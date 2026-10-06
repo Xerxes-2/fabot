@@ -226,9 +226,43 @@ let dangerTick (owned: string list) t (colony: ColonyView) (own: RaidState, dang
 let windows (state: RaidState) =
     state.Episodes |> List.map (fun e -> e.Opened, e.LastSeen)
 
-/// Every episode's roster rows, oldest episode first.
-let rosters (state: RaidState) =
-    state.Episodes |> List.collect (fun e -> Map.toList e.Roster)
+/// Every episode's rooms, oldest episode first.
+let episodeRooms (state: RaidState) =
+    state.Episodes |> List.map (fun e -> e.Rooms)
+
+/// A world vision answered for these rooms, each with the hostiles standing
+/// in it and the ids of the tombstones lying there: what the world roster
+/// (`Roster.fold`) reads.
+let seenRooms (rooms: (string * HostileInfo list * string list) list) : WorldView =
+    { WorldView.empty with
+        Rooms =
+            rooms
+            |> List.map (fun (room, hostiles, fallen) ->
+                room,
+                ({
+                    Hostiles = hostiles
+                    InvaderCores = []
+                    Fallen = fallen
+                    HostileFatigue = Map.empty
+                    Control =
+                        {
+                            Owner = Ownership.Unowned
+                            Reservation = None
+                            SafeMode = false
+                            SafeModeCooldownUntil = 0
+                            Sign = None
+                        }
+                }
+                : WorldRoom))
+            |> Map.ofList
+    }
+
+/// The world roster's rows as (room, id, row), by room and then id.
+let rosterRows (roster: Roster) =
+    roster
+    |> Map.toList
+    |> List.collect (fun (room, rows) ->
+        rows |> Map.toList |> List.map (fun (id, row) -> room, id, row))
 
 /// Every episode's recorded losses, oldest episode first.
 let losses (state: RaidState) =

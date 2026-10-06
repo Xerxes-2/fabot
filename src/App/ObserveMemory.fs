@@ -297,26 +297,34 @@ let private roomPosOf (raw: obj) : RoomPos =
             Y = numberOf raw "y"
         }
 
+// A body as `{ <part>: count }`.
+let private bodyObject (body: Map<BodyPart, int>) =
+    let o = createEmpty<obj>
+
+    for KeyValue(part, count) in body do
+        o?(partName part) <- count
+
+    o
+
+// The read of one: a part this bundle does not name, or a count that is no
+// number, costs the row around it.
+let private bodyOf (raw: obj) : Map<BodyPart, int> =
+    objectEntries raw
+    |> Array.map (fun (name, count) ->
+        match partOf name, numberValue count with
+        | Some part, Some number -> part, number
+        | Some _, None -> failwith ("not a number: " + name)
+        | None, _ -> failwith "unknown wire name")
+    |> Map.ofArray
+
+// One raid episode on the wire: `{ opened, last, rooms, closest?, losses,
+// damage }`. Who the raid was is the world roster's (`saveRoster`); a legacy
+// episode's own `roster` and `killed` are read as none and not written back.
 let private encodeEpisode (episode: RaidEpisode) =
     let o = createEmpty<obj>
     o?opened <- episode.Opened
     o?last <- episode.LastSeen
-
-    o?roster <-
-        episode.Roster
-        |> Map.toList
-        |> List.map (fun (id, row) ->
-            let r = createEmpty<obj>
-            r?id <- id
-            r?owner <- row.Owner
-            let body = createEmpty<obj>
-
-            for KeyValue(part, count) in row.Body do
-                body?(partName part) <- count
-
-            r?body <- body
-            r)
-        |> List.toArray
+    o?rooms <- episode.Rooms |> Set.toArray
 
     match episode.Closest with
     | Some approach ->
@@ -345,15 +353,12 @@ let private encodeEpisode (episode: RaidEpisode) =
             d)
         |> List.toArray
 
-    // Written only once the raid has lost a body, so a legacy row reads alike.
-    if not (List.isEmpty episode.Killed) then
-        o?killed <- List.toArray episode.Killed
-
     o?damage <- episode.Damage
     o
 
-// A list of creep ids off the wire (#507): anything not a list reads as none,
-// and an entry that is no id costs the entry and never the row around it.
+// A list of creep ids or room names off the wire (#507): anything not a list
+// reads as none, and an entry that is no name costs the entry and never the
+// row around it.
 let private idsOf (raw: obj) : string[] =
     if not (JS.Constructors.Array.isArray raw) then
         [||]
@@ -367,23 +372,9 @@ let private decodeEpisode (raw: obj) : RaidEpisode =
     {
         Opened = numberOf raw "opened"
         LastSeen = numberOf raw "last"
-        Roster =
-            raw?roster
-            |> unbox<obj[]>
-            |> Array.map (fun row ->
-                string row?id,
-                {
-                    Owner = string row?owner
-                    Body =
-                        objectEntries row?body
-                        |> Array.map (fun (name, count) ->
-                            match partOf name, numberValue count with
-                            | Some part, Some number -> part, number
-                            | Some _, None -> failwith ("not a number: " + name)
-                            | None, _ -> failwith "unknown wire name")
-                        |> Map.ofArray
-                })
-            |> Map.ofArray
+        // Absent on a legacy episode, which named its hostiles and no room:
+        // its roster is not carried over, having no room to file it under.
+        Rooms = idsOf raw?rooms |> Fresh.setOfSeq
         Closest =
             if isNull raw?closest then
                 None
@@ -416,8 +407,6 @@ let private decodeEpisode (raw: obj) : RaidEpisode =
                     Where = if isNull d?room then None else Some(roomPosOf d)
                 })
             |> Array.toList
-        // Absent on a legacy episode and on one whose raid lost nobody.
-        Killed = idsOf raw?killed |> Array.toList
         // Absent on a legacy episode, and zero is what that says; present and
         // off-shape costs the row like every number.
         Damage = if isNull raw?damage then 0 else numberOf raw "damage"
@@ -587,6 +576,22 @@ let private encodeFight (latch: FightLatch) =
 // or bar its cast, for ever. A dropped entry costs the room its record. A
 // `squad` that is no string reads as none latched, which re-prices the squad
 // and costs the room nothing else.
+let private decodeFight (value: obj) : FightLatch =
+    if isNull value || jsTypeof value <> "object" then
+        failwith "not a fight record"
+    else
+        let squad =
+            if jsTypeof value?squad = "string" then
+                Some(unbox<string> value?squad)
+            else
+                None
+
+        {
+            Seen = numberOf value "seen"
+            Squad = squad
+            Raiders = idsOf value?raiders |> Fresh.setOfSeq
+        }
+
 let private fightMapOf (raw: obj) : Map<string, FightLatch> =
     if isNull raw then
         Map.empty
@@ -594,36 +599,24 @@ let private fightMapOf (raw: obj) : Map<string, FightLatch> =
         objectEntries raw
         |> Array.choose (fun (key, value) ->
             try
-                if isNull value || jsTypeof value <> "object" then
-                    None
-                else
-                    let squad =
-                        if jsTypeof value?squad = "string" then
-                            Some(unbox<string> value?squad)
-                        else
-                            None
-
-                    Some(
-                        key,
-                        {
-                            Seen = numberOf value "seen"
-                            Squad = squad
-                            Raiders = idsOf value?raiders |> Fresh.setOfSeq
-                        }
-                    )
+                Some(key, decodeFight value)
             with _ ->
                 None)
         |> Map.ofArray
 
 // One room's probe log (#493) on the wire: `{ probe, first, hits, expires,
-// fate, hitAt?, safeMode?, ended? }`, `fate` one of probing, out, died,
-// expired and `ended` its tick, absent while probing.
+// fate, hitAt?, safeMode?, ended?, home? }`, `fate` one of probing, out, died,
+// expired and `ended` its tick, absent while probing; `home` the colony whose
+// probe it is, absent on a log before the world held it.
 let private encodeProbe (log: ProbeLog) =
     let o = createEmpty<obj>
     o?probe <- log.Probe
     o?first <- log.FirstHit
     o?hits <- log.Hits
     o?expires <- log.Expires
+
+    if log.Home <> "" then
+        o?home <- log.Home
 
     log.HitAt |> Option.iter (fun at -> o?hitAt <- at)
     log.SafeModeAt |> Option.iter (fun at -> o?safeMode <- at)
@@ -645,6 +638,46 @@ let private encodeProbe (log: ProbeLog) =
 // A checker and not a cast: a name that is no string, a tick that is no
 // number or a fate the encoder never writes costs the room its log, which
 // the next probe's first dismantle opens afresh.
+let private decodeProbe (value: obj) : ProbeLog =
+    if isNull value || jsTypeof value <> "object" || jsTypeof value?probe <> "string" then
+        failwith "not a probe log"
+    else
+        let optional key =
+            if jsTypeof value?(key) = "undefined" then
+                None
+            else
+                Some(numberOf value key)
+
+        let named =
+            if jsTypeof value?fate = "string" then
+                unbox<string> value?fate
+            else
+                ""
+
+        let fate =
+            match named with
+            | "probing" -> Probing
+            | "out" -> Out(numberOf value "ended")
+            | "died" -> Died(numberOf value "ended")
+            | "expired" -> Expired(numberOf value "ended")
+            | _ -> failwith "not a probe's fate"
+
+        {
+            Probe = unbox<string> value?probe
+            FirstHit = numberOf value "first"
+            Hits = numberOf value "hits"
+            HitAt = optional "hitAt"
+            SafeModeAt = optional "safeMode"
+            Fate = fate
+            Expires = numberOf value "expires"
+            // Absent on a log before the world held it: anybody's to move.
+            Home =
+                if jsTypeof value?home = "string" then
+                    unbox<string> value?home
+                else
+                    ""
+        }
+
 let private probeMapOf (raw: obj) : Map<string, ProbeLog> =
     if isNull raw || jsTypeof raw <> "object" then
         Map.empty
@@ -652,43 +685,7 @@ let private probeMapOf (raw: obj) : Map<string, ProbeLog> =
         objectEntries raw
         |> Array.choose (fun (room, value) ->
             try
-                if
-                    isNull value || jsTypeof value <> "object" || jsTypeof value?probe <> "string"
-                then
-                    None
-                else
-                    let optional key =
-                        if jsTypeof value?(key) = "undefined" then
-                            None
-                        else
-                            Some(numberOf value key)
-
-                    let named =
-                        if jsTypeof value?fate = "string" then
-                            unbox<string> value?fate
-                        else
-                            ""
-
-                    let fate =
-                        match named with
-                        | "probing" -> Probing
-                        | "out" -> Out(numberOf value "ended")
-                        | "died" -> Died(numberOf value "ended")
-                        | "expired" -> Expired(numberOf value "ended")
-                        | _ -> failwith "not a probe's fate"
-
-                    Some(
-                        room,
-                        {
-                            Probe = unbox<string> value?probe
-                            FirstHit = numberOf value "first"
-                            Hits = numberOf value "hits"
-                            HitAt = optional "hitAt"
-                            SafeModeAt = optional "safeMode"
-                            Fate = fate
-                            Expires = numberOf value "expires"
-                        }
-                    )
+                Some(room, decodeProbe value)
             with _ ->
                 None)
         |> Map.ofArray
@@ -961,7 +958,8 @@ let saveReactor (state: ReactorState) =
 
 /// The named colony's prior Raid log, or empty when its subtree is absent or
 /// unreadable; an episode that will not decode costs that episode alone. A
-/// flat legacy `observe.raids` leaf is not migrated: it reads as absent.
+/// flat legacy `observe.raids` leaf is not migrated: it reads as absent, and
+/// `pruneColonies` drops it.
 let loadRaids (home: string) : RaidState =
     leafOr RaidState.empty (fun () -> colonyLeaf home "raids") (fun raids ->
         {
@@ -975,6 +973,8 @@ let loadRaids (home: string) : RaidState =
             RivalHeld = latchMapOf raids?rivalHeld
             Holds = holdMapOf raids?holds
             Threatened = threatMapOf raids?threatened
+            // Likewise the three keys a bundle before the world roster wrote
+            // (the world layer's S5), read for `loadDanger`'s `adopt` alone.
             Fought = fightMapOf raids?fought
             Probes = probeMapOf raids?probes
             Taken = intMapOf raids?taken
@@ -1039,12 +1039,9 @@ let saveRaids (home: string) (declared: string list) (state: RaidState) =
     let raids = createEmpty<obj>
     raids?declared <- declared |> List.toArray
     raids?episodes <- state.Episodes |> List.map encodeEpisode |> List.toArray
-    // The stand-down rows, latches, holds and threats are the world's
-    // (`saveDanger`, `saveRoomLatches`), and not written here.
-    raids?fought <- state.Fought |> Map.toSeq |> hashOf encodeFight
-    raids?probes <- state.Probes |> Map.toSeq |> hashOf encodeProbe
-    // Each taken assault room against its tick (#496).
-    raids?taken <- state.Taken |> Map.toSeq |> hashOf box
+    // The stand-down rows, latches, holds, threats, fight records, probes
+    // and taken rooms are the world's (`saveDanger`, `saveRoomLatches`), and
+    // not written here.
     // The emergency reserve's latch (#505).
     raids?reserveShort <- state.ReserveShort
     // The haul overflow reading (#508).
@@ -1136,15 +1133,20 @@ let private decodeWatch (raw: obj) : ExitWatch =
     else
         failwith "not a watch"
 
-// One room of the world danger log on the wire: `{ down?, hold?,
-// threat?, watch? }`, each part written only while it holds and read alone,
-// so a bad part costs that part and never the room's others.
+// One room of the world danger log on the wire: `{ down?, hold?, threat?,
+// watch?, fight?, taken?, probe? }`, each part written only while it holds
+// and read alone, so a bad part costs that part and never the room's others.
+// `fight` is a fought room's `{ seen, squad?, raiders? }`, `taken` the tick an
+// assault room's targets were first seen down, `probe` its probe log.
 let private encodeDangerRoom (entry: DangerRoom) =
     let o = createEmpty<obj>
     entry.Down |> Option.iter (fun down -> o?down <- encodeOutpost down)
     entry.Hold |> Option.iter (fun hold -> o?hold <- encodeHold hold)
     entry.Threat |> Option.iter (fun threat -> o?threat <- encodeThreat threat)
     entry.Watch |> Option.iter (fun watch -> o?watch <- encodeWatch watch)
+    entry.Fight |> Option.iter (fun fight -> o?fight <- encodeFight fight)
+    entry.Taken |> Option.iter (fun tick -> o?taken <- tick)
+    entry.Probe |> Option.iter (fun probe -> o?probe <- encodeProbe probe)
     o
 
 let private decodeDangerRoom (room: string) (raw: obj) : DangerRoom option =
@@ -1173,35 +1175,40 @@ let private decodeDangerRoom (room: string) (raw: obj) : DangerRoom option =
                 Hold = part "hold" decodeHold
                 Threat = part "threat" decodeThreat
                 Watch = part "watch" decodeWatch
+                Fight = part "fight" decodeFight
+                Taken =
+                    part "taken" (fun value ->
+                        match numberValue value with
+                        | Some tick -> tick
+                        | None -> failwith "not a number: taken")
+                Probe = part "probe" decodeProbe
             }
 
-        if
-            Option.isSome entry.Down
-            || Option.isSome entry.Hold
-            || Option.isSome entry.Threat
-            || Option.isSome entry.Watch
-        then
-            Some entry
-        else
-            None
+        if Danger.held entry then Some entry else None
 
-// `Memory.fabot.observe.world.danger` as it stands, or null.
-let private dangerLeaf () : obj =
+// One leaf of `Memory.fabot.observe.world` as it stands, or null.
+let private worldLeaf (leaf: string) : obj =
     let world = observeLeaf "world"
 
     if isNull world || jsTypeof world <> "object" then
         null
     else
-        world?danger
+        world?(leaf)
+
+// `Memory.fabot.observe.world.danger` as it stands, or null.
+let private dangerLeaf () : obj = worldLeaf "danger"
+
+// Whether a world leaf holds an object, as every bundle that writes it does.
+let private worldStands (leaf: string) =
+    let value = worldLeaf leaf
+
+    not (isNull value)
+    && jsTypeof value = "object"
+    && not (JS.Constructors.Array.isArray value)
 
 // Whether the world danger log has been written: until it has, the colonies'
 // legacy danger keys are the record (`loadDanger`, `loadRoomLatches`).
-let dangerStands () =
-    let leaf = dangerLeaf ()
-
-    not (isNull leaf)
-    && jsTypeof leaf = "object"
-    && not (JS.Constructors.Array.isArray leaf)
+let dangerStands () = worldStands "danger"
 
 // Every colony's log as it stands under `observe.colonies`, the given-up ones
 // included: what the migration merges.
@@ -1213,29 +1220,41 @@ let private everyColonyLog () : RaidState list =
     else
         objectEntries colonies |> Array.map (fst >> loadRaids) |> List.ofArray
 
+// Whether the world roster has been written: until it has, the colonies'
+// legacy fight records, probes and taken rooms are the record (`loadDanger`).
+let rosterStands () = worldStands "roster"
+
 /// The world danger log's rooms (`Danger`), the latches being the room
 /// latches' (`loadRoomLatches`). An absent leaf is a bundle before the world
-/// log: every colony's legacy rows, holds and threats merged into one
-/// (`Danger.ofColonies`), once, the tick's write making the leaf stand. A room
-/// that will not decode costs that room alone.
+/// log: every colony's legacy rows, holds, threats, fight records, probes and
+/// taken rooms merged into one (`Danger.ofColonies`), once, the tick's write
+/// making the leaf stand. A standing leaf with no world roster beside it is a
+/// bundle before the roster: every colony's legacy fight records, probes and
+/// taken rooms laid in (`Danger.adopt`), once, the tick's roster write
+/// marking it done. A room that will not decode costs that room alone.
 let loadDanger (tuning: Tuning) (tick: int) : Danger =
     if not (dangerStands ()) then
         { Danger.ofColonies tuning tick (everyColonyLog ()) with
             Rivals = Danger.empty.Rivals
         }
     else
-        leafOr Danger.empty dangerLeaf (fun leaf ->
-            { Danger.empty with
-                Rooms =
-                    objectEntries leaf
-                    |> Array.choose (fun (room, raw) ->
-                        decodeDangerRoom room raw |> Option.map (fun entry -> room, entry))
-                    |> Fresh.mapOfArray
-            })
+        let danger =
+            leafOr Danger.empty dangerLeaf (fun leaf ->
+                { Danger.empty with
+                    Rooms =
+                        objectEntries leaf
+                        |> Array.choose (fun (room, raw) ->
+                            decodeDangerRoom room raw |> Option.map (fun entry -> room, entry))
+                        |> Fresh.mapOfArray
+                })
 
-/// Write the world danger log's rooms under `Memory.fabot.observe.world.danger`,
-/// every tick and whole, leaving the rest of `world` alone.
-let saveDanger (danger: Danger) =
+        if rosterStands () then
+            danger
+        else
+            Danger.adopt (everyColonyLog ()) danger
+
+// The `world` subtree, made an object if what stands there is not one.
+let private ensureWorld () =
     ensureObserve ()
 
     let world = Memory?fabot?observe?world
@@ -1247,7 +1266,92 @@ let saveDanger (danger: Danger) =
     then
         Memory?fabot?observe?world <- createEmpty<obj>
 
+/// Write the world danger log's rooms under `Memory.fabot.observe.world.danger`,
+/// every tick and whole, leaving the rest of `world` alone.
+let saveDanger (danger: Danger) =
+    ensureWorld ()
     Memory?fabot?observe?world?danger <- danger.Rooms |> Map.toSeq |> hashOf encodeDangerRoom
+
+// One roster row on the wire: `{ o, b, f, l, e, d? }` — the owner, the body
+// as first seen there (`{ <part>: count }`), the first and last ticks seen
+// there, `e` the tick its life runs out on, and `d` the tick its tombstone
+// was first seen (a kill when before `e`). Short keys: a siege writes
+// hundreds of rows.
+let private encodeRosterRow (row: RosterRow) =
+    let o = createEmpty<obj>
+    o?o <- row.Owner
+    o?b <- bodyObject row.Body
+    o?f <- row.First
+    o?l <- row.Last
+    o?e <- row.Dies
+    row.Fell |> Option.iter (fun tick -> o?d <- tick)
+    o
+
+// A checker: an owner that is no string, a tick that is no number or a body
+// off its shape costs the row.
+let private decodeRosterRow (raw: obj) : RosterRow =
+    if isNull raw || jsTypeof raw <> "object" || jsTypeof raw?o <> "string" then
+        failwith "not a roster row"
+    else
+        {
+            Owner = unbox<string> raw?o
+            Body = bodyOf raw?b
+            First = numberOf raw "f"
+            Last = numberOf raw "l"
+            Dies = numberOf raw "e"
+            Fell = numberValue raw?d
+        }
+
+/// The world [[raid roster]] under `Memory.fabot.observe.world.roster`:
+/// `{ <room>: { <hostile id>: row } }`. A row that will not decode costs that
+/// row alone, a room that is no object that room.
+let loadRoster () : Roster =
+    leafOr Roster.empty (fun () -> worldLeaf "roster") (fun leaf ->
+        if jsTypeof leaf <> "object" || JS.Constructors.Array.isArray leaf then
+            Roster.empty
+        else
+            objectEntries leaf
+            |> Array.choose (fun (room, rows) ->
+                if isNull rows || jsTypeof rows <> "object" then
+                    None
+                else
+                    let decoded =
+                        objectEntries rows
+                        |> Array.choose (fun (id, raw) ->
+                            try
+                                Some(id, decodeRosterRow raw)
+                            with _ ->
+                                None)
+                        |> Fresh.mapOfArray
+
+                    if Map.isEmpty decoded then None else Some(room, decoded))
+            |> Fresh.mapOfArray)
+
+/// Write the world roster back every full tick, empty or not: its standing
+/// is what marks the fight records' migration done (`rosterStands`).
+let saveRoster (roster: Roster) =
+    ensureWorld ()
+
+    Memory?fabot?observe?world?roster <-
+        roster
+        |> Map.toSeq
+        |> hashOf (fun rows -> rows |> Map.toSeq |> hashOf encodeRosterRow)
+
+/// Drop the colony leaves of every home not among `homes` (a given-up
+/// colony's log, which nothing writes again) and the flat `observe.raids` a
+/// bundle before the colony split wrote. Nothing is dropped while `homes` is
+/// empty, so a declaration emptied by mistake costs no record.
+let pruneColonies (homes: string list) =
+    if not (List.isEmpty homes) then
+        let colonies = observeLeaf "colonies"
+
+        if not (isNull colonies) && jsTypeof colonies = "object" then
+            for home, _ in objectEntries colonies do
+                if not (List.contains home homes) then
+                    emitJsStatement (colonies, home) "delete $0[$1]"
+
+        if not (isNull (observeLeaf "raids")) then
+            emitJsStatement Memory?fabot?observe "delete $0.raids"
 
 /// One tile as a wire object; the deferral rows carry two of them. The room
 /// is not written: the leaf is already filed under the colony's home name.

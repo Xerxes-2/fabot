@@ -1406,7 +1406,8 @@ let private decideOurs (a: Arena) : Intent list * Carried =
                     (raidsOf a c.Home)
                     danger
 
-            Map.add c.Home (Observe.foldProbes view decision.Intents state) raids, danger)
+            let state, danger = Observe.Danger.probing view decision.Intents (state, danger)
+            Map.add c.Home state raids, danger)
 
     let decisions = decisions |> List.map (fun (c, _, decision) -> c.Home, decision)
 

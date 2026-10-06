@@ -2242,6 +2242,85 @@ let worldDangerTests =
                     "the later hold"
             }
 
+            // The world layer's S5 migration: the fight records, taken rooms and
+            // probes each colony's log carried, laid into a world log that
+            // already stands.
+            test
+                "the reset tick's adoption lays each room's latest fight record, earliest taken tick and latest probe into the world log" {
+                let fight seen squad =
+                    {
+                        Seen = seen
+                        Squad = squad
+                        Raiders = Set.empty
+                    }
+
+                let probe first =
+                    {
+                        Probe = $"probe-{first}"
+                        FirstHit = first
+                        Hits = 1
+                        HitAt = None
+                        SafeModeAt = None
+                        Fate = Died(first + 4)
+                        Expires = first + 1_000
+                        Home = ""
+                    }
+
+                let mother =
+                    { RaidState.empty with
+                        Fought = Map.ofList [ "W17S25", fight 900 (Some "duo") ]
+                        Taken = Map.ofList [ "W18S26", 800 ]
+                        Probes = Map.ofList [ "W18S26", probe 700 ]
+                    }
+
+                let child =
+                    { RaidState.empty with
+                        Fought = Map.ofList [ "W17S25", fight 950 None ]
+                        Taken = Map.ofList [ "W18S26", 850 ]
+                        Probes = Map.ofList [ "W18S26", probe 750 ]
+                    }
+
+                let standing =
+                    { Danger.empty with
+                        Rooms =
+                            Map.ofList
+                                [
+                                    "W18S26",
+                                    { Danger.quiet with
+                                        Hold =
+                                            Some
+                                                {
+                                                    Holder = ReservationHolder.Rival
+                                                    Until = 2_000
+                                                }
+                                    }
+                                ]
+                    }
+
+                let adopted = Danger.adopt [ mother; child ] standing
+                let laid = Danger.into adopted RaidState.empty
+
+                Expect.equal
+                    (laid.Fought, laid.Taken, laid.Probes |> Map.map (fun _ log -> log.FirstHit))
+                    (Map.ofList [ "W17S25", fight 950 None ],
+                     Map.ofList [ "W18S26", 800 ],
+                     Map.ofList [ "W18S26", 750 ])
+                    "the latest record, the earliest taken tick, the latest probe"
+
+                Expect.equal
+                    (adopted.Rooms
+                     |> Map.tryFind "W18S26"
+                     |> Option.bind _.Hold
+                     |> Option.map _.Until)
+                    (Some 2_000)
+                    "beside what the world log already held"
+
+                Expect.equal
+                    (Danger.into (Danger.adopt [ child ] adopted) RaidState.empty).Taken
+                    laid.Taken
+                    "and a part the world log holds is kept: adopting twice moves nothing"
+            }
+
             test
                 "a raid row one colony opens shuts the room for every colony, and one that does not price it leaves it be" {
                 let squad = squadIn outpostRoom "Trepidimous"

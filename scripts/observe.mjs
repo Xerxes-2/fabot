@@ -850,7 +850,7 @@ if (command === "console") {
   // ---- raids: the Raid log, colony-level and episodic --------------------
 
   // The wire shape written by ObserveMemory.fs:
-  //   { episodes: [{ opened, last, roster: [{ id, owner, body: { part: n } }],
+  //   { episodes: [{ opened, last, rooms: [room],
   //                  closest?: { range, room, x, y, t },
   //                  losses: [{ creep, t, room?, x?, y? }],
   //                  damage }],
@@ -872,7 +872,8 @@ if (command === "console") {
   // all) as the string "Incorrect memory path", and both fail loudly rather
   // than reporting no raids. `living` and `hits` are the fold's own
   // baselines, scratch state and not part of the record, so --json prints
-  // the episodes alone. `damage` is absent on an episode written before
+  // the episodes alone, each with its world roster rows joined in as
+  // `roster`. `damage` is absent on an episode written before
   // ADR 0034 and reads as zero. `outposts` is the Raid log's second family
   // (ADR 0043) — one row per [[stand-down]], the room it shuts, the tick it
   // runs to and which deadline that tick was read off; it is a family of
@@ -889,10 +890,52 @@ if (command === "console") {
   // hitAt?, safeMode?, ended? }` — its first dismantle, its dismantles before
   // safe mode showed, the tick that was, and its fate (probing, out, died,
   // expired) on `ended`. A line each, above the episodes.
+  //
+  // Since ADR 0086's S5 the roster, the probes and the taken rooms are the
+  // world's. An episode names the rooms it works that its raid stood in
+  // (`rooms`), and its roster is the world roster's rows
+  // (`observe.world.roster.<room>.<id>` = `{ o, b, f, l, e, d? }`: owner,
+  // body as first seen there, first and last tick seen there, `e` the tick
+  // its life runs out on, `d` the tick its tombstone was first seen) in those
+  // rooms seen inside its window. A row fallen before its life ran out was
+  // killed; one that fell on it died of age (beside us, as giaco's haulers
+  // did). The roster keeps, past the quiet gap, only bodies that could hurt,
+  // heal or fell, the latest 50 a room (`Roster.prune`). The probes and taken
+  // rooms are `probe` and `taken` on `observe.world.danger.<room>`. A legacy
+  // episode carries its own `roster` and `killed`, printed as they were, and
+  // a bundle before S5 its own `probes` and `taken`.
   const { home, stored } = await raidLeaf();
-  const episodes = Array.isArray(stored.episodes) ? [...stored.episodes].reverse() : [];
+  const world = await memoryGet("fabot.observe.world");
+  const isObject = (v) => v != null && typeof v === "object" && !Array.isArray(v);
+  const roster = isObject(world?.roster) ? world.roster : null;
+  const danger = isObject(world?.danger) ? world.danger : null;
+  const probes = { ...(stored.probes ?? {}) };
+  const taken = { ...(stored.taken ?? {}) };
+  if (roster && danger) {
+    for (const [room, entry] of Object.entries(danger)) {
+      if (entry?.probe != null) probes[room] = entry.probe;
+      if (entry?.taken != null) taken[room] = entry.taken;
+    }
+  }
+  // An episode's rows off the world roster, by room: every row of a room it
+  // names seen inside its window, as { room, id, owner, body, killed?, died? }.
+  const rowsOf = (e) =>
+    (Array.isArray(e.rooms) ? e.rooms : []).flatMap((room) =>
+      Object.entries(roster?.[room] ?? {})
+        .filter(([, r]) => r?.f <= e.last && r?.l >= e.opened)
+        .map(([id, r]) => ({
+          room,
+          id,
+          owner: r.o,
+          body: r.b ?? {},
+          ...(r.d != null ? (r.d < r.e ? { killed: r.d } : { died: r.d }) : {}),
+        })),
+    );
+  const episodes = (Array.isArray(stored.episodes) ? [...stored.episodes].reverse() : []).map((e) =>
+    Array.isArray(e.roster) ? e : { ...e, roster: rowsOf(e) },
+  );
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  const probeLines = Object.entries(stored.probes ?? {}).map(([room, p]) => {
+  const probeLines = Object.entries(probes).map(([room, p]) => {
     const raised =
       p.safeMode != null
         ? `safe mode raised by t${p.safeMode} after ${plural(p.hits, "dismantle hit")} from t${p.first}`
@@ -902,7 +945,7 @@ if (command === "console") {
   });
   // `taken` (#496): each assault room whose declared targets were all down
   // at the last look, against the tick first seen so.
-  for (const [room, tick] of Object.entries(stored.taken ?? {})) {
+  for (const [room, tick] of Object.entries(taken)) {
     probeLines.push(`taken ${room}: its targets down since t${tick}`);
   }
 
@@ -917,12 +960,13 @@ if (command === "console") {
     console.log(`colony ${home}`);
     console.log("");
     for (const e of episodes) {
-      console.log(`t${e.opened}-${e.last}  (${e.last - e.opened + 1} ticks)`);
+      const rooms = Array.isArray(e.rooms) && e.rooms.length > 0 ? `  in ${e.rooms.join(", ")}` : "";
+      console.log(`t${e.opened}-${e.last}  (${e.last - e.opened + 1} ticks)${rooms}`);
       for (const r of e.roster ?? []) {
         const body = Object.entries(r.body ?? {})
           .map(([part, n]) => `${n} ${part}`)
           .join(" / ");
-        console.log(`  ${r.owner}  ${r.id}  ${body}`);
+        console.log(`  ${r.room ? `${r.room}  ` : ""}${r.owner}  ${r.id}  ${body}`);
       }
       // Since #376 the approach is measured against **armed** hostiles alone,
       // so an episode of scouts and keepers-at-a-distance has none — but a row
@@ -956,9 +1000,17 @@ if (command === "console") {
           console.log(`    ${room}  ${rows.length}: ${line}`);
         }
       }
-      // The raid's own dead (#507): roster ids seen as tombstones.
-      const killed = e.killed ?? [];
+      // The raid's own dead (#507): roster ids seen as tombstones, a kill
+      // only for a body that fell before its life ran out (S5), each id once
+      // whichever rooms it was seen in. A legacy episode's `killed` counted
+      // every tombstone.
+      const unique = (ids) => [...new Set(ids)];
+      const killed = Array.isArray(e.killed)
+        ? e.killed
+        : unique((e.roster ?? []).filter((r) => r.killed != null).map((r) => r.id));
+      const died = unique((e.roster ?? []).filter((r) => r.died != null).map((r) => r.id));
       if (killed.length > 0) console.log(`  killed ${killed.length}: ${killed.join(", ")}`);
+      if (died.length > 0) console.log(`  died of age ${died.length}: ${died.join(", ")}`);
       console.log(`  damage: ${e.damage ?? 0} hits off the Keep and the ramparts`);
       console.log("");
     }

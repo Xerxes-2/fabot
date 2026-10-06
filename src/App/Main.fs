@@ -896,6 +896,9 @@ let private fullTick
     // The world danger log, folded through every deciding colony in order
     // (`Danger.foldColony`): each reads what the one before wrote.
     let mutable folded = danger
+    // Each colony's raid log as this tick leaves it: the episodes the world
+    // roster is pruned against.
+    let mutable logs = raids
 
     for colony, view, decision, _, _ in decisions do
         // The Raid log, written every tick whether or not the fold changed
@@ -912,16 +915,17 @@ let private fullTick
                 (raids |> Map.tryFind colony.Home |> Option.defaultValue Observe.RaidState.empty)
                 folded
 
+        let state, after = Observe.Danger.probing view decision.Intents (state, after)
         folded <- after
 
-        state
-        |> Observe.foldProbes view decision.Intents
         // The haul overflow reading the decision smoothed (#508).
-        |> fun state ->
+        let state =
             { state with
                 HaulOverflow = decision.HaulOverflow
             }
-        |> ObserveMemory.saveRaids colony.Home (colony.Outposts |> List.map _.RoomName)
+
+        logs <- Map.add colony.Home state logs
+        ObserveMemory.saveRaids colony.Home (colony.Outposts |> List.map _.RoomName) state
 
         // The Layout's channel, written every tick, empty or not. The refused
         // declarations come off the view and not the memo: they are the
@@ -956,6 +960,22 @@ let private fullTick
         |> Observe.Danger.watching world.ExitWatches
 
     ObserveMemory.saveDanger folded
+
+    // The world raid roster: this tick's sightings and tombstones, every
+    // room's, kept while some colony's episode reads them. Written every full
+    // tick: its standing marks the fight records' migration done.
+    ObserveMemory.loadRoster ()
+    |> Observe.Roster.fold world.Time watch
+    |> Observe.Roster.prune
+        world.Time
+        Tuning.defaults.QuietGap
+        (logs |> Map.toList |> List.collect (fun (_, log) -> log.Episodes))
+    |> ObserveMemory.saveRoster
+
+    // A given-up colony's leaf and the flat legacy log, which nothing writes:
+    // every home neither declared nor living (an undeclared spawn room, when
+    // nothing declared lives, is a colony of its own).
+    ObserveMemory.pruneColonies ((Colony.declared @ colonies) |> List.map _.Home)
 
     let latches = { latches with Latched = folded.Rivals }
 

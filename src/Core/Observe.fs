@@ -208,13 +208,27 @@ let foldReactor (tick: int) (reading: ReactorReading option) (prior: ReactorStat
             DryTicks = prior.DryTicks + if current.StoreT = 0 then 1 else 0
         }
 
-/// One row of an episode's roster: one hostile, who owns it and what it is
-/// made of.
+/// One hostile in one room of the world [[raid roster]] (`Roster`): who owns
+/// it, what it was made of when first seen there, the ticks it was first and
+/// last seen there, the tick its life runs out on, and when it fell.
 type RosterRow =
     {
         Owner: string
         Body: Map<BodyPart, int>
+        First: int
+        Last: int
+        /// Its last sighting plus the ticks it then had to live: the same
+        /// tick in every room it is seen in. A tombstone before it is a death
+        /// before its time, a kill (`killed`); one on it, old age.
+        Dies: int
+        /// The tick its tombstone was first seen, wherever our vision reached.
+        Fell: int option
     }
+
+/// Whether a fallen row died before its time: its tombstone was seen before
+/// its life ran out. A body that died of age beside us is no kill.
+let killed (row: RosterRow) =
+    row.Fell |> Option.exists (fun fell -> fell < row.Dies)
 
 /// The smallest range recorded between any hostile and anything of ours, with
 /// the tile the hostile stood on and the tick it was measured at: the number
@@ -233,7 +247,8 @@ type Loss =
 
 /// One raid: opened on the first tick any room the colony works and can see
 /// holds a hostile, kept open while hostiles keep appearing, closed by a quiet
-/// gap. Colony-level, so it names no room; its coordinates carry their own.
+/// gap. A room it only crosses opens nothing. Colony-level: the losses, the
+/// closest approach and the damage are its side of the raid.
 type RaidEpisode =
     {
         /// The tick the episode opened.
@@ -242,17 +257,16 @@ type RaidEpisode =
         /// The episode stays open while `tick - LastSeen` is inside the
         /// quiet gap — openness is derived, never stored.
         LastSeen: int
-        /// Hostile id -> its row, unioned over the whole window: a squad
-        /// reads as five rows however often it steps back in.
-        Roster: Map<string, RosterRow>
+        /// The rooms the colony works that a hostile stood in inside the
+        /// window: where the world roster's rows of this raid are read. Who
+        /// the hostiles were, and which of them fell, is the world's
+        /// (`Roster`), so a raid two colonies see is enrolled once.
+        Rooms: Set<string>
         /// None while nothing of ours could be placed, never a zero range.
         Closest: Approach option
         /// Owned creeps lost inside the window, oldest first — every one
         /// stamped at a tick between `Opened` and `LastSeen`.
         Losses: Loss list
-        /// The roster's ids seen dead (a tombstone) inside the window, first
-        /// seen first (#507): what the raid lost.
-        Killed: string list
         /// Hits lost across the Keep and the ramparts inside the window:
         /// decreases summed tick over tick, repairs ignored. Read only on the
         /// ticks a hostile stood there or the one after, so a quiet gap's
@@ -397,6 +411,10 @@ type ProbeLog =
         Fate: ProbeFate
         /// The tick its life runs out on, as last seen.
         Expires: int
+        /// The home of the colony whose probe it is: the one colony that moves
+        /// the log while it probes. Empty on a log before the world held it,
+        /// which any colony moves.
+        Home: string
     }
 
 /// The whole persisted Raid log.
@@ -437,7 +455,9 @@ type RaidState =
         /// The resident rooms a raid their residents lose was seen in
         /// (`foldFights`), each against the last tick it was: what holds a
         /// Fight pooled through the ticks its raid steps out, and then bars a
-        /// second cast. Bounded by the resident rooms.
+        /// second cast. Bounded by the resident rooms. This and the two below,
+        /// like the four above, are the world danger log's, laid in
+        /// (`Danger.into`): every colony reads one record a room.
         Fought: Map<string, FightLatch>
         /// Each [[assault]] room's last probe (`foldProbes`, #493): what
         /// `observe.mjs raids` prints of what raised its safe mode. Bounded
@@ -523,7 +543,7 @@ let private ourTilesIn (view: ColonyView) (room: string) : RoomPos list =
 /// ours to measure it against. The hostile-free tick is the common one — every
 /// tick of an open episode's quiet gap is one — so it answers before the owned
 /// set is built.
-let private approachAt (view: ColonyView) : Approach option =
+let private approachAt (view: ColonyView) (hostiles: HostileInfo list) : Approach option =
     // Armed hostiles alone: a `1 MOVE` scout at range 1 is neither a probe
     // nor a loss, and one was once read as the raid (#376). The scouts stay
     // on the roster.
@@ -534,7 +554,7 @@ let private approachAt (view: ColonyView) : Approach option =
         view.Assaults |> List.map (fun facts -> facts.Assault.RoomName) |> Set.ofList
 
     let armed =
-        view.Hostiles
+        hostiles
         |> List.filter (fun hostile ->
             HostileInfo.armed view.Hostiles hostile
             && not (Set.contains hostile.Pos.Room view.HarassCast)
@@ -578,20 +598,17 @@ let private nearer (stored: Approach option) (fresh: Approach option) =
     | Some stored, None -> Some stored
     | None, fresh -> fresh
 
-/// Union one sighting into the roster: the first sighting of an id wins, so a
-/// row records the body that entered the room rather than what the tower left
-/// of it, and a creep that steps back in is one row still.
-let private enrol roster (hostile: HostileInfo) =
-    if Map.containsKey hostile.Id roster then
-        roster
-    else
-        Map.add
-            hostile.Id
-            {
-                Owner = hostile.Owner
-                Body = partsOf hostile.Body
-            }
-            roster
+/// The rooms a colony's raid episodes read: its home, the rooms it declares
+/// or prices (`Facts.pricedRooms`) and its resident rooms. A room it only
+/// crosses is the world roster's alone, so a siege three colonies cross is
+/// enrolled once and opens no episode in the two that only pass by.
+let private workedRooms (view: ColonyView) (declared: string list) : Set<string> =
+    Set.unionMany
+        [
+            Set.singleton (SpatialInfo.homeName view.Spatial)
+            Decide.Facts.pricedRooms (Set.ofList declared) view
+            Decide.Facts.residentRooms view
+        ]
 
 /// The tick one core's stand-down runs to, and which deadline it was read
 /// off, in order of availability. `TicksToEnd` is the engine's relative count,
@@ -1088,6 +1105,8 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
 /// whose room holds no raider, and every one of whose last-seen raiders lies
 /// dead, is dropped at once: the raid was killed there, and the hold is for
 /// one that left. Rooms the colony cannot see this tick keep what they had.
+/// The records are the world's: a room this colony is not resident in is
+/// moved by the clocks alone, never by this colony's vision.
 let foldFights (view: ColonyView) (prior: Map<string, FightLatch>) : Map<string, FightLatch> =
     let hold = view.Tuning.FightHoldTicks
 
@@ -1104,17 +1123,19 @@ let foldFights (view: ColonyView) (prior: Map<string, FightLatch>) : Map<string,
         && not (Set.isEmpty latch.Raiders)
         && Set.isSubset latch.Raiders fallen
 
+    let resident = Decide.Facts.residentRooms view
+
+    // The clocks run out for every record, whoever's room it is; only a room
+    // this colony is resident in is judged killed off its vision.
     let standing =
         prior
         |> Map.filter (fun room latch ->
             let since = view.Time - latch.Seen
 
-            not (killed room latch)
+            not (resident.Contains room && killed room latch)
             && match latch.Squad with
                | Some _ -> since < 2 * hold
                | None -> since <= view.Tuning.FightConfirmTicks)
-
-    let resident = Decide.Facts.residentRooms view
 
     raiders
     |> Map.filter (fun room _ -> Set.contains room resident)
@@ -1152,7 +1173,14 @@ let foldFights (view: ColonyView) (prior: Map<string, FightLatch>) : Map<string,
 /// declared targets all down is recorded on the first tick it is, and dropped
 /// on a tick one is seen standing; a dark room keeps what it had.
 let foldTaken (view: ColonyView) (prior: Map<string, int>) : Map<string, int> =
-    match view.Assaults |> List.filter (fun facts -> Option.isSome facts.Targets) with
+    // The record is the world's, one a room: only an assault that declares
+    // targets says whether they are down, so a second colony's assault of the
+    // room with none (a probe's) leaves it be.
+    match
+        view.Assaults
+        |> List.filter (fun facts ->
+            Option.isSome facts.Targets && not (List.isEmpty facts.Assault.Targets))
+    with
     | [] -> prior
     | seen ->
         seen
@@ -1268,8 +1296,14 @@ let foldRaids
                     Where = Map.tryFind name prior.Placed
                 })
 
+    // The hostiles in the rooms this colony works: a raid in a room it only
+    // crosses is enrolled by the world (`Roster`) and opens nothing here.
+    let worked =
+        let rooms = workedRooms view declared
+        view.Hostiles |> List.filter (fun hostile -> rooms.Contains hostile.Pos.Room)
+
     let episode =
-        match current, view.Hostiles with
+        match current, worked with
         | None, [] -> None
         | current, hostiles ->
             let lost = current |> Option.map lostSince |> Option.defaultValue []
@@ -1286,14 +1320,11 @@ let foldRaids
                     {
                         Opened = view.Time
                         LastSeen = view.Time
-                        Roster = Map.empty
+                        Rooms = Fresh.setOfSeq Seq.empty
                         Closest = None
                         Losses = []
-                        Killed = []
                         Damage = 0
                     }
-
-            let roster = (episode.Roster, hostiles) ||> List.fold enrol
 
             Some
                 { episode with
@@ -1302,16 +1333,16 @@ let foldRaids
                             episode.LastSeen
                         else
                             view.Time
-                    Roster = roster
-                    Closest = nearer episode.Closest (approachAt view)
+                    Rooms =
+                        if List.isEmpty hostiles then
+                            episode.Rooms
+                        else
+                            Seq.append
+                                episode.Rooms
+                                (hostiles |> Seq.map (fun hostile -> hostile.Pos.Room))
+                            |> Fresh.setOfSeq
+                    Closest = nearer episode.Closest (approachAt view hostiles)
                     Losses = episode.Losses @ lost
-                    // A tombstone lies for ticks: each id once.
-                    Killed =
-                        episode.Killed
-                        @ (view.Fallen
-                           |> List.distinct
-                           |> List.filter (fun id ->
-                               Map.containsKey id roster && not (List.contains id episode.Killed)))
                     Damage = episode.Damage + damage
                 }
 
@@ -1448,11 +1479,14 @@ let foldRaids
 /// the light ticks' replays of one, until safe mode is seen in the room, and
 /// settles its fate — out of the room alive once safe mode is up, or gone,
 /// killed or of age. A settled log stands until the next probe's first
-/// dismantle there. Built by `Fresh`: the map is carried to the next tick.
+/// dismantle there. A log still probing is moved only by the colony whose
+/// probe it is (`ProbeLog.Home`). Built by `Fresh`: the map is carried to the
+/// next tick.
 let foldProbes (view: ColonyView) (intents: Intent list) (state: RaidState) : RaidState =
     let alive = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
 
     let expiresOf (creep: CreepInfo) = view.Time + creep.TicksToLive
+    let home = SpatialInfo.homeName view.Spatial
 
     let foldRoom (probes: Map<string, ProbeLog>) (facts: AssaultFacts) =
         let room = facts.Assault.RoomName
@@ -1470,6 +1504,9 @@ let foldProbes (view: ColonyView) (intents: Intent list) (state: RaidState) : Ra
                 | _ -> None)
 
         match Map.tryFind room probes with
+        // Another colony's probe, still probing: its log is that colony's to
+        // move, and this colony, not holding the body, would read it dead.
+        | Some({ Fate = Probing } as log) when log.Home <> "" && log.Home <> home -> probes
         | Some({ Fate = Probing } as log) ->
             let next =
                 match Map.tryFind log.Probe alive with
@@ -1527,6 +1564,7 @@ let foldProbes (view: ColonyView) (intents: Intent list) (state: RaidState) : Ra
                             Map.tryFind name alive
                             |> Option.map expiresOf
                             |> Option.defaultValue view.Time
+                        Home = home
                     }
                     probes
             | [] -> probes
@@ -1539,9 +1577,11 @@ let foldProbes (view: ColonyView) (intents: Intent list) (state: RaidState) : Ra
         }
 
 /// One room's entry in the world [[danger log]]: its stand-down row, somebody
-/// else's hold on its controller, the memory of an armed threat in it, and its
-/// exit watch. One record a room, whichever colony concluded each part; a part
-/// is None while nothing holds it: the world layer's (`WorldView`) memory.
+/// else's hold on its controller, the memory of an armed threat in it, its
+/// exit watch, its fight record, and, an assault room, whether it was taken
+/// and its last probe. One record a room, whichever colony concluded each
+/// part; a part is None while nothing holds it: the world layer's
+/// (`WorldView`) memory.
 type DangerRoom =
     {
         Down: OutpostEpisode option
@@ -1550,6 +1590,14 @@ type DangerRoom =
         /// The exit watch (`World.watchExits`, #450), written beside the rest
         /// so a reset keeps a held exit (#542).
         Watch: ExitWatch option
+        /// The resident room's fight record (`foldFights`): a raised child's
+        /// home's is the mother's to fold and the child's to read.
+        Fight: FightLatch option
+        /// The tick an assault room's targets were first seen all down
+        /// (`foldTaken`).
+        Taken: int option
+        /// An assault room's last probe (`foldProbes`).
+        Probe: ProbeLog option
     }
 
 /// The world danger log: one `DangerRoom` a room, and the rival latches
@@ -1568,19 +1616,28 @@ module Danger =
             Rivals = Fresh.mapOfSeq Seq.empty
         }
 
-    let private quiet =
+    /// A room the log holds nothing for.
+    let quiet =
         {
             Down = None
             Hold = None
             Threat = None
             Watch = None
+            Fight = None
+            Taken = None
+            Probe = None
         }
 
-    let private held (entry: DangerRoom) =
+    /// Whether the log holds anything for a room: a room holding nothing is
+    /// dropped.
+    let held (entry: DangerRoom) =
         Option.isSome entry.Down
         || Option.isSome entry.Hold
         || Option.isSome entry.Threat
         || Option.isSome entry.Watch
+        || Option.isSome entry.Fight
+        || Option.isSome entry.Taken
+        || Option.isSome entry.Probe
 
     let private entryOf (danger: Danger) (room: string) =
         Map.tryFind room danger.Rooms |> Option.defaultValue quiet
@@ -1592,8 +1649,9 @@ module Danger =
         |> Fresh.mapOfSeq
 
     /// A colony's own log with the world's danger laid in: every row, hold,
-    /// threat and latch, whoever concluded it. What its stand-down gate is read
-    /// off (`standDown`): one log, so every colony's gate agrees on a room.
+    /// threat, latch, fight record, taken room and probe, whoever concluded
+    /// it. What its stand-down gate is read off (`standDown`): one log, so
+    /// every colony's gate agrees on a room.
     let into (danger: Danger) (own: RaidState) : RaidState =
         { own with
             Outposts =
@@ -1604,7 +1662,38 @@ module Danger =
             RivalHeld = danger.Rivals
             Holds = partsOf _.Hold danger
             Threatened = partsOf _.Threat danger
+            Fought = partsOf _.Fight danger
+            Probes = partsOf _.Probe danger
+            Taken = partsOf _.Taken danger
         }
+
+    /// The rooms with a folded log's holds, threats, fight records, taken
+    /// rooms and probes laid back in, each part replaced by the log's: the
+    /// world facts a colony moves only for the rooms it saw, so the order the
+    /// colonies fold in does not matter for them.
+    let private relay (folded: RaidState) (rooms: Map<string, DangerRoom>) =
+        Seq.concat
+            [
+                Map.keys rooms
+                Map.keys folded.Holds
+                Map.keys folded.Threatened
+                Map.keys folded.Fought
+                Map.keys folded.Taken
+                Map.keys folded.Probes
+            ]
+        |> Seq.distinct
+        |> Seq.choose (fun room ->
+            let entry =
+                { (Map.tryFind room rooms |> Option.defaultValue quiet) with
+                    Hold = Map.tryFind room folded.Holds
+                    Threat = Map.tryFind room folded.Threatened
+                    Fight = Map.tryFind room folded.Fought
+                    Taken = Map.tryFind room folded.Taken
+                    Probe = Map.tryFind room folded.Probes
+                }
+
+            if held entry then Some(room, entry) else None)
+        |> Fresh.mapOfSeq
 
     /// Two standing rows of one room as one: the later expiry and its basis, a
     /// bunker either saw (a wrong merge reopens a stronghold room), the earlier
@@ -1651,11 +1740,52 @@ module Danger =
         | [] -> rows |> List.maxBy (fun row -> row.Expiry, row.Opened)
         | standing -> standing |> List.reduce mergeDown
 
+    /// Several logs' maps of one part as one: each room's entry with the
+    /// greatest `by`.
+    let private latest (by: 'a -> int) (maps: Map<string, 'a> list) =
+        maps
+        |> List.collect Map.toList
+        |> List.groupBy fst
+        |> List.map (fun (room, parts) -> room, parts |> List.map snd |> List.maxBy by)
+
+    /// The fight records, taken rooms and probes each colony's log carried
+    /// before the world log took them (the world layer's S5), laid into the rooms
+    /// that hold none (the reset tick's migration): each room's latest fight
+    /// record, its earliest taken tick and its latest probe.
+    let adopt (logs: RaidState list) (danger: Danger) : Danger =
+        let lay (parts: (string * 'a) list) (fill: 'a -> DangerRoom -> DangerRoom) rooms =
+            (rooms, parts)
+            ||> List.fold (fun rooms (room, part) ->
+                Map.add
+                    room
+                    (fill part (Map.tryFind room rooms |> Option.defaultValue quiet))
+                    rooms)
+
+        let rooms =
+            danger.Rooms
+            |> lay (logs |> List.map _.Fought |> latest _.Seen) (fun fight entry ->
+                { entry with
+                    Fight = entry.Fight |> Option.orElse (Some fight)
+                })
+            |> lay (logs |> List.map _.Taken |> latest (fun tick -> -tick)) (fun tick entry ->
+                { entry with
+                    Taken = entry.Taken |> Option.orElse (Some tick)
+                })
+            |> lay (logs |> List.map _.Probes |> latest _.FirstHit) (fun probe entry ->
+                { entry with
+                    Probe = entry.Probe |> Option.orElse (Some probe)
+                })
+
+        { danger with
+            Rooms = rooms |> Map.toSeq |> Fresh.mapOfSeq
+        }
+
     /// The per-colony logs a bundle before the world log wrote, merged into
     /// one (the reset tick's migration): each room's standing rows merged
     /// (`mergeDown`: the max expiry, the OR of the stronghold bit), else its
     /// latest; the later hold and threat; every latch, on its earliest shut and
-    /// earliest look. A ring's bounce is read off it before its rows merge.
+    /// earliest look; the fight records, taken rooms and probes (`adopt`). A
+    /// ring's bounce is read off it before its rows merge.
     let ofColonies (tuning: Tuning) (tick: int) (logs: RaidState list) : Danger =
         let bounced (ring: OutpostEpisode list) (row: OutpostEpisode) =
             { row with
@@ -1674,12 +1804,6 @@ module Danger =
             |> List.collect (fun log -> log.Outposts |> List.map (bounced log.Outposts))
             |> List.groupBy _.RoomName
             |> List.map (fun (room, rows) -> room, oneRow tick rows)
-
-        let latest (until: 'a -> int) (maps: Map<string, 'a> list) =
-            maps
-            |> List.collect Map.toList
-            |> List.groupBy fst
-            |> List.map (fun (room, parts) -> room, parts |> List.map snd |> List.maxBy until)
 
         let holds = logs |> List.map _.Holds |> latest _.Until
         let threats = logs |> List.map _.Threatened |> latest _.Until
@@ -1702,10 +1826,12 @@ module Danger =
             ||> List.fold (fun rooms (room, threat) ->
                 set room (fun entry -> { entry with Threat = Some threat }) rooms)
 
-        {
-            Rooms = rooms |> Map.toSeq |> Fresh.mapOfSeq
-            Rivals = logs |> List.map _.RivalHeld |> mergeRivals
-        }
+        adopt
+            logs
+            {
+                Rooms = rooms |> Map.toSeq |> Fresh.mapOfSeq
+                Rivals = logs |> List.map _.RivalHeld |> mergeRivals
+            }
 
     /// The rooms of the standing raid rows a colony prices (`Facts.pricedRooms`
     /// over the rooms it declares, `owned`), off its own log with the world's
@@ -1724,8 +1850,9 @@ module Danger =
     /// (`Facts.pricedRooms` over the rooms it declares, `owned`), folded as its own (`foldRaids`)
     /// and written back. A row it opens in a room whose row it was not handed
     /// (a core or a reservation it saw there) merges with the world's
-    /// (`mergeDown`); the holds, threats and latches come back whole, each
-    /// colony moving only the rooms it saw. Threaded through the colonies in
+    /// (`mergeDown`); the holds, threats, latches, fight records and taken
+    /// rooms come back whole, each colony moving only the rooms it saw (the
+    /// probes are `probing`'s). Threaded through the colonies in
     /// order, so each folds what the one before wrote. The colony's log comes
     /// back with the rows laid in as it folded them.
     let foldColony
@@ -1773,24 +1900,24 @@ module Danger =
 
                 Map.add room { entry with Down = Some row } rooms)
 
-        let touched =
-            Seq.concat [ Map.keys rooms; Map.keys folded.Holds; Map.keys folded.Threatened ]
-            |> Set.ofSeq
-
         folded,
         {
-            Rooms =
-                touched
-                |> Seq.choose (fun room ->
-                    let entry =
-                        { (Map.tryFind room rooms |> Option.defaultValue quiet) with
-                            Hold = Map.tryFind room folded.Holds
-                            Threat = Map.tryFind room folded.Threatened
-                        }
-
-                    if held entry then Some(room, entry) else None)
-                |> Fresh.mapOfSeq
+            Rooms = relay folded rooms
             Rivals = folded.RivalHeld |> Map.toSeq |> Fresh.mapOfSeq
+        }
+
+    /// The probe log's fold (`foldProbes`) over a colony's log as
+    /// `foldColony` handed it back, its probes laid back into the world's.
+    let probing
+        (view: ColonyView)
+        (intents: Intent list)
+        (state: RaidState, danger: Danger)
+        : RaidState * Danger =
+        let probed = foldProbes view intents state
+
+        probed,
+        { danger with
+            Rooms = relay probed danger.Rooms
         }
 
     /// The log with this tick's exit watches laid in, every room's replaced.
@@ -1856,6 +1983,129 @@ module Danger =
                        threats |> List.exists (fun threat -> threat.Dies > tick)))
         |> Seq.map fst
         |> Set.ofSeq
+
+/// The world [[raid roster]]: every hostile our vision saw, by room and then
+/// by id, whichever colony's look it was. A Source Keeper is the room's
+/// terrain and an ally no raider, so neither is enrolled. A colony's episode
+/// names the rooms it works that its raid stood in (`RaidEpisode.Rooms`),
+/// and its roster is these rows in those rooms inside its window.
+type Roster = Map<string, Map<string, RosterRow>>
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Roster =
+    let empty: Roster = Fresh.mapOfSeq Seq.empty
+
+    /// This tick's sightings and tombstones folded in: a hostile's first
+    /// sighting in a room writes its row there (the body that entered, not
+    /// what the tower left of it), every later one moves its last tick and
+    /// the tick its life runs out on; a tombstone stamps every row of its id
+    /// once, on the tick first seen.
+    let fold (tick: int) (watch: WorldView) (prior: Roster) : Roster =
+        let sighted =
+            watch.Rooms
+            |> Map.toList
+            |> List.collect (fun (room, seen) ->
+                seen.Hostiles
+                |> List.filter (fun hostile ->
+                    not (Colony.isAlly hostile.Owner) && not (HostileInfo.isKeeper hostile))
+                |> List.map (fun hostile -> room, hostile))
+
+        let fallen =
+            watch.Rooms
+            |> Map.toSeq
+            |> Seq.collect (fun (_, seen) -> seen.Fallen)
+            |> Fresh.setOfSeq
+
+        if List.isEmpty sighted && Set.isEmpty fallen then
+            prior
+        else
+            let enrolled =
+                (prior, sighted)
+                ||> List.fold (fun roster (room, hostile) ->
+                    let rows = Map.tryFind room roster |> Option.defaultValue Map.empty
+                    let dies = tick + hostile.TicksToLive
+
+                    let row =
+                        match Map.tryFind hostile.Id rows with
+                        | Some row -> { row with Last = tick; Dies = dies }
+                        | None ->
+                            {
+                                Owner = hostile.Owner
+                                Body = partsOf hostile.Body
+                                First = tick
+                                Last = tick
+                                Dies = dies
+                                Fell = None
+                            }
+
+                    Map.add room (Map.add hostile.Id row rows) roster)
+
+            enrolled
+            |> Map.toSeq
+            |> Seq.map (fun (room, rows) ->
+                room,
+                rows
+                |> Map.toSeq
+                |> Seq.map (fun (id, row) ->
+                    id,
+                    if Option.isNone row.Fell && fallen.Contains id then
+                        { row with Fell = Some tick }
+                    else
+                        row)
+                |> Fresh.mapOfSeq)
+            |> Fresh.mapOfSeq
+
+    /// The most rows a room keeps past the quiet gap (`prune`): an episode
+    /// open for eleven thousand ticks beside a neighbour's hauler lane would
+    /// otherwise keep every hauler that ever passed.
+    let roomCap = 50
+
+    /// Whether a row is worth keeping once its raid has gone: a body that
+    /// could hurt or heal, or one that fell.
+    let private worthKeeping (row: RosterRow) =
+        Option.isSome row.Fell
+        || [ Attack; RangedAttack; Heal ]
+           |> List.exists (fun part -> Map.tryFind part row.Body |> Option.defaultValue 0 > 0)
+
+    /// The rows seen inside the quiet gap, which an episode may yet open on,
+    /// all kept; and of the rest, the ones some colony's episode still reads
+    /// (a room it names, seen inside its window) that could hurt, heal or
+    /// fell, the latest `roomCap` a room. Every other row is dropped. So the
+    /// roster is bounded by the colonies' episode rings and the cap, and a
+    /// transit room's raid leaves no row once it has gone.
+    let prune (tick: int) (gap: int) (episodes: RaidEpisode list) (roster: Roster) : Roster =
+        let windows =
+            episodes
+            |> List.collect (fun episode ->
+                episode.Rooms
+                |> Set.toList
+                |> List.map (fun room -> room, (episode.Opened, episode.LastSeen)))
+            |> List.groupBy fst
+            |> List.map (fun (room, spans) -> room, List.map snd spans)
+            |> Map.ofList
+
+        roster
+        |> Map.toSeq
+        |> Seq.choose (fun (room, rows) ->
+            let spans = Map.tryFind room windows |> Option.defaultValue []
+
+            let read (row: RosterRow) =
+                spans
+                |> List.exists (fun (opened, last) -> row.First <= last && row.Last >= opened)
+
+            let recent, older =
+                rows |> Map.toList |> List.partition (fun (_, row) -> tick - row.Last <= gap)
+
+            let kept =
+                older
+                |> List.filter (fun (_, row) -> worthKeeping row && read row)
+                |> List.sortByDescending (fun (id, row) -> row.Last, id)
+                |> List.truncate roomCap
+                |> List.append recent
+                |> Fresh.mapOfList
+
+            if Map.isEmpty kept then None else Some(room, kept))
+        |> Fresh.mapOfSeq
 
 /// One reading of `Grid.Counters`: floods built, how many of them
 /// free-origin, and heap pops. Cumulative where the shell reads it,

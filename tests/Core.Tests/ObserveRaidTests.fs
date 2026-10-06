@@ -113,86 +113,24 @@ let episodeTests =
 
                 Expect.equal (windows state) [ 10, 10 ] "the first sighting simply opens an episode"
             }
-        ]
 
-[<Tests>]
-let rosterTests =
-    testList
-        "raid fold: roster"
-        [
-            test "one row per hostile id, with its owner and its part counts" {
-                let twx = raider "TWX" "giaco" { X = 38; Y = 47 } [ Tough; Tough; Attack; Move ]
-                let ccv = raider "Ccv" "giaco" { X = 39; Y = 47 } [ RangedAttack; Heal; Move ]
-
-                let state =
-                    RaidState.empty
-                    |> raidTick 10 (raid [ twx; ccv ])
-                    |> raidTick 11 quiet
-                    |> raidTick 12 (raid [ twx ])
-                    |> raidTick 13 (raid [ twx; ccv ])
-
-                Expect.equal
-                    (rosters state)
-                    [
-                        "Ccv",
-                        {
-                            Owner = "giaco"
-                            Body = Map.ofList [ Move, 1; RangedAttack, 1; Heal, 1 ]
-                        }
-                        "TWX",
-                        {
-                            Owner = "giaco"
-                            Body = Map.ofList [ Move, 1; Attack, 1; Tough, 2 ]
-                        }
-                    ]
-                    "a squad reads as one row a creep, however often it re-enters"
-            }
-
-            // #507: the four Trepidimous bodies died at W17S25's ramparts and the
-            // log said nothing of it.
-            test "a raider's tombstone is the raid's loss, recorded once" {
-                let dead =
-                    { quiet with
-                        Fallen = [ "TWX"; "not-a-raider" ]
-                    }
-
+            test "an episode names the rooms it works that its raid stood in" {
                 let state =
                     RaidState.empty
                     |> raidTick 10 (raid squad)
-                    |> raidTick 11 dead
-                    |> raidTick 12 dead
+                    |> raidTick 11 (raid outpostSquad |> withDeclaredOutpost outpostRoom)
 
                 Expect.equal
-                    (state.Episodes |> List.map (fun episode -> episode.Killed))
-                    [ [ "TWX" ] ]
-                    "the roster's body, once however long its tombstone lies, and nobody else's"
+                    (episodeRooms state)
+                    [ Set.ofList [ raidRoom; outpostRoom ] ]
+                    "the home and the outpost, where the world roster's rows of the raid are read"
             }
 
-            test "a row keeps the body that entered the room, not what the tower left of it" {
-                let whole = raider "TWX" "giaco" { X = 38; Y = 47 } [ Tough; Tough; Attack; Move ]
-                let chewed = raider "TWX" "giaco" { X = 38; Y = 48 } [ Attack; Move ]
-
-                let state =
-                    RaidState.empty |> raidTick 10 (raid [ whole ]) |> raidTick 11 (raid [ chewed ])
-
-                Expect.equal
-                    (rosters state)
-                    [
-                        "TWX",
-                        {
-                            Owner = "giaco"
-                            Body = Map.ofList [ Move, 1; Attack, 1; Tough, 2 ]
-                        }
-                    ]
-                    "the first sighting wins: the roster answers what came, not what survived"
-            }
-
-            // Characterisation (the world layer's S0, `docs/adr/0086`): pins
-            // pre-world-layer behaviour, flips at S5 (the roster a world fact)
-            // with S1-S2 pricing the room. Live t973,5xx: W17S29's 105.8 KB of
-            // `episodes` were W17S25's siege, seen only in its transit rooms.
-            test
-                "a raid seen in a room the colony only crosses is enrolled, and no stand-down opens for it" {
+            // Characterisation (the world layer's S0, `docs/adr/0086`), flipped
+            // at S5: the roster is the world's, and a room the colony only
+            // crosses opens nothing in its log. Live t973,5xx: W17S29's 105.8 KB
+            // of `episodes` were W17S25's siege, seen only in its transit rooms.
+            test "a raid seen in a room the colony only crosses opens no episode, and no stand-down" {
                 let transit = "W13S27"
 
                 let crossing =
@@ -203,12 +141,263 @@ let rosterTests =
 
                 let state = RaidState.empty |> raidTick 10 crossing
 
-                Expect.equal
-                    (rosters state |> List.map fst)
-                    [ "raid-1" ]
-                    "the transit room's raider is on this colony's roster"
+                Expect.isEmpty
+                    state.Episodes
+                    "the transit room's raider is in no episode of this colony's"
 
                 Expect.isEmpty state.Outposts "and the colony prices no stand-down there"
+
+                Expect.equal
+                    (Roster.fold 10 (seenRooms [ transit, crossing.Hostiles, [] ]) Roster.empty
+                     |> rosterRows
+                     |> List.map (fun (room, id, _) -> room, id))
+                    [ transit, "raid-1" ]
+                    "it is enrolled once, in the world roster"
+            }
+        ]
+
+[<Tests>]
+let rosterTests =
+    let rosterOf (ticks: (int * WorldView) list) =
+        (Roster.empty, ticks)
+        ||> List.fold (fun roster (t, watch) -> Roster.fold t watch roster)
+
+    testList
+        "raid roster: the world's"
+        [
+            test
+                "one row per hostile id in its room, with its owner, its part counts and its window" {
+                let twx = raider "TWX" "giaco" { X = 38; Y = 47 } [ Tough; Tough; Attack; Move ]
+                let ccv = raider "Ccv" "giaco" { X = 39; Y = 47 } [ RangedAttack; Heal; Move ]
+
+                let roster =
+                    rosterOf
+                        [
+                            10, seenRooms [ raidRoom, [ twx; ccv ], [] ]
+                            11, seenRooms [ raidRoom, [], [] ]
+                            12, seenRooms [ raidRoom, [ twx ], [] ]
+                            13, seenRooms [ raidRoom, [ twx; ccv ], [] ]
+                        ]
+
+                Expect.equal
+                    (rosterRows roster)
+                    [
+                        raidRoom,
+                        "Ccv",
+                        {
+                            Owner = "giaco"
+                            Body = Map.ofList [ Move, 1; RangedAttack, 1; Heal, 1 ]
+                            First = 10
+                            Last = 13
+                            Dies = 13 + Engine.creepLifetime
+                            Fell = None
+                        }
+                        raidRoom,
+                        "TWX",
+                        {
+                            Owner = "giaco"
+                            Body = Map.ofList [ Move, 1; Attack, 1; Tough, 2 ]
+                            First = 10
+                            Last = 13
+                            Dies = 13 + Engine.creepLifetime
+                            Fell = None
+                        }
+                    ]
+                    "a squad reads as one row a creep, however often it re-enters"
+            }
+
+            test "a row keeps the body that entered the room, not what the tower left of it" {
+                let whole = raider "TWX" "giaco" { X = 38; Y = 47 } [ Tough; Tough; Attack; Move ]
+                let chewed = raider "TWX" "giaco" { X = 38; Y = 48 } [ Attack; Move ]
+
+                let roster =
+                    rosterOf
+                        [
+                            10, seenRooms [ raidRoom, [ whole ], [] ]
+                            11, seenRooms [ raidRoom, [ chewed ], [] ]
+                        ]
+
+                Expect.equal
+                    (rosterRows roster |> List.map (fun (_, _, row) -> row.Body))
+                    [ Map.ofList [ Move, 1; Attack, 1; Tough, 2 ] ]
+                    "the first sighting wins: the roster answers what came, not what survived"
+            }
+
+            test
+                "one hostile in two rooms is a row in each, and neither an ally nor a keeper is enrolled" {
+                let twx = raider "TWX" "giaco" { X = 38; Y = 47 } [ Attack; Move ]
+
+                let ally = raider "Ally" (Set.minElement Colony.allies) { X = 1; Y = 1 } [ Move ]
+
+                let keeper = raider "Keeper" "Source Keeper" { X = 2; Y = 2 } [ Attack; Move ]
+
+                let roster =
+                    rosterOf
+                        [
+                            10, seenRooms [ raidRoom, [ twx; ally; keeper ], [] ]
+                            11,
+                            seenRooms
+                                [
+                                    outpostRoom,
+                                    [
+                                        { twx with
+                                            Pos = RoomPos.at outpostRoom { X = 38; Y = 0 }
+                                        }
+                                    ],
+                                    []
+                                ]
+                        ]
+
+                Expect.equal
+                    (rosterRows roster
+                     |> List.map (fun (room, id, row) -> room, id, row.First, row.Last))
+                    [ outpostRoom, "TWX", 11, 11; raidRoom, "TWX", 10, 10 ]
+                    "room by room, and only the raiders"
+            }
+
+            // #507: the four Trepidimous bodies died at W17S25's ramparts and the
+            // log said nothing of it. And live, giaco's haulers died of age beside
+            // W17S29 and the log counted them killed: a death is a kill only for a
+            // body that died before its time.
+            test
+                "a tombstone stamps its rows once, and a kill is a body that fell before its life ran out" {
+                let twx = raider "TWX" "giaco" { X = 38; Y = 47 } [ Tough; Attack; Move ]
+
+                let hauler =
+                    { raider "Hauler" "giaco" { X = 30; Y = 30 } [ Carry; Move ] with
+                        TicksToLive = 2
+                    }
+
+                let roster =
+                    rosterOf
+                        [
+                            // TWX is hit in the outpost and dies at home.
+                            10,
+                            seenRooms
+                                [
+                                    outpostRoom,
+                                    [
+                                        { twx with
+                                            Pos = RoomPos.at outpostRoom { X = 38; Y = 1 }
+                                        }
+                                    ],
+                                    []
+                                    raidRoom, [ hauler ], []
+                                ]
+                            11, seenRooms [ raidRoom, [ twx; { hauler with TicksToLive = 1 } ], [] ]
+                            12, seenRooms [ raidRoom, [], [ "TWX"; "Hauler"; "not-a-raider" ] ]
+                            13, seenRooms [ raidRoom, [], [ "TWX"; "Hauler" ] ]
+                        ]
+
+                Expect.equal
+                    (rosterRows roster |> List.map (fun (room, id, row) -> room, id, row.Fell))
+                    [
+                        outpostRoom, "TWX", Some 12
+                        raidRoom, "Hauler", Some 12
+                        raidRoom, "TWX", Some 12
+                    ]
+                    "every row of a fallen id, on t12, once however long the tombstones lie"
+
+                Expect.equal
+                    (rosterRows roster
+                     |> List.filter (fun (_, _, row) -> killed row)
+                     |> List.map (fun (_, id, _) -> id)
+                     |> List.distinct)
+                    [ "TWX" ]
+                    "the raider fell with its life ahead of it, once whichever room; the hauler's ran out on t12"
+            }
+
+            test "a row no episode reads is dropped once it is older than the quiet gap" {
+                let twx = raider "TWX" "giaco" { X = 38; Y = 47 } [ Attack; Move ]
+
+                let roster =
+                    rosterOf
+                        [
+                            10, seenRooms [ raidRoom, [ twx ], [] ]
+                            10,
+                            seenRooms
+                                [
+                                    outpostRoom,
+                                    [
+                                        { twx with
+                                            Id = "Passer"
+                                            Pos = RoomPos.at outpostRoom { X = 5; Y = 5 }
+                                        }
+                                    ],
+                                    []
+                                ]
+                        ]
+
+                let episode =
+                    {
+                        Opened = 10
+                        LastSeen = 10
+                        Rooms = Set.singleton raidRoom
+                        Closest = None
+                        Losses = []
+                        Damage = 0
+                    }
+
+                let gap = Tuning.defaults.QuietGap
+
+                Expect.equal
+                    (Roster.prune (10 + gap) gap [] roster |> rosterRows |> List.length)
+                    2
+                    "inside the gap every row stands"
+
+                Expect.equal
+                    (Roster.prune (11 + gap) gap [ episode ] roster
+                     |> rosterRows
+                     |> List.map (fun (room, id, _) -> room, id))
+                    [ raidRoom, "TWX" ]
+                    "past it, the row an episode reads stands, and the transit room's goes"
+            }
+
+            // Live t988,7xx: W17S29's episode, open 11,300 ticks beside giaco's
+            // hauler lane, kept 1,668 rows, about 5 ms a full tick.
+            test
+                "past the quiet gap a room keeps only bodies that could hurt, heal or fell, the latest RoomCap of them" {
+                let gap = Tuning.defaults.QuietGap
+                let armed i = raiderIn raidRoom i [ Attack; Move ]
+
+                let hauler i =
+                    { raiderIn raidRoom (1_000 + i) [ Carry; Move ] with
+                        Id = $"hauler-{i}"
+                    }
+
+                let roster =
+                    rosterOf (
+                        [ 1 .. Roster.roomCap + 10 ]
+                        |> List.map (fun i ->
+                            i, seenRooms [ raidRoom, [ armed i; hauler i ], [ "hauler-1" ] ])
+                    )
+
+                let episode =
+                    {
+                        Opened = 1
+                        LastSeen = Roster.roomCap + 10
+                        Rooms = Set.singleton raidRoom
+                        Closest = None
+                        Losses = []
+                        Damage = 0
+                    }
+
+                let tick = Roster.roomCap + 10 + gap + 1
+                let kept = Roster.prune tick gap [ episode ] roster |> rosterRows
+
+                Expect.equal
+                    (kept |> List.map (fun (_, id, _) -> id) |> List.sort)
+                    ([ 11 .. Roster.roomCap + 10 ] |> List.map (fun i -> $"raid-{i}") |> List.sort)
+                    "the latest fifty armed rows: no hauler that lived, and the fallen hauler seen first goes with the earliest"
+
+                let fallen =
+                    Map.ofList
+                        [ raidRoom, Map.ofList [ "hauler-1", roster.[raidRoom].["hauler-1"] ] ]
+                    |> Roster.prune tick gap [ episode ]
+                    |> rosterRows
+                    |> List.map (fun (_, id, _) -> id)
+
+                Expect.equal fallen [ "hauler-1" ] "a fallen body stays, armed or not"
             }
         ]
 
@@ -338,12 +527,18 @@ let approachTests =
                 // The other half: the room is read off the raider, not assumed to be the
                 // colony's. Everything of ours stands in W12S28, so a raider filed under
                 // the outpost has nothing to close on — absence, not a zero range.
+                // Declared, so the raid is the colony's (a room it only crosses
+                // opens no episode).
                 let elsewhere =
                     { raider "TWX" "giaco" { X = 9; Y = 46 } [ Attack; Move ] with
-                        Pos = RoomPos.at "W12S27" { X = 9; Y = 46 }
+                        Pos = RoomPos.at outpostRoom { X = 9; Y = 46 }
                     }
 
-                let state = RaidState.empty |> raidTick 10 { placed with Hostiles = [ elsewhere ] }
+                let state =
+                    RaidState.empty
+                    |> raidTick
+                        10
+                        ({ placed with Hostiles = [ elsewhere ] } |> withDeclaredOutpost outpostRoom)
 
                 Expect.equal
                     (state.Episodes |> List.map (fun e -> e.Closest))
@@ -808,7 +1003,9 @@ let damageTests =
                 // own room, so a window held open from next door would charge 3 hits a
                 // tick per rampart of ordinary decay as what the raid cost.
                 let decaying hostiles t =
-                    raid hostiles |> withHits "ram-1" BuiltKind.Rampart (100_000 - 300 * t)
+                    raid hostiles
+                    |> withDeclaredOutpost outpostRoom
+                    |> withHits "ram-1" BuiltKind.Rampart (100_000 - 300 * t)
 
                 let over hostiles =
                     (RaidState.empty, [ 0..2 ])
@@ -915,6 +1112,48 @@ let harassStandDownTests =
                     (standDowns state)
                     [ harassRoom, 100, 100, 150, StandDownBasis.HarassSighting ]
                     "the clock is the last sighting's, and says so"
+            }
+
+            // Characterisation (the world layer's S5): B8 of its inventory, the
+            // clock left in the old caster's log when `harassCasters` picked
+            // another colony, was closed by S2's world log already. This pins
+            // it, and passes on S2 by design.
+            test "the clock is the world log's: a new caster moves the row the old one opened" {
+                let colony =
+                    { (harassing quiet) with
+                        Hostiles = trepidimousSquad
+                        Bank = { Available = 5600; Capacity = 5600 }
+                    }
+
+                let row (danger: Danger) =
+                    danger.Rooms
+                    |> Map.tryFind harassRoom
+                    |> Option.bind _.Down
+                    |> Option.map (fun down -> down.Opened, down.LastSeen, down.Expiry, down.Basis)
+
+                let first, opened = (RaidState.empty, Danger.empty) |> dangerTick [] 100 colony
+
+                // The next caster, its own log empty, sees the squad again.
+                let _, moved = (RaidState.empty, opened) |> dangerTick [] 130 (shutOut colony)
+
+                Expect.equal
+                    (row moved)
+                    (Some(100, 130, 180, StandDownBasis.HarassSighting))
+                    "one row: opened by the first caster, moved by the next"
+
+                let _, left =
+                    (first, moved)
+                    |> dangerTick
+                        []
+                        131
+                        { quiet with
+                            Hostiles = trepidimousSquad
+                        }
+
+                Expect.equal
+                    (row left)
+                    (row moved)
+                    "and the old caster, casting it no more, leaves the clock be"
             }
 
             test "the squad seen again while the room is shut moves the clock to that sighting" {
@@ -1394,6 +1633,52 @@ let fightRecordTests =
                     (foldFights (at [ resident "r-1" 24; resident "r-2" 26 ]) Map.empty)
                     "the two standing there win it together: no Fight"
             }
+
+            // The world layer's S5: the records are one world map, so a colony
+            // that is not resident in a room never judges its record off its own
+            // vision; the clocks end it whoever folds.
+            test "a record of a room this colony is not resident in moves by its clocks alone" {
+                let hold = Tuning.defaults.FightHoldTicks
+                let lost = Decide.Fixtures.w17s25RaidIn "W1N2"
+                let latched = recordOf 1_000 (Some "duo") lost
+
+                let neighbour time =
+                    { quiet with
+                        Time = time
+                        Fallen = raidersOf lost |> Set.toList
+                    }
+
+                Expect.equal
+                    (foldFights (neighbour 1_003) latched)
+                    latched
+                    "every raider lies dead where it can see, and the record is not its to drop"
+
+                Expect.isEmpty
+                    (foldFights (neighbour (1_000 + 2 * hold)) latched)
+                    "but the bar runs out for it as for anybody"
+            }
+
+            // B6 of the world layer's inventory: a garrisoned child home's record
+            // was the mother's, and the child could not see it.
+            test
+                "the mother's record of her child's home is the world log's, which every colony's gate reads" {
+                let lost = Decide.Fixtures.w17s25RaidIn "W1N2"
+
+                let _, danger =
+                    Danger.foldColony
+                        3
+                        Set.empty
+                        Set.empty
+                        (fightRecordAt 1_000 lost)
+                        []
+                        RaidState.empty
+                        Danger.empty
+
+                Expect.equal
+                    (gateAt 1_001 danger).Fought
+                    (recordOf 1_000 None lost)
+                    "the child's gate holds the record the mother opened"
+            }
         ]
 
 /// `fightingMother`'s child room under a probe's Provoke (#493), a rampart
@@ -1450,6 +1735,7 @@ let probeLogTests =
                             SafeModeAt = None
                             Fate = Probing
                             Expires = 1_100
+                            Home = "W1N1"
                         })
                     "opened on the first dismantle"
 
@@ -1533,6 +1819,11 @@ let probeLogTests =
                             view.Assaults
                             |> List.map (fun facts ->
                                 { facts with
+                                    // Taken is an assault's with declared targets alone.
+                                    Assault =
+                                        { facts.Assault with
+                                            Targets = [ { X = 25; Y = 41 } ]
+                                        }
                                     Targets = targets
                                     Taken = taken
                                 })
@@ -1551,6 +1842,106 @@ let probeLogTests =
                 Expect.isEmpty
                     (foldTaken (seenAt 103 (Some [ "link-1", { X = 25; Y = 41 } ]) false) opened)
                     "the link rebuilt: dropped"
+            }
+
+            // The world layer's S5: a rival room's probe and its taken tick are
+            // the room's, not the assaulter's.
+            test "the probe log and the taken room are the world log's, laid into every colony's" {
+                let view = probedAt 100 1_000 inTheRoom false
+
+                let state, danger =
+                    Danger.foldColony 3 Set.empty Set.empty view [] RaidState.empty Danger.empty
+                    |> Danger.probing view dismantles
+
+                let laid = Danger.into danger RaidState.empty
+
+                Expect.equal (probeLogOf laid) (probeLogOf state) "the log the assaulter folded"
+                Expect.isSome (probeLogOf laid) "and it holds one"
+
+                let taken =
+                    { view with
+                        Assaults =
+                            view.Assaults
+                            |> List.map (fun facts ->
+                                { facts with
+                                    Assault =
+                                        { facts.Assault with
+                                            Targets = [ { X = 20; Y = 30 } ]
+                                        }
+                                    Targets = Some []
+                                    Taken = true
+                                })
+                    }
+
+                let _, danger =
+                    Danger.foldColony 3 Set.empty Set.empty taken [] RaidState.empty Danger.empty
+
+                Expect.equal
+                    (Danger.into danger RaidState.empty).Taken
+                    (Map.ofList [ "W1N2", 100 ])
+                    "and so is the tick its targets were first seen down"
+            }
+
+            // W18S26 is declared twice live: w18s26Link with its target, w18s26
+            // (a probe's line) with none. One record a room, so each colony moves
+            // only the part that is its own.
+            test
+                "a second colony assaulting the room moves neither the first's probe log nor its taken tick" {
+                let assaulter time intents (state, danger) =
+                    let view = probedAt time 1_000 inTheRoom false
+
+                    let view =
+                        { view with
+                            Assaults =
+                                view.Assaults
+                                |> List.map (fun facts ->
+                                    { facts with
+                                        Assault =
+                                            { facts.Assault with
+                                                Targets = [ { X = 20; Y = 30 } ]
+                                            }
+                                        Taken = true
+                                    })
+                        }
+
+                    Danger.foldColony 3 Set.empty Set.empty view [] state danger
+                    |> Danger.probing view intents
+
+                let other time (state, danger) =
+                    let view = probedAt time 1_000 None false
+
+                    let view =
+                        { view with
+                            Spatial =
+                                { view.Spatial with
+                                    RoomName = Some "W9N9"
+                                }
+                        }
+
+                    Danger.foldColony 3 Set.empty Set.empty view [] state danger
+                    |> Danger.probing view []
+
+                let _, first = assaulter 100 dismantles (RaidState.empty, Danger.empty)
+                let _, after = other 101 (RaidState.empty, first)
+
+                let parts (danger: Danger) =
+                    danger.Rooms
+                    |> Map.tryFind "W1N2"
+                    |> Option.map (fun entry -> entry.Taken, entry.Probe)
+
+                Expect.isSome
+                    (parts first |> Option.bind snd)
+                    "the premise: the first colony's probe opened the log"
+
+                Expect.equal
+                    (parts first |> Option.bind fst)
+                    (Some 100)
+                    "and its targets were seen down"
+
+                Expect.equal
+                    (parts after)
+                    (parts first)
+                    "the other colony, holding no probe and declaring no target, moves neither"
             }
         ]
 

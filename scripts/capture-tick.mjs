@@ -100,10 +100,29 @@ let live = null;
 if (wantLive) {
   if (!recent) console.error(`t${tick} is ${liveTick - tick} ticks behind live: its live Memory is mostly another fight's`);
   const colonies = (await memoryRead("fabot.observe.colonies")) ?? {};
+  // The stand-down rows, threat memories and fight records are the world
+  // danger log's (ADR 0086 S2, S5), one record a room: laid into each captured
+  // colony's log in its old shape, as `Danger.into` lays them into every
+  // colony's, and the arena merges them back into one.
+  const danger = (await memoryRead("fabot.observe.world.danger")) ?? {};
+  const worldRows = { outposts: [], threatened: {}, fought: {} };
+  for (const [room, entry] of Object.entries(danger)) {
+    if (entry?.down != null) worldRows.outposts.push({ ...entry.down, room });
+    if (entry?.threat != null) worldRows.threatened[room] = entry.threat;
+    if (entry?.fight != null) worldRows.fought[room] = entry.fight;
+  }
   const raids = Object.fromEntries(
     Object.entries(colonies)
       .filter(([home, leaf]) => roomNames.includes(home) && leaf?.raids)
-      .map(([home, leaf]) => [home, leaf.raids]),
+      .map(([home, leaf]) => [
+        home,
+        {
+          ...leaf.raids,
+          outposts: [...(leaf.raids.outposts ?? []), ...worldRows.outposts],
+          threatened: { ...leaf.raids.threatened, ...worldRows.threatened },
+          fought: { ...leaf.raids.fought, ...worldRows.fought },
+        },
+      ]),
   );
   live = { readAt: liveTick, raids, rooms: (await memoryRead("fabot.observe.rooms")) ?? {} };
 }

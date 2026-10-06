@@ -992,7 +992,8 @@ type StandDown =
         /// (`OutpostEpisode.Chased`, #510): projected still as a transit room,
         /// where a ranger's chase is pooled and nothing else is.
         ChasedOutposts: Set<string>
-        /// Each resident room's [[fight]] record (`RaidState.Fought`): what
+        /// Each resident room's [[fight]] record (`RaidState.Fought`),
+        /// whichever colony is resident there (the world danger log's): what
         /// keeps the Fight pooled for `Tuning.FightHoldTicks` after its raid
         /// was last seen, and casts nothing for the room as long again.
         Fought: Map<string, FightLatch>
