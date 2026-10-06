@@ -476,9 +476,8 @@ module SpatialInfo =
 
     /// The ids the projection files under one kind, in id order.
     let idsOfKindIn (kinds: Map<string, TargetKind>) (kind: TargetKind) : string list =
-        kinds
-        |> Map.toList
-        |> List.choose (fun (id, k) -> if sameKind k kind then Some id else None)
+        // A fold, not `Map.toList`: the whole census as pairs, a tick, per ask.
+        Map.foldBack (fun id k ids -> if sameKind k kind then id :: ids else ids) kinds []
 
     /// The same walk over a whole projection's census.
     let idsOfKind (spatial: SpatialInfo) (kind: TargetKind) : string list =

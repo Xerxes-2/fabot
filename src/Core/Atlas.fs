@@ -2181,6 +2181,24 @@ let private nearestReached (reached: Pos -> int) (tiles: Pos list) : int option 
 
     if best = unreached then None else Some best
 
+/// `nearestReached reached (besideExit grid tile)` without the two lists: the
+/// band asks it once per crossing.
+let private nearestReachedBeside (reached: Pos -> int) (grid: int[]) (tile: Pos) : int option =
+    let mutable best = unreached
+
+    for dx in -1 .. 1 do
+        for dy in -1 .. 1 do
+            if dx <> 0 || dy <> 0 then
+                let near = { X = tile.X + dx; Y = tile.Y + dy }
+
+                if walkableAt grid near then
+                    let d = reached near
+
+                    if d < best then
+                        best <- d
+
+    if best = unreached then None else Some best
+
 /// What this body pays to step onto an exit tile, priced by the same rule every
 /// other step is: one tick only for a plain exit under a body at fatigue
 /// parity, and a swamp exit is not free. Read off the border ring, the only
@@ -2312,7 +2330,7 @@ let private carriedAcross
         |> List.collect (fun pair ->
             match
                 exitPrice atlas stepPrices hop.From (fst pair),
-                nearestReached field (besideExit fieldGround (fieldTileOf pair))
+                nearestReachedBeside field fieldGround (fieldTileOf pair)
             with
             | Some crossing, Some onward ->
                 besideExit seedGround (seedTileOf pair)
@@ -2572,7 +2590,7 @@ let private joinedAcross
                     exitPrice atlas stepPrices fromRoom exitTile,
                     besideExitFrom nearGround from exitTile
 
-            match crossing, nearestReached far (besideExit farGround landing) with
+            match crossing, nearestReachedBeside far farGround landing with
             | Some crossing, Some departure -> Some(crossing + departure, exitTile, approach)
             | _ -> None)
         // On the sum of the two terms alone, a primitive key over a list the

@@ -1434,6 +1434,14 @@ module Threats =
         |> Option.map (fun pace -> pace.Swamp)
         |> Option.defaultValue 0
 
+    /// The soonest any class is on a tile, by tile index: the per-tile reads
+    /// below ask it of every tile of a room, and a `List.exists` closure there
+    /// is one allocation a tile.
+    let rec internal soonestAmong (index: int) (classes: ClassArrival list) (soonest: int) : int =
+        match classes with
+        | [] -> soonest
+        | map :: rest -> soonestAmong index rest (min soonest (Grid.at index map.Ticks))
+
     /// Whether a hostile strikes the tile a body stands on before it can step
     /// off it at its next decision: the room's Reach, or, for a body its
     /// fatigue holds, a map striking the tile within the horizon and its wait
@@ -1512,7 +1520,7 @@ module Threats =
                     let leaves = Grid.at index walk.Leaves
 
                     leaves < System.Int32.MaxValue
-                    && maps.Classes |> List.exists (fun map -> Grid.at index map.Ticks <= leaves)
+                    && soonestAmong index maps.Classes System.Int32.MaxValue <= leaves
                     && (not fighter
                         || heal = 0
                         || Arrival.damageAt room (strikers.Force()) leaves (posAt index) > heal)
@@ -1554,23 +1562,29 @@ module Threats =
                     let stands = Atlas.standsAt atlas room
                     let ramparts = lazy (Atlas.ourRampartTilesIn atlas room)
                     let mutable least = System.Int32.MaxValue
-                    let mutable found = []
+                    // Indices, not tiles: most safe tiles lie past the band, so
+                    // a tile is made only for one that falls within it.
+                    let safe = ResizeArray<int>()
 
                     for index in 0 .. tileCount - 1 do
                         let mine = Grid.at index walk.Ticks
 
                         if mine < System.Int32.MaxValue && stands index then
-                            let soonest =
-                                maps.Classes
-                                |> List.fold
-                                    (fun soonest map -> min soonest (Grid.at index map.Ticks))
-                                    System.Int32.MaxValue
+                            let soonest = soonestAmong index maps.Classes System.Int32.MaxValue
 
                             if horizon < soonest || Set.contains (posAt index) ramparts.Value then
                                 least <- min least mine
-                                found <- (mine, RoomPos.at room (posAt index)) :: found
+                                safe.Add index
 
-                    found |> List.filter (fun (mine, _) -> mine <= least + horizon) |> List.map snd
+                    let mutable found = []
+
+                    for i in 0 .. safe.Count - 1 do
+                        let index = safe.[i]
+
+                        if Grid.at index walk.Ticks <= least + horizon then
+                            found <- RoomPos.at room (posAt index) :: found
+
+                    found
                 | _ -> []
 
             if Set.isEmpty (reachIn threats room) then
@@ -2019,7 +2033,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             let build () =
                 Atlas.standingTilesWhere atlas room ramparts (fun index ->
-                    maps.Classes |> List.exists (fun map -> Grid.at index map.Ticks <= horizon))
+                    Threats.soonestAmong index maps.Classes System.Int32.MaxValue <= horizon)
 
             let tiles =
                 match view.World.ReachGround with
