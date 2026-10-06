@@ -353,28 +353,15 @@ let outpostFactsOf (view: ColonyView) atlas : OutpostFacts =
         Fuelled = fuelled
     }
 
-/// Planner: rebuild this tick's full Task pool from the colony view. Pure and
-/// from scratch every tick — Tasks are never persisted.
-///
-/// `held` is the narrow pair of facts this half reads about the colony's own
-/// assignment table (ADR-0067): all task ids living creeps hold, and
-/// the subset whose holder still carries Thorium, derived once in `Entry`
-/// (`heldTaskFacts`). Repairs read the first to pick a decaying kind's line; a
-/// partially poured delivery reads the second so it cannot move to a different
-/// carrier when its empty holder releases it. The Planner still sees no body,
-/// position or name.
-///
-/// What the held Repairs change is not the Repair line alone: `Quota.workerFloor`
-/// stands the worker row at two while anything stands in the Build or Repair
-/// pool, so a held road between the two lines keeps that floor where an empty
-/// pool would have dropped it to one. Masked at the shipped tuning, where
-/// `MinWorkforce` binds first.
-let planTasks
+/// The head of the pool, the fight pass's Tasks: Flee and the combat Tasks,
+/// off the Briefs. Of the economy it reads only the outposts the guard row
+/// hires for (`OutpostFacts.Guarded`), handed in as a list.
+let planFightTasks
     (view: ColonyView)
     atlas
     (threats: Threats)
     (held: HeldTaskFacts)
-    (outposts: OutpostFacts)
+    (guardedRooms: string list)
     : Task list =
     // Flee exists while a Reach does: one Task for the whole colony, at the
     // head of the pool as its Safety tier is at the head of the ranking.
@@ -407,7 +394,7 @@ let planTasks
             |> Set.ofSeq
 
         let guarded =
-            outposts.Guarded
+            guardedRooms
             |> List.filter (fun room -> Threats.pools view (Threats.briefOf threats room))
 
         // Every Brief of a Task of its own, by its Task.
@@ -421,7 +408,7 @@ let planTasks
             briefed (fun brief -> List.contains BriefKind.ExitHold brief.Claims)
             |> Set.filter (fun room ->
                 Set.contains (taskId (Guard room)) held.All
-                && not (List.contains room outposts.Guarded))
+                && not (List.contains room guardedRooms))
             |> Set.toList
 
         let killing =
@@ -429,7 +416,7 @@ let planTasks
             |> List.collect (fun kind ->
                 Set.difference
                     (briefed (fun brief -> brief.Duty = Duty.Guard kind))
-                    (Set.ofList (outposts.Guarded @ holding))
+                    (Set.ofList (guardedRooms @ holding))
                 |> Set.toList)
 
         // And every Guard a body of ours holds while it still holds the fight
@@ -455,6 +442,30 @@ let planTasks
         @ (briefedAs Duty.Defend
            |> List.filter (fun task -> Threats.wants view threats task > 0))
 
+    flees @ guards
+
+/// The rest of the pool, the economy's Tasks: everything below the Safety
+/// tier, in pool order.
+///
+/// `held` is the narrow pair of facts this half reads about the colony's own
+/// assignment table (ADR-0067): all task ids living creeps hold, and
+/// the subset whose holder still carries Thorium, derived once in `Entry`
+/// (`heldTaskFacts`). Repairs read the first to pick a decaying kind's line; a
+/// partially poured delivery reads the second so it cannot move to a different
+/// carrier when its empty holder releases it. The Planner still sees no body,
+/// position or name.
+///
+/// What the held Repairs change is not the Repair line alone: `Quota.workerFloor`
+/// stands the worker row at two while anything stands in the Build or Repair
+/// pool, so a held road between the two lines keeps that floor where an empty
+/// pool would have dropped it to one. Masked at the shipped tuning, where
+/// `MinWorkforce` binds first.
+let planEconomyTasks
+    (view: ColonyView)
+    atlas
+    (held: HeldTaskFacts)
+    (outposts: OutpostFacts)
+    : Task list =
     // Harvest exists for every source, drained or not (ADR-0025): whether a
     // dry rock is worth walking to depends on the walker's body and position —
     // the Matcher's knowledge, and none of this half's.
@@ -961,9 +972,7 @@ let planTasks
             |> List.filter (fun id -> stored id > 0)
             |> List.map (fun id -> Withdraw(id, Energy))
 
-    flees
-    @ guards
-    @ harvests
+    harvests
     // The consignment's rungs sit here, above the energy cycle and below the
     // season's own: ore is the season's score and the hauling it asks for is a
     // few tiles of the home room (#349).
@@ -1014,3 +1023,17 @@ let planTasks
     @ labDraws
     @ deliveryWithdraws
     @ reactorRefills
+
+/// Planner: rebuild this tick's full Task pool from the colony view, the
+/// fight pass's Tasks at its head (`planFightTasks`) and the economy's after
+/// (`planEconomyTasks`). Pure and from scratch every tick — Tasks are never
+/// persisted.
+let planTasks
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (held: HeldTaskFacts)
+    (outposts: OutpostFacts)
+    : Task list =
+    planFightTasks view atlas threats held outposts.Guarded
+    @ planEconomyTasks view atlas held outposts

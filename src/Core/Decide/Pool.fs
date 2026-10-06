@@ -604,7 +604,51 @@ let bodyClassOf (tuning: Tuning) atlas (creep: CreepInfo) : BodyClass =
     elif isStandingBody tuning creep then Standing
     else Light
 
-/// Planner, second half: this tick's pool with each entry's priority and
+/// A Safety-tier Task's entry: Flee's, or a combat Task's off its Brief. It
+/// reads no economy fact, so the fight pass prices its pool alone
+/// (`planFightPool`).
+let private safetyEntry (view: ColonyView) (threats: Threats) (task: Task) : PooledTask =
+    let brief = lazy (Threats.briefFor threats task)
+
+    {
+        Task = task
+        Priority =
+            priorityOfTier Safety
+            + rankOfRung (
+                match task with
+                // A kill over a quiet holder's own Guard (#510, #516), and a
+                // raid's Guard over a kill (#528): its Brief's.
+                | Guard _ ->
+                    brief.Value
+                    |> Option.map (fun brief -> brief.Rung)
+                    |> Option.defaultValue OnTheTier
+                | _ -> OnTheTier
+            )
+        Capacity =
+            match task with
+            // The bodies the Task's Brief admits: a Guard's and a Defend's off
+            // their row's own count, a squad's its slots, one cap per role.
+            | Guard _
+            | Defend _
+            | Assault _ ->
+                brief.Value
+                |> Option.map (fun brief -> brief.Capacity view threats)
+                |> Option.defaultValue (Capacity.roles [])
+            | _ -> Capacity.unbounded
+        Borrowed = false
+        // Every Guard's holder may be called off it for a kill, and a Guard
+        // whose Brief recalls is a kill.
+        Recall =
+            match task with
+            | Guard room ->
+                match (Threats.briefOf threats room).Recall with
+                | Some recall -> Some(RecallPolicy.Kill(room, recall))
+                | None -> Some(RecallPolicy.Callable room)
+            | _ -> None
+    }
+
+/// Planner, second half: the economy's pool, every Task below the Safety tier
+/// (`planPools` hands it no other), with each entry's priority and
 /// capacity on it. `planTasks` says what is pooled; this says where each
 /// entry ranks and how many bodies it admits, and between them they are
 /// everything the Matcher knows about a Task. Every exception the colony has
@@ -615,7 +659,6 @@ let planPoolHolding
     (held: HeldTaskFacts)
     (view: ColonyView)
     atlas
-    (threats: Threats)
     (busy: BusyReason list)
     (tasks: Task list)
     : PooledTask list =
@@ -1247,12 +1290,6 @@ let planPoolHolding
             // tier alone travel cost keeps every loaded pioneer at home, the
             // claim lands with no party, and the tap comes first.
             | Upgrade id when Set.contains id partyControllers -> TwoRungsUp
-            // A kill over a quiet holder's own Guard (#510, #516), and a raid's
-            // Guard over a kill (#528): its Brief's.
-            | Guard _ ->
-                Threats.briefFor threats task
-                |> Option.map (fun brief -> brief.Rung)
-                |> Option.defaultValue OnTheTier
             | Refill(id, Energy) when reserveShort && isStorage id -> OneRungUp
             | Refill(id, Energy) when yieldingBuffer id -> OneRungUp
             | _ -> OnTheTier
@@ -1317,14 +1354,6 @@ let planPoolHolding
                  |> Option.filter (fun _ -> posts > 0)
                  |> Option.map (fun n -> max 0 (n - posts)))
             |> Capacity.garrisoning postTiles
-        // The bodies the Task's Brief admits: a Guard's and a Defend's off
-        // their row's own count, a squad's its slots, one cap per role.
-        | Guard _
-        | Defend _
-        | Assault _ ->
-            Threats.briefFor threats task
-            |> Option.map (fun brief -> brief.Capacity view threats)
-            |> Option.defaultValue (Capacity.roles [])
         // One holder per controller: a second body there buys nothing.
         | Reserve _
         | Claim _ -> Capacity.total 1
@@ -1526,21 +1555,34 @@ let planPoolHolding
                 | Upgrade controllerId -> isBorrowedUpgrade view controllerId
                 | Build siteId -> isBorrowedSite siteId
                 | _ -> false
-            // Every Guard's holder may be called off it for a kill, and a
-            // Guard whose Brief recalls is a kill.
             Recall =
                 match task with
-                | Guard room ->
-                    match (Threats.briefOf threats room).Recall with
-                    | Some recall -> Some(RecallPolicy.Kill(room, recall))
-                    | None -> Some(RecallPolicy.Callable room)
                 | Repair id when Set.contains id struck ->
                     Atlas.targetRoom atlas id |> Option.map RecallPolicy.Struck
                 | _ -> None
         })
 
-/// `planPoolHolding` over a colony whose bodies hold nothing: every load
-/// aboard is uncommitted.
+/// The fight pass's pool: the Safety-tier Tasks of `tasks`, Flee and the
+/// combat Tasks, in their order.
+let planFightPool (view: ColonyView) (threats: Threats) (tasks: Task list) : PooledTask list =
+    tasks |> List.filter safetyTier |> List.map (safetyEntry view threats)
+
+/// The tick's pool in its two halves, each in pool order: the fight pass's
+/// (`planFightPool`) and the economy's, every Task below the Safety tier
+/// (`planPoolHolding`). The whole pool is the one then the other.
+let planPools
+    (held: HeldTaskFacts)
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (busy: BusyReason list)
+    (tasks: Task list)
+    : PooledTask list * PooledTask list =
+    planFightPool view threats tasks,
+    planPoolHolding held view atlas busy (List.filter (safetyTier >> not) tasks)
+
+/// The whole pool (`planPools`) over a colony whose bodies hold nothing:
+/// every load aboard is uncommitted.
 let planPool
     (view: ColonyView)
     atlas
@@ -1548,4 +1590,5 @@ let planPool
     (busy: BusyReason list)
     (tasks: Task list)
     =
-    planPoolHolding HeldTaskFacts.empty view atlas threats busy tasks
+    let fight, economy = planPools HeldTaskFacts.empty view atlas threats busy tasks
+    fight @ economy

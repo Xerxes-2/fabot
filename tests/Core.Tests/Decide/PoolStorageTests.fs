@@ -327,7 +327,6 @@ let stockGateTests =
                         holding
                         colony
                         (Atlas.ofView colony)
-                        noThreats
                         []
                         (planTasksOn colony noThreats)
                     |> List.tryPick (fun entry ->

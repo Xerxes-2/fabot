@@ -545,6 +545,14 @@ let decideUnarbitrated
 
     let sizing = rowSizingOf view atlas threats outposts held
 
+    // The fight pass, carved out of the match: the fighters
+    // (`isFighterBody`) are kept and matched over Flee and the combat Tasks
+    // first, every other body over Flee and the economy's after them. It
+    // reads the view's fighters, the Atlas, the Threats and their Briefs,
+    // `held`, the guarded outposts and the row sizing (a relief's lead);
+    // it leaves the fighters' assignments and Verdicts. The structures' fight
+    // (`defenseIntents`), the Emitter, the reflexes and the one Resolver
+    // still run over both passes' bodies together.
     let tasks = planTasks view atlas threats held outposts
 
     // Why the colony is busy (#523), once a tick for the upgrader row and the
@@ -552,8 +560,10 @@ let decideUnarbitrated
     let busy = busyReasons view tasks (not (List.isEmpty aidIntents))
 
     // Every entry's priority and capacity, set once here and read by the
-    // Matcher and the mover.
-    let pool = planPoolHolding held view atlas threats busy tasks
+    // Matcher and the mover: the fight pass's off the Briefs, the economy's
+    // after them, and the whole pool the two in pool order.
+    let fightPool, economyPool = planPools held view atlas threats busy tasks
+    let pool = fightPool @ economyPool
 
     // A far field whose Task is not in the tick's list is dead weight the
     // census never evicts (#392). Every far leg priced this tick — by the
@@ -576,7 +586,29 @@ let decideUnarbitrated
             busy
             (withOverflow plan.HaulerQuota overflow)
 
-    let next, verdicts = matchCreeps view atlas sizing threats pool assignments verbose
+    let fighters, economyBodies = view.Creeps |> List.partition isFighterBody
+
+    let next, verdicts =
+        matchCreeps
+            view
+            atlas
+            sizing
+            threats
+            pool
+            [
+                {
+                    Bodies = fighters
+                    Offered = fightPool
+                }
+                {
+                    Bodies = economyBodies
+                    // Flee is both sides': the fight pool's entry, ahead.
+                    Offered = List.filter (fun pooled -> pooled.Task = Flee) fightPool @ economyPool
+                }
+            ]
+            assignments
+            verbose
+
     let assigned = assignedTasks tasks next
 
     // The other half of the vision grace (#151): the holders the Matcher kept

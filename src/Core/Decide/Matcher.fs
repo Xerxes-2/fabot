@@ -6,9 +6,23 @@ module Fabot.Core.Decide.Matcher
 open Fabot.Core
 open Fabot.Core.Types
 
-/// Keep still-valid assignments (anti-thrash) and greedily assign the rest.
+/// One pass of the match: the bodies it keeps and assigns, and the Tasks it
+/// offers them. The fight pass's share is the fighters and the fight pool,
+/// the economy's every other body and the rest of the pool, Flee in both.
+type MatchShare =
+    {
+        Bodies: CreepInfo list
+        Offered: PooledTask list
+    }
+
+/// Keep still-valid assignments (anti-thrash) and greedily assign the rest,
+/// one share after another, each starting from the holdings the shares before
+/// it left. A body in no share is neither kept nor matched. `pool` is the
+/// whole pool: what a remembered Task is looked up in, what a verbose creep is
+/// scored against, and whether there are Tasks at all.
+///
 /// Verdicts out: releases first in memory order, then one status Verdict per
-/// living creep in view order — each preceded, for a creep on the verbose
+/// creep of a share in view order — each preceded, for a creep on the verbose
 /// list, by its Scoring Verdict, the whole pool judged against the same state
 /// its status was decided from.
 let matchCreeps
@@ -17,6 +31,7 @@ let matchCreeps
     (sizing: RowSizing)
     (threats: Threats)
     (pool: PooledTask list)
+    (shares: MatchShare list)
     (assignments: Assignments)
     (verbose: Set<string>)
     : Assignments * Verdict list =
@@ -499,74 +514,80 @@ let matchCreeps
                 | _ -> holders)
 
     // The releases are reported in the assignment map's order whatever order
-    // they were decided in, so the Verdict list stays in memory order.
-    let kept, keptLoads, released =
-        ((Map.empty, Map.empty, []), remembered)
-        ||> List.fold (fun (acc, loads, released) (name, tid) ->
-            let release reason =
-                acc, loads, (name, Verdict.Released(name, tid, reason)) :: released
+    // they were decided in, so the Verdict list stays in memory order. One
+    // share's bodies at a time.
+    let keep
+        (bodies: Map<string, CreepInfo>)
+        (offered: Set<string>)
+        (acc, loads, released)
+        (name, tid)
+        =
+        let release reason =
+            acc, loads, (name, Verdict.Released(name, tid, reason)) :: released
 
-            match view.Creeps |> List.tryFind (fun c -> c.Name = name) with
-            | None -> acc, loads, released
-            | Some creep ->
-                match Map.tryFind tid byId with
-                // Kept, by the Verdict every other steady assignment answers
-                // with. The Task is in no pool, so `graced` is the whole
-                // judgement.
-                | None when Option.isSome (graced creep tid) ->
-                    Map.add name tid acc, hold loads tid, released
-                | None -> release ReleaseReason.TaskGone
-                // An expiring holder, or one of a relief pair, is kept over
-                // capacity where a fresh candidate would be refused.
-                // A holder Flee applies to runs, whatever its Task's ground
-                // (#472): `threatened` reads the Task's tiles, and a body
-                // walking past a raid toward safe ground is struck all the way.
-                // A fight Task's holder keeps it (#533): its ground is the
-                // fight's answer to the Reach.
-                | Some pooled when
-                    not (safetyTier pooled.Task)
-                    && fleeing
-                       |> Option.exists (fun flee -> applicable view threats atlas creep flee)
-                    ->
-                    release (ReleaseReason.Rejected RejectReason.Threatened)
-                | Some pooled when outranked acc creep pooled -> release ReleaseReason.Outranked
-                | Some _ when Set.contains creep.Name called -> release ReleaseReason.Called
-                // The one hold rule (#535, `Threats.holdsFight`): a fight begun
-                // is kept while its holder can still strike a target there,
-                // whatever the room's kind, capacity or muster.
-                // It ends for a holder #533's flee takes: out-damaged where it
-                // stands and losing its own exchange there (a guard shot
-                // rooted beside shooters it can no longer reach).
-                | Some pooled when
-                    Threats.holdsFight view atlas threats creep pooled.Task
-                    && not (
-                        fleeing
-                        |> Option.exists (fun flee -> applicable view threats atlas creep flee)
-                        && (match pooled.Task with
-                            | Guard room ->
-                                not (
-                                    Facts.bodyWins view room (partCount creep.Body) creep.Hits.Hits
-                                )
-                            | _ -> false)
-                    )
-                    ->
-                    Map.add name tid acc, hold loads tid, released
-                | Some pooled ->
-                    let escape = lazy (isExpiring creep.Name || reliefPair acc creep pooled)
+        match Map.tryFind name bodies with
+        | None -> acc, loads, released
+        | Some creep ->
+            match Map.tryFind tid byId with
+            // Kept, by the Verdict every other steady assignment answers
+            // with. The Task is in no pool, so `graced` is the whole
+            // judgement.
+            | None when Option.isSome (graced creep tid) ->
+                Map.add name tid acc, hold loads tid, released
+            | None -> release ReleaseReason.TaskGone
+            // A Task across the line from the body, which its share does
+            // not offer: a fighter's economy Task, or the fight Task of a
+            // body disarmed since (`CreepInfo.Body` counts live parts).
+            | Some _ when not (Set.contains tid offered) ->
+                release (ReleaseReason.Rejected RejectReason.Inapplicable)
+            // An expiring holder, or one of a relief pair, is kept over
+            // capacity where a fresh candidate would be refused.
+            // A holder Flee applies to runs, whatever its Task's ground
+            // (#472): `threatened` reads the Task's tiles, and a body
+            // walking past a raid toward safe ground is struck all the way.
+            // A fight Task's holder keeps it (#533): its ground is the
+            // fight's answer to the Reach.
+            | Some pooled when
+                not (safetyTier pooled.Task)
+                && fleeing |> Option.exists (fun flee -> applicable view threats atlas creep flee)
+                ->
+                release (ReleaseReason.Rejected RejectReason.Threatened)
+            | Some pooled when outranked acc creep pooled -> release ReleaseReason.Outranked
+            | Some _ when Set.contains creep.Name called -> release ReleaseReason.Called
+            // The one hold rule (#535, `Threats.holdsFight`): a fight begun
+            // is kept while its holder can still strike a target there,
+            // whatever the room's kind, capacity or muster.
+            // It ends for a holder #533's flee takes: out-damaged where it
+            // stands and losing its own exchange there (a guard shot
+            // rooted beside shooters it can no longer reach).
+            | Some pooled when
+                Threats.holdsFight view atlas threats creep pooled.Task
+                && not (
+                    fleeing |> Option.exists (fun flee -> applicable view threats atlas creep flee)
+                    && (match pooled.Task with
+                        | Guard room ->
+                            not (Facts.bodyWins view room (partCount creep.Body) creep.Hits.Hits)
+                        | _ -> false)
+                )
+                ->
+                Map.add name tid acc, hold loads tid, released
+            | Some pooled ->
+                let escape = lazy (isExpiring creep.Name || reliefPair acc creep pooled)
 
-                    match gate escape acc creep pooled with
-                    | Error reason -> release (ReleaseReason.Rejected reason)
-                    | Ok _ -> Map.add name tid acc, hold loads tid, released)
+                match gate escape acc creep pooled with
+                | Error reason -> release (ReleaseReason.Rejected reason)
+                | Ok _ -> Map.add name tid acc, hold loads tid, released
 
-    // The fresh candidate's reading of the same cascade, over the whole pool:
-    // scored on the full key where a holder is merely kept, and with no escape
-    // from the capacity gate. The key's rank is `matchRank`'s, which reads the
-    // creep's cheapest intake, so the pool is gated before any row is scored.
-    // Each pooled Task beside its id, worked out once for the tick.
+    // The fresh candidate's reading of the same cascade, over the Tasks its
+    // share offers: scored on the full key where a holder is merely kept, and
+    // with no escape from the capacity gate. The key's rank is `matchRank`'s,
+    // which reads the creep's cheapest intake, so the pool is gated before any
+    // row is scored. Each pooled Task beside its id, worked out once for the
+    // tick.
     let ids = pool |> List.map (fun pooled -> taskId pooled.Task, pooled)
 
-    let gateAll acc (creep: CreepInfo) =
-        ids
+    let gateAmong offered acc (creep: CreepInfo) =
+        offered
         |> List.map (fun (tid, pooled) -> tid, pooled, gate (lazy false) acc creep pooled)
 
     let score
@@ -799,14 +820,61 @@ let matchCreeps
                     (Verdict.Matched(creep.Name, tid, factorOf keyed top), rows)
                     decided)
 
-    let next, nextLoads, decided =
-        view.Creeps
-        |> List.mapi (fun i creep -> i, creep)
-        |> List.filter (fun (_, creep) -> not (Map.containsKey creep.Name kept))
-        |> List.map (fun (i, creep) -> entryOf keptLoads i creep (gateAll kept creep))
-        |> fun pending -> fresh kept keptLoads pending Map.empty
+    // One share: its bodies' remembered holdings judged, then its fresh match
+    // over the Tasks it offers, from the holdings the shares before it left.
+    // A body is in one share, so what one share keeps or matches is never a
+    // body another judges; they meet only on a Task both offer (Flee, which
+    // no cap bounds).
+    let pass (acc, loads, released, kept, decided) (share: MatchShare) =
+        let bodies = share.Bodies |> List.map (fun c -> c.Name, c) |> Map.ofList
 
-    // One status Verdict per living creep in view order, a verbose creep's
+        let offered = share.Offered |> List.map (fun pooled -> taskId pooled.Task, pooled)
+
+        let acc, loads, released =
+            ((acc, loads, released), remembered)
+            ||> List.fold (keep bodies (offered |> List.map fst |> Set.ofList))
+
+        let kept =
+            (kept, acc)
+            ||> Map.fold (fun kept name tid ->
+                if Map.containsKey name bodies then
+                    Map.add name tid kept
+                else
+                    kept)
+
+        let next, loads, decided =
+            view.Creeps
+            |> List.mapi (fun i creep -> i, creep)
+            |> List.filter (fun (_, creep) ->
+                Map.containsKey creep.Name bodies && not (Map.containsKey creep.Name acc))
+            |> List.map (fun (i, creep) -> entryOf loads i creep (gateAmong offered acc creep))
+            |> fun pending -> fresh acc loads pending decided
+
+        next, loads, released, kept, decided
+
+    let next, nextLoads, released, kept, decided =
+        ((Map.empty, Map.empty, [], Map.empty, Map.empty), shares) ||> List.fold pass
+
+    // A verbose fresh creep's rows over the whole pool, in pool order: its
+    // share's, then the Tasks it was not offered, each at the gate it fails
+    // against the match as it ended. Most fail ahead of capacity, where that
+    // state moves nothing; a sapper lamed to more Work than Move passes the
+    // Thorium mine's Harvest that far and reads its capacity as it ended.
+    let wholeRows (creep: CreepInfo) (rows: (PooledTask * Candidate) list) =
+        let offered = rows |> List.map (fun (pooled, _) -> taskId pooled.Task) |> Set.ofList
+        let others = ids |> List.filter (fun (tid, _) -> not (Set.contains tid offered))
+
+        match others with
+        | [] -> rows
+        | _ ->
+            let order = ids |> List.mapi (fun i (tid, _) -> tid, i) |> Map.ofList
+
+            rows @ score nextLoads creep (gateAmong others next creep)
+            |> List.sortBy (fun (pooled, _) ->
+                Map.tryFind (taskId pooled.Task) order
+                |> Option.defaultValue System.Int32.MaxValue)
+
+    // One status Verdict per creep of a share in view order, a verbose creep's
     // Scoring before it: a fresh creep's rows are the ones it was matched on,
     // its own claim not yet among them; a kept creep's are the whole pool
     // judged against the match with its own claim and crowding set aside
@@ -814,21 +882,24 @@ let matchCreeps
     let statuses =
         view.Creeps
         |> List.collect (fun creep ->
-            let status, rows =
+            let judged =
                 match Map.tryFind creep.Name kept with
                 | Some tid ->
-                    Verdict.Kept(creep.Name, tid),
-                    lazy
-                        (let without = Map.add tid (max 0 (load nextLoads tid - 1)) nextLoads
+                    Some(
+                        Verdict.Kept(creep.Name, tid),
+                        lazy
+                            (let without = Map.add tid (max 0 (load nextLoads tid - 1)) nextLoads
 
-                         score without creep (gateAll (Map.remove creep.Name next) creep))
+                             score without creep (gateAmong ids (Map.remove creep.Name next) creep))
+                    )
                 | None ->
-                    let status, rows = Map.find creep.Name decided
-                    status, lazy rows
+                    Map.tryFind creep.Name decided
+                    |> Option.map (fun (status, rows) -> status, lazy (wholeRows creep rows))
 
-            if Set.contains creep.Name verbose then
+            match judged with
+            | None -> []
+            | Some(status, rows) when Set.contains creep.Name verbose ->
                 [ Verdict.Scoring(creep.Name, rows.Value |> List.map snd); status ]
-            else
-                [ status ])
+            | Some(status, _) -> [ status ])
 
     next, (released |> List.sortBy fst |> List.map snd) @ statuses
