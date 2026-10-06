@@ -47,7 +47,7 @@ A live firefight the user flags may be fixed in the current session without the 
 
 - A background task or subagent notifies when it finishes: end the turn. Wait on the game with `npm run observe -- wait --ticks N`.
 - Stop a background job with TaskStop; `pkill -f` matches its own shell.
-- A subagent that edits runs with `isolation: "worktree"`: the WorktreeCreate hook gives it its own jj workspace under `~/.cache/claude-jj-workspaces/`, based on a copy of the default workspace's `@`, and the repo-local `.claude/worktree-setup.local.sh` (untracked) links `node_modules`, copies `.env` and restores the dotnet tools. Put the default `@` on the latest `main` before spawning. The subagent describes its change and never moves a bookmark or pushes.
+- A subagent that edits runs with `isolation: "worktree"`: the WorktreeCreate hook gives it its own jj workspace under `~/.cache/claude-jj-workspaces/`, based on `main` (the hook's `trunk()`), and the repo-local `.claude/worktree-setup.local.sh` (untracked) links `node_modules`, copies `.env` and restores the dotnet tools. The subagent describes its change and never moves a bookmark or pushes.
 - Ship a subagent's change from the default workspace: `jj new <change>` (rebase it onto `main` first if `main` moved), then steps 4–5 with `-r <change>`. Subagent workspaces are swept at session end, or by hand with `jj workspace forget` and removing the directory.
 - Another live session works in its own workspace too, or stays read-only.
 
