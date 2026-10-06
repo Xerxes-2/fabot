@@ -4445,14 +4445,16 @@ let fleeTests =
 
                 let atlas = Atlas.ofView (facingHostile true)
 
-                // Less the walks' and flights' tables and the bodies they are
-                // of, and the unclaimed Briefs read off the view, which are
-                // the tick's own and no Reach.
+                // Less the walks', flights' and flight costs' tables and the
+                // bodies they are of, the rooms seen and the unclaimed Briefs
+                // read off the view, which are the tick's own and no Reach.
                 Expect.equal
                     { threatsOf (facingHostile true) atlas with
                         Unclaimed = noThreats.Unclaimed
                         Walks = noThreats.Walks
                         Flights = noThreats.Flights
+                        FleeCosts = noThreats.FleeCosts
+                        Seen = Set.empty
                         Bodies = []
                     }
                     noThreats
@@ -4480,6 +4482,67 @@ let fleeTests =
 
                 Expect.isFalse (fleesWith 0) "free to step, it stays at work"
                 Expect.isTrue (fleesWith 4) "held two ticks, it runs"
+            }
+
+            // Movement S4 (#583): W17S26 t986,005 under S3, reserver-985957
+            // stood on a swamp tile its 16 fatigue held it four ticks on; the
+            // melee struck it before it could step off, so it took Flee, and
+            // Flee's ground was that one tile (out of the Reach, the stay not
+            // counted). It stood there until the melee's road took it. A body
+            // flees to the tiles it can be on and gone before any hostile
+            // strikes them, its own tile judged by its stay like any other.
+            test "a body its fatigue holds is never given its own struck tile as Flee's ground" {
+                let hauler =
+                    { creepWith "h1" 50 50 [ Carry; Carry; Move ] with
+                        Fatigue = 4
+                    }
+
+                let colony =
+                    laneColony [ hauler ] [ "h1", { X = 25; Y = 24 } ]
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 20 } [ Attack; Move ] ]
+
+                let atlas = Atlas.ofView colony
+
+                let area =
+                    Threats.fleeAreaFor (threatsOf colony atlas) atlas hauler |> Set.map RoomPos.pos
+
+                Expect.isFalse
+                    (Set.contains { X = 25; Y = 24 } area)
+                    $"not the tile it is struck on before it can leave: {area}"
+
+                Expect.isNonEmpty area "there is ground down the lane it reaches first"
+
+                Expect.isTrue
+                    (area |> Set.forall (fun tile -> tile.Y > 24))
+                    $"all of it down the lane, away from the melee: {area}"
+            }
+
+            // Movement S4 (#583): Flee's ground is the tiles a body is on
+            // before any hostile strikes them (`T_b < A`, ties unsafe), not
+            // every tile outside the Reach. A 1:1 melee three above a 1:1
+            // worker: (22,31) and (28,31) lie outside the Reach (the melee
+            // strikes them in three ticks), but the worker is on them in
+            // three too.
+            test "a body never flees onto a tile a hostile strikes as soon as it is on it" {
+                let colony =
+                    { bareRespawn with
+                        Creeps = [ worker "w1" 0 100 ]
+                        Spatial = openRoom 10 |> withCreepsAt [ "w1", { X = 25; Y = 30 } ]
+                    }
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 27 } [ Attack; Move ] ]
+
+                let atlas = Atlas.ofView colony
+                let body = colony.Creeps |> List.find (fun c -> c.Name = "w1")
+
+                let area =
+                    Threats.fleeAreaFor (threatsOf colony atlas) atlas body |> Set.map RoomPos.pos
+
+                Expect.contains area { X = 25; Y = 31 } "the step straight away is in it"
+
+                for tile in [ { X = 22; Y = 31 }; { X = 28; Y = 31 } ] do
+                    Expect.isFalse
+                        (Set.contains tile area)
+                        $"{tile} is the melee's as soon as ours: {area}"
             }
 
             test "a body with no Work part flees too: no part and no capacity are asked" {
@@ -6204,6 +6267,187 @@ let acrossTheBorderTests =
                     (Map.tryFind "reserver-1" decision.Assignments)
                     (Some(taskId Flee))
                     "it runs from the melee next door"
+
+                let threats, atlas, reserver =
+                    let colony =
+                        borderHome
+                            true
+                            []
+                            [ meleeWestAt { X = 48; Y = 34 } ]
+                            [ reserverAt { X = 1; Y = 34 } ]
+
+                    let atlas = Atlas.ofView colony
+
+                    threatsOf colony atlas,
+                    atlas,
+                    colony.Creeps |> List.find (fun c -> c.Name = "reserver-1")
+
+                Expect.isTrue
+                    (Threats.fleeAreaFor threats atlas reserver
+                     |> Set.forall (fun tile -> tile.Room = "W1N1"))
+                    "at home it flees in the room"
+            }
+
+            // #511 (movement S4): live t947,504, worker-946920-Spawn8 fled
+            // inside W15S29 from two Invaders and was stripped to 16 MOVE: an
+            // outpost's safe set is small and moves with the raid. An unarmed
+            // body caught away from home flees home across the exits it
+            // reaches before any hostile, and in the room where every way home
+            // crosses the raid.
+            test "an unarmed body caught in the outpost flees home, unless the raid holds the way" {
+                let caught (melee: Pos) (at: Pos) =
+                    let colony = borderHome true [] [ meleeWestAt melee ] []
+                    let west = SpatialInfo.layerOf colony.Spatial "W2N1"
+                    let reserver, _ = reserverAt at
+
+                    { colony with
+                        Creeps = colony.Creeps @ [ reserver ]
+                        Spatial =
+                            colony.Spatial
+                            |> withNeighbour
+                                "W2N1"
+                                { west with
+                                    CreepPositions = Map.ofList [ reserver.Name, at ]
+                                }
+                    }
+
+                let areaOf colony =
+                    let atlas = Atlas.ofView colony
+                    let reserver = colony.Creeps |> List.find (fun c -> c.Name = "reserver-1")
+                    Threats.fleeAreaFor (threatsOf colony atlas) atlas reserver
+
+                // The melee at the corridor's west end, the reserver between it
+                // and the exits home.
+                let homeward = caught { X = 40; Y = 34 } { X = 43; Y = 34 }
+                let decision = decideOn homeward
+
+                Expect.equal
+                    (Map.tryFind "reserver-1" decision.Assignments)
+                    (Some(taskId Flee))
+                    "the premise: it flees"
+
+                let area = areaOf homeward
+
+                Expect.isTrue
+                    (not (Set.isEmpty area) && area |> Set.forall (fun tile -> tile.Room = "W1N1"))
+                    $"its ground is home, beside the landings: {area}"
+
+                let step = moveIntentsFor "reserver-1" decision.Intents
+
+                Expect.isTrue
+                    (not (List.isEmpty step)
+                     && step
+                        |> List.forall (function
+                            | MoveCreep(_, (Right | TopRight | BottomRight)) -> true
+                            | _ -> false))
+                    $"and it steps east, toward the exits home: {step}"
+
+                // The melee beside the exits home: it is on every one before
+                // the reserver, which flees west in the outpost instead.
+                let cut = areaOf (caught { X = 47; Y = 34 } { X = 44; Y = 34 })
+
+                Expect.isTrue
+                    (not (Set.isEmpty cut) && cut |> Set.forall (fun tile -> tile.Room = "W2N1"))
+                    $"the raid holds the way home: it flees in the room: {cut}"
+            }
+
+            // Movement S4 review: an exit reached first is no way home when
+            // every walk to it crosses a strike. A shooter behind a wall
+            // (y 35-36) covers the road along y = 34 to the exits home; it
+            // never reaches the exits, so they alone read as reached first.
+            test
+                "a body flees home only by a walk it is on first, and never steps into the strike on the road" {
+                let shooter = { X = 36; Y = 37 }
+
+                let flanked (northOpen: bool) (fatigue: int) =
+                    let raid =
+                        { hostileIn "W2N1" shooter [ RangedAttack; RangedAttack; Move ] with
+                            Id = "h-west"
+                            Owner = "Trepidimous"
+                        }
+
+                    let colony = borderHome true [] [ raid ] []
+                    let west = SpatialInfo.layerOf colony.Spatial "W2N1"
+
+                    let reserver =
+                        { creepWith "reserver-1" 0 0 [ BodyPart.Claim; Move ] with
+                            Fatigue = fatigue
+                        }
+
+                    let wall (tile: Pos) =
+                        tile.Y = 35
+                        || tile.Y = 36
+                        || (not northOpen && tile.X >= 35 && tile.Y <= 33)
+
+                    { colony with
+                        Creeps = colony.Creeps @ [ reserver ]
+                        Spatial =
+                            colony.Spatial
+                            |> withNeighbour
+                                "W2N1"
+                                { west with
+                                    Terrain =
+                                        TerrainGrid.ofList
+                                            [
+                                                for x in 20..48 do
+                                                    for y in 25..45 ->
+                                                        { X = x; Y = y },
+                                                        (if wall { X = x; Y = y } then
+                                                             Wall
+                                                         else
+                                                             Plain)
+                                            ]
+                                    Roads = Set.ofList [ for x in 34..48 -> { X = x; Y = 34 } ]
+                                    CreepPositions =
+                                        Map.ofList [ reserver.Name, { X = 34; Y = 34 } ]
+                                }
+                    }
+
+                let areaOf colony =
+                    let atlas = Atlas.ofView colony
+                    let body = colony.Creeps |> List.find (fun c -> c.Name = "reserver-1")
+                    Threats.fleeAreaFor (threatsOf colony atlas) atlas body
+
+                let struck (tile: Pos) =
+                    range tile shooter <= Engine.rangedRange
+
+                let open' = flanked true 0
+
+                Expect.isTrue
+                    (areaOf open' |> Set.forall (fun tile -> tile.Room = "W1N1"))
+                    "the walk north of the road reaches the exits first: home"
+
+                let decision = decideOn open'
+
+                Expect.equal
+                    (Map.tryFind "reserver-1" decision.Assignments)
+                    (Some(taskId Flee))
+                    "the premise"
+
+                match moveIntentsFor "reserver-1" decision.Intents with
+                | [ MoveCreep(_, direction) ] ->
+                    let step = stepFrom { X = 34; Y = 34 } direction
+                    Expect.isFalse (struck step) $"off the road the shooter covers: {step}"
+                | other -> failtest $"one step: {other}"
+
+                // Held by its fatigue, the step its light tick replays is the
+                // same walk's, not the road's.
+                let held = decideOn (flanked true 2)
+
+                match Map.tryFind "reserver-1" held.Steps with
+                | Some(_ :: next :: _) ->
+                    Expect.isFalse
+                        (struck (RoomPos.pos next))
+                        $"its planned step is off the road: {next}"
+                | other -> failtest $"a planned step: {other}"
+
+                // With the north walled, the road is the only way to the exits:
+                // it flees in the outpost, away from the shooter.
+                let cut = areaOf (flanked false 0)
+
+                Expect.isTrue
+                    (not (Set.isEmpty cut) && cut |> Set.forall (fun tile -> tile.Room = "W2N1"))
+                    $"no walk home it is on first: it flees in the room: {cut}"
             }
 
             test "an idle body beside a home exit walks in, raid across it or none" {

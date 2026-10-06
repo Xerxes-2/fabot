@@ -96,6 +96,69 @@ let private kiteStep
         else
             None
 
+/// What a fleeing body's walk keeps off (movement S4): the tiles a hostile
+/// strikes before it could be on them and gone (`Threats.unsafeFor`, every
+/// class counted); None where no map is near it.
+let private fleeUnsafe (threats: Threats) atlas (creep: string) : (int -> bool) option =
+    Threats.bodyOf threats creep
+    |> Option.bind (fun body -> Threats.unsafeFor threats atlas body false)
+
+/// A fleeing body's step toward its ground (movement S4), the full tick's
+/// and the light tick's plan alike: the plain step (`stepToward`), unless a
+/// hostile strikes that tile before the body could be on it and gone; then
+/// the walk through the tiles it is on and gone first, toward the ground's
+/// room where that lies across a border (#511); and where no such walk
+/// reaches it, never a step onto a tile struck sooner than its own: the tile
+/// beside it a hostile strikes last, where that is later than its own, else
+/// the plain step where that is struck no sooner, else none.
+let private fleeStep
+    (threats: Threats)
+    atlas
+    (creep: string)
+    (at: RoomPos)
+    (area: Set<RoomPos>)
+    (later: (int -> int) option)
+    : RoomPos option =
+    let room = at.Room
+    let direct = stepToward atlas creep Flee area
+
+    match fleeUnsafe threats atlas creep with
+    | Some unsafe when
+        direct
+        |> Option.exists (fun step -> step.Room = room && unsafe (indexOf (RoomPos.pos step)))
+        ->
+        let walked =
+            match area |> Seq.tryHead with
+            | Some tile when tile.Room <> room ->
+                Atlas.stepTowardRoomWhere atlas creep Set.empty (Some unsafe) later tile.Room
+            | _ -> Atlas.firstStepAvoidingWhere atlas creep Set.empty unsafe later area
+
+        match walked with
+        | Some step -> Some step
+        | None ->
+            Atlas.dropStep atlas creep
+
+            match Threats.soonestIn threats room with
+            | Some soonest ->
+                let pos = RoomPos.pos at
+                let here = soonest (indexOf pos)
+
+                Atlas.adjacentWalkableIn atlas room pos
+                |> List.sortBy (fun tile -> unsafe (indexOf tile), -(soonest (indexOf tile)), tile)
+                |> List.tryHead
+                |> Option.filter (fun tile ->
+                    not (unsafe (indexOf tile)) || soonest (indexOf tile) > here)
+                |> Option.map (RoomPos.at room)
+                // Where every tile about it is struck as soon as its own (a
+                // room its towers cover whole, #566), the plain step, which
+                // is struck no sooner.
+                |> Option.orElse (
+                    direct
+                    |> Option.filter (fun step -> soonest (indexOf (RoomPos.pos step)) >= here)
+                )
+            | None -> None
+    | _ -> direct
+
 /// Register one creep's Move Intent — every creep gets one: a traveller heads
 /// its next step and tails a sidestep, an arrived body heads its own tile and
 /// tails its area's neighbours then the ground outside, an idle body heads the
@@ -385,7 +448,8 @@ let private moveIntentFor
                                 Atlas.stepTowardRoom atlas creep avoid tile.Room
                             | _ -> Atlas.firstStepAvoiding atlas creep avoid area)
                         plain
-                | None, None when runs && task <> Flee ->
+                | None, None when task = Flee -> fleeStep threats atlas creep at area later
+                | None, None when runs ->
                     let avoids =
                         match task with
                         | Defend _ -> [ Threats.defendAvoidIn threats room, None ]
@@ -862,7 +926,7 @@ let movementAmong
     // (user, 2026-10-04): its plan is its own tile, then the step it would
     // take. The light tick re-issues it until the engine lets it move. A
     // kiter's is its kite step, the ticks it still stands held counted
-    // (#524).
+    // (#524); a fleeing body's its flee step (movement S4).
     for name, at in placed do
         match Map.tryFind name assigned with
         | Some task when Set.contains name tired ->
@@ -882,6 +946,7 @@ let movementAmong
                 match kiting with
                 | Some(unsafe, soonest, approach) ->
                     kiteStep atlas name at unsafe soonest approach area
+                | None when task = Flee -> fleeStep threats atlas name at area (laterOf name at)
                 | None -> stepToward atlas name task area
 
             if not (Set.contains at area && standsSafe) then

@@ -4577,6 +4577,335 @@ let private haulerBesideCore () : Arena =
 // arena lays no `InvaderCores`, #558). The Transition log no longer held the
 // two W17S26 rangers' Tasks, nor the anchor's or the guards'.
 
+// ---- arena capture: W17S26 t1,006,904 (movement S4, #583) -------------------
+// `npm run capture -- W17S26 1006904 --rooms W17S25`, read at live t1,007,728.
+//   W17S26  https://screeps.com/room-history/shardSeason/W17S26/1006900.json
+//   W17S25  https://screeps.com/room-history/shardSeason/W17S25/1006900.json
+// W17S26's reservation, 6 ruins and a tombstone are not placed, nor the
+// anchor Spawn11 was casting. The Transition log no longer held any Task of
+// the tick's. W17S25's ramparts are laid without their decay clocks.
+
+/// W17S26 at t1,006,904: Trepidimous' Coefficient6755 (17 MOVE + 1, 17
+/// ATTACK, a step a tick) walks in along y = 1 from (14,1). Live,
+/// anchor-1005773 stepped from (22,3) to the exit road's (20,1), toward the
+/// melee, then back to (22,3), where it was struck dead (t1,006,911-912);
+/// reserver-1006558 (2 CLAIM 2 MOVE, the melee's pace) walked north-east from
+/// (16,20) at the melee coming down the road, turned at (26,9) and was caught
+/// at (22,11) (t1,006,924).
+let private trepEntersW17S26 (melee: Behaviour) : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+
+    let w17s26 =
+        room "W17S26"
+        |> withStructures
+            [
+                { structureOf "container" None 169_900 250_000 { X = 27; Y = 9 } with
+                    Energy = 420
+                }
+                structureOf
+                    "invaderCore"
+                    (Some(Side.Npc "Invader"))
+                    100_000
+                    100_000
+                    { X = 12; Y = 25 }
+            ]
+        |> withRoads
+            [
+                20, 1, 3_600
+                21, 2, 2_680
+                22, 3, 3_200
+                23, 4, 3_700
+                24, 5, 1_700
+                25, 6, 3_700
+                26, 7, 2_300
+                27, 8, 3_500
+            ]
+
+    let w17s25 =
+        room "W17S25"
+        |> withController Ownership.Ours None 5 3
+        |> withControllerClocks 0 0 79_811 7_093
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        9, 23
+                        9, 25
+                        9, 27
+                        9, 29
+                        10, 24
+                        10, 26
+                        10, 28
+                        10, 30
+                        11, 23
+                        11, 25
+                        11, 27
+                        12, 24
+                        12, 28
+                        12, 30
+                        13, 23
+                        13, 25
+                        13, 31
+                        14, 24
+                        14, 26
+                        14, 30
+                        15, 31
+                        16, 32
+                        17, 29
+                        17, 31
+                        18, 30
+                        19, 31
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 50
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in [ 15, 27; 15, 29; 16, 28; 16, 30 ] ->
+                    structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y }
+            ]
+        |> withStructures
+            [
+                { structureOf "container" None 142_000 250_000 { X = 16; Y = 34 } with
+                    Energy = 1_000
+                }
+                { structureOf "container" None 125_200 250_000 { X = 17; Y = 20 } with
+                    Energy = 518
+                }
+                yield!
+                    [
+                        for x, y, hits in
+                            [
+                                2, 15, 99_721
+                                2, 16, 99_661
+                                2, 17, 90_931
+                                2, 18, 99_231
+                                2, 19, 98_811
+                                2, 20, 98_731
+                                2, 23, 93_321
+                                2, 24, 93_901
+                                2, 25, 93_401
+                                2, 26, 93_661
+                                2, 27, 94_261
+                                11, 29, 25_001
+                                13, 27, 87_201
+                                13, 29, 87_201
+                                14, 28, 86_601
+                                16, 44, 100_321
+                                17, 20, 87_001
+                                17, 44, 100_301
+                                18, 44, 100_101
+                                32, 31, 99_911
+                                32, 32, 93_201
+                            ] ->
+                            structureOf "rampart" (Some Side.Ours) hits 10_000_000 { X = x; Y = y }
+                    ]
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 13; Y = 27 } with
+                    Energy = 5_982
+                }
+                towerOf Side.Ours { X = 11; Y = 29 } 1_000
+                towerOf Side.Ours { X = 13; Y = 29 } 1_000
+            ]
+        |> withRoads
+            [
+                1, 16, 2_300
+                2, 17, 1_800
+                3, 18, 2_200
+                4, 19, 3_400
+                5, 20, 3_300
+                6, 21, 3_800
+                7, 22, 12_900
+                8, 23, 10_700
+                9, 24, 11_000
+                9, 26, 24_500
+                9, 28, 24_000
+                10, 23, 24_000
+                10, 25, 12_600
+                10, 27, 13_300
+                10, 29, 14_600
+                11, 24, 15_600
+                11, 26, 7_600
+                11, 28, 8_300
+                11, 30, 3_400
+                12, 23, 13_300
+                12, 25, 9_700
+                12, 27, 10_500
+                12, 29, 1_800
+                12, 31, 4_600
+                13, 24, 1_500
+                13, 26, 1_900
+                13, 28, 2_800
+                13, 30, 1_900
+                14, 23, 1_800
+                14, 25, 2_300
+                14, 27, 1_900
+                14, 29, 2_100
+                14, 31, 4_900
+                15, 22, 2_900
+                15, 28, 3_100
+                15, 30, 3_900
+                15, 32, 4_800
+                16, 21, 3_200
+                16, 29, 4_000
+                16, 31, 4_900
+                16, 33, 3_700
+                16, 35, 2_600
+                16, 37, 4_000
+                16, 38, 8_600
+                16, 39, 9_100
+                16, 41, 4_800
+                16, 43, 4_600
+                16, 44, 3_800
+                17, 20, 3_700
+                17, 30, 1_800
+                17, 32, 2_600
+                17, 34, 5_000
+                17, 36, 3_200
+                17, 38, 2_800
+                17, 39, 14_000
+                17, 40, 19_100
+                17, 42, 5_000
+                17, 45, 5_000
+                18, 29, 2_900
+                18, 31, 3_300
+                18, 35, 3_900
+                18, 37, 3_000
+                18, 39, 3_700
+                18, 41, 1_900
+                18, 46, 3_700
+                19, 30, 2_600
+                19, 34, 3_200
+                19, 36, 2_500
+                19, 38, 3_800
+                19, 40, 3_700
+                19, 47, 3_600
+                20, 31, 4_400
+                20, 33, 3_000
+                20, 35, 3_700
+                20, 37, 3_100
+                20, 39, 3_800
+                20, 48, 3_000
+                21, 32, 2_800
+                21, 34, 2_600
+                21, 36, 3_800
+                21, 38, 2_600
+                22, 33, 3_100
+                22, 35, 3_800
+                22, 37, 3_200
+                23, 34, 3_100
+                23, 36, 3_600
+                24, 35, 3_700
+                25, 34, 2_100
+                26, 33, 2_500
+                27, 32, 2_200
+                28, 31, 7_000
+                28, 33, 11_600
+                29, 32, 15_900
+                29, 34, 14_100
+                30, 31, 8_000
+                30, 33, 13_400
+                31, 32, 11_400
+                32, 31, 20_800
+                33, 30, 15_140
+                33, 32, 7_380
+            ]
+
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W17S25" ])
+
+    let bodies: Body list =
+        [
+            // Ocean6422 (23 MOVE 23 CARRY): live, no act.
+            { body
+                  "Ocean6422"
+                  trepidimous
+                  (parts [ Move, 23; Carry, 23 ])
+                  (at "W17S26" 28 8)
+                  (Some Hold) with
+                TicksToLive = 1_154
+            }
+            { body
+                  "Coefficient6755"
+                  trepidimous
+                  (parts [ Move, 17; Attack, 17; Move, 1 ])
+                  (at "W17S26" 14 1)
+                  (Some melee) with
+                TicksToLive = 1_454
+            }
+            { body
+                  "anchor-1005773-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W17S26" 22 3)
+                  None with
+                TicksToLive = 397
+                Energy = 50
+            }
+            { body
+                  "reserver-1006558-Spawn11"
+                  Side.Ours
+                  (parts [ BodyPart.Claim, 2; Move, 2 ])
+                  (at "W17S26" 16 20)
+                  None with
+                TicksToLive = 264
+            }
+            { body
+                  "hauler-1005435-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 20; Move, 10 ])
+                  (at "W17S25" 12 25)
+                  None with
+                TicksToLive = 119
+            }
+            { body
+                  "guard-1005661-Spawn11"
+                  Side.Ours
+                  (parts [ Tough, 2; Move, 10; Attack, 6; Heal, 2 ])
+                  (at "W17S25" 17 47)
+                  None with
+                TicksToLive = 315
+            }
+            { body
+                  "worker-1006267-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 8; Carry, 10; Move, 9 ])
+                  (at "W17S25" 16 31)
+                  None with
+                TicksToLive = 942
+                Energy = 201
+            }
+            { body
+                  "hauler-1006605-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 24; Move, 12 ])
+                  (at "W17S25" 15 22)
+                  None with
+                TicksToLive = 1_307
+            }
+            { body
+                  "hauler-1006713-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 24; Move, 12 ])
+                  (at "W17S25" 14 29)
+                  None with
+                TicksToLive = 1_415
+                Energy = 50
+            }
+            { body
+                  "ranger-1006821-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W17S25" 18 47)
+                  None with
+                TicksToLive = 1_451
+            }
+        ]
+
+    arena 1_006_905 [ w17s26; w17s25 ] colonies bodies
+
 /// W17S26 at t986,005 (the movement ADR's W17S26 symptom): Trepidimous' HalfLife847
 /// (17 MOVE + 1, 17 ATTACK, a step a tick) walks in from (20,1) on its way to
 /// the container at (27,8); our ranger-984393-Spawn3 (21M 14R 7H) at (25,7)
@@ -8150,6 +8479,63 @@ let arenaBorderTests =
                     (diedOn "anchor-985849-Spawn11" trace)
                     (Some 8)
                     $"the anchor dies at t8\n{failure}"
+            }
+
+            // Characterisation (movement S4, #583). The capture does not
+            // reproduce live: the Transition log no longer held either body's
+            // Task, and live ran an older bundle. Here the reserver holds its
+            // Reserve, walks toward the controller, turns at (23,12) the tick
+            // the melee's map reaches it and flees south-west, untouched,
+            // against the melee on its live tiles and against one chasing the
+            // nearest body, on main as under S4. The anchor (6 WORK 1 CARRY 3
+            // MOVE: two ticks a road tile, three a plain one) walks to its
+            // Post down the road the melee takes, flees ahead of it from t5
+            // and is struck at t10, dead by t12: a melee at a tile a tick reaches every
+            // tile before it, the exit home (20,0) included, so it has no
+            // escape to be given.
+            test
+                "S4 capture t1,006,904: the reserver flees the melee untouched; the anchor it outpaces has none" {
+                let live =
+                    Waypoints
+                        [
+                            for x, y in
+                                [
+                                    15, 1
+                                    16, 1
+                                    17, 1
+                                    18, 1
+                                    19, 1
+                                    20, 1
+                                    21, 2
+                                    22, 3
+                                    23, 4
+                                    24, 5
+                                    25, 6
+                                    26, 7
+                                    27, 8
+                                    26, 9
+                                    25, 10
+                                    24, 11
+                                    23, 12
+                                    22, 13
+                                    22, 14
+                                    21, 15
+                                    20, 16
+                                ] -> RoomPos.at "W17S26" { X = x; Y = y }
+                        ]
+
+                for label, melee in [ "live tiles", live; "chasing", Chase(Nearest, None) ] do
+                    let _, trace = trepEntersW17S26 melee |> run 40
+                    let failure = describe trace
+
+                    Expect.isTrue
+                        (pathOf "reserver-1006558-Spawn11" trace
+                         |> List.forall (fun (_, s) -> s.Hits = 400))
+                        $"{label}: the melee never strikes the reserver\n{failure}"
+
+                    Expect.isTrue
+                        (diedOn "anchor-1005773-Spawn11" trace |> Option.exists (fun t -> t <= 12))
+                        $"{label}: the anchor dies by t12\n{failure}"
             }
 
             // Movement S2 (`docs/adr/0088`) flipped the S0 pin here, which read

@@ -380,6 +380,13 @@ and Threats =
         /// Each body's Flee ground (`Threats.fleeAreaFor`), laid on first read
         /// this tick: three readers ask it a body.
         Flights: System.Collections.Generic.Dictionary<string, Set<RoomPos>>
+        /// Each fleeing body's travel cost to that ground (`Pool.travelCostOf`),
+        /// priced on first read this tick: the Matcher and the verdicts ask it
+        /// again and again, and across a border it is a priced crossing.
+        FleeCosts: System.Collections.Generic.Dictionary<string, int option>
+        /// The rooms vision answers for this tick (`WorldView.sees`): an
+        /// unseen one is no room to flee into (#511, Decided 2).
+        Seen: Set<string>
         /// The colony's bodies this tick, whose walks those are.
         Bodies: CreepInfo list
         /// The reach horizon the Reach was laid at (`Tuning.ReachHorizon`).
@@ -400,6 +407,8 @@ let noThreats =
         Ramparts = Map.empty
         Walks = System.Collections.Generic.Dictionary()
         Flights = System.Collections.Generic.Dictionary()
+        FleeCosts = System.Collections.Generic.Dictionary()
+        Seen = Set.empty
         Bodies = []
         Horizon = Tuning.defaults.ReachHorizon
     }
@@ -1786,14 +1795,97 @@ module Threats =
 
                 Some(unsafe, soonest)
 
-    /// Flee's ground for a body (movement S2): the tiles of the room's safe
-    /// set (`safeIn`) within a horizon of the nearest by its own arrival. Not
-    /// narrowed to the tiles it reaches before any hostile (`T_b < A`): that
-    /// cost the spar bench (`outpost-ranged-healer` never cleared). Where the
-    /// room has no safe tile at all — a room its hostile towers cover whole
-    /// (#566) — the ground beside the landings across the nearest open border
-    /// (`acrossFrom`). Empty for a body the projection does not place, or
-    /// with nowhere to go.
+    /// By tile index of the room a body stands in, whether it reaches the
+    /// tile by a walk through tiles it is on and gone from before any map
+    /// strikes them (`Leaves < A`, ties unsafe; our ramparts never struck):
+    /// its own tile, and each tile its flood reaches from a neighbour so
+    /// reached that it arrives on sooner (movement S4). A tile the flood
+    /// reaches only through a strike is not one it reaches first, however
+    /// late the hostiles arrive on it.
+    let internal reachedFirst
+        (walk: Arrival.BodyArrival)
+        (maps: ArrivalMaps)
+        (ramparts: Set<Pos>)
+        : bool[] =
+        let first = Array.create tileCount false
+
+        // The reached tiles in arrival order, by a counting sort: a closure
+        // sort a body a tick cost the siege half a millisecond.
+        let mutable most = -1
+        let mutable count = 0
+
+        for index in 0 .. tileCount - 1 do
+            let ticks = Grid.at index walk.Ticks
+
+            if ticks < System.Int32.MaxValue then
+                most <- max most ticks
+                count <- count + 1
+
+        let starts = Array.zeroCreate<int> (most + 2)
+
+        for index in 0 .. tileCount - 1 do
+            let ticks = Grid.at index walk.Ticks
+
+            if ticks < System.Int32.MaxValue then
+                starts.[ticks + 1] <- starts.[ticks + 1] + 1
+
+        for t in 1 .. most + 1 do
+            starts.[t] <- starts.[t] + starts.[t - 1]
+
+        let order = Array.zeroCreate<int> count
+
+        for index in 0 .. tileCount - 1 do
+            let ticks = Grid.at index walk.Ticks
+
+            if ticks < System.Int32.MaxValue then
+                order.[starts.[ticks]] <- index
+                starts.[ticks] <- starts.[ticks] + 1
+
+        let edge = Engine.roomSide - 1
+
+        for index in order do
+            let ticks = Grid.at index walk.Ticks
+
+            if ticks = 0 then
+                first.[index] <- true
+            elif
+                Grid.at index walk.Leaves < Arrival.soonestAmong
+                    index
+                    maps.Classes
+                    System.Int32.MaxValue
+                || Set.contains (posAt index) ramparts
+            then
+                let x = index / Engine.roomSide
+                let y = index % Engine.roomSide
+
+                for nx in max 0 (x - 1) .. min edge (x + 1) do
+                    for ny in max 0 (y - 1) .. min edge (y + 1) do
+                        let n = nx * Engine.roomSide + ny
+
+                        // No walk goes on from an exit tile but the one it
+                        // stands on: the engine carries it over the border.
+                        let ring = nx = 0 || ny = 0 || nx = edge || ny = edge
+
+                        if
+                            n <> index
+                            && first.[n]
+                            && (not ring || Grid.at n walk.Ticks = 0)
+                            && Grid.at n walk.Ticks < ticks
+                        then
+                            first.[index] <- true
+
+        first
+
+    /// Flee's ground for a body (movement S4): every tile it is on before any
+    /// hostile strikes it (`T_b < A`), widest escape first — away from home,
+    /// home across the border (`homeward`, #511); else the refuges it stands a
+    /// decision out on, else the tiles out of the Reach it is on first, else
+    /// those the hostiles reach last; never its own tile while it is struck
+    /// there before it can leave. With none, the room's safe set (`safeIn`),
+    /// and where the room has no safe tile at all — a room its hostile towers
+    /// cover whole (#566) — the ground beside the landings across the nearest
+    /// open border (`acrossFrom`). Empty for a body the projection does not
+    /// place, or with nowhere to go.
     let rec fleeAreaFor (threats: Threats) atlas (creep: CreepInfo) : Set<RoomPos> =
         if Map.isEmpty threats.Arrivals then
             Set.empty
@@ -1811,39 +1903,99 @@ module Threats =
         | Some at ->
             let room = at.Room
 
-            // The safe tiles a horizon's ticks or less past the nearest by the
-            // body's own arrival, a pass over the grid rather than the safe
-            // set built whole: what its walk to the safe set ends on, with a
-            // band, not the edge's one tile, so a held tile parks nobody.
+            let firsts =
+                lazy
+                    (match walkOf threats atlas creep, Map.tryFind room threats.Arrivals with
+                     | Some walk, Some(maps, _) ->
+                         Some(reachedFirst walk maps (rampartsIn threats atlas room))
+                     | _ -> None)
+
+            // One pass over the grid, by the body's own arrival, its fatigue,
+            // load and parts shot off counted (`walkOf`), never the safe set
+            // built whole. A refuge is a tile it can be on and stand a
+            // decision out before any map strikes it (its departure plus the
+            // horizon, before the soonest arrival: its own tile judged by its
+            // stay like any other); its ground is the refuges a horizon's
+            // ticks or less past the nearest, a band, so a held tile parks
+            // nobody. With no refuge, the tiles out of the Reach it is on and
+            // gone before any map strikes them, as a band; with none, the
+            // tiles but its own it is on and gone first, a horizon or less
+            // short of the latest arrival among them: the widest escape, run
+            // toward, never stood on where it is. Where it is on no tile
+            // first, the nearest band out of the Reach but its own tile.
             let nearest () =
-                match walkOf threats atlas creep, Map.tryFind room threats.Arrivals with
-                | Some walk, Some(maps, _) ->
+                match
+                    walkOf threats atlas creep, Map.tryFind room threats.Arrivals, firsts.Value
+                with
+                | Some walk, Some(maps, _), Some first ->
                     let horizon = threats.Horizon
+                    let wait = fst (lagOf creep)
                     let stands = Atlas.standsAt atlas room
                     let ramparts = lazy (rampartsIn threats atlas room)
                     let mutable least = System.Int32.MaxValue
-                    // Indices, not tiles: most safe tiles lie past the band, so
-                    // a tile is made only for one that falls within it.
-                    let safe = ResizeArray<int>()
+                    let mutable leastNear = System.Int32.MaxValue
+                    let mutable leastOut = System.Int32.MaxValue
+                    let mutable latest = 0
+                    // Indices, not tiles: most lie past the band, so a tile is
+                    // made only for one that falls within it.
+                    let refuges = ResizeArray<int>()
+                    let near = ResizeArray<int>()
+                    let ahead = ResizeArray<int>()
+                    let out = ResizeArray<int>()
 
                     for index in 0 .. tileCount - 1 do
                         let mine = Grid.at index walk.Ticks
 
                         if mine < System.Int32.MaxValue && stands index then
+                            let leaves = Grid.at index walk.Leaves
+
                             let soonest =
                                 Arrival.soonestAmong index maps.Classes System.Int32.MaxValue
 
-                            if horizon < soonest || Set.contains (posAt index) ramparts.Value then
+                            // The horizon is the body's next decision: this
+                            // full tick and the light one after it, not Lean's
+                            // third (ADR 0082), which no reader here takes.
+                            if
+                                first.[index]
+                                && (leaves + horizon < soonest
+                                    || Set.contains (posAt index) ramparts.Value)
+                            then
                                 least <- min least mine
-                                safe.Add index
+                                refuges.Add index
+                            elif first.[index] && leaves < soonest && horizon + wait < soonest then
+                                leastNear <- min leastNear mine
+                                near.Add index
+                            elif first.[index] && leaves < soonest && mine > 0 then
+                                latest <- max latest soonest
+                                ahead.Add index
+                            elif horizon < soonest && mine > 0 then
+                                leastOut <- min leastOut mine
+                                out.Add index
 
                     let mutable found = []
 
-                    for i in 0 .. safe.Count - 1 do
-                        let index = safe.[i]
+                    let band (tiles: ResizeArray<int>) nearest =
+                        for i in 0 .. tiles.Count - 1 do
+                            let index = tiles.[i]
 
-                        if Grid.at index walk.Ticks <= least + horizon then
-                            found <- RoomPos.at room (posAt index) :: found
+                            if Grid.at index walk.Ticks <= nearest + horizon then
+                                found <- RoomPos.at room (posAt index) :: found
+
+                    if refuges.Count > 0 then
+                        band refuges least
+                    elif near.Count > 0 then
+                        band near leastNear
+                    elif ahead.Count = 0 then
+                        band out leastOut
+                    else
+                        for i in 0 .. ahead.Count - 1 do
+                            let index = ahead.[i]
+
+                            if
+                                Arrival.soonestAmong index maps.Classes System.Int32.MaxValue
+                                >= latest - horizon
+                            then
+                                found <- RoomPos.at room (posAt index) :: found
 
                     found
                 | _ -> []
@@ -1851,12 +2003,82 @@ module Threats =
             if Set.isEmpty (reachIn threats room) then
                 Set.empty
             else
-                match nearest () with
-                | _ :: _ as tiles -> Set.ofList tiles
-                | [] ->
-                    match safeIn threats room with
-                    | safe when not (Set.isEmpty safe) -> safe
-                    | _ -> acrossFrom threats atlas at (walkOf threats atlas creep)
+                match homeward threats atlas creep at firsts.Value with
+                | home when not (Set.isEmpty home) -> home
+                | _ ->
+                    match nearest () with
+                    | _ :: _ as tiles -> Set.ofList tiles
+                    | [] ->
+                        match safeIn threats room with
+                        | safe when not (Set.isEmpty safe) -> safe
+                        | _ -> acrossFrom threats atlas at (walkOf threats atlas creep)
+
+    /// Flee's ground for an unarmed body caught in a room not its colony's
+    /// home (#511): the ground beside the landings into the next room on a
+    /// chain home, home or a room seen this tick, across the exits it reaches
+    /// by a walk through tiles it is on first (`reachedFirst`), whose landings
+    /// lie in no Reach of that room; the nearest such room by
+    /// its own walk. Home has the towers, the ramparts and the fighters; an
+    /// outpost's safe set is small and moves with the raid. Empty at home, for
+    /// an armed body (it flees only with no fight to hold, #533), and where
+    /// every way home crosses the raid: it flees in the room.
+    and private homeward
+        (threats: Threats)
+        atlas
+        (creep: CreepInfo)
+        (at: RoomPos)
+        (firsts: bool[] option)
+        : Set<RoomPos> =
+        let room = at.Room
+
+        let armed =
+            partCount creep.Body Attack > 0
+            || partCount creep.Body RangedAttack > 0
+            || partCount creep.Body Heal > 0
+
+        match Atlas.homeRoom atlas, walkOf threats atlas creep, firsts with
+        | Some home, Some walk, Some(first: bool[]) when home <> room && not armed ->
+            Atlas.routes atlas room home
+            |> List.choose (function
+                | _ :: next :: _ -> Some next
+                | _ -> None)
+            |> List.distinct
+            // A room no vision answers for this tick stays as risky as the
+            // danger log last left it (Decided 2): only home, or a room seen
+            // now, is landed in.
+            |> List.filter (fun next -> next = home || Set.contains next threats.Seen)
+            |> List.choose (fun next ->
+                let hot = reachIn threats next
+
+                match
+                    Atlas.seams atlas room next
+                    |> List.filter (fun (exit, landing) ->
+                        first.[indexOf exit] && not (Set.contains landing hot))
+                with
+                | [] -> None
+                | band ->
+                    let ground =
+                        band
+                        |> List.collect (snd >> Atlas.adjacentWalkableIn atlas next)
+                        |> List.filter (fun tile -> not (Set.contains tile hot))
+                        |> Set.ofList
+                        |> RoomPos.setAt next
+
+                    if Set.isEmpty ground then
+                        None
+                    else
+                        Some(
+                            (band
+                             |> List.map (fun (exit, _) -> Grid.at (indexOf exit) walk.Ticks)
+                             |> List.min,
+                             next),
+                            ground
+                        ))
+            |> List.sortBy fst
+            |> List.tryHead
+            |> Option.map snd
+            |> Option.defaultValue Set.empty
+        | _ -> Set.empty
 
     /// Flee's ground out of a room with no safe tile (#566): the ground
     /// beside each landing across the nearest border whose landings lie in no
@@ -3093,6 +3315,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         Ramparts = dangers |> Map.map (fun _ danger -> danger.Ramparts)
         Walks = System.Collections.Generic.Dictionary()
         Flights = System.Collections.Generic.Dictionary()
+        FleeCosts = System.Collections.Generic.Dictionary()
+        Seen = view.World.Rooms |> Map.keys |> Set.ofSeq
         Bodies = view.Creeps
         Horizon = view.Tuning.ReachHorizon
     }
