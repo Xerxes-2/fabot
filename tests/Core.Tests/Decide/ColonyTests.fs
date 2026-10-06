@@ -1923,19 +1923,6 @@ let twoColonyTests =
                     "and out of the outposts she works"
 
                 Expect.equal
-                    (Colony.defending
-                        (Map.ofList [ "W1N2", Nursery ])
-                        (fun _ -> true)
-                        nurseryPair
-                        (List.head nurseryPair))
-                    [ "W1N2" ]
-                    "and a home of hers to defend the tick it is ours"
-
-                Expect.isEmpty
-                    (Colony.defending Map.empty (fun _ -> true) nurseryPair (List.head nurseryPair))
-                    "while nobody's it is the outpost, defended as one"
-
-                Expect.equal
                     (Colony.outpostsWorked Map.empty (List.head nurseryPair)
                      |> List.map (fun o -> o.RoomName))
                     [ "W1N2" ]
@@ -2254,10 +2241,11 @@ let private guardsIn tasks =
 [<Tests>]
 let defendedHomeTests =
     testList
-        "a mother defends a child's home"
+        "another colony defends a home"
         [
-            test
-                "the mother pools the Guard of a beaten child's home, and her guard row casts for it" {
+            test "the defender pools the Guard of a beaten home, and its guard row casts for it" {
+                // #589: no one body of hers wins the squad, the two she
+                // casts do, and a home fights on whatever the count.
                 let raided = defendingMother homeRaid
                 let quiet = defendingMother []
 
@@ -2268,7 +2256,24 @@ let defendedHomeTests =
                 Expect.equal
                     (guardsIn (planTasksOn raided noThreats))
                     [ Guard "W1N2" ]
-                    "raided, the child's home is one Guard in her pool, under the room's name"
+                    "raided, the home is one Guard in her pool, under the room's name"
+
+                let overwhelming =
+                    homeRaid
+                    @ [
+                        for i in 3..8 ->
+                            { hostileIn
+                                  "W1N2"
+                                  { X = 10; Y = 45 }
+                                  (List.replicate 7 Heal @ List.replicate 11 Move) with
+                                Id = $"med-{i}"
+                            }
+                    ]
+
+                Expect.equal
+                    (guardsIn (planTasksOn (defendingMother overwhelming) noThreats))
+                    [ Guard "W1N2" ]
+                    "and a raid even her two lose is still hers to fight"
 
                 Expect.equal
                     (guardQuotaOf raided)
@@ -2294,7 +2299,7 @@ let defendedHomeTests =
                     "and the Guard takes it"
             }
 
-            test "the child's own guard row casts nothing for its home" {
+            test "the child's own guard row, which loses the raid, casts nothing for its home" {
                 let raided = raidedChildColony homeRaid
 
                 Expect.isEmpty (guardsIn (planTasksOn raided noThreats)) "no Guard in its own home"

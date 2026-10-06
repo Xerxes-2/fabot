@@ -1670,22 +1670,11 @@ module Colony =
         : string list =
         colony |> childrenWhere stages colonies (fun home -> Set.contains home unowned)
 
-    /// The declared children of this colony whose home it **defends** this
-    /// tick (`World.defends`, handed in off the world as the stages are to
-    /// `bootstrapping`): the homes its guard row guards.
-    let defending
-        (stages: Map<string, ColonyStage>)
-        (defends: string -> bool)
-        (colonies: Colony list)
-        (colony: Colony)
-        : string list =
-        colony |> childrenWhere stages colonies defends
-
     /// The rooms one colony projects this tick: its home and its worked
     /// [[outpost]]s, its [[errand]]s, its [[salvage]] rooms, the rooms it
-    /// bootstraps, and the children's homes it defends. The whole scan set in
-    /// one sentence, here and not in the shell, because the entity lists the
-    /// Task pool is built from are swept over it too.
+    /// bootstraps, and the homes it defends (`World.defends`). The whole scan
+    /// set in one sentence, here and not in the shell, because the entity
+    /// lists the Task pool is built from are swept over it too.
     let roomsProjected
         (outposts: Outpost list)
         (errands: Errand list)

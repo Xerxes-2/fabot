@@ -690,7 +690,7 @@ let private rivalDeadlines (view: ColonyView) =
 /// (#432): its ranger is weighed against the armed squad standing there, in
 /// every room the colony casts, shut or not, and it is clocked off the
 /// sighting and not the squad's life (#441). A raised child's home is no
-/// room to withdraw from (#447), as a defended one is not (#428), whatever
+/// room to withdraw from (#447), as a defended one is not (#589), whatever
 /// the raid: one no ranger wins keeps its garrison, on safe ground, and has
 /// nobody cast into it (its Brief's `Asks`, #451); it is the child's safe
 /// mode's.

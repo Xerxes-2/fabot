@@ -342,11 +342,6 @@ let guardRowTests =
                     (Some 1)
                     "with no tower loaded and no line, the guard row answers it"
 
-                Expect.equal
-                    (guardQuotaOf { athome 0 with Mother = Some "W2N1" })
-                    (Some 0)
-                    "a child's home is its mother's to guard (#428), never its own row's"
-
                 // One tower drained under a shot's energy for a tick.
                 let drained stock =
                     let colony = athome 0

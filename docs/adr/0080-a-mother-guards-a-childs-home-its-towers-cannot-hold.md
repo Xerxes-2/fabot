@@ -1,6 +1,8 @@
 # A mother guards a child's home its towers cannot hold
 
-> **Status:** accepted, amended by 0083
+> **Status:** superseded by 0091
+
+> **Superseded by 0091** (#589) on 2026-10-07: kinship no longer decides defence. A beaten home is projected by every colony with a spawn and a bank at `Tuning.CasterFloor`, within `Tuning.MaxHops` of it, and the world's verdict (`RoomVerdict.Defender`) has one row cast for it: of those whose cast wins (guardCap bodies, the raid killing them one at a time), the one that lands soonest, the home's own or another colony's; where none wins, the defending colony that lands soonest, for a home fights on. The projection latch (a guard still on the chain) and the raised home's relief stand, read off any defender.
 
 > **0083 superseded by 0090** (#564) on 2026-10-07: no squad is cast. The amendment below no longer holds; where no single body wins, the stand-down and safe mode stand.
 

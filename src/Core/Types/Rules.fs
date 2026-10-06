@@ -789,6 +789,12 @@ type Tuning =
         /// home (#479): the #478 arena held the t880,341 raid with two and
         /// lost the line with one.
         GarrisonTowers: int
+        /// The least bank (`RoomEnergy.Capacity`) a colony casts another
+        /// colony's home defence from (`World.defends`); below it, it casts
+        /// only its own home's (`RoomVerdict.Defender`). RCL5's full bank:
+        /// the least that buys two
+        /// blocks of the guard (1,500) or the ranger (1,400).
+        CasterFloor: int
         /// How many [[seam]]s one cross-room walk may cross: the hop budget a
         /// declared [[outpost]] has to sit inside, and the depth the route
         /// search stops at. Six since #437, for W15S28's walk to W18S27. There
@@ -1046,6 +1052,7 @@ module Tuning =
             BootstrapLevel = 3
             IndependenceTowerEnergy = Engine.towerCapacity
             GarrisonTowers = 2
+            CasterFloor = 1_800
             MaxHops = 6
             TrunkSwampWeight = 3
             RoadPayback = 50_000

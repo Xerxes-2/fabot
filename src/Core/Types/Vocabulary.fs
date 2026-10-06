@@ -140,7 +140,7 @@ let partCount (parts: Map<BodyPart, int>) part =
 
 /// The guard cut, over parts: an ATTACK part, the one cut no other row of
 /// ours makes. One predicate for a living body and one still in an oven, and
-/// for the mother reading which of her bodies still stand on a defended
+/// for the defender reading which of its bodies still stand on a defended
 /// chain (`World.defends`), so none of them can drift.
 let isGuardParts (parts: Map<BodyPart, int>) = partCount parts Attack > 0
 

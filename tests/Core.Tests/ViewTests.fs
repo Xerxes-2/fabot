@@ -1933,10 +1933,23 @@ let private independentChild (towers: int list) : World =
                     }))
     }
 
-/// One change to the child's room.
-let private inChild (change: RoomFacts -> RoomFacts) (world: World) : World =
+/// One change to one room.
+let private inRoom (room: string) (change: RoomFacts -> RoomFacts) (world: World) : World =
     { world with
-        Rooms = world.Rooms |> Map.change child (Option.map change)
+        Rooms = world.Rooms |> Map.change room (Option.map change)
+    }
+
+/// One change to the child's room.
+let private inChild = inRoom child
+
+/// A room's bank, full at `energy`.
+let private banked (energy: int) (facts: RoomFacts) : RoomFacts =
+    { facts with
+        Energy =
+            {
+                Available = energy
+                Capacity = energy
+            }
     }
 
 /// A squad in the child's home: one attacker and two healers of `heals`
@@ -2055,7 +2068,7 @@ let private farWorld: World =
 [<Tests>]
 let defendedHomeTests =
     testList
-        "a mother defends a child's home its towers cannot hold"
+        "another colony defends a home its towers cannot hold"
         [
             test
                 "the mother projects a raided child's home, as a room she crosses and works nothing in" {
@@ -2234,6 +2247,78 @@ let defendedHomeTests =
                     raided.Spatial.TargetKinds
                     quiet.Spatial.TargetKinds
                     "with every target of its own"
+            }
+
+            // #589: who defends a home is its bank and spawn's question,
+            // never kinship's.
+            test "a colony that is nobody's mother defends a beaten home its bank outbuys" {
+                let unrelated = declared |> List.map (fun colony -> { colony with Mother = None })
+
+                Expect.equal
+                    (viewUnder unrelated (raided 7) mother).Borrowed.Defended
+                    [ child ]
+                    "kinship plays no part"
+
+                Expect.isEmpty
+                    (viewUnder unrelated (raided 7) child).Borrowed.Defended
+                    "and the smaller bank defends nothing of the larger's"
+            }
+
+            test "a bank under the floor defends no home but its own" {
+                let poor = raided 7 |> inRoom mother (banked (Tuning.defaults.CasterFloor - 1))
+
+                Expect.isEmpty (viewOf poor mother).Borrowed.Defended "its economy is its own"
+            }
+
+            test "the home's own bank keeps no defender out: the verdict weighs both" {
+                let rich = raided 7 |> inChild (banked 1800)
+
+                Expect.equal
+                    (viewOf rich mother).Borrowed.Defended
+                    [ child ]
+                    "a bank no bigger than the home's still projects it"
+
+                Expect.equal
+                    (viewOf (rich |> inChild (fun facts -> { facts with Spawns = [] })) mother)
+                        .Borrowed.Defended
+                    [ child ]
+                    "and so does one beside a home with no spawn"
+            }
+
+            test "a raised home its mother defends too is still her residents', never its own row's" {
+                // The pair world's child is Bootstrapping at RCL2 with a
+                // spawn of its own; no tower, so any armed raid beats it.
+                let world = pairWorld |> raidedBy "Trepidimous" 7
+                let motherView = viewOf world mother
+                let childView = viewOf world child
+
+                Expect.equal motherView.Borrowed.Defended [ child ] "the premise: she defends it"
+                Expect.contains motherView.Borrowed.Rooms child "and raises it"
+
+                let deciding view : Facts.Judged =
+                    {
+                        Cut = view
+                        Owns = Set.empty
+                        Decides = true
+                    }
+
+                let judged =
+                    Facts.judge
+                        (fun home room -> RoomName.hopsBetween home room)
+                        Map.empty
+                        [ deciding motherView; deciding childView ]
+
+                let verdict = Facts.verdictOf (List.head judged) child
+
+                Expect.isFalse
+                    (Map.containsKey child verdict.Rows)
+                    "the child's own row is not weighed"
+
+                Expect.notEqual verdict.Defender (Some child) "nor named its defender"
+
+                Expect.isEmpty
+                    (guardsPooled (List.item 1 judged))
+                    "so the child pools no Guard in its own home"
             }
         ]
 

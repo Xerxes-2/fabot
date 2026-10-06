@@ -84,7 +84,6 @@ let quiet: ColonyView =
         RecalledHealers = []
         RecalledRaiders = []
         SafeModeRunning = false
-        Mother = None
         Crossed = Set.empty
         Evacuating = Set.empty
         Reactors = []

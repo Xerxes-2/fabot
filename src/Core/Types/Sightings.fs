@@ -1038,7 +1038,6 @@ module World =
             Engine.towerCapacity - r.FreeCapacity >= reserve + Engine.towerEnergyCost)
         |> List.choose (fun r -> Map.tryFind r.Id facts.Layer.TargetPositions)
 
-    /// ADR-0080
     /// Whether a colony's home cannot hold the raid standing in it this tick:
     /// the room is ours, an armed hostile that is not an ally is there, safe
     /// mode is off, and the raid heals at least what the towers holding a
@@ -1065,9 +1064,9 @@ module World =
         |> List.collect (fun (name, facts) ->
             facts.Spawns |> List.map (fun spawn -> spawn.Name, name))
 
-    /// Whether a guard `mother` cast stands in one of these rooms. The
+    /// Whether a guard `caster` cast stands in one of these rooms. The
     /// casters are read only once a guard body is found there.
-    let private guardCastIn (world: World) (mother: string) (rooms: string list) : bool =
+    let private guardCastIn (world: World) (caster: string) (rooms: string list) : bool =
         let standing =
             world.Creeps
             |> List.filter (fun creep ->
@@ -1077,22 +1076,42 @@ module World =
         && (let homes = spawnHomes world
 
             standing
-            |> List.exists (fun creep -> Colony.castBy homes creep.Info.Name = Some mother))
+            |> List.exists (fun creep -> Colony.castBy homes creep.Info.Name = Some caster))
 
-    /// Whether a mother defends one child's home this tick: while it is
-    /// beaten, and past that while a guard she cast still stands on the
-    /// defended chain (the home and the rooms between) outside the rooms she
-    /// projects anyway. The second half is the latch, read off the world and
-    /// kept nowhere: a raid the towers hold again once her guard has come
-    /// keeps the room hers, so the guard is not handed to a child with no
-    /// Guard to give it; and a guard left on the chain when the raid ends
-    /// stays placed and walks home. It lets go the tick the last one walks
-    /// out.
-    let defends (world: World) (covered: string list) (mother: string) (child: string) : bool =
-        homeBeaten (roomOf world child)
-        || child :: RoomName.transitBetween mother child
-           |> List.filter (fun room -> not (List.contains room covered))
-           |> guardCastIn world mother
+    /// Whether a colony may cast another's home defence (#589): a spawn of
+    /// its own and a bank at `Tuning.CasterFloor` or above. Kinship plays
+    /// no part. Which of them casts is the verdict's: the one whose cast
+    /// wins and lands soonest (`RoomVerdict.Defender`).
+    let private mayDefend (tuning: Tuning) (world: World) (defender: string) : bool =
+        let ours = roomOf world defender
+
+        not (List.isEmpty ours.Spawns) && ours.Energy.Capacity >= tuning.CasterFloor
+
+    /// Whether a colony projects another's home for its defence this tick,
+    /// as a [[transit room]] with the rooms between, the home inside the
+    /// hop budget off the names (`Tuning.MaxHops`, `RoomName.hopsBetween`):
+    /// while the home is beaten and the colony may defend it (`mayDefend`),
+    /// and past that while a guard it cast still stands on the defended
+    /// chain outside the rooms it projects anyway. The second half is the
+    /// latch, read off the world and kept nowhere: a raid the towers hold
+    /// again once its guard has come keeps the room its, so the guard is not
+    /// handed to a colony with no Guard to give it; and a guard left on the
+    /// chain when the raid ends stays placed and walks home. It lets go the
+    /// tick the last one walks out.
+    let defends
+        (tuning: Tuning)
+        (world: World)
+        (covered: string list)
+        (defender: string)
+        (home: string)
+        : bool =
+        defender <> home
+        && RoomName.hopsBetween defender home
+           |> Option.exists (fun hops -> hops <= tuning.MaxHops)
+        && (homeBeaten (roomOf world home) && mayDefend tuning world defender
+            || home :: RoomName.transitBetween defender home
+               |> List.filter (fun room -> not (List.contains room covered))
+               |> guardCastIn world defender)
 
     /// The rooms we own this tick, off the control entry vision paid for: one
     /// of the two facts a colony has to pass to be **living**.
@@ -1814,8 +1833,8 @@ module World =
             /// The rooms this colony projects for a child of its own, raised
             /// or re-claimed (#221).
             Borrowed: string list
-            /// The children's homes this colony defends this tick
-            /// (`Colony.defending`).
+            /// The other colonies' homes this colony projects for their
+            /// defence this tick (`defends`).
             Defended: string list
             /// The contested children's homes this colony still garrisons
             /// (`Colony.garrisoning`, #479).
@@ -1954,8 +1973,10 @@ module World =
         let covered =
             Colony.roomsProjected outposts errands salvage borrowed garrisoned colony.Home
 
+        // Every declared home of ours this one may answer, kin or not and
+        // spawn or not (#589).
         let defended =
-            Colony.defending stages (defends world covered colony.Home) colonies colony
+            Colony.homes colonies |> List.filter (defends tuning world covered colony.Home)
 
         let assaults = Assault.worked colony.Assaults
 

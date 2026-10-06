@@ -15,9 +15,10 @@ type BorrowedWork =
         /// to make. Both narrow to the same three kinds, because a Claim asks
         /// for exactly what an Upgrade does.
         Rooms: string list
-        /// The children's homes this colony **defends** this tick
-        /// (`Colony.defending`): projected as transit rooms, so nothing of
-        /// them is work but the Guard the planner pools there.
+        /// The other colonies' homes this colony projects for their
+        /// **defence** this tick (`World.defends`), kin or not: transit
+        /// rooms, so nothing of them is work but the Guard the planner pools
+        /// there where the verdict has this colony cast it.
         Defended: string list
         /// The `Independent` children's homes this colony still keeps its
         /// resident garrison in (`Colony.garrisoning`, #479): projected for
@@ -119,6 +120,13 @@ type RoomVerdict =
         /// the largest bank, then by home name. None on a Lose. On a `Win`
         /// outside our homes only it casts for the room (`Brief.Answerer`).
         Answerer: string option
+        /// In a home of ours, the one colony that casts its defence (#589):
+        /// of the home's own row and the rows of the colonies that defend it
+        /// (`BorrowedWork.Defended`), the one whose cast wins and lands
+        /// soonest (`Facts.landsIn`); where no cast wins, the defender that
+        /// lands soonest, for a home fights on. None elsewhere, and where
+        /// neither the home's row wins nor another colony defends it.
+        Defender: string option
     }
 
 /// The whole ticks a tile of road, plain and swamp takes one body
@@ -662,10 +670,6 @@ type ColonyView =
         /// The home room's declared perimeter (`Colony.Perimeter`, #446): the
         /// chokes the Layout ramparts beside the Keep.
         Perimeter: Pos list
-        /// The colony's declared mother (`Colony.Mother`): a child's home is
-        /// hers to guard when its towers cannot hold it (#428), never its own
-        /// guard row's (#568).
-        Mother: string option
         /// The hits a rampart on each of these home tiles is whole at, in
         /// place of `Tuning.RampartFloor` (`Colony.RampartFloors`).
         RampartFloors: Map<Pos, int>
@@ -1846,7 +1850,6 @@ module ColonyView =
                 else
                     None
             Perimeter = colony.Perimeter
-            Mother = colony.Mother
             RampartFloors = colony.RampartFloors
             // Off the world's creeps and not `mine` (#448): who holds a body
             // is not whether it defends the room it stands in.

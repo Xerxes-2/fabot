@@ -628,8 +628,9 @@ module Brief =
 
     /// How many rangers one resident room wants: the standing garrison
     /// (`Tuning.RangerResidents`). A raised home whose towers cannot hold its
-    /// raid (`BorrowedWork.Defended`, #428) and whose resident loses it alone
-    /// adds #428's relief, `Engine.guardCap` raid-sized bodies, on top of the
+    /// raid, which this colony may defend too (`BorrowedWork.Defended`,
+    /// #589), and whose resident loses it alone adds #428's relief,
+    /// `Engine.guardCap` raid-sized bodies, on top of the
     /// garrison (#447). A resident room whose raid no ranger size wins
     /// (`outmatched`) wants none (#451): a body cast into it only feeds the
     /// raid, so the home is the child's safe mode's, and the garrison already
