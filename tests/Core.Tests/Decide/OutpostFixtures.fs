@@ -633,3 +633,204 @@ let internal tasksNaming room colony =
     planTasksOn colony noThreats
     |> List.map taskId
     |> List.filter (fun id -> (id: string).Contains(room: string))
+
+// ---- the raid suites' shared bodies and rooms (`OutpostRaidTests` and its siblings) ----
+
+/// The outpost's field run out to its west border (#450): the y 41..48 rows
+/// laid from x = 0, exit tiles and all, so a hold's ground can be read
+/// against tiles the terrain would let a body stand on.
+let internal westField (colony: ColonyView) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    Terrain =
+                        TerrainGrid.ofList
+                            [
+                                for x in 0..30 do
+                                    for y in 41..48 -> { X = x; Y = y }, Plain
+                            ]
+                }
+    }
+
+/// The west side's exit tiles beside that field.
+let internal westRun = [ for y in 41..48 -> { X = 0; Y = y } ]
+
+/// The view of a tick the raid has just left by the west exit: the world's
+/// hold on that run, as `ColonyView.ofWorld` hands it on.
+let internal heldWest (colony: ColonyView) =
+    { colony with
+        ExitHolds =
+            Map.ofList
+                [
+                    "W1N2",
+                    {
+                        Run = westRun
+                        Exit = { X = 0; Y = 44 }
+                        Until = colony.Time + 50
+                    }
+                ]
+    }
+
+/// A ranger body as the ranger row casts it at an 800 bank.
+let internal ranger name =
+    creepWith name 0 0 (bodyFor Bodies.rangerPattern 800)
+
+/// Torque404 as W18S25 saw it (#510): 17 MOVE and 3 ATTACK destroyed, 14
+/// ATTACK and one MOVE alive under the whole body's weight.
+let internal crippledAt pos =
+    { hostileIn
+          "W1N2"
+          pos
+          (List.replicate 17 Move
+           @ List.replicate 3 Attack
+           @ [ Move ]
+           @ List.replicate 14 Attack) with
+        Hits = 1_454
+    }
+
+/// A heavy melee slower than a ranger on plain and on road alike: twelve
+/// ATTACK on five MOVE, 360 a swing, which the one guard block a 600 bank
+/// cannot even buy loses to. Ten on five would keep a ranger's pace on road.
+let internal plodderAt pos =
+    hostileIn "W1N2" pos (List.replicate 5 Move @ List.replicate 12 Attack)
+
+/// Crunchy047 as W17S25's door saw it (live t972,544): Torque404's shape,
+/// Trepidimous's.
+let internal crunchyAt pos =
+    { crippledAt pos with
+        Id = "Crunchy047"
+        Owner = "Trepidimous"
+    }
+
+/// Wraith403 as W17S26 saw it (live t972,544): its RANGED_ATTACK and a MOVE
+/// shot off, MOVE, HEAL and MOVE acting on 266 hits, its own HEAL the only
+/// one reaching it.
+let internal wraithAt room pos =
+    { hostileIn room pos [ Move; RangedAttack; Move; Heal; Move ] with
+        Id = "Wraith403"
+        Owner = "Trepidimous"
+        Hits = 266
+    }
+
+let internal groundOf colony =
+    Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) "W1N2"
+    |> Option.defaultValue Set.empty
+
+let internal rangeTo (pos: Pos) (tile: RoomPos) = range pos (RoomPos.pos tile)
+
+/// The cripple raid with these rangers standing in W1N2, laid into the
+/// world's fleet as `WorldView.ofWorld` lays it.
+let internal kitedBy (raid: HostileInfo list) (rangers: (CreepInfo * Pos) list) =
+    let colony = declaredRaid raid |> withGuards rangers
+
+    { colony with
+        World =
+            { colony.World with
+                Bodies = lazy (Map.ofList [ "W1N2", rangers ])
+            }
+    }
+
+/// Raptor865 as W17S26 saw it (#516): five WORK on three MOVE, no weapon,
+/// a player's body digging our outpost.
+let internal diggerAt room pos =
+    { hostileIn room pos (List.replicate 5 Work @ List.replicate 3 Move) with
+        Owner = "Trepidimous"
+    }
+
+/// The digger on its seat beside the outpost's rock at (25,40) (#550).
+let internal seatedDigger =
+    { diggerAt "W1N2" { X = 24; Y = 41 } with
+        Id = "d-1"
+    }
+
+/// The outpost floored out to its borders, and beyond it W1N3, the home of
+/// a child this colony raises, its controller at (25,25) and its resident
+/// ranger `r-1` on the ring: the home borders the outpost and not ours.
+let internal raisingBeyond hostiles =
+    let colony = declaredRaid hostiles
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    let floor =
+        TerrainGrid.ofList
+            [
+                for x in 1..48 do
+                    for y in 1..48 -> { X = x; Y = y }, Plain
+            ]
+
+    { colony with
+        Creeps = colony.Creeps @ [ ranger "r-1" ]
+        RoomControl = Map.add "W1N3" ownedRoom colony.RoomControl
+        Declared = [ "W1N1"; "W1N3" ]
+        Borrowed =
+            { BorrowedWork.empty with
+                Rooms = [ "W1N3" ]
+            }
+        Stages = Map.add "W1N3" Nursery colony.Stages
+        Spatial =
+            { colony.Spatial with
+                Borders = colony.Spatial.Borders |> Map.add "W1N3" plainRing
+                TargetKinds = colony.Spatial.TargetKinds |> Map.add "ctl-child" Controller
+            }
+            |> withNeighbour "W1N2" { outpost with Terrain = floor }
+            |> withNeighbour
+                "W1N3"
+                { RoomLayer.empty with
+                    Terrain = floor
+                    TargetPositions = Map.ofList [ "ctl-child", { X = 25; Y = 25 } ]
+                    Obstacles = Set.singleton { X = 25; Y = 25 }
+                    CreepPositions = Map.ofList [ "r-1", { X = 25; Y = 26 } ]
+                }
+    }
+
+let internal residentHeld = Map.ofList [ "r-1", taskId (Guard "W1N3") ]
+
+/// Virtual458 as W18S25 saw it (#528): a declared enemy's 17 ATTACK on 17
+/// MOVE, shot to 74 hits, every ATTACK and all but one MOVE gone. It strikes
+/// nothing back.
+let internal disarmedAt owner room pos =
+    { hostileIn room pos (List.replicate 17 Attack @ List.replicate 17 Move) with
+        Owner = owner
+        Hits = 74
+    }
+
+/// `raisingBeyond` with W1N4 beyond the child's home: the child's outpost,
+/// projected by this colony as a transit room for its resident (#517) — no
+/// furniture of it, its ground and bodies alone.
+let internal watchingBeyond hostiles =
+    let colony = raisingBeyond hostiles
+
+    let floor =
+        TerrainGrid.ofList
+            [
+                for x in 1..48 do
+                    for y in 1..48 -> { X = x; Y = y }, Plain
+            ]
+
+    { colony with
+        Borrowed =
+            { colony.Borrowed with
+                ChildOutposts = [ "W1N4" ]
+            }
+        Crossed = Set.add "W1N4" colony.Crossed
+        Spatial =
+            { colony.Spatial with
+                Borders = colony.Spatial.Borders |> Map.add "W1N4" plainRing
+            }
+            |> withNeighbour "W1N4" { RoomLayer.empty with Terrain = floor }
+    }
+
+/// One room's Guard Brief as a colony whose creeps hold these Tasks reads it.
+let internal heldBriefOf (holding: (string * Task) list) (room: string) (colony: ColonyView) =
+    let atlas = Atlas.ofView colony
+
+    let held =
+        heldTaskFacts
+            colony
+            (holding |> List.map (fun (name, task) -> name, taskId task) |> Map.ofList)
+
+    Threats.briefOf (threatsOfHeld colony atlas held) room
