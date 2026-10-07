@@ -64,7 +64,11 @@
     <Compile Include="Decide/HarassTests.fs" />
     <Compile Include="Decide/LabTests.fs" />
     <Compile Include="Decide/SignatureTests.fs" />
+    <Compile Include="Decide/ThreatFixtures.fs" />
     <Compile Include="Decide/ThreatTests.fs" />
+    <Compile Include="Decide/ThreatTowerTests.fs" />
+    <Compile Include="Decide/ThreatSafeModeTests.fs" />
+    <Compile Include="Decide/ThreatDefenderTests.fs" />
     <Compile Include="Decide/AnchorFixtures.fs" />
     <Compile Include="Decide/AnchorPinTests.fs" />
     <Compile Include="Decide/AnchorPostTests.fs" />
