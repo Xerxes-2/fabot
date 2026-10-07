@@ -200,6 +200,24 @@ let private fightOnlyNow () =
 // colonies half the turns and the other half none.
 let mutable private fullTicks = 0
 
+/// A creep's gait off `Game` (`Gait.walked`).
+let private gaitOf (c: ICreep) : Gait =
+    let mutable weighed = 0
+    let mutable moves = 0
+    let mutable carry = 0
+
+    for part in c.body do
+        match part.``type`` with
+        | "move" ->
+            if part.hits > 0 then
+                moves <- moves + 1
+        | "carry" ->
+            if part.hits > 0 then
+                carry <- carry + 1
+        | _ -> weighed <- weighed + 1
+
+    Gait.walked weighed carry moves (if carry = 0 then 0 else storeUsedTotal c.store)
+
 /// What this tick sees of `Game` without a World: our creeps, every hostile
 /// in a visible room, our structures' tiles and our controllers. Built with
 /// `Fresh`, because the full tick keeps it as the last full tick's record.
@@ -208,6 +226,12 @@ let private glance () : LightTick.Glance =
         RoomPos.at room { X = pos.x; Y = pos.y }
 
     let rooms = objectValues<IRoom> Game.rooms
+
+    // A chase's pace is asked of a body the last plans aim (`LightTick.aimers`).
+    let aimers =
+        match lastFull with
+        | Some(_, last) -> LightTick.aimers last
+        | None -> Set.empty
 
     {
         Creeps =
@@ -239,6 +263,7 @@ let private glance () : LightTick.Glance =
                                 1
                             else
                                 0)
+                    Gait = if Set.contains c.name aimers then Some(gaitOf c) else None
                 }
                 : LightTick.GlanceCreep))
             |> Fresh.mapOfArray
@@ -1127,6 +1152,7 @@ let private fullTick
                             decision.Aims
                             decision.Volleys
                             decision.Mired
+                        |> LightTick.tracking seen decision.Tracks
 
                     colony.Home,
                     LightTick.recorded

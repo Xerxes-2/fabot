@@ -1785,15 +1785,7 @@ let fightOnlyDecideTests =
                             |> List.choose (fun creep ->
                                 SpatialInfo.creepPlacementOf raidedHome.Spatial creep.Name
                                 |> Option.map (fun tile ->
-                                    creep.Name,
-                                    ({
-                                        Tile = tile
-                                        Hits = creep.Hits.Hits
-                                        Inward = []
-                                        Heals = 0
-                                        Strikes = 0
-                                    }
-                                    : LightTick.GlanceCreep)))
+                                    creep.Name, glanceCreep tile creep.Hits.Hits))
                             |> Map.ofList
                         Hostiles = []
                         Structures = []

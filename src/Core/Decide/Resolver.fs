@@ -30,6 +30,12 @@ type private Aimed =
         /// The steps the target can take by a tick, its fatigue waited out, at
         /// its quickest pace off swamp: its likely next steps, away.
         Steps: int -> int
+        /// The tile of the room it left since the full tick before
+        /// (`ColonyView.Stepped`): which way it walks.
+        Left: Pos option
+        /// Whether it bears no weapon (`HostileInfo.armed`): a quarry, not
+        /// the kite's.
+        Unarmed: bool
     }
 
 /// What a fighter strikes next (`Emitter.aimOf`), as its chase reads it.
@@ -224,6 +230,11 @@ let private chaseFor
                             else
                                 (ticks - wait + quickest - 1) / quickest
                     | None -> fun _ -> 0
+                Left =
+                    Map.tryFind target.Id view.Stepped
+                    |> Option.filter (fun left -> left.Room = at.Room)
+                    |> Option.map RoomPos.pos
+                Unarmed = not (HostileInfo.armed side target)
             }
 
         let aim () =
@@ -257,6 +268,190 @@ let glueChases (view: ColonyView) atlas (threats: Threats) (assigned: Map<string
             chaseStep chase from beside (Threats.soonestIn threats from.Room) (Some target)
             |> Option.isNone
         | None -> true
+
+/// A chase's walk over the cadence window and the quarry's track it assumes
+/// (#626), so a light tick walks it on while the quarry walks as assumed and
+/// re-decides it only off that. `quarry`: where the quarry stands by a tick
+/// of `horizon` (tick 0 now), walking on in its heading. `decided`: the
+/// decide's own walk from `from` (its step, then its step plan's tiles; none
+/// to stand), timed by `held` (the ticks a tile holds the body past its
+/// own). Laid only where the decide pursued the quarry — its step no farther
+/// from where the quarry stands, or a stand within `reach` of it — else
+/// nothing. With `extend` (a walk no chase weighing cut short), the walk goes
+/// on past its end, a tile a tick its gait allows, onto the `opens` tile
+/// beside it nearest where the quarry stands on arrival, never nearer than
+/// the decide's own walk left it (`keep`, the gap at its end) and only while
+/// that closes the gap the quarry opened; within the window's last light
+/// tick. The track: the quarry's tile for each tick from the first, while a
+/// stand keeps it in `reach`, or a walk within the gap its first tick
+/// leaves. The walk is the decide's then the extension; the track the
+/// quarry's tiles, tick 1 first.
+let chainOf
+    (horizon: int)
+    (reach: int)
+    (around: Pos -> Pos list)
+    (opens: Pos -> bool)
+    (held: Pos -> int)
+    (quarry: int -> Pos)
+    (from: Pos)
+    (decided: Pos list)
+    (extend: bool)
+    : Pos list * Pos list =
+    let start = quarry 0
+
+    let pursued =
+        match decided with
+        | [] -> range from start <= reach
+        | first :: _ -> range first start <= range from start
+
+    if not pursued then
+        [], []
+    else
+        let path = ResizeArray<Pos>()
+        let times = ResizeArray<int>()
+        let mutable tick = held from + 1
+
+        for tile in decided do
+            path.Add tile
+            times.Add tick
+            tick <- tick + held tile + 1
+
+        let last () =
+            if path.Count = 0 then from else path.[path.Count - 1]
+
+        let keep = range (last ()) start
+        let mutable walking = extend && path.Count > 0
+
+        while walking do
+            let here = last ()
+            let arrives = times.[times.Count - 1] + held here + 1
+
+            if arrives > horizon - 1 then
+                walking <- false
+            else
+                let toward = quarry arrives
+                let gap = range here toward
+
+                let next =
+                    if gap <= keep then
+                        None
+                    else
+                        around here
+                        |> List.filter (fun tile ->
+                            opens tile && range tile toward >= keep && range tile toward < gap)
+                        |> List.sortBy (fun tile ->
+                            let dx, dy = tile.X - toward.X, tile.Y - toward.Y
+                            range tile toward, held tile, dx * dx + dy * dy, tile.X, tile.Y)
+                        |> List.tryHead
+
+                match next with
+                | Some tile ->
+                    path.Add tile
+                    times.Add arrives
+                | None -> walking <- false
+
+        let standing t =
+            let mutable at = from
+
+            for i in 0 .. path.Count - 1 do
+                if times.[i] <= t then
+                    at <- path.[i]
+
+            at
+
+        // A stand holds while the quarry stays in reach; a walk while it
+        // keeps the gap its first tick leaves (a tick behind a quarry at its
+        // pace), which is the gap a decide each tick would keep.
+        let limit =
+            if path.Count = 0 then
+                reach
+            else
+                max reach (range (standing 1) (quarry 1))
+
+        let track =
+            Seq.initInfinite ((+) 1)
+            |> Seq.takeWhile (fun t -> t <= horizon - 1 && range (standing t) (quarry t) <= limit)
+            |> Seq.map quarry
+            |> List.ofSeq
+
+        List.ofSeq path, track
+
+/// A chaser's walk and track (`chainOf`) for a body whose chase aims its kill
+/// order's head at an unarmed quarry that walked since the full tick before
+/// (`Aimed.Left`): the walk `step` (or a stand) began, priced as the full
+/// tick prices it — never a tile a step onto holds the body on
+/// (`Chase.Holds`), any a hostile strikes within the cadence window
+/// (`later`), off its arrival or on the border ring — and timed by its own
+/// arrival (`Chase.Walk`).
+let private layChain
+    atlas
+    (creep: string)
+    (chase: Chase)
+    (later: (int -> int) option)
+    (at: RoomPos)
+    (step: RoomPos option)
+    (extend: bool)
+    =
+    match chase.Aim.Value, chase.Walk.Value with
+    | Some({ Targets = head :: _ } as aim), Some walk when head.Unarmed && walk.Room = at.Room ->
+        match head.Left with
+        | Some left when left <> head.Target ->
+            let dx, dy = sign (head.Target.X - left.X), sign (head.Target.Y - left.Y)
+            let clamp v = max 0 (min (Engine.roomSide - 1) v)
+
+            let quarry ticks =
+                let steps = head.Steps ticks
+
+                {
+                    X = clamp (head.Target.X + steps * dx)
+                    Y = clamp (head.Target.Y + steps * dy)
+                }
+
+            let leaves tile = Grid.at (indexOf tile) walk.Leaves
+            let held, _ = readingOf aim walk
+            let from = RoomPos.pos at
+
+            let decided =
+                match step with
+                | Some next when next.Room = at.Room && RoomPos.pos next <> from ->
+                    match Atlas.stepPlanOf atlas creep with
+                    | Some(first :: _ as plan) when
+                        first = next && plan |> List.forall (fun tile -> tile.Room = at.Room)
+                        ->
+                        plan |> List.map RoomPos.pos
+                    | _ -> [ RoomPos.pos next ]
+                | _ -> []
+
+            let opens tile =
+                not (Seam.onRing tile)
+                && leaves tile <> System.Int32.MaxValue
+                && not (chase.Holds tile)
+                && later
+                   |> Option.forall (fun soonest -> soonest (indexOf tile) > Tuning.maxCadence)
+
+            let path, track =
+                chainOf
+                    Tuning.maxCadence
+                    aim.Reach
+                    (Atlas.adjacentWalkableIn atlas at.Room)
+                    opens
+                    (fun tile -> if leaves tile = System.Int32.MaxValue then 0 else held tile)
+                    quarry
+                    from
+                    decided
+                    extend
+
+            if not (List.isEmpty track) then
+                Atlas.recordChain
+                    atlas
+                    creep
+                    (if List.length path > List.length decided then
+                         Some(path |> List.map (RoomPos.at at.Room))
+                     else
+                         None)
+                    (track |> List.map (RoomPos.at at.Room))
+        | _ -> ()
+    | _ -> ()
 
 /// A kiter's step toward its ground (#510, #524, movement S3): the first step
 /// of a walk that keeps off what it keeps off, across the border too, a tie
@@ -688,6 +883,13 @@ let private moveIntentFor
             let inside, outside =
                 beside |> List.partition (fun tile -> Set.contains (here tile) area)
 
+            // A chaser standing on its ground: the ticks its quarry stays in
+            // its reach, walking on (`layChain`).
+            match chase, kite with
+            | _, Some(Kiting.Keeps _)
+            | None, _ -> ()
+            | Some chase, _ -> layChain atlas creep chase later at None false
+
             // The one body that has arrived: the tiles it may be shuffled
             // between for nothing, and the border the arbitration charges for
             // pushing it over — the area less this tick's Reach, the same set
@@ -757,15 +959,24 @@ let private moveIntentFor
             // (`chaseStep`), whichever walk gave it; the light tick replays
             // what it keeps, and of a step kept, the plan its chase keeps
             // (`chasePlan`).
+            // Off the kite, its walk goes on after an unarmed quarry walking
+            // on over the cadence window (`layChain`), where no weighing cut
+            // it short.
             let step =
                 match chase with
                 | Some chase ->
+                    let chained step extend =
+                        match kite with
+                        | Some(Kiting.Keeps _) -> ()
+                        | _ -> layChain atlas creep chase later at step extend
+
                     match chaseStep chase at beside later step with
                     | Some kept ->
                         match kept with
                         | Some tile -> Atlas.recordStep atlas creep (at, tile)
                         | None -> Atlas.dropStep atlas creep
 
+                        chained kept false
                         kept
                     | None ->
                         match
@@ -773,8 +984,10 @@ let private moveIntentFor
                             |> Option.filter (fun plan -> step.IsSome && List.tryHead plan = step)
                             |> Option.bind (chasePlan atlas chase at later)
                         with
-                        | Some count -> Atlas.keepSteps atlas creep count
-                        | None -> ()
+                        | Some count ->
+                            Atlas.keepSteps atlas creep count
+                            chained step false
+                        | None -> chained step true
 
                         step
                 | None -> step

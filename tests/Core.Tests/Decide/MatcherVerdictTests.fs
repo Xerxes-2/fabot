@@ -398,18 +398,7 @@ let fullMineContainerTests =
 
                     let glance: LightTick.Glance =
                         {
-                            Creeps =
-                                Map.ofList
-                                    [
-                                        "m1",
-                                        {
-                                            Tile = RoomPos.at "" minePost
-                                            Hits = 300
-                                            Inward = []
-                                            Heals = 0
-                                            Strikes = 0
-                                        }
-                                    ]
+                            Creeps = Map.ofList [ "m1", glanceCreep (RoomPos.at "" minePost) 300 ]
                             Hostiles = []
                             Structures = []
                             Controllers = Map.empty

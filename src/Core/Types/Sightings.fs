@@ -54,6 +54,17 @@ module Gait =
             Moves = partCountIn live Move
         }
 
+    /// A body of ours' gait as the engine walks it (`movement.js`): every
+    /// part but MOVE and CARRY weighs (`weighed`, destroyed ones too — the
+    /// glance counts them, a CreepInfo reader adds `ShotOff`), and a
+    /// live CARRY only while loaded, one a 50 aboard (`load`), against its live
+    /// MOVE. The one reading of a body's walk, off `Game` or off a CreepInfo.
+    let walked (weighed: int) (liveCarry: int) (liveMoves: int) (load: int) : Gait =
+        {
+            Weight = weighed + min liveCarry ((load + 49) / 50)
+            Moves = liveMoves
+        }
+
     /// The whole ticks a tile of this fatigue takes, each live MOVE paying
     /// two a tick; None for no MOVE acting, which never steps of itself.
     let ticks (fatigue: int) (gait: Gait) : int option =

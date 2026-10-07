@@ -30,15 +30,19 @@ let internal noGround: int[] = Array.create tileCount -1
 /// Carry parts per 50 units of either resource, and the empty ones ride free.
 let internal fatigueFactorOf (creep: CreepInfo) : FatigueFactor =
     let carry = partCount creep.Body Carry
-
-    let loadedCarry =
-        min carry ((creep.Energy + creep.Thorium + CreepInfo.mineralsAboard creep + 49) / 50)
-
+    let moves = partCount creep.Body Move
     let parts = creep.Body |> Map.toList |> List.sumBy snd
 
+    let gait =
+        Gait.walked
+            (parts - moves - carry)
+            carry
+            moves
+            (creep.Energy + creep.Thorium + CreepInfo.mineralsAboard creep)
+
     {
-        FatigueParts = parts - partCount creep.Body Move - (carry - loadedCarry)
-        MoveParts = partCount creep.Body Move
+        FatigueParts = gait.Weight
+        MoveParts = gait.Moves
         Whole =
             partCount creep.Body Attack > 0
             || partCount creep.Body RangedAttack > 0

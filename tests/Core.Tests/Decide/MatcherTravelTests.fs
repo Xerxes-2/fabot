@@ -297,6 +297,66 @@ let movementTests =
     testList
         "movement"
         [
+            test
+                "a chase's chain walks on after a quarry walking off, never nearer than the decide's walk (#626)" {
+                let p x y : Pos = { X = x; Y = y }
+
+                let around (tile: Pos) =
+                    [
+                        for dx in -1 .. 1 do
+                            for dy in -1 .. 1 do
+                                if (dx, dy) <> (0, 0) then
+                                    yield p (tile.X + dx) (tile.Y + dy)
+                    ]
+
+                // A scout walking off east a tile a tick from 14,10.
+                let walking t = p (14 + t) 10
+
+                let chain opens decided quarry extend =
+                    Resolver.chainOf 4 3 around opens (fun _ -> 0) quarry (p 10 10) decided extend
+
+                Expect.equal
+                    (chain (fun _ -> true) [ p 11 10 ] walking true)
+                    ([ p 11 10; p 12 10; p 13 10 ], [ p 15 10; p 16 10; p 17 10 ])
+                    "a step after it, then a tile a tick behind it to the window's last light tick"
+
+                Expect.equal
+                    (chain (fun _ -> true) [ p 11 10 ] walking false)
+                    ([ p 11 10 ], [ p 15 10 ])
+                    "a walk a weighing cut goes no farther; its track holds while the gap does"
+
+                Expect.equal
+                    (chain (fun (tile: Pos) -> tile.X < 13) [ p 11 10 ] walking true)
+                    ([ p 11 10; p 12 10 ], [ p 15 10; p 16 10 ])
+                    "a tile the full tick would refuse ends it"
+
+                Expect.equal
+                    (chain (fun _ -> true) [ p 11 10 ] (fun _ -> p 13 10) true)
+                    ([ p 11 10 ], [ p 13 10; p 13 10; p 13 10 ])
+                    "a quarry standing two off its step: the walk closes no nearer"
+
+                // A hurt ranger the decide holds off: its stand in reach, or
+                // its step back.
+                Expect.equal
+                    (Resolver.chainOf
+                        4
+                        3
+                        around
+                        (fun _ -> true)
+                        (fun _ -> 0)
+                        (fun t -> p (12 + t) 10)
+                        (p 10 10)
+                        []
+                        true)
+                    ([], [ p 13 10 ])
+                    "a stand three off: no walk; its track holds while the quarry stays in reach"
+
+                Expect.equal
+                    (chain (fun _ -> true) [ p 9 10 ] walking true)
+                    ([], [])
+                    "a step away from it: no chain, no track"
+            }
+
             test "a creep outside its Work Area steps toward the source, acting not yet" {
                 // A one-tile-wide plain corridor: x = 10, y = 9..15, with the
                 // source tile itself a wall (sources always sit on walls).
@@ -339,17 +399,7 @@ let movementTests =
                 let glanceAt run y : LightTick.Glance =
                     {
                         Creeps =
-                            Map.ofList
-                                [
-                                    "w1",
-                                    {
-                                        Tile = RoomPos.at room { X = 10; Y = y }
-                                        Hits = 300
-                                        Inward = []
-                                        Heals = 0
-                                        Strikes = 0
-                                    }
-                                ]
+                            Map.ofList [ "w1", glanceCreep (RoomPos.at room { X = 10; Y = y }) 300 ]
                         Hostiles = []
                         Structures = []
                         Controllers = Map.empty

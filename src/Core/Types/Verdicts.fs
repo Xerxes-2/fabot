@@ -622,6 +622,10 @@ type Decision =
         /// tick: the tile it asked to step onto and the ones after it, all in
         /// the room it stands in. What the light ticks walk it on along.
         Steps: Map<string, RoomPos list>
+        /// Each chaser's track (`Resolver.chainOf`): where its chase assumed
+        /// its unarmed quarry stands each tick after this one, walking on in
+        /// its heading (#626). A light tick re-decides it only off it.
+        Tracks: Map<string, RoomPos list>
         /// The light tick's planned acts, never issued on this tick: each
         /// refiller that poured this tick and stands beside another hungry
         /// member of the refill cluster, its transfer into that one; and each

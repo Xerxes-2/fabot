@@ -20,6 +20,10 @@ type GlanceCreep =
         /// Its ATTACK and RANGED_ATTACK parts with hits left: a fighter's
         /// weapons (#552).
         Strikes: int
+        /// Its gait (`Gait.walked`), read for a body the plans aim
+        /// (`aimers`), None for any other: whether a chase out-paces its
+        /// quarry (`LightForce.Chase`).
+        Gait: Gait option
     }
 
 /// One hostile creep in a visible room, asked `HostileInfo`'s questions
@@ -127,6 +131,10 @@ type Plan =
         /// The tiles about each melee glue body whose step holds it
         /// (`Emitter.mired`, #614), which its light tick glue keeps off.
         Mired: Map<string, Set<RoomPos>>
+        /// Each chaser's track (`Decision.Tracks`): the tick of its first
+        /// tile, then where the decide's chase assumed its quarry stands each
+        /// tick on, walking on in its heading (`Resolver.chainOf`).
+        Tracks: Map<string, int * RoomPos list>
     }
 
 /// What the last full tick left for the ticks after it: every colony's plan,
@@ -173,9 +181,10 @@ type LightForce =
     /// A creep of ours that lost hits to a body no plan strikes, or to
     /// nothing in sight.
     | HitsLost of creep: string
-    /// A fighter of ours its plan stands while the unarmed body it aims at
-    /// has stepped since the plans (#619): replayed, the chase stands a tick
-    /// and falls a tile behind a quarry at its pace.
+    /// A fighter of ours whose unarmed quarry walks off where its plan put
+    /// it (#619), while the chaser can close on it (#626): replayed, the
+    /// chase stands a tick and falls a tile behind a quarry at its pace. Or
+    /// one whose chase walk an armed body newly reaches.
     | Chase of creep: string
     | ControllerChanged of room: string
     /// The reset tick before left colonies undecided (`resetSplit`).
@@ -459,7 +468,23 @@ let plan
             |> Map.toSeq
             |> Seq.map (fun (name, tiles) -> name, Fresh.setOfSeq tiles)
             |> Fresh.mapOfSeq
+        Tracks = Fresh.mapOfSeq Seq.empty
     }
+
+/// A plan with its chasers' tracks (`Decision.Tracks`), off the glance the
+/// decide began with: each from the tick after it, for a body it holds.
+let tracking (glance: Glance) (tracks: Map<string, RoomPos list>) (plan: Plan) : Plan =
+    if Map.isEmpty tracks then
+        plan
+    else
+        { plan with
+            Tracks =
+                tracks
+                |> Map.toSeq
+                |> Seq.filter (fun (name, _) -> Set.contains name plan.Creeps)
+                |> Seq.map (fun (name, track) -> name, (glance.Time + 1, track))
+                |> Fresh.mapOfSeq
+        }
 
 /// A plan's acts on the glance `now`: its `Acts`, each creep's later act
 /// (`Plan.Later`) superseding one of its own on its channel — a walker's the
@@ -586,6 +611,7 @@ let private without (claimed: Set<string>) (plan: Plan) : Plan =
             Aims = plan.Aims |> List.filter striking
             Volleys = plan.Volleys |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
             Mired = plan.Mired |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
+            Tracks = plan.Tracks |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
         }
 
 /// The record of the plans by home, each body claimed by the first plan that
@@ -673,6 +699,7 @@ let private merged (now: Glance) (last: LastFull) : Plan =
             Aims = plans |> List.collect _.Aims
             Volleys = mapOf _.Volleys
             Mired = mapOf _.Mired
+            Tracks = mapOf _.Tracks
         }
 
 /// The rooms the plans' volleys stand in (`Glance.PowerCreeps`).
@@ -795,6 +822,57 @@ let resetSplit
 
     threatened @ List.take spare quiet |> List.map fst, List.skip spare quiet |> List.map fst
 
+/// The plain tiles a body walks in `ticks`: none with no MOVE acting.
+let private stepsIn (ticks: int) (gait: Gait) : int =
+    Gait.ticks Gait.plain gait
+    |> Option.map (fun pace -> ticks / pace)
+    |> Option.defaultValue 0
+
+/// Whether an armed body can strike one of `tiles` within `ticks`, walking
+/// plain at its own gait: its weapon's range and the tiles it walks by then,
+/// none for a body as good as rooted or with no MOVE acting.
+let private strikesWithin (ticks: int) (tiles: RoomPos list) (hostile: GlanceHostile) : bool =
+    match hostile.Weapon with
+    | Some weapon when hostile.Armed ->
+        let reach = weapon + stepsIn (max 0 ticks) hostile.Gait
+
+        tiles
+        |> List.exists (fun tile ->
+            RoomPos.range hostile.Tile tile |> Option.exists (fun r -> r <= reach))
+    | _ -> false
+
+/// Whether an armed body can strike a tile within the cadence window
+/// (`Tuning.maxCadence` ticks): a body of ours there kites or flees it, and
+/// a decide keeps that whatever its aim does.
+let private menaced (now: Glance) (tile: RoomPos) : bool =
+    now.Hostiles
+    |> List.exists (fun hostile ->
+        not (harmless now hostile) && strikesWithin Tuning.maxCadence [ tile ] hostile)
+
+/// Whether a chaser can close on its quarry: it stands within a step of its
+/// reach, or the quarry falls behind it on plain. A quarry at its pace and
+/// farther stays as far, decided or replayed.
+let private closes (chaser: GlanceCreep) (quarry: GlanceHostile) (reach: int) : bool =
+    match RoomPos.range chaser.Tile quarry.Tile with
+    | Some gap ->
+        gap <= reach + 1
+        || chaser.Gait |> Option.exists (fun gait -> Gait.fallsBehind gait quarry.Gait)
+    | None -> false
+
+/// Whether a walk from one tile onto another pursues a quarry standing on
+/// `quarry`: it ends nearer, or within the walker's reach.
+let private pursues (reach: int) (quarry: RoomPos) (from: RoomPos) (onto: RoomPos) : bool =
+    match RoomPos.range onto quarry, RoomPos.range from quarry with
+    | Some after, Some before -> after < before || after <= reach
+    | _ -> false
+
+/// Where a chaser's track (`Plan.Tracks`) puts its quarry on a tick: None
+/// before or past it, or with none.
+let private trackAt (plan: Plan) (name: string) (time: int) : RoomPos option =
+    match Map.tryFind name plan.Tracks with
+    | Some(first, track) when time >= first -> List.tryItem (time - first) track
+    | _ -> None
+
 /// Every fact the plans did not account for, in the ADR's order (#549): a
 /// replay is wrong only where the world moved off what a plan was made
 /// against — a raider in a home room, every tick (a home is never a tick
@@ -804,7 +882,7 @@ let resetSplit
 /// reach, reaches nothing); a creep of ours that lost hits, unless every body
 /// that could have struck it is one a striker of ours aims at and reaches,
 /// and the loss is within the healing the plans give it; a chaser its plan
-/// stands while its unarmed quarry walks off; a creep born or
+/// stands while its unarmed quarry walks off, if it can close; a creep born or
 /// gone; one on the border ring with no step in; a controller changed — or
 /// where a plan holds an act no replay repeats (a structure's fight), or a
 /// colony has no plan (a cold reset's deferred).
@@ -903,36 +981,73 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
             | _ -> false)
         |> List.map (fst >> LightForce.HitsLost)
 
-    // A fighter its plan stands (no step on from where it is) while the
-    // unarmed body it aims at walks off its plan's tile: the full tick laid
-    // its ground about where the quarry stood. A melee body beside its quarry
-    // keeps it on its light tick (`Emitter.glueStep`); an armed quarry is
-    // the kite's, whose stand a replay may keep.
+    // A fighter whose unarmed quarry walks off where the plan put it: off
+    // its track (`Plan.Tracks`) while the decide's chase holds one, else off
+    // its mark while the plan stands the fighter after a walk that pursued
+    // it. Only while a decide can change the outcome (#626): the chaser
+    // closes on the quarry and no armed body menaces it, whose kite or
+    // flight a decide keeps. A melee body beside its quarry keeps it on its
+    // light tick (`Emitter.glueStep`); an armed quarry is the kite's. And a
+    // chase on its track whose walk left (where it stands and its step plan
+    // on) an armed body that stepped since the plan, or came into sight,
+    // newly reaches before the next decide: the decide priced its walk off
+    // where the bodies stood (`Resolver.chainOf`).
     let chase =
         let plan = merged now last
 
         plan.Aims
         |> List.choose (fun aim ->
             match aim with
-            | AttackCreep(name, target) -> Some(name, target, Engine.meleeRange)
-            | RangedAttackCreep(name, target) -> Some(name, target, 0)
+            | AttackCreep(name, target) -> Some(name, target, Engine.meleeRange, Engine.meleeRange)
+            | RangedAttackCreep(name, target) -> Some(name, target, Engine.rangedRange, 0)
             | _ -> None)
-        |> List.filter (fun (name, target, glues) ->
+        |> List.filter (fun (name, target, reach, glues) ->
             match
                 Map.tryFind name now.Creeps,
                 now.Hostiles |> List.tryFind (fun hostile -> hostile.Id = target),
                 Map.tryFind target last.Marks
             with
             | Some creep, Some quarry, Some mark ->
-                quarry.Tile <> mark
-                && not quarry.Armed
-                && not (harmless now quarry)
-                && RoomPos.range creep.Tile quarry.Tile |> Option.forall (fun r -> r > glues)
-                && Map.tryFind name plan.Steps
-                   |> Option.bind (fun path -> onward path creep.Tile)
-                   |> Option.isNone
+                let expected = trackAt plan name now.Time
+
+                let exposed () =
+                    match Map.tryFind name plan.Tracks with
+                    | Some(first, _) when Option.isSome expected ->
+                        let walk =
+                            match Map.tryFind name plan.Steps with
+                            | Some path when List.contains creep.Tile path ->
+                                path |> List.skipWhile ((<>) creep.Tile)
+                            | _ -> [ creep.Tile ]
+
+                        let window = first - 1 + Tuning.maxCadence - now.Time
+
+                        now.Hostiles
+                        |> List.exists (fun hostile ->
+                            not (harmless now hostile)
+                            && Map.tryFind hostile.Id last.Marks <> Some hostile.Tile
+                            && strikesWithin window walk hostile)
+                    | _ -> false
+
+                let lost () =
+                    match expected with
+                    | Some tile -> quarry.Tile <> tile
+                    | None ->
+                        quarry.Tile <> mark
+                        && Map.tryFind name plan.Steps
+                           |> Option.bind (fun path -> onward path creep.Tile)
+                           |> Option.isNone
+                        && Map.tryFind name plan.Standing
+                           |> Option.exists (fun from -> pursues reach mark from creep.Tile)
+
+                exposed ()
+                || not quarry.Armed
+                   && not (harmless now quarry)
+                   && RoomPos.range creep.Tile quarry.Tile |> Option.forall (fun r -> r > glues)
+                   && lost ()
+                   && closes creep quarry reach
+                   && not (menaced now creep.Tile)
             | _ -> false)
-        |> List.map (fun (name, _, _) -> name)
+        |> List.map (fun (name, _, _, _) -> name)
         |> List.distinct
         |> List.map LightForce.Chase
 
@@ -1144,6 +1259,7 @@ let withFight (fighters: Set<string>) (fresh: Plan) (carried: Plan) : Plan =
         Aims = economy.Aims @ fresh.Aims
         Volleys = joined _.Volleys
         Mired = joined _.Mired
+        Tracks = joined _.Tracks
     }
 
 /// The ids the last full tick's acts name, for the glance to look up
@@ -1486,3 +1602,16 @@ let recorded (fighters: Set<string> option) (decided: Plan) (carried: Plan optio
     match fighters, carried with
     | Some held, Some plan -> withFight held decided plan
     | _ -> decided
+
+/// The bodies the plans aim (`Plan.Aims`): whose pace a glance reads
+/// (`GlanceCreep.Gait`).
+let aimers (last: LastFull) : Set<string> =
+    last.Plans
+    |> Map.values
+    |> Seq.collect _.Aims
+    |> Seq.choose (fun aim ->
+        match aim with
+        | AttackCreep(name, _)
+        | RangedAttackCreep(name, _) -> Some name
+        | _ -> None)
+    |> Set.ofSeq

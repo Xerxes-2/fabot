@@ -178,6 +178,9 @@ type Atlas =
             /// walks it on only while it stands on a tile of the plan, so a
             /// mismatch costs that creep a tick and nothing else.
             Steps: System.Collections.Generic.Dictionary<string, RoomPos list>
+            /// Each chaser's track this tick (`Resolver.chainOf`): where its
+            /// chase assumed its quarry stands each tick after this one.
+            Tracks: System.Collections.Generic.Dictionary<string, RoomPos list>
             /// The creeps whose bodies carry more Work parts than Move, read from the
             /// body and never a name. Three readers ask it, so the arithmetic lives
             /// here once.
@@ -692,6 +695,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         StandingPosts = System.Collections.Generic.Dictionary()
         SeatUnions = System.Collections.Generic.Dictionary()
         Steps = System.Collections.Generic.Dictionary()
+        Tracks = System.Collections.Generic.Dictionary()
         Heavy =
             creeps
             |> List.filter (fun creep -> partCount creep.Body Work > partCount creep.Body Move)
@@ -3617,6 +3621,19 @@ let dropStep (atlas: Atlas) (creep: string) = atlas.Steps.Remove creep |> ignore
 /// in creep-name order.
 let stepPlans (atlas: Atlas) : (string * RoomPos list) list =
     [ for KeyValue(creep, plan) in atlas.Steps -> creep, plan ] |> List.sortBy fst
+
+/// Sets a chaser's step plan and its track (`Resolver.chainOf`).
+let recordChain (atlas: Atlas) (creep: string) (plan: RoomPos list option) (track: RoomPos list) =
+    match plan with
+    | Some plan -> atlas.Steps.[creep] <- plan
+    | None -> ()
+
+    atlas.Tracks.[creep] <- track
+
+/// Every chaser's track this tick (`Atlas.Tracks`), built by `Fresh`: the
+/// decision keeps it past the tick.
+let tracks (atlas: Atlas) : Map<string, RoomPos list> =
+    [ for KeyValue(creep, track) in atlas.Tracks -> creep, track ] |> Fresh.mapOfSeq
 
 /// One creep's step plan as the mover left it this tick, if it has one.
 let stepPlanOf (atlas: Atlas) (creep: string) : RoomPos list option =

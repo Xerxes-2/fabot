@@ -11,13 +11,7 @@ let private room = "W1N1"
 let private tile x y = RoomPos.at room { X = x; Y = y }
 
 let private creepAt x y hits : GlanceCreep =
-    {
-        Tile = tile x y
-        Hits = hits
-        Inward = []
-        Heals = 0
-        Strikes = 0
-    }
+    Fabot.Core.Tests.Decide.Fixtures.glanceCreep (tile x y) hits
 
 /// The room our controller stands in: not `room`, whose forcing rules are the
 /// reach rules (a raider in a home forces every tick, `homeTests`).
@@ -1092,6 +1086,7 @@ let forcedTests =
                                     Inward = []
                                     Heals = 0
                                     Strikes = 0
+                                    Gait = None
                                 }
                     }
 
@@ -1159,6 +1154,7 @@ let forcedTests =
                                     Inward = []
                                     Heals = 0
                                     Strikes = 0
+                                    Gait = None
                                 }
                             |> Map.add
                                 "anchor"
@@ -1168,6 +1164,7 @@ let forcedTests =
                                     Inward = []
                                     Heals = 0
                                     Strikes = 0
+                                    Gait = None
                                 }
                     }
 
@@ -1231,6 +1228,7 @@ let forcedTests =
                                     Inward = []
                                     Heals = 0
                                     Strikes = 0
+                                    Gait = None
                                 }
                             |> Map.add
                                 "ranger"
@@ -1240,6 +1238,7 @@ let forcedTests =
                                     Inward = []
                                     Heals = 0
                                     Strikes = 0
+                                    Gait = None
                                 }
                     }
 
@@ -1277,6 +1276,7 @@ let forcedTests =
                                     Inward = []
                                     Heals = 0
                                     Strikes = 0
+                                    Gait = None
                                 }
                     }
 
@@ -1650,6 +1650,7 @@ let forcedTests =
                                         Inward = []
                                         Heals = 0
                                         Strikes = 0
+                                        Gait = None
                                     }
                         }
 
@@ -1674,6 +1675,7 @@ let forcedTests =
                                     Inward = [ Right ]
                                     Heals = 0
                                     Strikes = 0
+                                    Gait = None
                                 }
                     }
 
@@ -2137,6 +2139,273 @@ let forcedTests =
                     "chase ranger"
                     "its CPU line"
             }
+
+            test "a chase forces its tick only while the chaser can close on its quarry (#626)" {
+                // Live W18S27 t1,021,5xx: a ranger kiting two armed rangers,
+                // its aim on a scout five off that stepped every tick, forced
+                // 61 fight-only ticks of 100.
+                let scout x y : GlanceHostile =
+                    { hostile x y "Trepidimous" false with
+                        Id = "scout"
+                    }
+
+                let ranged x y : GlanceHostile =
+                    { hostile x y "Trepidimous" true with
+                        Id = "ranger-t"
+                        Weapon = Some Engine.rangedRange
+                    }
+
+                let ranger x =
+                    { creepAt x 10 1000 with
+                        Gait = Some { Weight = 1; Moves = 1 }
+                    }
+
+                let at hostiles =
+                    { quiet with
+                        Creeps = Map.ofList [ "ranger", ranger 12 ]
+                        Hostiles = hostiles
+                    }
+
+                let full glance =
+                    LightTick.lastFull glance Map.empty [ RangedAttackCreep("ranger", "scout") ]
+                    |> aiming [ RangedAttackCreep("ranger", "scout") ] Map.empty
+
+                let forcedAfter before after =
+                    LightTick.forced (full (at before)) (at after)
+
+                Expect.equal
+                    (forcedAfter [ scout 14 10 ] [ scout 15 10 ])
+                    (Some(LightForce.Chase "ranger"))
+                    "a quarry a step past its reach: decide the chase"
+
+                Expect.isNone
+                    (forcedAfter [ scout 14 10; ranged 18 10 ] [ scout 15 10; ranged 18 10 ])
+                    "an armed body that strikes it within the cadence: the stand is the kite's"
+
+                Expect.equal
+                    (forcedAfter [ scout 14 10; ranged 30 10 ] [ scout 15 10; ranged 30 10 ])
+                    (Some(LightForce.Chase "ranger"))
+                    "an armed body across the room menaces nothing"
+
+                // A ranged body six off: rooted, it walks nowhere by the
+                // cadence; at two ticks a tile, two tiles: range 5 either way.
+                let gaited gait x = { ranged x 10 with Gait = gait }
+
+                let rooted = gaited { Weight = 10; Moves = 1 }
+                let paced = gaited { Weight = 2; Moves = 1 }
+
+                Expect.equal
+                    (forcedAfter [ scout 14 10; rooted 18 ] [ scout 15 10; rooted 18 ])
+                    (Some(LightForce.Chase "ranger"))
+                    "a rooted body six off menaces nothing"
+
+                Expect.equal
+                    (forcedAfter [ scout 14 10; paced 18 ] [ scout 15 10; paced 18 ])
+                    (Some(LightForce.Chase "ranger"))
+                    "a body two ticks a tile, six off, reaches five by the cadence"
+
+                Expect.isNone
+                    (forcedAfter [ scout 14 10; paced 17 ] [ scout 15 10; paced 17 ])
+                    "five off, it strikes within the cadence"
+
+                let slow x y =
+                    { scout x y with
+                        Gait = { Weight = 2; Moves = 1 }
+                    }
+
+                // The plan walked the ranger from 11,10 to 12,10 after it.
+                let walkedAfter before after =
+                    LightTick.forced
+                        (full
+                            { at before with
+                                Creeps = Map.ofList [ "ranger", ranger 11 ]
+                            })
+                        (at after)
+
+                Expect.isNone
+                    (walkedAfter [ scout 16 10 ] [ scout 17 10 ])
+                    "a quarry at its pace five off stays as far, decided or not"
+
+                Expect.equal
+                    (walkedAfter [ slow 16 10 ] [ slow 17 10 ])
+                    (Some(LightForce.Chase "ranger"))
+                    "a slower quarry it walked after: it closes"
+
+                Expect.isNone
+                    (forcedAfter [ slow 16 10 ] [ slow 17 10 ])
+                    "a slower quarry out of reach that the plan stood off: the decide stood it"
+            }
+
+            test
+                "a chase's track: a quarry walking on as the decide assumed forces nothing, one off it forces again (#626)" {
+                // The live shape the profile harness never raises: a forced
+                // decide that walked the ranger one tile after a scout walking
+                // off, then the scout's next steps.
+                let scout x y : GlanceHostile =
+                    { hostile x y "Trepidimous" false with
+                        Id = "scout"
+                    }
+
+                let at time rangerX quarry =
+                    { quiet with
+                        Creeps =
+                            Map.ofList
+                                [
+                                    "ranger",
+                                    { creepAt rangerX 10 1000 with
+                                        Gait = Some { Weight = 1; Moves = 1 }
+                                    }
+                                ]
+                        Hostiles = quarry
+                        Time = time
+                    }
+
+                let aims = [ RangedAttackCreep("ranger", "scout") ]
+
+                let before =
+                    LightTick.lastFull (at 9 12 [ scout 14 10 ]) Map.empty aims
+                    |> aiming aims Map.empty
+
+                let now = at 10 12 [ scout 15 10 ]
+
+                Expect.equal
+                    (LightTick.forcing before now)
+                    [ LightForce.Chase "ranger" ]
+                    "the quarry walked off: forced"
+
+                let decided steps tracks =
+                    LightTick.ofPlans
+                        now
+                        Set.empty
+                        [
+                            "",
+                            LightTick.plan
+                                now
+                                (Set.singleton "ranger")
+                                steps
+                                []
+                                []
+                                [ MoveCreep("ranger", Right) ]
+                                aims
+                                Map.empty
+                                Map.empty
+                            |> LightTick.tracking now tracks
+                        ]
+
+                // The decide's walk with no chain past its step, and the one
+                // its chase lays (`Resolver.chainOf`): on after the scout,
+                // which it assumed at 16, 17, 18 on the three light ticks.
+                let unchained = decided Map.empty Map.empty
+
+                let chained =
+                    decided
+                        (Map.ofList [ "ranger", [ tile 13 10; tile 14 10; tile 15 10; tile 16 10 ] ])
+                        (Map.ofList [ "ranger", [ tile 16 10; tile 17 10; tile 18 10 ] ])
+
+                let inLine = at 11 13 [ scout 16 10 ]
+
+                Expect.equal
+                    (LightTick.forced unchained inLine)
+                    (Some(LightForce.Chase "ranger"))
+                    "unchained, the plan stands it again: the next forcing (the live loop)"
+
+                Expect.isNone (LightTick.forced chained inLine) "on its track, nothing forces"
+
+                Expect.contains
+                    (LightTick.intents chained inLine)
+                    (MoveCreep("ranger", Right))
+                    "the light tick walks it on"
+
+                Expect.isNone
+                    (LightTick.forced chained (at 12 14 [ scout 17 10 ]))
+                    "nor on the tick after"
+
+                Expect.isNone
+                    (LightTick.forced chained (at 12 13 [ scout 17 10 ]))
+                    "a chaser a tick behind its walk (blocked, or two ticks a tile): the track is by tick"
+
+                Expect.equal
+                    (LightTick.forced chained (at 11 13 [ scout 16 11 ]))
+                    (Some(LightForce.Chase "ranger"))
+                    "a quarry that turns off its track: decide the chase again"
+
+                Expect.equal
+                    (LightTick.forced chained (at 14 16 [ scout 20 10 ]))
+                    (Some(LightForce.Chase "ranger"))
+                    "past its track, the chase is the mark's again"
+
+                // A raider in sight of no plan, a MOVE a part, walking up the
+                // chain: three ticks to the next decide, a tile each, and its
+                // reach of one.
+                let raider x =
+                    { hostile x 10 "Trepidimous" true with
+                        Id = "raider"
+                    }
+
+                Expect.equal
+                    (LightTick.forced chained (at 11 13 [ scout 16 10; raider 20 ]))
+                    (Some(LightForce.Chase "ranger"))
+                    "a raider that reaches the walk before the next decide: decide it before its swing"
+
+                Expect.isNone
+                    (LightTick.forced chained (at 11 13 [ scout 16 10; raider 21 ]))
+                    "one that reaches it after: nothing forces"
+            }
+
+            test "a chaser standing in reach of a quarry walking on stands on its light tick (#626)" {
+                let scout x =
+                    { hostile x 10 "Trepidimous" false with
+                        Id = "scout"
+                    }
+
+                let at time quarry =
+                    { quiet with
+                        Creeps = Map.ofList [ "ranger", creepAt 12 10 1000 ]
+                        Hostiles = [ quarry ]
+                        Time = time
+                    }
+
+                let aims = [ RangedAttackCreep("ranger", "scout") ]
+
+                // The decide stood it two off the scout, which walks on: the
+                // track holds while it stays in reach.
+                let record =
+                    LightTick.ofPlans
+                        (at 10 (scout 14))
+                        Set.empty
+                        [
+                            "",
+                            LightTick.plan
+                                (at 10 (scout 14))
+                                (Set.singleton "ranger")
+                                Map.empty
+                                []
+                                []
+                                []
+                                aims
+                                Map.empty
+                                Map.empty
+                            |> LightTick.tracking
+                                (at 10 (scout 14))
+                                (Map.ofList [ "ranger", [ tile 15 10 ] ])
+                        ]
+
+                Expect.isNone
+                    (LightTick.forced record (at 11 (scout 15)))
+                    "in reach on its track: no tick"
+
+                Expect.isFalse
+                    (LightTick.intents record (at 11 (scout 15))
+                     |> List.exists (function
+                         | MoveCreep("ranger", _) -> true
+                         | _ -> false))
+                    "and it does not move"
+
+                Expect.equal
+                    (LightTick.forced record (at 12 (scout 16)))
+                    (Some(LightForce.Chase "ranger"))
+                    "walked out of its reach past the track: decide the chase"
+            }
         ]
 
 /// Four colonies, each projecting its home and one outpost.
@@ -2362,6 +2631,7 @@ let private split: Glance =
                     Inward = []
                     Heals = 0
                     Strikes = 0
+                    Gait = None
                 }
             |> Map.add
                 "ranger"
@@ -2371,6 +2641,7 @@ let private split: Glance =
                     Inward = []
                     Heals = 0
                     Strikes = 0
+                    Gait = None
                 }
     }
 
@@ -2443,6 +2714,7 @@ let decidersTests =
                                     Inward = []
                                     Heals = 0
                                     Strikes = strikes
+                                    Gait = None
                                 }
                     }
 
@@ -2497,6 +2769,7 @@ let decidersTests =
                                     Inward = []
                                     Heals = 0
                                     Strikes = 0
+                                    Gait = None
                                 }
                     }
 

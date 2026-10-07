@@ -2605,3 +2605,15 @@ let withOurTowers (room: string) (tiles: Pos list) (colony: ColonyView) =
                 Rooms = Map.add room { seen with OurTowers = tiles } colony.World.Rooms
             }
     }
+
+/// A body of ours as a light tick's glance reads it: on `tile` with `hits`,
+/// no weapon, no HEAL, no ring step and no pace read.
+let glanceCreep (tile: RoomPos) (hits: int) : LightTick.GlanceCreep =
+    {
+        Tile = tile
+        Hits = hits
+        Inward = []
+        Heals = 0
+        Strikes = 0
+        Gait = None
+    }
