@@ -872,6 +872,49 @@ let lossTests =
 
                 Expect.equal (losses shuttle) [] "four ticks, two crossings, nothing owed"
             }
+
+            // #576 (3): what the recast cooldown reads, off the losses already
+            // kept, so it costs no leaf of its own.
+            test
+                "the stand-down reads each room's last guard or ranger lost, off every episode's losses" {
+                let lost name tick room =
+                    {
+                        Creep = name
+                        Tick = tick
+                        Where = room |> Option.map (fun room -> RoomPos.at room { X = 20; Y = 20 })
+                    }
+
+                let episode opened losses =
+                    {
+                        Opened = opened
+                        LastSeen = opened + 50
+                        Rooms = Set.singleton "W1N2"
+                        Closest = None
+                        Losses = losses
+                        Damage = 0
+                    }
+
+                let state =
+                    { RaidState.empty with
+                        Episodes =
+                            [
+                                episode 80 [ lost "guard-70-Spawn1" 90 (Some "W1N2") ]
+                                episode
+                                    110
+                                    [
+                                        lost "guard-100-Spawn1" 120 (Some "W1N2")
+                                        lost "ranger-105-Spawn1" 130 (Some "W1N3")
+                                        lost "hauler-90-Spawn1" 140 (Some "W1N4")
+                                        lost "guard-101-Spawn1" 150 None
+                                    ]
+                            ]
+                    }
+
+                Expect.equal
+                    (standDown Tuning.defaults 200 state).FighterLost
+                    (Map.ofList [ "W1N2", 120; "W1N3", 130 ])
+                    "the latest guard or ranger loss by the room it fell in: no hauler, no body never placed"
+            }
         ]
 
 /// Every episode's recorded damage, oldest episode first.

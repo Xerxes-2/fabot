@@ -500,6 +500,17 @@ let private briefAsks (threats: Threats) (row: CastRow) : RowAsk list =
         | Guard _ -> []
         | _ -> brief.Asks |> List.filter (fun ask -> ask.Row = row))
 
+/// Whether a room casts no fighter for now (#576): a guard or ranger of ours
+/// died there inside `Tuning.RecastCooldown` and its raid is still priced a
+/// Win, the price that killed it, so each recast would feed the same error.
+/// A home of ours fights on (#602); a Kite or a Lose asks as it would.
+let private recastCooling (view: ColonyView) (room: string) : bool =
+    match Map.tryFind room view.World.FighterLost with
+    | Some lost when view.Time - lost < view.Tuning.RecastCooldown ->
+        not (Set.contains room (Facts.homesOfOurs view))
+        && Facts.answer view room = Answer.Win
+    | _ -> false
+
 /// The chases outside the guarded rooms that a row casts for: a room shut on
 /// a raid this colony's own row wins (#571), whose Guard the stand-down keeps
 /// out of the guarded rooms but whose cast it never withholds.
@@ -517,19 +528,22 @@ let private chaseAsks
             brief.Duty = Duty.Guard BriefKind.Chase
             && not (List.contains room outposts.Guarded)
             && Threats.answers view brief
+            && not (recastCooling view room)
             ->
             brief.Asks |> List.filter (fun ask -> ask.Row = row)
         | _ -> [])
 
-/// A fighting row's asks: its guarded rooms', its cast chases' and every
-/// other Brief's.
+/// A fighting row's asks: its guarded rooms' but a cooling one's
+/// (`recastCooling`), its cast chases' and every other Brief's.
 let private asksFor
     (view: ColonyView)
     (threats: Threats)
     (outposts: OutpostFacts)
     (row: CastRow)
     : RowAsk list =
-    (guardedAsks view threats outposts row |> List.map snd)
+    (guardedAsks view threats outposts row
+     |> List.filter (fst >> recastCooling view >> not)
+     |> List.map snd)
     @ chaseAsks view threats outposts row
     @ briefAsks threats row
 

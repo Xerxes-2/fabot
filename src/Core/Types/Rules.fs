@@ -798,6 +798,14 @@ type Tuning =
         /// the least that buys two
         /// blocks of the guard (1,500) or the ranger (1,400).
         CasterFloor: int
+        /// How long a room not a home of ours asks no fighter after a guard
+        /// or ranger of ours died there, while its raid stays priced a Win
+        /// (#576): a Win that kills our body is a pricing error, and each
+        /// recast feeds it one more. 300 ticks: a whole cast and walk (a
+        /// 50-part body spawns in 150, a few crossings walk in under 150), so
+        /// at most one body a window, and a fifth of a raider's life, so a
+        /// room priced right after the loss is not handed over for long.
+        RecastCooldown: int
         /// How many [[seam]]s one cross-room walk may cross: the hop budget a
         /// declared [[outpost]] has to sit inside, and the depth the route
         /// search stops at. Six since #437, for W15S28's walk to W18S27. There
@@ -1060,6 +1068,7 @@ module Tuning =
             IndependenceTowerEnergy = Engine.towerCapacity
             GarrisonTowers = 2
             CasterFloor = 1_800
+            RecastCooldown = 300
             MaxHops = 6
             TrunkSwampWeight = 3
             RoadPayback = 50_000

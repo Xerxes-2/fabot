@@ -2123,6 +2123,17 @@ let kiteTests =
                     (Some(taskId (Guard "W1N2")))
                     "and the ranger takes the room"
 
+                // The recast cooldown (#576) holds a Win alone: a Kite after a
+                // loss casts and holds as it would.
+                let lost = decide (lostIn "W1N2" (colony.Time - 1) colony) Map.empty Set.empty None
+
+                Expect.equal
+                    (lost.Quotas, spawnIntents lost.Intents, Map.tryFind "r-1" lost.Assignments)
+                    (result.Quotas,
+                     spawnIntents result.Intents,
+                     Map.tryFind "r-1" result.Assignments)
+                    "a ranger just lost there moves nothing of a Kite"
+
                 Expect.isTrue
                     (groundOf colony
                      |> Set.exists (fun tile -> rangeTo (RoomPos.pos crunchy.Pos) tile <= 3))
@@ -3177,6 +3188,42 @@ let shutChaseTests =
                     (spawnIntents (decide shut Map.empty Set.empty None).Intents)
                     (fun (_, _, name) -> name.StartsWith "guard-")
                     "and the colony casts the guard"
+            }
+
+            test
+                "a chase whose guard was just lost to the raid it wins casts none until RecastCooldown runs out (#576)" {
+                // The chase passes no Guarded gate, so the recast loop the
+                // cooldown breaks runs through it too.
+                let shut =
+                    { raidedOutpost
+                          [
+                              hostileIn
+                                  "W1N2"
+                                  { X = 25; Y = 42 }
+                                  [ Attack; Attack; Attack; Attack; Move ]
+                          ] with
+                        RaidedOutposts = Set.singleton "W1N2"
+                        Bank = { Available = 5_600; Capacity = 5_600 }
+                    }
+
+                let cooldown = shut.Tuning.RecastCooldown
+
+                let guardsCast colony =
+                    spawnIntents (decide colony Map.empty Set.empty None).Intents
+                    |> List.filter (fun (_, _, name) -> name.StartsWith "guard-")
+                    |> List.length
+
+                Expect.equal (Facts.answer shut "W1N2") Answer.Win "the premise: the row wins it"
+
+                Expect.equal
+                    (guardsCast (lostIn "W1N2" (shut.Time - cooldown + 1) shut))
+                    0
+                    "a guard lost there inside the cooldown: the chase casts none"
+
+                Expect.equal
+                    (guardsCast (lostIn "W1N2" (shut.Time - cooldown) shut))
+                    1
+                    "and the cooldown run out, it casts the guard again"
             }
 
             test

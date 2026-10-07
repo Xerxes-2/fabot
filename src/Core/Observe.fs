@@ -1175,6 +1175,21 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
         HaulOverflow = state.HaulOverflow
         HomeRaided = state.HomeRaided
         KeepHitsBefore = state.Hits
+        // A fighter by its row's name: a loss carries no body. One the
+        // projection never placed names no room to hold.
+        FighterLost =
+            state.Episodes
+            |> List.collect _.Losses
+            |> List.choose (fun loss ->
+                match loss.Where with
+                | Some where when
+                    isNamedFor guardPattern loss.Creep || isNamedFor rangerPattern loss.Creep
+                    ->
+                    Some(where.Room, loss.Tick)
+                | _ -> None)
+            |> List.groupBy fst
+            |> List.map (fun (room, lost) -> room, lost |> List.map snd |> List.max)
+            |> Map.ofList
     }
 
 /// The fight half of the Raid-log fold: a resident room's record is opened on

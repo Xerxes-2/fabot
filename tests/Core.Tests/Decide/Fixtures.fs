@@ -1746,6 +1746,17 @@ let hostileIn room pos body =
         Pos = RoomPos.at room pos
     }
 
+/// The colony with a guard or ranger of ours last lost in `room` on `tick`,
+/// as every colony's raid log reads it (`WorldView.FighterLost`): what holds
+/// a room's recast for `Tuning.RecastCooldown` (#576).
+let lostIn room tick (colony: ColonyView) =
+    { colony with
+        World =
+            { colony.World with
+                FighterLost = Map.add room tick colony.World.FighterLost
+            }
+    }
+
 /// The same hostile with every part boosted at `tier` (`HostileInfo.Boosts`),
 /// as a raid out of a full lab arrives.
 let boostedAt (tier: Boost) (h: HostileInfo) : HostileInfo =

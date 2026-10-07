@@ -1031,6 +1031,11 @@ type StandDown =
         /// home (`RaidState.Hits`), carried while a hostile stands there:
         /// what tells a body dismantling ours from one passing (#429).
         KeepHitsBefore: Map<string, int>
+        /// Each room a guard or ranger of this colony was last lost in, by
+        /// the tick it was last seen alive (`RaidEpisode.Losses`, #576): what
+        /// holds the room's recast for `Tuning.RecastCooldown`, read world-wide
+        /// (`WorldView.FighterLost`).
+        FighterLost: Map<string, int>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -1054,6 +1059,7 @@ module StandDown =
             HaulOverflow = HaulOverflow.none
             HomeRaided = None
             KeepHitsBefore = Map.empty
+            FighterLost = Map.empty
         }
 
 /// Where one colony stands in its life: the one fact rules read instead of a

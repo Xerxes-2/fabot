@@ -9,6 +9,17 @@ open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 open Fabot.Core.Tests.Decide.QuotaFixtures
 
+/// The fighting rows' quotas this tick, and the fighters it casts.
+let private fightingRows colony =
+    let decision = decideOn colony
+
+    decision.Quotas.Rows
+    |> List.filter (fun row -> row.Row = "guard" || row.Row = "ranger")
+    |> List.map (fun row -> row.Row, row.Quota),
+    spawnIntents decision.Intents
+    |> List.map (fun (_, _, name: string) -> name.Split('-').[0])
+    |> List.filter (fun row -> row = "guard" || row = "ranger")
+
 [<Tests>]
 let guardRowTests =
     testList
@@ -872,6 +883,89 @@ let guardRowTests =
                             None)
                             .Intents)
                     "with the survivor standing, the same raid casts none"
+            }
+
+            test
+                "a guard lost to a raid priced Win asks for none until RecastCooldown, then asks again" {
+                // #576 (3): the verdict prices the raid a Win, the guard dies to
+                // it, and the row casts the next into the same mispricing every
+                // spawn. The room's last fighter loss holds its asks for the
+                // cooldown while the verdict stays Win.
+                let raided = guardColony [ hostileIn "W1N2" raidTile smallMelee ] []
+                let cooldown = raided.Tuning.RecastCooldown
+
+                Expect.equal
+                    (Facts.answer raided "W1N2")
+                    Answer.Win
+                    "the premise: the raid is priced a Win"
+
+                Expect.equal (guardQuotaOf raided) (Some 1) "and with no loss it hires one guard"
+
+                Expect.equal
+                    (guardQuotaOf (lostIn "W1N2" (raided.Time - cooldown + 1) raided))
+                    (Some 0)
+                    "a guard lost there inside the cooldown: the row hires none"
+
+                Expect.isEmpty
+                    (guardCasts
+                        (decideOn (lostIn "W1N2" (raided.Time - cooldown + 1) raided)).Intents)
+                    "and casts none"
+
+                Expect.equal
+                    (guardQuotaOf (lostIn "W1N2" (raided.Time - cooldown) raided))
+                    (Some 1)
+                    "the cooldown run out, it hires the guard again"
+
+                Expect.equal
+                    (guardQuotaOf (lostIn "W1N3" (raided.Time - cooldown + 1) raided))
+                    (Some 1)
+                    "a loss in another room holds nothing here"
+            }
+
+            test
+                "the recast cooldown holds only a Win: a raid priced Lose asks as it would, and a home fights on" {
+                // Kalgen's T3 pair: no row of ours wins it.
+                let lose =
+                    guardColony
+                        [
+                            for i in 1..2 ->
+                                { boostedAt Tier3 (hostileIn "W1N2" raidTile kalgenBody) with
+                                    Id = $"kalgen-{i}"
+                                }
+                        ]
+                        []
+
+                let recent (colony: ColonyView) = lostIn "W1N2" (colony.Time - 1) colony
+
+                Expect.equal
+                    (Facts.answer lose "W1N2")
+                    Answer.Lose
+                    "the premise: the raid is priced a Lose"
+
+                Expect.equal
+                    (fightingRows (recent lose))
+                    (fightingRows lose)
+                    "a loss beside a Lose moves no fighting row"
+
+                // A raid in the home no tower answers hires the home's guard
+                // (#602: a home fights to the death), a loss there or none.
+                let athome =
+                    let colony = guardColony [] []
+
+                    { colony with
+                        Hostiles = [ hostileIn "W1N1" { X = 8; Y = 9 } smallMelee ]
+                        Spatial =
+                            { colony.Spatial with
+                                RoomName = Some "W1N1"
+                            }
+                    }
+
+                Expect.equal (guardQuotaOf athome) (Some 1) "the premise: the home's raid hires one"
+
+                Expect.equal
+                    (guardQuotaOf (lostIn "W1N1" (athome.Time - 1) athome))
+                    (Some 1)
+                    "and a guard just lost at home holds nothing back"
             }
 
             test "a guard classifies Fighter, and no other row's body does" {
