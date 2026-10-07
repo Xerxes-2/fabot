@@ -50,7 +50,11 @@
     <Compile Include="Decide/QuotaMinerTests.fs" />
     <Compile Include="Decide/QuotaUpgraderTests.fs" />
     <Compile Include="Decide/QuotaTuningTests.fs" />
+    <Compile Include="Decide/ColonyFixtures.fs" />
     <Compile Include="Decide/ColonyTests.fs" />
+    <Compile Include="Decide/ColonyPairTests.fs" />
+    <Compile Include="Decide/ColonyDefenceTests.fs" />
+    <Compile Include="Decide/ColonyStageTests.fs" />
     <Compile Include="Decide/FightTests.fs" />
     <Compile Include="Decide/OutpostFixtures.fs" />
     <Compile Include="Decide/OutpostBorderTests.fs" />
