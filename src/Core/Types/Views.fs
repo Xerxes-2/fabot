@@ -1510,11 +1510,13 @@ module ColonyView =
         let bootstrap = scan.Borrowed
 
         // Each contested room another colony declares — a raider seen or
-        // recalled there — within `Tuning.LaneHops` crossings of a fighter of
-        // this colony over the rooms' ground (`World.reachHops`, #617), with
-        // the rooms a walk of those crossings may cross, projected as transit
-        // rooms off their ground: the room a world Brief may hand this
-        // colony's fighter must be one its Atlas prices. None in peace.
+        // recalled there, or a raid its declarer's log holds or remembers
+        // (`WorldView.Danger`: the blind room #366 pools a Guard for) — within
+        // `Tuning.LaneHops` crossings of a fighter of this colony over the
+        // rooms' ground (`World.reachHops`, #617), with the rooms a walk of
+        // those crossings may cross, projected as transit rooms off their
+        // ground: the room a world Brief may hand this colony's fighter must
+        // be one its Atlas prices. None in peace.
         let contested =
             let fighting =
                 mine
@@ -1525,6 +1527,7 @@ module ColonyView =
 
             let raided (room: string) =
                 Map.containsKey room world.Raiders
+                || watch.Danger.Contains room
                 || (World.roomOf world room).Hostiles
                    |> List.exists (fun hostile -> not (Colony.isAlly hostile.Owner))
 

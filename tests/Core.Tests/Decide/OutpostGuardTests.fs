@@ -589,6 +589,98 @@ let idleGuardTests =
             }
         ]
 
+/// The view pair's two colonies, the child independent at RCL4, cut the way
+/// the shell cuts them: the mother blind in her declared outpost with its
+/// last look's armed threat remembered (#366), and the child holding a
+/// guard of its own standing at home. The live W12S28 / W13S28 shape: the
+/// Caster handed the mother's remembered ask to the child's spawn.
+let private blindPairDecided () =
+    let outpost = ViewFixtures.outpost
+    let child = ViewFixtures.child
+    let tuning = Tuning.defaults
+    let colonies = ViewFixtures.declared
+
+    let world =
+        { ViewFixtures.pairWorld with
+            Rooms =
+                ViewFixtures.pairWorld.Rooms
+                |> ViewFixtures.unseen outpost
+                |> Map.change
+                    child
+                    (Option.map (fun facts ->
+                        { facts with
+                            Controller =
+                                facts.Controller
+                                |> Option.map (fun ctrl -> { ctrl with Level = 4 })
+                            Layer =
+                                { facts.Layer with
+                                    CreepPositions =
+                                        Map.ofList [ "guard-950-Spawn2", ViewFixtures.pioneerTile ]
+                                }
+                        }))
+            Sightings = Map.remove outpost ViewFixtures.pairWorld.Sightings
+            Creeps =
+                [
+                    ViewFixtures.creep "worker-900-Spawn1" ViewFixtures.mother
+                    ViewFixtures.creepWithBody
+                        "guard-950-Spawn2"
+                        child
+                        (Bodies.guardPattern.Block |> List.countBy id)
+                ]
+        }
+
+    let gates =
+        Map.ofList
+            [
+                ViewFixtures.mother,
+                { StandDown.none with
+                    ThreatenedOutposts = Set.singleton outpost
+                }
+                child, StandDown.none
+            ]
+
+    let joins = JoinTable()
+
+    let holders =
+        World.creepColonies
+            tuning
+            colonies
+            (World.living colonies world)
+            ViewFixtures.noneShut
+            world
+
+    let watch = WorldView.ofWorld colonies (gates |> Map.toList |> List.map snd) world
+
+    let views =
+        colonies
+        |> List.map (fun colony ->
+            colony,
+            ColonyView.ofWorldRecalling
+                joins
+                tuning
+                colonies
+                HarassCasting.none
+                gates.[colony.Home]
+                holders
+                isFighterBody
+                watch
+                world
+                colony)
+
+    decideColonies
+        {
+            Hops = World.reachHops StandDown.none joins tuning world tuning.MaxHops
+            Holding = Map.empty
+            Verbose = Set.empty
+            PlanMemos = Map.empty
+            Carries = Map.empty
+            Idle = Set.empty
+            FightAlone = Set.empty
+            TurnIndex = None
+        }
+        ignore
+        views
+
 [<Tests>]
 let blindGuardTests =
     testList
@@ -729,6 +821,48 @@ let blindGuardTests =
                 Expect.isNone
                     (pooledOf lit |> entryFor (Guard "W1N2"))
                     "and the tick vision answers for the room, the clear look wins over the memory"
+            }
+
+            test
+                "another colony's guard cast for the remembered raid is matched to its Guard and walks to it" {
+                // Live t1,024,013: the Caster cast W12S28's remembered ask for
+                // W13S29 in W13S28, and the body stood idle (none-applicable)
+                // at home, because the cast and the seat came from different
+                // places: the ask world-wide, the declared source ring out of
+                // the declarer's Atlas alone.
+                let decided = blindPairDecided ()
+
+                let childView, child =
+                    decided.Decided
+                    |> List.pick (fun (colony, view, decision, ()) ->
+                        if colony.Home = ViewFixtures.child then
+                            Some(view, decision)
+                        else
+                            None)
+
+                Expect.isEmpty decided.Faulted "the premise: both colonies decide"
+
+                Expect.contains
+                    (ColonyView.bodies childView |> List.map _.Name)
+                    "guard-950-Spawn2"
+                    "the premise: the child holds the guard"
+
+                Expect.isTrue
+                    (Map.containsKey ViewFixtures.outpost childView.Spatial.Rooms)
+                    "the child projects the room the world hands its guard"
+
+                Expect.equal
+                    (Map.tryFind "guard-950-Spawn2" child.Assignments)
+                    (Some(taskId (Guard ViewFixtures.outpost)))
+                    "the child's guard holds the mother's remembered Guard"
+
+                Expect.isTrue
+                    (child.Movement.Intents
+                     |> List.exists (fun step ->
+                         step.Creep = "guard-950-Spawn2"
+                         && not (List.isEmpty step.Candidates)
+                         && not (List.contains step.Pos step.Candidates)))
+                    "and steps off its tile toward the declared source ring"
             }
         ]
 
@@ -1151,7 +1285,11 @@ let guardPrecedenceTests =
                                 @ [ for y in 44..47 -> 28, y ]
                             )
                         )
-                        ChaseDark, None
+                        // Moved on purpose: out of sight, the declared source
+                        // ring rides on the Brief (#366), which the pool read
+                        // off its own Atlas before, so a world-handed Brief
+                        // carries it to another colony's body.
+                        ChaseDark, Some(tiles [ 24, 41; 25, 41; 26, 41 ])
                     ]
                     "each alone"
             }
@@ -1304,8 +1442,9 @@ let guardPrecedenceTests =
                         // one guard block loses the plodder's swing, so it is let
                         // go and the ranger that kites the plodder down takes it.
                         [ ChaseSeen ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
-                        // Out of sight a chase has no ground; the pool walks it in.
-                        [ ChaseDark ], row [] [] OneRungUp one [ "r-1" ]
+                        // Out of sight a chase lays no ground; its Brief's is the
+                        // declared source ring.
+                        [ ChaseDark ], row [ ChaseDark ] [] OneRungUp one [ "r-1" ]
                         // The raid before what it shares the room with.
                         [ Raid; Hold ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
                         [ Raid; Core ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
@@ -1385,7 +1524,7 @@ let guardPrecedenceTests =
                         // takes it (it was pooled as a kill nobody took).
                         [ ChaseDark; Raid; Hold ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
                         // And a chase out of sight shuts the trespasser's kill out.
-                        [ ChaseDark; Trespasser ], row [] [] OneRungUp one [ "g-1" ]
+                        [ ChaseDark; Trespasser ], row [ ChaseDark ] [] OneRungUp one [ "g-1" ]
                     ]
 
                 Expect.equal

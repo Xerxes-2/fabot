@@ -255,16 +255,11 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
             Threats.bodyOf threats creep
             |> Option.map (Threats.fleeAreaFor threats atlas)
             |> Option.defaultValue Set.empty
-        // The guard's ring, in the room the Planner keyed the Task on — with
-        // one fallback the room's blindness forces (#366): a Guard is pooled
-        // for an outpost the colony remembers a raid in, and a room nothing of
-        // ours stands in has no Threat, so no ring. The declared source tiles
-        // give the walk a destination; the instant the guard arrives the room
-        // is lit and this branch is not taken again.
-        //
-        // Which ground is the Guard's otherwise is its Brief's. One that walks
-        // in with no source placed (`Brief.WalksIn`) has the room's walkable
-        // ground off the border for a destination.
+        // The guard's ground is its Brief's, built by the colony that briefed
+        // the room, whichever colony's body holds it — a blind room's (#366)
+        // the declared source ring. One that walks in with no ground
+        // (`Brief.WalksIn`) has the room's walkable ground off the border for
+        // a destination.
         | Guard room ->
             let brief = Threats.briefOf threats room
 
@@ -285,12 +280,12 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
             |> Option.orElse (swing ())
             |> Option.orElse brief.Ground
             |> Option.defaultWith (fun () ->
-                match Atlas.sourceRingIn atlas room with
-                | ring when Set.isEmpty ring && brief.WalksIn ->
+                if brief.WalksIn then
                     Atlas.walkableTilesIn atlas room
                     |> Set.filter (Seam.onRing >> not)
                     |> RoomPos.setAt room
-                | ring -> ring)
+                else
+                    Set.empty)
         // The member's own ground, rally or fight, by its role
         // (`Threats.squadGroundIn`).
         | Assault _ -> Threats.squadGroundIn threats task creep

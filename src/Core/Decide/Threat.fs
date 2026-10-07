@@ -262,8 +262,8 @@ type Brief =
         /// `BriefKind.order`. A ranger's kind and a chase hold their kite
         /// ground (#451) first, so a melee guard's kind is never handed it; a
         /// ranger's declared ground next; a ring kind the room's `Ring`; a
-        /// trespass its own (#516). None where none is, and the pool falls
-        /// back to the source ring (#366). A Defend's, the perimeter ground
+        /// trespass its own (#516); with none laid, the room's declared source
+        /// ring (#366). None where none is. A Defend's, the perimeter ground
         /// (`defendGroundOf`); a squad's is per role, on its `Formation`.
         Ground: Set<RoomPos> option
         /// With no ground and no source placed, whether the walk in is to the
@@ -960,7 +960,14 @@ module Brief =
             Ends = Facts.endsIn view room
             Recall = if kill then Some { Walk = killWalk } else None
             Laid = laid
-            Ground = groundOf kind ranged laid
+            // With none laid, the ring of the room's declared sources, which
+            // `Outpost.Sources` places without vision (#366): off the
+            // builder's Atlas, so a body of another colony the world hands
+            // the Brief walks to it too (a transit room carries no source).
+            Ground =
+                groundOf kind ranged laid
+                |> Option.orElseWith (fun () ->
+                    Some(Atlas.sourceRingIn atlas room) |> Option.filter (Set.isEmpty >> not))
             WalksIn = kind = BriefKind.Chase
             Avoid =
                 match kind with
