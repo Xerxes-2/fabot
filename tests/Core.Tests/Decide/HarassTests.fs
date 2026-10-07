@@ -1,7 +1,7 @@
 /// The harassment room as `decide` sees it: the ranger's Guard there, the
 /// enemy's unarmed creeps as targets beside its armed ones, the ranger's ground,
 /// the row's floor, and the Dismantle of the enemy's containers. Which colony
-/// casts the room and what it may carry of it are `ViewTests`'.
+/// casts the room and what it may carry of it are `ViewHarassTests`'.
 module Fabot.Core.Tests.Decide.HarassTests
 
 open Expecto

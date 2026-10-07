@@ -7,7 +7,12 @@
     <Compile Include="SpatialFixtures.fs" />
     <Compile Include="RoomFixtures.fs" />
     <Compile Include="IntentPlanTests.fs" />
+    <Compile Include="ViewFixtures.fs" />
     <Compile Include="ViewTests.fs" />
+    <Compile Include="ViewDefenceTests.fs" />
+    <Compile Include="ViewReachTests.fs" />
+    <Compile Include="ViewDeclaredRoomTests.fs" />
+    <Compile Include="ViewHarassTests.fs" />
     <Compile Include="AtlasFixtures.fs" />
     <Compile Include="AtlasAreaTests.fs" />
     <Compile Include="AtlasPlacementTests.fs" />

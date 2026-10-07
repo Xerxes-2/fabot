@@ -1,6 +1,6 @@
 /// The errand as `decide` sees it: the one Task a declared controller-less
 /// room offers, who may hold it, what caps it, and the act it fires. The
-/// projection half — what a colony may carry of that room — is `ViewTests`'.
+/// projection half — what a colony may carry of that room — is `ViewDeclaredRoomTests`'.
 module Fabot.Core.Tests.Decide.ErrandTests
 
 open Expecto

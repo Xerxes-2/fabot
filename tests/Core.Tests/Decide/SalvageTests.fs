@@ -1,7 +1,7 @@
 /// The salvage room as `decide` sees it: the `Dismantle` Task each of its
 /// targets offers, who may hold it, the act it fires, and the row that casts
 /// the body. The projection half — which structures are targets, and what a
-/// colony may carry of the room — is `ViewTests`'.
+/// colony may carry of the room — is `ViewDeclaredRoomTests`'.
 module Fabot.Core.Tests.Decide.SalvageTests
 
 open Expecto

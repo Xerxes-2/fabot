@@ -696,7 +696,7 @@ let errandDeclarationTests =
                 // The shipped predicates at the shipped keeper margin, as the outpost
                 // case above asks them (#337), so a margin change moves both halves
                 // alike. The mask's own premise over W15S26 — that the margin closes
-                // a crossing the raw rings leave open — is `ViewTests`'
+                // a crossing the raw rings leave open — is `ViewReachTests`'
                 // `scanSetMaskTests`.
                 let linked =
                     shippedLinked (
