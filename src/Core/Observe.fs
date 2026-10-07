@@ -279,11 +279,39 @@ let sayCodes (verdicts: Verdict list) : Map<string, string> =
 /// The engine's cap on a say, in string length.
 let sayCap = 10
 
-/// A Task's glyph with its creep's say code after it, cut to the engine's
-/// cap: the glyph is never cut.
-let denser (glyph: string) (code: string) =
+/// The target inside a Task id: `Facts.taskId` writes it between the first
+/// colon and the next, and neither an object id nor a room name holds one.
+let taskTargetOf (tid: string) : string option =
+    match tid.IndexOf ':' with
+    | -1 -> None
+    | colon ->
+        let rest = tid.Substring(colon + 1)
+
+        match rest.IndexOf ':' with
+        | -1 -> Some rest
+        | next -> Some(rest.Substring(0, next))
+
+/// A Task's target as a bubble shows it (#638): a room name whole, an object
+/// id by its last three characters.
+let sayTarget (tid: string) : string =
+    match taskTargetOf tid with
+    | None -> ""
+    | Some target when
+        target.Length >= 4
+        && (target.[0] = 'W' || target.[0] = 'E')
+        && System.Char.IsDigit target.[1]
+        ->
+        target
+    | Some target when target.Length > 3 -> target.Substring(target.Length - 3)
+    | Some target -> target
+
+/// A Task's glyph, then its creep's say code, then the Task's target, cut to
+/// the engine's cap: the glyph is never cut, and the code goes before the
+/// target because it is this tick's news.
+let denser (glyph: string) (code: string) (target: string) =
     let room = max 0 (sayCap - glyph.Length)
-    glyph + (if code.Length > room then code.Substring(0, room) else code)
+    let text = code + target
+    glyph + (if text.Length > room then text.Substring(0, room) else text)
 
 /// One visible reading of the sector Reactor programme; `None` at the fold
 /// boundary means the room is blind.
@@ -3188,18 +3216,6 @@ let private starvesUpgrade (quotas: Quotas) =
         | UnderReserve -> true
         | LineBroken
         | SitesOwed -> false)
-
-/// The target inside a Task id: `Facts.taskId` writes it between the first
-/// colon and the next, and neither an object id nor a room name holds one.
-let private taskTargetOf (tid: string) : string option =
-    match tid.IndexOf ':' with
-    | -1 -> None
-    | colon ->
-        let rest = tid.Substring(colon + 1)
-
-        match rest.IndexOf ':' with
-        | -1 -> Some rest
-        | next -> Some(rest.Substring(0, next))
 
 /// Each body of this colony's whose task cursor says unassigned (a Flee is a
 /// Task, so a fleeing body is not here) for its share of its own life, while

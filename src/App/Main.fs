@@ -1569,24 +1569,30 @@ let private fullTick
             | Ok plan -> plan
             | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
 
-    // Each bubble's glyph with its creep's Verdicts this tick after it
-    // (#638): what the creep did, in the characters the say leaves.
+    // Each bubble's glyph with its creep's Verdicts this tick and its Task's
+    // target after it (#638): what the creep did and at what, in the
+    // characters the say leaves.
     let codes = Observe.sayCodes verdicts
 
-    let denser intent =
+    let denser (assignments: Assignments) intent =
         match intent with
         | SayCreep(name, glyph) ->
-            match Map.tryFind name codes with
-            | Some code -> SayCreep(name, Observe.denser glyph code)
-            | None -> intent
+            let code = Map.tryFind name codes |> Option.defaultValue ""
+
+            let target =
+                Map.tryFind name assignments
+                |> Option.map Observe.sayTarget
+                |> Option.defaultValue ""
+
+            SayCreep(name, Observe.denser glyph code target)
         | _ -> intent
 
     // A faulted colony's towers and safe mode ride with the decided acts: no
     // replay repeats them (#628).
     let decided =
         (decisions
-         |> List.collect (fun (_, _, decision, _, _) -> decision.Intents)
-         |> List.map denser)
+         |> List.collect (fun (_, _, decision, _, _) ->
+             decision.Intents |> List.map (denser decision.Assignments)))
         @ moveIntents
         @ (colonyDecisions.Towers |> List.collect snd)
         |> firstActivationOnly

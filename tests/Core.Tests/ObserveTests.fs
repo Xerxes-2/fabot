@@ -419,9 +419,32 @@ let sayTests =
             }
 
             test "the glyph is never cut and the bubble stays within the engine's cap" {
-                let said = denser "⚔️" "!9-gone+ts-x"
+                let said = denser "⚔️" "!9-gone+ts-x" "W19S25"
 
                 Expect.equal said.Length sayCap "cut to the cap"
-                Expect.isTrue (said.StartsWith "⚔️") "the glyph stands whole"
+
+                Expect.isTrue
+                    (said.StartsWith "⚔️!9")
+                    "the glyph stands whole, the news before the target"
+            }
+
+            test
+                "a steady body's bubble names its Task's target: a room whole, an object id by its tail" {
+                Expect.equal
+                    (denser "⚔️" "" (sayTarget "guard:W19S25"))
+                    "⚔️W19S25"
+                    "a room name whole"
+
+                Expect.equal
+                    (denser "⛏" "" (sayTarget "harvest:6a8caaaddd4872bccd319361"))
+                    "⛏361"
+                    "an object id by its last three characters"
+
+                Expect.equal
+                    (sayTarget "refill:6aaabca9f72878d0421e4d4b:Thorium")
+                    "d4b"
+                    "the resource after the id is not the target"
+
+                Expect.equal (sayTarget "flee") "" "a Task with no target shows none"
             }
         ]
