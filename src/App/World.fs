@@ -868,6 +868,13 @@ let private seenFacts
                 | held when held > 0 -> Some(c.id, held)
                 | _ -> None)
             |> Map.ofArray
+        // And each rampart a rival owns at its hits, by tile (#651): the
+        // exchange prices what a body standing on one takes first.
+        RivalRamparts =
+            hostileStructures
+            |> Array.filter (fun st -> st.structureType = "rampart")
+            |> Array.map (fun st -> posOf st.pos, st.hits)
+            |> Map.ofArray
         // The invader cores standing here. A core is a structure, so
         // `FIND_HOSTILE_CREEPS` cannot answer with one; `FIND_HOSTILE_STRUCTURES`
         // answers with every structure a rival owns, so the kind is checked.

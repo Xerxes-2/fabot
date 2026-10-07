@@ -264,6 +264,7 @@ let seenRooms (rooms: (string * HostileInfo list * string list) list) : WorldVie
                     Fallen = fallen
                     HostileFatigue = Map.empty
                     HostileCargo = Map.empty
+                    RivalRamparts = Map.empty
                     Control =
                         {
                             Owner = Ownership.Unowned

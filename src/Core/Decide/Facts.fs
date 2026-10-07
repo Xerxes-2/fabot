@@ -806,15 +806,16 @@ let internal disturbs (view: ColonyView) (residentRooms: Set<string>) (hostile: 
     || trespasser view Set.empty hostile
 
 /// The tiles of one projected room the strike rules ask after, read off its
-/// layer once: its sources', its controller's, and its standing ramparts not
+/// layer once: its sources', its controller's, its standing ramparts not
 /// ours (`underForeignRampart`), these by tile index (`indexOf`) where the
-/// tile is on the grid.
+/// tile is on the grid, and ours at their hits by tile (`rampartUnder`).
 type private StrikeTiles =
     {
         Sources: Pos list
         Controllers: Pos list
         ForeignRamparts: System.Collections.Generic.HashSet<int>
         ForeignRampartsOffGrid: Pos list
+        OurRamparts: Map<Pos, int>
     }
 
 let private strikeTilesIn (spatial: SpatialInfo, room: string) : StrikeTiles =
@@ -822,16 +823,17 @@ let private strikeTilesIn (spatial: SpatialInfo, room: string) : StrikeTiles =
     let mutable offGrid = []
     let mutable sources = []
     let mutable controllers = []
+    let mutable ours = Map.empty
 
     for KeyValue(id, tile) in (SpatialInfo.layerOf spatial room).TargetPositions do
         match Map.tryFind id spatial.TargetKinds with
         | Some Source -> sources <- tile :: sources
         | Some Controller -> controllers <- tile :: controllers
-        | Some(Structure BuiltKind.Rampart) when not (Map.containsKey id spatial.Hits) ->
-            if inGrid tile then
-                ramparts.Add(indexOf tile) |> ignore
-            else
-                offGrid <- tile :: offGrid
+        | Some(Structure BuiltKind.Rampart) ->
+            match Map.tryFind id spatial.Hits with
+            | Some hits -> ours <- Map.add tile hits.Hits ours
+            | None when inGrid tile -> ramparts.Add(indexOf tile) |> ignore
+            | None -> offGrid <- tile :: offGrid
         | _ -> ()
 
     {
@@ -839,6 +841,7 @@ let private strikeTilesIn (spatial: SpatialInfo, room: string) : StrikeTiles =
         Controllers = controllers
         ForeignRamparts = ramparts
         ForeignRampartsOffGrid = offGrid
+        OurRamparts = ours
     }
 
 /// One projection's rooms' `StrikeTiles`, a room's derived once it has been
@@ -972,6 +975,124 @@ let private placementOf (view: ColonyView) (name: string) : RoomPos option =
             |> List.tryPick (fun (body, pos) ->
                 if body.Name = name then Some(RoomPos.at here pos) else None)))
 
+/// The tiles between two positions: their range within one room, else across
+/// the world grid (`RoomName.tileRange`).
+let private tilesBetween (a: RoomPos) (b: RoomPos) : int option =
+    RoomPos.range a b |> Option.orElseWith (fun () -> RoomName.tileRange a b)
+
+/// One healing body as a fight reads it (#651): its live HEAL's rate
+/// (`HostileInfo.healing`), whether it bounces on the exit (in the room every
+/// other tick, so at half that over the two), and which of the engine's two
+/// heals it casts beside what it fights with: `CastsHeal`, a `heal` beside
+/// its patient or on itself, which drops its swing; `CastsRangedHeal`, a
+/// `rangedHeal` at two or three, which drops its swing and its shot
+/// (`intents.js` priorities).
+type private Healer =
+    {
+        Mender: HostileInfo
+        HealRate: int
+        Bounces: bool
+        CastsHeal: bool
+        CastsRangedHeal: bool
+    }
+
+/// The heal one healer puts on `target` a tick (#651): its rate beside the
+/// target or on itself (`heal`), a third of it at two or three
+/// (`rangedHeal`), nothing farther, one target a tick. Read at the range it
+/// closes to within `horizon` ticks, a tile each of its paces on plain, and
+/// halved for one bouncing on the exit. A heal it does not cast heals nothing.
+let private healOnto
+    (side: HostileInfo list)
+    (horizon: int)
+    (healer: Healer)
+    (target: HostileInfo)
+    =
+    match tilesBetween healer.Mender.Pos target.Pos with
+    | None -> 0
+    | Some range ->
+        let closes =
+            if horizon <= 0 || range <= Engine.meleeRange then
+                0
+            else
+                match Gait.ticks Gait.plain (HostileInfo.gait side healer.Mender) with
+                | Some pace when pace > 0 -> horizon / pace
+                | _ -> 0
+
+        let range = range - closes
+
+        let rate =
+            if range <= Engine.meleeRange && healer.CastsHeal then
+                healer.HealRate
+            elif range <= Engine.rangedRange && healer.CastsRangedHeal then
+                healer.HealRate * Engine.rangedHealPower / Engine.healPower
+            else
+                0
+
+        if healer.Bounces then rate / 2 else rate
+
+/// Every body among `bodies` that heals, casting either heal: what nothing
+/// it fights with stands against (`raidPrice` weighs the rest).
+let private healersAmong
+    (side: HostileInfo list)
+    (bouncing: HostileInfo -> bool)
+    (bodies: HostileInfo list)
+    =
+    bodies
+    |> List.choose (fun h ->
+        match HostileInfo.healing side h with
+        | 0 -> None
+        | healing ->
+            Some
+                {
+                    Mender = h
+                    HealRate = healing
+                    Bounces = bouncing h
+                    CastsHeal = true
+                    CastsRangedHeal = true
+                })
+
+/// The heal `healers` put on `target` a tick (`healOnto`), together.
+let private healFrom
+    (side: HostileInfo list)
+    (horizon: int)
+    (healers: Healer list)
+    (target: HostileInfo)
+    =
+    healers |> List.sumBy (fun healer -> healOnto side horizon healer target)
+
+/// The hits of the rampart not ours a hostile stands on (#651,
+/// `WorldRoom.RivalRamparts`): every strike at it lands there until it
+/// falls, and none at it, nor any swing of its, is struck back. 0 on open
+/// ground.
+let private rampartOver (view: ColonyView) (hostile: HostileInfo) : int =
+    Map.tryFind hostile.Pos.Room view.World.Rooms
+    |> Option.bind (fun seen -> Map.tryFind (RoomPos.pos hostile.Pos) seen.RivalRamparts)
+    |> Option.defaultValue 0
+
+/// Our rampart a body of ours stands on and its hits (#651), ours by the
+/// projection's hits: the raid's strikes land there until it falls, and no
+/// swing from it nor at it is struck back. None for a priced body no creep
+/// is yet, or one on open ground.
+let private rampartUnder (view: ColonyView) (fighter: Fighter) : (RoomPos * int) option =
+    match fighter.Creep |> Option.bind (placementOf view) with
+    | None -> None
+    | Some at ->
+        let tile = RoomPos.pos at
+
+        match strikeTilesOf view at.Room with
+        | Some tiles -> Map.tryFind tile tiles.OurRamparts
+        | None ->
+            (SpatialInfo.layerOf view.Spatial at.Room).TargetPositions
+            |> Map.tryPick (fun id placed ->
+                if
+                    placed = tile
+                    && Map.tryFind id view.Spatial.TargetKinds = Some(Structure BuiltKind.Rampart)
+                then
+                    Map.tryFind id view.Spatial.Hits |> Option.map (fun hits -> hits.Hits)
+                else
+                    None)
+        |> Option.map (fun hits -> at, hits)
+
 /// A fixture's danger (`WorldDanger.read` off a view the world laid none
 /// in), laid once for the same facts.
 let private dangersMemo: TickMemo.Memo<ColonyView, Map<string, Lazy<RoomDanger option>>> =
@@ -1086,8 +1207,9 @@ let private lamedMemo: TickMemo.Memo<BodyPart list * Boost list * int * Gait, in
 
 /// The ticks a hostile struck alone at `damage` a tick takes to stop
 /// pressing a body of ours that out-reaches it (#625): net of the heal its
-/// side can put on it (every HEAL of its owner in its room, the focus's
-/// worst case), until it falls behind the body on plain
+/// side puts on it (every healer of its owner in its room that reaches it
+/// within that window, `healOnto`, #651), until
+/// it falls behind the body on plain
 /// (`Gait.fallsBehind`), its last ATTACK falls, or it dies. Read off its
 /// live body head first, as the engine destroys it (`Engine.powerAt`): a
 /// body whose MOVE comes first is lamed in a few shots, one whose ATTACK
@@ -1099,39 +1221,60 @@ let private lamedIn
     (damage: int)
     (hostile: HostileInfo)
     : int option =
-    let heal =
+    let healers =
         view.Hostiles
         |> List.filter (fun h -> h.Owner = hostile.Owner && h.Pos.Room = hostile.Pos.Room)
-        |> List.sumBy (HostileInfo.healing view.Hostiles)
+        |> healersAmong view.Hostiles (fun _ -> false)
 
-    let net = damage - HostileInfo.damageFor hostile heal
+    // The net damage a tick while the healers reaching it within `ticks`
+    // heal it.
+    let netWithin ticks =
+        damage
+        - HostileInfo.damageFor hostile (healFrom view.Hostiles ticks healers hostile)
 
-    if net <= 0 then
-        None
-    else
-        TickMemo.recall lamedMemo (hostile.Body, hostile.Boosts, hostile.Hits, ours) (fun _ ->
-            let n = List.length hostile.Body
-            let weight = Gait.weightOf (partCountIn hostile.Body)
+    let needed =
+        lazy
+            (TickMemo.recall lamedMemo (hostile.Body, hostile.Boosts, hostile.Hits, ours) (fun _ ->
+                let n = List.length hostile.Body
+                let weight = Gait.weightOf (partCountIn hostile.Body)
 
-            // Its head destroyed a part at a time (`Engine.powerAt`): the
-            // hits it stands at once the next part is gone, and whether its
-            // MOVE and ATTACK then still press the body.
-            let rec lamedFrom live =
-                let hits = Engine.partHits * live
-                let power = Engine.powerAt hostile.Body hostile.Boosts hits
+                // Its head destroyed a part at a time (`Engine.powerAt`): the
+                // hits it stands at once the next part is gone, and whether
+                // its MOVE and ATTACK then still press the body.
+                let rec lamedFrom live =
+                    let hits = Engine.partHits * live
+                    let power = Engine.powerAt hostile.Body hostile.Boosts hits
 
-                if
-                    live <= 0
-                    || power Attack <= 0
-                    || Gait.fallsBehind ours { Weight = weight; Moves = power Move }
-                then
-                    hits
-                else
-                    lamedFrom (live - 1)
+                    if
+                        live <= 0
+                        || power Attack <= 0
+                        || Gait.fallsBehind ours { Weight = weight; Moves = power Move }
+                    then
+                        hits
+                    else
+                        lamedFrom (live - 1)
 
-            let live = min n ((hostile.Hits + Engine.partHits - 1) / Engine.partHits)
-            HostileInfo.damageFor hostile (max 0 (hostile.Hits - lamedFrom (live - 1))))
-        |> fun needed -> Some((needed + net - 1) / net)
+                let live = min n ((hostile.Hits + Engine.partHits - 1) / Engine.partHits)
+                HostileInfo.damageFor hostile (max 0 (hostile.Hits - lamedFrom (live - 1)))))
+
+    // The lame window and the heal within it read each other (#651): every
+    // healer that reaches it before it is lamed heals it. Widened until the
+    // window holds, the heal only growing with it; never lamed where the
+    // damage stops out-healing it.
+    let rec within ticks tries =
+        let net = netWithin ticks
+
+        if net <= 0 then
+            None
+        else
+            let lamed = (needed.Value + net - 1) / net
+
+            if lamed <= ticks || tries = 0 then
+                Some lamed
+            else
+                within lamed (tries - 1)
+
+    within view.Tuning.ReachHorizon 4
 
 /// The ticks a hostile presses a body of ours that out-reaches it (#625),
 /// struck by the body's own damage at its reach: one body shoots one target
@@ -1203,6 +1346,13 @@ let internal keepsOff (view: ColonyView) (fighter: Fighter) (hostile: HostileInf
         (HostileInfo.gait side hostile)
         (HostileInfo.weaponRange side hostile |> Option.defaultValue 0)
 
+/// Who picks the range a body of ours and a hostile fight at (`standoffPick`).
+[<RequireQualifiedAccess>]
+type private Picker =
+    | Kites
+    | Closes
+    | Theirs
+
 /// The range a body of ours and one hostile fight at (#615 U2), the faster
 /// side's pick on plain, the ground a fight crosses. Ours where it keeps the
 /// hostile off (`keepsOffAt`): its reach, the standoff a kite holds (#510).
@@ -1210,13 +1360,15 @@ let internal keepsOff (view: ColonyView) (fighter: Fighter) (hostile: HostileInf
 /// its legs (`HostileInfo.stationary`) or at its work (`rootedAtWork`):
 /// where it deals most (`Fighter.bestRange`). Else the hostile's
 /// (`closesIn`): onto us, or its shot's range, which keeps it off a swing.
-let internal standoff (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : int =
+/// Beside the range, who picks it: `Kites` (ours, walking off it),
+/// `Closes` (ours, walking to it), or `Theirs` (the hostile comes to it).
+let private standoffPick (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) =
     let side = view.Hostiles
     let gait = HostileInfo.gait side hostile
     let strike = HostileInfo.weaponRange side hostile |> Option.defaultValue 0
 
     if keepsOffAt view fighter hostile gait strike then
-        fighter.Reach
+        fighter.Reach, Picker.Kites
     elif
         Gait.fallsBehind fighter.Gait gait
         || Gait.stationary gait
@@ -1224,11 +1376,15 @@ let internal standoff (view: ColonyView) (fighter: Fighter) (hostile: HostileInf
         // brought to a swing by its claim (#550).
         || strike = 0 && rootedAtWork view hostile
     then
-        Fighter.bestRange fighter
+        Fighter.bestRange fighter, Picker.Closes
     elif closesIn side fighter hostile then
-        Engine.meleeRange
+        Engine.meleeRange, Picker.Theirs
     else
-        Engine.rangedRange
+        Engine.rangedRange, Picker.Theirs
+
+/// The range a body of ours and one hostile fight at (`standoffPick`).
+let internal standoff (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : int =
+    fst (standoffPick view fighter hostile)
 
 /// Whether a body of ours strikes a hostile at their standoff (`standoff`):
 /// what the guard's swing catches of a [[trespasser]] (#550) — a hauler at its
@@ -1353,10 +1509,14 @@ let private killTier (target: KillFacts) =
     else
         Prey
 
-/// The heal that reaches a hostile in `room` this tick, its own included: a
-/// heal reaches one tile, a ranged heal three. A closure over the room's
-/// healers, found once.
-let internal healReaching (view: ColonyView) (room: string) : HostileInfo -> int =
+/// The heal that reaches a hostile in `room` a tick, its own included, from
+/// where each healer stands and steps to within `horizon` ticks (`healOnto`,
+/// #651; 0 for this tick's). A closure over the room's healers, found once.
+let internal healReachingWithin
+    (view: ColonyView)
+    (room: string)
+    (horizon: int)
+    : HostileInfo -> int =
     // A healer remembered from the last few ticks counts where it was last
     // seen (#480). One bouncing on the exit, standing on it or remembered off
     // it, is in the room every other tick and heals at half its rate over the
@@ -1367,30 +1527,23 @@ let internal healReaching (view: ColonyView) (room: string) : HostileInfo -> int
     let present =
         view.Hostiles
         |> List.filter (fun h -> h.Pos.Room = room)
-        |> List.map (fun h ->
-            HostileInfo.healing view.Hostiles h,
-            h,
+        |> healersAmong view.Hostiles (fun h ->
             Seam.onRing (RoomPos.pos h.Pos) && HostileInfo.crossesExits h)
 
     let remembered =
         view.RecalledHealers
         |> List.filter (fun h -> h.Pos.Room = room)
-        |> List.map (fun h -> HostileInfo.healing view.RecalledHealers h, h, true)
+        |> healersAmong view.RecalledHealers (fun _ -> true)
 
-    let healers =
-        present @ remembered |> List.filter (fun (healing, _, _) -> healing > 0)
+    let healers = present @ remembered
+    let side = view.Hostiles
 
-    fun hostile ->
-        healers
-        |> List.sumBy (fun (healing, healer, bouncing) ->
-            let rate =
-                match RoomPos.range healer.Pos hostile.Pos with
-                | Some r when r <= Engine.meleeRange -> healing
-                | Some r when r <= Engine.rangedRange ->
-                    healing * Engine.rangedHealPower / Engine.healPower
-                | _ -> 0
+    fun hostile -> healFrom side horizon healers hostile
 
-            if bouncing then rate / 2 else rate)
+/// The heal that reaches a hostile in `room` this tick (`healReachingWithin`
+/// no tick on): a heal reaches one tile, a ranged heal three.
+let internal healReaching (view: ColonyView) (room: string) : HostileInfo -> int =
+    healReachingWithin view room 0
 
 /// What a body of these part counts deals one target at this range a tick: a
 /// swing one tile, a shot three.
@@ -1495,27 +1648,143 @@ let internal killValue (view: ColonyView) (hostile: HostileInfo) : float =
     )
     + harmRate view hostile walk * float replaced
 
+/// What one body of ours' blows on the hostiles of a room are priced by this
+/// tick (#651, #621), by id: each one's kill value a hit (`killValue` over
+/// its effective hits) beside the damage our other bodies deal it
+/// (`damageReaching`, less this body's own); and each healer there's heal on
+/// each (`healOnto`, this tick's, the healers `healReaching` reads), in the
+/// damage that undoes it through the target's TOUGH.
+let internal blowTerms
+    (view: ColonyView)
+    (room: string)
+    (striker: CreepInfo)
+    : Map<string, float * int> * Map<string, int> list =
+    let damageOn = damageReaching view
+    let here = SpatialInfo.creepPlacementOf view.Spatial striker.Name
+    let parts = partCount striker.Body
+    let targets = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+
+    let healers =
+        (targets
+         |> healersAmong view.Hostiles (fun h ->
+             Seam.onRing (RoomPos.pos h.Pos) && HostileInfo.crossesExits h))
+        @ (view.RecalledHealers
+           |> List.filter (fun h -> h.Pos.Room = room)
+           |> healersAmong view.RecalledHealers (fun _ -> true))
+
+    let terms =
+        targets
+        |> List.map (fun hostile ->
+            let own =
+                here
+                |> Option.bind (fun at -> RoomPos.range at hostile.Pos)
+                |> Option.map (damageAt parts)
+                |> Option.defaultValue 0
+
+            hostile.Id,
+            (killValue view hostile / float (max 1 (HostileInfo.effectiveHits hostile)),
+             max 0 (damageOn hostile - own)))
+        |> Fresh.mapOfList
+
+    let heals =
+        healers
+        |> List.map (fun healer ->
+            targets
+            |> List.choose (fun target ->
+                match healOnto view.Hostiles 0 healer target with
+                | 0 -> None
+                | heal -> Some(target.Id, HostileInfo.damageFor target heal))
+            |> Fresh.mapOfList)
+
+    terms, heals
+
+/// What blows landing together this tick are worth by their terms
+/// (`blowTerms`, #651): the value a hit of what each leaves standing on its
+/// target beside our other bodies' damage, once each healer has spent its
+/// heal on the one target where it undoes the most (a heal acts on one
+/// target a tick; the raid's best answer, our worst case), less what our
+/// other bodies leave standing without them. A blow a heal undoes is worth
+/// nothing; blows spread past what the healers can cover stand. A target the
+/// terms do not price (one come since they were laid) is priced at their
+/// mean value a hit, with no partner and no heal on it; with no terms at
+/// all, a blow at its damage.
+let blowsWorth
+    (terms: Map<string, float * int>)
+    (heals: Map<string, int> list)
+    (blows: (string * int) list)
+    =
+    let unpriced =
+        if Map.isEmpty terms then
+            1.0
+        else
+            (terms |> Map.fold (fun total _ (perHit, _) -> total + perHit) 0.0)
+            / float (Map.count terms)
+
+    let termsOf id =
+        Map.tryFind id terms |> Option.defaultValue (unpriced, 0)
+
+    let healOf (heal: Map<string, int>) id =
+        Map.tryFind id heal |> Option.defaultValue 0
+
+    // The healers, the most heal on these targets first.
+    let healers =
+        heals
+        |> List.sortByDescending (fun heal -> blows |> List.sumBy (fun (id, _) -> healOf heal id))
+
+    let standing (ours: bool) =
+        let left =
+            blows
+            |> List.map (fun (id, damage) -> id, snd (termsOf id) + (if ours then damage else 0))
+            |> Map.ofList
+
+        let worth id hits = fst (termsOf id) * float hits
+
+        healers
+        |> List.fold
+            (fun (left: Map<string, int>) heal ->
+                match
+                    left
+                    |> Map.toList
+                    |> List.map (fun (id, hits) -> id, min hits (healOf heal id))
+                    |> List.filter (fun (_, undone) -> undone > 0)
+                with
+                | [] -> left
+                | undone ->
+                    let id, hits = undone |> List.maxBy (fun (id, hits) -> worth id hits)
+                    Map.add id (left.[id] - hits) left)
+            left
+        |> Map.fold (fun total id hits -> total + worth id hits) 0.0
+
+    standing true - standing false
+
 /// The ticks our side takes to kill a hostile once it stands at their
 /// standoff (`standoff`), every body of `team` at its own: its hits through
 /// its TOUGH against the side's damage there together — force concentrated
 /// for the kill, which one body alone a healer out-heals may never make —
-/// net of the heal reaching it (`healOn`, its partners' and its own). None
-/// where the damage never out-heals it.
+/// net of the heal reaching it (`healOn`, its partners' and its own), after
+/// the rampart it stands on, which no heal puts back (`rampartOver`, #651).
+/// None where the damage never out-heals it.
 let private killTicksOf
     (view: ColonyView)
     (healOn: HostileInfo -> int)
     (team: Fighter list)
     (hostile: HostileInfo)
     : int option =
-    let net =
-        (team
-         |> List.sumBy (fun fighter -> fighter.DamageAt(standoff view fighter hostile)))
-        - HostileInfo.damageFor hostile (healOn hostile)
+    let damage =
+        team
+        |> List.sumBy (fun fighter -> fighter.DamageAt(standoff view fighter hostile))
+
+    let net = damage - HostileInfo.damageFor hostile (healOn hostile)
 
     if net <= 0 then
         None
     else
-        Some(max 1 ((HostileInfo.effectiveHits hostile + net - 1) / net))
+        let shield = rampartOver view hostile
+
+        Some(
+            (shield + damage - 1) / damage
+            + max 1 ((HostileInfo.effectiveHits hostile + net - 1) / net)
+        )
 
 /// The odds a body of ours lands the whole of a kill (#621), as the share of
 /// its `kill` ticks the hostile stays in reach. Certain where it cannot walk
@@ -1592,7 +1861,8 @@ let internal killScoresIn
     (room: string)
     (side: Fighter list)
     : Fighter -> RoomPos option -> int -> HostileInfo -> float =
-    let healOn = healReaching view room
+    // The heal over the kill, as every exchange reads it (#651).
+    let healOn = healReachingWithin view room view.Tuning.ReachHorizon
 
     fun fighter from arrival hostile ->
         let team =
@@ -1675,7 +1945,8 @@ let internal killBandOf (rank: KillRank) : int =
     | Prey -> 3
 
 /// A raid's price at a window (`raidPrice`). Its armed bodies' hits come in
-/// two phases: `Tough`, the damage that breaks their boosted TOUGH still
+/// three phases: `Shield`, the ramparts they stand on, which no heal puts
+/// back; `Tough`, the damage that breaks their boosted TOUGH still
 /// standing, while a hit healed costs `ToughHealing` of it; then `Hits`, the
 /// rest, struck and healed one for one at `Healing`.
 type private RaidPrice =
@@ -1683,66 +1954,207 @@ type private RaidPrice =
         Damage: int
         Healing: int
         ToughHealing: int
+        /// The hits of the ramparts its armed bodies stand on (#651,
+        /// `rampartOver`).
+        Shield: int
         Tough: int
         Hits: int
         /// Whether it endangers a room of ours it stands in
         /// (`endangersOurs`, #429): a dismantler there deals our creeps
         /// nothing and razes the room all the same.
         Breaches: bool
+        /// Each body of it with a WORK, beside what it dismantles a tick
+        /// (`Engine.dismantlePower` a WORK at its boost, #651): what breaks
+        /// our ramparts beside its damage, where it reaches them
+        /// (`exchangeAgainst`).
+        Dismantlers: (HostileInfo * int) list
+        /// The hits, through their TOUGH, of its unarmed bodies razing a room
+        /// of ours (`endangersOurs`): what our kill ends where no armed body
+        /// stands (`fightTicks`).
+        Razing: int
     }
+
+/// A raid priced both ways its fighting healers may act (#651): `Weapons`,
+/// each fighting with all it carries and healing only beside its weapon;
+/// `Heals`, each healing where its heal reaches, the weapon its heal drops
+/// dropped. One object where no healer fights. Every exchange settles both
+/// and takes the outcome worse for us (`worseOf`); a clock of ours reads
+/// `Heals`, a clock of the raid's `Weapons`.
+type private RaidPrices =
+    { Weapons: RaidPrice; Heals: RaidPrice }
 
 /// A raid's price at a window: the damage it deals a tick, each raider with
 /// what it fights with at its boosts (`HostileInfo.powerWithin`); the healing
-/// it does, priced as a rate; and the hits of its armed bodies as they stand.
-/// Healers are priced in the healing and never in the hits. Its boosted TOUGH
-/// is charged once, in the damage that breaks it (`HostileInfo.damageFor`),
-/// the healing meanwhile on the armed body it costs most: a T3 TOUGH in front
-/// makes each hit healed on it cost three of our damage and a third. Each
-/// armed body deals what reaches from the range it fights ours at
-/// (`rangeOf`, `damageAt`, #615 U2): a swing's range for all of it.
-let private raidPrice
+/// it does, priced as a rate; and the hits of its armed bodies as they stand,
+/// behind the ramparts they stand on. Healers are priced in the healing and
+/// never in the hits. Its boosted TOUGH is charged once, in the damage that
+/// breaks it (`HostileInfo.damageFor`), the healing meanwhile on the armed
+/// body it costs most: a T3 TOUGH in front makes each hit healed on it cost
+/// three of our damage and a third. Each armed body deals what reaches from
+/// the range it fights ours at (`rangeOf`, `damageAt`, #615 U2): a swing's
+/// range for all of it.
+///
+/// The healing is the engine's (#651): what its healers put on the armed
+/// body they heal most (with none armed, the dismantler razing a room of
+/// ours, never the healer's own self-heal; else any body), each
+/// from where it stands and steps to within `horizon` ticks (`healOnto`:
+/// our body's arrival, so every heal that reaches the raid before it lands
+/// counts), one target a tick. A healer that also fights heals beside its
+/// weapon alone where `heals` is false; where it is true it heals wherever
+/// its heal reaches, a heal dropping its swing, a ranged heal its swing and
+/// its shot, and what it drops to heal that body leaves the damage.
+let private raidPricedAs
     (view: ColonyView)
     (window: int)
+    (horizon: int)
+    (heals: bool)
     (rangeOf: HostileInfo -> int)
     (raid: HostileInfo list)
     : RaidPrice =
+    let side = view.Hostiles
+
     let armed =
         raid
         |> List.filter (fun h ->
-            Option.isSome (
-                HostileInfo.weaponRangeOf (HostileInfo.partsWithin window view.Hostiles h)
-            ))
+            Option.isSome (HostileInfo.weaponRangeOf (HostileInfo.partsWithin window side h)))
 
-    let healing = raid |> List.sumBy (HostileInfo.healing view.Hostiles)
+    // A body's swing and its shot at the range it fights ours at.
+    let weapons (h: HostileInfo) =
+        let power = HostileInfo.powerWithin window side h
+        let range = rangeOf h
+
+        (if range <= Engine.meleeRange then
+             Engine.attackPower * power Attack
+         else
+             0),
+        (if range <= Engine.rangedRange then
+             Engine.rangedAttackPower * power RangedAttack
+         else
+             0)
+
+    // Each healer's heals, the ones it casts beside what it fights with.
+    let healers =
+        healersAmong side (fun _ -> false) raid
+        |> List.map (fun healer ->
+            let swing, shot = weapons healer.Mender
+
+            { healer with
+                CastsHeal = heals || swing = 0
+                CastsRangedHeal = heals || swing + shot = 0
+            })
+
+    let healOn = healFrom side horizon healers
+
+    // The bodies our kill must end: its armed ones, else those razing a room
+    // of ours (a dismantler, not the healer keeping it up), else any.
+    let breachers =
+        raid |> List.filter (fun h -> ourRoom view h.Pos.Room && endangersOurs view h)
+
+    let focus =
+        match
+            (if not (List.isEmpty armed) then armed
+             elif not (List.isEmpty breachers) then breachers
+             else raid)
+        with
+        | [] -> None
+        | patients -> Some(List.maxBy healOn patients)
+
+    // What the healers drop to heal the focus: a heal beside it its swing, a
+    // ranged heal its swing and its shot.
+    let dropped =
+        match focus with
+        | None -> 0
+        | Some focus ->
+            healers
+            |> List.sumBy (fun healer ->
+                let swing, shot = weapons healer.Mender
+
+                if healOnto side horizon { healer with CastsRangedHeal = false } focus > 0 then
+                    swing
+                elif healOnto side horizon healer focus > 0 then
+                    swing + shot
+                else
+                    0)
+
+    let healing = focus |> Option.map healOn |> Option.defaultValue 0
     let tough = armed |> List.filter (fun h -> HostileInfo.toughHits h > 0)
 
     {
         Breaches = raid |> List.exists (fun h -> ourRoom view h.Pos.Room && endangersOurs view h)
-        Damage =
-            armed
-            |> List.sumBy (fun h ->
-                damageAt (HostileInfo.powerWithin window view.Hostiles h) (rangeOf h))
+        Damage = (armed |> List.sumBy (fun h -> weapons h ||> (+))) - dropped
         Healing = healing
         ToughHealing =
             match tough with
             | [] -> healing
-            | _ -> tough |> List.map (fun h -> HostileInfo.damageFor h healing) |> List.max
+            | _ -> tough |> List.map (fun h -> HostileInfo.damageFor h (healOn h)) |> List.max
+        Shield = armed |> List.sumBy (rampartOver view)
         Tough = tough |> List.sumBy (fun h -> HostileInfo.damageFor h (HostileInfo.toughHits h))
         Hits = armed |> List.sumBy (fun h -> h.Hits - HostileInfo.toughHits h)
+        Dismantlers =
+            raid
+            |> List.choose (fun h ->
+                match HostileInfo.powerWithin window side h Work with
+                | 0 -> None
+                | work -> Some(h, work * Engine.dismantlePower))
+        Razing =
+            breachers
+            |> List.filter (fun h -> not (List.contains h armed))
+            |> List.sumBy HostileInfo.effectiveHits
     }
+
+/// `raidPricedAs` both ways (`RaidPrices`), one where no healer of the raid
+/// carries a weapon that fights at its range.
+let private raidPrices
+    (view: ColonyView)
+    (window: int)
+    (horizon: int)
+    (rangeOf: HostileInfo -> int)
+    (raid: HostileInfo list)
+    : RaidPrices =
+    let weapons = raidPricedAs view window horizon false rangeOf raid
+
+    let fights (h: HostileInfo) =
+        HostileInfo.heals view.Hostiles h
+        && Option.isSome (
+            HostileInfo.weaponRangeOf (HostileInfo.partsWithin window view.Hostiles h)
+        )
+
+    if raid |> List.exists fights then
+        {
+            Weapons = weapons
+            Heals = raidPricedAs view window horizon true rangeOf raid
+        }
+    else
+        { Weapons = weapons; Heals = weapons }
+
+/// The outcome worse for us of a raid priced both ways (`RaidPrices`):
+/// lost either way is lost, and a raid only kited one way is only kited.
+let private settleBoth
+    (worse: 'outcome -> 'outcome -> 'outcome)
+    (prices: RaidPrices)
+    (settleOne: RaidPrice -> 'outcome)
+    =
+    if obj.ReferenceEquals(prices.Weapons, prices.Heals) then
+        settleOne prices.Weapons
+    else
+        worse (settleOne prices.Weapons) (settleOne prices.Heals)
 
 /// Whether this damage outpaces a priced raid's heal, through its TOUGH.
 let private outHeals (price: RaidPrice) (ourDamage: int) =
     ourDamage > price.Healing && (price.Tough = 0 || ourDamage > price.ToughHealing)
 
-/// Whether our side — this damage, healing and hits — wins against a priced
-/// raid: two clocks compared, cross-multiplied to stay in whole numbers. A
-/// raid that out-heals our damage is never killed, nor one whose TOUGH it
-/// never breaks; past its TOUGH our clock runs in two phases. A raid that
-/// deals our creeps nothing is won, but where it breaches a room of ours
-/// (`RaidPrice.Breaches`, #429) only by damage that outpaces its heal: a
+/// Whether our side — this damage, healing, ramparts' hits (`ourShield`,
+/// #651) and hits — wins against a priced raid: two clocks compared,
+/// cross-multiplied to stay in whole numbers where no rampart or TOUGH
+/// stands. A raid that out-heals our damage is never killed, nor one whose
+/// TOUGH it never breaks. Each clock breaks its ramparts first, at the whole
+/// damage, no heal putting them back, ours at the raid's damage and what its
+/// dismantlers reaching them take a tick (`broken`); past its TOUGH ours
+/// runs in phases. A
+/// raid that deals our creeps nothing is won, but where it breaches a room of
+/// ours (`RaidPrice.Breaches`, #429) only by damage that outpaces its heal: a
 /// dismantler left standing razes the room.
-let private wonAgainst (price: RaidPrice) ourDamage ourHealing ourHits =
+let private wonAgainst (price: RaidPrice) ourDamage ourHealing (ourShield, broken) ourHits =
     if price.Damage = 0 then
         not price.Breaches || outHeals price ourDamage
     elif
@@ -1752,22 +2164,27 @@ let private wonAgainst (price: RaidPrice) ourDamage ourHealing ourHits =
         false
     elif price.Damage <= ourHealing then
         true
-    elif price.Tough = 0 then
+    elif price.Tough = 0 && price.Shield = 0 && ourShield = 0 then
         price.Hits * (price.Damage - ourHealing) < ourHits * (ourDamage - price.Healing)
     else
         let ours =
-            float price.Tough / float (ourDamage - price.ToughHealing)
+            float price.Shield / float ourDamage
+            + (if price.Tough = 0 then
+                   0.0
+               else
+                   float price.Tough / float (ourDamage - price.ToughHealing))
             + float price.Hits / float (ourDamage - price.Healing)
 
-        ours < float ourHits / float (price.Damage - ourHealing)
+        ours < float ourShield / float (price.Damage + broken)
+               + float ourHits / float (price.Damage - ourHealing)
 
 /// `wonAgainst` for `bodies` bodies alike, each dealing `damage`, healing
 /// itself `heal`, struck back `back` a tick by its own swing (`hitBack`) and
 /// standing `hits`, beside `beside` damage, the raid focusing one at a time
 /// (#589): body k fights on while the k − 1 before it are dead, worn
 /// meanwhile by its own swing's hit back past its heal, so the raid's clock
-/// is each body's in turn and ours slows as they fall. One body is
-/// `wonAgainst` exactly.
+/// is each body's in turn and ours slows as they fall, breaking the raid's
+/// ramparts first (`RaidPrice.Shield`). One body is `wonAgainst` exactly.
 let private focusedAgainst (price: RaidPrice) beside (bodies: int) damage heal back hits =
     let dealt alive = float (beside + alive * damage)
     let struck = price.Damage + back
@@ -1785,28 +2202,49 @@ let private focusedAgainst (price: RaidPrice) beside (bodies: int) damage heal b
         let phase elapsed =
             max 0.0 (float hits - wear * elapsed) / float (struck - heal)
 
-        let rec fight alive elapsed (tough: float) (left: float) =
+        let rec fight alive elapsed (shield: float) (tough: float) (left: float) =
             alive > 0
-            && (let phase = phase elapsed
+            && (let whole = phase elapsed
+                let shieldRate = dealt alive
                 let toughRate = dealt alive - float price.ToughHealing
                 let hitRate = dealt alive - float price.Healing
 
-                let toughTime =
-                    if tough <= 0.0 then 0.0
-                    elif toughRate <= 0.0 then infinity
-                    else tough / toughRate
+                let shieldTime =
+                    if shield <= 0.0 then 0.0
+                    elif shieldRate <= 0.0 then infinity
+                    else shield / shieldRate
 
-                if toughTime > phase then
-                    fight (alive - 1) (elapsed + phase) (tough - phase * max 0.0 toughRate) left
+                if shieldTime > whole then
+                    fight (alive - 1) (elapsed + whole) (shield - whole * shieldRate) tough left
                 else
-                    let rest = phase - toughTime
+                    let phase = whole - shieldTime
 
-                    if hitRate > 0.0 && left / hitRate < rest then
-                        true
+                    let toughTime =
+                        if tough <= 0.0 then 0.0
+                        elif toughRate <= 0.0 then infinity
+                        else tough / toughRate
+
+                    if toughTime > phase then
+                        fight
+                            (alive - 1)
+                            (elapsed + whole)
+                            0.0
+                            (tough - phase * max 0.0 toughRate)
+                            left
                     else
-                        fight (alive - 1) (elapsed + phase) 0.0 (left - rest * max 0.0 hitRate))
+                        let rest = phase - toughTime
 
-        fight bodies 0.0 (float price.Tough) (float price.Hits)
+                        if hitRate > 0.0 && left / hitRate < rest then
+                            true
+                        else
+                            fight
+                                (alive - 1)
+                                (elapsed + whole)
+                                0.0
+                                0.0
+                                (left - rest * max 0.0 hitRate))
+
+        fight bodies 0.0 (float price.Shield) (float price.Tough) (float price.Hits)
 
 /// How a body of ours meets the raid it is priced against (#615 U2).
 [<RequireQualifiedAccess>]
@@ -1818,6 +2256,107 @@ type Stance =
     /// The faster side picks the range (`standoff`): a body kept outside its
     /// reach deals nothing, and a raid it stands off deals it nothing.
     | Standoff
+
+/// Whether a body of ours on a rampart stays on it through the fight
+/// (#651): it holds a post (`Stance.Hold`), or against every raider the
+/// raider comes to the range (`standoffPick`), or the range ours picks is
+/// already reached from the rampart; a body that kites walks off it.
+let private staysOn
+    (view: ColonyView)
+    (stance: Stance)
+    (raid: HostileInfo list)
+    (fighter: Fighter)
+    (tile: RoomPos)
+    =
+    stance = Stance.Hold
+    || raid
+       |> List.forall (fun h ->
+           not (HostileInfo.raider view.Hostiles h)
+           || (match standoffPick view fighter h with
+               | _, Picker.Theirs -> true
+               | range, Picker.Closes ->
+                   tilesBetween tile h.Pos |> Option.exists (fun r -> r <= range)
+               | _, Picker.Kites -> false))
+
+/// Our fighters as they stand on our ramparts they stay on (`rampartUnder`,
+/// `staysOn`): each strikes nothing back and is struck back by nothing
+/// (`StrikesBack` none); and those ramparts, which the raid breaks before
+/// any of them and our heal never puts back.
+let private onRamparts
+    (view: ColonyView)
+    (stance: Stance)
+    (raid: HostileInfo list)
+    (fighters: Fighter list)
+    : Fighter list * (RoomPos * int) list =
+    fighters
+    |> List.mapFold
+        (fun held fighter ->
+            match rampartUnder view fighter with
+            | Some(tile, hits) when staysOn view stance raid fighter tile ->
+                { fighter with StrikesBack = 0 }, (tile, hits) :: held
+            | _ -> fighter, held)
+        []
+
+/// What the raid's dismantlers reaching our ramparts take off them a tick
+/// (#651, `RaidPrice.Dismantlers`): each one whose walk to a tile beside one
+/// of them, at its plain pace, lands within `horizon`.
+let private brokenBy
+    (view: ColonyView)
+    (horizon: int)
+    (price: RaidPrice)
+    (ramparts: (RoomPos * int) list)
+    =
+    match ramparts with
+    | [] -> 0
+    | _ ->
+        price.Dismantlers
+        |> List.sumBy (fun (h, rate) ->
+            let pace =
+                Gait.ticks Gait.plain (HostileInfo.gait view.Hostiles h)
+                |> Option.defaultValue System.Int32.MaxValue
+
+            let reaches (tile: RoomPos) =
+                tilesBetween tile h.Pos
+                |> Option.exists (fun r ->
+                    r <= Engine.meleeRange || int64 (r - 1) * int64 pace <= int64 horizon)
+
+            if ramparts |> List.exists (fst >> reaches) then rate else 0)
+
+/// Our ramparts' hits and what breaks them a tick beside the raid's damage
+/// (`wonAgainst`'s shield).
+let private shieldOf
+    (view: ColonyView)
+    (horizon: int)
+    (price: RaidPrice)
+    (ramparts: (RoomPos * int) list)
+    =
+    List.sumBy snd ramparts, brokenBy view horizon price ramparts
+
+/// The ticks our body takes to arrive at the raid (#651), the heal it meets
+/// priced from then: the slowest of `fighters`' walks, its straight tiles to
+/// within its reach of the nearest body of the raid (a dismantler's or a
+/// healer's as much as a raider's: where the fight is) at its plain pace,
+/// where its creep is placed; else, a body not yet standing anywhere, the
+/// window our answering body needs (`Reaction.strike`), the worst case. At
+/// least the reach horizon. The exchange widens it to the fight's own length
+/// (`exchangeAgainst`).
+let private arrivalOf (view: ColonyView) (fighters: Fighter list) (raid: HostileInfo list) : int =
+    fighters
+    |> List.fold
+        (fun most (fighter: Fighter) ->
+            let walk =
+                match fighter.Creep |> Option.bind (placementOf view) with
+                | None -> Reaction.strike
+                | Some at ->
+                    match raid |> List.choose (fun h -> tilesBetween at h.Pos) with
+                    | [] -> 0
+                    | tiles ->
+                        max 0 (List.min tiles - fighter.Reach)
+                        * (Gait.ticks Gait.plain fighter.Gait
+                           |> Option.defaultValue Reaction.strike)
+
+            max most walk)
+        view.Tuning.ReachHorizon
 
 /// The range a body of ours fights a raid at (#535): the farthest any of its
 /// raiders holds it at (`standoff`), so a swing kept off by one shooter
@@ -1888,6 +2427,10 @@ type private HitBack =
         /// Those raiders' hits, through their TOUGH: the most hit back
         /// strikes before they fall.
         Swingers: int
+        /// The hits, through their TOUGH, of the raiders that strike back a
+        /// swing of ours (`Taken`): it is taken only while they stand
+        /// (`takenWhile`, #651).
+        Strikers: int
     }
 
 /// The engine's hit back between our fighters and a raid (#624,
@@ -1902,7 +2445,10 @@ type private HitBack =
 /// A raider no body of ours strikes back is no swinger. Each side's swing
 /// lands twice a tick where both swing at range 1 (spar
 /// `outpost-melee-healer`: the guard's 90 comes back off the smallMelee's
-/// swing at it).
+/// swing at it). Nothing is struck back either way where either side stands
+/// on a rampart (#651): a body of ours on ours strikes back nothing
+/// (`onRamparts`), and a raider on one is no swinger nor striker
+/// (`rampartOver`): a swing at it lands on the rampart.
 let private hitBack
     (view: ColonyView)
     (window: int)
@@ -1912,14 +2458,21 @@ let private hitBack
     : HitBack =
     let swings =
         rows
+        |> List.filter (fun (h, _) -> rampartOver view h = 0)
         |> List.map (fun (h, ranges) ->
             h, Engine.attackPower * HostileInfo.powerWithin window view.Hostiles h Attack, ranges)
         |> List.filter (fun (_, swing, _) -> swing > 0)
 
-    let taken =
+    // Whether fighter `i` swings, and so is struck back.
+    let swinging =
         List.zip fighters deals
-        |> List.mapi (fun i (fighter: Fighter, range) ->
-            if fighter.StrikesBack = 0 || range > Engine.meleeRange then
+        |> List.map (fun (fighter: Fighter, range) ->
+            fighter.StrikesBack > 0 && range <= Engine.meleeRange)
+
+    let taken =
+        swinging
+        |> List.mapi (fun i swings' ->
+            if not swings' then
                 0
             else
                 swings
@@ -1930,6 +2483,13 @@ let private hitBack
                         else
                             most)
                     0)
+
+    let strikers =
+        swings
+        |> List.filter (fun (_, _, ranges) ->
+            List.zip swinging ranges
+            |> List.exists (fun (swings', range) -> swings' && range <= Engine.meleeRange))
+        |> List.sumBy (fun (h, _, _) -> HostileInfo.effectiveHits h)
 
     let struck =
         swings
@@ -1953,7 +2513,29 @@ let private hitBack
         Taken = taken
         Struck = List.sumBy snd struck
         Swingers = struck |> List.sumBy (fst >> HostileInfo.effectiveHits)
+        Strikers = strikers
     }
+
+/// What our swings' hit back (`HitBack.Taken`, `taken` a tick) adds to a
+/// priced raid's damage while our side kills it at `damage` a tick (#651):
+/// taken only while the raiders striking back stand (`strikers`, their
+/// hits), so of our kill's ticks only the share they stand, the strikers
+/// falling first as `struckBack` has them, at our damage net of the heal,
+/// against the whole kill: the ramparts broken at the whole damage, the
+/// rest at the net. The bound on the strongest of them leaves nothing once
+/// they are gone. All of it where they are the whole raid, or `damage`
+/// never out-heals it.
+let private takenWhile (price: RaidPrice) (damage: int) (taken: int) (strikers: int) : int =
+    let net = damage - price.Healing
+
+    if taken = 0 || net <= 0 || strikers >= price.Tough + price.Hits then
+        taken
+    else
+        // Strikers / net over Shield / damage + (Tough + Hits) / net.
+        let kill =
+            float price.Shield * float net / float damage + float (price.Tough + price.Hits)
+
+        int (ceil (float taken * float strikers / kill))
 
 /// What a raid's swings struck back (`HitBack.Struck`, `struck` a tick) add
 /// to `damage` a tick against a priced raid: struck back only while its
@@ -1962,7 +2544,7 @@ let private hitBack
 /// do, the swingers' hits spent at most. All of it where the swingers are
 /// the whole raid; none where `damage` never out-heals what is left of it.
 let private struckBack (price: RaidPrice) (damage: int) (struck: int) (swingers: int) : int =
-    let hits = int64 (price.Tough + price.Hits)
+    let hits = int64 (price.Shield + price.Tough + price.Hits)
     let net = int64 (damage - price.Healing)
     let all = net + int64 struck
 
@@ -2028,6 +2610,14 @@ type internal Outcome =
 /// apart (`rowAnswer`), a raid its row only kites being the verdict's Kite.
 let internal won (outcome: Outcome) = outcome <> Lost
 
+/// The worse for us of a raid's two outcomes (`settleBoth`), its weapons'
+/// first: lost either way is lost, and else the weapons' reading says how it
+/// is won — a raid that strikes nothing while it heals is not kited.
+let private worseOf (weapons: Outcome) (heals: Outcome) : Outcome =
+    match heals with
+    | Lost -> Lost
+    | _ -> weapons
+
 /// Settles an exchange whose raid is priced at the ranges it fights at:
 /// kited where the raiders a fighter of ours stands off (`kited`, none
 /// holding the post) strike nothing there, else traded by `trade`.
@@ -2044,21 +2634,76 @@ let private settle
     else
         Lost
 
+/// The ticks an exchange lasts (#651), `wonAgainst`'s two clocks: the
+/// sooner of our kill of the raid (its ramparts at our whole damage, its
+/// TOUGH and hits net of its heal; with no armed body, the unarmed ones
+/// razing a room of ours, `Razing`) and its kill of our side (our ramparts
+/// at its damage and what breaks them, our hits net of our heal). None where
+/// neither side ever ends the other.
+let private fightTicks
+    (price: RaidPrice)
+    ourDamage
+    ourHealing
+    (ourShield, broken)
+    ourHits
+    : float option =
+    let price =
+        if price.Shield + price.Tough + price.Hits = 0 then
+            { price with Hits = price.Razing }
+        else
+            price
+
+    let ours =
+        if
+            ourDamage <= price.Healing
+            || (price.Tough > 0 && ourDamage <= price.ToughHealing)
+        then
+            None
+        else
+            Some(
+                float price.Shield / float ourDamage
+                + (if price.Tough = 0 then
+                       0.0
+                   else
+                       float price.Tough / float (ourDamage - price.ToughHealing))
+                + float price.Hits / float (ourDamage - price.Healing)
+            )
+
+    let theirs =
+        if price.Damage <= ourHealing then
+            None
+        else
+            Some(
+                float ourShield / float (price.Damage + broken)
+                + float ourHits / float (price.Damage - ourHealing)
+            )
+
+    match ours, theirs with
+    | Some a, Some b -> Some(min a b)
+    | Some a, None
+    | None, Some a -> Some a
+    | None, None -> None
+
 /// One exchange against a raid (#615 U2): what stands beside our bodies
 /// (`beside` damage and `besideHits`, a home's towers) and the bodies
 /// themselves, each at the range it fights at under `stance`, dealing what
 /// reaches from there and healing itself as it fights there
-/// (`Fighter.HealAt`), the raid dealing what reaches from its ranges, and
-/// each side's swings struck back (`hitBack`).
+/// (`Fighter.HealAt`), the raid dealing what reaches from its ranges, each
+/// side's swings struck back (`hitBack`) while the bodies striking back stand
+/// (`struckBack`, `takenWhile`), and each side's ramparts broken before the
+/// bodies on them (`onRamparts`, `RaidPrice.Shield`, #651).
 let private exchangeAgainst
     (view: ColonyView)
     (window: int)
+    (horizon: int)
     (raid: HostileInfo list)
     (stance: Stance)
     (beside: int)
     (besideHits: int)
     (fighters: Fighter list)
     : Outcome =
+    let fighters, ramparts = onRamparts view stance raid fighters
+
     let ours, theirs, kited, back =
         match stance, fighters with
         | Stance.Hold, _
@@ -2077,26 +2722,65 @@ let private exchangeAgainst
 
     let ranges = List.zip fighters ours
 
-    let price = raidPrice view window theirs raid
-
-    let damage =
+    let dealt =
         beside
         + List.sumBy (fun (fighter: Fighter, (range, _)) -> fighter.DamageAt range) ranges
 
-    let damage = damage + struckBack price damage back.Struck back.Swingers
+    let healing =
+        List.sumBy (fun (fighter: Fighter, (_, healing)) -> fighter.HealAt healing) ranges
 
-    settle
+    let hits =
+        besideHits + List.sumBy (fun (fighter: Fighter, _) -> fighter.Hits) ranges
+
+    // One reading of the raid at a horizon: its price with what our swings
+    // take back, and our damage with what its swings take back.
+    let terms horizon (price: RaidPrice) =
+        let damage = dealt + struckBack price dealt back.Struck back.Swingers
+
         { price with
-            Damage = price.Damage + List.sum back.Taken
-        }
-        kited
-        damage
-        (fun price ->
-            wonAgainst
-                price
-                damage
-                (List.sumBy (fun (fighter: Fighter, (_, healing)) -> fighter.HealAt healing) ranges)
-                (besideHits + List.sumBy (fun (fighter: Fighter, _) -> fighter.Hits) ranges))
+            Damage = price.Damage + takenWhile price damage (List.sum back.Taken) back.Strikers
+        },
+        damage,
+        shieldOf view horizon price ramparts
+
+    // The exchange at a horizon, and how long it lasts read both ways.
+    let at horizon =
+        let prices = raidPrices view window horizon theirs raid
+
+        let outcome =
+            settleBoth worseOf prices (fun price ->
+                let priced, damage, shield = terms horizon price
+
+                settle priced kited damage (fun priced ->
+                    wonAgainst priced damage healing shield hits))
+
+        let lasts =
+            [ prices.Weapons; prices.Heals ]
+            |> List.map (fun price ->
+                let priced, damage, shield = terms horizon price
+                fightTicks priced damage healing shield hits)
+            |> List.fold
+                (fun most ticks ->
+                    match ticks with
+                    | Some ticks -> max most (int (ceil ticks))
+                    | None -> max most Reaction.lend)
+                0
+
+        outcome, lasts
+
+    // Every heal and dismantle that reaches the fight before it ends counts
+    // (#651): from our arrival, widened to the fight's own length, a few
+    // rounds, the heal only growing with it; a fight neither side ends reads
+    // two rooms' walk, everything in reach.
+    let rec widen horizon rounds =
+        let outcome, lasts = at horizon
+
+        if lasts <= horizon || rounds = 0 then
+            outcome
+        else
+            widen (min Reaction.lend lasts) (rounds - 1)
+
+    widen horizon 3
 
 /// `exchangeAgainst` the raid standing in one room at the standoff, read at
 /// the window to close and strike (`Reaction.strike`): our fighters beside
@@ -2111,6 +2795,7 @@ let private exchangeIn (view: ColonyView) (room: string) (fighters: Fighter list
         exchangeAgainst
             view
             Reaction.strike
+            (arrivalOf view fighters raid)
             raid
             Stance.Standoff
             (ourTowersOn view room raid)
@@ -2142,7 +2827,7 @@ let bodiesWin (view: ColonyView) (room: string) (creeps: CreepInfo list) =
 /// takes back a tick whatever its blocks, and what one block strikes back.
 type private BlockPrice =
     {
-        Price: RaidPrice
+        Price: RaidPrices
         Kited: HostileInfo list
         Beside: int
         Damage: int
@@ -2190,7 +2875,9 @@ let private blockPrice (pattern: BodyPattern) (stance: Stance) (view: ColonyView
 
         Some
             {
-                Price = raidPrice view Reaction.strike theirs raid
+                // A body yet to be cast lands no sooner than the answering
+                // window: every heal that reaches the raid by then counts.
+                Price = raidPrices view Reaction.strike Reaction.strike theirs raid
                 Kited = kited
                 Beside = ourTowersOn view room raid
                 Damage = one.DamageAt range
@@ -2201,16 +2888,26 @@ let private blockPrice (pattern: BodyPattern) (stance: Stance) (view: ColonyView
 
 /// A body of `blocks` blocks of a priced row: what it deals beside our
 /// towers, what its swings struck back add to that (`struckBack`), and the
-/// raid's price with what its own swing takes back (`hitBack`).
-let private blocksDealt (block: BlockPrice) (bodies: int) (blocks: int) : int * int * RaidPrice =
+/// raid's price with what its own swing takes back (`hitBack`) while its
+/// strikers stand (`takenWhile`).
+let private blocksDealt
+    (block: BlockPrice)
+    (raid: RaidPrice)
+    (bodies: int)
+    (blocks: int)
+    : int * int * RaidPrice =
     let damage = block.Beside + bodies * blocks * block.Damage
 
+    let struck = struckBack raid damage (blocks * block.Back.Struck) block.Back.Swingers
+
     let price =
-        { block.Price with
-            Damage = block.Price.Damage + List.head block.Back.Taken
+        { raid with
+            Damage =
+                raid.Damage
+                + takenWhile raid (damage + struck) (List.head block.Back.Taken) block.Back.Strikers
         }
 
-    damage, struckBack block.Price damage (blocks * block.Back.Struck) block.Back.Swingers, price
+    damage, struck, price
 
 /// Whether `blocks` whole blocks of a fighting row, one body, win the raid in
 /// a room under `stance` (`blockPrice`): what sizes a row and decides whether
@@ -2233,19 +2930,20 @@ let private blocksOutcome
     | None -> fun _ -> Lost
     | Some block ->
         fun (blocks: int) ->
-            let damage, struck, price = blocksDealt block 1 blocks
-            let damage = damage + struck
+            settleBoth worseOf block.Price (fun raid ->
+                let damage, struck, price = blocksDealt block raid 1 blocks
+                let damage = damage + struck
 
-            let hits =
-                freshHits
-                    view
-                    room
-                    view.Tuning.ReachHorizon
-                    (blocks * block.Hits)
-                    (block.Price.Damage - blocks * block.Heal)
+                let hits =
+                    freshHits
+                        view
+                        room
+                        view.Tuning.ReachHorizon
+                        (blocks * block.Hits)
+                        (raid.Damage - blocks * block.Heal)
 
-            settle price block.Kited damage (fun price ->
-                wonAgainst price damage (blocks * block.Heal) hits)
+                settle price block.Kited damage (fun price ->
+                    wonAgainst price damage (blocks * block.Heal) (0, 0) hits))
 
 /// `blocksOutcome` that ends the raid (`won`): what sizes and counts a row.
 let blocksBeat
@@ -2272,18 +2970,23 @@ let private bodiesOutcome
         // Every raider that swings strikes the body it focuses, which
         // strikes it back while any body stands; each body's own swing is
         // struck back whether focused or not (`focusedAgainst`).
-        let damage, struck, _ = blocksDealt block bodies blocks
-        let beside = block.Beside + struck
+        settleBoth worseOf block.Price (fun raid ->
+            let damage, struck, _ = blocksDealt block raid bodies blocks
+            let beside = block.Beside + struck
 
-        settle block.Price block.Kited (damage + struck) (fun price ->
-            focusedAgainst
-                price
-                beside
-                bodies
-                (blocks * block.Damage)
-                (blocks * block.Heal)
-                (List.head block.Back.Taken)
-                (blocks * block.Hits))
+            settle raid block.Kited (damage + struck) (fun price ->
+                focusedAgainst
+                    price
+                    beside
+                    bodies
+                    (blocks * block.Damage)
+                    (blocks * block.Heal)
+                    (takenWhile
+                        price
+                        (damage + struck)
+                        (List.head block.Back.Taken)
+                        block.Back.Strikers)
+                    (blocks * block.Hits)))
     | _ -> Lost
 
 /// The biggest guard body the row can cast (#417): at most `guardBlocksMost`
@@ -2327,29 +3030,62 @@ let internal kitedDown (view: ColonyView) (fighter: Fighter) (room: string) : bo
 /// The ticks these fighters take, together and beside our towers there, to
 /// kill the raid standing in a room once they stand at it (#596): its armed
 /// bodies' hits, TOUGH first, against their damage net of the raid's heal
-/// (`raidPrice`), its swings struck back by them (`hitBack`). Our clock
-/// alone: what the raid deals them is the exchange's question, not this
-/// one. `Some 0` where no armed body stands there; None where the damage
-/// never out-heals the raid.
+/// (`raidPrice`), its swings struck back by them (`hitBack`, none by a body
+/// on our rampart), the ramparts its bodies stand on broken first (#651).
+/// Our clock alone: what the raid deals them is the exchange's question, not
+/// this one. `Some 0` where no armed body stands there; None where the
+/// damage never out-heals the raid.
 let private killTicks (view: ColonyView) (room: string) (fighters: Fighter list) : int option =
     let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
-    let price = raidPrice view Reaction.strike (fun _ -> Engine.meleeRange) raid
-    let back = hitBackUnder view Reaction.strike Stance.Standoff fighters raid
-    let dealt = ourTowersOn view room raid + List.sumBy (dealtOn view raid) fighters
-    let dealt = dealt + struckBack price dealt back.Struck back.Swingers
 
-    if price.Tough = 0 && price.Hits = 0 then
-        Some 0
-    elif not (outHeals price dealt) then
-        None
-    else
-        let tough =
-            if price.Tough = 0 then
-                0.0
-            else
-                float price.Tough / float (dealt - price.ToughHealing)
+    let back =
+        hitBackUnder
+            view
+            Reaction.strike
+            Stance.Standoff
+            (fst (onRamparts view Stance.Standoff raid fighters))
+            raid
 
-        Some(int (ceil (tough + float price.Hits / float (dealt - price.Healing))))
+    let towersAndOurs =
+        ourTowersOn view room raid + List.sumBy (dealtOn view raid) fighters
+
+    // Our clock at a horizon: the raid healing all it reaches by then.
+    let killAt horizon =
+        let price =
+            (raidPrices view Reaction.strike horizon (fun _ -> Engine.meleeRange) raid).Heals
+
+        let dealt = towersAndOurs + struckBack price towersAndOurs back.Struck back.Swingers
+
+        if price.Tough = 0 && price.Hits = 0 then
+            Some 0
+        elif not (outHeals price dealt) then
+            None
+        else
+            let tough =
+                if price.Tough = 0 then
+                    0.0
+                else
+                    float price.Tough / float (dealt - price.ToughHealing)
+
+            Some(
+                int (
+                    ceil (
+                        float price.Shield / float dealt
+                        + tough
+                        + float price.Hits / float (dealt - price.Healing)
+                    )
+                )
+            )
+
+    // From our arrival, widened to the kill's own length (#651): every heal
+    // that reaches the raid before it falls counts.
+    let rec widen horizon rounds =
+        match killAt horizon with
+        | Some ticks when ticks > horizon && rounds > 0 && horizon < Reaction.lend ->
+            widen (min Reaction.lend ticks) (rounds - 1)
+        | kill -> kill
+
+    widen (arrivalOf view fighters raid) 3
 
 /// The raiders standing in a room.
 let private raidersIn (view: ColonyView) (room: string) =
@@ -2403,19 +3139,68 @@ let private winsBeside
     =
     let raid = raidersIn view room
     let inRoom = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
-    let price = raidPrice view Reaction.strike (fun _ -> Engine.meleeRange) inRoom
 
-    // The hit back (`hitBack`) between this body alone and the raid.
+    // The raid priced from this body's arrival (#651): its damage on us at
+    // its weapons (`Weapons`), its heal against our clock (`Heals`).
+    let horizon = arrivalOf view [ Fighter.ofCreep creep ] inRoom
+
+    let prices =
+        raidPrices view Reaction.strike horizon (fun _ -> Engine.meleeRange) inRoom
+
+    let price = prices.Weapons
+    let healed = prices.Heals
+
+    // The hit back (`hitBack`) between this body alone and the raid, none
+    // from or at it on a rampart of ours it stays on (`onRamparts`, #651).
     let backOf (me: Fighter) =
-        hitBackUnder view Reaction.strike Stance.Standoff [ me ] inRoom
+        hitBackUnder
+            view
+            Reaction.strike
+            Stance.Standoff
+            (fst (onRamparts view stance inRoom [ me ]))
+            inRoom
+
+    // What this body's own damage alone deals the raid a tick, its swings
+    // struck back included (`struckBack`).
+    let dealtAlone (me: Fighter) (back: HitBack) =
+        let damage = me.DamageAt(rangeOn view inRoom me)
+        damage + struckBack healed damage back.Struck back.Swingers
+
+    // What its own swing takes back a tick, while the raiders striking it
+    // back stand under its own damage (`takenWhile`, #651).
+    let takenBy (me: Fighter) =
+        let back = backOf me
+        takenWhile healed (dealtAlone me back) (List.sum back.Taken) back.Strikers
 
     // What the raid takes off this body a tick, struck alone (#589's focus)
     // at their standoff, its own swing struck back, past what it heals
     // itself there.
     let struck (me: Fighter) =
-        (raidPrice view Reaction.strike (standoff view me) inRoom).Damage
-        + List.sum (backOf me).Taken
+        (raidPrices view Reaction.strike horizon (standoff view me) inRoom).Weapons.Damage
+        + takenBy me
         - me.HealAt(rangeOn view inRoom me)
+
+    // The rampart of ours this body stays on and what breaks it a tick
+    // beside the raid's damage (`shieldOf`, #651).
+    let shieldUnder (me: Fighter) =
+        match rampartUnder view me with
+        | Some(tile, hits) when staysOn view stance inRoom me tile ->
+            shieldOf view horizon price [ tile, hits ]
+        | _ -> 0, 0
+
+    // The ticks the raid alone takes to kill this body, struck as `struck`
+    // has it, the rampart it stays on broken first at the whole strike and
+    // its dismantlers' and no heal of its own putting it back (#651). None
+    // where it never does.
+    let diesIn (me: Fighter) =
+        let lost = struck me
+
+        if lost <= 0 then
+            None
+        else
+            let raw = lost + me.HealAt(rangeOn view inRoom me)
+            let shield, broken = shieldUnder me
+            Some(float shield / float (raw + broken) + float me.Hits / float lost)
 
     // A body not holding the fight is priced at the hits it keeps by its
     // next decision once in it (`soon` ticks struck alone): the holder lets
@@ -2430,17 +3215,30 @@ let private winsBeside
             creep.Hits.Hits
         else
             let me = Fighter.ofCreep creep
-            freshHits view room soon creep.Hits.Hits (struck me - List.sum (backOf me).Taken)
+            freshHits view room soon creep.Hits.Hits (struck me - takenBy me)
 
     let floor = max (creep.Hits.HitsMax / 4) (price.Damage * 2 * soon)
 
-    // What its own swing takes back a tick while it waits (`backOf`).
-    let back = lazy (List.sum (backOf (Fighter.ofCreep creep)).Taken)
+    // What its own swing takes back a tick while it waits (`backOf`), and
+    // the ticks the raiders striking it back stand under its own damage: the
+    // hit back ends with them (#651).
+    let back =
+        lazy
+            (let me = Fighter.ofCreep creep
+             let back = backOf me
+             let net = dealtAlone me back - healed.Healing
+
+             List.sum back.Taken,
+             if net <= 0 then
+                 System.Int32.MaxValue
+             else
+                 (back.Strikers + net - 1) / net)
 
     // This body's hits after `ticks` of the raid alone, its swing struck
-    // back and its heal worn with it, priced once a live part count.
+    // back while its strikers stand, the rampart it stands on broken first
+    // (#651), and its heal worn with it, priced once a live part count.
     let after ticks =
-        let struck = price.Damage + back.Value
+        let taken, falls = back.Value
         let heals = System.Collections.Generic.Dictionary<int, int>()
 
         let healAt hits =
@@ -2454,13 +3252,24 @@ let private winsBeside
                 heals.[live] <- heal
                 heal
 
-        let rec go t hits =
+        let shield, broken = shieldUnder (Fighter.ofCreep creep)
+
+        let rec go t shield hits =
             if t >= ticks || hits <= 0 then
                 hits
             else
-                go (t + 1) (hits - max 0 (struck - healAt hits))
+                let struck = price.Damage + (if t < falls then taken else 0)
+                let through = max 0 (struck - shield)
 
-        go 0 start
+                go
+                    (t + 1)
+                    (max 0 (shield - struck - broken))
+                    (if through > 0 then
+                         hits - max 0 (through - healAt hits)
+                     else
+                         hits)
+
+        go 0 shield start
 
     let counted =
         beside
@@ -2485,11 +3294,11 @@ let private winsBeside
     // needs and is fed to it, whatever the side's hits summed say; one the
     // side needs fights on.
     let outlives (me: Fighter) (side: Fighter list) =
-        let lost = struck me
-
-        lost <= 0
-        || killTicks view room (me :: side)
-           |> Option.exists (fun ticks -> me.Hits > lost * ticks)
+        match diesIn me with
+        | None -> true
+        | Some dies ->
+            killTicks view room (me :: side)
+            |> Option.exists (fun ticks -> dies > float ticks)
 
     let alone = Fighter.atHits creep start
 
@@ -2504,15 +3313,13 @@ let private winsBeside
     // is healed back and buys nothing. A body whose life is nearly spent
     // fights on while it still deals damage a kill keeps.
     let spends () =
-        let lost = struck alone
         let walk = walkToRaid view raid creep |> Option.defaultValue 0
         let left = creep.TicksToLive - walk
 
         let dies =
-            if lost <= 0 then
-                System.Int32.MaxValue
-            else
-                alone.Hits / lost
+            match diesIn alone with
+            | None -> System.Int32.MaxValue
+            | Some dies -> int (min dies (float System.Int32.MaxValue))
 
         let fought = max 0 (min left dies)
 
@@ -2525,13 +3332,7 @@ let private winsBeside
                 | _ -> None)
 
         let dealt =
-            let damage = alone.DamageAt(rangeOn view inRoom alone)
-            let back = backOf alone
-
-            int64 (
-                max 0 (damage + struckBack price damage back.Struck back.Swingers - price.Healing)
-            )
-            * int64 fought
+            int64 (max 0 (dealtAlone alone (backOf alone) - healed.Healing)) * int64 fought
 
         // The raid as this body leaves it: `kept` of its damage off the armed
         // raiders, the least to kill first, as a focus takes them.
@@ -2581,7 +3382,7 @@ let private winsBeside
                 None
             else
                 let lands = finishers |> List.map snd |> List.min
-                let kept = max 0L (dealt - int64 price.Healing * int64 (max 0 (lands - fought)))
+                let kept = max 0L (dealt - int64 healed.Healing * int64 (max 0 (lands - fought)))
 
                 if exchangeIn (wornBy kept) room side |> won then
                     Some lands
@@ -2595,11 +3396,11 @@ let private winsBeside
                 match finish with
                 | Some lands ->
                     let gap = max 0 (lands - fought)
-                    max 0L (dealt - int64 price.Healing * int64 gap)
+                    max 0L (dealt - int64 healed.Healing * int64 gap)
                 | None -> 0L
 
         let raidValue = raid |> List.sumBy (fun h -> bodyCost h.Body) |> int64
-        let raidHits = int64 (price.Tough + price.Hits)
+        let raidHits = int64 (healed.Shield + healed.Tough + healed.Hits)
 
         let mine =
             creep.Body
@@ -2682,7 +3483,12 @@ let kiteSeats (view: ColonyView) (room: string) (holding: Set<string>) : int =
     match raidersIn view room with
     | [] -> 1
     | raid ->
-        let price = raidPrice view Reaction.strike (fun _ -> Engine.meleeRange) inRoom
+        // Kiters on their way: every heal that reaches the raid in the
+        // answering window counts (#651).
+        let price =
+            (raidPrices view Reaction.strike Reaction.strike (fun _ -> Engine.meleeRange) inRoom)
+                .Heals
+
         let towers = ourTowersOn view room inRoom
         let heal = max price.Healing price.ToughHealing
         let deadline = raid |> List.map _.TicksToLive |> List.min
@@ -2708,9 +3514,10 @@ let kiteSeats (view: ColonyView) (room: string) (holding: Set<string>) : int =
                  || Set.contains creep.Name holding && atFight (walk - Engine.rangedRange)),
                 (walk, creep.TicksToLive, dealtOn view inRoom (Fighter.ofCreep creep)))
 
-        // The tick these bodies end the raid on.
+        // The tick these bodies end the raid on, its ramparts broken first,
+        // no heal putting them back (#651).
         let endOf chosen =
-            let rec go tick left =
+            let rec go tick shield left =
                 if tick >= deadline then
                     deadline
                 else
@@ -2721,10 +3528,16 @@ let kiteSeats (view: ColonyView) (room: string) (holding: Set<string>) : int =
                                 if walk <= tick && tick < life then damage else 0)
                             chosen
 
-                    let left = left - max 0 (dealt - heal)
-                    if left <= 0 then tick else go (tick + 1) left
+                    let through = max 0 (dealt - shield)
 
-            go 0 (price.Tough + price.Hits)
+                    let left = if through > 0 then left - max 0 (through - heal) else left
+
+                    if left <= 0 then
+                        tick
+                    else
+                        go (tick + 1) (max 0 (shield - dealt)) left
+
+            go 0 price.Shield (price.Tough + price.Hits)
 
         let enough =
             seq { 1 .. List.length kiters }
@@ -2825,6 +3638,7 @@ let homeHoldReleases
             && (List.isEmpty arriving
                 || exchangeAgainst
                     view
+                    Reaction.lend
                     Reaction.lend
                     arriving
                     Stance.Standoff
@@ -4091,11 +4905,16 @@ let private homeUnheld (view: ColonyView) atlas : bool =
 
         raid |> List.exists (endangersOurs view)
         && not (
-            wonAgainst
-                (raidPrice view Reaction.strike (fun _ -> Engine.meleeRange) raid)
-                (towers * Engine.towerAttackAt Engine.towerFalloffRange)
-                0
-                (towers * Engine.towerHits)
+            settleBoth
+                (&&)
+                (raidPrices view Reaction.strike Reaction.strike (fun _ -> Engine.meleeRange) raid)
+                (fun price ->
+                    wonAgainst
+                        price
+                        (towers * Engine.towerAttackAt Engine.towerFalloffRange)
+                        0
+                        (0, 0)
+                        (towers * Engine.towerHits))
         )
         && (let rows = (verdictOf view home).Rows
 

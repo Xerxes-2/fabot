@@ -751,6 +751,10 @@ type RoomFacts =
         /// What each of those hostiles carries by id, every resource
         /// counted, where it carries any (#621: a kill's cargo).
         HostileCargo: Map<string, int>
+        /// The hits of each standing rampart here that is not ours, by tile
+        /// (#651): what a body standing on one takes before the body itself.
+        /// `Hits` carries ours alone.
+        RivalRamparts: Map<Pos, int>
         /// The invader cores standing here.
         InvaderCores: InvaderCoreInfo list
         /// The ids of the creeps not ours whose tombstones lie here.
@@ -790,6 +794,7 @@ module RoomFacts =
             Hostiles = []
             HostileFatigue = Map.empty
             HostileCargo = Map.empty
+            RivalRamparts = Map.empty
             InvaderCores = []
             Fallen = []
             AllyGraves = Set.empty

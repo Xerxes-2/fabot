@@ -932,6 +932,7 @@ let private remoteWith (ranger: Pos) (hostiles: HostileInfo list) (cargo: (strin
                             Hostiles = hostiles
                             HostileFatigue = Map.empty
                             HostileCargo = Map.ofList cargo
+                            RivalRamparts = Map.empty
                             InvaderCores = []
                             Towers = []
                             OurTowers = []

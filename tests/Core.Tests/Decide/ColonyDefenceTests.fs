@@ -641,7 +641,9 @@ let raisedHomeGarrisonTests =
             test
                 "a beaten raised home is one Guard, the ranger row's, with the relief on top of the garrison" {
                 // A 10A2H raid: 300 a tick, which the seven-block resident
-                // loses alone and an eight-block ranger wins.
+                // loses alone and an eight-block ranger wins. Its own HEAL
+                // drops its swing (#651), so the 24 a tick that turns the
+                // seven blocks' trade is a healer's beside it.
                 let winnable =
                     [
                         hostileIn
@@ -650,6 +652,9 @@ let raisedHomeGarrisonTests =
                             (List.replicate 10 Attack
                              @ List.replicate 2 Heal
                              @ List.replicate 12 Move)
+                        { hostileIn "W1N2" { X = 11; Y = 44 } [ Heal; Heal; Move; Move ] with
+                            Id = "h-2"
+                        }
                     ]
 
                 let beaten raid =

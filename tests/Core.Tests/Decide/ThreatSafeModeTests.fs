@@ -638,6 +638,105 @@ let safeModeTests =
                     "10 a tick against 84 healed: the home is razed"
             }
 
+            // #651: a creep on a rampart is struck nothing until the rampart
+            // falls, and a dismantler beside it takes it down beside the
+            // raid's swings (`DISMANTLE_POWER` a WORK, at its boost).
+            test
+                "with no tower, a defender on its rampart holds a melee; beside T3 dismantlers it does not" {
+                let home = SpatialInfo.homeName towerless.Spatial
+
+                let defender =
+                    creepWith "defender-1" 0 0 (List.replicate 6 Move @ List.replicate 6 Attack)
+
+                let walled =
+                    { towerless with
+                        Creeps = towerless.Creeps @ [ defender ]
+                        Defenders = Map.ofList [ home, [ defender ] ]
+                        Spatial =
+                            towerless.Spatial
+                            |> withTargets
+                                [ "ram-1", { X = 25; Y = 26 }, Structure BuiltKind.Rampart ]
+                            |> withCreepsAt [ "defender-1", { X = 25; Y = 26 } ]
+                    }
+                    |> withHits "ram-1" BuiltKind.Rampart 95_000 1_000_000
+
+                let melee =
+                    hostileAt
+                        "h-1"
+                        { X = 25; Y = 27 }
+                        (List.replicate 17 Move @ List.replicate 17 Attack)
+
+                let dismantler id (pos: Pos) =
+                    boostedAt
+                        Tier3
+                        (hostileAt id pos (List.replicate 25 Work @ List.replicate 25 Move))
+
+                let fires raid =
+                    activations (decideOn (walled |> facing raid)).Intents
+
+                Expect.isEmpty
+                    (fires [ melee ])
+                    "on 95,000 of rampart its 180 a tick ends the melee's 3,400 first: it holds"
+
+                Expect.equal
+                    (fires
+                        [
+                            melee
+                            dismantler "d-1" { X = 24; Y = 27 }
+                            dismantler "d-2" { X = 26; Y = 27 }
+                        ])
+                    [ "ctrl-1" ]
+                    "two T3 dismantlers take 10,000 a tick off the rampart: it falls in nine, and the melee ends the defender before it ends the melee"
+            }
+
+            // #651: the heal a fight meets is every heal that reaches it
+            // before it ends, not the reach horizon's: a healer eight back
+            // walks up long before a shooter wears a dismantler down.
+            test
+                "with no tower, a shooter beside a dismantler does not hold it while a healer eight back can walk up" {
+                let home = SpatialInfo.homeName towerless.Spatial
+
+                let defender =
+                    creepWith
+                        "defender-1"
+                        0
+                        0
+                        (List.replicate 10 RangedAttack @ List.replicate 10 Move)
+
+                let guarded =
+                    { towerless with
+                        Creeps = towerless.Creeps @ [ defender ]
+                        Defenders = Map.ofList [ home, [ defender ] ]
+                        Spatial =
+                            towerless.Spatial |> withCreepsAt [ "defender-1", { X = 25; Y = 26 } ]
+                    }
+
+                let raid =
+                    [
+                        { hostileAt
+                              "h-1"
+                              { X = 25; Y = 27 }
+                              (List.replicate 10 Work @ List.replicate 10 Move) with
+                            Owner = "Trepidimous"
+                        }
+                        { hostileAt
+                              "med-1"
+                              { X = 25; Y = 35 }
+                              (List.replicate 20 Heal @ List.replicate 20 Move) with
+                            Owner = "Trepidimous"
+                        }
+                    ]
+
+                Expect.isEmpty
+                    (activations (decideOn (guarded |> facing [ List.head raid ])).Intents)
+                    "the premise: the dismantler alone, held"
+
+                Expect.equal
+                    (activations (decideOn (guarded |> facing raid)).Intents)
+                    [ "ctrl-1" ]
+                    "its 100 a tick takes the dismantler's 2,000 in 20 ticks; the healer is beside it in 7 and puts back 240: the home is razed"
+            }
+
             test "a garrison standing in another room is no defence of this one" {
                 // #448: the exchange is the home room's.
                 let { Intents = intents } =

@@ -65,6 +65,19 @@ let guardTaskTests =
                     ))
                     (Some(Some 2))
                     "and a raid healing 120 against the 90 one guard block deals admits the second"
+
+                // #651: a heal reaches from where its healer stands and walks
+                // to by the time our body lands (the two above, five off, are
+                // beside the melee long before a guard is cast): 12 a HEAL
+                // beside its patient, 4 at two or three, nothing farther. Two
+                // with no MOVE five off never reach it.
+                let rooted =
+                    healers 2 |> List.map (fun h -> { h with Body = List.replicate 5 Heal })
+
+                Expect.equal
+                    (capOf (declaredRaid (raiders @ rooted) |> withGuards [ guard "g-1", beside ]))
+                    (Some(Some 1))
+                    "the same HEAL rooted five off heals the melee nothing: one"
             }
 
             // The world lane's FightMatch: two colonies pooling

@@ -615,6 +615,81 @@ let guardRowTests =
                 Expect.isFalse
                     (holds (raidOf 0 @ [ shooter ]) 2)
                     "4,000 hits at 360 would fall in 11 ticks, before 170 kills two blocks in 12; the melee's fall leaves 3,000 at 180, 17"
+
+                // #651, the mirror: our swing is struck back only while the
+                // body striking it back stands. An 8-RANGED 16-MOVE shooter
+                // strikes nothing back, so once the smallMelee falls our
+                // blocks swing free.
+                let lighter =
+                    { hostileIn
+                          "W1N2"
+                          raidTile
+                          (List.replicate 8 RangedAttack @ List.replicate 16 Move) with
+                        Id = "s-1"
+                    }
+
+                Expect.isTrue
+                    (holds (raidOf 0 @ [ lighter ]) 2)
+                    "3,400 hits at 255 fall in 13.3 ticks; the melee's 30 back on our swing for its own 1,000 of them, 9 a tick over the fight, leaves 129 on 1,760 hits, 13.6 (charged the whole fight, 150 killed them in 11.7)"
+            }
+
+            // #651, `intents.js`: a heal drops the healer's swing, so a body
+            // carrying both swings or heals each tick, never both. Each
+            // reading is settled and the worse for us stands.
+            test
+                "a 1-ATTACK 3-HEAL hybrid is priced at its swing where that is the worse for us, not at its larger heal" {
+                let hybrid =
+                    { hostileIn
+                          "W1N2"
+                          raidTile
+                          ([ Attack ] @ List.replicate 3 Heal @ List.replicate 30 Move) with
+                        Id = "hybrid"
+                    }
+
+                Expect.isFalse
+                    (blocksBeat
+                        guardPattern
+                        Stance.Hold
+                        (guardColony [ hybrid ] [] |> banked 2300)
+                        "W1N2"
+                        1)
+                    "healing, 36 against our 180 and 30 back, it falls; swinging, its 30 and 30 back end 940 hits in 16 ticks while 180 needs 19 for its 3,400"
+            }
+
+            // #651: a creep on a rampart takes nothing until the rampart
+            // falls, a heal never puts its hits back, and no swing at it nor
+            // from it is struck back (`attack.js`, `_damage.js`).
+            test
+                "a raider on its own rampart is priced behind it: the rampart broken first, struck back nothing" {
+                let holds colony =
+                    blocksBeat guardPattern Stance.Hold (colony |> banked 2300) "W1N2" 1
+
+                let open' = guardColony (raidOf 0) []
+
+                let walled =
+                    let seen = withOurTowers "W1N2" [] open'
+
+                    { seen with
+                        World =
+                            { seen.World with
+                                Rooms =
+                                    seen.World.Rooms
+                                    |> Map.change
+                                        "W1N2"
+                                        (Option.map (fun room ->
+                                            { room with
+                                                RivalRamparts = Map.ofList [ raidTile, 30_000 ]
+                                            }))
+                            }
+                    }
+
+                Expect.isTrue
+                    (holds open')
+                    "the premise: one block beats a lone smallMelee in the open"
+
+                Expect.isFalse
+                    (holds walled)
+                    "behind 30,000 of rampart its 40 a tick outlasts the block, which takes nothing back off it"
             }
 
             test "two attackers and no healer at all buy the second guard" {

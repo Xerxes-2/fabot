@@ -652,10 +652,14 @@ let massOn
 /// it — or the mass attack (`massOn`, None for a melee body) in place of a
 /// strike in reach, where it deals the targets of that strike's band of the
 /// order (`band`) at least what the strike deals it (`dealt`, each capped by
-/// the target's hits, #563) and the whole order strictly more: a body beside
-/// a lower band, or none of the order, is no reason to spread the blow off
-/// the head, but a free blow on the band below one that loses nothing is.
-/// The full tick
+/// the target's hits, #563), and is worth strictly more over the whole
+/// order: a body beside a lower band, or none of the order, is no reason to
+/// spread the blow off the head, but a free blow on the band below one that
+/// loses nothing is. Blows are worth what `priced` makes of them landing
+/// together (#651, `Facts.blowsWorth`): the share no heal undoes, at each
+/// target's value, so a shot focused beside partners that out-damage the heal
+/// outweighs a spread the heal undoes, and a spread past what the healers can
+/// cover in a tick outweighs a shot one healer undoes. The full tick
 /// strikes only in reach (`strikeOf`); the light tick picks again off its
 /// glance (`LightTick.intents`). In reach first narrows ADR-0056 decision 2
 /// without overturning it: ordered the other way round, a guard standing on
@@ -665,19 +669,26 @@ let massOn
 let pickStrike
     (reaches: 'target -> bool)
     (dealt: 'target -> int)
+    (priced: ('target * int) list -> float)
     (band: 'target -> 'band)
     (mass: ('target -> int) option)
     (order: 'target list)
     : Strike<'target> option =
     match List.tryFind reaches order with
     | Some target ->
-        let single = dealt target
+        // Every plan priced over the whole order, a target it spares at
+        // none, so the heals spent elsewhere are the same in each.
+        let plan (deals: 'target -> int) =
+            priced (order |> List.map (fun t -> t, deals t))
+
+        let single = plan (fun t -> if obj.Equals(t, target) then dealt target else 0)
 
         let outdeals (deals: 'target -> int) =
             let peers = band target
 
-            order |> List.sumBy (fun t -> if band t = peers then deals t else 0) >= single
-            && order |> List.sumBy deals > single
+            order |> List.sumBy (fun t -> if band t = peers then deals t else 0)
+            >= dealt target
+            && plan deals > single
 
         match mass with
         | Some deals when outdeals deals -> Some Mass
@@ -815,14 +826,22 @@ let private strikeOf
             |> Option.map (fun deals (h: HostileInfo) -> deals h.Pos h.Hits)
         | _ -> None
 
-    // The bands are priced only where a mass attack may fire.
-    let band =
+    // The bands and the blows' worth are priced only where a mass attack may
+    // fire.
+    let band, priced =
         match mass with
-        | Some _ -> targets.Band room
-        | None -> fun _ -> 0
+        | Some _ ->
+            let terms, heals = Facts.blowTerms view room creep
+
+            targets.Band room,
+            (fun (blows: (HostileInfo * int) list) ->
+                blows
+                |> List.map (fun (h, damage) -> h.Id, damage)
+                |> Facts.blowsWorth terms heals)
+        | None -> (fun _ -> 0), (fun blows -> blows |> List.sumBy (snd >> float))
 
     strikeOrder view atlas targets fighting creep room
-    |> pickStrike inReach (fun h -> min h.Hits (guns * Engine.rangedAttackPower)) band mass
+    |> pickStrike inReach (fun h -> min h.Hits (guns * Engine.rangedAttackPower)) priced band mass
 
 /// The intent of a strike `strikeOf` picks that the body reaches.
 let private strikeIntent (creep: CreepInfo) (strike: Strike<HostileInfo> option) =
@@ -1337,6 +1356,7 @@ let volleys (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, T
                 shields view room
                 |> Option.map (fun shields ->
                     let band = targets.Band struck
+                    let blows, heals = Facts.blowTerms view struck creep
 
                     creep.Name,
                     {
@@ -1348,6 +1368,8 @@ let volleys (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, T
                             |> List.filter (fun h -> h.Pos.Room = struck)
                             |> List.map (fun h -> h.Id, band h)
                             |> Fresh.mapOfList
+                        Blows = blows
+                        Heals = heals
                     })
             | _ -> None)
         |> Map.ofList

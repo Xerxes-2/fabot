@@ -58,6 +58,53 @@ let rampartDefenderTests =
                     "the first row the cascade casts"
             }
 
+            // #651 (`attack.js`, `_damage.js`): a creep on a rampart takes
+            // nothing until the rampart falls, and no swing at it nor from it
+            // is struck back.
+            test "a defender on its rampart wins the exchange the same body off it loses" {
+                let raider = raidMeleeAt "h-1" { X = 19; Y = 34 }
+                let body = defender "defender-1"
+
+                let wins (at: Pos) =
+                    Facts.bodiesWin
+                        (defenderHome defendedLine [ raider ] [ body, at ])
+                        "W1N1"
+                        [ body ]
+
+                Expect.isFalse
+                    (wins { X = 21; Y = 34 })
+                    "off it: 510 a tick and 510 back off its own swing end 1,200 hits at once"
+
+                Expect.isTrue
+                    (wins { X = 20; Y = 34 })
+                    "on its 95,000-hit rampart: its 180 a tick ends the raider's 3,500 long before the rampart falls"
+
+                // A rampart breaks at the raid's damage and what its
+                // dismantlers reaching it take a tick (`DISMANTLE_POWER` a
+                // WORK at its boost).
+                let dismantler id (pos: Pos) =
+                    boostedAt
+                        Tier3
+                        { hostileIn "W1N1" pos (List.replicate 25 Work @ List.replicate 25 Move) with
+                            Id = id
+                            Owner = "Trepidimous"
+                        }
+
+                Expect.isFalse
+                    (Facts.bodiesWin
+                        (defenderHome
+                            defendedLine
+                            [
+                                raider
+                                dismantler "d-1" { X = 19; Y = 33 }
+                                dismantler "d-2" { X = 19; Y = 35 }
+                            ]
+                            [ body, { X = 20; Y = 34 } ])
+                        "W1N1"
+                        [ body ])
+                    "beside two T3 dismantlers, 10,000 a tick: the rampart falls in nine, and the raider ends the defender first"
+            }
+
             test
                 "no defender for a scout, a miner off the line, a raid inside it, no perimeter rampart, or a home that keeps none" {
                 let outside = { X = 10; Y = 34 }
@@ -808,6 +855,7 @@ let acrossTheBorderTests =
                                             Hostiles = []
                                             HostileFatigue = Map.empty
                                             HostileCargo = Map.empty
+                                            RivalRamparts = Map.empty
                                             InvaderCores = []
                                             // Past the falloff: 150 a tick on every tile we stand on.
                                             Towers = [ "tower-1", { X = 10; Y = 34 } ]

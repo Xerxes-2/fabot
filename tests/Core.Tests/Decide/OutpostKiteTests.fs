@@ -427,9 +427,11 @@ let kiteTests =
 
             // #615 U2: a hybrid as quick as a ranger picks the range, and
             // against a body that deals as much from three it closes to swing
-            // beside its shot.
+            // beside its shot. #651: its heal drops its swing (`intents.js`),
+            // so it is priced at the act worth more, never both: before, its
+            // 70 a tick beside its 36 heal outlasted the pair.
             test
-                "a quick hybrid closes on rangers to swing beside its shot, and two 2-block rangers lose it" {
+                "a quick hybrid closes on rangers to swing beside its shot, and two 2-block rangers win it: it heals or swings, never both" {
                 let hybrid =
                     { hostileIn
                           "W1N2"
@@ -448,9 +450,9 @@ let kiteTests =
                         Bank = bank 1400 1400
                     }
 
-                Expect.isFalse
+                Expect.isTrue
                     (Facts.rowAnswer colony "W1N2").Ranger
-                    "its 70 a tick, focused, kills the first ranger in ~26 ticks and outlasts the second: no ranger row (priced at its shot alone, 40, the pair won)"
+                    "its 36 heal beside its 40 shot (or its 70 unhealed) loses to the pair's 80: the ranger row"
             }
 
             // A part's boost multiplies what it does, as the
@@ -2018,6 +2020,7 @@ let shutChaseTests =
                                                 Hostiles = []
                                                 HostileFatigue = Map.empty
                                                 HostileCargo = Map.empty
+                                                RivalRamparts = Map.empty
                                                 InvaderCores = []
                                                 Towers = []
                                                 OurTowers = []

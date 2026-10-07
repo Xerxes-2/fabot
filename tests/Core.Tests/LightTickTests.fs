@@ -270,6 +270,8 @@ let replayTests =
                                 Guns = 2
                                 Shields = Set.empty
                                 Bands = Map.ofList [ "h-1", 2; "h-2", 2 ]
+                                Blows = Map.empty
+                                Heals = []
                             }
                         ]
 
@@ -324,6 +326,21 @@ let replayTests =
                     (ofRanger (full Map.empty) (shooting []))
                     [ RangedAttackCreep("ranger", "h-1") ]
                     "no volley recorded: the shot"
+
+                // #651: the full tick's blow terms (`Volley.Heals`): a healer
+                // reaching only the second aim, past what a blow deals it.
+                Expect.equal
+                    (ofRanger
+                        (full (
+                            gunned
+                            |> Map.map (fun _ volley ->
+                                { volley with
+                                    Heals = [ Map.ofList [ "h-2", 24 ] ]
+                                })
+                        ))
+                        (shooting []))
+                    [ RangedAttackCreep("ranger", "h-1") ]
+                    "the second aim's heal undoes the mass's 20 on it: the shot on the head"
             }
 
             test
@@ -360,6 +377,8 @@ let replayTests =
                                     Guns = 2
                                     Shields = Set.empty
                                     Bands = Map.ofList [ "melee", 2; "hauler", 4 ]
+                                    Blows = Map.empty
+                                    Heals = []
                                 }
                             ])
 

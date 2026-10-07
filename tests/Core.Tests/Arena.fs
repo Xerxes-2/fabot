@@ -1372,6 +1372,14 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                 |> List.filter (fun b -> b.Side <> Side.Ours && b.Energy + b.Thorium > 0)
                 |> List.map (fun b -> b.Id, b.Energy + b.Thorium)
                 |> Map.ofList
+            // And each rampart another side owns at its hits, by tile, as
+            // `World.seenFacts` reads `FIND_HOSTILE_STRUCTURES` (#651).
+            RivalRamparts =
+                structures
+                |> List.filter (fun (s, kind) ->
+                    kind = BuiltKind.Rampart && s.Owner <> Some Side.Ours && s.Owner <> None)
+                |> List.map (fun (s, _) -> s.At, s.Hits)
+                |> Map.ofList
             // `FIND_HOSTILE_STRUCTURES`' cores, as `World.seenFacts` reads
             // them: a stronghold's with its collapse clock.
             InvaderCores =

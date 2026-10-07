@@ -2578,6 +2578,7 @@ let withOurTowers (room: string) (tiles: Pos list) (colony: ColonyView) =
                 Hostiles = colony.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
                 HostileFatigue = Map.empty
                 HostileCargo = Map.empty
+                RivalRamparts = Map.empty
                 InvaderCores = []
                 Towers = []
                 OurTowers = []

@@ -1445,6 +1445,17 @@ let intents (record: LastFull) (now: Glance) : Intent list =
                             (aimedAt aim)
                         |> Option.flatten
 
+                    // Blows priced by the full tick's terms (`Volley.Blows`,
+                    // `Volley.Heals`, #651); with no volley at their damage.
+                    let priced blows =
+                        match volley with
+                        | Some volley ->
+                            blows
+                            |> List.choose (fun (aim, damage) ->
+                                aimedAt aim |> Option.map (fun target -> target, damage))
+                            |> Decide.Facts.blowsWorth volley.Blows volley.Heals
+                        | None -> blows |> List.sumBy (snd >> float)
+
                     held
                     |> Decide.Emitter.pickStrike
                         (fun aim ->
@@ -1453,6 +1464,7 @@ let intents (record: LastFull) (now: Glance) : Intent list =
                                 RoomPos.range creep.Tile tile |> Option.map (fun r -> r <= reach))
                             |> Option.defaultValue false)
                         dealt
+                        priced
                         band
                         mass
                     |> Option.map (function

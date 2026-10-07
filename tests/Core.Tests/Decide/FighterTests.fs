@@ -417,6 +417,9 @@ let private withForeign (owner: string) (pos: Pos) (colony: ColonyView) =
                 }
     }
 
+/// Blows priced at their damage alone, as `pickStrike` read them before #651.
+let private raw (blows: (string * int) list) = blows |> List.sumBy (snd >> float)
+
 [<Tests>]
 let strikeChoiceTests =
     testList
@@ -469,6 +472,7 @@ let strikeChoiceTests =
                     (Emitter.pickStrike
                         (fun _ -> false)
                         (fun _ -> 20)
+                        raw
                         (fun _ -> 0)
                         (Some(fun _ -> 2))
                         [ "far" ])
@@ -489,6 +493,7 @@ let strikeChoiceTests =
                     (Emitter.pickStrike
                         (fun _ -> true)
                         (fun _ -> 20)
+                        raw
                         band
                         (Some(fun _ -> 20))
                         [ "healer"; "melee" ])
@@ -499,11 +504,62 @@ let strikeChoiceTests =
                     (Emitter.pickStrike
                         (fun _ -> true)
                         (fun _ -> 20)
+                        raw
                         band
                         (Some(fun t -> if t = "healer" then 8 else 20))
                         [ "healer"; "melee" ])
                     (Some(Emitter.At("healer", true)))
                     "the healer at range 2: 8 on it against the shot's 20, the melee's 20 notwithstanding"
+            }
+
+            test
+                "beside a partner, two in the raid's band take the focused shot where the heal undoes the mass's spread (#651)" {
+                // Priced by `Facts.blowsWorth`: a partner deals the head 30
+                // and no heal reaches it, so the shot's 20 on it stands whole;
+                // a healer reaching only the other undoes the mass's 20 on it.
+                let terms = Map.ofList [ "head", (1.0, 30); "other", (1.0, 0) ]
+                let heals = [ Map.ofList [ "other", 30 ] ]
+
+                Expect.equal
+                    (Emitter.pickStrike
+                        (fun _ -> true)
+                        (fun _ -> 20)
+                        (Facts.blowsWorth terms heals)
+                        (fun _ -> 2)
+                        (Some(fun _ -> 20))
+                        [ "head"; "other" ])
+                    (Some(Emitter.At("head", true)))
+                    "20 kept on the head either way, nothing on the other"
+
+                Expect.equal
+                    (Emitter.pickStrike
+                        (fun _ -> true)
+                        (fun _ -> 20)
+                        raw
+                        (fun _ -> 2)
+                        (Some(fun _ -> 20))
+                        [ "head"; "other" ])
+                    (Some Emitter.Mass)
+                    "priced on raw damage it spread the blow: 40 against 20"
+            }
+
+            test
+                "a heal acts on one target a tick: two healers undo a focused 60 and only part of a spread (#651)" {
+                // #623's pair: each heals itself or the other 36; nothing of
+                // ours beside the striker.
+                let terms = Map.ofList [ "near", (1.0, 0); "far", (1.0, 0) ]
+                let both = Map.ofList [ "near", 36; "far", 36 ]
+                let worth = Facts.blowsWorth terms [ both; both ]
+
+                Expect.equal
+                    (worth [ "near", 60; "far", 0 ])
+                    0.0
+                    "the shot: 72 of heal on it undo all 60"
+
+                Expect.equal
+                    (worth [ "near", 60; "far", 24 ])
+                    24.0
+                    "the mass: the heals spent where they undo most still leave 24 standing"
             }
 
             test
