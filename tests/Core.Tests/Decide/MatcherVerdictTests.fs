@@ -161,6 +161,16 @@ let resolverVerdictTests =
             }
         ]
 
+/// The same colony with the extractor's clock reading `ticks` rather than zero
+/// — the five ticks in six on which `harvest.js` refuses the act.
+let private onCooldown ticks (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Cooldowns = Map.add "ext-a" ticks colony.Spatial.Cooldowns
+            }
+    }
+
 [<Tests>]
 let sayTests =
     testList

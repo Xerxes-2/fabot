@@ -873,19 +873,19 @@ let private trackAt (plan: Plan) (name: string) (time: int) : RoomPos option =
     | Some(first, track) when time >= first -> List.tryItem (time - first) track
     | _ -> None
 
-/// Every fact the plans did not account for, in the ADR's order (#549): a
-/// replay is wrong only where the world moved off what a plan was made
-/// against — a raider in a home room, every tick (a home is never a tick
-/// late); a body that can strike something of ours now or after one step
-/// that it could not as the plans were made, unless that is a creep of ours
-/// that strikes it (a cripple whose live parts hurt nothing, or one out of
-/// reach, reaches nothing); a creep of ours that lost hits, unless every body
-/// that could have struck it is one a striker of ours aims at and reaches,
-/// and the loss is within the healing the plans give it; a chaser its plan
-/// stands while its unarmed quarry walks off, if it can close; a creep born or
-/// gone; one on the border ring with no step in; a controller changed — or
-/// where a plan holds an act no replay repeats (a structure's fight), or a
-/// colony has no plan (a cold reset's deferred).
+/// Every fact the plans did not account for (#549), in the order `forced`
+/// takes the first of: a replay is wrong only where the world moved off what
+/// a plan was made against, or a colony has no plan (a cold reset's
+/// deferred, first) — a raider in a home room, every tick (a home is never a
+/// tick late); a body that can strike something of ours now or after one
+/// step that it could not as the plans were made, unless that is a creep of
+/// ours that strikes it (a cripple whose live parts hurt nothing, or one out
+/// of reach, reaches nothing); a plan holding an act no replay repeats (a
+/// structure's fight); a creep born or gone; one on the border ring with no
+/// step in; a creep of ours that lost hits, unless every body that could
+/// have struck it is one a striker of ours aims at and reaches, and the loss
+/// is within the healing the plans give it; a chaser its plan stands while
+/// its unarmed quarry walks off, if it can close; a controller changed.
 let forcing (last: LastFull) (now: Glance) : LightForce list =
     let strikers = strikers last
 

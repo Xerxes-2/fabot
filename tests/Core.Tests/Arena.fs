@@ -15,8 +15,8 @@
 /// tick (`Observe.Danger.foldColony`) and read into the next tick's
 /// [[stand-down]] gate (`Observe.standDown`), as `Main` does (#469); the
 /// first tick merges the danger rows an arena seeds in a colony's log
-/// (`Observe.Danger.ofColonies`), as `Main`'s first tick merges a bundle's
-/// before the world log. What the arena leaves out,
+/// (`Observe.Danger.ofColonies`), the shape a capture seats them in. What the
+/// arena leaves out,
 /// and says so: harassment casting unless named (`withHarass`), the round-robin
 /// replan (every colony is `ReplanTurn.Now`), and light ticks (`LightTick`):
 /// every tick is a full one.

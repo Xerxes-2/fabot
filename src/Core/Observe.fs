@@ -652,30 +652,22 @@ let private workedRooms (view: ColonyView) (declared: string list) : Set<string>
             Decide.Facts.residentRooms view
         ]
 
-/// The tick one core's stand-down runs to, and which deadline it was read
-/// off, in order of availability. `TicksToEnd` is the engine's relative count,
-/// so the tick is this one plus it. The reservation branch may never answer
-/// earlier than the fallback: a core re-reserves the controller the tick the
-/// hold lapses, and one that has just `attackController`'d holds it for three
-/// ticks (`invader-core/reserveController.js`), which read literally would be
-/// a three-tick stand-down.
+/// The tick one stronghold core's stand-down runs to, and which deadline it
+/// was read off: its collapse timer, or the fallback while it carries none —
+/// a deploying stronghold, which gains its timer only once it deploys, some
+/// 5,000 ticks after it lands (`backend/lib/strongholds.js`). No reservation
+/// is read: a stronghold lands in a keeper room, which has no controller, and
+/// one a map gives a controller owns it rather than reserving it.
 let private deadlineOf (view: ColonyView) (core: InvaderCoreInfo) =
     match core.CollapseTick with
     | Some tick -> tick, StandDownBasis.CollapseTimer
-    | None ->
-        view.RoomControl
-        |> Map.tryFind core.RoomName
-        |> Option.bind (RoomControlInfo.heldBy ReservationHolder.Invader)
-        |> Option.filter (fun held -> held.TicksToEnd >= view.Tuning.StandDownFallback)
-        |> Option.map (fun held -> view.Time + held.TicksToEnd, StandDownBasis.Reservation)
-        |> Option.defaultValue (view.Time + view.Tuning.StandDownFallback, StandDownBasis.Fallback)
+    | None -> view.Time + view.Tuning.StandDownFallback, StandDownBasis.Fallback
 
 /// The tick a room another player has reserved stands down to: the end of
 /// that reservation, off the engine's own countdown. A neutral's or an
 /// ally's alone: an enemy's hold is contested, never waited out (#604), so
 /// the room stays worked and its armed bodies are the verdict's
-/// (`raidDeadlines`). No floor, unlike `deadlineOf`'s reservation branch: a
-/// player's claimer that stops coming
+/// (`raidDeadlines`). No floor under it: a player's claimer that stops coming
 /// re-takes nothing. Ownership is not here: the engine gives it no end, so it
 /// stays the latch `RivalHeld` remembers.
 ///
@@ -1857,44 +1849,13 @@ module Danger =
         |> List.groupBy fst
         |> List.map (fun (room, parts) -> room, parts |> List.map snd |> List.maxBy by)
 
-    /// The fight records, taken rooms and probes each colony's log carried
-    /// before the world log took them (the world layer's S5), laid into the rooms
-    /// that hold none (the reset tick's migration): each room's latest fight
-    /// record, its earliest taken tick and its latest probe.
-    let adopt (logs: RaidState list) (danger: Danger) : Danger =
-        let lay (parts: (string * 'a) list) (fill: 'a -> DangerRoom -> DangerRoom) rooms =
-            (rooms, parts)
-            ||> List.fold (fun rooms (room, part) ->
-                Map.add
-                    room
-                    (fill part (Map.tryFind room rooms |> Option.defaultValue quiet))
-                    rooms)
-
-        let rooms =
-            danger.Rooms
-            |> lay (logs |> List.map _.Fought |> latest _.Seen) (fun fight entry ->
-                { entry with
-                    Fight = entry.Fight |> Option.orElse (Some fight)
-                })
-            |> lay (logs |> List.map _.Taken |> latest (fun tick -> -tick)) (fun tick entry ->
-                { entry with
-                    Taken = entry.Taken |> Option.orElse (Some tick)
-                })
-            |> lay (logs |> List.map _.Probes |> latest _.FirstHit) (fun probe entry ->
-                { entry with
-                    Probe = entry.Probe |> Option.orElse (Some probe)
-                })
-
-        { danger with
-            Rooms = rooms |> Map.toSeq |> Fresh.mapOfSeq
-        }
-
-    /// The per-colony logs a bundle before the world log wrote, merged into
-    /// one (the reset tick's migration): each room's standing rows merged
-    /// (`mergeDown`: the max expiry, the OR of the stronghold bit), else its
-    /// latest; the later hold and threat; every latch, on its earliest shut and
-    /// earliest look; the fight records, taken rooms and probes (`adopt`). A
-    /// ring's bounce is read off it before its rows merge.
+    /// Several colony logs merged into one world log — how an arena's first
+    /// tick reads the danger it seeds in a colony's log: each room's standing
+    /// rows merged (`mergeDown`: the max expiry, the OR of the stronghold bit),
+    /// else its latest; the later hold and threat; every latch, on its earliest
+    /// shut and earliest look; each room's latest fight record, earliest taken
+    /// tick and latest probe. A ring's bounce is read off it before its rows
+    /// merge.
     let ofColonies (tuning: Tuning) (tick: int) (logs: RaidState list) : Danger =
         let bounced (ring: OutpostEpisode list) (row: OutpostEpisode) =
             { row with
@@ -1931,16 +1892,24 @@ module Danger =
                 ||> List.fold (fun rooms (room, hold) ->
                     set room (fun entry -> { entry with Hold = Some hold }) rooms)
 
+            let lay (parts: (string * 'a) list) (fill: 'a -> DangerRoom -> DangerRoom) rooms =
+                (rooms, parts)
+                ||> List.fold (fun rooms (room, part) -> set room (fill part) rooms)
+
             (rooms, threats)
             ||> List.fold (fun rooms (room, threat) ->
                 set room (fun entry -> { entry with Threat = Some threat }) rooms)
+            |> lay (logs |> List.map _.Fought |> latest _.Seen) (fun fight entry ->
+                { entry with Fight = Some fight })
+            |> lay (logs |> List.map _.Taken |> latest (fun tick -> -tick)) (fun tick entry ->
+                { entry with Taken = Some tick })
+            |> lay (logs |> List.map _.Probes |> latest _.FirstHit) (fun probe entry ->
+                { entry with Probe = Some probe })
 
-        adopt
-            logs
-            {
-                Rooms = rooms |> Map.toSeq |> Fresh.mapOfSeq
-                Rivals = logs |> List.map _.RivalHeld |> mergeRivals
-            }
+        {
+            Rooms = rooms |> Map.toSeq |> Fresh.mapOfSeq
+            Rivals = logs |> List.map _.RivalHeld |> mergeRivals
+        }
 
     /// The rooms of the standing raid rows a colony prices (`Facts.pricedRooms`
     /// over the rooms it declares, `owned`), off its own log with the world's

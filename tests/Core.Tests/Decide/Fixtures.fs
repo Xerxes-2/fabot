@@ -823,16 +823,6 @@ let withoutMineContainer (colony: ColonyView) =
                 })
     }
 
-/// The same colony with the extractor's clock reading `ticks` rather than zero
-/// — the five ticks in six on which `harvest.js` refuses the act.
-let onCooldown ticks (colony: ColonyView) =
-    { colony with
-        Spatial =
-            { colony.Spatial with
-                Cooldowns = Map.add "ext-a" ticks colony.Spatial.Cooldowns
-            }
-    }
-
 /// A [[miner]]-bodied creep: the row's own block, Work-heavy with **no Carry at
 /// all**, which is the one shape no other row of this colony casts. Store-less,
 /// so it has neither energy nor free capacity to report.
@@ -913,13 +903,6 @@ let withMineralIn id (mineral: Resource) units (colony: ColonyView) =
 
 /// `withMineralIn` for an ore.
 let withOreIn id ore units (colony: ColonyView) = withMineralIn id (Ore ore) units colony
-
-/// The same colony with one ore's dig latched open, as the last decided tick
-/// left it (`ColonyView.DigOpen`).
-let digOpen ore (colony: ColonyView) =
-    { colony with
-        DigOpen = Some(colony.DigOpen |> Option.defaultValue Set.empty |> Set.add ore)
-    }
 
 /// A creep with `units` of one mineral aboard, off the free room it was built
 /// with — `carrying`'s twin one resource over.
@@ -1082,7 +1065,7 @@ let haulColony =
 /// stand on the rock's Seats: "can-far" at (9,9), range 3 of the controller,
 /// and "can-near" at (11,10), range 1. The rock's Post is the far one, and the
 /// near one is the controller's buffer. Both start empty.
-let seatBufferRoom =
+let private seatBufferRoom =
     { spatial
           []
           [
@@ -2221,11 +2204,6 @@ let withoutBankedOre (colony: ColonyView) =
                 Thorium = Map.remove "term-ore" colony.Spatial.Thorium
             }
     }
-
-/// The declared Reactor ours and burning, so the errand is fuelled (#420)
-/// without a Storage whose ore would open the courier programme.
-let withBurningReactor (colony: ColonyView) =
-    colony |> withReactorOwner (Some Ownership.Ours) |> withReactorStore 100
 
 /// The buffer lane: a plain corridor three rows deep, the controller
 /// standing at (10,10) as an obstacle, and its upgrade buffer "can-buf" at

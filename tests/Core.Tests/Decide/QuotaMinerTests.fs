@@ -705,6 +705,13 @@ let mineRoundingTests =
             }
         ]
 
+/// The same colony with one ore's dig latched open, as the last decided tick
+/// left it (`ColonyView.DigOpen`).
+let private digOpen ore (colony: ColonyView) =
+    { colony with
+        DigOpen = Some(colony.DigOpen |> Option.defaultValue Set.empty |> Set.add ore)
+    }
+
 [<Tests>]
 let oreMinerTests =
     testList

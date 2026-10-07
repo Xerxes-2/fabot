@@ -163,7 +163,7 @@ wire("raids: the declared outposts (#162) are written beside the ring, the leaf'
   assert.deepEqual(written.declared, ["W1N2", "W2N1"]);
 });
 
-wire("raids: the danger keys a bundle before the world log wrote are read for the migration and never written back", async () => {
+wire("raids: the danger keys a bundle before the world log wrote are not read and not written back", async () => {
   const written = await raidsThrough({
     ...emptyRaids,
     episodes: [episode],
@@ -176,7 +176,7 @@ wire("raids: the danger keys a bundle before the world log wrote are read for th
   assert.equal(stable(written), stable({ ...emptyRaids, episodes: [episode] }));
 });
 
-wire("raids: the fight records, probes and taken rooms a bundle before the world roster wrote are read for the migration and never written back", async () => {
+wire("raids: the fight records, probes and taken rooms a bundle before the world roster wrote are not read and not written back", async () => {
   const written = await raidsThrough({
     ...emptyRaids,
     episodes: [episode],
@@ -276,20 +276,13 @@ wire("raids: the haul overflow (#508) owes only as a boolean, its fill reads 0 o
 // The world danger log (ADR 0086 S2): one record a room under
 // `observe.world.danger`, each part — the stand-down row, the hold, the threat
 // memory, the exit watch — read alone. Loaded and written back as the raids
-// leaf is; `colonies` lays per-colony leaves beside it for the migration.
-const RULES = "../build/fable/Core/Types/Rules.js";
-
-// `roster` stands the world roster beside the leaf: unless it does, the
-// colonies' legacy fight records, probes and taken rooms are adopted (S5).
-const dangerThrough = async (leaf, colonies = undefined, tick = 1000, roster = undefined) => {
+// leaf is.
+const dangerThrough = async (leaf) => {
   const { loadDanger, saveDanger } = await import(MODULE);
-  const { TuningModule_defaults } = await import(RULES);
   const observe = {};
   if (leaf !== undefined) observe.world = { danger: leaf };
-  if (roster !== undefined) observe.world = { ...observe.world, roster };
-  if (colonies !== undefined) observe.colonies = colonies;
   globalThis.Memory = { fabot: { observe } };
-  saveDanger(loadDanger(TuningModule_defaults, tick));
+  saveDanger(loadDanger());
   return globalThis.Memory.fabot.observe.world.danger;
 };
 
@@ -305,7 +298,7 @@ for (const [name, leaf] of [
   ["a number", 7],
   ["an array", []],
 ]) {
-  wire(`danger: a leaf that is ${name}, with no colony log beside it, reads empty and writes empty`, async () => {
+  wire(`danger: a leaf that is ${name} reads empty and writes empty`, async () => {
     assert.equal(stable(await dangerThrough(leaf)), stable({}));
   });
 }
@@ -342,18 +335,13 @@ wire("danger: every holder's hold round-trips, an enemy's included", async () =>
 // #564: the Fight squad is retired; a record a bundle before it wrote carries
 // the `squad` it latched, which is read as nothing and dropped.
 wire("danger: a fought room with no seen tick costs its part, and a legacy squad key is dropped whatever it holds", async () => {
-  const written = await dangerThrough(
-    {
-      W1N5: { fight: { seen: "soon" }, threat },
-      W1N6: { fight: { seen: 700 } },
-      W1N7: { fight: { seen: 690, squad: 3 } },
-      W1N8: { fight: { seen: 680, squad: "duo", raiders: ["inv-1"] } },
-      W1N9: { fight: null },
-    },
-    undefined,
-    1000,
-    {},
-  );
+  const written = await dangerThrough({
+    W1N5: { fight: { seen: "soon" }, threat },
+    W1N6: { fight: { seen: 700 } },
+    W1N7: { fight: { seen: 690, squad: 3 } },
+    W1N8: { fight: { seen: 680, squad: "duo", raiders: ["inv-1"] } },
+    W1N9: { fight: null },
+  });
 
   assert.equal(
     stable(written),
@@ -367,16 +355,11 @@ wire("danger: a fought room with no seen tick costs its part, and a legacy squad
 });
 
 wire("danger: a fought room's raiders (the Brief's S7) that are no list, or no ids, read as none known", async () => {
-  const written = await dangerThrough(
-    {
-      W1N6: { fight: { seen: 700, raiders: "inv-1" } },
-      W1N7: { fight: { seen: 690, raiders: [3, "", "inv-2"] } },
-      W1N8: { fight: { seen: 680, raiders: [] } },
-    },
-    undefined,
-    1000,
-    {},
-  );
+  const written = await dangerThrough({
+    W1N6: { fight: { seen: 700, raiders: "inv-1" } },
+    W1N7: { fight: { seen: 690, raiders: [3, "", "inv-2"] } },
+    W1N8: { fight: { seen: 680, raiders: [] } },
+  });
 
   assert.equal(
     stable(written),
@@ -389,64 +372,16 @@ wire("danger: a fought room's raiders (the Brief's S7) that are no list, or no i
 });
 
 wire("danger: a probe log (#493) off its shape, or a taken tick (#496) that is no number, costs its part", async () => {
-  const written = await dangerThrough(
-    {
-      W18S26: { probe: probeOut, taken: 930_120 },
-      W17S24: { probe: { ...probeOut, probe: 3 }, taken: "soon" },
-      W17S25: { probe: { ...probeOut, fate: "fled" }, hold },
-      W17S26: { probe: { ...probeOut, ended: undefined } },
-      W17S27: { probe: { ...probeOut, safeMode: "soon" } },
-      W17S28: { probe: null, taken: null },
-    },
-    undefined,
-    1000,
-    {},
-  );
+  const written = await dangerThrough({
+    W18S26: { probe: probeOut, taken: 930_120 },
+    W17S24: { probe: { ...probeOut, probe: 3 }, taken: "soon" },
+    W17S25: { probe: { ...probeOut, fate: "fled" }, hold },
+    W17S26: { probe: { ...probeOut, ended: undefined } },
+    W17S27: { probe: { ...probeOut, safeMode: "soon" } },
+    W17S28: { probe: null, taken: null },
+  });
 
   assert.equal(stable(written), stable({ W18S26: { probe: probeOut, taken: 930_120 }, W17S25: { hold } }));
-});
-
-// The S5 migration: the world log stands and the roster does not, so every
-// colony's legacy fight records, probes and taken rooms are laid in once —
-// the latest record, the earliest taken tick, the latest probe — beside
-// what the log already held. A dead colony's leaf counts like any other.
-const legacyParts = {
-  W15S28: {
-    raids: {
-      fought: { W17S25: { seen: 900, squad: "duo" } },
-      taken: { W18S26: 800 },
-      probes: { W18S26: { ...probeOut, first: 700 } },
-    },
-  },
-  W17S25: {
-    raids: {
-      fought: { W17S25: { seen: 950 }, W1N8: "bad" },
-      taken: { W18S26: 850 },
-      probes: { W18S26: { ...probeOut, first: 750 } },
-    },
-  },
-};
-
-wire("danger: with the world log standing and no roster yet, every colony's fight records, probes and taken rooms are adopted", async () => {
-  const written = await dangerThrough({ W18S26: { hold } }, legacyParts);
-
-  assert.equal(
-    stable(written),
-    stable({
-      W17S25: { fight: { seen: 950 } },
-      W18S26: { hold, taken: 800, probe: { ...probeOut, first: 750 } },
-    }),
-  );
-});
-
-wire("danger: with no world log at all, the fight records, probes and taken rooms merge with the rest", async () => {
-  const written = await dangerThrough(undefined, legacyParts);
-  assert.equal(stable(written.W18S26), stable({ taken: 800, probe: { ...probeOut, first: 750 } }));
-  assert.equal(stable(written.W17S25), stable({ fight: { seen: 950 } }));
-});
-
-wire("danger: once the roster stands, a colony's legacy fight records, probes and taken rooms read as absent", async () => {
-  assert.equal(stable(await dangerThrough({ W18S26: { hold } }, legacyParts, 1000, {})), stable({ W18S26: { hold } }));
 });
 
 wire("danger: a part off its shape costs that part, and a room left with none is dropped", async () => {
@@ -524,74 +459,6 @@ wire("danger: an odd flag reads as none, an off-shape player tick costs the row,
   assert.equal(stable(written), stable({ W1N2: { down: { ...outpost, raiders: ["h2"] } } }));
 });
 
-// The migration: no world log yet, every colony's legacy danger keys merged
-// once. W16S26's bunker is under one colony's row, a longer raid under
-// another's: the merged row keeps the bunker (a wrong merge reopens a
-// stronghold room).
-const legacyColonies = {
-  W15S28: {
-    raids: {
-      outposts: [{ room: "W16S26", opened: 100, last: 120, expiry: 5000, basis: "collapse-timer", stronghold: true }],
-      holds: { W16S27: { holder: "rival", until: 4000 } },
-      threatened: { W17S27: { until: 1100 } },
-      rivalHeld: { W18S26: { since: 900, lastLooked: 970 } },
-    },
-  },
-  W17S29: {
-    raids: {
-      outposts: [
-        { room: "W16S26", opened: 10, last: 20, expiry: 40, basis: "raid-gone" },
-        { room: "W16S26", opened: 900, last: 990, expiry: 6000, basis: "invader-raid", raiders: ["h1"] },
-      ],
-      holds: { W16S27: { holder: "rival", until: 4500 } },
-      threatened: { W17S27: { until: 1050 } },
-      rivalHeld: { W18S26: { since: 950, lastLooked: 960 } },
-    },
-  },
-};
-
-wire("danger: with no world log, every colony's rows, holds and threats merge into one record a room", async () => {
-  const written = await dangerThrough(undefined, legacyColonies);
-
-  assert.equal(
-    stable(written),
-    stable({
-      W16S26: {
-        down: {
-          room: "W16S26",
-          opened: 100,
-          last: 990,
-          expiry: 6000,
-          basis: "invader-raid",
-          stronghold: true,
-          raiders: ["h1"],
-        },
-      },
-      W16S27: { hold: { holder: "rival", until: 4500 } },
-      W17S27: { threat: { until: 1100 } },
-    }),
-  );
-});
-
-wire("danger: a legacy ring's bounce is read off its earlier row in the merge", async () => {
-  const written = await dangerThrough(undefined, {
-    W1N1: {
-      raids: {
-        outposts: [
-          { room: "W1N2", opened: 900, last: 905, expiry: 910, basis: "raid-gone" },
-          { room: "W1N2", opened: 920, last: 990, expiry: 2000, basis: "invader-raid" },
-        ],
-      },
-    },
-  });
-
-  assert.equal(written.W1N2.down.bounced, true);
-});
-
-wire("danger: once the world log stands, a colony's legacy keys read as absent", async () => {
-  assert.equal(stable(await dangerThrough({}, legacyColonies)), stable({}));
-});
-
 // ---- the world raid roster ---------------------------------------------
 
 // The world roster (ADR 0086 S5): `observe.world.roster.<room>.<id>` =
@@ -653,16 +520,11 @@ wire("roster: a fell tick that is no number reads standing, and a key this bundl
 });
 
 wire("danger: a probe log names the colony whose probe it is; one before the world held it names none, and a home that is no string reads as none", async () => {
-  const written = await dangerThrough(
-    {
-      W18S26: { probe: { ...probeProbing, home: "W15S28" } },
-      W17S24: { probe: probeProbing },
-      W17S25: { probe: { ...probeProbing, home: 7 } },
-    },
-    undefined,
-    1000,
-    {},
-  );
+  const written = await dangerThrough({
+    W18S26: { probe: { ...probeProbing, home: "W15S28" } },
+    W17S24: { probe: probeProbing },
+    W17S25: { probe: { ...probeProbing, home: 7 } },
+  });
 
   assert.equal(
     stable(written),
@@ -1807,16 +1669,6 @@ wire("rooms: the rival controllers (#489) are a room-to-facts object; an off-sha
 
 // The world's rival latches (ADR 0086 S2) ride `rivals`: a latched room's
 // entry is `{ o?, since, lastLooked }`, an owner alone stays a bare string.
-// Each `roomsThrough` stands a world log first unless the case says not, so a
-// case reads the leaf and not the migration.
-const roomsBeside = async (value, colonies, world) => {
-  const { loadRoomLatches, saveRoomLatches } = await import(MODULE);
-  const observe = { rooms: value, colonies };
-  if (world) observe.world = { danger: {} };
-  globalThis.Memory = { fabot: { observe } };
-  saveRoomLatches(loadRoomLatches());
-  return globalThis.Memory.fabot.observe.rooms;
-};
 
 wire("rooms: a latched room round-trips with its owner, or without one, and a legacy bare owner stays bare", async () => {
   const leaf = {
@@ -1828,23 +1680,19 @@ wire("rooms: a latched room round-trips with its owner, or without one, and a le
     },
   };
 
-  assert.equal(stable(await roomsBeside(leaf, undefined, true)), stable(leaf));
+  assert.equal(stable(await roomsThrough(leaf)), stable(leaf));
 });
 
 wire("rooms: #275's null latch costs its own entry; a latch off its shape costs the latch and keeps the owner", async () => {
-  const written = await roomsBeside(
-    {
-      ...emptyRooms,
-      rivals: {
-        W1N3: null,
-        W1N4: { since: 100, lastLooked: 150 },
-        W1N5: { o: "Trepidimous", since: "soon" },
-        W1N6: { since: 100 },
-      },
+  const written = await roomsThrough({
+    ...emptyRooms,
+    rivals: {
+      W1N3: null,
+      W1N4: { since: 100, lastLooked: 150 },
+      W1N5: { o: "Trepidimous", since: "soon" },
+      W1N6: { since: 100 },
     },
-    undefined,
-    true,
-  );
+  });
 
   assert.equal(
     stable(written.rivals),
@@ -1856,56 +1704,6 @@ wire("rooms: #275's null latch costs its own entry; a latch off its shape costs 
   );
 });
 
-wire("rooms: with no world log, every colony's latches merge in on the earliest shut and look; once it stands they read absent", async () => {
-  const colonies = {
-    W15S28: { raids: { rivalHeld: { W18S26: { since: 900, lastLooked: 970 } } } },
-    W17S29: { raids: { rivalHeld: { W18S26: { since: 950, lastLooked: 960 }, W19S26: 940 } } },
-  };
-  const leaf = { ...emptyRooms, rivals: { W18S26: "Trepidimous" } };
-
-  assert.equal(
-    stable((await roomsBeside(leaf, colonies, false)).rivals),
-    stable({
-      W18S26: { o: "Trepidimous", since: 900, lastLooked: 960 },
-      W19S26: { since: 940, lastLooked: 940 },
-    }),
-    "one latch a room, the legacy bare tick read as both",
-  );
-
-  assert.equal(
-    stable((await roomsBeside(leaf, colonies, true)).rivals),
-    stable({ W18S26: "Trepidimous" }),
-  );
-});
-
-wire("rooms: the migrating tick's writes alone keep the latches across the next reset", async () => {
-  const { loadRoomLatches, saveRoomLatches, loadDanger, saveDanger, loadRaids, saveRaids, dangerStands } =
-    await import(MODULE);
-  const { TuningModule_defaults } = await import(RULES);
-  const { ofArray } = await import(LIST);
-  globalThis.Memory = {
-    fabot: {
-      observe: {
-        rooms: { ...emptyRooms, rivals: { W18S26: "Trepidimous" } },
-        colonies: { [home]: { raids: { ...emptyRaids, rivalHeld: { W18S26: { since: 900, lastLooked: 960 } } } } },
-      },
-    },
-  };
-  // The tick `Main.fullTick` runs: it saves the latches whenever the load migrated.
-  assert.equal(dangerStands(), false);
-  const latches = loadRoomLatches();
-  saveDanger(loadDanger(TuningModule_defaults, 1000));
-  saveRaids(home, ofArray([]), loadRaids(home));
-  saveRoomLatches(latches);
-
-  assert.equal(globalThis.Memory.fabot.observe.colonies[home].raids.rivalHeld, undefined, "the legacy copy is gone");
-  saveRoomLatches(loadRoomLatches());
-  assert.equal(
-    stable(globalThis.Memory.fabot.observe.rooms.rivals),
-    stable({ W18S26: { o: "Trepidimous", since: 900, lastLooked: 960 } }),
-    "a reset reading Memory alone keeps the latch",
-  );
-});
 
 // ---- the scoring row ----------------------------------------------------
 

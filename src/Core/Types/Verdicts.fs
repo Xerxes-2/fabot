@@ -190,17 +190,6 @@ let footingKindName =
     | FootingKind.ControllerContainer -> "controller-container"
     | FootingKind.Storage -> "storage"
 
-/// The FootingKind a wire name spells, or None for a name this vocabulary
-/// does not have.
-let footingKindOf =
-    reverseOf
-        footingKindName
-        [
-            FootingKind.SourceContainer
-            FootingKind.ControllerContainer
-            FootingKind.Storage
-        ]
-
 /// The wire spelling of each DeclarationKind, on the Layout channel's Memory
 /// leaf beside `footingKindName`. The refusal's own row carries it, because
 /// the operator's next act — which list to move the declaration in — turns
@@ -212,18 +201,6 @@ let declarationKindName =
     | DeclarationKind.Salvage -> "salvage"
     | DeclarationKind.Harass -> "harass"
 
-/// The DeclarationKind a wire name spells, or None for a name this vocabulary
-/// does not have.
-let declarationKindOf =
-    reverseOf
-        declarationKindName
-        [
-            DeclarationKind.Outpost
-            DeclarationKind.Errand
-            DeclarationKind.Salvage
-            DeclarationKind.Harass
-        ]
-
 /// The wire spelling of each OutpostRoadState, on the Layout channel's
 /// Memory leaf.
 let outpostRoadStateName =
@@ -233,19 +210,6 @@ let outpostRoadStateName =
     | OutpostRoadState.Unrouted -> "unrouted"
     | OutpostRoadState.NoContainer -> "no-container"
     | OutpostRoadState.Dark -> "dark"
-
-/// The OutpostRoadState a wire name spells, or None for a name this
-/// vocabulary does not have.
-let outpostRoadStateOf =
-    reverseOf
-        outpostRoadStateName
-        [
-            OutpostRoadState.Planned
-            OutpostRoadState.Unpaid
-            OutpostRoadState.Unrouted
-            OutpostRoadState.NoContainer
-            OutpostRoadState.Dark
-        ]
 
 /// The wire spelling of each TrunkGoal, on the Layout channel's Memory leaf.
 /// A carrying vocabulary: the spawn's id rides beside the name.
@@ -259,15 +223,6 @@ let trunkGoalSpawn =
     function
     | TrunkGoal.Spawn spawn -> Some spawn
     | TrunkGoal.UpgradeArea -> None
-
-/// The TrunkGoal a wire name spells for the spawn the wire carried beside it,
-/// or None — including `spawn` with no id. An empty id is a spawn like any
-/// other here; what counts as a usable id is the caller's.
-let trunkGoalOf =
-    reverseCarrying
-        trunkGoalName
-        ""
-        [ (fun _ -> Some TrunkGoal.UpgradeArea); Option.map TrunkGoal.Spawn ]
 
 /// The wire spelling of each ContainerTarget, on the Layout channel's Memory
 /// leaf beside `trunkGoalName`. A carrying vocabulary like it: the source's
@@ -285,18 +240,6 @@ let containerTargetSource =
     | ContainerTarget.Source source -> Some source
     | ContainerTarget.Controller -> None
     | ContainerTarget.Mineral mineral -> Some mineral
-
-/// The ContainerTarget a wire name spells for the source the wire carried
-/// beside it, or None — including `source` with no id.
-let containerTargetOf =
-    reverseCarrying
-        containerTargetName
-        ""
-        [
-            Option.map ContainerTarget.Source
-            (fun _ -> Some ContainerTarget.Controller)
-            Option.map ContainerTarget.Mineral
-        ]
 
 /// The wire spelling of each StandDownBasis, on the Raid log's Memory leaf,
 /// round-tripped against the union itself by `Core.Tests`.

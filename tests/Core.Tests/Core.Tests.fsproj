@@ -73,6 +73,7 @@
     <Compile Include="Decide/HarassTests.fs" />
     <Compile Include="Decide/LabTests.fs" />
     <Compile Include="Decide/SignatureTests.fs" />
+    <Compile Include="Decide/FighterTests.fs" />
     <Compile Include="Decide/ThreatFixtures.fs" />
     <Compile Include="Decide/ThreatTests.fs" />
     <Compile Include="Decide/ThreatTowerTests.fs" />

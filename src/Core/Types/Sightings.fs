@@ -494,8 +494,7 @@ type InvaderCoreInfo =
         /// Where in that room: the tile a guard stands beside.
         Tile: Pos
         /// The **absolute** tick the core's collapse timer runs out at, or None
-        /// where it carries none, and the deadline is read off the reservation
-        /// it took (`ReservationHolder.Invader`).
+        /// where it carries none, as a stronghold still deploying does.
         CollapseTick: int option
         /// The core's level, and what tells a **stronghold** from the level-0
         /// expansion core beside it (#382): a level-1-and-up core is a bunker
@@ -546,19 +545,20 @@ type StandDownBasis =
     /// arrives, so one field for both would send a body through a room whose
     /// raid outlived its core with four towers standing in it.
     | CollapseTimer
-    /// The end of the reservation the core took with `attackController` —
-    /// what a level-0 core answers with. The measured case on this frontier
-    /// (docs/research/remote-mining.md §8.4).
+    /// The end of the reservation a core took with `attackController`. No
+    /// longer read (a level-0 core opens no stand-down, #487, and a
+    /// stronghold reserves nothing): kept so a row a past bundle wrote still
+    /// decodes.
     | Reservation
-    /// Neither deadline was readable, so the clock is the 2,500-tick
-    /// stronghold expansion period. It errs long deliberately: the gate may
-    /// be wrong only in the direction that costs an outpost's income.
+    /// No collapse timer was readable (a stronghold still deploying), so the
+    /// clock is the 2,500-tick stronghold expansion period. It errs long
+    /// deliberately: the gate may be wrong only in the direction that costs an
+    /// outpost's income.
     | Fallback
     /// The end of the [[reservation]] **another player** holds on the room
     /// (#165): a clock where ownership is a latch, because a hold that decays
-    /// is reversible where ownership is not. No floor under it, unlike
-    /// `Reservation`: a player's claimer that stops coming leaves nothing
-    /// behind, where the Invader's core re-takes the hold it lets lapse.
+    /// is reversible where ownership is not. No floor under it: a player's
+    /// claimer that stops coming leaves nothing behind.
     | RivalReservation
     /// A raid of plain [[invader]] creeps, clocked off the longest life among
     /// them (#257; `HostileInfo.TicksToLive` says why that is a deadline).

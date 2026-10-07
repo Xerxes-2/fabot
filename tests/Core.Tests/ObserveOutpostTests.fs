@@ -878,112 +878,9 @@ let outpostTests =
                     "the room, the tick it opened on, and the tick read off the threat itself"
             }
 
-            test "a core with no collapse timer runs to the end of the reservation it took" {
-                // A level-0 core carries no timer, so its only deadline is the hold it
-                // took. `TicksToEnd` is relative: stored as read it would be a
-                // deadline four thousand ticks after the epoch.
-                let state =
-                    RaidState.empty
-                    |> raidTick
-                        100
-                        (seen [ core outpostRoom None ]
-                         |> visible outpostRoom (heldBy ReservationHolder.Invader 4000))
-
-                Expect.equal
-                    (standDowns state)
-                    [ outpostRoom, 100, 100, 4100, StandDownBasis.Reservation ]
-                    "four thousand ticks left on the hold is a deadline at tick 4,100, not at tick 4,000"
-            }
-
-            test "a hold shorter than the fallback is no deadline at all" {
-                // #136, where a short clock first became observable: the reservation
-                // branch may only ever answer *later* than the fallback. A core
-                // re-reserves the controller the tick the hold lapses, and a core that
-                // has just taken an unreserved controller holds it for three ticks;
-                // read literally that is a three-tick stand-down.
-                //
-                // Pairwise on either side of the 2,500-tick fallback.
-                let heldFor ticks =
-                    RaidState.empty
-                    |> raidTick
-                        100
-                        (seen [ core outpostRoom None ]
-                         |> visible outpostRoom (heldBy ReservationHolder.Invader ticks))
-                    |> standDowns
-
-                Expect.equal
-                    (heldFor 3)
-                    [ outpostRoom, 100, 100, 2600, StandDownBasis.Fallback ]
-                    "a three-tick hold is read as unreadable, and the clock is the one the colony chose"
-
-                Expect.equal
-                    (heldFor 300)
-                    [ outpostRoom, 100, 100, 2600, StandDownBasis.Fallback ]
-                    "and so is a three-hundred-tick one: below the fallback the read never shortens the gate"
-
-                Expect.equal
-                    (heldFor Tuning.defaults.StandDownFallback)
-                    [
-                        outpostRoom,
-                        100,
-                        100,
-                        100 + Tuning.defaults.StandDownFallback,
-                        StandDownBasis.Reservation
-                    ]
-                    "at the fallback's own length the hold reads through, and says so"
-
-                // The basis: "shut until 2,600" and "shut until 2,600 because nothing
-                // could be read" are different answers (#117), so the floor is not a
-                // `max` over the tick with the reason left standing.
-                let basisOf rows =
-                    rows |> List.map (fun (_, _, _, _, basis) -> basis)
-
-                Expect.notEqual
-                    (basisOf (heldFor 300))
-                    (basisOf (heldFor Tuning.defaults.StandDownFallback))
-                    "the two sides of the floor are told apart by the reason, not only by the tick"
-            }
-
-            test
-                "the fallback clock is the colony's tunable, and it is both the floor and the answer" {
-                // `Tuning.StandDownFallback` is read twice in the same rule, as the
-                // deadline for an unreadable clock and as the floor under a short
-                // hold, so moving it has to move both answers together.
-                let shut fallback ticks =
-                    let colony =
-                        seen [ core outpostRoom None ]
-                        |> visible outpostRoom (heldBy ReservationHolder.Invader ticks)
-
-                    RaidState.empty
-                    |> raidTick
-                        100
-                        { colony with
-                            Tuning =
-                                { colony.Tuning with
-                                    StandDownFallback = fallback
-                                }
-                        }
-                    |> standDowns
-
-                Expect.equal
-                    (shut 2500 300)
-                    [ outpostRoom, 100, 100, 2600, StandDownBasis.Fallback ]
-                    "at the shipped 2,500 a three-hundred-tick hold is unreadable and the colony's own clock answers"
-
-                Expect.equal
-                    (shut 200 300)
-                    [ outpostRoom, 100, 100, 400, StandDownBasis.Reservation ]
-                    "at a fallback of 200 the same hold clears the floor and reads through as a reservation"
-
-                Expect.equal
-                    (shut 200 100)
-                    [ outpostRoom, 100, 100, 300, StandDownBasis.Fallback ]
-                    "and the fallback is still the answer under its own floor: 200 ticks from now, said as the colony's choice"
-            }
-
             test "with neither deadline readable the clock is the expansion period" {
-                // A core with no timer in a room nothing holds is the shape the
-                // fallback exists for.
+                // A stronghold still deploying carries no collapse timer for its
+                // first ~5,000 ticks, the shape the fallback exists for.
                 let state = RaidState.empty |> raidTick 100 (seen [ core outpostRoom None ])
 
                 Expect.equal
@@ -993,8 +890,9 @@ let outpostTests =
             }
 
             test "only the invader's own hold is a clock" {
-                // Pairwise, one holder at a time: a rule reading "not ours" would take
-                // a rival's reservation for the core's.
+                // A deploying stronghold, no collapse timer on it, beside one holder
+                // at a time: no hold is the core's clock, so neither moves its
+                // fallback.
                 //
                 // Since #165 a rival's hold is a deadline of its own (300 ticks here):
                 // the ring keeps the **later** of the reads a tick produces for one
@@ -1030,35 +928,28 @@ let outpostTests =
             }
 
             test "a re-read never shortens a stand-down that is already running" {
-                // A later sighting can land on a worse deadline (the core drains our
-                // hold and takes its own at a handful of ticks, or the read falls
+                // A later sighting can land on a worse deadline (the read falls
                 // through to the fallback), and reading that in would cut the
                 // stand-down short. The same rule `deadlines` applies to two cores in
                 // one tick, applied across ticks.
                 let shortened =
                     RaidState.empty
-                    |> raidTick
-                        100
-                        (seen [ core outpostRoom None ]
-                         |> visible outpostRoom (heldBy ReservationHolder.Invader 4000))
+                    |> raidTick 100 (seen [ core outpostRoom (Some 4100) ])
                     |> raidTick 110 (seen [ core outpostRoom None ])
 
                 Expect.equal
                     (standDowns shortened)
-                    [ outpostRoom, 100, 110, 4100, StandDownBasis.Reservation ]
+                    [ outpostRoom, 100, 110, 4100, StandDownBasis.CollapseTimer ]
                     "the window still extends to the sighting, and the clock and the reason it was read off both stand"
 
                 let lengthened =
                     RaidState.empty
                     |> raidTick 100 (seen [ core outpostRoom None ])
-                    |> raidTick
-                        110
-                        (seen [ core outpostRoom None ]
-                         |> visible outpostRoom (heldBy ReservationHolder.Invader 4000))
+                    |> raidTick 110 (seen [ core outpostRoom (Some 4110) ])
 
                 Expect.equal
                     (standDowns lengthened)
-                    [ outpostRoom, 100, 110, 4110, StandDownBasis.Reservation ]
+                    [ outpostRoom, 100, 110, 4110, StandDownBasis.CollapseTimer ]
                     "and a longer deadline is taken, with the basis of the tick that won"
             }
 
@@ -1262,7 +1153,7 @@ let clocklessTests =
                     (held ReservationHolder.Rival)
                     "nor does the third: since #165 the latch is ownership's alone"
 
-                // The NPC's hold is read off the *core* and never off the controller
+                // The NPC's hold is no clock: a stronghold's is its core's
                 // (`deadlineOf`), so a hold with no core standing in the room opens
                 // nothing, where a rival's opens an episode on the spot.
                 Expect.isEmpty
@@ -1996,7 +1887,7 @@ let gateTests =
 
                 // t300 and not t301: `TicksToEnd` counts down to the tick the
                 // reservation is *gone*, and `Expiry` is the first tick the room may
-                // be re-entered, as `deadlineOf` reads the Invader's hold.
+                // be re-entered (`rivalDeadlines`).
                 Expect.isEmpty
                     (shutAt 300 reserved)
                     "on the tick the hold ends the room is back in the pool, nobody having looked"
@@ -2367,8 +2258,7 @@ let worldDangerTests =
     testList
         "the world danger log: one record a room"
         [
-            test
-                "the reset tick's merge keeps a stronghold row a stronghold, whichever colony saw the bunker" {
+            test "the merge keeps a stronghold row a stronghold, whichever colony saw the bunker" {
                 // W16S26: a bunker under W15S28's row, a later raid under
                 // another's. A merge that kept the longer row's bit alone would
                 // let every chain walk back through the towers.
@@ -2435,11 +2325,10 @@ let worldDangerTests =
                     "the later hold"
             }
 
-            // The world layer's S5 migration: the fight records, taken rooms and
-            // probes each colony's log carried, laid into a world log that
-            // already stands.
+            // The fight records, taken rooms and probes an arena seats in each
+            // colony's log, merged into the world log.
             test
-                "the reset tick's adoption lays each room's latest fight record, earliest taken tick and latest probe into the world log" {
+                "the merge lays each room's latest fight record, earliest taken tick and latest probe into the world log" {
                 let fight seen = { Seen = seen; Raiders = Set.empty }
 
                 let probe first =
@@ -2468,25 +2357,10 @@ let worldDangerTests =
                         Probes = Map.ofList [ "W18S26", probe 750 ]
                     }
 
-                let standing =
-                    { Danger.empty with
-                        Rooms =
-                            Map.ofList
-                                [
-                                    "W18S26",
-                                    { Danger.quiet with
-                                        Hold =
-                                            Some
-                                                {
-                                                    Holder = ReservationHolder.Rival
-                                                    Until = 2_000
-                                                }
-                                    }
-                                ]
-                    }
-
-                let adopted = Danger.adopt [ mother; child ] standing
-                let laid = Danger.into adopted RaidState.empty
+                let laid =
+                    Danger.into
+                        (Danger.ofColonies Tuning.defaults 1_000 [ mother; child ])
+                        RaidState.empty
 
                 Expect.equal
                     (laid.Fought, laid.Taken, laid.Probes |> Map.map (fun _ log -> log.FirstHit))
@@ -2494,19 +2368,6 @@ let worldDangerTests =
                      Map.ofList [ "W18S26", 800 ],
                      Map.ofList [ "W18S26", 750 ])
                     "the latest record, the earliest taken tick, the latest probe"
-
-                Expect.equal
-                    (adopted.Rooms
-                     |> Map.tryFind "W18S26"
-                     |> Option.bind _.Hold
-                     |> Option.map _.Until)
-                    (Some 2_000)
-                    "beside what the world log already held"
-
-                Expect.equal
-                    (Danger.into (Danger.adopt [ child ] adopted) RaidState.empty).Taken
-                    laid.Taken
-                    "and a part the world log holds is kept: adopting twice moves nothing"
             }
 
             test

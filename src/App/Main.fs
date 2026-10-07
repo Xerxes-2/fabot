@@ -640,10 +640,8 @@ let private fullTick
     (forcedBy: (int * LightTick.LastFull * LightTick.LightForce list) option)
     : bool =
     // The world danger log's rooms, read once a tick off Memory as each
-    // colony's own log is: every colony's gate stands on them. Absent, the
-    // load migrates the colonies' legacy keys, which this tick's writes drop.
-    let migrating = not (ObserveMemory.dangerStands ())
-    let dangerRooms = ObserveMemory.loadDanger Tuning.defaults Game.time
+    // colony's own log is: every colony's gate stands on them.
+    let dangerRooms = ObserveMemory.loadDanger ()
 
     // A cold heap reads back what the last one wrote, so a rival's dark room
     // stays unentered, a weaned child stays weaned and a held exit stays held
@@ -1395,7 +1393,7 @@ let private fullTick
 
     // The world raid roster: this tick's sightings and tombstones, every
     // room's, kept while some colony's episode reads them. Written every full
-    // tick: its standing marks the fight records' migration done.
+    // tick.
     ObserveMemory.loadRoster ()
     |> Observe.Roster.fold world.Time watch
     |> Observe.Roster.prune
@@ -1411,9 +1409,7 @@ let private fullTick
 
     let latches = { latches with Latched = folded.Rivals }
 
-    // Always on the migrating tick: the merged latches equal what was read,
-    // and `saveRaids` has dropped the only copy Memory held of them.
-    if migrating || latches <> written then
+    if latches <> written then
         ObserveMemory.saveRoomLatches latches
 
     roomLatches <- Some latches

@@ -487,8 +487,7 @@ let private decodeOutpost (raw: obj) : OutpostEpisode =
         // Absent on a legacy row and on one no ranger chases; anything but
         // `true` reads as no chase, which projects nothing.
         Chased = (raw?chased: obj) = box true
-        // Absent on a legacy row: `Danger.ofColonies` reads a legacy ring's
-        // bounce off its earlier rows.
+        // Absent on a legacy row and on one no raid came back to.
         Bounced = (raw?bounced: obj) = box true
         // Absent on a row written before #604: its holder is unread.
         HolderUnread = (raw?read: obj) <> box true
@@ -523,19 +522,6 @@ let private decodeHold (raw: obj) : OutpostHold =
             Until = numberOf raw "until"
         }
 
-// The hold map read back, entry by entry as the latch map is.
-let private holdMapOf (raw: obj) : Map<string, OutpostHold> =
-    if isNull raw then
-        Map.empty
-    else
-        objectEntries raw
-        |> Array.choose (fun (key, value) ->
-            try
-                Some(key, decodeHold value)
-            with _ ->
-                None)
-        |> Map.ofArray
-
 // One remembered raid on the wire: `{ until }`, the tick the guard row stops
 // answering for a room it has gone blind in. An object and not a bare number:
 // `rivalHeld` was a bare number once and growing it a second field on a live
@@ -553,19 +539,6 @@ let private decodeThreat (raw: obj) : ThreatLatch =
         failwith "not a threat latch"
     else
         { Until = numberOf raw "until" }
-
-// The threat map read back, entry by entry as the two maps above are.
-let private threatMapOf (raw: obj) : Map<string, ThreatLatch> =
-    if isNull raw then
-        Map.empty
-    else
-        objectEntries raw
-        |> Array.choose (fun (key, value) ->
-            try
-                Some(key, decodeThreat value)
-            with _ ->
-                None)
-        |> Map.ofArray
 
 // One fought room on the wire: `{ seen, raiders }`, the tick its raid was
 // last seen and the ids standing at that sighting, `raiders` absent while
@@ -593,18 +566,6 @@ let private decodeFight (value: obj) : FightRecord =
             Seen = numberOf value "seen"
             Raiders = idsOf value?raiders |> Fresh.setOfSeq
         }
-
-let private fightMapOf (raw: obj) : Map<string, FightRecord> =
-    if isNull raw then
-        Map.empty
-    else
-        objectEntries raw
-        |> Array.choose (fun (key, value) ->
-            try
-                Some(key, decodeFight value)
-            with _ ->
-                None)
-        |> Map.ofArray
 
 // One room's probe log (#493) on the wire: `{ probe, first, hits, expires,
 // fate, hitAt?, safeMode?, ended?, home? }`, `fate` one of probing, out, died,
@@ -680,18 +641,6 @@ let private decodeProbe (value: obj) : ProbeLog =
                     ""
         }
 
-let private probeMapOf (raw: obj) : Map<string, ProbeLog> =
-    if isNull raw || jsTypeof raw <> "object" then
-        Map.empty
-    else
-        objectEntries raw
-        |> Array.choose (fun (room, value) ->
-            try
-                Some(room, decodeProbe value)
-            with _ ->
-                None)
-        |> Map.ofArray
-
 // One latched room on the wire: `{ since, lastLooked }`, the tick the gate
 // shut on and the tick of the last look, which the next look's stride is
 // measured from.
@@ -732,24 +681,6 @@ let private decodeLatch (raw: obj) : RivalLatch =
                 else
                     tickOf raw?lastLooked
         }
-
-// The latch map read back, entry by entry: the only `try` above this one is
-// `loadRaids`' `leafOr`, which wraps the whole bundle, so an entry throwing
-// past here would empty the episode ring and every stand-down row, and
-// `saveRaids` would write that emptiness back the same tick. A `null` under
-// one room is the likely hand edit (it is how the Memory HTTP API removes a
-// path).
-let private latchMapOf (raw: obj) : Map<string, RivalLatch> =
-    if isNull raw then
-        Map.empty
-    else
-        objectEntries raw
-        |> Array.choose (fun (key, value) ->
-            try
-                Some(key, decodeLatch value)
-            with _ ->
-                None)
-        |> Map.ofArray
 
 // The observe subtree is created on demand and replaced whole only when what
 // stands there is not an object; each writer then assigns its own leaf.
@@ -1093,20 +1024,16 @@ let loadRaids (home: string) : RaidState =
     leafOr RaidState.empty (fun () -> colonyLeaf home "raids") (fun raids ->
         {
             Episodes = raids?episodes |> rowsOf (decodeEpisode >> Some)
-            // The four danger keys a bundle before the world log wrote
-            // (`Danger`): read for `loadDanger`'s migration alone, and absent
-            // once the colony's log is written back. Each of these maps is
-            // absent from a bundle that predates it, and empty is what that
-            // says.
-            Outposts = raids?outposts |> rowsOf (decodeOutpost >> Some)
-            RivalHeld = latchMapOf raids?rivalHeld
-            Holds = holdMapOf raids?holds
-            Threatened = threatMapOf raids?threatened
-            // Likewise the three keys a bundle before the world roster wrote
-            // (the world layer's S5), read for `loadDanger`'s `adopt` alone.
-            Fought = fightMapOf raids?fought
-            Probes = probeMapOf raids?probes
-            Taken = intMapOf raids?taken
+            // The stand-down rows, latches, holds, threats, fight records,
+            // probes and taken rooms are the world's (`loadDanger`,
+            // `loadRoomLatches`): a key an older bundle left here is not read.
+            Outposts = RaidState.empty.Outposts
+            RivalHeld = RaidState.empty.RivalHeld
+            Holds = RaidState.empty.Holds
+            Threatened = RaidState.empty.Threatened
+            Fought = RaidState.empty.Fought
+            Probes = RaidState.empty.Probes
+            Taken = RaidState.empty.Taken
             // `true` and nothing else: `unbox` is erased, so a truthy
             // non-boolean would latch a colony under its reserve (#505).
             ReserveShort =
@@ -1345,63 +1272,28 @@ let private worldLeaf (leaf: string) : obj =
     else
         world?(leaf)
 
-// `Memory.fabot.observe.world.danger` as it stands, or null.
-let private dangerLeaf () : obj = worldLeaf "danger"
+// `Memory.fabot.observe.world.danger` when it holds an object, as every
+// bundle that writes it does, or null.
+let private dangerLeaf () : obj =
+    let value = worldLeaf "danger"
 
-// Whether a world leaf holds an object, as every bundle that writes it does.
-let private worldStands (leaf: string) =
-    let value = worldLeaf leaf
-
-    not (isNull value)
-    && jsTypeof value = "object"
-    && not (JS.Constructors.Array.isArray value)
-
-// Whether the world danger log has been written: until it has, the colonies'
-// legacy danger keys are the record (`loadDanger`, `loadRoomLatches`).
-let dangerStands () = worldStands "danger"
-
-// Every colony's log as it stands under `observe.colonies`, the given-up ones
-// included: what the migration merges.
-let private everyColonyLog () : RaidState list =
-    let colonies = observeLeaf "colonies"
-
-    if isNull colonies || jsTypeof colonies <> "object" then
-        []
+    if jsTypeof value = "object" && not (JS.Constructors.Array.isArray value) then
+        value
     else
-        objectEntries colonies |> Array.map (fst >> loadRaids) |> List.ofArray
-
-// Whether the world roster has been written: until it has, the colonies'
-// legacy fight records, probes and taken rooms are the record (`loadDanger`).
-let rosterStands () = worldStands "roster"
+        null
 
 /// The world danger log's rooms (`Danger`), the latches being the room
-/// latches' (`loadRoomLatches`). An absent leaf is a bundle before the world
-/// log: every colony's legacy rows, holds, threats, fight records, probes and
-/// taken rooms merged into one (`Danger.ofColonies`), once, the tick's write
-/// making the leaf stand. A standing leaf with no world roster beside it is a
-/// bundle before the roster: every colony's legacy fight records, probes and
-/// taken rooms laid in (`Danger.adopt`), once, the tick's roster write
-/// marking it done. A room that will not decode costs that room alone.
-let loadDanger (tuning: Tuning) (tick: int) : Danger =
-    if not (dangerStands ()) then
-        { Danger.ofColonies tuning tick (everyColonyLog ()) with
-            Rivals = Danger.empty.Rivals
-        }
-    else
-        let danger =
-            leafOr Danger.empty dangerLeaf (fun leaf ->
-                { Danger.empty with
-                    Rooms =
-                        objectEntries leaf
-                        |> Array.choose (fun (room, raw) ->
-                            decodeDangerRoom room raw |> Option.map (fun entry -> room, entry))
-                        |> Fresh.mapOfArray
-                })
-
-        if rosterStands () then
-            danger
-        else
-            Danger.adopt (everyColonyLog ()) danger
+/// latches' (`loadRoomLatches`). An absent leaf reads empty, and the tick's
+/// write makes it stand. A room that will not decode costs that room alone.
+let loadDanger () : Danger =
+    leafOr Danger.empty dangerLeaf (fun leaf ->
+        { Danger.empty with
+            Rooms =
+                objectEntries leaf
+                |> Array.choose (fun (room, raw) ->
+                    decodeDangerRoom room raw |> Option.map (fun entry -> room, entry))
+                |> Fresh.mapOfArray
+        })
 
 // The `world` subtree, made an object if what stands there is not one.
 let private ensureWorld () =
@@ -1477,8 +1369,7 @@ let loadRoster () : Roster =
                     if Map.isEmpty decoded then None else Some(room, decoded))
             |> Fresh.mapOfArray)
 
-/// Write the world roster back every full tick, empty or not: its standing
-/// is what marks the fight records' migration done (`rosterStands`).
+/// Write the world roster back every full tick, empty or not.
 let saveRoster (roster: Roster) =
     ensureWorld ()
 
@@ -2093,102 +1984,90 @@ let loadRoomLatches () : RoomLatches =
             Controllers = Map.empty
         }
 
-    let read =
-        leafOr empty (fun () -> observeLeaf "rooms") (fun rooms ->
-            if jsTypeof rooms <> "object" || JS.Constructors.Array.isArray rooms then
-                empty
-            else
-                let rivals = rooms?rivals
-                let towered = rooms?towered
-                let armed = rooms?armed
-                let controllers = rooms?controllers
+    leafOr empty (fun () -> observeLeaf "rooms") (fun rooms ->
+        if jsTypeof rooms <> "object" || JS.Constructors.Array.isArray rooms then
+            empty
+        else
+            let rivals = rooms?rivals
+            let towered = rooms?towered
+            let armed = rooms?armed
+            let controllers = rooms?controllers
 
-                // Each entry the owner's name, or `{ o?, since, lastLooked }`
-                // for a room latched (`decodeLatch`'s rules), its owner
-                // beside the latch while a sighting names one.
-                let entries =
+            // Each entry the owner's name, or `{ o?, since, lastLooked }`
+            // for a room latched (`decodeLatch`'s rules), its owner
+            // beside the latch while a sighting names one.
+            let entries =
+                if
+                    isNull rivals
+                    || jsTypeof rivals <> "object"
+                    || JS.Constructors.Array.isArray rivals
+                then
+                    [||]
+                else
+                    objectEntries rivals |> Array.filter (fun (room, _) -> room.Length > 0)
+
+            let ownerOf (raw: obj) =
+                if nonEmptyString raw then
+                    Some(unbox<string> raw)
+                elif not (isNull raw) && jsTypeof raw = "object" && nonEmptyString raw?o then
+                    Some(unbox<string> raw?o)
+                else
+                    None
+
+            {
+                Rivals =
+                    entries
+                    |> Array.choose (fun (room, raw) ->
+                        ownerOf raw |> Option.map (fun owner -> room, owner))
+                    |> Fresh.mapOfArray
+                Latched =
+                    entries
+                    |> Array.choose (fun (room, raw) ->
+                        if isNull raw || jsTypeof raw <> "object" || isNull raw?since then
+                            None
+                        else
+                            try
+                                Some(room, decodeLatch raw)
+                            with _ ->
+                                None)
+                    |> Fresh.mapOfArray
+                Towered =
+                    if isNull towered || not (JS.Constructors.Array.isArray towered) then
+                        Set.empty
+                    else
+                        towered
+                        |> unbox<obj[]>
+                        |> Array.filter nonEmptyString
+                        |> Array.map unbox<string>
+                        |> Fresh.setOfSeq
+                // Absent on a leaf an older bundle wrote: nothing remembered.
+                Armed =
                     if
-                        isNull rivals
-                        || jsTypeof rivals <> "object"
-                        || JS.Constructors.Array.isArray rivals
+                        isNull armed
+                        || jsTypeof armed <> "object"
+                        || JS.Constructors.Array.isArray armed
                     then
-                        [||]
+                        Map.empty
                     else
-                        objectEntries rivals |> Array.filter (fun (room, _) -> room.Length > 0)
-
-                let ownerOf (raw: obj) =
-                    if nonEmptyString raw then
-                        Some(unbox<string> raw)
-                    elif not (isNull raw) && jsTypeof raw = "object" && nonEmptyString raw?o then
-                        Some(unbox<string> raw?o)
+                        intMapOf armed
+                        |> Map.toArray
+                        |> Array.filter (fun (room, _) -> room.Length > 0)
+                        |> Fresh.mapOfArray
+                // Absent on a leaf an older bundle wrote: nothing remembered.
+                Controllers =
+                    if
+                        isNull controllers
+                        || jsTypeof controllers <> "object"
+                        || JS.Constructors.Array.isArray controllers
+                    then
+                        Map.empty
                     else
-                        None
-
-                {
-                    Rivals =
-                        entries
+                        objectEntries controllers
+                        |> Array.filter (fun (room, _) -> room.Length > 0)
                         |> Array.choose (fun (room, raw) ->
-                            ownerOf raw |> Option.map (fun owner -> room, owner))
+                            decodeRivalController raw |> Option.map (fun c -> room, c))
                         |> Fresh.mapOfArray
-                    Latched =
-                        entries
-                        |> Array.choose (fun (room, raw) ->
-                            if isNull raw || jsTypeof raw <> "object" || isNull raw?since then
-                                None
-                            else
-                                try
-                                    Some(room, decodeLatch raw)
-                                with _ ->
-                                    None)
-                        |> Fresh.mapOfArray
-                    Towered =
-                        if isNull towered || not (JS.Constructors.Array.isArray towered) then
-                            Set.empty
-                        else
-                            towered
-                            |> unbox<obj[]>
-                            |> Array.filter nonEmptyString
-                            |> Array.map unbox<string>
-                            |> Fresh.setOfSeq
-                    // Absent on a leaf an older bundle wrote: nothing remembered.
-                    Armed =
-                        if
-                            isNull armed
-                            || jsTypeof armed <> "object"
-                            || JS.Constructors.Array.isArray armed
-                        then
-                            Map.empty
-                        else
-                            intMapOf armed
-                            |> Map.toArray
-                            |> Array.filter (fun (room, _) -> room.Length > 0)
-                            |> Fresh.mapOfArray
-                    // Absent on a leaf an older bundle wrote: nothing remembered.
-                    Controllers =
-                        if
-                            isNull controllers
-                            || jsTypeof controllers <> "object"
-                            || JS.Constructors.Array.isArray controllers
-                        then
-                            Map.empty
-                        else
-                            objectEntries controllers
-                            |> Array.filter (fun (room, _) -> room.Length > 0)
-                            |> Array.choose (fun (room, raw) ->
-                                decodeRivalController raw |> Option.map (fun c -> room, c))
-                            |> Fresh.mapOfArray
-                })
-
-    // Before the world log was first written, the latches are still the
-    // colonies': every one merged in, once (`Danger.mergeRivals`).
-    if dangerStands () then
-        read
-    else
-        { read with
-            Latched =
-                read.Latched :: (everyColonyLog () |> List.map _.RivalHeld)
-                |> Danger.mergeRivals
-        }
+            })
 
 /// Write the room latches whole: the rivals as a room-to-owner object, each
 /// latched room's entry `{ o?, since, lastLooked }`, the towers as a room-name

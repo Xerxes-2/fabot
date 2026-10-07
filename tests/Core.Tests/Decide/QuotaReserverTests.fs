@@ -563,6 +563,11 @@ let reserverRowTests =
             }
         ]
 
+/// The declared Reactor ours and burning, so the errand is fuelled (#420)
+/// without a Storage whose ore would open the courier programme.
+let private withBurningReactor (colony: ColonyView) =
+    colony |> withReactorOwner (Some Ownership.Ours) |> withReactorStore 100
+
 [<Tests>]
 let reclaimerRowTests =
     testList
