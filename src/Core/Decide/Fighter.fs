@@ -86,6 +86,12 @@ module Fighter =
             hits
             (Engine.toughHits body boosts hits)
 
+    /// The fight of a body of these live part counts, unboosted, at these
+    /// hits: a block count's or a creep's counts as the pricing reads them,
+    /// its gait off the counts alone (`Gait.ofParts`).
+    let ofCounts (counts: BodyPart -> int) (hits: int) : Fighter =
+        ofPower counts (Gait.ofParts counts) hits 0
+
     /// A living creep of ours' fight: its live parts, unboosted (no body of
     /// ours is boosted at spawn yet), at `Arrival.gaitOf`.
     let ofCreep (creep: CreepInfo) : Fighter =
@@ -102,8 +108,8 @@ module Fighter =
     /// Whether a body stands off a hostile class (#615 U1): it holds at its
     /// own reach outside the class's strike, which it can only where the
     /// class strikes shorter than it reaches and falls behind it on plain
-    /// (`Gait.fallsBehind`, #613's ground, the reading `Facts.cannotClose`
-    /// admits a kite by). The faster side picks the standoff, and a tie is
+    /// (`Gait.fallsBehind`, #613's ground, the reading `Facts.standoff`
+    /// prices a kite by). The faster side picks the standoff, and a tie is
     /// the class's: it can close.
     let standsOff (fighter: Fighter) (cls: HostileClass) : bool =
         cls.Strike < fighter.Reach
@@ -111,6 +117,16 @@ module Fighter =
             | None, Some _ -> true
             | Some pace, Some ours -> pace.Plain > ours
             | _, None -> false)
+
+    /// The range a body picks where the pick is its own (#615 U2): the
+    /// farthest it deals its most from, so a ranger holds three and a body
+    /// that swings closes to one: what it deals falls with range, so its
+    /// reach is the farthest where its reach deals what a swing's range does.
+    let bestRange (fighter: Fighter) : int =
+        if fighter.DamageAt fighter.Reach >= fighter.DamageAt Engine.meleeRange then
+            max Engine.meleeRange fighter.Reach
+        else
+            Engine.meleeRange
 
     /// Whether a body's standoff is its target's tile (#615 U1): its reach is
     /// a swing, so it closes to one and steps after the target onto the tile

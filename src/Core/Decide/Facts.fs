@@ -805,14 +805,6 @@ let internal disturbs (view: ColonyView) (residentRooms: Set<string>) (hostile: 
            || healerAtHome view hostile && mayStrike view residentRooms hostile)
     || trespasser view Set.empty hostile
 
-/// Whether a ranged body of these part counts holds the range on a hostile
-/// for as long as it likes (#510): the hostile shoots nothing, and falls
-/// behind ours on plain (`Gait.fallsBehind`), ours read off
-/// its live parts, the hostile's among `side` (`HostileInfo.effectiveParts`).
-let internal cannotClose (side: HostileInfo list) (ours: BodyPart -> int) (hostile: HostileInfo) =
-    not (HostileInfo.shoots side hostile)
-    && Gait.fallsBehind (Gait.ofParts ours) (HostileInfo.gait side hostile)
-
 /// The tiles of one projected room the strike rules ask after, read off its
 /// layer once: its sources', its controller's, and its standing ramparts not
 /// ours (`underForeignRampart`), these by tile index (`indexOf`) where the
@@ -945,77 +937,91 @@ let private damageOf (parts: BodyPart -> int) =
     Engine.attackPower * parts Attack
     + Engine.rangedAttackPower * parts RangedAttack
 
-/// Whether a hostile is slower than a body of these part counts on plain, the
-/// ground a fight crosses: it cannot keep off that body's swing.
-let private slowerOnPlain (side: HostileInfo list) (ours: BodyPart -> int) (hostile: HostileInfo) =
-    match
-        Gait.ticks Gait.plain (HostileInfo.gait side hostile),
-        Gait.ticks Gait.plain (Gait.ofParts ours)
-    with
-    | None, _ -> true
-    | Some theirs, Some mine -> theirs > mine
-    | Some _, None -> false
+/// Whether a hostile closes onto a body of ours where the range is its own to
+/// pick (#535): it carries an ATTACK in effect and closing costs it nothing
+/// it keeps off at its shot's range — the body deals as much from three as
+/// from one, so the hostile closes to swing beside its shot —, or its swing
+/// is its weapon, matching or outdealing its shot (the engine's smallMelee,
+/// one gun beside its ATTACK, closes on a swing too); or it is an Invader
+/// carrying a live ATTACK, which walks onto its target whatever else it
+/// carries (#568: `findAttack.js` reads the active parts, never healed-back
+/// ones). Anything else keeps its shot's range: a body fighting with its gun
+/// against a swing, one token ATTACK among its guns not bringing it in, and
+/// its healers behind it; an Invader with no ATTACK, which flees every
+/// hostile inside three; and a body with no weapon, which keeps off a swing
+/// and never off a shot.
+let private closesIn (side: HostileInfo list) (fighter: Fighter) (hostile: HostileInfo) : bool =
+    let parts = HostileInfo.effectivePower side hostile
 
-/// Whether a melee swing reaches a raider (#535): one whose gun is not its
-/// weapon — no RANGED_ATTACK in effect, or a swing that outdeals its shot
-/// (the engine's smallMelee, one gun beside its ATTACK, closes) — so it must
-/// close to hurt our work; or one that cannot keep away, rooted, an Invader
-/// carrying ATTACK or slower than ours on plain, the ground a fight crosses.
-/// A body fighting with its gun, as quick as ours, keeps its range for as
-/// long as it likes, and its healers behind it: one token ATTACK among its
-/// guns does not bring it in. Penned in its room is no reach (#568): an
-/// Invader with no ATTACK flees every hostile inside three
-/// (`findAttack.js`), and kites a melee guard to death inside its room.
-let internal swingReaches (side: HostileInfo list) (ours: BodyPart -> int) (raider: HostileInfo) =
-    let parts = HostileInfo.effectivePower side raider
+    parts Attack > 0
+    && (fighter.DamageAt Engine.rangedRange >= fighter.DamageAt Engine.meleeRange
+        || Engine.attackPower * parts Attack
+           >= Engine.rangedAttackPower * parts RangedAttack)
+    || not (HostileInfo.crossesExits hostile)
+       && List.contains Attack (Engine.liveParts hostile.Body hostile.Hits)
 
-    Engine.attackPower * parts Attack
-    >= Engine.rangedAttackPower * parts RangedAttack
-    || HostileInfo.stationary side raider
-    // An Invader with a live ATTACK walks onto its target whatever else it
-    // carries: `findAttack.js` reads the active parts, never healed-back ones.
-    || not (HostileInfo.crossesExits raider)
-       && List.contains Attack (Engine.liveParts raider.Body raider.Hits)
-    || slowerOnPlain side ours raider
+/// The range a body of ours and one hostile fight at (#615 U2), the faster
+/// side's pick on plain, the ground a fight crosses, a tie the hostile's
+/// (`Fighter.standsOff`). Ours where the hostile falls behind it
+/// (`Gait.fallsBehind`) or cannot keep away, rooted on its legs
+/// (`HostileInfo.stationary`) or at its work (`rootedAtWork`): its reach
+/// where the hostile strikes shorter, the standoff a kite holds (#510), else
+/// where it deals most (`Fighter.bestRange`). Else the hostile's
+/// (`closesIn`): onto us, or its shot's range, which keeps it off a swing.
+let internal standoff (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : int =
+    let side = view.Hostiles
+    let gait = HostileInfo.gait side hostile
+    let strike = HostileInfo.weaponRange side hostile |> Option.defaultValue 0
+    // `Fighter.standsOff`'s reading, its pace read once.
+    let behind = Gait.fallsBehind fighter.Gait gait
 
-/// Whether a body of these part counts brings its swing to bear on one
-/// hostile (#535): one that is no raider, or a raider its swing reaches
-/// (`swingReaches`).
-let internal swingBorneOn (side: HostileInfo list) (ours: BodyPart -> int) (hostile: HostileInfo) =
-    not (HostileInfo.raider side hostile) || swingReaches side ours hostile
-
-/// What a body of these part counts brings to bear a tick on a raid (#535):
-/// its shot in full, and its swing only where it reaches every raider of the
-/// raid (`swingReaches`). A melee body that kills the ones that close and is
-/// kept off by a shooter clears nothing, so against a raid holding one its
-/// swing is priced at nothing: the named stand-in for a reach-aware exchange.
-let private borneDamage (side: HostileInfo list) (raid: HostileInfo list) (ours: BodyPart -> int) =
-    let swing =
-        if ours Attack > 0 && raid |> List.forall (swingBorneOn side ours) then
-            Engine.attackPower * ours Attack
-        else
-            0
-
-    swing + Engine.rangedAttackPower * ours RangedAttack
-
-/// Whether the [[defender]] meets one body of the raid at the home's line
-/// (#546, #552): a raider its swing reaches (`swingReaches`), which must
-/// close to hurt our work and so comes to the defender's rampart, a body
-/// working with a WORK beside it, or a healer, which comes with its melee. A
-/// shooter keeping its range never comes.
-let internal defenderMeets (side: HostileInfo list) (hostile: HostileInfo) : bool =
-    if HostileInfo.raider side hostile then
-        swingReaches side (partCountIn defenderPattern.Block) hostile
+    if behind && strike < fighter.Reach then
+        fighter.Reach
+    elif
+        behind
+        || Gait.stationary gait
+        // Only a body with no weapon is rooted at work (`onDigSeat`), or
+        // brought to a swing by its claim (#550).
+        || strike = 0 && rootedAtWork view hostile
+    then
+        Fighter.bestRange fighter
+    elif closesIn side fighter hostile then
+        Engine.meleeRange
     else
-        HostileInfo.works side hostile || HostileInfo.heals side hostile
+        Engine.rangedRange
 
-/// Whether the guard's swing catches a [[trespasser]] (#550): one rooted at
-/// its work (`rootedAtWork`), or one slower than the guard on plain. A hauler
-/// at the guard's pace keeps off a swing and never off a shot, so the guard
-/// row answers the ones it catches and the ranger row the rest.
-let internal guardCatches (view: ColonyView) (trespasser: HostileInfo) : bool =
-    rootedAtWork view trespasser
-    || slowerOnPlain view.Hostiles (partCountIn guardPattern.Block) trespasser
+/// Whether a body of ours strikes a hostile at their standoff (`standoff`):
+/// what the guard's swing catches of a [[trespasser]] (#550) — a hauler at its
+/// pace keeps off a swing and never off a shot — and the [[defender]] meets of
+/// a raid at the home's line (#546), where a raider that must close to hurt
+/// our work comes to its rampart and a shooter keeping its range never does.
+let internal strikesAtStandoff (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : bool =
+    fighter.DamageAt(standoff view fighter hostile) > 0
+
+/// A row's block counts `blocks` times over.
+let internal blocksOf (block: BodyPart list) (blocks: int) : BodyPart -> int =
+    let counts = partCountIn block
+    fun part -> blocks * counts part
+
+/// One body of one block of a row's pattern, as the pricing reads it: a body
+/// of whole blocks walks at one block's pace, and fights at its ranges.
+let private oneBlockOf (pattern: BodyPattern) : Fighter =
+    Fighter.ofCounts (blocksOf pattern.Block 1) (Engine.partHits * List.length pattern.Block)
+
+let private guardBlock = oneBlockOf guardPattern
+let private rangerBlock = oneBlockOf rangerPattern
+let private defenderBlock = oneBlockOf defenderPattern
+
+/// `oneBlockOf`, the fighting rows' read once.
+let internal blockFighter (pattern: BodyPattern) : Fighter =
+    if pattern.Name = guardPattern.Name then guardBlock
+    elif pattern.Name = rangerPattern.Name then rangerBlock
+    elif pattern.Name = defenderPattern.Name then defenderBlock
+    else oneBlockOf pattern
+
+/// One body of `blocks` whole blocks of a row's pattern.
+let internal blocksFighter (pattern: BodyPattern) (blocks: int) : Fighter =
+    Fighter.ofCounts (blocksOf pattern.Block blocks) (blocks * (blockFighter pattern).Hits)
 
 /// What a body of ours heals itself a tick while it fights: a ranged body's
 /// heal acts beside its shot (#411), and a melee body's is suppressed by its
@@ -1250,8 +1256,15 @@ type private RaidPrice =
 /// Healers are priced in the healing and never in the hits. Its boosted TOUGH
 /// is charged once, in the damage that breaks it (`HostileInfo.damageFor`),
 /// the healing meanwhile on the armed body it costs most: a T3 TOUGH in front
-/// makes each hit healed on it cost three of our damage and a third.
-let private raidPrice (view: ColonyView) (window: int) (raid: HostileInfo list) : RaidPrice =
+/// makes each hit healed on it cost three of our damage and a third. Each
+/// armed body deals what reaches from the range it fights ours at
+/// (`rangeOf`, `damageAt`, #615 U2): a swing's range for all of it.
+let private raidPrice
+    (view: ColonyView)
+    (window: int)
+    (rangeOf: HostileInfo -> int)
+    (raid: HostileInfo list)
+    : RaidPrice =
     let armed =
         raid
         |> List.filter (fun h ->
@@ -1265,8 +1278,9 @@ let private raidPrice (view: ColonyView) (window: int) (raid: HostileInfo list) 
     {
         Breaches = raid |> List.exists (fun h -> ourRoom view h.Pos.Room && endangersOurs view h)
         Damage =
-            raid
-            |> List.sumBy (fun h -> damageOf (HostileInfo.powerWithin window view.Hostiles h))
+            armed
+            |> List.sumBy (fun h ->
+                damageAt (HostileInfo.powerWithin window view.Hostiles h) (rangeOf h))
         Healing = healing
         ToughHealing =
             match tough with
@@ -1346,131 +1360,294 @@ let private focusedAgainst (price: RaidPrice) beside (bodies: int) damage heal h
 
         fight bodies (float price.Tough) (float price.Hits)
 
-/// Whether our side wins the exchange against a raid (`wonAgainst` its
-/// `raidPrice`): what stands beside our bodies (`beside` damage and
-/// `besideHits`, a home's towers) and the bodies themselves, each dealing
-/// what it brings to bear on this raid (`borneDamage`, #535) and healing
-/// itself as it fights (`selfHealOf`).
+/// How a body of ours meets the raid it is priced against (#615 U2).
+[<RequireQualifiedAccess>]
+type Stance =
+    /// It holds its post, which the raid must come to to hurt our work: both
+    /// sides at a swing's range, every weapon in full (#531: the guard holds
+    /// the post whatever it can reach).
+    | Hold
+    /// The faster side picks the range (`standoff`): a body kept outside its
+    /// reach deals nothing, and a raid it stands off deals it nothing.
+    | Standoff
+
+/// The range a body of ours fights a raid at (#535): the farthest any of its
+/// raiders holds it at (`standoff`), so a swing kept off by one shooter
+/// clears nothing, the ones that close dying to the rest of our side.
+let private rangeOn (view: ColonyView) (raid: HostileInfo list) (fighter: Fighter) : int =
+    raid
+    |> List.fold
+        (fun range h ->
+            if HostileInfo.raider view.Hostiles h then
+                max range (standoff view fighter h)
+            else
+                range)
+        Engine.meleeRange
+
+/// The range a hostile fights our side at: the nearest any of our fighters
+/// stands to it (`standoff`), a swing's with none of them there.
+let private rangeFrom (view: ColonyView) (fighters: Fighter list) (hostile: HostileInfo) : int =
+    match fighters with
+    | [] -> Engine.meleeRange
+    | _ -> fighters |> List.map (fun fighter -> standoff view fighter hostile) |> List.min
+
+/// For each of our fighters, aligned with them, the range it deals from
+/// (`rangeOn`) and the range it heals at: the nearest any raider stands to
+/// it, so a guard a shooter keeps off while a melee closes on it swings at
+/// that melee and heals nothing. And `rangeFrom` for each armed body of the
+/// raid, every pair's `standoff` read once.
+let private rangesBetween
+    (view: ColonyView)
+    (fighters: Fighter list)
+    (raid: HostileInfo list)
+    : (int * int) list * (HostileInfo -> int) =
+    let rows =
+        raid
+        |> List.filter (HostileInfo.armed view.Hostiles)
+        |> List.map (fun h ->
+            h,
+            HostileInfo.raider view.Hostiles h,
+            fighters |> List.map (fun fighter -> standoff view fighter h))
+
+    let ours =
+        fighters
+        |> List.mapi (fun i _ ->
+            let raiders =
+                rows
+                |> List.choose (fun (_, raider, ranges) ->
+                    if raider then Some(List.item i ranges) else None)
+
+            match raiders with
+            | [] -> Engine.meleeRange, Engine.meleeRange
+            | _ -> max Engine.meleeRange (List.max raiders), List.min raiders)
+
+    let theirs (hostile: HostileInfo) =
+        match rows |> List.tryFind (fun (h, _, _) -> obj.ReferenceEquals(h, hostile)) with
+        | Some(_, _, (_ :: _ as ranges)) -> List.min ranges
+        | Some _ -> Engine.meleeRange
+        | None -> rangeFrom view fighters hostile
+
+    ours, theirs
+
+/// What a fighter deals a raid a tick at the range it fights it at.
+let private dealtOn (view: ColonyView) (raid: HostileInfo list) (fighter: Fighter) : int =
+    fighter.DamageAt(rangeOn view raid fighter)
+
+/// Whether damage ends a raid that strikes nothing back (#510): it outruns
+/// the heal acting there priced on the raider it costs least
+/// (`HostileInfo.damageFor`), the one a kite kills first.
+let private kitesDown (price: RaidPrice) (raiders: HostileInfo list) (damage: int) =
+    damage > (raiders |> List.map (fun h -> HostileInfo.damageFor h price.Healing) |> List.min)
+
+/// How an exchange at the standoff comes out (#615 U2).
+type internal Outcome =
+    | Lost
+    /// Its raid strikes nothing at the range (every raider stood off,
+    /// `Fighter.standsOff`) and our damage, every body's together, outruns
+    /// its heal (`kitesDown`).
+    | Kites
+    /// Its raid strikes back and our clock beats its.
+    | Trades
+
+/// Whether a set of bodies ends the raid, trading or kiting it down: what
+/// every win, count and size reads. Only a row's own answer tells the two
+/// apart (`rowAnswer`), a raid its row only kites being the verdict's Kite.
+let internal won (outcome: Outcome) = outcome <> Lost
+
+/// Settles an exchange whose raid is priced at the ranges it fights at:
+/// kited where the raiders a fighter of ours stands off (`kited`, none
+/// holding the post) strike nothing there, else traded by `trade`.
+let private settle
+    (price: RaidPrice)
+    (kited: HostileInfo list)
+    (damage: int)
+    (trade: RaidPrice -> bool)
+    : Outcome =
+    if price.Damage = 0 && not (List.isEmpty kited) then
+        if kitesDown price kited damage then Kites else Lost
+    elif trade price then
+        Trades
+    else
+        Lost
+
+/// One exchange against a raid (#615 U2): what stands beside our bodies
+/// (`beside` damage and `besideHits`, a home's towers) and the bodies
+/// themselves, each at the range it fights at under `stance`, dealing what
+/// reaches from there and healing itself as it fights there
+/// (`Fighter.HealAt`), the raid dealing what reaches from its ranges.
 let private exchangeAgainst
     (view: ColonyView)
     (window: int)
     (raid: HostileInfo list)
+    (stance: Stance)
     (beside: int)
     (besideHits: int)
-    (bodies: ((BodyPart -> int) * int) list)
-    : bool =
-    wonAgainst
-        (raidPrice view window raid)
-        (beside
-         + List.sumBy (fun (ours, _) -> borneDamage view.Hostiles raid ours) bodies)
-        (List.sumBy (fst >> selfHealOf) bodies)
-        (besideHits + List.sumBy snd bodies)
+    (fighters: Fighter list)
+    : Outcome =
+    let ours, theirs, kited =
+        match stance, fighters with
+        | Stance.Hold, _
+        | _, [] ->
+            List.map (fun _ -> Engine.meleeRange, Engine.meleeRange) fighters,
+            (fun _ -> Engine.meleeRange),
+            []
+        | Stance.Standoff, _ ->
+            let ours, theirs = rangesBetween view fighters raid
+            ours, theirs, raid |> List.filter (HostileInfo.raider view.Hostiles)
 
-/// `exchangeAgainst` the raid standing in one room, read at the window to
-/// close and strike (`Reaction.strike`): our bodies, by part counts and hits,
-/// beside our towers there (`ourTowersOn`); never under towers not ours
+    let ranges = List.zip fighters ours
+
+    let damage =
+        beside
+        + List.sumBy (fun (fighter: Fighter, (range, _)) -> fighter.DamageAt range) ranges
+
+    settle (raidPrice view window theirs raid) kited damage (fun price ->
+        wonAgainst
+            price
+            damage
+            (List.sumBy (fun (fighter: Fighter, (_, healing)) -> fighter.HealAt healing) ranges)
+            (besideHits + List.sumBy (fun (fighter: Fighter, _) -> fighter.Hits) ranges))
+
+/// `exchangeAgainst` the raid standing in one room at the standoff, read at
+/// the window to close and strike (`Reaction.strike`): our fighters beside
+/// our towers there (`ourTowersOn`); Lost under towers not ours
 /// (`underRivalTowers`).
+let private exchangeIn (view: ColonyView) (room: string) (fighters: Fighter list) : Outcome =
+    let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+
+    if underRivalTowers view room then
+        Lost
+    else
+        exchangeAgainst
+            view
+            Reaction.strike
+            raid
+            Stance.Standoff
+            (ourTowersOn view room raid)
+            0
+            fighters
+
+/// Whether our bodies, by part counts and hits, win `exchangeIn`.
 let internal exchangeWon
     (view: ColonyView)
     (room: string)
     (bodies: ((BodyPart -> int) * int) list)
     =
-    let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
-
-    not (underRivalTowers view room)
-    && exchangeAgainst view Reaction.strike raid (ourTowersOn view room raid) 0 bodies
+    exchangeIn view room (bodies |> List.map (fun (parts, hits) -> Fighter.ofCounts parts hits))
+    |> won
 
 /// Whether these creeps of ours, together, win the raid standing in a room
 /// (`exchangeWon`): what a muster waits for (#535), and one body alone is
-/// what it weighs a body standing in the room by (`Quota.homeHolds`).
+/// what it weighs a body standing in the room by (`Quota.homeHolds`). Each
+/// at its live gait (`Fighter.ofCreep`), as the kite walk reads it.
 let bodiesWin (view: ColonyView) (room: string) (creeps: CreepInfo list) =
-    exchangeWon view room (creeps |> List.map (fun creep -> partCount creep.Body, creep.Hits.Hits))
+    exchangeIn view room (List.map Fighter.ofCreep creeps) |> won
 
-/// `exchangeWon` for one body of these active part counts and hits.
-let internal bodyWins (view: ColonyView) (room: string) (parts: BodyPart -> int) (hits: int) =
-    exchangeWon view room [ parts, hits ]
+/// A row's block against the raid in a room (#615 U2), priced once: the
+/// raid at the ranges it fights one block's body at under `stance`
+/// (`exchangeAgainst`) — a body of whole blocks walks at one block's pace and
+/// so fights at one block's ranges —, the raiders it may kite (`settle`), our
+/// towers' damage there (`ourTowersOn`), and what one block deals, heals and
+/// stands at its range.
+type private BlockPrice =
+    {
+        Price: RaidPrice
+        Kited: HostileInfo list
+        Beside: int
+        Damage: int
+        Heal: int
+        Hits: int
+    }
 
-/// Whether `blocks` whole blocks of a fighting row win `exchangeWon`, one
-/// body of the blocks' parts and hits, beside our towers there
-/// (`ourTowersOn`). Here and not in `Quota` because the ranger's ground reads
-/// it too (`outmatched`).
+/// `BlockPrice` of a row's pattern in a room; None under towers not ours
+/// (`underRivalTowers`).
+let private blockPrice (pattern: BodyPattern) (stance: Stance) (view: ColonyView) (room: string) =
+    if underRivalTowers view room then
+        None
+    else
+        let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+        let one = blockFighter pattern
+
+        let (range, healing), theirs, kited =
+            match stance with
+            | Stance.Hold ->
+                (Engine.meleeRange, Engine.meleeRange), (fun _ -> Engine.meleeRange), []
+            | Stance.Standoff ->
+                let ours, theirs = rangesBetween view [ one ] raid
+                List.head ours, theirs, raid |> List.filter (HostileInfo.raider view.Hostiles)
+
+        Some
+            {
+                Price = raidPrice view Reaction.strike theirs raid
+                Kited = kited
+                Beside = ourTowersOn view room raid
+                Damage = one.DamageAt range
+                Heal = one.HealAt healing
+                Hits = one.Hits
+            }
+
+/// Whether `blocks` whole blocks of a fighting row, one body, win the raid in
+/// a room under `stance` (`blockPrice`): what sizes a row and decides whether
+/// a room is a fight or a withdrawal (`Observe.raidDeadlines`). Here and not
+/// in `Quota` because the ranger's ground reads it too (`outmatched`). A
+/// guard row sized for its post is priced holding it (`Stance.Hold`, #531),
+/// the rest at the standoff. Partly applied to its room it prices the raid
+/// once and every block count off it.
 ///
 /// Worked example: a lone smallMelee needs one guard block; backed by a
 /// smallHealer, its 40 damage kills our 1,000 hits in 25 ticks, before our 30
 /// net damage kills its 1,000 hits, so that raid needs the second block.
-///
-/// Partly applied to its room it prices the raid and one block's damage once,
-/// and every block count off them: a body of whole blocks walks at one
-/// block's pace, so its swing reaches what one block's does. `borne` prices
-/// the damage the block brings to bear (`borneDamage`, #535); else in full,
-/// the guard holding the post (#531).
-let private blocksBeat (block: BodyPart list) (borne: bool) (view: ColonyView) (room: string) =
-    let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
-    let price = raidPrice view Reaction.strike raid
-    let towered = underRivalTowers view room
-    let besideDamage = ourTowersOn view room raid
-    let parts = partCountIn block
+let private blocksOutcome
+    (pattern: BodyPattern)
+    (stance: Stance)
+    (view: ColonyView)
+    (room: string)
+    : int -> Outcome =
+    match blockPrice pattern stance view room with
+    | None -> fun _ -> Lost
+    | Some block ->
+        fun (blocks: int) ->
+            let damage = block.Beside + blocks * block.Damage
 
-    let damage =
-        if borne then
-            borneDamage view.Hostiles raid parts
-        else
-            damageOf parts
+            settle block.Price block.Kited damage (fun price ->
+                wonAgainst price damage (blocks * block.Heal) (blocks * block.Hits))
 
-    let heal = selfHealOf parts
-    let hits = Engine.partHits * List.length block
+/// `blocksOutcome` that ends the raid (`won`): what sizes and counts a row.
+let blocksBeat
+    (pattern: BodyPattern)
+    (stance: Stance)
+    (view: ColonyView)
+    (room: string)
+    : int -> bool =
+    blocksOutcome pattern stance view room >> won
 
-    fun (blocks: int) ->
-        not towered
-        && wonAgainst price (besideDamage + blocks * damage) (blocks * heal) (blocks * hits)
-
-/// Whether `bodies` bodies of `blocks` whole blocks each win the raid in a
-/// room beside our towers there (#589): each dealing what it brings to bear
-/// (`borneDamage`, #535), the raid killing them one at a time
-/// (`focusedAgainst`), never summed into one body; never under towers not
-/// ours.
-let private bodiesBeat
-    (block: BodyPart list)
+/// How `bodies` bodies of `blocks` whole blocks each come out against the
+/// raid in a room at the standoff beside our towers there (#589,
+/// `blockPrice`), the raid killing them one at a time (`focusedAgainst`),
+/// never summed into one body; their damage together kites it down.
+let private bodiesOutcome
+    (pattern: BodyPattern)
     (view: ColonyView)
     (room: string)
     (bodies: int)
     (blocks: int)
-    =
-    let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
-    let body part = blocks * partCountIn block part
-
-    blocks > 0
-    && not (underRivalTowers view room)
-    && focusedAgainst
-        (raidPrice view Reaction.strike raid)
-        (ourTowersOn view room raid)
-        bodies
-        (borneDamage view.Hostiles raid body)
-        (selfHealOf body)
-        (Engine.partHits * blocks * List.length block)
-
-/// `blocksBeat` for the guard's melee block, its swing priced in full: the
-/// guard holds the post whatever it can reach (#531). Two readers: the guard
-/// row asks it of one block to size the crowd, and the stand-down asks it of
-/// the biggest body the bank buys (`guardBlocksReach`) to decide whether an
-/// outpost is a fight or a withdrawal (`Observe.raidDeadlines`).
-let guardBlocksBeat (view: ColonyView) (room: string) : int -> bool =
-    blocksBeat guardPattern.Block false view room
-
-/// `guardBlocksBeat` with the swing priced as brought to bear (#535): what
-/// picks the ranger row over the guard's.
-let private guardBorneBeat (view: ColonyView) (room: string) : int -> bool =
-    blocksBeat guardPattern.Block true view room
-
-/// `blocksBeat` for the ranger's block (#411), which the errand room's
-/// stand-down and the ranger row read as the guard's do an outpost's.
-let rangerBlocksBeat (view: ColonyView) (room: string) : int -> bool =
-    blocksBeat rangerPattern.Block true view room
+    : Outcome =
+    match blockPrice pattern Stance.Standoff view room with
+    | Some block when blocks > 0 ->
+        settle block.Price block.Kited (block.Beside + bodies * blocks * block.Damage) (fun price ->
+            focusedAgainst
+                price
+                block.Beside
+                bodies
+                (blocks * block.Damage)
+                (blocks * block.Heal)
+                (blocks * block.Hits))
+    | _ -> Lost
 
 /// The biggest guard body the row can cast (#417): at most `guardBlocksMost`
 /// blocks, and as many as the bank's capacity buys (`Bodies.guardBodyWithin`).
 /// What the stand-down weighs a raid against. One body and never the row's two
-/// summed: `guardBlocksBeat` grows about as the square of the blocks, and a
+/// summed: `blocksBeat` grows about as the square of the blocks, and a
 /// raid focuses one body at a time while the second may arrive late, so the
 /// sum would call a fight won that each body loses alone — and each body is
 /// sized to win alone (`guardBlocksFor`).
@@ -1489,32 +1666,22 @@ let castable (view: ColonyView) (pattern: BodyPattern) =
 let rangerBlocksReach (view: ColonyView) : int =
     min rangerBlocksMost (view.Bank.Capacity / bodyCost rangerPattern.Block)
 
-/// Whether a ranged body of these live parts kites the raid standing in a
-/// room down (#510): every raider there is one it holds the range on
-/// (`cannotClose`), and its damage out-runs every heal acting in the room,
-/// so the kite ends in a kill, our towers there beside it (`ourTowersOn`);
-/// never under towers not ours (`underRivalTowers`).
-let internal kitedDown (view: ColonyView) (parts: BodyPart -> int) (room: string) : bool =
-    let inRoom = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+/// Whether one body kites the raid standing in a room down alone (#510): its
+/// exchange there at the standoff (`exchangeIn`) is `Kites`, every raider
+/// struck from outside its reach and the heal acting in the room outrun, our
+/// towers there beside it.
+let internal kitedDown (view: ColonyView) (fighter: Fighter) (room: string) : bool =
+    // Every raider stood off first, the exchange's own reading, so a raid
+    // that can close is never priced.
+    let stoodOff (h: HostileInfo) =
+        h.Pos.Room <> room
+        || not (HostileInfo.raider view.Hostiles h)
+        || standoff view fighter h = fighter.Reach
+           && (HostileInfo.weaponRange view.Hostiles h |> Option.defaultValue 0) < fighter.Reach
 
-    let healing = inRoom |> List.sumBy (HostileInfo.healing view.Hostiles)
-
-    match inRoom |> List.filter (HostileInfo.raider view.Hostiles) with
-    | [] -> false
-    | raid ->
-        // The heal priced in damage on the raider it costs least
-        // (`HostileInfo.damageFor`), as `raidPrice` prices it.
-        let healed = raid |> List.map (fun h -> HostileInfo.damageFor h healing) |> List.min
-
-        not (underRivalTowers view room)
-        && raid |> List.forall (cannotClose view.Hostiles parts)
-        && damageOf parts + ourTowersOn view room raid > healed
-
-/// `kitedDown` for the biggest ranger body the bank buys: the room-level
-/// answer the stand-down, `outmatched` and the chase read.
-let internal kitedByRanger (view: ColonyView) (room: string) : bool =
-    let blocks = max 1 (rangerBlocksReach view)
-    kitedDown view (fun part -> blocks * partCountIn rangerPattern.Block part) room
+    Fighter.outranges fighter
+    && List.forall stoodOff view.Hostiles
+    && exchangeIn view room [ fighter ] = Kites
 
 /// The ticks bodies of these live parts take, together and beside our towers
 /// there, to kill the raid standing in a room once they stand at it (#596):
@@ -1528,10 +1695,11 @@ let private killTicks
     (bodies: (BodyPart -> int) list)
     : int option =
     let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
-    let price = raidPrice view Reaction.strike raid
+    let price = raidPrice view Reaction.strike (fun _ -> Engine.meleeRange) raid
 
     let dealt =
-        ourTowersOn view room raid + List.sumBy (borneDamage view.Hostiles raid) bodies
+        ourTowersOn view room raid
+        + List.sumBy (fun parts -> dealtOn view raid (Fighter.ofCounts parts 0)) bodies
 
     if price.Tough = 0 && price.Hits = 0 then
         Some 0
@@ -1619,7 +1787,11 @@ let winsBeside
     let raid = raidersIn view room
 
     let price =
-        raidPrice view Reaction.strike (view.Hostiles |> List.filter (fun h -> h.Pos.Room = room))
+        raidPrice
+            view
+            Reaction.strike
+            (fun _ -> Engine.meleeRange)
+            (view.Hostiles |> List.filter (fun h -> h.Pos.Room = room))
 
     let floor = max (creep.Hits.HitsMax / 4) (price.Damage * 2 * soon)
 
@@ -1680,7 +1852,7 @@ let kiteSeats (view: ColonyView) (room: string) (holding: Set<string>) : int =
     match raidersIn view room with
     | [] -> 1
     | raid ->
-        let price = raidPrice view Reaction.strike inRoom
+        let price = raidPrice view Reaction.strike (fun _ -> Engine.meleeRange) inRoom
         let towers = ourTowersOn view room inRoom
         let heal = max price.Healing price.ToughHealing
         let deadline = raid |> List.map _.TicksToLive |> List.min
@@ -1693,7 +1865,7 @@ let kiteSeats (view: ColonyView) (room: string) (holding: Set<string>) : int =
             |> List.collect snd
             |> List.map fst
             |> List.filter (fun creep ->
-                isRangerRowBody creep && kitedDown view (partCount creep.Body) room)
+                isRangerRowBody creep && kitedDown view (Fighter.ofCreep creep) room)
             |> List.sortBy (fun creep ->
                 endsIn view room creep
                 |> Option.map (fun (walk, kill) -> walk + kill)
@@ -1704,7 +1876,9 @@ let kiteSeats (view: ColonyView) (room: string) (holding: Set<string>) : int =
 
                 (atFight walk
                  || Set.contains creep.Name holding && atFight (walk - Engine.rangedRange)),
-                (walk, creep.TicksToLive, borneDamage view.Hostiles inRoom (partCount creep.Body)))
+                (walk,
+                 creep.TicksToLive,
+                 dealtOn view inRoom (Fighter.ofCounts (partCount creep.Body) 0)))
 
         // The tick these bodies end the raid on.
         let endOf chosen =
@@ -1794,7 +1968,7 @@ let homeHoldReleases
             own @ fleet
             |> List.distinctBy (fun body -> body.Name)
             |> List.filter (fun body -> body.Name <> creep.Name && not (leaving body home))
-            |> List.map (fun body -> partCount body.Body, body.Hits.Hits)
+            |> List.map (fun body -> Fighter.ofCounts (partCount body.Body) body.Hits.Hits)
 
         let holds (home: string) =
             let quiet = bouncingInto view home |> List.forall (disturbs view resident >> not)
@@ -1825,9 +1999,11 @@ let homeHoldReleases
                     view
                     Reaction.lend
                     arriving
+                    Stance.Standoff
                     (ourTowersOn view home arriving)
                     (List.length (ourTowersIn view home) * Engine.towerHits)
-                    (staying home))
+                    (staying home)
+                   |> won)
 
         resident
         |> Set.forall (fun home -> not (RoomName.neighbouring home kill) || holds home)
@@ -1869,52 +2045,53 @@ let internal mayBeCalled
         && view.Hostiles
            |> List.forall (fun h -> h.Pos.Room <> held || not (disturbs view resident h))
 
-/// Whether the biggest ranger the bank buys, at least one block as for the
-/// kite, wins a room's raid alone beside our towers there.
-let private rangerRowWins (view: ColonyView) (room: string) =
-    rangerBlocksBeat view room (max 1 (rangerBlocksReach view))
-
 /// A room's own row and its answer, the one reading `rangerAnswers` and the
 /// verdict share. A ranger room and one the colony harasses are the ranger's
-/// (#411). Any other is the melee guard's where the guard's borne damage wins
-/// (`guardBorneBeat`); else the ranger's where the biggest ranger wins; each
-/// only where the bank casts its block (`castable`, #546). Where neither
-/// wins alone and the guard's swing reaches no raider there
-/// (`swingReaches`), the ranger's where the `Engine.guardCap` bodies of its
-/// size it then casts win (`bodiesBeat`, `Threat.rangersWanted`, #609): a
-/// 3RA4H kiter out-heals the 4RA2H body an 1,800 bank buys and loses to
-/// two, and it went to the melee guard, which never catches it (W17S26,
-/// t1,012,579). Else
-/// still the guard's, which holds the post (#531) and wins while it outlasts
-/// the raid, its swing priced in full (`guardBlocksBeat`): no new stand-down
-/// for a raid of quick shooters no ranger wins either. Never a win in a
-/// child's outpost, which no row of this colony casts for (#517).
+/// (#411). Any other is the melee guard's where its biggest body wins at the
+/// standoff (`blocksBeat`); else the ranger's where the biggest ranger, at
+/// least one block, wins; each only where the bank casts its block
+/// (`castable`, #546). Where neither wins alone and the guard strikes no
+/// raider there at its standoff (`strikesAtStandoff`), the ranger's where the
+/// `Engine.guardCap` bodies of its size it then casts win (`bodiesBeat`,
+/// `Threat.rangersWanted`, #609): a 3RA4H kiter out-heals the 4RA2H body an
+/// 1,800 bank buys and loses to two, and it went to the melee guard, which
+/// never catches it (W17S26, t1,012,579). Else still the guard's, which holds
+/// the post (`Stance.Hold`, #531) and wins while it outlasts the raid: no new
+/// stand-down for a raid of quick shooters no ranger wins either. Never a win
+/// in a child's outpost, which no row of this colony casts for (#517). A
+/// row wins here by trading (`Trades`): a raid its rangers only kite down is
+/// the verdict's Kite, answered after the rows (`priceAmong`).
 let rowAnswer (view: ColonyView) (room: string) : RowAnswer =
+    let rangers = max 1 (rangerBlocksReach view)
+
+    let rangerWins () =
+        blocksOutcome rangerPattern Stance.Standoff view room rangers = Trades
+
     let swingStrikes () =
-        raidersIn view room
-        |> List.exists (swingReaches view.Hostiles (partCountIn guardPattern.Block))
+        let guard = blockFighter guardPattern
+        raidersIn view room |> List.exists (strikesAtStandoff view guard)
 
     if List.contains room view.Borrowed.ChildOutposts then
         { Ranger = false; Wins = false }
     elif Set.contains room (rangerRooms view) || Set.contains room view.HarassCast then
-        {
-            Ranger = true
-            Wins = rangerRowWins view room
-        }
-    elif castable view guardPattern && guardBorneBeat view room (guardBlocksReach view) then
+        { Ranger = true; Wins = rangerWins () }
+    elif
+        castable view guardPattern
+        && blocksOutcome guardPattern Stance.Standoff view room (guardBlocksReach view) = Trades
+    then
         { Ranger = false; Wins = true }
-    elif castable view rangerPattern && rangerRowWins view room then
+    elif castable view rangerPattern && rangerWins () then
         { Ranger = true; Wins = true }
     elif
         castable view rangerPattern
         && not (swingStrikes ())
-        && bodiesBeat rangerPattern.Block view room Engine.guardCap (max 1 (rangerBlocksReach view))
+        && bodiesOutcome rangerPattern view room Engine.guardCap rangers = Trades
     then
         { Ranger = true; Wins = true }
     else
         {
             Ranger = false
-            Wins = guardBlocksBeat view room (guardBlocksReach view)
+            Wins = blocksBeat guardPattern Stance.Hold view room (guardBlocksReach view)
         }
 
 /// Whether a room's own Guard is the ranger row's (`rowAnswer`).
@@ -2014,15 +2191,19 @@ let castPrice (view: ColonyView) (row: CastRow) (room: string) : bool * int =
 
         let pattern, most, beat =
             if ranger then
-                rangerPattern, max 1 (rangerBlocksReach priced), rangerBlocksBeat priced room
+                rangerPattern,
+                max 1 (rangerBlocksReach priced),
+                blocksBeat rangerPattern Stance.Standoff priced room
             else
-                guardPattern, guardBlocksReach priced, guardBlocksBeat priced room
+                guardPattern,
+                guardBlocksReach priced,
+                blocksBeat guardPattern Stance.Hold priced room
 
         let blocks =
             seq { 1 .. max 1 most } |> Seq.tryFind beat |> Option.defaultValue (max 1 most)
 
         castable priced pattern
-        && (beat most || bodiesBeat pattern.Block priced room Engine.guardCap most),
+        && (beat most || won (bodiesOutcome pattern priced room Engine.guardCap most)),
         blocks * List.length pattern.Block * Engine.spawnTicksPerPart
     | CastRow.Defender
     | CastRow.Squad _ -> true, 0
@@ -2067,20 +2248,19 @@ let private priceAmong (placed: string -> string option) (pricers: Pricer list) 
     // A fighter of this colony that may take the room's raid now: one it
     // sends, lent by its colony's rule, that strikes every raider; and
     // whether it wins alone or, a ranger, kites it down.
-    let fit (p: Pricer) (wins: ColonyView -> CreepInfo -> (BodyPart -> int) -> bool) =
+    let fit (p: Pricer) (wins: ColonyView -> CreepInfo -> bool) =
         let priced = aroundOf p
 
         fighters p
         |> List.exists (fun (creep, here) ->
-            let parts = partCount creep.Body
-
             p.Sends room creep
             && mayLeaveFor priced room (Some here) creep
-            && strikesEvery priced parts (HostileInfo.raider priced.Hostiles) room
-            && wins priced creep parts)
+            && strikesEvery priced (partCount creep.Body) (HostileInfo.raider priced.Hostiles) room
+            && wins priced creep)
 
     let kites (p: Pricer) =
-        fit p (fun priced creep parts -> isRangerRowBody creep && kitedDown priced parts room)
+        fit p (fun priced creep ->
+            isRangerRowBody creep && kitedDown priced (Fighter.ofCreep creep) room)
 
     // Whether a fighter of this colony takes the raid now, or already holds
     // the room's Guard: the verdict starts a fight and does not end it on a
@@ -2088,7 +2268,7 @@ let private priceAmong (placed: string -> string option) (pricers: Pricer list) 
     let takes (p: Pricer) =
         p.Holds room
         || kites p
-        || fit p (fun priced creep parts -> bodyWins priced room parts creep.Hits.Hits)
+        || fit p (fun priced creep -> bodiesWin priced room [ creep ])
 
     let seeing = pricers |> List.filter (fun p -> present p && raided (aroundOf p) room)
 
@@ -2163,7 +2343,11 @@ let private priceAmong (placed: string -> string option) (pricers: Pricer list) 
             // standing by that kites it down with its live parts.
             match
                 (casters
-                 |> List.filter (fun (_, priced) -> kitedByRanger priced room)
+                 |> List.filter (fun (_, priced) ->
+                     kitedDown
+                         priced
+                         (blocksFighter rangerPattern (max 1 (rangerBlocksReach priced)))
+                         room)
                  |> List.map fst)
                 @ (seeing |> List.filter kites)
                 |> List.distinctBy (fun p -> p.Home)
@@ -2228,7 +2412,12 @@ let internal chased (view: ColonyView) (verdict: Answer * bool) (kept: bool) (ro
         | _, false -> true
         | _, true ->
             Set.contains room view.RaidedOutposts
-            || kept && (kitedByRanger view room || Option.isSome (rangersWin view room)))
+            || kept
+               && (kitedDown
+                       view
+                       (blocksFighter rangerPattern (max 1 (rangerBlocksReach view)))
+                       room
+                   || Option.isSome (rangersWin view room)))
 
 /// Whether nothing of ours wins the raid standing in a room (`Answer.Lose`):
 /// in a ranger room, the raid its row casts nobody into, and the residents
@@ -2249,7 +2438,7 @@ let internal residentsLose (view: ColonyView) (room: string) : bool =
     let standingWin = not (List.isEmpty standing) && bodiesWin view room standing
 
     not standingWin
-    && not (rangerBlocksBeat view room view.Tuning.RangerResidentBlocks)
+    && not (blocksBeat rangerPattern Stance.Standoff view room view.Tuning.RangerResidentBlocks)
 
 /// Whether an economy body may walk into a room (#605): a room of ours
 /// always; any other while no raid stands in it, or while the verdict does
@@ -2313,7 +2502,7 @@ let internal openToEconomy
 
             not (List.isEmpty seated)
             && (bodiesWin view room seated
-                || seated |> List.exists (fun creep -> kitedDown view (partCount creep.Body) room))
+                || seated |> List.exists (fun creep -> kitedDown view (Fighter.ofCreep creep) room))
 
     ourRoom view room
     || List.isEmpty raid
@@ -3077,7 +3266,7 @@ let private homeUnheld (view: ColonyView) atlas : bool =
         raid |> List.exists (endangersOurs view)
         && not (
             wonAgainst
-                (raidPrice view Reaction.strike raid)
+                (raidPrice view Reaction.strike (fun _ -> Engine.meleeRange) raid)
                 (towers * Engine.towerAttackAt Engine.towerFalloffRange)
                 0
                 (towers * Engine.towerHits)

@@ -690,7 +690,7 @@ let matchAcross
             let tid = taskId task
 
             let loses () =
-                not (Facts.kitedDown ctx.View (partCount creep.Body) room)
+                not (Facts.kitedDown ctx.View (Fighter.ofCreep creep) room)
                 && not (
                     Facts.winsBeside
                         ctx.View

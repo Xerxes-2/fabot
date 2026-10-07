@@ -917,7 +917,7 @@ let fighterTests =
 
                 Expect.isFalse
                     (Fighter.standsOff ranger (melee 1))
-                    "one at its pace can close, as the admission reads it (`Facts.cannotClose`)"
+                    "one at its pace can close, as the exchange prices it (`Facts.standoff`)"
 
                 Expect.isFalse
                     (Fighter.standsOff (Fighter.ofParts rangerPattern.Block [] 350) (melee 2))

@@ -2140,6 +2140,104 @@ let kiteTests =
                     "on ground in range of the cripple, not kited off the room"
             }
 
+            // #615 U2: the exchange's Kites is a win for every set of bodies,
+            // priced on their damage together.
+            test "two rangers together kite down a slow melee whose healer out-heals each alone" {
+                let melee =
+                    { hostileIn "W1N2" { X = 25; Y = 44 } [ Move; Attack; Attack; Attack ] with
+                        Id = "melee"
+                        Owner = "Trepidimous"
+                    }
+
+                // Six HEAL, 72 a tick: one 2-block ranger's 40 never kills.
+                let healer =
+                    { hostileIn
+                          "W1N2"
+                          { X = 26; Y = 44 }
+                          (List.replicate 6 Move @ List.replicate 6 Heal) with
+                        Id = "healer"
+                        Owner = "Trepidimous"
+                    }
+
+                let colony =
+                    { declaredRaid [ melee; healer ] with
+                        Bank = bank 1400 1400
+                    }
+                    |> withGuards
+                        [
+                            creepWith "r-1" 0 0 (bodyFor Bodies.rangerPattern 1400),
+                            { X = 22; Y = 44 }
+                            creepWith "r-2" 0 0 (bodyFor Bodies.rangerPattern 1400),
+                            { X = 22; Y = 45 }
+                        ]
+
+                Expect.equal
+                    (Facts.answer colony "W1N2", (Facts.verdictOf colony "W1N2").Rangers.Value)
+                    (Answer.Win, Some 2)
+                    "the two rangers' 80 outruns the 72: won by both, not stood down"
+            }
+
+            test
+                "one ranger that kites a raid down alone is asked once, at the fewest blocks that kite it" {
+                let melee =
+                    { hostileIn "W1N2" { X = 25; Y = 44 } [ Move; Attack; Attack; Attack ] with
+                        Id = "melee"
+                        Owner = "Trepidimous"
+                    }
+
+                let healer =
+                    { hostileIn
+                          "W1N2"
+                          { X = 26; Y = 44 }
+                          (List.replicate 6 Move @ List.replicate 6 Heal) with
+                        Id = "healer"
+                        Owner = "Trepidimous"
+                    }
+
+                let colony =
+                    { declaredRaid [ melee; healer ] with
+                        Bank = bank 5600 5600
+                    }
+
+                // What `rangersWanted` and `rangerBlocksFor` read: the biggest
+                // body the bank buys kites it alone, so one is asked, sized at
+                // the fewest blocks that do.
+                let kites = blocksBeat rangerPattern Stance.Standoff colony "W1N2"
+
+                Expect.equal
+                    (kites (Facts.rangerBlocksReach colony), kites 3, kites 4)
+                    (true, false, true)
+                    "four blocks' 80 outruns the healer's 72, three blocks' 60 does not"
+            }
+
+            // #615 U2: a hybrid as quick as a ranger picks the range, and
+            // against a body that deals as much from three it closes to swing
+            // beside its shot.
+            test
+                "a quick hybrid closes on rangers to swing beside its shot, and two 2-block rangers lose it" {
+                let hybrid =
+                    { hostileIn
+                          "W1N2"
+                          { X = 25; Y = 44 }
+                          (List.replicate 8 Move
+                           @ List.replicate 4 RangedAttack
+                           @ [ Attack ]
+                           @ List.replicate 3 Heal) with
+                        Id = "hybrid"
+                        Owner = "Trepidimous"
+                    }
+
+                // A 1,400 bank buys 2-block rangers, 40 a tick and 24 heal each.
+                let colony =
+                    { declaredRaid [ hybrid ] with
+                        Bank = bank 1400 1400
+                    }
+
+                Expect.isFalse
+                    (Facts.rowAnswer colony "W1N2").Ranger
+                    "its 70 a tick, focused, kills the first ranger in ~26 ticks and outlasts the second: no ranger row (priced at its shot alone, 40, the pair won)"
+            }
+
             // A part's boost multiplies what it does, as the
             // engine's `calcBodyEffectiveness` and `_applyDamage` do.
             test
@@ -4985,7 +5083,7 @@ let childOutpostTests =
                     |> standingIn "W1N3" ("r-2", { X = 27; Y = 26 })
 
                 Expect.isTrue
-                    (guardBlocksBeat mother "W1N4" (guardBlocksReach mother))
+                    (blocksBeat guardPattern Stance.Hold mother "W1N4" (guardBlocksReach mother))
                     "the premise: the mother's guard row would win it, were the room hers"
 
                 Expect.equal (Facts.answer mother "W1N4") Answer.Win "answered by the residents"
@@ -5007,7 +5105,12 @@ let childOutpostTests =
                     judgedBeside mother (childBeside mother 850 [])
 
                 Expect.isFalse
-                    (guardBlocksBeat (child mother) "W1N4" (guardBlocksReach (child mother)))
+                    (blocksBeat
+                        guardPattern
+                        Stance.Hold
+                        (child mother)
+                        "W1N4"
+                        (guardBlocksReach (child mother)))
                     "the premise: the child's guard row loses it"
 
                 Expect.equal
@@ -6701,13 +6804,17 @@ let guardPrecedenceTests =
                             (Capacity.fighters (1 + precedenceBasis.Tuning.RangerResidents))
                             [ "r-1" ]
                         // A chase in sight kites before the core, the held exit
-                        // and the trespasser; beside a raid that can close, no chase.
+                        // and the trespasser. Moved on purpose (#615 U2): beside
+                        // a raid that can close, the ranger row trades with the
+                        // smallMelee at the standoff, the plodder kept off and
+                        // striking nothing (the smallMelee's gun still strikes
+                        // 10 from three), so its win is the ranger's chase:
+                        // kite ground, one seat (it was the guard's ring, two).
                         [ ChaseSeen; Core ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "g-1" ]
                         [ ChaseSeen; Hold ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "g-1" ]
                         [ ChaseSeen; Trespasser ],
                         row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "g-1" ]
-                        [ ChaseSeen; Raid ],
-                        row [] [ "Ring" ] TwoRungsUp (Capacity.fighters 2) [ "g-1" ]
+                        [ ChaseSeen; Raid ], row [] [ "Kite" ] TwoRungsUp one [ "g-1" ]
                         // Quirk, kept: a chase out of sight over a held exit takes
                         // the melee guard's range-1 exit ground, a rung up.
                         [ ChaseDark; Hold ], row [ Hold ] [ "Ring" ] OneRungUp one [ "r-1" ]
@@ -7101,7 +7208,7 @@ let killAdmissionTests =
                     |> withGuards [ guard "g-1", { X = 20; Y = 41 } ]
 
                 Expect.isTrue
-                    (guardBlocksBeat colony "W1N2" (guardBlocksReach colony))
+                    (blocksBeat guardPattern Stance.Hold colony "W1N2" (guardBlocksReach colony))
                     "the premise: the guard row's body out-trades it"
 
                 let ground = groundOf colony

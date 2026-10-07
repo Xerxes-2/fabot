@@ -56,8 +56,8 @@ let guardRowTests =
                         }
 
                 Expect.equal
-                    (rangerBlocksBeat (raidOf 2) errandRoom 6,
-                     rangerBlocksBeat (raidOf 2) errandRoom 7)
+                    (blocksBeat rangerPattern Stance.Standoff (raidOf 2) errandRoom 6,
+                     blocksBeat rangerPattern Stance.Standoff (raidOf 2) errandRoom 7)
                     (false, true)
                     "its heal acts beside its shot: seven blocks out-last the squad, six do not"
 
@@ -69,7 +69,7 @@ let guardRowTests =
                     }
 
                 Expect.isFalse
-                    (rangerBlocksBeat (boosted (raidOf 2)) errandRoom 7)
+                    (blocksBeat rangerPattern Stance.Standoff (boosted (raidOf 2)) errandRoom 7)
                     "T3-boosted, the pair seven blocks beat unboosted is not beaten"
 
                 let rangerRow colony =
@@ -833,7 +833,7 @@ let guardRowTests =
             }
 
             test "the guard the row casts is the block the fight takes, not the bank" {
-                // #375: `guardBlocksBeat` already priced the raid for the count; the
+                // #375: `blocksBeat` already priced the raid for the count; the
                 // size read the bank alone, so the 1,800 bank `reserverColony` holds
                 // bought two blocks against a lone melee one block kills, and W15S28's
                 // 2,300 bank asked 2,250 that the reserver row spent down to 650 every

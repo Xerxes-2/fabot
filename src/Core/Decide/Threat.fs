@@ -418,7 +418,7 @@ let noThreats =
 /// with no raid recalled is one guard (#366): a room with no `RoomControl`
 /// entry contributes no hostile of its own to the view, so neither number of
 /// the two-guard clause exists. Written as its own clause rather than left to
-/// `guardBlocksBeat`'s zero-damage arm: that one is a statement about a
+/// `blocksBeat`'s zero-damage arm: that one is a statement about a
 /// visible raid dealing nothing.
 let internal guardsWanted (view: ColonyView) (room: string) : int =
     if
@@ -427,14 +427,14 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
         && not (view.RecalledRaiders |> List.exists (fun h -> h.Pos.Room = room))
     then
         1
-    elif guardBlocksBeat view room 1 then
+    elif blocksBeat guardPattern Stance.Hold view room 1 then
         1
     else
         Engine.guardCap
 
 /// ADR-0072
 /// The whole guard blocks one raided room's exchange takes to win: the
-/// smallest count `guardBlocksBeat` answers yes to, the largest body where
+/// smallest count `blocksBeat` answers yes to holding its post, the largest body where
 /// none wins. A room the colony is blind in prices its raid as last seen
 /// (#569), or at one where none is recalled: enough to go and look. A room holding a
 /// level-0 core takes the biggest body the bank buys (#487): one block's 90 a
@@ -442,7 +442,7 @@ let internal guardsWanted (view: ColonyView) (room: string) : int =
 let internal guardBlocksFor (view: ColonyView) (room: string) : int =
     let fight =
         [ 1..guardBlocksMost ]
-        |> List.tryFind (guardBlocksBeat view room)
+        |> List.tryFind (blocksBeat guardPattern Stance.Hold view room)
         |> Option.defaultValue guardBlocksMost
 
     if Facts.expansionCores view |> List.exists (fun core -> core.RoomName = room) then
@@ -455,7 +455,7 @@ let internal guardBlocksFor (view: ColonyView) (room: string) : int =
 /// count the row's verdict prices (`Facts.rowAnswer`, #589). One body a
 /// raid out-heals is fed to it one at a time.
 let internal rangersWanted (view: ColonyView) (room: string) : int =
-    if rangerBlocksBeat view room (max 1 (rangerBlocksReach view)) then
+    if blocksBeat rangerPattern Stance.Standoff view room (max 1 (rangerBlocksReach view)) then
         1
     else
         Engine.guardCap
@@ -465,7 +465,7 @@ let internal rangersWanted (view: ColonyView) (room: string) : int =
 /// none wins.
 let internal rangerBlocksFor (floor: int) (view: ColonyView) (room: string) : int =
     [ 1..rangerBlocksMost ]
-    |> List.tryFind (rangerBlocksBeat view room)
+    |> List.tryFind (blocksBeat rangerPattern Stance.Standoff view room)
     |> Option.defaultValue rangerBlocksMost
     |> max floor
     |> min rangerBlocksMost
@@ -489,7 +489,7 @@ module Brief =
 
     /// The rows a trespass's kill asks (#550), each with the trespassers
     /// standing in its room it answers: the guard those its swing catches
-    /// (`Facts.guardCatches`), the ranger the rest — a hauler at the guard's
+    /// (`Facts.strikesAtStandoff`), the ranger the rest — a hauler at the guard's
     /// pace — wherever its block is castable or a ranger of ours may be lent
     /// to the kill, striking each of them. The guard answers the rest too
     /// until a ranger holds the kill (`holders`, sticky, so no tick-to-tick
@@ -501,7 +501,9 @@ module Brief =
             |> List.filter (fun hostile ->
                 hostile.Pos.Room = room && Facts.trespasser view (Set.singleton room) hostile)
 
-        let caught, rest = trespassers |> List.partition (guardCatches view)
+        let caught, rest =
+            trespassers
+            |> List.partition (Facts.strikesAtStandoff view (Facts.blockFighter guardPattern))
 
         let rangerMay () =
             ColonyView.bodies view
@@ -626,18 +628,16 @@ module Brief =
         // And under a Win, a guard row's body that wins the raid alone (#571):
         // a stand-down shuts the economy, never the kill.
         | BriefKind.Chase ->
-            let parts = partCount creep.Body
+            let fighter = Fighter.ofCreep creep
 
-            let alone () =
-                Facts.bodyWins view room parts creep.Hits.Hits
+            let alone () = Facts.bodiesWin view room [ creep ]
 
             (isRangerRowBody creep
              && (match verdict.Value with
-                 | Answer.Kite -> Facts.kitedDown view parts room
+                 | Answer.Kite -> Facts.kitedDown view fighter room
                  | Answer.Win ->
                      not (Facts.raided view room)
                      || rangers.Value |> Option.exists (fun n -> n > 1)
-                     || Facts.kitedDown view parts room
                      || alone ()
                  | Answer.Lose -> true)
              || isGuardRowBody creep
@@ -696,7 +696,9 @@ module Brief =
         elif
             Set.contains room (raisedHomes view)
             && List.contains room view.Borrowed.Defended
-            && not (rangerBlocksBeat view room view.Tuning.RangerResidentBlocks)
+            && not (
+                blocksBeat rangerPattern Stance.Standoff view room view.Tuning.RangerResidentBlocks
+            )
         then
             view.Tuning.RangerResidents + Engine.guardCap
         else
@@ -1054,8 +1056,11 @@ module Brief =
         |> List.length
 
     /// The rows the home's Defend asks (#546), each with the bodies of the
-    /// raid at the line it answers: the defender those it meets
-    /// (`Facts.defenderMeets`), waiting on its rampart for the ones not yet
+    /// raid at the line it answers: the defender those it meets — a raider it
+    /// strikes at their standoff (`Facts.strikesAtStandoff`, #552), which
+    /// must close to hurt our work and so comes to its rampart, a body
+    /// working with a WORK beside it, or a healer, which comes with its
+    /// melee —, waiting on its rampart for the ones not yet
     /// in its swing; the ranger those the defender never strikes from the
     /// line (#552) — a shooter keeping its range, a healer, and a body out
     /// of every perimeter rampart's swing that is parked (`ColonyView.Parked`)
@@ -1072,10 +1077,19 @@ module Brief =
                 RoomPos.range tile hostile.Pos
                 |> Option.exists (fun r -> r <= Engine.meleeRange))
 
-        let met = atLine |> List.filter (defenderMeets view.Hostiles)
+        let defender = Facts.blockFighter defenderPattern
+
+        let meets (hostile: HostileInfo) =
+            if HostileInfo.raider view.Hostiles hostile then
+                Facts.strikesAtStandoff view defender hostile
+            else
+                HostileInfo.works view.Hostiles hostile
+                || HostileInfo.heals view.Hostiles hostile
+
+        let met = atLine |> List.filter meets
 
         let neverStruck (hostile: HostileInfo) =
-            not (defenderMeets view.Hostiles hostile)
+            not (meets hostile)
             || not (
                 HostileInfo.armed view.Hostiles hostile
                 || HostileInfo.works view.Hostiles hostile
@@ -3026,9 +3040,9 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // itself: the switch sits where the two grounds meet, so a hauler swaying
     // on it moves no body standing on both (a 5-tile switch flipped the ground
     // 4 tiles every step, t1,017,270–275). Only while no trespasser the
-    // guard's swing catches stands in its room (`guardCatches`, #550): beside
-    // one, a body on the store ring has no target in reach nor a step away,
-    // so the hauler gets the tiles beside it too.
+    // guard's swing catches stands in its room (`Facts.strikesAtStandoff`,
+    // #550): beside one, a body on the store ring has no target in reach nor
+    // a step away, so the hauler gets the tiles beside it too.
     //
     // A trespasser on the exit row of a room beside one we mine is carried
     // into it next tick, and back if it is bouncing: keyed to that room, the
@@ -3047,7 +3061,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             lazy
                 (view.Hostiles
                  |> List.filter (fun hostile ->
-                     trespasser view engaged hostile && Facts.guardCatches view hostile)
+                     trespasser view engaged hostile
+                     && Facts.strikesAtStandoff view (Facts.blockFighter guardPattern) hostile)
                  |> List.map (fun hostile -> hostile.Pos.Room)
                  |> Set.ofList)
 
@@ -3167,7 +3182,9 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         && Brief.trespassSplit view (HeldTaskFacts.holdersOf held (taskId (Guard room))) room
            |> List.forall (fun (row, trespassers) ->
                match row with
-               | CastRow.Guard -> trespassers |> List.forall (Facts.guardCatches view >> not)
+               | CastRow.Guard ->
+                   let guard = Facts.blockFighter guardPattern
+                   trespassers |> List.forall (Facts.strikesAtStandoff view guard >> not)
                | _ -> List.isEmpty trespassers)
 
     let claimants, laid =
@@ -3775,11 +3792,7 @@ let private withMusters
             match holders with
             | [] -> Map.empty
             | _ when engagedHere -> Map.empty
-            | _ when
-                holders
-                |> List.exists (fun creep ->
-                    bodiesWin view room [ creep ] || kitedDown view (partCount creep.Body) room)
-                ->
+            | _ when holders |> List.exists (fun creep -> bodiesWin view room [ creep ]) ->
                 Map.empty
             | _ when not assembled.Value -> Map.empty
             | _ ->

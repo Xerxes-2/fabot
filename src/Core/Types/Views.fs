@@ -81,7 +81,7 @@ type Answer =
     /// rangers standing in it or called to it (`Facts.rangersWin`). A room
     /// with no raider in it.
     | Win
-    /// A ranger kites it down (`Facts.kitedByRanger`, #510): it cannot close.
+    /// A ranger kites it down (`Facts.kitedDown`, #510): it cannot close.
     | Kite
     /// Nothing of ours wins it: the [[stand-down]]'s.
     | Lose
@@ -548,7 +548,7 @@ type ColonyView =
         /// last tick anything of ours could see the room, and that fewer than
         /// `Tuning.ThreatMemory` ticks have passed — enough to hire **one**
         /// guard and pool its Guard. What it may not: what it is made of or
-        /// how many there are (`Facts.guardBlocksBeat` reads bodies, and there
+        /// how many there are (`Facts.blocksBeat` reads bodies, and there
         /// are none here). Not a withdrawal: the room is worked, which tells
         /// it apart from `StandDown.Shut`. **Vision overrules it**
         /// (`Planner.guardedOutposts` consults it only where there is none).

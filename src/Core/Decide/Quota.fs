@@ -482,7 +482,7 @@ let shutToEconomy (view: ColonyView) : Set<string> =
 let internal homeHolds (view: ColonyView) (room: string) : bool =
     Map.tryFind room view.Defenders
     |> Option.defaultValue []
-    |> List.exists (fun creep -> bodyWins view room (partCount creep.Body) creep.Hits.Hits)
+    |> List.exists (fun creep -> bodiesWin view room [ creep ])
 
 /// The guarded rooms a fighting row asks for, each with its Brief's row ask
 /// (#411): read off `Threats.briefOf`, so a guarded room no source claims —

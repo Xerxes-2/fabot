@@ -171,7 +171,12 @@ let errandStandDownTests =
                     }
 
                 Expect.isTrue
-                    (rangerBlocksBeat colony errandRoom (Facts.rangerBlocksReach colony))
+                    (blocksBeat
+                        rangerPattern
+                        Stance.Standoff
+                        colony
+                        errandRoom
+                        (Facts.rangerBlocksReach colony))
                     "the premise: the row's reach wins the exchange"
 
                 let log =
@@ -212,7 +217,12 @@ let errandStandDownTests =
                     }
 
                 Expect.isFalse
-                    (rangerBlocksBeat colony errandRoom (Facts.rangerBlocksReach colony))
+                    (blocksBeat
+                        rangerPattern
+                        Stance.Standoff
+                        colony
+                        errandRoom
+                        (Facts.rangerBlocksReach colony))
                     "the premise: one block loses to the squad"
 
                 let log =
