@@ -24108,3 +24108,484 @@ let w17s26FleeingHaulerTests =
                     | None -> ()
             }
         ]
+
+// ---- arena capture w19s25-t1019120 -------------------------------------------
+// `npm run capture -- W19S25 1019120 --rooms W17S29`, read at live t1,019,411.
+//   W19S25  https://screeps.com/room-history/shardSeason/W19S25/1019100.json
+//   W17S29  https://screeps.com/room-history/shardSeason/W17S29/1019100.json
+// Spawn9 is spawning worker-1019086-Spawn9 until t1019191: not placed.
+// not placed: 2 tombstone (the arena has no drops, tombstones or ruins).
+
+/// W17S29's ranger on Flee in W19S25 through the harassment room's stand-down
+/// (t1,018,999-1,019,160), Trepidimous' Ballistic8515 beside it and Bang8545
+/// two off (#623). Both harassers chase it, as live they did down the west
+/// edge.
+let private w19s25StandDownPair () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+
+    let w19s25 =
+        room "W19S25"
+        |> withSite trepidimous "road" None 0 { X = 9; Y = 37 }
+        |> withSite trepidimous "road" None 0 { X = 10; Y = 37 }
+        |> withSite trepidimous "road" None 0 { X = 11; Y = 37 }
+        |> withSite trepidimous "road" None 0 { X = 12; Y = 37 }
+
+    let w17s29 =
+        room "W17S29"
+        |> withController Ownership.Ours None 6 4
+        |> withControllerClocks 0 0 120_000 2_149_412
+        |> withSpawn "Spawn9" { X = 24; Y = 40 } 2_300
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        19, 35
+                        19, 41
+                        19, 43
+                        20, 36
+                        20, 38
+                        20, 40
+                        20, 42
+                        20, 44
+                        21, 35
+                        21, 37
+                        21, 41
+                        21, 43
+                        22, 36
+                        22, 38
+                        22, 40
+                        22, 42
+                        23, 37
+                        24, 38
+                        24, 42
+                        26, 44
+                        27, 43
+                        28, 44
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 50
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        21, 45
+                        22, 44
+                        23, 35
+                        23, 43
+                        23, 45
+                        24, 36
+                        24, 44
+                        25, 35
+                        25, 37
+                        25, 39
+                        25, 41
+                        25, 43
+                        25, 45
+                        26, 36
+                        26, 38
+                        26, 40
+                        27, 35
+                        27, 45
+                    ] -> structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y }
+            ]
+        |> withStructures
+            [
+                { structureOf "container" None 195_600 250_000 { X = 13; Y = 29 } with
+                    Energy = 552
+                }
+                structureOf "container" None 143_600 250_000 { X = 15; Y = 43 }
+                structureOf "container" None 141_000 250_000 { X = 27; Y = 42 }
+                { structureOf "container" None 125_000 250_000 { X = 44; Y = 38 } with
+                    Energy = 274
+                }
+                structureOf "extractor" (Some Side.Ours) 500 500 { X = 16; Y = 44 }
+                { structureOf "rampart" (Some Side.Ours) 100_601 30_000_000 { X = 13; Y = 29 } with
+                    NextDecay = 1_019_137
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_801 30_000_000 { X = 21; Y = 39 } with
+                    NextDecay = 1_019_148
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_301 30_000_000 { X = 23; Y = 39 } with
+                    NextDecay = 1_019_183
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_701 30_000_000 { X = 23; Y = 41 } with
+                    NextDecay = 1_019_127
+                }
+                { structureOf "rampart" (Some Side.Ours) 102_101 30_000_000 { X = 24; Y = 40 } with
+                    NextDecay = 1_019_126
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_001 30_000_000 { X = 26; Y = 42 } with
+                    NextDecay = 1_019_132
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_591 30_000_000 { X = 44; Y = 38 } with
+                    NextDecay = 1_019_180
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 23; Y = 39 } with
+                    Energy = 20_059
+                }
+                { structureOf "terminal" (Some Side.Ours) 3_000 3_000 { X = 26; Y = 42 } with
+                    Energy = 4_000
+                }
+                towerOf Side.Ours { X = 21; Y = 39 } 1_000
+                towerOf Side.Ours { X = 23; Y = 41 } 1_000
+            ]
+        |> withRoads
+            [
+                13, 29, 4_300
+                14, 29, 4_100
+                15, 30, 3_000
+                16, 31, 3_000
+                16, 42, 4_400
+                17, 32, 3_300
+                17, 42, 21_000
+                18, 33, 4_000
+                18, 41, 18_000
+                19, 34, 12_800
+                19, 40, 2_500
+                19, 42, 3_800
+                20, 35, 17_400
+                20, 37, 12_800
+                20, 39, 4_300
+                20, 41, 4_600
+                20, 43, 3_200
+                21, 36, 2_700
+                21, 38, 3_100
+                21, 40, 2_500
+                21, 42, 3_400
+                21, 44, 3_800
+                22, 35, 2_700
+                22, 37, 2_800
+                22, 39, 3_300
+                22, 41, 2_400
+                22, 43, 2_870
+                22, 45, 4_160
+                23, 36, 3_100
+                23, 38, 3_100
+                23, 42, 4_100
+                23, 44, 3_070
+                24, 35, 13_300
+                24, 37, 3_300
+                24, 39, 3_200
+                24, 41, 2_700
+                24, 43, 3_900
+                24, 45, 4_460
+                25, 36, 20_400
+                25, 38, 3_100
+                25, 40, 3_900
+                25, 42, 3_100
+                25, 44, 4_100
+                26, 35, 16_800
+                26, 37, 20_800
+                26, 39, 15_100
+                26, 41, 4_500
+                26, 43, 4_200
+                26, 45, 3_400
+                27, 36, 15_900
+                27, 37, 18_400
+                27, 38, 21_100
+                27, 39, 19_900
+                27, 40, 18_700
+                27, 41, 3_000
+                27, 42, 4_400
+                27, 44, 3_600
+                28, 36, 16_500
+                28, 37, 17_500
+                28, 38, 14_300
+                28, 39, 19_700
+                28, 40, 20_500
+                28, 41, 3_000
+                28, 43, 4_300
+                29, 35, 3_100
+                29, 36, 18_000
+                29, 37, 20_200
+                29, 38, 14_400
+                29, 39, 20_700
+                29, 40, 18_300
+                29, 41, 20_300
+                29, 42, 2_600
+                30, 34, 3_100
+                30, 36, 17_000
+                30, 37, 13_500
+                30, 40, 22_400
+                30, 41, 13_300
+                30, 42, 19_900
+                31, 33, 2_900
+                31, 36, 17_700
+                31, 41, 17_700
+                31, 42, 18_600
+                32, 32, 4_200
+                32, 36, 13_700
+                32, 41, 4_100
+                33, 31, 3_600
+                33, 36, 21_000
+                33, 37, 16_100
+                33, 40, 3_800
+                34, 30, 3_800
+                34, 39, 3_800
+                35, 29, 4_600
+                35, 38, 4_300
+                36, 28, 3_100
+                36, 37, 2_700
+                37, 27, 4_400
+                37, 38, 4_500
+                38, 26, 4_500
+                38, 39, 4_300
+                39, 25, 4_600
+                39, 40, 3_500
+                40, 24, 3_000
+                40, 41, 4_200
+                41, 23, 4_400
+                41, 40, 4_400
+                42, 24, 2_900
+                42, 39, 2_500
+                43, 25, 4_560
+                43, 38, 2_600
+                44, 25, 3_180
+                44, 37, 3_600
+                44, 38, 4_300
+                45, 26, 4_460
+                45, 36, 3_200
+                46, 26, 3_870
+                46, 35, 3_600
+                47, 25, 4_270
+                47, 36, 3_200
+                48, 20, 3_970
+                48, 21, 2_970
+                48, 22, 4_270
+                48, 23, 4_410
+                48, 24, 3_070
+                48, 37, 2_500
+            ]
+
+    // Today's declarations, not the tick's.
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W17S29" ])
+
+    let bodies: Body list =
+        [
+            // Ballistic8515: live: attacked→8,16 rangedAttack→8,16 heal→9,16 healed→10,16
+            { body
+                  "Ballistic8515"
+                  trepidimous
+                  (parts [ RangedAttack, 2; Move, 4; Heal, 3; Move, 1 ])
+                  (at "W19S25" 8 16)
+                  (Some(Chase(Nearest, None))) with
+                Hits = 988
+                TicksToLive = 923
+            }
+            // Bang8545: live: heal→9,16 rangedAttack→8,16
+            { body
+                  "Bang8545"
+                  trepidimous
+                  (parts [ RangedAttack, 2; Move, 4; Heal, 3; Move, 1 ])
+                  (at "W19S25" 9 16)
+                  (Some(Follow "Ballistic8515")) with
+                TicksToLive = 953
+            }
+            // ranger-1018280-Spawn9: live: 9 MOVE, 6 RANGED_ATTACK, 3 HEAL
+            { body
+                  "ranger-1018280-Spawn9"
+                  Side.Ours
+                  (parts [ Move, 9; RangedAttack, 6; Heal, 3 ])
+                  (at "W19S25" 7 17)
+                  None with
+                Hits = 1_756
+                TicksToLive = 712
+            }
+            { body
+                  "upgrader-1017622-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 15; Carry, 1; Move, 15 ])
+                  (at "W17S29" 32 43)
+                  None with
+                TicksToLive = 93
+            }
+            { body
+                  "hauler-1017985-Spawn9"
+                  Side.Ours
+                  (parts [ Carry, 30; Move, 15 ])
+                  (at "W17S29" 23 42)
+                  None with
+                TicksToLive = 498
+                Energy = 550
+            }
+            { body
+                  "anchor-1018120-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W17S29" 44 38)
+                  None with
+                TicksToLive = 522
+                Energy = 50
+            }
+            { body
+                  "anchor-1018256-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W17S29" 13 29)
+                  None with
+                TicksToLive = 658
+                Energy = 50
+            }
+            { body
+                  "worker-1018334-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 12; Move, 12 ])
+                  (at "W17S29" 28 42)
+                  None with
+                TicksToLive = 817
+            }
+            { body
+                  "upgrader-1018554-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 15; Carry, 1; Move, 15 ])
+                  (at "W17S29" 22 47)
+                  None with
+                TicksToLive = 1_025
+            }
+            { body
+                  "worker-1018816-Spawn9"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 12; Move, 12 ])
+                  (at "W17S29" 27 44)
+                  None with
+                TicksToLive = 1_299
+                Energy = 450
+            }
+        ]
+
+    let a = arena 1_019_121 [ w19s25; w17s29 ] colonies bodies
+
+    { a with
+        Carried =
+            { a.Carried with
+                // The Transition log's last task verdict at or before t1,019,120,
+                // read from Memory at live t1,019,411; upgrader-1017622-Spawn9
+                // has none that early.
+                Assignments =
+                    Map.ofList
+                        [
+                            "ranger-1018280-Spawn9", "flee"
+                            "hauler-1017985-Spawn9", "refill:spawn-Spawn9"
+                            "anchor-1018120-Spawn9", "harvest:6a8caa7ddd4872bccd318c83"
+                            "anchor-1018256-Spawn9", "harvest:6a8caa7ddd4872bccd318c81"
+                            "worker-1018334-Spawn9", "upgrade:6a8caa7ddd4872bccd318c82"
+                            "worker-1018816-Spawn9", "refill:spawn-Spawn9"
+                        ]
+                // From live Memory at t1,019,411, less what is stamped after
+                // the tick.
+                Towered = Set.ofList [ "W17S29" ]
+                Raids =
+                    Map.ofList
+                        [
+                            "W17S29",
+                            { Fabot.Core.Observe.RaidState.empty with
+                                Outposts =
+                                    [
+                                        {
+                                            Fabot.Core.Observe.OutpostEpisode.RoomName = "W16S26"
+                                            Opened = 972_732
+                                            LastSeen = 1_014_864
+                                            Expiry = 1_045_681
+                                            Basis = StandDownBasis.CollapseTimer
+                                            Stronghold = true
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = false
+                                        }
+                                        {
+                                            Fabot.Core.Observe.OutpostEpisode.RoomName = "W18S29"
+                                            Opened = 986_839
+                                            LastSeen = 1_019_120
+                                            Expiry = 1_021_368
+                                            Basis = StandDownBasis.RivalReservation
+                                            Stronghold = false
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = false
+                                        }
+                                        {
+                                            Fabot.Core.Observe.OutpostEpisode.RoomName = "W19S25"
+                                            Opened = 1_018_999
+                                            LastSeen = 1_019_110
+                                            Expiry = 1_019_160
+                                            Basis = StandDownBasis.HarassSighting
+                                            Stronghold = false
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = false
+                                        }
+                                        {
+                                            Fabot.Core.Observe.OutpostEpisode.RoomName = "W19S28"
+                                            Opened = 1_016_566
+                                            LastSeen = 1_019_120
+                                            Expiry = 1_021_258
+                                            Basis = StandDownBasis.RivalReservation
+                                            Stronghold = false
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = false
+                                        }
+                                    ]
+                                HomeRaided = Some 1_016_852
+                            }
+                        ]
+            }
+    }
+
+[<Tests>]
+let w19s25StandDownPairTests =
+    testList
+        "arena a harassment room under its stand-down (#623)"
+        [
+            // Live t1,019,121 the ranger shot Ballistic8515 beside it (60)
+            // and never massed (60 + 24) while the pair chased it down the
+            // west edge, until the stand-down ended at t1,019,160.
+            test
+                "#623 capture t1,019,120: the ranger beside one harasser and two off the other mass-attacks, and never shoots one while both stand within two" {
+                let _, trace = w19s25StandDownPair () |> run 20
+                let failure = describe trace
+                let ranger = "ranger-1018280-Spawn9"
+
+                let struck tick =
+                    trace
+                    |> List.tryFind (fun t -> t.Tick = tick)
+                    |> Option.map (fun t ->
+                        t.Ours
+                        |> List.choose (function
+                            | RangedAttackCreep(who, target) when who = ranger -> Some(Some target)
+                            | RangedMassAttack who when who = ranger -> Some None
+                            | _ -> None))
+                    |> Option.defaultValue []
+
+                Expect.equal (struck 0) [ None ] $"t0: the mass attack\n{failure}"
+
+                // Both within two of the ranger after a tick: the next tick's
+                // mass deals at least 60 + 24 against a shot's 60.
+                for t in trace do
+                    let at id =
+                        t.Bodies |> List.tryFind (fun b -> b.Id = id) |> Option.map _.At
+
+                    let near id =
+                        match at id, at ranger with
+                        | Some them, Some us ->
+                            RoomPos.range them us |> Option.exists (fun r -> r <= 2)
+                        | _ -> false
+
+                    if near "Ballistic8515" && near "Bang8545" then
+                        Expect.isFalse
+                            (struck (t.Tick + 1) |> List.exists Option.isSome)
+                            $"t{t.Tick + 1}: no single shot beside the pair\n{failure}"
+            }
+        ]

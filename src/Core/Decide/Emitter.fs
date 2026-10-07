@@ -598,15 +598,12 @@ type Strike<'target> =
 /// power creep of `RoomLayer.Foreign` whose owner is not ours to strike
 /// anywhere (`Colony.strikesAnywhere`, the diplomacy rule's: an ally's, a
 /// neutral's, a power bank), where a declared enemy's or an Invader's is a
-/// target too. None for a room whose objects this view does not carry — a
-/// transit room's, or one it does not project —, where no mass attack is
-/// fired.
+/// target too. Read in the room the striking body stands in, whose sight it
+/// is: every room the view holds keeps its layer's objects, a crossed room
+/// and a stray's alike, however it narrows the room's work. None for a room
+/// it does not project, where no mass attack is fired.
 let shields (view: ColonyView) (room: string) : Set<Pos> option =
-    if
-        not (Map.containsKey room view.Spatial.Rooms)
-        || Set.contains room view.Crossed
-        || Set.contains room view.Spatial.StrayRooms
-    then
+    if not (Map.containsKey room view.Spatial.Rooms) then
         None
     else
         (SpatialInfo.layerOf view.Spatial room).Foreign

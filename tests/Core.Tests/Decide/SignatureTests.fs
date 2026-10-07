@@ -478,16 +478,44 @@ let strikeChoiceTests =
                     "a single shot at a raider instead"
             }
 
-            test "in a room the view only crosses: never a mass attack, its objects unseen" {
-                let crossed =
-                    { pair () with
+            // Live t1,019,113–159 (W19S25): through a harassment room's
+            // stand-down a fleeing ranger shot the harasser beside it 45
+            // ticks running, its partner two off, and massed the tick the
+            // stand-down ended. The body standing there is the room's sight.
+            test
+                "in a room the view only crosses or holds for a stray alone, two beside the ranger take a mass attack; a neutral's structure within three still forbids it" {
+                let invaders (colony: ColonyView) =
+                    { colony with
                         Hostiles =
-                            (pair ()).Hostiles |> List.map (fun h -> { h with Owner = "Invader" })
+                            colony.Hostiles |> List.map (fun h -> { h with Owner = "Invader" })
+                    }
+
+                let crossed (colony: ColonyView) =
+                    { invaders colony with
                         Crossed = Set.ofList [ "W1N2" ]
                     }
 
+                let stray (colony: ColonyView) =
+                    { invaders colony with
+                        Spatial =
+                            { colony.Spatial with
+                                StrayRooms = Set.ofList [ "W1N2" ]
+                            }
+                    }
+
+                Expect.equal
+                    (strikesAmong (crossed (pair ())))
+                    [ RangedMassAttack "r-1" ]
+                    "a crossed room: 40 against 20"
+
+                Expect.equal
+                    (strikesAmong (stray (pair ())))
+                    [ RangedMassAttack "r-1" ]
+                    "a stray's room: 40 against 20"
+
                 Expect.isFalse
-                    (strikesAmong crossed |> List.contains (RangedMassAttack "r-1"))
-                    "a crossed room carries no shields to read"
+                    (strikesAmong (crossed (withForeign "passer" { X = 24; Y = 46 } (pair ())))
+                     |> List.contains (RangedMassAttack "r-1"))
+                    "a neutral's extension at range 3 in a crossed room"
             }
         ]
