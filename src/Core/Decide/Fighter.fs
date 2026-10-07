@@ -40,6 +40,10 @@ type Fighter =
         /// The share of `Hits` in boosted TOUGH still standing
         /// (`Engine.toughHits`), which a strike pays more for.
         Tough: int
+        /// The creep of ours it is (`atHits`), which a view places to read
+        /// the ground it kites on (`Facts.keepsOff`); None for a priced body
+        /// no creep is yet.
+        Creep: string option
     }
 
 [<RequireQualifiedAccess>]
@@ -74,6 +78,7 @@ module Fighter =
             Gait = gait
             Hits = hits
             Tough = tough
+            Creep = None
         }
 
     /// A body's fight at these hits: `body` head first as the engine holds
@@ -130,14 +135,16 @@ module Fighter =
         // live MOVE pays two off: a MOVE shot off since only stops paying.
         let gait = Arrival.gaitOf creep
 
-        ofPower
-            power
-            {
-                Weight = gait.Weight
-                Moves = min gait.Moves (power Move)
-            }
-            hits
-            0
+        { ofPower
+              power
+              {
+                  Weight = gait.Weight
+                  Moves = min gait.Moves (power Move)
+              }
+              hits
+              0 with
+            Creep = Some creep.Name
+        }
 
     /// A living creep of ours' fight at its hits (`atHits`).
     let ofCreep (creep: CreepInfo) : Fighter = atHits creep creep.Hits.Hits
@@ -150,12 +157,12 @@ module Fighter =
     /// the shortest, so only a body that shoots outranges anything.
     let outranges (fighter: Fighter) : bool = fighter.Reach > Engine.meleeRange
 
-    /// Whether a body stands off a hostile class (#615 U1): it holds at its
-    /// own reach outside the class's strike, which it can only where the
-    /// class strikes shorter than it reaches and falls behind it on plain
-    /// (`Gait.fallsBehind`, #613's ground, the reading `Facts.standoff`
-    /// prices a kite by). The faster side picks the standoff, and a tie is
-    /// the class's: it can close.
+    /// Whether a body stands off a hostile class on pace alone (#615 U1): it
+    /// holds at its own reach outside the class's strike, where the class
+    /// strikes shorter than it reaches and falls behind it on plain
+    /// (`Gait.fallsBehind`, #613's ground). A class as quick is stood off
+    /// only by a body's damage and its ground (`Facts.keepsOff`, #625),
+    /// which this floor is the first half of.
     let standsOff (fighter: Fighter) (cls: HostileClass) : bool =
         cls.Strike < fighter.Reach
         && (match cls.Pace, Gait.ticks Gait.plain fighter.Gait with

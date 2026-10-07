@@ -362,6 +362,35 @@ let rampartDefenderTests =
                     "and it keeps its own tile in the ground"
             }
 
+            // #625: a body that keeps a raider off kites it whatever its
+            // Guard's kind (`Threats.standsOffSome`), a resident holding its
+            // home's Guard too; the kite walk counts our rampart unstruck,
+            // so a resident standing on one against a melee at its pace it
+            // keeps off stays there, as its rampart walk left it.
+            test
+                "a resident holding its home's Guard stands its rampart against a melee at its pace" {
+                let colony =
+                    defenderHome
+                        defendedLine
+                        [ raidMeleeAt "h-1" { X = 17; Y = 34 } ]
+                        [ homeRanger, { X = 20; Y = 34 } ]
+
+                let held = Map.ofList [ homeRanger.Name, taskId (Guard "W1N1") ]
+                let decision = decide colony held Set.empty None
+
+                Expect.equal
+                    (Map.tryFind homeRanger.Name decision.Assignments)
+                    (Some(taskId (Guard "W1N1")))
+                    "the premise: it keeps the home's Guard"
+
+                Expect.isFalse
+                    (decision.Intents
+                     |> List.exists (function
+                         | MoveCreep(name, _) -> name = homeRanger.Name
+                         | _ -> false))
+                    "and stands on its rampart"
+            }
+
             test "a melee raider at the line is still the defender's, and calls no ranger" {
                 let colony = defenderHome defendedLine [ raidMeleeAt "h-1" { X = 19; Y = 34 } ] []
 

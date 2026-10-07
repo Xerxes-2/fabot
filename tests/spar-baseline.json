@@ -83,6 +83,18 @@
     "ticks": 300,
     "towerSpent": 0
   },
+  "outpost-equal-pace-melee": {
+    "castEnergy": 0,
+    "cleared": 53,
+    "hurt": 1000,
+    "kills": 1,
+    "ourDeaths": 1,
+    "safeMode": false,
+    "stoodDown": false,
+    "struck": 0,
+    "ticks": 150,
+    "towerSpent": 0
+  },
   "outpost-fleeing-hauler": {
     "castEnergy": 0,
     "cleared": null,

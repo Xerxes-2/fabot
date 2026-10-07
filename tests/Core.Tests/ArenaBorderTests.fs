@@ -1709,8 +1709,16 @@ let arenaBorderTests =
             // tile short and traded 360 with the melee, slowing it from
             // t1,014,117; here the guard flees untouched, the melee keeps its
             // pace, and the idle ranger-1013698 is caught at t23 (live never).
+            // Moved by #625: Zero3956 is at the ranger's pace with its MOVE
+            // first, so ranger-1013734 takes the Guard at t0 (was t22, once
+            // the melee's second MOVE fell) and kites it from there; the kill
+            // is t81, where it was t132. The pocket at (20..21, 11..12) that
+            // caught the idle ranger still catches a ranger there, now the
+            // holder, struck once at t24 (486, as the idle one was) by the
+            // lamed melee: it flees for a tick, stands two, and takes the
+            // Guard back.
             test
-                "a lone ranger takes the Guard of a melee it out-paces on plain, keeps it, and kites it dead" {
+                "a lone ranger takes the Guard of a melee at its pace it lames, keeps it but for one strike, and kites it dead" {
                 let trace, tasks =
                     zeroAtTheCore
                         (Phases [ 50, Waypoints zeroLiveTiles; 0, Chase(Nearest, None) ])
@@ -1721,12 +1729,15 @@ let arenaBorderTests =
                 let died = diedOn "Zero3956" trace
 
                 Expect.isSome died $"Zero3956 dies to the kite\n{describe trace}"
+                Expect.isLessThanOrEqual died.Value 81 "by t81"
 
                 let taken = tasks |> List.findIndex ((=) guard)
+                Expect.equal taken 0 "ranger-1013734 takes the Guard at once"
 
-                Expect.isTrue
-                    (tasks.[taken .. died.Value] |> List.forall ((=) guard))
-                    $"ranger-1013734 keeps the Guard from t{taken} until the melee dies: {tasks}"
+                Expect.isLessThanOrEqual
+                    (tasks.[taken .. died.Value] |> List.filter ((<>) guard) |> List.length)
+                    3
+                    $"ranger-1013734 keeps the Guard until the melee dies but for one strike's flee: {String.concat (string ',') tasks}\n{describe trace}"
 
                 Expect.isTrue (survived "ranger-1013734-Spawn11" trace) "the kiter lives"
                 Expect.isTrue (survived "ranger-1013698-Spawn11" trace) "and so does the idle one"
@@ -1941,7 +1952,7 @@ let arenaBorderTests =
             }
 
             test
-                "a hurt melee retreats across the border, its healer dies short of it, and our ranger does not follow" {
+                "a hurt melee retreats toward the border shot down to its legs, and our ranger does not follow" {
                 let ranger =
                     body
                         "ranger-880900-Spawn8"
@@ -1973,14 +1984,30 @@ let arenaBorderTests =
                         (Some(Retreat(760, refuge, 800, Follow "Brute1")))
 
                 let _, trace = nurseryWest [ ranger; melee; healer ] |> run 30
-                Expect.isNonEmpty (crossingsInto "Brute1" "W18S25" trace) "the brute left"
 
-                // Moved by #598: the medic, its HEAL shot off beside its
-                // brute, is no longer nobody's and dies short of the exit
-                // (it left at 380 hits).
-                Expect.isSome (diedOn "Medic1" trace) $"the medic dies\n{describe trace}"
+                // Moved by #625: the brute is at the ranger's pace, its legs
+                // last, and the ranger's 160 a tick take its ten head parts
+                // inside the ground it has, so the ranger keeps it off and
+                // shoots it from range three where it closed and traded
+                // before (#598: the medic beside the brute died short of the
+                // exit and the brute left at 1,776). The brute is shot to its
+                // legs short of the exit; the medic, behind it and out of the
+                // kiter's reach, now lives. A body with no weapon left is no
+                // raider, so the Guard lets the brute go there, and the medic
+                // heals it back over the border: the kill a disarmed raider
+                // still is goes unpriced (#625's report).
+                let brute =
+                    trace
+                    |> List.collect (fun t -> t.Bodies |> List.filter (fun b -> b.Id = "Brute1"))
+                    |> List.map _.Hits
+                    |> List.min
 
-                Expect.isEmpty (crossingsInto "Medic1" "W18S25" trace) "rather than leaving"
+                Expect.isLessThanOrEqual
+                    brute
+                    (6 * Engine.partHits + 4 * Engine.partHits)
+                    $"its TOUGH and ATTACK are shot off\n{describe trace}"
+
+                Expect.isEmpty (crossingsInto "Brute1" "W18S25" trace) "before it reaches the exit"
 
                 Expect.isEmpty
                     (crossingsInto "ranger-880900-Spawn8" "W18S25" trace)
@@ -2289,10 +2316,15 @@ let arenaBorderTests =
                 "movement S3 capture t986,005: a ranger holding the Guard kites the melee down untouched" {
                 let ranger = "ranger-984393-Spawn3"
                 let start = rangerIntoMelee ()
-                let first, _ = step start
+
+                // Moved by #625: on t0 the child's 1-block ranger-985441,
+                // which now keeps the melee at its pace off, takes the seat,
+                // and this one W17S25's Guard Obsidian522 crosses into; it
+                // holds W17S26's from t1.
+                let second, _ = start |> run 2
 
                 Expect.equal
-                    (Map.tryFind ranger first.Carried.Assignments)
+                    (Map.tryFind ranger second.Carried.Assignments)
                     (Some "guard:W17S26")
                     "the ranger holds W17S26's Guard"
 
@@ -2345,16 +2377,22 @@ let arenaBorderTests =
                 // rather than waiting a step off the ground. #615 U3 moved them
                 // to t21 and t32: the mother's two rangers are each other's
                 // side (the child's 2-RANGED one no longer fits beside them),
-                // so the first closes sooner, the second beside it.
+                // so the first closes sooner, the second beside it. #625 moved
+                // them to t24 and t36: the child's ranger keeps the melee at
+                // its pace off and fits the kite again, so the kite seats it
+                // beside the first of the mother's (`Facts.kiteSeats`: the
+                // fewest that kill before the raid ages out, and every body
+                // already at the fight), and the second, 140 a tick more, is
+                // not sent. Slower to the kill by four ticks, nobody struck.
                 Expect.equal
                     firstShot
-                    (Some 21)
-                    $"it shoots the melee from t21 (main t68)\n{failure}"
+                    (Some 24)
+                    $"it shoots the melee from t24 (main t68)\n{failure}"
 
                 Expect.equal
                     (diedOn "HalfLife847" trace)
-                    (Some 32)
-                    $"the melee dies at t32 (S3 t74)\n{failure}"
+                    (Some 36)
+                    $"the melee dies at t36 (S3 t74)\n{failure}"
 
                 // Characterisation (for S4's Flee band, #583). S3 kept
                 // anchor-985849 and lost reserver-985957 at t10: the 1-block
@@ -2394,7 +2432,13 @@ let arenaBorderTests =
             // Post down the road the melee takes, flees ahead of it from t5
             // and is struck at t10, dead by t12: a melee at a tile a tick reaches every
             // tile before it, the exit home (20,0) included, so it has no
-            // escape to be given.
+            // escape to be given. Moved by #625 (was dead by t12 in both): the
+            // ranger now keeps Coefficient6755 (18M 17A, MOVE first, its
+            // pace) off and shoots it from t1. On its live tiles its second
+            // MOVE is off by t6, a step every second tick from then, and the
+            // anchor dies at t14; chasing the nearest body, it chases the
+            // ranger over the exit home, where W17S25 kills it by t11, and the
+            // anchor lives.
             test
                 "S4 capture t1,006,904: the reserver flees the melee untouched; the anchor it outpaces has none" {
                 let live =
@@ -2435,9 +2479,18 @@ let arenaBorderTests =
                          |> List.forall (fun (_, s) -> s.Hits = 400))
                         $"{label}: the melee never strikes the reserver\n{failure}"
 
-                    Expect.isTrue
-                        (diedOn "anchor-1005773-Spawn11" trace |> Option.exists (fun t -> t <= 12))
-                        $"{label}: the anchor dies by t12\n{failure}"
+                    let died = diedOn "anchor-1005773-Spawn11" trace
+
+                    if label = "live tiles" then
+                        Expect.equal died (Some 14) $"{label}: the anchor dies at t14\n{failure}"
+                    else
+                        Expect.isNone died $"{label}: the anchor lives\n{failure}"
+
+                        Expect.isLessThanOrEqual
+                            (diedOn "Coefficient6755" trace
+                             |> Option.defaultValue System.Int32.MaxValue)
+                            11
+                            $"{label}: the melee chases the ranger into W17S25 and dies there by t11\n{failure}"
             }
 
             // Movement S2 (`docs/adr/0088`) flipped the S0 pin here, which read

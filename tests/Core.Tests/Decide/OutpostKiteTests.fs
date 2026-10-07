@@ -51,6 +51,40 @@ let private withDeadEnd (colony: ColonyView) =
                 }
     }
 
+/// The raided outpost on a wide field, x 5..44 and y 5..48 (its south row a
+/// step off the exits), plain but for `swamp`: ground to run off a melee at
+/// its pace for many ticks (#625).
+let private withOpenField (swamp: Pos list) (colony: ColonyView) =
+    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+    let swamps = Set.ofList swamp
+
+    { colony with
+        Spatial =
+            colony.Spatial
+            |> withNeighbour
+                "W1N2"
+                { outpost with
+                    Terrain =
+                        TerrainGrid.ofList
+                            [
+                                for x in 5..44 do
+                                    for y in 5..48 ->
+                                        let tile = { X = x; Y = y }
+                                        tile, (if swamps.Contains tile then Swamp else Plain)
+                            ]
+                }
+    }
+
+/// Whether the outpost's verdict is a Kite: the rangers standing in it kite
+/// its raid down (`Facts.kitedDown`).
+let private kiteVerdict (colony: ColonyView) =
+    (Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2").Verdict.Value = Answer.Kite
+
+/// A melee a tile a tick on plain as a ranger is, and quicker on swamp:
+/// twenty MOVE, its legs first, under ten ATTACK.
+let private swiftAt pos =
+    hostileIn "W1N2" pos (List.replicate 20 Move @ List.replicate 10 Attack)
+
 /// The kite ground's approach band (#595), and what the first cut closed on
 /// in its place: every walkable tile within three of the ground, off it.
 let private approachOf colony =
@@ -648,7 +682,7 @@ let kiteTests =
                     let assigned = Map.ofList [ "r-1", Guard "W1N2" ]
 
                     (Threats.briefOf threats "W1N2").Verdict.Value,
-                    Threats.standsOffNothing threats atlas lamed None,
+                    Threats.standsOffNothing colony threats atlas lamed None,
                     Resolver.closes colony threats assigned lamed
 
                 let verdict, nothing, closes = judged (runnerAt at) []
@@ -664,10 +698,10 @@ let kiteTests =
                             { X = 20; Y = 36 }
                         ]
 
-                Expect.equal
-                    verdict
-                    Answer.Win
-                    "the premise: a three-block ranger standing by wins the 2A melee"
+                // Moved by #625: the 2A melee is at a ranger's pace and its
+                // first MOVE shot off lames it, so the room's answer is the
+                // Kite where it was a Win.
+                Expect.equal verdict Answer.Kite "the premise: the 2A melee's room is a kite"
 
                 Expect.isTrue nothing "the premise: still the quicker"
                 Expect.isFalse closes "a partner holding no Guard beside it is no reason to close"
@@ -713,6 +747,176 @@ let kiteTests =
                     ))
                     (Some(taskId (Guard "W1N2")))
                     "ten ATTACK on five MOVE, slower on plain and quicker nowhere, is kited"
+            }
+
+            // #625 (W17S26 t1,021,484, Wolf0965 18M 17A at our rangers'
+            // pace): stepping at once, a pursuer at the kiter's pace never
+            // closes while the kiter has a tile to step onto that it reaches
+            // first, and it needs that ground only until its shots lame the
+            // pursuer (`Facts.keepsOff`): eleven ticks of one hundred a tick
+            // take the eleventh MOVE off the swift melee, which then falls
+            // behind on plain.
+            test
+                "an equal-pace melee is kited down where the ranger has run-off ground until it is lamed" {
+                let shooter = rangerOf "r-1" 10
+
+                let kitedDownFrom ground (melee: HostileInfo) (at: Pos) =
+                    kitedBy [ melee ] [ shooter, at ] |> ground |> kiteVerdict
+
+                let open' = swiftAt { X = 25; Y = 25 }
+
+                Expect.isFalse
+                    (Gait.fallsBehind
+                        (Fighter.ofCreep shooter).Gait
+                        (HostileInfo.gait [ open' ] open'))
+                    "the premise: a tile a tick on plain, as the ranger"
+
+                Expect.isTrue
+                    (kitedDownFrom (withOpenField []) open' { X = 25; Y = 28 })
+                    "in open ground it is kept off and kited down"
+
+                let colony = kitedBy [ open' ] [ shooter, { X = 25; Y = 28 } ] |> withOpenField []
+
+                Expect.equal
+                    ((decide colony Map.empty Set.empty None).Assignments |> Map.tryFind "r-1")
+                    (Some(taskId (Guard "W1N2")))
+                    "and the ranger takes the Guard"
+
+                Expect.isFalse
+                    (kitedDownFrom withDeadEnd (swiftAt { X = 31; Y = 44 }) { X = 34; Y = 44 })
+                    "its back to the dead end's wall, three steps of ground short of the lame: not kited"
+
+                Expect.isFalse
+                    (kitedDownFrom
+                        (withOpenField [])
+                        (swiftAt { X = 25; Y = 45 })
+                        { X = 25; Y = 48 })
+                    "its back to the room's edge: not kited"
+
+                let swamp =
+                    [
+                        for x in 5..44 do
+                            for y in 29..48 -> { X = x; Y = y }
+                    ]
+
+                Expect.isFalse
+                    (kitedDownFrom (withOpenField swamp) open' { X = 25; Y = 28 })
+                    "its back to swamp the melee crosses quicker: not kited"
+            }
+
+            // #625: the lame window is read off the live body head first, as
+            // the engine destroys it. The same twenty parts with the MOVE
+            // first fall behind on plain once one MOVE is shot off; with the
+            // ATTACK first they press the ranger until all ten are, a hundred
+            // ticks at ten a tick, longer than the field's run-off.
+            test "a melee whose MOVE parts come first falls behind after the lame window" {
+                let shooter = rangerOf "r-1" 1
+                let movesFirst = runnerAt { X = 25; Y = 25 }
+
+                let attacksFirst =
+                    hostileIn
+                        "W1N2"
+                        { X = 25; Y = 25 }
+                        (List.replicate 10 Attack @ List.replicate 10 Move)
+
+                let kited (melee: HostileInfo) =
+                    kitedBy [ melee ] [ shooter, { X = 25; Y = 28 } ]
+                    |> withOpenField []
+                    |> kiteVerdict
+
+                let lamed =
+                    { movesFirst with
+                        Hits = movesFirst.Hits - Engine.partHits
+                    }
+
+                Expect.isTrue
+                    (Gait.fallsBehind
+                        (Fighter.ofCreep shooter).Gait
+                        (HostileInfo.gait [ lamed ] lamed))
+                    "one MOVE shot off its head, it falls behind on plain"
+
+                Expect.isTrue (kited movesFirst) "so ten ticks of ground keep it off"
+
+                Expect.isFalse
+                    (kited attacksFirst)
+                    "its ATTACK first, it presses the ranger far longer"
+            }
+
+            // #625: run-off is ground no class that strikes the ranger
+            // before it strikes back reaches first. A second melee of
+            // another pace south of the ranger shuts the ground the swift
+            // one north of it leaves, though each is lamed in a tick or so.
+            test
+                "an equal-pace melee is not kited with a second melee class across the ranger's run-off" {
+                let shooter = rangerOf "r-1" 10
+                let north = swiftAt { X = 25; Y = 25 }
+
+                // Eleven MOVE under ten ATTACK: a tile a tick on plain, three
+                // on swamp where the swift melee takes two.
+                let south =
+                    { hostileIn
+                          "W1N2"
+                          { X = 25; Y = 31 }
+                          (List.replicate 11 Move @ List.replicate 10 Attack) with
+                        Id = "south"
+                    }
+
+                let kited raid =
+                    kitedBy raid [ shooter, { X = 25; Y = 28 } ] |> withOpenField [] |> kiteVerdict
+
+                Expect.isTrue (kited [ north ]) "the premise: the swift melee alone is kited"
+                Expect.isTrue (kited [ south ]) "the premise: so is the other alone"
+                Expect.isFalse (kited [ north; south ]) "the two from either side are not"
+            }
+
+            // #625: a pursuer quicker than the ranger is kept off only where
+            // the ranger lames it before it closes the two tiles between
+            // their reaches: at three ticks a tile against its two, twelve.
+            test "a quicker melee is kited where the ranger lames it before it closes" {
+                // Nine RANGED_ATTACK on three MOVE: three ticks a tile, 90 a tick.
+                let slow =
+                    creepWith "r-1" 0 0 (List.replicate 9 RangedAttack @ List.replicate 3 Move)
+
+                // Its own fit (`Facts.fits`): the row's rangers out-pace the
+                // melee on plain and would kite it whatever this one does.
+                let kited parts =
+                    let colony =
+                        kitedBy
+                            [ hostileIn "W1N2" { X = 25; Y = 25 } parts ]
+                            [ slow, { X = 25; Y = 28 } ]
+                        |> withOpenField []
+
+                    Facts.fits colony Stance.Standoff "W1N2" 1 true slow []
+
+                Expect.isTrue
+                    (kited (List.replicate 6 Move @ List.replicate 10 Attack))
+                    "its MOVE first, three shot off in four ticks make it the slower"
+
+                Expect.isFalse
+                    (kited (List.replicate 10 Attack @ List.replicate 6 Move))
+                    "its ATTACK first, it closes before the twelve ticks its swing takes to fall"
+            }
+
+            // #625: one ranger shoots one target a tick, so pursuers at its
+            // pace are lamed in turn: the second presses it for both turns.
+            test "two melees at the ranger's pace press it for both their lame windows" {
+                let shooter = rangerOf "r-1" 10
+
+                let quick id pos =
+                    { hostileIn "W1N2" pos (List.replicate 11 Move @ List.replicate 10 Attack) with
+                        Id = id
+                    }
+
+                let kited raid =
+                    kitedBy raid [ shooter, { X = 34; Y = 44 } ] |> withDeadEnd |> kiteVerdict
+
+                Expect.isTrue
+                    (kited [ quick "a" { X = 31; Y = 44 } ])
+                    "one lamed in two ticks, inside the dead end's three"
+
+                Expect.isFalse
+                    (kited [ quick "a" { X = 31; Y = 44 }; quick "b" { X = 30; Y = 44 } ])
+                    "the second waits its turn: four ticks, past the three"
             }
 
             // #613: one fitness answer takes and keeps the Guard. The brief

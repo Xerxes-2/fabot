@@ -477,6 +477,66 @@ let private fleeingHauler () : Arena =
             hauler
         ]
 
+/// The #625 shape (W17S26, live t1,021,484): Trepidimous' Wolf0965, 18M 17A
+/// with its MOVE first and no heal, a tile a tick on plain as our 6M 4R 2H
+/// rangers are, walks down the north road at the anchor digging by the
+/// container and chases the nearest of ours. Our two rangers stand south of
+/// the container; nothing casts: the two answer it alone.
+let private equalPaceMelee () : Arena =
+    let outpost =
+        room "W17S26"
+        |> withStructures
+            [
+                { structureOf "container" None 123_000 250_000 { X = 27; Y = 9 } with
+                    Energy = 862
+                }
+            ]
+        |> withRoads
+            [
+                20, 1, 3_700
+                21, 2, 3_700
+                22, 3, 4_300
+                23, 4, 3_800
+                24, 5, 3_600
+                25, 6, 3_900
+                26, 7, 3_800
+                27, 8, 3_800
+            ]
+
+    let home =
+        room "W17S25"
+        |> withController Ownership.Ours None 5 3
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+
+    let declared =
+        { colony "W17S25" with
+            Outposts = [ outpostOf outpost.Capture ]
+        }
+
+    let ranger id tile =
+        body id Side.Ours (parts [ Move, 6; RangedAttack, 4; Heal, 2 ]) tile None
+
+    arena
+        900_000
+        [ home; outpost ]
+        [ declared ]
+        [
+            ranger "ranger-1-Spawn11" (at "W17S26" 26 13)
+            ranger "ranger-2-Spawn11" (at "W17S26" 28 13)
+            body
+                "anchor-1-Spawn11"
+                Side.Ours
+                (parts [ Work, 6; Carry, 1; Move, 3 ])
+                (at "W17S26" 27 9)
+                None
+            body
+                "Wolf0965"
+                (Side.Player "Trepidimous")
+                (parts [ Move, 17; Attack, 17; Move, 1 ])
+                (at "W17S26" 21 2)
+                (Some(Chase(Nearest, None)))
+        ]
+
 /// No body of another side but a Source Keeper's stands in the arena.
 let private noHostile (a: Arena) =
     a.Bodies
@@ -549,6 +609,12 @@ let private scenarios () : Scenario list =
             // the live hauler, gone over the exit, never gave.
             Ticks = 34
             Start = fleeingHauler
+            Cleared = noHostile
+        }
+        {
+            Slug = "outpost-equal-pace-melee"
+            Ticks = 150
+            Start = equalPaceMelee
             Cleared = noHostile
         }
     ]

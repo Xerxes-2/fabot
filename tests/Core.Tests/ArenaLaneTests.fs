@@ -1079,9 +1079,13 @@ let worldLaneCaptureTests =
             // fits the kite (it held on `rangers > 1`); the mother's second
             // ranger, free and fitting beside the first, takes the seat, and
             // the melee dies two ticks sooner. The shots and the t32 kill are
-            // pinned in ArenaBorderTests' movement S3 kite test.
+            // pinned in ArenaBorderTests' movement S3 kite test. Moved again
+            // by #625: HalfLife847 (18M 17A, MOVE first) is at the child's
+            // ranger's pace, and its shots lame it inside the ground it has,
+            // so it keeps it off untouched and fits the kite once more; the
+            // mother's second ranger is not wanted beside it.
             test
-                "movement S3 capture t986,005, the world lane: at t20 the mother's two 14-RANGED rangers hold the kite" {
+                "movement S3 capture t986,005, the world lane: at t20 the mother's ranger and the child's hold the kite" {
                 let first, _ = rangerIntoMelee () |> run 20
 
                 Expect.equal
@@ -1089,8 +1093,8 @@ let worldLaneCaptureTests =
                      |> Map.filter (fun _ tid -> tid = "guard:W17S26")
                      |> Map.keys
                      |> List.ofSeq)
-                    [ "ranger-984683-Spawn3"; "ranger-985616-Spawn3" ]
-                    "at t20 the mother's two rangers hold the kite"
+                    [ "ranger-984683-Spawn3"; "ranger-985441-Spawn11" ]
+                    "at t20 the mother's ranger and the child's hold the kite"
             }
         ]
 
@@ -1592,10 +1596,13 @@ let foughtWhereStruckTests =
             // At the live 6,991, under `Tuning.CasterReserveHold`, no colony
             // casts either harassment room; each is held for its rangers
             // alone, and a Guard there is no fight they keep
-            // (`Planner.planFightTasks`).
+            // (`Planner.planFightTasks`). Moved by #625: ranger-1006965, home
+            // in W17S25 by t76, walks back out to W17S26 (t112) for its
+            // Guard, whose Coefficient6755 (18M 17A, MOVE first, a ranger's
+            // pace) it now kites; it walks home first all the same.
             test
                 "#602 capture t1,007,219 at the live stock: with W19S26 and W19S25 cast by nobody, both rangers yield their Guards and walk home unhurt" {
-                let _, trace = w19s26LosingTrade 6_991 |> run 120
+                let final, trace = w19s26LosingTrade 6_991 |> run 120
                 let failure = describe trace
 
                 let least ranger =
@@ -1607,10 +1614,16 @@ let foughtWhereStruckTests =
                 for ranger in [ "ranger-1006821-Spawn11"; "ranger-1006965-Spawn11" ] do
                     Expect.equal (least ranger) 1_200 $"{ranger} is never struck\n{failure}"
 
-                    Expect.contains
-                        [ "W18S25"; "W17S25" ]
-                        (pathOf ranger trace |> List.last |> (fun (_, s) -> s.At.Room))
+                    Expect.isTrue
+                        (pathOf ranger trace
+                         |> List.exists (fun (_, s) ->
+                             List.contains s.At.Room [ "W18S25"; "W17S25" ]))
                         $"{ranger} walks home to its caster\n{failure}"
+
+                Expect.equal
+                    (Map.tryFind "ranger-1006965-Spawn11" final.Carried.Assignments)
+                    (Some "guard:W17S26")
+                    $"and one, home, takes W17S26's Guard\n{failure}"
 
                 Expect.isTrue (survived "Wave7157" trace) $"and Wave7157 stands\n{failure}"
             }

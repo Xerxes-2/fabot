@@ -1775,16 +1775,50 @@ module Threats =
 
         fighter, shorter, camp |> Option.filter (fun _ -> Fighter.outranges fighter)
 
+    /// Whether a body stands off a class of its room's maps: it keeps off
+    /// every member it sees (`Facts.keepsOff`, #625), by its pace alone
+    /// (`Fighter.standsOff`) where it sees none.
+    let private stoodOff (view: ColonyView) (fighter: Fighter) (map: ClassArrival) : bool =
+        match
+            map.Members
+            |> List.choose (fun id -> view.Hostiles |> List.tryFind (fun h -> h.Id = id))
+        with
+        | [] -> Fighter.standsOff fighter map.Class
+        | members -> members |> List.forall (Facts.keepsOff view fighter)
+
     /// Whether a kiting body stands off none of the classes shorter than its
-    /// reach in its room (`Fighter.standsOff`, #615 U1), some standing there
-    /// and no camp: each is the quicker on plain, so it picks the standoff.
+    /// reach in its room (#615 U1), some standing there and no camp: none
+    /// it keeps off, so each picks the standoff.
     /// What the body may close by, where it also wins the fight (`Resolver`).
-    let standsOffNothing (threats: Threats) atlas (creep: CreepInfo) (camp: Pos option) : bool =
+    let standsOffNothing
+        (view: ColonyView)
+        (threats: Threats)
+        atlas
+        (creep: CreepInfo)
+        (camp: Pos option)
+        : bool =
         let fighter, shorter, camp = shorterIn threats atlas creep camp
 
         not (List.isEmpty shorter)
         && Option.isNone camp
-        && not (shorter |> List.exists (fun map -> Fighter.standsOff fighter map.Class))
+        && not (List.exists (stoodOff view fighter) shorter)
+
+    /// Whether a body keeps off the raiders of some class shorter than its
+    /// reach in its room (`Facts.keepsOff`, #625), one standing there at
+    /// least: raiders it is priced as keeping off, which its walk must keep
+    /// off too. A keeper or an unarmed body is no raider and asks no kite.
+    let standsOffSome (view: ColonyView) (threats: Threats) atlas (creep: CreepInfo) : bool =
+        let fighter, shorter, _ = shorterIn threats atlas creep None
+
+        shorter
+        |> List.exists (fun map ->
+            match
+                view.Hostiles
+                |> List.filter (fun h ->
+                    List.contains h.Id map.Members && HostileInfo.raider view.Hostiles h)
+            with
+            | [] -> false
+            | raiders -> raiders |> List.forall (Facts.keepsOff view fighter))
 
     /// A kiting body's walk (#510, #524, movement S3), by tile index of the
     /// room it stands in: whether a map whose class strikes shorter than the
@@ -1836,87 +1870,6 @@ module Threats =
 
                 Some(unsafe, soonest)
 
-    /// By tile index of the room a body stands in, whether it reaches the
-    /// tile by a walk through tiles it is on and gone from before any map
-    /// strikes them (`Leaves < A`, ties unsafe; our ramparts never struck):
-    /// its own tile, and each tile its flood reaches from a neighbour so
-    /// reached that it arrives on sooner (movement S4). A tile the flood
-    /// reaches only through a strike is not one it reaches first, however
-    /// late the hostiles arrive on it.
-    let internal reachedFirst
-        (walk: Arrival.BodyArrival)
-        (maps: ArrivalMaps)
-        (ramparts: Set<Pos>)
-        : bool[] =
-        let first = Array.create tileCount false
-
-        // The reached tiles in arrival order, by a counting sort: a closure
-        // sort a body a tick cost the siege half a millisecond.
-        let mutable most = -1
-        let mutable count = 0
-
-        for index in 0 .. tileCount - 1 do
-            let ticks = Grid.at index walk.Ticks
-
-            if ticks < System.Int32.MaxValue then
-                most <- max most ticks
-                count <- count + 1
-
-        let starts = Array.zeroCreate<int> (most + 2)
-
-        for index in 0 .. tileCount - 1 do
-            let ticks = Grid.at index walk.Ticks
-
-            if ticks < System.Int32.MaxValue then
-                starts.[ticks + 1] <- starts.[ticks + 1] + 1
-
-        for t in 1 .. most + 1 do
-            starts.[t] <- starts.[t] + starts.[t - 1]
-
-        let order = Array.zeroCreate<int> count
-
-        for index in 0 .. tileCount - 1 do
-            let ticks = Grid.at index walk.Ticks
-
-            if ticks < System.Int32.MaxValue then
-                order.[starts.[ticks]] <- index
-                starts.[ticks] <- starts.[ticks] + 1
-
-        let edge = Engine.roomSide - 1
-
-        for index in order do
-            let ticks = Grid.at index walk.Ticks
-
-            if ticks = 0 then
-                first.[index] <- true
-            elif
-                Grid.at index walk.Leaves < Arrival.soonestAmong
-                    index
-                    maps.Classes
-                    System.Int32.MaxValue
-                || Set.contains (posAt index) ramparts
-            then
-                let x = index / Engine.roomSide
-                let y = index % Engine.roomSide
-
-                for nx in max 0 (x - 1) .. min edge (x + 1) do
-                    for ny in max 0 (y - 1) .. min edge (y + 1) do
-                        let n = nx * Engine.roomSide + ny
-
-                        // No walk goes on from an exit tile but the one it
-                        // stands on: the engine carries it over the border.
-                        let ring = nx = 0 || ny = 0 || nx = edge || ny = edge
-
-                        if
-                            n <> index
-                            && first.[n]
-                            && (not ring || Grid.at n walk.Ticks = 0)
-                            && Grid.at n walk.Ticks < ticks
-                        then
-                            first.[index] <- true
-
-        first
-
     /// Flee's ground for a body (movement S4): every tile it is on before any
     /// hostile strikes it (`T_b < A`), widest escape first — away from home,
     /// home across the border (`homeward`, #511); else the refuges it stands a
@@ -1948,7 +1901,9 @@ module Threats =
                 lazy
                     (match walkOf threats atlas creep, Map.tryFind room threats.Arrivals with
                      | Some walk, Some(maps, _) ->
-                         Some(reachedFirst walk maps (rampartsIn threats atlas room))
+                         Some(
+                             Arrival.reachedFirst walk maps.Classes (rampartsIn threats atlas room)
+                         )
                      | _ -> None)
 
             // One pass over the grid, by the body's own arrival, its fatigue,
@@ -2057,7 +2012,7 @@ module Threats =
     /// Flee's ground for a body caught in a room not its colony's home (#511):
     /// the ground beside the landings into the next room on a chain home,
     /// home or a room seen this tick, across the exits it reaches by a walk
-    /// through tiles it is on first (`reachedFirst`), whose landings lie in
+    /// through tiles it is on first (`Arrival.reachedFirst`), whose landings lie in
     /// no Reach of that room; the nearest such room by its own walk. Home has
     /// the towers, the ramparts and the fighters; an outpost's safe set is
     /// small and moves with the raid. An armed body flees only with no fight

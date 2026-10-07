@@ -1439,10 +1439,23 @@ let movementAmong
     // its reach (`Kiting.Clear`) only where it stands off nothing there
     // (`Threats.standsOffNothing`: the raid picks the standoff) and wins the
     // fight (`closes`); a body that can neither keep off nor win keeps its
-    // kite walk, never walking into a quicker melee's ring.
+    // kite walk, never walking into a quicker melee's ring. Any holder of the
+    // Guard of the room it stands in kites a raider it keeps off there at its
+    // standoff (`Threats.standsOffSome`, #625), the kite its fight is priced
+    // by, whatever the Guard's kind: walked into it, the raider strikes it.
+    let kitesHere (creep: CreepInfo) (at: RoomPos) =
+        match Map.tryFind creep.Name assigned with
+        | Some(Guard room) when room = at.Room ->
+            Brief.stanceOf view room (Threats.briefOf threats room) creep = Stance.Standoff
+            && Threats.standsOffSome view threats atlas creep
+        | _ -> false
+
     let kitingOf name (at: RoomPos) =
         match view.Creeps |> List.tryFind (fun c -> c.Name = name) with
-        | Some creep when avoidFor name = Avoid.Kite && Fighter.outranges (Fighter.ofCreep creep) ->
+        | Some creep when
+            (avoidFor name = Avoid.Kite || kitesHere creep at)
+            && Fighter.outranges (Fighter.ofCreep creep)
+            ->
             let camp = Map.tryFind at.Room view.ExitHolds |> Option.map (fun hold -> hold.Exit)
 
             let approach =
@@ -1452,7 +1465,7 @@ let movementAmong
 
             match Threats.kiteUnsafeFor threats atlas creep camp with
             | Some(unsafe, soonest) when
-                not (Threats.standsOffNothing threats atlas creep camp && closesNow creep)
+                not (Threats.standsOffNothing view threats atlas creep camp && closesNow creep)
                 ->
                 Some(Kiting.Keeps(unsafe, soonest, approach))
             | _ -> Some Kiting.Clear

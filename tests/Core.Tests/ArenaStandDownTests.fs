@@ -2116,9 +2116,13 @@ let w18s25CrippledTests =
             // the room is the kite its biggest ranger answers. The kill time is the small
             // rangers' either way in the arena (t93 at writing); what this
             // pins is the binding. No Win on a row is pinned by the world
-            // lane test below.
+            // lane test below. Moved by #625: the mother's ranger, which took
+            // the kite's spell seat from t35 and never reached it, holds
+            // W17S25's own Guard throughout, where it now keeps Photon713
+            // (15M 13A, MOVE first, a ranger's pace) off at the door beside
+            // its healer.
             test
-                "#573 capture t994,917: the stand-down withholds no row, so the cripple is a kite and the mother's ranger takes its spell seat" {
+                "#573 capture t994,917: the stand-down withholds no row, so the cripple is a kite and the mother's ranger holds the home's Guard" {
                 let run = w18s25Crippled () |> crippledRun 50
 
                 Expect.exists
@@ -2129,11 +2133,11 @@ let w18s25CrippledTests =
                         | _ -> false)
                     "W17S25 reads the cripple as a Kite"
 
-                Expect.exists
+                Expect.all
                     run
                     (fun (_, _, assignments) ->
-                        Map.tryFind "ranger-993409-Spawn3" assignments = Some "guard:W18S25")
-                    "the mother's ranger takes the kite's spell seat"
+                        Map.tryFind "ranger-993409-Spawn3" assignments = Some "guard:W17S25")
+                    "the mother's ranger holds W17S25's Guard"
             }
 
             // The world lane (one match over the fleet): W17S25's own ranger

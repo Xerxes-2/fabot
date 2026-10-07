@@ -178,7 +178,10 @@ type Striker =
 /// that a body of ours may stand on or cross from, less our standing
 /// ramparts there (empty where nothing is left to run from), those ramparts'
 /// tiles, which every reader of the room's danger counts as unstruck, and
-/// the room's walkable tiles less that Reach, laid on first read.
+/// the room's walkable tiles less that Reach, laid on first read; and the
+/// walking grid that is read off (by tile index, a step's weight, -1 where
+/// no body of ours stands), what a kite's run-off is walked on
+/// (`Arrival.runOff`).
 type RoomDanger =
     {
         HostileMaps: ArrivalMaps
@@ -186,6 +189,7 @@ type RoomDanger =
         Reach: Set<Pos>
         Ramparts: Set<Pos>
         Safe: Lazy<Set<RoomPos>>
+        Walking: int[]
     }
 
 /// One room as this tick's vision answered for it, to every colony: a creep's

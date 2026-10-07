@@ -552,6 +552,149 @@ let damageAt (room: string) (strikers: Striker list) (ticks: int) (tile: Pos) : 
         else
             0)
 
+/// By tile index of the room a body stands in, whether it reaches the tile
+/// by a walk through tiles it is on and gone from before any of `classes`
+/// strikes them (`Leaves < A`, ties unsafe; our ramparts never struck): its
+/// own tile, and each tile its flood reaches from a neighbour so reached
+/// that it arrives on sooner (movement S4). A tile the flood reaches only
+/// through a strike is not one it reaches first, however late the hostiles
+/// arrive on it.
+let reachedFirst (walk: BodyArrival) (classes: ClassArrival list) (ramparts: Set<Pos>) : bool[] =
+    let first = Array.create tileCount false
+
+    // The reached tiles in arrival order, by a counting sort: a closure
+    // sort a body a tick cost the siege half a millisecond.
+    let mutable most = -1
+    let mutable count = 0
+
+    for index in 0 .. tileCount - 1 do
+        let ticks = at index walk.Ticks
+
+        if ticks < never then
+            most <- max most ticks
+            count <- count + 1
+
+    let starts = Array.zeroCreate<int> (most + 2)
+
+    for index in 0 .. tileCount - 1 do
+        let ticks = at index walk.Ticks
+
+        if ticks < never then
+            starts.[ticks + 1] <- starts.[ticks + 1] + 1
+
+    for t in 1 .. most + 1 do
+        starts.[t] <- starts.[t] + starts.[t - 1]
+
+    let order = Array.zeroCreate<int> count
+
+    for index in 0 .. tileCount - 1 do
+        let ticks = at index walk.Ticks
+
+        if ticks < never then
+            order.[starts.[ticks]] <- index
+            starts.[ticks] <- starts.[ticks] + 1
+
+    let edge = Engine.roomSide - 1
+
+    for index in order do
+        let ticks = at index walk.Ticks
+
+        if ticks = 0 then
+            first.[index] <- true
+        elif
+            at index walk.Leaves < soonestAmong index classes never
+            || Set.contains (posAt index) ramparts
+        then
+            let x = index / Engine.roomSide
+            let y = index % Engine.roomSide
+
+            for nx in max 0 (x - 1) .. min edge (x + 1) do
+                for ny in max 0 (y - 1) .. min edge (y + 1) do
+                    let n = nx * Engine.roomSide + ny
+
+                    // No walk goes on from an exit tile but the one it
+                    // stands on: the engine carries it over the border.
+                    let ring = nx = 0 || ny = 0 || nx = edge || ny = edge
+
+                    if
+                        n <> index
+                        && first.[n]
+                        && (not ring || at n walk.Ticks = 0)
+                        && at n walk.Ticks < ticks
+                    then
+                        first.[index] <- true
+
+    first
+
+/// The run-off ground a kiter has against `classes` (#625: every class that
+/// strikes it before it strikes back, and an unseen neighbour's risk), in
+/// its own ticks: the latest it can step off a tile it reaches before any
+/// of them strikes it (`reachedFirst`), walking from `seeds` (each a tile
+/// index and the ticks its fatigue holds it there) over `walking` at its
+/// `pace`. Never an exit, whose crossing the engine carries it over and
+/// back; `refuge` where a tile it reaches first is one none of them ever
+/// strikes, or our rampart.
+let runOff
+    (walking: int[])
+    (classes: ClassArrival list)
+    (unseen: int[] option)
+    (ramparts: Set<Pos>)
+    (pace: Pace)
+    (seeds: (int * int) list)
+    (refuge: int)
+    : int =
+    let classes =
+        match unseen with
+        | None -> classes
+        | Some ticks ->
+            {
+                Class =
+                    {
+                        Strike = Engine.rangedRange
+                        Pace = None
+                    }
+                Members = []
+                Ticks = ticks
+            }
+            :: classes
+
+    let ticks, leaves =
+        floodWithDepartures
+            walking
+            (Some pace)
+            false
+            (seeds |> List.map (fun (tile, wait) -> tile, 0, wait))
+
+    let first =
+        reachedFirst
+            {
+                Room = ""
+                Ticks = ticks
+                Leaves = leaves
+            }
+            classes
+            ramparts
+
+    let edge = Engine.roomSide - 1
+    let mutable run = 0
+
+    for index in 0 .. tileCount - 1 do
+        let x = index / Engine.roomSide
+        let y = index % Engine.roomSide
+
+        if first.[index] && x > 0 && y > 0 && x < edge && y < edge then
+            let held =
+                if
+                    soonestAmong index classes never = never || Set.contains (posAt index) ramparts
+                then
+                    refuge
+                else
+                    min refuge (at index leaves)
+
+            run <- max run held
+
+    run
+
 /// One body of ours' arrival over its room by its gait (`gaitOf`: its live
 /// MOVE, its load and its parts shot off), and the fatigue it waits out now;
 /// None for a body the projection does not place.

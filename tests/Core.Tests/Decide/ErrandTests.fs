@@ -320,7 +320,9 @@ let errandStandDownTests =
                     |> Option.map (fun row -> row.Quota)
 
                 // The garrison standing, two rangers on the ring, under a raid
-                // of this many ATTACK.
+                // of this many ATTACK, a gun beside them on a MOVE more: it
+                // strikes as far as a ranger reaches, so no ranger kites it
+                // at its pace (#625), and the garrison trades with it.
                 let underRaid attack =
                     let errand = bareHome |> errandColony (Some Ownership.Ours) []
 
@@ -331,7 +333,9 @@ let errandStandDownTests =
                                 { hostileIn
                                       errandRoom
                                       { ringTile with X = ringTile.X + 3 }
-                                      (List.replicate attack Move @ List.replicate attack Attack) with
+                                      (List.replicate (attack + 1) Move
+                                       @ List.replicate attack Attack
+                                       @ [ RangedAttack ]) with
                                     Owner = "Trepidimous"
                                 }
                             ]

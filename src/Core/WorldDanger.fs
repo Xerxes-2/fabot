@@ -131,6 +131,7 @@ let private tableOver
                              Reach = reach
                              Ramparts = ramparts
                              Safe = lazy (Atlas.walkableTilesExceptOn walking room reach)
+                             Walking = walking
                          }
              | _ -> None))
     |> Map.ofList

@@ -1682,7 +1682,16 @@ let fightRecordTests =
             // raid the residents lose, and the residents standing in the room are
             // priced together, where one body of the garrison's size was.
             test "a raid one resident loses but the two standing in the room win opens no record" {
-                let raid = meleeOf 12
+                // A gun beside its twelve ATTACK, on a MOVE more: it strikes
+                // as far as a ranger reaches, so no ranger kites it at its
+                // pace (#625), and the residents trade with it.
+                let raid =
+                    [
+                        Decide.Fixtures.hostileIn
+                            "W1N2"
+                            { X = 26; Y = 40 }
+                            (List.replicate 13 Move @ List.replicate 12 Attack @ [ RangedAttack ])
+                    ]
 
                 let resident name x =
                     Decide.Fixtures.creepWith

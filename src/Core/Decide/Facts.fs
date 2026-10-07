@@ -960,25 +960,265 @@ let private closesIn (side: HostileInfo list) (fighter: Fighter) (hostile: Hosti
     || not (HostileInfo.crossesExits hostile)
        && List.contains Attack (Engine.liveParts hostile.Body hostile.Hits)
 
+/// Where a creep of ours stands: its colony's projection, else the world's
+/// census of every body (`WorldView.Bodies`).
+let private placementOf (view: ColonyView) (name: string) : RoomPos option =
+    SpatialInfo.creepPlacementOf view.Spatial name
+    |> Option.orElseWith (fun () ->
+        view.World.Bodies.Value
+        |> Map.toSeq
+        |> Seq.tryPick (fun (here, bodies) ->
+            bodies
+            |> List.tryPick (fun (body, pos) ->
+                if body.Name = name then Some(RoomPos.at here pos) else None)))
+
+/// A fixture's danger (`WorldDanger.read` off a view the world laid none
+/// in), laid once for the same facts.
+let private dangersMemo: TickMemo.Memo<ColonyView, Map<string, Lazy<RoomDanger option>>> =
+    TickMemo.create 4 (fun a b ->
+        obj.ReferenceEquals(a.World, b.World)
+        && obj.ReferenceEquals(a.Spatial, b.Spatial)
+        && obj.ReferenceEquals(a.Hostiles, b.Hostiles)
+        && obj.ReferenceEquals(a.RoomControl, b.RoomControl)
+        && obj.ReferenceEquals(a.Tuning, b.Tuning))
+
+/// The world's danger as a view reads it (`WorldDanger.read`).
+let private dangersOf (view: ColonyView) : Map<string, Lazy<RoomDanger option>> =
+    match view.World.Dangers with
+    | Some table -> table
+    | None -> TickMemo.recall dangersMemo view WorldDanger.read
+
+/// One kiter's run-off (`Arrival.runOff`) by the room's danger (its maps,
+/// laid once a tick), the reach that picks the classes striking it first,
+/// its pace and where it walks from, walked once a tick. Sized for a war
+/// tick's kiters and the priced bodies' stands about each pursuer.
+let private runOffMemo: TickMemo.Memo<RoomDanger * int * Pace * (int * int) list, int> =
+    TickMemo.create 64 (fun (danger, reach, pace, seeds) (danger', reach', pace', seeds') ->
+        obj.ReferenceEquals(danger, danger')
+        && reach = reach'
+        && pace = pace'
+        && seeds = seeds')
+
+/// The run-off ground a body of ours has against a hostile it out-reaches
+/// (#625), in its own ticks (`Arrival.runOff`): against every class of the
+/// room's maps that strikes shorter than the body reaches (each strikes it
+/// before it strikes back, the hostile's own among them) and the risk an
+/// unseen neighbour lands, walked from the tile the body stands on in the
+/// hostile's room, its fatigue waited out; else from every tile at its
+/// reach about the hostile, where a body coming to the fight takes its
+/// stand. None where the room lays no map of the hostile.
+let private runOffFor (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : int =
+    let room = hostile.Pos.Room
+
+    let danger =
+        Map.tryFind room (dangersOf view) |> Option.bind (fun danger -> danger.Value)
+
+    let shorter (map: ClassArrival) = map.Class.Strike < fighter.Reach
+
+    let mapped =
+        danger
+        |> Option.exists (fun danger ->
+            danger.HostileMaps.Classes
+            |> List.exists (fun map -> shorter map && List.contains hostile.Id map.Members))
+
+    match danger, Arrival.paceOf fighter.Gait with
+    | Some danger, Some pace when mapped ->
+        let walking = danger.Walking
+
+        let seeds =
+            match
+                fighter.Creep
+                |> Option.bind (fun name ->
+                    placementOf view name |> Option.map (fun at -> name, at))
+            with
+            | Some(name, at) when at.Room = room ->
+                let wait =
+                    ColonyView.bodies view
+                    |> List.tryFind (fun creep -> creep.Name = name)
+                    |> Option.map (fun creep -> Arrival.waitOf creep.Fatigue fighter.Gait)
+                    |> Option.defaultValue 0
+
+                [ indexOf (RoomPos.pos at), wait ]
+            | _ ->
+                let centre = RoomPos.pos hostile.Pos
+                let reach = fighter.Reach
+                let edge = Engine.roomSide - 1
+
+                [
+                    for dx in -reach .. reach do
+                        for dy in -reach .. reach do
+                            let x = centre.X + dx
+                            let y = centre.Y + dy
+
+                            if
+                                max (abs dx) (abs dy) = reach
+                                && x > 0
+                                && y > 0
+                                && x < edge
+                                && y < edge
+                            then
+                                let index = indexOf { X = x; Y = y }
+
+                                if walking.[index] > 0 then
+                                    yield index, 0
+                ]
+
+        TickMemo.recall
+            runOffMemo
+            (danger, fighter.Reach, pace, seeds)
+            (fun (danger, _, pace, seeds) ->
+                Arrival.runOff
+                    danger.Walking
+                    (danger.HostileMaps.Classes |> List.filter shorter)
+                    danger.HostileMaps.Unseen
+                    danger.Ramparts
+                    pace
+                    seeds
+                    Engine.creepLifetime)
+    | _ -> 0
+
+/// The damage that lames or disarms a hostile body against one gait of
+/// ours (`lamedIn`), by its parts, boosts and hits: worked once a tick.
+/// Sized for a war tick's pursuers against each gait of ours, worn ones
+/// (`Fighter.atHits`) among them.
+let private lamedMemo: TickMemo.Memo<BodyPart list * Boost list * int * Gait, int> =
+    TickMemo.create 128 (fun a b -> a = b)
+
+/// The ticks a hostile struck alone at `damage` a tick takes to stop
+/// pressing a body of ours that out-reaches it (#625): net of the heal its
+/// side can put on it (every HEAL of its owner in its room, the focus's
+/// worst case), until it falls behind the body on plain
+/// (`Gait.fallsBehind`), its last ATTACK falls, or it dies. Read off its
+/// live body head first, as the engine destroys it (`Engine.powerAt`): a
+/// body whose MOVE comes first is lamed in a few shots, one whose ATTACK
+/// does is disarmed before its legs go. None where the damage never
+/// out-heals it.
+let private lamedIn
+    (view: ColonyView)
+    (ours: Gait)
+    (damage: int)
+    (hostile: HostileInfo)
+    : int option =
+    let heal =
+        view.Hostiles
+        |> List.filter (fun h -> h.Owner = hostile.Owner && h.Pos.Room = hostile.Pos.Room)
+        |> List.sumBy (HostileInfo.healing view.Hostiles)
+
+    let net = damage - HostileInfo.damageFor hostile heal
+
+    if net <= 0 then
+        None
+    else
+        TickMemo.recall lamedMemo (hostile.Body, hostile.Boosts, hostile.Hits, ours) (fun _ ->
+            let n = List.length hostile.Body
+            let weight = Gait.weightOf (partCountIn hostile.Body)
+
+            // Its head destroyed a part at a time (`Engine.powerAt`): the
+            // hits it stands at once the next part is gone, and whether its
+            // MOVE and ATTACK then still press the body.
+            let rec lamedFrom live =
+                let hits = Engine.partHits * live
+                let power = Engine.powerAt hostile.Body hostile.Boosts hits
+
+                if
+                    live <= 0
+                    || power Attack <= 0
+                    || Gait.fallsBehind ours { Weight = weight; Moves = power Move }
+                then
+                    hits
+                else
+                    lamedFrom (live - 1)
+
+            let live = min n ((hostile.Hits + Engine.partHits - 1) / Engine.partHits)
+            HostileInfo.damageFor hostile (max 0 (hostile.Hits - lamedFrom (live - 1))))
+        |> fun needed -> Some((needed + net - 1) / net)
+
+/// The ticks a hostile presses a body of ours that out-reaches it (#625),
+/// struck by the body's own damage at its reach: one body shoots one target
+/// a tick, so every hostile in the room pressing it alike (armed shorter
+/// than it reaches, and not behind it on plain) is lamed in turn
+/// (`lamedIn`), the soonest first, and this one presses it until its own
+/// turn ends. None where its damage never out-heals this one.
+let private pressesFor (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : int option =
+    let side = view.Hostiles
+    let damage = fighter.DamageAt fighter.Reach
+
+    lamedIn view fighter.Gait damage hostile
+    |> Option.map (fun own ->
+        side
+        |> List.sumBy (fun h ->
+            if h.Id = hostile.Id || h.Pos.Room <> hostile.Pos.Room then
+                0
+            else
+                match HostileInfo.weaponRange side h with
+                | Some strike when
+                    strike < fighter.Reach
+                    && not (Gait.fallsBehind fighter.Gait (HostileInfo.gait side h))
+                    ->
+                    match lamedIn view fighter.Gait damage h with
+                    | Some ticks when ticks < own || ticks = own && h.Id < hostile.Id -> ticks
+                    | _ -> 0
+                | _ -> 0)
+        |> (+) own)
+
+/// Whether a body of ours keeps a hostile off at its own reach (#615 U1,
+/// #625), given the hostile's gait and the range it strikes from: the
+/// hostile strikes shorter than the body reaches, and falls behind it on
+/// plain now (`Fighter.standsOff`'s floor), or, armed and as quick, presses
+/// it (`pressesFor`, the body's own damage at its reach) no longer than the
+/// run-off ground the body has (`runOffFor`): with both stepping at once, a
+/// pursuer at its pace never closes while the body has ground to step
+/// onto. One quicker presses it no longer than it takes to close the
+/// ground between their reaches, too. A body of ours to be lamed meanwhile
+/// is priced at its worn gait by its reader (`winsBeside`'s `atHits`).
+let private keepsOffAt
+    (view: ColonyView)
+    (fighter: Fighter)
+    (hostile: HostileInfo)
+    (gait: Gait)
+    (strike: int)
+    : bool =
+    strike < fighter.Reach
+    && (Gait.fallsBehind fighter.Gait gait
+        || strike > 0
+           && (match Gait.ticks Gait.plain fighter.Gait, Gait.ticks Gait.plain gait with
+               | Some ours, Some theirs ->
+                   pressesFor view fighter hostile
+                   |> Option.exists (fun presses ->
+                       (theirs = ours
+                        || presses < (fighter.Reach - strike) * ours * theirs / (ours - theirs))
+                       && presses <= runOffFor view fighter hostile)
+               | _ -> false))
+
+/// Whether a body of ours keeps a hostile off at its own reach
+/// (`keepsOffAt`): the one reading the exchange, the admission, the hold
+/// and the kite walk take of who picks the range.
+let internal keepsOff (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : bool =
+    let side = view.Hostiles
+
+    keepsOffAt
+        view
+        fighter
+        hostile
+        (HostileInfo.gait side hostile)
+        (HostileInfo.weaponRange side hostile |> Option.defaultValue 0)
+
 /// The range a body of ours and one hostile fight at (#615 U2), the faster
-/// side's pick on plain, the ground a fight crosses, a tie the hostile's
-/// (`Fighter.standsOff`). Ours where the hostile falls behind it
-/// (`Gait.fallsBehind`) or cannot keep away, rooted on its legs
-/// (`HostileInfo.stationary`) or at its work (`rootedAtWork`): its reach
-/// where the hostile strikes shorter, the standoff a kite holds (#510), else
+/// side's pick on plain, the ground a fight crosses. Ours where it keeps the
+/// hostile off (`keepsOffAt`): its reach, the standoff a kite holds (#510).
+/// Ours too where the hostile falls behind it or cannot keep away, rooted on
+/// its legs (`HostileInfo.stationary`) or at its work (`rootedAtWork`):
 /// where it deals most (`Fighter.bestRange`). Else the hostile's
 /// (`closesIn`): onto us, or its shot's range, which keeps it off a swing.
 let internal standoff (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : int =
     let side = view.Hostiles
     let gait = HostileInfo.gait side hostile
     let strike = HostileInfo.weaponRange side hostile |> Option.defaultValue 0
-    // `Fighter.standsOff`'s reading, its pace read once.
-    let behind = Gait.fallsBehind fighter.Gait gait
 
-    if behind && strike < fighter.Reach then
+    if keepsOffAt view fighter hostile gait strike then
         fighter.Reach
     elif
-        behind
+        Gait.fallsBehind fighter.Gait gait
         || Gait.stationary gait
         // Only a body with no weapon is rooted at work (`onDigSeat`), or
         // brought to a swing by its claim (#550).
@@ -1566,8 +1806,8 @@ let private kitesDown (price: RaidPrice) (raiders: HostileInfo list) (damage: in
 /// How an exchange at the standoff comes out (#615 U2).
 type internal Outcome =
     | Lost
-    /// Its raid strikes nothing at the range (every raider stood off,
-    /// `Fighter.standsOff`) and our damage, every body's together, outruns
+    /// Its raid strikes nothing at the range (every raider kept off,
+    /// `keepsOff`) and our damage, every body's together, outruns
     /// its heal (`kitesDown`).
     | Kites
     /// Its raid strikes back and our clock beats its.
@@ -1847,8 +2087,7 @@ let internal kitedDown (view: ColonyView) (fighter: Fighter) (room: string) : bo
     let stoodOff (h: HostileInfo) =
         h.Pos.Room <> room
         || not (HostileInfo.raider view.Hostiles h)
-        || standoff view fighter h = fighter.Reach
-           && (HostileInfo.weaponRange view.Hostiles h |> Option.defaultValue 0) < fighter.Reach
+        || keepsOff view fighter h
 
     Fighter.outranges fighter
     && List.forall stoodOff view.Hostiles
@@ -1896,18 +2135,7 @@ let private walkToRaid (view: ColonyView) (raid: HostileInfo list) (creep: Creep
         else
             1
 
-    SpatialInfo.creepPlacementOf view.Spatial creep.Name
-    |> Option.orElse (
-        view.World.Bodies.Value
-        |> Map.toSeq
-        |> Seq.tryPick (fun (here, bodies) ->
-            bodies
-            |> List.tryPick (fun (body, pos) ->
-                if body.Name = creep.Name then
-                    Some(RoomPos.at here pos)
-                else
-                    None))
-    )
+    placementOf view creep.Name
     |> Option.bind (fun at ->
         match raid |> List.choose (fun h -> RoomName.tileRange at h.Pos) with
         | [] -> None
