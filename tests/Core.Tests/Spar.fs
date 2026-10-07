@@ -374,6 +374,109 @@ let private boostedPass () : Arena =
     arena 900_000 [ w12s28 () ] [ colony "W12S28" ] (homeCrew @ [ passer ])
     |> withCasts [ "guard"; "ranger"; "defender" ]
 
+/// Two rangers of ours by W17S26's container (27,9) and a declared enemy's
+/// empty 23C23M hauler, shot to 2,480, walking past the container and out
+/// along the road to the west exit, on Wolf6836's live tiles of
+/// t1,017,285-318 (#619). Nothing casts: the two answer it alone.
+let private fleeingHauler () : Arena =
+    let outpost =
+        room "W17S26"
+        |> withStructures
+            [
+                { structureOf "container" None 123_000 250_000 { X = 27; Y = 9 } with
+                    Energy = 862
+                }
+            ]
+        |> withRoads
+            [
+                20, 1, 3_700
+                21, 2, 3_700
+                22, 3, 4_300
+                23, 4, 3_800
+                24, 5, 3_600
+                25, 6, 3_900
+                26, 7, 3_800
+                27, 8, 3_800
+            ]
+
+    let home =
+        room "W17S25"
+        |> withController Ownership.Ours None 5 3
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+
+    let declared =
+        { colony "W17S25" with
+            Outposts = [ outpostOf outpost.Capture ]
+        }
+
+    let walk =
+        [
+            33, 8
+            32, 7
+            31, 7
+            30, 7
+            29, 7
+            28, 8
+            27, 8
+            26, 7
+            25, 6
+            24, 5
+            23, 4
+            22, 3
+            21, 2
+            20, 1
+            19, 1
+            18, 1
+            17, 2
+            16, 2
+            15, 1
+            14, 1
+            13, 1
+            12, 1
+            11, 1
+            10, 1
+            9, 1
+            8, 1
+            7, 1
+            6, 1
+            5, 1
+            4, 2
+            3, 2
+            3, 3
+            2, 4
+            1, 5
+        ]
+        |> List.map (fun (x, y) -> at "W17S26" x y)
+
+    let ranger id tile =
+        body id Side.Ours (parts [ Move, 6; RangedAttack, 4; Heal, 2 ]) tile None
+
+    let hauler =
+        { body
+              "hauler-trespasser"
+              (Side.Player "Trepidimous")
+              (List.concat (List.replicate 23 [ Move; Carry ]))
+              (at "W17S26" 33 9)
+              (Some(WalkRound walk)) with
+            Hits = 2_480
+        }
+
+    arena
+        900_000
+        [ home; outpost ]
+        [ declared ]
+        [
+            ranger "ranger-1-Spawn11" (at "W17S26" 32 9)
+            ranger "ranger-2-Spawn11" (at "W17S26" 32 8)
+            body
+                "anchor-1-Spawn11"
+                Side.Ours
+                (parts [ Work, 6; Carry, 1; Move, 3 ])
+                (at "W17S26" 27 9)
+                None
+            hauler
+        ]
+
 /// No body of another side but a Source Keeper's stands in the arena.
 let private noHostile (a: Arena) =
     a.Bodies
@@ -438,6 +541,14 @@ let private scenarios () : Scenario list =
             Slug = "home-boosted-pass"
             Ticks = 150
             Start = boostedPass
+            Cleared = noHostile
+        }
+        {
+            Slug = "outpost-fleeing-hauler"
+            // It stands a step off the exit from t33: a kill after it is one
+            // the live hauler, gone over the exit, never gave.
+            Ticks = 34
+            Start = fleeingHauler
             Cleared = noHostile
         }
     ]

@@ -8795,15 +8795,9 @@ let arenaBorderTests =
                     Expect.isSome (diedOn id trace) $"{id} dies\n{failure}"
 
                 // Left with Gambit229 at its pace and Infinity425 crossing, the
-                // guard waits on the store ring, where it swings at every draw.
-                let container = RoomPos.at "W17S26" { X = 27; Y = 9 }
-
-                Expect.isTrue
-                    (pathOf guard trace
-                     |> List.last
-                     |> fun (_, s) ->
-                         RoomPos.range s.At container |> Option.exists (fun r -> r <= 2))
-                    $"and then waits for Gambit229 at the container\n{failure}"
+                // guard waited on the store ring until #619: Gambit229, four off
+                // the container, is beside itself, and the guards kill it there.
+                Expect.isSome (diedOn "Gambit229" trace) $"and then Gambit229 dies\n{failure}"
             }
 
             // Live (t974,722-974,950) the anchor stepped onto the invader's
@@ -23639,5 +23633,478 @@ let w17s26FarGuardsTests =
                         (Map.tryFind guard after.Carried.Assignments)
                         (Some "guard:W17S26")
                         $"{guard} is not handed it\n{failure}"
+            }
+        ]
+
+// ---- arena capture w17s26-t1017284 -------------------------------------------
+// `npm run capture -- W17S26 1017284 --rooms W17S25`, read at live t1,017,586.
+// The room-history replay at t1,017,284, the state after that tick ran: arena
+// tick 0 runs as t1,017,285 and decides what our code decided live then.
+//   W17S26  https://screeps.com/room-history/shardSeason/W17S26/1017200.json
+//   W17S25  https://screeps.com/room-history/shardSeason/W17S25/1017200.json
+// W17S26 is reserved by us to t1018610: the arena has no reservations.
+// not placed: 9 ruin, 1 tombstone (the arena has no drops, tombstones or ruins).
+
+/// Trepidimous' Wolf6836, an empty 23C23M hauler shot to 2,480, walks past our
+/// container (27,9) in W17S26 and out along the road to the west exit (0,6) at
+/// t1,017,319, on its live tiles; W17S25's two rangers hold the trespass.
+let private w17s26FleeingHauler () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+
+    let w17s26 =
+        room "W17S26"
+        |> withStructures
+            [
+                { structureOf "container" None 123_000 250_000 { X = 27; Y = 9 } with
+                    Energy = 862
+                }
+            ]
+        |> withRoads
+            [
+                20, 1, 3_700
+                21, 2, 3_700
+                22, 3, 4_300
+                23, 4, 3_800
+                24, 5, 3_600
+                25, 6, 3_900
+                26, 7, 3_800
+                27, 8, 3_800
+            ]
+
+    let w17s25 =
+        room "W17S25"
+        |> withController Ownership.Ours None 5 3
+        |> withControllerClocks 0 0 80_000 83_424
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        9, 23
+                        9, 25
+                        9, 27
+                        9, 29
+                        10, 24
+                        10, 26
+                        10, 28
+                        10, 30
+                        11, 23
+                        11, 25
+                        11, 27
+                        12, 24
+                        12, 28
+                        12, 30
+                        13, 23
+                        13, 25
+                        13, 31
+                        14, 24
+                        14, 26
+                        14, 30
+                        15, 27
+                        15, 29
+                        15, 31
+                        16, 28
+                        16, 30
+                        16, 32
+                        17, 29
+                        18, 30
+                        19, 31
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 50
+                    }
+            ]
+        |> withStructures
+            [
+                structureOf "container" None 190_900 250_000 { X = 16; Y = 34 }
+                { structureOf "container" None 125_000 250_000 { X = 17; Y = 20 } with
+                    Energy = 480
+                }
+                structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = 17; Y = 31 }
+                { structureOf "rampart" (Some Side.Ours) 101_021 10_000_000 { X = 2; Y = 15 } with
+                    NextDecay = 1_017_378
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_961 10_000_000 { X = 2; Y = 16 } with
+                    NextDecay = 1_017_359
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_031 10_000_000 { X = 2; Y = 17 } with
+                    NextDecay = 1_017_362
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_731 10_000_000 { X = 2; Y = 18 } with
+                    NextDecay = 1_017_367
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_911 10_000_000 { X = 2; Y = 19 } with
+                    NextDecay = 1_017_339
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_831 10_000_000 { X = 2; Y = 20 } with
+                    NextDecay = 1_017_341
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_021 10_000_000 { X = 2; Y = 23 } with
+                    NextDecay = 1_017_366
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_001 10_000_000 { X = 2; Y = 24 } with
+                    NextDecay = 1_017_328
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_201 10_000_000 { X = 2; Y = 25 } with
+                    NextDecay = 1_017_345
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_561 10_000_000 { X = 2; Y = 26 } with
+                    NextDecay = 1_017_360
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_261 10_000_000 { X = 2; Y = 27 } with
+                    NextDecay = 1_017_309
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_001 10_000_000 { X = 11; Y = 29 } with
+                    NextDecay = 1_017_342
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_601 10_000_000 { X = 13; Y = 27 } with
+                    NextDecay = 1_017_359
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_401 10_000_000 { X = 13; Y = 29 } with
+                    NextDecay = 1_017_344
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_601 10_000_000 { X = 14; Y = 28 } with
+                    NextDecay = 1_017_320
+                }
+                { structureOf "rampart" (Some Side.Ours) 97_621 10_000_000 { X = 16; Y = 44 } with
+                    NextDecay = 1_017_308
+                }
+                { structureOf "rampart" (Some Side.Ours) 101_201 10_000_000 { X = 17; Y = 20 } with
+                    NextDecay = 1_017_365
+                }
+                { structureOf "rampart" (Some Side.Ours) 97_601 10_000_000 { X = 17; Y = 44 } with
+                    NextDecay = 1_017_310
+                }
+                { structureOf "rampart" (Some Side.Ours) 97_401 10_000_000 { X = 18; Y = 44 } with
+                    NextDecay = 1_017_306
+                }
+                { structureOf "rampart" (Some Side.Ours) 91_811 10_000_000 { X = 32; Y = 31 } with
+                    NextDecay = 1_017_319
+                }
+                { structureOf "rampart" (Some Side.Ours) 90_501 10_000_000 { X = 32; Y = 32 } with
+                    NextDecay = 1_017_337
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 13; Y = 27 } with
+                    Energy = 10_401
+                }
+                towerOf Side.Ours { X = 11; Y = 29 } 1_000
+                towerOf Side.Ours { X = 13; Y = 29 } 1_000
+            ]
+        |> withRoads
+            [
+                1, 16, 3_300
+                2, 17, 3_300
+                3, 18, 3_300
+                4, 19, 3_400
+                5, 20, 3_200
+                6, 21, 3_800
+                7, 22, 20_400
+                8, 23, 19_300
+                9, 24, 18_600
+                9, 26, 17_000
+                9, 28, 18_000
+                10, 23, 16_500
+                10, 25, 19_100
+                10, 27, 13_800
+                10, 29, 16_200
+                11, 24, 16_100
+                11, 26, 17_900
+                11, 28, 12_600
+                11, 30, 3_900
+                12, 23, 15_800
+                12, 25, 16_900
+                12, 27, 20_700
+                12, 29, 3_100
+                12, 31, 3_400
+                13, 24, 4_000
+                13, 26, 3_100
+                13, 28, 2_700
+                13, 30, 3_000
+                14, 23, 2_700
+                14, 25, 3_900
+                14, 27, 3_500
+                14, 29, 3_100
+                14, 31, 3_000
+                15, 22, 4_200
+                15, 28, 3_200
+                15, 30, 3_900
+                15, 32, 2_900
+                16, 21, 3_400
+                16, 29, 4_200
+                16, 31, 3_200
+                16, 33, 3_800
+                16, 35, 2_900
+                16, 37, 2_400
+                16, 38, 15_000
+                16, 39, 17_800
+                16, 41, 3_300
+                16, 43, 3_000
+                16, 44, 4_000
+                17, 20, 2_600
+                17, 30, 3_500
+                17, 32, 2_800
+                17, 34, 3_600
+                17, 36, 3_600
+                17, 38, 3_600
+                17, 39, 17_500
+                17, 40, 12_100
+                17, 42, 3_700
+                17, 45, 3_600
+                18, 29, 3_500
+                18, 31, 3_900
+                18, 35, 2_500
+                18, 37, 3_700
+                18, 39, 2_700
+                18, 41, 4_300
+                18, 46, 2_400
+                19, 30, 3_200
+                19, 34, 3_600
+                19, 36, 3_200
+                19, 38, 2_700
+                19, 40, 2_600
+                19, 47, 4_100
+                20, 31, 3_300
+                20, 33, 3_700
+                20, 35, 2_600
+                20, 37, 2_100
+                20, 39, 2_700
+                20, 48, 3_600
+                21, 32, 3_500
+                21, 34, 3_400
+                21, 36, 2_700
+                21, 38, 3_300
+                22, 33, 3_900
+                22, 35, 2_800
+                22, 37, 2_200
+                23, 34, 3_800
+                23, 36, 2_600
+                24, 35, 2_600
+                25, 34, 4_600
+                26, 33, 4_600
+                27, 32, 4_600
+                28, 31, 15_900
+                28, 33, 18_700
+                29, 32, 19_400
+                29, 34, 17_600
+                30, 31, 16_900
+                30, 33, 16_900
+                31, 32, 16_700
+                32, 31, 15_800
+                33, 30, 10_140
+                33, 32, 16_780
+            ]
+
+    // Today's declarations, not the tick's: spell them out if the test must outlive a roster change.
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W17S25" ])
+
+    // Wolf6836's live tiles t1,017,285-318 (`observe history W17S26`), the
+    // last a step off the west exit it crossed at t1,017,319.
+    let wolfWalk =
+        [
+            33, 8
+            32, 7
+            31, 7
+            30, 7
+            29, 7
+            28, 8
+            27, 8
+            26, 7
+            25, 6
+            24, 5
+            23, 4
+            22, 3
+            21, 2
+            20, 1
+            19, 1
+            18, 1
+            17, 2
+            16, 2
+            15, 1
+            14, 1
+            13, 1
+            12, 1
+            11, 1
+            10, 1
+            9, 1
+            8, 1
+            7, 1
+            6, 1
+            5, 1
+            4, 2
+            3, 2
+            3, 3
+            2, 4
+            1, 5
+        ]
+        |> List.map (fun (x, y) -> at "W17S26" x y)
+
+    let bodies: Body list =
+        [
+            { body
+                  "anchor-1016455-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W17S26" 27 9)
+                  None with
+                TicksToLive = 699
+                Energy = 20
+            }
+            { body
+                  "reserver-1017160-Spawn11"
+                  Side.Ours
+                  (parts [ BodyPart.Claim, 2; Move, 2 ])
+                  (at "W17S26" 9 22)
+                  None with
+                TicksToLive = 486
+            }
+            // Wolf6836: live 13 CARRY, 12 MOVE; its store empty throughout. It
+            // walks round a ranger on its path, as live.
+            { body
+                  "Wolf6836"
+                  trepidimous
+                  (List.concat (List.replicate 23 [ Move; Carry ]))
+                  (at "W17S26" 33 9)
+                  (Some(WalkRound wolfWalk)) with
+                Hits = 2_480
+                TicksToLive = 1_188
+            }
+            { body
+                  "ranger-1017078-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W17S26" 32 9)
+                  None with
+                TicksToLive = 1_328
+            }
+            { body
+                  "ranger-1016532-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W17S26" 32 8)
+                  None with
+                TicksToLive = 782
+            }
+            { body
+                  "hauler-1015828-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 24; Move, 12 ])
+                  (at "W17S26" 17 17)
+                  None with
+                TicksToLive = 150
+                Energy = 46
+            }
+            { body
+                  "worker-1015724-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 9; Carry, 9; Move, 9 ])
+                  (at "W17S25" 17 33)
+                  None with
+                TicksToLive = 19
+                Energy = 9
+            }
+            { body
+                  "anchor-1015936-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W17S25" 17 20)
+                  None with
+                TicksToLive = 174
+                Energy = 50
+            }
+            { body
+                  "worker-1016374-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 9; Carry, 9; Move, 9 ])
+                  (at "W17S25" 16 33)
+                  None with
+                TicksToLive = 669
+                Energy = 450
+            }
+            { body
+                  "upgrader-1016966-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 1; Move, 11 ])
+                  (at "W17S25" 19 35)
+                  None with
+                TicksToLive = 1_249
+            }
+            { body
+                  "hauler-1015964-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 24; Move, 12 ])
+                  (at "W17S25" 16 29)
+                  None with
+                TicksToLive = 286
+                Energy = 172
+            }
+        ]
+
+    let a = arena 1_017_285 [ w17s26; w17s25 ] colonies bodies
+
+    { a with
+        Carried =
+            { a.Carried with
+                // The Transition log's last task verdict at or before t1,017,284,
+                // read from Memory at live t1,017,586; the economy bodies it
+                // holds none for that early start unassigned.
+                Assignments =
+                    Map.ofList
+                        [
+                            "anchor-1016455-Spawn11", "harvest:6a8caa7ddd4872bccd318c78"
+                            "reserver-1017160-Spawn11", "reserve:6a8caa7ddd4872bccd318c79"
+                            "ranger-1017078-Spawn11", "guard:W17S26"
+                            "ranger-1016532-Spawn11", "guard:W17S26"
+                            "worker-1016374-Spawn11", "upgrade:6a8caa7cdd4872bccd318c76"
+                        ]
+            }
+    }
+
+[<Tests>]
+let w17s26FleeingHaulerTests =
+    testList
+        "arena a hauler walking off its store (#619)"
+        [
+            // Live, the rangers stood on the container's ring t1,017,292-295
+            // while Wolf6836 walked past it and on (the ground was waited for at
+            // the store within 5 of it, whichever way the hauler walked), then
+            // trailed it four to five behind and out of the room; on the light
+            // ticks (cadence 2) they replayed a stand as well. The arena decides
+            // every tick and does not model light ticks, so it parts from live
+            // from t1,017,287 on (live stood, the arena steps); the light tick's
+            // half is `LightTickTests`' (`LightForce.Chase`). With the 5-tile
+            // store ground the arena still kept live's outcome: both rangers
+            // stood on 28,7/29,7 t7-11 and Wolf6836 left at 1,640 (live 1,720).
+            // Not both keep it in reach yet: one steps into the swamp at 24,3
+            // and stands five ticks. Alone it steps round it (24,4, #614's
+            // chaseStep); here its partner takes 24,4 and the arbitration
+            // rehouses it onto the swamp, a step no chase weighs: the fight
+            // traffic's seats and swaps (#615 S3).
+            test
+                "#619 capture t1,017,284: the rangers chase the hauler walking off the container and keep it in reach until it dies or exits" {
+                let _, trace = w17s26FleeingHauler () |> run 36
+                let failure = describe trace
+                let wolf = pathOf "Wolf6836" trace |> Map.ofList
+                let rangers = [ "ranger-1017078-Spawn11"; "ranger-1016532-Spawn11" ]
+
+                let inReach tick (quarry: Snapshot) =
+                    rangers
+                    |> List.exists (fun ranger ->
+                        pathOf ranger trace
+                        |> List.exists (fun (t, s) ->
+                            t = tick
+                            && RoomPos.range s.At quarry.At
+                               |> Option.exists (fun r -> r <= Engine.rangedRange)))
+
+                // It leaves the container's side at t7 (26,7) and stands a step
+                // off the exit from t33.
+                for tick in 7..33 do
+                    match Map.tryFind tick wolf with
+                    | Some quarry ->
+                        Expect.isTrue
+                            (inReach tick quarry)
+                            $"t{tick}: a ranger keeps Wolf6836 in reach\n{failure}"
+                    | None -> ()
             }
         ]

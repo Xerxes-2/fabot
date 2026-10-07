@@ -158,6 +158,11 @@ type Behaviour =
     /// on, the first while it stands on none; at the last it holds. Its gait
     /// is the arena's fatigue, so it keeps the live tiles, not the live ticks.
     | Waypoints of RoomPos list
+    /// `Waypoints` that walks round a body on its path, as the engine's own
+    /// path does (#619: one of ours on a live tile held a hauler there for
+    /// good): a tile another body holds is passed for the next free one, and
+    /// off the path the next is the path tile nearest it, the latest of ties.
+    | WalkRound of RoomPos list
 
 /// One creep in the arena: its body head first, the hits it has left (which
 /// say which parts still act, `Engine.liveParts`), where it stands, its
@@ -3186,6 +3191,34 @@ let rec private scriptActs (a: Arena) (planned: Map<string, RoomPos>) (b: Body) 
             match List.tryFindIndexBack ((=) b.At) tiles with
             | Some i -> List.tryItem (i + 1) tiles
             | None -> List.tryHead tiles
+
+        fightInReach a Nearest b
+        @ move (next |> Option.bind (fun tile -> stepToward a b (Set.singleton tile)))
+    | WalkRound tiles ->
+        let held =
+            a.Bodies
+            |> List.filter (fun other -> other.Id <> b.Id)
+            |> List.map (fun other -> other.At)
+            |> Set.ofList
+
+        let from =
+            match List.tryFindIndexBack ((=) b.At) tiles with
+            | Some i -> Some(i + 1)
+            | None ->
+                tiles
+                |> List.indexed
+                |> List.choose (fun (i, tile) ->
+                    RoomPos.range b.At tile |> Option.map (fun r -> (r, -i), i))
+                |> List.sortBy fst
+                |> List.tryHead
+                |> Option.map snd
+
+        let next =
+            from
+            |> Option.bind (fun i ->
+                tiles
+                |> List.skip (min i (List.length tiles))
+                |> List.tryFind (fun tile -> not (Set.contains tile held)))
 
         fightInReach a Nearest b
         @ move (next |> Option.bind (fun tile -> stepToward a b (Set.singleton tile)))

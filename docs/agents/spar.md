@@ -27,6 +27,7 @@ Every scenario is hermetic. Its colonies are spelt out in `Spar.fs` and never re
 | `stronghold-l2-rangers` | Three 21M 14R 7H rangers one tile inside W16S26's south exit, under the L2 bunker (#565, #566). Cleared means the core fell. 150 ticks. |
 | `stronghold-w16s26` | The live L2 bunker (t1,002,250: towers at 660 and 550, nine 200k ramparts, the defender) against the cheapest squad that clears it whichever body the towers focus: three 25R 25M rangers on the range-3 tiles east of the core and seven 25H 25M healers behind them, scripted from the first tick (no walk-in, no colony). The core falls at t399. 400 ticks. |
 | `home-boosted-pass` | A T3-boosted 10T 15R 10M 15H neutral player walks through W12S28, north exit to west exit (ADR 0089 S0). 150 ticks. |
+| `outpost-fleeing-hauler` | Two rangers vs a fleeing hauler (#619): Trepidimous' empty 23C23M hauler, shot to 2,480, walks past W17S26's container and out along the road to the west exit on Wolf6836's live tiles. Our two 6M 4R 2H rangers stand beside it at the start; nothing casts. 34 ticks, ending as it stands a step off the exit, so a later kill does not count. |
 
 `<raid>` grows in size: `melee` (smallMelee), `melee-healer` (smallMelee + smallHealer), `ranged-healer` (2 smallRanged + smallHealer), `squad` (the W11S28 five: a mixed body, two shooters, two healers).
 

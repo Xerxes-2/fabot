@@ -889,6 +889,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         // borrowed, and every hand-declared outpost borders its home.
         Foreign = Set.empty
         Parked = Set.empty
+        Stepped = Map.empty
         Loose = Set.empty
         Borrowed = BorrowedWork.empty
         Refused = []

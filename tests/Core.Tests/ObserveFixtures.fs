@@ -67,6 +67,7 @@ let quiet: ColonyView =
         Stages = Map.empty
         Foreign = Set.empty
         Parked = Set.empty
+        Stepped = Map.empty
         Loose = Set.empty
         Borrowed = BorrowedWork.empty
         Refused = []

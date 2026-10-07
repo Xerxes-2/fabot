@@ -726,6 +726,10 @@ type ColonyView =
         /// The hostiles in sight standing on the tile they stood on the full
         /// tick before (`HostileStep.Since`, #552): parked, not walking in.
         Parked: Set<string>
+        /// The hostiles in sight that stepped since the full tick before, each
+        /// with the tile of its room it left (`HostileStep.Left`): which way
+        /// it walks.
+        Stepped: Map<string, RoomPos>
         /// The tiles, world-wide, of our bodies this tick's arbitration shoves
         /// for free (#600): rested, holding no Task at the last match, and
         /// moved by a colony deciding this tick (`Entry.looseTiles`). Empty
@@ -2033,6 +2037,13 @@ module ColonyView =
                     |> Option.exists (fun step -> step.At = h.Pos && step.Since < world.Time))
                 |> List.map (fun h -> h.Id)
                 |> Set.ofList
+            Stepped =
+                collected (fun facts -> facts.Hostiles)
+                |> List.choose (fun h ->
+                    Map.tryFind h.Id world.HostileSteps
+                    |> Option.bind (fun step -> step.Left)
+                    |> Option.map (fun left -> h.Id, left))
+                |> Map.ofList
             Loose = Set.empty
             Borrowed =
                 {

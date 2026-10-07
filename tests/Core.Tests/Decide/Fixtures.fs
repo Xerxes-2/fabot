@@ -211,6 +211,7 @@ let bareRespawn =
         // borders "W1N1", so nothing is refused.
         Foreign = Set.empty
         Parked = Set.empty
+        Stepped = Map.empty
         Loose = Set.empty
         Borrowed = BorrowedWork.empty
         Refused = []

@@ -3014,22 +3014,28 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     // The trespassers' ground (#516), off the exits.
     //
-    // A digger or a claimer stands at its work: the tiles beside it. A hauler
-    // keeps a ranger's pace, so it is waited for, not chased: within
-    // `haulGround` of the store nearest it, which it comes within a ranger's
-    // shot of to draw at all; one `storeReach` or more from every store is
-    // drawing from none, and gets the tiles beside it, a melee guard's chance.
-    // Only while no trespasser the guard's swing catches stands in its room
-    // (`guardCatches`, #550): beside one, a body on the store ring has no
-    // target in reach nor a step away, so the hauler gets the tiles beside it
-    // too.
+    // A digger or a claimer stands at its work: the tiles beside it. So does
+    // a trespasser walking off: chased, the ground about the body closing to
+    // our reach (#619). A hauler keeps a ranger's pace, so one coming to draw
+    // is waited for at the store nearest it, within `haulGround` of it, which
+    // it comes within a ranger's shot of to draw at all — only while it is
+    // within a step of that ring and its last step (`ColonyView.Stepped`) took
+    // it no farther from the store. One stepping away is leaving, loaded or
+    // not (W17S26 t1,017,292: an empty hauler walked past the container and
+    // out while two rangers stood on its ring), and one farther off is beside
+    // itself: the switch sits where the two grounds meet, so a hauler swaying
+    // on it moves no body standing on both (a 5-tile switch flipped the ground
+    // 4 tiles every step, t1,017,270–275). Only while no trespasser the
+    // guard's swing catches stands in its room (`guardCatches`, #550): beside
+    // one, a body on the store ring has no target in reach nor a step away,
+    // so the hauler gets the tiles beside it too.
     //
     // A trespasser on the exit row of a room beside one we mine is carried
     // into it next tick, and back if it is bouncing: keyed to that room, the
     // tiles beside where it lands, so the kill holds across the bounce.
     let trespassIn (open': string -> bool) =
         let haulGround = 2
-        let storeReach = 5
+        let waitReach = haulGround + 1
 
         // A carrier, not a cripple shot disarmed, which is struck where it
         // stands (#535).
@@ -3061,15 +3067,23 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
                 let tiles =
                     if hauls hostile && not (Set.contains room caught.Value) then
+                        let leaving store =
+                            Map.tryFind hostile.Id view.Stepped
+                            |> Option.exists (fun left ->
+                                range store (RoomPos.pos left) < range store at)
+
                         match
-                            storesIn room |> List.filter (fun store -> range store at < storeReach)
+                            storesIn room |> List.filter (fun store -> range store at <= waitReach)
                         with
                         | [] -> beside ()
                         | near ->
                             let store = near |> List.minBy (fun store -> range store at, store)
 
-                            Atlas.walkableWithinIn atlas room haulGround store
-                            |> List.filter ((<>) store)
+                            if leaving store then
+                                beside ()
+                            else
+                                Atlas.walkableWithinIn atlas room haulGround store
+                                |> List.filter ((<>) store)
                     else
                         beside ()
 

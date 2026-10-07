@@ -2083,6 +2083,60 @@ let forcedTests =
 
                 Expect.isNone (LightTick.forced held holding) "nothing forces the tick full"
             }
+
+            test
+                "a fighter its plan stands while the unarmed body it aims at walks off forces its tick; one stepping on, or an armed quarry, does not (#619)" {
+                // Live W17S26 t1,017,287: a light tick replayed two rangers'
+                // stand while the hauler they chased stepped away.
+                let chasing =
+                    { quiet with
+                        Creeps = Map.ofList [ "ranger", creepAt 12 10 1000 ]
+                        Hostiles = [ hostile 13 10 "Trepidimous" false ]
+                    }
+
+                let full steps =
+                    LightTick.lastFull chasing steps [ RangedAttackCreep("ranger", "h-1") ]
+                    |> aiming [ RangedAttackCreep("ranger", "h-1") ] Map.empty
+
+                let walkedOff =
+                    { chasing with
+                        Hostiles = [ hostile 14 10 "Trepidimous" false ]
+                    }
+
+                Expect.isNone
+                    (LightTick.forced (full Map.empty) chasing)
+                    "a quarry standing forces nothing"
+
+                Expect.equal
+                    (LightTick.forced (full Map.empty) walkedOff)
+                    (Some(LightForce.Chase "ranger"))
+                    "a quarry walked off a stood chaser: decide the chase"
+
+                Expect.isNone
+                    (LightTick.forced
+                        (full (Map.ofList [ "ranger", [ tile 12 10; tile 13 10 ] ]))
+                        walkedOff)
+                    "a chaser its plan steps on walks after it"
+
+                let armed =
+                    { chasing with
+                        Hostiles = [ hostile 13 10 "Trepidimous" true ]
+                    }
+
+                Expect.isNone
+                    (LightTick.forced
+                        (LightTick.lastFull armed Map.empty []
+                         |> aiming [ RangedAttackCreep("ranger", "h-1") ] Map.empty)
+                        { armed with
+                            Hostiles = [ hostile 15 10 "Trepidimous" true ]
+                        })
+                    "an armed quarry stepping off is the kite's"
+
+                Expect.equal
+                    (LightTick.tag (LightForce.Chase "ranger"))
+                    "chase ranger"
+                    "its CPU line"
+            }
         ]
 
 /// Four colonies, each projecting its home and one outpost.
@@ -2641,6 +2695,11 @@ let fightOnlyTests =
                     (alone [ LightForce.HitsLost "ranger" ])
                     (Set.ofList [ "W3N1" ])
                     "its fighter hurt"
+
+                Expect.equal
+                    (alone [ LightForce.Chase "ranger" ])
+                    (Set.ofList [ "W3N1" ])
+                    "its fighter's quarry walking off (#619)"
             }
 
             test "an economy fact decides its colony whole" {

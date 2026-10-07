@@ -1,6 +1,8 @@
 # Every fight is pooled off one Brief: a room's targets, the bodies fit for them, and the ground they hit from
 
-> **Status:** accepted, amended by 0086, 0088, #550, #558, #568, 0091
+> **Status:** accepted, amended by 0086, 0088, #550, #558, #568, 0091, #619
+
+> **Amended by #619** (live W17S26 t1,017,284–319: two rangers stood "arrived" on a container's ring while an empty hauler walked past it and out of the room): #550's **Ground** narrows. A trespasser that is leaving is chased, on the tiles beside it. A hauler stepping away from its nearest store is leaving, loaded or not, and its last step decides that (`ColonyView.Stepped`). The store ring holds only while the hauler is within 3 of the store and not moving away from it. At 3 the ring and the tiles beside the hauler share ground, so a hauler swaying on that line moves no body standing on both. Before, every hauler within 5 got the ring, whichever way it walked. A chaser that its plan stands while its unarmed quarry walks off forces its colony's fight-only decide (`LightForce.Chase`).
 
 > **Amended by ADR 0091 W6 S2** (#580): `Brief.Answerer` leaves the Brief, and `Threats.answers` with it. Every colony asks for its own Briefs' rows (`Quota.castsOf`), and the Caster (`Caster.assign`) decides which colony casts each body.
 

@@ -141,6 +141,9 @@ type LastFull =
         /// Who could hurt what of ours as the plans were made (`reached`):
         /// a threat the plans already saw, by hostile id.
         Hurting: Set<string * Reached>
+        /// Where each hostile in sight stood as the plans were made: one that
+        /// has stepped off it since walks away from a plan (`LightForce.Chase`).
+        Marks: Map<string, RoomPos>
         /// The colonies a cold reset left undecided (`resetSplit`): the tick
         /// after it is full and decides them.
         Deferred: Set<string>
@@ -170,6 +173,10 @@ type LightForce =
     /// A creep of ours that lost hits to a body no plan strikes, or to
     /// nothing in sight.
     | HitsLost of creep: string
+    /// A fighter of ours its plan stands while the unarmed body it aims at
+    /// has stepped since the plans (#619): replayed, the chase stands a tick
+    /// and falls a tile behind a quarry at its pace.
+    | Chase of creep: string
     | ControllerChanged of room: string
     /// The reset tick before left colonies undecided (`resetSplit`).
     | Deferred
@@ -185,6 +192,7 @@ let tag (reason: LightForce) : string =
     | LightForce.CreepsChanged _ -> "creeps"
     | LightForce.OnBorder creep -> $"border {creep}"
     | LightForce.HitsLost creep -> $"hurt {creep}"
+    | LightForce.Chase creep -> $"chase {creep}"
     | LightForce.ControllerChanged room -> $"controller {room}"
     | LightForce.Deferred -> "deferred"
 
@@ -606,6 +614,10 @@ let ofPlans (glance: Glance) (deferred: Set<string>) (plans: (string * Plan) lis
             |> Seq.collect (fun hostile ->
                 reached glance hostile |> Seq.map (fun r -> hostile.Id, r))
             |> Fresh.setOfSeq
+        Marks =
+            glance.Hostiles
+            |> Seq.map (fun hostile -> hostile.Id, hostile.Tile)
+            |> Fresh.mapOfSeq
         Deferred = Fresh.setOfSeq deferred
     }
 
@@ -791,7 +803,8 @@ let resetSplit
 /// that strikes it (a cripple whose live parts hurt nothing, or one out of
 /// reach, reaches nothing); a creep of ours that lost hits, unless every body
 /// that could have struck it is one a striker of ours aims at and reaches,
-/// and the loss is within the healing the plans give it; a creep born or
+/// and the loss is within the healing the plans give it; a chaser its plan
+/// stands while its unarmed quarry walks off; a creep born or
 /// gone; one on the border ring with no step in; a controller changed — or
 /// where a plan holds an act no replay repeats (a structure's fight), or a
 /// colony has no plan (a cold reset's deferred).
@@ -890,6 +903,39 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
             | _ -> false)
         |> List.map (fst >> LightForce.HitsLost)
 
+    // A fighter its plan stands (no step on from where it is) while the
+    // unarmed body it aims at walks off its plan's tile: the full tick laid
+    // its ground about where the quarry stood. A melee body beside its quarry
+    // keeps it on its light tick (`Emitter.glueStep`); an armed quarry is
+    // the kite's, whose stand a replay may keep.
+    let chase =
+        let plan = merged now last
+
+        plan.Aims
+        |> List.choose (fun aim ->
+            match aim with
+            | AttackCreep(name, target) -> Some(name, target, Engine.meleeRange)
+            | RangedAttackCreep(name, target) -> Some(name, target, 0)
+            | _ -> None)
+        |> List.filter (fun (name, target, glues) ->
+            match
+                Map.tryFind name now.Creeps,
+                now.Hostiles |> List.tryFind (fun hostile -> hostile.Id = target),
+                Map.tryFind target last.Marks
+            with
+            | Some creep, Some quarry, Some mark ->
+                quarry.Tile <> mark
+                && not quarry.Armed
+                && not (harmless now quarry)
+                && RoomPos.range creep.Tile quarry.Tile |> Option.forall (fun r -> r > glues)
+                && Map.tryFind name plan.Steps
+                   |> Option.bind (fun path -> onward path creep.Tile)
+                   |> Option.isNone
+            | _ -> false)
+        |> List.map (fun (name, _, _) -> name)
+        |> List.distinct
+        |> List.map LightForce.Chase
+
     let controllerChanged =
         Seq.append (Map.keys last.Controllers) (Map.keys now.Controllers)
         |> Seq.distinct
@@ -908,6 +954,7 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
             creepsChanged
             onBorder
             hitsLost
+            chase
             controllerChanged
         ]
 
@@ -966,7 +1013,8 @@ let private scoping
             | LightForce.Fought home -> Set.singleton home
             | LightForce.CreepsChanged names -> names |> List.map holderOf |> Set.unionMany
             | LightForce.OnBorder name -> holderOf name
-            | LightForce.HitsLost name -> holderOf name
+            | LightForce.HitsLost name
+            | LightForce.Chase name -> holderOf name
             | LightForce.ControllerChanged room -> answering room
             | LightForce.Deferred -> last.Deferred
 
@@ -994,8 +1042,8 @@ let deciders
 
 /// The deciders that decide their fight alone and replay their economy
 /// (`Entry.decideFight`): each whose every fact is a fight's — a raider at home, a
-/// hostile newly able to strike, a structure's fight, a fighter's lost hits
-/// (`fighter`) — with a plan to replay. Never one an economy fact concerns (a
+/// hostile newly able to strike, a structure's fight, a chase, a fighter's
+/// lost hits (`fighter`) — with a plan to replay. Never one an economy fact concerns (a
 /// creep born, gone, on the ring or hurt, a controller changed, a deferred
 /// decide), nor one with an economy body a hostile can newly strike, from
 /// where it stands or from where its replayed step lands it: Flee is the
@@ -1013,7 +1061,8 @@ let fightOnly
         match reason with
         | LightForce.Home _
         | LightForce.Hostile _
-        | LightForce.Fought _ -> true
+        | LightForce.Fought _
+        | LightForce.Chase _ -> true
         | LightForce.HitsLost name -> fighter name
         | LightForce.CreepsChanged _
         | LightForce.OnBorder _

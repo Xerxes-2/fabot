@@ -3806,12 +3806,64 @@ let trespassTests =
                     "seven from the one store it draws from none, and is the ground's own"
             }
 
+            // Live W17S26 t1,017,292 (#619): an empty hauler walked past the
+            // container and out while two rangers stood on its ring.
+            test
+                "a hauler stepping away from its store is chased, one stepping toward it waited for at the store, one four off chased (#619)" {
+                let container = { X = 25; Y = 41 }
+
+                let haulerAt pos =
+                    { hostileIn "W1N2" pos (List.replicate 23 Carry @ List.replicate 23 Move) with
+                        Owner = "Trepidimous"
+                    }
+
+                let stepped (from: Pos) (colony: ColonyView) =
+                    { colony with
+                        Stepped = Map.ofList [ "h-1", RoomPos.at "W1N2" from ]
+                    }
+
+                let at = { X = 27; Y = 43 }
+
+                let leaving = groundOf (declaredRaid [ haulerAt at ] |> stepped { X = 26; Y = 42 })
+
+                Expect.isNonEmpty leaving "the premise: the kill has ground"
+
+                Expect.isTrue
+                    (leaving |> Set.forall (fun tile -> rangeTo at tile = 1))
+                    "two off and stepping away, it is beside itself"
+
+                let coming = groundOf (declaredRaid [ haulerAt at ] |> stepped { X = 28; Y = 44 })
+
+                Expect.isTrue
+                    (not (Set.isEmpty coming)
+                     && coming |> Set.forall (fun tile -> rangeTo container tile <= 2))
+                    "two off and stepping toward it, it is waited for at the container"
+
+                let four = { X = 29; Y = 44 }
+                let far = groundOf (declaredRaid [ haulerAt four ] |> stepped { X = 30; Y = 45 })
+
+                Expect.isTrue
+                    (not (Set.isEmpty far) && far |> Set.forall (fun tile -> rangeTo four tile = 1))
+                    "four off and coming in, it is beside itself"
+
+                let three = { X = 28; Y = 44 }
+                let ring = groundOf (declaredRaid [ haulerAt three ])
+
+                let chased =
+                    groundOf (declaredRaid [ haulerAt three ] |> stepped { X = 27; Y = 43 })
+
+                Expect.isNonEmpty
+                    (Set.intersect ring chased)
+                    "three off, where it is waited for at the farthest, the ring and the tiles beside it share ground: a sway there moves no body standing on both"
+            }
+
             // Live W17S26 t979,593-980,050 (#550): a hauler parked four from the
             // container laid its store ring under the whole kill, and the guard
             // standing on it waited ~450 ticks beside a digger and a claimer.
+            // Three off here: four off, a hauler is beside itself since #619.
             test
                 "beside a trespasser the guard catches a hauler is not waited for at its store (#550)" {
-                let hauler = haulerOf "a-haul" { X = 29; Y = 44 }
+                let hauler = haulerOf "a-haul" { X = 28; Y = 44 }
                 let beside (pos: Pos) tile = rangeTo pos tile = 1
 
                 let besideAny bodies tile =
