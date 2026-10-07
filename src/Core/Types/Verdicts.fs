@@ -540,12 +540,21 @@ type CastAsk =
         Blocks: int
     }
 
-/// What a full decide leaves for the fight-only ticks after it
-/// (`LightTick.fightOnly`): the economy's answers the fight pass reads, carried until the next
-/// full decide, and the fight's own answers that tell a fight-only tick it
-/// would decide the economy differently. It outlives the tick, so every
-/// collection in it is built by `Fresh` (#401).
+/// A decision's half of the world's fight: the fighters whose plans it laid
+/// this tick, each priced in its colony's Atlas. What the plan record splices
+/// beside a fight-only colony's carried economy (`LightTick.recorded`).
 type FightCarry =
+    {
+        /// The fighters this decision decided.
+        Fighters: Set<string>
+    }
+
+/// What a colony's whole decide leaves for the fight-only ticks after it
+/// (`LightTick.fightOnly`): the economy's answers the world's fight reads of
+/// it, carried until its next whole decide, and the answers that tell a
+/// fight-only tick its economy would decide differently. It outlives the
+/// tick, so every collection in it is built by `Fresh` (#401).
+type EconomyCarry =
     {
         /// The row sizing: a fighter's relief lead. Its two fighting rows'
         /// blocks are the cast asks' (`Asks`), so a tick whose asks are these
@@ -554,9 +563,9 @@ type FightCarry =
         /// Every ask the fighting rows cast for: spawning is the economy's,
         /// so an ask that moved is a full decide.
         Asks: CastAsk list
-        /// The bodies the fight pass held: one across the line since is a
-        /// full decide.
-        Fighters: Set<string>
+        /// The economy bodies the decide held: one across the fighter line
+        /// since, a fighter disarmed, is a full decide.
+        Economy: Set<string>
         /// Whether the economy's pool held any Task: what an idle fighter's
         /// reason reads (`IdleReason.NoTasks`).
         EconomyPooled: bool
@@ -624,6 +633,9 @@ type Decision =
         /// aboard (#530): the Memory the next tick's `CreepInfo.DrawnFrom`
         /// is read off.
         Drawn: Map<string, DrawRecord>
-        /// What the fight-only ticks after this decide read of it.
+        /// The fighters whose plans this decision laid.
         Fight: FightCarry
+        /// What the fight-only ticks after this decide read of its economy:
+        /// a fight-only decide hands back the one it read.
+        Economy: EconomyCarry
     }

@@ -6901,7 +6901,7 @@ let private fightAlike (colony: ColonyView) =
             | SetRampartPublic _ -> true
             | _ -> false
 
-    match decideFight colony first.Assignments Set.empty first.Memo first.Fight with
+    match decideFight colony first.Assignments Set.empty first.Memo first.Economy with
     | Some fight -> fight.Intents, whole.Intents |> List.filter fightIntent
     | None -> failtest "nothing hands the fight back to a whole decide"
 

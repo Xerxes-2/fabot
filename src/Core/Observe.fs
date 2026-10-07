@@ -1291,7 +1291,7 @@ let foldRaids
     // CREEP_LIFE_TIME ran down is old age, and TicksToLive says which is which
     // before the fact, so the difference never has to guess after it.
     let surviving =
-        view.Creeps
+        ColonyView.bodies view
         |> List.filter (fun creep -> creep.TicksToLive > 1)
         |> List.map (fun creep -> creep.Name)
         |> Set.ofList
@@ -1551,7 +1551,10 @@ let foldRaids
 /// probe it is (`ProbeLog.Home`). Built by `Fresh`: the map is carried to the
 /// next tick.
 let foldProbes (view: ColonyView) (intents: Intent list) (state: RaidState) : RaidState =
-    let alive = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
+    let alive =
+        ColonyView.bodies view
+        |> List.map (fun creep -> creep.Name, creep)
+        |> Map.ofList
 
     let expiresOf (creep: CreepInfo) = view.Time + creep.TicksToLive
     let home = SpatialInfo.homeName view.Spatial

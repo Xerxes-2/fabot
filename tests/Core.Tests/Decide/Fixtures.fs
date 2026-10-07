@@ -189,6 +189,7 @@ let bareRespawn =
         ConstructionSites = []
         PlayerSites = 0
         Creeps = []
+        Fighters = []
         Unprojected = Set.empty
         Hostiles = []
         Allies = []

@@ -1049,6 +1049,69 @@ let colonyViewTests =
                     "and is carried as another colony's occupant instead (#220)"
             }
 
+            test
+                "a fighter a colony holds stands apart from its economy, and counts for its holder whoever cast it" {
+                // The child's ranger standing in the mother's home, which the
+                // mother alone projects: she adopts it.
+                let ranger =
+                    let body = creep "ranger-950-Spawn2" mother
+
+                    { body with
+                        Info =
+                            { body.Info with
+                                Body = Map.ofList [ RangedAttack, 1; Move, 1 ]
+                            }
+                    }
+
+                let world =
+                    { pairWorld with
+                        Creeps = ranger :: pairWorld.Creeps
+                    }
+
+                let holders =
+                    World.creepColonies
+                        Tuning.defaults
+                        declared
+                        (World.living declared world)
+                        noneShut
+                        world
+
+                let watch = WorldView.ofWorld declared [] world
+
+                let shed home =
+                    ColonyView.ofWorldRecalling
+                        (JoinTable())
+                        Tuning.defaults
+                        declared
+                        HarassCasting.none
+                        StandDown.none
+                        holders
+                        Quota.isFighterBody
+                        watch
+                        world
+                        (declared |> List.find (fun colony -> colony.Home = home))
+
+                let motherView = shed mother
+                let name = ranger.Info.Name
+
+                Expect.equal (Map.tryFind name holders) (Some mother) "premise: the mother holds it"
+
+                Expect.equal
+                    (motherView.Fighters |> List.map _.Name)
+                    [ name ]
+                    "the world's fight prices it in her Atlas"
+
+                Expect.isFalse
+                    (names motherView |> List.contains name)
+                    "and her economy sees it not"
+
+                Expect.equal
+                    (Quota.fightersHeld motherView |> List.map _.Name,
+                     Quota.fightersHeld (shed child) |> List.map _.Name)
+                    ([ name ], [])
+                    "its row counts it where the asks it answers count it: at the holder, until W6"
+            }
+
             test "a hostile's and an ally's creep are bodies no colony of ours can move" {
                 // #536: an invader rooted on an anchor's step was free ground
                 // to the flood and to arbitration, and the anchor stepped into
@@ -2727,6 +2790,7 @@ let private viewShutUnder colonies (shut: Map<string, Set<string>>) world home =
             Shut = Map.tryFind home shut |> Option.defaultValue Set.empty
         }
         holders
+        (fun _ -> false)
         (WorldView.ofWorld colonies [] world)
         world
         colony
@@ -5166,6 +5230,7 @@ let private harassViewOver
         casting
         gate
         holders
+        (fun _ -> false)
         (WorldView.ofWorld declared [ gate ] world)
         world
         colony

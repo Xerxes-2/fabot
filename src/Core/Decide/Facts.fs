@@ -1168,7 +1168,7 @@ let internal damageAt (parts: BodyPart -> int) (range: int) =
 /// closure over our placed creeps, found once.
 let internal damageReaching (view: ColonyView) : HostileInfo -> int =
     let fighters =
-        view.Creeps
+        ColonyView.bodies view
         |> List.choose (fun creep ->
             SpatialInfo.creepPlacementOf view.Spatial creep.Name
             |> Option.map (fun at -> at, partCount creep.Body))
@@ -1742,7 +1742,7 @@ let homeHoldReleases
                 |> List.map fst
 
             let own =
-                view.Creeps
+                ColonyView.bodies view
                 |> List.filter (fun body ->
                     SpatialInfo.creepPlacementOf view.Spatial body.Name
                     |> Option.exists (fun at -> at.Room = home))
@@ -1879,7 +1879,7 @@ let private lendableTo
         view.Hostiles
         |> List.forall (fun h -> h.Pos.Room <> here || not (disturbs view resident h))
 
-    view.Creeps
+    ColonyView.bodies view
     |> List.choose (fun creep -> placed creep.Name |> Option.map (fun here -> creep, here))
     |> List.filter (fun (creep, here) ->
         (here = room || RoomName.neighbouring here room)
@@ -2038,7 +2038,7 @@ let private priceAmong
     // Each colony's fighters standing in the room or beside it, each with
     // the room it stands in.
     let fighters (p: Pricer) =
-        p.View.Creeps
+        ColonyView.bodies p.View
         |> List.filter (fun creep -> isGuardRowBody creep || isRangerRowBody creep)
         |> List.choose (fun creep ->
             placed creep.Name
@@ -2283,7 +2283,7 @@ let internal outmatched (view: ColonyView) (room: string) : bool = answer view r
 /// rangers actually standing there, priced together, lose.
 let internal residentsLose (view: ColonyView) (room: string) : bool =
     let standing =
-        view.Creeps
+        ColonyView.bodies view
         |> List.filter (fun creep ->
             isRangerRowBody creep
             && SpatialInfo.creepPlacementOf view.Spatial creep.Name
@@ -2325,10 +2325,12 @@ let internal openToEconomy
 
     let near = Set.ofList (room :: RoomName.adjacent room)
 
-    // The holders standing in the room or beside it, whichever colony's.
+    // The holders standing in the room or beside it, whichever colony's: the
+    // world's fleet (`WorldView.Bodies`), the colony's own beside it for a
+    // fixture with no world laid in.
     let holders () =
         let placed =
-            view.Creeps
+            ColonyView.bodies view
             |> List.filter (fun creep ->
                 SpatialInfo.creepPlacementOf view.Spatial creep.Name
                 |> Option.exists (fun at -> near.Contains at.Room))
@@ -2366,7 +2368,10 @@ let internal openToEconomy
 /// to task kinds: a reader that wants one kind writes the key it wants and
 /// asks, as `isHungry` does.
 let heldTaskFacts (view: ColonyView) (assignments: Assignments) : HeldTaskFacts =
-    let living = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
+    let living =
+        ColonyView.bodies view
+        |> List.map (fun creep -> creep.Name, creep)
+        |> Map.ofList
 
     assignments
     |> Map.fold
@@ -3245,7 +3250,7 @@ let judge
                         fun room creep -> Map.tryFind creep.Name held = Some(taskId (Guard room))
                 Holds =
                     fun room ->
-                        colony.Cut.Creeps
+                        ColonyView.bodies colony.Cut
                         |> List.exists (fun creep ->
                             Map.tryFind creep.Name held = Some(taskId (Guard room)))
             })

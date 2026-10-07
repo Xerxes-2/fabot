@@ -240,6 +240,7 @@ let internal colonyOf (room: LoadedRoom) level =
         ConstructionSites = []
         PlayerSites = 0
         Creeps = []
+        Fighters = []
         Unprojected = Set.empty
         Hostiles = []
         Allies = []

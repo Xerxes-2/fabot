@@ -176,9 +176,9 @@ do
 // cadence's), on the heap: a reset empties it and the next tick is full.
 let mutable private lastFull: (int * LightTick.LastFull) option = None
 
-// What each colony's last whole decide left its fight-only ticks
-// (`Decision.Fight`): heap only, a reset deciding whole.
-let mutable private fightCarries: Map<string, FightCarry> = Map.empty
+// What each colony's last whole decide left its fight-only ticks of its
+// economy (`Decision.Economy`): heap only, a reset deciding whole.
+let mutable private economyCarries: Map<string, EconomyCarry> = Map.empty
 
 // Ticks since the cadence's full one that replayed a plan (0 on it): light
 // ticks, and forced ticks that carried a colony (#549) or a colony's economy.
@@ -565,6 +565,7 @@ let private fullTick
                     casting
                     (gateOf colony.Home)
                     holders
+                    isFighterBody
                     watch
                     world
                     colony
@@ -637,8 +638,7 @@ let private fullTick
 
             let fighters =
                 views
-                |> List.collect (fun (_, view) ->
-                    view.Creeps |> List.filter isFighterBody |> List.map _.Name)
+                |> List.collect (fun (_, view) -> view.Fighters |> List.map _.Name)
                 |> Set.ofList
 
             let alone =
@@ -651,7 +651,7 @@ let private fullTick
                         seen
                         reasons
                     |> Set.filter (fun home ->
-                        Map.containsKey home planMemos && Map.containsKey home fightCarries)
+                        Map.containsKey home planMemos && Map.containsKey home economyCarries)
                 else
                     Set.empty
 
@@ -712,7 +712,7 @@ let private fullTick
                 Holding = assignments
                 Verbose = verbose
                 PlanMemos = planMemos
-                Carries = fightCarries
+                Carries = economyCarries
                 Idle = idle
                 FightAlone = fightCandidates
                 TurnIndex = Some turn
@@ -752,14 +752,13 @@ let private fullTick
             let economy =
                 views
                 |> List.filter (fun (colony, _) -> Set.contains colony.Home fightOnly)
-                |> List.collect (fun (_, view: ColonyView) ->
-                    view.Creeps |> List.filter (isFighterBody >> not) |> List.map _.Name)
+                |> List.collect (fun (_, view: ColonyView) -> view.Creeps |> List.map _.Name)
                 |> Set.ofList
 
             let tired =
                 views
                 |> List.collect (fun (_, view: ColonyView) ->
-                    view.Creeps
+                    ColonyView.bodies view
                     |> List.choose (fun c -> if c.Fatigue > 0 then Some c.Name else None))
                 |> Set.ofList
 
@@ -834,13 +833,13 @@ let private fullTick
         // `decisions`, views and Atlases alive until the next tick's memos.
         |> Fresh.mapOfList
 
-    // And its carry; a fight-only decide hands back the one it read.
-    fightCarries <-
-        (fightCarries
+    // And its economy's carry; a fight-only decide hands back the one it read.
+    economyCarries <-
+        (economyCarries
          |> Map.filter (fun home _ -> Set.contains home replaying)
          |> Map.toList)
         @ (decisions
-           |> List.map (fun (colony, _, decision, _, _) -> colony.Home, decision.Fight))
+           |> List.map (fun (colony, _, decision, _, _) -> colony.Home, decision.Economy))
         |> Fresh.mapOfList
 
     // The Reactor programme's observation. The room facts answer only while
@@ -899,7 +898,7 @@ let private fullTick
         views
         |> List.filter (fun (colony, _) -> Set.contains colony.Home idle)
         |> List.collect (fun (_, view) ->
-            view.Creeps
+            ColonyView.bodies view
             |> List.choose (fun creep ->
                 Map.tryFind creep.Name assignments |> Option.map (fun task -> creep.Name, task)))
         |> Map.ofList
@@ -917,7 +916,7 @@ let private fullTick
         views
         |> List.filter (fun (colony, _) -> Set.contains colony.Home idle)
         |> List.collect (fun (_, view) ->
-            view.Creeps
+            ColonyView.bodies view
             |> List.choose (fun creep ->
                 creep.DrawnFrom |> Option.map (fun store -> creep.Name, store)))
         |> Map.ofList
@@ -1111,7 +1110,7 @@ let private fullTick
                         if Set.contains colony.Home fightOnly then
                             decision.Fight.Fighters
                         else
-                            view.Creeps |> List.map _.Name |> Set.ofList
+                            ColonyView.bodies view |> List.map _.Name |> Set.ofList
 
                     let plan =
                         LightTick.plan

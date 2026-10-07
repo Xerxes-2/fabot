@@ -1542,6 +1542,27 @@ let private fightIntent intent =
         | SetRampartPublic _ -> true
         | _ -> false
 
+/// The worker's tile in `chokedHome`.
+let private chokedWorker = { X = 23; Y = 25 }
+
+/// A one-wide corridor along y = 25, the worker in it between the guard and
+/// the ground it walks to: a choke only a whole decide's arbitration shoves
+/// the worker out of.
+let private chokedHome =
+    { raidedHome with
+        Spatial =
+            raidedHome.Spatial
+            |> withCreepsAt
+                [ "guard", { X = 22; Y = 25 }; "ranger", { X = 22; Y = 22 }; "w", chokedWorker ]
+            |> withObstacles (
+                { X = 25; Y = 25 }
+                :: [
+                    for x in 17..33 do
+                        for y in [ 24; 26 ] -> { X = x; Y = y }
+                ]
+            )
+    }
+
 [<Tests>]
 let fightOnlyDecideTests =
     testList
@@ -1559,7 +1580,9 @@ let fightOnlyDecideTests =
                         (Some first.Memo)
                         ReplanTurn.Now
 
-                match decideFight raidedHome first.Assignments Set.empty first.Memo first.Fight with
+                match
+                    decideFight raidedHome first.Assignments Set.empty first.Memo first.Economy
+                with
                 | None -> failtest "the asks and the fighters held: the fight decides alone"
                 | Some fight ->
                     Expect.exists
@@ -1606,7 +1629,7 @@ let fightOnlyDecideTests =
                     }
 
                 Expect.isFalse
-                    (List.contains defender first.Fight.Asks)
+                    (List.contains defender first.Economy.Asks)
                     "premise: the home asks no defender"
 
                 Expect.isNone
@@ -1615,8 +1638,8 @@ let fightOnlyDecideTests =
                         first.Assignments
                         Set.empty
                         first.Memo
-                        { first.Fight with
-                            Asks = defender :: first.Fight.Asks
+                        { first.Economy with
+                            Asks = defender :: first.Economy.Asks
                         })
                     "the carry's defender is gone: spawning is the economy's"
             }
@@ -1630,49 +1653,75 @@ let fightOnlyDecideTests =
                         first.Assignments
                         Set.empty
                         first.Memo
-                        { first.Fight with
-                            Fighters = Set.ofList [ "guard" ]
+                        { first.Economy with
+                            Economy = Set.add "ranger" first.Economy.Economy
                         })
                     "the ranger was an economy body when the carry was laid"
             }
 
             test "a fighter's step an economy body stands in decides the colony whole" {
-                // A one-wide corridor along y = 25, the worker in it between
-                // the guard and the ground it walks to: a choke only a whole
-                // decide's arbitration shoves the worker out of.
-                let worker = { X = 23; Y = 25 }
-
-                let choked =
-                    { raidedHome with
-                        Spatial =
-                            raidedHome.Spatial
-                            |> withCreepsAt
-                                [
-                                    "guard", { X = 22; Y = 25 }
-                                    "ranger", { X = 22; Y = 22 }
-                                    "w", worker
-                                ]
-                            |> withObstacles (
-                                { X = 25; Y = 25 }
-                                :: [
-                                    for x in 17..33 do
-                                        for y in [ 24; 26 ] -> { X = x; Y = y }
-                                ]
-                            )
-                    }
-
+                let choked = chokedHome
                 let first = decideUnarbitrated choked Map.empty Set.empty None ReplanTurn.Now
 
                 Expect.isTrue
                     (first.Movement.Intents
                      |> List.exists (fun step ->
                          step.Creep = "guard"
-                         && List.tryHead step.Candidates = Some(RoomPos.at "W1N1" worker)))
+                         && List.tryHead step.Candidates = Some(RoomPos.at "W1N1" chokedWorker)))
                     $"premise: the guard wants the worker's tile %A{first.Movement.Intents}"
 
                 Expect.isNone
-                    (decideFight choked first.Assignments Set.empty first.Memo first.Fight)
+                    (decideFight choked first.Assignments Set.empty first.Memo first.Economy)
                     "the worker stands in the fighter's way"
+            }
+
+            test
+                "a fight-only colony a fighter's step hands back is decided whole off the world's one match" {
+                let first = decideUnarbitrated chokedHome Map.empty Set.empty None ReplanTurn.Now
+
+                let colony: Colony =
+                    {
+                        Home = "W1N1"
+                        Outposts = []
+                        Errands = []
+                        Salvage = []
+                        Mother = None
+                        Consignee = None
+                        Perimeter = []
+                        RampartFloors = Map.empty
+                        FirstSpawn = None
+                        Assaults = []
+                    }
+
+                let decidedAlone alone =
+                    decideColonies
+                        {
+                            Hops = fun _ _ -> None
+                            Holding = first.Assignments
+                            Verbose = Set.empty
+                            PlanMemos = Map.ofList [ "W1N1", first.Memo ]
+                            Carries = Map.ofList [ "W1N1", first.Economy ]
+                            Idle = Set.empty
+                            FightAlone = alone
+                            TurnIndex = None
+                        }
+                        ignore
+                        [ colony, chokedHome ]
+
+                let handed = decidedAlone (Set.singleton "W1N1")
+                let whole = decidedAlone Set.empty
+
+                Expect.isEmpty handed.FoughtAlone "the colony did not fight alone"
+
+                match handed.Decided, whole.Decided with
+                | [ _, _, decision, () ], [ _, _, wholly, () ] ->
+                    Expect.equal
+                        decision.Assignments
+                        wholly.Assignments
+                        "its fighters hold what the one match gave them, its economy what a whole decide gives it"
+
+                    Expect.equal decision.Quotas wholly.Quotas "and its economy decided this tick"
+                | decided, _ -> failtest $"one decision each: %A{List.length decided}"
             }
 
             test
@@ -1703,14 +1752,14 @@ let fightOnlyDecideTests =
                     (Some(taskId (Repair "ram-1")))
                     "premise: with a way round, the worker takes the Repair"
 
-                Expect.isEmpty first.Fight.Parked "and nothing is parked"
+                Expect.isEmpty first.Economy.Parked "and nothing is parked"
 
                 Expect.isSome
-                    (decideFight open' first.Assignments Set.empty first.Memo first.Fight)
+                    (decideFight open' first.Assignments Set.empty first.Memo first.Economy)
                     "premise: nothing moved, the fight decides alone"
 
                 Expect.isNone
-                    (decideFight walled first.Assignments Set.empty first.Memo first.Fight)
+                    (decideFight walled first.Assignments Set.empty first.Memo first.Economy)
                     "walled off since: a whole decide lets the worker go the same tick"
 
                 Expect.isSome
@@ -1719,7 +1768,7 @@ let fightOnlyDecideTests =
                         first.Assignments
                         Set.empty
                         first.Memo
-                        { first.Fight with
+                        { first.Economy with
                             Parked = Set.singleton "w1"
                         })
                     "a body the full decide left parked owes no other"
@@ -1774,7 +1823,7 @@ let fightOnlyDecideTests =
 
                 let fight =
                     match
-                        decideFight raidedHome first.Assignments Set.empty first.Memo first.Fight
+                        decideFight raidedHome first.Assignments Set.empty first.Memo first.Economy
                     with
                     | Some fight -> fight
                     | None -> failtest "premise: the fight decides alone"

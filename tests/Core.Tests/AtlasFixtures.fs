@@ -37,6 +37,7 @@ let snapshotWith creeps spatial =
         ConstructionSites = []
         PlayerSites = 0
         Creeps = creeps
+        Fighters = []
         Unprojected = Set.empty
         Hostiles = []
         Allies = []

@@ -415,7 +415,10 @@ let planFightTasks
         // (`Threats.holdsFight`, #535): the verdict starts a fight, never
         // ends one, whoever answers the room.
         let fought =
-            let bodies = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
+            let bodies =
+                ColonyView.bodies view
+                |> List.map (fun creep -> creep.Name, creep)
+                |> Map.ofList
 
             threats.Engaged
             |> Set.filter (fun room ->

@@ -272,6 +272,11 @@ let internal planSpawns
     (busy: BusyReason list)
     (haulerQuota: int)
     : Intent list * Quotas =
+    // The economy's census in `Creeps`; the fighting rows count the fighters
+    // this colony holds (`fightersHeld`).
+    let view = economyOf view
+    let fighters = view.Fighters
+
     // The spawn holds while its doorstep is hot: a creep born into a Reach is
     // a kill delivered, the disaster fallback included.
     let doorstepInReach (s: SpawnInfo) =
@@ -332,7 +337,8 @@ let internal planSpawns
         // An expiring creep is already outside the count, so its successor is
         // cast while it still works.
         let unexpired =
-            view.Creeps |> List.filter (fun creep -> not (expiring view atlas sizing creep))
+            view.Creeps @ fighters
+            |> List.filter (fun creep -> not (expiring view atlas sizing creep))
 
         let unexpiredGarrison = unexpired |> List.filter isAnchorBody
 
@@ -678,7 +684,7 @@ let internal planSpawns
                             defenderPattern
 
                     let atHome =
-                        view.Creeps
+                        fighters
                         |> List.filter (fun creep ->
                             CastRow.cut ask.Row creep.Name creep.Body
                             && SpatialInfo.creepPlacementOf view.Spatial creep.Name

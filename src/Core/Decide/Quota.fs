@@ -417,8 +417,28 @@ let internal isSapperBody (creep: CreepInfo) =
 let isFighterBody (creep: CreepInfo) =
     isGuardBody creep
     || isRangerBody creep
-    || isMedicBody creep
-    || isSapperBody creep
+    // A medic or a sapper: any squad role, its name read once.
+    || Option.isSome (squadRoleByName creep.Name)
+
+/// The view a colony's economy decides off: its economy bodies in `Creeps`,
+/// its fighters apart in `Fighters`, whatever shape it came in (a fixture's
+/// whole view, or the fight's own). A view whose fighters stand apart already
+/// is one.
+let economyOf (view: ColonyView) : ColonyView =
+    match view.Fighters with
+    | _ :: _ -> view
+    | [] ->
+        let fighters, economy = view.Creeps |> List.partition isFighterBody
+
+        { view with
+            Creeps = economy
+            Fighters = fighters
+        }
+
+/// The fighters this colony holds: what its fighting rows count, by the
+/// holder the asks they answer are sized by (a Defend's `Wanted`, the lent
+/// rangers), until W6 moves casting and its census to the caster.
+let fightersHeld (view: ColonyView) : CreepInfo list = (economyOf view).Fighters
 
 /// Whether a towerless room of ours holds the raid standing in it without
 /// safe mode (#448): some one armed body of ours standing there, whichever
@@ -516,7 +536,7 @@ let private asksFor
 /// Every fighting row's asks this tick, each with its row, bodies and blocks,
 /// in `asksFor`'s order — what spawning reads of the fight —, off the guarded
 /// rooms, the one outpost fact `asksFor` reads: a fight-only decide holds them
-/// against the last whole decide's (`FightCarry.Asks`).
+/// against the last whole decide's (`EconomyCarry.Asks`).
 let internal castAsks (view: ColonyView) (threats: Threats) (guarded: string list) : CastAsk list =
     let outposts =
         {
@@ -573,15 +593,16 @@ let internal rowBlocksWanted
 
 /// Whether a fighting row is filled — every body it wants standing or in an
 /// oven. Read by the reserver row. Counted over every living body of the row
-/// and not the census less its expiring ones: a fighter inside its lead still
-/// stands in the room, so the seat stays open while the row buys the relief.
+/// this colony holds (`fightersHeld`) and not the census less its expiring
+/// ones: a fighter inside its lead still stands in the room, so the seat stays
+/// open while the row buys the relief.
 let private fightingRowStands
     (view: ColonyView)
     (cut: string -> Map<BodyPart, int> -> bool)
     (quota: int)
     : bool =
     let living =
-        view.Creeps
+        fightersHeld view
         |> List.filter (fun creep -> cut creep.Name creep.Body)
         |> List.length
 

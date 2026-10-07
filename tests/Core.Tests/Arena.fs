@@ -1466,6 +1466,7 @@ let private cut (a: Arena) : World * (string -> string -> int option) * (Colony 
             casting
             gates.[c.Home]
             holders
+            isFighterBody
             watch
             world
             c)
@@ -1515,7 +1516,11 @@ let private decideOurs (a: Arena) : Intent list * Carried =
     // Characterisation (the world-first epic's W0): a fighter holds no economy
     // Task and an economy body no combat one, on every tick of every arena.
     for (c, view, decision) in decisions do
-        match Fabot.Core.Tests.Decide.Fixtures.partitionBreaks view.Creeps decision.Assignments with
+        match
+            Fabot.Core.Tests.Decide.Fixtures.partitionBreaks
+                (ColonyView.bodies view)
+                decision.Assignments
+        with
         | [] -> ()
         | breaks ->
             invalidOp $"{c.Home} t{a.Time}: bodies across the fight/economy line: %A{breaks}"

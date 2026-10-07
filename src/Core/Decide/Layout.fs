@@ -150,7 +150,7 @@ let private economyRazed (view: ColonyView) atlas (held: HeldTaskFacts) : bool =
     | _ when Array.isEmpty raiders -> false
     | placed ->
         let tiles = (SpatialInfo.layerOf view.Spatial home).TargetPositions
-        let living = view.Creeps |> List.map (fun c -> c.Name, c) |> Map.ofList
+        let living = ColonyView.bodies view |> List.map (fun c -> c.Name, c) |> Map.ofList
 
         let towers =
             placed
@@ -1313,7 +1313,7 @@ let internal planTowerHeal (view: ColonyView) atlas : Intent list =
         []
     else
         let wounded =
-            view.Creeps
+            ColonyView.bodies view
             |> List.filter (fun creep -> creep.Hits.Hits < creep.Hits.HitsMax)
             |> List.choose (fun creep ->
                 SpatialInfo.creepPlacementOf view.Spatial creep.Name

@@ -101,6 +101,49 @@ let guardRowTests =
                     "the resident is the body a raid meets first"
             }
 
+            test
+                "the ranger row counts the rangers its colony holds apart from its economy, whoever cast them" {
+                // The peace garrison of two (#419): the asks a fighting row
+                // answers count the bodies their colony holds, so its census
+                // does too until casting moves to the caster (W6).
+                let colony =
+                    { deliveryColony (Some Ownership.Ours) with
+                        Bank = bank 5300 5300
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps = worker "w" 0 50 :: colony.Creeps
+                            Spatial = colony.Spatial |> withCreepsAt [ "w", { X = 9; Y = 10 } ]
+                        }
+
+                // Cast by another colony's spawn, adopted here.
+                let rangers =
+                    [
+                        for i in 1..2 ->
+                            creepWith $"ranger-{i}-Spawn9" 0 0 (bodyFor Bodies.rangerPattern 1300)
+                    ]
+
+                let ranger colony =
+                    (decideOn colony).Quotas.Rows
+                    |> List.tryFind (fun row -> row.Row = "ranger")
+                    |> Option.map (fun row -> row.Quota, row.Living)
+
+                Expect.equal (ranger colony) (Some(2, 0)) "premise: none held, the row is short"
+
+                Expect.equal
+                    (ranger { colony with Fighters = rangers })
+                    (Some(2, 2))
+                    "held apart from the economy: both count"
+
+                Expect.equal
+                    (ranger
+                        { colony with
+                            Creeps = colony.Creeps @ rangers
+                        })
+                    (Some(2, 2))
+                    "and a whole view's alike"
+            }
+
             test "the reach a raid is weighed against is one body, as big as the bank buys" {
                 // #417: one body and never the row's two summed, capped at the most
                 // blocks one body carries.

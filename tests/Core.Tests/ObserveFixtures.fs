@@ -48,6 +48,7 @@ let quiet: ColonyView =
         ConstructionSites = []
         PlayerSites = 0
         Creeps = []
+        Fighters = []
         Unprojected = Set.empty
         Hostiles = []
         Allies = []

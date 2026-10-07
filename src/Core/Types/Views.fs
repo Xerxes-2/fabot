@@ -553,10 +553,19 @@ type ColonyView =
         /// Every construction site the player holds, every colony's and in
         /// every room (`World.Sites`): what the engine's cap counts.
         PlayerSites: int
-        /// The creeps this colony holds this tick (`World.creepColonies`), in
-        /// the world's own order, so who holds a body does not move the
-        /// Matcher's order.
+        /// The economy bodies this colony holds this tick
+        /// (`World.creepColonies`), in the world's own order, so who holds a
+        /// body does not move the Matcher's order. No fighter: the world's
+        /// fight commands those (`Fighters`). A view whose `Fighters` is
+        /// empty may hold its fighters here too — a fixture's, or the fight's
+        /// own (`ColonyView.fought`).
         Creeps: CreepInfo list
+        /// The fighters (`isFighterBody`) this colony holds this tick, in the
+        /// world's own order: the bodies the world's fight prices in this
+        /// colony's Atlas (`ColonyView.bodies`), and, until W6 casts by
+        /// caster, what its fighting rows count (`fightersHeld`), as the
+        /// asks they answer count the holder's.
+        Fighters: CreepInfo list
         /// The names of those creeps standing in a room this colony does not
         /// project, and so in no layer: the bodies the projection does not
         /// place because the shell does not, told apart from a fixture that
@@ -746,6 +755,24 @@ module ColonyView =
     /// The rooms past home whose [[ore]] this colony digs into its home
     /// terminal: its errand rooms, held or not, less a stood-down one.
     let oreRooms (view: ColonyView) : Set<string> = view.OreRooms
+
+    /// Every body this colony holds, its economy's and the fighters the
+    /// world's fight prices in its Atlas: what a fight rule reads of ours.
+    let bodies (view: ColonyView) : CreepInfo list =
+        match view.Fighters with
+        | [] -> view.Creeps
+        | fighters -> view.Creeps @ fighters
+
+    /// The view the world's fight reads for this colony: every body it holds
+    /// in `Creeps`, as the Emitter, the reflexes and the mover walk them.
+    let fought (view: ColonyView) : ColonyView =
+        match view.Fighters with
+        | [] -> view
+        | _ ->
+            { view with
+                Creeps = bodies view
+                Fighters = []
+            }
 
     /// The view with the world's vision of these rooms laid in, for each one
     /// it does not project (#534): their hostiles, allies, cores, tombstones
@@ -1390,10 +1417,11 @@ module ColonyView =
     /// of it**: the shell reads the engine once (`World.ofGame`) and every
     /// rule about which rooms a colony works, which creeps are its own and
     /// what it may borrow is here, where a test can hand it a two-colony
-    /// world. Six facts are handed in and none is decided here: the
+    /// world. Seven facts are handed in and none is decided here: the
     /// tunables, the declaration, the [[stand-down]] gate (Memory's answer,
     /// not the world's), the holders `World.creepColonies` cut over every
-    /// living colony at once, the world layer's read (`WorldView`, carried
+    /// living colony at once, which of them is a fighter (`isFighterBody`,
+    /// the decision layer's), the world layer's read (`WorldView`, carried
     /// whole) and the world. The join table is the shell's,
     /// handed in for the life of the process (`JoinTable`).
     let ofWorldRecalling
@@ -1403,6 +1431,7 @@ module ColonyView =
         (casting: HarassCasting)
         (gate: StandDown)
         (holders: Map<string, string>)
+        (fighter: CreepInfo -> bool)
         // The world layer's read, built once a tick for every colony.
         (watch: WorldView)
         (world: World)
@@ -1416,6 +1445,9 @@ module ColonyView =
         let mine =
             world.Creeps
             |> List.filter (fun creep -> Map.tryFind creep.Info.Name holders = Some home)
+
+        // Its fighters apart from its economy: the world's fight commands them.
+        let fighters, economy = mine |> List.map _.Info |> List.partition fighter
 
         // The declaration's narrowings and their union, off the one
         // derivation the creep adoption reads too (`World.scanRecalling`),
@@ -1733,7 +1765,8 @@ module ColonyView =
             KeepHitsBefore = gate.KeepHitsBefore
             ConstructionSites = collected (fun facts -> facts.ConstructionSites)
             PlayerSites = world.Sites
-            Creeps = mine |> List.map (fun creep -> creep.Info)
+            Creeps = economy
+            Fighters = fighters
             Unprojected =
                 mine
                 |> List.filter (fun creep ->
@@ -1979,6 +2012,8 @@ module ColonyView =
 
     /// `ofWorldRecalling` over a table of this call's own — the shape a test
     /// asks in, the way `Atlas.ofView` is `ofViewRecalling` over fresh tables.
+    /// Every body it holds in `Creeps`, a fixture's whole view: this layer
+    /// does not know a fighter's body.
     let ofWorld
         (tuning: Tuning)
         (colonies: Colony list)
@@ -1994,6 +2029,7 @@ module ColonyView =
             HarassCasting.none
             gate
             holders
+            (fun _ -> false)
             (WorldView.ofWorld colonies [ gate ] world)
             world
             colony

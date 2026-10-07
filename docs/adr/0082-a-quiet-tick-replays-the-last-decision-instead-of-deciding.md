@@ -2,6 +2,8 @@
 
 > **Status:** accepted
 
+> **Amended 2026-10-07 (ADR 0091 W5 S5)**: a forced tick's fight-only colonies (ADR 0091's W4b) are the world fight's: their fighters are matched in the one world match beside every deciding colony's, their economy replays its plan off its own carry, and one a fighter's step hands back is decided whole off that match, never by deciding the tick's fight a second time. Decision 4's forcing rules are unchanged; their split into fight and economy facts is W7's.
+
 > **Amended 2026-10-06 (the cadence is tunable)**: decision 1's cadence is `k` ticks per full decide, **default 2** — today's full-then-light — set by `Tuning.Cadence`. A live override, `Memory.fabot.observe.cadence` (`observe cadence <2..4> | clear`), takes its place on the next tick, clamped to 2..4; unset, a bucket line raises it (`Tuning.CadenceBuckets`, shipped as the Lean amendment's half bucket → 3, now falling back only `CadenceBand` = 1,000 over the line). A step plan holds up to four tiles and a decision lays each light tick's own planned acts (`Decision.Later`: a refiller's further pours, a hauler's act on arriving at a later tile), so a plan replays `k − 1` ticks; a forced tick's fresh plan counts its light ticks from its own tick. The forcing rules (4) are unchanged at every `k`.
 
 > **Accepted 2026-09-30**, the user taking every recommendation: a tick of latency outside combat, the `rangedRange` + 2 radius, and a one-to-one cadence. Out of the CPU round that took the mean tick from 86 to about 68 ms by exact cuts alone. The remaining cost is spread over dozens of sites; this is the one structural cut left that is worth double digits. The user chose it over rewriting the projection's collections (B) and caching the snapshot's static structures (C).

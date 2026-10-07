@@ -8375,7 +8375,7 @@ let arenaBorderTests =
                 let mother, threats, brief = briefIn "W15S28"
 
                 Expect.contains
-                    (mother.Creeps |> List.filter brief.Admits |> List.map (fun c -> c.Name))
+                    (mother.Fighters |> List.filter brief.Admits |> List.map (fun c -> c.Name))
                     "ranger-979811-Spawn8"
                     "the mother's resident may be lent to her kill there"
 
@@ -17725,7 +17725,7 @@ let w17s29TowerBackedTests =
             test
                 "#590 capture t996,675: the ranger in the home wins the pair beside the home's towers, and loses it alone" {
                 let view = viewOf (w17s29TowerBacked ()) "W17S29"
-                let ranger = view.Creeps |> List.filter (fun c -> c.Name = "ranger-996535-Spawn9")
+                let ranger = view.Fighters |> List.filter (fun c -> c.Name = "ranger-996535-Spawn9")
 
                 Expect.equal
                     (Map.tryFind "W17S29" view.World.Rooms

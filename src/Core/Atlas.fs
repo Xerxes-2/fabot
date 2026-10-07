@@ -491,8 +491,11 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
             Map.empty
         |> Map.map (fun _ ids -> List.rev ids)
 
+    // Every body the colony holds, its fighters among them: each is traffic.
+    let creeps = ColonyView.bodies view
+
     let placed =
-        view.Creeps
+        creeps
         |> List.choose (fun creep ->
             if creepsFound.ContainsKey creep.Name then
                 let room, pos = creepsFound.[creep.Name]
@@ -501,7 +504,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
                 None)
 
     let factors =
-        view.Creeps
+        creeps
         |> List.map (fun creep -> creep.Name, fatigueFactorOf creep)
         |> Map.ofList
 
@@ -521,7 +524,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         |> Set.ofList
 
     let standing =
-        view.Creeps
+        creeps
         |> List.filter (fun c -> (not c.Moved || c.Fatigue > 0) && not (Set.contains c.Name loose))
         |> List.map (fun c -> c.Name)
         |> Set.ofList
@@ -690,7 +693,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         SeatUnions = System.Collections.Generic.Dictionary()
         Steps = System.Collections.Generic.Dictionary()
         Heavy =
-            view.Creeps
+            creeps
             |> List.filter (fun creep -> partCount creep.Body Work > partCount creep.Body Move)
             |> List.map (fun creep -> creep.Name)
             |> Set.ofList

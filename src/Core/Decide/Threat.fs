@@ -499,7 +499,7 @@ module Brief =
         let caught, rest = trespassers |> List.partition (guardCatches view)
 
         let rangerMay () =
-            view.Creeps
+            ColonyView.bodies view
             |> List.exists (fun creep ->
                 isRangerRowBody creep
                 && Facts.mayLeaveFor
@@ -511,7 +511,7 @@ module Brief =
                 && rest |> List.forall (Facts.canStrike view (partCount creep.Body)))
 
         let rangerHolds =
-            view.Creeps
+            ColonyView.bodies view
             |> List.exists (fun creep -> isRangerRowBody creep && List.contains creep.Name holders)
 
         let asked = not (List.isEmpty rest) && (castable view rangerPattern || rangerMay ())
@@ -892,7 +892,7 @@ module Brief =
             let guards = wanted ()
 
             let seated =
-                view.Creeps
+                ColonyView.bodies view
                 |> List.filter (fun creep ->
                     isRangerRowBody creep
                     && SpatialInfo.creepPlacementOf view.Spatial creep.Name
@@ -1026,7 +1026,9 @@ module Brief =
     /// casts none for them.
     let internal lentRangers (view: ColonyView) (holders: Set<string>) : int =
         let home = SpatialInfo.homeName view.Spatial
-        let mine = view.Creeps |> List.map (fun creep -> creep.Name) |> Set.ofList
+
+        let mine =
+            ColonyView.bodies view |> List.map (fun creep -> creep.Name) |> Set.ofList
 
         Map.tryFind home view.World.Bodies.Value
         |> Option.defaultValue []
@@ -1067,7 +1069,7 @@ module Brief =
                && (Set.contains hostile.Id view.Parked || Seam.isExit (RoomPos.pos hostile.Pos))
 
         let held =
-            view.Creeps
+            ColonyView.bodies view
             |> List.exists (fun creep ->
                 isRangerRowBody creep
                 && (Set.contains creep.Name holders
@@ -1338,7 +1340,7 @@ module Formation =
 
     /// Every squad cast of this colony, by the role its name carries.
     let internal casts (view: ColonyView) : Map<string, SquadRole> =
-        view.Creeps
+        ColonyView.bodies view
         |> List.choose (fun creep ->
             squadRoleByName creep.Name |> Option.map (fun role -> creep.Name, role))
         |> Map.ofList
@@ -2373,7 +2375,7 @@ let private defendGroundOf
                 Engine.meleeRange
 
         let taken =
-            view.Creeps
+            ColonyView.bodies view
             |> List.filter (fun creep -> not (CastRow.cut row creep.Name creep.Body))
             |> List.choose (fun creep -> SpatialInfo.creepPlacementOf view.Spatial creep.Name)
             |> Set.ofList
@@ -2590,7 +2592,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             // Our shooters in the room, where they stand.
             let shooters =
-                view.Creeps
+                ColonyView.bodies view
                 |> List.filter (fun creep -> partCount creep.Body RangedAttack > 0)
                 |> List.choose (fun creep -> Atlas.creepTile atlas creep.Name)
                 |> List.filter (fun tile -> tile.Room = room)
@@ -2709,7 +2711,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         let kept room =
             let holders = HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList
 
-            view.Creeps
+            ColonyView.bodies view
             |> List.exists (fun creep -> Set.contains creep.Name holders && isRangerRowBody creep)
 
         verdicts
@@ -2812,7 +2814,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     (let guarding =
                         HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList
 
-                     view.Creeps
+                     ColonyView.bodies view
                      |> List.exists (fun creep ->
                          partCount creep.Body RangedAttack > 0
                          && (Set.contains creep.Name guarding
@@ -2833,7 +2835,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     |> Set.filter (fun tile -> not (Set.contains tile standing))
 
                 let held =
-                    view.Creeps
+                    ColonyView.bodies view
                     |> List.filter (fun creep -> partCount creep.Body RangedAttack > 0)
                     |> List.choose (fun creep ->
                         SpatialInfo.creepPlacementOf view.Spatial creep.Name)
@@ -3243,7 +3245,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             HeldTaskFacts.holdersOf held (taskId (Guard room))
             |> List.choose (fun name ->
-                view.Creeps |> List.tryFind (fun creep -> creep.Name = name))
+                ColonyView.bodies view |> List.tryFind (fun creep -> creep.Name = name))
             |> List.filter isRangerRowBody
             |> List.map (fun creep -> creep.Name, reached creep)
             |> Map.ofList
@@ -3284,7 +3286,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     defendGroundOf view row raid |> Option.map (fun ground -> row, ground))
 
             let stances =
-                view.Creeps
+                ColonyView.bodies view
                 |> List.choose (fun creep ->
                     grounds
                     |> List.tryFind (fun (row, _) -> CastRow.cut row creep.Name creep.Body)
@@ -3324,7 +3326,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         Flights = System.Collections.Generic.Dictionary()
         FleeCosts = System.Collections.Generic.Dictionary()
         Seen = view.World.Rooms |> Map.keys |> Set.ofSeq
-        Bodies = view.Creeps
+        Bodies = ColonyView.bodies view
         Horizon = view.Tuning.ReachHorizon
         Homes = Facts.homesOfOurs view
     }
@@ -3454,7 +3456,7 @@ let private withAssaults
             SpatialInfo.creepPlacementOf view.Spatial name
 
         let share =
-            view.Creeps
+            ColonyView.bodies view
             |> List.map (fun creep ->
                 creep.Name, float creep.Hits.Hits / float (max 1 creep.Hits.HitsMax))
             |> Map.ofList
@@ -3656,7 +3658,10 @@ let private withMusters
     | _ ->
         let home = SpatialInfo.homeName view.Spatial
 
-        let bodies = view.Creeps |> List.map (fun creep -> creep.Name, creep) |> Map.ofList
+        let bodies =
+            ColonyView.bodies view
+            |> List.map (fun creep -> creep.Name, creep)
+            |> Map.ofList
 
         // The bodies the room's rows still cast for it beyond its holders,
         // each at the row's blocks: what a muster may wait for.
