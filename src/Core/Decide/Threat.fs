@@ -455,6 +455,16 @@ let internal guardBlocksFor (view: ColonyView) (room: string) : int =
     else
         fight
 
+/// The rangers one room's raid takes, `guardsWanted`'s twin: one where the
+/// biggest ranger the bank buys wins it alone, else `Engine.guardCap`, the
+/// count the row's verdict prices (`Facts.rowAnswer`, #589). One body a
+/// raid out-heals is fed to it one at a time.
+let internal rangersWanted (view: ColonyView) (room: string) : int =
+    if rangerBlocksBeat view room (max 1 (rangerBlocksReach view)) then
+        1
+    else
+        Engine.guardCap
+
 /// The ranger blocks one ranger room wants (#411): the smallest body that wins
 /// its raid alone, never below the room's floor, and the largest body where
 /// none wins.
@@ -754,13 +764,13 @@ module Brief =
                 }
             ]
         | BriefKind.Harass -> [ harassAsk view room ]
-        // An outpost a ranger answers (#535): one, the smallest that wins it
-        // alone.
+        // An outpost a ranger answers (#535): the smallest that wins it
+        // alone, or the pair where none the bank buys does (`rangersWanted`).
         | BriefKind.Outpost when ranged ->
             [
                 {
                     Row = CastRow.Ranger
-                    Wanted = fun _ -> 1
+                    Wanted = fun _ -> rangersWanted view room
                     Blocks = fun () -> rangerBlocksFor 1 view room
                 }
             ]
@@ -808,7 +818,7 @@ module Brief =
                 [
                     {
                         Row = CastRow.Ranger
-                        Wanted = fun _ -> 1
+                        Wanted = fun _ -> rangersWanted view room
                         Blocks = fun () -> rangerBlocksFor 1 view room
                     }
                 ]
@@ -853,7 +863,16 @@ module Brief =
         | BriefKind.Resident -> Capacity.fighters (wanted () + view.Tuning.RangerResidents)
         // One ranger per harassment room (#439), and its relief beside it
         // (`Capacity.Relieved`).
-        | BriefKind.Harass -> Capacity.fighters (wanted ()) |> Capacity.relieving
+        // A raid one ranger loses seats the rangers that win it together
+        // (`Facts.rangersWin`, #609): one seat left the second at the
+        // harassment room beside it while the first bounced on the border.
+        | BriefKind.Harass ->
+            let seats =
+                match verdict.Value with
+                | Answer.Win -> max (wanted ()) (rangers.Value |> Option.defaultValue 1)
+                | _ -> wanted ()
+
+            Capacity.fighters seats |> Capacity.relieving
         // A kite seats as many rangers as kill what cannot close on them
         // before it ages out, and every one at the fight (`Facts.kiteSeats`,
         // #510, #596); a raid the rangers
@@ -973,6 +992,9 @@ module Brief =
                 | BriefKind.Outpost -> TwoRungsUp
                 | BriefKind.Resident
                 | BriefKind.Chase when raided -> TwoRungsUp
+                // A raid in a harassment room our side wins is the raid's
+                // rung, a ranger idling on a quiet Guard sent to it (#609).
+                | BriefKind.Harass when raided && verdict.Value = Answer.Win -> TwoRungsUp
                 | _ when kill -> OneRungUp
                 | _ -> OnTheTier
             Asks = ask

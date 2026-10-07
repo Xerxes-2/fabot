@@ -1582,28 +1582,72 @@ let private walkToRaid (view: ColonyView) (raid: HostileInfo list) (creep: Creep
 /// kiter's dance about its range, three steps either way.
 let internal atFight (walk: int) = walk <= Engine.rangedRange
 
+/// A body of ours worn down to `hits`: each live part count cut in the
+/// share of hits it keeps, rounded up — which parts go first is the body's
+/// order, which the counts do not carry, so every kind is lost alike.
+let private wornTo (creep: CreepInfo) (hits: int) : CreepInfo =
+    let now = max 1 creep.Hits.Hits
+    let hits = max 0 (min hits creep.Hits.Hits)
+
+    { creep with
+        Hits = { creep.Hits with Hits = hits }
+        Body = creep.Body |> Map.map (fun _ count -> (count * hits + now - 1) / now)
+    }
+
 /// Whether a body of ours wins the fight in a room beside its side there
 /// (#602): the exchange (`bodiesWin`) by it and those of `beside` at the
-/// fight (`atFight`), and, of those holding the fight (the flag beside each),
-/// every one whose walk lands it there within `soon` ticks. One still
-/// walking from farther strikes nothing yet, whatever a verdict counted it
-/// for.
+/// fight (`atFight`), and of those holding the fight (the flag, beside its
+/// walk's ticks there where its colony's Atlas prices one), every one that lands within
+/// `soon` ticks, or (#609) by its walk's ticks while this body still stands
+/// above its floor: a quarter of its hits, or the raid's damage over twice
+/// `soon`, whichever is more — the slack for a landing a few ticks late.
+/// Meanwhile the raid's whole damage strikes it, net of the heal of the
+/// parts it still has (`wornTo`), and the exchange is priced on what is
+/// left of it when the last of them lands. A holder this view places no
+/// walk for counts only within `soon`, its straight tiles. One that lands
+/// later strikes nothing beside it, whatever a verdict counted it for.
+/// Before #609 a friend farther than `soon` was never counted, so a ranger
+/// that outlasts a 3RA4H kiter by two hundred ticks ran from it, and the
+/// pair never met.
 let winsBeside
     (view: ColonyView)
     (room: string)
     (soon: int)
     (creep: CreepInfo)
-    (beside: (CreepInfo * bool) list)
+    (beside: (CreepInfo * bool * int option) list)
     =
     let raid = raidersIn view room
 
-    creep
-    :: (beside
-        |> List.filter (fun (other, holds) ->
-            walkToRaid view raid other
-            |> Option.exists (fun walk -> atFight walk || holds && atFight (walk - soon)))
-        |> List.map fst)
-    |> bodiesWin view room
+    let price =
+        raidPrice view Reaction.strike (view.Hostiles |> List.filter (fun h -> h.Pos.Room = room))
+
+    let floor = max (creep.Hits.HitsMax / 4) (price.Damage * 2 * soon)
+
+    // This body's hits after `ticks` of the raid alone, its heal worn with it.
+    let after ticks =
+        let rec go t hits =
+            if t >= ticks || hits <= 0 then
+                hits
+            else
+                let heal = selfHealOf (partCount (wornTo creep hits).Body)
+                go (t + 1) (hits - max 0 (price.Damage - heal))
+
+        go 0 creep.Hits.Hits
+
+    let counted =
+        beside
+        |> List.choose (fun (other, holds, ticks) ->
+            match walkToRaid view raid other, ticks with
+            | Some walk, _ when atFight walk -> Some(other, 0)
+            | _, Some ticks when holds && (ticks <= soon || after ticks > floor) ->
+                Some(other, ticks)
+            | Some walk, None when holds && atFight (walk - soon) ->
+                Some(other, walk - Engine.rangedRange)
+            | _ -> None)
+
+    let waits = counted |> List.map snd |> List.fold max 0
+
+    wornTo creep (after waits) :: List.map fst counted |> bodiesWin view room
 
 /// How a body of ours ends the raid standing in a room alone (#596): its
 /// walk there (`walkToRaid`) and then its kill (`killTicks`), the kill
@@ -1834,12 +1878,22 @@ let private rangerRowWins (view: ColonyView) (room: string) =
 /// verdict share. A ranger room and one the colony harasses are the ranger's
 /// (#411). Any other is the melee guard's where the guard's borne damage wins
 /// (`guardBorneBeat`); else the ranger's where the biggest ranger wins; each
-/// only where the bank casts its block (`castable`, #546); else
+/// only where the bank casts its block (`castable`, #546). Where neither
+/// wins alone and the guard's swing reaches no raider there
+/// (`swingReaches`), the ranger's where the `Engine.guardCap` bodies of its
+/// size it then casts win (`bodiesBeat`, `Threat.rangersWanted`, #609): a
+/// 3RA4H kiter out-heals the 4RA2H body an 1,800 bank buys and loses to
+/// two, and it went to the melee guard, which never catches it (W17S26,
+/// t1,012,579). Else
 /// still the guard's, which holds the post (#531) and wins while it outlasts
 /// the raid, its swing priced in full (`guardBlocksBeat`): no new stand-down
 /// for a raid of quick shooters no ranger wins either. Never a win in a
 /// child's outpost, which no row of this colony casts for (#517).
 let rowAnswer (view: ColonyView) (room: string) : RowAnswer =
+    let swingStrikes () =
+        raidersIn view room
+        |> List.exists (swingReaches view.Hostiles (partCountIn guardPattern.Block))
+
     if List.contains room view.Borrowed.ChildOutposts then
         { Ranger = false; Wins = false }
     elif Set.contains room (rangerRooms view) || Set.contains room view.HarassCast then
@@ -1850,6 +1904,12 @@ let rowAnswer (view: ColonyView) (room: string) : RowAnswer =
     elif castable view guardPattern && guardBorneBeat view room (guardBlocksReach view) then
         { Ranger = false; Wins = true }
     elif castable view rangerPattern && rangerRowWins view room then
+        { Ranger = true; Wins = true }
+    elif
+        castable view rangerPattern
+        && not (swingStrikes ())
+        && bodiesBeat rangerPattern.Block view room Engine.guardCap (max 1 (rangerBlocksReach view))
+    then
         { Ranger = true; Wins = true }
     else
         {

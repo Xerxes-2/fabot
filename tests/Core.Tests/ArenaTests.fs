@@ -20847,7 +20847,10 @@ let private w19s26LosingTrade () : Arena =
             }
         ]
 
+    // W19S26 and W19S25 are harassment rooms W17S25 casts (#609): without
+    // them the capture never sat ranger-1006965 on W19S25's Stand as live.
     arena 1_007_220 [ w19s26; w19s25; w18s26; w17s25; w18s25; w17s26 ] colonies bodies
+    |> withHarass Colony.harass
 
 [<Tests>]
 let foughtWhereStruckTests =
@@ -20855,16 +20858,19 @@ let foughtWhereStruckTests =
         "arena a fight lost where it is struck"
         [
             // #602: a Guard is priced again on every tick its body is struck.
-            // Struck alone at the fight, ranger-1006821 loses it, lets it go
-            // and runs for the exit home, shooting back, Wave7157 on its heels
-            // at its own pace, and crosses home at t28 (1,086 hits at the
-            // least). Moved by #608: before it walked the exit row beside the
-            // landings Wave7157 would cross to after it (956 at the least),
-            // until the other ranger met it there and the pair killed
-            // Wave7157 at t88. Home, nothing of ours sees W19S26, its Guard
-            // goes, and Wave7157 is left at the border.
+            // #608 had ranger-1006821, losing alone, run for the exit and cross
+            // home at t28; home, nothing of ours saw W19S26, its Guard went,
+            // and Wave7157 was left at the border.
+            // #609: with the harassment rooms cast as live, ranger-1006965
+            // held W19S25's quiet Guard on its Stand (live: 27,20 past
+            // t1,007,350) while W19S26's harassment Guard seated one ranger.
+            // Now the raided room seats the pair that wins it, two rungs up,
+            // so ranger-1006965 is sent at t1; and ranger-1006821, which
+            // outlasts Wave7157 by two hundred ticks (6 a tick net), holds
+            // the fight until it lands. The pair kills Wave7157 at t109, the
+            // first ranger down to 824, neither leaving W19S26 once in it.
             test
-                "#602 capture t1,007,219: the ranger runs home from the exchange it loses alone and crosses" {
+                "#602 capture t1,007,219: a ranger losing alone holds while its partner walks in, and the pair kills Wave7157" {
                 let _, trace = w19s26LosingTrade () |> run 120
                 let failure = describe trace
 
@@ -20876,18 +20882,23 @@ let foughtWhereStruckTests =
 
                 Expect.isGreaterThanOrEqual
                     (least "ranger-1006821-Spawn11")
-                    1_050
-                    $"it never stands trading its hits away\n{failure}"
-
-                Expect.isTrue
-                    (pathOf "ranger-1006821-Spawn11" trace
-                     |> List.exists (fun (t, s) -> t <= 30 && s.At.Room = "W19S25"))
-                    $"it crosses home by t30\n{failure}"
+                    800
+                    $"it holds at the cost of the wait, never to its death\n{failure}"
 
                 Expect.isGreaterThanOrEqual
                     (least "ranger-1006965-Spawn11")
                     1_150
-                    $"nor does the other trade its hits\n{failure}"
+                    $"the other walks in to a won fight\n{failure}"
+
+                Expect.isFalse
+                    (pathOf "ranger-1006821-Spawn11" trace
+                     |> List.exists (fun (_, s) -> s.At.Room <> "W19S26"))
+                    $"it never leaves W19S26 for the exit row\n{failure}"
+
+                Expect.isLessThanOrEqual
+                    (diedOn "Wave7157" trace |> Option.defaultValue System.Int32.MaxValue)
+                    115
+                    $"the pair kills Wave7157 by t115\n{failure}"
             }
         ]
 
@@ -21407,5 +21418,1040 @@ let shotHomeTests =
                     $"chasing: the anchor never steps onto the swamp (31,4) under fire\n{failure}"
 
                 Expect.isNone (diedOn anchor chased) $"chasing: the anchor outlives t87\n{failure}"
+            }
+        ]
+
+// ---- arena capture w19s25-t1012579 -------------------------------------------
+// `npm run capture -- W19S25 1012579 --rooms W17S25,W15S28,W17S26,W18S25`, read at live t1,012,645.
+// The room-history replay at t1,012,579, the state after that tick ran: arena
+// tick 0 runs as t1,012,580 and decides what our code decided live then.
+//   W19S25  https://screeps.com/room-history/shardSeason/W19S25/1012500.json
+//   W17S25  https://screeps.com/room-history/shardSeason/W17S25/1012500.json
+//   W15S28  https://screeps.com/room-history/shardSeason/W15S28/1012500.json
+//   W17S26  https://screeps.com/room-history/shardSeason/W17S26/1012500.json
+//   W18S25  https://screeps.com/room-history/shardSeason/W18S25/1012500.json
+// Spawn11 is spawning worker-1012533-Spawn11 until t1012614: not placed.
+// Spawn3 is spawning worker-1012447-Spawn3 until t1012597: not placed.
+// Spawn8 is spawning hauler-1012517-Spawn8 until t1012661: not placed.
+// W17S26 is reserved by us to t1012751: the arena has no reservations.
+// W18S25 is reserved by us to t1017579: the arena has no reservations.
+// not placed: 8 ruin, 1 energy, 1 tombstone (the arena has no drops, tombstones or ruins).
+/// Two Trepidimous 3RA4H7M kiters, Shadow2363 in W17S26 and Deepening1722
+/// looping W19S25's west exit, against W17S25's two 4RA2H rangers and melee
+/// guards (#609).
+let private trepKiters () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+
+    let w19s25 =
+        room "W19S25"
+        |> withSite trepidimous "road" None 0 { X = 9; Y = 37 }
+        |> withSite trepidimous "road" None 0 { X = 10; Y = 37 }
+        |> withSite trepidimous "road" None 0 { X = 11; Y = 37 }
+        |> withSite trepidimous "road" None 0 { X = 12; Y = 37 }
+
+    let w17s25 =
+        room "W17S25"
+        |> withController Ownership.Ours None 5 3
+        |> withControllerClocks 0 0 80_000 44_240
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        9, 23
+                        9, 25
+                        9, 27
+                        9, 29
+                        10, 24
+                        10, 26
+                        10, 28
+                        10, 30
+                        11, 23
+                        11, 25
+                        11, 27
+                        12, 24
+                        12, 28
+                        12, 30
+                        13, 23
+                        13, 25
+                        13, 31
+                        14, 24
+                        14, 26
+                        14, 30
+                        15, 29
+                        15, 31
+                        16, 30
+                        16, 32
+                        17, 31
+                        19, 31
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 50
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in [ 15, 27; 16, 28; 17, 29; 18, 30 ] ->
+                    structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y }
+            ]
+        |> withStructures
+            [
+                { structureOf "container" None 160_800 250_000 { X = 16; Y = 34 } with
+                    Energy = 348
+                }
+                { structureOf "container" None 160_000 250_000 { X = 17; Y = 20 } with
+                    Energy = 468
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_221 10_000_000 { X = 2; Y = 15 } with
+                    NextDecay = 1_012_626
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_161 10_000_000 { X = 2; Y = 16 } with
+                    NextDecay = 1_012_607
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_231 10_000_000 { X = 2; Y = 17 } with
+                    NextDecay = 1_012_610
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_731 10_000_000 { X = 2; Y = 18 } with
+                    NextDecay = 1_012_615
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_111 10_000_000 { X = 2; Y = 19 } with
+                    NextDecay = 1_012_587
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_031 10_000_000 { X = 2; Y = 20 } with
+                    NextDecay = 1_012_589
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_221 10_000_000 { X = 2; Y = 23 } with
+                    NextDecay = 1_012_614
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_701 10_000_000 { X = 2; Y = 24 } with
+                    NextDecay = 1_012_675
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_301 10_000_000 { X = 2; Y = 25 } with
+                    NextDecay = 1_012_593
+                }
+                { structureOf "rampart" (Some Side.Ours) 98_761 10_000_000 { X = 2; Y = 26 } with
+                    NextDecay = 1_012_608
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_961 10_000_000 { X = 2; Y = 27 } with
+                    NextDecay = 1_012_656
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_001 10_000_000 { X = 11; Y = 29 } with
+                    NextDecay = 1_012_590
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_701 10_000_000 { X = 13; Y = 27 } with
+                    NextDecay = 1_012_607
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_501 10_000_000 { X = 13; Y = 29 } with
+                    NextDecay = 1_012_592
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_401 10_000_000 { X = 14; Y = 28 } with
+                    NextDecay = 1_012_667
+                }
+                { structureOf "rampart" (Some Side.Ours) 93_721 10_000_000 { X = 16; Y = 44 } with
+                    NextDecay = 1_012_655
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_301 10_000_000 { X = 17; Y = 20 } with
+                    NextDecay = 1_012_613
+                }
+                { structureOf "rampart" (Some Side.Ours) 93_701 10_000_000 { X = 17; Y = 44 } with
+                    NextDecay = 1_012_657
+                }
+                { structureOf "rampart" (Some Side.Ours) 93_501 10_000_000 { X = 18; Y = 44 } with
+                    NextDecay = 1_012_653
+                }
+                { structureOf "rampart" (Some Side.Ours) 93_311 10_000_000 { X = 32; Y = 31 } with
+                    NextDecay = 1_012_666
+                }
+                { structureOf "rampart" (Some Side.Ours) 94_101 10_000_000 { X = 32; Y = 32 } with
+                    NextDecay = 1_012_585
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 13; Y = 27 } with
+                    Energy = 8_348
+                }
+                towerOf Side.Ours { X = 11; Y = 29 } 980
+                towerOf Side.Ours { X = 13; Y = 29 } 935
+            ]
+        |> withRoads
+            [
+                1, 16, 4_100
+                2, 17, 4_100
+                3, 18, 4_100
+                4, 19, 2_500
+                5, 20, 4_100
+                6, 21, 2_900
+                7, 22, 15_900
+                8, 23, 15_300
+                9, 24, 14_600
+                9, 26, 20_500
+                9, 28, 21_000
+                10, 23, 20_000
+                10, 25, 15_100
+                10, 27, 17_800
+                10, 29, 19_200
+                11, 24, 20_100
+                11, 26, 14_400
+                11, 28, 16_600
+                11, 30, 2_700
+                12, 23, 18_800
+                12, 25, 13_400
+                12, 27, 16_200
+                12, 29, 4_000
+                12, 31, 4_000
+                13, 24, 3_300
+                13, 26, 4_000
+                13, 28, 3_600
+                13, 30, 4_000
+                14, 23, 3_800
+                14, 25, 4_400
+                14, 27, 4_200
+                14, 29, 4_000
+                14, 31, 3_900
+                15, 22, 3_400
+                15, 28, 4_000
+                15, 30, 2_900
+                15, 32, 3_800
+                16, 21, 4_100
+                16, 29, 3_100
+                16, 31, 4_000
+                16, 33, 2_800
+                16, 35, 3_600
+                16, 37, 3_200
+                16, 38, 19_000
+                16, 39, 21_300
+                16, 41, 4_000
+                16, 43, 3_800
+                16, 44, 3_000
+                17, 20, 3_100
+                17, 30, 4_200
+                17, 32, 3_600
+                17, 34, 4_300
+                17, 36, 2_500
+                17, 38, 2_300
+                17, 39, 20_000
+                17, 40, 15_600
+                17, 42, 4_300
+                17, 45, 4_300
+                18, 29, 4_100
+                18, 31, 2_600
+                18, 35, 3_200
+                18, 37, 2_400
+                18, 39, 3_100
+                18, 41, 4_800
+                18, 46, 3_000
+                19, 30, 3_800
+                19, 34, 4_200
+                19, 36, 3_700
+                19, 38, 3_200
+                19, 40, 3_100
+                19, 47, 2_900
+                20, 31, 3_800
+                20, 33, 4_200
+                20, 35, 3_100
+                20, 37, 2_600
+                20, 39, 3_200
+                20, 48, 2_400
+                21, 32, 4_000
+                21, 34, 3_800
+                21, 36, 3_200
+                21, 38, 3_800
+                22, 33, 2_600
+                22, 35, 3_200
+                22, 37, 2_700
+                23, 34, 2_500
+                23, 36, 3_100
+                24, 35, 3_100
+                25, 34, 1_500
+                26, 33, 1_900
+                27, 32, 1_600
+                28, 31, 18_400
+                28, 33, 8_600
+                29, 32, 12_900
+                29, 34, 20_100
+                30, 31, 19_400
+                30, 33, 19_400
+                31, 32, 19_200
+                32, 31, 17_800
+                33, 30, 12_140
+                33, 32, 19_280
+            ]
+
+    let w15s28 =
+        room "W15S28"
+        |> withController Ownership.Ours None 7 5
+        |> withControllerClocks 0 0 150_000 6_696_895
+        |> withSpawn "Spawn3" { X = 18; Y = 30 } 5_600
+        |> withSpawn "Spawn8" { X = 17; Y = 35 } 5_600
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        12, 24
+                        12, 30
+                        13, 25
+                        13, 31
+                        14, 26
+                        14, 30
+                        15, 27
+                        15, 29
+                        15, 31
+                        16, 30
+                        16, 32
+                        19, 31
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 100
+                        Id = $"extension-{x}-{y}-W15S28"
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        12, 26
+                        12, 32
+                        12, 34
+                        12, 36
+                        13, 27
+                        13, 29
+                        13, 33
+                        13, 35
+                        14, 28
+                        14, 32
+                        14, 34
+                        15, 25
+                        15, 33
+                        15, 35
+                        16, 26
+                        16, 34
+                        17, 25
+                        17, 27
+                        17, 33
+                        18, 26
+                        18, 28
+                        18, 32
+                        18, 34
+                        19, 27
+                        19, 33
+                        20, 26
+                        20, 28
+                        20, 30
+                        20, 32
+                        21, 27
+                        21, 29
+                        21, 31
+                        21, 33
+                        21, 35
+                        22, 26
+                        23, 25
+                        23, 27
+                        23, 35
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 100
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in [ 17, 31; 19, 29; 20, 34 ] -> towerOf Side.Ours { X = x; Y = y } 1_000
+            ]
+        |> withStructures
+            [
+                { structureOf "container" None 162_700 250_000 { X = 6; Y = 29 } with
+                    Energy = 12
+                }
+                { structureOf "container" None 125_100 250_000 { X = 11; Y = 18 } with
+                    Energy = 264
+                }
+                { structureOf "container" None 135_700 250_000 { X = 23; Y = 29 } with
+                    Energy = 1_976
+                }
+                structureOf "extractor" (Some Side.Ours) 500 500 { X = 29; Y = 12 }
+                { structureOf "rampart" (Some Side.Ours) 99_701 100_000_000 { X = 6; Y = 29 } with
+                    NextDecay = 1_012_637
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_101 100_000_000 { X = 11; Y = 18 } with
+                    NextDecay = 1_012_597
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_401 100_000_000 { X = 16; Y = 28 } with
+                    NextDecay = 1_012_655
+                }
+                { structureOf "rampart" (Some Side.Ours) 97_801 100_000_000 { X = 17; Y = 29 } with
+                    NextDecay = 1_012_593
+                }
+                { structureOf "rampart" (Some Side.Ours) 100_401 100_000_000 { X = 17; Y = 31 } with
+                    NextDecay = 1_012_598
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_601 100_000_000 { X = 17; Y = 35 } with
+                    NextDecay = 1_012_651
+                }
+                { structureOf "rampart" (Some Side.Ours) 99_101 100_000_000 { X = 18; Y = 30 } with
+                    NextDecay = 1_012_672
+                }
+                { structureOf "rampart" (Some Side.Ours) 102_001 100_000_000 { X = 19; Y = 29 } with
+                    NextDecay = 1_012_621
+                }
+                { structureOf "rampart" (Some Side.Ours) 102_401 100_000_000 { X = 20; Y = 34 } with
+                    NextDecay = 1_012_614
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 17; Y = 29 } with
+                    Energy = 34_135
+                    Thorium = 41_977
+                }
+                { structureOf "terminal" (Some Side.Ours) 3_000 3_000 { X = 16; Y = 28 } with
+                    Energy = 319
+                }
+            ]
+        |> withRoads
+            [
+                4, 5, 4_500
+                5, 4, 3_300
+                5, 6, 4_500
+                5, 44, 3_500
+                6, 3, 2_500
+                6, 7, 3_800
+                6, 29, 3_800
+                6, 43, 3_000
+                6, 45, 3_900
+                7, 2, 4_300
+                7, 8, 4_500
+                7, 28, 4_200
+                7, 42, 2_700
+                7, 46, 3_300
+                8, 1, 3_000
+                8, 9, 2_700
+                8, 28, 3_800
+                8, 41, 4_600
+                8, 47, 2_600
+                9, 10, 3_800
+                9, 27, 3_300
+                9, 28, 4_800
+                9, 40, 2_700
+                9, 48, 4_000
+                10, 11, 3_000
+                10, 26, 3_800
+                10, 29, 4_300
+                10, 39, 4_600
+                11, 12, 2_500
+                11, 18, 3_500
+                11, 27, 2_500
+                11, 30, 4_400
+                11, 38, 3_500
+                12, 13, 3_400
+                12, 17, 3_600
+                12, 25, 17_700
+                12, 27, 19_100
+                12, 28, 2_500
+                12, 29, 4_300
+                12, 31, 3_100
+                12, 33, 21_800
+                12, 35, 15_100
+                12, 37, 2_900
+                13, 14, 3_500
+                13, 16, 5_000
+                13, 26, 16_000
+                13, 28, 3_100
+                13, 30, 4_400
+                13, 32, 4_900
+                13, 34, 4_600
+                13, 36, 3_000
+                14, 15, 5_000
+                14, 25, 14_800
+                14, 27, 4_200
+                14, 29, 3_500
+                14, 31, 3_300
+                14, 33, 4_200
+                14, 35, 3_800
+                15, 15, 3_700
+                15, 26, 4_000
+                15, 28, 4_600
+                15, 30, 4_800
+                15, 32, 2_700
+                15, 34, 4_600
+                16, 16, 3_900
+                16, 25, 15_700
+                16, 27, 2_500
+                16, 29, 4_100
+                16, 31, 2_800
+                16, 33, 4_400
+                16, 35, 3_200
+                17, 17, 4_900
+                17, 26, 14_600
+                17, 28, 2_500
+                17, 30, 3_700
+                17, 32, 3_400
+                17, 34, 3_000
+                18, 18, 3_600
+                18, 25, 13_900
+                18, 27, 16_700
+                18, 29, 4_800
+                18, 31, 4_900
+                18, 33, 3_300
+                19, 19, 18_000
+                19, 22, 18_800
+                19, 24, 13_900
+                19, 26, 14_600
+                19, 28, 2_800
+                19, 30, 4_400
+                19, 32, 3_700
+                20, 20, 18_300
+                20, 21, 18_800
+                20, 23, 20_000
+                20, 25, 16_600
+                20, 27, 17_500
+                20, 29, 2_700
+                20, 31, 4_900
+                20, 33, 18_300
+                21, 21, 4_800
+                21, 22, 2_600
+                21, 23, 3_000
+                21, 24, 15_200
+                21, 25, 15_200
+                21, 26, 16_000
+                21, 28, 21_800
+                21, 30, 3_200
+                21, 32, 13_600
+                21, 34, 20_400
+                22, 24, 4_900
+                22, 25, 13_400
+                22, 27, 15_100
+                22, 28, 3_300
+                22, 29, 2_900
+                22, 30, 19_200
+                22, 31, 15_400
+                22, 32, 18_700
+                22, 33, 16_300
+                22, 35, 4_500
+                23, 26, 13_400
+                23, 28, 18_700
+                23, 29, 15_300
+                23, 30, 17_000
+                23, 31, 20_200
+                23, 32, 18_500
+                23, 33, 21_900
+                23, 34, 2_700
+                24, 25, 19_300
+                24, 28, 17_100
+                24, 29, 20_200
+                24, 30, 17_500
+                24, 33, 14_100
+                25, 24, 4_100
+                25, 28, 19_800
+                25, 29, 17_800
+                25, 34, 20_500
+                26, 23, 14_100
+                27, 22, 11_800
+                28, 21, 19_000
+                28, 34, 16_100
+                29, 20, 12_800
+                30, 19, 11_200
+                31, 18, 3_400
+                32, 17, 3_300
+                33, 16, 2_100
+                34, 15, 4_400
+                35, 14, 3_400
+                36, 13, 13_700
+                37, 12, 4_100
+                38, 11, 2_500
+                39, 12, 3_500
+                40, 13, 13_000
+                41, 14, 11_300
+                42, 15, 2_300
+                43, 16, 2_400
+                44, 17, 4_200
+                45, 18, 4_200
+                46, 19, 4_200
+                47, 20, 2_600
+                48, 21, 4_000
+            ]
+
+    let w17s26 =
+        room "W17S26"
+        |> withStructures
+            [
+                { structureOf "container" None 120_700 250_000 { X = 27; Y = 9 } with
+                    Energy = 814
+                }
+            ]
+        |> withRoads
+            [
+                20, 1, 2_700
+                21, 2, 4_500
+                22, 3, 2_100
+                23, 4, 2_700
+                24, 5, 4_400
+                25, 6, 2_900
+                26, 7, 4_600
+                27, 8, 2_700
+            ]
+
+    let w18s25 =
+        room "W18S25"
+        |> withStructures
+            [
+                { structureOf "container" None 125_100 250_000 { X = 31; Y = 5 } with
+                    Energy = 312
+                }
+            ]
+        |> withRoads
+            [
+                28, 9, 2_500
+                29, 8, 3_850
+                29, 10, 3_580
+                30, 7, 4_000
+                30, 11, 3_300
+                31, 6, 2_900
+                31, 12, 4_000
+                32, 13, 3_200
+                33, 14, 3_600
+                34, 15, 3_900
+                35, 16, 3_600
+                36, 17, 2_400
+                37, 16, 3_300
+                38, 15, 4_000
+                39, 14, 4_000
+                40, 13, 4_200
+                41, 12, 4_100
+                42, 13, 3_700
+                43, 13, 2_970
+                44, 13, 2_800
+                45, 13, 3_200
+                46, 14, 4_200
+                47, 15, 3_100
+                48, 16, 4_200
+            ]
+
+    // Today's declarations, not the tick's: spell them out if the test must outlive a roster change.
+    let colonies =
+        Colony.declared
+        |> List.filter (fun c -> List.contains c.Home [ "W17S25"; "W15S28" ])
+
+    let bodies: Body list =
+        [
+            // Fourier1584: live: no act
+            { body
+                  "Fourier1584"
+                  trepidimous
+                  (parts
+                      [
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                          Move, 1
+                          Carry, 1
+                      ])
+                  (at "W19S25" 27 26)
+                  (Some Hold) with
+                TicksToLive = 641
+            }
+            // Reptile2176: live: no act
+            { body
+                  "Reptile2176"
+                  trepidimous
+                  (parts [ Move, 1; Work, 1; Carry, 1 ])
+                  (at "W19S25" 34 26)
+                  (Some Hold) with
+                TicksToLive = 1_104
+            }
+            { body
+                  "ranger-1011255-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W19S25" 27 20)
+                  None with
+                TicksToLive = 210
+            }
+            { body
+                  "ranger-1011720-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W19S25" 7 12)
+                  None with
+                TicksToLive = 675
+            }
+            // Deepening1722: live: healed→2,17 heal→2,17. Live it loops the
+            // west exit: in at 0,19, up the diagonal to 3,16, out at 0,13,
+            // about eight ticks in W20S25, and in again (t1,012,505-530).
+            { body
+                  "Deepening1722"
+                  trepidimous
+                  (parts [ RangedAttack, 3; Move, 6; Heal, 4; Move, 1 ])
+                  (at "W19S25" 3 16)
+                  (Some(
+                      Phases
+                          [
+                              for k in 0..39 do
+                                  16 * k + 4,
+                                  Waypoints
+                                      [ at "W19S25" 2 15; at "W19S25" 1 14; at "W20S25" 48 13 ]
+
+                                  16 * k + 12, GoTo(at "W20S25" 47 17)
+
+                                  16 * k + 16,
+                                  Waypoints [ at "W19S25" 1 18; at "W19S25" 2 17; at "W19S25" 3 16 ]
+                          ]
+                  )) with
+                TicksToLive = 683
+            }
+            { body
+                  "anchor-1011403-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W17S25" 17 20)
+                  None with
+                TicksToLive = 352
+                Energy = 50
+            }
+            { body
+                  "hauler-1011503-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 24; Move, 12 ])
+                  (at "W17S25" 14 29)
+                  None with
+                TicksToLive = 530
+            }
+            { body
+                  "worker-1011790-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 9; Carry, 9; Move, 9 ])
+                  (at "W17S25" 18 31)
+                  None with
+                TicksToLive = 790
+                Energy = 400
+            }
+            { body
+                  "upgrader-1012042-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 1; Move, 11 ])
+                  (at "W17S25" 17 34)
+                  None with
+                TicksToLive = 1_030
+                Energy = 39
+            }
+            // guard-1012445-Spawn11: crossing to W17S26 3,0
+            { body
+                  "guard-1012445-Spawn11"
+                  Side.Ours
+                  (parts [ Tough, 2; Move, 10; Attack, 6; Heal, 2 ])
+                  (at "W17S25" 3 49)
+                  None with
+                TicksToLive = 1_424
+            }
+            { body
+                  "ranger-1011014-Spawn3"
+                  Side.Ours
+                  (parts [ Move, 12; RangedAttack, 8; Heal, 4 ])
+                  (at "W15S28" 4 45)
+                  None with
+                TicksToLive = 5
+            }
+            { body
+                  "hauler-1011018-Spawn8"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W15S28" 22 28)
+                  None with
+                TicksToLive = 81
+                Energy = 12
+            }
+            { body
+                  "hauler-1011086-Spawn3"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W15S28" 2 1)
+                  None with
+                TicksToLive = 149
+            }
+            { body
+                  "anchor-1011168-Spawn8"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W15S28" 6 29)
+                  None with
+                TicksToLive = 117
+                Energy = 50
+            }
+            { body
+                  "upgrader-1011653-Spawn3"
+                  Side.Ours
+                  (parts [ Work, 24; Carry, 1; Move, 24 ])
+                  (at "W15S28" 23 28)
+                  None with
+                TicksToLive = 719
+                Energy = 26
+            }
+            { body
+                  "anchor-1011928-Spawn3"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W15S28" 11 18)
+                  None with
+                TicksToLive = 871
+                Energy = 50
+            }
+            { body
+                  "hauler-1012086-Spawn3"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W15S28" 18 27)
+                  None with
+                TicksToLive = 1_149
+            }
+            { body
+                  "worker-1012144-Spawn8"
+                  Side.Ours
+                  (parts [ Work, 16; Carry, 17; Move, 17 ])
+                  (at "W15S28" 22 29)
+                  None with
+                TicksToLive = 1_213
+                Energy = 386
+            }
+            { body
+                  "hauler-1011688-Spawn8"
+                  Side.Ours
+                  (parts [ Carry, 32; Move, 16 ])
+                  (at "W15S28" 7 28)
+                  None with
+                TicksToLive = 751
+                Energy = 1_092
+            }
+            // Shadow2363: live: healed→5,3 heal→5,3 rangedAttack→7,0
+            { body
+                  "Shadow2363"
+                  trepidimous
+                  (parts [ RangedAttack, 3; Move, 6; Heal, 4; Move, 1 ])
+                  (at "W17S26" 5 3)
+                  (Some(Waypoints [ at "W17S26" 5 3 ])) with
+                TicksToLive = 1_324
+            }
+            // guard-1011187-Spawn11: live: 2 TOUGH, 10 MOVE, 6 ATTACK, 2 HEAL
+            // guard-1011187-Spawn11: crossing to W17S25 7,49
+            { body
+                  "guard-1011187-Spawn11"
+                  Side.Ours
+                  (parts [ Tough, 2; Move, 10; Attack, 6; Heal, 2 ])
+                  (at "W17S26" 7 0)
+                  None with
+                Hits = 1_994
+                TicksToLive = 166
+            }
+            { body
+                  "anchor-1011647-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W18S25" 31 5)
+                  None with
+                TicksToLive = 596
+                Energy = 50
+            }
+            { body
+                  "reserver-1012178-Spawn11"
+                  Side.Ours
+                  (parts [ BodyPart.Claim, 2; Move, 2 ])
+                  (at "W18S25" 17 8)
+                  None with
+                TicksToLive = 209
+            }
+            // hauler-1011295-Spawn11: crossing to W17S25 0,15
+            { body
+                  "hauler-1011295-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 24; Move, 12 ])
+                  (at "W18S25" 49 15)
+                  None with
+                TicksToLive = 322
+                Energy = 1_008
+            }
+        ]
+
+    // W19S25 is a harassment room W17S25 casts (live `outposts`).
+    let a =
+        arena 1_012_580 [ w19s25; w17s25; w15s28; w17s26; w18s25; room "W20S25" ] colonies bodies
+        |> withHarass Colony.harass
+
+    { a with
+        Carried =
+            { a.Carried with
+                // The Transition log's last task verdict at or before t1,012,579,
+                // read from Memory at live t1,012,645; the log held none for
+                // guard-1012445, ranger-1011014 or guard-1011187.
+                Assignments =
+                    Map.ofList
+                        [
+                            "ranger-1011255-Spawn11", "guard:W19S25"
+                            "ranger-1011720-Spawn11", "guard:W19S25"
+                            "anchor-1011403-Spawn11", "harvest:6a8caa7cdd4872bccd318c75"
+                            "hauler-1011503-Spawn11", "refill:tower-13-29"
+                            "worker-1011790-Spawn11", "refill:spawn-Spawn11"
+                            "upgrader-1012042-Spawn11", "upgrade:6a8caa7cdd4872bccd318c76"
+                            "hauler-1011018-Spawn8", "refill:container-23-29"
+                            "hauler-1011086-Spawn3", "withdraw:6ac0e2f1e169cce45673df61"
+                            "anchor-1011168-Spawn8", "harvest:6a8caa95dd4872bccd319014"
+                            "upgrader-1011653-Spawn3", "upgrade:6a8caa95dd4872bccd319015"
+                            "anchor-1011928-Spawn3", "harvest:6a8caa95dd4872bccd319013"
+                            "hauler-1012086-Spawn3", "withdraw:6aba1ca3293c6f833d8b43f5"
+                            "worker-1012144-Spawn8", "upgrade:6a8caa95dd4872bccd319015"
+                            "hauler-1011688-Spawn8", "withdraw:container-6-29"
+                            "anchor-1011647-Spawn11", "harvest:6a8caa71dd4872bccd318b28"
+                            "reserver-1012178-Spawn11", "reserve:6a8caa71dd4872bccd318b29"
+                            "hauler-1011295-Spawn11", "refill:tower-11-29"
+                        ]
+                // From live Memory at t1,012,645, 66 ticks after the capture,
+                // less what is stamped after the tick. Healers, ExitWatches
+                // and Sightings start empty.
+                ArmedSeen = Map.ofList [ "W17S25", 1_012_536 ]
+                Towered = Set.ofList [ "W15S28"; "W17S25" ]
+                Raids =
+                    Map.ofList
+                        [
+                            "W15S28",
+                            { Fabot.Core.Observe.RaidState.empty with
+                                Outposts =
+                                    [
+                                        {
+                                            Fabot.Core.Observe.OutpostEpisode.RoomName = "W16S26"
+                                            Opened = 972_732
+                                            LastSeen = 1_004_791
+                                            Expiry = 1_045_681
+                                            Basis = StandDownBasis.CollapseTimer
+                                            Stronghold = true
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = false
+                                        }
+                                        {
+                                            Fabot.Core.Observe.OutpostEpisode.RoomName = "W18S29"
+                                            Opened = 986_839
+                                            LastSeen = 1_012_579
+                                            Expiry = 1_014_298
+                                            Basis = StandDownBasis.RivalReservation
+                                            Stronghold = false
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = false
+                                        }
+                                    ]
+                            }
+                            "W17S25",
+                            { Fabot.Core.Observe.RaidState.empty with
+                                Outposts =
+                                    [
+                                        {
+                                            Fabot.Core.Observe.OutpostEpisode.RoomName = "W16S26"
+                                            Opened = 972_732
+                                            LastSeen = 1_004_791
+                                            Expiry = 1_045_681
+                                            Basis = StandDownBasis.CollapseTimer
+                                            Stronghold = true
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = false
+                                        }
+                                        {
+                                            Fabot.Core.Observe.OutpostEpisode.RoomName = "W18S29"
+                                            Opened = 986_839
+                                            LastSeen = 1_012_579
+                                            Expiry = 1_014_298
+                                            Basis = StandDownBasis.RivalReservation
+                                            Stronghold = false
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = false
+                                        }
+                                    ]
+                                HomeRaided = Some 1_012_536
+                            }
+                        ]
+            }
+    }
+
+[<Tests>]
+let rangerPairTests =
+    testList
+        "arena a raid the ranger row's pair beats"
+        [
+            // #609: Shadow2363, 3 RANGED_ATTACK 4 HEAL 7 MOVE, out-heals the
+            // 4RA2H ranger W17S25's 1,800 bank buys (40 < 48) and loses to two
+            // (80). Before, the room was the melee guard's, which never
+            // catches a 7M kiter: as live, guard-1011187 bounced on the
+            // W17S25/W17S26 border and Shadow2363 stood at full hits; and in
+            // W19S25 ranger-1011255 sat on the Stand's seat while
+            // ranger-1011720 hovered four off Deepening1722, neither ever
+            // shooting (live t1,012,580-605). Now the room is the ranger
+            // row's at two bodies: ranger-1011720 is sent, the cast waits for
+            // it at W17S25's south exit, the pair goes in together and kills
+            // Shadow2363 at t175, neither below 1,186.
+            test
+                "#609 capture t1,012,579: a kiter one ranger loses to and two beat is answered by two rangers, which kill it" {
+                let _, trace = trepKiters () |> withCasts [ "ranger" ] |> run 200
+                let failure = describe trace
+
+                Expect.isLessThanOrEqual
+                    (diedOn "Shadow2363" trace |> Option.defaultValue System.Int32.MaxValue)
+                    190
+                    $"the pair kills Shadow2363 by t190\n{failure}"
+
+                let least =
+                    trace
+                    |> List.collect (fun t ->
+                        t.Bodies
+                        |> List.filter (fun b -> b.At.Room = "W17S26" && b.Id.StartsWith "ranger-"))
+                    |> List.map _.Hits
+
+                Expect.isNonEmpty least $"rangers fight in W17S26\n{failure}"
+
+                Expect.isGreaterThanOrEqual
+                    (List.min least)
+                    1_100
+                    $"they go in together: none trades its hits away alone\n{failure}"
             }
         ]

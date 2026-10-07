@@ -248,6 +248,32 @@ let harassGuardTests =
                     Expect.equal (guardQuotaOf colony) (Some 0) $"{label}: and the guard row none"
             }
 
+            // #609: Trepidimous' 3RA4H kiter out-heals one 4RA2H ranger (40 <
+            // 48) and loses to two. One seat left the second ranger on a
+            // quiet Guard while the first bounced on the border.
+            test "a raid one ranger loses and two standing there beat seats both, two rungs up" {
+                let kiter =
+                    List.replicate 3 RangedAttack @ List.replicate 4 Heal @ List.replicate 7 Move
+
+                let pair = Bodies.rangerPattern.Block @ Bodies.rangerPattern.Block
+
+                let colony =
+                    { (bareHome |> harassing) with
+                        Bank = bank 1800 1800
+                        Hostiles = [ theirs "kiter" enemy { X = 25; Y = 20 } kiter ]
+                    }
+                    |> standingThere
+                        [
+                            creepWith "ranger-a" 0 0 pair, { X = 25; Y = 30 }
+                            creepWith "ranger-b" 0 0 pair, { X = 27; Y = 30 }
+                        ]
+
+                Expect.equal
+                    (pooledHolding [] (Guard harassRoom) colony)
+                    (Some(safetyRank TwoRungsUp, Capacity.fighters 2 |> Capacity.relieving))
+                    "the raid's rung, and a seat for each ranger that wins it"
+            }
+
             test
                 "the ranger shoots the enemy's unarmed miner, and never a third player's or a keeper's" {
                 let here = { X = 20; Y = 20 }

@@ -6310,9 +6310,11 @@ let guardPrecedenceTests =
                         [ Raid; Core ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
                         [ Raid; Trespasser ], row [ Raid ] [ "Ring" ] TwoRungsUp one [ "g-1" ]
                         // In a ranger room a raid is kited, on ground of its own;
-                        // a harassment room's raid is the enemy's own, on the tier.
+                        // a harassment room's raid is the enemy's own. Moved on
+                        // purpose (#609): one our side wins is the raid's rung,
+                        // two up, so a ranger on a quiet Guard is sent to it.
                         [ Raid; Resident ], row [] [ "Kite" ] TwoRungsUp garrison [ "g-1"; "r-1" ]
-                        [ Raid; Harassed ], row [] [ "Kite" ] OnTheTier relieved [ "g-1" ]
+                        [ Raid; Harassed ], row [] [ "Kite" ] TwoRungsUp relieved [ "g-1" ]
                         // The held exit before the trespasser, the trespasser
                         // before the core. Moved on purpose (#558): the
                         // trespasser, which can step away, is struck before
@@ -6939,6 +6941,14 @@ let killAdmissionTests =
             }
         ]
 
+/// Trepidimous' kiter (#609): 3 RANGED_ATTACK, 4 HEAL, 7 MOVE — 30 a tick at
+/// three, 48 healed.
+let private trepKiter =
+    List.replicate 3 RangedAttack @ List.replicate 4 Heal @ List.replicate 7 Move
+
+/// The 4RA2H ranger an 1,800 bank buys: two ranger blocks.
+let private twoBlockRanger = Bodies.rangerPattern.Block @ Bodies.rangerPattern.Block
+
 /// The W11S28 invasion's shape (#535, live t973,670): a small mixed body
 /// that closes, two shooters that keep range, a healer behind each.
 let private invasion =
@@ -7011,6 +7021,99 @@ let engagementTests =
                      |> List.map (fun ask -> ask.Row))
                     [ CastRow.Guard ]
                     "a bank that casts no ranger block is never asked for one (#546): the guard's"
+            }
+
+            // #609 (W17S26, live t1,012,579): Trepidimous' 3RA4H7M kiter heals
+            // 48 a tick; the 4RA2H body an 1,800 bank buys deals 40 and loses
+            // alone, two deal 80 and win. Priced one body, the room went to
+            // the melee guard, which never catches it.
+            test
+                "a kiter the bank's biggest ranger loses to alone and two beat asks the ranger row for two" {
+                let colony =
+                    { declaredRaid [ hostileIn "W1N2" { X = 25; Y = 42 } trepKiter ] with
+                        Bank = bank 1800 1800
+                    }
+
+                let threats = threatsOf colony (Atlas.ofView colony)
+                let brief = Threats.briefOf threats "W1N2"
+
+                Expect.equal
+                    (brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted threats))
+                    [ CastRow.Ranger, Engine.guardCap ]
+                    "the ranger row is asked, for the pair the verdict prices"
+
+                Expect.equal
+                    brief.Verdict.Value
+                    Answer.Win
+                    "and the pair wins it: the room stays open"
+
+                Expect.isFalse (brief.Admits(guard "g-1")) "a melee guard does not take it"
+            }
+
+            // #609: the same kiter in a room the stand-down shuts is the chase,
+            // and the chase casts the pair as the outpost does.
+            test "the chase of a kiter one ranger loses to casts the pair" {
+                let shut =
+                    { declaredRaid [ hostileIn "W1N2" { X = 25; Y = 42 } trepKiter ] with
+                        RaidedOutposts = Set.singleton "W1N2"
+                        Bank = bank 1800 1800
+                    }
+                    |> withGuards [ creepWith "r-1" 0 0 twoBlockRanger, { X = 22; Y = 47 } ]
+
+                let threats = threatsOf shut (Atlas.ofView shut)
+                let brief = Threats.briefOf threats "W1N2"
+
+                Expect.equal
+                    brief.Duty
+                    (Duty.Guard BriefKind.Chase)
+                    "the premise: the room is the chase"
+
+                Expect.equal
+                    (brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted threats))
+                    [ CastRow.Ranger, Engine.guardCap ]
+                    "its row's ask is the pair"
+            }
+
+            // #609 (`Facts.winsBeside`): a body struck by a raid it loses alone
+            // counts a partner holding the fight that lands while it still
+            // stands above its floor, priced at the hits it has left then.
+            test
+                "a struck body wins beside a partner that lands before it falls, and not one that lands after" {
+                let raid = [ hostileIn "W1N2" { X = 25; Y = 42 } trepKiter ]
+                let struck = creepWith "r-1" 0 0 twoBlockRanger
+                let partner = creepWith "r-2" 0 0 twoBlockRanger
+                let world = kitedBy raid [ struck, { X = 25; Y = 45 } ]
+
+                let wins (body: CreepInfo) beside =
+                    Facts.winsBeside world "W1N2" 2 body beside
+
+                Expect.isFalse (wins struck []) "the premise: alone it loses (40 against 48 heal)"
+
+                Expect.isTrue
+                    (wins struck [ partner, true, Some 60 ])
+                    "whole, it outlasts a partner sixty ticks out (6 a tick net)"
+
+                Expect.isFalse
+                    (wins struck [ partner, false, Some 60 ])
+                    "one not holding the fight, off it, is no partner"
+
+                Expect.isFalse
+                    (wins struck [ partner, true, None ])
+                    "nor one no walk prices, off the fight"
+
+                // A third of its hits and its live parts: two shots, two heals.
+                let worn =
+                    { creepWith "r-1" 0 0 [ RangedAttack; RangedAttack; Heal; Heal ] with
+                        Hits = { Hits = 400; HitsMax = 1_200 }
+                    }
+
+                Expect.isTrue
+                    (wins worn [ partner, true, Some 2 ])
+                    "worn, a partner within the horizon still counts"
+
+                Expect.isFalse
+                    (wins worn [ partner, true, Some 60 ])
+                    "but one sixty ticks out lands after its heals are shot off and it falls"
             }
 
             test

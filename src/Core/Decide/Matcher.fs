@@ -651,7 +651,7 @@ let matchAcross
 
     // A Guard its body loses (#602): it loses the room's exchange beside
     // every other fighter of ours at the fight, whatever each holds, and the
-    // holders of the fight landing there within the horizon
+    // holders of the fight its walk lands while it still stands
     // (`Facts.winsBeside`); and its holder is struck this tick where it
     // stands, past its own heal, with Flee to take, or a fresh candidate is
     // hurt under `brokenOff` of its hits — a body that broke off comes back
@@ -659,6 +659,16 @@ let matchAcross
     // kept nor taken: priced again on every tick. Never a home of ours'
     // (`Threats.Homes`): a home is fought for to the death.
     let fighters = lazy (creeps |> List.filter isFighterBody)
+
+    // The ticks a body's travel to a fight takes, priced in its own colony
+    // (travel cost is in half-ticks, crossings counted); None for one no
+    // Atlas places, never the unplaced body's zero.
+    let landsIn name task =
+        match sideOf name, tileOf name with
+        | Some k, Some _ ->
+            travelCostOf contexts.[k].Threats contexts.[k].Atlas name task
+            |> Option.map (fun cost -> (cost + 1) / 2)
+        | _ -> None
 
     let brokenOff (creep: CreepInfo) =
         creep.Hits.Hits * 5 < creep.Hits.HitsMax * 4
@@ -687,7 +697,8 @@ let matchAcross
                         (fighters.Value
                          |> List.filter (fun other -> other.Name <> creep.Name)
                          |> List.map (fun other ->
-                             other, Map.tryFind other.Name assignments = Some tid))
+                             let holds = Map.tryFind other.Name assignments = Some tid
+                             other, holds, (if holds then landsIn other.Name task else None)))
                 )
 
             if Map.tryFind creep.Name assignments = Some tid then

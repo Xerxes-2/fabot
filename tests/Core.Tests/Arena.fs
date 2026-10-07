@@ -17,7 +17,7 @@
 /// first tick merges the danger rows an arena seeds in a colony's log
 /// (`Observe.Danger.ofColonies`), as `Main`'s first tick merges a bundle's
 /// before the world log. What the arena leaves out,
-/// and says so: harassment casting (`HarassCasting.none`), the round-robin
+/// and says so: harassment casting unless named (`withHarass`), the round-robin
 /// replan (every colony is `ReplanTurn.Now`), and light ticks (`LightTick`):
 /// every tick is a full one.
 ///
@@ -388,6 +388,10 @@ type Arena =
         /// The rooms an observer of ours the arena does not hold looks at
         /// every tick: a capture's W13S28 on W18S25 (#534). Vision only.
         Lookout: Set<string>
+        /// The harassment rooms the arena declares (`withHarass`), each
+        /// cast by the colony `World.harassCasters` names, as `Main` casts
+        /// `Colony.harass`; none by default.
+        Harass: Harass list
     }
 
 /// What happened in a tick beyond positions and hits.
@@ -915,7 +919,12 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
         Casts = Set.empty
         Observed = Set.empty
         Lookout = Set.empty
+        Harass = []
     }
+
+/// These harassment rooms declared, cast as `Main` casts `Colony.harass`
+/// (`World.harassCasters`): a capture of a fight in one names it.
+let withHarass (rooms: Harass list) (a: Arena) : Arena = { a with Harass = rooms }
 
 /// Our spawns cast these rows, by pattern name, and only these.
 let withCasts (rows: string list) (a: Arena) : Arena = { a with Casts = Set.ofList rows }
@@ -1433,7 +1442,20 @@ let private cut (a: Arena) : World * (string -> string -> int option) * (Colony 
 
     let living = World.living a.Colonies world
     let joins = JoinTable()
-    let casting = HarassCasting.none
+
+    let casting =
+        match a.Harass with
+        | [] -> HarassCasting.none
+        | rooms ->
+            World.harassCasters
+                joins
+                tuning
+                a.Colonies
+                {
+                    Rooms = rooms
+                    BlockCost = Bodies.rangerBlockCost
+                }
+                world
 
     let danger = dangerOf a
 
