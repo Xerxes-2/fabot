@@ -1268,11 +1268,11 @@ module Colony =
             "W9S26", "Kalgen" // RCL6
         ]
 
-    /// The enemy remotes a human has declared for harassment: one list for
-    /// the whole bot, each room cast by the colony `World.harassCasters`
-    /// names, or refused while none can. Each Stand is the enemy's source
-    /// tile off the committed capture, and each Controller the controller's.
-    let harass: Harass list =
+    /// The enemy remotes a human has declared for harassment, kept for the
+    /// sweep that replaces stationary harassment (#615 U4 E) and for the tests
+    /// that read the declarations. Each Stand is the enemy's source tile off
+    /// the committed capture, and each Controller the controller's.
+    let harassDeclared: Harass list =
         [
             {
                 RoomName = "W18S27"
@@ -1326,6 +1326,14 @@ module Colony =
                 Blocks = None
             }
         ]
+
+    /// The harassment rooms the bot works: one list for the whole bot, each
+    /// room cast by the colony `World.harassCasters` names, or refused while
+    /// none can. Empty since 2026-10-08 (user): stationary harassment is
+    /// paused until the sweep replaces it (#615 U4 E); one ranger chasing
+    /// equal-pace haulers in W19S25 forced 42 of 100 ticks full and drained
+    /// the bucket.
+    let harass: Harass list = []
 
     /// The colonies a human has declared, moved by a human in a commit: an
     /// entry in this list is the whole of "I mean to take that room", and an

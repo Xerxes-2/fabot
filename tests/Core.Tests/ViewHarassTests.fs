@@ -798,7 +798,7 @@ let harassViewTests =
                     |> fun kept -> Set.difference kept claims
 
                 Expect.isEmpty
-                    (Colony.harass
+                    (Colony.harassDeclared
                      |> List.filter (fun h -> Set.contains h.RoomName kept)
                      |> List.map (fun h -> h.RoomName))
                     "no room is harassed by one list and kept by another"
@@ -814,18 +814,18 @@ let harassViewTests =
                     |> fun mined -> Set.difference mined claims
 
                 Expect.isEmpty
-                    (Colony.harass |> List.filter (fun h -> Set.contains h.RoomName mined))
+                    (Colony.harassDeclared |> List.filter (fun h -> Set.contains h.RoomName mined))
                     "no room is both harassed and mined"
 
                 Expect.equal
-                    (Colony.harass
+                    (Colony.harassDeclared
                      |> List.filter (fun h -> Set.contains h.RoomName claims)
                      |> List.map (fun h -> h.RoomName))
                     [ "W17S25" ]
                     "W17S25 is the one room both harassed and a Claim (2026-10-03): W15S28 pools both until it lands"
 
                 Expect.isTrue
-                    (Colony.harass |> List.forall (fun h -> not (Colony.isAlly h.Enemy)))
+                    (Colony.harassDeclared |> List.forall (fun h -> not (Colony.isAlly h.Enemy)))
                     "and no ally is anybody's enemy"
             }
         ]

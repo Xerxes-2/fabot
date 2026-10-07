@@ -1539,7 +1539,7 @@ let private w19s26LosingTrade (stock: int) : Arena =
     // W19S26 and W19S25 are harassment rooms W17S25 casts (#609): without
     // them the capture never sat ranger-1006965 on W19S25's Stand as live.
     arena 1_007_220 [ w19s26; w19s25; w18s26; w17s25; w18s25; w17s26 ] colonies bodies
-    |> withHarass Colony.harass
+    |> withHarass Colony.harassDeclared
 
 [<Tests>]
 let foughtWhereStruckTests =

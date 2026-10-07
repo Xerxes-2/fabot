@@ -1241,7 +1241,7 @@ let private observerTiers (view: ColonyView) (watched: string list) : ObserverTi
                 | Some Nursery -> true
                 | Some _ -> false)
         Watched = watched
-        Harassed = Colony.harass |> List.map (fun h -> h.RoomName)
+        Harassed = Colony.harassDeclared |> List.map (fun h -> h.RoomName)
         Box = view.Spatial.Rooms |> Map.keys |> List.ofSeq
     }
 

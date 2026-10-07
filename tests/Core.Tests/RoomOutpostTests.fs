@@ -158,7 +158,7 @@ let outpostDeclarationTests =
                     Colony.declared
                     |> List.map (fun colony -> colony.Home)
                     |> List.filter (fun home ->
-                        Colony.harass
+                        Colony.harassDeclared
                         |> List.exists (fun h ->
                             Declaration.withinHopBudget Tuning.defaults.MaxHops home h.RoomName))
 
@@ -169,7 +169,7 @@ let outpostDeclarationTests =
                     |> List.collect (fun home ->
                         home
                         :: Harass.roomsProjected
-                            (Colony.harass
+                            (Colony.harassDeclared
                              |> List.filter (fun h ->
                                  Declaration.withinHopBudget
                                      Tuning.defaults.MaxHops
@@ -186,7 +186,7 @@ let outpostDeclarationTests =
                         Declaration.routable linked Tuning.defaults.MaxHops home room)
 
                 Expect.equal
-                    (Colony.harass |> List.map (fun h -> h.RoomName, castersOf h.RoomName))
+                    (Colony.harassDeclared |> List.map (fun h -> h.RoomName, castersOf h.RoomName))
                     [
                         // W17S29's every chain to W17S26 runs through W18S26,
                         // which Trepidimous owns (#444). W12S26, five columns
@@ -361,7 +361,7 @@ let outpostDeclarationTests =
                         Tuning.defaults
                         Colony.declared
                         {
-                            Rooms = Colony.harass
+                            Rooms = Colony.harassDeclared
                             BlockCost = Bodies.rangerBlockCost
                         }
                         Map.empty
@@ -433,7 +433,7 @@ let outpostDeclarationTests =
                     [ "W18S27", Some "W15S28"; "W19S26", Some "W17S29"; "W19S25", Some "W17S29" ]
                     "the tick W17S25's Claim lands it is ours, and no colony casts it: the rest are cast as before"
 
-                for h in Colony.harass do
+                for h in Colony.harassDeclared do
                     Expect.contains
                         (List.map snd (load h.RoomName).RealSources)
                         (RoomPos.pos h.Stand)

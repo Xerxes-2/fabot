@@ -1785,7 +1785,7 @@ let private trepKiters () : Arena =
     // W19S25 is a harassment room W17S25 casts (live `outposts`).
     let a =
         arena 1_012_580 [ w19s25; w17s25; w15s28; w17s26; w18s25; room "W20S25" ] colonies bodies
-        |> withHarass Colony.harass
+        |> withHarass Colony.harassDeclared
 
     { a with
         Carried =

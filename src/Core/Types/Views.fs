@@ -367,7 +367,9 @@ module WorldView =
                  @ (colony.Errands |> List.map (fun errand -> errand.RoomName))
                  @ colony.Salvage
                  @ (colony.Assaults |> List.map (fun assault -> assault.RoomName))))
-            @ (Colony.harass |> List.map (fun h -> h.RoomName))
+            // The declared harassment rooms stay watched while harassment is
+            // paused (#615 U4 E): the sweep reads their raids.
+            @ (Colony.harassDeclared |> List.map (fun h -> h.RoomName))
             |> Set.ofList
 
         let raidSeen =
