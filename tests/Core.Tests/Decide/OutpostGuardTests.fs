@@ -1794,3 +1794,76 @@ let guardPrecedenceTests =
                     "pooled on the tier for its holder"
             }
         ]
+
+/// A Guard holder for `Brief.seatsAmong`: its name, its ground, and its
+/// arrival a tile a tick from where it stands.
+let private holderAt name (from: Pos) (ground: Pos list) =
+    name,
+    ground |> List.map (RoomPos.at "W1N2") |> Set.ofList,
+    false,
+    fun (tile: RoomPos) -> Some(range from (RoomPos.pos tile))
+
+let private seatsOf (seats: Map<string, Set<RoomPos>>) name =
+    Map.tryFind name seats |> Option.map (Set.map RoomPos.pos)
+
+[<Tests>]
+let guardSeatTests =
+    testList
+        "a Guard's seats (#650)"
+        [
+            // Matched by arrival, not by name: r-b stands on its ground and
+            // keeps its tile tick to tick, and r-a, walking in, is sent to the
+            // tile beside it, as near as any.
+            test
+                "a holder standing on its ground keeps its tile, and a partner walking in is kept off it" {
+                let ground = [ { X = 10; Y = 10 }; { X = 11; Y = 10 }; { X = 12; Y = 10 } ]
+
+                let seats =
+                    Brief.seatsAmong
+                        [
+                            holderAt "r-a" { X = 11; Y = 12 } ground
+                            holderAt "r-b" { X = 10; Y = 10 } ground
+                        ]
+
+                Expect.equal
+                    (seatsOf seats "r-a")
+                    (Some(Set.ofList [ { X = 11; Y = 10 }; { X = 12; Y = 10 } ]))
+                    "r-a's ground is the ground less r-b's tile"
+
+                Expect.equal
+                    (seatsOf seats "r-b")
+                    (Some(Set.ofList [ { X = 10; Y = 10 }; { X = 12; Y = 10 } ]))
+                    "r-b's keeps its own tile, less the one r-a is matched to"
+            }
+
+            // Spar outpost-equal-pace-melee t5: the kite ground left one tile
+            // on the rangers' side of the melee, both two off it. A seat behind
+            // the melee is no seat: the second keeps the whole ground and the
+            // arbitration orders the two at the tile.
+            test "a seat that costs its holder ticks is no seat" {
+                let ground = [ { X = 24; Y = 10 }; { X = 26; Y = 4 } ]
+
+                let seats =
+                    Brief.seatsAmong
+                        [
+                            holderAt "r-1" { X = 23; Y = 12 } ground
+                            holderAt "r-2" { X = 22; Y = 12 } ground
+                        ]
+
+                Expect.equal
+                    (seatsOf seats "r-1")
+                    (Some(Set.singleton { X = 24; Y = 10 }))
+                    "the first is matched to the near tile, the far one kept off it for nothing"
+
+                Expect.equal
+                    (seatsOf seats "r-2")
+                    None
+                    "the second keeps the whole ground, the near tile too"
+            }
+
+            test "a lone holder has no seat but its own ground's" {
+                Expect.isEmpty
+                    (Brief.seatsAmong [ holderAt "r-a" { X = 11; Y = 12 } [ { X = 10; Y = 10 } ] ])
+                    "it reads the Brief's ground"
+            }
+        ]

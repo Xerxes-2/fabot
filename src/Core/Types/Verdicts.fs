@@ -300,6 +300,36 @@ let standDownBasisOf =
             StandDownBasis.PlayerRaidHold
         ]
 
+/// A fighter of ours in one fight, as the arbitration reads it (#650): which
+/// fight, what it aims at, and whether it is hurt or dying.
+type Engaged =
+    {
+        /// The room of the fight Task it holds (its Guard's, Defend's or
+        /// Assault's): two bodies holding one are partners.
+        Fight: string
+        /// The tiles of the targets it aims at in the room it stands in
+        /// (`Emitter.aimOf`); empty with no aim.
+        Targets: Pos list
+        /// How far it strikes them.
+        Reach: int
+        /// Below its full hits.
+        Hurt: bool
+        /// What strikes its tile within the horizon, net of its own heal,
+        /// takes its hits: it dies where it stands.
+        Dying: bool
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Engaged =
+    /// The tiles a body is from striking off a tile: how far past its reach
+    /// the nearest target it aims at stands; `Int32.MaxValue` with no aim.
+    let strikesFrom (engaged: Engaged) (tile: Pos) : int =
+        match engaged.Targets with
+        | [] -> System.Int32.MaxValue
+        | targets ->
+            let gap = targets |> List.map (Geometry.range tile) |> List.min
+            max 0 (gap - engaged.Reach)
+
 /// A creep's Move Intent: candidate standing tiles for next tick in preference
 /// order, plus a priority (the task rank). Input to the Resolver — not an
 /// Intent; the Resolver's output is what becomes one. Standing tiles but one: a
@@ -329,6 +359,9 @@ type MoveIntent =
         /// its head is put off last (#562), or that body walks up the lane
         /// ahead of it and is shoved again the next tick.
         Onward: RoomPos option
+        /// For a fighter holding a fight Task, its place in that fight; None
+        /// for every other body.
+        Engaged: Engaged option
     }
 
 /// One colony's movement for the tick, before a tile of it is arbitrated. It

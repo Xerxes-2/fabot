@@ -1117,11 +1117,6 @@ let w17s26FleeingHaulerTests =
             // half is `LightTickTests`' (`LightForce.Chase`). With the 5-tile
             // store ground the arena still kept live's outcome: both rangers
             // stood on 28,7/29,7 t7-11 and Wolf6836 left at 1,640 (live 1,720).
-            // Not both keep it in reach yet: one steps into the swamp at 24,3
-            // and stands five ticks. Alone it steps round it (24,4, #614's
-            // chaseStep); here its partner takes 24,4 and the arbitration
-            // rehouses it onto the swamp, a step no chase weighs: the fight
-            // traffic's seats and swaps (#615 S3).
             test
                 "#619 capture t1,017,284: the rangers chase the hauler walking off the container and keep it in reach until it dies or exits" {
                 let _, trace = w17s26FleeingHauler () |> run 36
@@ -1147,6 +1142,40 @@ let w17s26FleeingHaulerTests =
                             (inReach tick quarry)
                             $"t{tick}: a ranger keeps Wolf6836 in reach\n{failure}"
                     | None -> ()
+            }
+
+            // #650: on main one ranger stepped into the swamp at 24,3 at t12
+            // and stood five ticks out of reach: its partner took 24,4, the
+            // tile its chase stepped round the swamp by, and the arbitration
+            // rehoused it onto the swamp, a step no chase weighed. A chaser is
+            // shoved only onto the tiles beside it its chase keeps. Wolf6836
+            // now falls to 80 hits a step off the exit (560 on main). Along
+            // the north edge from x 14 the two walk single file, the second
+            // four behind: the terrain's, not the traffic's.
+            test
+                "#650 capture t1,017,284: neither ranger is shoved onto a tile that holds it out of Wolf6836's reach" {
+                let _, trace = w17s26FleeingHauler () |> run 36
+                let failure = describe trace
+                let wolf = pathOf "Wolf6836" trace |> Map.ofList
+
+                for ranger in [ "ranger-1017078-Spawn11"; "ranger-1016532-Spawn11" ] do
+                    let path = pathOf ranger trace |> Map.ofList
+
+                    let held =
+                        [ 7..33 ]
+                        |> List.filter (fun tick ->
+                            match
+                                Map.tryFind tick wolf,
+                                Map.tryFind (tick - 1) path,
+                                Map.tryFind tick path
+                            with
+                            | Some quarry, Some before, Some body ->
+                                body.At = before.At
+                                && RoomPos.range body.At quarry.At
+                                   |> Option.forall (fun r -> r > Engine.rangedRange)
+                            | _ -> false)
+
+                    Expect.isEmpty held $"{ranger} stands out of reach\n{failure}"
             }
         ]
 

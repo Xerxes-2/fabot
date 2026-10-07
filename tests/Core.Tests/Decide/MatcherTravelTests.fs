@@ -2379,3 +2379,143 @@ let pushWeightCorridorTests =
                     "so the Refill keeps the lane and the Withdraw takes the pocket beside it"
             }
         ]
+
+/// A fighter of one fight's Move Intent, drawn by hand: its tile, the tiles
+/// it asks for, the Work Area it holds (none: it walks), the target it aims
+/// at from three, and whether it is hurt and dying.
+let private fighterIntent name (x, y) (candidates: (int * int) list) area target (hurt, dying) =
+    let tile (x, y) = RoomPos.at "W1N2" { X = x; Y = y }
+
+    {
+        Creep = name
+        Pos = tile (x, y)
+        Rank = 0
+        Candidates = candidates |> List.map tile
+        Area = area |> List.map tile |> Set.ofList
+        Onward = None
+        Engaged =
+            Some
+                {
+                    Fight = "W1N2"
+                    Targets = [ target ]
+                    Reach = Engine.rangedRange
+                    Hurt = hurt
+                    Dying = dying
+                }
+    }
+
+let private whole = false, false
+
+/// r-a walking from 10,9 onto 10,8, where r-b stands on its Work Area
+/// asking these.
+let private swapAt target (asked: (int * int) list) area =
+    [
+        fighterIntent "r-a" (10, 9) [ 10, 8 ] [] target whole
+        fighterIntent "r-b" (10, 8) asked area target whole
+    ]
+
+/// One room's arbitration over hand-drawn intents, its moves read back.
+let private arbitrated (intents: MoveIntent list) =
+    resolveRooms
+        Set.empty
+        [
+            {
+                Order = intents |> List.map (fun i -> i.Creep)
+                Placed = intents |> List.map (fun i -> i.Creep, i.Pos)
+                Tired = Set.empty
+                Foreign = Set.empty
+                Intents = intents
+                Rerouted = Set.empty
+            }
+        ]
+    |> fst
+    |> moveIntents
+    |> List.sort
+
+[<Tests>]
+let fightTrafficTests =
+    testList
+        "a fight's traffic (#650)"
+        [
+            // Live W17S26 t1,017,288: two rangers asked one tile at a choke and
+            // the name gave it. The one already striking where it stands loses
+            // least by yielding.
+            test
+                "two fighters asking one tile: the one striking later where it stands takes it, whatever the names" {
+                let target = { X = 10; Y = 5 }
+
+                Expect.equal
+                    (arbitrated
+                        [
+                            fighterIntent "r-a" (11, 8) [ 10, 8 ] [] target whole
+                            fighterIntent "r-b" (9, 9) [ 10, 8 ] [] target whole
+                        ])
+                    [ "r-b", TopRight ]
+                    "r-b, four off, takes the tile; r-a strikes from three where it stands"
+
+                // A wound alone buys no tile: r-b still strikes from three
+                // where it stands, so r-a takes the tile and both strike.
+                Expect.equal
+                    (arbitrated
+                        [
+                            fighterIntent "r-a" (9, 9) [ 10, 8 ] [] target whole
+                            fighterIntent "r-b" (11, 8) [ 10, 8 ] [] target (true, false)
+                        ])
+                    [ "r-a", TopRight ]
+                    "a hurt body that does not walk off its target is ordered by its strikes"
+            }
+
+            test
+                "a hurt body walking off its targets, or one dying where it stands, passes through first" {
+                let target = { X = 10; Y = 4 }
+
+                let choke state =
+                    arbitrated
+                        [
+                            fighterIntent "r-a" (9, 9) [ 10, 8 ] [] target whole
+                            fighterIntent "r-b" (10, 7) [ 10, 8 ] [] target state
+                        ]
+
+                Expect.equal
+                    (choke whole)
+                    [ "r-a", TopRight ]
+                    "the premise: whole, r-b yields to the one closing"
+
+                Expect.equal
+                    (choke (true, false))
+                    [ "r-b", Bottom ]
+                    "hurt, it walks out from three to four first"
+
+                Expect.equal
+                    (choke (false, true))
+                    [ "r-b", Bottom ]
+                    "dying where it stands, it goes first"
+            }
+
+            // A kiter's candidates are the tiles beside it a melee strikes no
+            // sooner than it could be off them (`moveIntentFor`'s `beside`): the
+            // swap walks those alone, so it never lands a kiter in melee reach.
+            test
+                "a partner shoved off its tile takes the mover's only inside its Work Area and striking no later" {
+                let asked = [ (10, 8); (11, 8); (10, 9) ]
+                let ground = [ (10, 8); (11, 8); (10, 9) ]
+
+                Expect.equal
+                    (arbitrated (swapAt { X = 13; Y = 8 } asked ground))
+                    [ "r-a", Top; "r-b", Bottom ]
+                    "both at three from the target, r-b takes r-a's tile first"
+
+                Expect.equal
+                    (arbitrated (swapAt { X = 10; Y = 4 } asked ground))
+                    [ "r-a", Top; "r-b", Right ]
+                    "where it strikes later from r-a's tile it keeps its own order"
+
+                Expect.isEmpty
+                    (arbitrated (swapAt { X = 13; Y = 8 } [ (10, 8); (10, 9) ] [ 10, 8 ]))
+                    "a Defend holder on its rampart is never swapped off it"
+
+                Expect.isEmpty
+                    (arbitrated (swapAt { X = 13; Y = 8 } [ 10, 8 ] ground))
+                    "nor onto a tile that is not one of its candidates"
+            }
+        ]

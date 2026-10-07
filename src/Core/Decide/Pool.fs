@@ -274,9 +274,9 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
                 | _ -> None
 
             // A holder mustering waits on its own ground (#535); one seated
-            // strikes from its own (#558).
+            // strikes from its own, no partner's seat (#558, #650).
             Map.tryFind creep brief.Stances
-            |> Option.orElse (Map.tryFind creep brief.Seats)
+            |> Option.orElse (Map.tryFind creep brief.Seats.Value)
             |> Option.orElse (swing ())
             |> Option.orElse brief.Ground
             |> Option.defaultWith (fun () ->

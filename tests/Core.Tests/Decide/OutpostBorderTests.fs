@@ -268,7 +268,7 @@ let invaderCoreTests =
                 let threats = threatsOfHeld seated atlas (Facts.heldTaskFacts seated held)
                 let brief = Threats.briefOf threats "W1N2"
 
-                let seat = Map.tryFind "r-1" brief.Seats |> Option.defaultValue Set.empty
+                let seat = Map.tryFind "r-1" brief.Seats.Value |> Option.defaultValue Set.empty
                 Expect.isNonEmpty seat "it has a seat"
 
                 Expect.isTrue
@@ -296,7 +296,7 @@ let invaderCoreTests =
                         "W1N2"
 
                 Expect.equal
-                    (Map.tryFind "r-1" awayBrief.Seats)
+                    (Map.tryFind "r-1" awayBrief.Seats.Value)
                     (Some Set.empty)
                     "one with no walk to the ring from inside the room has no seat, never the ring beside the core"
             }

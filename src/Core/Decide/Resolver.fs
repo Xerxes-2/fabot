@@ -660,6 +660,10 @@ let private moveIntentFor
     // For a fighter aiming at a target in its room, its chase (`chaseStep`);
     // None for every other body.
     (chase: Chase option)
+    // For a fighter holding a fight Task, that fight's room, whether it is
+    // hurt and whether it is dying where it stands (#650); None for every
+    // other body.
+    (fight: (string * bool * bool) option)
     // For a trespass's killer, the Reach it walks round (#516); None for
     // every other body.
     (reachRound: Set<Pos> option)
@@ -675,14 +679,53 @@ let private moveIntentFor
     let around = Atlas.adjacentWalkableIn atlas room pos
     let onSeam = Atlas.standsOnSeam atlas creep && not (List.isEmpty around)
 
-    // The ground beside it it may be stepped or shoved onto: for a kiter,
-    // never a tile a melee strikes before it could be off it again
-    // (movement S3), whoever's chain asks.
+    // What a chaser aims at and its own arrival over its room, read only
+    // where a rule below asks.
+    let aimed =
+        lazy
+            (chase
+             |> Option.bind (fun chase ->
+                 match chase.Aim.Value, chase.Walk.Value with
+                 | Some aim, Some walk when walk.Room = room -> Some(aim, walk)
+                 | _ -> None))
+
+    // The ground beside it it may be stepped or shoved onto, whoever's chain
+    // asks: for a kiter, never a tile a melee strikes before it could be off
+    // it again (movement S3); for a chaser, never one that holds it while its
+    // targets walk out of its bar (`loses`, #650: a partner's chain shoved
+    // it onto a swamp no chase weighed).
     let beside =
-        match kite with
-        | Some(Kiting.Keeps(unsafe, _, _)) ->
-            around |> List.filter (fun tile -> not (unsafe (indexOf tile)))
-        | _ -> around
+        let kept =
+            match kite with
+            | Some(Kiting.Keeps(unsafe, _, _)) ->
+                around |> List.filter (fun tile -> not (unsafe (indexOf tile)))
+            | _ -> around
+
+        match chase with
+        | Some chase when kept |> List.exists chase.Holds ->
+            match aimed.Value with
+            | Some(aim, walk) ->
+                kept
+                |> List.filter (fun tile -> not (chase.Holds tile && loses aim walk pos tile))
+            | None -> kept
+        | _ -> kept
+
+    // Its place in its fight: what it aims at there.
+    let engaged =
+        fight
+        |> Option.map (fun (room, hurt, dying) ->
+            let targets, reach =
+                match aimed.Value with
+                | Some(aim, _) -> aim.Targets |> List.map (fun aimed -> aimed.Target), aim.Reach
+                | None -> [], 0
+
+            {
+                Fight = room
+                Targets = targets
+                Reach = reach
+                Hurt = hurt
+                Dying = dying
+            })
 
     // Where this creep may stay: its own tile, unless that tile is a Seam
     // with ground beside it to walk onto.
@@ -707,6 +750,7 @@ let private moveIntentFor
                     | Some(first :: second :: _) when first = here head -> Some second
                     | _ -> None
                 | _ -> None
+            Engaged = engaged
         }
 
     // A parked body has a Task it cannot reach, so it is standing where its
@@ -1030,8 +1074,11 @@ type private Matching =
 /// free-tiles-first order (incompatible with the head-and-tail list). A room's
 /// pass is O(creeps x 8). The intents are offered in a deterministic order:
 /// travellers before stayers (a stayer settled first walls off a traveller's
-/// only path), then by rank, then by name. Only a strictly positive chain is
-/// taken, and dropping the Map the search returned is the whole rollback.
+/// only path), then by rank, then by fight state (`precedence`), then by
+/// name. Only a strictly positive chain is taken, and dropping the Map the
+/// search returned is the whole rollback. A body shoved by a partner in its
+/// fight tries the partner's tile first where that is no worse for it
+/// (`swapsWith`).
 let private arbitrate
     (occupants: Map<RoomPos, string>)
     (blocked: Set<RoomPos>)
@@ -1059,6 +1106,24 @@ let private arbitrate
                 Tile = Map.remove creep m.Tile
             }
         | None -> m
+
+    // Whether a body shoved off its tile by a partner in its fight (#650)
+    // lands no worse on the partner's tile: the tile is one of its own
+    // candidates (a kiter's and a chaser's are the tiles beside it it keeps,
+    // so neither lands where it would not step), inside its Work Area (a
+    // Defend holder stays on its line, a seated holder on its seat, so no
+    // swap is free that it walks back from), and it strikes from there no
+    // later than from its own. A body with no aim is never shoved so.
+    let swapsWith (mover: MoveIntent) (occupant: MoveIntent) =
+        match mover.Engaged, occupant.Engaged with
+        | Some partner, Some engaged when
+            partner.Fight = engaged.Fight
+            && not engaged.Targets.IsEmpty
+            && (Set.isEmpty occupant.Area || Set.contains mover.Pos occupant.Area)
+            ->
+            Engaged.strikesFrom engaged (RoomPos.pos mover.Pos)
+            <= Engaged.strikesFrom engaged (RoomPos.pos occupant.Pos)
+        | _ -> false
 
     // What a creep landing on `tile` is worth to the chain. The eviction
     // charge is levied here, on the landing, because that is where the search
@@ -1096,14 +1161,18 @@ let private arbitrate
     // Where an idle body is tried once a mover shoves it off its tile:
     // anywhere else first, then the mover's own tile (a swap), and the
     // mover's way on last (#562) — up the lane ahead of it is where the mover
-    // shoves it again the next tick, and the tick after. Every other body
-    // keeps its own order.
+    // shoves it again the next tick, and the tick after. A partner in the
+    // mover's fight tries the mover's tile first where that is no worse for
+    // it (`swapsWith`, #650).
+    // Every other body keeps its own order.
     let rehouse (mover: MoveIntent) (occupant: MoveIntent) (tiles: RoomPos list) =
         if idle occupant then
             let last = List.choose id [ Some mover.Pos; mover.Onward ]
 
             (tiles |> List.filter (fun tile -> not (List.contains tile last)))
             @ (last |> List.filter (fun tile -> List.contains tile tiles))
+        elif swapsWith mover occupant && List.contains mover.Pos tiles then
+            mover.Pos :: (tiles |> List.filter ((<>) mover.Pos))
         else
             tiles
 
@@ -1191,8 +1260,29 @@ let private arbitrate
                 | Some tile -> idle intent || Set.contains tile intent.Area
                 | None -> false))
 
+    // A fighter's place among bodies of one rank (#650): first one that
+    // passes through, dying where it stands, or hurt and walking off its
+    // targets (it strikes later from the tile it asks for than from its
+    // own); then the one striking sooner from the tile it asks for; of two
+    // striking as soon from it (two asking one tile at a choke), the one
+    // striking later from where it stands, which the tile buys the most: the
+    // other loses less by yielding. The name breaks only what the strikes
+    // tie.
+    let precedence (intent: MoveIntent) =
+        match intent.Engaged with
+        | Some engaged ->
+            let head =
+                headOf intent
+                |> Option.map (RoomPos.pos >> Engaged.strikesFrom engaged)
+                |> Option.defaultValue System.Int32.MaxValue
+
+            let here = Engaged.strikesFrom engaged (RoomPos.pos intent.Pos)
+            let passes = engaged.Dying || (engaged.Hurt && head > here)
+            not passes, head, -here
+        | None -> true, System.Int32.MaxValue, 0
+
     let settled =
-        (start, moveIntents |> List.sortBy (fun i -> staying i, i.Rank, i.Creep))
+        (start, moveIntents |> List.sortBy (fun i -> staying i, i.Rank, precedence i, i.Creep))
         ||> List.fold (fun m intent ->
             if asked intent m then
                 m
@@ -1483,6 +1573,23 @@ let movementAmong
             Map.tryFind name named.Value
             |> Option.bind (fun creep -> chaseFor view atlas threats assigned creep at)
 
+    // A fighter holding a fight Task: the fight's room, whether it is hurt,
+    // and whether it dies where it stands: what strikes its tile over the
+    // horizon, net of its own heal, takes its hits (#650).
+    let fightOf name (at: RoomPos) =
+        match Map.tryFind name assigned, Map.tryFind name named.Value with
+        | Some(Guard room | Defend room | Assault room), Some creep when isFighterBody creep ->
+            let horizon = view.Tuning.ReachHorizon
+            let heal = Engine.healPower * partCount creep.Body Heal
+            let struck = Threats.damageAt threats at.Room horizon (RoomPos.pos at)
+
+            Some(
+                room,
+                creep.Hits.Hits < creep.Hits.HitsMax,
+                (struck - heal) * horizon >= creep.Hits.Hits
+            )
+        | _ -> None
+
     // A fighter's walk round breaks an equal-tick tie toward the tile a
     // hostile strikes later (movement S3).
     let laterOf name (at: RoomPos) =
@@ -1606,6 +1713,7 @@ let movementAmong
                      | _ -> Set.empty)
                     (kitingOf name at)
                     (chaseOf name at)
+                    (fightOf name at)
                     (if avoidFor name = Avoid.Reach then
                          Some(Threats.reachIn threats at.Room)
                      else

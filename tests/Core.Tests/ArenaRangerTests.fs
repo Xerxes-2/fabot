@@ -1946,3 +1946,80 @@ let rangerPairTests =
                     $"they go in together: none trades its hits away alone\n{failure}"
             }
         ]
+
+/// Two rangers of ours and Trepidimous' empty 23C23M hauler standing still
+/// in W17S26, eleven tiles off the container: the trespass's ground is the
+/// eight tiles beside it, a small ground two holders share (#650).
+let private standingHauler () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+
+    let outpost =
+        room "W17S26"
+        |> withStructures [ structureOf "container" None 123_000 250_000 { X = 27; Y = 9 } ]
+
+    let home =
+        room "W17S25"
+        |> withController Ownership.Ours None 5 3
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+
+    let declared =
+        { colony "W17S25" with
+            Outposts = [ outpostOf outpost.Capture ]
+        }
+
+    let ranger id tile =
+        body id Side.Ours (parts [ Move, 6; RangedAttack, 4; Heal, 2 ]) tile None
+
+    arena
+        900_000
+        [ home; outpost ]
+        [ declared ]
+        [
+            ranger "ranger-1-Spawn11" (at "W17S26" 26 13)
+            ranger "ranger-2-Spawn11" (at "W17S26" 28 13)
+            body
+                "Wolf1"
+                (Side.Player "Trepidimous")
+                (List.concat (List.replicate 23 [ Move; Carry ]))
+                (at "W17S26" 30 20)
+                None
+        ]
+
+[<Tests>]
+let sharedGroundTests =
+    testList
+        "arena two rangers on a small ground (#650)"
+        [
+            // A partner shoved off its tile takes the mover's only inside its
+            // own Work Area, so two holders seated on one small ground never
+            // trade tiles back and forth, paying fatigue for nothing.
+            test "neither ranger flips between two tiles tick to tick once both stand on the ground" {
+                let _, trace = standingHauler () |> run 30
+                let failure = describe trace
+
+                for ranger in [ "ranger-1-Spawn11"; "ranger-2-Spawn11" ] do
+                    let path = pathOf ranger trace |> Map.ofList
+
+                    Expect.equal
+                        (Map.tryFind 29 path
+                         |> Option.bind (fun body ->
+                             RoomPos.range body.At (RoomPos.at "W17S26" { X = 30; Y = 20 })))
+                        (Some 1)
+                        $"the premise: {ranger} stands on the ground beside Wolf1\n{failure}"
+
+                    let flips =
+                        [ 2..29 ]
+                        |> List.filter (fun tick ->
+                            match
+                                Map.tryFind (tick - 2) path,
+                                Map.tryFind (tick - 1) path,
+                                Map.tryFind tick path
+                            with
+                            | Some a, Some b, Some c -> a.At = c.At && a.At <> b.At
+                            | _ -> false)
+
+                    Expect.isEmpty
+                        flips
+                        $"{ranger} steps back onto the tile it left the tick before\n{failure}"
+            }
+        ]

@@ -291,11 +291,15 @@ type Brief =
         /// of the rows it asks on its own row's ground (#546). Empty for every
         /// other Task.
         Stances: Map<string, Set<RoomPos>>
-        /// A Guard's holders seated off `Ground` and striking from there: a
-        /// ranged holder of a level-0 core's Guard on the core's range-3 ring,
-        /// out of the swing of a melee body breaking the core (#558). Read
-        /// after `Stances`. Empty for every other Task.
-        Seats: Map<string, Set<RoomPos>>
+        /// A Guard's holders seated on its ground (`Brief.seatsAmong`, #650):
+        /// each holder's own ground less every other holder's seat, where
+        /// that costs it no tick. Its own
+        /// is a ranged holder of a level-0 core's Guard the core's range-3
+        /// ring, out of the swing of a melee body breaking the core (#558);
+        /// a melee holder of a chase the ring beside the raid (#571); every
+        /// other `Ground`. Read after `Stances`, priced on first read. Empty
+        /// for every other Task.
+        Seats: Lazy<Map<string, Set<RoomPos>>>
     }
 
 /// What one Brief asks a row for: the row, how many bodies, and the blocks
@@ -438,6 +442,20 @@ let private walksMemo
        > =
     TickMemo.create 32 TickMemo.byReference
 
+/// One body's own arrival over the room it stands in, flooded at most once a
+/// tick over its Atlas (`walksMemo`); None for a body the projection does not
+/// place.
+let private bodyWalk atlas (creep: CreepInfo) : Arrival.BodyArrival option =
+    let walks =
+        TickMemo.recall walksMemo atlas (fun _ -> System.Collections.Generic.Dictionary())
+
+    match walks.TryGetValue creep.Name with
+    | true, walk -> walk
+    | _ ->
+        let walk = Arrival.ofBody atlas creep
+        walks.[creep.Name] <- walk
+        walk
+
 /// The Flights by every input they are read off: the Threats' fields
 /// (`sameInputs`) and the Atlas, which tells one colony's from another's
 /// where both Threats are quiet and share every empty field.
@@ -530,6 +548,75 @@ module Brief =
             Ring = None
             Trespass = None
         }
+
+    /// One fight's ground divided into seats (#650): each holder's own
+    /// ground, the tiles it reaches by its arrival (`arrival`, None for
+    /// unreached), is matched a tile a holder, soonest arrival first (then
+    /// by name and tile), so a holder standing on its ground keeps its tile
+    /// tick to tick and two walking to one tile are sent to two. A matched
+    /// holder's seats are the tiles it reaches of its ground less every
+    /// other holder's match, where it reaches one of those as soon as any
+    /// tile of its ground: a seat that would cost it ticks (one tile of a
+    /// kite ground left on its side) is no seat, and the arbitration orders
+    /// the two at the tile. One whose ground is its own (`own`, read only
+    /// through its seats) has the tiles it reaches whatever, none reached
+    /// being no ground at all. Absent for any other holder, which keeps the
+    /// ground it would read without seats.
+    let seatsAmong
+        (holders: (string * Set<RoomPos> * bool * (RoomPos -> int option)) list)
+        : Map<string, Set<RoomPos>> =
+        let reached =
+            holders
+            |> List.map (fun (name, ground, own, arrival) ->
+                name,
+                own,
+                ground
+                |> Seq.choose (fun tile -> arrival tile |> Option.map (fun ticks -> ticks, tile))
+                |> List.ofSeq)
+
+        let matched =
+            match reached with
+            | []
+            | [ _ ] -> Map.empty
+            | _ ->
+                reached
+                |> List.collect (fun (name, _, tiles) ->
+                    tiles |> List.map (fun (ticks, tile) -> ticks, name, tile))
+                |> List.sort
+                |> List.fold
+                    (fun (seated: Map<string, RoomPos>, taken: Set<RoomPos>) (_, name, tile) ->
+                        if Map.containsKey name seated || Set.contains tile taken then
+                            seated, taken
+                        else
+                            Map.add name tile seated, Set.add tile taken)
+                    (Map.empty, Set.empty)
+                |> fst
+
+        reached
+        |> List.choose (fun (name, own, tiles) ->
+            let others =
+                matched
+                |> Map.toSeq
+                |> Seq.choose (fun (other, tile) -> if other <> name then Some tile else None)
+                |> Set.ofSeq
+
+            let soonest (tiles: (int * RoomPos) list) =
+                tiles
+                |> List.fold (fun soonest (ticks, _) -> min soonest ticks) System.Int32.MaxValue
+
+            let kept, off =
+                tiles |> List.partition (fun (_, tile) -> not (Set.contains tile others))
+
+            // Kept off its partners' seats only where that costs it no tick.
+            let keptOff = not off.IsEmpty && not kept.IsEmpty && soonest kept = soonest tiles
+
+            let seats = (if keptOff then kept else tiles) |> List.map snd |> Set.ofList
+
+            if own || (Map.containsKey name matched && keptOff) then
+                Some(name, seats)
+            else
+                None)
+        |> Map.ofList
 
     /// The rows a trespass's kill asks (#550), each with the trespassers
     /// standing in its room it answers: the guard those its swing catches
@@ -1032,7 +1119,7 @@ module Brief =
             Verdict = verdict
             Formation = None
             Stances = Map.empty
-            Seats = Map.empty
+            Seats = lazy Map.empty
         }
 
     /// The stance a body meets its Guard's raid at (#615 U3): a swing on a
@@ -1239,7 +1326,7 @@ module Brief =
             Verdict = verdict
             Formation = None
             Stances = stances
-            Seats = Map.empty
+            Seats = lazy Map.empty
         }
 
     /// An Assault's Brief on its squad's `Formation`: it admits the bodies
@@ -1287,7 +1374,7 @@ module Brief =
             Verdict = verdict
             Formation = Some formation
             Stances = Map.empty
-            Seats = Map.empty
+            Seats = lazy Map.empty
         }
 
     /// A combat Task no source claims this tick: a Guard's `unclaimed`; a
@@ -1701,15 +1788,7 @@ module Threats =
     /// once a tick over its Atlas (`walksMemo`), Reach or none; None for a
     /// body the projection does not place.
     let bodyWalkOf (_: Threats) atlas (creep: CreepInfo) : Arrival.BodyArrival option =
-        let walks =
-            TickMemo.recall walksMemo atlas (fun _ -> System.Collections.Generic.Dictionary())
-
-        match walks.TryGetValue creep.Name with
-        | true, walk -> walk
-        | _ ->
-            let walk = Arrival.ofBody atlas creep
-            walks.[creep.Name] <- walk
-            walk
+        bodyWalk atlas creep
 
     /// `bodyWalkOf` on a tick with a Reach; None for any body on a tick
     /// with none, which floods nothing.
@@ -3358,47 +3437,63 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 })
         |> Map.ofSeq
 
-    // A core's ranged holders on its range-3 ring (#558): they shoot it from
-    // there, out of the swing of a melee body beside it. Only the tiles of it
-    // the holder walks to from where it stands in the room; none reached is
-    // no seat, never the ring beside the core.
+    // Every Guard's holders seated on its ground (`Brief.seatsAmong`, #650),
+    // each on its own: a core's ranged holder on the core's range-3 ring
+    // (#558), shooting it from out of the swing of a melee body beside it,
+    // never the ring beside the core; a chase's melee holder on the ring
+    // beside the raid (#571); every other on the Brief's ground. Matched by
+    // each holder's own arrival over the room it stands in.
     let briefs =
-        let seatsIn room =
-            let ring =
+        let seatsIn room (brief: Brief) =
+            let coreRing =
                 lazy
                     (Facts.expansionCores view
                      |> List.filter (fun core -> core.RoomName = room)
                      |> List.collect (fun core ->
                          Atlas.walkableWithinIn atlas room Engine.rangedRange core.Tile
                          |> List.filter (fun tile ->
-                             range tile core.Tile = Engine.rangedRange && not (Seam.onRing tile))))
+                             range tile core.Tile = Engine.rangedRange && not (Seam.onRing tile)))
+                     |> Set.ofList
+                     |> RoomPos.setAt room)
 
-            let reached (creep: CreepInfo) =
-                match Atlas.creepTile atlas creep.Name with
-                | Some at when at.Room = room ->
-                    let walk = Atlas.pricedWalksFrom atlas room (fun _ -> 1) (RoomPos.pos at)
+            let groundOf (creep: CreepInfo) =
+                match brief.Duty, brief.Laid.Ring with
+                | Duty.Guard BriefKind.Core, _ when isRangerRowBody creep ->
+                    Some(coreRing.Value, true)
+                | Duty.Guard BriefKind.Chase, Some ring when
+                    not (Set.isEmpty ring) && isGuardRowBody creep
+                    ->
+                    Some(ring, false)
+                | _ -> brief.Ground |> Option.map (fun ground -> ground, false)
 
-                    ring.Value
-                    |> List.filter (walk >> Option.isSome)
-                    |> Set.ofList
-                    |> RoomPos.setAt room
-                | _ -> Set.empty
+            let arrivalOf (creep: CreepInfo) =
+                match bodyWalk atlas creep with
+                | Some walk when walk.Room = room ->
+                    fun (tile: RoomPos) ->
+                        if tile.Room = room then
+                            match Grid.at (indexOf (RoomPos.pos tile)) walk.Ticks with
+                            | ticks when ticks = System.Int32.MaxValue -> None
+                            | ticks -> Some ticks
+                        else
+                            None
+                | _ -> fun _ -> None
 
             HeldTaskFacts.holdersOf held (taskId (Guard room))
             |> List.choose (fun name ->
                 ColonyView.bodies view |> List.tryFind (fun creep -> creep.Name = name))
-            |> List.filter isRangerRowBody
-            |> List.map (fun creep -> creep.Name, reached creep)
-            |> Map.ofList
+            |> List.choose (fun creep ->
+                groundOf creep
+                |> Option.map (fun (ground, own) -> creep.Name, ground, own, arrivalOf creep))
+            |> Brief.seatsAmong
 
-        (briefs, briefs)
-        ||> Map.fold (fun seated task brief ->
+        briefs
+        |> Map.map (fun task brief ->
             match task, brief.Duty with
-            | Guard room, Duty.Guard BriefKind.Core ->
-                match seatsIn room with
-                | seats when Map.isEmpty seats -> seated
-                | seats -> Map.add task { brief with Seats = seats } seated
-            | _ -> seated)
+            | Guard room, Duty.Guard _ ->
+                { brief with
+                    Seats = lazy (seatsIn room brief)
+                }
+            | _ -> brief)
 
     // The home's Defend while a raid stands at its line (#504).
     let briefs =
