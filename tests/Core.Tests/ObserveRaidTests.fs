@@ -1358,10 +1358,14 @@ let harassStandDownTests =
             }
 
             test "an outpost under a harassing squad is held the player window past its opening" {
+                // A bank of four guard blocks. The live 5,600 bank's five
+                // blocks now win this raid, so that outpost is no longer
+                // stood down (#624, a behaviour change): each swing is
+                // struck back, and five trade the 17-ATTACK body by a tick.
                 let colony =
                     { (withDeclaredOutpost harassRoom quiet) with
                         Hostiles = trepidimousSquad
-                        Bank = { Available = 5600; Capacity = 5600 }
+                        Bank = { Available = 3000; Capacity = 3000 }
                     }
 
                 let state =

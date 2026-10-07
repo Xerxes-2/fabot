@@ -9,11 +9,13 @@ open Fabot.Core.Types
 open Fabot.Core.Observe
 
 /// Five attackers two guard blocks cannot beat, all one owner's, standing in
-/// `room` while the colony has `outpostRoom` declared.
+/// `room` while the colony has `outpostRoom` declared. Four ATTACK each:
+/// three a body lose to the guard's swing struck back on every one of them
+/// (#624, `_damage.js`).
 let private squadIn room owner =
     { (quiet |> withDeclaredOutpost outpostRoom) with
         Hostiles =
-            List.replicate 5 [ Attack; Attack; Attack; Move; Move; Move ]
+            List.replicate 5 [ Attack; Attack; Attack; Attack; Move; Move; Move; Move ]
             |> List.mapi (raiderIn room)
             |> List.map (fun hostile -> { hostile with Owner = owner })
         Bank = { Available = 0; Capacity = 1_500 }
@@ -157,7 +159,8 @@ let outpostTests =
                         Bank = { Available = 0; Capacity = 1_500 }
                     }
 
-                let overwhelming = List.replicate 5 [ Attack; Attack; Attack; Move; Move; Move ]
+                let overwhelming =
+                    List.replicate 5 [ Attack; Attack; Attack; Attack; Move; Move; Move; Move ]
 
                 Expect.equal
                     (standDowns (RaidState.empty |> raidTick 100 (raidIn overwhelming)))
@@ -776,19 +779,22 @@ let outpostTests =
                         Hostiles =
                             List.replicate
                                 2
-                                (List.replicate attacks Attack @ List.replicate (10 - attacks) Move)
+                                (List.replicate attacks Attack @ List.replicate (12 - attacks) Move)
                             |> List.mapi (raiderIn outpostRoom)
                         Bank = { Available = 0; Capacity = 1_500 }
                     }
 
+                // Each side's swing is struck back (#624): the raid deals its
+                // swings and our swing's 30 an ATTACK back, ours its 180 and
+                // the 180 each raider takes back off its swing, 540 on 2,400.
                 Expect.isEmpty
-                    (standDowns (RaidState.empty |> raidTick 100 (raid 2)))
-                    "two blocks kill 2,000 hits before 120 damage kills them"
+                    (standDowns (RaidState.empty |> raidTick 100 (raid 4)))
+                    "two blocks kill 2,400 hits at 540 before 360 kills their 2,000"
 
                 Expect.equal
-                    (standDowns (RaidState.empty |> raidTick 100 (raid 3)))
+                    (standDowns (RaidState.empty |> raidTick 100 (raid 5)))
                     [ outpostRoom, 100, 100, 1600, StandDownBasis.InvaderRaid ]
-                    "equal 180 damage and 2,000 hits is not a win; fictitious self-heal must not keep the room open"
+                    "an equal clock, 2,400 at 540 against 2,000 at 450, is not a win; fictitious self-heal must not keep the room open"
             }
 
             test "a transit-room hostile opens no stand-down, regardless of owner" {
@@ -796,7 +802,9 @@ let outpostTests =
                 // it. The ordinary Invader is the asymmetric case: filtering only the
                 // expected Source Keeper would make this half fail.
                 let transitRoom = "W15S26"
-                let overwhelming = List.replicate 5 [ Attack; Attack; Attack; Move; Move; Move ]
+
+                let overwhelming =
+                    List.replicate 5 [ Attack; Attack; Attack; Attack; Move; Move; Move; Move ]
 
                 let raidBy owner =
                     { quiet with
@@ -816,7 +824,9 @@ let outpostTests =
                 // #428: the raid that stands a declared outpost down, in the
                 // same room read as a defended home instead.
                 let defended = "W13S28"
-                let overwhelming = List.replicate 5 [ Attack; Attack; Attack; Move; Move; Move ]
+
+                let overwhelming =
+                    List.replicate 5 [ Attack; Attack; Attack; Attack; Move; Move; Move; Move ]
 
                 let raidedAs (colony: ColonyView) =
                     { colony with
@@ -2227,7 +2237,7 @@ let watchedShutTests =
             test
                 "an observer's look at a raid nothing wins is a sighting: last seen now, the clock re-read" {
                 let raid =
-                    List.replicate 5 [ Attack; Attack; Attack; Move; Move; Move ]
+                    List.replicate 5 [ Attack; Attack; Attack; Attack; Move; Move; Move; Move ]
                     |> List.mapi (raiderIn outpostRoom)
 
                 Expect.equal

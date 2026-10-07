@@ -108,16 +108,16 @@
     "towerSpent": 40
   },
   "outpost-melee-healer": {
-    "castEnergy": 1500,
-    "cleared": 104,
-    "hurt": 1600,
+    "castEnergy": 0,
+    "cleared": 37,
+    "hurt": 670,
     "kills": 2,
-    "ourDeaths": 1,
+    "ourDeaths": 0,
     "safeMode": false,
     "stoodDown": false,
     "struck": 0,
     "ticks": 500,
-    "towerSpent": 50
+    "towerSpent": 60
   },
   "outpost-ranged-healer": {
     "castEnergy": 2800,

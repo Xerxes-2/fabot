@@ -934,6 +934,35 @@ let fighterTests =
                 Expect.equal (ranger.DamageAt 3) 80 "XKHO2 shoots ×4"
             }
 
+            // #624, `_damage.js`: a swing on a creep is struck back by the
+            // creep's live ATTACK at its boosts (`calcBodyEffectiveness`).
+            test
+                "a body strikes back a swing at it by its live ATTACK at its boosts, and nothing else" {
+                let boosted =
+                    guardPattern.Block
+                    |> List.map (function
+                        | Attack -> Tier2
+                        | _ -> Unboosted)
+
+                Expect.equal
+                    ([ guardPattern; rangerPattern; defenderPattern; medicPattern ]
+                     |> List.map (fun pattern -> (wholeFighter pattern.Block).StrikesBack))
+                    [ 90; 0; 30; 0 ]
+                    "three ATTACK strike back 90; a shot or a heal strikes back nothing"
+
+                Expect.equal
+                    (Fighter.ofParts guardPattern.Block boosted 1000).StrikesBack
+                    270
+                    "UH2O strikes back ×3 too"
+
+                Expect.equal
+                    ([ 250; 100 ]
+                     |> List.map (fun hits ->
+                         (Fighter.ofParts guardPattern.Block [] hits).StrikesBack))
+                    [ 60; 0 ]
+                    "an ATTACK shot off strikes nothing back: at 250 hits two still stand, at 100 only the HEAL"
+            }
+
             test "a body stands off a class it outranges and out-paces on plain (U1)" {
                 let melee plain =
                     {

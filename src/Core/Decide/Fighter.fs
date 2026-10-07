@@ -29,6 +29,10 @@ type Fighter =
         /// (`rangedHeal`), which the engine drops beside a `heal` and which
         /// drops a `rangedAttack` beside it.
         RangedHeal: int
+        /// What the engine strikes back a tick at each body that swings at
+        /// it (`_damage.js`): its live ATTACK at their boosts, whatever it
+        /// does that tick. A shot is never struck back.
+        StrikesBack: int
         /// Its weight, every part but MOVE and shot-off ones too, against its
         /// live MOVE at their boosts.
         Gait: Gait
@@ -66,6 +70,7 @@ module Fighter =
                            0)
             HealAt = fun range -> if swings range then 0 else Engine.healPower * heal
             RangedHeal = Engine.rangedHealPower * heal
+            StrikesBack = Engine.attackPower * attack
             Gait = gait
             Hits = hits
             Tough = tough

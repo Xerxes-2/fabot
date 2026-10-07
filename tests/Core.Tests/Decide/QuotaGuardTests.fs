@@ -562,15 +562,56 @@ let guardRowTests =
                     (Some 1)
                     "90 damage kills the lone melee before its 40 damage kills one block"
 
+                // #624: the melee's swing at the block is struck back by its
+                // 90 (`_damage.js`), and the block's by the melee's 30.
                 Expect.equal
                     (guardQuotaOf (raid 1))
-                    (Some 2)
-                    "30 net damage needs 34 ticks, but without self-heal the block dies in 25"
+                    (Some 1)
+                    "90 and 90 struck back, 120 net, kill it in 9 ticks; its 40 and 30 back need 15"
 
                 Expect.equal
                     (guardQuotaOf (raid 2))
                     (Some 2)
-                    "120 healing exceeds one block's damage and still asks for two"
+                    "120 healing leaves one block 60 net, 17 ticks, and without self-heal it dies in 15"
+            }
+
+            // #624, `_damage.js`: every swing at a creep carrying ATTACK is
+            // struck back, so where both swing at range 1 each side's ATTACK
+            // lands twice a tick; and a raider struck back falls, and strikes
+            // nothing back after.
+            test "a swing struck back counts only while its swinger stands" {
+                let holds hostiles blocks =
+                    blocksBeat
+                        guardPattern
+                        Stance.Hold
+                        (guardColony hostiles [] |> banked 2300)
+                        "W1N2"
+                        blocks
+
+                let melee i =
+                    { hostileIn "W1N2" raidTile [ Attack; Attack; Attack; Move; Move; Move ] with
+                        Id = $"m-{i}"
+                    }
+
+                Expect.isTrue
+                    (holds [ for i in 1..5 -> melee i ] 2)
+                    "five 3-ATTACK bodies, 450 a tick and the 90 our swing takes back, fall to two blocks: each of them takes our 180 back off its own swing"
+
+                // A 10-RANGED 20-MOVE shooter strikes nothing back and is
+                // struck back by nothing: 180 a tick on its 3,000 hits once
+                // the smallMelee, 1,000 of them, falls to our swing and the
+                // 180 it takes back.
+                let shooter =
+                    { hostileIn
+                          "W1N2"
+                          raidTile
+                          (List.replicate 10 RangedAttack @ List.replicate 20 Move) with
+                        Id = "s-1"
+                    }
+
+                Expect.isFalse
+                    (holds (raidOf 0 @ [ shooter ]) 2)
+                    "4,000 hits at 360 would fall in 11 ticks, before 170 kills two blocks in 12; the melee's fall leaves 3,000 at 180, 17"
             }
 
             test "two attackers and no healer at all buy the second guard" {

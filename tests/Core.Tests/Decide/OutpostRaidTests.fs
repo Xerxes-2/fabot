@@ -7585,6 +7585,48 @@ let engagementTests =
                     "but one sixty ticks out lands after its heals are shot off and it falls"
             }
 
+            // #624 (from #615 U3's review): a body lost anyway spends itself
+            // only on damage a kill keeps, and a kill is only a finisher's
+            // that survives its own exchange, or our towers'.
+            test
+                "a body lost anyway spends itself only beside a finisher that outlives the raid, or our towers" {
+                let raid =
+                    [
+                        { hostileIn
+                              "W1N2"
+                              { X = 25; Y = 42 }
+                              (List.replicate 12 Attack @ List.replicate 12 Move) with
+                            Id = "m-1"
+                        }
+                        { hostileIn "W1N2" { X = 25; Y = 43 } smallHealer with
+                            Id = "h-1"
+                        }
+                    ]
+
+                let fourBlocks = List.concat (List.replicate 4 Bodies.rangerPattern.Block)
+
+                // Five ticks to live: it ages out before it falls, so leaving
+                // saves nothing, and its 80 a tick outpaces the 60 heal.
+                let dying =
+                    { creepWith "r-1" 0 0 fourBlocks with
+                        TicksToLive = 5
+                    }
+
+                let partner = creepWith "r-2" 0 0 fourBlocks
+                let world = kitedBy raid [ dying, { X = 25; Y = 45 }; partner, { X = 26; Y = 45 } ]
+
+                let fits colony beside =
+                    Facts.fits colony Stance.Standoff "W1N2" 2 true dying beside
+
+                Expect.isFalse
+                    (fits world [ partner, true, Some 0 ])
+                    "the two lose together, and the partner alone, out-healing the heal by 20, falls to the 360 swing long before: what the dying one strikes is healed back"
+
+                Expect.isTrue
+                    (fits (world |> withOurTowers "W1N2" [ { X = 25; Y = 30 } ]) [])
+                    "a tower out-damaging the heal alone finishes the raid: its 100 hits are kept"
+            }
+
             test
                 "the W11S28 shape as the engine's Invaders asks the ranger row: penned, its shooters still flee" {
                 // An Invader with no ATTACK flees every hostile inside three
@@ -7669,11 +7711,12 @@ let engagementTests =
             }
 
             test "two guards that lose alone and win together wait out of reach for each other" {
-                // A smallMelee beside a smallHealer: one 800-bank guard loses it
-                // (`guard`'s own worked example), two win. The bank now buys a
+                // A smallMelee beside two smallHealers: one 800-bank guard loses
+                // it, two win. One healer no longer does: the melee's swing is
+                // struck back by the guard's 90 (#624). The bank now buys a
                 // guard that wins alone, so the room is the guard row's `Win`;
                 // the two held were cast smaller.
-                let raid = raiders @ healers 1
+                let raid = raiders @ healers 2
 
                 let declared hostiles =
                     { declaredRaid hostiles with
