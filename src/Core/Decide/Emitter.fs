@@ -1294,24 +1294,31 @@ let aims (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
                 strikeOrder view atlas targets fighting creep room |> List.map (strikeAt creep)
             | _ -> [])
 
-/// What one fighter aims at first where it stands (`aims`), with how far it
-/// strikes: the head of its kill order, in its own room. What a chase step
-/// keeps in its reach (`Resolver.chaseStep`). None for a body that aims at
-/// nothing, or whose head stands in another room.
+/// What one fighter strikes next where it stands (`aims`), with how far it
+/// strikes: the head of its kill order, then every other target of it in
+/// its reach, which a light tick's `pickStrike` shoots first. What a chase
+/// step keeps in its reach (`Resolver.chaseStep`). None for a body that aims
+/// at nothing, or whose kill order stands in another room.
 let internal aimOf
     (view: ColonyView)
     atlas
     (threats: Threats)
     (assigned: Map<string, Task>)
     (creep: CreepInfo)
-    : (HostileInfo * int) option =
-    match strikesBy view atlas threats assigned creep, Atlas.creepRoom atlas creep.Name with
+    : (HostileInfo list * int) option =
+    match strikesBy view atlas threats assigned creep, Atlas.creepTile atlas creep.Name with
     | Some(room, targets, true), Some here when
-        room = here && not (mustering threats assigned creep)
+        room = here.Room && not (mustering threats assigned creep)
         ->
-        strikeOrder view atlas targets (Threats.fightRooms threats) creep room
-        |> List.tryHead
-        |> Option.map (fun head -> head, reachOf creep)
+        let reach = reachOf creep
+
+        match strikeOrder view atlas targets (Threats.fightRooms threats) creep room with
+        | head :: rest ->
+            let inReach (hostile: HostileInfo) =
+                RoomPos.range here hostile.Pos |> Option.exists (fun r -> r <= reach)
+
+            Some(head :: List.filter inReach rest, reach)
+        | [] -> None
     | _ -> None
 
 /// Each aiming ranger's `Volley` (#537), for the light ticks' mass attack:

@@ -1619,12 +1619,13 @@ module Threats =
                     && not (Set.contains (RoomPos.pos tile) (rampartsIn threats atlas tile.Room))
                 | _ -> false)
 
-    /// One body's own arrival over the room it stands in, flooded once a
-    /// tick (`Threats.Walks`); None for a body the projection does not place,
-    /// and for any body on a tick with no Reach, which floods nothing.
-    let walkOf (threats: Threats) atlas (creep: CreepInfo) : Arrival.BodyArrival option =
-        if Map.isEmpty threats.Arrivals then
-            None
+    /// One body's own arrival over the room it stands in, flooded at most
+    /// once a tick (`Threats.Walks`), Reach or none; None for a body the
+    /// projection does not place. The quiet tick's (`noThreats`, `quietOn`)
+    /// is one value every test shares, and keeps none.
+    let bodyWalkOf (threats: Threats) atlas (creep: CreepInfo) : Arrival.BodyArrival option =
+        if obj.ReferenceEquals(threats.Walks, noThreats.Walks) then
+            Arrival.ofBody atlas creep
         else
             match threats.Walks.TryGetValue creep.Name with
             | true, walk -> walk
@@ -1632,6 +1633,14 @@ module Threats =
                 let walk = Arrival.ofBody atlas creep
                 threats.Walks.[creep.Name] <- walk
                 walk
+
+    /// `bodyWalkOf` on a tick with a Reach; None for any body on a tick
+    /// with none, which floods nothing.
+    let walkOf (threats: Threats) atlas (creep: CreepInfo) : Arrival.BodyArrival option =
+        if Map.isEmpty threats.Arrivals then
+            None
+        else
+            bodyWalkOf threats atlas creep
 
     /// By tile index of the room a body stands in, whether a hostile strikes
     /// the tile before the body could be on it and gone (movement S2:

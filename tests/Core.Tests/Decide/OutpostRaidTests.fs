@@ -2916,6 +2916,94 @@ let kiteStepTests =
                     "four off, where no plain tile reaches it, it crosses the band"
             }
 
+            // #607: the swamp check weighed only the kill order's head, but
+            // the light tick shoots whatever it reaches first (`pickStrike`).
+            // Head four off across the band, a second two off on its edge: a
+            // step onto the band beside the second held the body five ticks,
+            // from which the second, walking off, is out of its reach. It
+            // weighs every target it strikes next, and keeps the second in
+            // reach from the plain.
+            test
+                "a ranger shooting a second target keeps it in reach rather than step onto swamp toward the head" {
+                let band =
+                    set
+                        [
+                            for x in 15..35 do
+                                for y in 41..42 -> { X = x; Y = y }
+                        ]
+
+                let from = { X = 25; Y = 43 }
+
+                let decided (headAt: Pos) (secondAt: Pos) =
+                    // The head is the hurt one, first of the kill order, its
+                    // MOVE still whole.
+                    let head =
+                        { hostileIn "W1N2" headAt smallRanged with
+                            Hits = 800
+                        }
+
+                    let second =
+                        { hostileIn "W1N2" secondAt smallRanged with
+                            Id = "h-2"
+                        }
+
+                    let colony = declaredRaid [ head; second ] |> withField
+                    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+                    let colony =
+                        { colony with
+                            Spatial =
+                                colony.Spatial
+                                |> withNeighbour
+                                    "W1N2"
+                                    { outpost with
+                                        Terrain =
+                                            TerrainGrid.ofList
+                                                [
+                                                    for x in 15..35 do
+                                                        for y in 35..48 ->
+                                                            let tile = { X = x; Y = y }
+
+                                                            tile,
+                                                            (if Set.contains tile band then
+                                                                 Swamp
+                                                             else
+                                                                 Plain)
+                                                ]
+                                    }
+                        }
+                        |> withGuards
+                            [
+                                creepWith
+                                    "r-1"
+                                    0
+                                    0
+                                    (List.concat (List.replicate 5 Bodies.rangerPattern.Block)),
+                                from
+                            ]
+
+                    let decision =
+                        decide colony (Map.ofList [ "r-1", taskId (Guard "W1N2") ]) Set.empty None
+
+                    let step =
+                        moveIntents decision.Intents
+                        |> List.tryFind (fst >> (=) "r-1")
+                        |> Option.map (snd >> stepped from)
+
+                    step, decision.Intents
+
+                let step, intents = decided { X = 25; Y = 39 } { X = 23; Y = 41 }
+
+                Expect.contains
+                    intents
+                    (RangedAttackCreep("r-1", "h-2"))
+                    "it shoots the second, in reach"
+
+                Expect.isFalse
+                    (step |> Option.exists (fun tile -> Set.contains tile band))
+                    $"and steps onto no swamp, which would lose it: {step}"
+            }
+
             // Movement S3 retired `glueStep`'s `struck` (a second melee beside
             // the target's tile): the full tick reads the maps
             // (`Emitter.glueKeeps`), the tile kept where it is struck no harder
