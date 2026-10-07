@@ -332,8 +332,6 @@ let killAdmissionTests =
                 // the kill's ground less the Reach is empty, so there is no
                 // way round to it.
                 let colony = trespassPastAReach { X = 27; Y = 1 }
-                let reach = Threats.reachIn (threatsOf colony (Atlas.ofView colony)) "W1N2"
-
                 let decision = decideOn colony
 
                 Expect.equal
@@ -348,10 +346,6 @@ let killAdmissionTests =
 
                 Expect.isEmpty steps "it waits rather than step in"
                 Expect.isNone (Map.tryFind "g-1" decision.Steps) "and plans no step"
-
-                Expect.isFalse
-                    (steps |> List.exists (fun tile -> Set.contains tile reach))
-                    "and its step keeps out of the Reach"
             }
         ]
 

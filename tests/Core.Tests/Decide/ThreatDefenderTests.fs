@@ -186,15 +186,21 @@ let rampartDefenderTests =
                 // raider, so no Defend was pooled and the defender stood idle.
                 let onExit = defenderHome defendedLine [ raidMeleeAt "h-1" { X = 0; Y = 34 } ] []
 
-                Expect.isNonEmpty (defendAsks onExit) "the melee on the exit tile is answered"
+                // A brief with no want still lists both rows at zero, so the
+                // whole list is the claim.
+                Expect.equal
+                    (defendAsks onExit)
+                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
+                    "the melee on the exit tile is answered, by both rows"
 
                 let medic =
                     { raidMeleeAt "h-1" { X = 0; Y = 34 } with
                         Body = List.replicate 7 Heal @ List.replicate 7 Move
                     }
 
-                Expect.isNonEmpty
+                Expect.equal
                     (defendAsks (defenderHome defendedLine [ medic ] []))
+                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
                     "so is the healer alone there"
             }
 
@@ -207,9 +213,10 @@ let rampartDefenderTests =
                         Pos = RoomPos.at "W2N1" { X = 49; Y = 34 }
                     }
 
-                Expect.isNonEmpty
+                Expect.equal
                     (defendAsks (defenderHome defendedLine [ across ] []))
-                    "the melee on W2N1's exit tile, carried onto ours next tick"
+                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
+                    "the melee on W2N1's exit tile, carried onto ours next tick, as on ours"
 
                 let remembered =
                     { defenderHome defendedLine [] [] with
@@ -221,7 +228,10 @@ let rampartDefenderTests =
                             ]
                     }
 
-                Expect.isNonEmpty (defendAsks remembered) "the healer remembered off the exit tile"
+                Expect.equal
+                    (defendAsks remembered)
+                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
+                    "the healer remembered off the exit tile"
 
                 Expect.isEmpty
                     (defendAsks

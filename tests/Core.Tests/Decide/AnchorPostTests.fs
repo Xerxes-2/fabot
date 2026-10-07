@@ -342,11 +342,14 @@ let anchorWorkCapTests =
 
             test "the charge is one body a Post and not the quota times one ceiling" {
                 // Five Posts over two rates: Post by Post the row is charged
-                // 2 × 700 + 3 × 400 = 2,600; the quota times its richest
-                // ceiling charges 5 × 700 = 3,500. At a 1,600 bank a worker
-                // place is 12,000 of lifetime drain and the 900 straddles
-                // one: 11 against 10. Held, all five saturate at six Work
-                // and the two readings agree at 12.
+                // at the body each Post's cast buys, the home's 2 × 700 and
+                // the neutral outposts' legged three Work, 3 × 450 (#515):
+                // 2,750, where the quota times its richest ceiling would
+                // charge 5 × 800 = 4,000. At a 1,600 bank a worker place is
+                // 12,000 of lifetime drain, so the 1,250 shows only where the
+                // surplus straddles a place. Held,
+                // all five saturate at six Work, charged as cast at
+                // 2 × 700 + 3 × 800, and the richer rock pays for the 12.
                 let target held =
                     let colony = anchorChargeColony true 3
 

@@ -70,9 +70,10 @@ let internal withoutHomePosts (colony: ColonyView) =
 
 /// The W12S28 colony at a 1,300 bank with `postedOutpostColony`'s posted
 /// outpost source beside it and a fleet of one worker, so every Post is an
-/// unfilled Anchor gap. 700 of the 1,300 goes on the first body, so the
-/// tick casts exactly one Anchor whatever the gap. Two dials: whether the
-/// home room keeps its Posts, and who holds W1N2.
+/// unfilled Anchor gap. The first body takes 800 of the 1,300 (the legged
+/// six Work, #515) or 450 (the legged three), and the tick casts exactly one
+/// Anchor whatever the gap. Two dials: whether the home room keeps its
+/// Posts, and who holds W1N2.
 let internal anchorCapColony homePosts (control: (string * RoomControlInfo) list) =
     let rock = { X = 40; Y = 40 }
 
@@ -115,9 +116,10 @@ let internal anchorCastBy colony =
 /// — so a charge that moves by 350 an Anchor is invisible unless the
 /// surplus straddles a boundary. Three Posts move it by 1,050: 21,450
 /// charged at the cast body against 20,400 at the held one, three places
-/// and two. `homePosts` keeps the home Posts too: five Posts over two
-/// rates, charged 2 × 700 + 3 × 400 Post by Post where a quota times one
-/// ceiling charges 5 × 700.
+/// and two (350 = the legged six Work's 800 less the legged three's 450,
+/// #515). `homePosts` keeps the home Posts too: five Posts over two rates,
+/// charged 2 × 700 + 3 × 450 Post by Post, and 2 × 700 + 3 × 800 when all
+/// five are held.
 let internal anchorChargeColony homePosts workers =
     let rocks = [ { X = 10; Y = 40 }; { X = 20; Y = 40 }; { X = 30; Y = 40 } ]
 

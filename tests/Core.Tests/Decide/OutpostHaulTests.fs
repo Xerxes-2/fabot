@@ -28,26 +28,15 @@ let outpostContainerTests =
                     (Set.ofList [ { X = 10; Y = 45 }; { X = 11; Y = 43 } ])
                     "the premise: the rock has two Seats, and the nearer one to the border is (10,45)"
 
-                Expect.equal
-                    (containerSites colony)
-                    [ "W1N2", { X = 11; Y = 43 } ]
-                    "the farther Seat wins, because the ground between it and the Seam is cheaper"
-            }
-
-            test "the Intent carries the outpost's own room, never the colony's" {
+                // The Intent carries the outpost's own room, never the colony's:
                 // `planLayout` stamps the one room it plans onto every site it emits,
                 // so a pick routed through it would land on the home room's tile of the
-                // same coordinates. (11,43) is a real coordinate in both rooms.
-                let colony =
-                    northBorderColony { X = 10; Y = 38 }
-                    |> withOutpostGround "W1N2" detourGround [ "src-out", outpostSource, Source ]
-
-                // The whole list, never `Expect.all`, which is vacuously true of an
-                // empty one.
+                // same coordinates. (11,43) is a real coordinate in both rooms. The
+                // whole list, never `Expect.all`, which is vacuously true of an empty one.
                 Expect.equal
                     (containerSites colony)
                     [ "W1N2", { X = 11; Y = 43 } ]
-                    "the one site this rule places names the room its source stands in"
+                    "the farther Seat wins, because the ground between it and the Seam is cheaper, in the room its source stands in"
             }
 
             test "a room the colony cannot see this tick is planned nothing" {

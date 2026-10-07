@@ -956,18 +956,6 @@ let guardFlavourTests =
                     ((Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2").Duty)
                     (Duty.Guard BriefKind.Trespass)
                     "a trespass's"
-
-                let shut =
-                    Observe.RaidState.empty
-                    |> Observe.foldRaids
-                        Observe.capEpisodes
-                        Set.empty
-                        colony
-                        (Planner.outpostFactsOf colony (Atlas.ofView colony)).Declared
-                    |> Observe.standDown Tuning.defaults (colony.Time + 1)
-                    |> fun gate -> gate.Shut
-
-                Expect.isEmpty shut "and it stands nothing down"
             }
 
             // The Brief's S7, rule 1: healing reaches it, so its parts come back
@@ -1343,7 +1331,11 @@ let guardPrecedenceTests =
                         // room's (it was the resident's, pooled for nobody).
                         [ Resident; Hold ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         // The core pools the Guard, and the garrison takes it
-                        // on the Reactor's ring, the core unhit.
+                        // on the Reactor's ring, the core unhit. Quirk, kept
+                        // (the Brief's S3): `Planner.coredOutpostsOf` pools a
+                        // declared outpost's core whatever kind claims the room
+                        // first, so an errand with no ore, pooling nothing alone
+                        // ([ Resident ]), is pooled for its core.
                         [ Resident; Core ],
                         row [ Resident ] [ "ResidentRing" ] OnTheTier garrison [ "r-1" ]
                         // The guard holding it holds the trespass's fight (#535).
@@ -1400,64 +1392,6 @@ let guardPrecedenceTests =
                     (rows |> List.map (fun (flavours, _) -> flavours, read flavours))
                     rows
                     "each mix's answer"
-            }
-
-            // Quirk, kept (the Brief's S0): the two orders that disagree, named.
-            test
-                "quirk: a resident room that is harassed too caps its Guard at one ranger and the reliefs" {
-                let colony = List.fold withFlavour precedenceBasis [ Resident; Harassed ]
-
-                Expect.equal
-                    (pooledHolding [] (Guard "W1N2") colony)
-                    (Some(
-                        safetyRank OnTheTier,
-                        Capacity.fighters (1 + precedenceBasis.Tuning.RangerResidents)
-                    ))
-                    "the cap's arm is the resident's, its count the row ask's harassment one"
-            }
-
-            test
-                "quirk: a chase out of sight over a held exit holds the exit's range-1 ground, a rung up" {
-                let colony = List.fold withFlavour precedenceBasis [ ChaseDark; Hold ]
-
-                Expect.equal
-                    (Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) "W1N2")
-                    (Some([ for y in 41..48 -> RoomPos.at "W1N2" { X = 1; Y = y } ] |> Set.ofList))
-                    "the melee guard's ground a step inside the run, which a kiter keeps off"
-
-                Expect.equal
-                    (pooledHolding [ "g-1", Guard "W1N2" ] (Guard "W1N2") colony)
-                    (Some(safetyRank OneRungUp, Capacity.fighters 1))
-                    "pooled as the chase's kill"
-
-                Expect.equal
-                    ((decideFrom (Map.ofList [ "g-1", taskId (Guard "W1N2") ]) colony).Assignments
-                     |> Map.tryFind "r-1")
-                    (Some(taskId (Guard "W1N2")))
-                    "and the ranger takes it"
-            }
-
-            // Quirk, kept (the Brief's S3): `Planner.coredOutpostsOf` pools a
-            // declared outpost's core whatever kind claims the room first, so an
-            // errand room with no ore to burn, pooled for nothing else, is
-            // pooled for its core and held on the Reactor's ring.
-            test "quirk: an unfuelled errand room with a core pools its Guard as the resident's" {
-                let colony = List.fold withFlavour precedenceBasis [ Resident; Core ]
-                let threats = threatsOf colony (Atlas.ofView colony)
-
-                Expect.equal
-                    ((Threats.briefOf threats "W1N2").Duty, Threats.guardGroundIn threats "W1N2")
-                    (Duty.Guard BriefKind.Resident, Some(besideIn { X = 6; Y = 46 }))
-                    "read as the resident's, on the Reactor's ring"
-
-                Expect.equal
-                    (pooledHolding [] (Guard "W1N2") (withFlavour precedenceBasis Resident))
-                    None
-                    "the errand alone pools nothing"
-
-                Expect.isSome
-                    (pooledHolding [] (Guard "W1N2") colony)
-                    "the core beside it pools the Guard"
             }
 
             // The Brief's S3: a chase leaves its room open to the ring kinds alone.

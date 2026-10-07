@@ -518,7 +518,7 @@ let errandStandDownTests =
                     "and its own heal in the same tick"
             }
 
-            test "a rival's claimer is the ranger's first target beside the flag" {
+            test "a rival's claimer beside the flag keeps the ranger's ground on the Reactor's ring" {
                 let claimer =
                     { hostileIn
                           errandRoom
@@ -541,11 +541,9 @@ let errandStandDownTests =
                     (Guard errandRoom)
                     "the Task stands, and the claimer is its business"
 
-                Expect.contains
-                    (emitOn colony [ guard.Name, Guard errandRoom ])
-                    (RangedAttackCreep(guard.Name, "claimer"))
-                    "and the ranger beside it shoots it"
-
+                // Which target it shoots first is pinned with competitors
+                // beside it: "only a ranger holds an errand room's Guard…"
+                // above and the claimer's whole approach below.
                 let atlas = Atlas.ofView colony
                 let threats = threatsOf colony atlas
 
@@ -619,7 +617,7 @@ let errandStandDownTests =
             }
 
             test
-                "a Source Keeper is terrain in an errand room, as the guard row's fight is an outpost's too" {
+                "a Source Keeper is terrain in an errand room: the tile a player's body shuts, it does not" {
                 let tick = 100
 
                 let defender owner =
@@ -651,29 +649,13 @@ let errandStandDownTests =
                         Hostiles = [ defender "Source Keeper" ]
                     }
 
-                // At a bank that buys the ranger which wins it: a melee guard's
-                // swing reaches no shooter as quick as it (#535).
-                let guardServedRoom =
-                    { errandRaid with
-                        Errands = []
-                        OreRooms = Set.empty
-                        RoomControl = Map.add errandRoom neutralRoom errandRaid.RoomControl
-                        Bank = bank 5600 5600
-                    }
-                    |> withOutpostRoom errandRoom { X = 25; Y = 25 } false
+                Expect.isTrue
+                    (Set.contains errandRoom (folded errandRaid))
+                    "the premise: a player's body on that tile shuts the errand room"
 
                 Expect.isFalse
                     (Set.contains errandRoom (folded expectedKeeper))
                     "a Source Keeper is the expected transit hazard, not a player raid on the target"
-
-                Expect.isTrue
-                    (Facts.rangerAnswers guardServedRoom errandRoom
-                     && Facts.answer guardServedRoom errandRoom = Answer.Win)
-                    "the premise: the declared Outpost's own row, the ranger's, wins this exchange"
-
-                Expect.isFalse
-                    (Set.contains errandRoom (folded guardServedRoom))
-                    "so the same player body in an Outpost keeps the existing fight answer"
             }
 
             test "the target-room withdrawal removes the errand from the scan until its clock ends" {
@@ -2049,7 +2031,7 @@ let courierTests =
                     "the premise: uncontested, the same body pours"
             }
 
-            test "a drawn load banks when no errand is worked, held or shut" {
+            test "a drawn load banks when no errand is in the view" {
                 let loaded = courier "courier-held" |> carrying 500
 
                 let banked colony =

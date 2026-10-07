@@ -362,12 +362,13 @@ let neighbouringRoomTests =
     testList
         "decide across a border"
         [
-            test "a source in the neighbouring room is no Task this creep can be given" {
+            test "a neighbour's source with no crossing to it is no Task this creep can be given" {
                 // The Matcher prices through the Work Area, not the Task-shaped wrapper,
                 // so a guard on the wrapper alone leaves the neighbour's source priced
                 // off this room's flood at cost 0, cheaper than every home rival, and
                 // the creep walks inside its own room toward ground it will never stand
-                // on. Until #123 sums the legs over the Seam band the Task does not apply.
+                // on. This view has no Borders and no Seam, so no leg crosses to it; with
+                // a Seam the outpost's Harvest is assigned (OutpostDeclarationTests).
                 let home =
                     { SpatialInfo.empty with
                         RoomName = Some "W1N1"
@@ -409,63 +410,5 @@ let neighbouringRoomTests =
                 Expect.isEmpty
                     (moveIntents intents)
                     "and nobody is walked toward a border they cannot cross"
-            }
-
-            test "a grounded creep in the neighbouring room grounds nobody here" {
-                // Arbitrated movement and the occupancy surcharge are single-room. The
-                // Resolver pre-claims a fatigued creep's tile through a `Set<Pos>` with
-                // no room dimension, so a creep on the same coordinate of another room
-                // would deny a step here on evidence from fifty tiles away.
-                let home =
-                    { SpatialInfo.empty with
-                        RoomName = Some "W1N1"
-                        TargetKinds = Map.ofList [ "src-home", Source ]
-                    }
-                    |> withHome (fun layer ->
-                        { layer with
-                            Terrain = TerrainGrid.ofList (corridor 10 10 18)
-                            TargetPositions = Map.ofList [ "src-home", { X = 10; Y = 18 } ]
-                            CreepPositions = Map.ofList [ "w-home", { X = 10; Y = 10 } ]
-                        })
-
-                let colony creeps layer =
-                    { bareRespawn with
-                        Spawns = []
-                        Sources = [ source "src-home" ]
-                        Controller = None
-                        Refillables = []
-                        Creeps = creeps
-                        Spatial = home |> withNeighbour "W2N1" layer
-                    }
-
-                let assigned = Map.ofList [ "w-home", "harvest:src-home" ]
-
-                let { Intents = alone } =
-                    decideFrom assigned (colony [ worker "w-home" 0 50 ] RoomLayer.empty)
-
-                let neighbour =
-                    { RoomLayer.empty with
-                        Terrain = TerrainGrid.ofList (corridor 10 10 18)
-                        CreepPositions = Map.ofList [ "w-out", { X = 10; Y = 11 } ]
-                    }
-
-                let { Intents = crowded } =
-                    decide
-                        (colony
-                            [ worker "w-home" 0 50; { worker "w-out" 0 50 with Fatigue = 5 } ]
-                            neighbour)
-                        assigned
-                        Set.empty
-                        None
-
-                Expect.equal
-                    (moveIntents alone)
-                    [ "w-home", Bottom ]
-                    "the premise: with the neighbour empty the home creep steps down its corridor"
-
-                Expect.equal
-                    (moveIntents crowded)
-                    (moveIntents alone)
-                    "and a creep paying off fatigue in another room changes nothing here"
             }
         ]

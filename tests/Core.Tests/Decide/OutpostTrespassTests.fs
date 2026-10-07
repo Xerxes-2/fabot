@@ -531,7 +531,7 @@ let trespassTests =
                     "only a declared enemy trespasses"
             }
 
-            test "an ally's body, a scout and an Invader's digger pool none" {
+            test "an ally's body and an Invader's digger pool none" {
                 let guardIn colony =
                     pooledOf colony
                     |> List.exists (fun e ->
@@ -545,10 +545,6 @@ let trespassTests =
                             Allies = [ diggerAt "W1N2" { X = 25; Y = 44 } ]
                         })
                     "an ally's digger is no hostile"
-
-                Expect.isFalse
-                    (guardIn (declaredRaid [ hostileIn "W1N2" { X = 25; Y = 44 } [ Move ] ]))
-                    "a scout digs nothing"
 
                 Expect.isFalse
                     (guardIn (
@@ -863,14 +859,14 @@ let trespassTests =
                     (pooled (remnant "giaco"))
                     "nor a neutral's healer, which carried no weapon (`mayStrike`)"
 
-                for label, parts in
-                    [ "scout", [ Move ]; "hauler", List.replicate 4 Carry @ List.replicate 4 Move ] do
-                    Expect.isFalse
-                        (pooled
-                            { hostileIn "W1N2" { X = 25; Y = 44 } parts with
-                                Owner = "giaco"
-                            })
-                        $"nor a neutral's {label}"
+                // A neutral's hauler is "a neutral player's hauler in our
+                // outpost pools nothing".
+                Expect.isFalse
+                    (pooled
+                        { hostileIn "W1N2" { X = 25; Y = 44 } [ Move ] with
+                            Owner = "giaco"
+                        })
+                    "nor a neutral's scout"
             }
 
             // #598: arena "a hurt pair retreats", Medic1's HEAL shot off

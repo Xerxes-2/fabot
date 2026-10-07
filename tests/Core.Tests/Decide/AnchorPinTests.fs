@@ -187,6 +187,8 @@ let anchorTests =
             }
 
             test "a Post and banked capacity plan an Anchor body" {
+                // Whatever the container's range to the controller: with no
+                // Dual Seat, upgrade range separates no Post from another.
                 let snapshot =
                     { postedColony with
                         Creeps = [ worker "w1" 0 50 ]
@@ -220,43 +222,6 @@ let anchorTests =
                 | [ (_, body, creepName) ] ->
                     Expect.equal body (workerBodyFor 300) "the worker row sized to the bank"
                     Expect.stringStarts creepName "worker-" "the name carries the worker row"
-                | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
-            }
-
-            test "a source-container Post out of upgrade range casts an Anchor at full bank" {
-                // The W12S28 shape: controller far from every Seat, and a
-                // built container stands on the Seat at (9,10) — a Post.
-                let snapshot =
-                    { unpostedColony with
-                        Creeps = [ worker "w1" 0 50 ]
-                        Spatial =
-                            { unpostedRoom with
-                                TargetKinds =
-                                    unpostedRoom.TargetKinds
-                                    |> Map.add "cont-1" (Structure BuiltKind.Container)
-                            }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    TargetPositions =
-                                        Map.ofList
-                                            [
-                                                "src-a", { X = 10; Y = 10 }
-                                                "ctrl-1", { X = 40; Y = 40 }
-                                                "cont-1", { X = 9; Y = 10 }
-                                            ]
-                                })
-                    }
-
-                let { Intents = intents } = decideOn snapshot
-
-                match spawnIntents intents with
-                | [ (_, body, creepName) ] ->
-                    Expect.equal
-                        body
-                        [ Work; Work; Carry; Move ]
-                        "the Anchor row sized to the 300 bank"
-
-                    Expect.stringStarts creepName "anchor-" "the container Seat is a Post"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 

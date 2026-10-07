@@ -372,6 +372,7 @@ let threatGateTests =
                     |> withHits "ramp-1" BuiltKind.Rampart 100000 300000
 
                 let {
+                        Intents = intents
                         Assignments = kept
                         Verdicts = verdicts
                     } =
@@ -388,6 +389,11 @@ let threatGateTests =
                          | Verdict.Released _ -> true
                          | _ -> false))
                     "and nothing releases it"
+
+                Expect.contains
+                    (actionIntents intents)
+                    (HarvestSource("a1", "src-a"))
+                    "and it digs this tick: a kept Task is not enough"
             }
 
             test "the same body on a bare Post is released Threatened, and is not matched to Flee" {
@@ -671,7 +677,7 @@ let fleeTests =
                     "and rank is what decided it against the deadline Upgrade"
             }
 
-            test "a dismantler beside a hauler makes it flee from nothing" {
+            test "a dismantler beside a hauler is no Reach: the hauler keeps its Refill" {
                 // #429: a dismantler endangers our home, and a WORK hurts no
                 // creep: the hauler keeps its Refill.
                 let held = taskId (Refill("spawn-1", Energy))
@@ -1293,7 +1299,7 @@ let fleeTests =
 /// whose corridors share a column, so every coordinate the outpost's
 /// worker stands on is a coordinate the home room could hold a hostile at
 /// — the shape a Reach filed without its room would collapse.
-let private twoRoomColony (hostiles: HostileInfo list) =
+let private twoRoomColonyAt (home: Pos) (outpost: Pos) (hostiles: HostileInfo list) =
     let colony =
         northBorderColony { X = 10; Y = 20 }
         |> withNorthOutpost (Some { X = 10; Y = 47 })
@@ -1303,15 +1309,17 @@ let private twoRoomColony (hostiles: HostileInfo list) =
         Hostiles = hostiles
         Spatial =
             colony.Spatial
-            |> withCreepsAt [ "wh", { X = 10; Y = 10 } ]
+            |> withCreepsAt [ "wh", home ]
             |> withNeighbour
                 "W1N2"
                 { RoomLayer.empty with
                     Terrain = TerrainGrid.ofList (corridor 10 40 48)
                     TargetPositions = Map.ofList [ "src-out", { X = 10; Y = 47 } ]
-                    CreepPositions = Map.ofList [ "wo", { X = 10; Y = 45 } ]
+                    CreepPositions = Map.ofList [ "wo", outpost ]
                 }
     }
+
+let private twoRoomColony = twoRoomColonyAt { X = 10; Y = 10 } { X = 10; Y = 45 }
 
 [<Tests>]
 let layeredThreatTests =
@@ -1324,19 +1332,28 @@ let layeredThreatTests =
             // Reach, so the quiet tick is the yardstick every case below is
             // measured against, byte for byte.
             test "a home Threat digs no hole in the outpost: the coordinate is another room's" {
-                // The ticket's trace: one melee hostile at (10,45) in W1N1, a
-                // tile the home corridor does not even cover, shares its
-                // coordinate with the outpost's worker fifty tiles and a
-                // border away. Before #138 that worker dropped its source
-                // and fled.
-                let quiet = twoRoomColony []
+                // The ticket's trace: one melee hostile in W1N1 shares its
+                // coordinate with the outpost's worker a border away. Before
+                // #138 that worker dropped its source and fled. (10,40) is
+                // the one coordinate both corridors cover, so the home Reach
+                // holds the worker's coordinate (a Reach holds only standable
+                // tiles, movement S2) and a Reach collapsed onto one set
+                // would reach it.
+                let atOverlap = twoRoomColonyAt { X = 10; Y = 10 } { X = 10; Y = 40 }
+                let quiet = atOverlap []
 
                 Expect.equal
                     (let _, assignments, _ = outcomeOf quiet in Map.toList assignments)
                     [ "wh", taskId (Harvest "src-home"); "wo", taskId (Harvest "src-out") ]
                     "each worker digs the source of its own room"
 
-                let raided = twoRoomColony [ hostileIn "W1N1" { X = 10; Y = 45 } [ Attack; Move ] ]
+                let raided = atOverlap [ hostileIn "W1N1" { X = 10; Y = 40 } [ Attack; Move ] ]
+
+                Expect.isTrue
+                    (Set.contains
+                        { X = 10; Y = 40 }
+                        (Threats.reachIn (threatsOf raided (Atlas.ofView raided)) "W1N1"))
+                    "the premise: the home Reach holds the outpost worker's coordinate"
 
                 Expect.equal
                     (outcomeOf raided)
@@ -1384,9 +1401,16 @@ let layeredThreatTests =
                 // home worker stands on — pairwise with the case above,
                 // because a Reach collapsed onto one set would fail both
                 // and a Reach keyed on the home room alone would pass one.
-                let quiet = twoRoomColony []
+                let atOverlap = twoRoomColonyAt { X = 10; Y = 40 } { X = 10; Y = 45 }
+                let quiet = atOverlap []
 
-                let raided = twoRoomColony [ hostileIn "W1N2" { X = 10; Y = 10 } [ Attack; Move ] ]
+                let raided = atOverlap [ hostileIn "W1N2" { X = 10; Y = 40 } [ Attack; Move ] ]
+
+                Expect.isTrue
+                    (Set.contains
+                        { X = 10; Y = 40 }
+                        (Threats.reachIn (threatsOf raided (Atlas.ofView raided)) "W1N2"))
+                    "the premise: the outpost Reach holds the home worker's coordinate"
 
                 Expect.equal
                     (outcomeOf raided)

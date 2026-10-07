@@ -1330,7 +1330,7 @@ let outpostTests =
             }
 
             test
-                "the declared outposts are ADR 0042's north room, the survey's south one and the third colony's room two hops east" {
+                "the declared colonies, their mothers and the outposts each works are the ones a human wrote" {
                 // #124 landed this constant empty and pinned the emptiness; this is
                 // where that pin turns over: the rooms, in the order a human wrote
                 // them, and the scan set the shell takes from them.

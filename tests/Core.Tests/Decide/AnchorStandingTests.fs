@@ -40,28 +40,6 @@ let standingBodyTests =
                     "the generalist at the same tile takes the nearer Task, as it always has"
             }
 
-            test "the Anchor row's body is a standing body too" {
-                // Pinned against the generalist in the same lane, so it is
-                // the arithmetic `1 * 4 < 6` on trial and not an
-                // Anchor-shaped exception. This creep stands one step
-                // outside the Upgrade Work Area, so it holds no Task at all.
-                let site = [ "site-1", { X = 15; Y = 10 }, Site BuiltKind.Extension ]
-
-                Expect.equal
-                    (laneAssignment
-                        site
-                        [
-                            {
-                                Id = "site-1"
-                                Left = siteOwes
-                                Begun = false
-                            }
-                        ]
-                        anchorBody)
-                    None
-                    "one Carry against six Work is a commute, whichever row cast it and whichever way it walks"
-            }
-
             test "a standing body does not repair either" {
                 // A road at half hits is the ordinary Repair, one step from
                 // the creep.

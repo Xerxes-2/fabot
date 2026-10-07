@@ -1115,7 +1115,7 @@ let guardRowTests =
                     "and a guard just lost at home holds nothing back"
             }
 
-            test "a guard classifies Fighter, and no other row's body does" {
+            test "a guard classifies Fighter, and no economy row's body does" {
                 // The body class ladder's head, read the only way it is readable
                 // today: `Fighter` answers no differently from `Light` in every
                 // capacity scope but its own — `(=) Heavy`, `(<>) Heavy`,
@@ -1153,7 +1153,7 @@ let guardRowTests =
                         "reserver", Light
                         "worker", Light
                     ]
-                    "one row's body classifies Fighter and it is the guard's"
+                    "of these rows, one body classifies Fighter and it is the guard's"
             }
         ]
 

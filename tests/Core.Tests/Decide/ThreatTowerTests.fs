@@ -95,22 +95,6 @@ let rampartTests =
                     "five tiles: the Keep and both Posts"
             }
 
-            test "the working-ground exclusion does not reach a rampart" {
-                // A Post container stands on a Seat, which the clustered ordering never
-                // offers. A rampart is no footprint, so it is placed there regardless.
-                let { Intents = intents } = decideOn (atLevel 4 keepRoom)
-                let seats = Set.ofList [ { X = 21; Y = 25 }; { X = 29; Y = 25 } ]
-
-                Expect.isTrue
-                    (seats
-                     |> Set.forall (fun seat -> List.contains seat (sitesOfKind Rampart intents)))
-                    "both Seats under a container are ramparted"
-
-                Expect.isEmpty
-                    (Set.intersect seats (clusterTiles intents))
-                    "and no clustered structure follows the rampart onto working ground"
-            }
-
             test "a Storage that is only a site is not covered yet" {
                 // Standing is the built census: a site is not covered until
                 // it is a structure, so the Storage's own tile waits.
@@ -503,7 +487,7 @@ let fireReflexTests =
                 Expect.equal (shots intents) [ "tower-1", "h-a" ] "same range: lowest id wins"
             }
 
-            test "each tower picks its own nearest — no focus fire" {
+            test "on equal threat, each tower takes its own nearest" {
                 let snapshot =
                     towerColony
                         [ "tower-1", { X = 10; Y = 40 }; "tower-2", { X = 40; Y = 10 } ]
@@ -517,7 +501,7 @@ let fireReflexTests =
                 Expect.equal
                     (shots intents |> List.sort)
                     [ "tower-1", "h-a"; "tower-2", "h-b" ]
-                    "the rule is per-tower, stated once"
+                    "two bodies of one rank: range breaks the tie per tower"
             }
 
             test

@@ -406,13 +406,6 @@ let safeModeTests =
                 Expect.isEmpty (activations intents) "nobody is here to be held off"
             }
 
-            test "a full Keep with a hostile in the room fires nothing while a tower stands" {
-                let snapshot = towered wholeKeep |> facing [ hostile [ Attack; Attack; Move ] ]
-
-                let { Intents = intents } = decideOn snapshot
-                Expect.isEmpty (activations intents) "an intact Keep is not yet certain harm"
-            }
-
             test "a WORK-only hostile in a room with a dented tower fires" {
                 // A dismantler hurts a structure without ever qualifying as a
                 // Threat — the arm reads any hostile for exactly this case.

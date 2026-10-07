@@ -240,7 +240,7 @@ let economyEntryTests =
                 Expect.equal
                     (Map.tryFind "w-home" (homeBodyUnder homeWorker [ neutral ] rich).Assignments)
                     (quietDraw ())
-                    "nobody strikes it anywhere, so it is no raid the economy waits out"
+                    "we may strike its weapon in a trespass room, but its owner is none we strike anywhere, so it is no raid the economy waits out"
             }
 
             // Live t1,006,924, W17S26: the room's row cut to its first sighting

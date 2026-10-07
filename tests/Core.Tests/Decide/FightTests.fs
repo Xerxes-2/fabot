@@ -50,9 +50,8 @@ let residentFightTests =
     testList
         "a resident room's fight"
         [
-            // The Fight squad is retired (#564): the per-raider rows and the
-            // world verdict answer the raid, and no squad Task is pooled.
-            test "the t880,341 raid in a raised home pools the residents' Guard and no squad Task" {
+            test
+                "the t880,341 raid in a raised home pools the residents' Guard as its one fight Task" {
                 let mother = fightingMother (w17s25RaidIn "W1N2") []
                 let tasks = planHolding mother []
 
@@ -65,11 +64,6 @@ let residentFightTests =
                          | _ -> false))
                     [ Guard "W1N2" ]
                     "the Guard is the room's one fight Task"
-
-                Expect.equal
-                    ([ "sapper"; "probe"; "medic" ] |> List.map (quotaHolding mother []))
-                    [ Some 0; Some 0; Some 0 ]
-                    "and no squad row casts for it"
             }
 
             test

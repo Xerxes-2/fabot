@@ -1013,6 +1013,9 @@ let childOutpostTests =
             // or already holding the room's Guard.
             test
                 "a raid only the child's ranger and a resident beside wins is Lose where the mother works no room of the raid" {
+                // The mother sees the raid in the one world every colony reads, so
+                // what drops her resident is that she works no room of it,
+                // not that she is blind to it.
                 let mother =
                     (raisingBeyond [])
                     |> fun colony ->
@@ -1020,7 +1023,9 @@ let childOutpostTests =
                             Creeps =
                                 (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
                                 @ [ smallResident "r-1" ]
+                            Hostiles = [ synapse "W1N4" ]
                         }
+                    |> seenBeyond [] []
 
                 let child =
                     { childBeside mother 850 [ ranger "r-own", { X = 24; Y = 26 } ] with
@@ -1051,7 +1056,7 @@ let childOutpostTests =
             }
 
             test
-                "a neighbour's ranger beside a child's home it does not work leaves the mother's resident outmatched" {
+                "a neighbour that sees no raid beside a child's home lends its ranger nothing: the mother's resident stays outmatched" {
                 let mother =
                     { raisingBeyond [ synapse "W1N3" ] with
                         Bank = bank 850 850
