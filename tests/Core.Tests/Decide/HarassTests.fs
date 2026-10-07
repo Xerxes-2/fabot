@@ -1047,6 +1047,38 @@ let diggerFirstTests =
                     "the slow loaded carrier first: the quick one is never caught"
             }
 
+            // Live t1,030,4xx, W19S25: two empty 23C23M haulers on one
+            // four-step dance in place, each a step nearer the edge every
+            // other tick; read off that one step, each was "leaving" in
+            // turn, the order's head flipped between them every two ticks
+            // and the ranger walked two tiles each way for 100+ ticks.
+            test
+                "a hauler stepping back toward the edge after a step away is milling, not walking off" {
+                let hauler id pos =
+                    theirs id enemy pos (List.replicate 23 Carry @ List.replicate 23 Move)
+
+                let at x y = RoomPos.at harassRoom { X = x; Y = y }
+
+                let stepped (back: RoomPos) =
+                    { remoteWith
+                          { X = 22; Y = 21 }
+                          [ hauler "a-near" { X = 14; Y = 20 }; hauler "b-far" { X = 32; Y = 22 } ]
+                          [] with
+                        Stepped = Map.ofList [ "a-near", at 15 21 ]
+                        SteppedBack = Map.ofList [ "a-near", back ]
+                    }
+
+                Expect.equal
+                    (bigRangerOrder (stepped (at 14 20)))
+                    [ "a-near"; "b-far" ]
+                    "back on the tile it stood two steps ago: the nearer hauler leads"
+
+                Expect.equal
+                    (bigRangerOrder (stepped (at 16 22)))
+                    [ "b-far"; "a-near" ]
+                    "two steps on for the edge: it walks off at the ranger's pace, never caught"
+            }
+
             test "a hauler on the source's work spot and a slow miner off it: the miner's ground" {
                 // W19S25, t943,777: a hauler stepping on and off the source's work
                 // spot turned the ground between it and a miner at the room's other

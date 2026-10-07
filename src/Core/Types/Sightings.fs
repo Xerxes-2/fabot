@@ -895,11 +895,13 @@ type RaidSeen = { Raid: HostileInfo list; Tick: int }
 /// Where a hostile stands, and the tile of its room it stood on the full tick
 /// before when it has stepped off it since (`World.recallHostiles`, #551),
 /// and the first full tick it was seen on `At` (#552): one seen there on two
-/// is parked.
+/// is parked. `Back`: the tile of that room it left on the step before
+/// `Left`, which tells a body walking off from one milling in place.
 type HostileStep =
     {
         At: RoomPos
         Left: RoomPos option
+        Back: RoomPos option
         Since: int
     }
 
@@ -1553,13 +1555,19 @@ module World =
                 |> Map.toSeq
                 |> Seq.collect (fun (_, facts) -> facts.Hostiles)
                 |> Seq.map (fun h ->
+                    let left =
+                        Map.tryFind h.Id previous
+                        |> Option.map (fun step -> step.At)
+                        |> Option.filter (fun at -> at <> h.Pos && at.Room = h.Pos.Room)
+
                     h.Id,
                     {
                         At = h.Pos
-                        Left =
-                            Map.tryFind h.Id previous
-                            |> Option.map (fun step -> step.At)
-                            |> Option.filter (fun at -> at <> h.Pos && at.Room = h.Pos.Room)
+                        Left = left
+                        Back =
+                            match left, Map.tryFind h.Id previous with
+                            | Some _, Some step -> step.Left
+                            | _ -> None
                         Since =
                             match Map.tryFind h.Id previous with
                             | Some step when step.At = h.Pos -> step.Since

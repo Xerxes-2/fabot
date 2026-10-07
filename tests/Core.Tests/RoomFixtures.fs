@@ -891,6 +891,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         Foreign = Set.empty
         Parked = Set.empty
         Stepped = Map.empty
+        SteppedBack = Map.empty
         Leaving = Set.empty
         Refusals = []
         Borrowed = BorrowedWork.empty

@@ -1794,8 +1794,8 @@ let private killTicksOf
 /// quicker on plain stays in reach only until it opens the gap past the
 /// body's reach, from where they stand or, coming in, from the reach; one at
 /// the body's pace is caught at its work, but once it walks off (its last
-/// step took it toward the edge, `ColonyView.Stepped`) only from in reach,
-/// and then until it is off.
+/// step took it toward the edge, `ColonyView.Stepped`, and the one before
+/// not away, `ColonyView.SteppedBack`) only from in reach, and then until it is off.
 let private catchOdds
     (view: ColonyView)
     (fighter: Fighter)
@@ -1825,10 +1825,18 @@ let private catchOdds
         let pace = Gait.ticks Gait.plain theirs |> Option.defaultValue 1
         let off = toEdge at * pace
 
+        // A body stepping back and forth in place is caught at its work
+        // (live t1,030,4xx, W19S25: two haulers on one four-step dance,
+        // each read leaving off one step every other tick, turned the
+        // ranger between them for 100+ ticks).
         let leaving =
             Map.tryFind hostile.Id view.Stepped
             |> Option.exists (fun last ->
-                last.Room = hostile.Pos.Room && toEdge at < toEdge (RoomPos.pos last))
+                last.Room = hostile.Pos.Room
+                && toEdge at < toEdge (RoomPos.pos last)
+                && Map.tryFind hostile.Id view.SteppedBack
+                   |> Option.forall (fun back ->
+                       toEdge (RoomPos.pos last) <= toEdge (RoomPos.pos back)))
 
         let window =
             match Gait.ticks Gait.plain fighter.Gait with

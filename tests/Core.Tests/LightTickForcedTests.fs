@@ -1396,6 +1396,79 @@ let forcedTests =
                     "one that reaches it after: nothing forces"
             }
 
+            test
+                "a chase forces off its head's track alone: a slower body further down the kill order, standing at its work, forces nothing" {
+                // Live t1,030,5xx, W19S25: the ranger's head a hauler, its
+                // order on to a miner harvesting; read against the head's
+                // track, the miner was off it every glance and forced 71 of
+                // 100 ticks.
+                let scout x y : GlanceHostile =
+                    { hostile x y "Trepidimous" false with
+                        Id = "scout"
+                    }
+
+                let miner: GlanceHostile =
+                    { hostile 6 10 "Trepidimous" false with
+                        Id = "miner"
+                        Gait = { Weight = 5; Moves = 3 }
+                    }
+
+                let at time rangerX quarry =
+                    { quiet with
+                        Creeps =
+                            Map.ofList
+                                [
+                                    "ranger",
+                                    { creepAt rangerX 10 1000 with
+                                        Gait = Some { Weight = 1; Moves = 1 }
+                                    }
+                                ]
+                        Hostiles = miner :: quarry
+                        Time = time
+                    }
+
+                let aims =
+                    [ RangedAttackCreep("ranger", "scout"); RangedAttackCreep("ranger", "miner") ]
+
+                let now = at 10 12 [ scout 15 10 ]
+
+                let chained =
+                    LightTick.ofPlans
+                        now
+                        Set.empty
+                        [
+                            "",
+                            LightTick.plan
+                                now
+                                (Set.singleton "ranger")
+                                (Map.ofList
+                                    [ "ranger", [ tile 13 10; tile 14 10; tile 15 10; tile 16 10 ] ])
+                                []
+                                []
+                                [ MoveCreep("ranger", Right) ]
+                                aims
+                                Map.empty
+                                Map.empty
+                            |> LightTick.tracking
+                                now
+                                (Map.ofList [ "ranger", [ tile 16 10; tile 17 10; tile 18 10 ] ])
+                        ]
+
+                Expect.isNone
+                    (LightTick.forced chained (at 11 13 [ scout 16 10 ]))
+                    "the head on its track, the miner at its work: nothing forces"
+
+                Expect.equal
+                    (LightTick.forced chained (at 11 13 [ scout 16 11 ]))
+                    (Some(LightForce.Chase "ranger"))
+                    "the head off its track: decide the chase again"
+
+                Expect.equal
+                    (LightTick.forced chained (at 11 13 []))
+                    (Some(LightForce.Chase "ranger"))
+                    "the head out of sight: the miner heads the order, off the track laid for the head"
+            }
+
             test "a chaser standing in reach of a quarry walking on stands on its light tick (#626)" {
                 let scout x =
                     { hostile x 10 "Trepidimous" false with

@@ -1022,9 +1022,14 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
     // chase on its track whose walk left (where it stands and its step plan
     // on) an armed body that stepped since the plan, or came into sight,
     // newly reaches before the next decide: the decide priced its walk off
-    // where the bodies stood (`Resolver.chainOf`).
+    // where the bodies stood (`Resolver.chainOf`). The quarry is the head
+    // of the chaser's kill order still in sight, the body its walk and its
+    // track follow: the rest of the order is struck only in reach
+    // (`pickStrike`), and read against the head's track every one was off
+    // it (live t1,030,5xx, W19S25: a miner at work forced 71 of 100 ticks).
     let chase =
         let plan = merged now last
+        let seen = now.Hostiles |> List.map _.Id |> Set.ofList
 
         plan.Aims
         |> List.choose (fun aim ->
@@ -1032,6 +1037,8 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
             | AttackCreep(name, target) -> Some(name, target, Engine.meleeRange, Engine.meleeRange)
             | RangedAttackCreep(name, target) -> Some(name, target, Engine.rangedRange, 0)
             | _ -> None)
+        |> List.filter (fun (_, target, _, _) -> Set.contains target seen)
+        |> List.distinctBy (fun (name, _, _, _) -> name)
         |> List.filter (fun (name, target, reach, glues) ->
             match
                 Map.tryFind name now.Creeps,
@@ -1078,9 +1085,7 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
                    && closes creep quarry reach
                    && not (menaced now creep.Tile)
             | _ -> false)
-        |> List.map (fun (name, _, _, _) -> name)
-        |> List.distinct
-        |> List.map LightForce.Chase
+        |> List.map (fun (name, _, _, _) -> LightForce.Chase name)
 
     let controllerChanged =
         Seq.append (Map.keys last.Controllers) (Map.keys now.Controllers)

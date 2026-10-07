@@ -744,6 +744,9 @@ type ColonyView =
         /// with the tile of its room it left (`HostileStep.Left`): which way
         /// it walks.
         Stepped: Map<string, RoomPos>
+        /// Of those, each with the tile it left on the step before
+        /// (`HostileStep.Back`): whether it walks on or mills in place.
+        SteppedBack: Map<string, RoomPos>
         /// The tiles, world-wide, of our bodies that leave them this tick
         /// (`Entry.leavingTiles`, #649): on the border ring, or rested and on
         /// the move (`CreepInfo.Walking`) or shoved for free by the
@@ -2156,6 +2159,13 @@ module ColonyView =
                     Map.tryFind h.Id world.HostileSteps
                     |> Option.bind (fun step -> step.Left)
                     |> Option.map (fun left -> h.Id, left))
+                |> Map.ofList
+            SteppedBack =
+                collected (fun facts -> facts.Hostiles)
+                |> List.choose (fun h ->
+                    Map.tryFind h.Id world.HostileSteps
+                    |> Option.bind (fun step -> step.Back)
+                    |> Option.map (fun back -> h.Id, back))
                 |> Map.ofList
             Leaving = Set.empty
             Borrowed =

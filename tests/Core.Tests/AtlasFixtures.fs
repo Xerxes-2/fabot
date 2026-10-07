@@ -49,6 +49,7 @@ let snapshotWith creeps spatial =
         Foreign = Set.empty
         Parked = Set.empty
         Stepped = Map.empty
+        SteppedBack = Map.empty
         Leaving = Set.empty
         Refusals = []
         Borrowed = BorrowedWork.empty
