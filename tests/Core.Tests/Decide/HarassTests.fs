@@ -895,11 +895,157 @@ let minedHarassTests =
             }
         ]
 
+/// Our biggest ranger, eight blocks: 160 a tick at three.
+let private bigRanger =
+    creepWith "ranger-big" 0 0 (List.replicate 8 Bodies.rangerPattern.Block |> List.concat)
+
+let private enemySource = "src-enemy"
+
+/// The harassment room with the enemy's source on its Stand, our biggest
+/// ranger standing on `ranger`, and these hostiles carrying `cargo` as the
+/// world's vision reads their stores (#621).
+let private remoteWith (ranger: Pos) (hostiles: HostileInfo list) (cargo: (string * int) list) =
+    let worked =
+        { (bareHome |> harassing) with
+            Hostiles = hostiles
+        }
+        |> standingThere [ bigRanger, ranger ]
+
+    let layer = SpatialInfo.layerOf worked.Spatial harassRoom
+
+    { worked with
+        Spatial =
+            { worked.Spatial with
+                TargetKinds = worked.Spatial.TargetKinds |> Map.add enemySource Source
+            }
+            |> withNeighbour
+                harassRoom
+                { layer with
+                    TargetPositions = Map.add enemySource standTile layer.TargetPositions
+                }
+        World =
+            { worked.World with
+                Rooms =
+                    Map.add
+                        harassRoom
+                        {
+                            Hostiles = hostiles
+                            HostileFatigue = Map.empty
+                            HostileCargo = Map.ofList cargo
+                            InvaderCores = []
+                            Towers = []
+                            OurTowers = []
+                            Fallen = []
+                            Control = neutralRoom
+                        }
+                        worked.World.Rooms
+            }
+    }
+
+/// The harassment room's kill order for our biggest ranger, by id.
+let private bigRangerOrder (colony: ColonyView) =
+    (Threats.briefOf (threatsOf colony (Atlas.ofView colony)) harassRoom).Targets.Order
+        harassRoom
+        (Some bigRanger)
+        (fun _ -> 0)
+        colony.Hostiles
+    |> List.map (fun h -> h.Id)
+
 [<Tests>]
 let diggerFirstTests =
     testList
-        "a harassment ranger goes for the digger before the hauler"
+        "a harassment ranger goes for the body worth most a tick of its effort (#621)"
         [
+            // Trepidimous' remote as the issue prices it: a 23C23M hauler
+            // (2,300 body, 4,600 hits) loaded with 1,150 or empty, and a 5W3M
+            // miner on its seat (650 body, 800 hits, the source's 10 a tick
+            // until it is replaced). Our biggest ranger, 160 a tick, walks in
+            // sixteen ticks to each: the hauler's kill takes 29 ticks, the
+            // miner's 5, and each kill is priced by its value over the
+            // ticks of effort, walk and kill. Nearer, the miner's short kill
+            // leads: the order is the price's, not a fixed one.
+            test
+                "a near loaded hauler before a catchable empty one before a miner; a far fleeing hauler after a near miner" {
+                let hauler id pos =
+                    theirs id enemy pos (List.replicate 23 Carry @ List.replicate 23 Move)
+
+                let colony = remoteWith
+                let orderOf = bigRangerOrder
+
+                let miner =
+                    theirs
+                        "miner"
+                        enemy
+                        { X = 19; Y = 11 }
+                        (List.replicate 5 Work @ List.replicate 3 Move)
+
+                let remote =
+                    colony
+                        { X = 25; Y = 30 }
+                        [
+                            miner
+                            hauler "empty" { X = 6; Y = 30 }
+                            hauler "loaded" { X = 25; Y = 11 }
+                        ]
+                        [ "loaded", 1150 ]
+
+                Expect.equal
+                    (orderOf remote)
+                    [ "loaded"; "empty"; "miner" ]
+                    "nineteen tiles from each: the loaded hauler, the empty one, then the miner"
+
+                // Beside the miner, the loaded hauler far off and walking out:
+                // at the ranger's pace and out of its reach it is never caught.
+                let fleeing =
+                    { colony
+                          { X = 22; Y = 14 }
+                          [ miner; hauler "loaded" { X = 45; Y = 40 } ]
+                          [ "loaded", 1150 ] with
+                        Stepped = Map.ofList [ "loaded", RoomPos.at harassRoom { X = 44; Y = 39 } ]
+                    }
+
+                Expect.equal
+                    (orderOf fleeing)
+                    [ "miner"; "loaded" ]
+                    "the near miner before the far hauler leaving the room"
+            }
+
+            // #621: a body's load weighs on its legs as the engine walks it
+            // (`Gait.walked`): a 10C5M with 500 aboard steps every second
+            // tick on plain, behind our ranger, so walking off out of reach
+            // it is still caught; a 10C10M with the same load keeps the
+            // ranger's pace and is not.
+            test
+                "a loaded carrier walking off is priced at its loaded pace: a 10C5M is caught, a 10C10M is not" {
+                let carrier id moves pos =
+                    theirs id enemy pos (List.replicate 10 Carry @ List.replicate moves Move)
+
+                // The quick one hurt below the slow one's hits, so the focus
+                // tie-break alone would put it first.
+                let quick =
+                    { carrier "a-quick" 10 { X = 40; Y = 40 } with
+                        Hits = 1000
+                    }
+
+                let leaving =
+                    { remoteWith
+                          { X = 25; Y = 25 }
+                          [ quick; carrier "b-slow" 5 { X = 10; Y = 40 } ]
+                          [ "a-quick", 500; "b-slow", 500 ] with
+                        Stepped =
+                            Map.ofList
+                                [
+                                    "a-quick", RoomPos.at harassRoom { X = 39; Y = 39 }
+                                    "b-slow", RoomPos.at harassRoom { X = 11; Y = 39 }
+                                ]
+                    }
+
+                Expect.equal
+                    (bigRangerOrder leaving)
+                    [ "b-slow"; "a-quick" ]
+                    "the slow loaded carrier first: the quick one is never caught"
+            }
+
             test "a hauler on the source's work spot and a slow miner off it: the miner's ground" {
                 // W19S25, t943,777: a hauler stepping on and off the source's work
                 // spot turned the ground between it and a miner at the room's other
@@ -925,10 +1071,13 @@ let diggerFirstTests =
                     "the miner, wherever it digs; the hauler only when no digger is caught"
             }
 
-            // Quirk, kept (the Brief's S0): the shot is `guardTarget`'s kill order,
-            // nearest first, and not the ground's digger-first order; a later
-            // stage makes the shot follow the ground.
-            test "quirk: the ranger stands on the miner's ground and shoots the nearer hauler" {
+            // Moved by #621 (ADR 0085's B1, superseded): the shot and the ground
+            // follow one order, the kill score. The miner (350 body, 400 hits)
+            // is worth more a tick of the ranger's effort than the 1C1M hauler
+            // (100 body, 200 hits), so the ranger shoots the body its ground
+            // was chosen for, where it shot the nearer hauler before.
+            test
+                "the ranger stands on the miner's ground and shoots the miner, not the nearer hauler" {
                 let here = { X = 22; Y = 12 }
                 let shooter = ranger "ranger-r"
                 let minerTile = { X = 19; Y = 11 }
@@ -956,7 +1105,7 @@ let diggerFirstTests =
                      |> List.choose (function
                          | RangedAttackCreep(name, id) when name = shooter.Name -> Some id
                          | _ -> None))
-                    [ "hauler" ]
-                    "the shot is the hauler's, two tiles off where the miner is three"
+                    [ "miner" ]
+                    "the shot is the miner's, three tiles off where the hauler is two"
             }
         ]

@@ -2001,10 +2001,22 @@ let arenaBorderTests =
                 // before (#598: the medic beside the brute died short of the
                 // exit and the brute left at 1,776). The brute is shot to its
                 // legs short of the exit; the medic, behind it and out of the
-                // kiter's reach, now lives. A body with no weapon left is no
-                // raider, so the Guard lets the brute go there, and the medic
-                // heals it back over the border: the kill a disarmed raider
-                // still is goes unpriced (#625's report).
+                // kiter's reach, now lives. Moved by #648: shot disarmed, the
+                // brute is no raider, but its kill still pays (#621's score:
+                // its body, lamed behind the ranger, nothing healing it), so
+                // the garrison's ground follows it off the controller's ring
+                // and the ranger shoots it dead where, before, it walked back
+                // to the ring and the medic healed the brute back over the
+                // border.
+                Expect.isTrue
+                    (trace
+                     |> List.exists (fun t ->
+                         t.Events
+                         |> List.exists (function
+                             | Died who -> who = "Brute1"
+                             | _ -> false)))
+                    $"the disarmed brute is killed\n{describe trace}"
+
                 let brute =
                     trace
                     |> List.collect (fun t -> t.Bodies |> List.filter (fun b -> b.Id = "Brute1"))

@@ -67,6 +67,7 @@ let private dangerWorld (views: ColonyView list) (watch: WorldView) : WorldView 
                             {
                                 Hostiles = hostiles
                                 HostileFatigue = Map.empty
+                                HostileCargo = Map.empty
                                 InvaderCores = []
                                 Towers = []
                                 OurTowers = []

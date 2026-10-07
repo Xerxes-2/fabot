@@ -28,6 +28,7 @@ let private seenBeyond
                         {
                             Hostiles = colony.Hostiles |> List.filter (fun h -> h.Pos.Room = "W1N4")
                             HostileFatigue = Map.empty
+                            HostileCargo = Map.empty
                             InvaderCores = cores
                             Towers = towers
                             OurTowers = []
@@ -876,6 +877,7 @@ let childOutpostTests =
                                         {
                                             Hostiles = [ cripple ]
                                             HostileFatigue = Map.empty
+                                            HostileCargo = Map.empty
                                             InvaderCores = []
                                             Towers = [ "tower-1", { X = 10; Y = 10 } ]
                                             OurTowers = []

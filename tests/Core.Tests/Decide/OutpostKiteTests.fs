@@ -2017,6 +2017,7 @@ let shutChaseTests =
                                             {
                                                 Hostiles = []
                                                 HostileFatigue = Map.empty
+                                                HostileCargo = Map.empty
                                                 InvaderCores = []
                                                 Towers = []
                                                 OurTowers = []

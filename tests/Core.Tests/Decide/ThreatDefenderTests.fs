@@ -807,6 +807,7 @@ let acrossTheBorderTests =
                                         {
                                             Hostiles = []
                                             HostileFatigue = Map.empty
+                                            HostileCargo = Map.empty
                                             InvaderCores = []
                                             // Past the falloff: 150 a tick on every tile we stand on.
                                             Towers = [ "tower-1", { X = 10; Y = 34 } ]

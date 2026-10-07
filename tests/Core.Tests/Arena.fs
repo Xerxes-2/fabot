@@ -1366,6 +1366,12 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                 |> List.filter (fun b -> b.Side <> Side.Ours && b.Fatigue > 0)
                 |> List.map (fun b -> b.Id, b.Fatigue)
                 |> Map.ofList
+            // And what each carries, as `World.seenFacts` reads its store.
+            HostileCargo =
+                here
+                |> List.filter (fun b -> b.Side <> Side.Ours && b.Energy + b.Thorium > 0)
+                |> List.map (fun b -> b.Id, b.Energy + b.Thorium)
+                |> Map.ofList
             // `FIND_HOSTILE_STRUCTURES`' cores, as `World.seenFacts` reads
             // them: a stronghold's with its collapse clock.
             InvaderCores =

@@ -754,7 +754,7 @@ let private strikeOrder
     // too (#432), after its armed ones.
     view.Hostiles
     |> List.filter (fun h -> h.Pos.Room = room && targets.Shoots residentRooms fighting h)
-    |> targets.Order room distance
+    |> targets.Order room (Some creep) distance
 
 /// How far a body strikes, off its live parts (`Fighter.Reach`, #615 U1):
 /// within three with a gun (#411), beside it with a swing alone.
@@ -1072,7 +1072,7 @@ let private defendIntent
             let pick (targets: HostileInfo list) =
                 targets
                 |> List.filter beside
-                |> line.Order here.Room (fun _ -> 0)
+                |> line.Order here.Room (Some creep) (fun _ -> 0)
                 |> List.tryHead
 
             pick (view.Hostiles |> List.filter (line.Shoots Set.empty Set.empty))

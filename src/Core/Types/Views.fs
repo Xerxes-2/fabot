@@ -201,6 +201,9 @@ type WorldRoom =
         /// Each of those creeps' fatigue by id, as glanced this tick
         /// (`Arrival`: a hostile's arrival waits on it); absent is none.
         HostileFatigue: Map<string, int>
+        /// What each of those creeps carries by id (`RoomFacts.HostileCargo`);
+        /// absent is nothing.
+        HostileCargo: Map<string, int>
         InvaderCores: InvaderCoreInfo list
         /// The towers not ours that fire there, each by id and tile
         /// (`WorldView.hostileTowers`): every tile of the room is under them.
@@ -383,6 +386,7 @@ module WorldView =
                         {
                             Hostiles = facts.Hostiles
                             HostileFatigue = facts.HostileFatigue
+                            HostileCargo = facts.HostileCargo
                             InvaderCores = facts.InvaderCores
                             Towers = hostileTowers facts
                             OurTowers =

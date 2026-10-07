@@ -134,6 +134,7 @@ let threatTests =
                                             {
                                                 Hostiles = view.Hostiles
                                                 HostileFatigue = Map.ofList [ "h-1", fatigue ]
+                                                HostileCargo = Map.empty
                                                 InvaderCores = []
                                                 Towers = []
                                                 OurTowers = []

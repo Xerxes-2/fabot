@@ -860,6 +860,14 @@ let private seenFacts
             |> Array.filter (fun c -> c.fatigue > 0)
             |> Array.map (fun c -> c.id, c.fatigue)
             |> Map.ofArray
+        // And what each carries, every resource counted (#621).
+        HostileCargo =
+            hostileCreeps
+            |> Array.choose (fun c ->
+                match storeUsedTotal c.store with
+                | held when held > 0 -> Some(c.id, held)
+                | _ -> None)
+            |> Map.ofArray
         // The invader cores standing here. A core is a structure, so
         // `FIND_HOSTILE_CREEPS` cannot answer with one; `FIND_HOSTILE_STRUCTURES`
         // answers with every structure a rival owns, so the kind is checked.

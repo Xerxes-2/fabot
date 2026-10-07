@@ -168,10 +168,19 @@ type Selector =
         /// rooms and the rooms whose fight it holds, then the hostile.
         Shoots: Set<string> -> Set<string> -> HostileInfo -> bool
         /// The kill order among the shots in a room, its head first: by
-        /// `Facts.killRank`, then by the holder's walk to each, then by id.
-        /// The room, the walk and the shots; each rank priced once.
-        /// What a holder strikes is `Emitter.pickStrike`'s choice off it.
-        Order: string -> (HostileInfo -> int) -> HostileInfo list -> HostileInfo list
+        /// `Facts.killRank`, the bodies that strike nothing back by the
+        /// holder's kill score on each beside its partners (#621), then by
+        /// our damage's focus, the holder's walk to each, then by id. The
+        /// room, the holder (None prices the side's best, a ranger block's
+        /// where none holds it), the walk and the shots; each rank priced
+        /// once. What a
+        /// holder strikes is `Emitter.pickStrike`'s choice off it.
+        Order:
+            string
+                -> CreepInfo option
+                -> (HostileInfo -> int)
+                -> HostileInfo list
+                -> HostileInfo list
         /// Each shot's band of that order (`Facts.killBandOf`), first band
         /// first, the room applied once: a mass attack counts only what it
         /// deals the band of the shot it would replace (#563).
@@ -189,7 +198,9 @@ type Laid =
         /// a resident room whose raid no ranger wins (`Facts.outmatched`), the
         /// room's safe set, laid only while a ranger of ours stands there or
         /// holds its Guard (`threatsOfHeld`); else, while a melee body stands
-        /// there or the kill order's head is a claimer, the kite ground — the
+        /// there, the kill order's head is a claimer, or in a resident room an
+        /// unarmed head its kill score prices worth the kill (#648), the kite
+        /// ground — the
         /// tiles within three of that head, less every tile a melee body
         /// reaches in a step and a swing, and less swamp near one. With a
         /// melee body there and that empty, the tiles farthest from it, never
@@ -209,8 +220,9 @@ type Laid =
         Resident: Set<RoomPos> option
         /// In a [[harassment room]] (#432), the ranger's: an ambush (#439) —
         /// beside every armed target, and only there while a holder fits its
-        /// fight (#611); the walkable tiles within ranged reach of every enemy
-        /// creep on a work spot; and the declared `Stand`'s seats while
+        /// fight (#611); the walkable tiles within ranged reach of the enemy
+        /// creep on a work spot, or caught off one, that the side's kill
+        /// score leads (#621); and the declared `Stand`'s seats while
         /// neither stands there.
         Harass: Set<RoomPos> option
         /// The walkable tiles within range 1 of a Threat standing in the room,
@@ -296,7 +308,9 @@ type Brief =
         /// that costs it no tick. Its own
         /// is a ranged holder of a level-0 core's Guard the core's range-3
         /// ring, out of the swing of a melee body breaking the core (#558);
-        /// a melee holder of a chase the ring beside the raid (#571); every
+        /// a melee holder of a chase the ring beside the raid (#571); a
+        /// trespass's holder the tiles of the ground within its reach of the
+        /// body its kill score leads, where it reaches one (#621); every
         /// other `Ground`. Read after `Stances`, priced on first read. Empty
         /// for every other Task.
         Seats: Lazy<Map<string, Set<RoomPos>>>
@@ -455,6 +469,74 @@ let private bodyWalk atlas (creep: CreepInfo) : Arrival.BodyArrival option =
         let walk = Arrival.ofBody atlas creep
         walks.[creep.Name] <- walk
         walk
+
+/// A body of ours' kill score on each hostile of one room (#621,
+/// `Facts.killScoresIn`, the room's `scores`): its fight at its hits, and its
+/// arrival within its reach of the hostile, over its own walk (`bodyWalk`)
+/// where it stands in that room, else its tiles to that reach at its pace on
+/// plain.
+let private scoreOf
+    atlas
+    (scores: Fighter -> RoomPos option -> int -> HostileInfo -> float)
+    (creep: CreepInfo)
+    : HostileInfo -> float =
+    let fighter = Fighter.ofCreep creep
+    let from = Atlas.creepTile atlas creep.Name
+    let pace = Gait.ticks Gait.plain fighter.Gait |> Option.defaultValue 1
+
+    let straight (hostile: HostileInfo) =
+        from
+        |> Option.bind (fun tile -> RoomName.tileRange tile hostile.Pos)
+        |> Option.map (fun tiles -> max 0 (tiles - fighter.Reach) * pace)
+        |> Option.defaultValue 0
+
+    let arrival (hostile: HostileInfo) =
+        match bodyWalk atlas creep with
+        | Some walk when walk.Room = hostile.Pos.Room ->
+            let centre = RoomPos.pos hostile.Pos
+            let reach = fighter.Reach
+            let mutable soonest = System.Int32.MaxValue
+
+            for x in centre.X - reach .. centre.X + reach do
+                for y in centre.Y - reach .. centre.Y + reach do
+                    let tile = { X = x; Y = y }
+
+                    if inGrid tile then
+                        soonest <- min soonest (Grid.at (indexOf tile) walk.Ticks)
+
+            if soonest = System.Int32.MaxValue then
+                straight hostile
+            else
+                soonest
+        | _ -> straight hostile
+
+    if fighter.Reach = 0 then
+        fun _ -> 0.0
+    else
+        fun hostile -> scores fighter from (arrival hostile) hostile
+
+/// The kill scores of one room for a side of ours (#621,
+/// `Facts.killScoresIn`): each kill priced at the damage of every body of
+/// `side` together, each body's arrival its own.
+let private sideScoresIn (view: ColonyView) (side: CreepInfo list) (room: string) =
+    Facts.killScoresIn view room (side |> List.map Fighter.ofCreep)
+
+/// The kill score a room's side prices each hostile at (#621): the best of
+/// these bodies' (`scoreOf`), each beside the whole `side`, or with none a
+/// ranger block's from where it stands, the row that strikes any body it
+/// does not fall behind.
+let private scoreAmong
+    (view: ColonyView)
+    atlas
+    (side: CreepInfo list)
+    (bodies: CreepInfo list)
+    (room: string)
+    =
+    let scores = sideScoresIn view side room
+
+    match bodies |> List.map (scoreOf atlas scores) with
+    | [] -> scores (Facts.blockFighter rangerPattern) None 0
+    | each -> fun hostile -> each |> List.fold (fun best score -> max best (score hostile)) 0.0
 
 /// The Flights by every input they are read off: the Threats' fields
 /// (`sameInputs`) and the Atlas, which tells one colony's from another's
@@ -660,31 +742,44 @@ module Brief =
         ]
 
     /// Every kind's targets today: what `Facts.guardShoots` passes, in the kill
-    /// order. One a Brief: its holders each order the same shots, so a
-    /// room's `killRank` is built once for a view and each shot ranked once.
-    let private guardTargets (view: ColonyView) =
+    /// order. One a Brief: a room's `killRank` is built once for a view and
+    /// a holder (its kill scores, #621, each kill priced at the damage of the
+    /// holder and every body `holding` the fight together), and each shot
+    /// ranked once. With no holder named, the side's best score.
+    let private guardTargets (view: ColonyView) atlas (holding: Set<string>) =
+        let side =
+            lazy (ColonyView.bodies view |> List.filter (fun creep -> holding.Contains creep.Name))
+
         let built =
             System.Collections.Generic.Dictionary<
-                string,
+                string * string,
                 ColonyView *
                 (HostileInfo -> KillRank) *
                 System.Collections.Generic.Dictionary<string, HostileInfo * KillRank>
              >()
 
-        let rankIn (view: ColonyView) (room: string) : HostileInfo -> KillRank =
+        let rankIn (view: ColonyView) (room: string) (holder: CreepInfo option) =
+            let key =
+                room, holder |> Option.map (fun creep -> creep.Name) |> Option.defaultValue ""
+
             let rank, ranked =
-                match built.TryGetValue room with
+                match built.TryGetValue key with
                 | true, (seen, rank, ranked) when obj.ReferenceEquals(seen, view) -> rank, ranked
                 | _ ->
-                    let rank = killRank view room
+                    let bodies =
+                        match holder with
+                        | Some creep -> [ creep ]
+                        | None -> side.Value
+
+                    let rank = killRank view room (scoreAmong view atlas side.Value bodies room)
 
                     let ranked =
                         System.Collections.Generic.Dictionary<string, HostileInfo * KillRank>()
 
-                    built.[room] <- (view, rank, ranked)
+                    built.[key] <- (view, rank, ranked)
                     rank, ranked
 
-            fun hostile ->
+            fun (hostile: HostileInfo) ->
                 match ranked.TryGetValue hostile.Id with
                 | true, (seen, kept) when obj.ReferenceEquals(seen, hostile) -> kept
                 | _ ->
@@ -695,18 +790,18 @@ module Brief =
         {
             Shoots = guardShoots view
             Order =
-                fun room walk shots ->
+                fun room holder walk shots ->
                     match shots with
                     | []
                     | [ _ ] -> shots
                     | _ ->
-                        let rank = rankIn view room
+                        let rank = rankIn view room holder
 
                         shots
                         |> List.map (fun h -> (rank h, walk h, h.Id), h)
                         |> List.sortBy fst
                         |> List.map snd
-            Band = fun room -> rankIn view room >> killBandOf
+            Band = fun room -> rankIn view room None >> killBandOf
         }
 
     /// An outpost a ranger answers (`ranged`, #535) holds the kite ground
@@ -1085,7 +1180,7 @@ module Brief =
             Duty = Duty.Guard kind
             BuiltBy = SpatialInfo.homeName view.Spatial
             Claims = claims
-            Targets = guardTargets view
+            Targets = guardTargets view atlas holding
             Admits = admitsOf kind room ranged answered view atlas
             Ends = Facts.endsIn view room
             Recall = if kill then Some { Walk = killWalk } else None
@@ -1308,7 +1403,7 @@ module Brief =
             Targets =
                 {
                     Shoots = fun _ _ hostile -> Set.contains hostile.Id line
-                    Order = fun _ _ shots -> shots |> List.sortBy (fun h -> h.Hits, h.Id)
+                    Order = fun _ _ _ shots -> shots |> List.sortBy (fun h -> h.Hits, h.Id)
                     Band = fun _ _ -> 0
                 }
             Admits =
@@ -1335,6 +1430,7 @@ module Brief =
     /// for a room it cannot rally for.
     let internal formed
         (view: ColonyView)
+        (atlas: Atlas.Atlas)
         (duty: Duty)
         (rung: Rung)
         (verdict: Lazy<Answer>)
@@ -1360,7 +1456,7 @@ module Brief =
             Duty = duty
             BuiltBy = SpatialInfo.homeName view.Spatial
             Claims = []
-            Targets = guardTargets view
+            Targets = guardTargets view atlas (formation.Roles |> Map.keys |> Set.ofSeq)
             Admits = fun creep -> Map.containsKey creep.Name formation.Roles
             Ends = fun _ -> None
             Recall = None
@@ -1395,7 +1491,7 @@ module Brief =
                 }
 
             Some
-                { formed view duty OnTheTier (lazy Answer.Win) (fun _ -> false) none with
+                { formed view atlas duty OnTheTier (lazy Answer.Win) (fun _ -> false) none with
                     Formation = None
                 }
 
@@ -2418,13 +2514,19 @@ module Threats =
             | _ -> false
         | _ -> false
 
-/// The kill order's head among one room's targets (`Facts.killRank`), ties by
-/// id; each target's rank priced once, not once a comparison.
-let private killHead (view: ColonyView) (room: string) (targets: HostileInfo list) =
+/// The kill order's head among one room's targets (`Facts.killRank`, its
+/// side's kill scores `score`), ties by id; each target's rank priced once,
+/// not once a comparison.
+let private killHead
+    (view: ColonyView)
+    (room: string)
+    (score: HostileInfo -> float)
+    (targets: HostileInfo list)
+    =
     match targets with
     | [] -> None
     | _ ->
-        let rank = killRank view room
+        let rank = killRank view room score
 
         targets
         |> List.map (fun hostile -> (rank hostile, hostile.Id), hostile)
@@ -2745,6 +2847,29 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     let resident = residentRooms view
 
+    // The kill scores each room's side prices its hostiles at (#621): its
+    // Guard's holders', priced on first read, once a room.
+    let sideScores =
+        view.Hostiles
+        |> List.map (fun hostile -> hostile.Pos.Room)
+        |> List.distinct
+        |> List.map (fun room ->
+            room,
+            lazy
+                (let holders = HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList
+
+                 let side =
+                     ColonyView.bodies view
+                     |> List.filter (fun creep -> holders.Contains creep.Name)
+
+                 scoreAmong view atlas side side room))
+        |> Map.ofList
+
+    let sideScore room : HostileInfo -> float =
+        match Map.tryFind room sideScores with
+        | Some score -> score.Value
+        | None -> fun _ -> 0.0
+
     // A work spot is where the enemy's bodies must stop: within two of the
     // source, where a hauler draws from the miner's pile, and around the
     // controller, within three because a reserver shuffles about it. The
@@ -2807,13 +2932,15 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     && not (within h.Controller 3 hostile)
                     && catchable hostile)
 
-            // A digger first, at the source or caught off it: the income is
-            // the miner's. A hauler stepping on and off the source's work
-            // spot otherwise turned the ground between it and a slow miner at
-            // the room's other source every few ticks, the ranger caught
-            // between the two (W19S25, t943,777).
+            // The one body at the source or caught off it worth most a tick
+            // of the side's effort (`sideScore`, #621), which the shot's kill
+            // order leads with too. Ground round two bodies turned the ranger
+            // between them: a hauler stepping on and off the source's work
+            // spot and a slow miner at the room's other source (W19S25,
+            // t943,777).
             let atSource = unarmedTargets |> List.filter (within h.Stand 2)
             let digs = HostileInfo.works inRoom
+            let score = sideScore room
 
             let reachOf targets =
                 targets
@@ -2821,15 +2948,14 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     Engine.rangedRange, RoomPos.pos hostile.Pos)
 
             let working =
-                match List.filter digs atSource, List.filter digs chased with
-                | (_ :: _ as diggers), _
-                | [], (_ :: _ as diggers) -> reachOf diggers
-                | [], [] ->
-                    match atSource with
-                    | _ :: _ -> reachOf atSource
-                    | [] when not (List.isEmpty chased) -> reachOf chased
-                    | [] when unarmedTargets |> List.exists digs -> seats
-                    | [] -> unarmedTargets |> List.filter (within h.Controller 3) |> reachOf
+                match atSource @ chased with
+                | _ :: _ as caught ->
+                    caught
+                    |> List.sortBy (fun hostile -> -(score hostile), hostile.Id)
+                    |> List.truncate 1
+                    |> reachOf
+                | [] when unarmedTargets |> List.exists digs -> seats
+                | [] -> unarmedTargets |> List.filter (within h.Controller 3) |> reachOf
 
             // An armed target turns the ambush into its fight where a holder
             // of the Guard fits that fight beside the others (`Facts.fits`,
@@ -2955,9 +3081,18 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
              || HostileInfo.heals view.Hostiles hostile)
             && guardShoots view resident Set.empty hostile)
 
+    // Whether a body worth its kill stands unarmed in a room (#648): one
+    // shot disarmed or bare, which its healer heals back into a raider, is
+    // struck while its side's kill score on it pays (#621), armed or not.
+    let worthIn room (hostile: HostileInfo) =
+        hostile.Pos.Room = room
+        && not (HostileInfo.armed view.Hostiles hostile)
+        && sideScore room hostile > 0.0
+
     // The ranger rooms an armed raid, or a rival's claimer, stands in, the
     // chased rooms a raid stands in, the raided rooms a ranger answers
-    // (#535), and the resident rooms a raid stands at (#552).
+    // (#535), the resident rooms a raid stands at (#552), and those a body
+    // worth its kill stands in (`worthIn`).
     let contested =
         (view.Hostiles
          |> List.filter (fun hostile ->
@@ -2972,6 +3107,14 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         @ (match view.Hostiles, view.RecalledHealers with
            | [], [] -> []
            | _ -> resident |> Set.filter (residentRaid >> List.isEmpty >> not) |> Set.toList)
+        @ (view.Hostiles
+           |> List.filter (fun hostile ->
+               let room = hostile.Pos.Room
+
+               Set.contains room resident
+               && guardShoots view resident engaged hostile
+               && worthIn room hostile)
+           |> List.map (fun hostile -> hostile.Pos.Room))
         |> List.distinct
 
     let kite =
@@ -2992,8 +3135,11 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             let head =
                 inRoom
-                |> List.filter (guardShoots view resident Set.empty)
-                |> killHead view room
+                // What the Emitter shoots there (`Threats.fightRooms`): a
+                // body left in a room whose fight we hold — a cripple shot
+                // disarmed, a healer — is the head the ground follows (#648).
+                |> List.filter (guardShoots view resident engaged)
+                |> killHead view room (sideScore room)
 
             // Whether a hostile can step this tick: a MOVE acting and its
             // fatigue paid (`Arrival.waitOf`).
@@ -3080,6 +3226,17 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             let claimerLeads = head |> Option.exists (claimsAFlag inRoom resident)
 
+            // A resident room's head worth its kill (`worthIn`): the
+            // garrison's ground follows it off its ring (#648), but never
+            // while an armed raider stands at the room's line, across its
+            // exit too (`residentRaid`): the ring is the raid's to hold
+            // first. A healer whose raid is gone is no raider: it is a
+            // target itself, and stands in no kill's way.
+            let worthLeads =
+                Set.contains room resident
+                && head |> Option.exists (worthIn room)
+                && not (residentRaid room |> List.exists (HostileInfo.armed view.Hostiles))
+
             let outmatchedHere =
                 Set.contains room resident && fst (verdictOf room) = Answer.Lose
 
@@ -3092,7 +3249,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 if outmatchedHere then
                     if rangerHere.Value then
                         bare safe
-                elif not (List.isEmpty melee) || claimerLeads then
+                elif not (List.isEmpty melee) || claimerLeads || worthLeads then
                     aroundHead
                 if not (List.isEmpty melee) && (not outmatchedHere || rangerHere.Value) then
                     bare farthest
@@ -3478,11 +3635,54 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                             None
                 | _ -> fun _ -> None
 
-            HeldTaskFacts.holdersOf held (taskId (Guard room))
-            |> List.choose (fun name ->
-                ColonyView.bodies view |> List.tryFind (fun creep -> creep.Name = name))
+            // A kill's holder is seated about the body worth most a tick of
+            // its own effort (#621, `scoreOf`): the ground within its reach
+            // of that body, where it reaches a tile of it; else, or where it
+            // kills none, the whole ground.
+            let holders =
+                HeldTaskFacts.holdersOf held (taskId (Guard room))
+                |> List.choose (fun name ->
+                    ColonyView.bodies view |> List.tryFind (fun creep -> creep.Name = name))
+
+            let scores = lazy (sideScoresIn view holders room)
+
+            let seatGroundOf (creep: CreepInfo) =
+                match brief.Duty, groundOf creep with
+                | Duty.Guard BriefKind.Trespass, Some(ground, false) ->
+                    let score = scoreOf atlas scores.Value creep
+                    let reach = Fighter.reachOf creep
+                    let arrival = arrivalOf creep
+
+                    let head =
+                        view.Hostiles
+                        |> List.filter (fun hostile ->
+                            hostile.Pos.Room = room
+                            && brief.Targets.Shoots resident engaged hostile)
+                        |> List.map (fun hostile -> score hostile, hostile)
+                        |> List.filter (fun (worth, _) -> worth > 0.0)
+                        |> List.sortBy (fun (worth, hostile) -> -worth, hostile.Id)
+                        |> List.tryHead
+
+                    let near =
+                        match head with
+                        | Some(_, target) ->
+                            ground
+                            |> Set.filter (fun tile ->
+                                RoomPos.range tile target.Pos
+                                |> Option.exists (fun r -> r <= reach))
+                        | None -> Set.empty
+
+                    if
+                        near.Count < ground.Count && near |> Set.exists (arrival >> Option.isSome)
+                    then
+                        Some(near, true)
+                    else
+                        Some(ground, false)
+                | _, seated -> seated
+
+            holders
             |> List.choose (fun creep ->
-                groundOf creep
+                seatGroundOf creep
                 |> Option.map (fun (ground, own) -> creep.Name, ground, own, arrivalOf creep))
             |> Brief.seatsAmong
 
@@ -3858,6 +4058,7 @@ let private withAssaults
                             (Assault room)
                             (Brief.formed
                                 view
+                                atlas
                                 Duty.Assault
                                 OnTheTier
                                 (lazy Answer.Win)

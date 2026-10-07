@@ -322,11 +322,135 @@ let trespassTests =
                 Expect.equal
                     ((Threats.briefOf threats "W1N2").Targets.Order
                         "W1N2"
+                        None
                         (fun _ -> 0)
                         [ hauler; claimer; raider ]
                      |> List.map (fun h -> h.Id))
                     [ "z-raid"; "y-claim"; "a-haul" ]
                     "the raid first, then the claimer, then the rest"
+            }
+
+            // #621: the digger on its seat (650 body, our source's 10 a tick
+            // until it is replaced, 800 hits) is worth more a tick of one
+            // ranger block's effort (20 a tick) than the empty hauler (4,600
+            // hits, a 230-tick kill), so the holder is seated beside the
+            // digger alone and shoots it first, where before every
+            // trespasser's tiles were its ground.
+            test
+                "a ranger holding the kill is seated about the trespasser worth most a tick of its effort, and shoots it first (#621)" {
+                let hauler = haulerOf "a-haul" { X = 30; Y = 46 }
+
+                let colony =
+                    declaredRaid [ hauler; seatedDigger ]
+                    |> withGuards [ ranger "r-9", { X = 27; Y = 45 } ]
+
+                let held = Map.ofList [ "r-9", taskId (Guard "W1N2") ]
+                let atlas = Atlas.ofView colony
+                let threats = threatsOfHeld colony atlas (Facts.heldTaskFacts colony held)
+                let brief = Threats.briefOf threats "W1N2"
+
+                Expect.isTrue
+                    (brief.Ground
+                     |> Option.exists (
+                         Set.exists (fun tile -> rangeTo (RoomPos.pos hauler.Pos) tile = 1)
+                     ))
+                    "the premise: the hauler's tiles are the kill's ground too"
+
+                let seat = Map.tryFind "r-9" brief.Seats.Value |> Option.defaultValue Set.empty
+
+                Expect.isNonEmpty seat "it has a seat"
+
+                Expect.isTrue
+                    (seat
+                     |> Set.forall (fun tile ->
+                         rangeTo (RoomPos.pos seatedDigger.Pos) tile <= Engine.rangedRange))
+                    "every tile of it within its reach of the digger"
+
+                Expect.equal
+                    (brief.Targets.Order
+                        "W1N2"
+                        (Some(ranger "r-9"))
+                        (fun _ -> 0)
+                        [ hauler; seatedDigger ]
+                     |> List.map (fun h -> h.Id))
+                    [ "d-1"; "a-haul" ]
+                    "the digger leads its kill order"
+            }
+
+            // #621 (concentrate force for kills, user 2026-10-08): the digger's
+            // medic heals it 48 a tick, more than one 40-a-tick ranger deals and
+            // less than two. Each kill is priced at the damage of every holder
+            // of the fight together, so the pair focuses the digger, where one
+            // alone goes for the small carrier it kills by itself.
+            test
+                "two rangers holding the kill both shoot the healed digger only the two of them kill; one alone leads with the carrier it kills (#621)" {
+                let twoBlocks name =
+                    creepWith name 0 0 (List.replicate 2 Bodies.rangerPattern.Block |> List.concat)
+
+                let medic =
+                    { hostileIn
+                          "W1N2"
+                          { X = 25; Y = 42 }
+                          (List.replicate 4 Heal @ List.replicate 4 Move) with
+                        Id = "m-1"
+                        Owner = "Trepidimous"
+                    }
+
+                let carrier =
+                    { hostileIn "W1N2" { X = 27; Y = 43 } [ Carry; Move ] with
+                        Id = "c-1"
+                        Owner = "Trepidimous"
+                    }
+
+                // Each holder three from the digger, and out of a mass
+                // attack's reach of the other two.
+                let pair =
+                    [ twoBlocks "r-1", { X = 21; Y = 44 }; twoBlocks "r-2", { X = 24; Y = 44 } ]
+
+                let colonyOf holders =
+                    declaredRaid [ seatedDigger; medic; carrier ] |> withGuards holders
+
+                let heldBy (holders: (CreepInfo * Pos) list) =
+                    holders
+                    |> List.map (fun (creep, _) -> creep.Name, taskId (Guard "W1N2"))
+                    |> Map.ofList
+
+                let headFor holders (creep: CreepInfo) =
+                    let colony = colonyOf holders
+                    let atlas = Atlas.ofView colony
+
+                    let threats =
+                        threatsOfHeld colony atlas (Facts.heldTaskFacts colony (heldBy holders))
+
+                    (Threats.briefOf threats "W1N2").Targets.Order
+                        "W1N2"
+                        (Some creep)
+                        (fun _ -> 0)
+                        [ seatedDigger; medic; carrier ]
+                    |> List.tryHead
+                    |> Option.map (fun h -> h.Id)
+
+                for creep, _ in pair do
+                    Expect.equal
+                        (headFor pair creep)
+                        (Some "d-1")
+                        $"{creep.Name} beside its partner leads with the digger"
+
+                Expect.equal
+                    ((decide (colonyOf pair) (heldBy pair) Set.empty None).Intents
+                     |> List.choose (function
+                         | RangedAttackCreep(name, id) -> Some(name, id)
+                         | _ -> None)
+                     |> List.sort)
+                    [ "r-1", "d-1"; "r-2", "d-1" ]
+                    "the pair both shoot the digger"
+
+                let alone = [ List.head pair ]
+
+                Expect.equal
+                    (headFor alone (fst (List.head pair)))
+                    (Some "c-1")
+                    "one alone leads with the carrier it kills by itself"
             }
 
             test
@@ -975,5 +1099,42 @@ let residentChaseTests =
                     (Map.tryFind "r-1" held.Assignments)
                     (Some(taskId (Guard "W1N3")))
                     "the home is not quiet: no lend"
+            }
+
+            // #648, #621: a body shot disarmed in the raised home is worth its
+            // kill, and the garrison's ground follows it off the controller's
+            // ring; never while an armed raider bounces on the home's exit,
+            // across the border this tick, whose line the ring holds first.
+            test
+                "a disarmed body in the raised home draws the garrison off its ring, but not while a raider bounces on its exit" {
+                let brute = disarmedAt "Trepidimous" "W1N3" { X = 40; Y = 40 }
+
+                let raider =
+                    { hostileIn "W1N2" { X = 25; Y = 0 } [ RangedAttack; RangedAttack; Move; Move ] with
+                        Id = "raider"
+                        Owner = "Trepidimous"
+                    }
+
+                let groundIn colony =
+                    let atlas = Atlas.ofView colony
+
+                    let threats =
+                        threatsOfHeld colony atlas (Facts.heldTaskFacts colony residentHeld)
+
+                    (Threats.briefOf threats "W1N3").Ground |> Option.defaultValue Set.empty
+
+                let besideBrute (ground: Set<RoomPos>) =
+                    not (Set.isEmpty ground)
+                    && ground
+                       |> Set.forall (fun tile ->
+                           rangeTo (RoomPos.pos brute.Pos) tile <= Engine.rangedRange)
+
+                Expect.isTrue
+                    (besideBrute (groundIn (raisingBeyond [ brute ])))
+                    "alone in the home, the ground is within three of the brute"
+
+                Expect.isFalse
+                    (besideBrute (groundIn (raisingBeyond [ brute; raider ])))
+                    "with a raider on the exit, the garrison holds its ring"
             }
         ]

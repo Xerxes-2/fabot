@@ -2242,6 +2242,43 @@ let w17s26FarGuardsTests =
                         (Some "guard:W17S26")
                         $"{guard} is not handed it\n{failure}"
             }
+
+            // #621: the three bodies priced by one kill score for the ranger
+            // that takes the kill (6M4R2H, 40 a tick): the 3M3C claimer
+            // (1,950 body, the room's reservation, a 15-tick kill) before
+            // the 5W3M miner on its seat (650 body, its dig, 20 ticks)
+            // before the empty 24C24M hauler (2,400 body, 120 ticks). Before
+            // it the ranger stood on the hauler's store ring and shot it for
+            // a hundred ticks, the claimer standing. The bodies hold where
+            // live stood them (the skeleton's script): the pin reads the
+            // order on the live bodies and ground, not their live walks.
+            test
+                "#621 capture t1,015,956: the ranger kills the claimer, then the miner, before the hauler" {
+                let _, trace = w17s26FarGuards () |> run 250
+
+                let diedAt who =
+                    trace
+                    |> List.tryPick (fun t ->
+                        if
+                            t.Events
+                            |> List.exists (function
+                                | Died id -> id = who
+                                | _ -> false)
+                        then
+                            Some t.Tick
+                        else
+                            None)
+
+                let failure = describe trace
+
+                match diedAt "Dragon5749", diedAt "Genetic5584" with
+                | Some claimer, Some miner ->
+                    Expect.isLessThan claimer miner $"the claimer first\n{failure}"
+                | claimer, miner ->
+                    failtest $"both die: the claimer at {claimer}, the miner at {miner}\n{failure}"
+
+                Expect.isNone (diedAt "Forest5611") $"the hauler's long kill comes last\n{failure}"
+            }
         ]
 
 /// The world epic's W7: a colony that decides nothing this tick is projected over

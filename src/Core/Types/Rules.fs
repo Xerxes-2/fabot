@@ -42,6 +42,12 @@ module Engine =
     /// step.
     let spawnTicksPerPart = 3
 
+    /// LAB_BOOST_ENERGY and LAB_BOOST_MINERAL: what a lab spends boosting
+    /// one part, energy and compound, which a boosted body carries as cost.
+    let boostEnergyPerPart = 20
+
+    let boostMineralPerPart = 30
+
     /// CREEP_CLAIM_LIFE_TIME: the ticks a body carrying a CLAIM part lives,
     /// well short of the 1,500 every other row gets. The reservation deficit's
     /// divisor and the reserver row's amortization both read it.

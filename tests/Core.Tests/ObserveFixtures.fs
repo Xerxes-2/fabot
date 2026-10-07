@@ -263,6 +263,7 @@ let seenRooms (rooms: (string * HostileInfo list * string list) list) : WorldVie
                     OurTowers = []
                     Fallen = fallen
                     HostileFatigue = Map.empty
+                    HostileCargo = Map.empty
                     Control =
                         {
                             Owner = Ownership.Unowned

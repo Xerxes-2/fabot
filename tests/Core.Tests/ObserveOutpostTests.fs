@@ -2073,6 +2073,7 @@ let private observedShut (hostiles: HostileInfo list) =
                             {
                                 Hostiles = hostiles
                                 HostileFatigue = Map.empty
+                                HostileCargo = Map.empty
                                 InvaderCores = []
                                 Towers = []
                                 OurTowers = []

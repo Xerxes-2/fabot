@@ -2376,6 +2376,8 @@ function furnishOutpost(capture, register, structure, raided = false, homeRoom =
         // `findAttack.js` suicides only where the controller has an owner,
         // and an outpost's has none.
         ticksToLive: CREEP_LIFE_TIME,
+        // Empty, as every creep's store in the engine (#621).
+        store: store(),
       }),
     );
   }
@@ -2935,6 +2937,8 @@ function furnishSiege(home, register) {
       body: body.map((type) => ({ type })),
       hits: body.length * 100,
       ticksToLive: CREEP_LIFE_TIME,
+      // Empty, as every creep's store in the engine (#621).
+      store: store(),
     });
   });
   home.finds[103].push(...hostiles);
@@ -3663,6 +3667,9 @@ function buildReactorWorld() {
       // than aged out, so a `ticksToLive` this file chose would be the one
       // number here the live room does not carry.
       ticksToLive: undefined,
+      // Every creep carries a store in the engine, an empty one here
+      // (`World.seenFacts` reads what each hostile carries, #621).
+      store: store(),
     });
   });
   // --- the bunker standing in the crossed room ----------------------------

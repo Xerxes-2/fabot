@@ -1311,18 +1311,19 @@ type KillTier =
     /// The rest of the raid: a threat (`threatens`), or a healer we do not
     /// break.
     | Raid
-    /// A CLAIM body outside a ranger's room (#550): a reservation against
-    /// ours shuts the room's sources, so it goes first of the bodies that
-    /// strike nothing back.
-    | Reserver
-    /// Anything else the Guard may shoot.
-    | Bystander
+    /// Anything else the Guard may shoot, a body that strikes nothing back:
+    /// ordered by its kill score (`killScoresIn`, #621), a CLAIM body's
+    /// reservation, a digger's dig and a hauler's load priced in it.
+    | Prey
 
 /// One target's place in the kill order, compared field by field.
 [<Struct>]
 type KillRank =
     {
         Tier: KillTier
+        /// A body of the `Prey` band's kill score, negated so the highest
+        /// leads (#621); 0 in every other band.
+        Worth: float
         /// Its hits, plus the heal that reaches it this tick, less our damage
         /// that does, all priced in damage through its TOUGH. Without a lock
         /// this all but locks itself: the target we hurt stays the lowest.
@@ -1350,7 +1351,7 @@ let private killTier (target: KillFacts) =
     elif target.Threatens || target.RaidHealer then
         Raid
     else
-        Bystander
+        Prey
 
 /// The heal that reaches a hostile in `room` this tick, its own included: a
 /// heal reaches one tile, a ranged heal three. A closure over the room's
@@ -1417,19 +1418,226 @@ let internal damageReaching (view: ColonyView) : HostileInfo -> int =
             |> Option.map (damageAt parts)
             |> Option.defaultValue 0)
 
+/// What a hostile carries, every resource counted one for one
+/// (`WorldRoom.HostileCargo`, #621): a kill drops it in its tombstone.
+let internal cargoOf (view: ColonyView) (hostile: HostileInfo) : int =
+    Map.tryFind hostile.Pos.Room view.World.Rooms
+    |> Option.bind (fun seen -> Map.tryFind hostile.Id seen.HostileCargo)
+    |> Option.defaultValue 0
+
+/// The tiles a rival's body walks from its spawn to the room it works: the
+/// spawn stands in a room we do not see, a room's side off at least (#621).
+let private replacementWalk = Engine.roomSide
+
+/// The energy a tick a hostile's work takes now (#621), off its parts in
+/// effect: a digger's dig while it stands on a seat (one with no free seat
+/// takes nothing), at most its source's output; a carrier's load once a
+/// round trip of its walk (`walk` ticks each way); a CLAIM body's
+/// reservation, every source of its room held — against ours where we mine
+/// it, else the output it doubles from a source nobody holds.
+let private harmRate (view: ColonyView) (hostile: HostileInfo) (walk: int) : float =
+    let power = HostileInfo.effectivePower view.Hostiles hostile
+    let room = hostile.Pos.Room
+
+    let digs =
+        if onDigSeat view hostile then
+            min (power Work * Engine.harvestPerWork) Engine.heldOutputPerTick
+        else
+            0
+
+    let reserves =
+        if power BodyPart.Claim > 0 then
+            let sources =
+                strikeTilesOf view room
+                |> Option.map (fun tiles -> List.length tiles.Sources)
+                |> Option.defaultValue 0
+
+            sources
+            * (if minesRoom view room then
+                   Engine.heldOutputPerTick
+               else
+                   Engine.heldOutputPerTick - Engine.neutralOutputPerTick)
+        else
+            0
+
+    float (digs + reserves)
+    + float (power Carry * Engine.carryPartCapacity) / float (2 * max 1 walk)
+
+/// A hostile's gait as the engine walks it loaded (#621, `Gait.walked`): its
+/// gait (`HostileInfo.gait`, CARRY read empty) and a live CARRY's weight for
+/// each 50 it carries (`cargoOf`). The score's alone: every other reader keeps
+/// the empty reading, the safe side for a threat's pace.
+let private loadedGait (view: ColonyView) (hostile: HostileInfo) : Gait =
+    let gait = HostileInfo.gait view.Hostiles hostile
+    let carry = HostileInfo.effectivePower view.Hostiles hostile Carry
+
+    { gait with
+        Weight = gait.Weight + min carry ((cargoOf view hostile + 49) / 50)
+    }
+
+/// What killing a hostile is worth, in energy (#621): its body (every part,
+/// destroyed ones too, and each boost a lab spent on it), what it carries,
+/// and its work lost until its owner replaces it — its spawn time and its
+/// walk back (`replacementWalk` at its loaded pace) at its rate (`harmRate`).
+let internal killValue (view: ColonyView) (hostile: HostileInfo) : float =
+    let boosted =
+        hostile.Boosts |> List.filter (fun boost -> boost <> Unboosted) |> List.length
+
+    let pace = Gait.ticks Gait.plain (loadedGait view hostile) |> Option.defaultValue 1
+
+    let walk = replacementWalk * pace
+    let replaced = Engine.spawnTicksPerPart * List.length hostile.Body + walk
+
+    float (
+        bodyCost hostile.Body
+        + boosted * (Engine.boostEnergyPerPart + Engine.boostMineralPerPart)
+        + cargoOf view hostile
+    )
+    + harmRate view hostile walk * float replaced
+
+/// The ticks our side takes to kill a hostile once it stands at their
+/// standoff (`standoff`), every body of `team` at its own: its hits through
+/// its TOUGH against the side's damage there together — force concentrated
+/// for the kill, which one body alone a healer out-heals may never make —
+/// net of the heal reaching it (`healOn`, its partners' and its own). None
+/// where the damage never out-heals it.
+let private killTicksOf
+    (view: ColonyView)
+    (healOn: HostileInfo -> int)
+    (team: Fighter list)
+    (hostile: HostileInfo)
+    : int option =
+    let net =
+        (team
+         |> List.sumBy (fun fighter -> fighter.DamageAt(standoff view fighter hostile)))
+        - HostileInfo.damageFor hostile (healOn hostile)
+
+    if net <= 0 then
+        None
+    else
+        Some(max 1 ((HostileInfo.effectiveHits hostile + net - 1) / net))
+
+/// The odds a body of ours lands the whole of a kill (#621), as the share of
+/// its `kill` ticks the hostile stays in reach. Certain where it cannot walk
+/// off: penned in its room (an Invader), stationary or rooted at its work,
+/// behind the body on plain (#613), or kept off. Else it walks for the
+/// room's edge at its pace, the nearer side of the room its way out: one
+/// quicker on plain stays in reach only until it opens the gap past the
+/// body's reach, from where they stand or, coming in, from the reach; one at
+/// the body's pace is caught at its work, but once it walks off (its last
+/// step took it toward the edge, `ColonyView.Stepped`) only from in reach,
+/// and then until it is off.
+let private catchOdds
+    (view: ColonyView)
+    (fighter: Fighter)
+    (from: RoomPos option)
+    (arrival: int)
+    (kill: int)
+    (hostile: HostileInfo)
+    : float =
+    let side = view.Hostiles
+    let theirs = loadedGait view hostile
+
+    if
+        not (HostileInfo.crossesExits hostile)
+        || HostileInfo.stationary side hostile
+        || rootedAtWork view hostile
+        || Gait.fallsBehind fighter.Gait theirs
+        || keepsOff view fighter hostile
+    then
+        1.0
+    else
+        let edge = Engine.roomSide - 1
+
+        let toEdge (tile: Pos) =
+            min (min tile.X tile.Y) (min (edge - tile.X) (edge - tile.Y))
+
+        let at = RoomPos.pos hostile.Pos
+        let pace = Gait.ticks Gait.plain theirs |> Option.defaultValue 1
+        let off = toEdge at * pace
+
+        let leaving =
+            Map.tryFind hostile.Id view.Stepped
+            |> Option.exists (fun last ->
+                last.Room = hostile.Pos.Room && toEdge at < toEdge (RoomPos.pos last))
+
+        let window =
+            match Gait.ticks Gait.plain fighter.Gait with
+            | Some ours when ours > pace ->
+                if leaving && arrival > 0 then
+                    0
+                else
+                    let range =
+                        from
+                        |> Option.bind (fun tile -> RoomPos.range tile hostile.Pos)
+                        |> Option.defaultValue fighter.Reach
+                        |> min fighter.Reach
+
+                    min off ((fighter.Reach - range + 1) * ours * pace / (ours - pace))
+            | _ when not leaving -> kill
+            | _ when arrival > 0 -> 0
+            | _ -> off
+
+        min 1.0 (float (max 0 window) / float kill)
+
+/// One room's kill scores (#621), the heal reaching each hostile found once:
+/// what killing a hostile is worth (`killValue`) per tick of a body's effort,
+/// its own `arrival` within reach and the kill it lands beside its partners
+/// in the fight (`side`, every one at its standoff, `killTicksOf`), times the
+/// odds it lands the kill (`catchOdds`). Zero where the side never kills it.
+/// One score every kill order, ground and seat reads, so partners agree on
+/// the head and focus it.
+let internal killScoresIn
+    (view: ColonyView)
+    (room: string)
+    (side: Fighter list)
+    : Fighter -> RoomPos option -> int -> HostileInfo -> float =
+    let healOn = healReaching view room
+
+    fun fighter from arrival hostile ->
+        let team =
+            fighter
+            :: (side
+                |> List.filter (fun partner ->
+                    Option.isNone partner.Creep || partner.Creep <> fighter.Creep))
+
+        match killTicksOf view healOn team hostile with
+        | None -> 0.0
+        | Some kill ->
+            catchOdds view fighter from arrival kill hostile * killValue view hostile
+            / float (max 0 arrival + kill)
+
 /// The kill order's leading key for one room's targets (#451), smallest
 /// first; the caller breaks ties. Outside a ranger's room (an outpost's
-/// melee guard) the raid first, then a claimer, and nothing more.
-let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRank =
+/// melee guard) the raid first, then every other body by its kill score
+/// (`score`, #621), highest first. An equal score is broken toward the body
+/// our damage already wears down most (its effective hits net of the heal and
+/// our damage reaching it), so partners lock onto one.
+let internal killRank
+    (view: ColonyView)
+    (room: string)
+    (score: HostileInfo -> float)
+    : HostileInfo -> KillRank =
     if not (Set.contains room (rangerRooms view)) then
+        let healOn = lazy (healReaching view room)
+        let damageOn = lazy (damageReaching view)
+
         fun hostile ->
-            {
-                Tier =
-                    (if threatens view hostile then Raid
-                     elif HostileInfo.claims view.Hostiles hostile then Reserver
-                     else Bystander)
-                EffectiveHits = 0
-            }
+            if threatens view hostile then
+                {
+                    Tier = Raid
+                    Worth = 0.0
+                    EffectiveHits = 0
+                }
+            else
+                {
+                    Tier = Prey
+                    Worth = -(score hostile)
+                    EffectiveHits =
+                        HostileInfo.effectiveHits hostile
+                        + HostileInfo.damageFor hostile (healOn.Value hostile)
+                        - damageOn.Value hostile
+                }
     else
         let resident = residentRooms view
         let healOn = healReaching view room
@@ -1441,16 +1649,19 @@ let internal killRank (view: ColonyView) (room: string) : HostileInfo -> KillRan
             let heal = HostileInfo.damageFor hostile (healOn hostile)
             let damage = damageOn hostile
 
+            let tier =
+                killTier
+                    {
+                        ClaimsAFlag = claimsAFlag view.Hostiles resident hostile
+                        RaidHealer = raidHealer view hostile
+                        Threatens = threatens view hostile
+                        HealOn = heal
+                        DamageOn = damage
+                    }
+
             {
-                Tier =
-                    killTier
-                        {
-                            ClaimsAFlag = claimsAFlag view.Hostiles resident hostile
-                            RaidHealer = raidHealer view hostile
-                            Threatens = threatens view hostile
-                            HealOn = heal
-                            DamageOn = damage
-                        }
+                Tier = tier
+                Worth = if tier = Prey then -(score hostile) else 0.0
                 EffectiveHits = HostileInfo.effectiveHits hostile + heal - damage
             }
 
@@ -1461,8 +1672,7 @@ let internal killBandOf (rank: KillRank) : int =
     | Claimer -> 0
     | BrokenHealer -> 1
     | Raid -> 2
-    | Reserver -> 3
-    | Bystander -> 4
+    | Prey -> 3
 
 /// A raid's price at a window (`raidPrice`). Its armed bodies' hits come in
 /// two phases: `Tough`, the damage that breaks their boosted TOUGH still
