@@ -90,7 +90,10 @@
     <Compile Include="ObserveOutpostTests.fs" />
     <Compile Include="ObserveCpuTests.fs" />
     <Compile Include="ObserveBreachTests.fs" />
+    <Compile Include="LightTickFixtures.fs" />
     <Compile Include="LightTickTests.fs" />
+    <Compile Include="LightTickForcedTests.fs" />
+    <Compile Include="LightTickColonyTests.fs" />
     <Compile Include="WireTests.fs" />
     <Compile Include="ProjectionShapeTests.fs" />
     <Compile Include="RoomInvariantFixtures.fs" />
