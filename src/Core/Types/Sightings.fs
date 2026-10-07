@@ -628,11 +628,15 @@ type CreepInfo =
         /// stops paying its two a tick. 0 in every hand-built fixture that
         /// does not say otherwise.
         ShotOff: int
-        /// Whether the creep stands on a different tile from last tick — the
-        /// shell's reading of Memory's last positions, false for a body born
-        /// this tick and in every hand-built fixture. The one reader is the
-        /// occupancy surcharge (#225).
-        Moved: bool
+        /// Whether the body is on the move (#649): it stands on a different
+        /// tile from last tick (Memory's last positions), or the last decide
+        /// tracked a quarry for it and it stands off the tile it stood on
+        /// then (`LightTick.walkers`), a light tick that stepped it nowhere
+        /// (a chaser's kept step) not stopping it. False for a body born this
+        /// tick and in every hand-built fixture that does not say otherwise.
+        /// The one reader is who leaves a tile this tick
+        /// (`Entry.leavingTiles`).
+        Walking: bool
         /// The store the energy aboard was drawn from, and when (#530): the
         /// shell's reading of Memory's draw record, None in every hand-built
         /// fixture that does not say otherwise. The one reader is the Refill

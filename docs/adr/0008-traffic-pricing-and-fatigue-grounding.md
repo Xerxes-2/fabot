@@ -1,6 +1,8 @@
 # Traffic re-prices a route; fatigue grounds a creep
 
-> **Status:** amended by #436, #600
+> **Status:** amended by #436, #600, #649
+
+> **Amended by #649**: who is standing traffic is ADR 0088's occupancy by arrival (its 2026-10-08 #649 banner): every body but one of ours leaving its tile this tick, whichever colony holds it, #600's loose body being one way of leaving.
 
 > **Amended by #436**: a creep standing on the crossing its walk takes is no longer bounced along the border but waits on it, since the engine carries it across for free.
 

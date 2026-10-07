@@ -858,6 +858,65 @@ let replayTests =
                          | _ -> false))
                     "and none at a target gone from sight"
             }
+
+            test
+                "#649 a chaser the plans track is on the move the full tick after a light tick that stepped it nowhere; a seated body is not" {
+                // The hauler's plan walks it from (20,20); the digger has none.
+                // Untracked, the hauler is an economy walk; tracked, a chase.
+                let chasing =
+                    { last with
+                        Plans =
+                            last.Plans
+                            |> Map.map (fun _ plan ->
+                                LightTick.tracking
+                                    quiet
+                                    (Map.ofList [ "hauler", [ tile 25 20 ] ])
+                                    plan)
+                    }
+
+                Expect.isEmpty (LightTick.walkers last) "a step plan alone walks nobody on"
+
+                let walkers = LightTick.walkers chasing
+
+                Expect.equal
+                    walkers
+                    (Map.ofList [ "hauler", tile 20 20 ])
+                    "the chaser, at the tile it planned from"
+
+                let walking walkers lastTile name now =
+                    LightTick.walking (Map.ofList [ name, lastTile ]) walkers name now
+
+                Expect.isFalse
+                    (walking (LightTick.walkers last) (tile 21 20) "hauler" (tile 21 20))
+                    "stepped onto its seat on the full tick and stood on the light one: a wall"
+
+                Expect.isTrue
+                    (walking walkers (tile 21 20) "hauler" (tile 21 20))
+                    "a chaser that stepped on the full tick and stood on the light one: still on the move"
+
+                Expect.isFalse
+                    (walking walkers (tile 20 20) "hauler" (tile 20 20))
+                    "a chaser held on its tile since the plan: stopped"
+
+                Expect.isEmpty
+                    (LightTick.walkers
+                        { chasing with
+                            Plans =
+                                chasing.Plans
+                                |> Map.map (fun _ plan -> LightTick.faultedPlan quiet (Some plan))
+                        })
+                    "a faulted colony's carried plan walks nobody on"
+
+                let walking = walking walkers
+
+                Expect.isFalse
+                    (walking (tile 10 10) "digger" (tile 10 10))
+                    "no plan and no step: stopped"
+
+                Expect.isTrue
+                    (walking (tile 10 11) "digger" (tile 10 10))
+                    "no plan, but stepped last tick"
+            }
         ]
 
 [<Tests>]

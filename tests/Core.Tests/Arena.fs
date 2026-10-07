@@ -1111,10 +1111,9 @@ let private creepInfo (a: Arena) (b: Body) : CreepInfo =
             - (List.take (List.length b.Parts - List.length active) b.Parts
                |> List.filter (fun part -> part = Move || part = Carry)
                |> List.length)
-        Moved =
-            match Map.tryFind b.Id a.Carried.LastPositions with
-            | Some last -> last <> b.At
-            | None -> false
+        // Every arena tick decides, so the tile a body stood on at the last
+        // decide is last tick's and no plan's walkers add to it.
+        Walking = LightTick.walking a.Carried.LastPositions Map.empty b.Id b.At
         DrawnFrom = Map.tryFind b.Id a.Carried.Drawn
     }
 
@@ -1585,7 +1584,6 @@ let private decideOurs (a: Arena) : Intent list * Carried =
 
     let decisions =
         decided.Decided |> List.map (fun (c, view, decision, ()) -> c, view, decision)
-
     // Characterisation (the world-first epic's W0): a fighter holds no economy
     // Task and an economy body no combat one, on every tick of every arena.
     for (c, view, decision) in decisions do

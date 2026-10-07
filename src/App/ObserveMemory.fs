@@ -1847,7 +1847,7 @@ let private decodeCpuPhases (raw: obj) : CpuPhases option =
     else
         None
 
-/// Last tick's tile of every creep of ours, the fact `CreepInfo.Moved` is
+/// Last tick's tile of every creep of ours, the fact `CreepInfo.Walking` is
 /// read against. One flat leaf, rewritten every tick; a missing or
 /// malformed entry reads as "did not move", the conservative answer.
 let loadPositions () : Map<string, RoomPos> =

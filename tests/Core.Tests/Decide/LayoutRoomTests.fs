@@ -184,28 +184,37 @@ let squareRingTests =
                     | 1 -> if (name = "eb") = (tick % 2 = 1) then 4 else 0
                     | _ -> 0
 
+                // Both hold their Harvest, so neither is shoved for free: each
+                // leaves its tile only by walking on (`Entry.leavingTiles`).
+                let holding = Map.ofList [ "eb", "harvest:src-e"; "wb", "harvest:src-w" ]
+
                 let tickOf variant tick (positions: Map<string, Pos>) =
-                    { bareRespawn with
-                        Sources = [ source "src-w"; source "src-e" ]
-                        Controller = None
-                        Refillables = []
-                        Creeps =
-                            [
-                                { worker "eb" 0 50 with
-                                    Fatigue = fatigueOf variant "eb" tick
-                                    Moved = variant <> 2 && tick > 0
-                                }
-                                { worker "wb" 0 50 with
-                                    Fatigue = fatigueOf variant "wb" tick
-                                    Moved = variant <> 2 && tick > 0
-                                }
-                            ]
-                        Spatial =
-                            ring
-                            |> withHome (fun layer ->
-                                { layer with
-                                    CreepPositions = positions
-                                })
+                    let view =
+                        { bareRespawn with
+                            Sources = [ source "src-w"; source "src-e" ]
+                            Controller = None
+                            Refillables = []
+                            Creeps =
+                                [
+                                    { worker "eb" 0 50 with
+                                        Fatigue = fatigueOf variant "eb" tick
+                                        Walking = variant <> 2 && tick > 0
+                                    }
+                                    { worker "wb" 0 50 with
+                                        Fatigue = fatigueOf variant "wb" tick
+                                        Walking = variant <> 2 && tick > 0
+                                    }
+                                ]
+                            Spatial =
+                                ring
+                                |> withHome (fun layer ->
+                                    { layer with
+                                        CreepPositions = positions
+                                    })
+                        }
+
+                    { view with
+                        Leaving = Entry.leavingTiles holding Set.empty Set.empty [ "W1N1", view ]
                     }
 
                 let start = Map.ofList [ "eb", { X = 7; Y = 12 }; "wb", { X = 17; Y = 12 } ]

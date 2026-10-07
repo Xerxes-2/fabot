@@ -633,7 +633,7 @@ let private lightTick (atEntry: float) (last: LightTick.LastFull) (seen: LightTi
     // The glance and the replay are this tick's decision; nothing was swept
     // or projected, so those phases are zero-width.
     let atDecide = Game.cpu.getUsed ()
-    // `Moved` keeps meaning "moved since the last tick".
+    // `CreepInfo.Walking` keeps reading "moved since the last tick".
     World.positions () |> ObserveMemory.savePositions
     let atSave = Game.cpu.getUsed ()
     let outcomes = Executor.runQuiet plan
@@ -716,6 +716,9 @@ let private fullTick
             Colony.declared
             harassment
             (ObserveMemory.loadPositions ())
+            (match lastFull with
+             | Some(_, last) -> LightTick.walkers last
+             | None -> Map.empty)
             (ObserveMemory.loadDrawn ())
         |> World.recalling sightings
         |> World.latchTowers Tuning.defaults towered
@@ -1504,7 +1507,7 @@ let private fullTick
     pruneDeadCreepMemory living
 
     // Where every creep of ours stood this tick, for next tick's
-    // `CreepInfo.Moved`.
+    // `CreepInfo.Walking`.
     World.positions () |> ObserveMemory.savePositions
     // The Memory boundary: everything this tick persists except the CPU
     // line's own leaf, which is written after the last reading and so is the

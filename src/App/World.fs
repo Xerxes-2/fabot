@@ -1060,6 +1060,7 @@ let ofGame
     (colonies: Colony list)
     (harass: Harassment)
     (lastPositions: Map<string, RoomPos>)
+    (walkers: Map<string, RoomPos>)
     (drawn: Map<string, DrawRecord>)
     : World =
     let spawns = objectValues<ISpawn> Game.spawns
@@ -1226,10 +1227,12 @@ let ofGame
                                         1
                                     else
                                         0)
-                            Moved =
-                                match Map.tryFind c.name lastPositions with
-                                | Some last -> last <> tileOf c
-                                | None -> false
+                            Walking =
+                                Fabot.Core.LightTick.walking
+                                    lastPositions
+                                    walkers
+                                    c.name
+                                    (tileOf c)
                             DrawnFrom = Map.tryFind c.name drawn
                         }
                 }
@@ -1238,7 +1241,7 @@ let ofGame
 
 
 /// Where every creep of ours stands this tick, for next tick's
-/// `CreepInfo.Moved`. Here so it shares `ofGame`'s gestating filter.
+/// `CreepInfo.Walking`. Here so it shares `ofGame`'s gestating filter.
 let positions () : (string * RoomPos) list =
     objectValues<ICreep> Game.creeps
     |> Array.filter (fun c -> not c.spawning)

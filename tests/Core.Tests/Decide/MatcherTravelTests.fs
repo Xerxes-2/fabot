@@ -687,7 +687,7 @@ let private laneUp side idle mover =
 
 /// #600: the lane with a swamp at (11,12) beside the idle body's (10,12),
 /// one step round it onto (10,11) for the walker on (10,13); `loose` puts
-/// the idle body's tile in `ColonyView.Loose`.
+/// the idle body's tile in `ColonyView.Leaving`.
 let private laneUpSwamp loose =
     let terrain =
         [
@@ -702,7 +702,7 @@ let private laneUpSwamp loose =
         Spatial =
             spatial [ "src-a", { X = 10; Y = 9 } ] terrain
             |> withCreepsAt [ "h", { X = 10; Y = 13 }; "i", { X = 10; Y = 12 } ]
-        Loose =
+        Leaving =
             if loose then
                 Set.singleton (RoomPos.at "" { X = 10; Y = 12 })
             else
@@ -1035,7 +1035,7 @@ let arbitrationTests =
 
             test "#600 another colony's loose body is priced and shoved as this colony's is" {
                 // The lane split between two colonies, as `laneUpShared`
-                // splits it, each the other's foreign body; `Loose` is the
+                // splits it, each the other's foreign body; `Leaving` is the
                 // world's one set, so both views carry it.
                 let split loose =
                     let lane = laneUpSwamp loose
@@ -1101,12 +1101,154 @@ let arbitrationTests =
                         Spatial =
                             spatial [ "src-a", { X = 10; Y = 9 } ] terrain
                             |> withCreepsAt [ "h", { X = 10; Y = 11 }; "i", { X = 10; Y = 10 } ]
-                        Loose = Set.singleton (RoomPos.at "" { X = 10; Y = 10 })
+                        Leaving = Set.singleton (RoomPos.at "" { X = 10; Y = 10 })
                     }
 
                 Expect.isEmpty
                     (resolveOn seat [ "h", Harvest "src-a"; "i", Harvest "src-a" ] |> moveIntents)
                     "the holder keeps its Seat and the walker waits"
+            }
+
+            test
+                "#649 a walker steps through a body of ours on the move; a stopped or fatigued one it walks round" {
+                // The #600 lane, both bodies holding the rock's Harvest, so
+                // neither is shoved for free: "i" on (10,12) leaves its tile
+                // only by walking on.
+                let held =
+                    Map.ofList [ "h", taskId (Harvest "src-a"); "i", taskId (Harvest "src-a") ]
+
+                let lane (body: CreepInfo -> CreepInfo) =
+                    let view = laneUpSwamp false
+
+                    let view =
+                        { view with
+                            Creeps =
+                                view.Creeps
+                                |> List.map (fun c -> if c.Name = "i" then body c else c)
+                        }
+
+                    { view with
+                        Leaving =
+                            Entry.leavingTiles
+                                held
+                                Set.empty
+                                Set.empty
+                                [ SpatialInfo.homeName view.Spatial, view ]
+                    }
+
+                let first body =
+                    resolveOn (lane body) [ "h", Harvest "src-a"; "i", Harvest "src-a" ]
+                    |> moveIntents
+                    |> List.tryFind (fun (name, _) -> name = "h")
+                    |> Option.map snd
+
+                Expect.equal
+                    (first (fun c -> { c with Walking = true }))
+                    (Some Top)
+                    "on the move, its tile costs the walk its step: up the lane behind it"
+
+                Expect.equal
+                    (first id)
+                    (Some TopRight)
+                    "stopped on its tile, a seated miner's shape: the walk goes round through the swamp"
+
+                Expect.equal
+                    (first (fun c -> { c with Walking = true; Fatigue = 2 }))
+                    (Some TopRight)
+                    "fatigued, it stands there whatever it walked: round it"
+            }
+
+            test "#649 another colony's body on the move is no wall either" {
+                let held =
+                    Map.ofList [ "h", taskId (Harvest "src-a"); "i", taskId (Harvest "src-a") ]
+
+                let lane = laneUpSwamp false
+                let tile pos = Set.singleton (RoomPos.at "" pos)
+
+                let holding name =
+                    { lane with
+                        Creeps =
+                            lane.Creeps
+                            |> List.filter (fun c -> c.Name = name)
+                            |> List.map (fun c -> { c with Walking = c.Name = "i" })
+                        Spatial =
+                            lane.Spatial
+                            |> withHome (fun layer ->
+                                { layer with
+                                    CreepPositions =
+                                        layer.CreepPositions |> Map.filter (fun n _ -> n = name)
+                                })
+                    }
+
+                let hauling =
+                    { holding "h" with
+                        Foreign = tile { X = 10; Y = 12 }
+                    }
+
+                let walking =
+                    { holding "i" with
+                        Foreign = tile { X = 10; Y = 13 }
+                    }
+
+                // The world's one set, laid on both views as the decide lays it.
+                let leaving =
+                    Entry.leavingTiles
+                        held
+                        Set.empty
+                        Set.empty
+                        [ "mother", hauling; "child", walking ]
+
+                Expect.equal
+                    leaving
+                    (tile { X = 10; Y = 12 })
+                    "the walking body's tile, whichever colony holds it"
+
+                // One room pass over both colonies' moves, as the tick runs it.
+                let moves leaving =
+                    resolveRooms
+                        Set.empty
+                        [
+                            movementFor { hauling with Leaving = leaving } [ "h", Harvest "src-a" ]
+                            movementFor { walking with Leaving = leaving } [ "i", Harvest "src-a" ]
+                        ]
+                    |> fst
+                    |> moveIntents
+                    |> List.sort
+
+                Expect.equal
+                    (moves leaving)
+                    [ "h", Top; "i", Top ]
+                    "the walk takes its tile, as it takes this colony's own"
+
+                Expect.contains
+                    (moves Set.empty)
+                    ("h", TopRight)
+                    "while it stands, it is a foreign body priced as occupied"
+            }
+
+            test "#649 a body of ours on the border ring leaves it whatever it does" {
+                // The engine carries a body that ends its tick on the ring into
+                // the neighbour: held, stopped and fatigued, it is gone all the
+                // same, and one tile in it stays.
+                let at pos =
+                    let view =
+                        { bareRespawn with
+                            Creeps = [ { worker "b" 0 50 with Fatigue = 4 } ]
+                            Spatial = SpatialInfo.empty |> withCreepsAt [ "b", pos ]
+                        }
+
+                    Entry.leavingTiles
+                        (Map.ofList [ "b", taskId (Harvest "src-a") ])
+                        Set.empty
+                        Set.empty
+                        [ SpatialInfo.homeName view.Spatial, view ]
+
+                Expect.equal
+                    (at { X = 0; Y = 12 })
+                    (Set.singleton (RoomPos.at "" { X = 0; Y = 12 }))
+                    "on the ring"
+
+                Expect.isEmpty (at { X = 1; Y = 12 }) "a tile in, it stands"
             }
 
             test "#600 the decide settles who is loose off the carried assignments" {

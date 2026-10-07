@@ -512,25 +512,13 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         |> Map.ofList
 
     // The room's grids, one set per projected room (`groundGrids`); -1
-    // answers every tile outside the projection. The occupancy
-    // surcharge marks **standing** traffic (#225) — a body that did not move
-    // last tick, a fatigued one, and every body of another colony's — because
-    // two travellers each pricing the other's tile never pass. A loose body
-    // (`ColonyView.Loose`), this colony's or another's, is not traffic
-    // (#600): the arbitration shoves an idle body for free, the same tick, so
-    // its tile costs the walk its step and no more. One handed a Task this
-    // tick is not shoved off it (#562): the walker takes its detour then.
-    let loose =
-        placed
-        |> List.filter (fun (_, room, pos) -> Set.contains (RoomPos.at room pos) view.Loose)
-        |> List.map (fun (name, _, _) -> name)
-        |> Set.ofList
-
-    let standing =
-        creeps
-        |> List.filter (fun c -> (not c.Moved || c.Fatigue > 0) && not (Set.contains c.Name loose))
-        |> List.map (fun c -> c.Name)
-        |> Set.ofList
+    // answers every tile outside the projection. The occupancy surcharge
+    // marks every body still standing on its tile when a walker gets there
+    // (#225, #649): every body but one of ours leaving its tile this tick
+    // (`ColonyView.Leaving`, this colony's or another's), because two
+    // travellers each pricing the other's tile never pass. One handed a Task
+    // this tick is not shoved off it (#562): the walker takes its detour then.
+    let held = creeps |> List.map _.Name |> Set.ofList
 
     // The [[keeper margin]] (`Keepers`), on the raw ground ahead of the copy
     // the walking grid is made from (`groundGrids`), so a masked tile is
@@ -545,7 +533,9 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
 
         layer.CreepPositions
         |> Map.iter (fun name tile ->
-            if Set.contains name standing then
+            if
+                Set.contains name held && not (Set.contains (RoomPos.at room tile) view.Leaving)
+            then
                 occupied.[indexOf tile] <- true)
 
         // The bodies this colony does not hold stand here too: the layer carries
@@ -564,10 +554,10 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
     let ringOf (room: string) (ring: Map<Pos, Terrain>) = ringGrid keeperMargin room ring
 
     let foreign =
-        if Set.isEmpty view.Loose then
+        if Set.isEmpty view.Leaving then
             view.Foreign
         else
-            Set.difference view.Foreign view.Loose
+            Set.difference view.Foreign view.Leaving
 
     let grids =
         spatial.Rooms

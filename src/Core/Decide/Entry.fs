@@ -334,29 +334,44 @@ let private withDrawn (view: ColonyView) (assignments: Assignments) : ColonyView
         Fighters = drawn view.Fighters
     }
 
-/// The tiles of our bodies this tick's one room pass shoves for free (#600,
-/// `ColonyView.Loose`), every colony's, by home: a body rested and holding no
-/// Task at the last match (`holding`), of a colony deciding this tick (`idle`
-/// names those replaying, whose bodies are the pass's walls), and of a
-/// colony that may decide its fight alone, a fighter, the one body such a
-/// decide moves (`joinFight`). The one statement of who is loose, which every
-/// colony's walk reads off the view; the pass shoves such a body as it
-/// shoves any idle one (#562).
-let private looseTiles
+/// The tiles of our bodies that leave them this tick (#649,
+/// `ColonyView.Leaving`), every colony's, by home: the one statement of who
+/// is traffic, which every walk reads off the view. A tile is occupied only
+/// by a body still standing on it when a walker gets there. A body of ours
+/// on its room's border ring is gone from it whatever it does, the engine
+/// carrying a body that ends its tick there into the neighbour; a rested one
+/// elsewhere is gone either way it leaves:
+/// - it is on the move (`CreepInfo.Walking`), whichever colony holds it, the
+///   first step left to the arbitration;
+/// - or this tick's one room pass shoves it for free (#600): holding no Task
+///   at the last match (`holding`), of a colony deciding this tick (`idle`
+///   names those replaying, whose bodies are the pass's walls), and of a
+///   colony that may decide its fight alone, a fighter, the one body such a
+///   decide moves (`joinFight`); the pass shoves it as it shoves any idle
+///   one (#562).
+/// A fatigued body stays, as does one that stopped (seated at its work, or
+/// held), and every body not ours.
+let leavingTiles
     (holding: Assignments)
     (idle: Set<string>)
     (fightAlone: Set<string>)
     (views: (string * ColonyView) list)
     : Set<RoomPos> =
     views
-    |> List.filter (fun (home, _) -> not (Set.contains home idle))
     |> List.collect (fun (home, view) ->
-        ColonyView.bodies view
-        |> List.filter (fun creep ->
-            creep.Fatigue = 0
+        let shoves (creep: CreepInfo) =
+            not (Set.contains home idle)
             && not (Map.containsKey creep.Name holding)
-            && (not (Set.contains home fightAlone) || isFighterBody creep))
-        |> List.choose (fun creep -> SpatialInfo.creepPlacementOf view.Spatial creep.Name))
+            && (not (Set.contains home fightAlone) || isFighterBody creep)
+
+        ColonyView.bodies view
+        |> List.choose (fun creep ->
+            SpatialInfo.creepPlacementOf view.Spatial creep.Name
+            |> Option.filter (fun tile ->
+                // A fatigued body on the ring is carried back onto it every
+                // other tick: gone this tick, back the next.
+                Seam.onRing (RoomPos.pos tile)
+                || creep.Fatigue = 0 && (creep.Walking || shoves creep))))
     |> Set.ofList
 
 /// The Atlas a decide prices from, its tables recalled off the memo and each
@@ -1574,8 +1589,8 @@ let decide
     // added staggers colonies against each other.
     let view =
         { view with
-            Loose =
-                looseTiles
+            Leaving =
+                leavingTiles
                     assignments
                     Set.empty
                     Set.empty
@@ -2149,16 +2164,17 @@ let decideColonies
     (stamp: unit -> 'Stamp)
     (colonies: (Colony * ColonyView) list)
     : ColonyDecisions<'Stamp> =
-    // Every view on the one set of loose tiles the tick's room pass shoves
-    // for free. Laid before any colony faults: a faulted colony's creeps may
-    // count as shovable here though they replay their plan's steps (#628).
-    let loose =
+    // Every view on the one set of tiles our bodies leave this tick. Laid
+    // before any colony faults: a faulted colony's creeps may count as
+    // shovable here though they replay their plan's steps (#628).
+    let leaving =
         colonies
         |> List.map (fun (colony, view) -> colony.Home, view)
-        |> looseTiles inputs.Holding inputs.Idle inputs.FightAlone
+        |> leavingTiles inputs.Holding inputs.Idle inputs.FightAlone
 
     let colonies =
-        colonies |> List.map (fun (colony, view) -> colony, { view with Loose = loose })
+        colonies
+        |> List.map (fun (colony, view) -> colony, { view with Leaving = leaving })
 
     let judged = judgeColonies inputs.Holding inputs.Idle colonies
 

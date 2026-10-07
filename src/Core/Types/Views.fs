@@ -734,13 +734,14 @@ type ColonyView =
         /// with the tile of its room it left (`HostileStep.Left`): which way
         /// it walks.
         Stepped: Map<string, RoomPos>
-        /// The tiles, world-wide, of our bodies this tick's arbitration shoves
-        /// for free (#600): rested, holding no Task at the last match, and
-        /// moved by a colony deciding this tick (`Entry.looseTiles`). Empty
-        /// off the shell and in every hand-built fixture, which price every
-        /// standing body as occupied; the decide settles it before the Atlas
-        /// is built. The one reader is the Atlas's occupancy grid.
-        Loose: Set<RoomPos>
+        /// The tiles, world-wide, of our bodies that leave them this tick
+        /// (`Entry.leavingTiles`, #649): on the border ring, or rested and on
+        /// the move (`CreepInfo.Walking`) or shoved for free by the
+        /// arbitration (#600).
+        /// Empty off the shell and in every hand-built fixture, which price
+        /// every body as occupied; the decide settles it before the Atlas is
+        /// built. The one reader is the Atlas's occupancy grid.
+        Leaving: Set<RoomPos>
         /// The engine's refusals of this colony's acts (`World.Refusals`,
         /// #629): its bodies', wherever they stand, and the structures' and
         /// sites' whose acts its plan issued, wherever they stand. What the
@@ -2064,7 +2065,7 @@ module ColonyView =
                     |> Option.bind (fun step -> step.Left)
                     |> Option.map (fun left -> h.Id, left))
                 |> Map.ofList
-            Loose = Set.empty
+            Leaving = Set.empty
             Borrowed =
                 {
                     Rooms = bootstrap

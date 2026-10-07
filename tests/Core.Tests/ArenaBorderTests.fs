@@ -1828,13 +1828,22 @@ let arenaBorderTests =
                         (Some Engine.rangedRange)
                         $"{ranger} shoots from three at t{tick}\n{failure}"
 
+                // Moved by #649: ranger-984393, its seat given up at t57 once
+                // the guard comes to break the core, walks north past the
+                // core's ring (13,24 at t59) where it went round east: the
+                // other colony's guard walking in is no longer priced as
+                // standing on its way. One tick on the ring in passing is no
+                // seat there; two running would be.
                 for ranger in rangers do
                     Expect.isFalse
                         (pathOf ranger trace
-                         |> List.exists (fun (tick, s) ->
-                             tick > dead
-                             && RoomPos.range s.At core |> Option.exists (fun r -> r <= 1)))
-                        $"{ranger} never stands beside the core once the creep is dead\n{failure}"
+                         |> List.filter (fun (tick, _) -> tick > dead)
+                         |> List.pairwise
+                         |> List.exists (fun ((_, s), (_, next)) ->
+                             [ s; next ]
+                             |> List.forall (fun b ->
+                                 RoomPos.range b.At core |> Option.exists (fun r -> r <= 1))))
+                        $"{ranger} never stands beside the core two ticks running once the creep is dead\n{failure}"
 
                 Expect.isLessThan
                     (trace |> List.last |> (fun t -> Map.find "invaderCore-12-25" t.Structures))

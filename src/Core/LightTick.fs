@@ -710,6 +710,37 @@ let volleyRooms (last: LastFull) : string list =
     |> Seq.distinct
     |> List.ofSeq
 
+/// The chasers the plans track a quarry for (`Plan.Tracks`), each with the
+/// tile it stood on as its plan was made (`Plan.Standing`): one off that tile
+/// is still after its quarry, whether or not its light ticks stepped it
+/// (`CreepInfo.Walking`). Only a chase: a body that walked to its seat or
+/// stop and stood since is stopped, and a faulted colony's carried plan holds
+/// no tracks (`faultedPlan`), so it walks nobody on for ever.
+let walkers (last: LastFull) : Map<string, RoomPos> =
+    last.Plans
+    |> Map.values
+    |> Seq.collect (fun plan ->
+        plan.Tracks
+        |> Map.keys
+        |> Seq.choose (fun name ->
+            Map.tryFind name plan.Standing |> Option.map (fun tile -> name, tile)))
+    |> Map.ofSeq
+
+/// Whether a body of ours standing on `tile` is on the move
+/// (`CreepInfo.Walking`): off its tile of last tick (`lastPositions`), or a
+/// chaser off the one it stood on as the plans that track its quarry were
+/// made (`walkers`), a light tick that stepped it nowhere not stopping it.
+let walking
+    (lastPositions: Map<string, RoomPos>)
+    (walkers: Map<string, RoomPos>)
+    (name: string)
+    (tile: RoomPos)
+    : bool =
+    let off (tiles: Map<string, RoomPos>) =
+        Map.tryFind name tiles |> Option.exists ((<>) tile)
+
+    off lastPositions || off walkers
+
 /// The hostiles the plans strike at, each with the creeps of ours that aim or
 /// shoot at it and the range they strike from.
 let private strikers (last: LastFull) : Map<string, (string * int) list> =
