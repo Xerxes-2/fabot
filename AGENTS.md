@@ -18,7 +18,9 @@ Each rule's reason is in `docs/agents/hygiene.md`.
 - Name the broken invariant before the fix: one sentence about every body, room or colony it covers, not the case in front of you; then fix at that level, or fold the case into the epic that owns the invariant. A rule that ends an act too early is fixed there, not by a new act that mops up after it.
 - A combat rule reads the body, never the owner; the owner decides only diplomacy (`Facts.mayStrike`) and engine facts (an Invader stays in its room, a keeper holds its lair).
 - A capture (`npm run capture`, `docs/agents/arena-capture.md`) reproduces the live outcome before it is pinned; one that doesn't is a finding about the capture or the arena.
-- A behaviour change names every test expectation it moves and why; a refactor moves none.
+- A decision is priced from the facts already computed (value: body cost, cargo, throughput; cost: arrival, ticks to kill, catch odds), not from a fixed order, threshold or count; a constant stays only for an engine fact or a named safety margin.
+- A refactor of the seam a bug lives in outranks a patch beside it: a live report that isn't a firefight (home in danger, bucket falling, income being lost) is recorded on the epic that owns the seam, not slotted in ahead of it.
+- A change names every test expectation it moves and why; a refactor may move them too, when each move is justified.
 - A fight change (Facts, Threat, Emitter, Resolver, Arrival, the arena) runs `npm run spar` and names every worse metric in the commit: `docs/agents/spar.md`.
 
 ## ADRs
@@ -42,7 +44,7 @@ Each rule's reason is in `docs/agents/hygiene.md`.
 
 Squash TDD slices into one change per issue; push per issue.
 
-A live firefight the user flags may be fixed in the current session without the subagent loop; steps 1, 3 and 4 still apply.
+A live firefight (as above) the user flags may be fixed in the current session without the subagent loop; steps 1, 3 and 4 still apply.
 
 ### Working alongside
 
