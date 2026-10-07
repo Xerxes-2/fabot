@@ -27,6 +27,32 @@ let workforceTests =
                         { X = 31; Y = 30 }, Plain
                     ]
 
+            // A refused cast is a body not yet cast (#629): the one body the
+            // bank funds goes to the spawn the engine did not refuse.
+            test "a spawn the engine refused takes its seat after one it did not" {
+                let snapshot =
+                    { bareRespawn with
+                        Spawns =
+                            [
+                                spawn
+                                { spawn with
+                                    Name = "Spawn2"
+                                    Id = "spawn-2"
+                                }
+                            ]
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = fiveSeats
+                        Refusals = [ Refusal.one "Spawn1" false "W1N1" "" -14 bareRespawn.Time ]
+                    }
+
+                let { Intents = intents } = decideOn snapshot
+
+                Expect.equal
+                    (spawnIntents intents |> List.map (fun (name, _, _) -> name))
+                    [ "Spawn2" ]
+                    "Spawn1 casts nothing the engine takes; the bank's one body is Spawn2's"
+            }
+
             test "the Seat total raises the target above the floor" {
                 let snapshot =
                     { bareRespawn with

@@ -344,6 +344,7 @@ let internal pairWorld: World =
         ArmedSeen = Map.empty
         RivalControllers = Map.empty
         StrayGround = fun _ -> None
+        Refusals = []
     }
 
 let internal noneShut = Map.empty<string, Set<string>>

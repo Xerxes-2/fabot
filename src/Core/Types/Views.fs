@@ -741,6 +741,12 @@ type ColonyView =
         /// standing body as occupied; the decide settles it before the Atlas
         /// is built. The one reader is the Atlas's occupancy grid.
         Loose: Set<RoomPos>
+        /// The engine's refusals of this colony's acts (`World.Refusals`,
+        /// #629): its bodies', wherever they stand, and the structures' and
+        /// sites' whose acts its plan issued, wherever they stand. What the
+        /// Matcher prices a refused (body, Task) pair by, what the spawn
+        /// plan orders its spawns by, and what the breach log counts.
+        Refusals: Refusal list
         /// What this colony may take of a neighbour's, explicitly and
         /// bounded.
         Borrowed: BorrowedWork
@@ -1848,6 +1854,13 @@ module ColonyView =
             PlayerSites = world.Sites
             Creeps = economy
             Fighters = fighters
+            Refusals =
+                world.Refusals
+                |> List.filter (fun row ->
+                    if row.Body then
+                        Map.tryFind row.Actor holders = Some home
+                    else
+                        row.Home = home)
             // Its economy bodies alone: a fighter is the world's fight's.
             Unprojected =
                 mine

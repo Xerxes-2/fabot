@@ -50,6 +50,7 @@ let snapshotWith creeps spatial =
         Parked = Set.empty
         Stepped = Map.empty
         Loose = Set.empty
+        Refusals = []
         Borrowed = BorrowedWork.empty
         Refused = []
         Errands = []

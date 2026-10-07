@@ -235,6 +235,7 @@ let private world: World =
         ArmedSeen = Map.empty
         RivalControllers = Map.empty
         StrayGround = fun _ -> None
+        Refusals = []
     }
 
 let private sweptView () =

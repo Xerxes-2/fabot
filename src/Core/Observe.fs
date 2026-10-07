@@ -46,7 +46,8 @@ let private creepOf =
     | Verdict.Grounded creep
     | Verdict.Yielded(creep, _)
     | Verdict.Rerouted creep
-    | Verdict.Stalled creep -> creep
+    | Verdict.Stalled creep
+    | Verdict.Refused(creep, _, _, _) -> creep
 
 let private isMovement =
     function
@@ -75,6 +76,43 @@ let private trim cap entries =
     let overflow = List.length entries - cap
     if overflow > 0 then List.skip overflow entries else entries
 
+/// A refusal's entry (#629): one a streak, its count grown in place while
+/// it is the creep's newest entry off the movement and scoring channels and
+/// names the same Task and code, so a body refused on every tick costs its
+/// ring one row and not the ring. It moves no cursor: which Task the body
+/// holds is the Matcher's to say.
+let private refuse cap tick (verdict: Verdict) (log: CreepLog) : CreepLog =
+    let newest =
+        log.Entries
+        |> List.tryFindIndexBack (fun entry ->
+            not (isMovement entry.Verdict || isScoring entry.Verdict))
+
+    let grown =
+        match verdict, newest |> Option.map (fun i -> i, List.item i log.Entries) with
+        | Verdict.Refused(creep, task, code, count),
+          Some(at,
+               ({
+                    Verdict = Verdict.Refused(_, before, was, counted)
+                } as entry)) when before = task && was = code ->
+            Some(
+                log.Entries
+                |> List.mapi (fun i other ->
+                    if i = at then
+                        { entry with
+                            Verdict = Verdict.Refused(creep, task, code, counted + count)
+                        }
+                    else
+                        other)
+            )
+        | _ -> None
+
+    { log with
+        Entries =
+            grown
+            |> Option.defaultWith (fun () ->
+                log.Entries @ [ { Tick = tick; Verdict = verdict } ] |> trim cap)
+    }
+
 /// Fold one tick of a single creep's Verdicts, in emission order, into its
 /// log: append each Verdict that is a change, stamp it with the tick, keep the
 /// newest cap-many entries, and advance the channel cursors. The task cursor
@@ -84,26 +122,29 @@ let private step cap tick (verdicts: Verdict list) (log: CreepLog) : CreepLog =
     let appended =
         (log, verdicts)
         ||> List.fold (fun log verdict ->
-            let unchanged =
-                if isMovement verdict then
-                    log.LastMove |> List.exists (sameSubstance verdict)
-                elif isScoring verdict then
-                    log.LastScoring |> Option.exists (sameSubstance verdict)
-                else
-                    log.LastTask |> Option.exists (sameSubstance verdict)
+            match verdict with
+            | Verdict.Refused _ -> refuse cap tick verdict log
+            | _ ->
+                let unchanged =
+                    if isMovement verdict then
+                        log.LastMove |> List.exists (sameSubstance verdict)
+                    elif isScoring verdict then
+                        log.LastScoring |> Option.exists (sameSubstance verdict)
+                    else
+                        log.LastTask |> Option.exists (sameSubstance verdict)
 
-            let log =
-                if isMovement verdict || isScoring verdict then
+                let log =
+                    if isMovement verdict || isScoring verdict then
+                        log
+                    else
+                        { log with LastTask = Some verdict }
+
+                if unchanged then
                     log
                 else
-                    { log with LastTask = Some verdict }
-
-            if unchanged then
-                log
-            else
-                { log with
-                    Entries = log.Entries @ [ { Tick = tick; Verdict = verdict } ] |> trim cap
-                })
+                    { log with
+                        Entries = log.Entries @ [ { Tick = tick; Verdict = verdict } ] |> trim cap
+                    })
 
     { appended with
         LastScoring = verdicts |> List.filter isScoring |> List.tryLast
@@ -2623,8 +2664,7 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
 /// has no tests by construction: three of four Thorium incidents shipped green
 /// through the untested half (#355). A closed vocabulary rather than a message
 /// string: the kind crosses the wire and a kind added without its wire name
-/// fails the build. A `RefusalStorm` kind waits on R1 (#629), which feeds the
-/// engine's refusals back for it to count.
+/// fails the build.
 [<RequireQualifiedAccess>]
 type BreachKind =
     /// Every tick of the CPU line's last few cadences ran full and a forcing
@@ -2652,6 +2692,13 @@ type BreachKind =
     /// while nothing holds it on purpose (a fighter no open ask wants is a
     /// reserve). `Subject` is the creep, `Amount` the ticks idle.
     | BodyIdle
+    /// An actor of this colony's — a body, a spawn or another structure —
+    /// the engine refused since the colony last decided (#629): a pending
+    /// row until it has been refused on every decide for
+    /// `Tuning.RefusalHalfLife` (`Window`), the price the Matcher and the
+    /// spawn plan put on a refusal having moved nothing in that time.
+    /// `Subject` is the actor, `Amount` its refusals' weight standing.
+    | RefusalStorm
     /// Ore decaying in a room this colony projects and may sweep, with the
     /// object it is decaying in as the `Subject`: a pile, or a tombstone or
     /// ruin holding Thorium. One kind for both because a decaying tombstone
@@ -2903,8 +2950,12 @@ type ColonyBreachFacts =
         /// stands as it was while its spawn stays free at a full bank, and
         /// no body reads as idle.
         Quotas: Quotas option
-        /// The spawns a `SpawnCreep` of this tick's names: busy from now.
+        /// The spawns a `SpawnCreep` of this tick's names: busy from now,
+        /// unless the engine refused the last one (`casting`).
         Casting: Set<string>
+        /// The spawns whose last cast the engine refused (#629): the cast
+        /// before this tick's, whichever full tick made it.
+        CastRefused: Set<string>
         /// The outposts of this colony's a stand-down shuts: the bodies whose
         /// last Task worked one wait by design.
         StoodDown: Set<string>
@@ -2922,6 +2973,7 @@ module ColonyBreachFacts =
         {
             Quotas = None
             Casting = Set.empty
+            CastRefused = Set.empty
             StoodDown = Set.empty
             Log = Map.empty
             Faults = []
@@ -2970,6 +3022,35 @@ let private faultBreaches (tick: int) (room: string) (faults: (string * int) lis
 /// where one free a few ticks has lost a part of one.
 let spawnIdleWindow = Engine.maxBodyParts * Engine.spawnTicksPerPart
 
+/// Whether a spawn casts this tick: a `SpawnCreep` of this tick's names it
+/// and the engine did not refuse its last cast (#629). The view's
+/// `IsSpawning` already reads a refused cast as no body; this tick's cast is
+/// not yet answered, and asks the same of the same spawn as the refused one.
+let private casting (facts: ColonyBreachFacts) (spawn: string) =
+    Set.contains spawn facts.Casting && not (Set.contains spawn facts.CastRefused)
+
+/// One `RefusalStorm` row per actor of this colony's the engine refused
+/// since the colony last decided, its weight summed over the Tasks it was
+/// refused holding.
+let private refusalStorm (view: ColonyView) : Breach list =
+    let halfLife = view.Tuning.RefusalHalfLife
+
+    view.Refusals
+    |> List.filter (fun row -> row.Fresh > 0)
+    |> List.groupBy _.Actor
+    |> List.map (fun (actor, rows) ->
+        {
+            Kind = BreachKind.RefusalStorm
+            Room = SpatialInfo.homeName view.Spatial
+            Subject = actor
+            Amount =
+                rows
+                |> List.sumBy (Refusal.weightAt halfLife view.Time)
+                |> System.Math.Round
+                |> int
+            Window = halfLife
+        })
+
 /// Each spawn free beside a full bank that cast nothing this tick, while the
 /// spawn plan left seats a full bank cannot pay though their row's block fits
 /// it (`Quotas.Unfilled`: a body sized over capacity, a defect). The plan's
@@ -2986,8 +3067,7 @@ let private spawnIdle
         []
     else
         view.Spawns
-        |> List.filter (fun spawn ->
-            not spawn.IsSpawning && not (Set.contains spawn.Name facts.Casting))
+        |> List.filter (fun spawn -> not spawn.IsSpawning && not (casting facts spawn.Name))
         |> List.choose (fun spawn ->
             match facts.Quotas |> Option.map _.Unfilled with
             | Some seats when seats > 0 -> Some seats
@@ -3140,6 +3220,7 @@ let colonyBreaches
     faultBreaches view.Time (SpatialInfo.homeName view.Spatial) facts.Faults
     @ spawnIdle facts view prior
     @ bodyIdle facts view
+    @ refusalStorm view
     @ breachesIn view
 
 /// Every tick of the line's last `LightStarvedCadences` cadences ran full,

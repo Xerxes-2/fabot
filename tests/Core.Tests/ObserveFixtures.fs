@@ -69,6 +69,7 @@ let quiet: ColonyView =
         Parked = Set.empty
         Stepped = Map.empty
         Loose = Set.empty
+        Refusals = []
         Borrowed = BorrowedWork.empty
         Refused = []
         Errands = []

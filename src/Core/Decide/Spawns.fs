@@ -754,12 +754,26 @@ let internal planSpawns
             @ upgraderSeats
 
 
+        // A spawn's refusals standing (#629): a refused cast is a body not yet
+        // cast, which the bank was debited for all the same.
+        let refused (spawn: SpawnInfo) =
+            view.Refusals
+            |> List.sumBy (fun row ->
+                if not row.Body && row.Actor = spawn.Name then
+                    Refusal.costAt view.Tuning.RefusalHalfLife view.Time row
+                else
+                    0)
+
         // Idle spawns draw from the colony's one bank in list order — each
         // body debits the budget the next spawn sees, so the same energy is
-        // never committed twice.
+        // never committed twice — the ones the engine refused after the rest,
+        // the least refused first, so the first seat goes to a spawn that
+        // casts it and a refused one takes its turn back as its weight
+        // halves away.
         let intents, _, unfilled =
             view.Spawns
             |> List.filter (fun s -> not s.IsSpawning)
+            |> List.sortBy refused
             |> List.fold
                 (fun
                     (intents,

@@ -268,6 +268,7 @@ let internal colonyOf (room: LoadedRoom) level =
         Parked = Set.empty
         Stepped = Map.empty
         Loose = Set.empty
+        Refusals = []
         Borrowed = BorrowedWork.empty
         Refused = []
         Errands = []
@@ -1067,7 +1068,8 @@ let internal verdictCreep =
     | Verdict.Grounded creep
     | Verdict.Yielded(creep, _)
     | Verdict.Rerouted creep
-    | Verdict.Stalled creep -> creep
+    | Verdict.Stalled creep
+    | Verdict.Refused(creep, _, _, _) -> creep
 
 /// The three rungs of a colony's life the fixture is built at: the child
 /// as it was claimed, the child at the level the bootstrap window closes

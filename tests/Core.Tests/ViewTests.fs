@@ -635,6 +635,35 @@ let colonyViewTests =
             }
 
             test
+                "a refusal is cut to the colony holding the body, or whose plan issued the structure's act" {
+                // The pioneer stands in the child's room and is the mother's
+                // (#629): its refusal follows the body, not the room; a road
+                // site the mother placed in her outpost is hers, though it
+                // stands in no home.
+                let refused =
+                    [
+                        Refusal.one "pioneer-900-Spawn1" true "" "build:site-child" -7 999
+                        Refusal.one "hauler-950-Spawn2" true "" "" -12 999
+                        Refusal.one "Spawn2" false child "" -3 999
+                        Refusal.one "tower-1" false mother "" -14 999
+                        Refusal.one $"{outpost}:5,6" false mother "" -1 999
+                    ]
+
+                let actors home =
+                    (viewOf { pairWorld with Refusals = refused } home).Refusals |> List.map _.Actor
+
+                Expect.equal
+                    (actors mother)
+                    [ "pioneer-900-Spawn1"; "tower-1"; $"{outpost}:5,6" ]
+                    "the mother's body, her tower and her outpost's site"
+
+                Expect.equal
+                    (actors child)
+                    [ "hauler-950-Spawn2"; "Spawn2" ]
+                    "the child's body and her spawn"
+            }
+
+            test
                 "a fighter a colony holds stands apart from its economy, and counts for the colony that cast it" {
                 // The child's ranger standing in the mother's home, which the
                 // mother alone projects: she adopts it.
@@ -1671,6 +1700,69 @@ let terrainGridTests =
                     "its neighbour is not"
 
                 Expect.equal (TerrainGrid.count grid) 2 "and the grid it came from is untouched"
+            }
+        ]
+
+/// The engine's refusals the World carries (#629): how one tick's are
+/// folded in, priced, read and forgotten.
+[<Tests>]
+let refusalTests =
+    let halfLife = Tuning.defaults.RefusalHalfLife
+    let claim = Refusal.one "claimer-1" true "" "claim:c1" -15
+
+    testList
+        "the engine's refusals"
+        [
+            test "a pair refused again adds one to the weight standing and to its news" {
+                let rows =
+                    []
+                    |> Refusal.record halfLife 100 [ claim 100 ]
+                    |> Refusal.record halfLife (100 + halfLife) [ claim (100 + halfLife) ]
+
+                Expect.equal
+                    (rows |> List.map (fun row -> row.Weight, row.Fresh, row.Last))
+                    [ 1.5, 2, 100 + halfLife ]
+                    "the first refusal halved over a half-life, the second whole"
+            }
+
+            test "a refusal is priced a tick of walk, and halves away" {
+                let row = claim 100
+
+                Expect.equal
+                    (Refusal.costAt halfLife 100 row, Refusal.costAt halfLife (100 + halfLife) row)
+                    (2, 1)
+                    "two half-ticks, then one"
+            }
+
+            test
+                "a decide reads the news; the weight stands until it prices nothing or the body dies" {
+                let rows = [ claim 100; Refusal.one "Spawn1" false "W1N1" "" -3 100 ]
+
+                let settled = rows |> Refusal.settle (fun row -> row.Body)
+
+                Expect.equal
+                    (settled |> List.map (fun row -> row.Actor, row.Fresh))
+                    [ "claimer-1", 0; "Spawn1", 1 ]
+                    "only the decided actor's news is read"
+
+                Expect.equal
+                    (settled |> Refusal.forget halfLife 101 Set.empty |> List.map _.Actor)
+                    [ "Spawn1" ]
+                    "a dead body's row goes, a structure's stays"
+
+                Expect.isEmpty
+                    (settled
+                     |> Refusal.settle (fun _ -> true)
+                     |> Refusal.forget halfLife (100 + 3 * halfLife) (Set.singleton "claimer-1"))
+                    "a weight priced at no half-tick is forgotten"
+
+                Expect.isEmpty
+                    (Refusal.forget
+                        halfLife
+                        (100 + 3 * halfLife)
+                        Set.empty
+                        [ Refusal.one "W1N2:5,6" false "" "" -1 100 ])
+                    "news no decide read is forgotten with its price: no row outlives it"
             }
         ]
 

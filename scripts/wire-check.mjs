@@ -998,14 +998,24 @@ wire("breaches: a row whose kind is not in the vocabulary costs its row", async 
   assert.equal(rows[0].subject, "pile-1");
 });
 
-// The kinds the bot reads itself by (#630), one row each as the fold writes
-// it: a pending `spawn-idle` carries its `window`, every other row none.
+// The kinds the bot reads itself by (#630, #629), one row each as the fold
+// writes it: a pending `spawn-idle` or `refusal-storm` carries its `window`,
+// every other row none.
 const selfRows = {
   "light-starved": { kind: "light-starved", room: "", subject: "chase", amount: 20, first: 100, last: 120 },
   "bucket-falling": { kind: "bucket-falling", room: "", subject: "bucket", amount: 400, first: 100, last: 120 },
   fault: { kind: "fault", room: "W1N1", subject: "decide", amount: 3, first: 100, last: 120 },
   "spawn-idle": { kind: "spawn-idle", room: "W1N1", subject: "Spawn1", amount: 2, first: 100, last: 120, window: 150 },
   "body-idle": { kind: "body-idle", room: "W1N2", subject: "guard-1", amount: 150, first: 100, last: 120 },
+  "refusal-storm": {
+    kind: "refusal-storm",
+    room: "W1N1",
+    subject: "claimer-1",
+    amount: 48,
+    first: 100,
+    last: 120,
+    window: 100,
+  },
 };
 
 for (const [kind, row] of Object.entries(selfRows)) {
@@ -1335,6 +1345,37 @@ wire("creeps: an entry with no tick costs its entry and not the log", async () =
 
   assert.equal(written.w1.log.length, 1, "the entry with no readable tick is dropped");
   assert.equal(written.w1.log[0].t, 100, "and tick zero is not written in its place");
+});
+
+wire("creeps: an engine refusal's row and its Refused release round-trip (#629)", async () => {
+  const refused = {
+    ...creepLog,
+    log: [
+      { t: 100, v: { kind: "refused", task: "claim:ctrl-1", code: -15, count: 4 } },
+      { t: 103, v: { kind: "released", task: "claim:ctrl-1", reason: "refused" } },
+      { t: 104, v: { kind: "refused", task: "", code: -12, count: 1 } },
+    ],
+  };
+
+  assert.equal(stable(await creepsThrough({ w1: refused })), stable({ w1: refused }));
+});
+
+wire("creeps: a refusal with no Task string, or a code or count not a number, costs its row", async () => {
+  const written = await creepsThrough({
+    w1: {
+      ...creepLog,
+      log: [
+        { t: 100, v: { kind: "refused", task: "claim:ctrl-1", code: "-15", count: 4 } },
+        { t: 101, v: { kind: "refused", task: "claim:ctrl-1", code: -15 } },
+        { t: 102, v: { kind: "refused", code: -15, count: 2 } },
+        { t: 103, v: { kind: "refused", task: "claim:ctrl-1", code: -15, count: 2 } },
+      ],
+    },
+  });
+
+  assert.equal(written.w1.log.length, 1, "the three off-shape refusals are dropped");
+  assert.equal(written.w1.log[0].t, 103);
+  assert.equal(written.w1.log[0].v.task, "claim:ctrl-1", "and no Task is read as \"undefined\"");
 });
 
 wire("creeps: a verdict kind nobody knows costs its row", async () => {

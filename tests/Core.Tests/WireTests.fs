@@ -337,7 +337,7 @@ let observerTableTests =
             }
 
             test "the breach kinds the script can name are all of them" {
-                // Ten kinds today: five the bot reads itself by (#630), two about ore that
+                // Eleven kinds today: six the bot reads itself by (#630, #629), two about ore that
                 // cannot be spent and three about the Reactor.
                 let spelt =
                     casesOf<Observe.BreachKind> ()

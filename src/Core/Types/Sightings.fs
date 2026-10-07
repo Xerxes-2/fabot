@@ -915,6 +915,113 @@ type JoinTable() =
     /// The ordered pairs filed.
     member this.Count = this.Joins.Count
 
+/// The engine's refusal of an act it was told to make (#629): its answer,
+/// read by the next decide, so no act is decided identically for ever with
+/// a console line the only place the refusal lands. The shell folds the
+/// Executor's outcomes into these, light ticks and full (`Refusal.record`),
+/// one row per actor and the Task it held.
+type Refusal =
+    {
+        /// The body refused, by name, or the structure: a spawn by name,
+        /// a site by its tile, any other by id.
+        Actor: string
+        /// Whether the actor is a body of ours: cut into the view of the
+        /// colony that holds it, where a structure is cut into the view of
+        /// the colony that issued its act (`Home`).
+        Body: bool
+        /// The home of the colony whose plan issued a structure's act, a
+        /// site in an outpost's room included; empty for a body, or an act
+        /// no plan owns.
+        Home: string
+        /// The Task the body held when refused; empty for a structure, or a
+        /// body holding none.
+        Task: string
+        /// The engine's code for the newest refusal, carried for the
+        /// operator: no rule reads an engine code.
+        Code: int
+        /// The refusals, each counted one and halved every
+        /// `Tuning.RefusalHalfLife` ticks since, as of `Last`.
+        Weight: float
+        /// The newest refusal's tick.
+        Last: int
+        /// The refusals since the actor's colony last decided: the news the
+        /// next decide reads.
+        Fresh: int
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Refusal =
+    /// One refusal at `tick`, before any fold.
+    let one (actor: string) (body: bool) (home: string) (task: string) (code: int) (tick: int) =
+        {
+            Actor = actor
+            Body = body
+            Home = home
+            Task = task
+            Code = code
+            Weight = 1.0
+            Last = tick
+            Fresh = 1
+        }
+
+    /// The weight standing at `tick`, halved every `halfLife` ticks since
+    /// the newest refusal.
+    let weightAt (halfLife: int) (tick: int) (row: Refusal) : float =
+        row.Weight * 2.0 ** (-(float (tick - row.Last)) / float (max 1 halfLife))
+
+    /// The price a refusal puts on its (body, Task) pair at `tick`, in the
+    /// travel cost's half-ticks: each refusal cost the body a tick its Task
+    /// did not advance, which is what a tick of walk costs it.
+    let costAt (halfLife: int) (tick: int) (row: Refusal) : int =
+        int (System.Math.Round(2.0 * weightAt halfLife tick row))
+
+    /// This tick's refusals (`one`) folded into the rows: a pair refused
+    /// before adds one to the weight standing now and to its news, and a
+    /// pair not refused stands as it was.
+    let record
+        (halfLife: int)
+        (tick: int)
+        (refused: Refusal list)
+        (rows: Refusal list)
+        : Refusal list =
+        (rows, refused)
+        ||> List.fold (fun rows fresh ->
+            let pair (row: Refusal) =
+                row.Actor = fresh.Actor && row.Task = fresh.Task
+
+            match rows |> List.tryFind pair with
+            | Some row ->
+                { fresh with
+                    Weight = weightAt halfLife tick row + fresh.Weight
+                    Fresh = row.Fresh + fresh.Fresh
+                }
+                :: (rows |> List.filter (pair >> not))
+            | None -> fresh :: rows)
+
+    /// The rows past their price, news unread or not, and a body's once it
+    /// is dead: a weight whose price rounds to no half-tick moves no
+    /// decision, and is a refusal no decide is left to read (two half-lives
+    /// and more since the last), so no row outlives its price.
+    let forget
+        (halfLife: int)
+        (tick: int)
+        (living: Set<string>)
+        (rows: Refusal list)
+        : Refusal list =
+        rows
+        |> List.filter (fun row ->
+            costAt halfLife tick row > 0 && (not row.Body || Set.contains row.Actor living))
+
+    /// The news read: each row `decided` says its colony decided on has
+    /// none left, its weight standing.
+    let settle (decided: Refusal -> bool) (rows: Refusal list) : Refusal list =
+        rows
+        |> List.map (fun row ->
+            if row.Fresh > 0 && decided row then
+                { row with Fresh = 0 }
+            else
+                row)
+
 /// Everything this tick was seen to hold, once. The shell builds one
 /// (`World.ofGame`, the only code that touches `Game`) and
 /// `ColonyView.ofWorld` cuts one colony's share of it; `decide` is written
@@ -979,6 +1086,11 @@ type World =
         /// declaration's routing reads it. The shell's terrain memo; None
         /// where nothing can be read.
         StrayGround: string -> RoomFacts option
+        /// The engine's refusals of our acts, folded off every tick's
+        /// Executor outcomes since (`Refusal.record`, #629). Heap state in
+        /// the shell, never Memory: a reset forgets a refusal the next
+        /// refused act teaches again.
+        Refusals: Refusal list
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -999,6 +1111,7 @@ module World =
             ArmedSeen = Map.empty
             RivalControllers = Map.empty
             StrayGround = fun _ -> None
+            Refusals = []
         }
 
     /// This tick's world with what it saw **before** laid under it (#151):

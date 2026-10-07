@@ -145,6 +145,51 @@ let movementTests =
                     "the continuing pair appends nothing"
             }
 
+            // The engine's refusals (#629): one row a streak, grown in place.
+            test "a refusal streak on one Task and code is one row whose count grows" {
+                let state =
+                    Map.empty
+                    |> tick 5 [ "a" ] [ Verdict.Matched("a", "claim:c1", MatchFactor.Rank) ]
+                    |> tick
+                        8
+                        [ "a" ]
+                        [ Verdict.Refused("a", "claim:c1", -15, 1); Verdict.Kept("a", "claim:c1") ]
+                    |> tick
+                        11
+                        [ "a" ]
+                        [ Verdict.Refused("a", "claim:c1", -15, 3); Verdict.Grounded "a" ]
+
+                Expect.equal
+                    (timeline "a" state)
+                    [
+                        5, Verdict.Matched("a", "claim:c1", MatchFactor.Rank)
+                        8, Verdict.Refused("a", "claim:c1", -15, 4)
+                        11, Verdict.Grounded "a"
+                    ]
+                    "dated from the streak's first refusal, counting every one since; a step between moves nothing"
+            }
+
+            test "a refusal moves no task cursor, and a new code or Task opens a row of its own" {
+                let state =
+                    Map.empty
+                    |> tick 5 [ "a" ] [ Verdict.Matched("a", "t1", MatchFactor.Rank) ]
+                    |> tick 6 [ "a" ] [ Verdict.Refused("a", "t1", -7, 1); Verdict.Kept("a", "t1") ]
+                    |> tick 7 [ "a" ] [ Verdict.Refused("a", "t1", -12, 1) ]
+                    |> tick 8 [ "a" ] [ Verdict.Matched("a", "t2", MatchFactor.TravelCost) ]
+                    |> tick 9 [ "a" ] [ Verdict.Refused("a", "t2", -12, 2) ]
+
+                Expect.equal
+                    (timeline "a" state)
+                    [
+                        5, Verdict.Matched("a", "t1", MatchFactor.Rank)
+                        6, Verdict.Refused("a", "t1", -7, 1)
+                        7, Verdict.Refused("a", "t1", -12, 1)
+                        8, Verdict.Matched("a", "t2", MatchFactor.TravelCost)
+                        9, Verdict.Refused("a", "t2", -12, 2)
+                    ]
+                    "the Kept after a refusal is still the steady state the match opened"
+            }
+
             test "matcher and resolver events interleave in one timeline in tick order" {
                 let state =
                     Map.empty

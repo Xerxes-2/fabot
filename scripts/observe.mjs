@@ -140,6 +140,25 @@ const breachLine = (row, whose, now) =>
       ? ` of ${row.window}, pending`
       : "");
 
+// The engine's result codes a refusal row carries (#629), by the name the
+// API documents them under; a code missing here prints as its number.
+const ERR_NAME = {
+  [-1]: "ERR_NOT_OWNER",
+  [-2]: "ERR_NO_PATH",
+  [-3]: "ERR_NAME_EXISTS",
+  [-4]: "ERR_BUSY",
+  [-5]: "ERR_NOT_FOUND",
+  [-6]: "ERR_NOT_ENOUGH_RESOURCES",
+  [-7]: "ERR_INVALID_TARGET",
+  [-8]: "ERR_FULL",
+  [-9]: "ERR_NOT_IN_RANGE",
+  [-10]: "ERR_INVALID_ARGS",
+  [-11]: "ERR_TIRED",
+  [-12]: "ERR_NO_BODYPART",
+  [-14]: "ERR_RCL_NOT_ENOUGH",
+  [-15]: "ERR_GCL_NOT_ENOUGH",
+};
+
 // A breach log's rows, one aligned line each, in the stored order: Core's
 // (`breachRows`), oldest first.
 const printBreaches = (rows, ticks, tickOf) => {
@@ -2300,6 +2319,10 @@ if (command === "console") {
       "(a body sized over capacity), while that spawn stood free beside a full bank casting nothing; " +
       "pending until it has stood the longest cast (`window`)",
     "body-idle": "the ticks that body has stood with no Task, not fleeing and not held on purpose",
+    "refusal-storm":
+      "the engine's refusals of that actor (the subject: a body, a spawn, a structure or a site's tile), " +
+      "their weight standing, refused on every decide since its colony last decided; pending until it " +
+      "has stood a refusal half-life (`window`) the price did not move it off — `observe timeline` names the codes",
     "ore-on-the-floor": "the T of ore lying on the floor of a room this colony sweeps",
     "ore-unplaceable": "the T aboard a body at the Reactor that the Reactor has no room for",
     "reactor-running-dry":
@@ -3144,9 +3167,23 @@ if (command === "console") {
         return "rerouted";
       case "stalled":
         return "stalled: nobody this pass can name holds the tile";
+      case "refused":
+        return `refused ${ERR_NAME[v.code] ?? v.code} ×${v.count} holding ${v.task || "no Task"}`;
       default:
         return JSON.stringify(v);
     }
+  };
+
+  // A refusal's newest row, while it stands after the creep's last task
+  // verdict (#629): what `tasks` prints beside the Task it was refused on.
+  const refusalAfterTask = (record) => {
+    const log = Array.isArray(record.log) ? record.log : [];
+    for (let i = log.length - 1; i >= 0; i--) {
+      const kind = log[i].v?.kind;
+      if (kind === "refused") return log[i].v;
+      if (["matched", "kept", "released", "unassigned"].includes(kind)) return null;
+    }
+    return null;
   };
 
   const names = Object.keys(creeps).sort();
@@ -3162,8 +3199,10 @@ if (command === "console") {
       const width = Math.max(...names.map((n) => n.length));
       for (const name of names) {
         const last = creeps[name].lastTask;
+        const refused = refusalAfterTask(creeps[name]);
         console.log(
-          `${name.padEnd(width)}  ${last ? describeVerdict(last) : "(no task verdict yet)"}`,
+          `${name.padEnd(width)}  ${last ? describeVerdict(last) : "(no task verdict yet)"}` +
+            (refused ? `  [${describeVerdict(refused)}]` : ""),
         );
       }
     }

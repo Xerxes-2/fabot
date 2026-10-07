@@ -892,6 +892,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         Parked = Set.empty
         Stepped = Map.empty
         Loose = Set.empty
+        Refusals = []
         Borrowed = BorrowedWork.empty
         Refused = []
         // No errand, so no Reclaim is pooled and no reserver seat is the

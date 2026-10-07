@@ -233,6 +233,50 @@ let mutable private loadedAt = -1
 // world's: what the room visuals draw on every tick between.
 let mutable private openBreaches: Observe.Breach list = []
 
+// The engine's refusals of our acts (#629), folded off every tick's
+// outcomes, light and full, and laid into the next full tick's World. Heap
+// only: a reset forgets what the next refused act teaches again.
+let mutable private refusals: Refusal list = []
+
+// The Tasks the last full tick saved: what a light tick's refused body was
+// holding, read without the Memory leaf.
+let mutable private heldTasks: Assignments = Map.empty
+
+// The spawns whose last cast the engine refused (#629): a spawn leaves it on
+// the next cast the engine takes. Only a full tick casts.
+let mutable private castRefused: Set<string> = Set.empty
+
+/// One replay's refusals folded into the heap's (`Refusal.record`), each
+/// body's under the Task it holds and each structure's under the colony
+/// whose intents (`issued`, by home, read only on a refusal) hold its act;
+/// an act none holds is filed under no colony and decays unread.
+let private recordRefusals
+    (issued: Lazy<(string * Intent list) list>)
+    (outcomes: (Intent * Executor.Outcome) list)
+    =
+    let issuedBy intent =
+        issued.Value
+        |> List.tryPick (fun (home, intents) ->
+            if List.contains intent intents then Some home else None)
+        |> Option.defaultValue ""
+
+    match
+        Executor.refusals
+            (fun name -> Map.tryFind name heldTasks |> Option.defaultValue "")
+            issuedBy
+            Game.time
+            outcomes
+    with
+    | [] -> ()
+    | refused -> refusals <- Refusal.record tuning.RefusalHalfLife Game.time refused refusals
+
+/// Each colony's replayable acts in the last full tick's record, by home:
+/// what issued a replayed act.
+let private planned (last: LightTick.LastFull) : (string * Intent list) list =
+    last.Plans
+    |> Map.toList
+    |> List.map (fun (home, plan) -> home, plan.Acts @ List.concat plan.Later)
+
 /// A creep's gait off `Game` (`Gait.walked`).
 let private gaitOf (c: ICreep) : Gait =
     let mutable weighed = 0
@@ -594,6 +638,7 @@ let private lightTick (atEntry: float) (last: LightTick.LastFull) (seen: LightTi
     let atSave = Game.cpu.getUsed ()
     let outcomes = Executor.runQuiet plan
     recordFaults (thrownOf outcomes)
+    recordRefusals (lazy (planned last)) outcomes
     let accepted = acceptedOf outcomes
     let heap, external = heapReading ()
 
@@ -680,6 +725,7 @@ let private fullTick
         |> World.recallRaiders raiders
         |> World.recallArmed Tuning.defaults armedSeen
         |> World.recallRivalControllers rivalControllers
+        |> fun world -> { world with Refusals = refusals }
 
     sightings <- world.Sightings
     towered <- world.Towered
@@ -1157,12 +1203,16 @@ let private fullTick
                 Map.tryFind creep.Name assignments |> Option.map (fun task -> creep.Name, task)))
         |> Map.ofList
 
-    saveAssignments (
+    let saved =
         (kept, decisions)
         ||> List.fold (fun acc (_, _, decision, _, _) ->
             (acc, decision.Assignments)
             ||> Map.fold (fun acc creep task -> Map.add creep task acc))
-    )
+
+    saveAssignments saved
+    // Kept for the light ticks after, so rebuilt where nothing is captured
+    // (#401).
+    heldTasks <- Fresh.mapOfSeq (Map.toSeq saved)
 
     // The draw record (#530) on the same terms: an idle colony's creeps keep
     // what they were read with.
@@ -1196,12 +1246,48 @@ let private fullTick
 
     let priorLog = restored |> Option.defaultValue Map.empty
 
+    // The refusals this tick's decides read as news (#629): each deciding
+    // colony's bodies the match judged — a fight-only decide's fighters —
+    // and its home's structures where its economy decided. Their news is
+    // settled once the breach log has read it.
+    let decidedBodies =
+        decisions
+        |> List.collect (fun (colony, view, decision, _, _) ->
+            if Set.contains colony.Home fightOnly then
+                Set.toList decision.Fight.Fighters
+            else
+                ColonyView.bodies view |> List.map _.Name)
+        |> Set.ofList
+
+    let decidedHomes =
+        decisions
+        |> List.choose (fun (colony, _, _, _, _) ->
+            if Set.contains colony.Home fightOnly then
+                None
+            else
+                Some colony.Home)
+        |> Set.ofList
+
+    let decidedOn (row: Refusal) =
+        if row.Body then
+            Set.contains row.Actor decidedBodies
+        else
+            Set.contains row.Home decidedHomes
+
+    // Each body's refusals since its colony last decided, ahead of the
+    // decide's own Verdicts: they answer acts made before it.
+    let refused =
+        world.Refusals
+        |> List.filter (fun row -> row.Body && row.Fresh > 0 && decidedOn row)
+        |> List.map (fun row -> Verdict.Refused(row.Actor, row.Task, row.Code, row.Fresh))
+
     let log =
         Observe.fold
             Observe.capPerCreep
             Game.time
             living
-            ((decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Verdicts))
+            (refused
+             @ (decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Verdicts))
              @ moveVerdicts)
             priorLog
         |> Observe.forgetScorings verbose
@@ -1322,6 +1408,7 @@ let private fullTick
                         | SpawnCreep(spawn, _, _) -> Some spawn
                         | _ -> None)
                     |> Set.ofList
+                CastRefused = castRefused
                 StoodDown =
                     (state.Outposts
                      |> List.filter (Observe.standingDown Game.time)
@@ -1448,6 +1535,31 @@ let private fullTick
         @ Executor.runQuiet (planOf (Fabot.Core.IntentPlan.beside decided replayed))
 
     recordFaults (thrownOf outcomes)
+
+    // The decided colonies' news read, this tick's refusals laid on, and the
+    // rows priced at nothing and the dead bodies' gone.
+    refusals <-
+        refusals
+        |> Refusal.settle decidedOn
+        |> Refusal.forget tuning.RefusalHalfLife Game.time living
+
+    // The decided acts by the colony that decided them, a faulted colony's
+    // towers by its home, then the plans the replayed acts came off.
+    recordRefusals
+        (lazy
+            ((decisions
+              |> List.map (fun (colony, _, decision, _, _) -> colony.Home, decision.Intents))
+             @ colonyDecisions.Towers
+             @ (prior |> Option.map planned |> Option.defaultValue [])))
+        outcomes
+
+    for spawn, refused in Executor.casts outcomes do
+        castRefused <-
+            if refused then
+                Set.add spawn castRefused
+            else
+                Set.remove spawn castRefused
+
     let accepted = acceptedOf outcomes
 
     // The record the next tick replays: each deciding colony's plan off the

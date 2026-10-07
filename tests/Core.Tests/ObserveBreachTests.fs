@@ -819,6 +819,77 @@ let selfBreachTests =
                     "a bank still filling is income, not an idle spawn"
             }
 
+            test
+                "a spawn whose last cast the engine refused casts nothing, whatever this tick names it for" {
+                let idleOn castRefused =
+                    colonyBreaches
+                        { ColonyBreachFacts.none with
+                            Quotas = Some(unfilled 2)
+                            Casting = Set.singleton "Spawn1"
+                            CastRefused = castRefused
+                        }
+                        { spawnFree 300 with Time = 100 }
+                        BreachState.empty
+                    |> List.filter (fun breach -> breach.Kind = BreachKind.SpawnIdle)
+                    |> List.map _.Subject
+
+                Expect.equal
+                    (idleOn (Set.singleton "Spawn1"))
+                    [ "Spawn1" ]
+                    "its last cast refused, this one asks the same (#629)"
+
+                Expect.isEmpty (idleOn Set.empty) "a spawn whose last cast the engine took is busy"
+            }
+
+            test "an actor refused on every decide for a half-life is a refusal storm" {
+                let halfLife = Tuning.defaults.RefusalHalfLife
+
+                let colony t news =
+                    { quiet with
+                        Time = t
+                        Refusals =
+                            [
+                                { Refusal.one "claimer-1" true "" "claim:c1" -15 (t - 1) with
+                                    Fresh = news
+                                }
+                            ]
+                    }
+
+                let fold t news prior =
+                    foldBreaches
+                        capBreaches
+                        t
+                        (colonyBreaches ColonyBreachFacts.none (colony t news) prior)
+                        prior
+
+                let pending = BreachState.empty |> fold 100 1
+
+                Expect.equal
+                    (breachRows pending |> List.map _.Breach, openRows 100 pending)
+                    ([
+                        {
+                            Kind = BreachKind.RefusalStorm
+                            Room = raidRoom
+                            Subject = "claimer-1"
+                            Amount = 1
+                            Window = halfLife
+                        }
+                     ],
+                     [])
+                    "pending: its price may yet move it"
+
+                let stood = pending |> fold (100 + halfLife) 2
+
+                Expect.equal
+                    (openRows (100 + halfLife) stood |> List.map _.Breach.Subject)
+                    [ "claimer-1" ]
+                    "refused still a half-life on, the price moved nothing"
+
+                Expect.isEmpty
+                    (breachRows (stood |> fold (101 + halfLife) 0))
+                    "a decide with no refusal since the last closes it"
+            }
+
             test "a body with no Task for a tenth of its life is idle; a fleeing one is not" {
                 let colony t =
                     { quiet with

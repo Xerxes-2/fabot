@@ -226,6 +226,50 @@ let matchAcross
 
     let classOf name = Map.tryFind name classes
 
+    // The engine's refusals of each colony's bodies (#629), one row a
+    // (body, Task) pair, read only while a colony has any: the gate prices a
+    // refused pair (`refusalCost`) and the keep matches a holder refused
+    // since the last decide afresh (`refusedSince`).
+    let refusals =
+        contexts
+        |> Array.map (fun ctx ->
+            let table =
+                System.Collections.Generic.Dictionary<struct (string * string), Refusal>()
+
+            for row in ctx.View.Refusals do
+                if row.Body && row.Task <> "" then
+                    table.[struct (row.Actor, row.Task)] <- row
+
+            table)
+
+    let refusalOf k name tid =
+        match refusals.[k].TryGetValue(struct (name, tid)) with
+        | true, row -> Some row
+        | _ -> None
+
+    // A refused pair's price beside its travel cost, in the same half-ticks
+    // (`Refusal.costAt`): priced, never barred, so a Task refused for a state
+    // that ends is taken again once its weight has halved away, and a body
+    // with no rival keeps it.
+    let refusalCost k name task =
+        if refusals.[k].Count = 0 then
+            0
+        else
+            let view = contexts.[k].View
+
+            refusalOf k name (taskId task)
+            |> Option.map (Refusal.costAt view.Tuning.RefusalHalfLife view.Time)
+            |> Option.defaultValue 0
+
+    let refusedSince k name tid =
+        refusals.[k].Count > 0
+        && refusalOf k name tid |> Option.exists (fun row -> row.Fresh > 0)
+
+    // Each holder the keep let go for a refusal (`refusedSince`), with the
+    // Task it held: released `Refused` only where the match did not hand it
+    // back.
+    let reopened = System.Collections.Generic.Dictionary<string, string>()
+
     // Each living body's squad role, for an Assault's per-role caps.
     let roles =
         creeps
@@ -871,7 +915,7 @@ let matchAcross
                 | Some cost ->
                     match tooEarly ctx.View ctx.Atlas creep pooled.Task arrival with
                     | Some(walk, wait) -> Error(RejectReason.TooEarly(walk, wait))
-                    | None -> Ok cost
+                    | None -> Ok(cost + refusalCost k creep.Name pooled.Task)
 
     // Whether a holder is let go for a struck rampart's Repair (#481): a
     // non-fighter in the rampart's room whose Task that Repair outranks, and
@@ -1064,6 +1108,15 @@ let matchAcross
                 && not (unfit k creep pooled.Task)
                 ->
                 Map.add name tid acc, hold loads tid, released
+            // A holder the engine refused since the last decide is matched
+            // afresh at its refusal's price (#629): the keep stands on the
+            // work landing, and the engine said it did not. Afresh means as a
+            // candidate: an expiring holder or a relief pair loses the
+            // keep's escape over a full cap, by design — the escape protects
+            // work under way, and this work is not.
+            | Some _ when refusedSince k name tid ->
+                reopened.[name] <- tid
+                acc, loads, released
             | Some pooled ->
                 let escape = lazy (isExpiring creep.Name || reliefPair acc creep pooled)
 
@@ -1404,6 +1457,15 @@ let matchAcross
 
     let next, nextLoads, released, kept, decided =
         ((seed, seedLoads, [], Map.empty, Map.empty), passes) ||> List.fold pass
+
+    // A refused holder the match handed its Task back to was never let go.
+    let released =
+        released
+        @ [
+            for KeyValue(name, tid) in reopened do
+                if Map.tryFind name next <> Some tid then
+                    name, Verdict.Released(name, tid, ReleaseReason.Refused)
+        ]
 
     // A verbose fresh creep's rows over the whole pool, in pool order: its
     // share's, then the Tasks it was not offered, each at the gate it fails

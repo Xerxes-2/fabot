@@ -553,6 +553,139 @@ let verdictTests =
                     "a held source is kept against a cheaper same-rank one"
             }
 
+            // The engine's refusals (#629), one refused Task against one
+            // rival: the near and the far source down one corridor, w1 two
+            // tiles from the near rock's seat and six from the far one's.
+            test "a refused pair is priced: the far source outbids the near one the engine refused" {
+                let near = taskId (Harvest "src-near")
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ source "src-far"; source "src-near" ]
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
+                        Refusals =
+                            [
+                                { Refusal.one "w1" true "" near -7 bareRespawn.Time with
+                                    Weight = 10.0
+                                    Fresh = 0
+                                }
+                            ]
+                    }
+
+                let { Verdicts = verdicts } = decideOn snapshot
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("w1", taskId (Harvest "src-far"), MatchFactor.TravelCost) ]
+                    "ten refusals price the near rock past the far one's four tiles more walk"
+            }
+
+            test "a refusal is a price, not a bar: one refusal leaves the near source the cheaper" {
+                let near = taskId (Harvest "src-near")
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ source "src-far"; source "src-near" ]
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
+                        Refusals = [ Refusal.one "w1" true "" near -7 bareRespawn.Time ]
+                    }
+
+                let { Verdicts = verdicts } = decideOn snapshot
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("w1", near, MatchFactor.TravelCost) ]
+                    "one refused tick is one tick of walk, and the far rock is four"
+            }
+
+            test
+                "a holder refused since the last decide is released Refused to the rival that outbids it" {
+                let near = taskId (Harvest "src-near")
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ source "src-far"; source "src-near" ]
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
+                        Refusals =
+                            [
+                                { Refusal.one "w1" true "" near -7 bareRespawn.Time with
+                                    Weight = 10.0
+                                }
+                            ]
+                    }
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decideFrom (Map.ofList [ "w1", near ]) snapshot
+
+                Expect.equal
+                    verdicts
+                    [
+                        Verdict.Released("w1", near, ReleaseReason.Refused)
+                        Verdict.Matched("w1", taskId (Harvest "src-far"), MatchFactor.TravelCost)
+                    ]
+                    "the keep stands on the work landing; the engine said it did not"
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId (Harvest "src-far")))
+                    "w1 walks on"
+            }
+
+            test "a refused holder its price leaves cheapest takes its Task back unreleased" {
+                let near = taskId (Harvest "src-near")
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ source "src-far"; source "src-near" ]
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
+                        Refusals = [ Refusal.one "w1" true "" near -7 bareRespawn.Time ]
+                    }
+
+                let { Verdicts = verdicts } = decideFrom (Map.ofList [ "w1", near ]) snapshot
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Matched("w1", near, MatchFactor.TravelCost) ]
+                    "matched afresh, not kept, and never let go"
+            }
+
+            test "a refusal already read keeps its holder: only news reopens the keep" {
+                let near = taskId (Harvest "src-near")
+
+                let snapshot =
+                    { bareRespawn with
+                        Sources = [ source "src-far"; source "src-near" ]
+                        Controller = None
+                        Creeps = [ worker "w1" 0 50 ]
+                        Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
+                        Refusals =
+                            [
+                                { Refusal.one "w1" true "" near -7 bareRespawn.Time with
+                                    Weight = 10.0
+                                    Fresh = 0
+                                }
+                            ]
+                    }
+
+                let { Verdicts = verdicts } = decideFrom (Map.ofList [ "w1", near ]) snapshot
+
+                Expect.equal
+                    verdicts
+                    [ Verdict.Kept("w1", near) ]
+                    "the decide before read it and let w1 stay"
+            }
+
             test "a Task that left the pool releases with TaskGone" {
                 // The remembered Refill target has no free capacity this
                 // tick, so the Planner never generates the Task.

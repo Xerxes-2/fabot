@@ -118,6 +118,10 @@ type ReleaseReason =
     | Outranked
     /// A quiet ranger let go of its Guard for a chase (#510).
     | Called
+    /// A holder the engine refused since the last decide, matched afresh at
+    /// its refusal's price, which a rival took the Task from or which took
+    /// another (#629).
+    | Refused
 
 /// The wire spelling of each ReleaseReason: the refusals spell what they
 /// spelt as refusals, so the release and scoring channels name one failure
@@ -127,6 +131,7 @@ let releaseReasonName =
     | ReleaseReason.TaskGone -> "task-gone"
     | ReleaseReason.Outranked -> "outranked"
     | ReleaseReason.Called -> "called"
+    | ReleaseReason.Refused -> "refused"
     | ReleaseReason.Rejected reason -> rejectReasonName reason
 
 /// The numbers a ReleaseReason carries beside its wire name, or None for a
@@ -135,7 +140,8 @@ let releaseReasonNumbers =
     function
     | ReleaseReason.TaskGone
     | ReleaseReason.Outranked
-    | ReleaseReason.Called -> None
+    | ReleaseReason.Called
+    | ReleaseReason.Refused -> None
     | ReleaseReason.Rejected reason -> rejectReasonNumbers reason
 
 /// The ReleaseReason a wire name spells for the numbers the wire carried
@@ -147,6 +153,8 @@ let releaseReasonOf payload name =
         Some ReleaseReason.Outranked
     elif name = releaseReasonName ReleaseReason.Called then
         Some ReleaseReason.Called
+    elif name = releaseReasonName ReleaseReason.Refused then
+        Some ReleaseReason.Refused
     else
         rejectReasonOf payload name |> Option.map ReleaseReason.Rejected
 
@@ -376,6 +384,12 @@ type Verdict =
     /// Rested, settled off the tile it asked for first — with nobody the pass
     /// can name holding that tile.
     | Stalled of creep: string
+    /// The engine refused the body's acts `count` times since its colony
+    /// last decided, holding `task` (empty for none), the newest with
+    /// `code` (#629). The shell's, off the Executor's outcomes: no decide
+    /// emits it. One row a streak, its count grown in place
+    /// (`Observe.fold`).
+    | Refused of creep: string * task: string * code: int * count: int
 
 /// One casting row's count this tick: what the quota asks for, how many living
 /// bodies the row reads back (`patternOf`), and how many are in the oven for

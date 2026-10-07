@@ -5894,3 +5894,41 @@ console.log(
     process.exitCode = 1;
   }
 }
+
+// The engine's refusals fed back (#629), after the guard: the first creep to
+// call a work verb has every work verb after it answer ERR_INVALID_TARGET
+// (-7) for two cadences, light ticks and full. A full tick among them must
+// write that creep a `refused` row coded -7 into the Transition log.
+{
+  let victim;
+  const work = new Set([
+    "harvest", "transfer", "withdraw", "build", "repair", "upgradeController", "reserveController",
+    "attackController", "claimController", "claimReactor", "signController", "attack", "heal",
+    "rangedHeal", "rangedAttack", "rangedMassAttack", "dismantle", "pickup", "drop",
+  ]);
+  for (const creep of Object.values(game.creeps)) {
+    for (const [verb, call] of Object.entries(creep)) {
+      if (typeof call !== "function" || !work.has(verb)) continue;
+      creep[verb] = (...args) => {
+        victim ??= creep.name;
+        return creep.name === victim ? -7 : call.apply(creep, args);
+      };
+    }
+  }
+  for (let i = 0; i < 8; i++) {
+    game.time++;
+    loop();
+  }
+  const log = victim === undefined ? [] : (observeWire().creeps?.[victim]?.log ?? []);
+  const refused = log.filter((entry) => entry.v?.kind === "refused");
+  if (victim === undefined) {
+    console.error("refusals: no work verb on the extra ticks, so the feedback went unchecked");
+    process.exitCode = 1;
+  } else if (refused.length > 0 && refused.every((entry) => entry.v.code === -7 && entry.v.count > 0)) {
+    const counted = refused.reduce((sum, entry) => sum + entry.v.count, 0);
+    console.log(`refusals: ${victim}'s refused acts reached the Transition log, ${counted} counted`);
+  } else {
+    console.error(`refusals broken: ${victim} refused, its log reads ${JSON.stringify(log.slice(-4))}`);
+    process.exitCode = 1;
+  }
+}

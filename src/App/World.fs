@@ -1181,6 +1181,8 @@ let ofGame
         RivalControllers = Map.empty
         // Any room's ground, asked for a stray's walk out alone (#570).
         StrayGround = strayGround
+        // The shell lays its refusals in after the read (`Main`).
+        Refusals = []
         // Every creep we own that is not still gestating, in the engine's own
         // order.
         Creeps =

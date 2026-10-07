@@ -190,6 +190,11 @@ let private encodeVerdict verdict =
         o?counterpart <- counterpart
     | Verdict.Rerouted _ -> o?kind <- "rerouted"
     | Verdict.Stalled _ -> o?kind <- "stalled"
+    | Verdict.Refused(_, task, code, count) ->
+        o?kind <- "refused"
+        o?task <- task
+        o?code <- code
+        o?count <- count
 
     o
 
@@ -223,6 +228,10 @@ let private decodeVerdict creep (raw: obj) : Verdict =
     | "yielded" -> Verdict.Yielded(creep, string raw?counterpart)
     | "rerouted" -> Verdict.Rerouted creep
     | "stalled" -> Verdict.Stalled creep
+    // A refusal names its Task, empty for none: a row with no string there
+    // is off the shape, not a Task called "undefined".
+    | "refused" when jsTypeof raw?task = "string" ->
+        Verdict.Refused(creep, string raw?task, numberOf raw "code", numberOf raw "count")
     | _ -> failwith "unknown verdict kind"
 
 let private encodeCreepLog (log: CreepLog) =
@@ -1601,6 +1610,7 @@ let private breachKindName =
     | BreachKind.Fault -> "fault"
     | BreachKind.SpawnIdle -> "spawn-idle"
     | BreachKind.BodyIdle -> "body-idle"
+    | BreachKind.RefusalStorm -> "refusal-storm"
     | BreachKind.OreOnTheFloor -> "ore-on-the-floor"
     | BreachKind.OreUnplaceable -> "ore-unplaceable"
     | BreachKind.ReactorRunningDry -> "reactor-running-dry"
@@ -1614,6 +1624,7 @@ let private breachKindOf name =
     | "fault" -> Some BreachKind.Fault
     | "spawn-idle" -> Some BreachKind.SpawnIdle
     | "body-idle" -> Some BreachKind.BodyIdle
+    | "refusal-storm" -> Some BreachKind.RefusalStorm
     | "ore-on-the-floor" -> Some BreachKind.OreOnTheFloor
     | "ore-unplaceable" -> Some BreachKind.OreUnplaceable
     | "reactor-running-dry" -> Some BreachKind.ReactorRunningDry

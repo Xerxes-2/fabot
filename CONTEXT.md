@@ -408,6 +408,9 @@ The per-tick record of what a tick cost, flat and keyed by tick, kept on the hea
 ### Breach log
 The colony-level channel carrying what is broken right now, under `Memory.fabot.observe.colonies.<home>.breaches` and read with `observe.mjs breaches`: one row per live invariant violation in the [[thorium]] programme, with its room, object id, the number that makes it actionable and how long it has stood. Measured against what the colony can see; nothing reacts to it. ADR-0004, ADR-0035.
 
+### Refusal
+The engine's answer refusing an act we made (#629): any result code but the four a plan expects of every act (out of range, full, empty, tired), filed under its actor — a body with the [[task]] it held, or a spawn, structure or site's tile under the colony whose plan issued the act. Folded on the heap off every tick's outcomes into a weight that halves every `Tuning.RefusalHalfLife` ticks, and read by the next full tick: the Matcher prices a refused (body, Task) pair a tick of walk per refusal and matches a holder refused since the last decide afresh, the spawn plan casts from an unrefused spawn first, a spawn whose last cast was refused is not casting for `SpawnIdle`, a body's refusals carry one `refused` row a streak in the [[transition log]], and a `RefusalStorm` breach opens on any actor refused on every decide for a half-life.
+
 ### Chat bubble
 The glyph an assigned creep says over its head each tick, one per [[task]] (⛏ Harvest · 📥 Withdraw · 🧲 Pickup · 🔋 Refill · 🔨 Build · 🔧 Repair · ⚡ Upgrade · 🚩 Reserve · 🏴 Claim · 🏃 Flee · ⚔️ Guard). Observability only; unassigned creeps show nothing.
 

@@ -100,8 +100,8 @@ let private execute (intent: Intent) : Outcome =
     | AttackController(creepName, controllerId) ->
         withCreepTarget creepName controllerId (fun c t -> c.attackController t)
     // The one act with a precondition Core has no model of: no GCL level left
-    // answers ERR_GCL_NOT_ENOUGH, the Task is pooled again next tick, and this
-    // can repeat forever with the log line as the only place a human sees it.
+    // answers ERR_GCL_NOT_ENOUGH, which reaches the next decide as a refusal
+    // (`refusals`) and the breach log as a `RefusalStorm`.
     | ClaimController(creepName, controllerId) ->
         withCreepTarget creepName controllerId (fun c t -> c.claimController t)
     // The reactor is the errand's declared id, in the projection without
@@ -181,7 +181,7 @@ let private replay (logged: bool) (plan: Fabot.Core.IntentPlan.Plan) : (Intent *
 
 /// Replay every Intent and answer back what the engine said. Failures are
 /// logged here, once; the outcome list is what `Main.loop` counts accepted
-/// intents off.
+/// intents and folds refusals (`refusals`) off.
 let run (plan: Fabot.Core.IntentPlan.Plan) : (Intent * Outcome) list = replay true plan
 
 /// The refusals a light tick's replay expects (#529): it re-issues every act
@@ -211,3 +211,69 @@ let runQuiet (plan: Fabot.Core.IntentPlan.Plan) : (Intent * Outcome) list =
         JS.console.log $"light tick, {List.length unexpected} unexpected: {shown}"
 
     outcomes
+
+/// The actor a refused Intent is filed under (#629), and whether it is a
+/// body: a body's act under its name, a spawn's under its name, a site's
+/// under its tile, any other structure's under its id. None for a body's
+/// `say`, a glyph no decision stands on.
+let private actorOf (intent: Intent) : (string * bool) option =
+    let structure (id: string) = Some(id, false)
+
+    let site (tile: RoomPos) =
+        Some($"{tile.Room}:{tile.X},{tile.Y}", false)
+
+    match intent with
+    | SayCreep _ -> None
+    | SpawnCreep(spawnName, _, _) -> structure spawnName
+    | PlaceConstructionSite(tile, _) -> site tile
+    | PlaceSpawnSite(tile, _) -> site tile
+    | ActivateSafeMode id
+    | FireTower(id, _)
+    | HealWithTower(id, _)
+    | RepairWithTower(id, _)
+    | SetRampartPublic(id, _)
+    | DestroyStructure id
+    | RemoveSite id
+    | ObserveRoom(id, _)
+    | RunReaction(id, _, _)
+    | SendFromTerminal(id, _, _, _) -> structure id
+    | _ -> Fabot.Core.IntentPlan.actor intent |> Option.map (fun name -> name, true)
+
+/// Whether an outcome is a refusal fed back to the next decide (#629): every
+/// `Failed` code but the four a plan expects of any act (`expected`: the
+/// walk, the store and the fatigue it already models). An actor or target
+/// gone is the view's lag, and a throw the fault ring's.
+let private refusedWith outcome =
+    match outcome with
+    | Failed code when not (expected code) -> Some code
+    | Failed _
+    | Ok
+    | ActorMissing
+    | Threw _ -> None
+
+/// The engine's refusals among a replay's outcomes (`refusedWith`), each one
+/// refusal (`Refusal.one`) of its actor: a body's holding `taskOf` its
+/// Task, a structure's filed under `issuedBy`, the colony whose plan made
+/// the act, asked of a refused act alone.
+let refusals
+    (taskOf: string -> string)
+    (issuedBy: Intent -> string)
+    (tick: int)
+    (outcomes: (Intent * Outcome) list)
+    : Refusal list =
+    outcomes
+    |> List.choose (fun (intent, outcome) ->
+        match refusedWith outcome, actorOf intent with
+        | Some code, Some(actor, true) -> Some(Refusal.one actor true "" (taskOf actor) code tick)
+        | Some code, Some(actor, false) ->
+            Some(Refusal.one actor false (issuedBy intent) "" code tick)
+        | _ -> None)
+
+/// Each spawn a replay's `SpawnCreep` reached, and whether the engine
+/// refused that cast (`refusedWith`): what a spawn's last cast was.
+let casts (outcomes: (Intent * Outcome) list) : (string * bool) list =
+    outcomes
+    |> List.choose (fun (intent, outcome) ->
+        match intent with
+        | SpawnCreep(spawn, _, _) -> Some(spawn, Option.isSome (refusedWith outcome))
+        | _ -> None)

@@ -954,6 +954,11 @@ type Tuning =
         /// Task, not fleeing and not held on purpose before a `BodyIdle`
         /// breach opens on it (#630).
         BodyIdlePercent: int
+        /// The ticks over which an engine refusal's weight halves
+        /// (`Refusal.weightAt`, #629): how long the answer stands as a price
+        /// on the pair it refused, and how long a body refused on every
+        /// decide stands before a `RefusalStorm` breach opens on it.
+        RefusalHalfLife: int
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -1140,6 +1145,14 @@ module Tuning =
             // standing, longer than a Matcher wait (a site placed next
             // replan, a Post freed by a relief inside its lead).
             BodyIdlePercent = 10
+            // A named margin, not a fact: a refusal answers for a state the
+            // engine moves on its own clock (a GCL level, an owner, a
+            // structure gone inactive), none of which Core models. A hundred
+            // ticks is past the cadence many times over, so a pair refused on
+            // every full tick piles up a price a rival tens of ticks further
+            // off outbids, and a fifteenth of a body's life, so a state that
+            // ended is offered back while the bodies it refused still live.
+            RefusalHalfLife = 100
         }
 
     /// The cadence bounds a tuned or live value is clamped to: under 2 there
