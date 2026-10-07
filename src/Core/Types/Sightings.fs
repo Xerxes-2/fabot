@@ -1093,8 +1093,7 @@ module World =
 
     /// Whether a colony may cast another's home defence (#589): a spawn of
     /// its own and a bank at `Tuning.CasterFloor` or above. Kinship plays
-    /// no part. Which of them casts is the verdict's: the one whose cast
-    /// wins and lands soonest (`RoomVerdict.Defender`).
+    /// no part. Which of them casts is the Caster's (`Caster.assign`).
     let private mayDefend (tuning: Tuning) (world: World) (defender: string) : bool =
         let ours = roomOf world defender
 

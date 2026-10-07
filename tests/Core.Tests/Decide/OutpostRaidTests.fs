@@ -4401,7 +4401,7 @@ let private smallResident name =
 /// `Facts.judge` over these colonies with the world's fleet laid into each
 /// view, as `WorldView.ofWorld` lays it in the shell: every body any of them
 /// places, by the room it stands in.
-let private judgeOverFleet hops held (colonies: Facts.Judged list) =
+let private judgeOverFleet held (colonies: Facts.Judged list) =
     let fleet =
         colonies
         |> List.collect (fun colony ->
@@ -4426,15 +4426,11 @@ let private judgeOverFleet hops held (colonies: Facts.Judged list) =
                         }
                 }
         })
-    |> Facts.judge hops held
+    |> Facts.judge held
 
 /// The mother's view and the child's with the world's verdicts priced over
-/// both (`Facts.judge`), a crossing a room apart.
+/// both (`Facts.judge`).
 let private judgedBoth (mother: ColonyView) (child: ColonyView) =
-    let crossings (home: string) (room: string) =
-        RoomName.offsetOf home room
-        |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
-
     let deciding view : Facts.Judged =
         {
             Cut = view
@@ -4442,9 +4438,42 @@ let private judgedBoth (mother: ColonyView) (child: ColonyView) =
             Decides = true
         }
 
-    match judgeOverFleet crossings Map.empty [ deciding mother; deciding child ] with
+    match judgeOverFleet Map.empty [ deciding mother; deciding child ] with
     | [ mother; child ] -> mother, child
     | _ -> failwith "two views in, two out"
+
+/// The bodies each colony casts for a Task (`Caster.assign`), every view a
+/// colony asking what it asks alone (`Quota.castsOf`), a
+/// crossing a room apart; a colony casting none for it left out.
+let private castsFor (task: Task) (views: ColonyView list) : (string * int) list =
+    let crossings (home: string) (room: string) =
+        RoomName.offsetOf home room
+        |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
+
+    views
+    |> List.map (fun view ->
+        let atlas = Atlas.ofView view
+
+        ({
+            Home = SpatialInfo.homeName view.Spatial
+            View = view
+            Asks =
+                Quota.castsOf
+                    view
+                    (threatsOf view atlas)
+                    (Planner.outpostFactsOf view atlas).Guarded
+        }
+        : Caster.Bidder))
+    |> Caster.assign crossings Map.empty Map.empty
+    |> Map.toList
+    |> List.choose (fun (home, casts) ->
+        match
+            casts
+            |> List.filter (fun cast -> cast.For = task)
+            |> List.sumBy (fun cast -> cast.Ask.Wanted)
+        with
+        | 0 -> None
+        | bodies -> Some(home, bodies))
 
 /// The child's view of `judgedBoth`.
 let private judgedBeside (mother: ColonyView) (child: ColonyView) = snd (judgedBoth mother child)
@@ -4695,7 +4724,7 @@ let childOutpostTests =
             // verdict prices both colonies' bodies, each lent by its own
             // colony's rule, and the raid is a Win. Its S4 gate below.
             test
-                "a raid only the child's ranger and the mother's resident win together is one Win, cast for by one colony and fought by both" {
+                "a raid only the child's ranger and the mother's resident win together is one Win, fought by both and cast for by nobody" {
                 let harasser room =
                     { hostileIn
                           room
@@ -4767,38 +4796,27 @@ let childOutpostTests =
                     Answer.Win
                     "priced once over both colonies' bodies, the raid is a Win"
 
-                Expect.equal
-                    (Facts.verdictOf judged "W1N4").Answerer
-                    (Some "W1N3")
-                    "answered by one colony: the child, a crossing from it where the mother is three"
-
                 Expect.isEmpty (shut judged) "and the child stands nothing down"
 
                 // The world layer's S4: both colonies decide off the judged
                 // views. Each colony the `Win` counts pools the room's Guard
                 // and sends its own body, so neither sends half the answer;
-                // only the answerer casts for it.
+                // the two standing win it, so no colony casts another (W6 S2:
+                // the Caster's ask, where the answerer's gate stood).
                 let judgedMother, judgedChild = judgedBoth mother child
                 let held = Map.ofList [ "r-1", taskId (Guard "W1N3") ]
 
                 Expect.isSome
                     (pooledOf judgedChild |> entryFor (Guard "W1N4"))
-                    "the child, the answerer, pools guard:W1N4"
+                    "the child pools guard:W1N4"
 
                 Expect.isSome
                     (pooledOf judgedMother |> entryFor (Guard "W1N4"))
                     "the mother, whose resident it counts, pools it too"
 
-                let briefIn (view: ColonyView) =
-                    Threats.briefOf (threatsOf view (Atlas.ofView view)) "W1N4"
-
-                Expect.equal
-                    [
-                        Threats.answers judgedChild (briefIn judgedChild)
-                        Threats.answers judgedMother (briefIn judgedMother)
-                    ]
-                    [ true; false ]
-                    "and only the child casts for it"
+                Expect.isEmpty
+                    (castsFor (Guard "W1N4") [ judgedMother; judgedChild ])
+                    "and no colony casts for it: the bodies standing win it"
 
                 let childDecides = decide judgedChild held Set.empty None
                 let motherDecides = decide judgedMother held Set.empty None
@@ -4942,19 +4960,22 @@ let childOutpostTests =
                     Answer.Lose
                     "the one verdict is the child's row's"
 
-                Expect.isNone (Facts.verdictOf judged "W1N4").Answerer "answered by nobody"
+                Expect.equal
+                    (Facts.verdictOf judged "W1N4").Rows
+                    (Map.ofList [ "W1N3", { Ranger = false; Wins = false } ])
+                    "the mother's row weighed nowhere"
 
                 Expect.equal (shutOf judged) (Set.singleton "W1N4") "so the child stands it down"
             }
 
-            // The world layer's S4: the answerer's binding never strips a
-            // room of the colony whose own Guard it is. The child's row loses
-            // her outpost, the mother's resident beside it wins it alone, and
-            // the mother answers; the child still pools her outpost's Guard
-            // and casts for it, or nobody of hers would guard the room her
-            // miners keep working.
+            // The world layer's S4: a neighbour's body winning a room never
+            // strips it of the colony whose own Guard it is. The child's row
+            // loses her outpost, the mother's resident beside it wins it
+            // alone; the child still pools her outpost's Guard and asks for
+            // it, or nobody of hers would guard the room her miners keep
+            // working.
             test
-                "a neighbour's ranger winning the child's outpost alone leaves the child pooling and casting for it" {
+                "a neighbour's ranger winning the child's outpost alone leaves the child pooling and guarding it" {
                 let mother =
                     { watchingBeyond [ synapse "W1N4" ] with
                         Bank = bank 5600 5600
@@ -4977,24 +4998,24 @@ let childOutpostTests =
                 let mother, child = judgedBoth mother (childBeside mother 850 [])
 
                 Expect.equal
-                    (Facts.verdictOf child "W1N4").Answerer
-                    (Some "W1N1")
-                    "the premise: the mother's resident wins it alone, and she answers"
+                    (Facts.answer child "W1N4", (Facts.verdictOf child "W1N4").Rows.["W1N3"].Wins)
+                    (Answer.Win, false)
+                    "the premise: the mother's resident wins it alone, the child's row loses"
 
-                let briefIn (view: ColonyView) =
-                    Threats.briefOf (threatsOf view (Atlas.ofView view)) "W1N4"
+                let atlas = Atlas.ofView child
 
                 Expect.isSome
                     (pooledOf child |> entryFor (Guard "W1N4"))
                     "the child pools her outpost's Guard"
 
-                Expect.isTrue
-                    (Threats.answers child (briefIn child))
-                    "and casts for it, whoever answers"
+                Expect.contains
+                    (Planner.outpostFactsOf child atlas).Guarded
+                    "W1N4"
+                    "and guards it, whoever wins it: its ask is hers (`Quota.castsOf`), the Caster's to cast"
 
                 Expect.isSome
                     (pooledOf mother |> entryFor (Guard "W1N4"))
-                    "the mother, the answerer, pools it for her resident"
+                    "the mother pools it for her resident"
             }
 
             // The user's complaint, a cripple nobody chases: the owner's row
@@ -5017,14 +5038,9 @@ let childOutpostTests =
                     (Facts.rowAnswer child "W1N4").Wins
                     "the premise: the child's row, cast, would win it"
 
-                let crossings (home: string) (room: string) =
-                    RoomName.offsetOf home room
-                    |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
-
                 let _, child =
                     match
                         judgeOverFleet
-                            crossings
                             Map.empty
                             [
                                 {
@@ -5043,9 +5059,9 @@ let childOutpostTests =
                     | _ -> failwith "two views in, two out"
 
                 Expect.equal
-                    (Facts.answer child "W1N4", (Facts.verdictOf child "W1N4").Answerer)
-                    (Answer.Win, Some "W1N3")
-                    "the Win binds the child, whose row casts for her own room, shut or not"
+                    (Facts.answer child "W1N4", (Facts.verdictOf child "W1N4").Casting)
+                    (Answer.Win, Set.singleton "W1N3")
+                    "the Win is the child's row's, which casts for her own room, shut or not"
 
                 let threats = threatsOf child (Atlas.ofView child)
                 let brief = Threats.briefOf threats "W1N4"
@@ -5097,14 +5113,9 @@ let childOutpostTests =
 
                 let child = shut (childBeside mother 300 [])
 
-                let crossings (home: string) (room: string) =
-                    RoomName.offsetOf home room
-                    |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
-
                 let judgedWith (mother: ColonyView) (child: ColonyView) =
                     match
                         judgeOverFleet
-                            crossings
                             Map.empty
                             [
                                 {
@@ -5192,7 +5203,6 @@ let childOutpostTests =
                 let verdictHeld held =
                     match
                         judgeOverFleet
-                            (fun _ _ -> None)
                             held
                             [
                                 {
@@ -5373,7 +5383,6 @@ let childOutpostTests =
 
                 let judged =
                     judgeOverFleet
-                        (fun _ _ -> None)
                         Map.empty
                         [
                             {
@@ -5411,7 +5420,6 @@ let childOutpostTests =
 
                 let answerHeld held =
                     judgeOverFleet
-                        (fun _ _ -> None)
                         held
                         [
                             {
@@ -5476,11 +5484,11 @@ let childOutpostTests =
             }
 
             // The world layer's S4: a home's raid is its own colony's Defend
-            // and its garrison's Guard, two Tasks (#552), so no answerer binds
-            // it: the mother keeps her garrison's Guard though the child's
-            // rangers alone are the fewest that win.
+            // and its garrison's Guard, two Tasks (#552): the mother keeps her
+            // garrison's Guard though the child's rangers alone are the
+            // fewest that win.
             test
-                "a raid at a raised child's home her rangers win binds no answerer: the mother keeps her garrison's Guard" {
+                "a raid at a raised child's home her rangers win leaves the mother her garrison's Guard" {
                 let mother =
                     { raisingBeyond [ synapse "W1N3" ] with
                         Bank = bank 850 850

@@ -331,6 +331,11 @@ type OutpostFacts =
         /// the reserver row each read: a scan of every target's kind in every
         /// projected room, derived here once rather than three times a tick.
         Fuelled: Errand list
+        /// The fight asks the world's Caster hands this colony
+        /// (`Caster.assign`), what its fighting rows cast for in place of its
+        /// own; None for a colony decided alone, which casts its own asks
+        /// (`Quota.castAsks`).
+        Casts: Cast list option
     }
 
 /// Derive the chain once, sharing each stage with the next. That sharing is
@@ -351,6 +356,7 @@ let outpostFactsOf (view: ColonyView) atlas : OutpostFacts =
         ReservableRooms = reservableOutpostsOf view reservable
         Guarded = guardedRooms view atlas declared fuelled
         Fuelled = fuelled
+        Casts = None
     }
 
 /// The head of the pool, the fight pass's Tasks: Flee and the combat Tasks,

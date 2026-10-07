@@ -435,10 +435,28 @@ let economyOf (view: ColonyView) : ColonyView =
             Fighters = fighters
         }
 
-/// The fighters this colony holds: what its fighting rows count, by the
-/// holder the asks they answer are sized by (a Defend's `Wanted`, the lent
-/// rangers), until W6 moves casting and its census to the caster.
-let fightersHeld (view: ColonyView) : CreepInfo list = (economyOf view).Fighters
+/// The fighters this colony cast, wherever they stand and whoever holds them
+/// (`WorldView.CastBy`): what its fighting rows count, as the asks the
+/// world's Caster hands it are its share of the fleet's (`Caster.assign`). A
+/// fighter it holds whose caster no living colony's spawn names counts here,
+/// at its holder: every fighter of a fixture with no world.
+let fightersCast (view: ColonyView) : CreepInfo list =
+    let held = (economyOf view).Fighters
+    let cast = view.World.CastBy.Value
+
+    if Map.isEmpty cast then
+        held
+    else
+        let home = SpatialInfo.homeName view.Spatial
+
+        (cast
+         |> Map.toList
+         |> List.choose (fun (_, (caster, creep)) ->
+             if caster = home && isFighterBody creep then
+                 Some creep
+             else
+                 None))
+        @ (held |> List.filter (fun creep -> not (Map.containsKey creep.Name cast)))
 
 /// Whether a towerless room of ours holds the raid standing in it without
 /// safe mode (#448): some one armed body of ours standing there, whichever
@@ -466,39 +484,36 @@ let internal homeHolds (view: ColonyView) (room: string) : bool =
     |> Option.defaultValue []
     |> List.exists (fun creep -> bodyWins view room (partCount creep.Body) creep.Hits.Hits)
 
-/// The guarded rooms a fighting row casts for, each with its Brief's row ask
+/// The guarded rooms a fighting row asks for, each with its Brief's row ask
 /// (#411): read off `Threats.briefOf`, so a guarded room no source claims —
 /// an outpost the colony is blind in (#366) — asks as `Brief.unclaimed`'s
 /// melee guard. A chased room (#510) asks neither row but where its own row
-/// wins a room the stand-down shuts (`chaseAsks`), nor a raided room
-/// another colony answers (the world layer's S4): the answerer casts for it.
+/// wins a room the stand-down shuts (`chaseAsks`). Every colony asks for
+/// its own rooms; which colony casts is the Caster's (`Caster.assign`).
 let private guardedAsks
-    (view: ColonyView)
     (threats: Threats)
     (outposts: OutpostFacts)
     (row: CastRow)
     : (string * RowAsk) list =
     outposts.Guarded
     |> List.collect (fun room ->
-        let brief = Threats.briefOf threats room
+        (Threats.briefOf threats room).Asks
+        |> List.filter (fun ask -> ask.Row = row)
+        |> List.map (fun ask -> room, ask))
 
-        if Threats.answers view brief then
-            brief.Asks
-            |> List.filter (fun ask -> ask.Row = row)
-            |> List.map (fun ask -> room, ask)
-        else
-            [])
-
-/// Every other Brief's ask of a row — the home's Defend's (#504), each
-/// Assault's per squad role —: a Brief exists only while its
+/// Every other Brief's ask of a row, with its Task — the home's Defend's
+/// (#504), each Assault's per squad role —: a Brief exists only while its
 /// Task is pooled, so each is read whole.
-let private briefAsks (threats: Threats) (row: CastRow) : RowAsk list =
+let private briefAsks (threats: Threats) (row: CastRow) : (Task * RowAsk) list =
     threats.Briefs
     |> Map.toList
     |> List.collect (fun (task, brief) ->
         match task with
         | Guard _ -> []
-        | _ -> brief.Asks |> List.filter (fun ask -> ask.Row = row))
+        | _ ->
+            brief.Asks
+            |> List.filter (fun ask -> ask.Row = row)
+            |> List.map (fun ask -> task, ask))
 
 /// Whether a room's ask casts nothing for now (#576): a guard or ranger of
 /// ours died there inside `Tuning.RecastCooldown` and its raid is still
@@ -528,7 +543,7 @@ let private chaseAsks
     (threats: Threats)
     (outposts: OutpostFacts)
     (row: CastRow)
-    : RowAsk list =
+    : (Task * RowAsk) list =
     threats.Briefs
     |> Map.toList
     |> List.collect (fun (task, brief) ->
@@ -536,31 +551,32 @@ let private chaseAsks
         | Guard room when
             brief.Duty = Duty.Guard BriefKind.Chase
             && not (List.contains room outposts.Guarded)
-            && Threats.answers view brief
             ->
             brief.Asks
             |> List.filter (fun ask -> ask.Row = row && not (recastCooling view threats room ask))
+            |> List.map (fun ask -> task, ask)
         | _ -> [])
 
-/// A fighting row's asks: its guarded rooms' but a cooling one's
-/// (`recastCooling`), its cast chases' and every other Brief's.
+/// A fighting row's asks, each with its Task: its guarded rooms' but a
+/// cooling one's (`recastCooling`), its cast chases' and every other
+/// Brief's.
 let private asksFor
     (view: ColonyView)
     (threats: Threats)
     (outposts: OutpostFacts)
     (row: CastRow)
-    : RowAsk list =
-    (guardedAsks view threats outposts row
+    : (Task * RowAsk) list =
+    (guardedAsks threats outposts row
      |> List.filter (fun (room, ask) -> not (recastCooling view threats room ask))
-     |> List.map snd)
+     |> List.map (fun (room, ask) -> Guard room, ask))
     @ chaseAsks view threats outposts row
     @ briefAsks threats row
 
-/// Every fighting row's asks this tick, each with its row, bodies and blocks,
-/// in `asksFor`'s order — what spawning reads of the fight —, off the guarded
-/// rooms, the one outpost fact `asksFor` reads: a fight-only decide holds them
-/// against the last whole decide's (`EconomyCarry.Asks`).
-let internal castAsks (view: ColonyView) (threats: Threats) (guarded: string list) : CastAsk list =
+/// Every fighting row's asks this tick, each with its Task, row, bodies and
+/// blocks, in `asksFor`'s order, off the guarded rooms, the one outpost fact
+/// `asksFor` reads: what this colony asks the world's Caster for
+/// (`Caster.assign`), and, decided alone, what it casts for.
+let castsOf (view: ColonyView) (threats: Threats) (guarded: string list) : Cast list =
     let outposts =
         {
             Claims = []
@@ -569,6 +585,7 @@ let internal castAsks (view: ColonyView) (threats: Threats) (guarded: string lis
             ReservableRooms = []
             Guarded = guarded
             Fuelled = []
+            Casts = None
         }
 
     threats.Briefs
@@ -578,24 +595,43 @@ let internal castAsks (view: ColonyView) (threats: Threats) (guarded: string lis
     |> List.distinct
     |> List.collect (fun row ->
         asksFor view threats outposts row
-        |> List.map (fun ask ->
+        |> List.map (fun (task, ask) ->
             {
-                Row = row
-                Wanted = ask.Wanted threats
-                Blocks = ask.Blocks()
+                For = task
+                Ask =
+                    {
+                        Row = row
+                        Wanted = ask.Wanted threats
+                        Blocks = ask.Blocks()
+                    }
             }))
 
-/// A fighting row's quota: its asks' counts, summed.
+/// `castsOf` without their Tasks: what a fight-only decide holds against the
+/// last whole decide's (`EconomyCarry.Asks`).
+let internal castAsks (view: ColonyView) (threats: Threats) (guarded: string list) : CastAsk list =
+    castsOf view threats guarded |> List.map _.Ask
+
+/// A fighting row's casts this tick: the Caster's share where it handed one
+/// (`OutpostFacts.Casts`), else the row's own asks.
+let private rowCasts (outposts: OutpostFacts) (row: CastRow) : CastAsk list option =
+    outposts.Casts
+    |> Option.map (List.choose (fun cast -> if cast.Ask.Row = row then Some cast.Ask else None))
+
+/// A fighting row's quota: its casts' counts, summed.
 let internal rowQuota
     (view: ColonyView)
     (threats: Threats)
     (outposts: OutpostFacts)
     (row: CastRow)
     : int =
-    asksFor view threats outposts row |> List.sumBy (fun ask -> ask.Wanted threats)
+    match rowCasts outposts row with
+    | Some casts -> casts |> List.sumBy _.Wanted
+    | None ->
+        asksFor view threats outposts row
+        |> List.sumBy (fun (_, ask) -> ask.Wanted threats)
 
-/// The blocks a fighting row casts this tick: the worst of its guarded rooms'
-/// answers, the row's floor where none is guarded — one guard block, the
+/// The blocks a fighting row casts this tick: the worst of its casts'
+/// answers, the row's floor where it has none — one guard block, the
 /// resident's ranger blocks. Every cast carries it, as the reserver row's
 /// casts carry the largest outstanding claim: the Matcher pairs a finished
 /// body to a room by travel cost.
@@ -605,7 +641,11 @@ let internal rowBlocksWanted
     (outposts: OutpostFacts)
     (row: CastRow)
     : int =
-    match asksFor view threats outposts row |> List.map (fun ask -> ask.Blocks()) with
+    match
+        match rowCasts outposts row with
+        | Some casts -> casts |> List.map _.Blocks
+        | None -> asksFor view threats outposts row |> List.map (fun (_, ask) -> ask.Blocks())
+    with
     | [] ->
         match row with
         | CastRow.Ranger -> view.Tuning.RangerResidentBlocks
@@ -616,7 +656,7 @@ let internal rowBlocksWanted
 
 /// Whether a fighting row is filled — every body it wants standing or in an
 /// oven. Read by the reserver row. Counted over every living body of the row
-/// this colony holds (`fightersHeld`) and not the census less its expiring
+/// this colony cast (`fightersCast`) and not the census less its expiring
 /// ones: a fighter inside its lead still stands in the room, so the seat stays
 /// open while the row buys the relief.
 let private fightingRowStands
@@ -625,7 +665,7 @@ let private fightingRowStands
     (quota: int)
     : bool =
     let living =
-        fightersHeld view
+        fightersCast view
         |> List.filter (fun creep -> cut creep.Name creep.Body)
         |> List.length
 
@@ -660,7 +700,7 @@ let private castRowStands
 /// (`Brief.formed`).
 let internal squadQuota (threats: Threats) (role: SquadRole) : int =
     briefAsks threats (CastRow.Squad role)
-    |> List.sumBy (fun ask -> ask.Wanted threats)
+    |> List.sumBy (fun (_, ask) -> ask.Wanted threats)
 
 /// ADR-0057
 /// The miner row's quota: one body per deposit the colony can actually dig —
@@ -733,7 +773,7 @@ let internal reserverClaimsOf
     // the raid eats it whatever the rows stand at.
     let withheld =
         let castFor row =
-            guardedAsks view threats outposts row |> List.map fst |> Set.ofList
+            guardedAsks threats outposts row |> List.map fst |> Set.ofList
 
         let lost =
             residentRooms view

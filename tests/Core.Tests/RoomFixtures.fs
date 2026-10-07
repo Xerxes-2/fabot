@@ -756,6 +756,7 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
                     Id = "spawn-1"
                     RoomName = capture.RoomName
                     IsSpawning = false
+                    Remaining = 0
                 }
             ]
         Bank = { Available = bank; Capacity = bank }

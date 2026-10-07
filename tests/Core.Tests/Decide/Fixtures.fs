@@ -19,6 +19,7 @@ let spawn =
         Id = "spawn-1"
         RoomName = "W1N1"
         IsSpawning = false
+        Remaining = 0
     }
 
 /// The colony's bank holding the given energy against the given capacity:

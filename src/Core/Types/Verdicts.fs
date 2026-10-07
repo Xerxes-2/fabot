@@ -462,6 +462,20 @@ type BusyReason =
     /// The stock stands under its emergency reserve (#505).
     | UnderReserve
 
+/// One ask a fighting row casts for: the row, how many bodies and of how many
+/// blocks. What spawning reads of the fight.
+type CastAsk =
+    {
+        Row: CastRow
+        Wanted: int
+        Blocks: int
+    }
+
+/// One ask a colony casts for, with the combat Task it is for: what the
+/// world's Caster hands each colony (`Caster.assign`), and what the `quotas`
+/// view prints as its asks.
+type Cast = { For: Task; Ask: CastAsk }
+
 /// The tick's workforce arithmetic as the cascade saw it: the whole
 /// target, the living and casting counts it was measured against, and one
 /// `RowQuota` per row. `Rows` empty and `Target` zero is the cascade's
@@ -482,6 +496,9 @@ type Quotas =
         Overflow: HaulOverflow
         /// Why the colony is busy this tick, empty when it is not (#523).
         Busy: BusyReason list
+        /// The fight asks this colony casts for this tick, the world's Caster's
+        /// share of them (`Caster.assign`): its fighting rows' quotas.
+        Casts: Cast list
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -496,6 +513,7 @@ module Quotas =
             HaulerDemand = []
             Overflow = HaulOverflow.none
             Busy = []
+            Casts = []
         }
 
 /// The facts the rows whose sizing is not the bank's answer alone read,
@@ -531,14 +549,6 @@ type RowSizing =
         UpgraderWork: int option
     }
 
-/// One ask a fighting row casts for: the row, how many bodies and of how many
-/// blocks. What spawning reads of the fight.
-type CastAsk =
-    {
-        Row: CastRow
-        Wanted: int
-        Blocks: int
-    }
 
 /// A decision's half of the world's fight: the fighters whose plans it laid
 /// this tick, each priced in its colony's Atlas. What the plan record splices

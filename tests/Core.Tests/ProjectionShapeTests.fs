@@ -144,6 +144,7 @@ let private homeFacts =
                         Id = "spawn-1"
                         RoomName = home
                         IsSpawning = false
+                        Remaining = 0
                     }
                 ]
             Energy = { Available = 2_300; Capacity = 2_300 }

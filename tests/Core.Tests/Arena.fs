@@ -1121,6 +1121,10 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                     Id = s.Id
                     RoomName = name
                     IsSpawning = a.Ovens |> List.exists (fun oven -> oven.Spawn = s.Id)
+                    Remaining =
+                        a.Ovens
+                        |> List.filter (fun oven -> oven.Spawn = s.Id)
+                        |> List.sumBy (fun oven -> max 0 (oven.Done - a.Time))
                 }))
 
     if not (seen a name r) then
@@ -1473,9 +1477,9 @@ let private cut (a: Arena) : World * (string -> string -> int option) * (Colony 
 
     let watch = WorldView.ofWorld a.Colonies (gates |> Map.toList |> List.map snd) world
 
-    // Each colony's view as cut, and the crossings a raided room's answerer
-    // is ranked by: `Entry.decideColonies` judges and aims them as `Main`
-    // hands it them, every colony deciding every arena tick.
+    // Each colony's view as cut, and the crossings from a home to a room
+    // (`ColonyInputs.Hops`): `Entry.decideColonies` judges and aims them as
+    // `Main` hands it them, every colony deciding every arena tick.
     world,
     (fun home room -> World.hopsUnder StandDown.none joins tuning world home room),
     living
@@ -1496,9 +1500,9 @@ let private cut (a: Arena) : World * (string -> string -> int option) * (Colony 
 /// The view one living colony decides this tick off: judged and aimed as
 /// `Entry.decideColonies` lays them.
 let viewOf (a: Arena) (home: string) : ColonyView =
-    let _, hops, views = cut a
+    let _, _, views = cut a
 
-    judgeColonies hops a.Carried.Assignments Set.empty views
+    judgeColonies a.Carried.Assignments Set.empty views
     |> Layout.aimObservers Set.empty
     |> List.zip (views |> List.map fst)
     |> List.tryPick (fun (c, view) -> if c.Home = home then Some view else None)

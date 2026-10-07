@@ -793,11 +793,15 @@ type Tuning =
         /// lost the line with one.
         GarrisonTowers: int
         /// The least bank (`RoomEnergy.Capacity`) a colony casts another
-        /// colony's home defence from (`World.defends`); below it, it casts
-        /// only its own home's (`RoomVerdict.Defender`). RCL5's full bank:
-        /// the least that buys two
+        /// colony's ask from (`Caster.assign`, `World.defends`); below it, it
+        /// casts only its own. RCL5's full bank: the least that buys two
         /// blocks of the guard (1,500) or the ranger (1,400).
         CasterFloor: int
+        /// The least Storage energy (`Facts.stockedEnergy`) a colony casts
+        /// another colony's ask from, beside `CasterFloor` (#580, the user):
+        /// one colony's bank pays another's fight only out of a stock that
+        /// keeps its own. 20,000: the RCL6 [[emergency reserve]].
+        CasterReserve: int
         /// How long a room not a home of ours asks no fighter after a guard
         /// or ranger of ours died there, while its raid stays priced a Win
         /// (#576): a Win that kills our body is a pricing error, and each
@@ -1068,6 +1072,7 @@ module Tuning =
             IndependenceTowerEnergy = Engine.towerCapacity
             GarrisonTowers = 2
             CasterFloor = 1_800
+            CasterReserve = 20_000
             RecastCooldown = 300
             MaxHops = 6
             TrunkSwampWeight = 3

@@ -39,7 +39,7 @@ let signatureTests =
                 Expect.equal
                     (signatures (decideOn colony).Intents)
                     [ "w1", "ctrl-1", homeLine ]
-                    "a controller nobody has signed is the case this exists for (ADR 0004: absence is not a match)"
+                    "a controller nobody has signed is the case this exists for: absence is not a match"
             }
 
             test "a controller already carrying our line is left alone" {

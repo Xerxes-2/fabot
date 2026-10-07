@@ -537,14 +537,16 @@ let private fightActs
 
 /// What the world's fight hands one colony (`worldFights`): the Briefs of the
 /// world's combat Tasks it pools none of itself but may send a fighter to,
-/// those Tasks, and each world Task's caps, its owner's. Lives within the
-/// tick.
+/// those Tasks, each world Task's caps, its owner's, and the fight asks it
+/// casts for (`Caster.assign`). Lives within the tick.
 [<NoEquality; NoComparison>]
 type private WorldFight =
     {
         Briefs: Map<Task, Brief>
         Tasks: Task list
         Caps: Map<Task, Capacity>
+        /// None for a colony alone, which casts its own asks.
+        Casts: Cast list option
     }
 
 /// A colony alone in the world: its own fight.
@@ -553,6 +555,7 @@ let private ownFight =
         Briefs = Map.empty
         Tasks = []
         Caps = Map.empty
+        Casts = None
     }
 
 /// A colony's decide opened as far as its fight's head: its Threats and its
@@ -567,6 +570,9 @@ type private Opening =
         Threats: Threats
         /// Flee and its own combat Tasks (`planFightTasks`), on first read.
         FightTasks: Lazy<Task list>
+        /// What it asks the world's Caster for (`Quota.castsOf`), on first
+        /// read.
+        Casts: Lazy<Cast list>
         Fighters: CreepInfo list
         Join: WorldFight -> Joining
     }
@@ -683,6 +689,8 @@ type private WholeTail =
         EconomyPool: PooledTask list
         Fighters: CreepInfo list
         EconomyBodies: CreepInfo list
+        /// The fight asks it casts for (`Quotas.Casts`).
+        Casts: Cast list
     }
 
 /// A whole decide opened (`Opening`): plan, match, emit, move, beside the
@@ -835,6 +843,7 @@ let rec private openWhole
         View = view
         Threats = fight.Threats
         FightTasks = fight.Tasks
+        Casts = lazy (castsOf view fight.Threats outposts.Guarded)
         Fighters = economy.Fighters
         Join = joinWhole head
     }
@@ -842,9 +851,20 @@ let rec private openWhole
 /// A whole decide joined to the world's fight (`Joining`).
 and private joinWhole (head: WholeHead) (world: WorldFight) : Joining =
     let view, economy, atlas, plan = head.View, head.Economy, head.Atlas, head.Plan
-    let held, outposts, fight = head.Held, head.Outposts, head.Fight
+    let held, fight = head.Held, head.Fight
     let threats = fight.Threats
     let fought = foughtThreats threats world
+
+    // The fighting rows cast for the Caster's share of the world's asks
+    // where it handed one, else for the colony's own.
+    let outposts =
+        { head.Outposts with
+            Casts = world.Casts
+        }
+
+    let casts =
+        world.Casts
+        |> Option.defaultWith (fun () -> castsOf view threats outposts.Guarded)
 
     // The outpost's source containers, beside the memoised Layout and never
     // inside it: derived fresh every tick for the reason on the rule itself.
@@ -953,6 +973,7 @@ and private joinWhole (head: WholeHead) (world: WorldFight) : Joining =
             EconomyPool = economyPool
             Fighters = fighters
             EconomyBodies = economyBodies
+            Casts = casts
         }
 
     {
@@ -1212,6 +1233,7 @@ and private finishWhole (tail: WholeTail) (outcomes: MatchOutcome list) : Decisi
                 HaulerDemand = plan.HaulerDemand
                 Overflow = overflow
                 Busy = busy
+                Casts = tail.Casts
             }
         HaulOverflow = overflow
         OutpostRooms = outposts.Declared
@@ -1294,11 +1316,13 @@ let decideUnarbitrated
 ///
 /// None where the economy would decide otherwise, so the caller decides the
 /// colony whole this tick: an economy body new since the carry (a fighter
-/// disarmed across the line), a cast ask moved or owed a spawn standing
-/// idle — spawning is the economy's —, an economy body a Reach has walled
-/// off from its Task since (`walledOffBy`), or a fighter's step an economy
-/// body stands in. The last is read once the match is made, so the opening
-/// is None for the rest and the joined decide's `Finish` None for it.
+/// disarmed across the line), its own cast asks moved, an economy body a
+/// Reach has walled off from its Task since (`walledOffBy`), a body its
+/// share of the world's asks (`Caster.assign`; its own, alone) owes a spawn
+/// standing idle — spawning is the economy's —, or a fighter's step an
+/// economy body stands in. The last two are read once the world's fight is
+/// laid in, so the opening is None for the rest and the joined decide's
+/// `Finish` None for them.
 let rec private openFight
     (view: ColonyView)
     (assignments: Assignments)
@@ -1342,11 +1366,7 @@ let rec private openFight
                         | Some task, Some tid when taskId task = tid -> walledOff creep task
                         | _ -> false))
 
-        if
-            castAsks view threats guarded <> carry.Asks
-            || castOwed view carry.Asks
-            || walledOffAnew.Force()
-        then
+        if castAsks view threats guarded <> carry.Asks || walledOffAnew.Force() then
             None
         else
             Some
@@ -1355,6 +1375,7 @@ let rec private openFight
                     View = view
                     Threats = threats
                     FightTasks = fight.Tasks
+                    Casts = lazy (castsOf view threats guarded)
                     Fighters = fighters
                     Join =
                         joinFight
@@ -1451,7 +1472,16 @@ and private joinFight
                 | wanted :: _ -> wanted <> step.Pos && Set.contains wanted walls
                 | [] -> false)
 
-        if blocked then
+        // A body its share of the world's asks owes an idle spawn: its
+        // own asks alone (`carry.Asks`) where no Caster weighed them.
+        let owed () =
+            castOwed
+                view
+                (match world.Casts with
+                 | Some share -> share |> List.map _.Ask
+                 | None -> carry.Asks)
+
+        if owed () || blocked then
             None
         else
 
@@ -1551,8 +1581,9 @@ let decide
 [<NoEquality; NoComparison>]
 type ColonyInputs =
     {
-        /// Crossings from a colony's home to a room, as `Facts.judge` ranks
-        /// a raided room's answerer by.
+        /// Crossings from a colony's home to a room: a Task's owner where
+        /// no colony declares it (`worldFights`), and a cast's walk
+        /// (`Caster.assign`).
         Hops: string -> string -> int option
         /// Last tick's assignments, every colony's in one table.
         Holding: Assignments
@@ -1596,7 +1627,6 @@ type ColonyDecisions<'Stamp> =
 /// not decide (`idle`) sends only the bodies its plan already holds there.
 /// And each contested room's one danger (`WorldDanger.lay`).
 let judgeColonies
-    (hops: string -> string -> int option)
     (assignments: Assignments)
     (idle: Set<string>)
     (colonies: (Colony * ColonyView) list)
@@ -1609,22 +1639,23 @@ let judgeColonies
             Decides = not (Set.contains colony.Home idle)
         }
         : Facts.Judged))
-    |> Facts.judge hops assignments
+    |> Facts.judge assignments
     |> WorldDanger.lay
 
 /// ADR-0091
 /// The world's fight, one Brief per combat Task world-wide: of the colonies
 /// that pool a Guard or a Defend, its owner's — a home's Defend the home's;
-/// a Guard its declarer's, else the room's verdict's Defender or answerer,
-/// else the fewest crossings from it, then by home. Each Task is capped as
-/// its owner caps it, whichever colony pools it, so one count of holders
-/// over the fleet fills it. A colony with a fighter is handed the owner's
-/// Brief of each such Task it pools none of in a room it projects. An
-/// Assault stays its declarer's alone.
+/// a Guard its declarer's, else the fewest crossings from it, then by home.
+/// Each Task is capped as its owner caps it, whichever colony pools it, so
+/// one count of holders over the fleet fills it. A colony with a fighter is
+/// handed the owner's Brief of each such Task it pools none of in a room it
+/// projects. An Assault stays its declarer's alone. Beside each colony's
+/// fight, each Task's owner, whose ask the Caster weighs (`Caster.assign`);
+/// no colony's casts yet.
 let private worldFights
     (hops: string -> string -> int option)
     (openings: (Colony * Opening) list)
-    : Map<string, WorldFight> =
+    : Map<string, WorldFight> * Map<Task, string> =
     let claims =
         openings
         |> List.collect (fun (colony, opening) ->
@@ -1651,27 +1682,16 @@ let private worldFights
 
             let ranked = claimed |> List.filter (fun (_, _, _, brief) -> kindRank brief = first)
 
-            let named home =
-                ranked |> List.tryFind (fun (_, colony, _, _) -> colony.Home = home)
-
-            let judged () =
-                ranked
-                |> List.tryPick (fun (_, _, opening, _) ->
-                    Map.tryFind room opening.View.World.Answers)
-                |> Option.bind (fun verdict ->
-                    verdict.Value.Defender |> Option.orElse verdict.Value.Answerer)
-                |> Option.bind named
-
             let owner =
                 (match task with
-                 | Defend home -> named home
+                 | Defend home ->
+                     ranked |> List.tryFind (fun (_, colony, _, _) -> colony.Home = home)
                  | _ -> None)
                 |> Option.orElse (
                     ranked
                     |> List.tryFind (fun (_, colony, _, _) ->
                         Set.contains room (Colony.declaredRooms colony))
                 )
-                |> Option.orElse (judged ())
                 |> Option.defaultWith (fun () ->
                     ranked
                     |> List.minBy (fun (_, colony, _, _) ->
@@ -1767,8 +1787,10 @@ let private worldFights
                 handed
                 |> List.map (fun (task, (_, _, _, capacity), _) -> task, capacity)
                 |> Map.ofList
+            Casts = None
         })
-    |> Map.ofList
+    |> Map.ofList,
+    owned |> List.map (fun (task, (_, owner, _, _), _) -> task, owner) |> Map.ofList
 
 /// The world lane's tick: every deciding colony opened —
 /// the fight-only ones (`openFight`) off the judged views, every other whole
@@ -1846,8 +1868,38 @@ let private decideWorld
 
     let opened = fought @ whole
 
-    let fights =
+    let fights, owners =
         worldFights inputs.Hops (opened |> List.map (fun (colony, _, opening) -> colony, opening))
+
+    // Who casts each of the world's fight asks (`Caster.assign`): every
+    // colony's fleet and oven read, an idle colony asking nothing. A
+    // fight-only colony handed a body its spawn owes is decided whole
+    // (`joinFight`).
+    let casts =
+        List.zip colonies judged
+        |> List.map (fun ((colony, _), view) ->
+            match opened |> List.tryFind (fun (decided, _, _) -> decided.Home = colony.Home) with
+            | Some(_, _, opening) ->
+                ({
+                    Home = colony.Home
+                    View = opening.View
+                    Asks = opening.Casts.Value
+                }
+                : Caster.Bidder)
+            | None ->
+                {
+                    Home = colony.Home
+                    View = ColonyView.fought view
+                    Asks = []
+                })
+        |> Caster.assign inputs.Hops inputs.Holding owners
+
+    let fights =
+        fights
+        |> Map.map (fun home fight ->
+            { fight with
+                Casts = Some(Map.tryFind home casts |> Option.defaultValue [])
+            })
 
     let joined =
         opened
@@ -1987,6 +2039,6 @@ let decideColonies
     let colonies =
         colonies |> List.map (fun (colony, view) -> colony, { view with Loose = loose })
 
-    let judged = judgeColonies inputs.Hops inputs.Holding inputs.Idle colonies
+    let judged = judgeColonies inputs.Holding inputs.Idle colonies
 
     decideWorld inputs stamp colonies judged

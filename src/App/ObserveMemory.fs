@@ -1434,7 +1434,8 @@ let private tileObject (tile: RoomPos) =
 
 /// The cascade's workforce arithmetic this tick, one leaf per colony
 /// beside the Layout record: `{ target, living, casting, rows: [{ row,
-/// quota, living, casting }], load, haul, overflow: { fill, owed } }`.
+/// quota, living, casting }], load, haul, overflow: { fill, owed }, asks:
+/// [{ task, row, wanted, blocks }] }`.
 /// Written every tick and read by
 /// `observe.mjs quotas`; silence writes `rows: []` and `target 0`.
 let saveQuotas (home: string) (quotas: Quotas) =
@@ -1488,6 +1489,27 @@ let saveQuotas (home: string) (quotas: Quotas) =
     overflow?fill <- quotas.Overflow.Fill
     overflow?owed <- quotas.Overflow.Owed
     o?overflow <- overflow
+
+    // The fight asks this colony casts for, the Caster's share (#580).
+    o?asks <-
+        quotas.Casts
+        |> List.map (fun cast ->
+            let a = createEmpty<obj>
+            a?task <- Fabot.Core.Decide.Facts.taskId cast.For
+
+            a?row <-
+                match cast.Ask.Row with
+                | CastRow.Guard -> "guard"
+                | CastRow.Ranger -> "ranger"
+                | CastRow.Defender -> "defender"
+                | CastRow.Squad Sapper -> "sapper"
+                | CastRow.Squad Probe -> "probe"
+                | CastRow.Squad Medic -> "medic"
+
+            a?wanted <- cast.Ask.Wanted
+            a?blocks <- cast.Ask.Blocks
+            a)
+        |> List.toArray
 
     writeColonyLeaf home "quotas" o
 

@@ -112,6 +112,7 @@ let private ourColony spawnName level energy (name, facts: RoomFacts) =
                     Id = $"spawn-{name}"
                     RoomName = name
                     IsSpawning = false
+                    Remaining = 0
                 }
             ]
         Energy =
@@ -1050,7 +1051,7 @@ let colonyViewTests =
             }
 
             test
-                "a fighter a colony holds stands apart from its economy, and counts for its holder whoever cast it" {
+                "a fighter a colony holds stands apart from its economy, and counts for the colony that cast it" {
                 // The child's ranger standing in the mother's home, which the
                 // mother alone projects: she adopts it.
                 let ranger =
@@ -1106,10 +1107,10 @@ let colonyViewTests =
                     "and her economy sees it not"
 
                 Expect.equal
-                    (Quota.fightersHeld motherView |> List.map _.Name,
-                     Quota.fightersHeld (shed child) |> List.map _.Name)
-                    ([ name ], [])
-                    "its row counts it where the asks it answers count it: at the holder, until W6"
+                    (Quota.fightersCast motherView |> List.map _.Name,
+                     Quota.fightersCast (shed child) |> List.map _.Name)
+                    ([], [ name ])
+                    "its row counts it at its caster, the child whose Spawn2 its name carries (W6 S2)"
             }
 
             test "a hostile's and an ally's creep are bodies no colony of ours can move" {
@@ -2430,19 +2431,13 @@ let defendedHomeTests =
                         Decides = true
                     }
 
-                let judged =
-                    Facts.judge
-                        (fun home room -> RoomName.hopsBetween home room)
-                        Map.empty
-                        [ deciding motherView; deciding childView ]
+                let judged = Facts.judge Map.empty [ deciding motherView; deciding childView ]
 
                 let verdict = Facts.verdictOf (List.head judged) child
 
                 Expect.isFalse
                     (Map.containsKey child verdict.Rows)
                     "the child's own row is not weighed"
-
-                Expect.notEqual verdict.Defender (Some child) "nor named its defender"
 
                 Expect.isEmpty
                     (guardsPooled (List.item 1 judged))
@@ -3015,10 +3010,6 @@ let worldSeamTests =
                     Answer.Lose
                     "the premise: alone, the mother's bodies lose it"
 
-                let crossings (home: string) (room: string) =
-                    RoomName.offsetOf home room
-                    |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
-
                 let deciding view : Facts.Judged =
                     {
                         Cut = view
@@ -3026,8 +3017,7 @@ let worldSeamTests =
                         Decides = true
                     }
 
-                let judged =
-                    Facts.judge crossings Map.empty [ deciding motherView; deciding childView ]
+                let judged = Facts.judge Map.empty [ deciding motherView; deciding childView ]
 
                 Expect.equal
                     (judged |> List.map (fun view -> Facts.answer view childOutpost))
@@ -3041,9 +3031,11 @@ let worldSeamTests =
                     "by two rangers: the mother's at the child's home and one of the child's"
 
                 Expect.equal
-                    (judged |> List.map (fun view -> (Facts.verdictOf view childOutpost).Answerer))
-                    [ Some child; Some child ]
-                    "answered by one colony, the child, a crossing from the room where the mother is two"
+                    (judged
+                     |> List.map (fun view ->
+                         (Facts.verdictOf view childOutpost).Bodies |> List.map snd |> Set.ofList))
+                    [ Set.ofList [ mother; child ]; Set.ofList [ mother; child ] ]
+                    "each of the two colonies' own: who casts for the room is the Caster's (W6 S2)"
             }
         ]
 

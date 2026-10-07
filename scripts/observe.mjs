@@ -1814,7 +1814,8 @@ if (command === "console") {
   // ---- quotas: the cascade's workforce arithmetic ------------------------
   // Wire shape written by ObserveMemory.saveQuotas:
   //   { target, living, casting, rows: [{ row, quota, living, casting }],
-  //     load, haul: [...], overflow: { fill, owed } }
+  //     load, haul: [...], overflow: { fill, owed },
+  //     asks: [{ task, row, wanted, blocks }] }
   // One tick's reading, no history. rows: [] with target 0 is the cascade's
   // silence — a spawn's doorstep stood inside a Reach — and is said as such
   // rather than as "nothing to hire".
@@ -1874,6 +1875,18 @@ if (command === "console") {
         );
       } else {
         console.log("  overflow: not recorded (a bundle older than #508)");
+      }
+      // The fight asks this colony casts for (#580): the world's Caster's
+      // share of every colony's asks, each by its Task — already inside the
+      // guard, ranger, defender and squad quotas above. A bundle older than
+      // it writes no `asks`.
+      if (Array.isArray(stored.asks)) {
+        if (stored.asks.length === 0) console.log("  casts for: no fight ask");
+        for (const a of stored.asks) {
+          console.log(`  casts for ${a.task}: ${a.wanted} ${a.row} of ${a.blocks} block${a.blocks === 1 ? "" : "s"}`);
+        }
+      } else {
+        console.log("  casts for: not recorded (a bundle older than #580)");
       }
     }
   }

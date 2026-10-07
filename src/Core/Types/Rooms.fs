@@ -15,6 +15,8 @@ type SpawnInfo =
         /// world's per-room banks (`RoomFacts.Energy`).
         RoomName: string
         IsSpawning: bool
+        /// Ticks until the body it is building stands; 0 when idle.
+        Remaining: int
     }
 
 /// One room's shared spawn-energy account this tick. Colony state, not

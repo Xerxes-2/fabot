@@ -1086,6 +1086,7 @@ let ofGame
                 Id = s.id
                 RoomName = s.room.name
                 IsSpawning = not (isNull s.spawning)
+                Remaining = if isNull s.spawning then 0 else s.spawning.remainingTime
             })
         |> Array.toList
         |> List.groupBy fst

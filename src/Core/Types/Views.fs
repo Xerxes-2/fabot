@@ -113,20 +113,6 @@ type RoomVerdict =
         /// Those rangers by name, each with its colony's home, where they
         /// are the answer (no row wins and none kites); empty otherwise.
         Bodies: (string * string) list
-        /// The one colony that answers the room: among the colonies whose
-        /// row wins it, else those of them whose biggest ranger kites it,
-        /// else whose rangers are among the fewest that win it — one whose
-        /// row casts for the room first —, the fewest crossings from it, then
-        /// the largest bank, then by home name. None on a Lose. On a `Win`
-        /// outside our homes only it casts for the room (`Brief.Answerer`).
-        Answerer: string option
-        /// In a home of ours, the one colony that casts its defence (#589):
-        /// of the home's own row and the rows of the colonies that defend it
-        /// (`BorrowedWork.Defended`), the one whose cast wins and lands
-        /// soonest (`Facts.landsIn`); where no cast wins, the defender that
-        /// lands soonest, for a home fights on. None elsewhere, and where
-        /// neither the home's row wins nor another colony defends it.
-        Defender: string option
     }
 
 /// The whole ticks a tile of road, plain and swamp takes one body
@@ -253,6 +239,12 @@ type WorldView =
         /// whoever holds it. Read on first use: by a home's Defend, and by the
         /// world's verdicts as the fleet (`Facts.judge`).
         Bodies: Lazy<Map<string, (CreepInfo * Pos) list>>
+        /// Every body of ours whose name a living colony's spawn is in, by
+        /// name, with that colony's home (`Colony.castBy`), whoever holds it:
+        /// the census by caster (`Quota.fightersCast`). Read on first use;
+        /// empty in a fixture with no world, whose bodies count at their
+        /// holder.
+        CastBy: Lazy<Map<string, string * CreepInfo>>
         /// Each room a raider stands in, its one verdict, priced on first
         /// read over the fleet and this vision (`Facts.judge`). Empty until the
         /// views are cut, and in every fixture of one colony, which prices
@@ -294,6 +286,7 @@ module WorldView =
             Observers = []
             Looks = None
             Bodies = lazy Map.empty
+            CastBy = lazy Map.empty
             Answers = Map.empty
             Facts = Map.empty
             Dangers = None
@@ -446,6 +439,17 @@ module WorldView =
                      |> List.groupBy fst
                      |> List.map (fun (room, placed) -> room, List.map snd placed)
                      |> Map.ofList)
+            CastBy =
+                lazy
+                    (let spawns = World.spawnHomes world
+                     let homes = colonies |> List.map (fun colony -> colony.Home) |> Set.ofList
+
+                     world.Creeps
+                     |> List.choose (fun creep ->
+                         Colony.castBy spawns creep.Info.Name
+                         |> Option.filter homes.Contains
+                         |> Option.map (fun home -> creep.Info.Name, (home, creep.Info)))
+                     |> Map.ofList)
             Answers = Map.empty
             Facts = world.Rooms
             Dangers = None
@@ -577,9 +581,8 @@ type ColonyView =
         Creeps: CreepInfo list
         /// The fighters (`isFighterBody`) this colony holds this tick, in the
         /// world's own order: the bodies the world's fight prices in this
-        /// colony's Atlas (`ColonyView.bodies`), and, until W6 casts by
-        /// caster, what its fighting rows count (`fightersHeld`), as the
-        /// asks they answer count the holder's.
+        /// colony's Atlas (`ColonyView.bodies`). Its fighting rows count the
+        /// fighters it cast, wherever held (`Quota.fightersCast`).
         Fighters: CreepInfo list
         /// The names of those creeps standing in a room this colony does not
         /// project, and so in no layer: the bodies the projection does not

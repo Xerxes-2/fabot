@@ -187,6 +187,7 @@ let internal colonyOf (room: LoadedRoom) level =
                     Id = "spawn-1"
                     RoomName = name
                     IsSpawning = false
+                    Remaining = 0
                 }
             ]
         Bank = { Available = 300; Capacity = 300 }

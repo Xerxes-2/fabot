@@ -273,9 +273,9 @@ let internal planSpawns
     (haulerQuota: int)
     : Intent list * Quotas =
     // The economy's census in `Creeps`; the fighting rows count the fighters
-    // this colony holds (`fightersHeld`).
+    // this colony cast, wherever held (`fightersCast`).
     let view = economyOf view
-    let fighters = view.Fighters
+    let fighters = fightersCast view
 
     // The spawn holds while its doorstep is hot: a creep born into a Reach is
     // a kill delivered, the disaster fallback included.
@@ -584,6 +584,7 @@ let internal planSpawns
                 HaulerDemand = []
                 Overflow = HaulOverflow.none
                 Busy = []
+                Casts = []
                 Rows =
                     (filled
                      |> List.map (fun (row, alive, inOven, _) ->

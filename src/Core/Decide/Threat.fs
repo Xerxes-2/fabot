@@ -293,13 +293,6 @@ type Brief =
         /// out of the swing of a melee body breaking the core (#558). Read
         /// after `Stances`. Empty for every other Task.
         Seats: Map<string, Set<RoomPos>>
-        /// The one colony that casts for it, where the world's verdict binds
-        /// one (the world layer's S4): a raided room's `Win` answerer
-        /// (`RoomVerdict.Answerer`). None where none binds — no raid, a
-        /// `Kite`, a `Lose`, a home of ours, a room whose Guard is this
-        /// colony's own (`Facts.guardedRooms`), a Task of the colony's own —,
-        /// and this colony pools it and casts for it as before.
-        Answerer: string option
     }
 
 /// What one Brief asks a row for: the row, how many bodies, and the blocks
@@ -1003,7 +996,6 @@ module Brief =
             Formation = None
             Stances = Map.empty
             Seats = Map.empty
-            Answerer = None
         }
 
     /// A room no source claims or lays ground in: a melee guard's `Outpost`
@@ -1177,7 +1169,6 @@ module Brief =
             Formation = None
             Stances = stances
             Seats = Map.empty
-            Answerer = None
         }
 
     /// An Assault's Brief on its squad's `Formation`: it admits the bodies
@@ -1226,7 +1217,6 @@ module Brief =
             Formation = Some formation
             Stances = Map.empty
             Seats = Map.empty
-            Answerer = None
         }
 
     /// A combat Task no source claims this tick: a Guard's `unclaimed`; a
@@ -1541,13 +1531,6 @@ module Threats =
         match Map.tryFind task threats.Briefs with
         | Some brief -> Some brief
         | None -> threats.Unclaimed.BriefOf task
-
-    /// Whether this colony casts for a Brief (the world layer's S4): one no
-    /// world answerer binds, or one it answers. A raided room's `Win` is cast
-    /// for by one colony.
-    let answers (view: ColonyView) (brief: Brief) : bool =
-        brief.Answerer
-        |> Option.forall (fun answerer -> answerer = SpatialInfo.homeName view.Spatial)
 
     /// How many bodies a combat Task asks its rows for this tick, every ask
     /// summed; none for a Task no Brief describes.
@@ -3206,26 +3189,6 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     let trespass = laidBy BriefKind.Trespass |> Map.ofList
 
-    // Who casts for each raided room's Guard (the world layer's S4): a
-    // `Win`'s answerer; every colony pools it, one match over the fleet
-    // counting its holders. The binding governs only a colony
-    // that crosses or neighbours the room: one whose own Guard it is
-    // (`Facts.guardedRooms`) casts for it whoever answers, so a
-    // neighbour's ranger winning it never strips the room of its own guard.
-    // A `Kite` binds none: the verdict names no body, and the ranger that
-    // kites it down is any colony's. Nor does a home of ours: its raid is its
-    // own colony's Defend and its garrison's Guard, two Tasks (#552).
-    let answererIn room =
-        match Map.tryFind room judged with
-        | Some verdict when not (Map.containsKey room view.Stages) ->
-            match verdict.Value with
-            | {
-                  Answer = Answer.Win
-                  Answerer = Some answerer
-              } when not (Set.contains room guarded.Value) -> Some answerer
-            | _ -> None
-        | _ -> None
-
     // Every room a source claimed or laid ground in; one no source claims is
     // the default kind's, `Outpost`.
     let briefs =
@@ -3246,38 +3209,36 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 | None -> lazy Answer.Win, lazy None
 
             Guard room,
-            { Brief.claimed
-                  view
-                  atlas
-                  room
-                  (Map.containsKey room ring)
-                  verdict
-                  winners
-                  (lazy (answeredByRanger room))
-                  (lazy
-                      (Set.contains room view.RaidedOutposts
-                       && Map.tryFind room judged
-                          |> Option.exists (fun verdict -> verdict.Value.Casting.Contains home)))
-                  (lazy
-                      (Brief.trespassSplit
-                          view
-                          (HeldTaskFacts.holdersOf held (taskId (Guard room)))
-                          room))
-                  (HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList)
-                  (claimsIn room)
-                  {
-                      Kite = Map.tryFind room kite |> Option.map fst
-                      Approach =
-                          Map.tryFind room kite
-                          |> Option.map snd
-                          |> Option.defaultValue (lazy Set.empty)
-                      Resident = Map.tryFind room residentRing
-                      Harass = Map.tryFind room harassRing
-                      Ring = Map.tryFind room rings
-                      Trespass = Map.tryFind room trespass
-                  } with
-                Answerer = answererIn room
-            })
+            Brief.claimed
+                view
+                atlas
+                room
+                (Map.containsKey room ring)
+                verdict
+                winners
+                (lazy (answeredByRanger room))
+                (lazy
+                    (Set.contains room view.RaidedOutposts
+                     && Map.tryFind room judged
+                        |> Option.exists (fun verdict -> verdict.Value.Casting.Contains home)))
+                (lazy
+                    (Brief.trespassSplit
+                        view
+                        (HeldTaskFacts.holdersOf held (taskId (Guard room)))
+                        room))
+                (HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList)
+                (claimsIn room)
+                {
+                    Kite = Map.tryFind room kite |> Option.map fst
+                    Approach =
+                        Map.tryFind room kite
+                        |> Option.map snd
+                        |> Option.defaultValue (lazy Set.empty)
+                    Resident = Map.tryFind room residentRing
+                    Harass = Map.tryFind room harassRing
+                    Ring = Map.tryFind room rings
+                    Trespass = Map.tryFind room trespass
+                })
         |> Map.ofSeq
 
     // A core's ranged holders on its range-3 ring (#558): they shoot it from

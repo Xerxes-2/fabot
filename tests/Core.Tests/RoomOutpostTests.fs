@@ -338,6 +338,7 @@ let outpostDeclarationTests =
                                                         Id = $"spawn-{name}"
                                                         RoomName = name
                                                         IsSpawning = false
+                                                        Remaining = 0
                                                     }
                                                 ]
                                             Energy = { Available = bank; Capacity = bank }

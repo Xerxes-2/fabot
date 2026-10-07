@@ -1996,75 +1996,36 @@ type private Pricer =
         Holds: string -> bool
     }
 
-/// The one colony that answers among these: the fewest crossings from the
-/// room (`hops`), then the largest bank, then by home name, as
-/// `World.harassCasters` ranks a harassment room's casters.
-let private answererAmong
-    (hops: string -> string -> int option)
-    (room: string)
-    (among: Pricer list)
-    =
-    match among with
-    | [] -> None
-    | [ one ] -> Some one.Home
-    | _ ->
-        among
-        |> List.sortBy (fun p ->
-            hops p.Home room |> Option.defaultValue System.Int32.MaxValue,
-            -p.View.Bank.Capacity,
-            p.Home)
-        |> List.tryHead
-        |> Option.map (fun p -> p.Home)
+/// What one colony's cast of a guard or ranger row for a room comes to, as
+/// the Caster weighs it (`Caster.assign`, #589): whether it wins the raid
+/// there — its biggest body alone, or the `Engine.guardCap` bodies of that
+/// size where one loses, the raid killing them one at a time
+/// (`bodiesBeat`), a row whose block the bank buys not winning anything —
+/// and its spawn time: the least body of the row that wins alone, else its
+/// biggest. Priced in the colony's view with the world's vision of the room
+/// and the rooms beside it laid in. Any other row wins, and spawns in no
+/// time: it is never weighed between colonies.
+let castPrice (view: ColonyView) (row: CastRow) (room: string) : bool * int =
+    match row with
+    | CastRow.Guard
+    | CastRow.Ranger ->
+        let priced = ColonyView.lookingInto (room :: RoomName.adjacent room) view
+        let ranger = row = CastRow.Ranger
 
-/// Whether what a colony's `row` casts for a home wins its raid (#589): its
-/// biggest body alone (`RowAnswer.Wins`), or the `Engine.guardCap` bodies of
-/// that size it casts where one block loses (`Threat.guardsWanted`), the
-/// raid killing them one at a time (`bodiesBeat`).
-let private castWins (priced: ColonyView) (row: RowAnswer) (room: string) =
-    row.Wins
-    || (if row.Ranger then
-            bodiesBeat
-                rangerPattern.Block
-                priced
-                room
-                Engine.guardCap
-                (max 1 (rangerBlocksReach priced))
-        else
-            bodiesBeat guardPattern.Block priced room Engine.guardCap (guardBlocksReach priced))
-
-/// The ticks until a colony's `row` stands in `room` (#589): none where a
-/// fighter of its already takes the raid (`taken`); else the spawn time of
-/// the least body of the row that wins alone, or its biggest
-/// (`guardBlocksBeat`, `rangerBlocksBeat`), and the walk, a room's side a
-/// crossing (`hops`, the route's, else off the names). None for a colony
-/// with no spawn. A busy spawn and a body already in the oven are not read.
-let private landsIn
-    (hops: string -> string -> int option)
-    (p: Pricer)
-    (priced: ColonyView)
-    (row: RowAnswer)
-    (taken: bool)
-    (room: string)
-    =
-    if taken then
-        Some 0
-    elif List.isEmpty p.View.Spawns then
-        None
-    else
         let pattern, most, beat =
-            if row.Ranger then
-                rangerPattern, rangerBlocksReach priced, rangerBlocksBeat priced room
+            if ranger then
+                rangerPattern, max 1 (rangerBlocksReach priced), rangerBlocksBeat priced room
             else
                 guardPattern, guardBlocksReach priced, guardBlocksBeat priced room
 
         let blocks =
             seq { 1 .. max 1 most } |> Seq.tryFind beat |> Option.defaultValue (max 1 most)
 
-        hops p.Home room
-        |> Option.orElse (RoomName.hopsBetween p.Home room)
-        |> Option.map (fun crossings ->
-            blocks * List.length pattern.Block * Engine.spawnTicksPerPart
-            + crossings * Engine.roomSide)
+        castable priced pattern
+        && (beat most || bodiesBeat pattern.Block priced room Engine.guardCap most),
+        blocks * List.length pattern.Block * Engine.spawnTicksPerPart
+    | CastRow.Defender
+    | CastRow.Squad _ -> true, 0
 
 /// One room's verdict over these colonies, each reading the
 /// world's vision of the room and the rooms beside it laid into its view, and
@@ -2077,12 +2038,7 @@ let private landsIn
 /// then the biggest ranger kiting it. Then the rangers standing in it or lent
 /// to it, of every colony taking part, together (`rangersAmong`). A room no
 /// colony sees a raider in is a Win every row gives.
-let private priceAmong
-    (hops: string -> string -> int option)
-    (placed: string -> string option)
-    (pricers: Pricer list)
-    (room: string)
-    =
+let private priceAmong (placed: string -> string option) (pricers: Pricer list) (room: string) =
     let beside = room :: RoomName.adjacent room
     let near = Set.ofList beside
 
@@ -2147,7 +2103,7 @@ let private priceAmong
                      (seeing |> List.map (fun p -> p.Home, aroundOf p, p.Sends room))
                      room)
 
-    let verdict answer rows own bodies (answering: Pricer list) =
+    let verdict answer rows own bodies =
         {
             Answer = answer
             Rows = rows
@@ -2155,12 +2111,10 @@ let private priceAmong
             Casting = Set.empty
             Rangers = lazy (Option.map List.length rangers.Value)
             Bodies = bodies
-            Answerer = answererAmong hops room answering
-            Defender = None
         }
 
     match seeing with
-    | [] -> verdict Answer.Win Map.empty (pricers |> List.map (fun p -> p.Home) |> Set.ofList) [] []
+    | [] -> verdict Answer.Win Map.empty (pricers |> List.map (fun p -> p.Home) |> Set.ofList) []
     | first :: _ ->
         let casters =
             match seeing |> List.filter (fun p -> p.Casts.Value.Contains room) with
@@ -2197,46 +2151,8 @@ let private priceAmong
                 rows.[p.Home].Wins && (p.Casts.Value.Contains room || takes p))
             |> List.map fst
 
-        // A home of ours is defended by one row, kin or not (#589): of
-        // those whose cast wins, the one that lands soonest; where none
-        // wins, the colony defending it that lands soonest, for a home
-        // fights on. The home's own row casts a losing fight nowhere.
-        let defender =
-            let home =
-                Map.containsKey room first.View.Stages
-                || pricers
-                   |> List.exists (fun p ->
-                       p.Home = room || List.contains room p.View.Borrowed.Defended)
-
-            let soonest among =
-                among
-                |> List.choose (fun (p, priced) ->
-                    landsIn hops p priced rows.[p.Home] (takes p) room
-                    |> Option.map (fun ticks -> ticks, -p.View.Bank.Capacity, p.Home))
-                |> List.sort
-                |> List.tryHead
-                |> Option.map (fun (_, _, home) -> home)
-
-            let answering =
-                casters |> List.filter (fun (p, _) -> p.Casts.Value.Contains room || takes p)
-
-            if not home then
-                None
-            else
-                answering
-                |> List.filter (fun (p, priced) -> castWins priced rows.[p.Home] room)
-                |> soonest
-                |> Option.orElse (
-                    answering |> List.filter (fun (p, _) -> p.Home <> room) |> soonest
-                )
-
-        let verdict answer rows own bodies answering =
-            { verdict answer rows own bodies answering with
-                Defender = defender
-            }
-
         if not (List.isEmpty rowed) then
-            { verdict Answer.Win rows (rowed |> List.map (fun p -> p.Home) |> Set.ofList) [] rowed with
+            { verdict Answer.Win rows (rowed |> List.map (fun p -> p.Home) |> Set.ofList) [] with
                 Casting =
                     rowed
                     |> List.filter (fun p -> p.Casts.Value.Contains room)
@@ -2253,28 +2169,11 @@ let private priceAmong
                 @ (seeing |> List.filter kites)
                 |> List.distinctBy (fun p -> p.Home)
             with
-            | _ :: _ as kiters -> verdict Answer.Kite rows Set.empty [] kiters
+            | _ :: _ -> verdict Answer.Kite rows Set.empty []
             | [] ->
                 match rangers.Value with
-                | Some taken ->
-                    let homes = taken |> List.map snd |> Set.ofList
-                    let among = pricers |> List.filter (fun p -> homes.Contains p.Home)
-
-                    // A colony whose row casts for the room answers it ahead
-                    // of one whose rangers only join it (the world layer's
-                    // S4): it casts what the room still wants, as for a
-                    // child's outpost the child, not the mother crossing it.
-                    let answering =
-                        match
-                            among
-                            |> List.filter (fun p ->
-                                casters |> List.exists (fun (c, _) -> c.Home = p.Home))
-                        with
-                        | [] -> among
-                        | casting -> casting
-
-                    verdict Answer.Win rows Set.empty taken answering
-                | None -> verdict Answer.Lose rows Set.empty [] []
+                | Some taken -> verdict Answer.Win rows Set.empty taken
+                | None -> verdict Answer.Lose rows Set.empty []
 
 /// One room's verdict as this view reads it: the world's, priced once a tick
 /// over the fleet (`judge`), or, where the world priced none — a room nothing
@@ -2285,7 +2184,6 @@ let verdictOf (view: ColonyView) (room: string) : RoomVerdict =
     | Some verdict -> verdict.Value
     | None ->
         priceAmong
-            (fun _ _ -> None)
             (SpatialInfo.creepRoomOf view.Spatial)
             [
                 {
@@ -3113,16 +3011,14 @@ let private guardedErrandsOf (fuelled: Errand list) : string list =
     |> List.sort
 
 /// The other colonies' homes this colony defends (`BorrowedWork.Defended`)
-/// that a hostile endangers this tick (`endangersOurs`, #429), where the
-/// verdict has this colony defend it (`RoomVerdict.Defender`, #589).
+/// that a hostile endangers this tick (`endangersOurs`, #429): it pools
+/// their Guard and asks for it; which colony casts is the Caster's
+/// (`Caster.assign`, #589).
 let private defendedHomesOf (view: ColonyView) : string list =
-    let home = SpatialInfo.homeName view.Spatial
-
     view.Borrowed.Defended
     |> List.filter (fun room ->
         view.Hostiles
-        |> List.exists (fun h -> h.Pos.Room = room && endangersOurs view h)
-        && (verdictOf view room).Defender = Some home)
+        |> List.exists (fun h -> h.Pos.Room = room && endangersOurs view h))
 
 /// Whether the home stands raided by bodies nothing of ours answers but its
 /// own row's cast (#568): a body we may strike that endangers it
@@ -3131,10 +3027,11 @@ let private defendedHomesOf (view: ColonyView) : string list =
 /// on (`raidAtLine`, `perimeterRamparts`) — priced with the healers beside
 /// it against the home's towers, which lose it — a dismantler's raid where
 /// their damage does not outpace its heal (`RaidPrice.Breaches`); and the
-/// verdict has the home's own row
-/// defend it (`RoomVerdict.Defender`, #589): what it casts wins, and lands
-/// sooner than any other colony's that defends the home
-/// (`defendedHomesOf`). A row whose cast loses casts nothing.
+/// verdict weighs the home's own row (`RoomVerdict.Rows`; a home another
+/// colony raises or garrisons is its residents'), whose cast wins
+/// (`castPrice`) or beside which another colony's row is weighed. It pools
+/// the home's Guard and asks for it; which colony casts is the Caster's
+/// (`Caster.assign`, #589), and the home's own row casts no losing fight.
 let private homeUnheld (view: ColonyView) atlas : bool =
     let home = SpatialInfo.homeName view.Spatial
 
@@ -3186,14 +3083,20 @@ let private homeUnheld (view: ColonyView) atlas : bool =
                 0
                 (towers * Engine.towerHits)
         )
-        && (verdictOf view home).Defender = Some home
+        && (let rows = (verdictOf view home).Rows
+
+            match Map.tryFind home rows with
+            | Some row ->
+                Map.count rows > 1
+                || fst (castPrice view (if row.Ranger then CastRow.Ranger else CastRow.Guard) home)
+            | None -> false)
 
 /// The rooms whose Guard `planTasks` pools whatever kind claims them, and the
 /// rooms the fighting rows cast for (`OutpostFacts.Guarded`), or a Guard is
 /// pooled with no body bought or a body cast with no Task: the declared
 /// outposts a threat or a level-0 core (#487) stands in, the errand rooms the
 /// ranger row keeps a body in (#414), the children's homes this colony raises
-/// (#447), the other homes it casts the defence of (#589), the harassment
+/// (#447), the other homes it defends (#589), the harassment
 /// rooms it casts (#432), and its own home while a raid there is unheld
 /// (`homeUnheld`, #568). Each
 /// room once: a raised home that is beaten is one Guard and one row's count,
@@ -3289,13 +3192,8 @@ type Judged =
 /// one room has one verdict whoever reads it and whatever any colony's cut
 /// or stand-down holds. Each view comes with whether it decides this tick
 /// (`Judged`); `held` is the shard's assignments, what a replaying colony's
-/// bodies hold; `hops` is the crossings from a home to a room, the
-/// answerer's rank.
-let judge
-    (hops: string -> string -> int option)
-    (held: Assignments)
-    (colonies: Judged list)
-    : ColonyView list =
+/// bodies hold.
+let judge (held: Assignments) (colonies: Judged list) : ColonyView list =
     let pricers =
         colonies
         |> List.map (fun colony ->
@@ -3345,7 +3243,7 @@ let judge
              |> raidedIn))
         @ (pricers |> List.collect (fun p -> raidedIn p.View.Hostiles))
         |> List.distinct
-        |> List.map (fun room -> room, lazy (priceAmong hops placed pricers room))
+        |> List.map (fun room -> room, lazy (priceAmong placed pricers room))
         |> Map.ofList
 
     colonies

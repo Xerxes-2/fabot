@@ -3021,6 +3021,7 @@ let private raisingWorld level (towers: int list) : World =
                         Id = $"spawn-{name}"
                         RoomName = name
                         IsSpawning = false
+                        Remaining = 0
                     }
                 ]
             Refillables = refillables

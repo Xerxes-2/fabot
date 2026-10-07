@@ -590,6 +590,7 @@ let layoutTests =
                         Id = "spawn-2"
                         RoomName = "W1N1"
                         IsSpawning = false
+                        Remaining = 0
                     }
 
                 let casting (view: ColonyView) =

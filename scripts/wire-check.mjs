@@ -1812,6 +1812,7 @@ wire("quotas: silence writes the shape observe.mjs destructures", async () => {
       load: 0,
       haul: [],
       overflow: { fill: 0, owed: false },
+      asks: [],
     }),
   );
 });
@@ -1830,6 +1831,7 @@ wire("quotas: the haul overflow (#508) writes its fill and whether the extra bod
     s.HaulerDemand,
     new HaulOverflow(0.8125, true),
     s.Busy,
+    s.Casts,
   );
 
   globalThis.Memory = memoryWith("quotas", undefined);
@@ -1838,6 +1840,43 @@ wire("quotas: the haul overflow (#508) writes its fill and whether the extra bod
   assert.equal(
     stable(globalThis.Memory.fabot.observe.colonies[home].quotas.overflow),
     stable({ fill: 0.8125, owed: true }),
+  );
+});
+
+wire("quotas: the asks (#580) write each cast's task, row, bodies and blocks", async () => {
+  const { saveQuotas } = await import(MODULE);
+  const { QuotasModule_silent, Quotas, Cast, CastAsk } = await import("../build/fable/Core/Types/Verdicts.js");
+  const { CastRow, SquadRole } = await import("../build/fable/Core/Types/Tasks.js");
+  const { Task } = await import("../build/fable/Core/Types/Vocabulary.js");
+  const { ofArray } = await import(LIST);
+  const s = QuotasModule_silent;
+  const casts = ofArray([
+    new Cast(new Task(12, ["W1N2"]), new CastAsk(CastRow.Ranger, 2, 3)),
+    new Cast(new Task(13, ["W1N1"]), new CastAsk(CastRow.Defender, 1, 1)),
+    new Cast(new Task(14, ["W2N2"]), new CastAsk(new CastRow(3, [new SquadRole(2, [])]), 1, 2)),
+  ]);
+  const quotas = new Quotas(
+    s.Target,
+    s.Living,
+    s.Casting,
+    s.Rows,
+    s.HaulerLoad,
+    s.HaulerDemand,
+    s.Overflow,
+    s.Busy,
+    casts,
+  );
+
+  globalThis.Memory = memoryWith("quotas", undefined);
+  saveQuotas(home, quotas);
+
+  assert.equal(
+    stable(globalThis.Memory.fabot.observe.colonies[home].quotas.asks),
+    stable([
+      { task: "guard:W1N2", row: "ranger", wanted: 2, blocks: 3 },
+      { task: "defend:W1N1", row: "defender", wanted: 1, blocks: 1 },
+      { task: "assault:W2N2", row: "medic", wanted: 1, blocks: 2 },
+    ]),
   );
 });
 

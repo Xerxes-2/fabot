@@ -113,10 +113,10 @@ let guardRowTests =
             }
 
             test
-                "the ranger row counts the rangers its colony holds apart from its economy, whoever cast them" {
-                // The peace garrison of two (#419): the asks a fighting row
-                // answers count the bodies their colony holds, so its census
-                // does too until casting moves to the caster (W6).
+                "the ranger row counts the rangers its colony holds apart from its economy, where no world names their caster" {
+                // The peace garrison of two (#419): a fixture with no world
+                // reads no caster, so its held fighters count at their holder
+                // (`Quota.fightersCast`).
                 let colony =
                     { deliveryColony (Some Ownership.Ours) with
                         Bank = bank 5300 5300
@@ -153,6 +153,61 @@ let guardRowTests =
                         })
                     (Some(2, 2))
                     "and a whole view's alike"
+            }
+
+            // W6 S2: the census by caster, consistent with the Caster's asks
+            // (`Caster.assign`): a colony's fighting rows count the fighters
+            // it cast wherever they stand, and none another colony cast.
+            test
+                "the ranger row counts the rangers its colony cast, wherever held, and none another cast" {
+                let colony =
+                    { deliveryColony (Some Ownership.Ours) with
+                        Bank = bank 5300 5300
+                    }
+                    |> fun colony ->
+                        { colony with
+                            Creeps = worker "w" 0 50 :: colony.Creeps
+                            Spatial = colony.Spatial |> withCreepsAt [ "w", { X = 9; Y = 10 } ]
+                        }
+
+                let home = SpatialInfo.homeName colony.Spatial
+
+                let rangers prefix =
+                    [
+                        for i in 1..2 ->
+                            creepWith $"ranger-{i}-{prefix}" 0 0 (bodyFor Bodies.rangerPattern 1300)
+                    ]
+
+                let castBy (caster: string) (creeps: CreepInfo list) (colony: ColonyView) =
+                    { colony with
+                        World =
+                            { colony.World with
+                                CastBy =
+                                    lazy
+                                        (creeps
+                                         |> List.map (fun creep -> creep.Name, (caster, creep))
+                                         |> Map.ofList)
+                            }
+                    }
+
+                let ranger colony =
+                    (decideOn colony).Quotas.Rows
+                    |> List.tryFind (fun row -> row.Row = "ranger")
+                    |> Option.map (fun row -> row.Quota, row.Living)
+
+                let theirs = rangers "Spawn9"
+
+                Expect.equal
+                    (ranger ({ colony with Fighters = theirs } |> castBy "W9N9" theirs))
+                    (Some(2, 0))
+                    "two it holds that another colony cast count there, not here: the row is short"
+
+                let mine = rangers "Spawn1"
+
+                Expect.equal
+                    (ranger (colony |> castBy home mine))
+                    (Some(2, 2))
+                    "two it cast that another colony holds count here"
             }
 
             test "the reach a raid is weighed against is one body, as big as the bank buys" {

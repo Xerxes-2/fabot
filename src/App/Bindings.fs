@@ -277,11 +277,17 @@ type IRoom =
     abstract controller: IController
     abstract createConstructionSite: x: int * y: int * structureType: string -> int
 
+/// The body a spawn is building (`StructureSpawn.spawning`).
+[<AllowNullLiteral>]
+type ISpawning =
+    /// Ticks until the body stands.
+    abstract remainingTime: int
+
 type ISpawn =
     abstract name: string
     abstract id: string
     /// Null when the spawn is idle.
-    abstract spawning: obj
+    abstract spawning: ISpawning
     abstract room: IRoom
     abstract store: IStore
     abstract pos: IRoomPosition

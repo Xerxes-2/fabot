@@ -17747,14 +17747,23 @@ let private w18s25Crippled () : Arena =
     }
 
 
-/// Each tick's world verdict on W18S25 as W17S25 reads it, its answerer, and
-/// the assignments after the tick.
+/// Each tick's world verdict on W18S25 as W17S25 reads it, the colonies
+/// whose weighed row or rangers give a raid seen a `Win` (`Own` where a row
+/// was weighed, `Bodies`), and the assignments after the tick.
 let private crippledRun (ticks: int) (start: Arena) =
     ((start, []), List.replicate ticks ())
     ||> List.fold (fun (a, acc) () ->
         let verdict =
             Map.tryFind "W18S25" (viewOf a "W17S25").World.Answers
-            |> Option.map (fun v -> v.Value.Answer, v.Value.Answerer)
+            |> Option.map (fun v ->
+                let rowed = if Map.isEmpty v.Value.Rows then Set.empty else v.Value.Own
+                let giving = Set.union rowed (v.Value.Bodies |> List.map snd |> Set.ofList)
+
+                v.Value.Answer,
+                (if Set.isEmpty giving || v.Value.Answer <> Answer.Win then
+                     None
+                 else
+                     Some(String.concat "," giving)))
 
         let next, _ = step a
         next, (a.Tick, verdict, next.Carried.Assignments) :: acc)
@@ -17781,8 +17790,8 @@ let w18s25CrippledTests =
 
                 for tick, verdict, _ in run do
                     match verdict with
-                    | Some(Answer.Win, Some answerer) ->
-                        failtest $"t{tick}: a Win bound to {answerer}"
+                    | Some(Answer.Win, Some giving) ->
+                        failtest $"t{tick}: a Win given by {giving}'s row or rangers"
                     | _ -> ()
 
                 Expect.exists
@@ -17809,8 +17818,8 @@ let w18s25CrippledTests =
 
                 for tick, verdict, _ in run do
                     match verdict with
-                    | Some(Answer.Win, Some answerer) ->
-                        failtest $"t{tick}: a Win bound to {answerer}"
+                    | Some(Answer.Win, Some giving) ->
+                        failtest $"t{tick}: a Win given by {giving}'s row or rangers"
                     | _ -> ()
 
                 for tick, _, assignments in run do
@@ -19684,10 +19693,15 @@ let w17s29DismantlerTests =
                 let _, trace = start |> run 1
                 let casts = firstCasts trace
 
+                let wins home =
+                    fst (
+                        Fabot.Core.Decide.Facts.castPrice (viewOf start home) CastRow.Guard "W17S29"
+                    )
+
                 Expect.equal
-                    (Fabot.Core.Decide.Facts.verdictOf (viewOf start "W17S29") "W17S29").Defender
-                    (Some "W15S28")
-                    $"the verdict names W15S28\n{casts}"
+                    (wins "W17S29", wins "W15S28")
+                    (false, true)
+                    $"the premise: the home's own guard cast loses, W15S28's wins\n{casts}"
 
                 Expect.exists
                     casts
