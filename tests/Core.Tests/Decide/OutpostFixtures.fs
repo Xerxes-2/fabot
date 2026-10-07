@@ -630,7 +630,7 @@ let internal standingIn room (name, pos) (colony: ColonyView) =
 /// controller and the container `withOutpostRoom` gives it, whose ids all
 /// carry the room's name.
 let internal tasksNaming room colony =
-    planTasksOn colony noThreats
+    planTasksOn colony (noThreats ())
     |> List.map taskId
     |> List.filter (fun id -> (id: string).Contains(room: string))
 

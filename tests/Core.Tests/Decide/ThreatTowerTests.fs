@@ -70,16 +70,16 @@ let rampartTests =
                     |> withHits "ram-west" BuiltKind.Rampart hits 3_000_000
 
                 Expect.equal
-                    (repairTasks (planTasksOn (at 150_000) noThreats))
+                    (repairTasks (planTasksOn (at 150_000) (noThreats ())))
                     [ "ram-east" ]
                     "150,000: over RampartFloor, under the declared 300,000"
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn (at 300_000) noThreats))
+                    (repairTasks (planTasksOn (at 300_000) (noThreats ())))
                     "300,000: both whole"
 
                 Expect.equal
-                    (repairTasks (planTasksOn (at 90_000) noThreats) |> List.sort)
+                    (repairTasks (planTasksOn (at 90_000) (noThreats ())) |> List.sort)
                     [ "ram-east"; "ram-west" ]
                     "90,000: both hungry"
             }
@@ -1532,7 +1532,7 @@ let dyingRampartTests =
                         }
 
                 Expect.contains
-                    (planTasksOn colony noThreats)
+                    (planTasksOn colony (noThreats ()))
                     (Repair "rampart-1")
                     "the premise: a colony that keeps ramparts pools it"
 

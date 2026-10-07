@@ -1104,7 +1104,7 @@ let selfHealTests =
 
         match IntentPlan.create actions with
         | Error conflict -> failtestf "invalid fixture: %A" conflict
-        | Ok plan -> healReflex colony noThreats plan |> IntentPlan.intents
+        | Ok plan -> healReflex colony (noThreats ()) plan |> IntentPlan.intents
 
     testList
         "self-heal reflex"
@@ -1195,7 +1195,7 @@ let selfHealTests =
 
                     match IntentPlan.create [] with
                     | Error conflict -> failtestf "invalid fixture: %A" conflict
-                    | Ok plan -> healReflex colony noThreats plan |> IntentPlan.intents
+                    | Ok plan -> healReflex colony (noThreats ()) plan |> IntentPlan.intents
 
                 let at x = { X = x; Y = 10 }
 
@@ -1389,7 +1389,7 @@ let selfHealTests =
 
                     match IntentPlan.create [] with
                     | Error conflict -> failtestf "invalid fixture: %A" conflict
-                    | Ok plan -> healReflex colony noThreats plan |> IntentPlan.intents
+                    | Ok plan -> healReflex colony (noThreats ()) plan |> IntentPlan.intents
 
                 Expect.equal
                     (heals 10)

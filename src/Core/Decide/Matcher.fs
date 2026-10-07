@@ -19,12 +19,17 @@ type MatchShare =
 /// from a Threat, standing outside its room's Reach, has no walk round the
 /// Reach to a Task's tiles in that room. The mover walks it round or parks
 /// it at the edge (`Resolver.moveIntentFor`), so such work is out of its
-/// reach, not merely dear. One closure a decide, recalled by its Threats so
-/// the Matcher and the fight carry share it: each room's grid with its Reach
-/// shut (`Atlas.weightsAvoiding`) built once, one flood a body
-/// (`Atlas.wayRound`), and nothing asked on a tick with no Reach.
-let private walledOffMemo: TickMemo.Memo<Threats, CreepInfo -> Task -> bool> =
-    TickMemo.create 8 TickMemo.byReference
+/// reach, not merely dear. One closure a decide, recalled by the view, Atlas
+/// and Threats it closes over so the Matcher and the fight carry share it:
+/// each room's grid with its Reach shut (`Atlas.weightsAvoiding`) built once,
+/// one flood a body (`Atlas.wayRound`), and nothing asked on a tick with no
+/// Reach.
+let private walledOffMemo
+    : TickMemo.Memo<ColonyView * Atlas.Atlas * Threats, CreepInfo -> Task -> bool> =
+    TickMemo.create 8 (fun (view, atlas, threats) (view', atlas', threats') ->
+        obj.ReferenceEquals(view, view')
+        && obj.ReferenceEquals(atlas, atlas')
+        && obj.ReferenceEquals(threats, threats'))
 
 let private walledOffAfresh
     (view: ColonyView)
@@ -72,7 +77,8 @@ let private walledOffAfresh
                            way |> Option.exists (fun reaches -> not (reaches area))))
 
 let internal walledOffBy (view: ColonyView) atlas (threats: Threats) : CreepInfo -> Task -> bool =
-    TickMemo.recall walledOffMemo threats (fun _ -> walledOffAfresh view atlas threats)
+    TickMemo.recall walledOffMemo (view, atlas, threats) (fun (view, atlas, threats) ->
+        walledOffAfresh view atlas threats)
 
 /// One colony's side of a match: its view, the Atlas and the Threats its
 /// bodies are priced in, its row sizing, and its whole pool — what a

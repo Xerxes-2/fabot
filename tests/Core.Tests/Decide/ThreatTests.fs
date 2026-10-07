@@ -887,21 +887,17 @@ let fleeTests =
 
                 let atlas = Atlas.ofView (facingHostile true)
 
-                // Less the walks', flights' and flight costs' tables and the
-                // bodies they are of, the rooms seen, the homes and the
-                // unclaimed Briefs read off the view, which are the tick's own
-                // and no Reach.
+                // Less the bodies, the rooms seen, the homes and the unclaimed
+                // Briefs read off the view, which are the tick's own and no
+                // Reach.
                 Expect.equal
                     { threatsOf (facingHostile true) atlas with
-                        Unclaimed = noThreats.Unclaimed
-                        Walks = noThreats.Walks
-                        Flights = noThreats.Flights
-                        FleeCosts = noThreats.FleeCosts
+                        Unclaimed = (noThreats ()).Unclaimed
                         Seen = Set.empty
                         Bodies = []
                         Homes = Set.empty
                     }
-                    noThreats
+                    (noThreats ())
                     "and the tick derives no Reach at all"
             }
 
@@ -987,6 +983,35 @@ let fleeTests =
                     Expect.isFalse
                         (Set.contains tile area)
                         $"{tile} is the melee's as soon as ours: {area}"
+            }
+
+            // #633: Flee's ground is memoised by the inputs it is read off,
+            // never by the record, so a `with` copy (`withAssaults`, the
+            // world's fight) that sets a field shares no answer the original
+            // laid first.
+            test "a with copy with a different Reach answers Flee off its own fields" {
+                let colony =
+                    { bareRespawn with
+                        Creeps = [ worker "w1" 0 100 ]
+                        Spatial = openRoom 10 |> withCreepsAt [ "w1", { X = 25; Y = 30 } ]
+                    }
+                    |> facing [ hostileAt "h-1" { X = 25; Y = 27 } [ Attack; Move ] ]
+
+                let atlas = Atlas.ofView colony
+                let body = colony.Creeps |> List.find (fun c -> c.Name = "w1")
+                let threats = threatsOf colony atlas
+
+                Expect.isNonEmpty
+                    (Threats.fleeAreaFor threats atlas body)
+                    "the premise: the original flees"
+
+                Expect.isEmpty
+                    (Threats.fleeAreaFor { threats with Reach = Map.empty } atlas body)
+                    "the copy, with no Reach in the room, has nothing to flee"
+
+                Expect.isNonEmpty
+                    (Threats.fleeAreaFor threats atlas body)
+                    "and the original still answers its own"
             }
 
             test "a body with no Work part flees too: no part and no capacity are asked" {

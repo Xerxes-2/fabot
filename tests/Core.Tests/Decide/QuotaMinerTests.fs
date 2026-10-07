@@ -444,7 +444,7 @@ let minerGroundTests =
                 Expect.equal (quotaOfRow "miner" rivalMine) (Some 1) "our deposit and not theirs"
 
                 Expect.equal
-                    (planTasksOn rivalMine noThreats
+                    (planTasksOn rivalMine (noThreats ())
                      |> List.choose (function
                          | Harvest rock -> Some rock
                          | _ -> None))
@@ -948,7 +948,7 @@ let errandOreTests =
                 Expect.equal (quotaOfRow "miner" errandOre) (Some 1) "one body for the utrium"
 
                 Expect.contains
-                    (planTasksOn errandOre noThreats)
+                    (planTasksOn errandOre (noThreats ()))
                     (Harvest "min-u")
                     "and the dig is pooled"
             }
@@ -1024,7 +1024,7 @@ let errandOreTests =
                     "no re-claimer"
 
                 Expect.isFalse
-                    (planTasksOn held noThreats
+                    (planTasksOn held (noThreats ())
                      |> List.exists (function
                          | Reclaim _ -> true
                          | Refill(id, Thorium) -> id = reactorId

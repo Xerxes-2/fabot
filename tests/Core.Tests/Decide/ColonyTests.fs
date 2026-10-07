@@ -84,7 +84,7 @@ let claimTests =
                 // reservation of the room it is trying to own.
                 //
                 // Pairwise on the declaration alone: only the human's sentence moves.
-                let pooled (colony: ColonyView) = planTasksOn colony noThreats
+                let pooled (colony: ColonyView) = planTasksOn colony (noThreats ())
 
                 let outpost =
                     let colony = reserveColony []
@@ -129,7 +129,7 @@ let claimTests =
                                     SafeModeCooldownUntil = until
                                 }
                     }
-                    |> fun colony -> planTasksOn colony noThreats
+                    |> fun colony -> planTasksOn colony (noThreats ())
 
                 let time = (candidateColony []).Time
                 let cooling = pooledAt (time + 1)
@@ -155,7 +155,7 @@ let claimTests =
                     { colony with
                         RoomControl = colony.RoomControl |> Map.add "W1N2" control
                     }
-                    |> fun colony -> planTasksOn colony noThreats
+                    |> fun colony -> planTasksOn colony (noThreats ())
 
                 let unowned = pooledUnder neutralRoom
                 let ours = pooledUnder ownedRoom
@@ -191,7 +191,7 @@ let claimTests =
                             | Some control -> colony.RoomControl |> Map.add "W1N2" control
                             | None -> colony.RoomControl |> Map.remove "W1N2"
                     }
-                    |> fun colony -> planTasksOn colony noThreats
+                    |> fun colony -> planTasksOn colony (noThreats ())
 
                 let blind = pooledWith None
 
@@ -214,7 +214,7 @@ let claimTests =
                     { colony with
                         RoomControl = colony.RoomControl |> Map.add "W1N2" (reservedRoom true 4000)
                     }
-                    |> fun colony -> planTasksOn colony noThreats
+                    |> fun colony -> planTasksOn colony (noThreats ())
 
                 Expect.equal
                     (claimTasks held, reserveTasks held)
@@ -595,7 +595,7 @@ let nurseryTests =
                 // projects no layer for that room and so pools no Build in it. The
                 // three bodies are walked toward a room that is going to need them.
                 Expect.isEmpty
-                    (planTasksOn nursery noThreats
+                    (planTasksOn nursery (noThreats ())
                      |> List.filter (function
                          | Build _ -> true
                          | _ -> false))
@@ -904,13 +904,13 @@ let nurseryTests =
                 let ferry = Refill("site-spawn", Energy)
 
                 Expect.isFalse
-                    (List.contains ferry (planTasksOn nurseryFerryMother noThreats))
+                    (List.contains ferry (planTasksOn nurseryFerryMother (noThreats ())))
                     "no Work body of ours in the nursery: nothing is dropped to decay or be taken"
 
                 Expect.contains
                     (planTasksOn
                         (inChild [ worker "p1" 0 50, { X = 10; Y = 44 } ] nurseryFerryMother)
-                        noThreats)
+                        (noThreats ()))
                     ferry
                     "a pioneer there to pick it up: the spawn site is the ferry's sink"
 
@@ -921,7 +921,7 @@ let nurseryTests =
                             (inChild
                                 [ worker "p1" 0 50, { X = 10; Y = 44 } ]
                                 (withPile siteOwes nurseryFerryMother))
-                            noThreats))
+                            (noThreats ())))
                     "and no more is dropped than the site still owes"
 
                 let dropped =

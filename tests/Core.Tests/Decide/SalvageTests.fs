@@ -108,7 +108,7 @@ let salvagePoolTests =
                 let colony = bareHome |> salvaging
 
                 Expect.equal
-                    (planTasksOn colony noThreats
+                    (planTasksOn colony (noThreats ())
                      |> List.filter (fun task ->
                          targetIds |> List.exists (fun id -> (taskId task).EndsWith $":{id}")))
                     (targetIds |> List.map Dismantle)

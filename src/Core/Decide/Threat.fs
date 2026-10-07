@@ -366,20 +366,11 @@ and Threats =
         /// Reach, the walk round, the kite and Flee all count as unstruck,
         /// whatever this colony's cut of the room keeps (`rampartsIn`).
         Ramparts: Map<string, Set<Pos>>
-        /// Our bodies' own arrival (`Arrival.ofBody`), each flooded on first
-        /// read this tick: heap-only, and gone with the Threats.
-        Walks: System.Collections.Generic.Dictionary<string, Arrival.BodyArrival option>
-        /// Each body's Flee ground (`Threats.fleeAreaFor`), laid on first read
-        /// this tick: three readers ask it a body.
-        Flights: System.Collections.Generic.Dictionary<string, Set<RoomPos>>
-        /// Each fleeing body's travel cost to that ground (`Pool.travelCostOf`),
-        /// priced on first read this tick: the Matcher and the verdicts ask it
-        /// again and again, and across a border it is a priced crossing.
-        FleeCosts: System.Collections.Generic.Dictionary<string, int option>
         /// The rooms vision answers for this tick (`WorldView.sees`): an
         /// unseen one is no room to flee into (#511, Decided 2).
         Seen: Set<string>
-        /// The colony's bodies this tick, whose walks those are.
+        /// The colony's bodies this tick, whose walks `Threats.bodyWalkOf`
+        /// floods.
         Bodies: CreepInfo list
         /// The reach horizon the Reach was laid at (`Tuning.ReachHorizon`).
         Horizon: int
@@ -388,26 +379,78 @@ and Threats =
         Homes: Set<string>
     }
 
+/// The quiet tick's Briefs: none. One value, so two quiet ticks are equal.
+let private briefsNothing: Unclaimed = { BriefOf = fun _ -> None }
+
 /// The tick with nothing to run from: what a test hands the Planner for a
-/// quiet colony. No view derived it, so no Task is briefed.
-let noThreats =
+/// quiet colony. No view derived it, so no Task is briefed. A function, like
+/// an Atlas fixture (#310): every caller gets its own.
+let noThreats () =
     {
         Reach = Map.empty
         Safe = Map.empty
         Shelter = Map.empty
         Briefs = Map.empty
-        Unclaimed = { BriefOf = fun _ -> None }
+        Unclaimed = briefsNothing
         Engaged = Set.empty
         Arrivals = Map.empty
         Ramparts = Map.empty
-        Walks = System.Collections.Generic.Dictionary()
-        Flights = System.Collections.Generic.Dictionary()
-        FleeCosts = System.Collections.Generic.Dictionary()
         Seen = Set.empty
         Bodies = []
         Horizon = Tuning.defaults.ReachHorizon
         Homes = Set.empty
     }
+
+/// Whether two Threats are one tick's same inputs: every field the same
+/// value, by reference, as a `with` copy keeps those it does not set. The
+/// Briefs come first, being what such a copy sets (`withAssaults`,
+/// `withMusters`, the world's fight). A miss here only re-derives.
+let private sameInputs (a: Threats) (b: Threats) =
+    obj.ReferenceEquals(a.Briefs, b.Briefs)
+    && obj.ReferenceEquals(a.Arrivals, b.Arrivals)
+    && obj.ReferenceEquals(a.Reach, b.Reach)
+    && obj.ReferenceEquals(a.Safe, b.Safe)
+    && obj.ReferenceEquals(a.Shelter, b.Shelter)
+    && obj.ReferenceEquals(a.Unclaimed, b.Unclaimed)
+    && obj.ReferenceEquals(a.Engaged, b.Engaged)
+    && obj.ReferenceEquals(a.Ramparts, b.Ramparts)
+    && obj.ReferenceEquals(a.Seen, b.Seen)
+    && obj.ReferenceEquals(a.Bodies, b.Bodies)
+    && obj.ReferenceEquals(a.Homes, b.Homes)
+    && a.Horizon = b.Horizon
+
+/// Each body's Flee ground (`Threats.fleeAreaFor`) and its travel cost to
+/// it (`Pool.travelCostOf`), laid on first read this tick: the Matcher and
+/// the verdicts ask them again and again.
+type private Flights =
+    {
+        Grounds: System.Collections.Generic.Dictionary<string, Set<RoomPos>>
+        Costs: System.Collections.Generic.Dictionary<string, int option>
+    }
+
+/// Our bodies' own arrival (`Arrival.ofBody`), by the Atlas they are
+/// flooded over: each Atlas is one colony's one view, whose bodies those
+/// are, and no Threats field enters the flood.
+let private walksMemo
+    : TickMemo.Memo<
+          Atlas.Atlas,
+          System.Collections.Generic.Dictionary<string, Arrival.BodyArrival option>
+       > =
+    TickMemo.create 32 TickMemo.byReference
+
+/// The Flights by every input they are read off: the Threats' fields
+/// (`sameInputs`) and the Atlas, which tells one colony's from another's
+/// where both Threats are quiet and share every empty field.
+let private flightsMemo: TickMemo.Memo<Threats * Atlas.Atlas, Flights> =
+    TickMemo.create 32 (fun (threats, atlas) (threats', atlas') ->
+        obj.ReferenceEquals(atlas, atlas') && sameInputs threats threats')
+
+let private flightsOf (threats: Threats) (atlas: Atlas.Atlas) : Flights =
+    TickMemo.recall flightsMemo (threats, atlas) (fun _ ->
+        {
+            Grounds = System.Collections.Generic.Dictionary()
+            Costs = System.Collections.Generic.Dictionary()
+        })
 
 /// ADR-0056
 /// How many guards one guarded room wants: one, two where one block loses
@@ -1537,7 +1580,7 @@ module Threats =
     /// a combat Task no source claims still has its Brief: what a test
     /// hands a reader of the Briefs.
     let quietOn (view: ColonyView) (atlas: Atlas.Atlas) : Threats =
-        { noThreats with
+        { noThreats () with
             Unclaimed =
                 {
                     BriefOf = Brief.unclaimedFor view atlas
@@ -1655,19 +1698,18 @@ module Threats =
                 | _ -> false)
 
     /// One body's own arrival over the room it stands in, flooded at most
-    /// once a tick (`Threats.Walks`), Reach or none; None for a body the
-    /// projection does not place. The quiet tick's (`noThreats`, `quietOn`)
-    /// is one value every test shares, and keeps none.
-    let bodyWalkOf (threats: Threats) atlas (creep: CreepInfo) : Arrival.BodyArrival option =
-        if obj.ReferenceEquals(threats.Walks, noThreats.Walks) then
-            Arrival.ofBody atlas creep
-        else
-            match threats.Walks.TryGetValue creep.Name with
-            | true, walk -> walk
-            | _ ->
-                let walk = Arrival.ofBody atlas creep
-                threats.Walks.[creep.Name] <- walk
-                walk
+    /// once a tick over its Atlas (`walksMemo`), Reach or none; None for a
+    /// body the projection does not place.
+    let bodyWalkOf (_: Threats) atlas (creep: CreepInfo) : Arrival.BodyArrival option =
+        let walks =
+            TickMemo.recall walksMemo atlas (fun _ -> System.Collections.Generic.Dictionary())
+
+        match walks.TryGetValue creep.Name with
+        | true, walk -> walk
+        | _ ->
+            let walk = Arrival.ofBody atlas creep
+            walks.[creep.Name] <- walk
+            walk
 
     /// `bodyWalkOf` on a tick with a Reach; None for any body on a tick
     /// with none, which floods nothing.
@@ -1870,6 +1912,23 @@ module Threats =
 
                 Some(unsafe, soonest)
 
+    /// A fleeing body's travel cost to its Flee ground, priced by `price` on
+    /// its first ask over these Threats and this Atlas, recalled after.
+    let fleeCostOf
+        (threats: Threats)
+        atlas
+        (creep: string)
+        (price: unit -> int option)
+        : int option =
+        let costs = (flightsOf threats atlas).Costs
+
+        match costs.TryGetValue creep with
+        | true, cost -> cost
+        | _ ->
+            let cost = price ()
+            costs.[creep] <- cost
+            cost
+
     /// Flee's ground for a body (movement S4): every tile it is on before any
     /// hostile strikes it (`T_b < A`), widest escape first — away from home,
     /// home across the border (`homeward`, #511); else the refuges it stands a
@@ -1884,11 +1943,13 @@ module Threats =
         if Map.isEmpty threats.Arrivals then
             Set.empty
         else
-            match threats.Flights.TryGetValue creep.Name with
+            let grounds = (flightsOf threats atlas).Grounds
+
+            match grounds.TryGetValue creep.Name with
             | true, ground -> ground
             | _ ->
                 let ground = fleeGroundOf threats atlas creep
-                threats.Flights.[creep.Name] <- ground
+                grounds.[creep.Name] <- ground
                 ground
 
     and private fleeGroundOf (threats: Threats) atlas (creep: CreepInfo) : Set<RoomPos> =
@@ -3402,9 +3463,6 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         Engaged = engaged
         Arrivals = arrivals
         Ramparts = dangers |> Map.map (fun _ danger -> danger.Ramparts)
-        Walks = System.Collections.Generic.Dictionary()
-        Flights = System.Collections.Generic.Dictionary()
-        FleeCosts = System.Collections.Generic.Dictionary()
         Seen = view.World.Rooms |> Map.keys |> Set.ofSeq
         Bodies = ColonyView.bodies view
         Horizon = view.Tuning.ReachHorizon

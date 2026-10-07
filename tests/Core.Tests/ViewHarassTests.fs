@@ -621,7 +621,7 @@ let harassViewTests =
                     planTasks
                         view
                         (Fabot.Core.Atlas.ofView view)
-                        noThreats
+                        (noThreats ())
                         HeldTaskFacts.empty
                         facts
 
@@ -663,7 +663,7 @@ let harassViewTests =
                     planTasks
                         view
                         (Fabot.Core.Atlas.ofView view)
-                        noThreats
+                        (noThreats ())
                         HeldTaskFacts.empty
                         facts
 

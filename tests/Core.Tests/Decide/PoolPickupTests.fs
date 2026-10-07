@@ -307,7 +307,7 @@ let logisticsTests =
         [
             test "a stocked container yields a Withdraw Task; an empty one yields none" {
                 Expect.equal
-                    (withdrawTasks (planTasksOn haulColony noThreats))
+                    (withdrawTasks (planTasksOn haulColony (noThreats ())))
                     [ "can-ctrl" ]
                     "the stocked buffer enters the pool; the empty source container does not"
             }
@@ -322,7 +322,7 @@ let logisticsTests =
                             }
                     }
 
-                let tasks = planTasksOn snapshot noThreats
+                let tasks = planTasksOn snapshot (noThreats ())
 
                 Expect.equal
                     (refillTasks tasks)
@@ -339,7 +339,7 @@ let logisticsTests =
                 // #405: the rock's Post is the far container; the one beside
                 // the controller is its buffer though it stands on a Seat.
                 Expect.equal
-                    (refillTasks (planTasksOn seatBufferColony noThreats))
+                    (refillTasks (planTasksOn seatBufferColony (noThreats ())))
                     [ "can-near" ]
                     "the buffer is filled; the rock's own container never is"
             }
@@ -353,7 +353,7 @@ let logisticsTests =
                             }
                     }
 
-                let tasks = planTasksOn snapshot noThreats
+                let tasks = planTasksOn snapshot (noThreats ())
                 Expect.isEmpty (refillTasks tasks) "no room left to refill"
                 Expect.equal (withdrawTasks tasks) [ "can-ctrl" ] "still stocked to draw from"
             }
@@ -613,11 +613,11 @@ let heldWalkSweepTests =
                     }
 
                 Expect.contains
-                    (planTasksOn onTheWay noThreats)
+                    (planTasksOn onTheWay (noThreats ()))
                     (Pickup("pile-crossing", Thorium))
                     "the premise: a crossed floor is swept"
 
-                let pooled = planTasksOn heldBeyond noThreats
+                let pooled = planTasksOn heldBeyond (noThreats ())
 
                 Expect.isFalse
                     (List.contains (Pickup("pile-crossing", Thorium)) pooled

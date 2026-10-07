@@ -1394,7 +1394,7 @@ let outpostRoadTests =
                     |> List.map (fun tile -> Repair $"road-W12S26-{tile.X}-{tile.Y}")
 
                 Expect.containsAll
-                    (Fixtures.planTasksOn unpaid noThreats)
+                    (Fixtures.planTasksOn unpaid (noThreats ()))
                     ids
                     "the roads already standing are still repaired: payback gates new sites only"
             }
@@ -1419,7 +1419,7 @@ let outpostRoadTests =
                     "the outpost's road was judged and planned"
 
                 Expect.contains
-                    (Fixtures.planTasksOn paved noThreats)
+                    (Fixtures.planTasksOn paved (noThreats ()))
                     (Repair $"road-W12S26-{hand.X}-{hand.Y}")
                     "the hand road off the line is the user's, and stays repaired"
             }

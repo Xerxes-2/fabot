@@ -727,7 +727,7 @@ let pickupTaskTests =
                 // The pairwise control: energy only. `Tombstone` carries no
                 // resource, so it is the holding that admits the Task.
                 Expect.isFalse
-                    (planTasksOn (tombColony 408 [ "h1", { X = 11; Y = 10 } ]) noThreats
+                    (planTasksOn (tombColony 408 [ "h1", { X = 11; Y = 10 } ]) (noThreats ())
                      |> List.contains (Withdraw("tomb-1", Thorium)))
                     "an energy-only tombstone pools no ore draw"
             }
@@ -958,7 +958,7 @@ let thoriumLegTests =
                 // The mine-to-Storage leg is the existing pair with a
                 // resource on it. The Storage is the one store nothing can
                 // stand on, so the contact penalty never reaches it.
-                let tasks = planTasksOn mineHaulColony noThreats
+                let tasks = planTasksOn mineHaulColony (noThreats ())
 
                 Expect.contains
                     tasks
@@ -981,7 +981,7 @@ let thoriumLegTests =
                 // ground, because a hauler walking home with a load must
                 // have somewhere to put it the tick the container reads
                 // zero.
-                let tasks = planTasksOn (mineHaulColony |> withMineStock 0) noThreats
+                let tasks = planTasksOn (mineHaulColony |> withMineStock 0) (noThreats ())
 
                 Expect.isFalse
                     (List.contains (Withdraw("can-min", Thorium)) tasks)
@@ -998,7 +998,7 @@ let thoriumLegTests =
                 // miner's last digs are still in the container. The container is
                 // known by the extractor that stays on the deposit's tile, so the
                 // tail is drained like any other load.
-                let tasks = planTasksOn (mineHaulColony |> withDepositGone) noThreats
+                let tasks = planTasksOn (mineHaulColony |> withDepositGone) (noThreats ())
 
                 Expect.contains
                     tasks
@@ -1006,7 +1006,9 @@ let thoriumLegTests =
                     "the deposit is gone and the ore beside its tile is still ours to fetch"
 
                 Expect.isFalse
-                    (planTasksOn (mineHaulColony |> withDepositGone |> withMineStock 0) noThreats
+                    (planTasksOn
+                        (mineHaulColony |> withDepositGone |> withMineStock 0)
+                        (noThreats ())
                      |> List.contains (Withdraw("can-min", Thorium)))
                     "and once it is drained nobody comes back for it"
             }
@@ -1018,7 +1020,7 @@ let thoriumLegTests =
                 // else, so a sink gated on the intake's ground stranded a
                 // hauler mid-haul for the window the Layout takes to
                 // re-place a destroyed container.
-                let tasks = planTasksOn (mineHaulColony |> withoutMineContainer) noThreats
+                let tasks = planTasksOn (mineHaulColony |> withoutMineContainer) (noThreats ())
 
                 Expect.isFalse
                     (List.contains (Withdraw("can-min", Thorium)) tasks)
@@ -1250,7 +1252,7 @@ let thoriumPileTests =
                 // it, so every tick the haul lags the next dig lands on the
                 // floor as a pile, decaying `ceil(amount / 1000)` a tick.
                 // Pairwise on the ground alone.
-                let piled = planTasksOn (mineHaulColony |> withMinePile 630) noThreats
+                let piled = planTasksOn (mineHaulColony |> withMinePile 630) (noThreats ())
 
                 Expect.contains
                     piled
@@ -1258,7 +1260,7 @@ let thoriumPileTests =
                     "the pile on the mine post is the container's own intake off the floor"
 
                 Expect.isFalse
-                    (planTasksOn mineHaulColony noThreats
+                    (planTasksOn mineHaulColony (noThreats ())
                      |> List.exists (function
                          | Pickup _ -> true
                          | _ -> false))
@@ -1364,7 +1366,7 @@ let thoriumPileTests =
                 // knob: it prices the trip, not the cargo. Inclusive at the
                 // line.
                 let pooled units =
-                    planTasksOn (mineHaulColony |> withMinePile units) noThreats
+                    planTasksOn (mineHaulColony |> withMinePile units) (noThreats ())
                     |> List.contains (Pickup("pile-min", Thorium))
 
                 Expect.isTrue (pooled 100) "a hundred exactly is worth the walk"
@@ -1446,7 +1448,7 @@ let thoriumPileTests =
                     }
 
                 let pooledIn colony =
-                    planTasksOn colony noThreats |> List.contains (Pickup("pile-r", Thorium))
+                    planTasksOn colony (noThreats ()) |> List.contains (Pickup("pile-r", Thorium))
 
                 Expect.isTrue
                     (pooledIn (withPileIn "W1N2" ownedRoom))
@@ -1487,7 +1489,7 @@ let oreLegTests =
         [
             test "a mineral container holding ore is drawn in that ore" {
                 // The Thorium leg one resource over, out of the same container.
-                let tasks = planTasksOn (oreColony |> withOreIn "can-min" Oxygen 800) noThreats
+                let tasks = planTasksOn (oreColony |> withOreIn "can-min" Oxygen 800) (noThreats ())
 
                 Expect.contains
                     tasks
@@ -1507,7 +1509,7 @@ let oreLegTests =
             test "a body holding ore finds the home terminal its sink, and nothing else" {
                 let loaded = hauler "h1" 0 100 |> carryingOre Oxygen 100
 
-                let tasks = planTasksOn { oreColony with Creeps = [ loaded ] } noThreats
+                let tasks = planTasksOn { oreColony with Creeps = [ loaded ] } (noThreats ())
 
                 Expect.contains tasks (Refill("term-1", Ore Oxygen)) "the terminal takes the ore"
 
@@ -1516,18 +1518,22 @@ let oreLegTests =
                     "the Storage never does"
 
                 Expect.isFalse
-                    (planTasksOn oreColony noThreats |> List.contains (Refill("term-1", Ore Oxygen)))
+                    (planTasksOn oreColony (noThreats ())
+                     |> List.contains (Refill("term-1", Ore Oxygen)))
                     "and with nobody holding ore there is no sink to pool"
             }
 
             test
                 "the ore's Harvest is pooled while the terminal is short and withdrawn at its target" {
-                Expect.contains (planTasksOn oreColony noThreats) (Harvest "min-a") "short: dig"
+                Expect.contains
+                    (planTasksOn oreColony (noThreats ()))
+                    (Harvest "min-a")
+                    "short: dig"
 
                 Expect.isFalse
                     (planTasksOn
                         (oreColony |> withOreIn "term-1" Oxygen oreColony.Tuning.OreTarget)
-                        noThreats
+                        (noThreats ())
                      |> List.contains (Harvest "min-a"))
                     "at the target the living miner has nothing to dig"
             }
@@ -1545,7 +1551,7 @@ let oreLegTests =
                             |> withTargets [ "min-t", { X = 20; Y = 10 }, Mineral Thorium ]
                     }
 
-                let tasks = planTasksOn both noThreats
+                let tasks = planTasksOn both (noThreats ())
 
                 Expect.contains tasks (Harvest "min-t") "the Thorium is dug"
                 Expect.isFalse (List.contains (Harvest "min-a") tasks) "the ore is not"

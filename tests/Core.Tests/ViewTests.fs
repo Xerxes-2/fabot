@@ -1427,7 +1427,7 @@ let colonyViewTests =
                     (planTasks
                         taken
                         (Fabot.Core.Atlas.ofView taken)
-                        noThreats
+                        (noThreats ())
                         HeldTaskFacts.empty
                         (outpostFactsOf taken (Fabot.Core.Atlas.ofView taken)))
                     (Claim $"ctrl-{child}")
@@ -1443,7 +1443,7 @@ let colonyViewTests =
                     (planTasks
                         rival
                         (Fabot.Core.Atlas.ofView rival)
-                        noThreats
+                        (noThreats ())
                         HeldTaskFacts.empty
                         (outpostFactsOf rival (Fabot.Core.Atlas.ofView rival))
                      |> List.filter (function
@@ -1481,7 +1481,7 @@ let colonyViewTests =
                         (planTasks
                             taken
                             (Fabot.Core.Atlas.ofView taken)
-                            noThreats
+                            (noThreats ())
                             HeldTaskFacts.empty
                             (outpostFactsOf taken (Fabot.Core.Atlas.ofView taken))))
                     "nothing of that room is an intake of hers"
@@ -1506,7 +1506,7 @@ let colonyViewTests =
                         (planTasks
                             raising
                             (Fabot.Core.Atlas.ofView raising)
-                            noThreats
+                            (noThreats ())
                             HeldTaskFacts.empty
                             (outpostFactsOf raising (Fabot.Core.Atlas.ofView raising))))
                     "so nothing pools a draw on it"

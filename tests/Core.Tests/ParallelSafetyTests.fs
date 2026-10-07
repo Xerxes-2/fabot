@@ -58,12 +58,16 @@ open Expecto
 /// but the part of it a name can reach. `WalkTable` and the resumable `Flood`
 /// are named beside `Atlas` because the plan memo carries both without an
 /// Atlas around them (the kept creep floods, #553), and a memo held as a
-/// fixture would share them the same way.
+/// fixture would share them the same way. `Threats` is named because the
+/// tick's memos are keyed by it (Flee's grounds and costs, the Matcher's
+/// walled-off closure, #633): one colony's one tick, built by a function
+/// (`noThreats`, `threatsOf`) like an Atlas.
 let private mutableRoots =
     [
         typeof<Fabot.Core.Atlas.Atlas>
         typeof<Fabot.Core.Types.Intents.WalkTable>
         typeof<Fabot.Core.Types.Intents.Flood>
+        typeof<Fabot.Core.Decide.Threat.Threats>
     ]
 
 /// The roots recognised by shape instead: the mutable containers a fixture
@@ -155,6 +159,10 @@ let parallelSafetyTests =
                     "one as a Map's value"
 
                 Expect.isTrue (reaches typeof<Fabot.Core.Types.Intents.WalkTable>) "the other root"
+
+                Expect.isTrue
+                    (reaches typeof<Fabot.Core.Decide.Threat.Threats>)
+                    "a tick's Threats, which its memos are keyed by"
 
                 Expect.isTrue
                     (reaches typeof<System.Collections.Generic.HashSet<string>>)

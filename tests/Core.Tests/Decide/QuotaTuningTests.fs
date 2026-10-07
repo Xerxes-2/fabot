@@ -45,14 +45,14 @@ let tuningTests =
                 let road = bareRespawn |> withHits "road-1" BuiltKind.Road 3000 5000
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn road noThreats))
+                    (repairTasks (planTasksOn road (noThreats ())))
                     "three fifths of max is above the shipped half, so the road is left alone"
 
                 Expect.equal
                     (repairTasks (
                         planTasksOn
                             (road |> tunedBy (fun t -> { t with RepairTrigger = 0.7 }))
-                            noThreats
+                            (noThreats ())
                     ))
                     [ "road-1" ]
                     "a trigger of seven tenths and the same road is hungry"
@@ -82,7 +82,7 @@ let tuningTests =
                     (repairTasks (
                         planTasksOn
                             (road |> tunedBy (fun t -> { t with RepairWholeLine = 0.95 }))
-                            noThreats
+                            (noThreats ())
                     ))
                     "and with nobody holding it the whole line is not read at all: the trigger is"
             }
@@ -115,14 +115,14 @@ let tuningTests =
                     bareRespawn |> withLevel 5 |> withHits "ram-1" BuiltKind.Rampart 150_000 300_000
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn keep noThreats))
+                    (repairTasks (planTasksOn keep (noThreats ())))
                     "a hundred and fifty thousand is over the shipped floor"
 
                 Expect.equal
                     (repairTasks (
                         planTasksOn
                             (keep |> tunedBy (fun t -> { t with RampartFloor = 200_000 }))
-                            noThreats
+                            (noThreats ())
                     ))
                     [ "ram-1" ]
                     "raise the floor past it and the same rampart is hungry"
@@ -134,7 +134,7 @@ let tuningTests =
                              |> withLevel 2
                              |> withHits "ram-1" BuiltKind.Rampart 1 300_000
                              |> tunedBy (fun t -> { t with RampartFloor = 200_000 }))
-                            noThreats
+                            (noThreats ())
                     ))
                     "and under `Independent` no floor is read at all: the rampart decays away (#214)"
             }
@@ -143,7 +143,7 @@ let tuningTests =
                 let pile = pileTaskColony 80 []
 
                 Expect.isEmpty
-                    (planTasksOn pile noThreats
+                    (planTasksOn pile (noThreats ())
                      |> List.filter (function
                          | Pickup _ -> true
                          | _ -> false))
@@ -152,7 +152,7 @@ let tuningTests =
                 Expect.equal
                     (planTasksOn
                         (pile |> tunedBy (fun t -> { t with PickupThreshold = 50 }))
-                        noThreats
+                        (noThreats ())
                      |> List.filter (function
                          | Pickup _ -> true
                          | _ -> false))

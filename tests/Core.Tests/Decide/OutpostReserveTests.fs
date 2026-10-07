@@ -39,7 +39,7 @@ let reserveTests =
                             }
                     }
 
-                let tasks = planTasksOn colony noThreats
+                let tasks = planTasksOn colony (noThreats ())
 
                 Expect.equal
                     (reserveTasks tasks)
@@ -49,7 +49,7 @@ let reserveTests =
                 Expect.contains tasks (Upgrade "ctrl-1") "and the colony's own is still Upgraded"
 
                 Expect.isEmpty
-                    (reserveTasks (planTasksOn bareRespawn noThreats))
+                    (reserveTasks (planTasksOn bareRespawn (noThreats ())))
                     "a colony projecting one room reserves nothing: the pool is the pool it always was"
             }
 
@@ -207,7 +207,7 @@ let reserveTests =
                     }
                     |> withHits "road-1" BuiltKind.Road 100 5000
 
-                let pool = planTasksOn colony noThreats
+                let pool = planTasksOn colony (noThreats ())
 
                 Expect.equal
                     (pool |> List.map taskId |> List.sort)
@@ -307,7 +307,7 @@ let reserveTests =
                     { colony with
                         RoomControl = colony.RoomControl |> Map.add "W1N2" control
                     }
-                    |> fun colony -> planTasksOn colony noThreats
+                    |> fun colony -> planTasksOn colony (noThreats ())
                     |> reserveTasks
 
                 Expect.equal
@@ -366,7 +366,7 @@ let reserveTests =
 
                 let pooledUnder control =
                     reserverColony [ northOutpost true ] (surplusFleet 3) [ "W1N2", control ]
-                    |> fun colony -> planTasksOn colony noThreats
+                    |> fun colony -> planTasksOn colony (noThreats ())
                     |> reserveTasks
 
                 // The Invader's leftover hold, at the ticks the ticket was filed at:
@@ -474,7 +474,7 @@ let reserveTests =
                     "the tick after the look, blind again, the row hires nobody: the record answers"
 
                 Expect.isEmpty
-                    (reserveTasks (planTasksOn (blindAt 5_098) noThreats))
+                    (reserveTasks (planTasksOn (blindAt 5_098) (noThreats ())))
                     "and the controller is out of the pool for every blind tick of the hold"
 
                 Expect.equal

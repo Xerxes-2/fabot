@@ -328,21 +328,15 @@ let private groundRoom (room: string) (area: Set<RoomPos>) =
 let internal travelCostOf (threats: Threats) atlas (creep: string) task =
     match task with
     | Flee ->
-        match threats.FleeCosts.TryGetValue creep with
-        | true, cost -> cost
-        | _ ->
+        Threats.fleeCostOf threats atlas creep (fun () ->
             // Out over a border: home (#511), or where its room has no safe
             // tile (#566).
             let area = areaFor threats atlas creep task
 
-            let cost =
-                match Atlas.creepRoom atlas creep with
-                | Some room when groundRoom room area <> room ->
-                    Atlas.travelCostToward atlas creep task (groundRoom room area) area
-                | _ -> Atlas.travelCostWithin atlas creep area
-
-            threats.FleeCosts.[creep] <- cost
-            cost
+            match Atlas.creepRoom atlas creep with
+            | Some room when groundRoom room area <> room ->
+                Atlas.travelCostToward atlas creep task (groundRoom room area) area
+            | _ -> Atlas.travelCostWithin atlas creep area)
     | Guard room when Map.containsKey creep (Threats.briefOf threats room).Stances ->
         let area = areaFor threats atlas creep task
         Atlas.travelCostToward atlas creep task (groundRoom room area) area

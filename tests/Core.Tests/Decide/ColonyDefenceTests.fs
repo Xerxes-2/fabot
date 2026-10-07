@@ -72,11 +72,11 @@ let defendedHomeTests =
                 let quiet = defendingMother []
 
                 Expect.isEmpty
-                    (guardsIn (planTasksOn quiet noThreats))
+                    (guardsIn (planTasksOn quiet (noThreats ())))
                     "the premise: a defended home with nobody in it is no fight"
 
                 Expect.equal
-                    (guardsIn (planTasksOn raided noThreats))
+                    (guardsIn (planTasksOn raided (noThreats ())))
                     [ Guard "W1N2" ]
                     "raided, the home is one Guard in her pool, under the room's name"
 
@@ -93,7 +93,7 @@ let defendedHomeTests =
                     ]
 
                 Expect.equal
-                    (guardsIn (planTasksOn (defendingMother overwhelming) noThreats))
+                    (guardsIn (planTasksOn (defendingMother overwhelming) (noThreats ())))
                     [ Guard "W1N2" ]
                     "and a raid even her two lose is still hers to fight"
 
@@ -124,7 +124,9 @@ let defendedHomeTests =
             test "the child's own guard row, which loses the raid, casts nothing for its home" {
                 let raided = raidedChildColony homeRaid
 
-                Expect.isEmpty (guardsIn (planTasksOn raided noThreats)) "no Guard in its own home"
+                Expect.isEmpty
+                    (guardsIn (planTasksOn raided (noThreats ())))
+                    "no Guard in its own home"
 
                 Expect.isEmpty (guardCasts (decideOn raided).Intents) "and no guard cast for it"
             }
@@ -204,7 +206,7 @@ let raisedHomeGarrisonTests =
                     let mother = garrisonMother stage
 
                     Expect.equal
-                        (guardsIn (planTasksOn mother noThreats))
+                        (guardsIn (planTasksOn mother (noThreats ())))
                         [ Guard "W1N2" ]
                         $"{stage}: the child's home is one Guard in her pool, under its name"
 
@@ -222,7 +224,7 @@ let raisedHomeGarrisonTests =
             test "an Independent child's home draws no garrison" {
                 let mother = garrisonMother Independent
 
-                Expect.isEmpty (guardsIn (planTasksOn mother noThreats)) "no Guard in its home"
+                Expect.isEmpty (guardsIn (planTasksOn mother (noThreats ()))) "no Guard in its home"
 
                 Expect.equal (rangerQuotaOf mother) (Some 0) "and no ranger for it"
             }
@@ -241,7 +243,7 @@ let raisedHomeGarrisonTests =
                     }
 
                 Expect.equal
-                    (guardsIn (planTasksOn mother noThreats))
+                    (guardsIn (planTasksOn mother (noThreats ())))
                     [ Guard "W1N2" ]
                     "one Guard in its home"
 
@@ -661,7 +663,7 @@ let raisedHomeGarrisonTests =
                     }
 
                 Expect.equal
-                    (guardsIn (planTasksOn (beaten winnable) noThreats))
+                    (guardsIn (planTasksOn (beaten winnable) (noThreats ())))
                     [ Guard "W1N2" ]
                     "raised and defended, the home is still one Guard"
 
@@ -702,7 +704,7 @@ let raisedHomeGarrisonTests =
                 Expect.equal (rangerQuotaOf beaten) (Some 0) "no ranger cast for it"
 
                 Expect.equal
-                    (guardsIn (planTasksOn beaten noThreats))
+                    (guardsIn (planTasksOn beaten (noThreats ())))
                     [ Guard "W1N2" ]
                     "the Guard stands for the one already there"
 

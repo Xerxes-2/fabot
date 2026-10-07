@@ -118,7 +118,7 @@ let resolveVerdictsVerboseOn snapshot assigned verbose =
     resolve
         snapshot
         (Atlas.ofView snapshot)
-        noThreats
+        (noThreats ())
         (poolOn snapshot)
         (Map.ofList assigned)
         Map.empty

@@ -430,7 +430,7 @@ let colonyStageTests =
                     "and a weaning one places the very same roads"
 
                 let hungry colony =
-                    repairTasks (planTasksOn colony noThreats)
+                    repairTasks (planTasksOn colony (noThreats ()))
 
                 let ramparted stage =
                     bareRespawn
@@ -447,7 +447,7 @@ let colonyStageTests =
             test
                 "a weaning child is raised as a bootstrapping one: the mother's borrowed work waits for the tower" {
                 let pool colony =
-                    planTasksOn colony noThreats |> List.map taskId
+                    planTasksOn colony (noThreats ()) |> List.map taskId
 
                 let weaning =
                     { raisingMother with
@@ -480,7 +480,7 @@ let colonyStageTests =
                 // both, where the level-reading rule would have answered "no floor"
                 // whatever the stage.
                 let hungry colony =
-                    repairTasks (planTasksOn colony noThreats)
+                    repairTasks (planTasksOn colony (noThreats ()))
 
                 let ramparted stage =
                     bareRespawn
@@ -549,7 +549,7 @@ let colonyStageTests =
                 // in the child's layer, the fact both predicates used to be written
                 // on, and here the stage is forced back to `Nursery`.
                 let pool colony =
-                    planTasksOn colony noThreats |> List.map taskId
+                    planTasksOn colony (noThreats ()) |> List.map taskId
 
                 let stagedAs stage colony =
                     { colony with
@@ -662,7 +662,7 @@ let colonyStageTests =
                 // The Upgrade half of the same borrowing: it stays in her pool while
                 // the room is in her scan set, and leaves with the room.
                 let pool colony =
-                    planTasksOn colony noThreats |> List.map taskId
+                    planTasksOn colony (noThreats ()) |> List.map taskId
 
                 let outgrownInPlace =
                     { raisingMother with
@@ -725,7 +725,12 @@ let borrowedRoomBudgetTests =
 
                     let atlas = Atlas.ofView view
 
-                    planPool view atlas (Threats.quietOn view atlas) [] (planTasksOn view noThreats)
+                    planPool
+                        view
+                        atlas
+                        (Threats.quietOn view atlas)
+                        []
+                        (planTasksOn view (noThreats ()))
                     |> List.tryPick (fun pooled ->
                         if pooled.Task = Refill(id, Energy) then
                             Capacity.capOf CapScope.Everyone pooled.Capacity
@@ -859,12 +864,12 @@ let unbufferedChildTests =
                 Expect.contains
                     (planTasksOn
                         (unbufferedChild [ worker "p1" 0 50, { X = 10; Y = 44 } ])
-                        noThreats)
+                        (noThreats ()))
                     drop
                     "a pioneer there to pick it up: dropped beside the controller"
 
                 Expect.isFalse
-                    (List.contains drop (planTasksOn (unbufferedChild []) noThreats))
+                    (List.contains drop (planTasksOn (unbufferedChild []) (noThreats ())))
                     "nobody there: nothing is dropped to decay"
 
                 let dropped =

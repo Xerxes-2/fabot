@@ -407,8 +407,8 @@ let containerSwitchTests =
                 // `hungryStructures` pools a cross-room `Repair` beside this Withdraw;
                 // `isHungry` judges every structure against its own kind's whole line.
                 Expect.equal
-                    (planTasksOn switchPosted noThreats)
-                    (planTasksOn switchUnposted noThreats)
+                    (planTasksOn switchPosted (noThreats ()))
+                    (planTasksOn switchUnposted (noThreats ()))
                     "an empty container standing changes no Task in the pool"
 
                 let stocked =
@@ -421,8 +421,8 @@ let containerSwitchTests =
 
                 Expect.equal
                     (List.except
-                        (planTasksOn switchPosted noThreats)
-                        (planTasksOn stocked noThreats))
+                        (planTasksOn switchPosted (noThreats ()))
+                        (planTasksOn stocked (noThreats ())))
                     [ Withdraw("can-out", Energy) ]
                     "and stocked it adds exactly one Task, the Withdraw of its own store"
 
@@ -440,8 +440,8 @@ let containerSwitchTests =
 
                 Expect.equal
                     (List.except
-                        (planTasksOn switchPosted noThreats)
-                        (planTasksOn decayed noThreats))
+                        (planTasksOn switchPosted (noThreats ()))
+                        (planTasksOn decayed (noThreats ())))
                     [ Repair "can-out" ]
                     "and decayed it adds exactly one more, its own Repair across the Seam"
             }

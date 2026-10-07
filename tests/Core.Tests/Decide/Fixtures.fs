@@ -514,7 +514,7 @@ let decideFrom assigned colony = decide colony assigned Set.empty None
 /// (`Emitter.arrival`), on a quiet colony.
 let arrivalOn (colony: ColonyView) (creep: CreepInfo) task (landing: Pos) =
     let room = SpatialInfo.homeName colony.Spatial
-    arrival colony (Atlas.ofView colony) noThreats creep task (RoomPos.at room landing)
+    arrival colony (Atlas.ofView colony) (noThreats ()) creep task (RoomPos.at room landing)
 
 /// `planTasksOn` over a colony whose assignment table holds nothing. Named
 /// `…On` like `decideOn` rather than shadowing `Planner.planTasks`: a shadow
@@ -536,7 +536,7 @@ let planTasksHolding (holding: Task list) view =
     Planner.planTasks
         view
         (Atlas.ofView view)
-        noThreats
+        (noThreats ())
         { HeldTaskFacts.empty with
             All = holding |> List.map taskId |> Set.ofList
         }
@@ -549,7 +549,7 @@ let planTasksHoldingThorium (holding: Task list) view =
     Planner.planTasks
         view
         (Atlas.ofView view)
-        noThreats
+        (noThreats ())
         { HeldTaskFacts.empty with
             All = ids
             WithThorium = ids
@@ -561,7 +561,13 @@ let planTasksHoldingThorium (holding: Task list) view =
 /// with the colony busy for these reasons (#523).
 let poolBusyOn busy snapshot =
     let atlas = Atlas.ofView snapshot
-    planPool snapshot atlas (Threats.quietOn snapshot atlas) busy (planTasksOn snapshot noThreats)
+
+    planPool
+        snapshot
+        atlas
+        (Threats.quietOn snapshot atlas)
+        busy
+        (planTasksOn snapshot (noThreats ()))
 
 /// The same pool with the colony busy for nothing.
 let poolOn snapshot = poolBusyOn [] snapshot
@@ -573,7 +579,7 @@ let resolveOn snapshot assigned =
     resolve
         snapshot
         (Atlas.ofView snapshot)
-        noThreats
+        (noThreats ())
         (poolOn snapshot)
         (Map.ofList assigned)
         Map.empty

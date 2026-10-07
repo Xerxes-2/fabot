@@ -224,7 +224,7 @@ let bootstrapTests =
                 // Build are visible to the mother's workers. The Build needs no rule of
                 // its own: a site in a projected room is already pooled by id (#150).
                 let pool colony =
-                    planTasksOn colony noThreats |> List.map taskId |> List.sort
+                    planTasksOn colony (noThreats ()) |> List.map taskId |> List.sort
 
                 Expect.containsAll
                     (pool raisingMother)
@@ -284,7 +284,7 @@ let bootstrapTests =
                     }
 
                 let pool colony =
-                    planTasksOn colony noThreats |> List.map taskId
+                    planTasksOn colony (noThreats ()) |> List.map taskId
 
                 Expect.contains
                     (pool (atLevel 1))
@@ -324,7 +324,7 @@ let bootstrapTests =
                     }
 
                 let pool colony =
-                    planTasksOn colony noThreats |> List.map taskId
+                    planTasksOn colony (noThreats ()) |> List.map taskId
 
                 Expect.isFalse
                     (pool (withTimer 5_001) |> List.contains (taskId (Upgrade "ctrl-child")))
@@ -346,7 +346,7 @@ let bootstrapTests =
                 // she projects, the child off its own `ColonyView.Controller`, and each
                 // Matcher counts only its own holders.
                 let pool colony =
-                    planTasksOn colony noThreats |> List.map taskId
+                    planTasksOn colony (noThreats ()) |> List.map taskId
 
                 Expect.contains
                     (pool childRunningItself)
@@ -1063,7 +1063,7 @@ let twoColonyTests =
                 // Two views, two pools, and no Task of one in the other. `decide` reads
                 // the projection it is handed and never the declaration.
                 let pool colony =
-                    planTasksOn colony noThreats |> List.map taskId
+                    planTasksOn colony (noThreats ()) |> List.map taskId
 
                 let mother = pool (motherColony [ motherCast, { X = 10; Y = 2 } ])
                 let child = pool (childColony [ childCast, { X = 10; Y = 44 } ])
@@ -1191,28 +1191,28 @@ let energyAidTests =
 
             test "a donor stocks its terminal for the send; a colony that is not giving does not" {
                 Expect.contains
-                    (planTasksOn (aidColony 60_000 5_000 [ "W1N4" ]) noThreats)
+                    (planTasksOn (aidColony 60_000 5_000 [ "W1N4" ]) (noThreats ()))
                     (Refill("term-1", Energy))
                     "the donor's terminal is a sink up to the aid's load"
 
                 Expect.isFalse
                     (List.contains
                         (Refill("term-1", Energy))
-                        (planTasksOn (aidColony 39_999 5_000 [ "W1N4" ]) noThreats))
+                        (planTasksOn (aidColony 39_999 5_000 [ "W1N4" ]) (noThreats ())))
                     "under the donor line the terminal is no sink"
             }
 
             test "a colony under the need line draws the arrivals out of its terminal" {
                 // The need line is the colony's own reserve (#505).
                 Expect.contains
-                    (planTasksOn (aidColony 19_999 8_000 []) noThreats)
+                    (planTasksOn (aidColony 19_999 8_000 []) (noThreats ()))
                     (Withdraw("term-1", Energy))
                     "under RCL6's 20,000: the terminal is an intake"
 
                 Expect.isFalse
                     (List.contains
                         (Withdraw("term-1", Energy))
-                        (planTasksOn (aidColony 20_000 8_000 []) noThreats))
+                        (planTasksOn (aidColony 20_000 8_000 []) (noThreats ())))
                     "at it: the terminal keeps what it holds"
             }
         ]

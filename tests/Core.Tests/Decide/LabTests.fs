@@ -342,7 +342,7 @@ let clusterTests =
                 "the fills and drains are pooled: reagents out of the terminal into the labs, the rest back" {
                 let view = clusterHome 150_000 ore [ "lab-c", Compound UtriumHydride, 200 ]
 
-                let tasks = planTasksOn view noThreats
+                let tasks = planTasksOn view (noThreats ())
 
                 for task in
                     [
@@ -370,7 +370,7 @@ let clusterTests =
                             ]
                     }
 
-                let tasks = planTasksOn view noThreats
+                let tasks = planTasksOn view (noThreats ())
 
                 Expect.contains tasks (Refill("lab-a", Ore Hydrogen)) "the H's lab"
 
@@ -465,7 +465,10 @@ let clusterTests =
                         "idle, under the floor",
                         withStorage (floor - 1) (clusterHome 150_000 ore [])
                     ] do
-                    Expect.isEmpty (labTasks (planTasksOn view noThreats)) $"{label}: no lab haul"
+                    Expect.isEmpty
+                        (labTasks (planTasksOn view (noThreats ())))
+                        $"{label}: no lab haul"
+
                     Expect.isEmpty (reactions (decideOn view).Intents) $"{label}: no reaction"
             }
 
@@ -556,20 +559,20 @@ let oreSendTests =
                     }
 
                 Expect.contains
-                    (planTasksOn (drained 500 []) noThreats)
+                    (planTasksOn (drained 500 []) (noThreats ()))
                     (Refill("term-1", Energy))
                     "it ships H: under its fee, the terminal is stocked"
 
                 Expect.isFalse
                     (List.contains
                         (Refill("term-1", Energy))
-                        (planTasksOn (drained 600 []) noThreats))
+                        (planTasksOn (drained 600 []) (noThreats ())))
                     "over its fee: no Refill, though 600 is far under the consignment's 4,000"
 
                 Expect.isFalse
                     (List.contains
                         (Refill("term-1", Energy))
-                        (planTasksOn (drained 100 [ Ore Hydrogen, 6_000 ]) noThreats))
+                        (planTasksOn (drained 100 [ Ore Hydrogen, 6_000 ]) (noThreats ())))
                     "nothing to ship and no consignee: no fee to stock"
             }
         ]

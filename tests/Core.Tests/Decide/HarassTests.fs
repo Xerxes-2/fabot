@@ -188,7 +188,7 @@ let harassGuardTests =
                         ]
 
                 Expect.contains
-                    (planTasksOn colony noThreats)
+                    (planTasksOn colony (noThreats ()))
                     (Guard harassRoom)
                     "the room is worked target or none, as an errand room is"
 
@@ -858,7 +858,7 @@ let harassContainerTests =
                 let id = fst container
 
                 let naming =
-                    planTasksOn colony noThreats
+                    planTasksOn colony (noThreats ())
                     |> List.filter (fun task -> (taskId task).EndsWith $":{id}")
 
                 Expect.equal naming [ Dismantle id ] "no Withdraw, Refill or Repair of it"

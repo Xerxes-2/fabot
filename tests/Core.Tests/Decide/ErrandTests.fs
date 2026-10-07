@@ -86,7 +86,7 @@ let private bareHome =
 
 /// The Reclaims this tick's pool offers.
 let private reclaimsOf (colony: ColonyView) =
-    planTasksOn colony noThreats
+    planTasksOn colony (noThreats ())
     |> List.filter (function
         | Reclaim _ -> true
         | _ -> false)
@@ -192,7 +192,7 @@ let errandStandDownTests =
                     "a fight the guard row can win is no withdrawal"
 
                 Expect.contains
-                    (planTasksOn colony noThreats)
+                    (planTasksOn colony (noThreats ()))
                     (Guard errandRoom)
                     "and the errand room is guarded like an outpost"
             }
@@ -258,7 +258,7 @@ let errandStandDownTests =
                     }
 
                 Expect.contains
-                    (planTasksOn quiet noThreats)
+                    (planTasksOn quiet (noThreats ()))
                     (Guard errandRoom)
                     "the Task stands in peace"
 
@@ -362,7 +362,7 @@ let errandStandDownTests =
                         |> List.tryFind (fun row -> row.Row = name)
                         |> Option.map (fun row -> row.Quota)
 
-                    let pool = planTasksOn colony noThreats
+                    let pool = planTasksOn colony (noThreats ())
 
                     List.contains (Guard errandRoom) pool,
                     List.contains (Reclaim reactor) pool,
@@ -541,7 +541,7 @@ let errandStandDownTests =
                     |> withErrandCreep ringTile guard
 
                 Expect.contains
-                    (planTasksOn colony noThreats)
+                    (planTasksOn colony (noThreats ()))
                     (Guard errandRoom)
                     "the Task stands, and the claimer is its business"
 
@@ -1361,12 +1361,12 @@ let courierTests =
                 let partial = Tuning.defaults.ReactorLoad - 124
 
                 Expect.isFalse
-                    (planTasksOn (banked partial true) noThreats
+                    (planTasksOn (banked partial true) (noThreats ())
                      |> List.contains (Withdraw("sto-1", Thorium)))
                     "while the mine still feeds the bank, a part load buys no courier: the remainder is the front of a queue"
 
                 Expect.contains
-                    (planTasksOn (banked partial false) noThreats)
+                    (planTasksOn (banked partial false) (noThreats ()))
                     (Withdraw("sto-1", Thorium))
                     "with nothing left to dig, the remainder is all there will be and the draw opens on it"
 
@@ -1426,7 +1426,7 @@ let courierTests =
                     |> withHomeCreep { X = 13; Y = 10 } carrier
 
                 Expect.contains
-                    (planTasksOn colony noThreats)
+                    (planTasksOn colony (noThreats ()))
                     (Refill(reactor, Thorium))
                     "the load is in flight by the only reading left: nothing is mining, so ore aboard is a delivery"
 
@@ -1435,7 +1435,7 @@ let courierTests =
                     "and the body prefers it to the store it was drawn from, on the tier gap alone"
 
                 Expect.contains
-                    (planTasksOn colony noThreats)
+                    (planTasksOn colony (noThreats ()))
                     (Refill("sto-1", Thorium))
                     "the Storage is still a sink: a body that cannot reach the Reactor banks the ore rather than standing on it"
             }
@@ -1473,7 +1473,7 @@ let courierTests =
                     |> withHomeCreep { X = 13; Y = 10 } hauler
 
                 Expect.contains
-                    (planTasksOn colony noThreats)
+                    (planTasksOn colony (noThreats ()))
                     (Refill("sto-1", Thorium))
                     "the sink the mine haul and the arrival haul both depend on is pooled whatever the mine has become"
 
@@ -1538,7 +1538,7 @@ let courierTests =
                         "and one body goes for it: the ore is a finite remainder three crossings away"
 
                 Expect.contains
-                    (planTasksOn colony noThreats)
+                    (planTasksOn colony (noThreats ()))
                     (Refill(reactor, Thorium))
                     "the sink is the Reactor five tiles away, not the Storage three crossings back"
             }
@@ -1579,17 +1579,17 @@ let courierTests =
                 let room = Engine.reactorCapacity - Tuning.defaults.ReactorLoad
 
                 Expect.contains
-                    (planTasksOn (withStore room) noThreats)
+                    (planTasksOn (withStore room) (noThreats ()))
                     (Withdraw("sto-1", Thorium))
                     "exactly one load of room opens the draw"
 
                 Expect.isFalse
-                    (planTasksOn (withStore (room + 1)) noThreats
+                    (planTasksOn (withStore (room + 1)) (noThreats ())
                      |> List.contains (Withdraw("sto-1", Thorium)))
                     "one unit short of a load's room closes it: a load drawn now could not be put down"
 
                 Expect.isFalse
-                    (planTasksOn (withStore Engine.reactorCapacity) noThreats
+                    (planTasksOn (withStore Engine.reactorCapacity) (noThreats ())
                      |> List.contains (Withdraw("sto-1", Thorium)))
                     "and a full Reactor is the case that stranded a loaded courier on its own hot tile"
 
@@ -1602,7 +1602,7 @@ let courierTests =
                 let nearlyFull =
                     withStore (Engine.reactorCapacity - 1) |> withErrandCreep ringTile loaded
 
-                let tasks = planTasksOn nearlyFull noThreats
+                let tasks = planTasksOn nearlyFull (noThreats ())
 
                 Expect.contains
                     tasks
@@ -1630,19 +1630,19 @@ let courierTests =
                     |> withErrandCreep ringTile (courier "courier-walking" |> carrying aboard)
 
                 Expect.isFalse
-                    (planTasksOn (afloat 1 room) noThreats
+                    (planTasksOn (afloat 1 room) (noThreats ())
                      |> List.contains (Withdraw("sto-1", Thorium)))
                     "exactly one load of room and one unit walking: the second draw is the one that strands"
 
                 Expect.contains
-                    (planTasksOn (afloat 1 (room - 1)) noThreats)
+                    (planTasksOn (afloat 1 (room - 1)) (noThreats ()))
                     (Withdraw("sto-1", Thorium))
                     "and a unit of room to spare over what is afloat opens it again"
 
                 // The live shape: 204 aboard against a store that leaves room
                 // for a load and no more.
                 Expect.isFalse
-                    (planTasksOn (afloat 204 room) noThreats
+                    (planTasksOn (afloat 204 room) (noThreats ())
                      |> List.contains (Withdraw("sto-1", Thorium)))
                     "the incident's own arithmetic: 204 walking is 204 of the store's room already claimed"
 
@@ -1659,7 +1659,8 @@ let courierTests =
                     }
 
                 Expect.isFalse
-                    (planTasksOn mineHaul noThreats |> List.contains (Withdraw("sto-1", Thorium)))
+                    (planTasksOn mineHaul (noThreats ())
+                     |> List.contains (Withdraw("sto-1", Thorium)))
                     "ore walking home to the Storage defers the draw as well, deliberately"
             }
 
@@ -1680,12 +1681,12 @@ let courierTests =
                     }
 
                 Expect.contains
-                    (planTasksOn inTheWrongMap noThreats)
+                    (planTasksOn inTheWrongMap (noThreats ()))
                     (Withdraw("sto-1", Thorium))
                     "a full store written where the projection never writes one changes nothing"
 
                 Expect.isFalse
-                    (planTasksOn (ready |> withReactorStore Engine.reactorCapacity) noThreats
+                    (planTasksOn (ready |> withReactorStore Engine.reactorCapacity) (noThreats ())
                      |> List.contains (Withdraw("sto-1", Thorium)))
                     "the same number on the Reactor's own row closes the draw"
 
@@ -1693,7 +1694,7 @@ let courierTests =
                 // is better banked at home than walked towards a level nobody
                 // read.
                 Expect.isFalse
-                    (planTasksOn { ready with Reactors = [] } noThreats
+                    (planTasksOn { ready with Reactors = [] } (noThreats ())
                      |> List.contains (Withdraw("sto-1", Thorium)))
                     "no vision, no row, no draw"
             }
@@ -1727,17 +1728,17 @@ let courierTests =
                     }
 
                 Expect.contains
-                    (planTasksOn (withPile errandRoom 915) noThreats)
+                    (planTasksOn (withPile errandRoom 915) (noThreats ()))
                     (Pickup("pile-reactor", Thorium))
                     "the errand room's floor is the one floor of ours that is in nobody's room"
 
                 Expect.isFalse
-                    (planTasksOn (withPile errandRoom 99) noThreats
+                    (planTasksOn (withPile errandRoom 99) (noThreats ())
                      |> List.contains (Pickup("pile-reactor", Thorium)))
                     "the pickup threshold is unchanged by where the pile lies"
 
                 Expect.isFalse
-                    (planTasksOn (withPile "W9S9" 915) noThreats
+                    (planTasksOn (withPile "W9S9" 915) (noThreats ())
                      |> List.contains (Pickup("pile-reactor", Thorium)))
                     "a room we neither own nor declared is still none of ours"
             }
@@ -1770,19 +1771,19 @@ let courierTests =
                     }
 
                 Expect.contains
-                    (planTasksOn (withTomb errandRoom 175) noThreats)
+                    (planTasksOn (withTomb errandRoom 175) (noThreats ()))
                     (Withdraw("tomb-reactor", Thorium))
                     "the errand room's tombstone is drawn on the errand room's own argument"
 
                 // No threshold, where the pile above carries one: there is no
                 // reflex that empties a store, so the alternative is the decay.
                 Expect.contains
-                    (planTasksOn (withTomb errandRoom 1) noThreats)
+                    (planTasksOn (withTomb errandRoom 1) (noThreats ()))
                     (Withdraw("tomb-reactor", Thorium))
                     "a store that ends is worth the trip at any holding (`worthTheTrip`, #232)"
 
                 Expect.isFalse
-                    (planTasksOn (withTomb "W9S9" 175) noThreats
+                    (planTasksOn (withTomb "W9S9" 175) (noThreats ())
                      |> List.contains (Withdraw("tomb-reactor", Thorium)))
                     "a room we neither own nor declared is still none of ours"
             }
@@ -1867,7 +1868,7 @@ let courierTests =
                     }
 
                 Expect.isFalse
-                    (planTasksOn shut noThreats |> List.contains (Refill(reactor, Thorium)))
+                    (planTasksOn shut (noThreats ()) |> List.contains (Refill(reactor, Thorium)))
                     "the premise: a shut programme pools no Reactor Refill"
 
                 Expect.isTrue
@@ -1908,7 +1909,7 @@ let courierTests =
                     }
 
                 Expect.contains
-                    (planTasksOn afterMine noThreats)
+                    (planTasksOn afterMine (noThreats ()))
                     (Refill(reactor, Thorium))
                     "a drawn load keeps its sink after the start facts close"
 
@@ -1932,7 +1933,8 @@ let courierTests =
                     "a partially poured load keeps the delivery it already holds after the start facts close"
 
                 Expect.isFalse
-                    (planTasksOn afterPartial noThreats |> List.contains (Refill(reactor, Thorium)))
+                    (planTasksOn afterPartial (noThreats ())
+                     |> List.contains (Refill(reactor, Thorium)))
                     "an arbitrary partial mine load does not open a Reactor delivery"
 
                 let emptied =
@@ -1967,7 +1969,7 @@ let courierTests =
 
             test "a rival-held Reactor is no sink, while an unowned one may stage the load" {
                 let tasks owner =
-                    deliveryColony (Some owner) |> fun colony -> planTasksOn colony noThreats
+                    deliveryColony (Some owner) |> fun colony -> planTasksOn colony (noThreats ())
 
                 Expect.isFalse
                     (tasks Ownership.Rival |> List.contains (Refill(reactor, Thorium)))
@@ -2011,7 +2013,8 @@ let courierTests =
                     "the flag is ours this tick and theirs the next: no load is drawn into a flag war"
 
                 Expect.isFalse
-                    (planTasksOn contested noThreats |> List.contains (Refill(reactor, Thorium)))
+                    (planTasksOn contested (noThreats ())
+                     |> List.contains (Refill(reactor, Thorium)))
                     "and nothing is poured, since the Reactor burns for whoever holds it"
 
                 Expect.isFalse
@@ -2080,7 +2083,7 @@ let courierTests =
 
                 // Nor is a re-claimer kept standing by through their run (#415).
                 let reclaimSeat colony =
-                    (planTasksOn colony noThreats |> List.contains (Reclaim reactor)),
+                    (planTasksOn colony (noThreats ()) |> List.contains (Reclaim reactor)),
                     ((decideOn colony).Quotas.Rows
                      |> List.tryFind (fun row -> row.Row = "reserver")
                      |> Option.map (fun row -> row.Quota))
@@ -2101,7 +2104,7 @@ let courierTests =
                     "no load is drawn for an ally's run, and the programme reopens on their empty store"
 
                 Expect.isFalse
-                    (planTasksOn (heldBy "Odiodin" 1) noThreats
+                    (planTasksOn (heldBy "Odiodin" 1) (noThreats ())
                      |> List.contains (Refill(reactor, Thorium)))
                     "nothing is poured under their flag"
 
@@ -2166,17 +2169,17 @@ let crossedSweepTests =
                     }
 
                 Expect.isFalse
-                    (planTasksOn stranger noThreats
+                    (planTasksOn stranger (noThreats ())
                      |> List.contains (Pickup("pile-crossing", Thorium)))
                     "a floor we neither own, declared nor cross is not ours to walk onto"
 
                 Expect.contains
-                    (planTasksOn onTheWay noThreats)
+                    (planTasksOn onTheWay (noThreats ()))
                     (Pickup("pile-crossing", Thorium))
                     "and the same floor, once the projection says the chain crosses it, is ours to sweep"
 
                 Expect.contains
-                    (planTasksOn onTheWay noThreats)
+                    (planTasksOn onTheWay (noThreats ()))
                     (Withdraw("tomb-crossing", Thorium))
                     "the tombstone beside it too, which is what a courier that dies on the loaded leg leaves (#359)"
             }
@@ -2234,7 +2237,7 @@ let consignmentTests =
 
             test
                 "a declared consignee draws its bank towards the terminal, and the terminal takes it" {
-                let tasks = planTasksOn (consigningColony 0 10_000) noThreats
+                let tasks = planTasksOn (consigningColony 0 10_000) (noThreats ())
 
                 Expect.contains
                     tasks
@@ -2248,12 +2251,12 @@ let consignmentTests =
 
                 // `send` is paid out of the sending terminal's own energy.
                 Expect.contains
-                    (planTasksOn (consigningColony 0 0) noThreats)
+                    (planTasksOn (consigningColony 0 0) (noThreats ()))
                     (Refill("term-1", Energy))
                     "and energy follows it, because a terminal with no energy ships nothing"
 
                 Expect.isFalse
-                    (planTasksOn (consigningColony 0 Tuning.defaults.TerminalEnergy) noThreats
+                    (planTasksOn (consigningColony 0 Tuning.defaults.TerminalEnergy) (noThreats ())
                      |> List.contains (Refill("term-1", Energy)))
                     "stocked to the tuned figure it takes no more: energy in a terminal buys no body"
             }
@@ -2276,7 +2279,7 @@ let consignmentTests =
 
             test
                 "a colony that declares no consignee walks arriving ore out of its terminal instead" {
-                let arriving = planTasksOn (receivingColony 5_000) noThreats
+                let arriving = planTasksOn (receivingColony 5_000) (noThreats ())
 
                 Expect.contains
                     arriving
@@ -2304,7 +2307,7 @@ let consignmentTests =
                     "and the receiving end never offers its terminal as a sink: that is the loop, and the Storage is the sink a laden body needs"
 
                 Expect.contains
-                    (planTasksOn (receivingColony 5_000) noThreats)
+                    (planTasksOn (receivingColony 5_000) (noThreats ()))
                     (Refill("sto-1", Thorium))
                     "which the Storage's own unconditional Thorium sink already answers, as it does for the mine's ore"
 
@@ -2312,7 +2315,7 @@ let consignmentTests =
                 // a room that ships out and draws in would cycle its ore
                 // between two stores forever.
                 Expect.isFalse
-                    (planTasksOn (consigningColony 5_000 10_000) noThreats
+                    (planTasksOn (consigningColony 5_000 10_000) (noThreats ())
                      |> List.contains (Withdraw("term-1", Thorium)))
                     "a shipping colony never draws out of its own terminal"
             }

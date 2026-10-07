@@ -1251,7 +1251,7 @@ let salvageTests =
                     planTasks
                         view
                         (Fabot.Core.Atlas.ofView view)
-                        noThreats
+                        (noThreats ())
                         HeldTaskFacts.empty
                         (outpostFactsOf view (Fabot.Core.Atlas.ofView view))
                     |> List.filter (fun task ->

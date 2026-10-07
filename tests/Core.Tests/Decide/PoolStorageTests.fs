@@ -22,12 +22,12 @@ let stockTests =
                 let full = stockColony [] (Map.ofList [ "can-ctrl", 2000; "sto-1", 1000000 ])
 
                 Expect.equal
-                    (refillTasks (planTasksOn hungry noThreats))
+                    (refillTasks (planTasksOn hungry (noThreats ())))
                     [ "sto-1" ]
                     "the stock with room pools the deepest Refill of all"
 
                 Expect.isEmpty
-                    (refillTasks (planTasksOn full noThreats))
+                    (refillTasks (planTasksOn full (noThreats ())))
                     "a full stock pools no Refill: there is nowhere left to put a load"
             }
 
@@ -191,7 +191,7 @@ let stockGateTests =
                         (stockColony
                             [ refillable "spawn-1" 0 BuiltKind.Spawn ]
                             (Map.ofList [ "can-ctrl", 2000; "sto-1", 500 ]))
-                        noThreats
+                        (noThreats ())
 
                 Expect.equal (refillTasks tasks) [ "sto-1" ] "the stock's own Refill is pooled"
 
@@ -209,7 +209,7 @@ let stockGateTests =
                         (stockColony
                             [ refillable "ext-1" 50 BuiltKind.Extension ]
                             (Map.ofList [ "can-ctrl", 2000; "sto-1", 500 ]))
-                        noThreats
+                        (noThreats ())
 
                 Expect.equal
                     (withdrawTasks tasks)
@@ -328,7 +328,7 @@ let stockGateTests =
                         colony
                         (Atlas.ofView colony)
                         []
-                        (planTasksOn colony noThreats)
+                        (planTasksOn colony (noThreats ()))
                     |> List.tryPick (fun entry ->
                         if entry.Task = Withdraw("sto-1", Energy) then
                             Capacity.capOf CapScope.Carriers entry.Capacity
@@ -409,7 +409,7 @@ let stockGateTests =
                         (stockColony
                             [ refillable "spawn-1" 0 BuiltKind.Spawn ]
                             (Map.ofList [ "can-ctrl", 800; "sto-1", 500 ]))
-                        noThreats
+                        (noThreats ())
 
                 Expect.equal
                     (refillTasks tasks)
@@ -431,7 +431,7 @@ let stockGateTests =
                             [ refillable "spawn-1" 0 BuiltKind.Spawn ]
                             (Map.ofList [ "can-ctrl", 800; "sto-1", stock ])
                          |> withLevel 4)
-                        noThreats
+                        (noThreats ())
 
                 Expect.equal
                     (withdrawTasks (poolAt 9_999))
@@ -454,7 +454,7 @@ let stockGateTests =
                             ReserveShort = latched
                          }
                          |> withLevel 4)
-                        noThreats
+                        (noThreats ())
 
                 Expect.equal
                     (withdrawTasks (poolAt 10_199 true))
@@ -493,7 +493,7 @@ let stockGateTests =
                     |> withLevel 6
 
                 Expect.contains
-                    (planTasksOn colony noThreats)
+                    (planTasksOn colony (noThreats ()))
                     (Refill("term-1", Energy))
                     "no Storage: the fee stock is still a sink"
             }
@@ -503,7 +503,7 @@ let stockGateTests =
                     planTasksOn
                         (stockColony refillables (Map.ofList [ "can-ctrl", 2000; "sto-1", 5_000 ])
                          |> withLevel 4)
-                        noThreats
+                        (noThreats ())
 
                 Expect.contains
                     (withdrawTasks (poolWith [ refillable "ext-1" 50 BuiltKind.Extension ]))
@@ -535,7 +535,7 @@ let stockGateTests =
                                     [ "term-1", { X = 12; Y = 11 }, Structure BuiltKind.Terminal ]
                          }
                          |> withLevel 6)
-                        noThreats
+                        (noThreats ())
 
                 Expect.isFalse
                     (List.contains (Refill("term-1", Energy)) (poolAt 19_999))
@@ -559,7 +559,7 @@ let stockGateTests =
                         (stockColony
                             [ refillable "ext-1" 50 BuiltKind.Extension ]
                             (Map.ofList [ "can-ctrl", 800; "sto-1", 0 ]))
-                        noThreats
+                        (noThreats ())
 
                 Expect.equal
                     (withdrawTasks tasks)
@@ -756,7 +756,7 @@ let stockDrawTests =
                         Creeps = [ creepWith "h1" 50 50 [ Carry; Carry; Move ] ]
                     }
 
-                let tasks = planTasksOn colony noThreats
+                let tasks = planTasksOn colony (noThreats ())
 
                 Expect.contains (withdrawTasks tasks) "sto-1" "the stock is an intake this tick"
                 Expect.contains (refillTasks tasks) "sto-1" "and a sink on the very same tick"
@@ -1002,7 +1002,7 @@ let stockDrawTests =
                 let struck =
                     planTasksOn
                         (colonyWith [ hostileAt "raider" { X = 12; Y = 10 } [ Attack; Move ] ])
-                        noThreats
+                        (noThreats ())
 
                 Expect.contains (repairTasks struck) "ram-1" "the struck rampart's Repair is pooled"
 
@@ -1014,7 +1014,7 @@ let stockDrawTests =
                 Expect.isFalse
                     (List.contains
                         (Withdraw("sto-1", Energy))
-                        (planTasksOn (colonyWith []) noThreats))
+                        (planTasksOn (colonyWith []) (noThreats ())))
                     "the same rampart unstruck is routine Repair: the stock stays shut"
             }
 
@@ -1035,7 +1035,7 @@ let stockDrawTests =
                 let dying = colonyWith 1
 
                 Expect.contains
-                    (repairTasks (planTasksOn dying noThreats))
+                    (repairTasks (planTasksOn dying (noThreats ())))
                     "ram-1"
                     "the rampart at one hit is pooled"
 
@@ -1047,7 +1047,7 @@ let stockDrawTests =
                 Expect.isFalse
                     (List.contains
                         (Withdraw("sto-1", Energy))
-                        (planTasksOn (colonyWith 50_000) noThreats))
+                        (planTasksOn (colonyWith 50_000) (noThreats ())))
                     "a rampart merely under its floor is routine Repair: the stock stays shut"
             }
 
@@ -1211,7 +1211,7 @@ let storeArrivalTests =
                     (emit
                         beside
                         (Atlas.ofView beside)
-                        noThreats
+                        (noThreats ())
                         (Map.ofList [ "h1", Withdraw("sto-1", Energy) ]))
                     (WithdrawFromStore("h1", "sto-1", Energy, Some 100))
                     "the premise: beside it, the draw names the body's room"

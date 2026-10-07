@@ -166,7 +166,7 @@ let reserverRowTests =
                     }
 
                 Expect.equal
-                    (planTasksOn declared noThreats
+                    (planTasksOn declared (noThreats ())
                      |> List.filter (function
                          | Reserve _
                          | Claim _ -> true

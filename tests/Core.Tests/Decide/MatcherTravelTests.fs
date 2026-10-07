@@ -728,7 +728,7 @@ let private movementFor view assigned =
     movementOf
         view
         (Atlas.ofView view)
-        noThreats
+        (noThreats ())
         (poolOn view)
         (Map.ofList assigned)
         Map.empty
@@ -1005,7 +1005,7 @@ let arbitrationTests =
                     resolve
                         colony
                         (Atlas.ofView colony)
-                        noThreats
+                        (noThreats ())
                         (unreachable :: pool)
                         (Map.ofList [ "p", Harvest "src-x" ])
                         Map.empty
@@ -1480,7 +1480,7 @@ let arbitrationTests =
                     (resolve
                         (on plainRing { X = 10; Y = 0 })
                         (Atlas.ofView (on plainRing { X = 10; Y = 0 }))
-                        noThreats
+                        (noThreats ())
                         []
                         Map.empty
                         (Map.ofList [ "w", "W1N2" ])

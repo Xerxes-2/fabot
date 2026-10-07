@@ -500,12 +500,12 @@ let repairTests =
                 let half = bareRespawn |> withHits "road-1" BuiltKind.Road 2500 5000
 
                 Expect.equal
-                    (repairTasks (planTasksOn low noThreats))
+                    (repairTasks (planTasksOn low (noThreats ())))
                     [ "road-1" ]
                     "below the trigger: one Repair per ailing road"
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn half noThreats))
+                    (repairTasks (planTasksOn half (noThreats ())))
                     "at half hits the road is left alone"
             }
 
@@ -518,12 +518,12 @@ let repairTests =
                     bareRespawn |> withHits "road-1" BuiltKind.Road hits 5000
 
                 Expect.equal
-                    (repairTasks (planTasksOn (at 2400) noThreats))
+                    (repairTasks (planTasksOn (at 2400) (noThreats ())))
                     [ "road-1" ]
                     "under the hungry line, nobody holding: pooled, as it always was"
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn (at 2600) noThreats))
+                    (repairTasks (planTasksOn (at 2600) (noThreats ())))
                     "over the hungry line, nobody holding: no Task — the entry is unchanged"
 
                 Expect.equal
@@ -562,7 +562,7 @@ let repairTests =
                     |> withHits "sto-1" BuiltKind.Storage 1_000_000 1_000_000
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn colony noThreats))
+                    (repairTasks (planTasksOn colony (noThreats ())))
                     "a rampart over its floor and a whole Storage ask for nothing"
 
                 Expect.isEmpty
@@ -579,7 +579,7 @@ let repairTests =
 
                 Expect.equal
                     (repairTasks (planTasksHolding [ Repair "ram-1"; Repair "sto-1" ] ailing))
-                    (repairTasks (planTasksOn ailing noThreats))
+                    (repairTasks (planTasksOn ailing (noThreats ())))
                     "one hit under the floor and one hit off full: the same pool either way"
             }
 
@@ -607,7 +607,7 @@ let repairTests =
                                 snapshot |> withHits id kind (max * step / 100) max)
                             (bareRespawn |> withLevel 5)
 
-                    let unheld = repairTasks (planTasksOn colony noThreats) |> Set.ofList
+                    let unheld = repairTasks (planTasksOn colony (noThreats ())) |> Set.ofList
                     let held = repairTasks (planTasksHolding holding colony) |> Set.ofList
 
                     Expect.isTrue
@@ -675,11 +675,11 @@ let repairTests =
                     "the empty body is released and the next tick's table names it nowhere"
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn (emptied 3100) noThreats))
+                    (repairTasks (planTasksOn (emptied 3100) (noThreats ())))
                     "and at 62% of max, unheld, the road is over the hungry line and out of the pool"
 
                 Expect.equal
-                    (repairTasks (planTasksOn (emptied 2000) noThreats))
+                    (repairTasks (planTasksOn (emptied 2000) (noThreats ())))
                     [ "road-1" ]
                     "released under the hungry line it is back in the pool, uncapped, for anybody"
 
@@ -800,7 +800,7 @@ let repairTests =
                     |> facing [ hostileAt "h-1" { X = 32; Y = 25 } [ RangedAttack; Move ] ]
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn passing noThreats))
+                    (repairTasks (planTasksOn passing (noThreats ())))
                     "the premise: over its floor, with nothing in reach of it, the rampart asks for nothing"
 
                 for name, attacked in [ "beside a melee", struck; "in a longbow's reach", shot ] do
@@ -821,7 +821,7 @@ let repairTests =
                 let whole = bareRespawn |> withHits "road-1" BuiltKind.Road 5000 5000
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn whole noThreats))
+                    (repairTasks (planTasksOn whole (noThreats ())))
                     "a whole road needs nothing"
             }
 
@@ -835,7 +835,7 @@ let repairTests =
                     |> withHits "rock-1" BuiltKind.Other 1 5000
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn snapshot noThreats))
+                    (repairTasks (planTasksOn snapshot (noThreats ())))
                     "an extension, a link and an unmodelled structure are nobody's Repair"
             }
 
@@ -849,7 +849,7 @@ let repairTests =
                     |> withHits "term-1" BuiltKind.Terminal 2999 3000
 
                 Expect.equal
-                    (repairTasks (planTasksOn dented noThreats))
+                    (repairTasks (planTasksOn dented (noThreats ())))
                     [ "spawn-1"; "sto-1"; "term-1"; "tower-1" ]
                     "one hit off max is hungry, on every Keep structure"
 
@@ -860,7 +860,7 @@ let repairTests =
                     |> withHits "sto-1" BuiltKind.Storage 5000 5000
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn whole noThreats))
+                    (repairTasks (planTasksOn whole (noThreats ())))
                     "a Keep at full hits asks for nothing"
             }
 
@@ -879,21 +879,21 @@ let repairTests =
                 let over = keeping |> withHits "ram-1" BuiltKind.Rampart (max / 2) max
 
                 Expect.equal
-                    (repairTasks (planTasksOn below noThreats))
+                    (repairTasks (planTasksOn below (noThreats ())))
                     [ "ram-1" ]
                     "one hit under the floor is hungry"
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn at noThreats))
+                    (repairTasks (planTasksOn at (noThreats ())))
                     "at the floor the rampart is whole"
 
                 Expect.equal
-                    (repairTasks (planTasksOn fresh noThreats))
+                    (repairTasks (planTasksOn fresh (noThreats ())))
                     [ "ram-1" ]
                     "a rampart just built stands at 1 hit and is the pool's business at once"
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn over noThreats))
+                    (repairTasks (planTasksOn over (noThreats ())))
                     "half of a rampart's max is far over the floor: nothing to do"
             }
 
@@ -925,23 +925,23 @@ let repairTests =
                 let quiet = bareRespawn |> building
 
                 Expect.equal
-                    (repairTasks (planTasksOn (quiet |> at (buildFloor - 1)) noThreats))
+                    (repairTasks (planTasksOn (quiet |> at (buildFloor - 1)) (noThreats ())))
                     [ "ram-1" ]
                     "under the build floor: hungry"
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn (quiet |> at buildFloor) noThreats))
+                    (repairTasks (planTasksOn (quiet |> at buildFloor) (noThreats ())))
                     "at the build floor the rampart waits for the extensions"
 
                 Expect.equal
-                    (repairTasks (planTasksOn (bareRespawn |> at buildFloor) noThreats))
+                    (repairTasks (planTasksOn (bareRespawn |> at buildFloor) (noThreats ())))
                     [ "ram-1" ]
                     "no extension or Storage site: the full floor again"
 
                 let raided = quiet |> facing [ hostileAt "h-1" { X = 40; Y = 40 } [ Attack; Move ] ]
 
                 Expect.equal
-                    (repairTasks (planTasksOn (raided |> at buildFloor) noThreats))
+                    (repairTasks (planTasksOn (raided |> at buildFloor) (noThreats ())))
                     [ "ram-1" ]
                     "a raider in the home: the full floor"
 
@@ -957,12 +957,14 @@ let repairTests =
                         ]
 
                 Expect.equal
-                    (repairTasks (planTasksOn (worker "Trepidimous" |> at buildFloor) noThreats))
+                    (repairTasks (
+                        planTasksOn (worker "Trepidimous" |> at buildFloor) (noThreats ())
+                    ))
                     [ "ram-1" ]
                     "an enemy's dismantler in the home: the full floor"
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn (worker "raider" |> at buildFloor) noThreats))
+                    (repairTasks (planTasksOn (worker "raider" |> at buildFloor) (noThreats ())))
                     "a neutral's worker passing: the build floor stands"
 
                 let healed =
@@ -971,7 +973,7 @@ let repairTests =
                     }
 
                 Expect.equal
-                    (repairTasks (planTasksOn (healed |> at buildFloor) noThreats))
+                    (repairTasks (planTasksOn (healed |> at buildFloor) (noThreats ())))
                     [ "ram-1" ]
                     "a raid healer just stepped out: the full floor"
 
@@ -983,12 +985,14 @@ let repairTests =
                 let window = Tuning.defaults.BuildFloorRaidTicks
 
                 Expect.equal
-                    (repairTasks (planTasksOn (raidedAt (window - 1) |> at buildFloor) noThreats))
+                    (repairTasks (
+                        planTasksOn (raidedAt (window - 1) |> at buildFloor) (noThreats ())
+                    ))
                     [ "ram-1" ]
                     "a raider stood at home inside the window: the full floor"
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn (raidedAt window |> at buildFloor) noThreats))
+                    (repairTasks (planTasksOn (raidedAt window |> at buildFloor) (noThreats ())))
                     "a raid a whole window gone: the build floor again"
             }
 
@@ -1016,7 +1020,7 @@ let repairTests =
                         3_000_000
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn storing noThreats))
+                    (repairTasks (planTasksOn storing (noThreats ())))
                     "at the build floor with the Storage a site: whole"
             }
 
@@ -1049,7 +1053,7 @@ let repairTests =
                     |> facing [ hostileAt "h-1" { X = 29; Y = 25 } [ Work; Move ] ]
 
                 Expect.equal
-                    (repairTasks (planTasksOn struck noThreats))
+                    (repairTasks (planTasksOn struck (noThreats ())))
                     [ "ram-1" ]
                     "200,000 hits, far over both floors: struck, it is hungry to its max; the unstruck 50,000 waits under the cap"
 
@@ -1062,7 +1066,7 @@ let repairTests =
                             { struck with
                                 KeepHitsBefore = Map.ofList [ "ram-1", 200_050 ]
                             }
-                            noThreats
+                            (noThreats ())
                     ))
                     [ "ram-1"; "ram-2" ]
                     "dismantling, the unstruck 50,000 is under the full floor"
@@ -1078,13 +1082,13 @@ let repairTests =
                 let young = bareRespawn |> withLevel 2 |> withHits "ram-1" BuiltKind.Rampart 1 max
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn young noThreats))
+                    (repairTasks (planTasksOn young (noThreats ())))
                     "a rampart at 1 hit in an RCL2 room is left to decay"
 
                 let youngRoad = young |> withHits "road-1" BuiltKind.Road 1000 5000
 
                 Expect.equal
-                    (repairTasks (planTasksOn youngRoad noThreats))
+                    (repairTasks (planTasksOn youngRoad (noThreats ())))
                     [ "road-1" ]
                     "the decaying kinds keep their trigger in the same room"
 
@@ -1092,7 +1096,7 @@ let repairTests =
                     bareRespawn |> withLevel 3 |> withHits "ram-1" BuiltKind.Rampart (floor - 1) max
 
                 Expect.equal
-                    (repairTasks (planTasksOn grown noThreats))
+                    (repairTasks (planTasksOn grown (noThreats ())))
                     [ "ram-1" ]
                     "one level up the same rampart is hungry under the same floor"
             }
@@ -1114,12 +1118,16 @@ let repairTests =
                     |> withHits "ram-p" BuiltKind.Rampart (floor - 1) max
 
                 Expect.equal
-                    (repairTasks (planTasksOn (bareRespawn |> withLevel 3 |> declaring) noThreats))
+                    (repairTasks (
+                        planTasksOn (bareRespawn |> withLevel 3 |> declaring) (noThreats ())
+                    ))
                     [ "ram-p" ]
                     "under the floor at the level ramparts are kept: hungry"
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn (bareRespawn |> withLevel 2 |> declaring) noThreats))
+                    (repairTasks (
+                        planTasksOn (bareRespawn |> withLevel 2 |> declaring) (noThreats ())
+                    ))
                     "below the gate it decays away, as a Keep rampart does"
             }
 
@@ -1197,12 +1205,12 @@ let repairTests =
                 let half = bareRespawn |> withHits "cont-1" BuiltKind.Container 125000 250000
 
                 Expect.equal
-                    (repairTasks (planTasksOn low noThreats))
+                    (repairTasks (planTasksOn low (noThreats ())))
                     [ "cont-1" ]
                     "below the trigger: one Repair per ailing container"
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn half noThreats))
+                    (repairTasks (planTasksOn half (noThreats ())))
                     "at half hits the container is left alone"
             }
 
@@ -1210,7 +1218,7 @@ let repairTests =
                 let whole = bareRespawn |> withHits "cont-1" BuiltKind.Container 250000 250000
 
                 Expect.isEmpty
-                    (repairTasks (planTasksOn whole noThreats))
+                    (repairTasks (planTasksOn whole (noThreats ())))
                     "a whole container needs nothing"
             }
 

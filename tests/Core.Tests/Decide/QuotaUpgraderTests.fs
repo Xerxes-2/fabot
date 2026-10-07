@@ -850,7 +850,7 @@ let quotaInputTests =
                 // hers while the child is raised, and the Withdraw is denied her, or
                 // her hauler would take the load it just carried straight back out.
                 let poolFor stage =
-                    planTasksOn (ferryMother stage) noThreats
+                    planTasksOn (ferryMother stage) (noThreats ())
 
                 let lending = poolFor Bootstrapping
 
@@ -917,7 +917,7 @@ let quotaInputTests =
 
                 let stocked = stockedWith 240000
 
-                let lending = planTasksOn (stocked Bootstrapping) noThreats
+                let lending = planTasksOn (stocked Bootstrapping) (noThreats ())
 
                 Expect.isTrue
                     (List.contains (Refill("can-child", Energy)) lending)
@@ -932,13 +932,13 @@ let quotaInputTests =
                 Expect.isFalse
                     (List.contains
                         (Withdraw("storage-1", Energy))
-                        (planTasksOn (stocked Independent) noThreats))
+                        (planTasksOn (stocked Independent) (noThreats ())))
                     "and with nothing to feed, the stock stays shut"
 
                 // Under the mother's RCL5 reserve of 10,000 (#505) the lend
                 // is no emergency: the child's buffer stays a sink for
                 // what the flow brings, and the stock stays hers.
-                let short = planTasksOn (stockedWith 9_999 Bootstrapping) noThreats
+                let short = planTasksOn (stockedWith 9_999 Bootstrapping) (noThreats ())
 
                 Expect.isTrue
                     (List.contains (Refill("can-child", Energy)) short)
