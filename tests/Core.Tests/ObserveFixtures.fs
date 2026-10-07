@@ -128,6 +128,7 @@ let ours name : CreepInfo =
         Moved = false
         DrawnFrom = None
         Body = Map.ofList [ Work, 1; Carry, 1; Move, 1 ]
+        ShotOff = 0
     }
 
 /// One of ours on the last tick of its life: the engine's counter runs out

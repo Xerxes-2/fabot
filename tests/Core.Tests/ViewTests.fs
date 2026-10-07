@@ -215,6 +215,7 @@ let private creep name room : WorldCreep =
                 Moved = false
                 DrawnFrom = None
                 Body = body
+                ShotOff = 0
             }
     }
 

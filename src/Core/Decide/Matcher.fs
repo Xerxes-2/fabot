@@ -649,17 +649,18 @@ let matchAcross
                 ends
         | _ -> None
 
-    // A Guard its body loses (#602): it neither kites the raid down
-    // (`Facts.kitedDown`, the brief's own test for taking it, #613) nor wins
-    // the room's exchange beside
-    // every other fighter of ours at the fight, whatever each holds, and the
-    // holders of the fight its walk lands while it still stands
-    // (`Facts.winsBeside`); and its holder is struck this tick where it
-    // stands, past its own heal, with Flee to take, or a fresh candidate is
-    // hurt under `brokenOff` of its hits — a body that broke off comes back
-    // healed, or to a fight its side wins, never straight back in. Neither
-    // kept nor taken: priced again on every tick. Never a home of ours'
-    // (`Threats.Homes`): a home is fought for to the death.
+    // A Guard its body does not fit (#615 U3, `Facts.fits`): the one answer
+    // for taking and keeping it, asked of the fresh candidate and the holder
+    // alike on every tick, so a body is never admitted to a fight it would
+    // be let go of on arrival (#613), nor kept in one it loses (#602). Its
+    // side is every other fighter of ours at the fight, whatever each holds,
+    // those holding the fight, and those arriving: free (or lent to it off
+    // a Guard the fight may call it from), admitted, fitting the fight
+    // themselves, while a seat is open. Each lands by its walk past this
+    // body's own, the raid striking this body only once it is there, so
+    // the answer does not turn as it walks in. A holder is priced at its
+    // hits, any other once struck to its next decision. Never a home of
+    // ours' (`Threats.Homes`): a home is fought for to the death.
     let fighters = lazy (creeps |> List.filter isFighterBody)
 
     // The ticks a body's travel to a fight takes, priced in its own colony
@@ -672,46 +673,150 @@ let matchAcross
             |> Option.map (fun cost -> (cost + 1) / 2)
         | _ -> None
 
-    let brokenOff (creep: CreepInfo) =
-        creep.Hits.Hits * 5 < creep.Hits.HitsMax * 4
+    let unfits = System.Collections.Generic.Dictionary<struct (string * string), bool>()
 
-    let struckNow k (creep: CreepInfo) =
-        let ctx = contexts.[k]
-        let heal = Engine.healPower * partCount creep.Body Heal
-
-        Atlas.creepTile ctx.Atlas creep.Name
-        |> Option.exists (fun tile ->
-            Threats.damageAt ctx.Threats tile.Room 0 (RoomPos.pos tile) > heal)
-
-    let losesItsFight k (creep: CreepInfo) task =
+    let unfitNow k (creep: CreepInfo) task =
         match task with
-        | Guard room when not (Set.contains room contexts.[k].Threats.Homes) ->
+        | Guard room when
+            not (Set.contains room contexts.[k].Threats.Homes)
+            && Facts.raided contexts.[k].View room
+            ->
             let ctx = contexts.[k]
             let tid = taskId task
 
-            let loses () =
-                not (Facts.kitedDown ctx.View (Fighter.ofCreep creep) room)
-                && not (
-                    Facts.winsBeside
+            match Threats.briefFor ctx.Threats task with
+            | None -> false
+            // A garrison its raid out-matches holds the room's safe ground
+            // (#451): no fight, so nothing to fit.
+            | Some brief when
+                brief.Duty = Duty.Guard BriefKind.Resident && brief.Verdict.Value = Answer.Lose
+                ->
+                false
+            | Some brief ->
+                let named =
+                    lazy ((Facts.verdictOf ctx.View room).Bodies |> List.map fst |> Set.ofList)
+
+                // The raid strikes it only once it is at the fight: off it, a
+                // partner lands its walk past this body's own (#535's muster
+                // waits for it), and one no walk prices lands with it.
+                let waits =
+                    lazy
+                        (match ending k creep.Name task with
+                         | Some(atFight, _) -> not atFight
+                         | None -> false)
+
+                let mine =
+                    lazy
+                        (if waits.Value then
+                             landsIn creep.Name task |> Option.defaultValue 0
+                         else
+                             0)
+
+                // Held on the muster ground (`Brief.Stances`), it goes in with
+                // the last of the fight's holders; any other partner lands by
+                // its walk past this body's own.
+                let mustered = brief.Stances.ContainsKey creep.Name
+                let holding = Map.tryFind creep.Name assignments = Some tid
+                let stance = Brief.stanceOf ctx.View room brief
+
+                let landing (other: CreepInfo) (holder: bool) =
+                    match landsIn other.Name task with
+                    | _ when holder && mustered -> Some 0
+                    | Some ticks -> Some(max 0 (ticks - mine.Value))
+                    | None when waits.Value -> Some 0
+                    | None -> None
+
+                // The named bodies this match does not hold: another colony's,
+                // where the world's fleet stands them.
+                let lent () =
+                    match
+                        named.Value |> Set.filter (fun name -> not (byName.Value.ContainsKey name))
+                    with
+                    | away when Set.isEmpty away -> []
+                    | away ->
+                        ctx.View.World.Bodies.Value
+                        |> Map.toList
+                        |> List.collect (snd >> List.map fst)
+                        |> List.filter (fun body -> away.Contains body.Name)
+                        |> List.distinctBy _.Name
+
+                let others =
+                    fighters.Value @ lent () |> List.filter (fun other -> other.Name <> creep.Name)
+
+                // Who holds this fight now: they are coming.
+                let holders, rest =
+                    others
+                    |> List.partition (fun other -> Map.tryFind other.Name assignments = Some tid)
+
+                // Who else is coming: a body free, or one this fight may call
+                // off the Guard it holds (`Facts.mayBeCalled`, the verdict's
+                // lent residents), that the Brief admits, that fits the fight
+                // itself beside this body, while a seat is open for it. A body
+                // held elsewhere, or one the fight would feed, never comes.
+                let callable (other: CreepInfo) =
+                    match Map.tryFind other.Name assignments with
+                    | None -> true
+                    | Some held ->
+                        named.Value.Contains other.Name
+                        && (match held.Split ':' with
+                            | [| "guard"; from |] ->
+                                Facts.mayBeCalled ctx.View (Set.singleton room) from room other
+                            | _ -> false)
+
+                let seats =
+                    match brief.Capacity ctx.Threats |> Capacity.capOf CapScope.Fighters with
+                    | Some cap -> cap - List.length holders - 1
+                    | None -> System.Int32.MaxValue
+
+                let arriving =
+                    rest
+                    |> List.filter (fun other ->
+                        callable other
+                        && brief.Admits other
+                        && Facts.fits
+                            ctx.View
+                            (stance other)
+                            room
+                            ctx.Threats.Horizon
+                            false
+                            other
+                            [ creep, true, Some 0 ])
+                    |> List.choose (fun other ->
+                        landing other false |> Option.map (fun t -> t, other))
+                    |> List.sortBy (fun (ticks, other) -> ticks, other.Name)
+                    |> List.truncate (max 0 seats)
+
+                not (
+                    Facts.fits
                         ctx.View
+                        (stance creep)
                         room
                         ctx.Threats.Horizon
+                        holding
                         creep
-                        (fighters.Value
-                         |> List.filter (fun other -> other.Name <> creep.Name)
-                         |> List.map (fun other ->
-                             let holds = Map.tryFind other.Name assignments = Some tid
-                             other, holds, (if holds then landsIn other.Name task else None)))
+                        ((holders |> List.map (fun other -> other, true, landing other true))
+                         @ (arriving |> List.map (fun (ticks, other) -> other, true, Some ticks))
+                         // Any other already at the fight strikes beside it.
+                         @ (rest
+                            |> List.filter (fun other ->
+                                arriving |> List.forall (fun (_, came) -> came.Name <> other.Name))
+                            |> List.map (fun other -> other, false, None)))
                 )
+        | _ -> false
 
-            if Map.tryFind creep.Name assignments = Some tid then
-                struckNow k creep
-                && fleeings.[k]
-                   |> Option.exists (fun flee ->
-                       applicable ctx.View ctx.Threats ctx.Atlas creep flee)
-                && loses ()
-            else
-                (brokenOff creep || struckNow k creep) && loses ()
+    // `unfitNow`, priced once a tick for a body and a Task: the gate asks
+    // it of a pair as a candidate, a holder and a body called off.
+    let unfit k (creep: CreepInfo) task =
+        match task with
+        | Guard _ ->
+            let key = struct (creep.Name, taskId task)
+
+            match unfits.TryGetValue key with
+            | true, answer -> answer
+            | _ ->
+                let answer = unfitNow k creep task
+                unfits.[key] <- answer
+                answer
         | _ -> false
 
     // One gate cascade judges every (creep, Task) pair, for both readings of
@@ -743,7 +848,7 @@ let matchAcross
             Error RejectReason.Inapplicable
         elif homeHeld k acc creep pooled then
             Error RejectReason.Inapplicable
-        elif losesItsFight k creep pooled.Task then
+        elif unfit k creep pooled.Task then
             Error RejectReason.Threatened
         else
             let cost = travelCostOf ctx.Threats ctx.Atlas creep.Name pooled.Task
@@ -945,13 +1050,12 @@ let matchAcross
             // The one hold rule (#535, `Threats.holdsFight`): a fight begun
             // is kept while its holder can still strike a target there,
             // whatever the room's kind, capacity or muster.
-            // It ends for a holder that loses its fight where it is struck
-            // (`losesItsFight`), which the gate then refuses. One rule on
-            // both lanes (#601): the lane decides who takes a seat, never
-            // who keeps one.
+            // It ends for a holder that no longer fits its fight (`unfit`),
+            // which the gate then refuses. One rule on both lanes (#601):
+            // the lane decides who takes a seat, never who keeps one.
             | Some pooled when
                 Threats.holdsFight view atlas threats creep pooled.Task
-                && not (losesItsFight k creep pooled.Task)
+                && not (unfit k creep pooled.Task)
                 ->
                 Map.add name tid acc, hold loads tid, released
             | Some pooled ->

@@ -8340,6 +8340,33 @@ let arenaBorderTests =
                 Expect.isNone (diedOn "ranger-1013734-Spawn11" trace) "the kiter lives"
                 Expect.isNone (diedOn "ranger-1013698-Spawn11" trace) "and so does the idle one"
             }
+
+            // #615 U3's hysteresis: live, ranger-1013698 took W17S26's Guard,
+            // walked in, was let go and walked off, again and again (#613).
+            // One answer for taking and keeping, the taker priced once struck
+            // to its next decision: neither ranger turns its Guard over more
+            // than once each way in 500 ticks, longer than a ranger heals out
+            // its wounds in.
+            test "neither ranger takes and drops the Guard more than once over 500 ticks" {
+                let flips creep =
+                    let _, tasks =
+                        zeroAtTheCore
+                            (Phases [ 50, Waypoints zeroLiveTiles; 0, Chase(Nearest, None) ])
+                            ()
+                        |> taskEachTick creep 500
+
+                    tasks
+                    |> List.map ((=) "guard:W17S26")
+                    |> List.pairwise
+                    |> List.filter (fun (before, now) -> before <> now)
+                    |> List.length
+
+                for creep in [ "ranger-1013698-Spawn11"; "ranger-1013734-Spawn11" ] do
+                    Expect.isLessThanOrEqual
+                        (flips creep)
+                        2
+                        $"{creep} flips its Guard at most twice"
+            }
             // Live (t985,560-985,681) both rangers stood beside the core for
             // 100+ ticks shooting nothing: the core claimed the room ahead of
             // the hauler's kill. On main this capture reproduces that (both on
@@ -8919,16 +8946,19 @@ let arenaBorderTests =
                 // #615 U1 moved t24 to t22 and t36 to t34: the melee ties the
                 // mother's ranger on plain, so it stands off nothing, and the
                 // ranger, winning beside the child's, closes to its reach
-                // rather than waiting a step off the ground.
+                // rather than waiting a step off the ground. #615 U3 moved them
+                // to t21 and t32: the mother's two rangers are each other's
+                // side (the child's 2-RANGED one no longer fits beside them),
+                // so the first closes sooner, the second beside it.
                 Expect.equal
                     firstShot
-                    (Some 22)
-                    $"it shoots the melee from t22 (main t68)\n{failure}"
+                    (Some 21)
+                    $"it shoots the melee from t21 (main t68)\n{failure}"
 
                 Expect.equal
                     (diedOn "HalfLife847" trace)
-                    (Some 34)
-                    $"the melee dies at t34 (S3 t74)\n{failure}"
+                    (Some 32)
+                    $"the melee dies at t32 (S3 t74)\n{failure}"
 
                 // Characterisation (for S4's Flee band, #583). S3 kept
                 // anchor-985849 and lost reserver-985957 at t10: the 1-block
@@ -20756,8 +20786,13 @@ let worldLaneCaptureTests =
             // the melee died at t114. Now the kite seats the
             // body that ends the raid soonest (the mother's, walk and kill)
             // and beside it every ranger already at the fight (the child's).
+            // Moved on purpose (#615 U3): the child's 2-RANGED ranger ties the
+            // melee and falls to it before the mother's land, so it no longer
+            // fits the kite (it held on `rangers > 1`); the mother's second
+            // ranger, free and fitting beside the first, takes the seat, and
+            // the melee dies two ticks sooner.
             test
-                "movement S3 capture t986,005, the world lane: the mother's 14-RANGED ranger takes a seat beside the child's, and the melee dies at t34" {
+                "movement S3 capture t986,005, the world lane: the mother's two 14-RANGED rangers hold the kite, and the melee dies at t32" {
                 let first, _ = rangerIntoMelee () |> run 20
 
                 Expect.equal
@@ -20765,8 +20800,8 @@ let worldLaneCaptureTests =
                      |> Map.filter (fun _ tid -> tid = "guard:W17S26")
                      |> Map.keys
                      |> List.ofSeq)
-                    [ "ranger-984683-Spawn3"; "ranger-985441-Spawn11" ]
-                    "at t20 the mother's ranger and the child's at the fight hold the kite"
+                    [ "ranger-984683-Spawn3"; "ranger-985616-Spawn3" ]
+                    "at t20 the mother's two rangers hold the kite"
 
                 let _, trace = rangerIntoMelee () |> run 120
                 let failure = describe trace
@@ -20780,11 +20815,11 @@ let worldLaneCaptureTests =
                          )))
                     $"the mother's ranger shoots it\n{failure}"
 
-                // #615 U1: t36 → t34, the closing ranger above.
+                // #615 U1: t36 → t34, the closing ranger above; #615 U3: t32.
                 Expect.equal
                     (diedOn "HalfLife847" trace)
-                    (Some 34)
-                    $"HalfLife847 dies at t34\n{failure}"
+                    (Some 32)
+                    $"HalfLife847 dies at t32\n{failure}"
             }
 
             // The child's 600-hit ranger-985441 keeps its seat on W17S26's

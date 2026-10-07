@@ -612,6 +612,11 @@ type CreepInfo =
         /// Active part counts (body entries with hits > 0). Absent or zero
         /// means the creep has no usable part of that kind.
         Body: Map<BodyPart, int>
+        /// The parts shot off that the engine still weighs (`movement.js`:
+        /// every part but MOVE and CARRY, hits or none). A MOVE shot off only
+        /// stops paying its two a tick. 0 in every hand-built fixture that
+        /// does not say otherwise.
+        ShotOff: int
         /// Whether the creep stands on a different tile from last tick — the
         /// shell's reading of Memory's last positions, false for a body born
         /// this tick and in every hand-built fixture. The one reader is the

@@ -269,6 +269,7 @@ let creepWith name energy freeCapacity body =
         Moved = false
         DrawnFrom = None
         Body = body |> List.countBy id |> Map.ofList
+        ShotOff = 0
     }
 
 /// The same creep with the given ticks left to live — what puts it inside

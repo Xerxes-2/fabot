@@ -1213,6 +1213,17 @@ let ofGame
                                 |> List.filter (fun p -> p.hits > 0)
                                 |> List.map (fun p -> bodyPartOf p.``type``)
                                 |> partsOf
+                            ShotOff =
+                                c.body
+                                |> Array.sumBy (fun p ->
+                                    if
+                                        p.hits = 0
+                                        && p.``type`` <> "move"
+                                        && p.``type`` <> "carry"
+                                    then
+                                        1
+                                    else
+                                        0)
                             Moved =
                                 match Map.tryFind c.name lastPositions with
                                 | Some last -> last <> tileOf c

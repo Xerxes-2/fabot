@@ -532,6 +532,7 @@ let private castCreep name (body: BodyPart list) fill : CreepInfo =
         Moved = false
         DrawnFrom = None
         Body = body |> List.countBy id |> Map.ofList
+        ShotOff = 0
     }
 
 /// A whole colony's ColonyView on a captured room at one rung of its life:

@@ -1014,12 +1014,10 @@ type private RoomPass =
         Occupants: Map<RoomPos, string>
     }
 
-/// Whether a Guard's holder may close on a raid that picks the standoff
-/// (#615 U1): the room's verdict is no Lose, and it wins the fight beside
-/// the other fighters of ours holding that Guard as they stand
-/// (`Facts.winsBeside`: those at the fight, or near enough to land while it
-/// stands). The admission's tests alone (`rangers > 1`, a Lose's call) do
-/// not walk a body into a quicker raid.
+/// Whether a Guard's holder may close on its room's raid (#615 U1): it fits
+/// the fight (`Facts.fits`, #615 U3) beside the other fighters of ours
+/// holding that Guard as they stand, the answer it was matched by read
+/// where it stands, as its holder.
 let closes
     (view: ColonyView)
     (threats: Threats)
@@ -1028,11 +1026,14 @@ let closes
     : bool =
     match Map.tryFind creep.Name assigned with
     | Some(Guard room as task) ->
-        (Threats.briefOf threats room).Verdict.Value <> Answer.Lose
-        && Facts.winsBeside
+        let brief = Threats.briefOf threats room
+
+        Facts.fits
             view
+            (Brief.stanceOf view room brief creep)
             room
             threats.Horizon
+            true
             creep
             (view.Creeps
              |> List.filter (fun other -> other.Name <> creep.Name && isFighterBody other)
@@ -1121,13 +1122,34 @@ let movementAmong
     // no walk keeps out of those, the Reach alone. The last is the one its
     // own tile and its plain step are read against. A fighter that wins the
     // exchange against what strikes the room walks nothing round (#568,
-    // movement S3): the gate weighs the fight, not a tile's damage alone.
+    // movement S3): the gate weighs the fight, not a tile's damage alone;
+    // and a holder of the room's own Guard that stands off its raid and fits
+    // the fight beside the holders there (`closes`, #611), whose partner's
+    // shots are its win; a swing holding a post walks to it round the Reach.
+    // `closes` priced once a body this pass.
+    let closed = System.Collections.Generic.Dictionary<string, bool>()
+
+    let closesNow (creep: CreepInfo) =
+        match closed.TryGetValue creep.Name with
+        | true, answer -> answer
+        | _ ->
+            let answer = closes view threats assigned creep
+            closed.[creep.Name] <- answer
+            answer
+
     let roundsOf name room =
         let reach = Threats.reachIn threats room
 
         match view.Creeps |> List.tryFind (fun c -> c.Name = name) with
         | None -> [ reach, None ]
-        | Some creep when isFighterBody creep && Threats.winsIn view threats room creep ->
+        | Some creep when
+            isFighterBody creep
+            && (Threats.winsIn view threats room creep
+                || Map.tryFind name assigned = Some(Guard room)
+                   && Facts.raided view room
+                   && Brief.stanceOf view room (Threats.briefOf threats room) creep = Stance.Standoff
+                   && closesNow creep)
+            ->
             [ Set.empty, None ]
         | Some creep ->
             let fighter = isFighterBody creep
@@ -1217,10 +1239,7 @@ let movementAmong
 
             match Threats.kiteUnsafeFor threats atlas creep camp with
             | Some(unsafe, soonest) when
-                not (
-                    Threats.standsOffNothing threats atlas creep camp
-                    && closes view threats assigned creep
-                )
+                not (Threats.standsOffNothing threats atlas creep camp && closesNow creep)
                 ->
                 Some(Kiting.Keeps(unsafe, soonest, approach))
             | _ -> Some Kiting.Clear

@@ -517,7 +517,7 @@ let internal reserverBodyFor capacity =
 /// The guard row's sizing rule: whole blocks, never below one and capped at
 /// five by the engine's 50 parts. A remainder spent at parity would buy Carry
 /// a guard has no use for. `List.distinct` keeps the block's order, so two
-/// blocks are `[T;T; A×6; M×10; H;H]` and not a shuffle of them. 300 cannot
+/// blocks are `[T;T; M×10; A×6; H;H]` and not a shuffle of them. 300 cannot
 /// afford one block and the row yields; 800 and 1,300 buy one, 1,800 two,
 /// 2,300 three.
 let private guardBodyFor capacity =

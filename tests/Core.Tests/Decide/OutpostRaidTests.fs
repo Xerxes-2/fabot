@@ -3232,8 +3232,8 @@ let kiteStepTests =
 
             // #615 U1 flipped the U0 quirk pin ("the glue counts a guard's
             // HEAL beside its swing"): the glue reads `Fighter.HealAt`,
-            // nothing in a tick it swings. `Matcher`'s `struckNow` still reads
-            // `healPower × HEAL`, U2/U3's.
+            // nothing in a tick it swings. U3 took `Matcher`'s `struckNow`
+            // (`healPower × HEAL`) out with the struck gate it served.
             test "the glue, the exchange and the engine give a swinging guard no heal" {
                 let target = { X = 25; Y = 44 }
                 let from = { X = 24; Y = 44 }
@@ -3268,15 +3268,12 @@ let kiteStepTests =
                     (keeps (healerGuard 33))
                     "nor does 33 HEAL's 396: a heal would drop its swing"
 
-                Expect.equal
-                    (Facts.selfHealOf (partCount (healerGuard 33).Body))
-                    0
-                    "the exchange heals a melee body nothing"
+                let fighter = Fighter.ofCreep (healerGuard 33)
 
                 Expect.equal
-                    ((Fighter.ofCreep (healerGuard 33)).HealAt Engine.meleeRange)
+                    (fighter.HealAt(Fighter.bestRange fighter))
                     0
-                    "and the engine agrees: its heal would drop its attack"
+                    "the exchange heals a melee body nothing where it fights: its heal would drop its attack"
             }
 
             // #614: the glue was the one chaser's step no chase weighed. A
@@ -3530,18 +3527,25 @@ let shutChaseTests =
                     (Some(taskId (Guard "W1N2")))
                     "the stand-down shuts the economy, never the kill: the guard takes the room's Guard"
 
-                // Each body on its own fitness, not the row's: beside it, a
+                // Each body on its own fitness, not the row's (#615 U3: the
+                // Matcher's `Facts.fits`, no longer the Brief's admission): a
                 // two-ATTACK guard that loses this raid alone.
                 let weak = creepWith "g-weak" 0 0 [ Attack; Attack; Move; Move ]
-                let both = shut |> withGuards [ weak, { X = 20; Y = 47 } ]
-                let atlas = Atlas.ofView both
-                let brief = Threats.briefOf (threatsOf both atlas) "W1N2"
 
-                Expect.isTrue (brief.Admits(guard "g-1")) "the guard that wins alone is admitted"
+                let alone =
+                    decide
+                        ({ shut with
+                            Creeps = shut.Creeps |> List.filter (fun creep -> creep.Name <> "g-1")
+                         }
+                         |> withGuards [ weak, { X = 20; Y = 47 } ])
+                        Map.empty
+                        Set.empty
+                        None
 
-                Expect.isFalse
-                    (brief.Admits weak)
-                    "and one that loses the raid alone is not, though its row wins"
+                Expect.notEqual
+                    (Map.tryFind "g-weak" alone.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "one that loses the raid alone is not sent, though its row wins"
             }
 
             test
@@ -6750,9 +6754,12 @@ let guardPrecedenceTests =
                         row [ Trespasser ] [ "Trespass" ] OneRungUp hauled [ "g-1"; "r-1" ]
                         [ Resident ], unpooled [ Resident ] [ "ResidentRing" ]
                         [ Harassed ], row [ Harassed ] [ "HarassRing" ] OnTheTier relieved [ "r-1" ]
-                        // #535's hold rule: the guard holding the Guard keeps it
-                        // while it can strike a target there, whatever the kind.
-                        [ ChaseSeen ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "g-1" ]
+                        // Moved on purpose (#615 U3): #535's hold rule kept the
+                        // guard holding the Guard while it could strike a target
+                        // there; one fitness answer takes and keeps it now, and
+                        // one guard block loses the plodder's swing, so it is let
+                        // go and the ranger that kites the plodder down takes it.
+                        [ ChaseSeen ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
                         // Out of sight a chase has no ground; the pool walks it in.
                         [ ChaseDark ], row [] [] OneRungUp one [ "r-1" ]
                         // The raid before what it shares the room with.
@@ -6810,11 +6817,16 @@ let guardPrecedenceTests =
                         // striking nothing (the smallMelee's gun still strikes
                         // 10 from three), so its win is the ranger's chase:
                         // kite ground, one seat (it was the guard's ring, two).
-                        [ ChaseSeen; Core ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "g-1" ]
-                        [ ChaseSeen; Hold ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "g-1" ]
+                        // Moved on purpose (#615 U3), as [ ChaseSeen ]: the ranger
+                        // takes the chase the guard no longer fits; beside the
+                        // smallMelee, which closes on the one-block ranger, neither
+                        // fits, and nobody holds it (the row casts the ranger that
+                        // wins it).
+                        [ ChaseSeen; Core ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
+                        [ ChaseSeen; Hold ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
                         [ ChaseSeen; Trespasser ],
-                        row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "g-1" ]
-                        [ ChaseSeen; Raid ], row [] [ "Kite" ] TwoRungsUp one [ "g-1" ]
+                        row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
+                        [ ChaseSeen; Raid ], row [] [ "Kite" ] TwoRungsUp one []
                         // Quirk, kept: a chase out of sight over a held exit takes
                         // the melee guard's range-1 exit ground, a rung up.
                         [ ChaseDark; Hold ], row [ Hold ] [ "Ring" ] OneRungUp one [ "r-1" ]
@@ -7200,12 +7212,15 @@ let killAdmissionTests =
                     |> Observe.standDown Tuning.defaults (colony.Time + 1)
                     |> fun gate -> gate.Shut
 
-                // Two guard blocks out-trade it.
+                // Two guard blocks out-trade it, and the guard standing there
+                // is the two-block body the row casts: one block loses it
+                // alone, and is not sent (#615 U3).
                 let colony =
                     { declaredRaid [ synapse ] with
                         Bank = bank 1500 1500
                     }
-                    |> withGuards [ guard "g-1", { X = 20; Y = 41 } ]
+                    |> withGuards
+                        [ creepWith "g-1" 0 0 (bodyFor guardPattern 1500), { X = 20; Y = 41 } ]
 
                 Expect.isTrue
                     (blocksBeat guardPattern Stance.Hold colony "W1N2" (guardBlocksReach colony))
@@ -7528,7 +7543,7 @@ let engagementTests =
                     "its row's ask is the pair"
             }
 
-            // #609 (`Facts.winsBeside`): a body struck by a raid it loses alone
+            // #609 (`Facts.fits`): a body struck by a raid it loses alone
             // counts a partner holding the fight that lands while it still
             // stands above its floor, priced at the hits it has left then.
             test
@@ -7539,7 +7554,7 @@ let engagementTests =
                 let world = kitedBy raid [ struck, { X = 25; Y = 45 } ]
 
                 let wins (body: CreepInfo) beside =
-                    Facts.winsBeside world "W1N2" 2 body beside
+                    Facts.fits world Stance.Standoff "W1N2" 2 true body beside
 
                 Expect.isFalse (wins struck []) "the premise: alone it loses (40 against 48 heal)"
 

@@ -92,10 +92,50 @@ module Fighter =
     let ofCounts (counts: BodyPart -> int) (hits: int) : Fighter =
         ofPower counts (Gait.ofParts counts) hits 0
 
-    /// A living creep of ours' fight: its live parts, unboosted (no body of
-    /// ours is boosted at spawn yet), at `Arrival.gaitOf`.
-    let ofCreep (creep: CreepInfo) : Fighter =
-        ofPower (partCount creep.Body) (Arrival.gaitOf creep) creep.Hits.Hits 0
+    /// The order a body of ours carries its parts in, head first, as our rows
+    /// cast them (`Bodies`, a block's parts grouped in its own order): TOUGH,
+    /// then MOVE, the weapons, HEAL last. The engine destroys the head first.
+    let private headFirst =
+        [ Tough; Move; Work; Carry; BodyPart.Claim; Attack; RangedAttack; Heal ]
+
+    /// A living creep of ours' fight worn to `hits` (#615 U3): its parts laid
+    /// head first (`headFirst`), so the parts still acting are the tail those
+    /// hits cover (`Engine.powerAt`), unboosted (no body of ours is boosted at
+    /// spawn yet); its gait `Arrival.gaitOf`'s weight (`movement.js` weighs
+    /// every part but MOVE and CARRY, shot off or not) on the MOVE still
+    /// live (`tick.js` pays two a live MOVE). At the creep's own hits every part it counts is
+    /// live, and a count stating more than its hits cover prices none of the
+    /// rest.
+    let atHits (creep: CreepInfo) (hits: int) : Fighter =
+        let hits = max 0 (min hits creep.Hits.Hits)
+        let counts = partCount creep.Body
+        let parts = creep.Body |> Map.fold (fun total _ count -> total + count) 0
+
+        // Every part counted still acts (the live tick's case): no laying out.
+        let power =
+            if parts * Engine.partHits < hits + Engine.partHits then
+                counts
+            else
+                Engine.powerAt
+                    (headFirst |> List.collect (fun part -> List.replicate (counts part) part))
+                    []
+                    hits
+
+        // The engine weighs every part but MOVE, shot off or not, and each
+        // live MOVE pays two off: a MOVE shot off since only stops paying.
+        let gait = Arrival.gaitOf creep
+
+        ofPower
+            power
+            {
+                Weight = gait.Weight
+                Moves = min gait.Moves (power Move)
+            }
+            hits
+            0
+
+    /// A living creep of ours' fight at its hits (`atHits`).
+    let ofCreep (creep: CreepInfo) : Fighter = atHits creep creep.Hits.Hits
 
     /// A living creep of ours' `Reach` alone, for the readers asking nothing
     /// else of its fight every tick.

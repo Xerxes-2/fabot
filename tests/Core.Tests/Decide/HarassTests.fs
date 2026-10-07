@@ -421,12 +421,16 @@ let harassGuardTests =
 
                 let ours = [ holder, RoomPos.at harassRoom here; second, coming ]
 
+                // Moved on purpose (#615 U3): the other, holding nothing, is
+                // named among the two the verdict wins with, so it is coming
+                // (it takes the Guard by the same answer): it holds. It ran
+                // while #602 counted only the fight's holders.
                 Expect.equal
                     (Map.tryFind
                         holder.Name
                         (decided [ holder.Name, Guard harassRoom ] ours).Assignments)
-                    (Some(taskId Flee))
-                    "the other walking in on its own business: it runs"
+                    (Some(taskId (Guard harassRoom)))
+                    "the other walking in free, one of the pair that wins it: it holds"
 
                 Expect.equal
                     (Map.tryFind
@@ -455,10 +459,84 @@ let harassGuardTests =
                     (Some(taskId (Guard harassRoom)))
                     "hurt, it does not walk back into the fight it lost"
 
-                Expect.equal
+                // Moved on purpose (#615 U3, #613): healed and alone it took
+                // the Guard of a fight it loses alone, walked in, and was let
+                // go where it was struck. One answer for taking and keeping:
+                // alone it stays out, and beside a second ranger free to come,
+                // the pair that wins it, it takes it.
+                Expect.notEqual
                     (Map.tryFind holder.Name (decided [] [ holder, away ]).Assignments)
                     (Some(taskId (Guard harassRoom)))
-                    "healed, it takes the Guard again"
+                    "healed but alone, it takes no fight it loses alone"
+
+                Expect.equal
+                    (Map.tryFind
+                        holder.Name
+                        (decided [] [ holder, away; second, coming ]).Assignments)
+                    (Some(taskId (Guard harassRoom)))
+                    "healed, beside a second free to come, it takes the Guard again"
+            }
+
+            // #611 (W19S25, #609's capture): the ranger sat on the Stand's
+            // seat, inside its ground, while an armed raider stood in the
+            // room, and never shot. An armed raider turns the ambush into
+            // its fight: the ground is beside the raider alone, and the
+            // holder keeps the Guard while it fits that fight (`Facts.fits`);
+            // one it does not fit lets it go, though nothing strikes it there.
+            test
+                "an armed raider in the room turns the Stand's seat into the raider's fight, which only a body that fits it keeps" {
+                let block = Bodies.rangerPattern.Block
+                let holder = creepWith "ranger-r" 0 0 (block @ block)
+                let seat = RoomPos.at harassRoom { standTile with Y = standTile.Y + 1 }
+                let raiderTile = { X = 30; Y = 30 }
+
+                let withRaid (raider: BodyPart list) =
+                    { castingFrom [ declaration ] [ holder, seat ] with
+                        Hostiles =
+                            [
+                                miner "miner" { standTile with X = standTile.X + 1 }
+                                theirs "raider" enemy raiderTile raider
+                            ]
+                    }
+
+                // One RANGED_ATTACK beside a HEAL: 10 a tick into a ranger
+                // that heals 24, under its 40.
+                let weak = withRaid [ Move; Move; RangedAttack; Heal ]
+
+                let held = Map.ofList [ holder.Name, taskId (Guard harassRoom) ]
+
+                let groundHeld (colony: ColonyView) =
+                    Threats.harassRingIn
+                        (threatsOfHeld colony (Atlas.ofView colony) (heldTaskFacts colony held))
+                        harassRoom
+
+                Expect.equal
+                    (groundHeld weak)
+                    (Some(within 1 raiderTile (Set.singleton raiderTile)))
+                    "the ground is beside the raider, not the source's seats"
+
+                Expect.equal
+                    (Map.tryFind holder.Name (decideFrom held weak).Assignments)
+                    (Some(taskId (Guard harassRoom)))
+                    "a raider it beats alone: the seat holder takes the fight"
+
+                // #602's escort: 3 RANGED_ATTACK, 4 HEAL out-heal it alone.
+                let escort =
+                    withRaid (
+                        List.replicate 3 RangedAttack
+                        @ List.replicate 7 Move
+                        @ List.replicate 4 Heal
+                    )
+
+                Expect.isTrue
+                    (groundHeld escort
+                     |> Option.exists (Set.contains (RoomPos.at harassRoom standTile)))
+                    "one no holder fits stops no harassment: the work spots stay ground"
+
+                Expect.notEqual
+                    (Map.tryFind holder.Name (decideFrom held escort).Assignments)
+                    (Some(taskId (Guard harassRoom)))
+                    "one it loses alone: it lets the Guard go, unstruck on its seat"
             }
 
             test "with no enemy on a work spot, the ranger's ground is the Stand's seats" {

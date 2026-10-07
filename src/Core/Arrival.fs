@@ -34,17 +34,15 @@ let paceOf (gait: Gait) : Pace option =
             }
     | _ -> None
 
-/// One body of ours' gait as the engine walks it (#524): its live MOVE
-/// against the weight of every part but MOVE and empty CARRY
-/// (`fatigueFactorOf`), and of every part shot off, which the engine still
-/// weighs. A part shot off reads as weight even where it was a MOVE, the
-/// slower and so the safe direction.
+/// One body of ours' gait as the engine walks it (#524, `movement.js`): its
+/// live MOVE against the weight of every part but MOVE and empty CARRY
+/// (`fatigueFactorOf`), and of every part shot off but a MOVE or a CARRY
+/// (`CreepInfo.ShotOff`), which the engine still weighs.
 let gaitOf (creep: CreepInfo) : Gait =
     let factor = fatigueFactorOf creep
-    let live = creep.Body |> Map.fold (fun total _ count -> total + count) 0
 
     {
-        Weight = factor.FatigueParts + max 0 (creep.Hits.HitsMax / Engine.partHits - live)
+        Weight = factor.FatigueParts + creep.ShotOff
         Moves = factor.MoveParts
     }
 

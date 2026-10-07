@@ -433,6 +433,7 @@ let arrivalTests =
                     { whole with
                         Body = Map.ofList [ RangedAttack, 1; Heal, 1; Move, 1 ]
                         Hits = { Hits = 300; HitsMax = 600 }
+                        ShotOff = 1
                     }
 
                 Expect.equal
@@ -442,8 +443,8 @@ let arrivalTests =
 
                 Expect.equal
                     (Arrival.gaitOf shot)
-                    { Weight = 5; Moves = 1 }
-                    "three parts shot off: the two acting and the three gone, on the one MOVE left"
+                    { Weight = 3; Moves = 1 }
+                    "a RANGED_ATTACK and two MOVE shot off: the two acting and the gun gone, on the one MOVE left; a MOVE shot off weighs nothing (`movement.js`, #615 U3, was five)"
 
                 let atlas =
                     rooms (fun layer ->
@@ -458,8 +459,8 @@ let arrivalTests =
 
                 Expect.equal
                     (Arrival.ticksAt body.Ticks { X = 12; Y = 25 })
-                    (Some 6)
-                    "then five ticks a plain tile: ten fatigue on one MOVE"
+                    (Some 4)
+                    "then three ticks a plain tile: six fatigue on one MOVE"
             }
 
             test

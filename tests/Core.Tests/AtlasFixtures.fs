@@ -93,6 +93,7 @@ let worker name =
         Moved = false
         DrawnFrom = None
         Body = Map.ofList [ Work, 1; Carry, 1; Move, 1 ]
+        ShotOff = 0
     }
 
 /// A creep with the given carried energy and body's part counts.
@@ -113,6 +114,7 @@ let creepWith name energy body =
         Moved = false
         DrawnFrom = None
         Body = body |> List.countBy id |> Map.ofList
+        ShotOff = 0
     }
 
 /// The room a projection calls its own, defaulting the way

@@ -1103,6 +1103,12 @@ let private creepInfo (a: Arena) (b: Body) : CreepInfo =
         Minerals = Map.empty
         FreeCapacity = max 0 (carry - b.Energy - b.Thorium)
         Body = active |> List.countBy id |> Map.ofList
+        ShotOff =
+            List.length b.Parts
+            - List.length active
+            - (List.take (List.length b.Parts - List.length active) b.Parts
+               |> List.filter (fun part -> part = Move || part = Carry)
+               |> List.length)
         Moved =
             match Map.tryFind b.Id a.Carried.LastPositions with
             | Some last -> last <> b.At

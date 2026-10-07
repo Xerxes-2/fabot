@@ -845,26 +845,65 @@ let fighterTests =
             }
 
             test
-                "a living creep's fight, blind to its part order, weighs a shot-off MOVE (Arrival.gaitOf)" {
+                "a living creep's fight weighs what is shot off as the engine does (Arrival.gaitOf)" {
                 let body = guardPattern.Block
 
+                // #615 U3 (`movement.js`): the TOUGH shot off still weighs,
+                // the four MOVE shot off do not; it weighed all five.
                 let hurt =
                     { creepWith "g-1" 0 0 body with
                         Body = partsOf (Engine.liveParts body 450)
                         Hits = { Hits = 450; HitsMax = 1000 }
+                        ShotOff = 1
                     }
 
                 Expect.equal
                     (numbersOf (Fighter.ofCreep hurt))
-                    {| numbersOf (Fighter.ofParts body [] 450) with
-                        Gait = { Weight = 9; Moves = 1 }
-                    |}
-                    "the same weapons and heal; five parts shot off weigh as five, the four MOVE among them too"
+                    (numbersOf (Fighter.ofParts body [] 450))
+                    "the same weapons, heal and gait as the body read whole at its hits"
 
                 Expect.equal
                     (numbersOf (Fighter.ofCreep (creepWith "g-2" 0 0 body)))
                     (numbersOf (wholeFighter body))
                     "whole, the two readings agree"
+            }
+
+            // #615 U3: every Fighter field off the live parts, head first as
+            // our rows cast them. Before, a creep's damage and heal read its
+            // part counts as given, and a worn body (`Facts.winsBeside`) lost
+            // each kind in the share of its hits, its shots with its MOVE.
+            test
+                "a creep worn to fewer hits loses its head first, and a count past its hits prices nothing" {
+                let ranger = creepWith "r-1" 0 0 (rangerPattern.Block @ rangerPattern.Block)
+
+                Expect.equal
+                    (numbersOf (Fighter.atHits ranger 650))
+                    {| numbersOf (wholeFighter (rangerPattern.Block @ rangerPattern.Block)) with
+                        Gait = { Weight = 6; Moves = 1 }
+                        Hits = 650
+                    |}
+                    "five MOVE gone off the head: four shots and two HEAL act on one MOVE, under the same weight (a MOVE weighs nothing, live or dead)"
+
+                Expect.equal
+                    (numbersOf (Fighter.atHits ranger 150))
+                    {| numbersOf (wholeFighter (rangerPattern.Block @ rangerPattern.Block)) with
+                        Damage = [ 0; 0; 0; 0 ]
+                        Heal = [ 24; 24; 24; 24 ]
+                        Reach = 0
+                        Gait = { Weight = 6; Moves = 0 }
+                        Hits = 150
+                    |}
+                    "the shots gone, the two HEAL left"
+
+                let stated =
+                    { creepWith "g-1" 0 0 guardPattern.Block with
+                        Hits = { Hits = 150; HitsMax = 1000 }
+                    }
+
+                Expect.equal
+                    (numbersOf (Fighter.ofCreep stated))
+                    (numbersOf (Fighter.atHits (creepWith "g-1" 0 0 guardPattern.Block) 150))
+                    "a body counting parts its hits do not cover is priced on the tail they do"
             }
 
             test "boosts multiply the parts they act on, and a boosted TOUGH is counted" {

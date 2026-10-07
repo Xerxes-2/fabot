@@ -1023,15 +1023,6 @@ let internal blockFighter (pattern: BodyPattern) : Fighter =
 let internal blocksFighter (pattern: BodyPattern) (blocks: int) : Fighter =
     Fighter.ofCounts (blocksOf pattern.Block blocks) (blocks * (blockFighter pattern).Hits)
 
-/// What a body of ours heals itself a tick while it fights: a ranged body's
-/// heal acts beside its shot (#411), and a melee body's is suppressed by its
-/// own attack, so it heals nothing.
-let selfHealOf (parts: BodyPart -> int) =
-    if parts RangedAttack > 0 then
-        Engine.healPower * parts Heal
-    else
-        0
-
 /// Whether towers not ours fire in a room (`WorldRoom.Towers`: a
 /// stronghold's, a rival's, never an ally's), every tile of it under them.
 /// No body of ours wins or kites anything there (#576): the towers strike
@@ -1683,23 +1674,17 @@ let internal kitedDown (view: ColonyView) (fighter: Fighter) (room: string) : bo
     && List.forall stoodOff view.Hostiles
     && exchangeIn view room [ fighter ] = Kites
 
-/// The ticks bodies of these live parts take, together and beside our towers
-/// there, to kill the raid standing in a room once they stand at it (#596):
-/// its armed bodies' hits, TOUGH first, against their damage net of the
-/// raid's heal (`raidPrice`). Our clock alone: what the raid deals back is
-/// the exchange's question, not this one. `Some 0` where no armed body
-/// stands there; None where the damage never out-heals the raid.
-let private killTicks
-    (view: ColonyView)
-    (room: string)
-    (bodies: (BodyPart -> int) list)
-    : int option =
+/// The ticks these fighters take, together and beside our towers there, to
+/// kill the raid standing in a room once they stand at it (#596): its armed
+/// bodies' hits, TOUGH first, against their damage net of the raid's heal
+/// (`raidPrice`). Our clock alone: what the raid deals back is the
+/// exchange's question, not this one. `Some 0` where no armed body stands
+/// there; None where the damage never out-heals the raid.
+let private killTicks (view: ColonyView) (room: string) (fighters: Fighter list) : int option =
     let raid = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
     let price = raidPrice view Reaction.strike (fun _ -> Engine.meleeRange) raid
 
-    let dealt =
-        ourTowersOn view room raid
-        + List.sumBy (fun parts -> dealtOn view raid (Fighter.ofCounts parts 0)) bodies
+    let dealt = ourTowersOn view room raid + List.sumBy (dealtOn view raid) fighters
 
     if price.Tough = 0 && price.Hits = 0 then
         Some 0
@@ -1750,76 +1735,210 @@ let private walkToRaid (view: ColonyView) (raid: HostileInfo list) (creep: Creep
 /// kiter's dance about its range, three steps either way.
 let internal atFight (walk: int) = walk <= Engine.rangedRange
 
-/// A body of ours worn down to `hits`: each live part count cut in the
-/// share of hits it keeps, rounded up — which parts go first is the body's
-/// order, which the counts do not carry, so every kind is lost alike.
-let private wornTo (creep: CreepInfo) (hits: int) : CreepInfo =
-    let now = max 1 creep.Hits.Hits
-    let hits = max 0 (min hits creep.Hits.Hits)
-
-    { creep with
-        Hits = { creep.Hits with Hits = hits }
-        Body = creep.Body |> Map.map (fun _ count -> (count * hits + now - 1) / now)
-    }
-
-/// Whether a body of ours wins the fight in a room beside its side there
-/// (#602): the exchange (`bodiesWin`) by it and those of `beside` at the
+/// Whether a body of ours wins the fight in a room alone or beside its side
+/// there (#602): the exchange (`exchangeHeld`) by it and those of `beside` at the
 /// fight (`atFight`), and of those holding the fight (the flag, beside its
 /// walk's ticks there where its colony's Atlas prices one), every one that lands within
 /// `soon` ticks, or (#609) by its walk's ticks while this body still stands
 /// above its floor: a quarter of its hits, or the raid's damage over twice
 /// `soon`, whichever is more — the slack for a landing a few ticks late.
-/// Meanwhile the raid's whole damage strikes it, net of the heal of the
-/// parts it still has (`wornTo`), and the exchange is priced on what is
-/// left of it when the last of them lands. A holder this view places no
+/// Meanwhile the raid's whole damage strikes it, net of what it heals
+/// itself at its own range with the parts it still has (`Fighter.atHits`,
+/// its head lost first), and the exchange is priced on what is left of it
+/// when the last of them lands. A holder this view places no
 /// walk for counts only within `soon`, its straight tiles. One that lands
 /// later strikes nothing beside it, whatever a verdict counted it for.
 /// Before #609 a friend farther than `soon` was never counted, so a ranger
 /// that outlasts a 3RA4H kiter by two hundred ticks ran from it, and the
-/// pair never met.
-let winsBeside
+/// pair never met. A partner counts only while it lives to land (#615 U3).
+let private winsBeside
     (view: ColonyView)
+    (stance: Stance)
     (room: string)
     (soon: int)
+    (holding: bool)
     (creep: CreepInfo)
     (beside: (CreepInfo * bool * int option) list)
     =
     let raid = raidersIn view room
+    let inRoom = view.Hostiles |> List.filter (fun h -> h.Pos.Room = room)
+    let price = raidPrice view Reaction.strike (fun _ -> Engine.meleeRange) inRoom
 
-    let price =
-        raidPrice
-            view
-            Reaction.strike
-            (fun _ -> Engine.meleeRange)
-            (view.Hostiles |> List.filter (fun h -> h.Pos.Room = room))
+    // What the raid takes off this body a tick, struck alone (#589's focus)
+    // at their standoff, past what it heals itself there.
+    let struck (me: Fighter) =
+        (raidPrice view Reaction.strike (standoff view me) inRoom).Damage
+        - me.HealAt(rangeOn view inRoom me)
+
+    // A body not holding the fight is priced at the hits it keeps by its
+    // next decision once in it (`soon` ticks struck alone): the holder lets
+    // go only of a fight it loses, and one let go comes back only to a fight
+    // it still fits once struck, so the answer does not flip on its wounds.
+    let start =
+        if holding then
+            creep.Hits.Hits
+        else
+            max 1 (creep.Hits.Hits - soon * max 0 (struck (Fighter.ofCreep creep)))
 
     let floor = max (creep.Hits.HitsMax / 4) (price.Damage * 2 * soon)
 
-    // This body's hits after `ticks` of the raid alone, its heal worn with it.
+    // This body's hits after `ticks` of the raid alone, its heal worn with
+    // it, priced once a live part count.
     let after ticks =
+        let heals = System.Collections.Generic.Dictionary<int, int>()
+
+        let healAt hits =
+            let live = (hits + Engine.partHits - 1) / Engine.partHits
+
+            match heals.TryGetValue live with
+            | true, heal -> heal
+            | _ ->
+                let worn = Fighter.atHits creep hits
+                let heal = worn.HealAt(Fighter.bestRange worn)
+                heals.[live] <- heal
+                heal
+
         let rec go t hits =
             if t >= ticks || hits <= 0 then
                 hits
             else
-                let heal = selfHealOf (partCount (wornTo creep hits).Body)
-                go (t + 1) (hits - max 0 (price.Damage - heal))
+                go (t + 1) (hits - max 0 (price.Damage - healAt hits))
 
-        go 0 creep.Hits.Hits
+        go 0 start
 
     let counted =
         beside
         |> List.choose (fun (other, holds, ticks) ->
             match walkToRaid view raid other, ticks with
             | Some walk, _ when atFight walk -> Some(other, 0)
-            | _, Some ticks when holds && (ticks <= soon || after ticks > floor) ->
+            | _, Some ticks when
+                holds && other.TicksToLive > ticks && (ticks <= soon || after ticks > floor)
+                ->
                 Some(other, ticks)
-            | Some walk, None when holds && atFight (walk - soon) ->
+            | Some walk, None when holds && other.TicksToLive > walk && atFight (walk - soon) ->
                 Some(other, walk - Engine.rangedRange)
             | _ -> None)
 
     let waits = counted |> List.map snd |> List.fold max 0
 
-    wornTo creep (after waits) :: List.map fst counted |> bodiesWin view room
+    let wins fighters = exchangeIn view room fighters |> won
+
+    // Beside a side that wins without it, it fits only if it outlives the
+    // fight: the raid may strike it alone until the side's damage kills the
+    // raid (`killTicks`). One the raid falls on sooner adds nothing the side
+    // needs and is fed to it, whatever the side's hits summed say; one the
+    // side needs fights on.
+    let outlives (me: Fighter) (side: Fighter list) =
+        let lost = struck me
+
+        lost <= 0
+        || killTicks view room (me :: side)
+           |> Option.exists (fun ticks -> me.Hits > lost * ticks)
+
+    let alone = Fighter.atHits creep start
+
+    // A body lost anyway spends itself (#615 U3): what leaving saves is the
+    // life it would keep past the raid's kill of it, at its live parts'
+    // cost (none for one that ages out first, or before it walks home);
+    // what staying buys is the raid it takes off meanwhile that a kill
+    // keeps: its net damage alone at their standoff, at the raid's cost a
+    // hit, where it kills the raid itself while it stands or the side
+    // finishes it (`killTicks`: those at the fight and the holders that
+    // live to land, our towers beside), less what the raid heals back
+    // before they land. Damage no kill keeps is healed back and buys
+    // nothing. A body whose life is nearly spent fights on while it still
+    // deals damage a kill keeps.
+    let spends () =
+        let lost = struck alone
+        let walk = walkToRaid view raid creep |> Option.defaultValue 0
+        let left = creep.TicksToLive - walk
+
+        let dies =
+            if lost <= 0 then
+                System.Int32.MaxValue
+            else
+                alone.Hits / lost
+
+        let fought = max 0 (min left dies)
+
+        let finishers =
+            beside
+            |> List.choose (fun (other, holds, ticks) ->
+                match walkToRaid view raid other, ticks with
+                | Some walk, _ when atFight walk -> Some(other, 0)
+                | _, Some ticks when holds && other.TicksToLive > ticks -> Some(other, ticks)
+                | _ -> None)
+
+        let dealt =
+            int64 (max 0 (alone.DamageAt(rangeOn view inRoom alone) - price.Healing))
+            * int64 fought
+
+        let net =
+            if killTicks view room [ alone ] |> Option.exists (fun ticks -> ticks <= fought) then
+                dealt
+            elif
+                not (List.isEmpty finishers)
+                && Option.isSome (
+                    killTicks view room (finishers |> List.map (fst >> Fighter.ofCreep))
+                )
+            then
+                let gap = max 0 ((finishers |> List.map snd |> List.min) - fought)
+                max 0L (dealt - int64 price.Healing * int64 gap)
+            else
+                0L
+
+        let raidValue = raid |> List.sumBy (fun h -> bodyCost h.Body) |> int64
+        let raidHits = int64 (price.Tough + price.Hits)
+
+        let mine =
+            creep.Body
+            |> Map.toList
+            |> List.collect (fun (part, count) -> List.replicate count part)
+            |> bodyCost
+            |> int64
+
+        let gain =
+            if raidHits <= 0L then
+                0L
+            else
+                min raidValue (net * raidValue / raidHits)
+
+        gain > mine * int64 (max 0 (left - dies)) / int64 Engine.creepLifetime
+
+    // A post it holds (`Stance.Hold`, #531) is held while it stands: the raid
+    // must come to it to hurt our work, and one keeping off takes nothing
+    // off it its heal does not put back.
+    stance = Stance.Hold && struck alone <= 0
+    // Alone first: a partner the raid strikes can turn a kite into a trade.
+    || wins [ alone ]
+    || not (List.isEmpty counted)
+       && (let me = Fighter.atHits creep (after waits)
+           let side = List.map (fst >> Fighter.ofCreep) counted
+           wins (me :: side) && (outlives me side || not (wins side)))
+    || spends ()
+
+/// Whether a body fits a room's fight (#615 U3): the one answer taking a
+/// Guard and keeping it read, for every body, whatever its row or the room's
+/// kind. A room no raider stands in has no fight to lose. Else the body ends
+/// the raid at the standoff beside its side (`winsBeside`): those at the
+/// fight and those holding it or arriving at it in time, trading or kiting
+/// (`won`); or, holding a post (`Stance.Hold`, #531), it stands there
+/// whatever keeps off it; or, its life nearly spent, it buys more of the
+/// raid than leaving saves of it. The room's verdict is what a cast would
+/// come to, and loses nothing a body standing by wins. One that does not
+/// fit is let go, and never walks in; one not `holding` the fight is
+/// priced once struck to its next decision.
+let fits
+    (view: ColonyView)
+    (stance: Stance)
+    (room: string)
+    (soon: int)
+    (holding: bool)
+    (creep: CreepInfo)
+    (beside: (CreepInfo * bool * int option) list)
+    : bool =
+    List.isEmpty (raidersIn view room)
+    || winsBeside view stance room soon holding creep beside
 
 /// How a body of ours ends the raid standing in a room alone (#596): its
 /// walk there (`walkToRaid`) and then its kill (`killTicks`), the kill
@@ -1832,7 +1951,7 @@ let endsIn (view: ColonyView) (room: string) (creep: CreepInfo) : (int * int) op
         walkToRaid view raid creep
         |> Option.map (fun walk ->
             walk,
-            killTicks view room [ partCount creep.Body ]
+            killTicks view room [ Fighter.ofCreep creep ]
             |> Option.filter (fun kill -> walk + kill <= creep.TicksToLive)
             |> Option.defaultValue Engine.creepLifetime)
 
@@ -1876,9 +1995,7 @@ let kiteSeats (view: ColonyView) (room: string) (holding: Set<string>) : int =
 
                 (atFight walk
                  || Set.contains creep.Name holding && atFight (walk - Engine.rangedRange)),
-                (walk,
-                 creep.TicksToLive,
-                 dealtOn view inRoom (Fighter.ofCounts (partCount creep.Body) 0)))
+                (walk, creep.TicksToLive, dealtOn view inRoom (Fighter.ofCreep creep)))
 
         // The tick these bodies end the raid on.
         let endOf chosen =
@@ -1968,7 +2085,7 @@ let homeHoldReleases
             own @ fleet
             |> List.distinctBy (fun body -> body.Name)
             |> List.filter (fun body -> body.Name <> creep.Name && not (leaving body home))
-            |> List.map (fun body -> Fighter.ofCounts (partCount body.Body) body.Hits.Hits)
+            |> List.map Fighter.ofCreep
 
         let holds (home: string) =
             let quiet = bouncingInto view home |> List.forall (disturbs view resident >> not)
@@ -2247,7 +2364,7 @@ let private priceAmong (placed: string -> string option) (pricers: Pricer list) 
 
     // A fighter of this colony that may take the room's raid now: one it
     // sends, lent by its colony's rule, that strikes every raider; and
-    // whether it wins alone or, a ranger, kites it down.
+    // whether it wins alone, or kites it down.
     let fit (p: Pricer) (wins: ColonyView -> CreepInfo -> bool) =
         let priced = aroundOf p
 
@@ -2259,16 +2376,14 @@ let private priceAmong (placed: string -> string option) (pricers: Pricer list) 
             && wins priced creep)
 
     let kites (p: Pricer) =
-        fit p (fun priced creep ->
-            isRangerRowBody creep && kitedDown priced (Fighter.ofCreep creep) room)
+        fit p (fun priced creep -> kitedDown priced (Fighter.ofCreep creep) room)
 
-    // Whether a fighter of this colony takes the raid now, or already holds
-    // the room's Guard: the verdict starts a fight and does not end it on a
-    // tick a body's live parts dip under the price.
+    // Whether a fighter of this colony takes the raid now — it ends it alone,
+    // trading or kiting (`bodiesWin`), whatever its row (#615 U3) —, or
+    // already holds the room's Guard: the verdict starts a fight and does
+    // not end it on a tick a body's live parts dip under the price.
     let takes (p: Pricer) =
-        p.Holds room
-        || kites p
-        || fit p (fun priced creep -> bodiesWin priced room [ creep ])
+        p.Holds room || fit p (fun priced creep -> bodiesWin priced room [ creep ])
 
     let seeing = pricers |> List.filter (fun p -> present p && raided (aroundOf p) room)
 
