@@ -114,6 +114,15 @@ let mutable private observeLog: Observe.ObserveState option = None
 [<Emit("globalThis")>]
 let private globalThis: obj = jsNative
 
+// The change this bundle was built from, off the banner `scripts/bundle.mjs`
+// writes; a bundle built any other way (the tests, the harness off
+// `build/fable`) has none.
+[<Emit("(typeof __FABOT_VERSION__ === 'string' ? __FABOT_VERSION__ : 'unbuilt')")>]
+let private bannerVersion: string = jsNative
+
+// Read once, at module load: once per global reset.
+let private version = bannerVersion
+
 // The five process-lifetime slots, on the global for the console (#395):
 // `__fabot.sizes()` and `__fabot.drop.<slot>()`, so a heap that climbs with
 // every count flat can be attributed by dropping one slot, `gc()`, and
@@ -157,6 +166,7 @@ do
     globalThis?__fabot <-
         createObj
             [
+                "version" ==> version
                 "sizes" ==> sizes
                 "drop"
                 ==> createObj
@@ -364,6 +374,7 @@ let private writeCpuLine (readings: Observe.CpuReadings) =
     | None ->
         ObserveMemory.saveCpu line
         ObserveMemory.dropProbe ()
+        ObserveMemory.saveVersion version Game.time
 
     cpuLine <- Some line
 

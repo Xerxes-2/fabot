@@ -2446,3 +2446,13 @@ let appendCpu (state: CpuState) =
 /// bundle writes them after this, in the wrapper around `loop`.
 let dropProbe () =
     emitJsStatement Memory "delete $0.__probe"
+
+/// The change the running bundle was built from (`scripts/bundle.mjs`) and the
+/// tick it was loaded on, at `Memory.fabot.observe.version` (#634): written on
+/// the tick after a global reset, read by `observe health` and `observe cpu`
+/// and by nothing in the bot.
+let saveVersion (build: string) (reset: int) =
+    let raw = createEmpty<obj>
+    raw?build <- build
+    raw?reset <- reset
+    writeObserveLeaf "version" raw

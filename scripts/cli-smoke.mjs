@@ -349,8 +349,9 @@ smoke("observe outposts refuses a declared list off its shape", () => {
 
 // ---- probe.mjs ----------------------------------------------------------
 
-// The anchors the wrapper needs, as esbuild writes top-level functions.
-const bundle = `"use strict";
+// The anchors the wrapper needs, as esbuild writes top-level functions,
+// under the banner `scripts/bundle.mjs` writes.
+const bundle = `var __FABOT_VERSION__ = "abc 123+dirty";
 function SpatialInfoModule_homeName(s) { return s; }
 function planTasks() { return 1; }
 function decideUnarbitrated(view) { return planTasks() + planTasks(); }
@@ -371,6 +372,14 @@ smoke("probe wraps a bundle that then writes Memory.__probe", () => {
   assert.deepEqual(probe.fns["W1N1:planTasks"], [0, 4]);
   assert.deepEqual(probe.fns["W1N1:decide"], [0, 2]);
   assert.deepEqual(probe.fns["-:tick"], [0, 2]);
+  assert.equal(vm.runInNewContext(`${readFileSync(wrappedPath, "utf8")}\n__FABOT_VERSION__`, context), "abc 123+dirty+probe");
+});
+smoke("probe refuses a bundle with no version banner", () => {
+  const bare = join(dir, "bare.js");
+  writeFileSync(bare, bundle.slice(bundle.indexOf("\n")));
+  const { code, err } = run("probe.mjs", [bare, "--out", join(dir, "y.js"), "--fns", "planTasks"]);
+  assert.equal(code, 1);
+  assert.ok(!crashed(err) && err.includes("no version banner"), err);
 });
 smoke("probe refuses a bundle it already wrapped", () => {
   const { code, err } = run("probe.mjs", [wrappedPath, "--out", join(dir, "again.js"), "--fns", "planTasks"]);

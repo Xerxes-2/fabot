@@ -5769,9 +5769,10 @@ if (unprojected.length) {
     const row = line[line.length - 1] ?? {};
     const pops = Object.values(row.floods ?? {}).reduce((sum, f) => sum + (f?.[2] ?? 0), 0);
     const memory = { ...globalThis.Memory };
+    // The bundle's name (#634) differs between two builds by design.
     memory.fabot = {
       ...memory.fabot,
-      observe: { ...memory.fabot?.observe, cpu: line.map((r) => r.t) },
+      observe: { ...memory.fabot?.observe, cpu: line.map((r) => r.t), version: undefined },
     };
     resetRows.push({ ms, row, pops, print: fingerprint(memory) });
     // The first reset's Memory, for attributing a moved reset fingerprint.

@@ -101,6 +101,14 @@ import { actionSummary, bodySummary, readHistory, usernamesOf } from "./room-his
 import { MEAN_MS, TICK_MS, report as cpuReport } from "./cpu-trigger.mjs";
 import { switchesLine } from "./switches.mjs";
 
+// The change the running bundle was built from and the tick it was loaded on
+// (#634), off `Memory.fabot.observe.version` (`ObserveMemory.saveVersion`):
+// the first line of `health` and `cpu`, so a regression names its change.
+const versionLine = (leaf) =>
+  leaf != null && typeof leaf === "object" && typeof leaf.build === "string"
+    ? `bundle   ${leaf.build}, loaded t${leaf.reset}`
+    : "bundle   not named (the deployed bundle predates #634)";
+
 const usage =
   "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | " +
   "raids [--colony <home>] [--json] | outposts [--colony <home>] [--json] | " +
@@ -552,6 +560,7 @@ if (command === "console") {
   if (observe == null || typeof observe !== "object") {
     fail("no observe subtree at Memory.fabot.observe — the bundle is not writing one");
   }
+  console.log(versionLine(observe.version));
   const colonies = observe.colonies && typeof observe.colonies === "object" ? observe.colonies : {};
   const allHomes = Object.keys(colonies);
   if (colonyArg !== undefined && !allHomes.includes(colonyArg)) {
@@ -2421,6 +2430,8 @@ if (command === "console") {
   // a split is exactly the row an operator opens `--json` to find and
   // repair, and a guard that killed the dump first would leave it visible
   // nowhere.
+  // `--json` stays the rows alone, for jq.
+  if (!json) console.log(versionLine(await memoryGet("fabot.observe.version")));
   if (json) {
     console.log(JSON.stringify(stored.ticks, null, 2));
   } else if (stored.ticks.length === 0) {

@@ -14,6 +14,9 @@ const apiUrl = (process.env.SCREEPS_API_URL ?? "https://screeps.com/season").rep
 const branch = process.env.SCREEPS_BRANCH; // undefined -> server uses the active branch
 
 const main = await readFile(new URL("../dist/main.js", import.meta.url), "utf8");
+// The change the bundle names (`scripts/bundle.mjs`, #634), for the record.
+const banner = main.match(/^var __FABOT_VERSION__ = ("(?:[^"\\]|\\.)*");/);
+const version = banner ? JSON.parse(banner[1]) : "unnamed (no version banner)";
 
 const res = await fetch(`${apiUrl}/api/user/code`, {
   method: "POST",
@@ -25,4 +28,6 @@ if (!res.ok || body.ok !== 1) {
   console.error(`upload failed: HTTP ${res.status}`, body);
   process.exit(1);
 }
-console.log(`uploaded ${(main.length / 1024).toFixed(1)} KiB to ${apiUrl} branch "${branch ?? "(active)"}"`);
+console.log(
+  `uploaded ${version}, ${(main.length / 1024).toFixed(1)} KiB, to ${apiUrl} branch "${branch ?? "(active)"}"`,
+);

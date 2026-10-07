@@ -1461,6 +1461,24 @@ wire("switches: each switch in effect and its source, as observe health and cpu 
   assert.equal(fightOnly, true);
 });
 
+// ---- the bundle's name (#634) -------------------------------------------
+
+wire("version: the bundle's change and its reset tick, as observe health and cpu read them", async () => {
+  const { saveVersion } = await import(MODULE);
+
+  globalThis.Memory = rootMemoryWith("cadence", 3);
+  saveVersion("pmvunwvtkxys 56cb9d3e4893+dirty", 42);
+  assert.equal(
+    stable(globalThis.Memory.fabot.observe.version),
+    stable({ build: "pmvunwvtkxys 56cb9d3e4893+dirty", reset: 42 }),
+  );
+  assert.equal(globalThis.Memory.fabot.observe.cadence, 3, "the leaf beside it stands untouched");
+
+  globalThis.Memory = {};
+  saveVersion("unbuilt", 7);
+  assert.equal(stable(globalThis.Memory.fabot.observe.version), stable({ build: "unbuilt", reset: 7 }), "an absent subtree is made");
+});
+
 wire("positions: what savePositions writes is what loadPositions reads", async () => {
   const { loadPositions, savePositions } = await import(MODULE);
   const { ofArray } = await import(LIST);

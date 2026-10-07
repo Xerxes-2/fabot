@@ -91,7 +91,13 @@ if (missing.length > 0) {
   );
 }
 
-let patched = source;
+// The bundle's name (`scripts/bundle.mjs`, #634) is marked, so a probe live
+// never reads as the build it wraps.
+const BANNER = /^var __FABOT_VERSION__ = ("(?:[^"\\]|\\.)*");/;
+const banner = source.match(BANNER);
+if (!banner) fail(`${input} carries no version banner on its first line — run npm run build first`);
+
+let patched = source.replace(BANNER, () => `var __FABOT_VERSION__ = ${JSON.stringify(`${JSON.parse(banner[1])}+probe`)};`);
 for (const fn of [...fns, "decideUnarbitrated", "loop"]) {
   patched = patched.replace(`\nfunction ${fn}(`, `\nfunction ${fn}__orig(`);
 }
