@@ -508,7 +508,8 @@ let private fightActs
 
     // A melee fighter steps onto the target it swings at (#535): its move is
     // that step, and the mover leaves its tile standing, as a tired body's.
-    let glued = glue view atlas threats assigned
+    let glued =
+        glue view atlas threats assigned (glueChases view atlas threats assigned)
 
     let movement =
         let stepping =
@@ -1248,6 +1249,7 @@ and private finishWhole (tail: WholeTail) (outcomes: MatchOutcome list) : Decisi
             ]
         Aims = aims view atlas threats assigned
         Volleys = volleys view atlas threats assigned
+        Mired = mired view atlas threats assigned
         Drawn =
             view.Creeps
             |> List.choose (fun creep ->
@@ -1510,6 +1512,7 @@ and private joinFight
                     Later = []
                     Aims = aims view atlas threats assigned
                     Volleys = volleys view atlas threats assigned
+                    Mired = mired view atlas threats assigned
                     Drawn =
                         view.Creeps
                         |> List.choose (fun creep ->

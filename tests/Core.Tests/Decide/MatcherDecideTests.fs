@@ -1813,6 +1813,7 @@ let fightOnlyDecideTests =
                         first.Intents
                         first.Aims
                         first.Volleys
+                        first.Mired
 
                 let last = LightTick.ofPlans (glance 0) Set.empty [ "W1N1", plan ]
 
@@ -1865,6 +1866,7 @@ let fightOnlyDecideTests =
                         fight.Intents
                         fight.Aims
                         fight.Volleys
+                        fight.Mired
 
                 let record =
                     LightTick.recorded

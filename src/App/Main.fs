@@ -1123,6 +1123,7 @@ let private fullTick
                             decision.Intents
                             decision.Aims
                             decision.Volleys
+                            decision.Mired
 
                     colony.Home,
                     LightTick.recorded

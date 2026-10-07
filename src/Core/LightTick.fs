@@ -124,6 +124,9 @@ type Plan =
         Aims: Intent list
         /// Each aiming ranger's guns and shields (`Emitter.volleys`, #537).
         Volleys: Map<string, Volley>
+        /// The tiles about each melee glue body whose step holds it
+        /// (`Emitter.mired`, #614), which its light tick glue keeps off.
+        Mired: Map<string, Set<RoomPos>>
     }
 
 /// What the last full tick left for the ticks after it: every colony's plan,
@@ -426,6 +429,7 @@ let plan
     (intents: Intent list)
     (aims: Intent list)
     (volleys: Map<string, Volley>)
+    (mired: Map<string, Set<RoomPos>>)
     : Plan =
     {
         Creeps = Fresh.setOfSeq creeps
@@ -442,6 +446,11 @@ let plan
         Fought = intents |> List.exists fights
         Aims = aims
         Volleys = volleys |> Map.toSeq |> Fresh.mapOfSeq
+        Mired =
+            mired
+            |> Map.toSeq
+            |> Seq.map (fun (name, tiles) -> name, Fresh.setOfSeq tiles)
+            |> Fresh.mapOfSeq
     }
 
 /// A plan's acts on the glance `now`: its `Acts`, each creep's later act
@@ -568,6 +577,7 @@ let private without (claimed: Set<string>) (plan: Plan) : Plan =
             Fought = plan.Fought
             Aims = plan.Aims |> List.filter striking
             Volleys = plan.Volleys |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
+            Mired = plan.Mired |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
         }
 
 /// The record of the plans by home, each body claimed by the first plan that
@@ -617,7 +627,7 @@ and lastFullWith
     : LastFull =
     let creeps = glance.Creeps |> Map.keys |> Set.ofSeq
 
-    ofPlans glance Set.empty [ "", plan glance creeps steps next [] intents [] Map.empty ]
+    ofPlans glance Set.empty [ "", plan glance creeps steps next [] intents [] Map.empty Map.empty ]
 
 /// The record with only these colonies' plans.
 let only (homes: Set<string>) (last: LastFull) : LastFull =
@@ -650,6 +660,7 @@ let private merged (now: Glance) (last: LastFull) : Plan =
             Fought = plans |> List.exists _.Fought
             Aims = plans |> List.collect _.Aims
             Volleys = mapOf _.Volleys
+            Mired = mapOf _.Mired
         }
 
 /// The rooms the plans' volleys stand in (`Glance.PowerCreeps`).
@@ -1083,6 +1094,7 @@ let withFight (fighters: Set<string>) (fresh: Plan) (carried: Plan) : Plan =
         Fought = fresh.Fought
         Aims = economy.Aims @ fresh.Aims
         Volleys = joined _.Volleys
+        Mired = joined _.Mired
     }
 
 /// The ids the last full tick's acts name, for the glance to look up
@@ -1274,7 +1286,8 @@ let intents (record: LastFull) (now: Glance) : Intent list =
             // never off our structure's tile (a rampart). The light tick
             // glances no maps (movement S5 owns its margin), so it reads the
             // target's tile as kept where no other melee body of theirs
-            // swings at it.
+            // swings at it, and the full tick's mired tile, which holds the
+            // body while the target walks off, as not (#614).
             let glued =
                 match issued with
                 | Some(AttackCreep _ as aim, true) ->
@@ -1287,12 +1300,16 @@ let intents (record: LastFull) (now: Glance) : Intent list =
 
                     aimed aim
                     |> Option.bind (fun (tile, _) ->
+                        let mired =
+                            Map.tryFind name last.Mired |> Option.exists (Set.contains tile)
+
                         let keeps =
-                            melee
-                            |> List.forall (fun other ->
-                                other = tile
-                                || RoomPos.range other tile
-                                   |> Option.forall (fun r -> r > Engine.meleeRange))
+                            not mired
+                            && melee
+                               |> List.forall (fun other ->
+                                   other = tile
+                                   || RoomPos.range other tile
+                                      |> Option.forall (fun r -> r > Engine.meleeRange))
 
                         Decide.Emitter.glueStep creep.Tile tile onRampart keeps)
                 | _ -> None

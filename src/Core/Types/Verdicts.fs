@@ -639,6 +639,9 @@ type Decision =
         /// Each aiming ranger's guns and shields (`Emitter.volleys`, #537):
         /// what the light tick's mass attack is chosen by.
         Volleys: Map<string, Volley>
+        /// The tiles about each melee glue body whose step holds it
+        /// (`Emitter.mired`, #614): what the light tick's glue keeps off.
+        Mired: Map<string, Set<RoomPos>>
         /// The store each living creep's energy was drawn from, while any is
         /// aboard (#530): the Memory the next tick's `CreepInfo.DrawnFrom`
         /// is read off.

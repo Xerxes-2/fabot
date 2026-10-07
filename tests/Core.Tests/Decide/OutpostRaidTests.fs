@@ -3119,6 +3119,113 @@ let kiteStepTests =
                     0
                     "and the engine agrees: its heal would drop its attack"
             }
+
+            // #614: the glue was the one chaser's step no chase weighed. A
+            // guard of five MOVE to five other parts is held five ticks on
+            // swamp, from which a target walking off is out of its swing.
+            test
+                "a melee guard never glues onto its target's swamp tile it would be held on while the target walks off" {
+                let target = { X = 25; Y = 44 }
+                let from = { X = 24; Y = 44 }
+                let body = guard "g-1"
+
+                let glued (ground: Terrain) =
+                    let colony = declaredRaid [ hostileIn "W1N2" target smallRanged ] |> withField
+                    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+                    let colony =
+                        { colony with
+                            Spatial =
+                                colony.Spatial
+                                |> withNeighbour
+                                    "W1N2"
+                                    { outpost with
+                                        Terrain =
+                                            TerrainGrid.ofList
+                                                [
+                                                    for x in 15..35 do
+                                                        for y in 35..48 ->
+                                                            let tile = { X = x; Y = y }
+
+                                                            tile,
+                                                            (if tile = target then ground else Plain)
+                                                ]
+                                    }
+                        }
+                        |> withGuards [ body, from ]
+
+                    let atlas = Atlas.ofView colony
+                    let threats = threatsOf colony atlas
+                    let assigned = Map.ofList [ "g-1", Guard "W1N2" ]
+
+                    Emitter.glue
+                        colony
+                        atlas
+                        threats
+                        assigned
+                        (Resolver.glueChases colony atlas threats assigned)
+
+                Expect.equal
+                    (glued Plain)
+                    [ MoveCreep("g-1", Right) ]
+                    "the premise: onto its target's plain tile"
+
+                Expect.isEmpty (glued Swamp) "never onto its swamp tile: it stands and swings"
+            }
+
+            // #614 review: the light ticks' plan is cut only where the full
+            // tick would trade the step for another. A guard far off a
+            // target standing past a swamp band that spans the field has no
+            // plain way round: its plan crosses the band, as the full tick
+            // would, and no light tick stalls at the edge.
+            test "a far melee chaser's plan across a swamp band with no way round is kept whole" {
+                let band =
+                    set
+                        [
+                            for x in 15..35 do
+                                for y in 41..42 -> { X = x; Y = y }
+                        ]
+
+                let from = { X = 25; Y = 38 }
+
+                let colony =
+                    declaredRaid [ hostileIn "W1N2" { X = 25; Y = 46 } smallRanged ] |> withField
+
+                let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+                let colony =
+                    { colony with
+                        Spatial =
+                            colony.Spatial
+                            |> withNeighbour
+                                "W1N2"
+                                { outpost with
+                                    Terrain =
+                                        TerrainGrid.ofList
+                                            [
+                                                for x in 15..35 do
+                                                    for y in 35..48 ->
+                                                        let tile = { X = x; Y = y }
+
+                                                        tile,
+                                                        (if Set.contains tile band then
+                                                             Swamp
+                                                         else
+                                                             Plain)
+                                            ]
+                                }
+                    }
+                    |> withGuards [ guard "g-1", from ]
+
+                let decision =
+                    decide colony (Map.ofList [ "g-1", taskId (Guard "W1N2") ]) Set.empty None
+
+                let plan = Map.tryFind "g-1" decision.Steps |> Option.defaultValue []
+
+                Expect.isTrue
+                    (plan |> List.exists (fun tile -> Set.contains (RoomPos.pos tile) band))
+                    $"its plan walks onto the band: {plan}"
+            }
         ]
 
 [<Tests>]

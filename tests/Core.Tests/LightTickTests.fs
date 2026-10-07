@@ -533,6 +533,42 @@ let replayTests =
                     "with none in reach, the head, and the plan's step toward it"
             }
 
+            test
+                "a guard beside its target swings at it but never steps onto it where the full tick reads the tile as mired (#614)" {
+                let guarded =
+                    { quiet with
+                        Creeps = quiet.Creeps |> Map.add "guard" (creepAt 12 10 1000)
+                        Hostiles = [ hostile 12 11 "Trepidimous" true ]
+                    }
+
+                let full mired =
+                    LightTick.lastFull guarded Map.empty [ AttackCreep("guard", "h-1") ]
+                    |> aiming [ AttackCreep("guard", "h-1") ] Map.empty
+                    |> fun record ->
+                        { record with
+                            Plans =
+                                record.Plans |> Map.map (fun _ plan -> { plan with Mired = mired })
+                        }
+
+                let ofGuard record =
+                    LightTick.intents record guarded
+                    |> List.filter (fun intent ->
+                        match intent with
+                        | AttackCreep("guard", _)
+                        | MoveCreep("guard", _) -> true
+                        | _ -> false)
+
+                Expect.equal
+                    (ofGuard (full Map.empty))
+                    [ AttackCreep("guard", "h-1"); MoveCreep("guard", Bottom) ]
+                    "the premise: on plain it steps onto its target's tile"
+
+                Expect.equal
+                    (ofGuard (full (Map.ofList [ "guard", Set.ofList [ tile 12 11 ] ])))
+                    [ AttackCreep("guard", "h-1") ]
+                    "on a tile that holds it, it swings and stands"
+            }
+
             // Melee glue steps onto the target's tile from range 1. Movement S3
             // moved what keeps it off a tile into the caller's reading: the
             // full tick's maps (`Emitter.glueKeeps`, a tile struck no harder
@@ -796,6 +832,7 @@ let replayTests =
                         [ TransferEnergyToStructure("hauler", "link-1", Energy) ]
                         []
                         Map.empty
+                        Map.empty
 
                 let issued time (plan: Plan) =
                     LightTick.intents
@@ -841,6 +878,7 @@ let replayTests =
                                 [ [ TransferEnergyToStructure("hauler", "spawn", Energy) ] ]
                                 []
                                 []
+                                Map.empty
                                 Map.empty
                         ]
 
@@ -2289,7 +2327,7 @@ let private holders =
 /// step into a walk; the miner harvesting, the observer looking.
 let private planned: LastFull =
     let planOf creeps steps intents =
-        LightTick.plan split (Set.ofList creeps) steps [] [] intents [] Map.empty
+        LightTick.plan split (Set.ofList creeps) steps [] [] intents [] Map.empty Map.empty
 
     LightTick.ofPlans
         split
@@ -2553,6 +2591,7 @@ let decidersTests =
                         [ PickupPile("hauler", "pile") ]
                         []
                         Map.empty
+                        Map.empty
 
                 let carried = planned.Plans["W1N1"]
                 let record = LightTick.ofPlans split Set.empty [ "W3N1", fresh; "W1N1", carried ]
@@ -2722,6 +2761,7 @@ let fightOnlyTests =
                         [ FireTower("tower-1", "h-1"); RangedAttackCreep("ranger", "h-1") ]
                         [ RangedAttackCreep("ranger", "h-1") ]
                         Map.empty
+                        Map.empty
 
                 let merged = LightTick.withFight (Set.ofList [ "ranger" ]) fresh carried
 
@@ -2777,7 +2817,16 @@ let homeTests =
                             [
                                 for home in [ room; "W3N1" ] ->
                                     home,
-                                    LightTick.plan far Set.empty Map.empty [] [] [] [] Map.empty
+                                    LightTick.plan
+                                        far
+                                        Set.empty
+                                        Map.empty
+                                        []
+                                        []
+                                        []
+                                        []
+                                        Map.empty
+                                        Map.empty
                             ])
                         far
                         [ LightForce.Home(room, "Trepidimous") ])

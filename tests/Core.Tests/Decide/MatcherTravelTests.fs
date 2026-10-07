@@ -375,6 +375,7 @@ let movementTests =
                                 full.Intents
                                 full.Aims
                                 full.Volleys
+                                full.Mired
                         ]
 
                 for run, y in [ 1, 13; 2, 12 ] do

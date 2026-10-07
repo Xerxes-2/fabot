@@ -22853,3 +22853,151 @@ let rangerPairTests =
                     $"they go in together: none trades its hits away alone\n{failure}"
             }
         ]
+
+// ---- arena capture guard-swamp-chase -----------------------------------------
+// `npm run capture -- W17S26 1015553 --rooms W17S25 --name guard-swamp-chase`, read at live t1,015,755.
+// The room-history replay at t1,015,553, the state after that tick ran: arena
+// tick 0 runs as t1,015,554 and decides what our code decided live then.
+//   W17S26  https://screeps.com/room-history/shardSeason/W17S26/1015500.json
+//   W17S25  https://screeps.com/room-history/shardSeason/W17S25/1015500.json
+// W17S26 is reserved by us to t1016089: the arena has no reservations.
+// not placed: 9 ruin, 3 tombstone (the arena has no drops, tombstones or ruins).
+/// W17S25's melee guard (10 MOVE, 10 other parts) chasing Trepidimous's
+/// 5W3M miner Viral5422 off W17S26's source (#614).
+let private guardSwampChase () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+
+    let w17s26 =
+        room "W17S26"
+        |> withStructures
+            [
+                { structureOf "container" None 125_000 250_000 { X = 27; Y = 9 } with
+                    Energy = 502
+                }
+            ]
+        |> withRoads
+            [
+                20, 1, 4_000
+                21, 2, 4_100
+                22, 3, 4_600
+                23, 4, 2_300
+                24, 5, 4_000
+                25, 6, 2_400
+                26, 7, 4_100
+                27, 8, 2_300
+            ]
+
+    let w17s25 =
+        room "W17S25"
+        |> withController Ownership.Ours None 5 3
+        |> withControllerClocks 0 0 80_000 61_681
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+        |> withStructures
+            [
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 13; Y = 27 } with
+                    Energy = 8_864
+                }
+                towerOf Side.Ours { X = 11; Y = 29 } 1_000
+                towerOf Side.Ours { X = 13; Y = 29 } 1_000
+            ]
+
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W17S25" ])
+
+    let bodies: Body list =
+        [
+            // Viral5422: live, a step every two ticks south-west off the
+            // source, its live tiles to t1,015,567.
+            { body
+                  "Viral5422"
+                  trepidimous
+                  (parts [ Move, 3; Work, 5 ])
+                  (at "W17S26" 25 10)
+                  (Some(
+                      Waypoints
+                          [
+                              for x, y in [ 24, 11; 24, 12; 24, 13; 23, 14; 22, 15; 22, 16; 23, 17 ] ->
+                                  at "W17S26" x y
+                          ]
+                  )) with
+                TicksToLive = 1_391
+                Fatigue = 4
+            }
+            { body
+                  "anchor-1014956-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W17S26" 27 9)
+                  None with
+                TicksToLive = 931
+                Energy = 50
+            }
+            { body
+                  "guard-1014093-Spawn11"
+                  Side.Ours
+                  (parts [ Tough, 2; Move, 10; Attack, 6; Heal, 2 ])
+                  (at "W17S26" 24 6)
+                  None with
+                TicksToLive = 98
+            }
+        ]
+
+    let a = arena 1_015_554 [ w17s26; w17s25 ] colonies bodies
+
+    { a with
+        Carried =
+            { a.Carried with
+                // The guard's from its timeline (matched t1,015,490); the
+                // anchor's from the Transition log.
+                Assignments =
+                    Map.ofList
+                        [
+                            "anchor-1014956-Spawn11", "harvest:6a8caa7ddd4872bccd318c78"
+                            "guard-1014093-Spawn11", "guard:W17S26"
+                        ]
+                ArmedSeen = Map.ofList [ "W17S26", 1_014_874 ]
+                Towered = Set.ofList [ "W17S25" ]
+            }
+    }
+
+[<Tests>]
+let guardSwampChaseTests =
+    testList
+        "arena a melee chase over swamp"
+        [
+            // #614. Before the fix the capture reproduced live tile for tile:
+            // the guard, three off the miner at (26,8), stepped onto the swamp
+            // at (25,9) (t2, live t1,015,556) — the chase weighed a step only
+            // within one of striking — and stood there held while the miner
+            // walked two tiles off; it caught it at t13 and killed it at t17
+            // (live t1,015,567 and t1,015,571). Now it steps onto the plain
+            // at (26,9), keeps pace, swings from t7 and kills it at t11.
+            test
+                "#614 capture t1,015,553: the melee guard keeps pace with the fleeing miner on the plain" {
+                let guard = "guard-1014093-Spawn11"
+                let _, trace = guardSwampChase () |> run 20
+                let failure = describe trace
+
+                Expect.isFalse
+                    (pathOf guard trace
+                     |> List.exists (fun (_, s) -> s.At = RoomPos.at "W17S26" { X = 25; Y = 9 }))
+                    $"the guard never steps onto the swamp (25,9)\n{failure}"
+
+                Expect.isEmpty
+                    (pathOf "Viral5422" trace
+                     |> List.choose (fun (tick, miner) ->
+                         pathOf guard trace
+                         |> List.tryFind (fun (at, s) ->
+                             at = tick
+                             && s.Fatigue > 0
+                             && RoomPos.range s.At miner.At |> Option.exists (fun r -> r > 1))
+                         |> Option.map fst))
+                    $"nor is held while the miner is out of its reach\n{failure}"
+
+                Expect.isLessThanOrEqual
+                    (diedOn "Viral5422" trace |> Option.defaultValue System.Int32.MaxValue)
+                    12
+                    $"and kills it by t12 (live t1,015,571, t17)\n{failure}"
+            }
+        ]
