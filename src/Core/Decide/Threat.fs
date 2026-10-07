@@ -391,6 +391,9 @@ and Threats =
         Bodies: CreepInfo list
         /// The reach horizon the Reach was laid at (`Tuning.ReachHorizon`).
         Horizon: int
+        /// The homes of ours the colony knows (`Facts.homesOfOurs`): a body
+        /// caught in one flees in it, never off home to its own (#602).
+        Homes: Set<string>
     }
 
 /// The tick with nothing to run from: what a test hands the Planner for a
@@ -411,6 +414,7 @@ let noThreats =
         Seen = Set.empty
         Bodies = []
         Horizon = Tuning.defaults.ReachHorizon
+        Homes = Set.empty
     }
 
 /// ADR-0056
@@ -2013,15 +2017,20 @@ module Threats =
                         | safe when not (Set.isEmpty safe) -> safe
                         | _ -> acrossFrom threats atlas at (walkOf threats atlas creep)
 
-    /// Flee's ground for an unarmed body caught in a room not its colony's
-    /// home (#511): the ground beside the landings into the next room on a
-    /// chain home, home or a room seen this tick, across the exits it reaches
-    /// by a walk through tiles it is on first (`reachedFirst`), whose landings
-    /// lie in no Reach of that room; the nearest such room by
-    /// its own walk. Home has the towers, the ramparts and the fighters; an
-    /// outpost's safe set is small and moves with the raid. Empty at home, for
-    /// an armed body (it flees only with no fight to hold, #533), and where
-    /// every way home crosses the raid: it flees in the room.
+    /// Flee's ground for a body caught in a room not its colony's home (#511):
+    /// the ground beside the landings into the next room on a chain home,
+    /// home or a room seen this tick, across the exits it reaches by a walk
+    /// through tiles it is on first (`reachedFirst`), whose landings lie in
+    /// no Reach of that room; the nearest such room by its own walk. Home has
+    /// the towers, the ramparts and the fighters; an outpost's safe set is
+    /// small and moves with the raid. An armed body flees only with no fight
+    /// to hold (#533), and then home as any other (#602), but in a home of
+    /// ours (`Threats.Homes`), which it defends: there it flees in the room.
+    /// A body on no tile but its own first — a chaser at its pace already
+    /// striking it — outruns nothing in the room: its way out is an exit home
+    /// it walks to that no striker there stands nearer than it, never one
+    /// past the chaser. Empty at home, and where every way home crosses the
+    /// raid: it flees in the room.
     and private homeward
         (threats: Threats)
         atlas
@@ -2031,13 +2040,35 @@ module Threats =
         : Set<RoomPos> =
         let room = at.Room
 
-        let armed =
-            partCount creep.Body Attack > 0
-            || partCount creep.Body RangedAttack > 0
-            || partCount creep.Body Heal > 0
+        let defends =
+            Set.contains room threats.Homes
+            && (partCount creep.Body Attack > 0
+                || partCount creep.Body RangedAttack > 0
+                || partCount creep.Body Heal > 0)
 
         match Atlas.homeRoom atlas, walkOf threats atlas creep, firsts with
-        | Some home, Some walk, Some(first: bool[]) when home <> room && not armed ->
+        | Some home, Some walk, Some(first: bool[]) when home <> room && not defends ->
+            let outruns = (first |> Array.sumBy (fun f -> if f then 1 else 0)) > 1
+
+            let strikers =
+                lazy
+                    (match Map.tryFind room threats.Arrivals with
+                     | Some(_, strikers) -> strikers.Force()
+                     | None -> [])
+
+            let ahead (exit: Pos) =
+                let mine = range (RoomPos.pos at) exit
+
+                strikers.Value
+                |> List.forall (fun striker ->
+                    striker.At.Room <> room || range (RoomPos.pos striker.At) exit >= mine)
+
+            let leaves (exit: Pos) =
+                if outruns then
+                    first.[indexOf exit]
+                else
+                    Grid.at (indexOf exit) walk.Ticks < System.Int32.MaxValue && ahead exit
+
             Atlas.routes atlas room home
             |> List.choose (function
                 | _ :: next :: _ -> Some next
@@ -2053,7 +2084,7 @@ module Threats =
                 match
                     Atlas.seams atlas room next
                     |> List.filter (fun (exit, landing) ->
-                        first.[indexOf exit] && not (Set.contains landing hot))
+                        leaves exit && not (Set.contains landing hot))
                 with
                 | [] -> None
                 | band ->
@@ -3319,6 +3350,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         Seen = view.World.Rooms |> Map.keys |> Set.ofSeq
         Bodies = view.Creeps
         Horizon = view.Tuning.ReachHorizon
+        Homes = Facts.homesOfOurs view
     }
 
 /// This tick's Threats as a colony holding nothing would see them: no

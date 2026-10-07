@@ -651,6 +651,57 @@ let matchAcross
                 ends
         | _ -> None
 
+    // A Guard its body loses (#602): it loses the room's exchange beside
+    // every other fighter of ours at the fight, whatever each holds, and the
+    // holders of the fight landing there within the horizon
+    // (`Facts.winsBeside`); and its holder is struck this tick where it
+    // stands, past its own heal, with Flee to take, or a fresh candidate is
+    // hurt under `brokenOff` of its hits — a body that broke off comes back
+    // healed, or to a fight its side wins, never straight back in. Neither
+    // kept nor taken: priced again on every tick. Never a home of ours'
+    // (`Threats.Homes`): a home is fought for to the death.
+    let fighters = lazy (creeps |> List.filter isFighterBody)
+
+    let brokenOff (creep: CreepInfo) =
+        creep.Hits.Hits * 5 < creep.Hits.HitsMax * 4
+
+    let struckNow k (creep: CreepInfo) =
+        let ctx = contexts.[k]
+        let heal = Engine.healPower * partCount creep.Body Heal
+
+        Atlas.creepTile ctx.Atlas creep.Name
+        |> Option.exists (fun tile ->
+            Threats.damageAt ctx.Threats tile.Room 0 (RoomPos.pos tile) > heal)
+
+    let losesItsFight k (creep: CreepInfo) task =
+        match task with
+        | Guard room when not (Set.contains room contexts.[k].Threats.Homes) ->
+            let ctx = contexts.[k]
+            let tid = taskId task
+
+            let loses () =
+                not (
+                    Facts.winsBeside
+                        ctx.View
+                        room
+                        ctx.Threats.Horizon
+                        creep
+                        (fighters.Value
+                         |> List.filter (fun other -> other.Name <> creep.Name)
+                         |> List.map (fun other ->
+                             other, Map.tryFind other.Name assignments = Some tid))
+                )
+
+            if Map.tryFind creep.Name assignments = Some tid then
+                struckNow k creep
+                && fleeings.[k]
+                   |> Option.exists (fun flee ->
+                       applicable ctx.View ctx.Threats ctx.Atlas creep flee)
+                && loses ()
+            else
+                (brokenOff creep || struckNow k creep) && loses ()
+        | _ -> false
+
     // One gate cascade judges every (creep, Task) pair, for both readings of
     // one: the fresh candidate the Matcher scores and the assignment it is
     // deciding whether to keep. Rejected at the first gate it fails
@@ -680,6 +731,8 @@ let matchAcross
             Error RejectReason.Inapplicable
         elif homeHeld k acc creep pooled then
             Error RejectReason.Inapplicable
+        elif losesItsFight k creep pooled.Task then
+            Error RejectReason.Threatened
         else
             let cost = travelCostOf ctx.Threats ctx.Atlas creep.Name pooled.Task
             let arrival = lazy (Atlas.walkTicks ctx.Atlas creep.Name pooled.Task)
@@ -894,20 +947,13 @@ let matchAcross
             // The one hold rule (#535, `Threats.holdsFight`): a fight begun
             // is kept while its holder can still strike a target there,
             // whatever the room's kind, capacity or muster.
-            // It ends for a holder #533's flee takes: out-damaged where it
-            // stands and losing its own exchange there (a guard shot
-            // rooted beside shooters it can no longer reach). One rule on
+            // It ends for a holder that loses its fight where it is struck
+            // (`losesItsFight`), which the gate then refuses. One rule on
             // both lanes (#601): the lane decides who takes a seat, never
             // who keeps one.
             | Some pooled when
                 Threats.holdsFight view atlas threats creep pooled.Task
-                && not (
-                    fleeing |> Option.exists (fun flee -> applicable view threats atlas creep flee)
-                    && (match pooled.Task with
-                        | Guard room ->
-                            not (Facts.bodyWins view room (partCount creep.Body) creep.Hits.Hits)
-                        | _ -> false)
-                )
+                && not (losesItsFight k creep pooled.Task)
                 ->
                 Map.add name tid acc, hold loads tid, released
             | Some pooled ->

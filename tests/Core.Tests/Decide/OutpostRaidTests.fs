@@ -6470,6 +6470,30 @@ let killAdmissionTests =
                     "a raider next door to its home is a home that is not quiet"
             }
 
+            // #602: a Guard lost where its body is struck is let go, but
+            // never a home of ours': the resident struck in the child home it
+            // defends, losing on paper, keeps fighting there, and never runs
+            // off to its own home.
+            test
+                "a resident struck in the child home it defends, losing on paper, keeps its Guard there" {
+                let escort =
+                    { hostileIn
+                          "W1N3"
+                          { X = 26; Y = 26 }
+                          (List.replicate 3 RangedAttack
+                           @ List.replicate 7 Move
+                           @ List.replicate 4 Heal) with
+                        Id = "h-escort"
+                    }
+
+                let result = decide (raisingBeyond [ escort ]) residentHeld Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-1" result.Assignments)
+                    (Some(taskId (Guard "W1N3")))
+                    "it holds the child's Guard"
+            }
+
             test "a resident standing in its home is never a fresh taker of a kill not beside it" {
                 let takes hostiles =
                     (decideOn (raisingBeyond hostiles)).Assignments |> Map.tryFind "r-1"
@@ -6848,8 +6872,12 @@ let engagementTests =
                         Id = "h-near"
                     }
 
+                // A guard that wins the two: an 800 one loses them, so it
+                // runs from the one beside it (#602) and swings at nothing.
                 let colony =
-                    declaredRaid [ head; near ] |> withGuards [ guard "g-1", { X = 28; Y = 45 } ]
+                    declaredRaid [ head; near ]
+                    |> withGuards
+                        [ creepWith "g-1" 0 0 (bodyFor guardPattern 2400), { X = 28; Y = 45 } ]
 
                 let result = decideFrom (Map.ofList [ "g-1", taskId (Guard "W1N2") ]) colony
 

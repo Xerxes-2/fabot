@@ -305,6 +305,141 @@ let harassGuardTests =
                     "what shoots back first, the miner after"
             }
 
+            // Live W19S26 t1,007,230-417 (#602): ranger-1006821 (two blocks)
+            // traded at range 1 with Trepidimous' Wave7157 (3 RANGED, 4 HEAL)
+            // until it died: its 40 under the other's 48 heal, the other's
+            // 30 over its own 24. The Guard is priced again on every tick
+            // its body is struck: lost there, the body runs; beside a second
+            // ranger at the fight it is won, and kept.
+            test
+                "a ranger struck by an escort it cannot out-damage runs, and keeps the Guard beside a second at the fight" {
+                let here = { X = 20; Y = 20 }
+                let block = Bodies.rangerPattern.Block
+                let holder = creepWith "ranger-r" 0 0 (block @ block)
+                let second = creepWith "ranger-s" 0 0 (block @ block)
+
+                let escort =
+                    theirs
+                        "escort"
+                        enemy
+                        { X = 21; Y = 20 }
+                        (List.replicate 3 RangedAttack
+                         @ List.replicate 7 Move
+                         @ List.replicate 4 Heal)
+
+                let decided lane (ours: (CreepInfo * RoomPos) list) =
+                    let colony = castingFrom [ declaration ] ours
+
+                    { colony with
+                        Hostiles = [ escort ]
+                        Tuning = { colony.Tuning with FightLane = lane }
+                    }
+                    |> decideFrom (Map.ofList [ holder.Name, taskId (Guard harassRoom) ])
+
+                for lane in [ FightLane.PerColony; FightLane.World ] do
+                    let alone = decided lane [ holder, RoomPos.at harassRoom here ]
+
+                    Expect.contains
+                        alone.Verdicts
+                        (Verdict.Released(
+                            holder.Name,
+                            taskId (Guard harassRoom),
+                            ReleaseReason.Rejected RejectReason.Threatened
+                        ))
+                        $"{lane}: alone it loses the exchange where it is struck, and lets the Guard go"
+
+                    Expect.equal
+                        (Map.tryFind holder.Name alone.Assignments)
+                        (Some(taskId Flee))
+                        $"{lane}: and runs"
+
+                    let paired =
+                        decided
+                            lane
+                            [
+                                holder, RoomPos.at harassRoom here
+                                second, RoomPos.at harassRoom { here with Y = 21 }
+                            ]
+
+                    Expect.equal
+                        (Map.tryFind holder.Name paired.Assignments)
+                        (Some(taskId (Guard harassRoom)))
+                        $"{lane}: beside a second ranger at the fight the pair wins it, and it holds"
+            }
+
+            // #602: help landing within the horizon counts, a body still
+            // walking from farther does not; and a body that broke off comes
+            // back healed, not straight back into the fight it lost.
+            test
+                "a ranger struck alone holds for a second holder of the fight landing within the horizon, and a hurt one stays out" {
+                let here = { X = 20; Y = 20 }
+                let block = Bodies.rangerPattern.Block
+                let holder = creepWith "ranger-r" 0 0 (block @ block)
+                let second = creepWith "ranger-s" 0 0 (block @ block)
+
+                let escort =
+                    theirs
+                        "escort"
+                        enemy
+                        { X = 21; Y = 20 }
+                        (List.replicate 3 RangedAttack
+                         @ List.replicate 7 Move
+                         @ List.replicate 4 Heal)
+
+                // Eight off the escort: five tiles' walk to its range, two
+                // past the fight's three.
+                let coming = RoomPos.at harassRoom { X = 21; Y = 28 }
+
+                let decided (held: (string * Task) list) (ours: (CreepInfo * RoomPos) list) =
+                    let colony = castingFrom [ declaration ] ours
+
+                    { colony with Hostiles = [ escort ] }
+                    |> decideFrom (
+                        held |> List.map (fun (name, task) -> name, taskId task) |> Map.ofList
+                    )
+
+                let ours = [ holder, RoomPos.at harassRoom here; second, coming ]
+
+                Expect.equal
+                    (Map.tryFind
+                        holder.Name
+                        (decided [ holder.Name, Guard harassRoom ] ours).Assignments)
+                    (Some(taskId Flee))
+                    "the other walking in on its own business: it runs"
+
+                Expect.equal
+                    (Map.tryFind
+                        holder.Name
+                        (decided
+                            [ holder.Name, Guard harassRoom; second.Name, Guard harassRoom ]
+                            ours)
+                            .Assignments)
+                    (Some(taskId (Guard harassRoom)))
+                    "the other holding the fight and landing within the horizon: it holds"
+
+                // Out of the escort's reach, half its hits gone, holding
+                // nothing: the Guard waits until it is healed.
+                let hurt =
+                    { holder with
+                        Hits =
+                            { holder.Hits with
+                                Hits = holder.Hits.HitsMax / 2
+                            }
+                    }
+
+                let away = RoomPos.at harassRoom { X = 21; Y = 40 }
+
+                Expect.notEqual
+                    (Map.tryFind holder.Name (decided [] [ hurt, away ]).Assignments)
+                    (Some(taskId (Guard harassRoom)))
+                    "hurt, it does not walk back into the fight it lost"
+
+                Expect.equal
+                    (Map.tryFind holder.Name (decided [] [ holder, away ]).Assignments)
+                    (Some(taskId (Guard harassRoom)))
+                    "healed, it takes the Guard again"
+            }
+
             test "with no enemy on a work spot, the ranger's ground is the Stand's seats" {
                 let quiet = bareHome |> harassing
 

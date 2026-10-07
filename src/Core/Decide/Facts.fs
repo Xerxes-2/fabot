@@ -629,6 +629,17 @@ let internal raisedHomes (view: ColonyView) : Set<string> =
     |> List.append view.Borrowed.Garrisoned
     |> Set.ofList
 
+/// Every home of ours this colony knows, any colony's (#602): its own, each
+/// room whose controller it sees ours, and the children it raises. A home is
+/// fought for to the death, never broken off.
+let internal homesOfOurs (view: ColonyView) : Set<string> =
+    view.RoomControl
+    |> Map.filter (fun _ control -> control.Owner = Ownership.Ours)
+    |> Map.keys
+    |> Set.ofSeq
+    |> Set.add (SpatialInfo.homeName view.Spatial)
+    |> Set.union (raisedHomes view)
+
 /// The rooms the ranger row keeps its resident garrison in, raid or none
 /// (#419): the errand rooms, and the children's homes this colony raises
 /// (#447). One rule for both, read by the row, the pool's cap, the ground and
@@ -1570,6 +1581,29 @@ let private walkToRaid (view: ColonyView) (raid: HostileInfo list) (creep: Creep
 /// Whether a body this walk (`walkToRaid`) off its raid is at the fight: a
 /// kiter's dance about its range, three steps either way.
 let internal atFight (walk: int) = walk <= Engine.rangedRange
+
+/// Whether a body of ours wins the fight in a room beside its side there
+/// (#602): the exchange (`bodiesWin`) by it and those of `beside` at the
+/// fight (`atFight`), and, of those holding the fight (the flag beside each),
+/// every one whose walk lands it there within `soon` ticks. One still
+/// walking from farther strikes nothing yet, whatever a verdict counted it
+/// for.
+let winsBeside
+    (view: ColonyView)
+    (room: string)
+    (soon: int)
+    (creep: CreepInfo)
+    (beside: (CreepInfo * bool) list)
+    =
+    let raid = raidersIn view room
+
+    creep
+    :: (beside
+        |> List.filter (fun (other, holds) ->
+            walkToRaid view raid other
+            |> Option.exists (fun walk -> atFight walk || holds && atFight (walk - soon)))
+        |> List.map fst)
+    |> bodiesWin view room
 
 /// How a body of ours ends the raid standing in a room alone (#596): its
 /// walk there (`walkToRaid`) and then its kill (`killTicks`), the kill

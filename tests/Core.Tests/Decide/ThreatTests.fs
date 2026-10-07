@@ -4446,8 +4446,9 @@ let fleeTests =
                 let atlas = Atlas.ofView (facingHostile true)
 
                 // Less the walks', flights' and flight costs' tables and the
-                // bodies they are of, the rooms seen and the unclaimed Briefs
-                // read off the view, which are the tick's own and no Reach.
+                // bodies they are of, the rooms seen, the homes and the
+                // unclaimed Briefs read off the view, which are the tick's own
+                // and no Reach.
                 Expect.equal
                     { threatsOf (facingHostile true) atlas with
                         Unclaimed = noThreats.Unclaimed
@@ -4456,6 +4457,7 @@ let fleeTests =
                         FleeCosts = noThreats.FleeCosts
                         Seen = Set.empty
                         Bodies = []
+                        Homes = Set.empty
                     }
                     noThreats
                     "and the tick derives no Reach at all"
@@ -6349,6 +6351,83 @@ let acrossTheBorderTests =
                 Expect.isTrue
                     (not (Set.isEmpty cut) && cut |> Set.forall (fun tile -> tile.Room = "W2N1"))
                     $"the raid holds the way home: it flees in the room: {cut}"
+            }
+
+            // #602: an armed body flees only with no fight to hold (#533), and
+            // then home as any other. Live W19S26 t1,007,230-417, ranger-1006821
+            // traded with a shooter at its own pace until it died: struck by a
+            // chaser at its pace, a body outruns nothing in the room, and any
+            // exit home it walks to is its way out.
+            test
+                "an armed body caught in the outpost flees home too, and so does one a chaser at its pace strikes" {
+                let block = Bodies.rangerPattern.Block
+
+                let shooterWestAt (pos: Pos) =
+                    { hostileIn
+                          "W2N1"
+                          pos
+                          (List.replicate 3 RangedAttack
+                           @ List.replicate 7 Move
+                           @ List.replicate 4 Heal) with
+                        Id = "h-west"
+                    }
+
+                let groundIn (wide: bool) (hostile: HostileInfo) (at: Pos) =
+                    let colony = borderHome true [] [ hostile ] []
+                    let west = SpatialInfo.layerOf colony.Spatial "W2N1"
+                    let ranger = creepWith "ranger-1" 0 0 (block @ block)
+
+                    // Wide, the outpost is plain to its borders: ground out
+                    // of the Reach to flee to in the room.
+                    let terrain =
+                        if wide then
+                            TerrainGrid.ofList
+                                [
+                                    for x in 1..48 do
+                                        for y in 1..48 -> { X = x; Y = y }, Plain
+                                ]
+                        else
+                            west.Terrain
+
+                    let caught =
+                        { colony with
+                            Creeps = colony.Creeps @ [ ranger ]
+                            Spatial =
+                                colony.Spatial
+                                |> withNeighbour
+                                    "W2N1"
+                                    { west with
+                                        Terrain = terrain
+                                        CreepPositions = Map.ofList [ ranger.Name, at ]
+                                    }
+                        }
+
+                    let atlas = Atlas.ofView caught
+                    Threats.fleeAreaFor (threatsOf caught atlas) atlas ranger
+
+                let groundOf = groundIn false
+
+                let home (area: Set<RoomPos>) =
+                    not (Set.isEmpty area) && area |> Set.forall (fun tile -> tile.Room = "W1N1")
+
+                let ahead = groundOf (meleeWestAt { X = 40; Y = 34 }) { X = 43; Y = 34 }
+
+                Expect.isTrue
+                    (home ahead)
+                    $"a melee three behind it: home, as the unarmed body's: {ahead}"
+
+                let chased = groundOf (shooterWestAt { X = 42; Y = 34 }) { X = 43; Y = 34 }
+
+                Expect.isTrue
+                    (home chased)
+                    $"a shooter at its pace beside it, first on every tile: home all the same: {chased}"
+
+                // The shooter between it and the exits home: never past it.
+                let cut = groundIn true (shooterWestAt { X = 44; Y = 34 }) { X = 43; Y = 34 }
+
+                Expect.isTrue
+                    (not (Set.isEmpty cut) && cut |> Set.forall (fun tile -> tile.Room = "W2N1"))
+                    $"the shooter holds the way home: it flees in the room: {cut}"
             }
 
             // Movement S4 review: an exit reached first is no way home when
