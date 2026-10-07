@@ -1136,6 +1136,52 @@ wire("breaches: a row whose kind is not in the vocabulary costs its row", async 
   assert.equal(rows[0].subject, "pile-1");
 });
 
+// The kinds the bot reads itself by (#630), one row each as the fold writes
+// it: a pending `spawn-idle` carries its `window`, every other row none.
+const selfRows = {
+  "light-starved": { kind: "light-starved", room: "", subject: "chase", amount: 20, first: 100, last: 120 },
+  "bucket-falling": { kind: "bucket-falling", room: "", subject: "bucket", amount: 400, first: 100, last: 120 },
+  fault: { kind: "fault", room: "W1N1", subject: "decide", amount: 3, first: 100, last: 120 },
+  "spawn-idle": { kind: "spawn-idle", room: "W1N1", subject: "Spawn1", amount: 2, first: 100, last: 120, window: 150 },
+  "body-idle": { kind: "body-idle", room: "W1N2", subject: "guard-1", amount: 150, first: 100, last: 120 },
+};
+
+for (const [kind, row] of Object.entries(selfRows)) {
+  wire(`breaches: a ${kind} row round-trips in a colony's log and in the world's`, async () => {
+    const { loadBreaches, saveBreaches, loadWorldBreaches, saveWorldBreaches } = await import(MODULE);
+
+    globalThis.Memory = memoryWith("breaches", { rows: [row] });
+    saveBreaches(home, loadBreaches(home));
+    assert.equal(stable(globalThis.Memory.fabot.observe.colonies[home].breaches), stable({ rows: [row] }));
+
+    globalThis.Memory = rootMemoryWith("breaches", { rows: [row] });
+    saveWorldBreaches(loadWorldBreaches());
+    assert.equal(stable(globalThis.Memory.fabot.observe.breaches), stable({ rows: [row] }));
+  });
+}
+
+wire("breaches: the world's absent leaf reads empty and writes empty", async () => {
+  const { loadWorldBreaches, saveWorldBreaches } = await import(MODULE);
+
+  globalThis.Memory = rootMemoryWith("breaches", undefined);
+  saveWorldBreaches(loadWorldBreaches());
+  assert.equal(stable(globalThis.Memory.fabot.observe.breaches), stable({ rows: [] }));
+});
+
+wire("breaches: a row whose window is not a number costs its row", async () => {
+  const { loadBreaches, saveBreaches } = await import(MODULE);
+
+  globalThis.Memory = memoryWith("breaches", {
+    rows: [{ ...selfRows["spawn-idle"], window: "150" }, selfRows["body-idle"]],
+  });
+
+  saveBreaches(home, loadBreaches(home));
+  const rows = globalThis.Memory.fabot.observe.colonies[home].breaches.rows;
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].subject, "guard-1");
+});
+
 // ---- the fault ring (#628) ---------------------------------------------
 
 const fault = (t, colony = "W1N2") => ({

@@ -224,6 +224,15 @@ let mutable private fullTicks = 0
 // #628): only the first fault of a run forces the next tick full.
 let mutable private faultRuns: Map<string, int> = Map.empty
 
+// The tick this heap first ran: the bundle's load, written as
+// `observe.version.reset` and the line the `Fault` breaches read the fault
+// ring from (#630), as `observe health` does.
+let mutable private loadedAt = -1
+
+// The breaches open as the last full tick left them, every colony's and the
+// world's: what the room visuals draw on every tick between.
+let mutable private openBreaches: Observe.Breach list = []
+
 /// A creep's gait off `Game` (`Gait.walked`).
 let private gaitOf (c: ICreep) : Gait =
     let mutable weighed = 0
@@ -392,12 +401,35 @@ let private drawCpu (line: Observe.CpuState) =
             $"cpu %.1f{s.Ms} ms %s{kind}, mean %.1f{mean} of %d{int Game.cpu?limit}"
         | None -> $"cpu mean %.1f{mean} of %d{int Game.cpu?limit}"
 
+    // The open breaches (#630), a line each: the world's under the bucket in
+    // every room we own, and each colony's in the room it names.
+    let world, placed = openBreaches |> List.partition (fun b -> b.Room = "")
+
+    let draw room (top: float) (rows: Observe.Breach list) =
+        rows
+        |> List.iteri (fun i b ->
+            visualText room $"breach {b.Kind} {b.Subject} {b.Amount}" (top + 0.8 * float i))
+
+    let worldTop = 2.6
+    let mutable owned = Set.empty
+
     for room in objectValues<IRoom> Game.rooms do
         let c = room.controller
 
         if not (isNull (box c)) && c.my then
+            owned <- Set.add room.name owned
             visualText room.name bucket 1.0
             visualText room.name cost 1.8
+            draw room.name worldTop world
+
+    for room, rows in List.groupBy (fun (b: Observe.Breach) -> b.Room) placed do
+        let top =
+            if Set.contains room owned then
+                worldTop + 0.8 * float (List.length world)
+            else
+                1.0
+
+        draw room top rows
 
 /// The CPU line's write, the same on both kinds of tick: nothing in the bot
 /// reads it back.
@@ -430,7 +462,7 @@ let private writeCpuLine (readings: Observe.CpuReadings) =
 
     if not announced then
         ObserveMemory.dropProbe ()
-        ObserveMemory.saveVersion version Game.time
+        ObserveMemory.saveVersion version loadedAt
         announced <- true
 
     drawCpu line
@@ -1195,6 +1227,34 @@ let private fullTick
     // roster is pruned against.
     let mutable logs = raids
 
+    // Each colony's open breaches as its fold leaves them, for the visuals.
+    let colonyOpen = ResizeArray<Observe.StandingBreach>()
+
+    // The fault ring's rows since the bundle's load, as `observe health`
+    // lists them: the `Fault` breaches' fact, by colony ("" for a throw no
+    // colony owns).
+    let sinceLoad =
+        ObserveMemory.loadFaults () |> List.filter (fun row -> row.Tick >= loadedAt)
+
+    let faultsOf (colony: string) =
+        sinceLoad
+        |> List.filter (fun row -> row.Colony = colony)
+        |> List.map (fun row -> row.Phase, row.Tick)
+
+    // One colony's breach log folded off its view and the facts beside it.
+    let foldColonyBreaches (home: string) (view: ColonyView) (facts: Observe.ColonyBreachFacts) =
+        let prior = ObserveMemory.loadBreaches home
+
+        let state =
+            Observe.foldBreaches
+                Observe.capBreaches
+                Game.time
+                (Observe.colonyBreaches facts view prior)
+                prior
+
+        ObserveMemory.saveBreaches home state
+        colonyOpen.AddRange(Observe.openRows Game.time state)
+
     for colony, view, decision, _, _ in decisions do
         let economic = not (Set.contains colony.Home fightOnly)
 
@@ -1251,10 +1311,34 @@ let private fullTick
         // it confirms the code's belief about the projection; an assertion
         // read off the real projection every tick is the feedback loop that
         // could have caught the `World.fs` incidents (#278). Written every
-        // tick, empty or not.
-        ObserveMemory.loadBreaches colony.Home
-        |> Observe.foldBreaches Observe.capBreaches Game.time view
-        |> ObserveMemory.saveBreaches colony.Home
+        // tick, empty or not. A fight-only decide's quotas are silent, so
+        // the seats owed and the holds are unknown there.
+        foldColonyBreaches
+            colony.Home
+            view
+            {
+                Quotas = (if economic then Some decision.Quotas else None)
+                Casting =
+                    decision.Intents
+                    |> List.choose (function
+                        | SpawnCreep(spawn, _, _) -> Some spawn
+                        | _ -> None)
+                    |> Set.ofList
+                StoodDown =
+                    (state.Outposts
+                     |> List.filter (Observe.standingDown Game.time)
+                     |> List.map _.RoomName)
+                    @ (colony.Outposts
+                       |> List.map _.RoomName
+                       |> List.filter (fun room ->
+                           Map.tryFind room after.Rooms
+                           |> Option.bind _.Down
+                           |> Option.exists (Observe.standingDown Game.time)))
+                    |> Set.ofList
+                    |> Set.union view.HeldOutposts
+                Log = log
+                Faults = faultsOf colony.Home
+            }
 
     // A faulted colony's breaches read its view alone, and are folded; its
     // Raid log and the world danger fold read its decision's outposts and
@@ -1262,9 +1346,43 @@ let private fullTick
     // do.
     for colony, view in views do
         if Set.contains colony.Home faulted then
-            ObserveMemory.loadBreaches colony.Home
-            |> Observe.foldBreaches Observe.capBreaches Game.time view
-            |> ObserveMemory.saveBreaches colony.Home
+            foldColonyBreaches
+                colony.Home
+                view
+                { Observe.ColonyBreachFacts.none with
+                    Log = log
+                    Faults = faultsOf colony.Home
+                }
+
+    // The world's breach log: the CPU line's and the throws no colony owns.
+    // The line ends at the tick before this one, which writes its row last.
+    let world' =
+        cpuLine
+        |> Option.map (fun line ->
+            ObserveMemory.loadWorldBreaches ()
+            |> Observe.foldBreaches
+                Observe.capBreaches
+                Game.time
+                (Observe.worldBreaches
+                    tuning
+                    {
+                        Time = Game.time
+                        Line = line
+                        Limit = float Game.cpu?limit
+                        Cadence =
+                            (if Tuning.defaults.LightTicks then
+                                 Some tuning.Cadence
+                             else
+                                 None)
+                        Faults = faultsOf ""
+                    }))
+
+    world' |> Option.iter ObserveMemory.saveWorldBreaches
+
+    openBreaches <-
+        (world' |> Option.map (Observe.openRows Game.time) |> Option.defaultValue [])
+        @ List.ofSeq colonyOpen
+        |> List.map _.Breach
 
     // The world danger log, written every tick with this tick's exit watches,
     // and its latches with the room latches when either moved.
@@ -1461,6 +1579,10 @@ let private runTick () =
     // parse is charged to the `snapshot` phase. Every reading is taken every
     // tick; a measurement that switches itself off has absences to explain.
     let atEntry = Game.cpu.getUsed ()
+
+    if loadedAt < 0 then
+        loadedAt <- Game.time
+
     // The flood counters start the tick at zero, so each colony's reading
     // below is cumulative from here and `foldCpu` can difference it; and the
     // last tick's hostile sides go (`HostileInfo.forgetSides`), and with them

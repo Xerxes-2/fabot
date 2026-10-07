@@ -499,6 +499,13 @@ type Quotas =
         /// The fight asks this colony casts for this tick, the world's Caster's
         /// share of them (`Caster.assign`): its fighting rows' quotas.
         Casts: Cast list
+        /// The seats the spawns left this tick that a full bank cannot pay
+        /// though the row's own block fits it: a body sized over capacity
+        /// (`Spawns.planSpawns`), the `SpawnIdle` breach's fact (#630).
+        Unfilled: int
+        /// The seats a named rule holds back this tick: a row whose block
+        /// the bank cannot hold, a row the defender owed holds (#504).
+        Held: int
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -514,6 +521,8 @@ module Quotas =
             Overflow = HaulOverflow.none
             Busy = []
             Casts = []
+            Unfilled = 0
+            Held = 0
         }
 
 /// The facts the rows whose sizing is not the bank's answer alone read,

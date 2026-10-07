@@ -71,11 +71,13 @@
 //                                       (gives up after 20 minutes)
 //   observe.mjs health [--colony <home>] [--samples K]
 //                                       one line per anomaly after a deploy:
-//                                       the faults the bot caught first, then
-//                                       idle creeps, creeps that did not move
-//                                       over K position samples, creeps outside
-//                                       their colony's rooms, stand-downs,
-//                                       standing breaches, and the CPU split
+//                                       the open breaches first (the world's,
+//                                       then each colony's), the faults the
+//                                       bot caught, then idle creeps, creeps
+//                                       that did not move over K position
+//                                       samples, creeps outside their colony's
+//                                       rooms, stand-downs, pending breaches,
+//                                       and the CPU split
 //   observe.mjs history <room> <tick> [--json]
 //                                       the room-history replay at that tick:
 //                                       objects by type and owner, and every
@@ -111,6 +113,50 @@ const versionLine = (leaf) =>
   leaf != null && typeof leaf === "object" && typeof leaf.build === "string"
     ? `bundle   ${leaf.build}, loaded t${leaf.reset}`
     : "bundle   not named (the deployed bundle predates #634)";
+
+// A breach leaf is rewritten on every full tick, at most the longest cadence
+// (4) apart; a row last confirmed more than twice that long ago belongs to a
+// log nothing writes any more (a colony lost, a world leaf after a reset) and
+// is stale, not open.
+const BREACH_STALE_TICKS = 8;
+
+// Whether a breach row is stale at `now` (undefined: no clock read).
+const breachStale = (row, now) => now !== undefined && now - row.last > BREACH_STALE_TICKS;
+
+// Whether a breach row is pending: it has not stood its `window` (#630),
+// which a row of a kind with none does not carry (`Observe.isOpen`).
+const breachPending = (row) => row.last - row.first < (typeof row.window === "number" ? row.window : 0);
+
+// Whether a breach row is open at `now`: confirmed recently, and past its window.
+const breachOpen = (row, now) => !breachStale(row, now) && !breachPending(row);
+
+// One breach as `health` prints it: kind, room, subject, amount, whose log.
+const breachLine = (row, whose, now) =>
+  `breach   ${row.kind} ${row.room || "(world)"}${row.subject ? ` ${row.subject}` : ""} amount ${row.amount}` +
+  ` (${whose}), standing ${row.last - row.first} ticks` +
+  (breachStale(row, now)
+    ? `, stale: last confirmed t${row.last}, ${now - row.last} ticks ago`
+    : breachPending(row)
+      ? ` of ${row.window}, pending`
+      : "");
+
+// A breach log's rows, one aligned line each, in the stored order: Core's
+// (`breachRows`), oldest first.
+const printBreaches = (rows, ticks, tickOf) => {
+  console.log(`${rows.length} breach${rows.length === 1 ? "" : "es"} standing, oldest first:`);
+  const kindWidth = Math.max(...rows.map((row) => row.kind.length));
+  const roomWidth = Math.max(...rows.map((row) => row.room.length));
+  const subjectWidth = Math.max(...rows.map((row) => row.subject.length));
+  for (const row of rows) {
+    console.log(
+      `  ${row.kind.padEnd(kindWidth)}  ${row.room.padEnd(roomWidth)}  ` +
+        `${row.subject.padEnd(subjectWidth)}  amount ${String(row.amount).padStart(4)}  ` +
+        `standing ${ticks(row.last - row.first)} ` +
+        `(since ${tickOf(row.first)}, last read ${tickOf(row.last)})` +
+        (breachPending(row) ? ` — pending, opens at ${ticks(row.window)}` : ""),
+    );
+  }
+};
 
 const usage =
   "usage: observe.mjs tasks [--json] | timeline <creep> [--json] | " +
@@ -569,8 +615,8 @@ if (command === "console") {
   // Read off what the bot already writes — the Transition log's task
   // cursor, the positions leaf, each colony's Raid log, breach log and
   // quotas, the CPU line and the switches in effect (#575) — plus the API's view of each home for the
-  // spawn names a creep's name ends in. Nothing here needs new bot code,
-  // and nothing here is a verdict: each line is a thing to go and look at.
+  // spawn names a creep's name ends in. Only the open breaches are verdicts
+  // (#630); every other line is a thing to go and look at.
   const observe = await memoryGet("fabot.observe");
   if (observe == null || typeof observe !== "object") {
     fail("no observe subtree at Memory.fabot.observe — the bundle is not writing one");
@@ -591,6 +637,36 @@ if (command === "console") {
     fail(`no colony "${colonyArg}" here; the homes with a record are [${allHomes.join(", ")}].`);
   }
   const homes = colonyArg !== undefined ? [colonyArg] : allHomes;
+
+  // The open breaches first (#630): the invariants the bot itself found
+  // broken, the world's (cause before symptom) then each colony's. These
+  // are verdicts; everything after them is a heuristic. A pending or stale
+  // row is listed with the heuristics.
+  const breachRowsOf = (leaf) =>
+    (Array.isArray(leaf?.rows) ? leaf.rows : []).filter(
+      (row) => typeof row?.kind === "string" && typeof row?.first === "number" && typeof row?.last === "number",
+    );
+  const breachLeaves = [["world", observe.breaches], ...homes.map((home) => [home, colonies[home]?.breaches])];
+  // The clock off the same snapshot: the newest tick any leaf just read
+  // confirms, so a row is judged against the tick the bot last wrote and
+  // not a later read of the game clock.
+  const breachClock = Math.max(
+    -Infinity,
+    ...breachLeaves.flatMap(([, leaf]) => breachRowsOf(leaf).map((row) => row.last)),
+    ...(Array.isArray(cpuLog?.ticks) ? cpuLog.ticks.map((row) => row?.t).filter((t) => typeof t === "number") : []),
+  );
+  const pendingBreaches = [];
+  let openBreaches = 0;
+  for (const [whose, leaf] of breachLeaves) {
+    for (const row of breachRowsOf(leaf)) {
+      if (breachOpen(row, breachClock)) {
+        openBreaches++;
+        console.log(breachLine(row, whose, breachClock));
+      } else {
+        pendingBreaches.push(breachLine(row, whose, breachClock));
+      }
+    }
+  }
 
   // K position samples, one per tick. A read that comes back identical to
   // the last is the same tick served twice, not a colony that froze, so it
@@ -709,15 +785,8 @@ if (command === "console") {
     }
   }
 
-  for (const home of homes) {
-    for (const row of colonies[home]?.breaches?.rows ?? []) {
-      counts.breach++;
-      lines.push(
-        `breach   ${row.kind} ${row.room}${row.subject ? ` ${row.subject}` : ""} amount ${row.amount}` +
-          ` (${home}), standing ${row.last - row.first} ticks`,
-      );
-    }
-  }
+  counts.breach = openBreaches;
+  lines.push(...pendingBreaches);
 
   // The fault ring (#628), first: a throw the bot caught, one line per
   // colony, step and message, newest first, with how often the ring holds it
@@ -2218,6 +2287,19 @@ if (command === "console") {
   // and a row this reader guessed at would describe a violation nobody
   // wrote.
   const KIND = {
+    "light-starved":
+      "the ticks a forcing condition (the subject) forced in a window of the CPU line that ran no light " +
+      "tick, at a draw over the CPU limit that empties the bucket inside the horizon; the cause " +
+      "bucket-falling is the symptom of",
+    "bucket-falling": "the ticks until the bucket stands empty at its slope over the CPU line's ring",
+    fault:
+      "the throws the bot caught in that step (the subject) since this bundle's load, the newest " +
+      "within a creep's life — `observe health` lists them",
+    "spawn-idle":
+      "the seats the spawn plan left that a full bank cannot pay though their row's block fits it " +
+      "(a body sized over capacity), while that spawn stood free beside a full bank casting nothing; " +
+      "pending until it has stood the longest cast (`window`)",
+    "body-idle": "the ticks that body has stood with no Task, not fleeing and not held on purpose",
     "ore-on-the-floor": "the T of ore lying on the floor of a room this colony sweeps",
     "ore-unplaceable": "the T aboard a body at the Reactor that the Reactor has no room for",
     "reactor-running-dry":
@@ -2236,38 +2318,52 @@ if (command === "console") {
   // under, and for the same reason. Core drops a row it cannot decode, so
   // an unreadable row is one this command would otherwise hide while the
   // colony is standing in it.
-  const rows = stored.rows.map((row) => {
-    if (
-      row === null ||
-      typeof row !== "object" ||
-      Array.isArray(row) ||
-      // An own-key test and never `KIND[row.kind] !== undefined`: every
-      // object literal answers `toString` and `constructor` with a
-      // function, so a prototype name off the wire would read as a known
-      // kind here while Core's decoder answers `None` and drops the row.
-      !Object.hasOwn(KIND, row.kind) ||
-      typeof row.room !== "string" ||
-      typeof row.subject !== "string" ||
-      typeof row.amount !== "number" ||
-      typeof row.first !== "number" ||
-      typeof row.last !== "number"
-    ) {
-      fail(
-        `a row at Memory.fabot.observe.colonies.${home}.breaches.rows is off the wire shape: ` +
-          `${JSON.stringify(row)} — the leaf was hand-edited, or its wire shape has moved. ` +
-          'Not read as "that one is fine": the bot drops a row it cannot decode, so this may be ' +
-          "a violation nothing else will tell you about.",
-      );
-    }
-    return row;
-  });
+  const readRows = (list, place) =>
+    list.map((row) => {
+      if (
+        row === null ||
+        typeof row !== "object" ||
+        Array.isArray(row) ||
+        // An own-key test and never `KIND[row.kind] !== undefined`: every
+        // object literal answers `toString` and `constructor` with a
+        // function, so a prototype name off the wire would read as a known
+        // kind here while Core's decoder answers `None` and drops the row.
+        !Object.hasOwn(KIND, row.kind) ||
+        typeof row.room !== "string" ||
+        typeof row.subject !== "string" ||
+        typeof row.amount !== "number" ||
+        typeof row.first !== "number" ||
+        typeof row.last !== "number" ||
+        (row.window !== undefined && typeof row.window !== "number")
+      ) {
+        fail(
+          `a row at ${place}.rows is off the wire shape: ` +
+            `${JSON.stringify(row)} — the leaf was hand-edited, or its wire shape has moved. ` +
+            'Not read as "that one is fine": the bot drops a row it cannot decode, so this may be ' +
+            "a violation nothing else will tell you about.",
+        );
+      }
+      return row;
+    });
+  const rows = readRows(stored.rows, `Memory.fabot.observe.colonies.${home}.breaches`);
+  // The world's log (#630): the CPU line's rows and the throws no colony
+  // owns. Absent under a bundle that predates it.
+  const worldStored = await memoryGet("fabot.observe.breaches");
+  const worldRows = Array.isArray(worldStored?.rows)
+    ? readRows(worldStored.rows, "Memory.fabot.observe.breaches")
+    : [];
 
   const tickOf = (t) => `t${t.toLocaleString("en-US")}`;
   const ticks = (n) => `${n.toLocaleString("en-US")} tick${n === 1 ? "" : "s"}`;
 
   if (json) {
-    console.log(JSON.stringify(stored.rows, null, 2));
+    console.log(JSON.stringify({ colony: stored.rows, world: worldRows }, null, 2));
   } else {
+    if (worldRows.length > 0) {
+      console.log("world");
+      printBreaches(worldRows, ticks, tickOf);
+      console.log("");
+    }
     console.log(`colony ${home}`);
     console.log("");
     if (rows.length === 0) {
@@ -2284,26 +2380,16 @@ if (command === "console") {
       // test. The age is what turns a list into a priority — a pile a
       // courier is three ticks from picking up and a pile that is bleeding
       // read exactly alike without it.
-      console.log(`${rows.length} breach${rows.length === 1 ? "" : "es"} standing, oldest first:`);
-      const kindWidth = Math.max(...rows.map((row) => row.kind.length));
-      const roomWidth = Math.max(...rows.map((row) => row.room.length));
-      const subjectWidth = Math.max(...rows.map((row) => row.subject.length));
-      for (const row of rows) {
-        console.log(
-          `  ${row.kind.padEnd(kindWidth)}  ${row.room.padEnd(roomWidth)}  ` +
-            `${row.subject.padEnd(subjectWidth)}  amount ${String(row.amount).padStart(4)}  ` +
-            `standing ${ticks(row.last - row.first)} ` +
-            `(since ${tickOf(row.first)}, last read ${tickOf(row.last)})`,
-        );
-      }
-      console.log("");
-      // What each kind that actually appeared means, once rather than per
-      // row: the rows are the priority list and stay one line each, and the
-      // sentence explaining a kind does not get longer the more piles are
-      // on the floor.
-      for (const kind of [...new Set(rows.map((row) => row.kind))]) {
-        console.log(`  ${kind}: amount is ${KIND[kind]}`);
-      }
+      printBreaches(rows, ticks, tickOf);
+    }
+    // What each kind that actually appeared means, once rather than per
+    // row: the rows are the priority list and stay one line each, and the
+    // sentence explaining a kind does not get longer the more piles are
+    // on the floor.
+    const kinds = [...new Set([...worldRows, ...rows].map((row) => row.kind))];
+    if (kinds.length > 0) console.log("");
+    for (const kind of kinds) {
+      console.log(`  ${kind}: amount is ${KIND[kind]}`);
     }
   }
 } else if (command === "reactor") {

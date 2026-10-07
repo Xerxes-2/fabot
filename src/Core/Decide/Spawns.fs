@@ -409,6 +409,13 @@ let internal planSpawns
                 else
                     None
 
+        // One seat: its row's pattern, the row's sizing off the bank, and the
+        // cast that sizing makes when the bank pays it. The first two say,
+        // of a seat no spawn took, why a full bank would not take it either
+        // (`Quotas.Unfilled`, `Quotas.Held`).
+        let seat pattern (sizing: RoomEnergy -> BodyPart list) =
+            pattern, sizing, castFromBank pattern sizing
+
         // The vacancies' ceilings, richest first. A stranded Anchor stands on
         // no Post, so leaving it out of the count leaves these unmoved.
         let emptyPostCaps = vacantPosts |> Map.toList |> List.map snd |> List.sortDescending
@@ -585,6 +592,8 @@ let internal planSpawns
                 Overflow = HaulOverflow.none
                 Busy = []
                 Casts = []
+                Unfilled = 0
+                Held = 0
                 Rows =
                     (filled
                      |> List.map (fun (row, alive, inOven, _) ->
@@ -703,7 +712,7 @@ let internal planSpawns
             |> List.collect (fun (row, _, _, gap) ->
                 List.replicate
                     gap
-                    (castFromBank row.Pattern (fun bank ->
+                    (seat row.Pattern (fun bank ->
                         sizedBodyFor rowSizing row.Pattern bank.Capacity)))
 
         // The upgrader row casts after the workers (user, 2026-10-05): W17S25
@@ -727,13 +736,13 @@ let internal planSpawns
         let seats =
             List.replicate
                 harvestFloor
-                (castFromBank anchorPattern (fun bank ->
+                (seat anchorPattern (fun bank ->
                     sizedBodyFor rowSizing anchorPattern bank.Available))
             @ List.replicate
                 supplyFloor
                 // Sized from `Available` like the harvest floor (with the disaster
                 // fallback inside `castFromBank`, for the same reason).
-                (castFromBank haulerPattern (fun bank -> bodyFor haulerPattern bank.Available))
+                (seat haulerPattern (fun bank -> bodyFor haulerPattern bank.Available))
             @ rowSeats otherRows
             @ floorSeats
             @ List.replicate
@@ -741,31 +750,34 @@ let internal planSpawns
                      0
                  else
                      deficit - (harvestFloor + supplyFloor + specialistSeats) |> max 0)
-                (castFromBank workerPattern (fun bank -> bodyFor workerPattern bank.Capacity))
+                (seat workerPattern (fun bank -> bodyFor workerPattern bank.Capacity))
             @ upgraderSeats
 
 
         // Idle spawns draw from the colony's one bank in list order — each
         // body debits the budget the next spawn sees, so the same energy is
         // never committed twice.
-        let intents, _, _ =
+        let intents, _, unfilled =
             view.Spawns
             |> List.filter (fun s -> not s.IsSpawning)
             |> List.fold
                 (fun
                     (intents,
                      bank: RoomEnergy,
-                     unfilled: (RoomEnergy -> (BodyPattern * BodyPart list) option) list)
+                     unfilled:
+                         (BodyPattern *
+                         (RoomEnergy -> BodyPart list) *
+                         (RoomEnergy -> (BodyPattern * BodyPart list) option)) list)
                     s ->
                     // The first seat this bank can pay for, and the rest of
                     // the list with exactly that seat taken out of it.
                     let rec take passed remaining =
                         match remaining with
                         | [] -> None
-                        | cast :: rest ->
+                        | (_, _, cast) as seat :: rest ->
                             match cast bank with
                             | Some filled -> Some(filled, List.rev passed @ rest)
-                            | None -> take (cast :: passed) rest
+                            | None -> take (seat :: passed) rest
 
                     match take [] unfilled with
                     | Some((pattern, body), left) ->
@@ -777,4 +789,36 @@ let internal planSpawns
                     | None -> intents, bank, unfilled)
                 ([], view.Bank, seats)
 
-        List.rev intents, quotas
+        // Of the seats no spawn took, the ones a full bank would not take
+        // either: the row's own block over the bank is its named rule (a row
+        // priced at capacity casts nothing at a bank that cannot hold one
+        // block, the guard's 750), and held; a block that fits sized into a
+        // body over capacity breaks the capacity sizing above, and is unfilled. The
+        // disaster fallback casts from what is banked, and leaves neither.
+        let full =
+            { view.Bank with
+                Available = view.Bank.Capacity
+            }
+
+        let unpaid =
+            if List.isEmpty view.Creeps then
+                []
+            else
+                unfilled
+                |> List.filter (fun (_, sizing, _) -> bodyCost (sizing full) > view.Bank.Capacity)
+
+        let byRule, defects =
+            unpaid
+            |> List.partition (fun (pattern, _, _) -> bodyCost pattern.Block > view.Bank.Capacity)
+
+        // The seats the defender owed holds back (#504) never became seats.
+        let defenderHeld =
+            filled
+            |> List.filter (fun (row, _, _, _) -> not (owed row))
+            |> List.sumBy (fun (_, _, _, gap) -> gap)
+
+        List.rev intents,
+        { quotas with
+            Unfilled = List.length defects
+            Held = List.length byRule + defenderHeld
+        }

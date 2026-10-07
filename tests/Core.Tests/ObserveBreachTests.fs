@@ -127,11 +127,16 @@ let private withCourierBody name (colony: ColonyView) =
                     creep)
     }
 
+/// One tick of a colony's breach log folded off its view alone, as the
+/// shell folds a faulted colony's.
+let private foldView cap t (colony: ColonyView) (prior: BreachState) =
+    foldBreaches cap t (colonyBreaches ColonyBreachFacts.none colony prior) prior
+
 /// The breaches this view yields on one tick, as (kind, room, subject, amount)
 /// rows — the whole of what a row says, so a case that fires the right kind on
 /// the wrong object cannot pass.
 let private breachesOn t (colony: ColonyView) =
-    foldBreaches capBreaches t { colony with Time = t } BreachState.empty
+    foldView capBreaches t { colony with Time = t } BreachState.empty
     |> breachRows
     |> List.map (fun row -> row.Breach.Kind, row.Breach.Room, row.Breach.Subject, row.Breach.Amount)
 
@@ -418,8 +423,8 @@ let breachAgeTests =
 
                 let state =
                     BreachState.empty
-                    |> foldBreaches capBreaches 100 { colony with Time = 100 }
-                    |> foldBreaches capBreaches 150 { colony with Time = 150 }
+                    |> foldView capBreaches 100 { colony with Time = 100 }
+                    |> foldView capBreaches 150 { colony with Time = 150 }
 
                 Expect.equal
                     (standing 150 state |> List.map (fun (breach, age) -> breach.Subject, age))
@@ -440,8 +445,8 @@ let breachAgeTests =
 
                 let state =
                     BreachState.empty
-                    |> foldBreaches capBreaches 100 { broken with Time = 100 }
-                    |> foldBreaches
+                    |> foldView capBreaches 100 { broken with Time = 100 }
+                    |> foldView
                         capBreaches
                         101
                         { (quiet |> owning raidRoom) with
@@ -460,9 +465,9 @@ let breachAgeTests =
 
                 let state =
                     BreachState.empty
-                    |> foldBreaches capBreaches 100 { broken with Time = 100 }
-                    |> foldBreaches capBreaches 101 { clear with Time = 101 }
-                    |> foldBreaches capBreaches 102 { broken with Time = 102 }
+                    |> foldView capBreaches 100 { broken with Time = 100 }
+                    |> foldView capBreaches 101 { clear with Time = 101 }
+                    |> foldView capBreaches 102 { broken with Time = 102 }
 
                 Expect.equal
                     (standing 102 state |> List.map snd)
@@ -473,13 +478,13 @@ let breachAgeTests =
             test "the latest reading wins: a growing pile reports what it holds now" {
                 let state =
                     BreachState.empty
-                    |> foldBreaches
+                    |> foldView
                         capBreaches
                         100
                         { (quiet |> owning raidRoom |> withPile raidRoom "pile-1" 90) with
                             Time = 100
                         }
-                    |> foldBreaches
+                    |> foldView
                         capBreaches
                         101
                         { (quiet |> owning raidRoom |> withPile raidRoom "pile-1" 915) with
@@ -504,12 +509,497 @@ let breachAgeTests =
 
                 let state =
                     BreachState.empty
-                    |> foldBreaches 2 100 (piles [ "old-a"; "old-b" ] 915 100)
-                    |> foldBreaches 2 101 (piles [ "old-a"; "old-b"; "new-c" ] 915 101)
+                    |> foldView 2 100 (piles [ "old-a"; "old-b" ] 915 100)
+                    |> foldView 2 101 (piles [ "old-a"; "old-b"; "new-c" ] 915 101)
 
                 Expect.equal
                     (breachRows state |> List.map (fun row -> row.Breach.Subject))
                     [ "old-a"; "old-b" ]
                     "the cap drops the breach that has only just appeared"
+            }
+        ]
+
+/// A tick the CPU line reads: full unless `light`, forced by `forced`,
+/// costing `ms`, the bucket as it ended.
+let private cpuTick (light: bool) (forced: string option) (ms: float) (bucket: int) : CpuReadings =
+    {
+        AtEntry = 0.0
+        AtSnapshot = ms
+        AtDecide = ms
+        AtSave = ms
+        AtExecute = ms
+        Intents = 0
+        Bucket = bucket
+        Replans = 0
+        ColonyDecides = []
+        RoomSnapshots = []
+        AtRooms = 0.0
+        AtProjects = 0.0
+        ColonyProjects = []
+        ColonyFloods = []
+        HeapMb = 0.0
+        ExternalMb = 0.0
+        MemoRows = 0
+        Light = light
+        Forced =
+            forced
+            |> Option.map (fun reason ->
+                {
+                    Reason = reason
+                    Facts = 1
+                    Replayed = 0
+                    FightOnly = 0
+                })
+        Moved = []
+    }
+
+/// The CPU line over ticks 1..n, each tick's reading off its tick.
+let private lineOf (n: int) (reading: int -> CpuReadings) =
+    [ 1..n ]
+    |> List.fold (fun line tick -> foldCpu capCpuTicks tick (reading tick) line) CpuState.empty
+
+/// The world's breaches on one tick, as (kind, room, subject, amount) rows.
+let private worldOn (facts: WorldBreachFacts) =
+    worldBreaches Tuning.defaults facts
+    |> List.map (fun breach -> breach.Kind, breach.Room, breach.Subject, breach.Amount)
+
+/// The world at t100 under a 20 ms allowance.
+let private worldFacts line =
+    {
+        Time = 100
+        Line = line
+        Cadence = Some Tuning.defaults.Cadence
+        Limit = 20.0
+        Faults = []
+    }
+
+/// The facts of a colony whose economy decided whole, quiet and unheld.
+let private decided =
+    { ColonyBreachFacts.none with
+        Quotas = Some Quotas.silent
+    }
+
+/// One of ours whose task cursor went unassigned at `since`, after `task`.
+let private idleAfter name task since : ObserveState =
+    Map.ofList
+        [
+            name,
+            {
+                Entries =
+                    [
+                        {
+                            Tick = since - 50
+                            Verdict = Verdict.Kept(name, task)
+                        }
+                        {
+                            Tick = since
+                            Verdict = Verdict.Unassigned(name, IdleReason.NoneApplicable)
+                        }
+                    ]
+                LastTask = Some(Verdict.Unassigned(name, IdleReason.NoneApplicable))
+                LastScoring = None
+                LastMove = []
+            }
+        ]
+
+/// The same after a harvest at a rock no stand-down shuts.
+let private idleSince name since = idleAfter name "harvest:source-1" since
+
+/// A colony with one free spawn beside a bank holding `available` of 300.
+let private spawnFree available =
+    { quiet with
+        Spawns =
+            [
+                {
+                    Name = "Spawn1"
+                    Id = "spawn-1"
+                    RoomName = raidRoom
+                    IsSpawning = false
+                    Remaining = 0
+                }
+            ]
+        Bank =
+            {
+                Available = available
+                Capacity = 300
+            }
+    }
+
+/// Quotas whose spawn plan left `seats` a full bank pays.
+let private unfilled seats = { Quotas.silent with Unfilled = seats }
+
+[<Tests>]
+let selfBreachTests =
+    testList
+        "breach log: the bot reads itself (#630)"
+        [
+            test
+                "a window of forced ticks over the limit with no light tick is light-starved; one light tick clears it" {
+                // 2026-10-08: a chase forced every tick and the bucket fell 10k to 5k
+                // before anyone looked. At cadence 2 the window is twenty ticks.
+                let chasing = lineOf 30 (fun _ -> cpuTick false (Some "chase") 30.0 9_000)
+
+                Expect.equal
+                    (worldOn (worldFacts chasing))
+                    [ BreachKind.LightStarved, "", "chase", 20 ]
+                    "the amount is the ticks forcing took in the window, the subject what forced them"
+
+                Expect.isEmpty
+                    (worldOn (
+                        worldFacts (
+                            lineOf 30 (fun tick -> cpuTick (tick = 25) (Some "chase") 30.0 9_000)
+                        )
+                    ))
+                    "a light tick inside the window is the cadence still running"
+
+                Expect.isEmpty
+                    (worldOn
+                        { worldFacts chasing with
+                            Cadence = None
+                        })
+                    "with light ticks off no light tick is owed"
+            }
+
+            test "a forced fight the bucket can pay for is not light-starved" {
+                // A long defence forces every tick; at 10 ms of a 20 ms limit the
+                // bucket refills, and nothing is starved.
+                Expect.isEmpty
+                    (worldOn (
+                        worldFacts (lineOf 30 (fun _ -> cpuTick false (Some "raid") 10.0 10_000))
+                    ))
+                    "forced full ticks under the limit cost the bucket nothing"
+
+                // A siege at 22 ms of 20 draws 2 a tick: a full bucket lasts 5,000
+                // ticks of it, past the horizon. The same draw at 3,000 lasts 1,500.
+                Expect.isEmpty
+                    (worldOn (
+                        worldFacts (lineOf 30 (fun _ -> cpuTick false (Some "raid") 22.0 10_000))
+                    ))
+                    "a draw a full bucket outlasts the horizon on is paid for"
+
+                Expect.equal
+                    (worldOn (
+                        worldFacts (lineOf 30 (fun _ -> cpuTick false (Some "raid") 22.0 3_000))
+                    ))
+                    [ BreachKind.LightStarved, "", "raid", 20 ]
+                    "the same draw on a bucket it empties inside the horizon starves it"
+            }
+
+            test "a bucket whose slope empties it inside the horizon is falling; a flat one is not" {
+                // Ten a tick from 5,000: 4,000 left at tick 100 is 400 ticks of it.
+                Expect.equal
+                    (worldOn (
+                        worldFacts (
+                            lineOf capCpuTicks (fun tick ->
+                                cpuTick true None 10.0 (5_000 - 10 * tick))
+                        )
+                    ))
+                    [ BreachKind.BucketFalling, "", "bucket", 400 ]
+                    "the amount is the ticks until the bucket stands empty at this slope"
+
+                Expect.isEmpty
+                    (worldOn (
+                        worldFacts (lineOf capCpuTicks (fun _ -> cpuTick true None 10.0 10_000))
+                    ))
+                    "a full bucket holding is no fall"
+
+                Expect.isEmpty
+                    (worldOn (
+                        worldFacts (
+                            lineOf (capCpuTicks - 1) (fun tick ->
+                                cpuTick true None 10.0 (5_000 - 10 * tick))
+                        )
+                    ))
+                    "a ring short of full is too short to tell a dip from a fall"
+            }
+
+            test
+                "a throw since the load is a fault: the colony's in its room, the tick's in the world's" {
+                Expect.equal
+                    (foldBreaches
+                        capBreaches
+                        100
+                        (colonyBreaches
+                            { ColonyBreachFacts.none with
+                                Faults = [ "decide", 99; "decide", 98; "decide", 40 ]
+                            }
+                            quiet
+                            BreachState.empty)
+                        BreachState.empty
+                     |> openRows 100
+                     |> List.map (fun row ->
+                         row.Breach.Kind, row.Breach.Room, row.Breach.Subject, row.Breach.Amount))
+                    [ BreachKind.Fault, raidRoom, "decide", 3 ]
+                    "the step that threw, and how often since the load"
+
+                Expect.equal
+                    (worldOn
+                        { worldFacts CpuState.empty with
+                            Faults = [ "execute", 90 ]
+                        })
+                    [ BreachKind.Fault, "", "execute", 1 ]
+                    "a throw no colony owns is the world's"
+
+                Expect.isEmpty
+                    (worldOn
+                        { worldFacts CpuState.empty with
+                            Time = 90 + faultOpenTicks
+                            Faults = [ "execute", 90 ]
+                        })
+                    "a transient throw a creep's life old has closed, though the ring still lists it"
+            }
+
+            test
+                "a spawn free beside a full bank while the plan leaves seats opens after the longest cast" {
+                let foldCasting casting t colony quotas prior =
+                    foldBreaches
+                        capBreaches
+                        t
+                        (colonyBreaches
+                            { ColonyBreachFacts.none with
+                                Quotas = quotas
+                                Casting = casting
+                            }
+                            { colony with Time = t }
+                            prior)
+                        prior
+
+                let fold = foldCasting Set.empty
+
+                let pending = BreachState.empty |> fold 100 (spawnFree 300) (Some(unfilled 2))
+
+                Expect.equal
+                    (breachRows pending, openRows 100 pending)
+                    ([
+                        {
+                            FirstSeen = 100
+                            LastSeen = 100
+                            Breach =
+                                {
+                                    Kind = BreachKind.SpawnIdle
+                                    Room = raidRoom
+                                    Subject = "Spawn1"
+                                    Amount = 2
+                                    Window = spawnIdleWindow
+                                }
+                        }
+                     ],
+                     [])
+                    "a pending row: the seats left, folded for its age"
+
+                let opened =
+                    pending
+                    |> fold (100 + spawnIdleWindow - 1) (spawnFree 300) None
+                    |> fold (100 + spawnIdleWindow) (spawnFree 300) (Some(unfilled 2))
+
+                Expect.equal
+                    (openRows (100 + spawnIdleWindow) opened |> List.map _.Breach.Subject)
+                    [ "Spawn1" ]
+                    "a fight-only tick in between leaves it standing, and a whole cast later it is open"
+
+                Expect.isEmpty
+                    (breachRows (
+                        opened |> fold (101 + spawnIdleWindow) (spawnFree 300) (Some(unfilled 0))
+                    ))
+                    "the plan leaving no seat a full bank pays closes it"
+
+                Expect.isEmpty
+                    (breachRows (
+                        BreachState.empty
+                        |> foldCasting
+                            (Set.singleton "Spawn1")
+                            100
+                            (spawnFree 300)
+                            (Some(unfilled 2))
+                    ))
+                    "a spawn this tick's plan casts on is busy"
+
+                Expect.isEmpty
+                    (breachRows (BreachState.empty |> fold 100 (spawnFree 299) (Some(unfilled 2))))
+                    "a bank still filling is income, not an idle spawn"
+            }
+
+            test "a body with no Task for a tenth of its life is idle; a fleeing one is not" {
+                let colony t =
+                    { quiet with
+                        Time = t
+                        Creeps = [ ours "worker-1" ]
+                    }
+
+                let idleWith facts t log =
+                    colonyBreaches { facts with Log = log } (colony t) BreachState.empty
+                    |> List.map (fun breach ->
+                        breach.Kind, breach.Room, breach.Subject, breach.Amount)
+
+                let idleOn = idleWith decided
+
+                Expect.equal
+                    (idleOn 350 (idleSince "worker-1" 200))
+                    [ BreachKind.BodyIdle, raidRoom, "worker-1", 150 ]
+                    "none-applicable since t200, a tenth of 1,500 ticks later"
+
+                Expect.isEmpty
+                    (idleOn 349 (idleSince "worker-1" 200))
+                    "a tick short of it is a wait"
+
+                let withTask task =
+                    idleSince "worker-1" 200
+                    |> Map.map (fun _ record ->
+                        { record with
+                            Entries =
+                                record.Entries
+                                @ [
+                                    {
+                                        Tick = 340
+                                        Verdict = Verdict.Kept("worker-1", task)
+                                    }
+                                ]
+                            LastTask = Some(Verdict.Kept("worker-1", task))
+                        })
+
+                Expect.isEmpty (idleOn 350 (withTask "flee")) "a Flee is a Task"
+                Expect.isEmpty (idleOn 350 (withTask "build")) "a new Task closes it"
+            }
+
+            test "a body held on purpose is not idle" {
+                let idleOf facts (creep: CreepInfo) =
+                    colonyBreaches
+                        { facts with
+                            Log = idleSince creep.Name 200
+                        }
+                        { quiet with
+                            Time = 350
+                            Creeps = [ creep ]
+                        }
+                        BreachState.empty
+
+                Expect.isEmpty
+                    (idleOf
+                        decided
+                        { ours "guard-1" with
+                            Body = Map.ofList [ Attack, 2; Move, 2 ]
+                        })
+                    "a fighter with no Task and no ask open for it is a reserve at its idle home"
+
+                // #647: W13S28 cast guard-1023983-Spawn2 for guard:W13S29, and it idled
+                // none-applicable at home from birth, the ask open and no seat for it.
+                let guardAsked =
+                    { decided with
+                        Quotas =
+                            Some
+                                { Quotas.silent with
+                                    Casts =
+                                        [
+                                            {
+                                                For = Guard "W13S29"
+                                                Ask =
+                                                    {
+                                                        Row = CastRow.Guard
+                                                        Wanted = 1
+                                                        Blocks = 1
+                                                    }
+                                            }
+                                        ]
+                                }
+                    }
+
+                Expect.equal
+                    (idleOf
+                        guardAsked
+                        { ours "guard-1" with
+                            Body = Map.ofList [ Attack, 2; Move, 2 ]
+                        }
+                     |> List.map (fun breach -> breach.Kind, breach.Subject, breach.Amount))
+                    [ BreachKind.BodyIdle, "guard-1", 150 ]
+                    "a fighter its colony casts for with no Task is cast-for-but-unseated, and idle"
+
+                // A child fed spends the energy the upgrade would take: the upgrader
+                // row is the one it starves, and it starves nobody else.
+                let feeding =
+                    { decided with
+                        Quotas =
+                            Some
+                                { Quotas.silent with
+                                    Busy = [ FeedingChild ]
+                                }
+                    }
+
+                Expect.isEmpty
+                    (idleOf feeding (ours "upgrader-1"))
+                    "the starved row's body waits by design"
+
+                Expect.isNonEmpty
+                    (idleOf feeding (ours "hauler-1"))
+                    "a body of a row the child's feed does not starve still counts"
+
+                let shut =
+                    { decided with
+                        StoodDown = Set.singleton outpostRoom
+                    }
+
+                let idleAfterIn facts (creep: CreepInfo) task =
+                    colonyBreaches
+                        { facts with
+                            Log = idleAfter creep.Name task 200
+                        }
+                        { quiet with
+                            Time = 350
+                            Creeps = [ creep ]
+                        }
+                        BreachState.empty
+
+                Expect.isEmpty
+                    (idleAfterIn shut (ours "reserver-1") $"reserve:{outpostRoom}")
+                    "a stand-down holds the body whose last Task worked the shut outpost"
+
+                Expect.isNonEmpty
+                    (idleAfterIn shut (ours "worker-1") "build:site-1")
+                    "and not a body whose work was elsewhere"
+
+                Expect.isEmpty
+                    (idleOf ColonyBreachFacts.none (ours "worker-1"))
+                    "an economy that did not decide whole says nothing of its holds"
+
+                Expect.isNonEmpty
+                    (idleOf
+                        { decided with
+                            Quotas =
+                                Some
+                                    { Quotas.silent with
+                                        Busy = [ SitesOwed ]
+                                    }
+                        }
+                        (ours "worker-1"))
+                    "sites owed are work, and hold nobody"
+            }
+
+            test "the cap evicts an idle body before the ore" {
+                let idle n =
+                    {
+                        Kind = BreachKind.BodyIdle
+                        Room = raidRoom
+                        Subject = $"worker-{n}"
+                        Amount = 150
+                        Window = 0
+                    }
+
+                let pile =
+                    {
+                        Kind = BreachKind.OreOnTheFloor
+                        Room = raidRoom
+                        Subject = "pile-1"
+                        Amount = 915
+                        Window = 0
+                    }
+
+                let state =
+                    BreachState.empty
+                    |> foldBreaches 2 100 [ idle 1; idle 2 ]
+                    |> foldBreaches 2 101 [ idle 1; idle 2; pile ]
+
+                Expect.contains
+                    (breachRows state |> List.map _.Breach.Subject)
+                    "pile-1"
+                    "the newest row survives when it is the ore and the older ones idle bodies"
             }
         ]

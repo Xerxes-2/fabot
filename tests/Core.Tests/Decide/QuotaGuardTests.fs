@@ -931,6 +931,15 @@ let guardRowTests =
                     (guardQuotaOf { raided with Bank = bank 300 300 })
                     (Some 1)
                     "and the quota is unmoved: what the poor bank refuses is the cast, not the row"
+
+                // The yield is the row's named rule, not a sizing defect: the seat is
+                // reported held, and the spawn-idle breach does not count it (#630).
+                let quotas = (decideOn { raided with Bank = bank 300 300 }).Quotas
+
+                Expect.equal
+                    (quotas.Unfilled, quotas.Held >= 1)
+                    (0, true)
+                    "a block over the bank is held by rule, never unfilled"
             }
 
             test "a guard fills the guard row's Living and no other row's" {

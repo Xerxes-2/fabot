@@ -941,6 +941,19 @@ type Tuning =
         /// stand that tick and decide on the next. Half: a reset's decide ran
         /// 313-504 ms live of the engine's 500 (#488).
         ResetFirstShare: float
+        /// How many cadences of the CPU line without one light tick, while a
+        /// forcing condition forced its ticks, a `LightStarved` breach reads
+        /// (`Observe.worldBreaches`, #630); it opens when that window's draw
+        /// empties the bucket within `BucketHorizon`.
+        LightStarvedCadences: int
+        /// The ticks within which the bucket would stand empty for a breach
+        /// to open (#630): at the CPU line's slope for `BucketFalling`, at a
+        /// forced window's draw over the limit for `LightStarved`.
+        BucketHorizon: int
+        /// The share of its own lifetime, in percent, a body stands with no
+        /// Task, not fleeing and not held on purpose before a `BodyIdle`
+        /// breach opens on it (#630).
+        BodyIdlePercent: int
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -1117,6 +1130,16 @@ module Tuning =
             // over (`Reaction.lend`).
             LaneHops = 2
             ResetFirstShare = 0.5
+            // Ten cadences: long enough that the window's mean is a draw, not
+            // one replan's spike; 2026-10-08's opens inside 30 ticks.
+            LightStarvedCadences = 10
+            // 2026-10-08's fall read empty about 600 ticks out; a full bucket's
+            // replan dips, or a siege it pays for, never reach 2,000.
+            BucketHorizon = 2000
+            // 150 ticks of a 1,500-tick body: a tenth of what it cost spent
+            // standing, longer than a Matcher wait (a site placed next
+            // replan, a Post freed by a relief inside its lead).
+            BodyIdlePercent = 10
         }
 
     /// The cadence bounds a tuned or live value is clamped to: under 2 there

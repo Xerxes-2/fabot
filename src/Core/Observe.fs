@@ -2654,9 +2654,35 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
 /// has no tests by construction: three of four Thorium incidents shipped green
 /// through the untested half (#355). A closed vocabulary rather than a message
 /// string: the kind crosses the wire and a kind added without its wire name
-/// fails the build.
+/// fails the build. A `RefusalStorm` kind waits on R1 (#629), which feeds the
+/// engine's refusals back for it to count.
 [<RequireQualifiedAccess>]
 type BreachKind =
+    /// Every tick of the CPU line's last few cadences ran full and a forcing
+    /// condition forced them (`CpuSample.Forced`), and at their draw over the
+    /// CPU limit the bucket stands empty within `Tuning.BucketHorizon`: no
+    /// light tick ran, and the bucket cannot pay for it. World-wide; `Subject` is the forcing most of those
+    /// ticks named, `Amount` how many it forced. The cause `BucketFalling` is
+    /// the symptom of (#630), and ahead of it.
+    | LightStarved
+    /// The bucket, at its slope over the CPU line's ring, stands empty within
+    /// `Tuning.BucketHorizon`. World-wide; `Amount` is the ticks until empty.
+    | BucketFalling
+    /// The fault ring holds a throw from this bundle's load (#628) no older
+    /// than `faultOpenTicks`. `Room` is the colony it cost, empty for a tick
+    /// or an intent; `Subject` the step that threw, `Amount` how many times
+    /// since the load.
+    | Fault
+    /// A spawn free beside a full bank, casting nothing, while the spawn plan
+    /// left seats a full bank cannot pay though their row's block fits it
+    /// (`Quotas.Unfilled`): a pending row until it has stood the longest cast
+    /// (`Window`). `Subject` is the spawn, `Amount` the seats.
+    | SpawnIdle
+    /// A body with no Task and not fleeing (a Flee is a Task) for a share of
+    /// its own life (`Tuning.BodyIdlePercent`), read off the Transition log,
+    /// while nothing holds it on purpose (a fighter no open ask wants is a
+    /// reserve). `Subject` is the creep, `Amount` the ticks idle.
+    | BodyIdle
     /// Ore decaying in a room this colony projects and may sweep, with the
     /// object it is decaying in as the `Subject`: a pile, or a tombstone or
     /// ruin holding Thorium. One kind for both because a decaying tombstone
@@ -2697,6 +2723,10 @@ type Breach =
         Room: string
         Subject: string
         Amount: int
+        /// The ticks the condition stands before the row is open (`isOpen`):
+        /// 0 for a kind whose fact already carries its own duration, and the
+        /// row before that is pending, folded for its age alone.
+        Window: int
     }
 
 /// One breach as the log carries it. The age is the whole reason this channel
@@ -2761,6 +2791,7 @@ let private breachesIn (view: ColonyView) : Breach list =
                     Room = room
                     Subject = id
                     Amount = SpatialInfo.heldIn view.Spatial Thorium id
+                    Window = 0
                 }))
 
     let reactors = declaredReactors view
@@ -2795,6 +2826,7 @@ let private breachesIn (view: ColonyView) : Breach list =
                             Room = room
                             Subject = creep.Name
                             Amount = stranded
+                            Window = 0
                         }
                 else
                     None))
@@ -2854,6 +2886,7 @@ let private breachesIn (view: ColonyView) : Breach list =
                 // it counts down every tick the row stands, and the row's age
                 // says how long nobody has answered.
                 Amount = reactor.Thorium
+                Window = 0
             })
 
     // A Reactor of ours standing dry: the one kind that is routinely
@@ -2868,6 +2901,7 @@ let private breachesIn (view: ColonyView) : Breach list =
                 Room = room
                 Subject = reactor.Id
                 Amount = 0
+                Window = 0
             })
 
     // A declared Reactor whose row says the flag on it is not ours, the
@@ -2881,14 +2915,365 @@ let private breachesIn (view: ColonyView) : Breach list =
                 Room = room
                 Subject = reactor.Id
                 Amount = 0
+                Window = 0
             })
 
     decayingOre @ unplaceable @ runningDry @ starved @ lost
 
-/// Trim the log to the cap: newest `FirstSeen` dropped first, since the row
-/// that has stood longest is the one bleeding longest (every surviving row
-/// ties on `LastSeen`). The remaining tie is broken on kind and subject so
-/// the eviction is a function of the state and not of map ordering.
+/// Whether a standing row is open at `tick`: it has stood its `Window`.
+let isOpen (tick: int) (row: StandingBreach) =
+    tick - row.FirstSeen >= row.Breach.Window
+
+/// The facts a colony's breaches read beside its view, each one already
+/// computed this tick: nothing here walks, floods or parses Memory.
+type ColonyBreachFacts =
+    {
+        /// This tick's quota arithmetic (`Decision.Quotas`), or None where the
+        /// economy did not decide whole (fight-only, replayed, faulted):
+        /// the seats owed and the holds are then unknown, a `SpawnIdle` row
+        /// stands as it was while its spawn stays free at a full bank, and
+        /// no body reads as idle.
+        Quotas: Quotas option
+        /// The spawns a `SpawnCreep` of this tick's names: busy from now.
+        Casting: Set<string>
+        /// The outposts of this colony's a stand-down shuts: the bodies whose
+        /// last Task worked one wait by design.
+        StoodDown: Set<string>
+        /// The Transition log as this tick left it.
+        Log: ObserveState
+        /// The fault ring's rows in this colony since the bundle's load
+        /// (`observe.version.reset`), as (step, tick).
+        Faults: (string * int) list
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module ColonyBreachFacts =
+    /// A colony read off its view alone.
+    let none =
+        {
+            Quotas = None
+            Casting = Set.empty
+            StoodDown = Set.empty
+            Log = Map.empty
+            Faults = []
+        }
+
+/// The facts the world's breaches read: the CPU line, the cadence it was
+/// run at and the allowance it is measured against, and the throws no
+/// colony owns.
+type WorldBreachFacts =
+    {
+        Time: int
+        Line: CpuState
+        /// The cadence in effect, or None with light ticks off: no light tick
+        /// is owed then.
+        Cadence: int option
+        /// `Game.cpu.limit`: what a tick may spend without drawing the bucket.
+        Limit: float
+        /// The fault ring's rows since the bundle's load that cost no one
+        /// colony (a tick's, an intent's, a segment's), as (step, tick).
+        Faults: (string * int) list
+    }
+
+/// How long a step's last throw keeps its `Fault` row open: a creep's life,
+/// over which every body the throw cost a tick of intents has lived out what
+/// that tick did; the ring keeps listing it for `observe health`.
+let faultOpenTicks = Engine.creepLifetime
+
+/// One `Fault` row per step whose newest throw since the load is recent:
+/// the amount is its throws since the load.
+let private faultBreaches (tick: int) (room: string) (faults: (string * int) list) : Breach list =
+    faults
+    |> List.groupBy fst
+    |> List.filter (fun (_, rows) ->
+        rows |> List.exists (fun (_, at) -> tick - at < faultOpenTicks))
+    |> List.map (fun (phase, rows) ->
+        {
+            Kind = BreachKind.Fault
+            Room = room
+            Subject = phase
+            Amount = List.length rows
+            Window = 0
+        })
+
+/// The longest cast a spawn makes: a full-size body at three ticks a part,
+/// and an engine fact: a spawn free past it has lost a whole body's cast,
+/// where one free a few ticks has lost a part of one.
+let spawnIdleWindow = Engine.maxBodyParts * Engine.spawnTicksPerPart
+
+/// Each spawn free beside a full bank that cast nothing this tick, while the
+/// spawn plan left seats a full bank cannot pay though their row's block fits
+/// it (`Quotas.Unfilled`: a body sized over capacity, a defect). The plan's
+/// own answer, never re-derived from the rows; a seat a named rule holds
+/// (`Quotas.Held`) is not one. A bank still filling is income, not this.
+let private spawnIdle
+    (facts: ColonyBreachFacts)
+    (view: ColonyView)
+    (prior: BreachState)
+    : Breach list =
+    let bankFull = view.Bank.Capacity > 0 && view.Bank.Available >= view.Bank.Capacity
+
+    if not bankFull then
+        []
+    else
+        view.Spawns
+        |> List.filter (fun spawn ->
+            not spawn.IsSpawning && not (Set.contains spawn.Name facts.Casting))
+        |> List.choose (fun spawn ->
+            match facts.Quotas |> Option.map _.Unfilled with
+            | Some seats when seats > 0 -> Some seats
+            | Some _ -> None
+            | None ->
+                prior.Standing
+                |> Map.tryFind (BreachKind.SpawnIdle, spawn.Name)
+                |> Option.map _.Breach.Amount
+            |> Option.map (fun seats ->
+                {
+                    Kind = BreachKind.SpawnIdle
+                    Room = spawn.RoomName
+                    Subject = spawn.Name
+                    Amount = seats
+                    Window = spawnIdleWindow
+                }))
+
+/// The ticks a body lives: a CLAIM part's shorter life, else the creep's.
+let private lifetimeOf (body: Map<BodyPart, int>) =
+    if partCount body BodyPart.Claim > 0 then
+        Engine.claimLifetime
+    else
+        Engine.creepLifetime
+
+/// Whether a busy reason starves the upgrader row by design: a raid, a child
+/// fed and the reserve under its floor each spend the energy the upgrade
+/// would take, so the controller's buffer yields and the row stands at one
+/// (`Pool.planPool`, `Quota.quotaRowsOf`). The two that are work (a broken
+/// line, sites owed) starve nobody.
+let private starvesUpgrade (quotas: Quotas) =
+    quotas.Busy
+    |> List.exists (function
+        | Raided
+        | FeedingChild
+        | UnderReserve -> true
+        | LineBroken
+        | SitesOwed -> false)
+
+/// The target inside a Task id: `Facts.taskId` writes it between the first
+/// colon and the next, and neither an object id nor a room name holds one.
+let private taskTargetOf (tid: string) : string option =
+    match tid.IndexOf ':' with
+    | -1 -> None
+    | colon ->
+        let rest = tid.Substring(colon + 1)
+
+        match rest.IndexOf ':' with
+        | -1 -> Some rest
+        | next -> Some(rest.Substring(0, next))
+
+/// Each body of this colony's whose task cursor says unassigned (a Flee is a
+/// Task, so a fleeing body is not here) for its share of its own life, while
+/// nothing holds that body on purpose: a fighter with no Task and no ask
+/// open for its row is a reserve walking to its idle home; an upgrader is
+/// held while a busy reason starves its row (`starvesUpgrade`); a body whose
+/// last Task worked an outpost a stand-down shuts waits for it. Unknown
+/// quotas hold every economy body. The idle opens on the first unassigned
+/// entry after the last Task the ring holds; a ring that evicted it dates the
+/// idle from its oldest entry, which understates it and never overstates it.
+let private bodyIdle (facts: ColonyBreachFacts) (view: ColonyView) : Breach list =
+    let tick = view.Time
+    let log = facts.Log
+
+    let isTask =
+        function
+        | Verdict.Matched _
+        | Verdict.Kept _
+        | Verdict.Released _ -> true
+        | _ -> false
+
+    let isIdle =
+        function
+        | Verdict.Unassigned _ -> true
+        | _ -> false
+
+    // The room the body's last Task worked: its target's, or the target
+    // itself where the Task names a room.
+    let lastWorked (record: CreepLog) =
+        record.Entries
+        |> List.tryFindBack (fun entry -> isTask entry.Verdict)
+        |> Option.bind (fun entry ->
+            match entry.Verdict with
+            | Verdict.Matched(_, tid, _)
+            | Verdict.Kept(_, tid)
+            | Verdict.Released(_, tid, _) -> taskTargetOf tid
+            | _ -> None)
+        |> Option.map (fun target ->
+            SpatialInfo.roomOf view.Spatial target |> Option.defaultValue target)
+
+    let economyHeld (creep: CreepInfo) (record: CreepLog) =
+        match facts.Quotas with
+        | None -> true
+        | Some quotas ->
+            (isNamedFor upgraderPattern creep.Name && starvesUpgrade quotas)
+            || lastWorked record
+               |> Option.exists (fun room -> Set.contains room facts.StoodDown)
+
+    // A fighter is a reserve only while nothing asks for it: an ask this
+    // colony casts for whose row cuts the body (`Quotas.Casts`) and that it
+    // stands unseated for is idleness, not reserve (#647).
+    let asked (creep: CreepInfo) =
+        facts.Quotas
+        |> Option.exists (fun quotas ->
+            quotas.Casts
+            |> List.exists (fun cast ->
+                Decide.Threat.CastRow.cut cast.Ask.Row creep.Name creep.Body))
+
+    let held (creep: CreepInfo) record =
+        if Decide.Quota.isFighterBody creep then
+            not (asked creep)
+        else
+            economyHeld creep record
+
+    ColonyView.bodies view
+    |> List.choose (fun creep ->
+        match Map.tryFind creep.Name log with
+        | Some record when not (held creep record) && record.LastTask |> Option.exists isIdle ->
+            let sinceTask =
+                record.Entries
+                |> List.rev
+                |> List.takeWhile (fun entry -> not (isTask entry.Verdict))
+
+            sinceTask
+            |> List.filter (fun entry -> isIdle entry.Verdict)
+            |> List.tryLast
+            |> Option.orElse (List.tryHead record.Entries)
+            |> Option.map (fun entry -> tick - entry.Tick)
+            |> Option.filter (fun idle ->
+                idle * 100 >= lifetimeOf creep.Body * view.Tuning.BodyIdlePercent)
+            |> Option.map (fun idle ->
+                {
+                    Kind = BreachKind.BodyIdle
+                    Room =
+                        SpatialInfo.creepRoomOf view.Spatial creep.Name
+                        |> Option.defaultValue (SpatialInfo.homeName view.Spatial)
+                    Subject = creep.Name
+                    Amount = idle
+                    Window = 0
+                })
+        | _ -> None)
+
+/// This tick's violations in one colony, off its view and the facts beside
+/// it; `prior` is the log they fold onto, read for what an unknown fact
+/// leaves standing.
+let colonyBreaches
+    (facts: ColonyBreachFacts)
+    (view: ColonyView)
+    (prior: BreachState)
+    : Breach list =
+    faultBreaches view.Time (SpatialInfo.homeName view.Spatial) facts.Faults
+    @ spawnIdle facts view prior
+    @ bodyIdle facts view
+    @ breachesIn view
+
+/// Every tick of the line's last `LightStarvedCadences` cadences ran full,
+/// forcing made at least one of them so, and at the window's draw (its mean
+/// over `limit`) the bucket stands empty within `Tuning.BucketHorizon`, the
+/// margin `BucketFalling` prices by. Forced full ticks the bucket can pay
+/// for (a siege at a full bucket, a defence under the limit) starve
+/// nothing. The line must reach
+/// back over the whole window: a ring younger than it has not seen a cadence
+/// fail.
+let private lightStarved
+    (tuning: Tuning)
+    (limit: float)
+    (cadence: int option)
+    (line: CpuState)
+    : Breach list =
+    match cadence, List.tryHead line.Ticks, List.tryLast line.Ticks with
+    | Some cadence, Some oldest, Some newest ->
+        let from = newest.Tick - cadence * tuning.LightStarvedCadences + 1
+        let window = line.Ticks |> List.filter (fun sample -> sample.Tick >= from)
+        let forced = window |> List.choose _.Forced
+
+        if
+            oldest.Tick <= from
+            && not (List.isEmpty forced)
+            && window |> List.forall (fun sample -> not sample.Light)
+            && (let over = (window |> List.averageBy _.Ms) - limit
+
+                let bucket = newest.Phases |> Option.map (fun phases -> float phases.Bucket)
+
+                over > 0.0
+                && bucket
+                   |> Option.exists (fun bucket -> bucket / over <= float tuning.BucketHorizon))
+        then
+            // The forcing most of the window named, so the row's identity
+            // holds while one forcing hands over to another for a tick.
+            let reason =
+                forced
+                |> List.countBy _.Reason
+                |> List.sortBy (fun (reason, count) -> -count, reason)
+                |> List.head
+                |> fst
+
+            [
+                {
+                    Kind = BreachKind.LightStarved
+                    Room = ""
+                    Subject = reason
+                    Amount = List.length forced
+                    Window = 0
+                }
+            ]
+        else
+            []
+    | _ -> []
+
+/// The bucket's least-squares slope over the whole ring (`capCpuTicks`
+/// rows), priced as the ticks until it stands empty; a ring not yet full is
+/// too short to tell a replan's dip from a fall.
+let private bucketFalling (tuning: Tuning) (line: CpuState) : Breach list =
+    let samples =
+        line.Ticks
+        |> List.choose (fun sample ->
+            sample.Phases
+            |> Option.map (fun phases -> float sample.Tick, float phases.Bucket))
+
+    if List.length samples < capCpuTicks then
+        []
+    else
+        let meanX = samples |> List.averageBy fst
+        let meanY = samples |> List.averageBy snd
+        let sxx = samples |> List.sumBy (fun (x, _) -> (x - meanX) * (x - meanX))
+        let sxy = samples |> List.sumBy (fun (x, y) -> (x - meanX) * (y - meanY))
+        let slope = if sxx = 0.0 then 0.0 else sxy / sxx
+        let toEmpty = snd (List.last samples) / -slope
+
+        if slope < 0.0 && toEmpty <= float tuning.BucketHorizon then
+            [
+                {
+                    Kind = BreachKind.BucketFalling
+                    Room = ""
+                    Subject = "bucket"
+                    Amount = int toEmpty
+                    Window = 0
+                }
+            ]
+        else
+            []
+
+/// This tick's violations that belong to no one colony: the CPU line's two,
+/// cause before symptom, and the throws no colony owns.
+let worldBreaches (tuning: Tuning) (facts: WorldBreachFacts) : Breach list =
+    lightStarved tuning facts.Limit facts.Cadence facts.Line
+    @ bucketFalling tuning facts.Line
+    @ faultBreaches facts.Time "" facts.Faults
+
+/// Trim the log to the cap: a pending row before an open one, a `BodyIdle`
+/// row before any other kind (a colony's idle bodies can number dozens, and
+/// must never evict the Reactor or the ore), then newest `FirstSeen` dropped
+/// first, since the row that has stood longest is the one bleeding longest
+/// (every surviving row ties on `LastSeen`). The remaining tie is broken on
+/// kind and subject so the eviction is a function of the state and not of
+/// map ordering.
 let private capStanding (cap: int) (rows: Map<BreachKind * string, StandingBreach>) =
     let overflow = Map.count rows - cap
 
@@ -2897,20 +3282,27 @@ let private capStanding (cap: int) (rows: Map<BreachKind * string, StandingBreac
     else
         rows
         |> Map.toList
-        |> List.sortBy (fun ((kind, subject), row) -> row.LastSeen, -row.FirstSeen, kind, subject)
+        |> List.sortBy (fun ((kind, subject), row) ->
+            isOpen row.LastSeen row,
+            kind <> BreachKind.BodyIdle,
+            row.LastSeen,
+            -row.FirstSeen,
+            kind,
+            subject)
         |> List.skip overflow
         |> Map.ofList
 
-/// The breach log's fold: a violation this tick keeps the tick it was first
-/// seen on; one this tick did not read is gone. Dropping out is the decision
-/// the channel is built on (a lingering row would make the log a history),
-/// and a breach that flickers off for one tick loses its age. A blind tick
-/// contributes no breach, so the channel says "nothing is broken that I can
-/// see" and never "nothing is broken".
-let foldBreaches (cap: int) (tick: int) (view: ColonyView) (prior: BreachState) : BreachState =
+/// The breach log's fold over this tick's violations (`colonyBreaches`,
+/// `worldBreaches`): a violation keeps the tick it was first seen on; one
+/// this tick did not read is gone. Dropping out is the decision the channel
+/// is built on (a lingering row would make the log a history), and a breach
+/// that flickers off for one tick loses its age. A blind tick contributes no
+/// breach, so the channel says "nothing is broken that I can see" and never
+/// "nothing is broken".
+let foldBreaches (cap: int) (tick: int) (found: Breach list) (prior: BreachState) : BreachState =
     {
         Standing =
-            breachesIn view
+            found
             |> List.map (fun breach ->
                 let key = breach.Kind, breach.Subject
 
@@ -2946,3 +3338,8 @@ let breachRows (state: BreachState) : StandingBreach list =
 /// standing, oldest first.
 let standing (tick: int) (state: BreachState) : (Breach * int) list =
     breachRows state |> List.map (fun row -> row.Breach, tick - row.FirstSeen)
+
+/// The rows open at `tick` (`isOpen`), oldest first: what is broken, the
+/// pending rows left out.
+let openRows (tick: int) (state: BreachState) : StandingBreach list =
+    breachRows state |> List.filter (isOpen tick)

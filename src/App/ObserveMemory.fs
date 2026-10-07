@@ -1705,6 +1705,11 @@ let saveLayout
 // never prints as a blank.
 let private breachKindName =
     function
+    | BreachKind.LightStarved -> "light-starved"
+    | BreachKind.BucketFalling -> "bucket-falling"
+    | BreachKind.Fault -> "fault"
+    | BreachKind.SpawnIdle -> "spawn-idle"
+    | BreachKind.BodyIdle -> "body-idle"
     | BreachKind.OreOnTheFloor -> "ore-on-the-floor"
     | BreachKind.OreUnplaceable -> "ore-unplaceable"
     | BreachKind.ReactorRunningDry -> "reactor-running-dry"
@@ -1713,6 +1718,11 @@ let private breachKindName =
 
 let private breachKindOf name =
     match name with
+    | "light-starved" -> Some BreachKind.LightStarved
+    | "bucket-falling" -> Some BreachKind.BucketFalling
+    | "fault" -> Some BreachKind.Fault
+    | "spawn-idle" -> Some BreachKind.SpawnIdle
+    | "body-idle" -> Some BreachKind.BodyIdle
     | "ore-on-the-floor" -> Some BreachKind.OreOnTheFloor
     | "ore-unplaceable" -> Some BreachKind.OreUnplaceable
     | "reactor-running-dry" -> Some BreachKind.ReactorRunningDry
@@ -1722,7 +1732,8 @@ let private breachKindOf name =
 
 // One standing breach on the wire. Both ticks ride, though `last` is always
 // this tick: it lets a reader with no game clock compute an age and tell
-// whether the bundle that wrote the row is still running.
+// whether the bundle that wrote the row is still running. `window` rides only
+// on a row that has one (#630), so a row with none keeps its old wire.
 let private encodeBreach (row: StandingBreach) =
     let o = createEmpty<obj>
     o?kind <- breachKindName row.Breach.Kind
@@ -1731,6 +1742,10 @@ let private encodeBreach (row: StandingBreach) =
     o?amount <- row.Breach.Amount
     o?first <- row.FirstSeen
     o?last <- row.LastSeen
+
+    if row.Breach.Window > 0 then
+        o?window <- row.Breach.Window
+
     o
 
 // A checker rather than a cast: a `first` that is not a number would date a
@@ -1749,6 +1764,7 @@ let private decodeBreach (raw: obj) : StandingBreach option =
                 || jsTypeof raw?amount <> "number"
                 || jsTypeof raw?first <> "number"
                 || jsTypeof raw?last <> "number"
+                || not (isNull raw?window || jsTypeof raw?window = "number")
             then
                 None
             else
@@ -1762,30 +1778,48 @@ let private decodeBreach (raw: obj) : StandingBreach option =
                                 Room = unbox<string> raw?room
                                 Subject = unbox<string> raw?subject
                                 Amount = unbox<int> raw?amount
+                                Window = if isNull raw?window then 0 else unbox<int> raw?window
                             }
                     }
+
+// A breach log off its wire leaf.
+let private breachesOf (breaches: obj) : BreachState =
+    {
+        Standing =
+            breaches?rows
+            |> rowsOf decodeBreach
+            |> List.map (fun row -> (row.Breach.Kind, row.Breach.Subject), row)
+            |> Map.ofList
+    }
+
+// A breach log on the wire, rows in `breachRows`' order, so the ordering is
+// Core's.
+let private breachLeaf (state: BreachState) : obj =
+    let breaches = createEmpty<obj>
+    breaches?rows <- state |> breachRows |> List.map encodeBreach |> List.toArray
+    breaches
 
 /// The named colony's prior breach log, or empty when its subtree is absent
 /// or unreadable. A discarded log costs the ages and nothing else: every live
 /// breach is re-read off this tick's view.
 let loadBreaches (home: string) : BreachState =
-    leafOr BreachState.empty (fun () -> colonyLeaf home "breaches") (fun breaches ->
-        {
-            Standing =
-                breaches?rows
-                |> rowsOf decodeBreach
-                |> List.map (fun row -> (row.Breach.Kind, row.Breach.Subject), row)
-                |> Map.ofList
-        })
+    leafOr BreachState.empty (fun () -> colonyLeaf home "breaches") breachesOf
 
 /// Write one colony's breach log back under
 /// `Memory.fabot.observe.colonies.<home>.breaches`, every tick, empty list
 /// included, so `observe.mjs breaches` can tell "no channel" from "nothing is
-/// broken". Rows in `breachRows`' order, so the ordering is Core's.
+/// broken".
 let saveBreaches (home: string) (state: BreachState) =
-    let breaches = createEmpty<obj>
-    breaches?rows <- state |> breachRows |> List.map encodeBreach |> List.toArray
-    writeColonyLeaf home "breaches" breaches
+    writeColonyLeaf home "breaches" (breachLeaf state)
+
+/// The world's breach log at `Memory.fabot.observe.breaches` (#630): the rows
+/// no one colony owns, on the colony log's wire.
+let loadWorldBreaches () : BreachState =
+    leafOr BreachState.empty (fun () -> observeLeaf "breaches") breachesOf
+
+/// Write the world's breach log back, every full tick, empty list included.
+let saveWorldBreaches (state: BreachState) =
+    writeObserveLeaf "breaches" (breachLeaf state)
 
 /// The keys a coarse span was written under before #538, in the order
 /// `encodeCpuSpan` now writes its cells.
