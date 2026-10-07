@@ -424,14 +424,6 @@ module Engine =
     /// flat `x * 50 + y` grid the Atlas lays.
     let roomSide = 50
 
-/// Where the fight is matched (the world-first epic's W5): each colony's own
-/// fighters over its own Briefs, under the lend rule; or the world's lane,
-/// one match over every fighter of every colony under HomeHold.
-[<RequireQualifiedAccess>]
-type FightLane =
-    | PerColony
-    | World
-
 /// The colony's **tunables**, in one record: every number the bot chose
 /// rather than read off the server, carried on the [[colony view]] so a rule
 /// reads its colony's own. Each field states the stage and bank it was
@@ -919,10 +911,7 @@ type Tuning =
         /// (`ObserveMemory.loadFightOnly`) takes its place. `false` gives back
         /// the forced tick that decides each such colony whole.
         FightOnly: bool
-        /// Which lane matches the fight (`FightLane`). A live override in
-        /// Memory (`ObserveMemory.loadFightLane`) takes its place.
-        FightLane: FightLane
-        /// On the world lane, how many crossings from one of its fighters a
+        /// How many crossings from one of its fighters a
         /// contested room another colony declares lies inside to be projected
         /// for it (`ColonyView.ofWorldRecalling`).
         LaneHops: int
@@ -1099,11 +1088,6 @@ module Tuning =
             // and a raid at home forces every tick, which is what empties the
             // bucket in a war.
             FightOnly = true
-            // The world lane since its watched live window (2026-10-08): it
-            // ties or beats per colony on every spar row and on the captures
-            // but two (ADR 0091's W5 as built). The kill switch is `observe
-            // fight-lane percolony`.
-            FightLane = FightLane.World
             // Two: a room beside the room beside, the window a body is lent
             // over (`Reaction.lend`).
             LaneHops = 2

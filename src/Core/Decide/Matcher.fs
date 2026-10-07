@@ -140,8 +140,7 @@ let private fightRoomOf (task: Task) : string option =
 /// neither kept nor matched. `bystanders` are bodies no context decides
 /// whose holdings `seed` counts.
 ///
-/// On the world lane (`Tuning.FightLane`) a garrison body is held by
-/// HomeHold (`Facts.homeHoldReleases`), the bodies already matched out of a home
+/// A garrison body is held by HomeHold (`Facts.homeHoldReleases`), the bodies already matched out of a home
 /// leaving it.
 let matchAcross
     (contexts: MatchContext list)
@@ -584,7 +583,7 @@ let matchAcross
                 otherWork.[creep.Name] <- answer
                 answer)
 
-    // HomeHold, the world lane's: a garrison body
+    // HomeHold: a garrison body
     // leaves its homes only while each holds without it and without every
     // body already matched out of it (`Facts.homeHoldReleases`). A body leaves a
     // home for a fight in another room.
@@ -597,26 +596,25 @@ let matchAcross
     let homeHeld k (acc: Assignments) (creep: CreepInfo) (pooled: PooledTask) =
         let ctx = contexts.[k]
 
-        ctx.View.Tuning.FightLane = FightLane.World
-        && match fightRoomOf pooled.Task with
-           | Some room ->
-               not (
-                   Facts.homeHoldReleases
-                       ctx.View
-                       room
-                       (Atlas.creepRoom ctx.Atlas creep.Name)
-                       (leaving acc)
-                       (fun home -> Map.tryFind home ctx.Threats.Arrivals |> Option.map fst)
-                       creep
-               )
-           | None -> false
+        match fightRoomOf pooled.Task with
+        | Some room ->
+            not (
+                Facts.homeHoldReleases
+                    ctx.View
+                    room
+                    (Atlas.creepRoom ctx.Atlas creep.Name)
+                    (leaving acc)
+                    (fun home -> Map.tryFind home ctx.Threats.Arrivals |> Option.map fst)
+                    creep
+            )
+        | None -> false
 
-    // On the world lane a fight's seat goes to the body that ends its raid
+    // A fight's seat goes to the body that ends its raid
     // soonest (#596): its walk and then its kill, alone, as the Task's Brief
     // prices them (`Brief.Ends`), in half-ticks as travel cost is, the walk
     // the travel cost where its colony's Atlas places it; a body that never
     // kills alone, or ages out first, after every one that does. Travel
-    // cost alone where no raider stands, and on the colony's lane.
+    // cost alone where no raider stands.
     // Beside it, whether the body is at the fight already (`Facts.atFight`).
     let endTimes =
         System.Collections.Generic.Dictionary<struct (string * string), (bool * int) option>()
@@ -627,7 +625,7 @@ let matchAcross
         let ctx = contexts.[k]
 
         match fightRoomOf task with
-        | Some _ when ctx.View.Tuning.FightLane = FightLane.World ->
+        | Some _ ->
             let key = struct (name, taskId task)
 
             match endTimes.TryGetValue key with
@@ -805,23 +803,9 @@ let matchAcross
                       Some creep -> Some(creep, pooled, room)
                     | _ -> None)
 
-            // Held by a body of this colony: the table is the shard's, and
-            // another colony's guard on the same room's kill — one that
-            // cannot catch what our ranger is called for — left our call
-            // unmade (live t981,500, W17S26's haulers). On the world lane a
-            // kill already held calls whoever its caps still seat, its holders
-            // counted whichever colony's (the gate below): one pool.
-            let world = view.Tuning.FightLane = FightLane.World
-
+            // A kill already held calls whoever its caps still seat, its
+            // holders counted whichever colony's (the gate below): one pool.
             recalls
-            |> List.filter (fun (kill, _, _) ->
-                world
-                || not (
-                    assignments
-                    |> Map.exists (fun name tid ->
-                        tid = taskId kill.Task
-                        && view.Creeps |> List.exists (fun c -> c.Name = name))
-                ))
             |> List.fold
                 (fun (taken: Set<string>) (chase, killRoom, recall) ->
                     holders
@@ -868,7 +852,7 @@ let matchAcross
     // take the slot on its name. The creep name breaks a tie so the fold stays
     // a function of the view. Sorting it last also keeps the reason right: it
     // meets the cap the kept holders filled and is released `CapacityFull`.
-    // On the world lane a fight's holders are read those at the fight first,
+    // A fight's holders are read those at the fight first,
     // its shots begun, then soonest done (`ending`, #596), wherever the
     // fleet stands them: a far holder yields to one that ends the raid
     // sooner, and none takes the seat of one striking it.
@@ -1087,7 +1071,7 @@ let matchAcross
     // near one because the view named it first. Ties go to the view's order.
     // A match moves one Task's holders, so only the bodies that could still
     // take that Task are gated again, and only on it — but where the match
-    // takes a garrison body out of a room on the world lane, every ranger
+    // takes a garrison body out of a room, every ranger
     // still pending is gated again whole, the bodies left there being fewer
     // (HomeHold).
     let entryOf loads i k (creep: CreepInfo) offered gated =
@@ -1117,7 +1101,7 @@ let matchAcross
             acc, loads, (decided, idle) ||> List.fold (fun m (name, entry) -> Map.add name entry m)
         | _ ->
             // The pair ranked best names the Task matched next; of the
-            // bodies whose best it is, on the world lane a fight's seat goes
+            // bodies whose best it is, a fight's seat goes
             // to the one that ends its raid soonest (`ending`, #596). Each
             // body's own choice among Tasks stays its key's.
             let _, (_, side, first, _, _, _, _, firstTop) = best |> List.minBy fst
@@ -1143,8 +1127,7 @@ let matchAcross
             let loads = hold loads tid
 
             let leaves =
-                contexts.[k].View.Tuning.FightLane = FightLane.World
-                && isRangerRowBody creep
+                isRangerRowBody creep
                 && match fightRoomOf task, Atlas.creepRoom contexts.[k].Atlas creep.Name with
                    | Some room, Some here -> room <> here
                    | _ -> false

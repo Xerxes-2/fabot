@@ -327,44 +327,39 @@ let harassGuardTests =
                          @ List.replicate 7 Move
                          @ List.replicate 4 Heal)
 
-                let decided lane (ours: (CreepInfo * RoomPos) list) =
+                let decided (ours: (CreepInfo * RoomPos) list) =
                     let colony = castingFrom [ declaration ] ours
 
-                    { colony with
-                        Hostiles = [ escort ]
-                        Tuning = { colony.Tuning with FightLane = lane }
-                    }
+                    { colony with Hostiles = [ escort ] }
                     |> decideFrom (Map.ofList [ holder.Name, taskId (Guard harassRoom) ])
 
-                for lane in [ FightLane.PerColony; FightLane.World ] do
-                    let alone = decided lane [ holder, RoomPos.at harassRoom here ]
+                let alone = decided [ holder, RoomPos.at harassRoom here ]
 
-                    Expect.contains
-                        alone.Verdicts
-                        (Verdict.Released(
-                            holder.Name,
-                            taskId (Guard harassRoom),
-                            ReleaseReason.Rejected RejectReason.Threatened
-                        ))
-                        $"{lane}: alone it loses the exchange where it is struck, and lets the Guard go"
+                Expect.contains
+                    alone.Verdicts
+                    (Verdict.Released(
+                        holder.Name,
+                        taskId (Guard harassRoom),
+                        ReleaseReason.Rejected RejectReason.Threatened
+                    ))
+                    "alone it loses the exchange where it is struck, and lets the Guard go"
 
-                    Expect.equal
-                        (Map.tryFind holder.Name alone.Assignments)
-                        (Some(taskId Flee))
-                        $"{lane}: and runs"
+                Expect.equal
+                    (Map.tryFind holder.Name alone.Assignments)
+                    (Some(taskId Flee))
+                    "and runs"
 
-                    let paired =
-                        decided
-                            lane
-                            [
-                                holder, RoomPos.at harassRoom here
-                                second, RoomPos.at harassRoom { here with Y = 21 }
-                            ]
+                let paired =
+                    decided
+                        [
+                            holder, RoomPos.at harassRoom here
+                            second, RoomPos.at harassRoom { here with Y = 21 }
+                        ]
 
-                    Expect.equal
-                        (Map.tryFind holder.Name paired.Assignments)
-                        (Some(taskId (Guard harassRoom)))
-                        $"{lane}: beside a second ranger at the fight the pair wins it, and it holds"
+                Expect.equal
+                    (Map.tryFind holder.Name paired.Assignments)
+                    (Some(taskId (Guard harassRoom)))
+                    "beside a second ranger at the fight the pair wins it, and it holds"
             }
 
             // #602: help landing within the horizon counts, a body still

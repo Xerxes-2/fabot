@@ -1,6 +1,8 @@
 # Every fight is pooled off one Brief: a room's targets, the bodies fit for them, and the ground they hit from
 
-> **Status:** accepted, amended by 0086, 0088, #550, #558, #568
+> **Status:** accepted, amended by 0086, 0088, #550, #558, #568, 0091
+
+> **Amended by ADR 0091 W5** (S4, 2026-10-07): a combat Task's Brief is built once world-wide, the owner's (`Entry.worldFights`), and one match over every colony's fighters counts its holders, so every colony pools every Brief: `Brief.Counted` and `Threats.pools` are gone. A Brief admits on fitness alone; HomeHold (`Facts.homeHoldReleases`) is the match's gate, and the per-colony lend rule (`Facts.rangerMayKill`) is gone. `Brief.Answerer` stays until W6's Caster. `Admits`/`Capacity`/`Asks` still read the building colony's view; Recall and Formation unchanged.
 
 > **Amended by #568** (spar: outpost-ranged-healer's melee guards kited to death by Invader shooters, a 2-block guard by one smallRanged over ~200 ticks): T2's `Facts.swingReaches` no longer counts a raider penned in its room as in a swing's reach unless it carries a live ATTACK. An Invader with none flees every hostile inside three (`findAttack.js`) and keeps its range inside its room, so its shooters are the ranger row's as a player's are. The t973,670 capture now casts one ranger for the shooters; the guards kill the mixed body and live. `canStrike`'s penned clause (admission) is unchanged.
 

@@ -379,25 +379,15 @@ let planFightTasks
     //
     // And one per room a trespasser stands in (#516): its kill, for a body
     // no row casts.
-    //
-    // Only the Guards this colony pools (the world layer's S4): a raided
-    // room's `Win` is pooled by its answerer and by each colony it counts,
-    // and by no other.
     let guards =
         let briefed (claimed: Brief -> bool) =
             threats.Briefs
             |> Map.toSeq
             |> Seq.choose (fun (task, brief) ->
                 match task with
-                | Guard room when claimed brief && Threats.pools view brief -> Some room
+                | Guard room when claimed brief -> Some room
                 | _ -> None)
             |> Set.ofSeq
-
-        // A room no source claims binds no answerer (`Brief.unclaimed`).
-        let guarded =
-            guardedRooms
-            |> List.filter (fun room ->
-                Map.tryFind (Guard room) threats.Briefs |> Option.forall (Threats.pools view))
 
         // Every Brief of a Task of its own, by its Task.
         let briefedAs duty =
@@ -433,10 +423,10 @@ let planFightTasks
                 |> List.choose (fun name -> Map.tryFind name bodies)
                 |> List.exists (fun creep ->
                     Threats.holdsFight view atlas threats creep (Guard room)))
-            |> fun rooms -> Set.difference rooms (Set.ofList (guarded @ holding @ killing))
+            |> fun rooms -> Set.difference rooms (Set.ofList (guardedRooms @ holding @ killing))
             |> Set.toList
 
-        (guarded @ holding @ killing @ fought |> List.map Guard)
+        (guardedRooms @ holding @ killing @ fought |> List.map Guard)
         // And one Assault per assault this colony pools (#490, #491).
         @ briefedAs Duty.Assault
         // And the home's Defend while it wants a defender (#504): the row

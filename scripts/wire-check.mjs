@@ -1421,42 +1421,15 @@ wire("fightOnly: a boolean reads as itself, and anything else reads as unset", a
   assert.equal("fabot" in globalThis.Memory, false, "and the read writes nothing");
 });
 
-// ---- the live fight-lane switch ------------------------------------------
-
-wire("fightLane: the two lane names read as their lane, and anything else reads as unset", async () => {
-  const { loadFightLane } = await import(MODULE);
-  // A lane comes back as the F# union; its case name is what the switch set.
-  const caseOf = (lane) => (lane === undefined ? undefined : lane.name);
-
-  for (const [what, value, read] of [
-    ["absent", undefined, undefined],
-    ["percolony", "percolony", "PerColony"],
-    ["parity, the lane that never shipped", "parity", undefined],
-    ["world", "world", "World"],
-    ["a case name", "World", undefined],
-    ["a boolean", true, undefined],
-    ["null", null, undefined],
-    ["an object", { fightLane: "world" }, undefined],
-  ]) {
-    globalThis.Memory = rootMemoryWith("fightLane", value);
-    assert.equal(caseOf(loadFightLane()), read, `${what} reads as ${read}`);
-  }
-
-  globalThis.Memory = {};
-  assert.equal(loadFightLane(), undefined, "no fabot subtree reads as unset");
-  assert.equal("fabot" in globalThis.Memory, false, "and the read writes nothing");
-});
-
 // ---- the switches in effect (#575) ---------------------------------------
 
 wire("switches: each switch in effect and its source, as observe health and cpu read them", async () => {
   const { saveSwitches } = await import(MODULE);
   const { SwitchFrom } = await import("../build/fable/Core/LightTick.js");
-  const { FightLane } = await import("../build/fable/Core/Types/Rules.js");
 
   globalThis.Memory = rootMemoryWith("cadence", 3);
   // Fable spreads each tupled parameter into two.
-  saveSwitches(3, SwitchFrom.Override, false, SwitchFrom.Tuned, FightLane.World, SwitchFrom.Override);
+  saveSwitches(3, SwitchFrom.Override, false, SwitchFrom.Tuned);
   assert.equal(
     stable(globalThis.Memory.fabot.observe.switches),
     stable({
@@ -1464,16 +1437,14 @@ wire("switches: each switch in effect and its source, as observe health and cpu 
       cadenceFrom: "override",
       fightOnly: false,
       fightOnlyFrom: "tuned",
-      fightLane: "world",
-      fightLaneFrom: "override",
     }),
   );
   assert.equal(globalThis.Memory.fabot.observe.cadence, 3, "the override beside it stands untouched");
 
-  saveSwitches(3, SwitchFrom.Bucket, true, SwitchFrom.Tuned, FightLane.PerColony, SwitchFrom.Tuned);
-  const { cadenceFrom, fightLane } = globalThis.Memory.fabot.observe.switches;
+  saveSwitches(3, SwitchFrom.Bucket, true, SwitchFrom.Tuned);
+  const { cadenceFrom, fightOnly } = globalThis.Memory.fabot.observe.switches;
   assert.equal(cadenceFrom, "bucket");
-  assert.equal(fightLane, "percolony");
+  assert.equal(fightOnly, true);
 });
 
 wire("positions: what savePositions writes is what loadPositions reads", async () => {

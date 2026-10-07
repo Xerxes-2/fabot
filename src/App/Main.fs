@@ -190,13 +190,10 @@ let mutable private lightRun = 0
 let mutable private bucketHeld = Tuning.defaults.Cadence
 let mutable private tuning = Tuning.defaults
 
-// The fight switches in effect, the tuned one or its live override, and
+// The fight-only switch in effect, the tuned one or its live override, and
 // which (`ObserveMemory.saveSwitches`).
 let private fightOnlyNow () =
     LightTick.switchFrom Tuning.defaults.FightOnly (ObserveMemory.loadFightOnly ())
-
-let private fightLaneNow () =
-    LightTick.switchFrom Tuning.defaults.FightLane (ObserveMemory.loadFightLane ())
 
 // Full ticks run since the reset: the replan turn counts these, not
 // `Game.time`, which with light ticks between would hand an even count of
@@ -557,14 +554,6 @@ let private fullTick
     let watch =
         WorldView.ofWorld Colony.declared (gates |> Map.toList |> List.map snd) world
 
-    // The lane that matches the fight (`Tuning.FightLane`, or its live
-    // override), on the Tuning every view carries: the projection reads it,
-    // and every rule of the fight.
-    let lane = fst (fightLaneNow ())
-
-    if tuning.FightLane <> lane then
-        tuning <- { tuning with FightLane = lane }
-
     let views =
         colonies
         |> List.map (fun colony ->
@@ -638,8 +627,8 @@ let private fullTick
     // decides its fight alone and replays its economy
     // (`LightTick.fightOnly`), while the switch stands (`Tuning.FightOnly`, or
     // its live override) and it has a memo and a whole decide's carry to
-    // read: `Entry.decideFight`, which hands it back to a whole decide when
-    // the economy would decide otherwise.
+    // read: `Entry.decideColonies` opens its fight alone, and hands it back
+    // to a whole decide when the economy would decide otherwise.
     let replaying, fightCandidates =
         match forcedBy, seen with
         | Some(_, last, reasons), Some seen when not resetTick ->
@@ -719,7 +708,6 @@ let private fullTick
         views
         |> Decide.Entry.decideColonies
             {
-                Lane = lane
                 Hops = fun home room -> hops.Value home room
                 Holding = assignments
                 Verbose = verbose
@@ -1240,7 +1228,7 @@ let loop () =
         let cadence, cadenceFrom =
             LightTick.cadenceFrom Tuning.defaults bucketHeld (ObserveMemory.loadCadence ())
 
-        ObserveMemory.saveSwitches (cadence, cadenceFrom) (fightOnlyNow ()) (fightLaneNow ())
+        ObserveMemory.saveSwitches (cadence, cadenceFrom) (fightOnlyNow ())
 
         if tuning.Cadence <> cadence then
             tuning <-

@@ -824,19 +824,6 @@ let loadFightOnly () : bool option =
         else
             None)
 
-/// The live fight-lane switch from `Memory.fabot.observe.fightLane`
-/// (`Tuning.FightLane`): set, it takes the tuned one's place. Read each tick;
-/// anything but `"percolony"` or `"world"` reads as unset.
-let loadFightLane () : FightLane option =
-    leafOr None (fun () -> observeLeaf "fightLane") (fun raw ->
-        if jsTypeof raw <> "string" then
-            None
-        else
-            match unbox<string> raw with
-            | "percolony" -> Some FightLane.PerColony
-            | "world" -> Some FightLane.World
-            | _ -> None)
-
 /// The live switches in effect this tick and where each comes from, at
 /// `Memory.fabot.observe.switches` (#575): `observe health` and `observe cpu`
 /// print them, an override standing flagged. Written each tick, read by
@@ -844,7 +831,6 @@ let loadFightLane () : FightLane option =
 let saveSwitches
     (cadence: int * Fabot.Core.LightTick.SwitchFrom)
     (fightOnly: bool * Fabot.Core.LightTick.SwitchFrom)
-    (fightLane: FightLane * Fabot.Core.LightTick.SwitchFrom)
     =
     let from source =
         match source with
@@ -857,13 +843,6 @@ let saveSwitches
     raw?cadenceFrom <- from (snd cadence)
     raw?fightOnly <- fst fightOnly
     raw?fightOnlyFrom <- from (snd fightOnly)
-
-    raw?fightLane <-
-        match fst fightLane with
-        | FightLane.PerColony -> "percolony"
-        | FightLane.World -> "world"
-
-    raw?fightLaneFrom <- from (snd fightLane)
     writeObserveLeaf "switches" raw
 
 /// The verbose list from `Memory.fabot.observe.verbose`: creep names owed

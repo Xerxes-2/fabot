@@ -1520,10 +1520,6 @@ let decide
 [<NoEquality; NoComparison>]
 type ColonyInputs =
     {
-        /// Which lane matches the fight (`Tuning.FightLane`, or its live
-        /// override): every view is put on it, and the world lane decides
-        /// the colonies together (`decideWorld`).
-        Lane: FightLane
         /// Crossings from a colony's home to a room, as `Facts.judge` ranks
         /// a raided room's answerer by.
         Hops: string -> string -> int option
@@ -1743,7 +1739,7 @@ let private worldFights
         })
     |> Map.ofList
 
-/// The world lane's tick (`FightLane.World`): every deciding colony opened —
+/// The world lane's tick: every deciding colony opened —
 /// the fight-only ones (`openFight`) off the judged views, every other whole
 /// (`openWhole`) off the aimed ones —, the world's fight laid in
 /// (`worldFights`), one match over every fighter of every colony
@@ -1791,6 +1787,11 @@ let private decideWorld
             |> Layout.aimObservers (Set.union inputs.Idle fightOnly)
             |> List.zip (colonies |> List.map fst)
 
+        // The turn is bound and is a DU (`ReplanTurn`), because the first
+        // shape shipped broken: as an expression inside the call with a
+        // `bool` last argument, the turn arrived as JavaScript `undefined`,
+        // `not undefined` is `true`, and no layout was planned at all
+        // (#357). Only `npm run profile` caught it.
         let whole =
             views
             |> List.indexed
@@ -1895,34 +1896,18 @@ let private decideWorld
 
     lane inputs.FightAlone
 
-/// Every colony's tick decided: the views judged (`judgeColonies`), the
-/// fight-only decides first (`decideFight`), so the turn and the observers'
-/// looks read the colonies that did fight alone, never the candidates a
-/// decide handed back — the fight reads no observer's look —, then every
-/// observer's one look aimed together (`Layout.aimObservers`), a fight-only
-/// or idle colony's replaying its last, then each other colony decided
-/// whole (`decideUnarbitrated`). `stamp` is read after each decision.
+/// Every colony's tick decided: the views judged (`judgeColonies`), then the
+/// world's fight and each colony's economy (`decideWorld`), the fight-only
+/// colonies opened first, so the turn and the observers' looks read the
+/// colonies that did fight alone — the fight reads no observer's look.
+/// `stamp` is read after each decision.
 let decideColonies
     (inputs: ColonyInputs)
     (stamp: unit -> 'Stamp)
     (colonies: (Colony * ColonyView) list)
     : ColonyDecisions<'Stamp> =
-    // Every view on the inputs' lane, which its rules read off its Tuning.
-    let colonies =
-        colonies
-        |> List.map (fun (colony, view) ->
-            colony,
-            if view.Tuning.FightLane = inputs.Lane then
-                view
-            else
-                { view with
-                    Tuning =
-                        { view.Tuning with
-                            FightLane = inputs.Lane
-                        }
-                })
-
-    // And on the one set of loose tiles the tick's room pass shoves for free.
+    // Every view on the one set of loose tiles the tick's room pass shoves
+    // for free.
     let loose =
         colonies
         |> List.map (fun (colony, view) -> colony.Home, view)
@@ -1933,70 +1918,4 @@ let decideColonies
 
     let judged = judgeColonies inputs.Hops inputs.Holding inputs.Idle colonies
 
-    match inputs.Lane with
-    | FightLane.World -> decideWorld inputs stamp colonies judged
-    | FightLane.PerColony ->
-
-        let fought =
-            List.zip (colonies |> List.map fst) judged
-            |> List.filter (fun (colony, _) -> Set.contains colony.Home inputs.FightAlone)
-            |> List.choose (fun (colony, view) ->
-                Option.map2
-                    (fun memo carry -> decideFight view inputs.Holding inputs.Verbose memo carry)
-                    (Map.tryFind colony.Home inputs.PlanMemos)
-                    (Map.tryFind colony.Home inputs.Carries)
-                |> Option.flatten
-                |> Option.map (fun decision -> colony, view, decision, stamp ()))
-
-        let fightOnly =
-            fought |> List.map (fun (colony, _, _, _) -> colony.Home) |> Set.ofList
-
-        let turnWaits =
-            match inputs.TurnIndex with
-            | Some turn ->
-                colonies
-                |> List.tryItem turn
-                |> Option.exists (fun (colony, _) ->
-                    Set.contains colony.Home inputs.Idle || Set.contains colony.Home fightOnly)
-            | None -> false
-
-        let turn =
-            match inputs.TurnIndex with
-            | Some turn when not turnWaits -> turn
-            | _ -> -1
-
-        let views =
-            judged
-            |> Layout.aimObservers (Set.union inputs.Idle fightOnly)
-            |> List.zip (colonies |> List.map fst)
-
-        // The decision is bound and then tupled, and the turn is a DU
-        // (`ReplanTurn`), because the first shape shipped broken: as an expression
-        // inside the tuple with a `bool` last argument, the turn arrived as
-        // JavaScript `undefined`, `not undefined` is `true`, and no layout was
-        // planned at all (#357). Only `npm run profile` caught it.
-        let whole =
-            views
-            |> List.indexed
-            |> List.filter (fun (_, (colony, _)) ->
-                not (Set.contains colony.Home inputs.Idle)
-                && not (Set.contains colony.Home fightOnly))
-            |> List.map (fun (index, (colony, view)) ->
-                let memo = Map.tryFind colony.Home inputs.PlanMemos
-
-                let whose =
-                    match inputs.TurnIndex with
-                    | Some _ when index <> turn -> ReplanTurn.Waiting
-                    | _ -> ReplanTurn.Now
-
-                let decision = decideUnarbitrated view inputs.Holding inputs.Verbose memo whose
-
-                colony, view, decision, stamp ())
-
-        {
-            Views = views
-            Decided = fought @ whole
-            FoughtAlone = fightOnly
-            Turn = turn
-            TurnWaits = turnWaits
-        }
+    decideWorld inputs stamp colonies judged

@@ -2897,8 +2897,8 @@ let cadenceTests =
                     "an override stands over the bucket's, even at the tuned value"
 
                 Expect.equal
-                    (LightTick.switchFrom FightLane.PerColony (Some FightLane.World))
-                    (FightLane.World, LightTick.SwitchFrom.Override)
+                    (LightTick.switchFrom false (Some true))
+                    (true, LightTick.SwitchFrom.Override)
                     "a switch's override"
 
                 Expect.equal

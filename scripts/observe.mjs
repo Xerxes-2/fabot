@@ -52,11 +52,6 @@
 //                                  tuned switch decides)
 //   observe.mjs fight-only on|off  set it: the bot reads it on its next tick
 //   observe.mjs fight-only clear   unset it
-//   observe.mjs fight-lane         the live fight-lane switch as stored
-//                                  (which lane matches the fight; unset,
-//                                  the tuned one decides)
-//   observe.mjs fight-lane percolony|world  set it
-//   observe.mjs fight-lane clear   unset it
 //   observe.mjs console --seconds N     subscribe to the live console for N
 //                                       seconds, print what arrives, exit —
 //                                       the console keeps no history, so a
@@ -113,7 +108,7 @@ const usage =
   "breaches [--colony <home>] [--json] | " +
   "reactor [--json] | cpu [--all] [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | cadence [<2..4> | clear] | " +
-  "fight-only [on | off | clear] | fight-lane [percolony | world | clear] | " +
+  "fight-only [on | off | clear] | " +
   "console --seconds N | eval '<expr>' [--seconds N] | room <name> [--json] | " +
   "wait --ticks N | health [--colony <home>] [--samples K] | " +
   "history <room> <tick> [--json] | probe [--json] | rivals [--json]";
@@ -158,7 +153,6 @@ const ACCEPTS = {
   verbose: ["--json"],
   cadence: [],
   "fight-only": [],
-  "fight-lane": [],
   console: ["--seconds"],
   eval: ["--seconds"],
   room: ["--json"],
@@ -202,12 +196,6 @@ if (command === "cadence" && action !== undefined) {
 // The bot reads a boolean and nothing else (`loadFightOnly`).
 if (command === "fight-only" && action !== undefined) {
   if (!["on", "off", "clear"].includes(action)) fail("fight-only takes on, off or clear");
-  if (actionName !== undefined) fail(usage);
-}
-// The bot reads these two strings and nothing else (`loadFightLane`).
-const LANES = ["percolony", "world"];
-if (command === "fight-lane" && action !== undefined) {
-  if (action !== "clear" && !LANES.includes(action)) fail("fight-lane takes percolony or world, or clear");
   if (actionName !== undefined) fail(usage);
 }
 if (command === "console" && !(Number.isFinite(seconds) && seconds > 0)) {
@@ -952,35 +940,6 @@ if (command === "console") {
       await new Promise((r) => setTimeout(r, 1000));
     }
     console.log(`fight-only override is now ${show(wanted)}`);
-  }
-} else if (command === "fight-lane") {
-  // ---- fight-lane: the live switch for which lane matches the fight -------
-
-  // As the bot reads it: one of the two strings; anything else unset.
-  const readable = (value) => (LANES.includes(value) ? value : undefined);
-  const show = (value) => (value === undefined ? "unset (the tuned lane)" : value);
-
-  if (action === undefined) {
-    console.log(`fight-lane override: ${show(readable(await memoryGet("fabot.observe.fightLane")))}`);
-  } else {
-    const next = action === "clear" ? null : action;
-    const res = await api.userMemorySet("fabot.observe.fightLane", next, shard).catch((err) => {
-      fail(`memory write failed: ${err.message ?? err}`);
-    });
-    if (res.ok !== 1) fail(`memory write failed: ${JSON.stringify(res)}`);
-
-    // Applied on a tick boundary, as `cadence` waits for.
-    const wanted = readable(next);
-    const deadline = Date.now() + 20_000;
-    for (;;) {
-      const seen = readable(await memoryGet("fabot.observe.fightLane"));
-      if (seen === wanted) break;
-      if (Date.now() >= deadline) {
-        fail(`write accepted but not visible after 20s; still reading ${show(seen)}`);
-      }
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-    console.log(`fight-lane override is now ${show(wanted)}`);
   }
 } else if (command === "raids") {
   // ---- raids: the Raid log, colony-level and episodic --------------------
@@ -2827,8 +2786,8 @@ if (command === "console") {
           `${fightOnlys}, mean ${fightOnlyMean}  ·  light ticks: ${lights}, mean ${lightMean}`,
       );
       if (forced) console.log(`  forced full: ${forced}`);
-      // The four leaves alone: the subtree whole is every creep's log.
-      const leaves = ["switches", "cadence", "fightOnly", "fightLane"];
+      // The three leaves alone: the subtree whole is every creep's log.
+      const leaves = ["switches", "cadence", "fightOnly"];
       const read = await Promise.all(leaves.map((leaf) => memoryGet(`fabot.observe.${leaf}`)));
       console.log(switchesLine(Object.fromEntries(leaves.map((leaf, i) => [leaf, read[i]]))));
       console.log("");

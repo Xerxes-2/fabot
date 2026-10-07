@@ -1,6 +1,8 @@
 # A colony is a home room, and `decide` runs once per colony
 
-> **Status:** amended by 0052, 0060, #216 R5, #517, 0086
+> **Status:** amended by 0052, 0060, #216 R5, #517, 0086, 0091
+
+> **Amended by ADR 0091 W5** (S4, 2026-10-07): `decide` per colony is the colony's economy decide. The fight is decided once a tick for the world (`Entry.decideColonies`, one match over every colony's fighters); the per-colony fight lane and its switch are gone. A colony still owns its fighters' acts and steps and casts them; stage and quotas stay per colony.
 
 > **Amended by #517** on 2026-10-05: a mother also projects, as [[transit room]]s, the outposts of each child she keeps [[ranger]] residents in (raised, or garrisoned) that border that child's home and that the child's own scan works — its stand-down and its chain (`ScanSet.ChildOutposts`, `BorrowedWork.ChildOutposts`) — so the residents see a [[trespasser]] or a [[chase]] next door and take it under ADR 0056's resident rule; nothing else is pooled there, no ore is swept there, and her melee guard is not sent. Decision 2's adoption reads these rooms too: the child projects each one whenever she does, so every body there stays its caster's — her resident is no longer adopted by the child the tick it steps in — and she never projects one alone. Out of scope: a chase in a child's outpost no body of ours sees (a room the child's stand-down shut is not hers to project, and her stand-down log holds no chase of the child's); the child's observer may give it a look, untested.
 

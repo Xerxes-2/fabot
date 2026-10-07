@@ -60,10 +60,7 @@ refuses(["cadence", "--json"], "usage:");
 refuses(["fight-only", "yes"], "fight-only takes on, off or clear");
 refuses(["fight-only", "on", "off"], "usage:");
 refuses(["fight-only", "--json"], "usage:");
-refuses(["fight-lane", "on"], "fight-lane takes percolony or world");
-refuses(["fight-lane", "parity"], "fight-lane takes percolony or world");
-refuses(["fight-lane", "world", "percolony"], "usage:");
-refuses(["fight-lane", "--json"], "usage:");
+refuses(["fight-lane"], "usage:");
 refuses(["console"], "console needs --seconds");
 refuses(["raids", "--colony"], "--colony needs a home room name");
 refuses(["cpu", "--colony", "W1N1"], "usage:");
@@ -99,9 +96,6 @@ for (const args of [
   ["fight-only"],
   ["fight-only", "off"],
   ["fight-only", "clear"],
-  ["fight-lane"],
-  ["fight-lane", "percolony"],
-  ["fight-lane", "clear"],
   ["console", "--seconds", "3"],
   ["eval", "Game.time"],
   ["eval", "Game.time", "--seconds", "4"],
@@ -189,16 +183,14 @@ const cpuRow = (t) => ({
 const cpuMemory = {
   fabot: {
     observe: {
-      // The switches in effect (#575), the fight lane overridden live.
+      // The switches in effect (#575), the fight-only switch overridden live.
       switches: {
         cadence: 3,
         cadenceFrom: "bucket",
-        fightOnly: true,
-        fightOnlyFrom: "tuned",
-        fightLane: "world",
-        fightLaneFrom: "override",
+        fightOnly: false,
+        fightOnlyFrom: "override",
       },
-      fightLane: "world",
+      fightOnly: false,
       cpu: {
         ticks: [
           ...Array.from({ length: 5 }, (_, i) => ({ ...cpuRow(i + 1), pops: 9001 + i })),
@@ -256,8 +248,8 @@ smoke("observe cpu names each switch in effect and its source, a standing overri
   assert.equal(code, 0, err);
   assert.ok(
     out.includes(
-      "switches cadence 3 (bucket) · fight-only on (tuned) · fight-lane world (override)" +
-        "  ! override standing: fight-lane world (observe fight-lane clear)",
+      "switches cadence 3 (bucket) · fight-only off (override)" +
+        "  ! override standing: fight-only off (observe fight-only clear)",
     ),
     out,
   );
@@ -267,11 +259,11 @@ const { switchesLine } = await import("./switches.mjs");
 smoke("switches: none overridden is no flag; a bundle before them names the override leaves it can read", () => {
   const tuned = { cadence: 2, cadenceFrom: "tuned", fightOnly: false, fightOnlyFrom: "tuned" };
   assert.equal(
-    switchesLine({ switches: { ...tuned, fightLane: "percolony", fightLaneFrom: "tuned" } }),
-    "switches cadence 2 (tuned) · fight-only off (tuned) · fight-lane percolony (tuned)",
+    switchesLine({ switches: tuned }),
+    "switches cadence 2 (tuned) · fight-only off (tuned)",
   );
   assert.equal(
-    switchesLine({ cadence: 4, fightOnly: null, fightLane: "parity" }),
+    switchesLine({ cadence: 4, fightOnly: null, fightLane: "world" }),
     "switches not written (the deployed bundle predates them)  ! override standing: cadence 4 (observe cadence clear)",
     "a cleared leaf is null and an unread one is no override",
   );

@@ -300,10 +300,6 @@ type Brief =
         /// colony's own (`Facts.guardedRooms`), a Task of the colony's own —,
         /// and this colony pools it and casts for it as before.
         Answerer: string option
-        /// The colonies whose rangers that `Win` counts (`RoomVerdict.Bodies`):
-        /// each pools it beside the answerer and sends its own, casting none
-        /// (`Threats.pools`). Empty where no answerer binds.
-        Counted: Set<string>
     }
 
 /// What one Brief asks a row for: the row, how many bodies, and the blocks
@@ -473,16 +469,8 @@ let internal rangerBlocksFor (floor: int) (view: ColonyView) (room: string) : in
 module Brief =
     /// How far a quiet ranger walks for a kill (#510), in travel cost (two
     /// units a tick): the reaction window of a lend, inside which no raid
-    /// reaches the home it left (`Facts.rangerMayKill`).
+    /// reaches the home it left (`Facts.homeHoldReleases`).
     let private killWalk = 2 * Reaction.lend
-
-    /// A kill's lend clause: the lend rule per colony
-    /// (`Facts.rangerMayKill`). The world lane admits on fitness alone: its
-    /// HomeHold is the match's gate (`Matcher`), asked in the body's own
-    /// colony's view and never in the view that built the Brief.
-    let private lent (view: ColonyView) (room: string) (standing: string option) =
-        view.Tuning.FightLane = FightLane.World
-        || Facts.rangerMayKill view room standing
 
     let private bare =
         {
@@ -625,7 +613,8 @@ module Brief =
         match kind with
         | BriefKind.Resident
         | BriefKind.Harass -> isRangerRowBody creep
-        // A ranger the resident rule lends (#516), on its own fitness: under
+        // A ranger on its own fitness (#516), HomeHold the match's gate
+        // (`Matcher`): under
         // a kite (#510), one that kites the raid down with its own live parts;
         // under a Win, one that kites it down or wins it alone, or any where
         // rangers win it together (`Facts.rangersWin`) or it is out of sight.
@@ -650,17 +639,15 @@ module Brief =
                 && verdict.Value = Answer.Win
                 && Facts.raided view room
                 && alone ())
-            && lent view room (Atlas.creepRoom atlas creep.Name)
             && strikes (HostileInfo.raider view.Hostiles)
         // A trespass's kill (#516): the guard row's body that strikes every
-        // trespasser its row answers (`trespassSplit`, #550), or a ranger the
-        // resident rule lends that strikes them all. A child's outpost is the
+        // trespasser its row answers (`trespassSplit`, #550), or a ranger
+        // that strikes them all. A child's outpost is the
         // child's guard's, and the residents' beside it (#517). Defence first
         // is the rank's: a raid's Guard outranks it (`claimed`, #528).
         | BriefKind.Trespass ->
             if isRangerRowBody creep then
-                lent view room (Atlas.creepRoom atlas creep.Name)
-                && strikes (Facts.trespasser view (Set.singleton room))
+                strikes (Facts.trespasser view (Set.singleton room))
             else
                 isGuardRowBody creep
                 && not (List.contains room view.Borrowed.ChildOutposts)
@@ -668,22 +655,20 @@ module Brief =
                    |> List.forall (fun (row, trespassers) ->
                        row <> CastRow.Guard
                        || trespassers |> List.forall (Facts.canStrike view (partCount creep.Body)))
-        | BriefKind.Outpost when ranged ->
-            isRangerRowBody creep && lent view room (Atlas.creepRoom atlas creep.Name)
+        | BriefKind.Outpost when ranged -> isRangerRowBody creep
         // A level-0 core is the guard row's to break (#487), and a ranger's
-        // already standing in its room with nothing better to strike (#558):
-        // by the lend rule, as a kill takes it, and on a seat of its own.
+        // already standing in its room with nothing better to strike (#558),
+        // on a seat of its own.
         | BriefKind.Core ->
             isGuardRowBody creep
             || isRangerRowBody creep
                && (match Atlas.creepRoom atlas creep.Name with
                    | Some here -> here = room
                    // Another colony's body, which this Atlas does not
-                   // place (the world lane): where the fleet stands it.
+                   // place: where the fleet stands it.
                    | None ->
                        Map.tryFind room view.World.Bodies.Value
                        |> Option.exists (List.exists (fun (body, _) -> body.Name = creep.Name)))
-               && lent view room (Some room)
         | BriefKind.Outpost
         | BriefKind.ExitHold -> isGuardRowBody creep
 
@@ -869,9 +854,9 @@ module Brief =
         // One ranger per harassment room (#439), and its relief beside it
         // (`Capacity.Relieved`).
         | BriefKind.Harass -> Capacity.fighters (wanted ()) |> Capacity.relieving
-        // One ranger kites what cannot close on it (#510), on the world lane
-        // as many as kill it before it ages out and every one at the fight
-        // (`Facts.kiteSeats`, #596); a raid the rangers
+        // A kite seats as many rangers as kill what cannot close on them
+        // before it ages out, and every one at the fight (`Facts.kiteSeats`,
+        // #510, #596); a raid the rangers
         // there and beside it win together takes as many as win it; one a row
         // casts for, as many as it asks.
         | BriefKind.Chase ->
@@ -879,9 +864,7 @@ module Brief =
             | Answer.Win when not (List.isEmpty asks) ->
                 Capacity.fighters (max (wanted ()) (rangers.Value |> Option.defaultValue 1))
             | Answer.Win -> Capacity.fighters (rangers.Value |> Option.defaultValue 1)
-            | Answer.Kite when view.Tuning.FightLane = FightLane.World ->
-                Capacity.fighters (Facts.kiteSeats view room holding)
-            | Answer.Kite
+            | Answer.Kite -> Capacity.fighters (Facts.kiteSeats view room holding)
             | Answer.Lose -> Capacity.fighters 1
         // One body kills a trespasser, which strikes nothing back (#516): its
         // row asks summed (#550). Where the ranger row answers one, the guards
@@ -999,7 +982,6 @@ module Brief =
             Stances = Map.empty
             Seats = Map.empty
             Answerer = None
-            Counted = Set.empty
         }
 
     /// A room no source claims or lays ground in: a melee guard's `Outpost`
@@ -1172,7 +1154,6 @@ module Brief =
             Stances = stances
             Seats = Map.empty
             Answerer = None
-            Counted = Set.empty
         }
 
     /// An Assault's Brief on its squad's `Formation`: it admits the bodies
@@ -1222,7 +1203,6 @@ module Brief =
             Stances = Map.empty
             Seats = Map.empty
             Answerer = None
-            Counted = Set.empty
         }
 
     /// A combat Task no source claims this tick: a Guard's `unclaimed`; a
@@ -1544,15 +1524,6 @@ module Threats =
     let answers (view: ColonyView) (brief: Brief) : bool =
         brief.Answerer
         |> Option.forall (fun answerer -> answerer = SpatialInfo.homeName view.Spatial)
-
-    /// Whether this colony pools a Brief: one it casts for (`answers`), or
-    /// one whose `Win` counts it (`Brief.Counted`), which sends its own
-    /// bodies and casts none. On the world lane, every Brief: one match over
-    /// the fleet counts its holders whoever pools it.
-    let pools (view: ColonyView) (brief: Brief) : bool =
-        view.Tuning.FightLane = FightLane.World
-        || answers view brief
-        || Set.contains (SpatialInfo.homeName view.Spatial) brief.Counted
 
     /// How many bodies a combat Task asks its rows for this tick, every ask
     /// summed; none for a Task no Brief describes.
@@ -2229,12 +2200,11 @@ module Threats =
                     || Set.contains room resident
                     || Facts.mayLeaveFor view room (Atlas.creepRoom atlas creep.Name) creep
 
-                // On the world lane a fight is held by a body at it: in the
-                // room or beside it, never one still walking from afar.
+                // A fight is held by a body at it: in the room or beside
+                // it, never one still walking from afar.
                 let there =
-                    view.Tuning.FightLane = FightLane.PerColony
-                    || Atlas.creepRoom atlas creep.Name
-                       |> Option.exists (fun here -> here = room || RoomName.neighbouring here room)
+                    Atlas.creepRoom atlas creep.Name
+                    |> Option.exists (fun here -> here = room || RoomName.neighbouring here room)
 
                 lent
                 && there
@@ -3162,12 +3132,11 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     let trespass = laidBy BriefKind.Trespass |> Map.ofList
 
-    // Who casts for and who pools each raided room's Guard (the world layer's
-    // S4): a `Win`'s answerer casts; it and every colony the `Win` counts —
-    // whose row wins it, or whose rangers are among the fewest that win it —
-    // pool it, each sending its own bodies. The binding governs only a colony
+    // Who casts for each raided room's Guard (the world layer's S4): a
+    // `Win`'s answerer; every colony pools it, one match over the fleet
+    // counting its holders. The binding governs only a colony
     // that crosses or neighbours the room: one whose own Guard it is
-    // (`Facts.guardedRooms`) pools it and casts for it whoever answers, so a
+    // (`Facts.guardedRooms`) casts for it whoever answers, so a
     // neighbour's ranger winning it never strips the room of its own guard.
     // A `Kite` binds none: the verdict names no body, and the ranger that
     // kites it down is any colony's. Nor does a home of ours: its raid is its
@@ -3179,10 +3148,9 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             | {
                   Answer = Answer.Win
                   Answerer = Some answerer
-              } as verdict when not (Set.contains room guarded.Value) ->
-                Some answerer, verdict.Bodies |> List.map snd |> Set.ofList |> Set.union verdict.Own
-            | _ -> None, Set.empty
-        | _ -> None, Set.empty
+              } when not (Set.contains room guarded.Value) -> Some answerer
+            | _ -> None
+        | _ -> None
 
     // Every room a source claimed or laid ground in; one no source claims is
     // the default kind's, `Outpost`.
@@ -3234,8 +3202,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                       Ring = Map.tryFind room rings
                       Trespass = Map.tryFind room trespass
                   } with
-                Answerer = fst (answererIn room)
-                Counted = snd (answererIn room)
+                Answerer = answererIn room
             })
         |> Map.ofSeq
 

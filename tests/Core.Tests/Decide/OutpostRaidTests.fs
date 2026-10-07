@@ -1997,8 +1997,7 @@ let seatTests =
             // The kill orders one Task's bodies, never one body's Tasks: in the
             // key a raid no body kills alone would price every candidate a
             // lifetime's kill and send it to any other Task of its rank.
-            test
-                "on the world lane the kill seats a Task's bodies and leaves each body's key its walk" {
+            test "the kill seats a Task's bodies and leaves each body's key its walk" {
                 let raid = [ crippledAt { X = 25; Y = 44 } ]
 
                 let rangers =
@@ -2007,14 +2006,7 @@ let seatTests =
                         rangerOf "r-strong" 10, { X = 20; Y = 44 }
                     ]
 
-                let onLane lane =
-                    let colony = kitedBy raid rangers
-
-                    { colony with
-                        Tuning = { colony.Tuning with FightLane = lane }
-                    }
-
-                let world = onLane FightLane.World
+                let world = kitedBy raid rangers
 
                 Expect.equal
                     (rangers |> List.map (fun (r, _) -> Facts.endsIn world "W1N2" r))
@@ -2024,9 +2016,9 @@ let seatTests =
                 let guard = taskId (Guard "W1N2")
                 let verbose = set [ "r-weak"; "r-strong" ]
 
-                let costs lane =
-                    let result = decide (onLane lane) Map.empty verbose None
+                let result = decide world Map.empty verbose None
 
+                let worldCosts =
                     result.Verdicts
                     |> List.choose (function
                         | Verdict.Scoring(name, rows) ->
@@ -2035,21 +2027,14 @@ let seatTests =
                                 | Candidate.Scored(tid, _, cost, _) when tid = guard ->
                                     Some(name, cost)
                                 | _ -> None)
-                        | _ -> None),
-                    result.Assignments
+                        | _ -> None)
 
-                let worldCosts, assigned = costs FightLane.World
-
+                let assigned = result.Assignments
 
                 Expect.equal
                     worldCosts
                     [ "r-weak", 0; "r-strong", 4 ]
                     "each key's cost is its walk alone, in half-ticks, no kill in it"
-
-                Expect.equal
-                    (fst (costs FightLane.PerColony) |> List.tryHead)
-                    (List.tryHead worldCosts)
-                    "as per colony"
 
                 for name in verbose do
                     Expect.equal (Map.tryFind name assigned) (Some guard) $"{name} takes the kite"
@@ -4112,19 +4097,6 @@ let private coreBeyond level : InvaderCoreInfo =
         Level = level
     }
 
-/// `watchingBeyond` on the colony's lane, whose lend rule (`rangerMayKill`)
-/// keeps every resident home while any raider reaches it inside the window.
-/// The world lane's HomeHold weighs the bodies left there instead (its own
-/// case below).
-let private lendingBeyond hostiles =
-    let colony = watchingBeyond hostiles
-
-    { colony with
-        Tuning =
-            { colony.Tuning with
-                FightLane = FightLane.PerColony
-            }
-    }
 
 /// The same with the resident gone and a melee guard of ours standing in
 /// the outpost instead.
@@ -4612,8 +4584,8 @@ let childOutpostTests =
             // quiet for the other, so she calls nobody; the child, whose own
             // resident rooms leave her home out, read it quiet, called the
             // residents a Win and stood nothing down. Since the world layer's
-            // S3 the residents are priced in the mother's view alone, by her
-            // rule (`Facts.judge`).
+            // S3 the residents are priced in the mother's view alone, by
+            // HomeHold (`Facts.judge`).
             test
                 "raids beside the child's home on two sides: the mother lends nobody, and the child stands her outpost down" {
                 let harasser room id =
@@ -4645,18 +4617,18 @@ let childOutpostTests =
                     |> fun gate -> gate.Shut
 
                 // The mother's view: the child's home W1N3 between W1N4, her
-                // outpost, and W2N3.
+                // outpost, and W2N3; her one resident the body that leaves,
+                // so nothing of the fleet stays (HomeHold).
                 let mother hostiles =
-                    { lendingBeyond hostiles with
+                    { watchingBeyond hostiles with
                         Bank = bank 5600 5600
                     }
                     |> fun colony ->
                         { colony with
                             Creeps =
                                 (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
-                                @ [ resident "r-1"; resident "r-2" ]
+                                @ [ resident "r-1" ]
                         }
-                    |> standingIn "W1N3" ("r-2", { X = 27; Y = 26 })
 
                 Expect.equal
                     (Facts.answer (mother [ harasser "W1N4" "h-a" ]) "W1N4")
@@ -5354,18 +5326,18 @@ let childOutpostTests =
                          @ List.replicate 7 Heal)
 
                 // The mother's view: the child's home W1N3, the kill in W1N4
-                // beyond it, W2N3 on its other side.
+                // beyond it, W2N3 on its other side; her one resident the
+                // body that leaves, so nothing of the fleet stays (HomeHold).
                 let mother others =
-                    { lendingBeyond (harasser :: others) with
+                    { watchingBeyond (harasser :: others) with
                         Bank = bank 5600 5600
                     }
                     |> fun colony ->
                         { colony with
                             Creeps =
                                 (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
-                                @ [ resident "r-1"; resident "r-2" ]
+                                @ [ resident "r-1" ]
                         }
-                    |> standingIn "W1N3" ("r-2", { X = 27; Y = 26 })
 
                 let slow =
                     { crunchyAt { X = 25; Y = 20 } with
@@ -5426,7 +5398,7 @@ let childOutpostTests =
                          @ List.replicate 7 Heal)
 
                 let mother towers others =
-                    { lendingBeyond (harasser :: others) with
+                    { watchingBeyond (harasser :: others) with
                         Bank = bank 5600 5600
                     }
                     |> withOurTowers "W1N3" (List.replicate towers { X = 25; Y = 25 })
@@ -5434,9 +5406,8 @@ let childOutpostTests =
                         { colony with
                             Creeps =
                                 (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
-                                @ [ resident "r-1"; resident "r-2" ]
+                                @ [ resident "r-1" ]
                         }
-                    |> standingIn "W1N3" ("r-2", { X = 27; Y = 26 })
 
                 let wraith = wraithAt "W2N3" { X = 25; Y = 20 }
 
@@ -5547,16 +5518,15 @@ let childOutpostTests =
                          @ List.replicate 7 Heal)
 
                 let mother others =
-                    { lendingBeyond (harasser :: others) with
+                    { watchingBeyond (harasser :: others) with
                         Bank = bank 5600 5600
                     }
                     |> fun colony ->
                         { colony with
                             Creeps =
                                 (colony.Creeps |> List.filter (fun creep -> creep.Name <> "r-1"))
-                                @ [ resident "r-1"; resident "r-2" ]
+                                @ [ resident "r-1" ]
                         }
-                    |> standingIn "W1N3" ("r-2", { X = 27; Y = 26 })
 
                 // Its gun at the head of eleven parts, back past 1,000 hits:
                 // 42 ticks of its own 12 from 500.

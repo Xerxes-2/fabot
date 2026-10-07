@@ -1,26 +1,24 @@
 // The live switches in effect, one line for `observe health` and `observe
-// cpu` (#575): the light-tick cadence, the fight-only switch and the fight
-// lane, each with where it comes from — the tuned value, the bucket's rule
-// (the cadence alone) or a live override in Memory. An override never
-// expires, so a standing one is flagged with the command that clears it.
+// cpu` (#575): the light-tick cadence and the fight-only switch, each with
+// where it comes from — the tuned value, the bucket's rule (the cadence
+// alone) or a live override in Memory. An override never expires, so a
+// standing one is flagged with the command that clears it.
 //
 // Read off `Memory.fabot.observe.switches` (`ObserveMemory.saveSwitches`).
 // A bundle before it writes none; then only the override leaves themselves
-// (`observe.cadence`, `observe.fightOnly`, `observe.fightLane`) are named.
+// (`observe.cadence`, `observe.fightOnly`) are named.
 
 // Each switch's key in Memory and its `observe` subcommand.
 const SWITCHES = [
   ["cadence", "cadence"],
   ["fightOnly", "fight-only"],
-  ["fightLane", "fight-lane"],
 ];
 
 // An override leaf the bot reads as set (`ObserveMemory.loadCadence` and its
-// two siblings): a cleared one is null.
+// sibling): a cleared one is null.
 const SET = {
   cadence: (value) => typeof value === "number" && Number.isInteger(value),
   fightOnly: (value) => typeof value === "boolean",
-  fightLane: (value) => value === "percolony" || value === "world",
 };
 
 const shown = (value) => (typeof value === "boolean" ? (value ? "on" : "off") : `${value}`);

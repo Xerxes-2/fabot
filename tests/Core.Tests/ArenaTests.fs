@@ -8084,69 +8084,66 @@ let arenaBorderTests =
                         (w17s25 2 17)
                         (Some(Retreat(760, refuge, 800, Follow "Brute1")))
 
-                for lane in [ FightLane.PerColony; FightLane.World ] do
-                    let _, trace = nurseryWest [ ranger; melee; healer ] |> runIn lane 30
-                    Expect.isNonEmpty (crossingsInto "Brute1" "W18S25" trace) "the brute left"
+                let _, trace = nurseryWest [ ranger; melee; healer ] |> run 30
+                Expect.isNonEmpty (crossingsInto "Brute1" "W18S25" trace) "the brute left"
 
-                    // Moved by #598: the medic, its HEAL shot off beside its
-                    // brute, is no longer nobody's and dies short of the exit
-                    // (it left at 380 hits).
-                    Expect.isSome
-                        (diedOn "Medic1" trace)
-                        $"{lane}: the medic dies\n{describe trace}"
+                // Moved by #598: the medic, its HEAL shot off beside its
+                // brute, is no longer nobody's and dies short of the exit
+                // (it left at 380 hits).
+                Expect.isSome (diedOn "Medic1" trace) $"the medic dies\n{describe trace}"
 
-                    Expect.isEmpty (crossingsInto "Medic1" "W18S25" trace) "rather than leaving"
+                Expect.isEmpty (crossingsInto "Medic1" "W18S25" trace) "rather than leaving"
 
-                    Expect.isEmpty
-                        (crossingsInto "ranger-880900-Spawn8" "W18S25" trace)
-                        $"the ranger did not follow\n{describe trace}"
+                Expect.isEmpty
+                    (crossingsInto "ranger-880900-Spawn8" "W18S25" trace)
+                    $"the ranger did not follow\n{describe trace}"
 
-                    // #598: half the raid going ends nothing for the half
-                    // still in our room; the ranger fires every tick a raider
-                    // stands in its reach there.
-                    let shots =
-                        trace
-                        |> List.map (fun t ->
-                            t.Tick,
-                            t.Ours
-                            |> List.exists (function
-                                | RangedAttackCreep(who, _)
-                                | RangedMassAttack who -> who = ranger.Id
-                                | _ -> false))
-                        |> Map.ofList
+                // #598: half the raid going ends nothing for the half
+                // still in our room; the ranger fires every tick a raider
+                // stands in its reach there.
+                let shots =
+                    trace
+                    |> List.map (fun t ->
+                        t.Tick,
+                        t.Ours
+                        |> List.exists (function
+                            | RangedAttackCreep(who, _)
+                            | RangedMassAttack who -> who = ranger.Id
+                            | _ -> false))
+                    |> Map.ofList
 
-                    let inReach =
-                        trace
-                        |> List.choose (fun t ->
-                            let at id =
-                                t.Bodies |> List.tryFind (fun b -> b.Id = id) |> Option.map _.At
+                let inReach =
+                    trace
+                    |> List.choose (fun t ->
+                        let at id =
+                            t.Bodies |> List.tryFind (fun b -> b.Id = id) |> Option.map _.At
 
-                            let reached raider =
-                                match at raider, at ranger.Id with
-                                | Some them, Some us ->
-                                    them.Room = "W17S25"
-                                    && RoomPos.range them us |> Option.exists (fun r -> r <= 3)
-                                | _ -> false
+                        let reached raider =
+                            match at raider, at ranger.Id with
+                            | Some them, Some us ->
+                                them.Room = "W17S25"
+                                && RoomPos.range them us |> Option.exists (fun r -> r <= 3)
+                            | _ -> false
 
-                            if reached "Brute1" || reached "Medic1" then
-                                Some(t.Tick + 1)
-                            else
-                                None)
+                        if reached "Brute1" || reached "Medic1" then
+                            Some(t.Tick + 1)
+                        else
+                            None)
 
-                    for tick in inReach do
-                        if Map.containsKey tick shots then
-                            Expect.isTrue
-                                shots[tick]
-                                $"{lane} t{tick}: the ranger fires while a raider stands in reach in W17S25\n{describe trace}"
+                for tick in inReach do
+                    if Map.containsKey tick shots then
+                        Expect.isTrue
+                            shots[tick]
+                            $"t{tick}: the ranger fires while a raider stands in reach in W17S25\n{describe trace}"
             }
 
             // As live (t972,617-972,661): the guard kills Wraith403 on its post
             // by t972,620; while Wraith403 stands in W17S26 no resident is lent
-            // to Crunchy047 next door (`residentQuiet`: a raider beside the
-            // home); once it is dead one is, and kills Crunchy047 by t972,661.
-            // The hold is the pre-#531 state #531 should flip: Wraith403 has
-            // no weapon left and Crunchy047 steps once in ~17 ticks, so neither
-            // reaches the home inside the lend's window.
+            // to Crunchy047 next door (HomeHold, `Facts.homeHoldReleases`);
+            // once it is dead one is, and
+            // kills Crunchy047 by t972,661. Wraith403 has no weapon left and
+            // Crunchy047 steps once in ~17 ticks, so neither reaches the home
+            // inside the lend's window (#531).
             test
                 "#532 capture t972,617: while Wraith403 stands in W17S26 the residents hold home, then one kills Crunchy047, as live" {
                 let _, trace = twoRaidsBesideW17S25 () |> run 80
@@ -17287,20 +17284,17 @@ let private w18s25Crippled () : Arena =
 
 /// Each tick's world verdict on W18S25 as W17S25 reads it, its answerer, and
 /// the assignments after the tick.
-let private crippledRunIn (lane: FightLane) (ticks: int) (start: Arena) =
+let private crippledRun (ticks: int) (start: Arena) =
     ((start, []), List.replicate ticks ())
     ||> List.fold (fun (a, acc) () ->
         let verdict =
-            Map.tryFind "W18S25" (viewOfIn lane a "W17S25").World.Answers
+            Map.tryFind "W18S25" (viewOf a "W17S25").World.Answers
             |> Option.map (fun v -> v.Value.Answer, v.Value.Answerer)
 
-        let next, _ = stepIn lane a
+        let next, _ = step a
         next, (a.Tick, verdict, next.Carried.Assignments) :: acc)
     |> snd
     |> List.rev
-
-let private crippledRun (ticks: int) (start: Arena) =
-    crippledRunIn Tuning.defaults.FightLane ticks start
 
 [<Tests>]
 let w18s25CrippledTests =
@@ -17338,17 +17332,15 @@ let w18s25CrippledTests =
             // throughout, its seat no far holder takes (#596); the mother's
             // bigger rangers, which would end it sooner on paper, take the
             // seat the kite adds for spells (t35-t52, t56-t69) and never reach
-            // it, so it alone kills at t102 —
-            // per colony, W17S29's ranger held it from W19S25 beside it and
-            // the mother's resident joined at t36, three bodies on a one-seat
-            // kite. W17S26's trespass, a digger, is W17S25's guard's beside it
-            // as per colony (#601): W17S25 home's Guard is the mother's
-            // resident kind, which the child's own Outpost claim of it gives
-            // way to, so the guard is not pulled home and W17S29's far ranger
-            // no longer takes W17S26 from W19S25 and walks there for ever.
+            // it, so it alone kills at t102. W17S26's trespass, a digger, is
+            // W17S25's guard's beside it (#601): W17S25 home's Guard is the
+            // mother's resident kind, which the child's own Outpost claim of
+            // it gives way to, so the guard is not pulled home and W17S29's
+            // far ranger does not take W17S26 from W19S25 and walk there for
+            // ever; the digger dies at t19.
             test
                 "#573 capture t994,917, the world lane: the fleet body at the fight holds the cripple's chase throughout" {
-                let run = w18s25Crippled () |> crippledRunIn FightLane.World 50
+                let run = w18s25Crippled () |> crippledRun 50
 
                 for tick, verdict, _ in run do
                     match verdict with
@@ -17376,86 +17368,19 @@ let w18s25CrippledTests =
                     (Some "guard:W17S26")
                     "W17S25's guard beside W17S26 takes its trespass"
 
-                let _, trace = w18s25Crippled () |> runIn FightLane.World 30
-                let _, perColony = w18s25Crippled () |> runIn FightLane.PerColony 30
+                let _, trace = w18s25Crippled () |> Arena.run 30
 
                 Expect.equal
                     (diedOn "Quantum825" trace)
-                    (diedOn "Quantum825" perColony)
-                    $"the digger dies when it does per colony\n{describe trace}"
-            }
-
-            // #599: per colony the mother's big ranger takes the chase at t36
-            // from W17S25's east side, 40 steps and a swamp choke from the
-            // cripple. Every rested tick it holds the chase it steps. #600:
-            // an idle body's tile is priced at its step, since the arbitration
-            // shoves it for free, so the 8 ticks it stands are the choke's two
-            // swamp columns alone; before, the walk priced another colony's
-            // idle defender on the choke's one road (32,31) as occupied and
-            // took a swamp step round it, 4 ticks more, and crossed at t88.
-            // Now the defender idles further west and the ranger walks onto
-            // its tile (25,31) at t57, shoving it off, and crosses at t82.
-            // Arriving too late is the seat's (#596), not the walk's.
-            test
-                "#573 capture t994,917: the mother's ranger holding the chase steps toward W18S25 every tick it is rested, through an idle body, and crosses at t82" {
-                let ranger = "ranger-993409-Spawn3"
-                let defender = "defender-994619-Spawn11"
-
-                let ticks =
-                    // Ticks 0 to 82.
-                    ((w18s25Crippled (), []), List.replicate 83 ())
-                    ||> List.fold (fun (a, acc) () ->
-                        let next, trace = stepIn FightLane.PerColony a
-                        let body = trace.Bodies |> List.find (fun b -> b.Id = ranger)
-                        let idle = trace.Bodies |> List.find (fun b -> b.Id = defender)
-
-                        next,
-                        (trace.Tick, body, idle, Map.tryFind ranger next.Carried.Assignments)
-                        :: acc)
-                    |> snd
-                    |> List.rev
-
-                let chasing =
-                    ticks
-                    |> List.filter (fun (_, body, _, task) ->
-                        task = Some "guard:W18S25" && body.At.Room <> "W18S25")
-
-                Expect.isNonEmpty chasing "it holds the cripple's chase"
-
-                for (_, before, _, _), (tick, after, _, task) in List.pairwise ticks do
-                    if
-                        task = Some "guard:W18S25"
-                        && before.At.Room <> "W18S25"
-                        && before.Fatigue = 0
-                    then
-                        Expect.notEqual
-                            after.At
-                            before.At
-                            $"t{tick}: rested and holding the chase, it steps"
-
-                Expect.equal
-                    (chasing |> List.filter (fun (_, body, _, _) -> body.Fatigue > 0) |> List.length)
-                    8
-                    "it stands 8 ticks, the choke's two swamp columns, and none round a body"
-
-                Expect.isTrue
-                    (List.pairwise ticks
-                     |> List.exists (fun ((_, _, idleBefore, _), (_, after, idleAfter, task)) ->
-                         task = Some "guard:W18S25"
-                         && after.At = idleBefore.At
-                         && idleAfter.At <> idleBefore.At))
-                    "it walks onto the idle defender's tile and the arbitration shoves the defender off"
-
-                let _, last, _, _ = List.last ticks
-                Expect.equal last.At.Room "W18S25" "it stands in W18S25 by t82"
+                    (Some 19)
+                    $"the digger dies at t19\n{describe trace}"
             }
 
             test
                 "#573 capture t994,917, the world lane: the one ranger on the kite kills the cripple" {
-                let _, trace = w18s25Crippled () |> runIn FightLane.World 120
+                let _, trace = w18s25Crippled () |> run 120
 
-                // t102 on the world lane; t92 per colony, three bodies on it
-                // (#599).
+                // t102.
                 Expect.isLessThanOrEqual
                     (diedOn "Faraday387" trace |> Option.defaultValue System.Int32.MaxValue)
                     110
@@ -20330,135 +20255,23 @@ let w17s29GluedHealerTests =
         ]
 
 // ---- the world lane ---------------------------------------------------------
-// The captures the world lane's one match over the fleet reads, on that lane
-// (`stepIn FightLane.World`): each pinned on the outcome it reproduces, or,
-// where it moves, on the move and why. The rest of this file runs the tuned
-// lane.
+// The captures the world lane's one match over the fleet first moved or
+// reproduced (ADR 0091 W5), each pinned on its outcome and why.
 
 [<Tests>]
 let worldLaneCaptureTests =
     testList
         "arena captures on the world lane"
         [
-            // As on the tuned lane, and as live (t972,617-972,661): the
-            // residents hold home while Wraith403 stands next door, one is
-            // lent to Crunchy047 and kills it, the other is called to
-            // W17S26's hauler — now a kill W17S25's guard already holds, its
-            // seat for a ranger counted over the fleet (the call is no longer
-            // refused for being held at all).
-            test
-                "#532 capture t972,617, the world lane: the residents hold home, then one kills Crunchy047, as live" {
-                let _, trace = twoRaidsBesideW17S25 () |> runIn FightLane.World 80
-                let failure = describe trace
-
-                let wraithDead =
-                    match diedOn "Wraith403" trace with
-                    | Some tick -> tick
-                    | None -> failtest $"the guard kills Wraith403\n{failure}"
-
-                for ranger in [ "ranger-971130-Spawn3"; "ranger-971410-Spawn3" ] do
-                    Expect.equal
-                        (pathOf ranger trace
-                         |> List.filter (fun (tick, _) -> tick <= wraithDead)
-                         |> List.map (fun (_, s) -> s.At.Room)
-                         |> List.distinct)
-                        [ "W17S25" ]
-                        $"{ranger} holds home while Wraith403 lives\n{failure}"
-
-                Expect.equal
-                    (roomsOf "ranger-971130-Spawn3" trace)
-                    [ "W17S25"; "W17S26" ]
-                    $"the other resident is called to W17S26's hauler\n{failure}"
-
-                Expect.isSome (diedOn "Crunchy047" trace) $"and Crunchy047 dies\n{failure}"
-            }
-
-            // As on the tuned lane: the mother's resident takes her Guard of
-            // W17S25 and walks home past Idol768, shooting it dead, never
-            // struck. The child's Defend there is the child's; the mother,
-            // briefing the room herself, is handed none of it.
-            test
-                "#533 capture t973,267, the world lane: the released ranger walks home on its Guard, unstruck" {
-                let ranger = "ranger-972464-Spawn8"
-                let first, _ = idleRangerInReach () |> stepIn FightLane.World
-
-                Expect.equal
-                    (Map.tryFind ranger first.Carried.Assignments)
-                    (Some "guard:W17S25")
-                    "its first Task is the home's Guard"
-
-                let _, trace = idleRangerInReach () |> runIn FightLane.World 30
-                let failure = describe trace
-
-                Expect.equal
-                    (pathOf ranger trace
-                     |> List.pairwise
-                     |> List.choose (fun ((_, before), (tick, now)) ->
-                         if now.Hits < before.Hits then Some tick else None)
-                     |> List.filter (fun tick -> tick < 12))
-                    []
-                    $"the melee never strikes it on its way out\n{failure}"
-
-                Expect.equal
-                    (diedOn "Idol768" trace)
-                    (Some 7)
-                    $"Idol768 dies of its shots\n{failure}"
-            }
-
-            // As on the tuned lane: the mother's resident enters the shut
-            // outpost and the cripple dies.
-            test
-                "#534 capture t973,320, the world lane: the mother's resident answers the cripple in the shut outpost" {
-                let _, trace = shutOutpostCripple () |> runIn FightLane.World 85
-
-                Expect.isNonEmpty
-                    (crossingsInto "ranger-972663-Spawn3" "W18S25" trace)
-                    $"the resident enters W18S25\n{describe trace}"
-
-                Expect.isSome (diedOn "Idol768" trace) $"and Idol768 dies\n{describe trace}"
-            }
-
-            // As on the tuned lane: the trespass's kill is pooled and held at
-            // t0, and Specter836 dies.
-            test "#542 capture t976,955, the world lane: Specter836 is answered at once" {
-                let first, _ = diggerBesideHeldExit () |> stepIn FightLane.World
-
-                Expect.isTrue
-                    (first.Carried.Assignments |> Map.exists (fun _ task -> task = "guard:W17S26"))
-                    "a body takes W17S26's Guard at t0"
-
-                let _, trace = diggerBesideHeldExit () |> runIn FightLane.World 60
-                Expect.isSome (diedOn "Specter836" trace) $"and Specter836 dies\n{describe trace}"
-            }
-
-            // As on the tuned lane, the cast being the economy's: W15S28
-            // casts W17S29's guard, W17S29 no fighter.
-            test
-                "#589 capture t996,620, the world lane: the colony whose cast wins casts the home's defence" {
-                let _, trace = w17s29Dismantler () |> runIn FightLane.World 1
-                let casts = firstCasts trace
-
-                Expect.exists
-                    casts
-                    (fun (spawn, row) -> (spawn = "Spawn3" || spawn = "Spawn8") && row = "guard")
-                    $"W15S28 casts the guard\n{casts}"
-
-                Expect.isFalse
-                    (casts
-                     |> List.exists (fun (spawn, row) ->
-                         spawn = "Spawn9" && isFighterRow (spawn, row)))
-                    $"and W17S29 none\n{casts}"
-            }
-
             // At t10 W17S26's chase turns Kite. Before #596 it seated one body
             // world-wide, the one at the fight soonest: the child's 2-RANGED
             // ranger-985441, the mother's 14-RANGED ranger-984683 let go, and
-            // the melee died at t114 (t36 per colony). Now the kite seats the
+            // the melee died at t114. Now the kite seats the
             // body that ends the raid soonest (the mother's, walk and kill)
             // and beside it every ranger already at the fight (the child's).
             test
-                "movement S3 capture t986,005, the world lane: the mother's 14-RANGED ranger takes a seat beside the child's, and the melee dies as soon as per colony" {
-                let first, _ = rangerIntoMelee () |> runIn FightLane.World 20
+                "movement S3 capture t986,005, the world lane: the mother's 14-RANGED ranger takes a seat beside the child's, and the melee dies at t36" {
+                let first, _ = rangerIntoMelee () |> run 20
 
                 Expect.equal
                     (first.Carried.Assignments
@@ -20468,8 +20281,7 @@ let worldLaneCaptureTests =
                     [ "ranger-984683-Spawn3"; "ranger-985441-Spawn11" ]
                     "at t20 the mother's ranger and the child's at the fight hold the kite"
 
-                let _, trace = rangerIntoMelee () |> runIn FightLane.World 120
-                let _, perColony = rangerIntoMelee () |> runIn FightLane.PerColony 120
+                let _, trace = rangerIntoMelee () |> run 120
                 let failure = describe trace
 
                 Expect.isTrue
@@ -20485,25 +20297,17 @@ let worldLaneCaptureTests =
                     (diedOn "HalfLife847" trace)
                     (Some 36)
                     $"HalfLife847 dies at t36\n{failure}"
-
-                Expect.isLessThanOrEqual
-                    (diedOn "HalfLife847" trace |> Option.defaultValue System.Int32.MaxValue)
-                    (diedOn "HalfLife847" perColony |> Option.defaultValue System.Int32.MaxValue)
-                    "no later than per colony"
             }
 
             // The child's 600-hit ranger-985441 keeps its seat on W17S26's
-            // trespass as per colony (#601). Before, the world lane's hold
+            // trespass (#601). Before, the world lane's hold
             // kept only the seats the caps still had, and the trespass's cap
             // was 1 while the child's own ranger held it (its guard row then
             // answers nothing) and 2 once it let go: the ranger stepped
             // (17,20) <-> (16,21) between this Guard and its home's and never
-            // shot, and the hauler died to the other alone at t35 (t31 per
-            // colony).
-            test
-                "#558 capture t985,660, the world lane: both rangers shoot Obsidian522 down as per colony" {
-                let _, trace = haulerBesideCore () |> runIn FightLane.World 80
-                let _, perColony = haulerBesideCore () |> runIn FightLane.PerColony 80
+            // shot, and the hauler died to the other alone at t35.
+            test "#558 capture t985,660, the world lane: both rangers shoot Obsidian522 down by t31" {
+                let _, trace = haulerBesideCore () |> run 80
                 let failure = describe trace
 
                 let dead =
@@ -20520,10 +20324,7 @@ let worldLaneCaptureTests =
                              t.Ours |> List.contains (RangedAttackCreep(ranger, "Obsidian522")))))
                     $"both shoot it every tick from t6 until it dies\n{failure}"
 
-                Expect.isLessThanOrEqual
-                    (Some dead)
-                    (diedOn "Obsidian522" perColony)
-                    $"no later than per colony\n{failure}"
+                Expect.isLessThanOrEqual dead 31 $"by t31\n{failure}"
             }
         ]
 
@@ -20979,30 +20780,29 @@ let foughtWhereStruckTests =
             // it on the way, the pair at the fight wins, holds and kills
             // Wave7157 at t88 (t109 before, the first ranger down to 818).
             test
-                "#602 capture t1,007,219: the ranger runs home from the exchange it loses alone, and the pair at the fight kills Wave7157, both lanes" {
-                for lane in [ FightLane.PerColony; FightLane.World ] do
-                    let _, trace = w19s26LosingTrade () |> runIn lane 120
-                    let failure = describe trace
+                "#602 capture t1,007,219: the ranger runs home from the exchange it loses alone, and the pair at the fight kills Wave7157" {
+                let _, trace = w19s26LosingTrade () |> run 120
+                let failure = describe trace
 
-                    let least ranger =
-                        trace
-                        |> List.collect (fun t -> t.Bodies |> List.filter (fun b -> b.Id = ranger))
-                        |> List.map _.Hits
-                        |> List.min
+                let least ranger =
+                    trace
+                    |> List.collect (fun t -> t.Bodies |> List.filter (fun b -> b.Id = ranger))
+                    |> List.map _.Hits
+                    |> List.min
 
-                    Expect.isGreaterThanOrEqual
-                        (least "ranger-1006821-Spawn11")
-                        900
-                        $"{lane}: it never stands trading its hits away\n{failure}"
+                Expect.isGreaterThanOrEqual
+                    (least "ranger-1006821-Spawn11")
+                    900
+                    $"it never stands trading its hits away\n{failure}"
 
-                    Expect.isGreaterThanOrEqual
-                        (least "ranger-1006965-Spawn11")
-                        1_150
-                        $"{lane}: nor does the other\n{failure}"
+                Expect.isGreaterThanOrEqual
+                    (least "ranger-1006965-Spawn11")
+                    1_150
+                    $"nor does the other\n{failure}"
 
-                    Expect.isLessThanOrEqual
-                        (diedOn "Wave7157" trace |> Option.defaultValue System.Int32.MaxValue)
-                        95
-                        $"{lane}: the pair kills Wave7157 by t95\n{failure}"
+                Expect.isLessThanOrEqual
+                    (diedOn "Wave7157" trace |> Option.defaultValue System.Int32.MaxValue)
+                    95
+                    $"the pair kills Wave7157 by t95\n{failure}"
             }
         ]
