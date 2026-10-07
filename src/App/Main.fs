@@ -351,6 +351,40 @@ let private standingOf (last: LightTick.LastFull) : Set<string> =
     |> Seq.filter (fun id -> not (isNull (Game.getObjectById id)))
     |> Fresh.setOfSeq
 
+// The harness's fake `Game` has no `RoomVisual`.
+[<Emit("typeof RoomVisual === 'function' && new RoomVisual($0).text($1, 1, $2, { align: 'left', font: 0.6, color: '#ffffff', stroke: '#000000', strokeWidth: 0.12 })")>]
+let private visualText (_room: string) (_text: string) (_y: float) : unit = jsNative
+
+/// The bucket and the tick's cost in the top-left corner of every room we
+/// own (#638): the season client shows no bucket, and a room visual reaches
+/// only our own client.
+let private drawCpu (line: Observe.CpuState) =
+    let mean =
+        if List.isEmpty line.Ticks then
+            0.0
+        else
+            line.Ticks |> List.averageBy (fun s -> s.Ms)
+
+    let bucket = $"bucket %d{Game.cpu.bucket}"
+
+    let cost =
+        match line.Ticks |> List.tryFind (fun s -> s.Tick = Game.time) with
+        | Some s ->
+            let kind =
+                if s.Light then "light"
+                elif s.Forced.IsSome then "forced"
+                else "full"
+
+            $"cpu %.1f{s.Ms} ms %s{kind}, mean %.1f{mean} of %d{int Game.cpu?limit}"
+        | None -> $"cpu mean %.1f{mean} of %d{int Game.cpu?limit}"
+
+    for room in objectValues<IRoom> Game.rooms do
+        let c = room.controller
+
+        if not (isNull (box c)) && c.my then
+            visualText room.name bucket 1.0
+            visualText room.name cost 1.8
+
 /// The CPU line's write, the same on both kinds of tick: nothing in the bot
 /// reads it back.
 let private writeCpuLine (readings: Observe.CpuReadings) =
@@ -377,6 +411,7 @@ let private writeCpuLine (readings: Observe.CpuReadings) =
         ObserveMemory.saveVersion version Game.time
 
     cpuLine <- Some line
+    drawCpu line
 
 /// Absent on the sim room and the shared-VM runtimes
 /// (`docs/research/engine-testing.md`); 0 there reads as unmeasured. One
