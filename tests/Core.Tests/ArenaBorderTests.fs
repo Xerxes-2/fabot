@@ -1728,8 +1728,8 @@ let arenaBorderTests =
                     (tasks.[taken .. died.Value] |> List.forall ((=) guard))
                     $"ranger-1013734 keeps the Guard from t{taken} until the melee dies: {tasks}"
 
-                Expect.isNone (diedOn "ranger-1013734-Spawn11" trace) "the kiter lives"
-                Expect.isNone (diedOn "ranger-1013698-Spawn11" trace) "and so does the idle one"
+                Expect.isTrue (survived "ranger-1013734-Spawn11" trace) "the kiter lives"
+                Expect.isTrue (survived "ranger-1013698-Spawn11" trace) "and so does the idle one"
             }
 
             // #615 U3's hysteresis: live, ranger-1013698 took W17S26's Guard,
@@ -1780,7 +1780,11 @@ let arenaBorderTests =
                     | Some tick -> tick
                     | None -> failtest $"Obsidian522 dies\n{failure}"
 
-                Expect.isLessThanOrEqual dead 35 $"at 160 a tick, by t35\n{failure}"
+                // The child's 600-hit ranger-985441 keeps its seat on W17S26's
+                // trespass (#601); before, it stepped between this Guard and its
+                // home's and never shot, and the hauler died to the other alone
+                // at t35.
+                Expect.isLessThanOrEqual dead 31 $"at 160 a tick, by t31\n{failure}"
 
                 // The one beside the core shoots it at t0, on its way to the
                 // creep, which stands out of its reach.
@@ -1936,7 +1940,8 @@ let arenaBorderTests =
                     "and never crossed after it"
             }
 
-            test "a hurt pair retreats across the border and our ranger does not follow" {
+            test
+                "a hurt melee retreats across the border, its healer dies short of it, and our ranger does not follow" {
                 let ranger =
                     body
                         "ranger-880900-Spawn8"
@@ -2370,7 +2375,7 @@ let arenaBorderTests =
                     (Some(RoomPos.at "W17S26" { X = 26; Y = 9 }, 0))
                     $"the reserver steps onto the plain round the ranger\n{failure}"
 
-                Expect.isNone (diedOn "reserver-985957-Spawn11" trace) $"and lives\n{failure}"
+                Expect.isTrue (survived "reserver-985957-Spawn11" trace) $"and lives\n{failure}"
 
                 Expect.equal
                     (diedOn "anchor-985849-Spawn11" trace)
@@ -2571,6 +2576,6 @@ let arenaBorderTests =
                     (Some 7)
                     $"Idol768 dies of its shots on the way\n{failure}"
 
-                Expect.isNone (diedOn ranger trace) $"and the ranger lives\n{failure}"
+                Expect.isTrue (survived ranger trace) $"and the ranger lives\n{failure}"
             }
         ]

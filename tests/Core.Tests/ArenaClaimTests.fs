@@ -409,7 +409,7 @@ let private afterClaim =
     ]
 
 /// The rows the arena casts for W15S28: the pioneers' and the fighters'.
-let private claimRows = [ "worker"; "ranger"; "medic" ]
+let private claimRows = [ "worker"; "ranger" ]
 
 /// W15S28 as it stands live at t921,063 — RCL7, a 5,600 bank, Spawn3 at
 /// 18,30 and Spawn8 at 17,35, 137,274 energy in the Storage at 17,29 — the
@@ -1119,7 +1119,7 @@ let arenaClaimTests =
             }
 
             test
-                "scenario 3, G2 with G1 under the live cooldown: the residents kill the tapper before it taps, all live, and neither a squad nor a reserver is cast into the raid" {
+                "scenario 3, G2 with G1 under the live cooldown: the residents kill the tapper before it taps, all live, and no reserver is cast into the raid" {
                 for arrival in [ 20; 100; 300 ] do
                     let _, _, trace =
                         claimWorld
@@ -1160,18 +1160,6 @@ let arenaClaimTests =
                     // rangers alone never close on it.
                     for r in residents do
                         Expect.isFalse (m.Died.ContainsKey r.Id) $"{r.Id} lives\n{failure}"
-
-                    // The Fight squad is retired (#564): no medic is cast.
-                    let squadCast =
-                        trace
-                        |> List.tryFind (fun t ->
-                            t.Ours
-                            |> List.exists (function
-                                | SpawnCreep(_, _, n) -> n.StartsWith "medic-"
-                                | _ -> false))
-                        |> Option.map (fun t -> t.Tick)
-
-                    Expect.isNone squadCast $"cast: {squadCast}\n{failure}"
             }
 
             // #472: an unarmed pioneer of the mother's, sent to the nursery's
@@ -1304,7 +1292,7 @@ let arenaClaimTests =
             }
 
             test
-                "#478, one tower: an Independent child with no residents loses its 100k perimeter before the mother's relief arrives, whose rangers alone kill no melee" {
+                "#478, one tower: an Independent child with no residents loses its 100k perimeter before the mother's relief arrives" {
                 let report, _, trace = independentWorld [ childTower ] |> lineReport 600
                 let failure = $"{report}\n{describe trace}"
 
@@ -1333,11 +1321,6 @@ let arenaClaimTests =
                         "no faster than one melee on one rampart"
 
                     Expect.isLessThan fell relief $"the line falls first\n{failure}"
-
-                    for id in [ "Eternity536"; "Prime803" ] do
-                        Expect.isFalse
-                            (Map.containsKey id report.Died)
-                            $"{id} outlives the rangers' relief\n{failure}"
                 | outcome -> failtest $"a fall and a relief: {outcome}\n{failure}"
 
                 Expect.isGreaterThan

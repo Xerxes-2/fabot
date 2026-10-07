@@ -2115,22 +2115,25 @@ let w18s25CrippledTests =
             // row: now its row is priced, shut or not, and
             // the room is the kite its biggest ranger answers. The kill time is the small
             // rangers' either way in the arena (t93 at writing); what this
-            // pins is the binding.
+            // pins is the binding. No Win on a row is pinned by the world
+            // lane test below.
             test
-                "#573 capture t994,917: the stand-down withholds no row, so the owner's ranger prices the cripple a kite every seeing colony pools" {
+                "#573 capture t994,917: the stand-down withholds no row, so the cripple is a kite and the mother's ranger takes its spell seat" {
                 let run = w18s25Crippled () |> crippledRun 50
 
-                for tick, verdict, _ in run do
-                    match verdict with
-                    | Some(Answer.Win, Some giving) ->
-                        failtest $"t{tick}: a Win given by {giving}'s row or rangers"
-                    | _ -> ()
+                Expect.exists
+                    run
+                    (fun (_, verdict, _) ->
+                        match verdict with
+                        | Some(Answer.Kite, _) -> true
+                        | _ -> false)
+                    "W17S25 reads the cripple as a Kite"
 
                 Expect.exists
                     run
                     (fun (_, _, assignments) ->
                         Map.tryFind "ranger-993409-Spawn3" assignments = Some "guard:W18S25")
-                    "once its home raid is down, W17S25's resident ranger next door takes the chase"
+                    "the mother's ranger takes the kite's spell seat"
             }
 
             // The world lane (one match over the fleet): W17S25's own ranger

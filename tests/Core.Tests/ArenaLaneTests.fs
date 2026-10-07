@@ -1039,7 +1039,23 @@ let intercept850Tests =
                 let gaps, died = guardGaps 4 run
 
                 Expect.isEmpty gaps "never task-gone between two looks"
-                Expect.isSome died "and its shots kill the cripple inside the run (t42 at writing)"
+
+                let died =
+                    match died with
+                    | Some tick -> tick
+                    | None -> failtest "the cripple dies inside the run (t42 at writing)"
+
+                // The guard is in the capture too: the ranger's shot lands on
+                // the death tick or the one before it.
+                Expect.isTrue
+                    (run
+                     |> List.exists (fun (t, _) ->
+                         (t.Tick = died || t.Tick = died - 1)
+                         && t.Ours
+                            |> List.contains (
+                                RangedAttackCreep("ranger-989686-Spawn8", "Intercept850")
+                            )))
+                    "and the ranger's shots kill it"
             }
         ]
 
@@ -1062,9 +1078,10 @@ let worldLaneCaptureTests =
             // melee and falls to it before the mother's land, so it no longer
             // fits the kite (it held on `rangers > 1`); the mother's second
             // ranger, free and fitting beside the first, takes the seat, and
-            // the melee dies two ticks sooner.
+            // the melee dies two ticks sooner. The shots and the t32 kill are
+            // pinned in ArenaBorderTests' movement S3 kite test.
             test
-                "movement S3 capture t986,005, the world lane: the mother's two 14-RANGED rangers hold the kite, and the melee dies at t32" {
+                "movement S3 capture t986,005, the world lane: at t20 the mother's two 14-RANGED rangers hold the kite" {
                 let first, _ = rangerIntoMelee () |> run 20
 
                 Expect.equal
@@ -1074,52 +1091,6 @@ let worldLaneCaptureTests =
                      |> List.ofSeq)
                     [ "ranger-984683-Spawn3"; "ranger-985616-Spawn3" ]
                     "at t20 the mother's two rangers hold the kite"
-
-                let _, trace = rangerIntoMelee () |> run 120
-                let failure = describe trace
-
-                Expect.isTrue
-                    (trace
-                     |> List.exists (fun t ->
-                         t.Ours
-                         |> List.contains (
-                             RangedAttackCreep("ranger-984683-Spawn3", "HalfLife847")
-                         )))
-                    $"the mother's ranger shoots it\n{failure}"
-
-                // #615 U1: t36 → t34, the closing ranger above; #615 U3: t32.
-                Expect.equal
-                    (diedOn "HalfLife847" trace)
-                    (Some 32)
-                    $"HalfLife847 dies at t32\n{failure}"
-            }
-
-            // The child's 600-hit ranger-985441 keeps its seat on W17S26's
-            // trespass (#601). Before, the world lane's hold
-            // kept only the seats the caps still had, and the trespass's cap
-            // was 1 while the child's own ranger held it (its guard row then
-            // answers nothing) and 2 once it let go: the ranger stepped
-            // (17,20) <-> (16,21) between this Guard and its home's and never
-            // shot, and the hauler died to the other alone at t35.
-            test "#558 capture t985,660, the world lane: both rangers shoot Obsidian522 down by t31" {
-                let _, trace = haulerBesideCore () |> run 80
-                let failure = describe trace
-
-                let dead =
-                    match diedOn "Obsidian522" trace with
-                    | Some tick -> tick
-                    | None -> failtest $"Obsidian522 dies\n{failure}"
-
-                Expect.isTrue
-                    (trace
-                     |> List.filter (fun t -> t.Tick >= 6 && t.Tick < dead)
-                     |> List.forall (fun t ->
-                         [ "ranger-984393-Spawn3"; "ranger-985441-Spawn11" ]
-                         |> List.forall (fun ranger ->
-                             t.Ours |> List.contains (RangedAttackCreep(ranger, "Obsidian522")))))
-                    $"both shoot it every tick from t6 until it dies\n{failure}"
-
-                Expect.isLessThanOrEqual dead 31 $"by t31\n{failure}"
             }
         ]
 
@@ -1144,8 +1115,8 @@ let worldLaneCaptureTests =
 // ranger-1006965, arrives: live it stood at W19S25 27,20 until past
 // t1,007,350, whatever held it there gone from the log, while here W19S26's
 // Guard takes it at t0. The pair then killed Wave7157 at t109, the first
-// ranger down to 818.
-let private w19s26LosingTrade () : Arena =
+// ranger down to 818. `stock` is W17S25's Storage energy: live 6,991.
+let private w19s26LosingTrade (stock: int) : Arena =
     let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
     let trepidimous = Side.Player "Trepidimous"
 
@@ -1247,7 +1218,7 @@ let private w19s26LosingTrade () : Arena =
                     Energy = 198
                 }
                 { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 13; Y = 27 } with
-                    Energy = 6_991
+                    Energy = stock
                 }
                 towerOf Side.Ours { X = 11; Y = 29 } 1_000
                 towerOf Side.Ours { X = 13; Y = 29 } 1_000
@@ -1583,15 +1554,48 @@ let foughtWhereStruckTests =
             // outlasts Wave7157 by two hundred ticks (6 a tick net), holds
             // the fight until it lands. The pair kills Wave7157 at t109, the
             // first ranger down to 824, neither leaving W19S26 once in it.
+            // W17S25's stock is raised from the live 6,991 to
+            // `Tuning.CasterReserve`, so it casts both harassment rooms as it
+            // did when the capture was taken (W6 S3 added the reserve).
             test
-                "#602 capture t1,007,219: with W19S26 and W19S25 cast by nobody, both rangers yield their Guards and walk home unhurt" {
-                // Moved at W6 S3: W17S25's 6,991 stored is under
-                // `Tuning.CasterReserveHold`, so no colony casts either
-                // harassment room; each is held for its rangers alone, and a
-                // Guard there is no fight they keep (`Planner.planFightTasks`).
-                // Until then the pair killed Wave7157 at t109. Both walk to
-                // W17S25 untouched and Wave7157 stands.
-                let _, trace = w19s26LosingTrade () |> run 120
+                "#602 capture t1,007,219: a ranger losing alone holds while its partner walks in, and the pair kills Wave7157" {
+                let _, trace = w19s26LosingTrade Tuning.defaults.CasterReserve |> run 120
+                let failure = describe trace
+
+                let least ranger =
+                    trace
+                    |> List.collect (fun t -> t.Bodies |> List.filter (fun b -> b.Id = ranger))
+                    |> List.map _.Hits
+                    |> List.min
+
+                Expect.isGreaterThanOrEqual
+                    (least "ranger-1006821-Spawn11")
+                    800
+                    $"it holds at the cost of the wait, never to its death\n{failure}"
+
+                Expect.isGreaterThanOrEqual
+                    (least "ranger-1006965-Spawn11")
+                    1_150
+                    $"the other walks in to a won fight\n{failure}"
+
+                Expect.isFalse
+                    (pathOf "ranger-1006821-Spawn11" trace
+                     |> List.exists (fun (_, s) -> s.At.Room <> "W19S26"))
+                    $"it never leaves W19S26 for the exit row\n{failure}"
+
+                Expect.isLessThanOrEqual
+                    (diedOn "Wave7157" trace |> Option.defaultValue System.Int32.MaxValue)
+                    115
+                    $"the pair kills Wave7157 by t115\n{failure}"
+            }
+
+            // At the live 6,991, under `Tuning.CasterReserveHold`, no colony
+            // casts either harassment room; each is held for its rangers
+            // alone, and a Guard there is no fight they keep
+            // (`Planner.planFightTasks`).
+            test
+                "#602 capture t1,007,219 at the live stock: with W19S26 and W19S25 cast by nobody, both rangers yield their Guards and walk home unhurt" {
+                let _, trace = w19s26LosingTrade 6_991 |> run 120
                 let failure = describe trace
 
                 let least ranger =
@@ -1608,7 +1612,7 @@ let foughtWhereStruckTests =
                         (pathOf ranger trace |> List.last |> (fun (_, s) -> s.At.Room))
                         $"{ranger} walks home to its caster\n{failure}"
 
-                Expect.isNone (diedOn "Wave7157" trace) $"and Wave7157 stands\n{failure}"
+                Expect.isTrue (survived "Wave7157" trace) $"and Wave7157 stands\n{failure}"
             }
         ]
 

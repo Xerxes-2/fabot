@@ -463,7 +463,7 @@ let arenaScenarioTests =
                     Expect.isSome (diedOn invader trace) $"{invader} dies\n{failure}"
 
                 for guard in [ "guard-973545-Spawn1"; "guard-973545-Spawn6" ] do
-                    Expect.isNone (diedOn guard trace) $"{guard} lives\n{failure}"
+                    Expect.isTrue (survived guard trace) $"{guard} lives\n{failure}"
             }
 
             // #535 invariant 3, the melee's rule: attacks resolve before moves,
@@ -554,7 +554,7 @@ let arenaScenarioTests =
 
                 Expect.isSome (diedOn "invader-1" trace) $"the invader dies\n{describe trace}"
 
-                Expect.isNone (diedOn "guard-1-Spawn1" trace) "the guard lives"
+                Expect.isTrue (survived "guard-1-Spawn1" trace) "the guard lives"
             }
 
             // #510, the W18S25 shape: Torque404 left at 1,454 hits, 14 ATTACK on
@@ -928,7 +928,7 @@ let arenaScenarioTests =
                 Expect.isSome (diedOn "Torque592" trace) "the melee dies"
 
                 for g in [ "g1"; "g2"; "g3" ] do
-                    Expect.isNone (diedOn g trace) $"{g} holds"
+                    Expect.isTrue (survived g trace) $"{g} holds"
             }
 
             test
@@ -944,8 +944,8 @@ let arenaScenarioTests =
                     // tapper lands on the controller. Since S0 (#451) the
                     // resident holds safe ground rather than dying.
                     for id in raidIds do
-                        Expect.isNone
-                            (diedOn id trace)
+                        Expect.isTrue
+                            (survived id trace)
                             $"{id} stands, from {start}\n{describe trace}"
 
                     Expect.isTrue
@@ -959,7 +959,7 @@ let arenaScenarioTests =
                         (caughtBeside [ "Eternity536"; "Prime803" ] ranger trace)
                         $"caught beside a melee, from {start}\n{describe trace}"
 
-                    Expect.isNone (diedOn ranger trace) "the resident lives"
+                    Expect.isTrue (survived ranger trace) "the resident lives"
             }
 
         ]

@@ -34,7 +34,9 @@
 /// none to cast for; the bank is never debited, as the economy the arena
 /// leaves out refills it. A controller is claimed, upgraded to its next
 /// level and tapped (#470), and safe mode is refused as the engine refuses
-/// it: on cooldown, under an upgrade block, or past the downgrade line.
+/// it: on cooldown, under an upgrade block, or past the downgrade line; a
+/// rival room marked `panicking` raises its own safe mode under the same
+/// rules once a structure of its owner's is struck (#491).
 /// Construction sites stand, are built with carried energy, and are removed
 /// by a body of another side stepping on them; placing one is a test's, not
 /// the pipeline's. A body withdraws energy from a store. A road (#560) is
@@ -47,7 +49,7 @@
 /// the core, its loot and its collapse.
 /// Not modelled: the rest of the economy (harvest, pickup, a store's
 /// refill), a downgrade, boosting itself, pulling, portals, power creeps,
-/// nukes, and safe mode for any side but ours.
+/// nukes, and a rival's safe mode in a room not marked `panicking`.
 module Fabot.Core.Tests.Arena
 
 open System.Collections.Generic
@@ -4862,7 +4864,26 @@ let diedOn (id: string) (trace: TickTrace list) : int option =
     |> List.tryFind (fun t -> t.Events |> List.contains (Died id))
     |> Option.map (fun t -> t.Tick)
 
-/// One body's snapshot at the end of every tick it lived through.
+/// Whether a body is still standing at the end of the trace: it neither died
+/// nor left by an exit into a room the arena does not hold, which `diedOn`
+/// alone cannot tell from living.
+let survived (id: string) (trace: TickTrace list) : bool =
+    let gone =
+        trace
+        |> List.exists (fun t ->
+            t.Events
+            |> List.exists (function
+                | Died d
+                | Exited(d, _) -> d = id
+                | _ -> false))
+
+    let present =
+        trace
+        |> List.tryLast
+        |> Option.exists (fun t -> t.Bodies |> List.exists (fun b -> b.Id = id))
+
+    not gone && present
+
 let pathOf (id: string) (trace: TickTrace list) : (int * Snapshot) list =
     trace
     |> List.choose (fun t ->

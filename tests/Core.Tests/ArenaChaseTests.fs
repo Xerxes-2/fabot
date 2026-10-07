@@ -498,8 +498,8 @@ let shotHomeTests =
                     (home anchor trace |> Option.exists (fun t -> t <= 70))
                     $"live tiles: so does the anchor\n{failure}"
 
-                Expect.isNone (diedOn reserver trace) $"live tiles: the reserver lives\n{failure}"
-                Expect.isNone (diedOn anchor trace) $"live tiles: so does the anchor\n{failure}"
+                Expect.isTrue (survived reserver trace) $"live tiles: the reserver lives\n{failure}"
+                Expect.isTrue (survived anchor trace) $"live tiles: so does the anchor\n{failure}"
 
                 let chasing =
                     match shadowLive with
@@ -513,7 +513,7 @@ let shotHomeTests =
                     (home reserver chased |> Option.exists (fun t -> t <= 75))
                     $"chasing: the reserver crosses home by t75\n{failure}"
 
-                Expect.isNone (diedOn reserver chased) $"chasing: the reserver lives\n{failure}"
+                Expect.isTrue (survived reserver chased) $"chasing: the reserver lives\n{failure}"
 
                 // Its fallback once ranked the tiles beside it by when they
                 // are struck alone: the swamp (31,4), struck later than the
@@ -523,7 +523,9 @@ let shotHomeTests =
                      |> List.exists (fun (_, s) -> s.At = RoomPos.at "W17S26" { X = 31; Y = 4 }))
                     $"chasing: the anchor never steps onto the swamp (31,4) under fire\n{failure}"
 
-                Expect.isNone (diedOn anchor chased) $"chasing: the anchor outlives t87\n{failure}"
+                Expect.isTrue
+                    (survived anchor chased)
+                    $"chasing: the anchor outlives t87\n{failure}"
             }
         ]
 

@@ -990,7 +990,7 @@ let arenaDefenceTests =
                         Expect.isLessThan fell.Value 400 "inside 400 ticks"
 
                         for id in squadIds do
-                            Expect.isNone (diedOn id trace) $"{id} lives\n{failure}"
+                            Expect.isTrue (survived id trace) $"{id} lives\n{failure}"
                     | "20 ATTACK melee" ->
                         // Measured: t691; the towers' nearest-first fire
                         // kills both healers on the walk in.
@@ -1015,7 +1015,7 @@ let arenaDefenceTests =
                 Expect.isLessThan fell.Value 400 "inside 400 ticks"
 
                 for b in start.Bodies do
-                    Expect.isNone (diedOn b.Id trace) $"{b.Id} lives\n{failure}"
+                    Expect.isTrue (survived b.Id trace) $"{b.Id} lives\n{failure}"
 
                 let sappers =
                     start.Bodies
@@ -1122,7 +1122,7 @@ let arenaDefenceTests =
                 Expect.isLessThan spawnDown.Value 600 $"inside 600 ticks, ended t{final.Tick}"
 
                 for id in strikers do
-                    Expect.isNone (diedOn id trace) $"{id} lives\n{failure}"
+                    Expect.isTrue (survived id trace) $"{id} lives\n{failure}"
 
                 // The Provoke's way out (#492): every exit it can reach is
                 // W17S26's, 18 tiles east of the far line — W18S27's lie
@@ -1173,7 +1173,7 @@ let arenaDefenceTests =
                 Expect.isSome raised $"safe mode raised\n{failure}"
 
                 for b in start.Bodies do
-                    Expect.isNone (diedOn b.Id trace) $"{b.Id} lives\n{failure}"
+                    Expect.isTrue (survived b.Id trace) $"{b.Id} lives\n{failure}"
 
                     Expect.isTrue
                         (pathOf b.Id trace
@@ -1188,7 +1188,7 @@ let arenaDefenceTests =
                 let failure = describe trace
                 let probe = start.Bodies |> List.exactlyOne
 
-                Expect.isNone (diedOn probe.Id trace) $"the probe lives\n{failure}"
+                Expect.isTrue (survived probe.Id trace) $"the probe lives\n{failure}"
 
                 let rooms =
                     pathOf probe.Id trace |> List.map (fun (_, s) -> s.At.Room) |> List.distinct
@@ -1328,7 +1328,7 @@ let arenaDefenceTests =
                 Expect.isLessThan out.Value (linkDown.Value + 40) "straight out once it is down"
 
                 for b in start.Bodies do
-                    Expect.isNone (diedOn b.Id trace) $"{b.Id} lives\n{failure}"
+                    Expect.isTrue (survived b.Id trace) $"{b.Id} lives\n{failure}"
 
                 // Launched from home whole: every cast leaves W15S28 for good
                 // within a dozen ticks of the rest — the tail shuffles at the
@@ -1403,7 +1403,7 @@ let arenaDefenceTests =
                 Expect.isEmpty stranded $"nobody left in the room\n{failure}"
 
                 for b in start.Bodies do
-                    Expect.isNone (diedOn b.Id trace) $"{b.Id} lives\n{failure}"
+                    Expect.isTrue (survived b.Id trace) $"{b.Id} lives\n{failure}"
 
                     Expect.isTrue
                         (pathOf b.Id trace
@@ -1432,7 +1432,7 @@ let arenaDefenceTests =
                     Expect.isLessThan fell.Value 330 $"both sappers at it\n{failure}"
 
                     for b in start.Bodies do
-                        Expect.isNone (diedOn b.Id trace) $"{b.Id} lives\n{failure}"
+                        Expect.isTrue (survived b.Id trace) $"{b.Id} lives\n{failure}"
                 }
 
             test
@@ -1680,7 +1680,7 @@ let arenaEconomyArmTests =
         "the economy arm on W17S25's t974,040 layout (#545)"
         [
             test
-                "two melee pairs beside the worn spawn, the tower full, fire: the spawn falls in six ticks" {
+                "two melee pairs beside the worn spawn, the tower full: the economy arm fires on the first tick" {
                 let a =
                     w17s25At974040 ()
                     |> withBodies

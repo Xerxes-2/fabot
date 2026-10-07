@@ -293,8 +293,9 @@ let reactorPhysicsTests =
 
                 Expect.all
                     born
-                    (fun (_, id) -> not (id.StartsWith "worker-"))
-                    "no economy row stands"
+                    (fun (_, id) ->
+                        fightingRows |> List.exists (fun row -> id.StartsWith(row + "-")))
+                    "every body born is of a row the arena names"
 
                 match
                     standingAt 125 trace |> List.tryFind (fun s -> s.Id = "ranger-900000-Spawn3")
@@ -392,7 +393,7 @@ let reactorHoldTests =
             }
 
             test
-                "scenario 4: a claimer slipping in by the east exit draws both residents off the ring, who shoot it 13 tiles short of the Reactor" {
+                "scenario 4: a claimer slipping in by the east exit draws both residents off the ring, who shoot it more than ten tiles short of the Reactor" {
                 let final, trace =
                     reactorWorld
                         (Some Side.Ours)
@@ -402,9 +403,8 @@ let reactorHoldTests =
 
                 let failure = describe trace
 
-                Expect.isTrue
-                    (shotBy residentIds "Claimer1" trace)
-                    $"the residents shoot it\n{failure}"
+                for id in residentIds do
+                    Expect.isTrue (shotBy [ id ] "Claimer1" trace) $"{id} shoots it\n{failure}"
 
                 // Measured: dead on t19 at 45,19; the longbows on t51 and t69.
                 match pathOf "Claimer1" trace |> List.tryLast with
