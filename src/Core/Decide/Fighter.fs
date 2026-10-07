@@ -1,0 +1,89 @@
+/// One body of ours as a fight reads it (#615): what it strikes from how
+/// far, what it heals, how it walks and what it takes to kill, read off its
+/// parts alone and never off the row that cast it — Arrival's
+/// `HostileClass` on our side of the fight.
+[<AutoOpen>]
+module Fabot.Core.Decide.Fighters
+
+open Fabot.Core
+open Fabot.Core.Types
+
+/// A body's fight, by its live parts at their boosts.
+type Fighter =
+    {
+        /// The farthest range it strikes from: 3 with a live RANGED_ATTACK, 1
+        /// with a live ATTACK alone, 0 with neither (a medic).
+        Reach: int
+        /// The hits it takes off one creep at this range a tick: its ATTACK
+        /// at range 1 beside its RANGED_ATTACK out to 3, the two acts being
+        /// in different chains of the engine's intent priorities. A mass
+        /// attack (`Engine.massAttackPowerAt`) never takes more off one
+        /// target than the single shot, so it is not priced here.
+        DamageAt: int -> int
+        /// What it heals itself a tick it fights at this range: nothing where
+        /// it swings (range 1 with a live ATTACK), because the engine drops
+        /// an `attack` beside a `heal`, so a body that heals has not swung;
+        /// all its HEAL elsewhere, a `heal` standing beside a `rangedAttack`.
+        HealAt: int -> int
+        /// What it puts back on another body at range 2..3 a tick
+        /// (`rangedHeal`), which the engine drops beside a `heal` and which
+        /// drops a `rangedAttack` beside it.
+        RangedHeal: int
+        /// Its weight, every part but MOVE and shot-off ones too, against its
+        /// live MOVE at their boosts.
+        Gait: Gait
+        Hits: int
+        /// The share of `Hits` in boosted TOUGH still standing
+        /// (`Engine.toughHits`), which a strike pays more for.
+        Tough: int
+    }
+
+[<RequireQualifiedAccess>]
+module Fighter =
+    /// The fight of a body acting at `power` (a part's count at its boost).
+    let private ofPower (power: BodyPart -> int) (gait: Gait) (hits: int) (tough: int) : Fighter =
+        let attack = power Attack
+        let ranged = power RangedAttack
+        let heal = power Heal
+
+        let swings range =
+            attack > 0 && range <= Engine.meleeRange
+
+        {
+            Reach =
+                if ranged > 0 then Engine.rangedRange
+                elif attack > 0 then Engine.meleeRange
+                else 0
+            DamageAt =
+                fun range ->
+                    (if swings range then Engine.attackPower * attack else 0)
+                    + (if range <= Engine.rangedRange then
+                           Engine.rangedAttackPower * ranged
+                       else
+                           0)
+            HealAt = fun range -> if swings range then 0 else Engine.healPower * heal
+            RangedHeal = Engine.rangedHealPower * heal
+            Gait = gait
+            Hits = hits
+            Tough = tough
+        }
+
+    /// A body's fight at these hits: `body` head first as the engine holds
+    /// it, so the parts still acting are the tail its hits cover
+    /// (`Engine.powerAt`), and `boosts` one a part head first, or empty.
+    let ofParts (body: BodyPart list) (boosts: Boost list) (hits: int) : Fighter =
+        let power = Engine.powerAt body boosts hits
+
+        ofPower
+            power
+            {
+                Weight = Gait.weightOf (partCountIn body)
+                Moves = power Move
+            }
+            hits
+            (Engine.toughHits body boosts hits)
+
+    /// A living creep of ours' fight: its live parts, unboosted (no body of
+    /// ours is boosted at spawn yet), at `Arrival.gaitOf`.
+    let ofCreep (creep: CreepInfo) : Fighter =
+        ofPower (partCount creep.Body) (Arrival.gaitOf creep) creep.Hits.Hits 0

@@ -1020,7 +1020,7 @@ let internal guardCatches (view: ColonyView) (trespasser: HostileInfo) : bool =
 /// What a body of ours heals itself a tick while it fights: a ranged body's
 /// heal acts beside its shot (#411), and a melee body's is suppressed by its
 /// own attack, so it heals nothing.
-let private selfHealOf (parts: BodyPart -> int) =
+let selfHealOf (parts: BodyPart -> int) =
     if parts RangedAttack > 0 then
         Engine.healPower * parts Heal
     else

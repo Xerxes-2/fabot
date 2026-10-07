@@ -723,3 +723,175 @@ let squadRoleBodyTests =
                     Expect.equal (parts Move) (List.length role.Block - parts Move) role.Name
             }
         ]
+
+/// A Fighter's numbers, its two by-range readings out to range 4.
+let private numbersOf (fighter: Fighter) =
+    {|
+        Reach = fighter.Reach
+        Damage = [ 1..4 ] |> List.map fighter.DamageAt
+        Heal = [ 1..4 ] |> List.map fighter.HealAt
+        RangedHeal = fighter.RangedHeal
+        Gait = fighter.Gait
+        Hits = fighter.Hits
+        Tough = fighter.Tough
+    |}
+
+/// A whole body's Fighter, unboosted.
+let private wholeFighter (body: BodyPart list) =
+    Fighter.ofParts body [] (Engine.partHits * List.length body)
+
+[<Tests>]
+let fighterTests =
+    testList
+        "a fighter read off its parts (#615)"
+        [
+            test "one block of each fighting row: reach, damage and heal by range, gait, hits" {
+                Expect.equal
+                    (numbersOf (wholeFighter guardPattern.Block))
+                    {|
+                        Reach = 1
+                        Damage = [ 90; 0; 0; 0 ]
+                        Heal = [ 0; 12; 12; 12 ]
+                        RangedHeal = 4
+                        Gait = { Weight = 5; Moves = 5 }
+                        Hits = 1000
+                        Tough = 0
+                    |}
+                    "the guard swings 3 × 30 at range 1, where its swing leaves its HEAL idle"
+
+                Expect.equal
+                    (numbersOf (wholeFighter rangerPattern.Block))
+                    {|
+                        Reach = 3
+                        Damage = [ 20; 20; 20; 0 ]
+                        Heal = [ 12; 12; 12; 12 ]
+                        RangedHeal = 4
+                        Gait = { Weight = 3; Moves = 3 }
+                        Hits = 600
+                        Tough = 0
+                    |}
+                    "the ranger shoots 2 × 10 out to 3 and heals beside every shot"
+
+                Expect.equal
+                    (numbersOf (wholeFighter defenderPattern.Block))
+                    {|
+                        Reach = 1
+                        Damage = [ 30; 0; 0; 0 ]
+                        Heal = [ 0; 0; 0; 0 ]
+                        RangedHeal = 0
+                        Gait = { Weight = 1; Moves = 1 }
+                        Hits = 200
+                        Tough = 0
+                    |}
+                    "the defender swings 30 and heals nothing"
+
+                Expect.equal
+                    (numbersOf (wholeFighter medicPattern.Block))
+                    {|
+                        Reach = 0
+                        Damage = [ 0; 0; 0; 0 ]
+                        Heal = [ 216; 216; 216; 216 ]
+                        RangedHeal = 72
+                        Gait = { Weight = 18; Moves = 18 }
+                        Hits = 3600
+                        Tough = 0
+                    |}
+                    "the medic strikes nothing and heals 18 × 12, or 18 × 4 at range"
+            }
+
+            test "a hybrid swings and shoots at range 1, heals only where it does not swing" {
+                Expect.equal
+                    (numbersOf (wholeFighter [ Move; Move; Move; Attack; RangedAttack; Heal ]))
+                    {|
+                        Reach = 3
+                        Damage = [ 40; 10; 10; 0 ]
+                        Heal = [ 0; 12; 12; 12 ]
+                        RangedHeal = 4
+                        Gait = { Weight = 3; Moves = 3 }
+                        Hits = 600
+                        Tough = 0
+                    |}
+                    "attack and rangedAttack are in separate chains; heal drops the attack"
+            }
+
+            test "a hurt body acts with the tail its hits cover and still weighs what is shot off" {
+                let at hits =
+                    numbersOf (Fighter.ofParts guardPattern.Block [] hits)
+
+                Expect.equal
+                    (at 450)
+                    {| at 1000 with
+                        Gait = { Weight = 5; Moves = 1 }
+                        Hits = 450
+                    |}
+                    "TOUGH and four MOVE gone: it still swings and heals, on one MOVE under the whole weight"
+
+                Expect.equal
+                    (at 350)
+                    {| at 1000 with
+                        Gait = { Weight = 5; Moves = 0 }
+                        Hits = 350
+                    |}
+                    "the last MOVE gone: rooted, still armed"
+
+                Expect.equal
+                    (at 150)
+                    {| at 1000 with
+                        Damage = [ 30; 0; 0; 0 ]
+                        Gait = { Weight = 5; Moves = 0 }
+                        Hits = 150
+                    |}
+                    "one ATTACK and the HEAL left: one swing, the heal idle beside it"
+            }
+
+            test
+                "a living creep's fight, blind to its part order, weighs a shot-off MOVE (Arrival.gaitOf)" {
+                let body = guardPattern.Block
+
+                let hurt =
+                    { creepWith "g-1" 0 0 body with
+                        Body = partsOf (Engine.liveParts body 450)
+                        Hits = { Hits = 450; HitsMax = 1000 }
+                    }
+
+                Expect.equal
+                    (numbersOf (Fighter.ofCreep hurt))
+                    {| numbersOf (Fighter.ofParts body [] 450) with
+                        Gait = { Weight = 9; Moves = 1 }
+                    |}
+                    "the same weapons and heal; five parts shot off weigh as five, the four MOVE among them too"
+
+                Expect.equal
+                    (numbersOf (Fighter.ofCreep (creepWith "g-2" 0 0 body)))
+                    (numbersOf (wholeFighter body))
+                    "whole, the two readings agree"
+            }
+
+            test "boosts multiply the parts they act on, and a boosted TOUGH is counted" {
+                let boosts =
+                    guardPattern.Block
+                    |> List.map (function
+                        | Tough -> Tier1
+                        | Move -> Tier1
+                        | Attack -> Tier2
+                        | Heal -> Tier3
+                        | _ -> Unboosted)
+
+                Expect.equal
+                    (numbersOf (Fighter.ofParts guardPattern.Block boosts 1000))
+                    {|
+                        Reach = 1
+                        Damage = [ 270; 0; 0; 0 ]
+                        Heal = [ 0; 48; 48; 48 ]
+                        RangedHeal = 16
+                        Gait = { Weight = 5; Moves = 10 }
+                        Hits = 1000
+                        Tough = 100
+                    |}
+                    "UH2O swings ×3, XLHO2 heals ×4, ZO walks ×2, GO's 100 hits take a share"
+
+                let ranger = Fighter.ofParts rangerPattern.Block (List.replicate 6 Tier3) 600
+
+                Expect.equal (ranger.DamageAt 3) 80 "XKHO2 shoots ×4"
+            }
+        ]

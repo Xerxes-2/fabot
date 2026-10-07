@@ -3071,6 +3071,54 @@ let kiteStepTests =
                     (keeps [ beyond ])
                     "a second melee a step from the target's tile and two from the guard's strikes it there first"
             }
+
+            // #615 U0 pins today's values; U2/U3 resolve them to the engine's
+            // (`Fighter.HealAt`: nothing in a tick it swings). `Matcher`'s
+            // `struckNow` reads the same `healPower × HEAL` as `glueKeeps`.
+            test "quirk: the exchange gives a swinging guard no heal while the glue counts its HEAL" {
+                let target = { X = 25; Y = 44 }
+                let from = { X = 24; Y = 44 }
+
+                // A light melee two tiles past the target strikes its tile
+                // and not the guard's: 30 more there than the target's 360.
+                let beyond =
+                    { hostileIn "W1N2" { X = 27; Y = 44 } [ Move; Attack ] with
+                        Id = "h-2"
+                    }
+
+                let healerGuard heals =
+                    creepWith "g-1" 0 0 ([ Tough; Move; Attack ] @ List.replicate heals Heal)
+
+                let keeps body =
+                    let colony =
+                        declaredRaid [ plodderAt target; beyond ]
+                        |> withField
+                        |> withGuards [ body, from ]
+
+                    let atlas = Atlas.ofView colony
+
+                    Emitter.glueKeeps
+                        (threatsOf colony atlas)
+                        body
+                        (RoomPos.at "W1N2" from)
+                        (RoomPos.at "W1N2" target)
+
+                Expect.isFalse (keeps (healerGuard 1)) "one HEAL's 12 does not cover the 390 there"
+
+                Expect.isTrue
+                    (keeps (healerGuard 33))
+                    "33 HEAL's 396 does: the glue counts a guard's HEAL beside its swing"
+
+                Expect.equal
+                    (Facts.selfHealOf (partCount (healerGuard 33).Body))
+                    0
+                    "the exchange heals a melee body nothing"
+
+                Expect.equal
+                    ((Fighter.ofCreep (healerGuard 33)).HealAt Engine.meleeRange)
+                    0
+                    "and the engine agrees: its heal would drop its attack"
+            }
         ]
 
 [<Tests>]
