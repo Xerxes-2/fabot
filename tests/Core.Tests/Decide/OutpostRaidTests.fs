@@ -4746,17 +4746,19 @@ let childOutpostTests =
                     "and takes the chase"
             }
 
-            test "a melee guard of ours is not sent across the child's border for it" {
+            // #616: a fighter is the fleet's, so the mother's guard that
+            // kills the trespasser hunts it as any colony's would.
+            test "a melee guard of ours hunts a trespasser across the child's border" {
                 let colony = guardedBeyond [ diggerAt "W1N4" { X = 25; Y = 42 } ]
 
                 Expect.isSome
                     (pooledOf colony |> entryFor (Guard "W1N4"))
                     "the premise: the kill is pooled"
 
-                Expect.notEqual
+                Expect.equal
                     (Map.tryFind "g-1" (decideOn colony).Assignments)
                     (Some(taskId (Guard "W1N4")))
-                    "the child's outpost is the child's guard's, and her resident's"
+                    "the guard takes the kill"
             }
 
             test "a transit room that is no child's outpost pools no kill" {

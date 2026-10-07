@@ -645,15 +645,14 @@ module Brief =
             && strikes (HostileInfo.raider view.Hostiles)
         // A trespass's kill (#516): the guard row's body that strikes every
         // trespasser its row answers (`trespassSplit`, #550), or a ranger
-        // that strikes them all. A child's outpost is the
-        // child's guard's, and the residents' beside it (#517). Defence first
-        // is the rank's: a raid's Guard outranks it (`claimed`, #528).
+        // that strikes them all, whichever colony cast it: a mother's guard
+        // hunts in her child's outpost too (#616). Defence first is the
+        // rank's: a raid's Guard outranks it (`claimed`, #528).
         | BriefKind.Trespass ->
             if isRangerRowBody creep then
                 strikes (Facts.trespasser view (Set.singleton room))
             else
                 isGuardRowBody creep
-                && not (List.contains room view.Borrowed.ChildOutposts)
                 && answered.Value
                    |> List.forall (fun (row, trespassers) ->
                        row <> CastRow.Guard
