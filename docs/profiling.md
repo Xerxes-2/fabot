@@ -52,7 +52,8 @@ Every run prints ADR 0041's trigger to revisit the layered projection —
 **a mean tick above 50 ms, or any single tick above 80** — judged against
 the run's own ticks. The thresholds live in `scripts/cpu-trigger.mjs`,
 shared with `npm run observe -- cpu`, which reads the deployed bundle's own
-`Game.cpu.getUsed()` line from `Memory.fabot.observe.cpu`. Only the live
+`Game.cpu.getUsed()` line from its memory segments (#639; the harness reads
+the bundle's heap copy, `__fabot.wire()`). Only the live
 reading decides it: a profile that prints "not triggered" has failed to
 trip the trigger, not cleared it. The trigger is a reason to re-decide,
 never a budget the bot acts on (ADR 0041: CPU is measured, not budgeted).

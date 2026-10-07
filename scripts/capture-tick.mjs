@@ -2,8 +2,9 @@
 // scenario skeleton (#532): a Trepidimous wave seen live becomes a
 // regression test in minutes. The emitting is `arena-skeleton.mjs`'s; this
 // reads. Reads only: the replay files, the owner names, the game time and
-// the Transition log in Memory (for each of our creeps' task at the tick),
-// and, for a recent tick, the Memory leaves the replay cannot give.
+// the Transition log off its memory segments (#639; for each of our creeps'
+// task at the tick), and, for a recent tick, the Memory leaves the replay
+// cannot give.
 // How to use what it writes: docs/agents/arena-capture.md.
 //
 // Usage:
@@ -18,6 +19,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { connect, fail } from "./screeps-api.mjs";
 import { readHistory, usernamesOf } from "./room-history.mjs";
 import { assignmentsAt, skeleton } from "./arena-skeleton.mjs";
+import { readLog } from "./observe-segments.mjs";
 
 const usage =
   "usage: capture-tick.mjs <room> <tick> [--rooms R1,R2] [--name slug] [--out path] [--live-memory | --no-live-memory]";
@@ -76,11 +78,15 @@ const liveTick = time?.time;
 const ourCreeps = all.filter((o) => o.type === "creep" && o.user === me._id && o.hits > 0 && !o.spawning).map((o) => o.name);
 let assignments = null;
 if (ourCreeps.length > 0) {
-  const res = await api.userMemoryGet("fabot.observe.creeps", shard).catch(() => null);
-  if (res?.ok === 1 && res.data && typeof res.data === "object") {
-    assignments = { ...assignmentsAt(res.data, ourCreeps, tick), readAt: liveTick };
+  // Off its memory segments (#639), or the Memory leaf an older bundle writes.
+  const creeps = await readLog(api, shard, "creeps").catch((err) => {
+    console.error(`the Transition log read failed: ${err.message ?? err}`);
+    return undefined;
+  });
+  if (creeps != null && typeof creeps === "object") {
+    assignments = { ...assignmentsAt(creeps, ourCreeps, tick), readAt: liveTick };
   } else {
-    console.error("no Transition log in Memory: Assignments left empty");
+    console.error("no Transition log in Memory or its segments: Assignments left empty");
   }
 }
 

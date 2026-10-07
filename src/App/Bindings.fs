@@ -403,6 +403,11 @@ let Game: IGame = jsNative
 [<Global("Memory")>]
 let Memory: obj = jsNative
 
+/// `segments` (id → string, the active ones this tick) and
+/// `setActiveSegments`; read and written by `ObserveMemory` alone.
+[<Global("RawMemory")>]
+let RawMemory: obj = jsNative
+
 [<Emit("Object.values($0)")>]
 let objectValues<'T> (_o: obj) : 'T[] = jsNative
 

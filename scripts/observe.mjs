@@ -1,8 +1,9 @@
 // One-shot CLI over the observe channels — the Transition log (ADR 0009),
 // the Raid log (ADR 0028), the Layout record (ADR 0035), the CPU line
 // (ADR 0041) and the breach log (#278): pull the observe subtree from
-// `Memory.fabot.observe`, flip the verbose list remotely, or watch the
-// console for a bounded window.
+// `Memory.fabot.observe` (the Transition log and the CPU line from memory
+// segments, #639), flip the verbose list remotely, or watch the console for
+// a bounded window.
 // `outposts` is the one read that needs a second endpoint — it also reads
 // the server's clock, because shut-or-open has no answer without it, and
 // it fails on that read alone where the others cannot.
@@ -101,6 +102,7 @@ import { gunzipSync } from "node:zlib";
 import { actionSummary, bodySummary, readHistory, usernamesOf } from "./room-history.mjs";
 import { MEAN_MS, TICK_MS, report as cpuReport } from "./cpu-trigger.mjs";
 import { switchesLine } from "./switches.mjs";
+import { SEGMENTS, SEGMENT_EVERY, readLog } from "./observe-segments.mjs";
 
 // The change the running bundle was built from and the tick it was loaded on
 // (#634), off `Memory.fabot.observe.version` (`ObserveMemory.saveVersion`):
@@ -261,6 +263,18 @@ const memoryGet = async (path) => {
   if (res.ok !== 1) fail(`memory read failed: ${JSON.stringify(res)}`);
   return res.data;
 };
+
+// The Transition log and the CPU line (#639): the Memory leaf a bundle before
+// the move writes, else their memory segments (`observe-segments.mjs`).
+// Offline the dump's leaf stands for the segments. A segment is written
+// every SEGMENT_EVERY ticks, so the log is up to that stale. `onFail` words
+// a failed read; by default it ends the command.
+const logLeaf = async (leaf, onFail = (err) => fail(`${err.message ?? err}`)) => {
+  if (offline) return memoryGet(`fabot.observe.${leaf}`);
+  return readLog(api, shard, leaf).catch(onFail);
+};
+// Where a log is read from, for a message that says it is missing.
+const logPlace = (leaf) => `memory segments ${SEGMENTS[leaf].join(",")}`;
 
 // One colony's leaf, under `Memory.fabot.observe.colonies.<home>` (ADR
 // 0047): the channels that are a colony's record rather than the world's —
@@ -561,6 +575,15 @@ if (command === "console") {
   if (observe == null || typeof observe !== "object") {
     fail("no observe subtree at Memory.fabot.observe — the bundle is not writing one");
   }
+  // A failed read is one line, and health carries on without that log.
+  const [creepLog, cpuLog] = await Promise.all(
+    ["creeps", "cpu"].map((leaf) =>
+      logLeaf(leaf, (err) => {
+        console.log(`read     the ${leaf} log (${logPlace(leaf)}) failed: ${err.message ?? err}`);
+        return undefined;
+      }),
+    ),
+  );
   console.log(versionLine(observe.version));
   const colonies = observe.colonies && typeof observe.colonies === "object" ? observe.colonies : {};
   const allHomes = Object.keys(colonies);
@@ -629,7 +652,7 @@ if (command === "console") {
   // was said on.
   const idle = new Set();
   for (const name of names) {
-    const record = observe.creeps?.[name];
+    const record = creepLog?.[name];
     const verdict = record?.lastTask;
     if (verdict?.kind !== "unassigned") continue;
     const since = [...(record.log ?? [])].reverse().find((entry) => entry?.v?.kind === "unassigned");
@@ -740,9 +763,9 @@ if (command === "console") {
   // The CPU line: its mean and the cadence's halves, and whether it is
   // still being written — a row more than a few ticks old is a bot that
   // is not finishing ticks, the first thing a bad deploy shows.
-  const cpuRows = Array.isArray(observe.cpu?.ticks) ? observe.cpu.ticks.filter(readableCpu) : [];
+  const cpuRows = Array.isArray(cpuLog?.ticks) ? cpuLog.ticks.filter(readableCpu) : [];
   if (cpuRows.length === 0) {
-    console.log("cpu      no CPU rows at Memory.fabot.observe.cpu");
+    console.log(`cpu      no CPU rows in ${logPlace("cpu")}`);
   } else {
     const c = cadence(cpuRows);
     const lastRow = cpuRows[cpuRows.length - 1];
@@ -756,7 +779,8 @@ if (command === "console") {
         (typeof lastRow.bucket === "number" ? ` · bucket ${lastRow.bucket}` : "") +
         flag,
     );
-    if (lag > 5) console.log(`stale    the last CPU row is t${lastRow.t}, ${lag} ticks behind the clock`);
+    // The line reaches its segments every SEGMENT_EVERY ticks.
+    if (lag > SEGMENT_EVERY + 5) console.log(`stale    the last CPU row is t${lastRow.t}, ${lag} ticks behind the clock`);
   }
   console.log(switchesLine(observe));
 
@@ -2424,16 +2448,16 @@ if (command === "console") {
   // and `layout` do: reading it as an empty window would print a
   // confident "not triggered" off a bundle that measures nothing, which
   // is the one answer this channel exists to prevent.
-  const stored = await memoryGet("fabot.observe.cpu");
+  const stored = await logLeaf("cpu");
   if (stored == null || typeof stored !== "object") {
     fail(
-      "no CPU line at Memory.fabot.observe.cpu — " +
+      `no CPU line in ${logPlace("cpu")} — ` +
         "the deployed bundle predates it, or the colony respawned and hasn't written one yet.",
     );
   }
   if (!Array.isArray(stored.ticks)) {
     fail(
-      "the CPU line at Memory.fabot.observe.cpu carries no `ticks` list — " +
+      `the CPU line in ${logPlace("cpu")} carries no \`ticks\` list — ` +
         'the leaf was hand-edited, or its wire shape has moved. Not read as "nothing measured".',
     );
   }
@@ -2478,8 +2502,8 @@ if (command === "console") {
     console.log("the CPU line is empty — the bundle has written no finished tick yet");
   } else if (ticks.length === 0) {
     console.log(
-      `${stored.ticks.length} row${stored.ticks.length === 1 ? "" : "s"} at ` +
-        "Memory.fabot.observe.cpu, none of them decodable — the leaf was hand-edited, or " +
+      `${stored.ticks.length} row${stored.ticks.length === 1 ? "" : "s"} in ` +
+        `${logPlace("cpu")}, none of them decodable — the leaf was hand-edited, or ` +
         'its wire shape has moved. Not read as "nothing measured".',
     );
   } else {
@@ -2499,7 +2523,7 @@ if (command === "console") {
       if (named.length === 0) continue;
       if (named.length !== COLUMNS.length || named.some((key) => typeof row[key] !== "number")) {
         fail(
-          `the phase split on the row for tick ${row.t} at Memory.fabot.observe.cpu is off the ` +
+          `the phase split on the row for tick ${row.t} in ${logPlace("cpu")} is off the ` +
             `wire shape: ${JSON.stringify(row)} — the leaf was hand-edited, or its wire shape ` +
             'has moved. Not printed as "that tick was never split": the bundle writing this row ' +
             "measured the boundaries and this reader cannot say what they were. `--json` still " +
@@ -2979,12 +3003,13 @@ if (command === "console") {
   //   { <creep>: { log: [{ t, v }], lastTask?: verdict, lastScoring?: verdict,
   //                lastMove: [verdict] } }
   // where a verdict is { kind, ...fields } — see encodeVerdict for the kinds.
-  // A missing leaf comes back with no data; a missing intermediate (fresh
-  // respawn, no Memory.fabot at all) as the string "Incorrect memory path".
-  const creeps = await memoryGet("fabot.observe.creeps");
+  // Empty segments and no legacy leaf come back with no data; a missing
+  // intermediate (fresh respawn, no Memory.fabot at all) as the string
+  // "Incorrect memory path".
+  const creeps = await logLeaf("creeps");
   if (creeps == null || typeof creeps !== "object") {
     fail(
-      "no Transition log at Memory.fabot.observe.creeps — " +
+      `no Transition log in ${logPlace("creeps")} — ` +
         "an old bundle is still running, or the colony respawned and hasn't written one yet.",
     );
   }

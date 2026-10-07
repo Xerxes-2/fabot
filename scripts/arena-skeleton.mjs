@@ -554,7 +554,8 @@ function liveFields(live, tick, rooms) {
 }
 
 /// Each creep's task at `tick` off the Transition log
-/// (`Memory.fabot.observe.creeps`: `{ <creep>: { log: [{ t, v }] } }`): the
+/// (memory segments 0-3, `observe-segments.mjs` `readLog`, #639:
+/// `{ <creep>: { log: [{ t, v }] } }`): the
 /// last matched or kept verdict at or before it, none after a release. A
 /// creep the log has no task verdict for that early is unknown.
 export function assignmentsAt(creeps, names, tick) {

@@ -94,11 +94,15 @@ let mutable private rivalControllers: Map<string, RivalController> = Map.empty
 // only on the tick either moves.
 let mutable private roomLatches: ObserveMemory.RoomLatches option = None
 
-// The CPU line on the heap: read off Memory only when the heap holds none (a
-// global reset), dropped when the leaf is gone (discarded on purpose). The
-// leaf is still written every tick; the heap saves decoding and re-encoding
-// the hundred standing rows to add one (`ObserveMemory.appendCpu`).
+// The CPU line on the heap: restored off its segments only when the heap
+// holds none (a global reset), and None until they are read. The heap saves
+// decoding and re-encoding the hundred standing rows to add one
+// (`ObserveMemory.appendCpu`).
 let mutable private cpuLine: Observe.CpuState option = None
+
+// Whether this heap has written the reset tick's `version` leaf and dropped
+// the probe's sums.
+let mutable private announced = false
 
 // Which ordered room pairs a Seam band joins, on the heap and emptied only
 // by a reset or the console (#395):
@@ -107,8 +111,7 @@ let mutable private cpuLine: Observe.CpuState option = None
 let private joins = JoinTable()
 
 // The Transition log on the heap, on the CPU line's terms: folded on the
-// heap and written back one changed creep at a time
-// (`ObserveMemory.saveChanged`). It was the largest leaf in Memory.
+// heap and encoded one changed creep at a time (`ObserveMemory.saveChanged`).
 let mutable private observeLog: Observe.ObserveState option = None
 
 [<Emit("globalThis")>]
@@ -174,6 +177,7 @@ do
             [
                 "version" ==> version
                 "sizes" ==> sizes
+                "wire" ==> ObserveMemory.wires
                 "drop"
                 ==> createObj
                         [
@@ -400,27 +404,35 @@ let private drawCpu (line: Observe.CpuState) =
 let private writeCpuLine (readings: Observe.CpuReadings) =
     // One flat leaf keyed by tick: nothing for two colonies to collide over.
     let prior =
-        if not (ObserveMemory.cpuLineStands ()) then
-            Observe.CpuState.empty
-        else
-            match cpuLine with
-            | Some line -> line
-            | None -> ObserveMemory.loadCpu ()
+        match cpuLine with
+        | Some line -> Some line
+        | None -> ObserveMemory.restoreCpu ()
 
-    let line = Observe.foldCpu Observe.capCpuTicks Game.time readings prior
+    let line =
+        Observe.foldCpu
+            Observe.capCpuTicks
+            Game.time
+            readings
+            (prior |> Option.defaultValue Observe.CpuState.empty)
 
-    // The tick after a global reset writes the line whole, and every tick
+    // The tick after a global reset encodes the line whole, and every tick
     // after it appends: only a re-encode normalises a phase group this bundle
     // no longer reads whole (`decodeCpuPhases` answers `None` for a row short
-    // a key, and `observe.mjs cpu` refuses such a row).
-    match cpuLine with
-    | Some _ -> ObserveMemory.appendCpu line
-    | None ->
-        ObserveMemory.saveCpu line
+    // a key, and `observe.mjs cpu` refuses such a row). A line folded onto
+    // empty while the segments are not read yet is drawn and not kept.
+    match cpuLine, prior with
+    | Some _, _ -> ObserveMemory.appendCpu line
+    | None, Some _ -> ObserveMemory.saveCpu line
+    | None, None -> ()
+
+    if prior.IsSome then
+        cpuLine <- Some line
+
+    if not announced then
         ObserveMemory.dropProbe ()
         ObserveMemory.saveVersion version Game.time
+        announced <- true
 
-    cpuLine <- Some line
     drawCpu line
 
 /// Absent on the sim room and the shared-VM runtimes
@@ -1147,13 +1159,12 @@ let private fullTick
 
     // One fold over every colony's Verdicts in colony order, so a creep
     // adopted this tick continues the timeline its caster started.
-    let priorLog =
-        if not (ObserveMemory.observeLogStands ()) then
-            Map.empty
-        else
-            match observeLog with
-            | Some log -> log
-            | None -> ObserveMemory.load ()
+    let restored =
+        match observeLog with
+        | Some log -> Some log
+        | None -> ObserveMemory.restoreLog ()
+
+    let priorLog = restored |> Option.defaultValue Map.empty
 
     let log =
         Observe.fold
@@ -1165,14 +1176,17 @@ let private fullTick
             priorLog
         |> Observe.forgetScorings verbose
 
-    // The tick after a global reset writes the log whole: the rows standing
-    // are another bundle's, and only a whole write normalises the leaf to
-    // what this bundle reads. Every tick after it writes the changed creeps.
-    match observeLog with
-    | Some _ -> ObserveMemory.saveChanged priorLog log
-    | None -> ObserveMemory.save log
+    // The tick after a global reset encodes the log whole: the rows standing
+    // are another bundle's, and only a whole write normalises the wire to
+    // what this bundle reads. Every tick after it encodes the changed creeps.
+    // A log folded onto empty while the segments are not read yet is dropped.
+    match observeLog, restored with
+    | Some _, _ -> ObserveMemory.saveChanged priorLog log
+    | None, Some _ -> ObserveMemory.save log
+    | None, None -> ()
 
-    observeLog <- Some log
+    if restored.IsSome then
+        observeLog <- Some log
 
     // The world danger log, folded through every deciding colony in order
     // (`Danger.foldColony`): each reads what the one before wrote.
@@ -1504,10 +1518,13 @@ let private runTick () =
 let loop () =
     try
         runTick ()
+        // The operator-only logs out to their segments, when owed (#639).
+        ObserveMemory.flushSegments Game.time |> recordFaults
     with error ->
         // A ring that will not write must not hide the throw it records.
         try
             recordFaults [ faultRow "" "tick" error ]
+            ObserveMemory.flushSegments Game.time |> recordFaults
         with _ ->
             ()
 

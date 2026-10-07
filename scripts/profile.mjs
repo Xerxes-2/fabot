@@ -5135,11 +5135,23 @@ if (!existsSync(bundle)) {
 // `loop` is called, so requiring it before those globals exist reads nothing
 // that is not there yet.
 const { loop, decideCalls } = loadBundle(bundle);
+// The Transition log and the CPU line as this bundle's heap holds them
+// (#639): they reach Memory segments only every few ticks, so the report
+// reads them here. Taken now, because each reset below loads another copy
+// of the bundle over `__fabot`.
+const observeWire = globalThis.__fabot.wire;
 
 const world = buildWorld();
 const { game, terrainReads } = buildGame(world);
 globalThis.Game = game;
 globalThis.Memory = {};
+// The engine's memory segments as a bot that keeps them active meets them:
+// ten readable ids, unwritten ones empty, and what a tick writes still there
+// on the next.
+globalThis.RawMemory = {
+  segments: Object.fromEntries(Array.from({ length: 10 }, (_, id) => [id, ""])),
+  setActiveSegments() {},
+};
 
 // The seven fields cross the real compiled codec in both directions. The
 // rival name deliberately collides with the `ours` sentinel unless the wire
@@ -5458,7 +5470,7 @@ const ticks = { all: [], perturbed: [], quiet: [] };
 const fullMs = { all: [], perturbed: [], quiet: [] };
 const lightMs = [];
 const wroteRow = () => {
-  const rows = globalThis.Memory?.fabot?.observe?.cpu?.ticks;
+  const rows = observeWire().cpu?.ticks;
   const last = Array.isArray(rows) ? rows[rows.length - 1] : undefined;
   return last?.t === game.time ? last : undefined;
 };
@@ -5614,7 +5626,7 @@ console.log(
 // broken is a line that is absent, one that misses profiled ticks it
 // should hold, or one whose mean is wildly apart from the ms/tick above —
 // none of which a healthy run can produce by arithmetic.
-const cpuLine = globalThis.Memory?.fabot?.observe?.cpu?.ticks;
+const cpuLine = observeWire().cpu?.ticks;
 const firstProfiled = ticks.all[0].t;
 const lastProfiled = ticks.all[ticks.all.length - 1].t;
 const inWindow = Array.isArray(cpuLine)
@@ -5622,11 +5634,11 @@ const inWindow = Array.isArray(cpuLine)
   : [];
 if (!Array.isArray(cpuLine) || cpuLine.length === 0) {
   console.log(
-    "observe CPU line (Memory.fabot.observe.cpu): absent — this bundle does not write it",
+    "observe CPU line (the heap wire): absent — this bundle does not write it",
   );
 } else if (inWindow.length === 0) {
   console.log(
-    `observe CPU line (Memory.fabot.observe.cpu): ${cpuLine.length} rows and not one of them a ` +
+    `observe CPU line (the heap wire): ${cpuLine.length} rows and not one of them a ` +
       `profiled tick (t${firstProfiled}-t${lastProfiled}) — the channel is broken`,
   );
 } else {
@@ -5634,7 +5646,7 @@ if (!Array.isArray(cpuLine) || cpuLine.length === 0) {
     inWindow.reduce((total, row) => total + row.ms, 0) / inWindow.length;
   const outside = cpuLine.length - inWindow.length;
   console.log(
-    `observe CPU line (Memory.fabot.observe.cpu): ${inWindow.length} of the run's ${TICKS} ` +
+    `observe CPU line (the heap wire): ${inWindow.length} of the run's ${TICKS} ` +
       `profiled ticks, t${inWindow[0].t}-t${inWindow[inWindow.length - 1].t}, ` +
       `mean ${mean.toFixed(2)} ms` +
       (inWindow.length < TICKS
@@ -5728,13 +5740,16 @@ if (unprojected.length) {
       .update(JSON.stringify(canonical(value ?? null)))
       .digest("hex")
       .slice(0, 16);
+  // The two logs that left Memory (#639) are read off the heap and set back
+  // where they stood, so a fingerprint compares across the move.
+  const withWire = (fabot, wire) => ({ ...fabot, observe: { ...fabot?.observe, ...wire } });
   if (process.env.FABOT_DUMP_OBSERVE) {
     writeFileSync(
       process.env.FABOT_DUMP_OBSERVE,
-      JSON.stringify(canonical(globalThis.Memory?.fabot ?? null), null, 1),
+      JSON.stringify(canonical(withWire(globalThis.Memory?.fabot, observeWire())), null, 1),
     );
   }
-  const observe = globalThis.Memory?.fabot?.observe ?? {};
+  const observe = withWire(globalThis.Memory?.fabot, observeWire()).observe;
   const leaves = [
     ["assignments", globalThis.Memory?.fabot?.assignments],
     ["creeps", observe.creeps],
@@ -5759,7 +5774,10 @@ if (unprojected.length) {
   // same Game.time, so the Memory each writes is fingerprinted: one
   // fingerprint across the resets, and the same one across two builds, is
   // an exact cut.
+  // The two logs restore off their segments, last written up to
+  // `segmentEvery` ticks before the reset (#639).
   const savedMemory = JSON.stringify(globalThis.Memory);
+  const savedSegments = JSON.stringify(globalThis.RawMemory.segments);
   const resetTime = game.time;
   const resetSession = new Session();
   resetSession.connect();
@@ -5774,17 +5792,20 @@ if (unprojected.length) {
     const probedFile = writeProbed(bundle, path.join("probe-reset", String(i)));
     tickStart = performance.now();
     globalThis.Memory = JSON.parse(savedMemory);
+    globalThis.RawMemory.segments = JSON.parse(savedSegments);
     createRequire(import.meta.url)(probedFile).loop();
     const ms = performance.now() - tickStart;
-    const line = globalThis.Memory?.fabot?.observe?.cpu?.ticks ?? [];
+    const resetWire = globalThis.__fabot.wire();
+    const line = resetWire.cpu?.ticks ?? [];
     const row = line[line.length - 1] ?? {};
     const pops = Object.values(row.floods ?? {}).reduce((sum, f) => sum + (f?.[2] ?? 0), 0);
     const memory = { ...globalThis.Memory };
     // The bundle's name (#634) differs between two builds by design.
-    memory.fabot = {
-      ...memory.fabot,
-      observe: { ...memory.fabot?.observe, cpu: line.map((r) => r.t), version: undefined },
-    };
+    memory.fabot = withWire(memory.fabot, {
+      creeps: resetWire.creeps,
+      cpu: line.map((r) => r.t),
+      version: undefined,
+    });
     resetRows.push({ ms, row, pops, print: fingerprint(memory) });
     // The first reset's Memory, for attributing a moved reset fingerprint.
     if (i === 0 && process.env.FABOT_DUMP_RESET) {
@@ -5858,7 +5879,7 @@ console.log(
   globalThis.Memory.fabot.observe.faults = undefined;
   loop();
   const rows = globalThis.Memory.fabot.observe.faults?.rows ?? [];
-  const line = globalThis.Memory.fabot.observe.cpu?.ticks ?? [];
+  const line = observeWire().cpu?.ticks ?? [];
   const accepted = line[line.length - 1]?.intents ?? 0;
   const executed = rows.filter((row) => row.phase === "execute");
   if (!thrown) {

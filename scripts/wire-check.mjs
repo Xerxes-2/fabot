@@ -53,6 +53,29 @@ const stable = (value) =>
 const cases = [];
 const wire = (name, run) => cases.push({ name, run });
 
+// The Transition log and the CPU line left Memory for the heap and memory
+// segments (#639); their codec is pure over the wire (`decodeCpu`,
+// `encodeCpu`, `appendCpuOnto`, `decodeLog`, `encodeLog`, `saveChangedOnto`).
+// The cases below were written against their old Memory leaves and still hold
+// the wire there, threaded through the codec by this shim.
+const logCodec = async () => {
+  const m = await import(MODULE);
+  const leaf = (name) => globalThis.Memory?.fabot?.observe?.[name];
+  const put = (name, wire) => {
+    globalThis.Memory.fabot ??= {};
+    globalThis.Memory.fabot.observe ??= {};
+    globalThis.Memory.fabot.observe[name] = wire;
+  };
+  return {
+    loadCpu: () => m.decodeCpu(leaf("cpu")),
+    saveCpu: (state) => put("cpu", m.encodeCpu(state)),
+    appendCpu: (state) => put("cpu", m.appendCpuOnto(leaf("cpu"), state)),
+    load: () => m.decodeLog(leaf("creeps")),
+    save: (state) => put("creeps", m.encodeLog(state)),
+    saveChanged: (prior, state) => put("creeps", m.saveChangedOnto(leaf("creeps"), prior, state)),
+  };
+};
+
 // ---- the Raid log -------------------------------------------------------
 
 // Load a raids leaf and write it straight back: what comes out is what
@@ -674,7 +697,7 @@ wire("prune: every colony leaf of a home no longer declared goes, with the flat 
 // ---- the CPU line -------------------------------------------------------
 
 wire("cpu: an absent leaf reads empty, and a well-formed one round-trips", async () => {
-  const { loadCpu, saveCpu } = await import(MODULE);
+  const { loadCpu, saveCpu } = await logCodec();
 
   globalThis.Memory = rootMemoryWith("cpu", undefined);
   saveCpu(loadCpu());
@@ -698,7 +721,7 @@ for (const [name, leaf] of [
   ["an object whose ticks are not an array", { ticks: 7 }],
 ]) {
   wire(`cpu: a leaf that is ${name} reads empty and writes empty`, async () => {
-    const { loadCpu, saveCpu } = await import(MODULE);
+    const { loadCpu, saveCpu } = await logCodec();
 
     globalThis.Memory = rootMemoryWith("cpu", leaf);
     saveCpu(loadCpu());
@@ -707,7 +730,7 @@ for (const [name, leaf] of [
 }
 
 wire("cpu: a light tick's row round-trips its flag, and a row without one reads as a full tick (#443)", async () => {
-  const { loadCpu, saveCpu } = await import(MODULE);
+  const { loadCpu, saveCpu } = await logCodec();
 
   const full = { t: 10, ms: 60.5, entry: 0.1, snapshot: 14, decide: 40, save: 3, execute: 3.4, intents: 90, bucket: 10000, replans: 0 };
   // A light tick's phases that did not run are zero-width, so the phase
@@ -735,7 +758,7 @@ wire("cpu: a light tick's row round-trips its flag, and a row without one reads 
 });
 
 wire("cpu: a forced full tick's row round-trips its reason, and an off-shape one reads as none", async () => {
-  const { loadCpu, saveCpu } = await import(MODULE);
+  const { loadCpu, saveCpu } = await logCodec();
 
   const full = { t: 10, ms: 60.5, entry: 0.1, snapshot: 14, decide: 40, save: 3, execute: 3.4, intents: 90, bucket: 10000, replans: 0 };
   const forced = { ...full, t: 12, forced: "border" };
@@ -776,7 +799,7 @@ wire("cpu: a forced full tick's row round-trips its reason, and an off-shape one
 });
 
 wire("cpu: a replan's row round-trips what moved each colony's signature, and an absent or off-shape one reads as none", async () => {
-  const { loadCpu, saveCpu } = await import(MODULE);
+  const { loadCpu, saveCpu } = await logCodec();
 
   const full = { t: 10, ms: 60.5, entry: 0.1, snapshot: 14, decide: 40, save: 3, execute: 3.4, intents: 90, bucket: 10000, replans: 0 };
   const replan = { ...full, t: 12, replans: 2, moved: { W15S28: ["W19S26", "level"], W17S29: ["reset"] } };
@@ -813,7 +836,7 @@ wire("cpu: a replan's row round-trips what moved each colony's signature, and an
 });
 
 wire("cpu: the coarse spans round-trip as positional arrays, and a leaf without them reads empty", async () => {
-  const { loadCpu, saveCpu } = await import(MODULE);
+  const { loadCpu, saveCpu } = await logCodec();
 
   const sample = { t: 10, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 };
 
@@ -839,7 +862,7 @@ wire("cpu: the coarse spans round-trip as positional arrays, and a leaf without 
 });
 
 wire("cpu: a keyed span written before #538 is read into the positional form, so a deploy keeps the record", async () => {
-  const { loadCpu, saveCpu } = await import(MODULE);
+  const { loadCpu, saveCpu } = await logCodec();
 
   const keyed = { f: 100, t: 199, n: 100, max: 480.5, sum: 2000.25, b: 3400, r: 2, p: 91920, h: 140.5, w: 719, hmin: 65.7, x: 39.5, ss: 728.969, sd: 2105.733, sv: 221.267, sx: 490.671 };
   globalThis.Memory = rootMemoryWith("cpu", { ticks: [], spans: [keyed] });
@@ -869,7 +892,7 @@ wire("cpu: a keyed span written before #538 is read into the positional form, so
 });
 
 wire("cpu: only the newest rows keep the per-name splits; an older row keeps its pops (#538)", async () => {
-  const { loadCpu, saveCpu, appendCpu } = await import(MODULE);
+  const { loadCpu, saveCpu, appendCpu } = await logCodec();
 
   const DETAIL = 20;
   const bare = (t) => ({ t, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 });
@@ -916,7 +939,7 @@ wire("probe: the reset tick's drop clears a leftover Memory.__probe (#538)", asy
 });
 
 wire("cpu: the append keeps the coarse spans current, one row a tick (#390)", async () => {
-  const { loadCpu, appendCpu } = await import(MODULE);
+  const { loadCpu, appendCpu } = await logCodec();
 
   const row = (t) => ({ t, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 });
   const span = (f, t, n) => [f, t, n, 1.5, 1.5 * n, 10000, 0, 0, 0, 0, 0, 0, 0.2 * n, 0.3 * n, 0.4 * n, 0.5 * n];
@@ -982,7 +1005,7 @@ wire("cpu: the append keeps the coarse spans current, one row a tick (#390)", as
 
 
 wire("cpu: heap, memo rows and the span's phase sums round-trip, and absent reads zero (#391)", async () => {
-  const { loadCpu, saveCpu } = await import(MODULE);
+  const { loadCpu, saveCpu } = await logCodec();
 
   const base = { t: 10, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 };
   const span = [100, 199, 100, 480.5, 2000.25, 3400, 2, 91920, 55.3, 1400, 41.3, 27.5, 900.5, 2100.25, 300, 700];
@@ -1011,7 +1034,7 @@ wire("cpu: heap, memo rows and the span's phase sums round-trip, and absent read
 });
 
 wire("cpu: the flood counts ride the row per colony, and a malformed triple is left out", async () => {
-  const { loadCpu, saveCpu } = await import(MODULE);
+  const { loadCpu, saveCpu } = await logCodec();
 
   const base = { t: 10, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 };
   const counted = { ...base, floods: { W12S28: [12, 9, 9554], W13S28: [3, 3, 812] } };
@@ -1035,7 +1058,7 @@ wire("cpu: the flood counts ride the row per colony, and a malformed triple is l
 });
 
 wire("cpu: a span with a field off the shape costs its span and not the line", async () => {
-  const { loadCpu, saveCpu } = await import(MODULE);
+  const { loadCpu, saveCpu } = await logCodec();
 
   const good = [100, 199, 100, 480.5, 2000.25, 3400, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
@@ -1051,7 +1074,7 @@ wire("cpu: a span with a field off the shape costs its span and not the line", a
 });
 
 wire("cpu: a row that will not decode costs its row and not the line", async () => {
-  const { loadCpu, saveCpu } = await import(MODULE);
+  const { loadCpu, saveCpu } = await logCodec();
 
   const good = { t: 10, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 };
 
@@ -1361,7 +1384,7 @@ const creepLog = {
 };
 
 const creepsThrough = async (value, write) => {
-  const { load, save, saveChanged } = await import(MODULE);
+  const { load, save, saveChanged } = await logCodec();
   globalThis.Memory = rootMemoryWith("creeps", value);
   const state = load();
   write === "changed" ? saveChanged(state, state) : save(state);
@@ -1423,7 +1446,7 @@ wire("creeps: saveChanged writes the same wire as save when nothing moved", asyn
 });
 
 wire("creeps: saveChanged falls back to a whole write when the leaf disagrees", async () => {
-  const { load, saveChanged } = await import(MODULE);
+  const { load, saveChanged } = await logCodec();
 
   globalThis.Memory = rootMemoryWith("creeps", { w1: creepLog });
   const state = load();
@@ -1848,7 +1871,7 @@ wire("rooms: the migrating tick's writes alone keep the latches across the next 
 // an answer, and the wrong one.
 
 const scoringThrough = async (candidates) => {
-  const { load, save } = await import(MODULE);
+  const { load, save } = await logCodec();
   globalThis.Memory = rootMemoryWith("creeps", {
     w1: { log: [{ t: 100, v: { kind: "scoring", candidates } }], lastMove: [] },
   });
@@ -2042,6 +2065,181 @@ wire("layout: an outpost road (#548) writes its state and its tiles' counts", as
       },
     ]),
   );
+});
+
+// ---- the operator-only logs' segments (#639) ----------------------------
+
+const { SEGMENTS, SEGMENT_EVERY, joinSegments, readLog } = await import("./observe-segments.mjs");
+
+// The server as `readLog` meets it: a Memory leaf at `memory` (undefined
+// when absent) and segment contents by id; `null` makes a read fail.
+const serverWith = (memory, segments) => ({
+  segmentReads: 0,
+  async userMemoryGet() {
+    return memory === null ? { ok: 0, error: "down" } : { ok: 1, data: memory };
+  },
+  async userMemorySegmentGet(ids) {
+    this.segmentReads += 1;
+    if (segments === null) return { ok: 0, error: "down" };
+    const data = ids.map((id) => segments[id] ?? null);
+    return { ok: 1, data: data.length === 1 ? data[0] : data };
+  },
+});
+
+wire("segments: the operator scripts read the Memory leaf first, else the segments", async () => {
+  const log = { w1: { log: [], lastMove: [] } };
+  const text = JSON.stringify(log);
+  const cut = { 0: text.slice(0, 5), 1: text.slice(5), 2: "", 3: "" };
+
+  const older = serverWith(log, cut);
+  assert.deepEqual(await readLog(older, "shard", "creeps"), log, "an older bundle's leaf wins");
+  assert.equal(older.segmentReads, 0, "and the segments are not read");
+
+  assert.deepEqual(await readLog(serverWith(undefined, cut), "shard", "creeps"), log, "else the segments, joined");
+  assert.equal(await readLog(serverWith(undefined, {}), "shard", "creeps"), undefined, "neither: no log");
+
+  const { gzipSync } = await import("node:zlib");
+  const gz = `gz:${gzipSync(Buffer.from(text)).toString("base64")}`;
+  assert.deepEqual(await readLog(serverWith(gz, {}), "shard", "creeps"), log, "a gzip'd leaf is read");
+
+  await assert.rejects(readLog(serverWith(undefined, null), "shard", "creeps"), /segment read failed/);
+  await assert.rejects(readLog(serverWith(null, cut), "shard", "creeps"), /memory read failed/);
+});
+
+// The engine's RawMemory as the bot meets it: `active` ids readable this
+// tick (an unwritten one reads ""), and the ids last requested.
+const rawMemoryWith = (segments) => {
+  const raw = {
+    segments: { ...segments },
+    asked: undefined,
+    setActiveSegments(ids) {
+      raw.asked = ids;
+    },
+  };
+  globalThis.RawMemory = raw;
+  return raw;
+};
+const allEmpty = () =>
+  Object.fromEntries([...SEGMENTS.creeps, ...SEGMENTS.cpu].map((id) => [id, ""]));
+
+// A Transition log of `creeps` creeps, `entries` rows each, as the wire holds it.
+const bigLog = (creeps, entries) =>
+  Object.fromEntries(
+    Array.from({ length: creeps }, (_, i) => [
+      `creep-${i}`,
+      {
+        log: Array.from({ length: entries }, (_, j) => ({ t: 1000 + j, v: { kind: "kept", task: `haul-${i}-${j}` } })),
+        lastMove: [],
+      },
+    ]),
+  );
+
+wire("segments: the ids and the cadence are the ones observe.mjs reads", async () => {
+  const { creepSegments, cpuSegments, segmentEvery } = await import(MODULE);
+
+  assert.deepEqual(Array.from(creepSegments), SEGMENTS.creeps);
+  assert.deepEqual(Array.from(cpuSegments), SEGMENTS.cpu);
+  assert.equal(segmentEvery, SEGMENT_EVERY);
+  assert.ok([...SEGMENTS.creeps, ...SEGMENTS.cpu].length <= 10, "never more than the engine's ten a tick");
+});
+
+wire("segments: a cold heap reads the legacy Memory leaf once and deletes it", async () => {
+  const { restoreCpu, encodeCpu, saveCpu, flushSegments } = await import(MODULE);
+  const sample = {
+    ticks: [{ t: 10, ms: 1.5, entry: 0.1, snapshot: 0.2, decide: 0.3, save: 0.4, execute: 0.5, intents: 3, bucket: 10000, replans: 0 }],
+    spans: [],
+  };
+
+  const raw = rawMemoryWith({});
+  globalThis.Memory = rootMemoryWith("cpu", sample);
+  const restored = restoreCpu();
+  assert.equal(stable(encodeCpu(restored)), stable(sample), "the leaf's line is the heap's");
+  assert.equal(Object.hasOwn(globalThis.Memory.fabot.observe, "cpu"), false, "and the leaf is gone");
+
+  // Written out the same tick, off the cadence: a reset before the next
+  // write tick finds the line in its segments.
+  saveCpu(restored);
+  flushSegments(SEGMENT_EVERY * 7 + 3);
+  assert.equal(stable(joinSegments(SEGMENTS.cpu.map((id) => raw.segments[id]))), stable(sample));
+  raw.segments = allEmpty();
+  flushSegments(SEGMENT_EVERY * 7 + 4);
+  assert.equal(raw.segments[SEGMENTS.cpu[0]], "", "and once only: the next tick is off the cadence again");
+});
+
+wire("segments: a cut never splits a surrogate pair, and every chunk is within the cap", async () => {
+  const { segmentChunks } = await import(MODULE);
+  const cap = 100 * 1024;
+
+  // A pair straddling the first cut: its high half is the cap's last unit.
+  const text = "a".repeat(cap - 1) + "\u{1F600}" + "b".repeat(10);
+  const chunks = segmentChunks(2, text);
+  assert.equal(chunks[0].length, cap - 1, "the cut moves one unit earlier");
+  assert.equal(chunks[1].codePointAt(0), 0x1f600, "and the pair opens the next chunk whole");
+  assert.equal(chunks.join(""), text);
+
+  assert.equal(segmentChunks(1, "a".repeat(cap + 1)), undefined, "past the room: none");
+  assert.deepEqual(segmentChunks(3, "xy"), ["xy", "", ""], "the unused chunks are empty");
+});
+
+wire("segments: not active, a cold heap asks for them and starts from nothing", async () => {
+  const { restoreLog, encodeLog } = await import(MODULE);
+
+  const raw = rawMemoryWith({ 0: "" });
+  globalThis.Memory = {};
+  assert.equal(restoreLog(), undefined, "None: not an empty log, which would be written over the stored one");
+  assert.ok(Array.isArray(raw.asked), "a plain array: the engine refuses a typed one");
+  assert.deepEqual(raw.asked, [...SEGMENTS.creeps, ...SEGMENTS.cpu]);
+
+  // Active and never written: an empty log, and nothing asked.
+  const fresh = rawMemoryWith(allEmpty());
+  const restored = restoreLog();
+  assert.notEqual(restored, undefined, "restored");
+  assert.equal(stable(encodeLog(restored)), stable({}), "as an empty log");
+  assert.equal(fresh.asked, undefined);
+});
+
+wire("segments: a log is cut across its segments under the cap and read back whole", async () => {
+  const { decodeLog, encodeLog, save, restoreLog, flushSegments } = await import(MODULE);
+  const cap = 100 * 1024;
+  const wireLog = encodeLog(decodeLog(bigLog(120, 40)));
+  assert.ok(JSON.stringify(wireLog).length > cap, "the fixture needs more than one segment");
+
+  globalThis.Memory = {};
+  const raw = rawMemoryWith(allEmpty());
+  save(decodeLog(wireLog));
+  flushSegments(SEGMENT_EVERY + 1);
+  assert.equal(raw.segments[0], "", "not a write tick: nothing written");
+
+  flushSegments(SEGMENT_EVERY * 3);
+  const chunks = SEGMENTS.creeps.map((id) => raw.segments[id]);
+  assert.ok(chunks.every((chunk) => typeof chunk === "string" && chunk.length <= cap), "every chunk within the cap");
+  assert.ok(chunks.filter((chunk) => chunk.length > 0).length >= 2, "and the log spans more than one");
+  assert.equal(stable(joinSegments(chunks)), stable(wireLog), "observe.mjs reads the log whole");
+  assert.equal(raw.asked, undefined, "active segments are not asked for again");
+
+  // A cold heap over those segments restores the same log.
+  rawMemoryWith(raw.segments);
+  assert.equal(stable(encodeLog(restoreLog())), stable(wireLog), "the bot reads it back whole");
+});
+
+wire("segments: a log past its segments' room is not written, and is one fault a heap", async () => {
+  const { decodeLog, save, flushSegments } = await import(MODULE);
+
+  globalThis.Memory = {};
+  const raw = rawMemoryWith(allEmpty());
+  save(decodeLog(bigLog(400, 50)));
+  const rows = [...flushSegments(SEGMENT_EVERY * 5)];
+  assert.deepEqual(
+    SEGMENTS.creeps.map((id) => raw.segments[id]),
+    SEGMENTS.creeps.map(() => ""),
+    "the segments keep what they held",
+  );
+  assert.equal(rows.length, 1, "one fault, for the shell's ring, and nothing threw");
+  assert.equal(rows[0].Phase, "segments");
+  assert.equal(rows[0].Tick, SEGMENT_EVERY * 5);
+  assert.equal([...flushSegments(SEGMENT_EVERY * 6)].length, 0, "and not again on this heap");
+  // The heap wire is the module's: leave it small for any case after this.
+  save(decodeLog({}));
 });
 
 // ---- run ----------------------------------------------------------------

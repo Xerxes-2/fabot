@@ -1,6 +1,8 @@
 /// Serialization shell for the observe channels: read each prior log from
 /// `Memory.fabot.observe`, hand it to its pure Core fold and write the result
-/// back; the Layout leaf is written outright. Absent or unreadable state is
+/// back; the Layout leaf is written outright. The Transition log and the CPU
+/// line, read by the operator alone, live on the heap and in memory segments
+/// instead (#639). Absent or unreadable state is
 /// discarded, never repaired, so telemetry cannot take the colony down.
 module Fabot.ObserveMemory
 
@@ -868,11 +870,93 @@ let loadVerbose () : Set<string> =
             else
                 Set.empty)
 
-/// The prior observe state, or empty when the subtree is absent or
+// ---- the operator-only logs' segments (#639) ------------------------------
+//
+// The Transition log and the CPU line are read by `observe.mjs` alone, so
+// they live in memory segments, not in the Memory the engine parses and
+// serialises every tick. Their wire is kept on the heap and written out to
+// the segments every `segmentEvery` ticks and on a tick that caught a fault.
+// The ids and the cadence are mirrored by `scripts/observe-segments.mjs`.
+
+/// The segment ids each log's JSON is cut across, in order: room for twice
+/// the live size of each (the Transition log 198 KB, the CPU line 56 KB, on
+/// 2026-10-08), six of the engine's ten a tick.
+let creepSegments = [| 0; 1; 2; 3 |]
+let cpuSegments = [| 4; 5 |]
+let private segmentIds = Array.append creepSegments cpuSegments
+
+/// The engine's cap on one segment, in string length.
+let private segmentCap = 100 * 1024
+
+/// Ticks between two segment writes: a write stringifies both logs whole
+/// (about a millisecond), so this spends a tenth of that a tick, and
+/// `observe` reads a log at most this many ticks stale.
+let segmentEvery = 10
+
+// The two logs' wire on the heap, null until restored: the leaf the codec
+// below appends to and the segments are written from.
+let mutable private creepsWire: obj = null
+let mutable private cpuWire: obj = null
+
+// The tick a fault was last recorded on, which writes the segments that tick.
+let mutable private faultedAt = -1
+
+// Whether a legacy leaf was read and deleted since the last write: the
+// segments are written that same tick, so no reset can find neither.
+let mutable private migrated = false
+
+// The logs found past their segments' room on this heap, each reported once.
+let mutable private oversized: Set<string> = Fresh.setOfSeq Seq.empty
+
+/// Both wires as the heap holds them, for the console and the profile
+/// harness (`__fabot.wire()`); read by nothing in the loop.
+let wires () : obj =
+    createObj [ "creeps" ==> creepsWire; "cpu" ==> cpuWire ]
+
+// Whether every segment the logs ride is active, and so readable, this tick.
+let private segmentsVisible () =
+    let segments: obj = RawMemory?segments
+
+    segmentIds |> Array.forall (fun id -> jsTypeof segments?(string id) = "string")
+
+// Boxed, so Fable emits a plain array and not an `Int32Array`, which the
+// engine's `_.isArray` check refuses. Takes effect on the next tick, and
+// stays until changed, so a cold heap finds them already loaded.
+let private requestSegments () =
+    RawMemory?setActiveSegments(segmentIds |> Array.map box)
+
+/// A log's stored wire on a cold heap: the legacy Memory leaf once, deleted as
+/// it is read (the migration off Memory) and written to the segments that
+/// tick, else its segments joined and parsed — null for none written or one
+/// that will not parse. None while the segments are not active this tick:
+/// they are requested, and the caller starts from empty and writes nothing
+/// until they arrive, so the stored log is never overwritten by an empty one.
+let private restoreWire (leaf: string) (ids: int[]) : obj option =
+    let legacy = observeLeaf leaf
+
+    if not (isNull legacy) then
+        emitJsStatement (Memory?fabot?observe, leaf) "delete $0[$1]"
+        migrated <- true
+        Some legacy
+    elif segmentsVisible () then
+        let text =
+            ids
+            |> Array.map (fun id -> unbox<string> RawMemory?segments?(string id))
+            |> String.concat ""
+
+        try
+            Some(if text = "" then null else JS.JSON.parse text)
+        with _ ->
+            Some null
+    else
+        requestSegments ()
+        None
+
+/// The Transition log off its wire, or empty when the wire is absent or
 /// unreadable. A creep whose log will not decode costs that creep alone, and
 /// inside a log an unreadable row costs itself.
-let load () : ObserveState =
-    leafOr Map.empty (fun () -> observeLeaf "creeps") (fun creeps ->
+let decodeLog (wire: obj) : ObserveState =
+    leafOr Map.empty (fun () -> wire) (fun creeps ->
         objectEntries creeps
         |> Array.choose (fun (name, raw) ->
             try
@@ -881,21 +965,17 @@ let load () : ObserveState =
                 None)
         |> Fresh.mapOfArray)
 
-/// Write the folded state back under `Memory.fabot.observe.creeps`,
-/// leaving the rest of the observe subtree alone — unless the subtree
-/// itself is not an object, in which case the bad state is replaced. The
-/// whole log, every creep; what `saveChanged` below falls back to.
-let save (state: ObserveState) =
-    state |> Map.toSeq |> hashOf encodeCreepLog |> writeObserveLeaf "creeps"
+/// The stored log on a cold heap (`restoreWire`); None while its segments
+/// are not active yet.
+let restoreLog () : ObserveState option =
+    restoreWire "creeps" creepSegments |> Option.map decodeLog
 
-/// Whether the leaf holds a log at all. Asked by the shell before it trusts
-/// the log on the heap, for `cpuLineStands`' reason.
-let observeLogStands () : bool =
-    let creeps = observeLeaf "creeps"
+/// The whole log on the wire, every creep.
+let encodeLog (state: ObserveState) : obj =
+    state |> Map.toSeq |> hashOf encodeCreepLog
 
-    not (isNull creeps)
-    && jsTypeof creeps = "object"
-    && not (JS.Constructors.Array.isArray creeps)
+/// Set the heap wire to the whole log; what `saveChanged` below falls back to.
+let save (state: ObserveState) = creepsWire <- encodeLog state
 
 /// Whether a creep's timeline is the one already written: the same entries —
 /// by reference, which is what `Observe.step` keeps when a tick appends
@@ -907,26 +987,19 @@ let private sameLog (a: CreepLog) (b: CreepLog) : bool =
     && a.LastScoring = b.LastScoring
     && a.LastMove = b.LastMove
 
-/// Write the creeps whose timeline moved this tick and no other, and drop the
-/// ones the fold pruned; the stored shape is the one `save` writes, key for
-/// key. The log is the largest leaf in Memory (a hundred kilobytes over fifty
-/// creeps) and encoding it whole every tick cost 1.5 ms of a live tick (#370).
-///
-/// The leaf is taken at its word only when it agrees with `prior` by key
-/// count; otherwise it is written whole. What the handshake cannot see, and
-/// is accepted: a hand-edited row under an unchanged creep stays as edited,
-/// and a tick whose Memory the engine did not commit leaves that tick's
-/// entries out for the creeps that then stay quiet.
-let saveChanged (prior: ObserveState) (state: ObserveState) =
-    let creeps = observeLeaf "creeps"
-
+/// Write the creeps whose timeline moved this tick onto `creeps` and no
+/// other, and drop the ones the fold pruned; the shape is the one `encodeLog`
+/// writes, key for key. Encoding the log whole every tick cost 1.5 ms of a
+/// live tick (#370). Answers the wire to keep: `creeps` itself, or the log
+/// encoded whole when `creeps` does not agree with `prior` by key count.
+let saveChangedOnto (creeps: obj) (prior: ObserveState) (state: ObserveState) : obj =
     if
         isNull creeps
         || jsTypeof creeps <> "object"
         || JS.Constructors.Array.isArray creeps
         || (JS.Constructors.Object.keys creeps).Count <> Map.count prior
     then
-        save state
+        encodeLog state
     else
         for KeyValue(name, log) in state do
             let unchanged =
@@ -943,6 +1016,12 @@ let saveChanged (prior: ObserveState) (state: ObserveState) =
         for name in JS.Constructors.Object.keys creeps do
             if not (Map.containsKey name state) then
                 emitJsStatement (creeps, name) "delete $0[$1]"
+
+        creeps
+
+/// `saveChangedOnto` the heap wire.
+let saveChanged (prior: ObserveState) (state: ObserveState) =
+    creepsWire <- saveChangedOnto creepsWire prior state
 
 let private reactorOwnerName =
     function
@@ -2104,10 +2183,10 @@ let saveRoomLatches (latches: RoomLatches) =
     raw?controllers <- latches.Controllers |> Map.toSeq |> hashOf encodeRivalController
     writeObserveLeaf "rooms" raw
 
-/// The prior CPU line, or empty when the leaf is absent or unreadable. A row
-/// that will not decode costs that row alone: the window shortens.
-let loadCpu () : CpuState =
-    leafOr CpuState.empty (fun () -> observeLeaf "cpu") (fun cpu ->
+/// The CPU line off its wire, or empty when the wire is absent or unreadable.
+/// A row that will not decode costs that row alone: the window shortens.
+let decodeCpu (wire: obj) : CpuState =
+    leafOr CpuState.empty (fun () -> wire) (fun cpu ->
         {
             Ticks =
                 cpu?ticks
@@ -2335,32 +2414,27 @@ let private encodeCpuSpan (span: CpuSpan) : obj =
             box span.ExecuteSum
         |]
 
-let saveCpu (state: CpuState) =
+/// The stored line on a cold heap (`restoreWire`); None while its segments
+/// are not active yet.
+let restoreCpu () : CpuState option =
+    restoreWire "cpu" cpuSegments |> Option.map decodeCpu
+
+/// The whole line on the wire.
+let encodeCpu (state: CpuState) : obj =
     let cpu = createEmpty<obj>
     cpu?ticks <- state.Ticks |> List.map encodeCpuSample |> List.toArray
     cpu?spans <- state.Spans |> List.map encodeCpuSpan |> List.toArray
-    writeObserveLeaf "cpu" cpu
+    cpu
 
-/// Whether the leaf holds a line at all: a `ticks` array with a row in it.
-/// The shell asks before it trusts the line on the heap: a leaf somebody
-/// removed or emptied is a line discarded on purpose, and restarts from
-/// `CpuState.empty`. Empty counts as discarded because `foldCpu` appends on
-/// every tick.
-let cpuLineStands () : bool =
-    let cpu = observeLeaf "cpu"
+/// Set the heap wire to the whole line.
+let saveCpu (state: CpuState) = cpuWire <- encodeCpu state
 
-    not (isNull cpu)
-    && JS.Constructors.Array.isArray cpu?ticks
-    && (unbox<obj[]> cpu?ticks).Length > 0
-
-/// Write this tick's row and no other: the newest row is pushed onto the
-/// leaf's own `ticks` array and, at the cap, the oldest shifted off. Encoding
+/// Write this tick's row onto `cpu` and no other: the newest row is pushed
+/// onto its `ticks` array and, at the cap, the oldest shifted off. Encoding
 /// the whole line every tick cost 1.36 ms of a live tick (#370). The append is
-/// taken only when the leaf agrees with the line, checked on the tick numbers
-/// at both ends; anything else is written whole. A row an edit changed inside
-/// the window is not repaired and stands until the ring shifts it off.
-let appendCpu (state: CpuState) =
-    let cpu = observeLeaf "cpu"
+/// taken only when the wire agrees with the line, checked on the tick numbers
+/// at both ends; anything else is encoded whole. Answers the wire to keep.
+let appendCpuOnto (cpu: obj) (state: CpuState) : obj =
     let ticks = if isNull cpu then null else cpu?ticks
 
     match List.rev state.Ticks with
@@ -2436,9 +2510,14 @@ let appendCpu (state: CpuState) =
                 else
                     cpu?spans <- state.Spans |> List.map encodeCpuSpan |> List.toArray
             | _ -> cpu?spans <- state.Spans |> List.map encodeCpuSpan |> List.toArray
+
+            cpu
         else
-            saveCpu state
-    | _ -> saveCpu state
+            encodeCpu state
+    | _ -> encodeCpu state
+
+/// `appendCpuOnto` the heap wire.
+let appendCpu (state: CpuState) = cpuWire <- appendCpuOnto cpuWire state
 
 /// One throw the bot caught (#628): the tick, the colony it cost (empty
 /// where it cost the whole tick, or an intent), the step it threw in, its
@@ -2505,6 +2584,7 @@ let saveFaults (rows: FaultRow list) =
 let recordFaults (fresh: FaultRow list) =
     if not (List.isEmpty fresh) then
         saveFaults (fresh @ loadFaults ())
+        faultedAt <- (List.head fresh).Tick
 
 /// The live-probe tool's sums (`scripts/probe.mjs`), dropped on the tick after
 /// a global reset: a clean bundle never writes them again, and every tick's
@@ -2522,3 +2602,66 @@ let saveVersion (build: string) (reset: int) =
     raw?build <- build
     raw?reset <- reset
     writeObserveLeaf "version" raw
+
+/// A log's JSON cut into `count` chunks in order, each within the segment cap
+/// and never between the two halves of a surrogate pair, the unused ones
+/// empty; None when it does not fit.
+let segmentChunks (count: int) (text: string) : string[] option =
+    let chunks = Array.create count ""
+    let mutable from = 0
+
+    for i in 0 .. count - 1 do
+        let mutable until = min text.Length (from + segmentCap)
+
+        // A cut after a high surrogate would leave each segment half a
+        // character; one code unit earlier keeps the pair together.
+        if
+            until < text.Length
+            && (let unit = int text.[until - 1] in unit >= 0xD800 && unit <= 0xDBFF)
+        then
+            until <- until - 1
+
+        chunks.[i] <- text.Substring(from, until - from)
+        from <- until
+
+    if from < text.Length then None else Some chunks
+
+/// Write the two logs' wire out to their segments on every `segmentEvery`th
+/// tick, on a tick that recorded a fault and on the tick a legacy leaf was
+/// migrated, the unused segments emptied, so no stale chunk follows the JSON.
+/// A log not restored yet is not written; one past its segments' room is not
+/// written either, and is answered as a fault, once a heap, for the shell's
+/// ring. A write needs no active segment, but a cold heap's read does, so
+/// they are requested again whenever they are not active.
+let flushSegments (tick: int) : FaultRow list =
+    if not (segmentsVisible ()) then
+        requestSegments ()
+
+    if tick % segmentEvery = 0 || faultedAt = tick || migrated then
+        migrated <- false
+
+        [ "creeps", creepSegments, creepsWire; "cpu", cpuSegments, cpuWire ]
+        |> List.filter (fun (_, _, wire) -> not (isNull wire))
+        |> List.choose (fun (leaf, ids, wire) ->
+            let text: string = JS.JSON.stringify wire
+
+            match segmentChunks ids.Length text with
+            | Some chunks ->
+                ids |> Array.iteri (fun i id -> RawMemory?segments?(string id) <- chunks.[i])
+
+                None
+            | None when Set.contains leaf oversized -> None
+            | None ->
+                oversized <- Fresh.setOfSeq (Seq.append oversized [ leaf ])
+
+                Some
+                    {
+                        Tick = tick
+                        Colony = ""
+                        Phase = "segments"
+                        Message =
+                            $"the {leaf} log is {text.Length} long, past its {ids.Length} segments"
+                        Frames = []
+                    })
+    else
+        []

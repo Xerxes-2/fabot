@@ -24,7 +24,7 @@ The skeleton has a header and a fixture `let private <slug> () : Arena`. The hea
 - **Bodies:** both sides, built with `body` plus their hits, life, fatigue and stores. A comment beside each body lists its live parts and its live acts.
 - **Banks:** each home's bank is its energy capacity, not what it held at the tick. The arena never debits the bank and reads it as the capacity too. A near-empty bank prices the guard row's cast as a loss, and that stands an outpost down that live held.
 - **Live Memory** (`--live-memory`, on by default when the tick is at most 300 ticks behind live): the captured homes' Raid log (stand-downs open at the tick, threat and fight latches, home raided), `ArmedSeen` and `Towered`. Memory holds only what it holds at the time of reading. An entry stamped after the tick is named in a comment and not seated.
-- **Assignments:** each creep's Task at the tick, taken from the Transition log in Memory. Engine ids are re-pointed to arena ids (`tower-13-29`, `spawn-Spawn11`). The log is a ring: a creep with no verdict that far back, or one that has since died, gets a `TODO`.
+- **Assignments:** each creep's Task at the tick, taken from the Transition log in its memory segments (#639; up to 10 ticks stale). Engine ids are re-pointed to arena ids (`tower-13-29`, `spawn-Spawn11`). The log is a ring: a creep with no verdict that far back, or one that has since died, gets a `TODO`.
 
 The skeleton ends with a pending `ptest` whose body is `// EXPECT:` and a `failtest`. It compiles as printed.
 

@@ -1,6 +1,8 @@
 # A Verdict is returned, never logged; Memory is the way out
 
-> **Status:** amended by #216 R5
+> **Status:** amended by #216 R5, #639
+
+> **Amended by #639** on the way out alone: the deferred RawMemory segment option is taken. The transition log outgrew its welcome in the Memory the engine parses every tick (~176 KB of 297 KB live), so the shell keeps it on the heap and writes it to memory segments every few ticks, and `observe.mjs` reads them; the verbose list stays in Memory, where the bot reads it back. Core never knew, as foreseen.
 
 > **Amended by #216 R5** on one Verdict's provenance and nothing else: `MatchFactor.Rank` and the number in `Candidate.Scored` now name the pooled Task's `Priority` (ADR 0052 decision 6). The tiers stand ten rungs apart rather than one, so a scored rank a reader remembers as 2 reads as 20; nothing about which factor decides a match, or about the observe channel's wire spellings, moves with it.
 
