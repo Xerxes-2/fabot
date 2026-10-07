@@ -2833,6 +2833,89 @@ let kiteStepTests =
                     "nor into its step and swing"
             }
 
+            // The user's chase (live 2026-10-07): a ranger that steps onto
+            // swamp is held there five ticks, and its target walks out of
+            // reach. Its step is weighed by when it strikes the target next,
+            // its own gait and the target's steps counted (`chaseStep`): across
+            // a two-row swamp band from a shooter, it shoots from the plain
+            // where it stands, steps along the plain back into reach, and
+            // crosses the band only where no plain tile reaches it.
+            test
+                "a ranger chasing across a swamp band keeps to the plain tiles that keep its target in reach" {
+                let band =
+                    set
+                        [
+                            for x in 15..35 do
+                                for y in 41..42 -> { X = x; Y = y }
+                        ]
+
+                let from = { X = 25; Y = 43 }
+
+                let decided (target: Pos) =
+                    let colony = declaredRaid [ hostileIn "W1N2" target smallRanged ] |> withField
+                    let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+                    let colony =
+                        { colony with
+                            Spatial =
+                                colony.Spatial
+                                |> withNeighbour
+                                    "W1N2"
+                                    { outpost with
+                                        Terrain =
+                                            TerrainGrid.ofList
+                                                [
+                                                    for x in 15..35 do
+                                                        for y in 35..48 ->
+                                                            let tile = { X = x; Y = y }
+
+                                                            tile,
+                                                            (if Set.contains tile band then
+                                                                 Swamp
+                                                             else
+                                                                 Plain)
+                                                ]
+                                    }
+                        }
+                        |> withGuards
+                            [
+                                creepWith
+                                    "r-1"
+                                    0
+                                    0
+                                    (List.concat (List.replicate 5 Bodies.rangerPattern.Block)),
+                                from
+                            ]
+
+                    let decision =
+                        decide colony (Map.ofList [ "r-1", taskId (Guard "W1N2") ]) Set.empty None
+
+                    decision.Intents,
+                    moveIntents decision.Intents
+                    |> List.tryFind (fst >> (=) "r-1")
+                    |> Option.map (snd >> stepped from)
+
+                let intents, step = decided { X = 28; Y = 40 }
+                Expect.contains intents (RangedAttackCreep("r-1", "h-1")) "in reach it shoots"
+
+                Expect.isNone
+                    step
+                    "and stands on the plain, where main stepped onto the band at (26,42)"
+
+                let _, step = decided { X = 29; Y = 40 }
+
+                Expect.equal
+                    step
+                    (Some { X = 26; Y = 43 })
+                    "a step out of reach, it steps along the plain back into it, not onto the band"
+
+                let _, step = decided { X = 25; Y = 39 }
+
+                Expect.isTrue
+                    (step |> Option.exists (fun tile -> Set.contains tile band))
+                    "four off, where no plain tile reaches it, it crosses the band"
+            }
+
             // Movement S3 retired `glueStep`'s `struck` (a second melee beside
             // the target's tile): the full tick reads the maps
             // (`Emitter.glueKeeps`), the tile kept where it is struck no harder

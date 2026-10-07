@@ -1421,6 +1421,87 @@ let arenaScenarioTests =
                     "nor ends a tick beside it"
             }
 
+            // The user's chase (live 2026-10-07): a ranger chasing stepped onto
+            // swamp, its fatigue held it, and two ticks later its target had
+            // walked out of reach. Here a shooter walks east along a lane with
+            // a two-row swamp band between it and the ranger, three rows off:
+            // the plain lane beside the band keeps it in reach.
+            test
+                "a ranger chasing a shooter along a swamp band keeps to the plain lane and keeps it in reach" {
+                let home =
+                    room "W12S28"
+                    |> withController Ownership.Ours None 7 0
+                    |> withSpawn "Spawn1" { X = 12; Y = 38 } 5_600
+
+                // A field laid on W12S27's south-west floor: plain, but for
+                // the swamp band on rows 29 and 30.
+                let outpost =
+                    let r = room "W12S27"
+
+                    { r with
+                        Capture =
+                            { r.Capture with
+                                Terrain =
+                                    (r.Capture.Terrain,
+                                     [
+                                         for x in 5..30 do
+                                             for y in 26..34 -> { X = x; Y = y }
+                                     ])
+                                    ||> List.fold (fun grid tile ->
+                                        TerrainGrid.add
+                                            tile
+                                            (if tile.Y = 29 || tile.Y = 30 then Swamp else Plain)
+                                            grid)
+                            }
+                    }
+
+                let declared =
+                    { colony "W12S28" with
+                        Outposts = [ outpostOf outpost.Capture ]
+                    }
+
+                let ranger =
+                    body
+                        "ranger-1-Spawn1"
+                        Side.Ours
+                        (List.concat (List.replicate 5 Fabot.Core.Decide.Bodies.rangerPattern.Block))
+                        (RoomPos.at "W12S27" { X = 8; Y = 31 })
+                        None
+
+                let shooter =
+                    body
+                        "invader-1"
+                        (Side.Npc "Invader")
+                        Fabot.Core.Tests.Decide.Fixtures.smallRanged
+                        (RoomPos.at "W12S27" { X = 8; Y = 28 })
+                        (Some(Do [ Act.Move Right ]))
+
+                let _, trace =
+                    arena 900_000 [ home; outpost ] [ declared ] [ ranger; shooter ] |> run 20
+
+                let failure = describe trace
+
+                // Main stepped onto the band at t0 and again at t5, each time
+                // held five ticks while the shooter walked off: it was shot
+                // twice and lived.
+                Expect.isEmpty
+                    (pathOf "invader-1" trace
+                     |> List.choose (fun (tick, target) ->
+                         pathOf "ranger-1-Spawn1" trace
+                         |> List.tryFind (fun (at, ranger) ->
+                             at = tick
+                             && ranger.Fatigue > 0
+                             && RoomPos.range ranger.At target.At
+                                |> Option.exists (fun r -> r > Engine.rangedRange))
+                         |> Option.map fst))
+                    $"its fatigue never holds it while the shooter stands out of its reach\n{failure}"
+
+                Expect.equal
+                    (diedOn "invader-1" trace)
+                    (Some 12)
+                    $"and it shoots it dead\n{failure}"
+            }
+
             // #571, the user's cripple nobody chased: an Invader shot down to
             // its ATTACK and one HEAL in an outpost the stand-down shuts, no
             // body of ours there, no ranger anywhere, an observer's look on

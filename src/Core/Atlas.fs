@@ -1117,6 +1117,11 @@ let linkTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 let isSwampIn (atlas: Atlas) (room: string) (tile: Pos) : bool =
     weightAt (groundOf atlas room) tile = Engine.swampWeight
 
+/// A tile's step weight on the walking grid (road 1, plain 2, swamp 10; -1
+/// impassable): what a step onto it costs in fatigue a weighted part.
+let stepWeightIn (atlas: Atlas) (room: string) (tile: Pos) : int =
+    weightAt (weightsOf atlas room) tile
+
 /// Walkable tiles adjacent to `pos` read as a tile of `room`, in deterministic
 /// (X, Y) order. Standing respects obstacles, unlike Seat counting. The room
 /// rides on the API, so a creep filed under an outpost is offered that room's

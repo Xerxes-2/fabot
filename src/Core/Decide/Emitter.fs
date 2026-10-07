@@ -1294,6 +1294,26 @@ let aims (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
                 strikeOrder view atlas targets fighting creep room |> List.map (strikeAt creep)
             | _ -> [])
 
+/// What one fighter aims at first where it stands (`aims`), with how far it
+/// strikes: the head of its kill order, in its own room. What a chase step
+/// keeps in its reach (`Resolver.chaseStep`). None for a body that aims at
+/// nothing, or whose head stands in another room.
+let internal aimOf
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (assigned: Map<string, Task>)
+    (creep: CreepInfo)
+    : (HostileInfo * int) option =
+    match strikesBy view atlas threats assigned creep, Atlas.creepRoom atlas creep.Name with
+    | Some(room, targets, true), Some here when
+        room = here && not (mustering threats assigned creep)
+        ->
+        strikeOrder view atlas targets (Threats.fightRooms threats) creep room
+        |> List.tryHead
+        |> Option.map (fun head -> head, reachOf creep)
+    | _ -> None
+
 /// Each aiming ranger's `Volley` (#537), for the light ticks' mass attack:
 /// a body that aims (`aims`) with a gun, in a room whose shields this view
 /// carries (`shields`), with the band of each hostile of the room it strikes

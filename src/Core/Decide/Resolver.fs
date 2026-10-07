@@ -21,6 +21,105 @@ type private Kiting =
     /// With the kite ground's approach band (`Laid.Approach`), lazily.
     | Keeps of unsafe: (int -> bool) * later: (int -> int) * approach: Lazy<Set<RoomPos>>
 
+/// The target a fighter aims at (`Emitter.aimOf`), as its chase reads it.
+type private Aim =
+    {
+        /// The target's tile, in the body's room.
+        Target: Pos
+        /// How far the body strikes.
+        Reach: int
+        /// The steps the target can take by a tick, its fatigue waited out, at
+        /// its quickest pace off swamp: its likely next steps, away.
+        Steps: int -> int
+    }
+
+/// A fighter's chase: what its step is weighed by (`chaseStep`), each part
+/// read only where the one before it asks.
+type private Chase =
+    {
+        /// Whether a step onto a tile holds the body there past the tick
+        /// after, by its gait and the tile's weight.
+        Holds: Pos -> bool
+        /// What it aims at in its room; None for nothing.
+        Aim: Lazy<Aim option>
+        /// The body's own arrival over its room (`Arrival.ofBody`: its legs,
+        /// load, parts shot off and fatigue).
+        Walk: Lazy<Arrival.BodyArrival option>
+    }
+
+/// `chaseStep`'s reading, off the body's own arrival: by the tick the body
+/// could step off each tile, how far from it the target can stand. The step
+/// wanted is kept where it holds the body no longer than a tick, or keeps
+/// the target within the bar (its reach, or the gap it stands at now);
+/// else the tile that does, held less and struck no sooner. None to keep it;
+/// Some None to stand.
+let private weighed
+    (aim: Aim)
+    (walk: Arrival.BodyArrival)
+    (pos: Pos)
+    (wanted: Pos)
+    (beside: Pos list)
+    (later: (int -> int) option)
+    : Pos option option =
+    let gap tile = range tile aim.Target
+    let leaves tile = Grid.at (indexOf tile) walk.Leaves
+
+    let held tile =
+        leaves tile - Grid.at (indexOf tile) walk.Ticks
+
+    let apart tile =
+        let leaves = leaves tile
+
+        if leaves = System.Int32.MaxValue then
+            System.Int32.MaxValue
+        else
+            gap tile + aim.Steps leaves
+
+    let bar = max aim.Reach (gap pos)
+
+    let struck tile =
+        later |> Option.map (fun soonest -> soonest (indexOf tile))
+
+    if held wanted > 0 && apart wanted > bar then
+        (if gap pos <= aim.Reach then pos :: beside else beside)
+        |> List.filter (fun tile ->
+            held tile < held wanted && apart tile <= bar && struck tile >= struck wanted)
+        |> List.sortBy (fun tile -> apart tile, gap tile, (if tile = pos then 0 else 1), tile)
+        |> List.tryHead
+        |> Option.map (fun tile -> if tile = pos then None else Some tile)
+    else
+        None
+
+/// A chaser's step, its own gait and the target's next steps counted: a body
+/// within a step of striking its target never takes a step that holds it on
+/// a tile (swamp, or a lamed body's plain) from which the target, walking
+/// away, is out of its reach by the tick it could step again, where it can
+/// stand still or step instead onto a tile held less that keeps the target
+/// within its reach by then, and no sooner struck than the step it was given.
+/// By the tick a body can next step off a tile it stands that far from where
+/// the target can have walked; ties to the nearer, then to standing. None to
+/// keep the step it was given; Some None to stand.
+let private chaseStep
+    (chase: Chase)
+    (at: RoomPos)
+    (beside: Pos list)
+    (later: (int -> int) option)
+    (step: RoomPos option)
+    : RoomPos option option =
+    let pos = RoomPos.pos at
+
+    match step with
+    | Some next when next.Room = at.Room && chase.Holds(RoomPos.pos next) ->
+        match chase.Aim.Value with
+        | Some aim when range pos aim.Target <= aim.Reach + 1 ->
+            match chase.Walk.Value with
+            | Some walk when walk.Room = at.Room ->
+                weighed aim walk pos (RoomPos.pos next) beside later
+                |> Option.map (Option.map (RoomPos.at at.Room))
+            | _ -> None
+        | _ -> None
+    | _ -> None
+
 /// A kiter's step toward its ground (#510, #524, movement S3): the first step
 /// of a walk that keeps off what it keeps off, across the border too, a tie
 /// going to the tile a melee strikes later. Where no such walk reaches the
@@ -195,6 +294,9 @@ let private moveIntentFor
     // For a kiting ranger, its walk in place of the Reach's (#510); None for
     // every other body.
     (kite: Kiting option)
+    // For a fighter aiming at a target in its room, its chase (`chaseStep`);
+    // None for every other body.
+    (chase: Chase option)
     // For a trespass's killer, the Reach it walks round (#516); None for
     // every other body.
     (reachRound: Set<Pos> option)
@@ -482,6 +584,19 @@ let private moveIntentFor
                                     area)
                         plain
                 | None, None -> plain ()
+
+            // A chaser's step weighed by when it strikes its target next
+            // (`chaseStep`), whichever walk gave it; the light tick replays
+            // what it keeps.
+            let step =
+                match chase |> Option.bind (fun chase -> chaseStep chase at beside later step) with
+                | Some kept ->
+                    match kept with
+                    | Some tile -> Atlas.recordStep atlas creep (at, tile)
+                    | None -> Atlas.dropStep atlas creep
+
+                    kept
+                | None -> step
 
             match step |> Option.map RoomPos.pos with
             | Some step -> travelling (rankOf task) step
@@ -891,6 +1006,61 @@ let movementAmong
             | None -> Some Kiting.Clear
         | _ -> None
 
+    // A fighter aiming at a target in its room weighs its step by when it
+    // strikes it next (`chaseStep`): the target's steps by its gait off
+    // swamp, its fatigue waited out, and the body's own arrival.
+    let chaseOf name (at: RoomPos) =
+        match view.Creeps |> List.tryFind (fun c -> c.Name = name) with
+        | Some creep when
+            not (List.isEmpty view.Hostiles)
+            && (partCount creep.Body Attack > 0 || partCount creep.Body RangedAttack > 0)
+            ->
+            let gait = Arrival.gaitOf creep
+
+            let aim () =
+                Emitter.aimOf view atlas threats assigned creep
+                |> Option.map (fun (head, reach) ->
+                    let side = view.Hostiles |> List.filter (fun h -> h.Pos.Room = at.Room)
+                    let gait = HostileInfo.gait side head
+
+                    let wait =
+                        Map.tryFind at.Room view.World.Rooms
+                        |> Option.bind (fun seen -> Map.tryFind head.Id seen.HostileFatigue)
+                        |> Option.defaultValue 0
+                        |> fun fatigue -> Arrival.waitOf fatigue gait
+
+                    {
+                        Target = RoomPos.pos head.Pos
+                        Reach = reach
+                        Steps =
+                            match Arrival.paceOf gait with
+                            | Some pace ->
+                                let quickest = min pace.Road pace.Plain
+
+                                fun ticks ->
+                                    if ticks <= wait then
+                                        0
+                                    else
+                                        (ticks - wait + quickest - 1) / quickest
+                            | None -> fun _ -> 0
+                    })
+
+            Some
+                {
+                    Holds =
+                        fun tile ->
+                            let weight = Atlas.stepWeightIn atlas at.Room tile
+
+                            weight > 0
+                            && Gait.ticks weight gait |> Option.exists (fun ticks -> ticks > 1)
+                    Aim = lazy (aim ())
+                    Walk =
+                        lazy
+                            (Threats.walkOf threats atlas creep
+                             |> Option.orElseWith (fun () -> Arrival.ofBody atlas creep))
+                }
+        | _ -> None
+
     // A fighter's walk round breaks an equal-tick tie toward the tile a
     // hostile strikes later (movement S3).
     let laterOf name (at: RoomPos) =
@@ -949,8 +1119,22 @@ let movementAmong
                 | None when task = Flee -> fleeStep threats atlas name at area (laterOf name at)
                 | None -> stepToward atlas name task area
 
+            // A chaser's, weighed as the full tick weighs it (`chaseStep`).
+            let chased step =
+                match chaseOf name at with
+                | Some chase ->
+                    let beside =
+                        Atlas.adjacentWalkableIn atlas at.Room (RoomPos.pos at)
+                        |> List.filter (fun tile ->
+                            match kiting with
+                            | Some(unsafe, _, _) -> not (unsafe (indexOf tile))
+                            | None -> true)
+
+                    chaseStep chase at beside (laterOf name at) step |> Option.defaultValue step
+                | None -> step
+
             if not (Set.contains at area && standsSafe) then
-                match Atlas.withoutRecording atlas name walk with
+                match Atlas.withoutRecording atlas name walk |> chased with
                 | Some step when step.Room = at.Room && step <> at ->
                     Atlas.recordStep atlas name (at, step)
                 | _ -> ()
@@ -999,6 +1183,7 @@ let movementAmong
                      | Some ground when Set.contains name sheltering -> ground.Force()
                      | _ -> Set.empty)
                     (kitingOf name at)
+                    (chaseOf name at)
                     (if avoidFor name = Avoid.Reach then
                          Some(Threats.reachIn threats at.Room)
                      else
