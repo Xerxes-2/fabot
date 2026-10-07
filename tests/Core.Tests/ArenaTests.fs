@@ -8758,15 +8758,25 @@ let arenaBorderTests =
 
                 let mother, threats, brief = briefIn "W15S28"
 
-                Expect.contains
-                    (mother.Fighters |> List.filter brief.Admits |> List.map (fun c -> c.Name))
-                    "ranger-979811-Spawn8"
-                    "the mother's resident may be lent to her kill there"
+                // The W6 S3 Caster floor moved this: W15S28's stock in the capture is
+                // under `Tuning.CasterReserve` and no ranger of hers stands in
+                // W17S25, so the Caster hands her no garrison there (live she
+                // kept one by kinship), her ranger is no resident to lend and
+                // her ranger row is asked for nothing.
+                Expect.isEmpty
+                    mother.Borrowed.Garrisoned
+                    "the mother garrisons no home under the reserve"
 
-                Expect.isTrue
+                Expect.isFalse
+                    (mother.Fighters
+                     |> List.filter brief.Admits
+                     |> List.exists (fun c -> c.Name = "ranger-979811-Spawn8"))
+                    "so her ranger is no resident lent to the kill"
+
+                Expect.isFalse
                     (brief.Asks
                      |> List.exists (fun ask -> ask.Row = CastRow.Ranger && ask.Wanted threats > 0))
-                    "and her ranger row is asked for the haulers"
+                    "and her ranger row is asked for nothing there"
 
                 let _, trace = start |> run 90
                 let failure = describe trace
@@ -21268,7 +21278,13 @@ let foughtWhereStruckTests =
             // the fight until it lands. The pair kills Wave7157 at t109, the
             // first ranger down to 824, neither leaving W19S26 once in it.
             test
-                "#602 capture t1,007,219: a ranger losing alone holds while its partner walks in, and the pair kills Wave7157" {
+                "#602 capture t1,007,219: with W19S26 and W19S25 cast by nobody, both rangers yield their Guards and walk home unhurt" {
+                // Moved at W6 S3: W17S25's 6,991 stored is under
+                // `Tuning.CasterReserveHold`, so no colony casts either
+                // harassment room; each is held for its rangers alone, and a
+                // Guard there is no fight they keep (`Planner.planFightTasks`).
+                // Until then the pair killed Wave7157 at t109. Both walk to
+                // W17S25 untouched and Wave7157 stands.
                 let _, trace = w19s26LosingTrade () |> run 120
                 let failure = describe trace
 
@@ -21278,25 +21294,15 @@ let foughtWhereStruckTests =
                     |> List.map _.Hits
                     |> List.min
 
-                Expect.isGreaterThanOrEqual
-                    (least "ranger-1006821-Spawn11")
-                    800
-                    $"it holds at the cost of the wait, never to its death\n{failure}"
+                for ranger in [ "ranger-1006821-Spawn11"; "ranger-1006965-Spawn11" ] do
+                    Expect.equal (least ranger) 1_200 $"{ranger} is never struck\n{failure}"
 
-                Expect.isGreaterThanOrEqual
-                    (least "ranger-1006965-Spawn11")
-                    1_150
-                    $"the other walks in to a won fight\n{failure}"
+                    Expect.contains
+                        [ "W18S25"; "W17S25" ]
+                        (pathOf ranger trace |> List.last |> (fun (_, s) -> s.At.Room))
+                        $"{ranger} walks home to its caster\n{failure}"
 
-                Expect.isFalse
-                    (pathOf "ranger-1006821-Spawn11" trace
-                     |> List.exists (fun (_, s) -> s.At.Room <> "W19S26"))
-                    $"it never leaves W19S26 for the exit row\n{failure}"
-
-                Expect.isLessThanOrEqual
-                    (diedOn "Wave7157" trace |> Option.defaultValue System.Int32.MaxValue)
-                    115
-                    $"the pair kills Wave7157 by t115\n{failure}"
+                Expect.isNone (diedOn "Wave7157" trace) $"and Wave7157 stands\n{failure}"
             }
         ]
 
@@ -22828,9 +22834,23 @@ let rangerPairTests =
             // row's at two bodies: ranger-1011720 is sent, the cast waits for
             // it at W17S25's south exit, the pair goes in together and kills
             // Shadow2363 at t175, neither below 1,186.
+            //
+            // Since W6 S3 W19S25 is cast by nobody (W17S25 holds no stock here,
+            // about 5k live, under `Tuning.CasterReserveHold`), so W17S25
+            // projects it for its rangers alone, and its Guard is no fight
+            // they keep (`Planner.planFightTasks`): ranger-1011720 is free
+            // for its colony's own outpost, as before.
             test
                 "#609 capture t1,012,579: a kiter one ranger loses to and two beat is answered by two rangers, which kill it" {
-                let _, trace = trepKiters () |> withCasts [ "ranger" ] |> run 200
+                let start = trepKiters () |> withCasts [ "ranger" ]
+                let first, _ = step start
+
+                Expect.notEqual
+                    (Map.tryFind "ranger-1011720-Spawn11" first.Carried.Assignments)
+                    (Some "guard:W19S25")
+                    "the premise: no ranger keeps the Guard of the room nobody casts"
+
+                let _, trace = start |> run 200
                 let failure = describe trace
 
                 Expect.isLessThanOrEqual

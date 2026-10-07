@@ -746,6 +746,31 @@ module Harassment =
         | [] -> System.Int32.MaxValue
         | rooms -> (rooms |> List.map (Harass.blocks tuning) |> List.min) * harass.BlockCost
 
+/// One colony's bid to cast an ask, as the Caster weighs it (`Caster.assign`,
+/// and before the views, `World.harassCasters` and `World.garrisonCasters`):
+/// what landing the body costs it in ticks, and whether the ask is its own.
+type CastBid = { Home: string; Cost: int; Asks: bool }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module CastBid =
+    /// The Caster's one choice: the least cost, then a colony asking it,
+    /// then by home. None with no bid.
+    let choose (bids: CastBid list) : string option =
+        bids
+        |> List.sortBy (fun bid -> bid.Cost, not bid.Asks, bid.Home)
+        |> List.tryHead
+        |> Option.map _.Home
+
+    /// Whether a colony's bank (`RoomEnergy.Capacity`) and Storage stock pay
+    /// an ask not its own: `Tuning.CasterFloor` and `Tuning.CasterReserve`.
+    let paysOthers (tuning: Tuning) (capacity: int) (stock: int) : bool =
+        capacity >= tuning.CasterFloor && stock >= tuning.CasterReserve
+
+    /// A walk's ticks in a cast's cost, a room's side a crossing; one no route
+    /// nor name prices is a crossing past the hop budget.
+    let walk (tuning: Tuning) (crossings: int option) : int =
+        (crossings |> Option.defaultValue (tuning.MaxHops + 1)) * Engine.roomSide
+
 /// The global harassment list as one tick decided it (`World.harassCasters`):
 /// each room beside the colony that casts it, None while no colony can.
 /// Decided once and handed to every colony's reading, so there is one answer
@@ -757,12 +782,27 @@ type HarassCasting =
         /// name: what its caster's bank had to buy, and what its ranger is
         /// cast at no fewer than (#457).
         Floors: Map<string, int>
+        /// The bank a contested home's resident garrison body costs
+        /// (`Tuning.RangerResidentBlocks` ranger blocks): what its caster's
+        /// bank buys (`World.garrisonCasters`).
+        GarrisonFloor: int
+        /// Last tick's Task per creep (the `assignments` leaf): a colony
+        /// whose fighter holds a room's Guard is casting that room
+        /// (`World.casterOf`).
+        Holding: Map<string, string>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module HarassCasting =
-    /// No harassment room declared.
-    let none: HarassCasting = { Casters = []; Floors = Map.empty }
+    /// No harassment room declared, a garrison floored at no bank, nothing
+    /// held.
+    let none: HarassCasting =
+        {
+            Casters = []
+            Floors = Map.empty
+            GarrisonFloor = 0
+            Holding = Map.empty
+        }
 
 /// What an [[assault]]'s squad does once its breach falls (#490).
 type AssaultMode =
@@ -1667,28 +1707,6 @@ module Colony =
         colony
         |> childrenWhere stages colonies (fun home ->
             Map.tryFind home stages |> Option.exists (fun stage -> stage <> Independent))
-
-    /// The rooms one colony keeps its resident garrison in past their
-    /// independence (#479): the homes of its `Independent` children that
-    /// declare a perimeter — a **contested** child — and that do not yet
-    /// stand `towered` (two towers of their own). Disjoint from
-    /// `bootstrapping` by stage. The stage is not touched: only the
-    /// garrison reads this.
-    let garrisoning
-        (stages: Map<string, ColonyStage>)
-        (towered: string -> bool)
-        (colonies: Colony list)
-        (colony: Colony)
-        : string list =
-        let contested home =
-            colonies
-            |> List.exists (fun child -> child.Home = home && not (List.isEmpty child.Perimeter))
-
-        colony
-        |> childrenWhere stages colonies (fun home ->
-            Map.tryFind home stages = Some Independent
-            && contested home
-            && not (towered home))
 
     /// The declared children of this colony that have stopped being ours, and
     /// are nobody else's either. Without this a child whose spawn was

@@ -1041,15 +1041,24 @@ and private finishWhole (tail: WholeTail) (outcomes: MatchOutcome list) : Decisi
         let home = SpatialInfo.homeName view.Spatial
 
         // So does any idle body standing in an evacuating room (#512): there
-        // is no work there for it to wait for.
+        // is no work there for it to wait for. A fighter walks to its
+        // caster's home (`ColonyView.idleHome`).
         let homeward =
             view.Creeps
             |> List.filter (fun creep -> not (Map.containsKey creep.Name assigned))
             |> List.choose (fun creep ->
+                let fighter = isFighterBody creep
+
+                let target =
+                    if fighter then
+                        ColonyView.idleHome view creep.Name
+                    else
+                        home
+
                 Atlas.creepRoom atlas creep.Name
                 |> Option.filter (fun room ->
-                    room <> home && (isFighterBody creep || Set.contains room view.Evacuating))
-                |> Option.map (fun _ -> creep.Name, home))
+                    room <> target && (fighter || Set.contains room view.Evacuating))
+                |> Option.map (fun _ -> creep.Name, target))
 
         // Graced last: `Map.ofList` keeps the later entry, so a guard walking a
         // held Task's crossing keeps that room over home.
@@ -1420,10 +1429,8 @@ and private joinFight
         let assigned = assignedTasks tasks next
 
         // `decideUnarbitrated`'s crossings, of the fighters: a graced keep's last
-        // room, else home for an idle one standing away.
+        // room, else its caster's home for an idle one standing away.
         let crossings =
-            let home = SpatialInfo.homeName view.Spatial
-
             let graced =
                 next
                 |> Map.toList
@@ -1435,9 +1442,11 @@ and private joinFight
                 fighters
                 |> List.filter (fun creep -> not (Map.containsKey creep.Name assigned))
                 |> List.choose (fun creep ->
+                    let target = ColonyView.idleHome view creep.Name
+
                     Atlas.creepRoom atlas creep.Name
-                    |> Option.filter (fun room -> room <> home)
-                    |> Option.map (fun _ -> creep.Name, home))
+                    |> Option.filter (fun room -> room <> target)
+                    |> Option.map (fun _ -> creep.Name, target))
 
             homeward @ graced |> Map.ofList
 

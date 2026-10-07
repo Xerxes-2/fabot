@@ -218,6 +218,17 @@ let private creep name room : WorldCreep =
             }
     }
 
+/// The same body with these live parts.
+let private creepWithBody name room (parts: (BodyPart * int) list) : WorldCreep =
+    let body = creep name room
+
+    { body with
+        Info =
+            { body.Info with
+                Body = Map.ofList parts
+            }
+    }
+
 /// The declaration the fixture world is read under: the mother with her
 /// one outpost, and the child that has left her outpost list and names her
 /// as its mother colony.
@@ -410,6 +421,34 @@ let private viewUnder colonies world home =
 /// The same, under the live declaration, which is what almost every test
 /// below wants.
 let private viewOf world home = viewUnder declared world home
+
+/// A home with a Storage holding `energy`: the stock the Caster's reserve
+/// reads (`Tuning.CasterReserve`).
+let private withStock energy (facts: RoomFacts) =
+    { facts with
+        TargetKinds = Map.add "sto-stock" (Structure BuiltKind.Storage) facts.TargetKinds
+        Stores = Map.add "sto-stock" energy facts.Stores
+    }
+
+/// One colony's view with its rangers and guards held apart as fighters, as
+/// the shell cuts them (`isFighterBody`; a fixture body's parts are none).
+let private viewHolding colonies world home =
+    let colony = colonies |> List.find (fun colony -> colony.Home = home)
+
+    let holders =
+        World.creepColonies Tuning.defaults colonies (World.living colonies world) noneShut world
+
+    ColonyView.ofWorldRecalling
+        (JoinTable())
+        Tuning.defaults
+        colonies
+        HarassCasting.none
+        StandDown.none
+        holders
+        (fun creep -> creep.Name.StartsWith "ranger" || creep.Name.StartsWith "guard")
+        (WorldView.ofWorld colonies [ StandDown.none ] world)
+        world
+        colony
 
 /// The same world with the child's spawn pulled down: the room is still
 /// ours and still claimed, and it is a nursery again.
@@ -1544,6 +1583,25 @@ let colonyViewTests =
                     "with every body placed, nobody"
             }
 
+            test
+                "a fighter standing in a room no colony projects is the world's, never named unplaced" {
+                // `Unprojected` is the economy's (the anchor row's); the
+                // fighter is a body of the world's fight.
+                let world =
+                    { pairWorld with
+                        Creeps = creep "ranger-900-Spawn1" "W20S20" :: pairWorld.Creeps
+                    }
+
+                let view = viewHolding declared world mother
+
+                Expect.equal
+                    (view.Fighters |> List.map _.Name)
+                    [ "ranger-900-Spawn1" ]
+                    "the premise: she holds it, a fighter"
+
+                Expect.isEmpty view.Unprojected "and names nobody unplaced"
+            }
+
             test "a re-checked room is looked into and worked no more than before" {
                 // On the one tick in every `Tuning.RivalRecheck` the gate
                 // hands a latched room back to the scan, the colony reads
@@ -2414,6 +2472,47 @@ let defendedHomeTests =
                     "and so does one beside a home with no spawn"
             }
 
+            // The verdict weighs the rows the Caster may cast (`castsInto`):
+            // another's home a colony only defends, past both its floors.
+            test "a home the mother only defends weighs her row past the Caster's stock floor alone" {
+                let stocked energy (facts: RoomFacts) =
+                    { facts with
+                        TargetKinds =
+                            Map.add "sto-mother" (Structure BuiltKind.Storage) facts.TargetKinds
+                        Stores = Map.add "sto-mother" energy facts.Stores
+                    }
+
+                let rowsOver world =
+                    let deciding view : Facts.Judged =
+                        {
+                            Cut = view
+                            Owns = Set.empty
+                            Decides = true
+                        }
+
+                    let judged =
+                        Facts.judge
+                            Map.empty
+                            [ deciding (viewOf world mother); deciding (viewOf world child) ]
+
+                    (Facts.verdictOf (List.head judged) child).Rows
+
+                let short = raided 7 |> inRoom mother (stocked (Tuning.defaults.CasterReserve - 1))
+
+                let reserved = raided 7 |> inRoom mother (stocked Tuning.defaults.CasterReserve)
+
+                Expect.equal
+                    (viewOf short mother).Borrowed.Defended
+                    [ child ]
+                    "the premise: she defends the home either way"
+
+                Expect.isFalse
+                    (Map.containsKey mother (rowsOver short))
+                    "one short of the reserve, her row is not weighed: she would cast nothing there"
+
+                Expect.isTrue (Map.containsKey mother (rowsOver reserved)) "at the reserve it is"
+            }
+
             test "a raised home its mother defends too is still her residents', never its own row's" {
                 // The pair world's child is Bootstrapping at RCL2 with a
                 // spawn of its own; no tower, so any armed raid beats it.
@@ -2479,7 +2578,9 @@ let garrisonedHomeTests =
                 let view =
                     viewUnder
                         contestedDeclared
-                        (independentChild [ 1000 ] |> withChildRampart)
+                        (independentChild [ 1000 ]
+                         |> withChildRampart
+                         |> inRoom mother (withStock Tuning.defaults.CasterReserve))
                         mother
 
                 Expect.equal view.Borrowed.Garrisoned [ child ] "the home is hers to garrison"
@@ -2523,6 +2624,74 @@ let garrisonedHomeTests =
                 Expect.isEmpty
                     (viewOf (independentChild [ 1000 ]) mother).Borrowed.Garrisoned
                     "an uncontested child is none of hers"
+            }
+
+            test "the garrison is the Caster's, not kinship's: any colony at the floor keeps it" {
+                // The child names no mother: the mother still garrisons it, the
+                // one colony at `Tuning.CasterFloor` within the hop budget.
+                let orphaned =
+                    contestedDeclared
+                    |> List.map (fun colony ->
+                        if colony.Home = child then
+                            { colony with Mother = None }
+                        else
+                            colony)
+
+                let stockedAt energy =
+                    independentChild [ 1000 ]
+                    |> withChildRampart
+                    |> inRoom mother (withStock energy)
+
+                let world = stockedAt Tuning.defaults.CasterReserve
+
+                Expect.equal
+                    (viewUnder orphaned world mother).Borrowed.Garrisoned
+                    [ child ]
+                    "the nearest colony at the floor garrisons it, kin or not"
+
+                // The stock's band (`Tuning.CasterReserveHold`): a newcomer
+                // comes in at the reserve, the one whose ranger stands there
+                // keeps the home down to the hold.
+                let dipped = stockedAt (Tuning.defaults.CasterReserve - 1)
+
+                Expect.isEmpty
+                    (viewUnder orphaned dipped mother).Borrowed.Garrisoned
+                    "one short of the reserve, and no ranger of hers there: she takes nothing up"
+
+                let held =
+                    { dipped with
+                        Creeps =
+                            creepWithBody "ranger-950-Spawn1" child [ RangedAttack, 1 ]
+                            :: dipped.Creeps
+                    }
+
+                Expect.equal
+                    (viewUnder orphaned held mother).Borrowed.Garrisoned
+                    [ child ]
+                    "with her ranger standing there, she keeps it under the reserve"
+
+                let drained =
+                    { stockedAt (Tuning.defaults.CasterReserveHold - 1) with
+                        Creeps = held.Creeps
+                    }
+
+                Expect.isEmpty
+                    (viewUnder orphaned drained mother).Borrowed.Garrisoned
+                    "and lets it go under the hold"
+
+                let poor =
+                    world
+                    |> inRoom mother (fun facts ->
+                        { facts with
+                            Energy =
+                                { facts.Energy with
+                                    Capacity = Tuning.defaults.CasterFloor - 1
+                                }
+                        })
+
+                Expect.isEmpty
+                    (viewUnder contestedDeclared poor mother).Borrowed.Garrisoned
+                    "a mother short of the floor garrisons nothing"
             }
 
             test "the child's own view carries no garrison" {
@@ -2621,6 +2790,47 @@ let childOutpostTests =
                 Expect.isFalse
                     (view.Sources |> List.exists (fun source -> source.Id = $"src-{childOutpost}"))
                     "not even its rock"
+            }
+
+            test
+                "a fighter the mother cast that the child holds walks to the mother's home, the walk projected for it" {
+                // A fighter's caster governs its walk home. The child is Independent, so only she projects her outpost,
+                // and she holds the mother's ranger standing in it.
+                let world =
+                    { withChildOutposts (independentChild [ 1000 ]) with
+                        Creeps = creep "ranger-960-Spawn1" childOutpost :: pairWorld.Creeps
+                    }
+
+                let view = viewHolding childMining world child
+
+                Expect.equal
+                    (view.Fighters |> List.map _.Name)
+                    [ "ranger-960-Spawn1" ]
+                    "the premise: the child holds the mother's ranger"
+
+                Expect.isTrue
+                    (Map.containsKey mother view.Spatial.Rooms && Set.contains mother view.Crossed)
+                    "the mother's home is a transit room of the child's"
+
+                Expect.equal
+                    (ColonyView.idleHome view "ranger-960-Spawn1")
+                    mother
+                    "the ranger's idle walk is to its caster's home"
+
+                Expect.isNonEmpty
+                    (Fabot.Core.Atlas.routes (Fabot.Core.Atlas.ofView view) childOutpost mother)
+                    "and the child's Atlas prices the walk"
+
+                Expect.equal
+                    (ColonyView.idleHome view "hauler-950-Spawn2")
+                    child
+                    "a body she cast walks to her own"
+
+                Expect.isFalse
+                    (Map.containsKey
+                        mother
+                        (viewHolding childMining (independentChild [ 1000 ]) child).Spatial.Rooms)
+                    "with no fighter of the mother's held, she projects no walk to her home"
             }
 
             test "the child's own view works its outpost as before" {
@@ -5176,8 +5386,12 @@ let private harassWorldAt control motherCapacity childCapacity =
         Rooms =
             pairWorld.Rooms
             |> Map.add (fst (harassSeen control)) (snd (harassSeen control))
-            |> Map.change mother (Option.map (bankOf motherCapacity))
-            |> Map.change child (Option.map (bankOf childCapacity))
+            |> Map.change
+                mother
+                (Option.map (bankOf motherCapacity >> withStock Tuning.defaults.CasterReserve))
+            |> Map.change
+                child
+                (Option.map (bankOf childCapacity >> withStock Tuning.defaults.CasterReserve))
     }
 
 /// The same with the mother's bank past the harassment floor (2,100).
@@ -5203,7 +5417,8 @@ let private harassViewOver
             BlockCost = Bodies.rangerBlockCost
         }
 
-    let casting = World.harassCasters joins Tuning.defaults declared harass world
+    let casting =
+        World.harassCasters joins Tuning.defaults declared harass Map.empty world
 
     let holders =
         World.creepColoniesRecalling
@@ -5406,7 +5621,13 @@ let harassViewTests =
                     let world = harassWorldAt (reservedFor enemy) motherBank childBank
 
                     let casting =
-                        World.harassCasters (JoinTable()) Tuning.defaults declared harass world
+                        World.harassCasters
+                            (JoinTable())
+                            Tuning.defaults
+                            declared
+                            harass
+                            Map.empty
+                            world
 
                     let castBy =
                         [ mother; child ]
@@ -5435,6 +5656,7 @@ let harassViewTests =
                         Tuning.defaults
                         declared
                         harass
+                        Map.empty
                         (harassWorld (control Ownership.Ours) 300)
 
                 Expect.isEmpty
@@ -5443,7 +5665,7 @@ let harassViewTests =
             }
 
             test
-                "the colony fewest crossings from the room casts it at any bank that buys the floor; the bank breaks equal crossings, the name last" {
+                "the colony fewest crossings from the room casts it at any bank that buys the floor; the name breaks equal crossings, the bank never" {
                 // W13S29: one crossing from the child, two from the mother and
                 // from a third colony at W14S28.
                 let near = "W13S29"
@@ -5482,11 +5704,12 @@ let harassViewTests =
                         BlockCost = Bodies.rangerBlockCost
                     }
 
-                let casterAt motherBank childBank thirdBank =
+                let casterHeld held standing motherBank childBank thirdBank =
                     let world = harassWorldAt (reservedFor enemy) motherBank childBank
 
                     let world =
                         { world with
+                            Creeps = standing @ world.Creeps
                             Rooms =
                                 world.Rooms
                                 |> Map.add near (snd (roomOf near Ownership.Unowned []))
@@ -5495,22 +5718,51 @@ let harassViewTests =
                                     (snd (
                                         roomOf third Ownership.Ours []
                                         |> ourColony "Spawn3" 5 thirdBank
-                                    ))
+                                     )
+                                     |> withStock Tuning.defaults.CasterReserve)
                         }
 
-                    (World.harassCasters (JoinTable()) Tuning.defaults colonies harass world)
+                    (World.harassCasters (JoinTable()) Tuning.defaults colonies harass held world)
                         .Casters
                     |> List.map (fun (h, caster) -> h.RoomName, caster)
+
+                let casterAmong = casterHeld Map.empty
+                let casterAt = casterAmong []
 
                 Expect.equal
                     (casterAt 2700 2400 2700)
                     [ near, Some child ]
                     "the child's one crossing over two, at the smaller bank"
 
+                // The one casting it now keeps it against a colony only one
+                // crossing nearer (`Tuning.CasterSwitchMargin`, two).
+                Expect.equal
+                    (casterAmong
+                        [ creepWithBody "ranger-950-Spawn1" near [ RangedAttack, 1 ] ]
+                        2700
+                        2400
+                        2700)
+                    [ near, Some mother ]
+                    "with the mother's ranger standing there, the child's one crossing nearer takes nothing"
+
+                // On its walk out too: the ranger holds the room's Guard from
+                // her home, the room not yet reached.
+                Expect.equal
+                    (casterHeld
+                        (Map.ofList [ "ranger-950-Spawn1", "guard:" + near ])
+                        [ creepWithBody "ranger-950-Spawn1" mother [ RangedAttack, 1 ] ]
+                        2700
+                        2400
+                        2700)
+                    [ near, Some mother ]
+                    "and with her ranger walking out to its Guard"
+
+                // The Caster's cost is the walk (`CastBid.choose`): a bigger
+                // bank lands the one body no sooner.
                 Expect.equal
                     (casterAt 2400 300 2700)
-                    [ near, Some third ]
-                    "two crossings each: the larger bank"
+                    [ near, Some mother ]
+                    "two crossings each: the name, over the larger bank"
 
                 Expect.equal
                     (casterAt 2400 300 2400)
@@ -5889,6 +6141,7 @@ let private declaredCasting blocks motherBank =
             Tuning.defaults
             declared
             harass
+            Map.empty
             (harassWorldAt (reservedFor enemy) motherBank 300)
 
     casting.Casters |> List.map (fun (h, caster) -> h.RoomName, caster), casting.Floors
@@ -5913,6 +6166,11 @@ let harassDeclaredFloorTests =
                     "the mother's 1,800 buys two blocks"
 
                 Expect.equal floors (Map.ofList [ harassRoom, 2 ]) "and the room is floored at two"
+
+                Expect.equal
+                    (fst (declaredCasting (Some 2) 1700))
+                    [ harassRoom, None ]
+                    "a 1,700 bank buys them too, short of the Caster's floor: nobody casts it"
 
                 Expect.equal
                     (harassView

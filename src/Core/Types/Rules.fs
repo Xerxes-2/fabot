@@ -802,6 +802,15 @@ type Tuning =
         /// one colony's bank pays another's fight only out of a stock that
         /// keeps its own. 20,000: the RCL6 [[emergency reserve]].
         CasterReserve: int
+        /// The Storage energy a colony already casting a harassment room or a
+        /// garrison keeps casting it down to (`World.casterOf`): the lower
+        /// mark of `CasterReserve`'s band, so one cast's dip under the
+        /// reserve does not move the room's projection to another colony.
+        CasterReserveHold: int
+        /// The walk, in ticks, by which another colony must land a body
+        /// sooner than the one already casting a harassment room or a
+        /// garrison to take it over (`World.casterOf`): two rooms' sides.
+        CasterSwitchMargin: int
         /// How long a room not a home of ours asks no fighter after a guard
         /// or ranger of ours died there, while its raid stays priced a Win
         /// (#576): a Win that kills our body is a pricing error, and each
@@ -1073,6 +1082,8 @@ module Tuning =
             GarrisonTowers = 2
             CasterFloor = 1_800
             CasterReserve = 20_000
+            CasterReserveHold = 10_000
+            CasterSwitchMargin = 2 * Engine.roomSide
             RecastCooldown = 300
             MaxHops = 6
             TrunkSwampWeight = 3

@@ -28,6 +28,7 @@ type Bidder =
 type private Ledger =
     {
         Supply: Map<string * CastRow, int>
+        HeldFor: Map<string * string * CastRow, int>
         Queued: Map<string, int>
         Handed: Map<string * Task * CastRow, int * int>
     }
@@ -79,10 +80,8 @@ let assign
     let crossings (bidder: Bidder) (room: string) =
         hops bidder.Home room |> Option.orElse (RoomName.hopsBetween bidder.Home room)
 
-    // A room no route nor name prices is a crossing past the hop budget.
     let walk bidder room =
-        (crossings bidder room |> Option.defaultValue (tuning.MaxHops + 1))
-        * Engine.roomSide
+        CastBid.walk tuning (crossings bidder room)
 
     let reaches (bidder: Bidder) (room: string) =
         let projects = Map.containsKey room bidder.View.Spatial.Rooms
@@ -90,10 +89,6 @@ let assign
         match crossings bidder room with
         | Some hops -> hops <= tuning.MaxHops && (projects || hops <= tuning.LaneHops)
         | None -> projects
-
-    let paysOthers (bidder: Bidder) =
-        bidder.View.Bank.Capacity >= tuning.CasterFloor
-        && Facts.stockedEnergy bidder.View >= tuning.CasterReserve
 
     let spawnsOf (bidder: Bidder) = max 1 (List.length bidder.View.Spawns)
 
@@ -130,20 +125,29 @@ let assign
              | _ -> 1),
             taskId task)
 
+    // The combat Task a body holds, if any: it is sent to that fight, and
+    // to no other.
+    let fightOf (creep: CreepInfo) =
+        Map.tryFind creep.Name held
+        |> Option.filter (fun tid ->
+            tid.StartsWith "guard:" || tid.StartsWith "defend:" || tid.StartsWith "assault:")
+
     // The fleet each colony brings to a row: its living bodies of it, cast
-    // wherever held (`Quota.fightersCast`), and its oven's. A body holding
-    // another home's Defend is out of it: that Defend's ask already counts
-    // it (`Brief.lentRangers`).
+    // wherever held (`Quota.fightersCast`), and its oven's. A body holding a
+    // combat Task is supply for that Task alone (`HeldFor`): a ranger held
+    // to another room's Guard is no partner for this fight, and a body
+    // holding another home's Defend is counted by that Defend's ask
+    // (`Brief.lentRangers`).
+    let cast =
+        bidders
+        |> List.map (fun bidder -> bidder.Home, fightersCast bidder.View)
+        |> Map.ofList
+
     let fleetOf (bidder: Bidder) (row: CastRow) =
         let cut = CastRow.cut row
 
-        let lent (creep: CreepInfo) =
-            match Map.tryFind creep.Name held with
-            | Some tid -> tid.StartsWith "defend:" && tid <> taskId (Defend bidder.Home)
-            | None -> false
-
-        (fightersCast bidder.View
-         |> List.filter (fun creep -> cut creep.Name creep.Body && not (lent creep))
+        (cast.[bidder.Home]
+         |> List.filter (fun creep -> cut creep.Name creep.Body && Option.isNone (fightOf creep))
          |> List.length)
         + (bidder.View.Casting
            |> List.filter (fun cast -> cut cast.Name (partsOf cast.Body))
@@ -156,6 +160,18 @@ let assign
                 |> List.collect (fun bidder ->
                     [ CastRow.Guard; CastRow.Ranger; CastRow.Defender ]
                     |> List.map (fun row -> (bidder.Home, row), fleetOf bidder row))
+                |> Map.ofList
+            HeldFor =
+                bidders
+                |> List.collect (fun bidder ->
+                    cast.[bidder.Home]
+                    |> List.choose (fun creep ->
+                        fightOf creep
+                        |> Option.bind (fun tid ->
+                            [ CastRow.Guard; CastRow.Ranger; CastRow.Defender ]
+                            |> List.tryFind (fun row -> CastRow.cut row creep.Name creep.Body)
+                            |> Option.map (fun row -> bidder.Home, tid, row))))
+                |> List.countBy id
                 |> Map.ofList
             Queued =
                 bidders
@@ -210,15 +226,17 @@ let assign
                 | None -> bidders |> List.filter (fun b -> isAsker b || reaches b room)
 
             // Its own ask a colony casts for past no floor: one it asks for,
-            // its home or a room that is no other colony's home it defends.
+            // its home or a room that is no other colony's home it defends
+            // (`Facts.defendsOthers`); any other past the floor, as the
+            // verdict weighs its row (`Facts.castsForOthers`).
             let own (bidder: Bidder) =
-                isAsker bidder && not (List.contains room bidder.View.Borrowed.Defended)
+                isAsker bidder && not (Facts.defendsOthers bidder.View room)
 
             let casters =
                 eligible
                 |> List.filter (fun b ->
                     not (List.isEmpty b.View.Spawns)
-                    && (Option.isSome fixedTo || own b || paysOthers b))
+                    && (Option.isSome fixedTo || own b || Facts.castsForOthers b.View))
 
             let priced =
                 casters
@@ -239,8 +257,13 @@ let assign
             let left (ledger: Ledger) (bidder: Bidder) =
                 Map.tryFind (bidder.Home, row) ledger.Supply |> Option.defaultValue 0
 
-            (ledger, [ 1 .. ask.Ask.Wanted ])
-            ||> List.fold (fun ledger _ ->
+            let tid = taskId task
+
+            let holding (ledger: Ledger) (bidder: Bidder) =
+                Map.tryFind (bidder.Home, tid, row) ledger.HeldFor |> Option.defaultValue 0
+
+            // A body free of every fight, else one cast.
+            let fromFleet (ledger: Ledger) =
                 let covering =
                     match
                         eligible
@@ -269,11 +292,15 @@ let assign
 
                     match
                         pool
-                        |> List.sortBy (fun b ->
-                            snd priced.[b.Home].Value + queue b + walk b room,
-                            not (isAsker b),
-                            b.Home)
-                        |> List.tryHead
+                        |> List.map (fun b ->
+                            ({
+                                Home = b.Home
+                                Cost = snd priced.[b.Home].Value + queue b + walk b room
+                                Asks = isAsker b
+                            }
+                            : CastBid))
+                        |> CastBid.choose
+                        |> Option.map (fun home -> pool |> List.find (fun b -> b.Home = home))
                     with
                     | Some bidder ->
                         let ledger =
@@ -290,7 +317,24 @@ let assign
                     | None ->
                         match askers |> List.tryFind (fun b -> own b && not (losesHome b)) with
                         | Some asker -> hand ledger asker task row (blocksOf asker)
-                        | None -> ledger))
+                        | None -> ledger
+
+            (ledger, [ 1 .. ask.Ask.Wanted ])
+            ||> List.fold (fun ledger _ ->
+                // A body already sent to this fight first, whoever cast it.
+                match bidders |> List.tryFind (fun b -> holding ledger b > 0) with
+                | Some bidder ->
+                    let ledger =
+                        { ledger with
+                            HeldFor =
+                                Map.add
+                                    (bidder.Home, tid, row)
+                                    (holding ledger bidder - 1)
+                                    ledger.HeldFor
+                        }
+
+                    hand ledger bidder task row (blocksOf bidder)
+                | None -> fromFleet ledger))
 
     let handed = (List.fold weigh ledger asks).Handed
 

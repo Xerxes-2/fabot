@@ -1983,14 +1983,14 @@ let private rangersAmong
 
 /// One colony as the world's verdict prices a room: its home; its view, as
 /// cut, which the world's vision of the room is laid into wherever it prices
-/// (`priceAmong`); the rooms its own rows cast for (`castsFor`, the rooms its
-/// stand-down shuts among them); and which of its bodies it sends to a room
-/// this tick.
+/// (`priceAmong`); whether it may cast for a room (`castsInto`, the
+/// Caster's eligibility); and which of its bodies it sends to a room this
+/// tick.
 type private Pricer =
     {
         Home: string
         View: ColonyView
-        Casts: Lazy<Set<string>>
+        Casts: string -> bool
         Sends: string -> CreepInfo -> bool
         /// Whether a body of its already holds a room's Guard.
         Holds: string -> bool
@@ -2030,10 +2030,10 @@ let castPrice (view: ColonyView) (row: CastRow) (room: string) : bool * int =
 /// One room's verdict over these colonies, each reading the
 /// world's vision of the room and the rooms beside it laid into its view, and
 /// our bodies where the world's fleet places them (`placed`), so no colony's
-/// cut decides it. A colony takes part where its rows cast for the room or a
+/// cut decides it. A colony takes part where it may cast for the room or a
 /// fighter of its stands in it or beside it, and sees the raid there. The room's
-/// own answer is its casters': of the colonies whose rows cast for it
-/// (`castsFor`, a home its own colony's), or, where none does and it is no
+/// own answer is its casters': of the colonies that may cast for it
+/// (`castsInto`, the Caster's eligibility), or, where none may and it is no
 /// home of ours, of every colony taking part, the biggest row cast first,
 /// then the biggest ranger kiting it. Then the rangers standing in it or lent
 /// to it, of every colony taking part, together (`rangersAmong`). A room no
@@ -2062,7 +2062,7 @@ let private priceAmong (placed: string -> string option) (pricers: Pricer list) 
             |> Option.map (fun here -> creep, here))
 
     let present (p: Pricer) =
-        p.Casts.Value.Contains room || not (List.isEmpty (fighters p))
+        p.Casts room || not (List.isEmpty (fighters p))
 
     // A fighter of this colony that may take the room's raid now: one it
     // sends, lent by its colony's rule, that strikes every raider; and
@@ -2117,7 +2117,7 @@ let private priceAmong (placed: string -> string option) (pricers: Pricer list) 
     | [] -> verdict Answer.Win Map.empty (pricers |> List.map (fun p -> p.Home) |> Set.ofList) []
     | first :: _ ->
         let casters =
-            match seeing |> List.filter (fun p -> p.Casts.Value.Contains room) with
+            match seeing |> List.filter (fun p -> p.Casts room) with
             | [] when Map.containsKey room first.View.Stages -> []
             | [] -> seeing
             | owners ->
@@ -2147,15 +2147,14 @@ let private priceAmong (placed: string -> string option) (pricers: Pricer list) 
         // rangers that win it (#573).
         let rowed =
             casters
-            |> List.filter (fun (p, _) ->
-                rows.[p.Home].Wins && (p.Casts.Value.Contains room || takes p))
+            |> List.filter (fun (p, _) -> rows.[p.Home].Wins && (p.Casts room || takes p))
             |> List.map fst
 
         if not (List.isEmpty rowed) then
             { verdict Answer.Win rows (rowed |> List.map (fun p -> p.Home) |> Set.ofList) [] with
                 Casting =
                     rowed
-                    |> List.filter (fun p -> p.Casts.Value.Contains room)
+                    |> List.filter (fun p -> p.Casts room)
                     |> List.map (fun p -> p.Home)
                     |> Set.ofList
             }
@@ -2189,7 +2188,7 @@ let verdictOf (view: ColonyView) (room: string) : RoomVerdict =
                 {
                     Home = SpatialInfo.homeName view.Spatial
                     View = view
-                    Casts = lazy (Set.singleton room)
+                    Casts = (=) room
                     Sends = fun _ _ -> true
                     Holds = fun _ -> false
                 }
@@ -3140,23 +3139,57 @@ let internal courierProgrammeOpen (view: ColonyView) atlas =
     && hasLoad
     && hasResidentReclaimer
 
-/// The rooms a colony answers a raid in by its own rows and towers: its home,
-/// its declared outposts, its ranger rooms (`rangerRooms`, a raised child's
-/// home among them), the harassment rooms it casts and the other homes it
-/// defends; and the rooms of its own (`owns`) the stand-down shuts on a
-/// raid, whose row the stand-down, an economy gate, never withholds from the
-/// verdict. Whose row the world's verdict weighs (`priceAmong`), a home's own
-/// only where no other colony raises or garrisons it.
-let private castsFor (owns: Set<string>) (view: ColonyView) : Set<string> =
-    Set.unionMany
-        [
-            Set.singleton (SpatialInfo.homeName view.Spatial)
-            Set.ofList (declaredOutposts view)
-            rangerRooms view
-            view.HarassCast
-            Set.ofList view.Borrowed.Defended
-            Set.intersect owns view.RaidedOutposts
-        ]
+/// Whether a colony may cast for an ask not its own: a spawn, and a bank and
+/// Storage stock that pay it (`CastBid.paysOthers`). The Caster's floor.
+let castsForOthers (view: ColonyView) : bool =
+    not (List.isEmpty view.Spawns)
+    && CastBid.paysOthers view.Tuning view.Bank.Capacity (stockedEnergy view)
+
+/// Whether a room is another colony's home this one defends
+/// (`BorrowedWork.Defended`) and neither raises nor garrisons
+/// (`raisedHomes`, whose residents are its own): of the rooms a colony asks
+/// for, the one it casts for only past the Caster's floor
+/// (`castsForOthers`).
+let defendsOthers (view: ColonyView) (room: string) : bool =
+    List.contains room view.Borrowed.Defended
+    && not (Set.contains room (raisedHomes view))
+
+/// Whether a colony's row is weighed for a room, by the Caster's
+/// eligibility for the asks it makes: a room of its own past no floor — its
+/// home, its declared outposts, its ranger rooms (`rangerRooms`, a raised or
+/// garrisoned home among them), the harassment rooms it casts, and the
+/// rooms of its own (`owns`) the stand-down shuts on a raid, whose row the
+/// stand-down, an economy gate, never withholds from the verdict —; another
+/// colony's home it defends (`defendsOthers`) only past the floor
+/// (`castsForOthers`). A colony that only could cast for a room, asking
+/// nothing there, is no row of its verdict: a cast on paper is no answer
+/// beside a body standing there (#573). Whose row the world's verdict weighs
+/// (`priceAmong`), a home's own only where no other colony raises or
+/// garrisons it.
+let private castsInto (owns: Set<string>) (view: ColonyView) : string -> bool =
+    let own =
+        lazy
+            (Set.unionMany
+                [
+                    Set.singleton (SpatialInfo.homeName view.Spatial)
+                    Set.ofList (declaredOutposts view)
+                    rangerRooms view
+                    view.HarassCast
+                    Set.intersect owns view.RaidedOutposts
+                ])
+
+    let defended =
+        match view.Borrowed.Defended with
+        | [] -> Set.empty
+        | rooms -> Set.difference (Set.ofList rooms) (raisedHomes view)
+
+    let floored = lazy (castsForOthers view)
+
+    fun room ->
+        if defended.Contains room then
+            floored.Value
+        else
+            own.Value.Contains room
 
 /// The rooms a colony prices a raid in, seen or not: those it declares
 /// (`Colony.declaredRooms`), its declared outposts, its ranger rooms and the
@@ -3200,7 +3233,7 @@ let judge (held: Assignments) (colonies: Judged list) : ColonyView list =
             {
                 Home = SpatialInfo.homeName colony.Cut.Spatial
                 View = colony.Cut
-                Casts = lazy (castsFor colony.Owns colony.Cut)
+                Casts = castsInto colony.Owns colony.Cut
                 Sends =
                     if colony.Decides then
                         fun _ _ -> true

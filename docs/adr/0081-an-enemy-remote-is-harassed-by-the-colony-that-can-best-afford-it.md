@@ -1,8 +1,10 @@
 # An enemy remote is harassed by the colony that can best afford it
 
-> **Status:** amended by #437, #439, #441
+> **Status:** amended by #437, #439, #441, ADR 0091 W6 S3
 
 > **Accepted 2026-09-29** on #432, after Trepidimous (W18S26, one spawn) raided W17S29 three times. The user's decision: before any siege, harass their remotes, and allocate the work globally rather than per colony.
+
+> **Amended by ADR 0091 W6 S3** (#580): the harassment caster is the Caster's rule (`CastBid.choose`, the one `Caster.assign` reads), asked before the views are cut (`World.harassCasters`, through `casterOf`): among the living colonies with a spawn, a bank at `Tuning.CasterFloor` that buys the room's floor, a Storage stock at `Tuning.CasterReserve`, and a chain inside the hop budget, the least cost, which is the walk, then by home name: spare capacity, never a developing colony. The bank no longer breaks equal crossings: one body costs every colony the same spawn time, so a bigger bank lands it no sooner. The stock floor has a band, so the caster does not flip with each cast (#437's flip, by another number): the colony whose ranger stands in the room or holds its Guard, or has a ranger in its oven, keeps it down to `Tuning.CasterReserveHold`, and another takes it only once that colony leaves the band or lands the body `Tuning.CasterSwitchMargin` sooner. The spawn queue is not read. A room no colony casts holds no fight: its rangers yield its Guard and walk home.
 
 > **Amended by #437** on 2026-09-29, the day it was accepted, so W15S28 can harass W18S27. Decision 2's order is now **fewest crossings first**, then the largest bank, then the home name: with the bank first, W13S28 (six crossings) would take W17S26 from W15S28 (four) whenever its capacity passed W15S28's, and flip back when it fell below, each flip a new ranger. The crossings do not move with the bank, so the order does not flip. Decision 3's budget is **six** (ADR 0058's amendment carries the history). A declaration may name a detour, `Harass.Via`, which its caster projects beside the name rectangle.
 

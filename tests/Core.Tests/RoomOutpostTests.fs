@@ -342,6 +342,16 @@ let outpostDeclarationTests =
                                                     }
                                                 ]
                                             Energy = { Available = bank; Capacity = bank }
+                                            // Each stock at the Caster's reserve.
+                                            TargetKinds =
+                                                Map.ofList
+                                                    [ $"sto-{name}", Structure BuiltKind.Storage ]
+                                            Stores =
+                                                Map.ofList
+                                                    [
+                                                        $"sto-{name}",
+                                                        Tuning.defaults.CasterReserve
+                                                    ]
                                         })
                                 |> Map.ofList
                         }
@@ -354,6 +364,7 @@ let outpostDeclarationTests =
                             Rooms = Colony.harass
                             BlockCost = Bodies.rangerBlockCost
                         }
+                        Map.empty
                         world
 
                 let casting = castingAfter false

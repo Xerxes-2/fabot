@@ -1134,8 +1134,11 @@ let movementAmong
 
             placed
             |> List.filter (fun (name, at) ->
-                Map.tryFind name crossings = Some home
-                && (Set.contains at.Room view.Evacuating || Set.contains name fighters))
+                match Map.tryFind name crossings with
+                | Some target ->
+                    target = home && Set.contains at.Room view.Evacuating
+                    || Set.contains name fighters && target = ColonyView.idleHome view name
+                | None -> false)
             |> List.map fst
             |> Set.ofList
 

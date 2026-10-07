@@ -1768,23 +1768,120 @@ module World =
         |> List.tryHead
         |> Option.map (fun colony -> colony.Home)
 
+    /// The energy in a room's Storage: the stock `CastBid.paysOthers` reads,
+    /// as `Facts.stockedEnergy` reads a view's.
+    let private stockIn (facts: RoomFacts) : int =
+        facts.TargetKinds
+        |> Map.fold
+            (fun total id kind ->
+                if kind = Structure BuiltKind.Storage then
+                    total + (Map.tryFind id facts.Stores |> Option.defaultValue 0)
+                else
+                    total)
+            0
+
+    /// The Caster's choice of one colony to cast a body of `floor` energy
+    /// for a room no colony asks for its own, before the views are cut, so
+    /// that colony alone projects the room: among the living colonies but
+    /// `except`, with a spawn, a bank at `Tuning.CasterFloor` that buys the
+    /// body, a stock past the floor, and `hopsOf` crossings to the room
+    /// inside the hop budget, the least cost (`CastBid.choose`): the walk,
+    /// the body being one size whoever casts it. The projection follows the
+    /// choice, so it holds still across the band a cast dips the stock
+    /// through, read off the world and last tick's Tasks, kept nowhere: the
+    /// **incumbent**, a colony that cast a ranger standing in the room or a
+    /// fighter holding its Guard (`held`: on the walk out too), keeps the
+    /// room down to `Tuning.CasterReserveHold`, and any other takes it only
+    /// once it leaves that band or by landing the body
+    /// `Tuning.CasterSwitchMargin` sooner; a colony with a ranger in its oven
+    /// is read at the hold too, the body not yet holding the Guard it was
+    /// cast for. Any other comes in at `Tuning.CasterReserve`. The spawns'
+    /// queue is not read.
+    let private casterOf
+        (hopsOf: string -> string -> int option)
+        (tuning: Tuning)
+        (living: Colony list)
+        (world: World)
+        (held: Map<string, string>)
+        (except: string)
+        (floor: int)
+        (room: string)
+        : string option =
+        // The Guard's id as `Tasks.taskId` spells it.
+        let guard = "guard:" + room
+
+        let incumbents =
+            match
+                world.Creeps
+                |> List.filter (fun creep ->
+                    creep.Room = room && Map.containsKey RangedAttack creep.Info.Body
+                    || Map.tryFind creep.Info.Name held = Some guard)
+            with
+            | [] -> Set.empty
+            | standing ->
+                let homes = spawnHomes world
+
+                standing
+                |> List.choose (fun creep -> Colony.castBy homes creep.Info.Name)
+                |> Set.ofList
+
+        let casting (home: RoomFacts) =
+            home.Casting |> List.exists (fun cast -> List.contains RangedAttack cast.Body)
+
+        let bids =
+            living
+            |> List.filter (fun colony ->
+                let home = roomOf world colony.Home
+
+                let reserve =
+                    if incumbents.Contains colony.Home || casting home then
+                        tuning.CasterReserveHold
+                    else
+                        tuning.CasterReserve
+
+                colony.Home <> except
+                && not (List.isEmpty home.Spawns)
+                && home.Energy.Capacity >= max floor tuning.CasterFloor
+                && stockIn home >= reserve)
+            |> List.choose (fun colony ->
+                hopsOf colony.Home room
+                |> Option.filter (fun hops -> hops <= tuning.MaxHops)
+                |> Option.map (fun hops ->
+                    {
+                        Home = colony.Home
+                        Cost = CastBid.walk tuning (Some hops)
+                        Asks = false
+                    }))
+
+        // The one casting it now bids its walk less the margin.
+        bids
+        |> List.map (fun bid ->
+            if incumbents.Contains bid.Home then
+                { bid with
+                    Cost = bid.Cost - tuning.CasterSwitchMargin
+                }
+            else
+                bid)
+        |> CastBid.choose
+
     /// ADR-0081
-    /// The colony that casts each [[harassment room]] this tick: among the
-    /// living colonies whose bank buys the room's floor (the blocks it is
-    /// declared at, `Harass.blocks`, #457) and whose chain
-    /// reaches the room inside the hop budget, the one fewest crossings from
-    /// it, then the one whose bank holds the most, then by home name (#437);
-    /// None while no colony is both. Stateless, and decided once for every
-    /// colony, so exactly one projects the room. Asked over the open gate: a
-    /// caster's own stand-down withdraws its work and hands the room to
-    /// nobody else. A room we own is out of the list, cast and refused by
-    /// nobody (#447): the day a Claim lands in a harassment room, its
-    /// mother's garrison holds it.
+    /// The colony that casts each [[harassment room]] this tick, by the
+    /// Caster's rule (`casterOf`), over the chain the room's projection
+    /// walks: the room is no colony's own, so its caster's bank and stock
+    /// are past the floors, and its bank buys the room's (the blocks it is declared at,
+    /// `Harass.blocks`, #457); None while no colony may. Stateless, and
+    /// decided once for every colony, so exactly one
+    /// projects the room. Asked over the open gate: a caster's own stand-down
+    /// withdraws its work and hands the room to nobody else. A room we own is
+    /// out of the list, cast and refused by nobody (#447): the day a Claim
+    /// lands in a harassment room, its garrison holds it.
     let harassCasters
         (joins: JoinTable)
         (tuning: Tuning)
         (colonies: Colony list)
         (harass: Harassment)
+        // Last tick's Tasks (`HarassCasting.Holding`).
+        (held: Map<string, string>)
         (world: World)
         : HarassCasting =
         let hopsOf = hopsUnder StandDown.none joins tuning world
@@ -1801,21 +1898,68 @@ module World =
             Casters =
                 rooms
                 |> List.map (fun h ->
-                    let floor = floors.[h.RoomName] * harass.BlockCost
-
                     h,
-                    living
-                    |> List.filter (fun colony ->
-                        (roomOf world colony.Home).Energy.Capacity >= floor)
-                    |> List.choose (fun colony ->
-                        hopsOf colony.Home h.RoomName
-                        |> Option.map (fun hops ->
-                            (hops, -(roomOf world colony.Home).Energy.Capacity, colony.Home)))
-                    |> List.sort
-                    |> List.tryHead
-                    |> Option.map (fun (_, _, home) -> home))
+                    casterOf
+                        hopsOf
+                        tuning
+                        living
+                        world
+                        held
+                        ""
+                        (floors.[h.RoomName] * harass.BlockCost)
+                        h.RoomName)
             Floors = floors
+            GarrisonFloor = tuning.RangerResidentBlocks * harass.BlockCost
+            Holding = held
         }
+
+    /// The colony that keeps each contested home's resident garrison
+    /// (#479), by the Caster's rule (`casterOf`): a home of ours declaring a
+    /// perimeter, `Independent`, short of `Tuning.GarrisonTowers` towers. Its
+    /// garrison is no ask of its own but its residents', so its caster is
+    /// another colony past both floors, its bank buying the resident body
+    /// (`HarassCasting.GarrisonFloor`); none while no colony may. Kinship
+    /// plays no part. Over the open gate and stateless, so every colony reads
+    /// one caster.
+    let garrisonCasters
+        (joins: JoinTable)
+        (tuning: Tuning)
+        (stages: Map<string, ColonyStage>)
+        (casting: HarassCasting)
+        (colonies: Colony list)
+        (world: World)
+        : Map<string, string> =
+        let contested =
+            colonies
+            |> List.filter (fun home ->
+                not (List.isEmpty home.Perimeter)
+                && Map.tryFind home.Home stages = Some Independent
+                && towersStanding (roomOf world home.Home) < tuning.GarrisonTowers)
+
+        match contested with
+        | [] -> Map.empty
+        | _ ->
+            let hopsOf = hopsUnder StandDown.none joins tuning world
+            let living = living colonies world
+
+            // Walked as a defended home's chain is, off the names where no
+            // route prices it (`defends`).
+            let crossings from room =
+                hopsOf from room |> Option.orElse (RoomName.hopsBetween from room)
+
+            contested
+            |> List.choose (fun home ->
+                casterOf
+                    crossings
+                    tuning
+                    living
+                    world
+                    casting.Holding
+                    home.Home
+                    casting.GarrisonFloor
+                    home.Home
+                |> Option.map (fun caster -> home.Home, caster))
+            |> Map.ofList
 
     /// The living colony that says a [[harassment room]] no colony casts out
     /// loud (`ColonyView.Refused`): the largest bank of all, ties by home
@@ -1848,8 +1992,8 @@ module World =
             /// The other colonies' homes this colony projects for their
             /// defence this tick (`defends`).
             Defended: string list
-            /// The contested children's homes this colony still garrisons
-            /// (`Colony.garrisoning`, #479).
+            /// The contested homes this colony garrisons
+            /// (`garrisonCasters`, #479).
             Garrisoned: string list
             /// The [[harassment room]]s this colony casts (`harassCasters`),
             /// less the ones its [[stand-down]] shuts.
@@ -1974,12 +2118,18 @@ module World =
 
         let borrowed = raising @ Colony.reclaiming stages unowned colonies colony
 
+        // The contested homes the Caster hands this colony's garrison, less a
+        // room it works as an outpost.
         let garrisoned =
-            Colony.garrisoning
-                stages
-                (fun home -> towersStanding (roomOf world home) >= tuning.GarrisonTowers)
-                colonies
-                colony
+            garrisonCasters joins tuning stages casting colonies world
+            |> Map.filter (fun home caster ->
+                caster = colony.Home
+                && not (
+                    Colony.outpostsWorked stages colony
+                    |> List.exists (fun outpost -> outpost.RoomName = home)
+                ))
+            |> Map.keys
+            |> List.ofSeq
 
         // A garrisoned home's chain walked as a defended one's is.
         let covered =

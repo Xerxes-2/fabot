@@ -20,8 +20,9 @@ type BorrowedWork =
         /// rooms, so nothing of them is work but the Guard the planner pools
         /// there where the verdict has this colony cast it.
         Defended: string list
-        /// The `Independent` children's homes this colony still keeps its
-        /// resident garrison in (`Colony.garrisoning`, #479): projected for
+        /// The contested `Independent` homes of other colonies this colony
+        /// keeps its resident garrison in, the Caster's choice
+        /// (`World.garrisonCasters`, #479): projected for
         /// the garrison's ground alone — the controller its ring is read
         /// off and the ramparts it fights from — and no Upgrade or Build.
         Garrisoned: string list
@@ -584,8 +585,8 @@ type ColonyView =
         /// colony's Atlas (`ColonyView.bodies`). Its fighting rows count the
         /// fighters it cast, wherever held (`Quota.fightersCast`).
         Fighters: CreepInfo list
-        /// The names of those creeps standing in a room this colony does not
-        /// project, and so in no layer: the bodies the projection does not
+        /// The names of its economy bodies standing in a room this colony
+        /// does not project, and so in no layer: the bodies the projection does not
         /// place because the shell does not, told apart from a fixture that
         /// simply placed nobody (#506).
         Unprojected: Set<string>
@@ -780,6 +781,15 @@ module ColonyView =
         match view.Fighters with
         | [] -> view.Creeps
         | fighters -> view.Creeps @ fighters
+
+    /// The home an idle fighter this colony holds walks to: the colony's
+    /// that cast it (`WorldView.CastBy`), which this colony projects the walk
+    /// to, else its own. A fighter's caster governs its walk home, its holder
+    /// only its tick.
+    let idleHome (view: ColonyView) (creep: string) : string =
+        match Map.tryFind creep view.World.CastBy.Value with
+        | Some(caster, _) when Map.containsKey caster view.Spatial.Rooms -> caster
+        | _ -> SpatialInfo.homeName view.Spatial
 
     /// The view the world's fight reads for this colony: every body it holds
     /// in `Creeps`, as the Emitter, the reflexes and the mover walk them.
@@ -1533,7 +1543,41 @@ module ColonyView =
                 |> Seq.distinct
                 |> List.ofSeq
 
-        let scanned = scan.Scanned @ contested
+        // The walk home of each fighter this colony holds and another cast,
+        // to its caster's home and the rooms between, inside the hop budget,
+        // projected as transit rooms: the home an idle fighter walks to is
+        // its caster's (`ColonyView.idleHome`), and the walk must be one this
+        // colony's Atlas prices. Its first step out of the rooms this colony
+        // alone projects hands it on: to its caster, or to whoever projects
+        // the room it steps into.
+        let homeward =
+            let held = Set.ofList (scan.Scanned @ contested)
+
+            match
+                mine
+                |> List.filter (fun creep -> fighter creep.Info)
+                |> List.choose (fun creep ->
+                    match Map.tryFind creep.Info.Name watch.CastBy.Value with
+                    | Some(caster, _) when caster <> home && creep.Room <> caster ->
+                        Some(creep.Room, caster)
+                    | _ -> None)
+            with
+            | [] -> []
+            | walks ->
+                // Every chain the Atlas may walk it by, over the masked rings
+                // and round the rooms a rival owns (`World.reachesUnder`); one
+                // no chain joins inside the budget projects nothing, and the
+                // body walks to its holder's home.
+                let linked = World.reachesUnder gate joins tuning world
+
+                walks
+                |> List.distinct
+                |> List.collect (fun (from, caster) ->
+                    RoomName.routesBy linked tuning.MaxHops from caster |> List.concat)
+                |> List.filter (held.Contains >> not)
+                |> List.distinct
+
+        let scanned = scan.Scanned @ contested @ homeward
 
         // The `elif` chain below reads this after the bootstrap and transit
         // branches and before the worked ones, which **presumes the two
@@ -1785,8 +1829,10 @@ module ColonyView =
             PlayerSites = world.Sites
             Creeps = economy
             Fighters = fighters
+            // Its economy bodies alone: a fighter is the world's fight's.
             Unprojected =
                 mine
+                |> List.filter (fun creep -> not (fighter creep.Info))
                 |> List.filter (fun creep ->
                     not (List.exists (fun (room, _) -> room = creep.Room) worked))
                 |> List.map (fun creep -> creep.Info.Name)

@@ -1447,19 +1447,19 @@ let private cut (a: Arena) : World * (string -> string -> int option) * (Colony 
     let living = World.living a.Colonies world
     let joins = JoinTable()
 
+    // As `Main` casts it, harassment declared or not: the garrison's floor
+    // and last tick's Tasks ride on it too.
     let casting =
-        match a.Harass with
-        | [] -> HarassCasting.none
-        | rooms ->
-            World.harassCasters
-                joins
-                tuning
-                a.Colonies
-                {
-                    Rooms = rooms
-                    BlockCost = Bodies.rangerBlockCost
-                }
-                world
+        World.harassCasters
+            joins
+            tuning
+            a.Colonies
+            {
+                Rooms = a.Harass
+                BlockCost = Bodies.rangerBlockCost
+            }
+            a.Carried.Assignments
+            world
 
     let danger = dangerOf a
 

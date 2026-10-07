@@ -435,7 +435,13 @@ let planFightTasks
             |> fun rooms -> Set.difference rooms (Set.ofList (guardedRooms @ holding @ killing))
             |> Set.toList
 
-        (guardedRooms @ holding @ killing @ fought |> List.map Guard)
+        // None held, chased or killed in a room held for a stray body alone
+        // (#570): no colony casts for it, so its Guard yields to the asks of
+        // the body's own colony, and the body walks home.
+        let unheld room =
+            not (Set.contains room view.Spatial.StrayRooms)
+
+        (guardedRooms @ List.filter unheld (holding @ killing @ fought) |> List.map Guard)
         // And one Assault per assault this colony pools (#490, #491).
         @ briefedAs Duty.Assault
         // And the home's Defend while it wants a defender (#504): the row

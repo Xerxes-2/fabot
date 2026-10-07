@@ -519,10 +519,15 @@ let private fullTick
     let gateOf home =
         gates |> Map.tryFind home |> Option.defaultValue StandDown.none
 
+    // Both flat and keyed by creep name, read once and handed to every colony;
+    // what a colony is handed for a creep it does not hold, the Matcher drops.
+    let assignments = loadAssignments ()
+
     // Which colony casts each harassment room, decided once for every
-    // colony's reading below (#434).
+    // colony's reading below (#434); a fighter held to a room's Guard keeps
+    // its caster.
     let casting =
-        World.harassCasters joins Tuning.defaults Colony.declared harassment world
+        World.harassCasters joins Tuning.defaults Colony.declared harassment assignments world
 
     // Every creep filed under the colony that holds it this tick, cut once
     // and handed to each view: two colonies holding one creep would write two
@@ -581,9 +586,6 @@ let private fullTick
     // the prelude: the gate and the cut are one act, and splitting them would
     // price a `find` sweep against a Memory read.
     let atSnapshot = Game.cpu.getUsed ()
-    // Both flat and keyed by creep name, read once and handed to every colony;
-    // what a colony is handed for a creep it does not hold, the Matcher drops.
-    let assignments = loadAssignments ()
     let verbose = ObserveMemory.loadVerbose ()
 
     // Each colony decides its own tick with its movement left unarbitrated: a
