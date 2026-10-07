@@ -425,6 +425,22 @@ let isFighterBody (creep: CreepInfo) =
 /// colony holds it (`ColonyView.Defenders`), wins `exchangeWon` alone on its
 /// live hits and active parts. One body and never the garrison summed, for
 /// `guardBlocksReach`'s reason: the raid focuses one body at a time.
+/// The projected rooms an economy body may not walk into this tick
+/// (`Facts.openToEconomy`, #605), read as a fresh candidate does with any
+/// fighting body of ours for a holder: the anchor and reserver rows hire
+/// nobody for them while they stay shut, as for a room the stand-down shuts.
+let shutToEconomy (view: ColonyView) : Set<string> =
+    match view.Hostiles with
+    | [] -> Set.empty
+    | hostiles ->
+        hostiles
+        |> List.map (fun h -> h.Pos.Room)
+        |> List.distinct
+        |> List.filter (fun room ->
+            Map.containsKey room view.Spatial.Rooms
+            && not (Facts.openToEconomy view isFighterBody false room))
+        |> Set.ofList
+
 let internal homeHolds (view: ColonyView) (room: string) : bool =
     Map.tryFind room view.Defenders
     |> Option.defaultValue []
@@ -690,6 +706,7 @@ let internal reserverClaimsOf
                  else
                      castFor CastRow.Ranger)
                 lost
+                shutToEconomy view
             ]
 
     if view.Bank.Capacity < bodyCost reserverPattern.Block then
@@ -1042,13 +1059,15 @@ let internal quotaRowsOf
             |> List.map (fun role -> role, squadQuota threats role)
             |> Map.ofList
         // One Anchor per Post of every projected room but a raised child's,
-        // whose rock its pioneers dig and its own row garrisons (#192).
+        // whose rock its pioneers dig and its own row garrisons (#192), and
+        // one a raid shuts to the economy (#605).
         Anchor =
             Atlas.postCount atlas
             - (view.BorrowedSources
                |> List.choose (fun s -> Atlas.targetRoom atlas s.Id)
-               |> List.distinct
-               |> List.sumBy (fun room -> Set.count (Atlas.postsIn atlas room)))
+               |> Set.ofList
+               |> Set.union (shutToEconomy view)
+               |> Seq.sumBy (fun room -> Set.count (Atlas.postsIn atlas room)))
         Hauler = haulerQuota
         Miner = sizing.MinerQuota
         Courier = sizing.CourierQuota

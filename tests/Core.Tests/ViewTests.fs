@@ -7147,4 +7147,54 @@ let worldViewTests =
 
                 Expect.isTrue (WorldView.sees watch mother) "a room seen this tick is the world's"
             }
+
+            // #605: a raid shuts its room to the economy, so nothing of ours
+            // walks in to look; the observer is the room's only look left.
+            test "a watched room a recalled raid shuts to the economy wants eyes while it shuts it" {
+                let raider owner : HostileInfo =
+                    {
+                        Id = "raid-1"
+                        Owner = owner
+                        Pos = RoomPos.at outpost { X = 25; Y = 25 }
+                        Body = [ Attack; Move ]
+                        Boosts = []
+                        Hits = 2 * Engine.partHits
+                        TicksToLive = Engine.creepLifetime
+                    }
+
+                let dangerAfter ago owner =
+                    let world =
+                        { pairWorld with
+                            // Nothing of ours sees the outpost this tick.
+                            Sightings = Map.remove outpost pairWorld.Sightings
+                            Raiders =
+                                Map.ofList
+                                    [
+                                        outpost,
+                                        {
+                                            Raid = [ raider owner ]
+                                            Tick = pairWorld.Time - ago
+                                        }
+                                    ]
+                        }
+
+                    let watch = WorldView.ofWorld declared [ StandDown.none ] world
+                    Set.contains outpost watch.Danger, Map.tryFind outpost watch.RaidSeen
+
+                let hold = Tuning.defaults.PlayerRaidHold
+
+                Expect.equal
+                    (dangerAfter (hold - 1) "Trepidimous")
+                    (true, Some(pairWorld.Time - hold + 1))
+                    "an enemy's raid last seen inside the hold wants eyes"
+
+                Expect.equal
+                    (fst (dangerAfter hold "Trepidimous"))
+                    false
+                    "past the hold it shuts nothing, and wants none"
+
+                Expect.isTrue (fst (dangerAfter (10 * hold) "Invader")) "an Invader's, for its life"
+
+                Expect.isFalse (fst (dangerAfter 1 "giaco")) "a neutral's shuts nothing"
+            }
         ]

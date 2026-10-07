@@ -492,13 +492,48 @@ let matchAcross
                     | Some(RecallPolicy.Struck room) -> Some(room, pooled)
                     | _ -> None))
 
-    let graced k (creep: CreepInfo) tid =
+    // An economy body walks into a raided room only once it is safe there on
+    // arrival (`Facts.openToEconomy`, #605), asked once a room, a colony and
+    // a reading (a holder's or a fresh candidate's); a body already standing
+    // in the room is the Reach's and Flee's. A room's holders are the bodies
+    // holding its Guard or Defend this tick, the fighters being matched
+    // first, else as remembered.
+    let openRooms =
+        contexts
+        |> Array.map (fun _ ->
+            System.Collections.Generic.Dictionary<struct (string * bool), bool>())
+
+    let shutTo k (acc: Assignments) (kept: bool) (creep: CreepInfo) (room: string) =
+        let ctx = contexts.[k]
+
+        let holds (body: CreepInfo) =
+            let held =
+                Map.tryFind body.Name acc |> Option.orElse (Map.tryFind body.Name assignments)
+
+            held = Some(taskId (Guard room)) || held = Some(taskId (Defend room))
+
+        Atlas.creepRoom ctx.Atlas creep.Name <> Some room
+        && not (
+            match openRooms.[k].TryGetValue(struct (room, kept)) with
+            | true, answer -> answer
+            | _ ->
+                let answer = Facts.openToEconomy ctx.View holds kept room
+                openRooms.[k].[struct (room, kept)] <- answer
+                answer
+        )
+
+    let closedFor k acc kept (creep: CreepInfo) task =
+        not (safetyTier task)
+        && roomOfWork contexts.[k].Atlas task |> Option.exists (shutTo k acc kept creep)
+
+    let graced k acc (creep: CreepInfo) tid =
         let ctx = contexts.[k]
 
         if standsInReach ctx.Threats ctx.Atlas creep.Name then
             None
         else
             lastSeenIn ctx.View tid
+            |> Option.filter (fun room -> isFighterBody creep || not (shutTo k acc true creep room))
 
     // `threatened` asked once per `threatenedKey` (a Task and a body kind)
     // rather than once a pair, a colony's Atlas each.
@@ -529,7 +564,7 @@ let matchAcross
 
     let otherWork = System.Collections.Generic.Dictionary<string, bool>()
 
-    let walledOff k (creep: CreepInfo) task =
+    let walledOff k acc (creep: CreepInfo) task =
         let ctx = contexts.[k]
 
         walledOffFrom.[k] creep task
@@ -541,6 +576,7 @@ let matchAcross
                     |> List.exists (fun other ->
                         not (safetyTier other.Task)
                         && not (threatenedFor k creep other.Task)
+                        && not (closedFor k acc false creep other.Task)
                         && applicable ctx.View ctx.Threats ctx.Atlas creep other
                         && Option.isSome (travelCostOf ctx.Threats ctx.Atlas creep.Name other.Task)
                         && not (walledOffFrom.[k] creep other.Task))
@@ -630,6 +666,7 @@ let matchAcross
     // cascade, where the Task is in no pool at all.
     let gate
         k
+        (kept: bool)
         (escape: Lazy<bool>)
         acc
         (creep: CreepInfo)
@@ -637,7 +674,7 @@ let matchAcross
         : Result<int, RejectReason> =
         let ctx = contexts.[k]
 
-        if threatenedFor k creep pooled.Task then
+        if threatenedFor k creep pooled.Task || closedFor k acc kept creep pooled.Task then
             Error RejectReason.Threatened
         elif not (applicable ctx.View ctx.Threats ctx.Atlas creep pooled) then
             Error RejectReason.Inapplicable
@@ -652,7 +689,7 @@ let matchAcross
             else
                 match cost with
                 | None -> Error RejectReason.Unreachable
-                | Some _ when walledOff k creep pooled.Task -> Error RejectReason.Unreachable
+                | Some _ when walledOff k acc creep pooled.Task -> Error RejectReason.Unreachable
                 | Some _ when not (outlivesTheStay ctx.View ctx.Atlas creep pooled.Task arrival) ->
                     Error RejectReason.Inapplicable
                 | Some cost ->
@@ -673,7 +710,7 @@ let matchAcross
                 |> List.exists (fun (struckIn, repair) ->
                     struckIn = room
                     && repair.Priority < pooled.Priority
-                    && Result.isOk (gate k (lazy false) acc creep repair))
+                    && Result.isOk (gate k false (lazy false) acc creep repair))
             | None -> false)
 
     // The holders let go for a kill this tick (#510, #516), decided once
@@ -746,6 +783,7 @@ let matchAcross
                             && Result.isOk (
                                 gate
                                     k
+                                    false
                                     (lazy false)
                                     (Map.remove creep.Name assignments)
                                     creep
@@ -831,7 +869,7 @@ let matchAcross
             // Kept, by the Verdict every other steady assignment answers
             // with. The Task is in no pool, so `graced` is the whole
             // judgement.
-            | None when Option.isSome (graced k creep tid) ->
+            | None when Option.isSome (graced k acc creep tid) ->
                 Map.add name tid acc, hold loads tid, released
             | None -> release ReleaseReason.TaskGone
             // A Task across the line from the body, which its share does
@@ -875,7 +913,7 @@ let matchAcross
             | Some pooled ->
                 let escape = lazy (isExpiring creep.Name || reliefPair acc creep pooled)
 
-                match gate k escape acc creep pooled with
+                match gate k true escape acc creep pooled with
                 | Error reason -> release (ReleaseReason.Rejected reason)
                 | Ok _ -> Map.add name tid acc, hold loads tid, released
 
@@ -891,7 +929,7 @@ let matchAcross
 
     let gateAmong k offered acc (creep: CreepInfo) =
         offered
-        |> List.map (fun (tid, pooled) -> tid, pooled, gate k (lazy false) acc creep pooled)
+        |> List.map (fun (tid, pooled) -> tid, pooled, gate k false (lazy false) acc creep pooled)
 
     let score
         k
@@ -1088,7 +1126,7 @@ let matchAcross
                     | Some(pooled, cost) ->
                         let result =
                             if Capacity.isBounded pooled.Capacity then
-                                gate side (lazy false) acc other pooled
+                                gate side false (lazy false) acc other pooled
                             else
                                 Ok cost
 

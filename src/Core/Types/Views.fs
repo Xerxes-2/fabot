@@ -268,6 +268,11 @@ type WorldView =
         /// every fixture that decides one view alone, which reads the danger
         /// off its own view (`WorldDanger.read`).
         Dangers: Map<string, Lazy<RoomDanger option>> option
+        /// Each watched room whose raid nothing sees this tick and the world
+        /// recalls (`World.Raiders`, #569), against the tick it was last seen:
+        /// how old the economy gate's memory of it is (`Facts.openToEconomy`,
+        /// #605).
+        RaidSeen: Map<string, int>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -278,6 +283,7 @@ module WorldView =
             Rooms = Map.empty
             Watched = Set.empty
             Danger = Set.empty
+            RaidSeen = Map.empty
             Questioned = Set.empty
             Observers = []
             Looks = None
@@ -332,6 +338,16 @@ module WorldView =
                     |> Option.map (fun tile -> id, tile)
                 | _ -> None)
 
+    /// Whether a raid body recalled through blind ticks, last seen on `seen`,
+    /// still shuts its room to the economy (#605): an Invader for its life,
+    /// which never leaves the room; a player's body no longer than
+    /// `Tuning.PlayerRaidHold`, #513's trade of a re-shut on its return for
+    /// the hours nobody sees it go. Only a body we strike wherever it stands
+    /// (`Colony.strikesAnywhere`) shuts a room at all.
+    let recallShuts (tuning: Tuning) (time: int) (seen: int) (hostile: HostileInfo) =
+        Colony.strikesAnywhere hostile.Owner
+        && (not (HostileInfo.crossesExits hostile) || time - seen < tuning.PlayerRaidHold)
+
     /// The world's read off this tick's `World` and every colony's
     /// stand-down gate. A room with a `Control` entry is one something of ours
     /// looked into (`World.ofGame`). No danger yet: it is laid once the views
@@ -346,6 +362,11 @@ module WorldView =
                  @ (colony.Assaults |> List.map (fun assault -> assault.RoomName))))
             @ (Colony.harass |> List.map (fun h -> h.RoomName))
             |> Set.ofList
+
+        let raidSeen =
+            world.Raiders
+            |> Map.filter (fun room _ -> watched.Contains room && not (World.seenNow world room))
+            |> Map.map (fun _ last -> last.Tick)
 
         {
             Rooms =
@@ -367,13 +388,24 @@ module WorldView =
                         }))
                 |> Map.ofList
             Watched = watched
+            // And each watched room a recalled raid still shuts to the economy
+            // (`recallShuts`, #605): nothing else of ours walks in to look.
             Danger =
                 gates
                 |> List.map (fun gate ->
                     Set.unionMany
                         [ gate.RaidedOutposts; gate.ChasedOutposts; gate.ThreatenedOutposts ])
                 |> Set.unionMany
+                |> Set.union (
+                    raidSeen
+                    |> Map.filter (fun room seen ->
+                        world.Raiders.[room].Raid
+                        |> List.exists (recallShuts Tuning.defaults world.Time seen))
+                    |> Map.keys
+                    |> Set.ofSeq
+                )
                 |> Set.intersect watched
+            RaidSeen = raidSeen
             Questioned =
                 gates
                 |> List.map (fun gate -> gate.RivalReserved)

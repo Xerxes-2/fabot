@@ -876,6 +876,228 @@ let crossSeamThreatTests =
             }
         ]
 
+/// The far corner of `raidedOutpost`'s field, six tiles and more off every
+/// tile the container is drawn from and nine off the controller's ring:
+/// whatever stands here takes no Work Area of either into its Reach.
+let private farCorner = { X = 20; Y = 48 }
+
+/// Trepidimous' 18M17A guard of W17S26 (#604, #605), standing at `pos`.
+let private standingMelee pos =
+    { hostileIn "W1N2" pos (List.replicate 18 Move @ List.replicate 17 Attack) with
+        Id = "melee-1"
+        Owner = "Trepidimous"
+    }
+
+/// One body at home, decided against the outpost and the hostiles given.
+let private homeBodyUnder (creep: CreepInfo) hostiles (change: ColonyView -> ColonyView) =
+    decide
+        (declaredRaid hostiles |> withBodyAtHome creep atSpawn |> change)
+        Map.empty
+        Set.empty
+        None
+
+/// An Invader's `smallMelee` at `pos`: a raid we strike anywhere.
+let private invaderAt pos =
+    { hostileIn "W1N2" pos smallMelee with
+        Id = "inv-1"
+        Owner = "Invader"
+    }
+
+let private homeWorker = worker "w-home" 0 50
+
+/// A bank whose guard wins `invaderAt`'s raid alone.
+let private rich (colony: ColonyView) =
+    { colony with
+        Bank = { Available = 1_300; Capacity = 1_300 }
+    }
+
+/// The outpost Task the home worker crosses for with the room quiet.
+let private quietDraw () =
+    Map.tryFind "w-home" (homeBodyUnder homeWorker [] rich).Assignments
+
+[<Tests>]
+let economyEntryTests =
+    testList
+        "an economy body walks into a raided outpost only once it is safe there (#605)"
+        [
+            test
+                "a raid the verdict wins keeps the home worker out until a fighter of ours is at the fight" {
+                let raid = [ invaderAt farCorner ]
+                let drawn = quietDraw ()
+
+                Expect.contains
+                    [ Some(taskId (Harvest "src-out")); Some(taskId (Withdraw("can-out", Energy))) ]
+                    drawn
+                    "the premise: with the room quiet the body crosses for the outpost's work"
+
+                // Pairwise on the guard alone: at home it is a room off the
+                // raid, beside it it is at the fight.
+                let guardAtHome =
+                    homeBodyUnder
+                        homeWorker
+                        raid
+                        (rich >> withBodyAtHome (guard "g-1") { X = 25; Y = 30 })
+
+                let guardAtFight =
+                    homeBodyUnder
+                        homeWorker
+                        raid
+                        (rich >> withGuards [ guard "g-1", { X = 21; Y = 47 } ])
+
+                Expect.equal
+                    (Facts.answer (rich (declaredRaid raid)) "W1N2")
+                    Answer.Win
+                    "the premise: the verdict wins it, so no stand-down shuts the room"
+
+                Expect.notEqual
+                    (Map.tryFind "w-home" guardAtHome.Assignments)
+                    drawn
+                    "the verdict says whether to fight, not whether the economy walks in"
+
+                Expect.equal
+                    (Map.tryFind "g-1" guardAtFight.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the premise: the guard beside the raid holds the room's Guard"
+
+                Expect.equal
+                    (Map.tryFind "w-home" guardAtFight.Assignments)
+                    drawn
+                    "once the guard holds the fight and wins it the room is the worker's again"
+            }
+
+            test
+                "a body already holding the outpost's work keeps it while the Guard's holder stays in the room" {
+                // The guard holds W1N2's Guard from the room's far corner,
+                // out of its swing: seated nowhere, but in the room.
+                let guardAway (colony: ColonyView) =
+                    rich colony |> withGuards [ guard "g-1", { X = 30; Y = 41 } ]
+
+                let held =
+                    Map.ofList [ "w-home", Option.get (quietDraw ()); "g-1", taskId (Guard "W1N2") ]
+
+                let fresh =
+                    decide
+                        (declaredRaid [ invaderAt farCorner ]
+                         |> withBodyAtHome homeWorker atSpawn
+                         |> guardAway)
+                        (Map.ofList [ "g-1", taskId (Guard "W1N2") ])
+                        Set.empty
+                        None
+
+                let kept =
+                    decide
+                        (declaredRaid [ invaderAt farCorner ]
+                         |> withBodyAtHome homeWorker atSpawn
+                         |> guardAway)
+                        held
+                        Set.empty
+                        None
+
+                Expect.notEqual
+                    (Map.tryFind "w-home" fresh.Assignments)
+                    (quietDraw ())
+                    "a fresh candidate waits for the holder to be seated at the fight"
+
+                Expect.equal
+                    (Map.tryFind "w-home" kept.Assignments)
+                    (quietDraw ())
+                    "a holder of the work keeps it while the Guard's holder stands in the room"
+            }
+
+            test "the anchor and reserver rows hire nobody for a room the raid shuts to the economy" {
+                let raided = rich (declaredRaid [ invaderAt farCorner ])
+
+                Expect.equal
+                    (Quota.shutToEconomy raided)
+                    (Set.singleton "W1N2")
+                    "with no fighter of ours at the fight the room is shut to the rows"
+
+                Expect.isEmpty
+                    (Quota.shutToEconomy (raided |> withGuards [ guard "g-1", { X = 21; Y = 47 } ]))
+                    "a guard at the fight that wins it opens it again"
+            }
+
+            test "a neutral's armed body in the outpost shuts nothing" {
+                let neutral =
+                    { hostileIn "W1N2" farCorner smallMelee with
+                        Id = "giaco-1"
+                        Owner = "giaco"
+                    }
+
+                Expect.equal
+                    (Map.tryFind "w-home" (homeBodyUnder homeWorker [ neutral ] rich).Assignments)
+                    (quietDraw ())
+                    "nobody strikes it anywhere, so it is no raid the economy waits out"
+            }
+
+            // Live t1,006,924, W17S26: the room's row cut to its first sighting
+            // plus `Tuning.PlayerRaidHold`, the reserver walked back to the
+            // controller the melee still stood beside, and died.
+            test
+                "a raid nothing of ours wins keeps the room shut past the player's hold while it is seen or recalled" {
+                let reserving = Some(taskId (Reserve "ctl-out"))
+                let reserver = reserver "r-home"
+
+                let contested (colony: ColonyView) =
+                    { colony with
+                        RoomControl = Map.add "W1N2" (enemyReservedRoom 3_000) colony.RoomControl
+                    }
+
+                Expect.equal
+                    (Map.tryFind "r-home" (homeBodyUnder reserver [] contested).Assignments)
+                    reserving
+                    "the premise: with the melee seen gone the reserver walks to attack his hold (#604)"
+
+                let melee = standingMelee farCorner
+
+                Expect.equal
+                    (Facts.answer (declaredRaid [ melee ]) "W1N2")
+                    Answer.Lose
+                    "the premise: nothing of ours wins it"
+
+                Expect.notEqual
+                    (Map.tryFind "r-home" (homeBodyUnder reserver [ melee ] contested).Assignments)
+                    reserving
+                    "seen, the melee keeps the reserver out whatever the stand-down's clock says"
+
+                let recalled (colony: ColonyView) =
+                    { contested colony with
+                        RecalledRaiders = [ melee ]
+                    }
+
+                Expect.notEqual
+                    (Map.tryFind "r-home" (homeBodyUnder reserver [ melee ] recalled).Assignments)
+                    reserving
+                    "and recalled through the blind ticks, until a sighting finds it gone"
+
+                // #513's trade: a player's raid nobody sees go holds the room
+                // no longer than `Tuning.PlayerRaidHold` past its last sighting.
+                let lastSeen ago (colony: ColonyView) =
+                    { recalled colony with
+                        World =
+                            { colony.World with
+                                RaidSeen = Map.ofList [ "W1N2", colony.Time - ago ]
+                            }
+                    }
+
+                let hold = Tuning.defaults.PlayerRaidHold
+
+                Expect.notEqual
+                    (Map.tryFind
+                        "r-home"
+                        (homeBodyUnder reserver [ melee ] (lastSeen (hold - 1))).Assignments)
+                    reserving
+                    "seen inside the hold, still shut"
+
+                Expect.equal
+                    (Map.tryFind
+                        "r-home"
+                        (homeBodyUnder reserver [ melee ] (lastSeen hold)).Assignments)
+                    reserving
+                    "unseen for the whole hold, the room is the reserver's again"
+            }
+        ]
+
 [<Tests>]
 let containerSwitchTests =
     testList

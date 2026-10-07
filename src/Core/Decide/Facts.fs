@@ -2321,6 +2321,72 @@ let internal residentsLose (view: ColonyView) (room: string) : bool =
     not standingWin
     && not (rangerBlocksBeat view room view.Tuning.RangerResidentBlocks)
 
+/// Whether an economy body may walk into a room (#605): a room of ours
+/// always; any other while no raid stands in it, or while the verdict does
+/// not lose the raid and the bodies of ours holding the room's Guard or
+/// Defend (`holds`) win it, those seated at the fight (`atFight`) together
+/// (`bodiesWin`) or one kiting it down (`kitedDown`). The verdict says whether
+/// to fight, never whether the economy walks in. A body already holding work
+/// there (`kept`) keeps it while any holder stands in the room or beside it,
+/// so a kite dancing out past the fight turns nobody back at the border. The
+/// raid is the raiders we strike anywhere (`Colony.strikesAnywhere`), seen,
+/// or recalled while `WorldView.recallShuts`; one that can barely move (#510)
+/// is the Reach's alone.
+let internal openToEconomy
+    (view: ColonyView)
+    (holds: CreepInfo -> bool)
+    (kept: bool)
+    (room: string)
+    : bool =
+    let recalled = view.RecalledRaiders |> List.map _.Id |> Set.ofList
+
+    let seen = Map.tryFind room view.World.RaidSeen |> Option.defaultValue view.Time
+
+    let raid =
+        raidersIn view room
+        |> List.filter (fun h ->
+            Colony.strikesAnywhere h.Owner
+            && not (HostileInfo.stationary view.Hostiles h)
+            && (not (Set.contains h.Id recalled)
+                || WorldView.recallShuts view.Tuning view.Time seen h))
+
+    let near = Set.ofList (room :: RoomName.adjacent room)
+
+    // The holders standing in the room or beside it, whichever colony's.
+    let holders () =
+        let placed =
+            view.Creeps
+            |> List.filter (fun creep ->
+                SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                |> Option.exists (fun at -> near.Contains at.Room))
+
+        near
+        |> Seq.collect (fun room ->
+            Map.tryFind room view.World.Bodies.Value
+            |> Option.defaultValue []
+            |> Seq.map fst)
+        |> Seq.append placed
+        |> Seq.distinctBy _.Name
+        |> Seq.filter holds
+        |> List.ofSeq
+
+    let held () =
+        match holders () with
+        | [] -> false
+        | _ when kept -> true
+        | holding ->
+            let seated =
+                holding
+                |> List.filter (fun creep -> walkToRaid view raid creep |> Option.exists atFight)
+
+            not (List.isEmpty seated)
+            && (bodiesWin view room seated
+                || seated |> List.exists (fun creep -> kitedDown view (partCount creep.Body) room))
+
+    ourRoom view room
+    || List.isEmpty raid
+    || answer view room <> Answer.Lose && held ()
+
 /// The Planner's narrow view of the assignment table, filtered to the living:
 /// `Assignments` arrives from Memory and may name a creep that died last tick,
 /// the Matcher drops those silently, but `planTasks` runs first. Not filtered
