@@ -204,7 +204,7 @@ let outpostTests =
                 Expect.equal
                     (standDowns state)
                     [ outpostRoom, 100, 100, 110, StandDownBasis.RaidGone ]
-                    "the clock ends on the tick the last body is seen at home"
+                    "the clock ends on the tick the last body is seen at home, well before its window would (#507)"
 
                 Expect.isEmpty (shutAt 111 state) "and the outpost is worked again"
             }
@@ -680,18 +680,6 @@ let outpostTests =
                 Expect.equal (shutAt 351 state) (Set.singleton outpostRoom) "shut on sight"
             }
 
-            test "a player's raid seen gone still reopens before its window ends" {
-                let state =
-                    RaidState.empty
-                    |> raidTick 100 (squadIn outpostRoom "Trepidimous")
-                    |> raidTick 110 (squadIn raidRoom "Trepidimous")
-
-                Expect.equal
-                    (standDowns state)
-                    [ outpostRoom, 100, 100, 110, StandDownBasis.RaidGone ]
-                    "#507's release is the sooner"
-            }
-
             // #510. Live t951,926: Torque404 left in W18S25 at 1,454 of 3,500 hits,
             // 14 ATTACK and 1 MOVE alive. The destroyed parts still weigh, so it
             // steps a plain tile every seventeen ticks and harms nothing not beside
@@ -820,7 +808,7 @@ let outpostTests =
                         $"{owner} in a room the colony only crosses is no stand-down"
             }
 
-            test "a child's home its mother defends opens no stand-down" {
+            test "a home this colony defends opens no stand-down" {
                 // #428: the raid that stands a declared outpost down, in the
                 // same room read as a defended home instead.
                 let defended = "W13S28"
@@ -873,7 +861,7 @@ let outpostTests =
                                     Stages = Map.add defended Bootstrapping quiet.Stages
                                 })
                     ))
-                    "nor as a home its mother raises"
+                    "nor as a home it raises as well as defends"
             }
 
             test "an invader core opens a stand-down that runs to its collapse timer" {

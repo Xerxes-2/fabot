@@ -1692,10 +1692,9 @@ let multiHopTests =
                     "nineteen up the transit room, the exit, and eight in the far one"
             }
 
-            test "three crossings is the budget, and it prices" {
-                // The longest chain the colony will ever join: two hops
-                // cannot tell a fold that runs `n-1` times from one that
-                // runs twice. 10 + 49 + 49 + 8.
+            test "a walk over three borders folds the same terms three times" {
+                // Two hops cannot tell a fold that runs `n-1` times from one
+                // that runs twice. 10 + 49 + 49 + 8.
                 let plainCorridorRing = [ { X = 25; Y = 0 }, Plain; { X = 25; Y = 49 }, Plain ]
 
                 let atlas =
@@ -1727,9 +1726,10 @@ let multiHopTests =
                     "and the same chain at two units a plain step"
             }
 
-            test "a chain longer than the hop budget is no chain at all" {
-                // Three rooms is two hops and inside the budget, so this
-                // pins the shape rather than the number.
+            test "a walled transit border breaks the chain, and the target is unpriced" {
+                // Three rooms is two hops and inside the budget: the chain
+                // fails on the missing band, not on the hop count (the
+                // budget itself is pinned in the Seam tests).
                 let atlas =
                     chainOfThree
                         (corridorHome [ "w", { X = 25; Y = 10 } ])

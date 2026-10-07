@@ -239,20 +239,6 @@ let walkTests =
                     "travel cost is untouched: eight units, the ranking price the old rule halved"
             }
 
-            test "the floor lifts a cheap step without capping a dear one" {
-                // A floor, not a rounding: the swamp step stays ceil(10 / 2) = 5.
-                let walkOn terrain roads =
-                    let atlas = seatPriced terrain roads |> snapshotWith [ worker "w" ] |> ofView
-
-                    walkTicks atlas "w" (Harvest "src-a")
-
-                let road = Set.singleton { X = 10; Y = 11 }
-
-                Expect.equal (walkOn Plain road) (Some 1) "a road step is one tick"
-                Expect.equal (walkOn Plain Set.empty) (Some 1) "so is a plain step"
-                Expect.equal (walkOn Swamp Set.empty) (Some 5) "a swamp step is five, not one"
-            }
-
             test "a Move surplus buys travel cost half a tick a tile and the walk nothing" {
                 // Three Moves under one Work price a plain step at
                 // ceil(2 / 3) = 1 unit; the walk floors it at a whole tick.

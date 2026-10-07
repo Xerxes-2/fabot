@@ -56,11 +56,18 @@ let workAreaTests =
                     ]
 
                 let atlas =
-                    spatial [ "ctrl-1", { X = 10; Y = 10 } ] tiles |> snapshotWith [] |> ofView
+                    spatial [ "ctrl-1", { X = 10; Y = 10 }; "site-1", { X = 10; Y = 10 } ] tiles
+                    |> snapshotWith []
+                    |> ofView
 
                 let area = workArea atlas (Upgrade "ctrl-1") |> tilesHome atlas
                 Expect.hasLength area 49 "the full 7x7 square is passable"
                 Expect.isTrue (Set.contains { X = 7; Y = 7 } area) "the corner at range 3 is in"
+
+                Expect.equal
+                    (workArea atlas (Build "site-1") |> tilesHome atlas)
+                    area
+                    "a site's Work Area is the same range-3 square"
             }
         ]
 

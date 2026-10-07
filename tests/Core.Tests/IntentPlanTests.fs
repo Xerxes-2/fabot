@@ -4,10 +4,12 @@ open Expecto
 open Fabot.Core.Types
 open Fabot.Core.IntentPlan
 
-// Independent transcription of the supported engine actions. The processor's
-// priority chain occupies indices 0..6; all remaining methods have separate
-// channels. Exercise both orders, identical duplicates and distinct actors.
-let private chain = 7
+// Independent transcription of every creep act outside the ranged slot. The
+// processor's priority chain occupies indices 0..8, harvest last; all remaining
+// methods have separate channels. The ranged acts share a second slot across
+// the chain and are pinned by the #411/#537 tests below. Exercise both orders,
+// identical duplicates and distinct actors.
+let private chain = 9
 
 let private candidates name =
     [
@@ -17,13 +19,18 @@ let private candidates name =
         RepairStructure(name, "road")
         BuildSite(name, "site")
         AttackCreep(name, "hostile")
+        AttackStructure(name, "wall")
+        AttackController(name, "controller")
         HarvestSource(name, "source")
         UpgradeController(name, "controller")
         TransferEnergyToStructure(name, "store", Energy)
         WithdrawFromStore(name, "store", Energy, None)
         PickupPile(name, "pile")
+        DropEnergy name
         ReserveController(name, "controller")
         ClaimController(name, "controller")
+        ClaimReactor(name, "reactor")
+        SignController(name, "controller", "line")
         MoveCreep(name, Top)
         SayCreep(name, "task")
     ]
@@ -38,7 +45,8 @@ let tests =
     testList
         "executable intent plan"
         [
-            test "all supported pairs follow the engine priority and overwrite rules" {
+            test
+                "every pair outside the ranged slot follows the engine priority and overwrite rules" {
                 for i, first in candidates "guard" |> List.indexed do
                     for j, second in candidates "guard" |> List.indexed do
                         match create [ first; second ] with
@@ -115,7 +123,7 @@ let tests =
                 Expect.equal
                     (accepted turn)
                     turn
-                    "harvest can accompany upgrade, carry, controller, move and say methods"
+                    "harvest can accompany upgrade, carry, drop, controller, reactor, sign, move and say methods"
 
                 Expect.equal (accepted []) [] "an idle tick is executable"
             }

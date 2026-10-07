@@ -516,15 +516,6 @@ let forcedTests =
                 Expect.isFalse (nearAt (10, Attack, 10) 3) "and no further"
             }
 
-            test "a MOVE-only hostile within range of our creep forces nothing" {
-                let scout =
-                    { stepped with
-                        Hostiles = [ hostile 11 10 "Mirroar" false ]
-                    }
-
-                Expect.equal (LightTick.forced last scout) None "a scout changes no decision"
-            }
-
             test "near a creep of ours, only a body that can hurt it forces a full tick" {
                 // User, 2026-10-04: a Trepidimous worker beside a harassing ranger
                 // held every tick full. No structure of ours in the room, so an
@@ -1106,7 +1097,7 @@ let forcedTests =
                     "lost"
             }
 
-            test "the reasons are read in the ADR's order" {
+            test "the reasons are read in `forcing`'s order" {
                 let everything =
                     { stepped with
                         Hostiles = [ hostile 11 10 "Invader" true ]

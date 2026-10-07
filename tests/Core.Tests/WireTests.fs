@@ -21,9 +21,6 @@ let private sampleText i = $"field-{i}"
 /// The numbers `casesOf` builds a payload-carrying case around, in field order.
 let private sampleNumbers = Some(sampleField 0, sampleField 1)
 
-/// The same, for a payload that is a name: the TrunkGoal's spawn id.
-let private sampleName = Some(sampleText 0)
-
 /// Every case of a closed union, read off the union's own metadata. Numbers,
 /// names, a `Resource`, an `Ore` and a `Compound` are sampled; any other field type throws,
 /// which is the next author's notice to widen this. The Resource sample is
@@ -50,8 +47,15 @@ let private casesOf<'a> () =
 
         FSharpValue.MakeUnion(case, fields) :?> 'a)
 
-/// One vocabulary's contract: every case spells a name that reads back as
-/// that same case, and no two cases share a name.
+/// A write-only vocabulary's contract: no two cases share a name.
+let private distinctNames label cases toName =
+    Expect.equal
+        (cases |> Array.map toName |> Array.distinct |> Array.length)
+        (Array.length cases)
+        $"{label}: no two cases share a wire name"
+
+/// One read-back vocabulary's contract: every case spells a name that reads
+/// back as that same case, and no two cases share a name.
 let private roundTrips label cases toName ofName =
     for case in cases do
         Expect.equal
@@ -59,18 +63,16 @@ let private roundTrips label cases toName ofName =
             (Some case)
             $"{label}: %A{case} reads back from its wire name"
 
-    Expect.equal
-        (cases |> Array.map toName |> Array.distinct |> Array.length)
-        (Array.length cases)
-        $"{label}: no two cases share a wire name"
+    distinctNames label cases toName
 
 [<Tests>]
 let wireVocabularyTests =
     testList
         "wire vocabularies"
         [
-            test "every observe vocabulary round-trips, case by case" {
-                // The seven unions that ride the observe channel's Memory subtree. The
+            test
+                "every observe vocabulary spells distinct names, and each one read back round-trips" {
+                // The unions that ride the observe channel's Memory subtree. The
                 // encoder is exhaustive by construction; the other direction is not.
                 roundTrips "MatchFactor" (casesOf<MatchFactor> ()) matchFactorName matchFactorOf
 
@@ -87,36 +89,21 @@ let wireVocabularyTests =
 
                 roundTrips "IdleReason" (casesOf<IdleReason> ()) idleReasonName idleReasonOf
 
-                // The Layout channel's own vocabulary: not a Verdict, same subtree.
-                roundTrips "FootingKind" (casesOf<FootingKind> ()) footingKindName footingKindOf
+                // The Layout channel is write-only: nothing in the bundle reads it
+                // back, its reader is `scripts/observe.mjs`. So its vocabularies are
+                // held to distinct names alone.
+                distinctNames "FootingKind" (casesOf<FootingKind> ()) footingKindName
 
                 // What the plan made of each outpost road (#548).
-                roundTrips
-                    "OutpostRoadState"
-                    (casesOf<OutpostRoadState> ())
-                    outpostRoadStateName
-                    outpostRoadStateOf
+                distinctNames "OutpostRoadState" (casesOf<OutpostRoadState> ()) outpostRoadStateName
 
-                // The Layout channel's fourth vocabulary: which kind of declaration.
-                roundTrips
-                    "DeclarationKind"
-                    (casesOf<DeclarationKind> ())
-                    declarationKindName
-                    declarationKindOf
+                distinctNames "DeclarationKind" (casesOf<DeclarationKind> ()) declarationKindName
 
-                // The Layout channel's second vocabulary, its first carrying one.
-                roundTrips
-                    "TrunkGoal"
-                    (casesOf<TrunkGoal> ())
-                    trunkGoalName
-                    (trunkGoalOf sampleName)
+                // The two that carry a name: the TrunkGoal's spawn id, the
+                // ContainerTarget's id.
+                distinctNames "TrunkGoal" (casesOf<TrunkGoal> ()) trunkGoalName
 
-                // The Layout channel's third vocabulary, its second carrying one.
-                roundTrips
-                    "ContainerTarget"
-                    (casesOf<ContainerTarget> ())
-                    containerTargetName
-                    (containerTargetOf sampleName)
+                distinctNames "ContainerTarget" (casesOf<ContainerTarget> ()) containerTargetName
 
                 roundTrips
                     "RejectReason"
@@ -132,8 +119,8 @@ let wireVocabularyTests =
                     standDownBasisName
                     standDownBasisOf
 
-                // The Raid log's second vocabulary. All three cases are spelt though only
-                // two are ever written.
+                // The Raid log's second vocabulary. Every case is spelt though `Ours`
+                // is never written.
                 roundTrips
                     "ReservationHolder"
                     (casesOf<ReservationHolder> ())
@@ -196,12 +183,6 @@ let wireVocabularyTests =
 
                 Expect.isNone (idleReasonOf "") "the empty name is no IdleReason"
 
-                Expect.isNone (footingKindOf "container") "a near miss is no FootingKind"
-
-                Expect.isNone (declarationKindOf "outposts") "a near miss is no DeclarationKind"
-
-                Expect.isNone (trunkGoalOf sampleName "upgrade") "a near miss is no TrunkGoal"
-
                 Expect.isNone
                     (rejectReasonOf sampleNumbers "task-gone")
                     "a ReleaseReason is no RejectReason"
@@ -212,15 +193,6 @@ let wireVocabularyTests =
                 // decodes to None, and the shell drops that row.
                 Expect.isNone (rejectReasonOf None "too-early") "no numbers, no reason"
                 Expect.isNone (releaseReasonOf None "too-early") "and the same on the other side"
-
-                // The Layout channel's carrying vocabulary under the same rule: a `spawn`
-                // row that lost its id names no goal.
-                Expect.isNone (trunkGoalOf None "spawn") "no spawn id, no goal"
-
-                Expect.equal
-                    (trunkGoalOf None "upgrade-area")
-                    (Some TrunkGoal.UpgradeArea)
-                    "while the goal that carries nothing needs nothing"
 
                 Expect.equal
                     (rejectReasonOf None "unreachable")
@@ -355,6 +327,15 @@ let observerTableTests =
                         $"every StandDownBasis is a key of {table} in scripts/observe.mjs — a case the script cannot name is a row it drops while blaming the operator (#368)"
             }
 
+            test "the reservation holders the script can name are all of them" {
+                let spelt =
+                    casesOf<ReservationHolder> () |> Seq.map reservationHolderName |> Set.ofSeq
+
+                Expect.isEmpty
+                    (Set.difference spelt (Observer.keysOf "HOLDER"))
+                    "every ReservationHolder is a key of HOLDER in scripts/observe.mjs (#368)"
+            }
+
             test "the breach kinds the script can name are all of them" {
                 // Five kinds today: two about ore that cannot be spent and three about the
                 // Reactor.
@@ -390,9 +371,9 @@ let observerCpuTests =
                         $"`observe.mjs cpu` reads `{key}` off a row: the sub-object `saveCpu` writes that split into"
             }
 
-            test "the split is not folded into the all-six-or-none phase group" {
-                // `cpuPhaseFields` decodes all of its keys or none, so a sixth phase key
-                // would make every row the previous bundle wrote read as unmeasured.
+            test "the observer's phase columns hold no split key" {
+                // The display list only: the F# decoder's all-or-none guard
+                // (`cpuPhaseFields`) lives in App, out of this project's reach.
                 let phases =
                     Observer.script.Value
                     |> fun text -> Regex.Match(text, @"const PHASES = \[([^\]]*)\]")

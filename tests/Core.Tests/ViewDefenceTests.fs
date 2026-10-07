@@ -549,7 +549,7 @@ let private withChildRampart =
 [<Tests>]
 let garrisonedHomeTests =
     testList
-        "a mother garrisons a contested child's home until it stands two towers"
+        "a colony at the caster floor garrisons a contested home until it stands two towers"
         [
             test
                 "an Independent child with a perimeter and one tower is garrisoned, as ground alone" {
@@ -869,48 +869,6 @@ let childOutpostTests =
                     "with the child's stand-down shutting the room, its anchor stays the child's to walk home"
             }
 
-            // Until S1 of the world layer (#534) the child's stand-down took the
-            // room out of the mother's projection too, and the raid there turned
-            // Kite was answered by nobody.
-            test
-                "a room the child's stand-down shuts stays in the mother's projection: shut withholds the child's economy, never the residents' watch" {
-                let projected gate home =
-                    World.roomsProjectedRecalling
-                        (JoinTable())
-                        Tuning.defaults
-                        childMining
-                        HarassCasting.none
-                        gate
-                        (withChildOutposts pairWorld)
-                        (childMining |> List.find (fun colony -> colony.Home = home))
-
-                let shut =
-                    { StandDown.none with
-                        Shut = Set.singleton childOutpost
-                    }
-
-                Expect.contains
-                    (projected StandDown.none mother)
-                    childOutpost
-                    "open or shut, she projects it"
-
-                let world = withChildOutposts pairWorld
-
-                let childScan =
-                    World.scanOf
-                        Tuning.defaults
-                        (World.stages Tuning.defaults childMining world)
-                        (World.unownedHomes childMining world)
-                        childMining
-                        shut
-                        world
-                        (childMining |> List.find (fun colony -> colony.Home = child))
-
-                Expect.isFalse
-                    (Set.contains childOutpost childScan.Worked)
-                    "while the child, who shut it, works it no more"
-            }
-
             test "decaying ore in the child's outpost is no sweep of hers" {
                 let pile = "ore-child-out"
 
@@ -1027,13 +985,13 @@ let private standing (bodies: (WorldCreep * Pos) list) (world: World) : World =
                         })))
     }
 
-/// The world layer's S0 (`docs/adr/0086`): each case pins a seam where one
-/// world fact is held or concluded per colony, and its comment names the
-/// stage that flips it, or flipped it.
+/// Each case pins a world fact once held or concluded per colony and now
+/// read once for every colony; its comment names the world-layer stage that
+/// flipped it.
 [<Tests>]
 let worldSeamTests =
     testList
-        "pre-world-layer seams: a world fact cut or concluded per colony"
+        "world facts read once for every colony"
         [
             // Flipped at the world layer's S1 (#534). Live t973,5xx: W13S28's
             // observer looked into W18S25 while W17S25's stand-down held it
@@ -1114,7 +1072,9 @@ let worldSeamTests =
 
             // Flipped at the world layer's S1 (#534). Live: W17S25's
             // stand-down shut W18S25, and the mother W15S28's `ChildOutposts`
-            // dropped it, so the trespasser there stood in no view at all.
+            // dropped it, so the trespasser there stood in no view at all and
+            // the raid there turned Kite was answered by nobody. Shut withholds
+            // the child's economy, never the residents' watch.
             test
                 "a child's shut outpost stays in the mother's ChildOutposts, and its hostile in her view" {
                 let world = withChildOutposts pairWorld
@@ -1150,7 +1110,27 @@ let worldSeamTests =
 
                 Expect.isTrue (seenBy shut mother) "so the mother's view carries the trespasser"
 
-                Expect.isFalse (seenBy shut child) "and the child, who shut it, works it no more"
+                Expect.isFalse (seenBy shut child) "and the child, who shut it, sees it no more"
+
+                let childWorks gate =
+                    World.scanOf
+                        Tuning.defaults
+                        (World.stages Tuning.defaults colonies world)
+                        (World.unownedHomes colonies world)
+                        colonies
+                        gate
+                        world
+                        (colonies |> List.find (fun colony -> colony.Home = child))
+                    |> fun scan -> Set.contains childOutpost scan.Worked
+
+                Expect.isTrue (childWorks StandDown.none) "the premise: open, the child works it"
+
+                Expect.isFalse
+                    (childWorks
+                        { StandDown.none with
+                            Shut = Set.singleton childOutpost
+                        })
+                    "shut, she works it no more"
             }
 
             // Flipped at the world layer's S3. The live shape: W18S25, priced

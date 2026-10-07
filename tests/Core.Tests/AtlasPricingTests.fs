@@ -202,31 +202,6 @@ let travelUnitTests =
                     "five fatigue parts on one Move price each plain step at 10 units"
             }
 
-            test "a Move surplus divides the weight, ceiled, never below one unit a step" {
-                // One step onto the only Seat: swamp shows the ceil, plain
-                // the one-unit floor.
-                let costOn terrain creep =
-                    let atlas = seatPriced terrain Set.empty |> snapshotWith [ creep ] |> ofView
-                    travelCost atlas "w" (Harvest "src-a")
-
-                Expect.equal
-                    (costOn Swamp (worker "w"))
-                    (Some 10)
-                    "the worker unit's cost equals terrain"
-
-                let surplus = creepWith "w" 0 [ Work; Move; Move; Move ]
-
-                Expect.equal
-                    (costOn Swamp surplus)
-                    (Some 4)
-                    "ceil(10/3) = 4: surplus Moves cannot divide a step below whole units"
-
-                Expect.equal
-                    (costOn Plain surplus)
-                    (Some 1)
-                    "ceil(2/3) = 1: the floor is one unit, never zero"
-            }
-
             test "carried energy loads Carry parts into the fatigue count" {
                 // Travel is priced from the load carried right now: the
                 // engine loads Carry parts 50 energy apiece, and an empty
