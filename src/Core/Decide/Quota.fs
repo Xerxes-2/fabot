@@ -500,15 +500,24 @@ let private briefAsks (threats: Threats) (row: CastRow) : RowAsk list =
         | Guard _ -> []
         | _ -> brief.Asks |> List.filter (fun ask -> ask.Row = row))
 
-/// Whether a room casts no fighter for now (#576): a guard or ranger of ours
-/// died there inside `Tuning.RecastCooldown` and its raid is still priced a
-/// Win, the price that killed it, so each recast would feed the same error.
-/// A home of ours fights on (#602); a Kite or a Lose asks as it would.
-let private recastCooling (view: ColonyView) (room: string) : bool =
+/// Whether a room's ask casts nothing for now (#576): a guard or ranger of
+/// ours died there inside `Tuning.RecastCooldown` and its raid is still
+/// priced a Win, the price that killed it, so recasting the cast that lost
+/// would feed the same error. An ask for more bodies than stood there
+/// (#612) is a cast the exchange prices a win where that one's fewer lose
+/// (`Threat.rangersWanted`, `guardsWanted` ask the fewest that win), and
+/// casts. A home of ours fights on (#602); a Kite or a Lose asks as it would.
+let private recastCooling
+    (view: ColonyView)
+    (threats: Threats)
+    (room: string)
+    (ask: RowAsk)
+    : bool =
     match Map.tryFind room view.World.FighterLost with
-    | Some lost when view.Time - lost < view.Tuning.RecastCooldown ->
+    | Some lost when view.Time - lost.Tick < view.Tuning.RecastCooldown ->
         not (Set.contains room (Facts.homesOfOurs view))
         && Facts.answer view room = Answer.Win
+        && ask.Wanted threats <= lost.Cast
     | _ -> false
 
 /// The chases outside the guarded rooms that a row casts for: a room shut on
@@ -528,9 +537,9 @@ let private chaseAsks
             brief.Duty = Duty.Guard BriefKind.Chase
             && not (List.contains room outposts.Guarded)
             && Threats.answers view brief
-            && not (recastCooling view room)
             ->
-            brief.Asks |> List.filter (fun ask -> ask.Row = row)
+            brief.Asks
+            |> List.filter (fun ask -> ask.Row = row && not (recastCooling view threats room ask))
         | _ -> [])
 
 /// A fighting row's asks: its guarded rooms' but a cooling one's
@@ -542,7 +551,7 @@ let private asksFor
     (row: CastRow)
     : RowAsk list =
     (guardedAsks view threats outposts row
-     |> List.filter (fst >> recastCooling view >> not)
+     |> List.filter (fun (room, ask) -> not (recastCooling view threats room ask))
      |> List.map snd)
     @ chaseAsks view threats outposts row
     @ briefAsks threats row

@@ -923,6 +923,57 @@ let guardRowTests =
             }
 
             test
+                "the recast cooldown holds the cast that lost: a lone ranger lost lets the pair cast, a pair lost holds it" {
+                // #612: Trepidimous' 3RA4H7M kiter heals 48 a tick, out-healing
+                // the 4RA2H ranger an 1,800 bank buys (40) and losing to two
+                // (#609). The lone ranger it killed priced nothing about the
+                // pair; a pair it killed priced the pair.
+                let kiter =
+                    List.replicate 3 RangedAttack @ List.replicate 4 Heal @ List.replicate 7 Move
+
+                let raided =
+                    { guardColony [ hostileIn "W1N2" raidTile kiter ] [] with
+                        Bank = bank 1800 1800
+                    }
+
+                let rangerQuotaOf colony =
+                    rowOf "ranger" colony |> Option.map (fun row -> row.Quota)
+
+                let recent cast (colony: ColonyView) =
+                    castLostIn "W1N2" (colony.Time - 1) cast colony
+
+                Expect.equal (Facts.answer raided "W1N2") Answer.Win "the premise: the pair wins it"
+
+                Expect.equal
+                    (rangerQuotaOf raided)
+                    (Some Engine.guardCap)
+                    "and the row hires the pair"
+
+                Expect.equal
+                    (rangerQuotaOf (recent 1 raided))
+                    (Some Engine.guardCap)
+                    "a lone ranger lost there: the pair, which wins where it lost, is still hired"
+
+                Expect.equal
+                    (rangerQuotaOf (recent Engine.guardCap raided))
+                    (Some 0)
+                    "a pair lost there: the same pair is cooled"
+
+                // A bank whose one ranger wins it asks one, the cast that lost.
+                let rich = { raided with Bank = bank 5600 5600 }
+
+                Expect.equal
+                    (rangerQuotaOf rich)
+                    (Some 1)
+                    "the premise: a bigger bank's one ranger wins it"
+
+                Expect.equal
+                    (rangerQuotaOf (recent 1 rich))
+                    (Some 0)
+                    "and after one lost there, the same single ask is cooled"
+            }
+
+            test
                 "the recast cooldown holds only a Win: a raid priced Lose asks as it would, and a home fights on" {
                 // Kalgen's T3 pair: no row of ours wins it.
                 let lose =

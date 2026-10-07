@@ -121,6 +121,20 @@ wire("raids: a well-formed leaf round-trips unchanged", async () => {
   assert.equal(stable(await raidsThrough(full)), stable(full));
 });
 
+wire("raids: a loss's cast (#612) round-trips, and a loss with none writes none", async () => {
+  const cast = { ...episode, losses: [{ ...episode.losses[0], cast: 2 }, { creep: "w3", t: 13 }] };
+  const written = await raidsThrough({ ...emptyRaids, episodes: [cast] });
+  assert.equal(stable(written.episodes), stable([cast]));
+});
+
+wire("ticks: a loss's cast off the shape costs its episode, and invents no zero", async () => {
+  const written = await raidsThrough({
+    ...emptyRaids,
+    episodes: [{ ...episode, losses: [{ ...episode.losses[0], cast: {} }] }],
+  });
+  assert.deepEqual(written.episodes, []);
+});
+
 wire("raids: the declared outposts (#162) are written beside the ring, the leaf's own never read back", async () => {
   const written = await raidsThrough({ ...emptyRaids, declared: ["W9N9"] }, ["W1N2", "W2N1"]);
   assert.deepEqual(written.declared, ["W1N2", "W2N1"]);

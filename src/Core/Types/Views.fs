@@ -273,10 +273,11 @@ type WorldView =
         /// how old the economy gate's memory of it is (`Facts.openToEconomy`,
         /// #605).
         RaidSeen: Map<string, int>
-        /// Each room a guard or ranger of ours was last lost in, against the
-        /// tick, the latest of every colony's raid log (`StandDown.FighterLost`):
-        /// a room's recast cooldown is the room's, whichever colony would cast.
-        FighterLost: Map<string, int>
+        /// Each room a guard or ranger of ours was last lost in, the latest of
+        /// every colony's raid log (`StandDown.FighterLost`), the larger cast
+        /// on one tick: a room's recast cooldown is the room's, whichever
+        /// colony would cast.
+        FighterLost: Map<string, FighterLoss>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -415,10 +416,11 @@ module WorldView =
                 (Map.empty, gates)
                 ||> List.fold (fun lost gate ->
                     (lost, gate.FighterLost)
-                    ||> Map.fold (fun lost room tick ->
+                    ||> Map.fold (fun lost room loss ->
                         match Map.tryFind room lost with
-                        | Some later when later >= tick -> lost
-                        | _ -> Map.add room tick lost))
+                        | Some later when (later.Tick, later.Cast) >= (loss.Tick, loss.Cast) ->
+                            lost
+                        | _ -> Map.add room loss lost))
             Questioned =
                 gates
                 |> List.map (fun gate -> gate.RivalReserved)

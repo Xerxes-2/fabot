@@ -1746,16 +1746,20 @@ let hostileIn room pos body =
         Pos = RoomPos.at room pos
     }
 
-/// The colony with a guard or ranger of ours last lost in `room` on `tick`,
-/// as every colony's raid log reads it (`WorldView.FighterLost`): what holds
-/// a room's recast for `Tuning.RecastCooldown` (#576).
-let lostIn room tick (colony: ColonyView) =
+/// The colony with a cast of `cast` guards or rangers of ours last lost in
+/// `room` on `tick`, as every colony's raid log reads it
+/// (`WorldView.FighterLost`): what holds a room's recast of that cast for
+/// `Tuning.RecastCooldown` (#576, #612).
+let castLostIn room tick cast (colony: ColonyView) =
     { colony with
         World =
             { colony.World with
-                FighterLost = Map.add room tick colony.World.FighterLost
+                FighterLost = Map.add room { Tick = tick; Cast = cast } colony.World.FighterLost
             }
     }
+
+/// `castLostIn` of one body: a lone guard or ranger lost.
+let lostIn room tick (colony: ColonyView) = castLostIn room tick 1 colony
 
 /// The same hostile with every part boosted at `tier` (`HostileInfo.Boosts`),
 /// as a raid out of a full lab arrives.

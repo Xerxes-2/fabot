@@ -617,6 +617,7 @@ let lossTests =
                             Creep = "w2"
                             Tick = 10
                             Where = None
+                            Cast = 0
                         }
                     ]
                     "the loss the Transition log prunes is the one this channel exists to keep"
@@ -659,6 +660,7 @@ let lossTests =
                             Creep = "w2"
                             Tick = 10
                             Where = Some(RoomPos.at raidRoom { X = 12; Y = 41 })
+                            Cast = 0
                         }
                     ]
                     "the loss names the tile w2 stood on the tick before it went missing"
@@ -672,6 +674,54 @@ let lossTests =
                     (losses unplaced |> List.map (fun loss -> loss.Where))
                     [ None ]
                     "a body the projection never placed is stamped with no tile (ADR 0004)"
+            }
+
+            // #612: what the recast cooldown compares the next ask with is the
+            // cast that lost, the guards and rangers standing in the room the
+            // tick the body was last seen.
+            test "a loss carries the guards and rangers placed in its room that tick, it among them" {
+                let withOurs (placed: (string * Pos) list) =
+                    { (raid squad) with
+                        Creeps = placed |> List.map (fst >> ours)
+                        Spatial =
+                            { (raid squad).Spatial with
+                                Rooms =
+                                    Map.ofList
+                                        [
+                                            raidRoom,
+                                            { RoomLayer.empty with
+                                                CreepPositions = Map.ofList placed
+                                            }
+                                        ]
+                            }
+                    }
+
+                let pair =
+                    [
+                        "ranger-1-Spawn1", { X = 9; Y = 44 }
+                        "ranger-2-Spawn1", { X = 12; Y = 41 }
+                        "hauler-3-Spawn1", { X = 20; Y = 20 }
+                    ]
+
+                let state =
+                    RaidState.empty
+                    |> raidTick 10 (withOurs pair)
+                    |> raidTick 11 (withOurs (List.tail pair))
+
+                Expect.equal
+                    (losses state |> List.map (fun loss -> loss.Creep, loss.Cast))
+                    [ "ranger-1-Spawn1", 2 ]
+                    "the ranger fell beside the other: a cast of two, the hauler no fighter"
+
+                let alone =
+                    RaidState.empty
+                    |> raidTick 10 (withOurs (List.tail pair))
+                    |> raidTick 11 (withOurs [ List.last pair ])
+
+                Expect.equal
+                    (losses alone |> List.map (fun loss -> loss.Creep, loss.Cast))
+                    [ "ranger-2-Spawn1", 1 ]
+                    "and alone, a cast of one"
             }
 
             test "the kill read on the first quiet tick is still the raid's" {
@@ -694,6 +744,7 @@ let lossTests =
                             Creep = "w2"
                             Tick = 10
                             Where = None
+                            Cast = 0
                         }
                     ]
                     "the reading lags the death by a tick, and the tick it lands on is the sighting"
@@ -833,6 +884,7 @@ let lossTests =
                             Creep = "w2"
                             Tick = 10
                             Where = None
+                            Cast = 0
                         }
                     ]
                     "and the same absence with the name gone from the world is the loss it always was"
@@ -874,15 +926,18 @@ let lossTests =
             }
 
             // #576 (3): what the recast cooldown reads, off the losses already
-            // kept, so it costs no leaf of its own.
+            // kept. #612: with the cast that lost, a legacy row's its own body.
             test
-                "the stand-down reads each room's last guard or ranger lost, off every episode's losses" {
-                let lost name tick room =
+                "the stand-down reads each room's last guard or ranger lost and its cast, off every episode's losses" {
+                let castLost cast name tick room =
                     {
                         Creep = name
                         Tick = tick
                         Where = room |> Option.map (fun room -> RoomPos.at room { X = 20; Y = 20 })
+                        Cast = cast
                     }
+
+                let lost = castLost 0
 
                 let episode opened losses =
                     {
@@ -903,7 +958,8 @@ let lossTests =
                                     110
                                     [
                                         lost "guard-100-Spawn1" 120 (Some "W1N2")
-                                        lost "ranger-105-Spawn1" 130 (Some "W1N3")
+                                        castLost 2 "ranger-105-Spawn1" 130 (Some "W1N3")
+                                        castLost 1 "ranger-106-Spawn1" 130 (Some "W1N3")
                                         lost "hauler-90-Spawn1" 140 (Some "W1N4")
                                         lost "guard-101-Spawn1" 150 None
                                     ]
@@ -912,8 +968,9 @@ let lossTests =
 
                 Expect.equal
                     (standDown Tuning.defaults 200 state).FighterLost
-                    (Map.ofList [ "W1N2", 120; "W1N3", 130 ])
-                    "the latest guard or ranger loss by the room it fell in: no hauler, no body never placed"
+                    (Map.ofList
+                        [ "W1N2", { Tick = 120; Cast = 1 }; "W1N3", { Tick = 130; Cast = 2 } ])
+                    "the latest guard or ranger loss by the room it fell in, the larger cast on a tick: no hauler, no body never placed"
             }
         ]
 

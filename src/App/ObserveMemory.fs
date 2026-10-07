@@ -350,6 +350,9 @@ let private encodeEpisode (episode: RaidEpisode) =
                 d?y <- tile.Y
             | None -> ()
 
+            if loss.Cast > 0 then
+                d?cast <- loss.Cast
+
             d)
         |> List.toArray
 
@@ -405,6 +408,8 @@ let private decodeEpisode (raw: obj) : RaidEpisode =
                     // Absent on a legacy row and on a body the projection
                     // never placed: both read as no tile.
                     Where = if isNull d?room then None else Some(roomPosOf d)
+                    // Absent on a legacy row and where no fighter stood (#612).
+                    Cast = if isNull d?cast then 0 else numberOf d "cast"
                 })
             |> Array.toList
         // Absent on a legacy episode, and zero is what that says; present and

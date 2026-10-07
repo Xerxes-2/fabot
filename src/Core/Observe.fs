@@ -266,7 +266,15 @@ type Loss =
         Creep: string
         Tick: int
         Where: RoomPos option
+        /// The guards and rangers of the colony placed in `Where`'s room that
+        /// tick, the body itself among them if it is one (#612): the cast
+        /// that lost there. Zero where no tile was, and on a legacy row.
+        Cast: int
     }
+
+/// Whether a creep's name is the guard row's or the ranger row's.
+let private isFighterName (name: string) =
+    isNamedFor guardPattern name || isNamedFor rangerPattern name
 
 /// One raid: opened on the first tick any room the colony works and can see
 /// holds a hostile, kept open while hostiles keep appearing, closed by a quiet
@@ -1175,20 +1183,25 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
         HaulOverflow = state.HaulOverflow
         HomeRaided = state.HomeRaided
         KeepHitsBefore = state.Hits
-        // A fighter by its row's name: a loss carries no body. One the
-        // projection never placed names no room to hold.
+        // A fighter by its row's name. One the projection never placed names
+        // no room to hold; a legacy row, no cast, lost at least its own body.
         FighterLost =
             state.Episodes
             |> List.collect _.Losses
             |> List.choose (fun loss ->
                 match loss.Where with
-                | Some where when
-                    isNamedFor guardPattern loss.Creep || isNamedFor rangerPattern loss.Creep
-                    ->
-                    Some(where.Room, loss.Tick)
+                | Some where when isFighterName loss.Creep ->
+                    Some(
+                        where.Room,
+                        {
+                            Tick = loss.Tick
+                            Cast = max 1 loss.Cast
+                        }
+                    )
                 | _ -> None)
             |> List.groupBy fst
-            |> List.map (fun (room, lost) -> room, lost |> List.map snd |> List.max)
+            |> List.map (fun (room, lost) ->
+                room, lost |> List.map snd |> List.maxBy (fun l -> l.Tick, l.Cast))
             |> Map.ofList
     }
 
@@ -1369,13 +1382,22 @@ let foldRaids
         if view.Time - episode.LastSeen > 1 then
             []
         else
+            let castIn room =
+                prior.Placed
+                |> Map.filter (fun name tile -> tile.Room = room && isFighterName name)
+                |> Map.count
+
             Set.difference prior.Living alive
             |> Set.toList
             |> List.map (fun name ->
+                let where = Map.tryFind name prior.Placed
+
                 {
                     Creep = name
                     Tick = episode.LastSeen
-                    Where = Map.tryFind name prior.Placed
+                    Where = where
+                    Cast =
+                        where |> Option.map (fun tile -> castIn tile.Room) |> Option.defaultValue 0
                 })
 
     // The hostiles in the rooms this colony works: a raid in a room it only

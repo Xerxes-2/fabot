@@ -933,6 +933,12 @@ module HaulOverflow =
     /// Nothing read yet: empty containers, nothing owed.
     let none = { Fill = 0.0; Owed = false }
 
+/// The last guard or ranger of ours lost in a room (#576, #612): the tick it
+/// was last seen alive, and the cast that lost there, the guards and rangers
+/// of its colony standing in the room that tick (`Loss.Cast`), at least the
+/// one that fell.
+type FighterLoss = { Tick: int; Cast: int }
+
 /// What this colony's [[raid log]] says about the rooms it declares, this tick
 /// (#165, #333, #366), derived once off that log (`Observe.standDown`) and
 /// handed to `ColonyView.ofWorld`: one record and not five derivations, so
@@ -1031,11 +1037,11 @@ type StandDown =
         /// home (`RaidState.Hits`), carried while a hostile stands there:
         /// what tells a body dismantling ours from one passing (#429).
         KeepHitsBefore: Map<string, int>
-        /// Each room a guard or ranger of this colony was last lost in, by
-        /// the tick it was last seen alive (`RaidEpisode.Losses`, #576): what
-        /// holds the room's recast for `Tuning.RecastCooldown`, read world-wide
+        /// Each room a guard or ranger of this colony was last lost in
+        /// (`RaidEpisode.Losses`, #576): what holds the room's recast of that
+        /// cast for `Tuning.RecastCooldown`, read world-wide
         /// (`WorldView.FighterLost`).
-        FighterLost: Map<string, int>
+        FighterLost: Map<string, FighterLoss>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]

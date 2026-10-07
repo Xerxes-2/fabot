@@ -215,7 +215,7 @@ A raid a ranged body of ours kites down (#510): every raider in the room shoots 
 _Avoid_: pursuit, hunt
 
 ### Recast cooldown
-The `Tuning.RecastCooldown` ticks (300) after a guard or ranger of ours died in a room not a home of ours, while that room's raid is still priced a Win: no row asks a fighter for the room, its guarded asks and its [[chase]]'s alike (#576). A Win that killed our body is a pricing error, and each recast fed it another. Read off every colony's [[raid log]] losses, the latest loss a room; a Kite or a Lose asks as it would, and a home fights to the death (#602). ADR-0091.
+The `Tuning.RecastCooldown` ticks (300) after a guard or ranger of ours died in a room not a home of ours, while that room's raid is still priced a Win: no row asks a fighter for the room, its guarded asks and its [[chase]]'s alike (#576). A Win that killed our body is a pricing error, and each recast fed it another. It holds the cast that lost: the guards and rangers standing in the room when the body fell (`Loss.Cast`), so an ask for more bodies than that, one the exchange prices a win where those lose (#609's pair after a lone ranger), casts (#612). Read off every colony's [[raid log]] losses, the latest loss a room; a Kite or a Lose asks as it would, and a home fights to the death (#602). ADR-0091.
 _Avoid_: guard timeout, death penalty
 
 ### Trespasser
