@@ -774,15 +774,18 @@ let outpostTests =
 
                 // Each side's swing is struck back (#624): the raid deals its
                 // swings and our swing's 30 an ATTACK back, ours its 180 and
-                // the 180 each raider takes back off its swing, 540 on 2,400.
+                // the 180 each raider takes back off its swing. Moved on
+                // purpose (#647): the body is priced at the hits it keeps as
+                // the gate prices a fresh one, struck for the horizon, so the
+                // edge is a raid of 3 ATTACK a body, not 4.
                 Expect.isEmpty
-                    (standDowns (RaidState.empty |> raidTick 100 (raid 4)))
-                    "two blocks kill 2,400 hits at 540 before 360 kills their 2,000"
+                    (standDowns (RaidState.empty |> raidTick 100 (raid 3)))
+                    "two blocks kill three-ATTACK raiders before they fall"
 
                 Expect.equal
-                    (standDowns (RaidState.empty |> raidTick 100 (raid 5)))
+                    (standDowns (RaidState.empty |> raidTick 100 (raid 4)))
                     [ outpostRoom, 100, 100, 1600, StandDownBasis.InvaderRaid ]
-                    "an equal clock, 2,400 at 540 against 2,000 at 450, is not a win; fictitious self-heal must not keep the room open"
+                    "2,400 at 540 against 2,000 less two ticks of 360 is not a win the gate would seat; fictitious self-heal must not keep the room open"
             }
 
             test "a transit-room hostile opens no stand-down, regardless of owner" {

@@ -1941,6 +1941,19 @@ type private BlockPrice =
         Back: HitBack
     }
 
+/// The hits a body not holding a fight brings to it (#647): what it keeps by
+/// its next decision once in it, `soon` ticks struck by the raid's own weapons
+/// (`struck` a tick, past its heal). The one price of a fresh body, the
+/// Matcher's (`fits`) and the row's that sizes one body (`blocksOutcome`)
+/// alike, so a row never casts a body the gate refuses alone. A home of ours
+/// keeps its whole hits: it is fought for to the death, and the gate prices
+/// no fit there.
+let private freshHits (view: ColonyView) (room: string) (soon: int) (hits: int) (struck: int) =
+    if (homesOfOurs view).Contains room then
+        hits
+    else
+        max 1 (hits - soon * max 0 struck)
+
 /// `BlockPrice` of a row's pattern in a room; None under towers not ours
 /// (`underRivalTowers`).
 let private blockPrice (pattern: BodyPattern) (stance: Stance) (view: ColonyView) (room: string) =
@@ -2013,8 +2026,16 @@ let private blocksOutcome
             let damage, struck, price = blocksDealt block 1 blocks
             let damage = damage + struck
 
+            let hits =
+                freshHits
+                    view
+                    room
+                    view.Tuning.ReachHorizon
+                    (blocks * block.Hits)
+                    (block.Price.Damage - blocks * block.Heal)
+
             settle price block.Kited damage (fun price ->
-                wonAgainst price damage (blocks * block.Heal) (blocks * block.Hits))
+                wonAgainst price damage (blocks * block.Heal) hits)
 
 /// `blocksOutcome` that ends the raid (`won`): what sizes and counts a row.
 let blocksBeat
@@ -2199,8 +2220,7 @@ let private winsBeside
             creep.Hits.Hits
         else
             let me = Fighter.ofCreep creep
-
-            max 1 (creep.Hits.Hits - soon * max 0 (struck me - List.sum (backOf me).Taken))
+            freshHits view room soon creep.Hits.Hits (struck me - List.sum (backOf me).Taken)
 
     let floor = max (creep.Hits.HitsMax / 4) (price.Damage * 2 * soon)
 

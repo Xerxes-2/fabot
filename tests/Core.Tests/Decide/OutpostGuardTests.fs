@@ -593,12 +593,30 @@ let idleGuardTests =
 /// the shell cuts them: the mother blind in her declared outpost with its
 /// last look's armed threat remembered (#366), and the child holding a
 /// guard of its own standing at home. The live W12S28 / W13S28 shape: the
-/// Caster handed the mother's remembered ask to the child's spawn.
-let private blindPairDecided () =
+/// Caster handed the mother's remembered ask to the child's spawn. `raid`
+/// is what the world recalls of the room (`World.Raiders`, #569), last
+/// seen ten ticks ago.
+let private blindPairDecided (raid: HostileInfo list) =
     let outpost = ViewFixtures.outpost
     let child = ViewFixtures.child
     let tuning = Tuning.defaults
     let colonies = ViewFixtures.declared
+
+    let guard =
+        let body =
+            ViewFixtures.creepWithBody
+                "guard-950-Spawn2"
+                child
+                (Bodies.guardPattern.Block |> List.countBy id)
+
+        let hits = Engine.partHits * List.length Bodies.guardPattern.Block
+
+        { body with
+            Info =
+                { body.Info with
+                    Hits = { Hits = hits; HitsMax = hits }
+                }
+        }
 
     let world =
         { ViewFixtures.pairWorld with
@@ -619,14 +637,11 @@ let private blindPairDecided () =
                                 }
                         }))
             Sightings = Map.remove outpost ViewFixtures.pairWorld.Sightings
-            Creeps =
-                [
-                    ViewFixtures.creep "worker-900-Spawn1" ViewFixtures.mother
-                    ViewFixtures.creepWithBody
-                        "guard-950-Spawn2"
-                        child
-                        (Bodies.guardPattern.Block |> List.countBy id)
-                ]
+            Creeps = [ ViewFixtures.creep "worker-900-Spawn1" ViewFixtures.mother; guard ]
+            Raiders =
+                match raid with
+                | [] -> Map.empty
+                | raid -> Map.ofList [ outpost, { Raid = raid; Tick = 990 } ]
         }
 
     let gates =
@@ -671,7 +686,7 @@ let private blindPairDecided () =
         {
             Hops = World.reachHops StandDown.none joins tuning world tuning.MaxHops
             Holding = Map.empty
-            Verbose = Set.empty
+            Verbose = Set.singleton "guard-950-Spawn2"
             PlanMemos = Map.empty
             Carries = Map.empty
             Idle = Set.empty
@@ -680,6 +695,28 @@ let private blindPairDecided () =
         }
         ignore
         views
+
+/// The live invader of W13S29 (t1,025,040's replay): 2T 5M 1R 1W 1A, 1000
+/// hits, its toughs GO, its ranged KO, its work ZH and its attack UH.
+let private rememberedInvader: HostileInfo =
+    let body =
+        [ Tough; Tough; Move; Move; Move; Move; RangedAttack; Work; Attack; Move ]
+
+    {
+        Id = "invader-remembered"
+        Owner = "Invader"
+        Pos =
+            {
+                Room = ViewFixtures.outpost
+                X = 5
+                Y = 6
+            }
+        Body = body
+        Boosts =
+            List.map2 Boost.ofCompound body [ "GO"; "GO"; ""; ""; ""; ""; "KO"; "ZH"; "UH"; "" ]
+        Hits = Engine.partHits * List.length body
+        TicksToLive = 700
+    }
 
 [<Tests>]
 let blindGuardTests =
@@ -824,45 +861,109 @@ let blindGuardTests =
             }
 
             test
+                "the row casts what the gate seats against a recalled raid: a fresh body is priced as the gate prices it" {
+                // #647, live t1,025,134: W13S29's boosted invader (UH attack,
+                // KO ranged, GO toughs) recalled in the blind room. The row
+                // priced one guard block at its whole hits and cast one; the
+                // Matcher prices a fresh body at the hits it keeps struck for
+                // the horizon (`Facts.fits`), which that block loses at, and
+                // refused it `threatened` every tick while the row, its cast
+                // living, cast nothing more.
+                let invader =
+                    { rememberedInvader with
+                        Pos = { Room = "W1N2"; X = 19; Y = 45 }
+                    }
+
+                let raided =
+                    let dark = remembering (blinded (declaredRaid []))
+
+                    { dark with
+                        Hostiles = dark.Hostiles @ [ invader ]
+                        RecalledRaiders = [ invader ]
+                    }
+
+                let alone = raided |> withBodyAtHome (guard "g-home") atSpawn
+                let decided = decide alone Map.empty (Set.singleton "g-home") None
+
+                Expect.contains
+                    (rejectionsFor "g-home" decided.Verdicts |> Option.defaultValue [])
+                    (taskId (Guard "W1N2"), RejectReason.Threatened)
+                    "the premise: one fresh block alone loses the fight the gate prices"
+
+                Expect.equal
+                    (decided.Quotas.Rows
+                     |> List.tryFind (fun row -> row.Row = "guard")
+                     |> Option.map (fun row -> row.Quota, row.Living))
+                    (Some(2, 1))
+                    "so the row asks a second guard beside it, never resting on the one the gate refuses"
+
+                // The second guard the row casts, two up the corridor.
+                let paired =
+                    alone
+                    |> withBodyAtHome
+                        (creepWith "g-2" 0 0 (bodyFor guardPattern 1500))
+                        { X = 25; Y = 7 }
+
+                let both = decide paired Map.empty (Set.ofList [ "g-home"; "g-2" ]) None
+
+                for name in [ "g-home"; "g-2" ] do
+                    Expect.equal
+                        (Map.tryFind name both.Assignments)
+                        (Some(taskId (Guard "W1N2")))
+                        $"beside the second, {name} takes the Guard"
+            }
+
+            test
                 "another colony's guard cast for the remembered raid is matched to its Guard and walks to it" {
                 // Live t1,024,013: the Caster cast W12S28's remembered ask for
                 // W13S29 in W13S28, and the body stood idle (none-applicable)
                 // at home, because the cast and the seat came from different
                 // places: the ask world-wide, the declared source ring out of
-                // the declarer's Atlas alone.
-                let decided = blindPairDecided ()
+                // the declarer's Atlas alone. Then, t1,025,134 (#647), with the
+                // invader still recalled: `rejected (threatened)` every tick.
+                // Once with the raid forgotten, once with it recalled.
+                for raid in [ []; [ rememberedInvader ] ] do
+                    let recalled = not (List.isEmpty raid)
+                    let decided = blindPairDecided raid
 
-                let childView, child =
-                    decided.Decided
-                    |> List.pick (fun (colony, view, decision, ()) ->
-                        if colony.Home = ViewFixtures.child then
-                            Some(view, decision)
-                        else
-                            None)
+                    let childView, child =
+                        decided.Decided
+                        |> List.pick (fun (colony, view, decision, ()) ->
+                            if colony.Home = ViewFixtures.child then
+                                Some(view, decision)
+                            else
+                                None)
 
-                Expect.isEmpty decided.Faulted "the premise: both colonies decide"
+                    Expect.isEmpty decided.Faulted "the premise: both colonies decide"
 
-                Expect.contains
-                    (ColonyView.bodies childView |> List.map _.Name)
-                    "guard-950-Spawn2"
-                    "the premise: the child holds the guard"
+                    Expect.contains
+                        (ColonyView.bodies childView |> List.map _.Name)
+                        "guard-950-Spawn2"
+                        "the premise: the child holds the guard"
 
-                Expect.isTrue
-                    (Map.containsKey ViewFixtures.outpost childView.Spatial.Rooms)
-                    "the child projects the room the world hands its guard"
+                    Expect.isTrue
+                        (Map.containsKey ViewFixtures.outpost childView.Spatial.Rooms)
+                        $"the child projects the room the world hands its guard (recalled %b{recalled})"
 
-                Expect.equal
-                    (Map.tryFind "guard-950-Spawn2" child.Assignments)
-                    (Some(taskId (Guard ViewFixtures.outpost)))
-                    "the child's guard holds the mother's remembered Guard"
+                    Expect.isEmpty
+                        (rejectionsFor "guard-950-Spawn2" child.Verdicts
+                         |> Option.defaultValue []
+                         |> List.filter (fun (task, _) ->
+                             task = taskId (Guard ViewFixtures.outpost)))
+                        $"its Guard is on no rejected row (recalled %b{recalled})"
 
-                Expect.isTrue
-                    (child.Movement.Intents
-                     |> List.exists (fun step ->
-                         step.Creep = "guard-950-Spawn2"
-                         && not (List.isEmpty step.Candidates)
-                         && not (List.contains step.Pos step.Candidates)))
-                    "and steps off its tile toward the declared source ring"
+                    Expect.equal
+                        (Map.tryFind "guard-950-Spawn2" child.Assignments)
+                        (Some(taskId (Guard ViewFixtures.outpost)))
+                        $"the child's guard holds the mother's remembered Guard (recalled %b{recalled})"
+
+                    Expect.isTrue
+                        (child.Movement.Intents
+                         |> List.exists (fun step ->
+                             step.Creep = "guard-950-Spawn2"
+                             && not (List.isEmpty step.Candidates)
+                             && not (List.contains step.Pos step.Candidates)))
+                        $"and steps off its tile toward the declared source ring (recalled %b{recalled})"
             }
         ]
 

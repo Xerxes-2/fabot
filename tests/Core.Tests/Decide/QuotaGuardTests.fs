@@ -593,9 +593,12 @@ let guardRowTests =
                         Id = $"m-{i}"
                     }
 
+                // Moved on purpose (#647): two blocks are priced at the hits
+                // they keep struck for the horizon, as the gate seats a fresh
+                // body, which the five's 450 a tick takes the win from.
                 Expect.isTrue
-                    (holds [ for i in 1..5 -> melee i ] 2)
-                    "five 3-ATTACK bodies, 450 a tick and the 90 our swing takes back, fall to two blocks: each of them takes our 180 back off its own swing"
+                    (holds [ for i in 1..4 -> melee i ] 2)
+                    "four 3-ATTACK bodies, 360 a tick and the 90 our swing takes back, fall to two blocks: each of them takes our 180 back off its own swing"
 
                 // A 10-RANGED 20-MOVE shooter strikes nothing back and is
                 // struck back by nothing: 180 a tick on its 3,000 hits once
@@ -1163,6 +1166,68 @@ let guardRowTests =
                         "worker", Light
                     ]
                     "of these rows, one body classifies Fighter and it is the guard's"
+            }
+
+            // #647: the row casts only what the gate seats. A guard body is
+            // sized priced fresh (`Facts.freshHits`); the ranger row's two
+            // bodies (`bodiesOutcome`) are priced whole, and on every raid of
+            // this scan they cast two where a fresh pair fits, so the band
+            // is not laid on them too: banded, the row refused three raids
+            // (4T6R2H, 4T7R1H, 0T7R2H) a fresh pair wins.
+            test "every raid the ranger row casts two bodies for, a fresh pair of them fits" {
+                let unseated =
+                    [
+                        for r in 1..12 do
+                            for h in 0..6 do
+                                for t in [ 0; 4 ] do
+                                    let body =
+                                        List.replicate t Tough
+                                        @ List.replicate r RangedAttack
+                                        @ List.replicate h Heal
+                                        @ List.replicate (r + h + t) Move
+
+                                    let colony =
+                                        guardColony [ hostileIn "W1N2" raidTile body ] []
+                                        |> banked 1800
+
+                                    let wins, _ = Facts.castPrice colony CastRow.Ranger "W1N2"
+                                    let blocks = max 1 (Facts.rangerBlocksReach colony)
+                                    let energy = blocks * bodyCost rangerPattern.Block
+                                    let a = creepWith "ranger-a" 0 0 (bodyFor rangerPattern energy)
+                                    let b = creepWith "ranger-b" 0 0 (bodyFor rangerPattern energy)
+
+                                    let soon = colony.Tuning.ReachHorizon
+
+                                    let byTwo =
+                                        wins
+                                        && not (
+                                            Facts.blocksBeat
+                                                rangerPattern
+                                                Stance.Standoff
+                                                colony
+                                                "W1N2"
+                                                blocks
+                                        )
+
+                                    if
+                                        byTwo
+                                        && not (
+                                            Facts.fits
+                                                colony
+                                                Stance.Standoff
+                                                "W1N2"
+                                                soon
+                                                false
+                                                a
+                                                [ b, true, Some 0 ]
+                                        )
+                                    then
+                                        yield $"%d{t}T%d{r}R%d{h}H"
+                    ]
+
+                Expect.isEmpty
+                    unseated
+                    "no raid the row casts two rangers for refuses a fresh one beside the other"
             }
         ]
 
