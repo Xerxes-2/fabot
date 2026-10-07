@@ -10,14 +10,15 @@ open Fabot.Core.Types
 /// Creeps with no Task rank below every task in arbitration.
 let private idleRank = System.Int32.MaxValue
 
-/// A kiting ranger's walk (#510, movement S3).
+/// A kiting body's walk (#510, movement S3, #615 U1).
 [<RequireQualifiedAccess>]
 type private Kiting =
-    /// No melee map nor camp in the room it stands in: the plain walk.
+    /// No class it stands off nor camp in the room it stands in: the plain
+    /// walk, closing to its reach.
     | Clear
     /// By tile index, what its walk keeps off (`Threats.kiteUnsafeFor`), and
-    /// the soonest a melee strikes each tile, which a tie breaks toward the
-    /// later.
+    /// the soonest a class shorter than its reach strikes each tile, which a
+    /// tie breaks toward the later.
     /// With the kite ground's approach band (`Laid.Approach`), lazily.
     | Keeps of unsafe: (int -> bool) * later: (int -> int) * approach: Lazy<Set<RoomPos>>
 
@@ -128,7 +129,10 @@ let private weighed
 /// it strikes one now. By the tick a body can next step off a tile it stands
 /// that far from where the nearest target can have walked; ties to the
 /// nearer, then to standing. None to keep the step it was given; Some None to
-/// stand.
+/// stand. One rule at any reach (#615 U1): a body closes to its reach, and
+/// at a reach of one its glue onto the target's tile is this step
+/// (`glueChases`); a body that stands off its target kites instead
+/// (`kiteStep`), and its step is weighed here too.
 let private chaseStep
     (chase: Chase)
     (at: RoomPos)
@@ -455,7 +459,7 @@ let private moveIntentFor
     // The home's shelter for an idle body at home that walks in to it and
     // stays on it (#514); empty for every other.
     (shelter: Set<RoomPos>)
-    // For a kiting ranger, its walk in place of the Reach's (#510); None for
+    // For a kiting body, its walk in place of the Reach's (#510); None for
     // every other body.
     (kite: Kiting option)
     // For a fighter aiming at a target in its room, its chase (`chaseStep`);
@@ -695,8 +699,8 @@ let private moveIntentFor
             // round reaches the work. Flee's own walk is the way out of one.
             // A Defend's holder walks round the tiles outside its line a raid melee
             // reaches (#504), and waits inside it where no way round reaches
-            // its rampart. A kiting ranger keeps off what a melee strikes
-            // before it could be on it and gone (`kiteStep`), across the
+            // its rampart. A kiting body keeps off what a class it stands off
+            // strikes before it could be on it and gone (`kiteStep`), across the
             // border too; a trespass's killer walks round the Reach.
             let plain () = stepToward atlas creep task area
 
@@ -1010,6 +1014,31 @@ type private RoomPass =
         Occupants: Map<RoomPos, string>
     }
 
+/// Whether a Guard's holder may close on a raid that picks the standoff
+/// (#615 U1): the room's verdict is no Lose, and it wins the fight beside
+/// the other fighters of ours holding that Guard as they stand
+/// (`Facts.winsBeside`: those at the fight, or near enough to land while it
+/// stands). The admission's tests alone (`rangers > 1`, a Lose's call) do
+/// not walk a body into a quicker raid.
+let closes
+    (view: ColonyView)
+    (threats: Threats)
+    (assigned: Map<string, Task>)
+    (creep: CreepInfo)
+    : bool =
+    match Map.tryFind creep.Name assigned with
+    | Some(Guard room as task) ->
+        (Threats.briefOf threats room).Verdict.Value <> Answer.Lose
+        && Facts.winsBeside
+            view
+            room
+            threats.Horizon
+            creep
+            (view.Creeps
+             |> List.filter (fun other -> other.Name <> creep.Name && isFighterBody other)
+             |> List.map (fun other -> other, Map.tryFind other.Name assigned = Some task, None))
+    | _ -> false
+
 /// Resolver, first half: one colony's Move Intents, unarbitrated. Every rested
 /// creep the Atlas places registers one; a fatigued creep registers none — the
 /// engine would answer its move with ERR_TIRED — and its tile is a wall for the
@@ -1167,13 +1196,18 @@ let movementAmong
         | Some(Guard room) -> (Threats.briefOf threats room).Avoid
         | _ -> Avoid.Runner
 
-    // A ranger kites (#510); a resident's walk onto its ramparts under a raid
-    // crosses the Reach, and is no kite. Its walk keeps off what a melee
-    // strikes before it could be on it and gone, its own timing counted, and
-    // the camp about the exit a raid left by (`Threats.kiteUnsafeFor`).
+    // A Chase's holder that outranges a swing kites (#510, #615 U1); a
+    // resident's walk onto its ramparts under a raid crosses the Reach, and
+    // is no kite. Its walk keeps off what a class it stands off strikes
+    // before it could be on it and gone, its own timing counted, and the camp
+    // about the exit a raid left by (`Threats.kiteUnsafeFor`). It closes to
+    // its reach (`Kiting.Clear`) only where it stands off nothing there
+    // (`Threats.standsOffNothing`: the raid picks the standoff) and wins the
+    // fight (`closes`); a body that can neither keep off nor win keeps its
+    // kite walk, never walking into a quicker melee's ring.
     let kitingOf name (at: RoomPos) =
         match view.Creeps |> List.tryFind (fun c -> c.Name = name) with
-        | Some creep when isRangerBody creep && avoidFor name = Avoid.Kite ->
+        | Some creep when avoidFor name = Avoid.Kite && Fighter.outranges (Fighter.ofCreep creep) ->
             let camp = Map.tryFind at.Room view.ExitHolds |> Option.map (fun hold -> hold.Exit)
 
             let approach =
@@ -1182,8 +1216,14 @@ let movementAmong
                 | _ -> lazy Set.empty
 
             match Threats.kiteUnsafeFor threats atlas creep camp with
-            | Some(unsafe, soonest) -> Some(Kiting.Keeps(unsafe, soonest, approach))
-            | None -> Some Kiting.Clear
+            | Some(unsafe, soonest) when
+                not (
+                    Threats.standsOffNothing threats atlas creep camp
+                    && closes view threats assigned creep
+                )
+                ->
+                Some(Kiting.Keeps(unsafe, soonest, approach))
+            | _ -> Some Kiting.Clear
         | _ -> None
 
     // The bodies by name, for the chase's lookup of each placed body.

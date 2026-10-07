@@ -8922,15 +8922,19 @@ let arenaBorderTests =
                         |> List.contains (RangedAttackCreep("ranger-984683-Spawn3", "HalfLife847")))
                     |> Option.map (fun t -> t.Tick)
 
+                // #615 U1 moved t24 to t22 and t36 to t34: the melee ties the
+                // mother's ranger on plain, so it stands off nothing, and the
+                // ranger, winning beside the child's, closes to its reach
+                // rather than waiting a step off the ground.
                 Expect.equal
                     firstShot
-                    (Some 24)
-                    $"it shoots the melee from t24 (main t68)\n{failure}"
+                    (Some 22)
+                    $"it shoots the melee from t22 (main t68)\n{failure}"
 
                 Expect.equal
                     (diedOn "HalfLife847" trace)
-                    (Some 36)
-                    $"the melee dies at t36 (S3 t74)\n{failure}"
+                    (Some 34)
+                    $"the melee dies at t34 (S3 t74)\n{failure}"
 
                 // Characterisation (for S4's Flee band, #583). S3 kept
                 // anchor-985849 and lost reserver-985957 at t10: the 1-block
@@ -20759,7 +20763,7 @@ let worldLaneCaptureTests =
             // body that ends the raid soonest (the mother's, walk and kill)
             // and beside it every ranger already at the fight (the child's).
             test
-                "movement S3 capture t986,005, the world lane: the mother's 14-RANGED ranger takes a seat beside the child's, and the melee dies at t36" {
+                "movement S3 capture t986,005, the world lane: the mother's 14-RANGED ranger takes a seat beside the child's, and the melee dies at t34" {
                 let first, _ = rangerIntoMelee () |> run 20
 
                 Expect.equal
@@ -20782,10 +20786,11 @@ let worldLaneCaptureTests =
                          )))
                     $"the mother's ranger shoots it\n{failure}"
 
+                // #615 U1: t36 → t34, the closing ranger above.
                 Expect.equal
                     (diedOn "HalfLife847" trace)
-                    (Some 36)
-                    $"HalfLife847 dies at t36\n{failure}"
+                    (Some 34)
+                    $"HalfLife847 dies at t34\n{failure}"
             }
 
             // The child's 600-hit ranger-985441 keeps its seat on W17S26's

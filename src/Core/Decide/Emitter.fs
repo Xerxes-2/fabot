@@ -710,10 +710,12 @@ let glueStep (from: RoomPos) (target: RoomPos) (onRampart: bool) (keeps: bool) :
 
 /// Whether a melee body beside its target keeps contact on the target's tile
 /// at no worse an exchange (movement S3): what the hostile maps land there by
-/// the tick it stands on it (`Threats.damageAt`) is no more than its heal, or
-/// than they land where it stands now. The target's own swing lands on both.
+/// the tick it stands on it (`Threats.damageAt`) is no more than its heal
+/// while it swings (`Fighter.HealAt`: none, the engine dropping a swing
+/// beside a heal, #615 U1), or than they land where it stands now. The
+/// target's own swing lands on both.
 let glueKeeps (threats: Threats) (creep: CreepInfo) (from: RoomPos) (target: RoomPos) : bool =
-    let heal = Engine.healPower * partCount creep.Body Heal
+    let heal = (Fighter.ofCreep creep).HealAt Engine.meleeRange
     let onto = Threats.damageAt threats target.Room 1 (RoomPos.pos target)
 
     onto <= heal || onto <= Threats.damageAt threats from.Room 1 (RoomPos.pos from)
@@ -757,28 +759,25 @@ let private strikeOrder
     |> List.filter (fun h -> h.Pos.Room = room && targets.Shoots residentRooms fighting h)
     |> targets.Order room distance
 
-/// A fighter's strike at a hostile: a ranger's shot, a guard's swing (#411).
-let private strikeAt (creep: CreepInfo) (hostile: HostileInfo) : Intent =
-    if isRangerBody creep then
-        RangedAttackCreep(creep.Name, hostile.Id)
-    else
-        AttackCreep(creep.Name, hostile.Id)
+/// How far a body strikes, off its live parts (`Fighter.Reach`, #615 U1):
+/// within three with a gun (#411), beside it with a swing alone.
+let private reachOf (creep: CreepInfo) = Fighter.reachOf creep
 
-/// How far a body strikes: a ranger shoots within three (#411), a guard
-/// swings at what stands beside it.
-let private reachOf (creep: CreepInfo) =
-    if isRangerBody creep then
-        Engine.rangedRange
-    else
-        Engine.meleeRange
+/// Whether a body strikes with its gun: it outranges a swing
+/// (`Fighter.outranges`), and holds its standoff at a shot's reach.
+let private shoots (creep: CreepInfo) = reachOf creep > Engine.meleeRange
 
-/// A ranger's live guns; a melee body's none, its strike being the swing
+/// A fighter's strike at a hostile: a shot from a body with a gun, else a
+/// swing (#411).
+let private strikeAt (creep: CreepInfo) : HostileInfo -> Intent =
+    if shoots creep then
+        fun hostile -> RangedAttackCreep(creep.Name, hostile.Id)
+    else
+        fun hostile -> AttackCreep(creep.Name, hostile.Id)
+
+/// A body's live guns; a melee body's none, its strike being the swing
 /// (`strikeAt`).
-let private gunsOf (creep: CreepInfo) =
-    if isRangerBody creep then
-        partCount creep.Body RangedAttack
-    else
-        0
+let private gunsOf (creep: CreepInfo) = partCount creep.Body RangedAttack
 
 /// Every creep not ours in sight, as `massOn` reads it: a hostile we may
 /// strike by the one diplomacy rule (`Facts.mayStrike`, the reflex's rooms),
@@ -859,7 +858,7 @@ let private guardIntent
                |> Option.bind (fun tile -> RoomPos.range tile (RoomPos.at room core.Tile))
                |> Option.exists (fun r -> r <= reach))
         |> Option.map (fun core ->
-            if isRangerBody creep then
+            if shoots creep then
                 RangedAttackStructure(creep.Name, core.Id)
             else
                 AttackStructure(creep.Name, core.Id))
@@ -1394,7 +1393,8 @@ let holds atlas (room: string) (gait: Gait) (tile: Pos) : bool =
 
     weight > 0 && Gait.ticks weight gait |> Option.exists (fun ticks -> ticks > 1)
 
-/// The melee glue's bodies (`glue`): a Guard's holder with no gun, not
+/// The melee glue's bodies (`glue`): a Guard's holder whose standoff is its
+/// target's tile (`Fighter.glues`: its reach a swing, #615 U1), not
 /// mustering, aiming where it stands; with its room and targets.
 let private gluing
     (view: ColonyView)
@@ -1405,18 +1405,18 @@ let private gluing
     =
     match Map.tryFind creep.Name assigned, strikesBy view atlas threats assigned creep with
     | Some(Guard _), Some(room, targets, true) when
-        not (isRangerBody creep)
-        && partCount creep.Body Attack > 0
-        && not (mustering threats assigned creep)
+        Fighter.glues (Fighter.ofCreep creep) && not (mustering threats assigned creep)
         ->
         Some(room, targets)
     | _ -> None
 
-/// Each melee fighter's step onto the target it reaches (`glueStep`, #535):
-/// a Guard's holder with no gun, not mustering, beside the swing
+/// Each melee fighter's step onto the target it reaches (`glueStep`, #535),
+/// its chase's step at a standoff of one (#615 U1): a Guard's holder whose
+/// reach is a swing (`gluing`), not mustering, beside the swing
 /// `guardIntent` issues at the same target, where its chase keeps the step
 /// (`chases`: from the body's tile onto its target's, `Resolver.chaseStep`'s
-/// weighing, #614). The mover leaves these bodies standing.
+/// weighing, #614). The mover leaves these bodies standing: the tile is the
+/// target's until it steps off, which no arbitration of ours settles.
 let glue
     (view: ColonyView)
     atlas

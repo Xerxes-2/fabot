@@ -136,12 +136,14 @@ type Avoid =
     /// Every Reach on the way (#516): its target strikes nothing back, and no
     /// Threat may.
     | Reach
-    /// A ranger's kite (#510, movement S3): the tiles of the room it stands
-    /// in that a melee map strikes before this body, its own legs and
-    /// fatigue counted, could be on them and gone (`Threats.kiteUnsafeFor`),
-    /// rather than the whole Reach, so the ring it shoots from stays open to
-    /// it; and about the exit a raid left by, where a body camping across
-    /// lands beside it. Across the border too.
+    /// The kite (#510, movement S3), for a holder that outranges a swing
+    /// (`Fighter.outranges`, #615 U1; a melee holder walks as a runner and
+    /// glues): the tiles of the room it stands in that a class it stands off
+    /// strikes before this body, its own legs and fatigue counted, could be
+    /// on them and gone (`Threats.kiteUnsafeFor`), rather than the whole
+    /// Reach, so the ring it shoots from stays open to it; and about the exit
+    /// a raid left by, where a body camping across lands beside it. Across
+    /// the border too.
     | Kite
     /// A [[defender]]'s (#504): the tiles outside the home's line a raid
     /// melee there reaches in a step and a swing, where every other runner
@@ -1731,31 +1733,53 @@ module Threats =
         |> Option.map (fun (maps, _) ->
             fun index -> Arrival.soonestAmong index maps.Classes System.Int32.MaxValue)
 
+    /// A body's Fighter, the maps of its room whose class strikes shorter
+    /// than it reaches, and the camp where it outranges the swing a camp is
+    /// read as.
+    let private shorterIn (threats: Threats) atlas (creep: CreepInfo) (camp: Pos option) =
+        let fighter = Fighter.ofCreep creep
+
+        let shorter =
+            Atlas.creepTile atlas creep.Name
+            |> Option.bind (fun at -> Map.tryFind at.Room threats.Arrivals)
+            |> Option.map (fun (maps, _) ->
+                maps.Classes |> List.filter (fun map -> map.Class.Strike < fighter.Reach))
+            |> Option.defaultValue []
+
+        fighter, shorter, camp |> Option.filter (fun _ -> Fighter.outranges fighter)
+
+    /// Whether a kiting body stands off none of the classes shorter than its
+    /// reach in its room (`Fighter.standsOff`, #615 U1), some standing there
+    /// and no camp: each is the quicker on plain, so it picks the standoff.
+    /// What the body may close by, where it also wins the fight (`Resolver`).
+    let standsOffNothing (threats: Threats) atlas (creep: CreepInfo) (camp: Pos option) : bool =
+        let fighter, shorter, camp = shorterIn threats atlas creep camp
+
+        not (List.isEmpty shorter)
+        && Option.isNone camp
+        && not (shorter |> List.exists (fun map -> Fighter.standsOff fighter map.Class))
+
     /// A kiting body's walk (#510, #524, movement S3), by tile index of the
-    /// room it stands in: whether a melee map strikes the tile before the
-    /// body could be on it and gone, its own legs, load, parts shot off and
-    /// fatigue counted (`walkOf`), never sooner than the tick after (a body
-    /// that stays put moves again no sooner); and, about `camp` (the exit a
-    /// raid left by, `ColonyView.ExitHolds`), a step and a swing, and a step
-    /// more for each tick past the first the tile holds the body. Off our
-    /// ramparts. With it, the soonest a melee strikes each tile, which an
-    /// equal-tick walk breaks toward the later. None where neither a melee
-    /// map nor a camp stands in its room, or for a body the projection does
-    /// not place.
+    /// room it stands in: whether a map whose class strikes shorter than the
+    /// body reaches (#615 U1: a melee's, against a body that shoots) strikes
+    /// the tile before the body could be on it and gone, its own legs, load,
+    /// parts shot off and fatigue counted (`walkOf`), never sooner than the
+    /// tick after (a body that stays put moves again no sooner); and, about
+    /// `camp` (the exit a raid left by, `ColonyView.ExitHolds`), a step and a
+    /// swing, and a step more for each tick past the first the tile holds the
+    /// body. Off our ramparts. With it, the soonest such a map strikes each
+    /// tile, which an equal-tick walk breaks toward the later. None where no
+    /// such map nor a camp it outranges stands in its room, or for a body the
+    /// projection does not place.
     let kiteUnsafeFor
         (threats: Threats)
         atlas
         (creep: CreepInfo)
         (camp: Pos option)
         : ((int -> bool) * (int -> int)) option =
-        let melee =
-            Atlas.creepTile atlas creep.Name
-            |> Option.bind (fun at -> Map.tryFind at.Room threats.Arrivals)
-            |> Option.map (fun (maps, _) ->
-                maps.Classes |> List.filter (fun map -> map.Class.Strike = Engine.meleeRange))
-            |> Option.defaultValue []
+        let _, shorter, camp = shorterIn threats atlas creep camp
 
-        if List.isEmpty melee && Option.isNone camp then
+        if List.isEmpty shorter && Option.isNone camp then
             None
         else
             // A camp on a tick with no map anywhere floods the body here,
@@ -1769,7 +1793,7 @@ module Threats =
                 let ramparts = lazy (rampartsIn threats atlas walk.Room)
 
                 let soonest index =
-                    Arrival.soonestAmong index melee System.Int32.MaxValue
+                    Arrival.soonestAmong index shorter System.Int32.MaxValue
 
                 let unsafe index =
                     let leaves = Grid.at index walk.Leaves
@@ -2290,21 +2314,28 @@ let private killHead (view: ColonyView) (room: string) (targets: HostileInfo lis
 /// at it reaches, which a defender's walk keeps off (#504).
 let private stepAndSwing = Engine.meleeRange + 1
 
-/// By tile index, the soonest a melee class of a room's maps strikes the
-/// tile (`Arrival`, movement S3); `Int32.MaxValue` where none ever does.
-let private meleeSoonest (maps: ArrivalMaps option) : int -> int =
+/// The reach the kite ground is laid for: a shot's, the body that outranges
+/// a swing (`Fighter.outranges`).
+let private kiteReach = Engine.rangedRange
+
+/// By tile index, the soonest a class of a room's maps that strikes shorter
+/// than `reach` strikes the tile (`Arrival`, movement S3; #615 U1: the
+/// classes a body of that reach stands off); `Int32.MaxValue` where none
+/// ever does.
+let private shorterSoonest (reach: int) (maps: ArrivalMaps option) : int -> int =
     match
         maps
         |> Option.map (fun maps ->
-            maps.Classes |> List.filter (fun map -> map.Class.Strike = Engine.meleeRange))
+            maps.Classes |> List.filter (fun map -> map.Class.Strike < reach))
     with
     | None
     | Some [] -> fun _ -> System.Int32.MaxValue
     | Some melee -> fun index -> Arrival.soonestAmong index melee System.Int32.MaxValue
 
 /// The kite ground (#510, movement S3): the tiles of one room within the
-/// head's reach that a body standing there steps off before any melee map
-/// strikes them (a melee arrival later than the tick after), off the exit
+/// head's reach that a body standing there steps off before any map shorter
+/// than its reach strikes them (#615 U1: a melee arrival later than the tick
+/// after), off the exit
 /// tiles, which carry a body out of the room. Within a tile less of the head
 /// where any is, while the head can step this tick (#535): its step away
 /// leaves such a tile in reach, where one at the edge is out of it the tick
@@ -2329,7 +2360,7 @@ let private kiteGroundIn
     let standing =
         inRoom |> List.map (fun hostile -> RoomPos.pos hostile.Pos) |> Set.ofList
 
-    let soonest = meleeSoonest maps
+    let soonest = shorterSoonest kiteReach maps
 
     let isOpen (tile: Pos) =
         not (Set.contains tile standing)
@@ -2360,14 +2391,9 @@ let private kiteGroundIn
             Atlas.walkableWithinIn atlas room reach at |> List.filter isOpen
 
         let reach, tiles =
-            match
-                (if stepsNow target then
-                     within (Engine.rangedRange - 1)
-                 else
-                     [])
-            with
-            | [] -> Engine.rangedRange, within Engine.rangedRange
-            | near -> Engine.rangedRange - 1, near
+            match (if stepsNow target then within (kiteReach - 1) else []) with
+            | [] -> kiteReach, within kiteReach
+            | near -> kiteReach - 1, near
 
         let ground, widest =
             match anyMelee, tiles with
@@ -2808,7 +2834,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 inRoom |> List.map (fun hostile -> RoomPos.pos hostile.Pos) |> Set.ofList
 
             let maps = Map.tryFind room arrivals |> Option.map fst
-            let soonest = meleeSoonest maps
+            let soonest = shorterSoonest kiteReach maps
 
             let head =
                 inRoom

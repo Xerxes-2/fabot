@@ -2341,6 +2341,66 @@ let kiteTests =
                     "one MOVE acting under its shot-off weight and twenty fatigue to pay: struck first"
             }
 
+            // #615 U1: a raid quicker than the body picks the standoff, so the
+            // body closes to its reach, but only where it wins the fight
+            // (`Resolver.closes`). A scratched ranger (MOVE first, so its
+            // first wound lames it) the admission let in by a Lose's call or
+            // a `rangers > 1` Win keeps its kite walk through the ticks its
+            // heal takes to stand its MOVE back up.
+            test "a lamed ranger closes on a quicker melee only where it wins the fight" {
+                let at = { X = 25; Y = 44 }
+                let from = { X = 21; Y = 47 }
+                let quick = ranger "r-1"
+
+                let lamed =
+                    { quick with
+                        Body = Map.add Move 1 quick.Body
+                        Hits =
+                            { quick.Hits with
+                                Hits = quick.Hits.HitsMax - 200
+                            }
+                    }
+
+                let judged hostile partners =
+                    let colony = declaredRaid [ hostile ] |> withGuards ((lamed, from) :: partners)
+
+                    let atlas = Atlas.ofView colony
+                    let threats = threatsOf colony atlas
+                    let assigned = Map.ofList [ "r-1", Guard "W1N2" ]
+
+                    (Threats.briefOf threats "W1N2").Verdict.Value,
+                    Threats.standsOffNothing threats atlas lamed None,
+                    Resolver.closes colony threats assigned lamed
+
+                let verdict, nothing, closes = judged (runnerAt at) []
+                Expect.equal verdict Answer.Lose "the premise: nothing of ours wins the runner"
+                Expect.isTrue nothing "the premise: the runner is the quicker on plain"
+                Expect.isFalse closes "under a Lose it keeps its kite walk"
+
+                let verdict, nothing, closes =
+                    judged
+                        (hostileIn "W1N2" at (List.replicate 2 Move @ List.replicate 2 Attack))
+                        [
+                            creepWith "r-2" 0 0 (bodyFor Bodies.rangerPattern 1950),
+                            { X = 20; Y = 36 }
+                        ]
+
+                Expect.equal
+                    verdict
+                    Answer.Win
+                    "the premise: a three-block ranger standing by wins the 2A melee"
+
+                Expect.isTrue nothing "the premise: still the quicker"
+                Expect.isFalse closes "a partner holding no Guard beside it is no reason to close"
+
+                let verdict, nothing, closes =
+                    judged (hostileIn "W1N2" at [ Move; Move; Attack ]) []
+
+                Expect.notEqual verdict Answer.Lose "the premise: the light melee is no Lose"
+                Expect.isTrue nothing "the premise: it is the quicker on plain"
+                Expect.isTrue closes "one it wins alone it closes on"
+            }
+
             test "the speed and not the paper picks the target" {
                 let withRanger hostile =
                     declaredRaid [ hostile ] |> withGuards [ ranger "r-1", { X = 22; Y = 48 } ]
@@ -3072,10 +3132,11 @@ let kiteStepTests =
                     "a second melee a step from the target's tile and two from the guard's strikes it there first"
             }
 
-            // #615 U0 pins today's values; U2/U3 resolve them to the engine's
-            // (`Fighter.HealAt`: nothing in a tick it swings). `Matcher`'s
-            // `struckNow` reads the same `healPower × HEAL` as `glueKeeps`.
-            test "quirk: the exchange gives a swinging guard no heal while the glue counts its HEAL" {
+            // #615 U1 flipped the U0 quirk pin ("the glue counts a guard's
+            // HEAL beside its swing"): the glue reads `Fighter.HealAt`,
+            // nothing in a tick it swings. `Matcher`'s `struckNow` still reads
+            // `healPower × HEAL`, U2/U3's.
+            test "the glue, the exchange and the engine give a swinging guard no heal" {
                 let target = { X = 25; Y = 44 }
                 let from = { X = 24; Y = 44 }
 
@@ -3105,9 +3166,9 @@ let kiteStepTests =
 
                 Expect.isFalse (keeps (healerGuard 1)) "one HEAL's 12 does not cover the 390 there"
 
-                Expect.isTrue
+                Expect.isFalse
                     (keeps (healerGuard 33))
-                    "33 HEAL's 396 does: the glue counts a guard's HEAL beside its swing"
+                    "nor does 33 HEAL's 396: a heal would drop its swing"
 
                 Expect.equal
                     (Facts.selfHealOf (partCount (healerGuard 33).Body))
@@ -3171,6 +3232,53 @@ let kiteStepTests =
                     "the premise: onto its target's plain tile"
 
                 Expect.isEmpty (glued Swamp) "never onto its swamp tile: it stands and swings"
+            }
+
+            // #615 U1: the glue is the standoff of a body whose reach is a
+            // swing (`Fighter.glues`), read off its live parts. A hybrid was
+            // the guard's cut and glued; it reaches three with its gun, so it
+            // holds there and shoots.
+            test "only a body whose reach is a swing glues onto its target; a hybrid shoots it" {
+                let target = { X = 25; Y = 44 }
+                let from = { X = 24; Y = 44 }
+
+                let glued body =
+                    let colony =
+                        declaredRaid [ hostileIn "W1N2" target smallRanged ]
+                        |> withField
+                        |> withGuards [ body, from ]
+
+                    let atlas = Atlas.ofView colony
+                    let threats = threatsOf colony atlas
+                    let assigned = Map.ofList [ "g-1", Guard "W1N2" ]
+
+                    Emitter.glue
+                        colony
+                        atlas
+                        threats
+                        assigned
+                        (Resolver.glueChases colony atlas threats assigned),
+                    Emitter.aims colony atlas threats assigned
+
+                let hybrid = creepWith "g-1" 0 0 [ Move; Move; Move; Attack; RangedAttack; Heal ]
+
+                Expect.equal
+                    (fst (glued (guard "g-1")))
+                    [ MoveCreep("g-1", Right) ]
+                    "the premise: the guard steps onto its target's tile"
+
+                let steps, strikes = glued hybrid
+                Expect.isEmpty steps "the hybrid never steps onto it"
+
+                Expect.allEqual
+                    (strikes
+                     |> List.map (function
+                         | RangedAttackCreep _ -> true
+                         | _ -> false))
+                    true
+                    "and aims its gun, the strike it holds its standoff for"
+
+                Expect.isNonEmpty strikes "the premise: it aims"
             }
 
             // #614 review: the light ticks' plan is cut only where the full

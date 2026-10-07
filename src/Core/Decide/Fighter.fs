@@ -40,6 +40,12 @@ type Fighter =
 
 [<RequireQualifiedAccess>]
 module Fighter =
+    /// `Reach` of a body acting at `power`.
+    let private reachOfPower (power: BodyPart -> int) =
+        if power RangedAttack > 0 then Engine.rangedRange
+        elif power Attack > 0 then Engine.meleeRange
+        else 0
+
     /// The fight of a body acting at `power` (a part's count at its boost).
     let private ofPower (power: BodyPart -> int) (gait: Gait) (hits: int) (tough: int) : Fighter =
         let attack = power Attack
@@ -50,10 +56,7 @@ module Fighter =
             attack > 0 && range <= Engine.meleeRange
 
         {
-            Reach =
-                if ranged > 0 then Engine.rangedRange
-                elif attack > 0 then Engine.meleeRange
-                else 0
+            Reach = reachOfPower power
             DamageAt =
                 fun range ->
                     (if swings range then Engine.attackPower * attack else 0)
@@ -87,3 +90,29 @@ module Fighter =
     /// ours is boosted at spawn yet), at `Arrival.gaitOf`.
     let ofCreep (creep: CreepInfo) : Fighter =
         ofPower (partCount creep.Body) (Arrival.gaitOf creep) creep.Hits.Hits 0
+
+    /// A living creep of ours' `Reach` alone, for the readers asking nothing
+    /// else of its fight every tick.
+    let reachOf (creep: CreepInfo) : int = reachOfPower (partCount creep.Body)
+
+    /// Whether some weapon strikes shorter than this body reaches: a swing is
+    /// the shortest, so only a body that shoots outranges anything.
+    let outranges (fighter: Fighter) : bool = fighter.Reach > Engine.meleeRange
+
+    /// Whether a body stands off a hostile class (#615 U1): it holds at its
+    /// own reach outside the class's strike, which it can only where the
+    /// class strikes shorter than it reaches and falls behind it on plain
+    /// (`Gait.fallsBehind`, #613's ground, the reading `Facts.cannotClose`
+    /// admits a kite by). The faster side picks the standoff, and a tie is
+    /// the class's: it can close.
+    let standsOff (fighter: Fighter) (cls: HostileClass) : bool =
+        cls.Strike < fighter.Reach
+        && (match cls.Pace, Gait.ticks Gait.plain fighter.Gait with
+            | None, Some _ -> true
+            | Some pace, Some ours -> pace.Plain > ours
+            | _, None -> false)
+
+    /// Whether a body's standoff is its target's tile (#615 U1): its reach is
+    /// a swing, so it closes to one and steps after the target onto the tile
+    /// it leaves (`Emitter.glue`), its chase weighing that step as any other.
+    let glues (fighter: Fighter) : bool = fighter.Reach = Engine.meleeRange

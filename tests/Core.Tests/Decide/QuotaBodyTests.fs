@@ -894,4 +894,59 @@ let fighterTests =
 
                 Expect.equal (ranger.DamageAt 3) 80 "XKHO2 shoots ×4"
             }
+
+            test "a body stands off a class it outranges and out-paces on plain (U1)" {
+                let melee plain =
+                    {
+                        Strike = Engine.meleeRange
+                        Pace = Some { Road = 1; Plain = plain; Swamp = 5 }
+                    }
+
+                let shooter =
+                    { melee 1 with
+                        Strike = Engine.rangedRange
+                    }
+
+                let ranger = wholeFighter rangerPattern.Block
+                let guard = wholeFighter guardPattern.Block
+                let hybrid = wholeFighter [ Move; Move; Move; Attack; RangedAttack; Heal ]
+
+                Expect.isTrue
+                    (Fighter.standsOff ranger (melee 2))
+                    "a ranger kites a melee slower on plain"
+
+                Expect.isFalse
+                    (Fighter.standsOff ranger (melee 1))
+                    "one at its pace can close, as the admission reads it (`Facts.cannotClose`)"
+
+                Expect.isFalse
+                    (Fighter.standsOff (Fighter.ofParts rangerPattern.Block [] 350) (melee 2))
+                    "a ranger on one MOVE under its whole weight is the slower: the melee picks the standoff"
+
+                Expect.isFalse
+                    (Fighter.standsOff ranger shooter)
+                    "a shooter strikes as far as it reaches: it closes"
+
+                Expect.isFalse
+                    (Fighter.standsOff guard (melee 5))
+                    "a melee stands off nothing, however slow the other: its standoff is the target's tile"
+
+                Expect.isTrue
+                    (Fighter.standsOff hybrid (melee 2))
+                    "a hybrid holds at its gun's reach"
+
+                Expect.isTrue
+                    (Fighter.standsOff ranger { melee 1 with Pace = None })
+                    "a melee with no MOVE acting never closes"
+
+                Expect.isTrue (Fighter.glues guard) "the guard's standoff is its target's tile"
+
+                Expect.isFalse
+                    (Fighter.glues ranger || Fighter.glues hybrid)
+                    "a body with a gun never glues"
+
+                Expect.isFalse
+                    (Fighter.glues (wholeFighter medicPattern.Block))
+                    "nor one with no weapon"
+            }
         ]
