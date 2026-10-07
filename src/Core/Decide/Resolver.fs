@@ -219,13 +219,15 @@ let private fleeUnsafe (threats: Threats) atlas (creep: string) : (int -> bool) 
     |> Option.bind (fun body -> Threats.unsafeFor threats atlas body false)
 
 /// A fleeing body's step toward its ground (movement S4), the full tick's
-/// and the light tick's plan alike: the plain step (`stepToward`), unless a
-/// hostile strikes that tile before the body could be on it and gone; then
-/// the walk through the tiles it is on and gone first, toward the ground's
-/// room where that lies across a border (#511); and where no such walk
-/// reaches it, never a step onto a tile struck sooner than its own: the tile
-/// beside it a hostile strikes last, where that is later than its own, else
-/// the plain step where that is struck no sooner, else none.
+/// and the light tick's plan alike. Near a map, the walk through the tiles it
+/// is on and gone first, all the way and not its first step alone (#608: the
+/// plain walk home led a reserver through a swamp the shooter struck), toward
+/// the ground's room where that lies across a border (#511); with no such
+/// walk, the plain step (`stepToward`) where no hostile strikes that tile
+/// before the body is gone from it. Else never a step onto a tile struck
+/// sooner than its own: the tile beside it struck latest after the body could
+/// be gone from it (a swamp holding it counted), where struck later than its
+/// own, else the plain step where that is struck no sooner, else none.
 let private fleeStep
     (threats: Threats)
     atlas
@@ -235,31 +237,60 @@ let private fleeStep
     (later: (int -> int) option)
     : RoomPos option =
     let room = at.Room
-    let direct = stepToward atlas creep Flee area
+    // Priced only where the walk round finds nothing: the walk is the step.
+    let direct = lazy (stepToward atlas creep Flee area)
 
     match fleeUnsafe threats atlas creep with
-    | Some unsafe when
-        direct
-        |> Option.exists (fun step -> step.Room = room && unsafe (indexOf (RoomPos.pos step)))
-        ->
+    | None -> direct.Value
+    | Some unsafe ->
         let walked =
             match area |> Seq.tryHead with
             | Some tile when tile.Room <> room ->
                 Atlas.stepTowardRoomWhere atlas creep Set.empty (Some unsafe) later tile.Room
             | _ -> Atlas.firstStepAvoidingWhere atlas creep Set.empty unsafe later area
 
+        let direct = direct.Value
+
         match walked with
         | Some step -> Some step
+        | None when direct |> Option.forall (fun step -> step.Room <> room) -> direct
+        | None when direct |> Option.exists (fun step -> not (unsafe (indexOf (RoomPos.pos step)))) ->
+            direct
         | None ->
             Atlas.dropStep atlas creep
 
             match Threats.soonestIn threats room with
             | Some soonest ->
                 let pos = RoomPos.pos at
+
+                // The ticks its gait holds it on a tile past the tick it is
+                // on it (a swamp, its load): the tiles beside it rank by the
+                // strike less that hold, so the plain outranks a swamp
+                // struck a tick later that holds it four.
+                let held =
+                    match
+                        Threats.bodyOf threats creep |> Option.bind (Threats.walkOf threats atlas)
+                    with
+                    | Some walk when walk.Room = room ->
+                        fun index ->
+                            let on = Grid.at index walk.Ticks
+
+                            if on = System.Int32.MaxValue then
+                                0
+                            else
+                                Grid.at index walk.Leaves - on
+                    | _ -> fun _ -> 0
+
+                let struck index = soonest index - held index
+                // Standing is no hold that ends: a body that stays is struck
+                // every tick it stays, so a step is weighed against the
+                // strike on its own tile alone. Weighed by its hold too, a
+                // reserver on a swamp whose only ways off are swamps (#608,
+                // (9,22)) stood and was shot dead.
                 let here = soonest (indexOf pos)
 
                 Atlas.adjacentWalkableIn atlas room pos
-                |> List.sortBy (fun tile -> unsafe (indexOf tile), -(soonest (indexOf tile)), tile)
+                |> List.sortBy (fun tile -> unsafe (indexOf tile), -(struck (indexOf tile)), tile)
                 |> List.tryHead
                 |> Option.filter (fun tile ->
                     not (unsafe (indexOf tile)) || soonest (indexOf tile) > here)
@@ -272,7 +303,6 @@ let private fleeStep
                     |> Option.filter (fun step -> soonest (indexOf (RoomPos.pos step)) >= here)
                 )
             | None -> None
-    | _ -> direct
 
 /// Register one creep's Move Intent — every creep gets one: a traveller heads
 /// its next step and tails a sidestep, an arrived body heads its own tile and

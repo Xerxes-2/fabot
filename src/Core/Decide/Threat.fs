@@ -2011,8 +2011,9 @@ module Threats =
     /// A body on no tile but its own first — a chaser at its pace already
     /// striking it — outruns nothing in the room: its way out is an exit home
     /// it walks to that no striker there stands nearer than it, never one
-    /// past the chaser. Empty at home, and where every way home crosses the
-    /// raid: it flees in the room.
+    /// past the chaser, onto a landing struck later than it is on it.
+    /// Empty at home, and where every way home crosses the raid: it flees in
+    /// the room.
     and private homeward
         (threats: Threats)
         atlas
@@ -2051,6 +2052,45 @@ module Threats =
                 else
                     Grid.at (indexOf exit) walk.Ticks < System.Int32.MaxValue && ahead exit
 
+            // Where it lands: a body that outruns the raid lands only out of
+            // the next room's Reach; one struck where it stands is kept from
+            // a tile across where a hostile standing in that room strikes it
+            // by the tick it is on it (`on`, its walk to the exit and the
+            // crossing), or anything strikes it no later than its own tile.
+            // The chaser it leaves behind, crossing on its heels, ties the
+            // crossing (the maps call a tie struck) and is no reason to stay
+            // where it already strikes (#608).
+            let here =
+                lazy
+                    (match soonestIn threats room with
+                     | Some soonest -> soonest (indexOf (RoomPos.pos at))
+                     | None -> System.Int32.MaxValue)
+
+            let struckIn (next: string) : int -> Pos -> bool =
+                if outruns then
+                    let hot = reachIn threats next
+                    fun _ tile -> Set.contains tile hot
+                else
+                    match soonestIn threats next, Map.tryFind next threats.Arrivals with
+                    | Some soonest, Some(_, strikers) ->
+                        let camped =
+                            lazy
+                                (strikers.Force()
+                                 |> List.filter (fun striker -> striker.At.Room = next))
+
+                        fun on tile ->
+                            soonest (indexOf tile) <= here.Value
+                            || Arrival.damageAt next camped.Value on tile > 0
+                    | _ -> fun _ _ -> false
+
+            let onAcross (exit: Pos) (steps: int) =
+                let ticks = Grid.at (indexOf exit) walk.Ticks
+
+                if ticks = System.Int32.MaxValue then
+                    ticks
+                else
+                    ticks + steps
+
             Atlas.routes atlas room home
             |> List.choose (function
                 | _ :: next :: _ -> Some next
@@ -2061,19 +2101,20 @@ module Threats =
             // now, is landed in.
             |> List.filter (fun next -> next = home || Set.contains next threats.Seen)
             |> List.choose (fun next ->
-                let hot = reachIn threats next
+                let hot = struckIn next
 
                 match
                     Atlas.seams atlas room next
                     |> List.filter (fun (exit, landing) ->
-                        leaves exit && not (Set.contains landing hot))
+                        leaves exit && not (hot (onAcross exit 1) landing))
                 with
                 | [] -> None
                 | band ->
                     let ground =
                         band
-                        |> List.collect (snd >> Atlas.adjacentWalkableIn atlas next)
-                        |> List.filter (fun tile -> not (Set.contains tile hot))
+                        |> List.collect (fun (exit, landing) ->
+                            Atlas.adjacentWalkableIn atlas next landing
+                            |> List.filter (hot (onAcross exit 2) >> not))
                         |> Set.ofList
                         |> RoomPos.setAt next
 

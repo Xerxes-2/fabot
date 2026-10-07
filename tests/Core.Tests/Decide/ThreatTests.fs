@@ -6372,8 +6372,8 @@ let acrossTheBorderTests =
                         Id = "h-west"
                     }
 
-                let groundIn (wide: bool) (hostile: HostileInfo) (at: Pos) =
-                    let colony = borderHome true [] [ hostile ] []
+                let groundAmong (wide: bool) (hostiles: HostileInfo list) (at: Pos) =
+                    let colony = borderHome true [] hostiles []
                     let west = SpatialInfo.layerOf colony.Spatial "W2N1"
                     let ranger = creepWith "ranger-1" 0 0 (block @ block)
 
@@ -6405,6 +6405,7 @@ let acrossTheBorderTests =
                     let atlas = Atlas.ofView caught
                     Threats.fleeAreaFor (threatsOf caught atlas) atlas ranger
 
+                let groundIn wide (hostile: HostileInfo) at = groundAmong wide [ hostile ] at
                 let groundOf = groundIn false
 
                 let home (area: Set<RoomPos>) =
@@ -6421,6 +6422,27 @@ let acrossTheBorderTests =
                 Expect.isTrue
                     (home chased)
                     $"a shooter at its pace beside it, first on every tile: home all the same: {chased}"
+
+                // #608 review: a raider camped across the border, five off the
+                // landings, strikes them before the chased body is on one: no
+                // landing is its way out, however soon its own tile is struck.
+                let camper =
+                    { hostileIn
+                          "W1N1"
+                          { X = 5; Y = 34 }
+                          (List.replicate 3 RangedAttack @ List.replicate 3 Move) with
+                        Id = "h-home"
+                    }
+
+                let camped =
+                    groundAmong
+                        false
+                        [ shooterWestAt { X = 42; Y = 34 }; camper ]
+                        { X = 43; Y = 34 }
+
+                Expect.isFalse
+                    (camped |> Set.exists (fun tile -> tile.Room = "W1N1"))
+                    $"a raider camped across: never home onto its strike: {camped}"
 
                 // The shooter between it and the exits home: never past it.
                 let cut = groundIn true (shooterWestAt { X = 44; Y = 34 }) { X = 43; Y = 34 }
