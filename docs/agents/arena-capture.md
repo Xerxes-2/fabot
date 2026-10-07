@@ -40,14 +40,14 @@ The arena starts at `tick + 1`. The replay holds the state after the tick ran, s
 
 ## Landing it
 
-1. Paste the fixture at module level in the arena file that owns the domain: `ArenaTests.fs` (scenarios, borders, defence), `ArenaClaimTests.fs`, `ArenaReactorTests.fs` or `ArenaStrongholdTests.fs`.
+1. Paste the fixture at module level in the arena file that owns the domain (the arena row of `docs/agents/orchestration.md` § Where a new Decide test goes names them, ~2,500 lines each): a capture a second file replays goes to a captures file as `internal`.
 2. Move the test into that file's testList.
 3. Name both after what they pin.
 4. Write the expectation, and turn `ptest` into `test`.
 5. If the test pins today's behaviour that an open issue will change, say so in a comment.
 6. Run `npm run format`.
 
-Example: `#532 capture t972,617` in `ArenaTests.fs`, "arena border play".
+Example: `#532 capture t972,617` in `ArenaBorderTests.fs`, "arena border play", its fixture in `ArenaOutpostCaptures.fs`.
 
 ## Cross-validating on xxscreeps
 
