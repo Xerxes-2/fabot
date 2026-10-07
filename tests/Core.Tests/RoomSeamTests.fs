@@ -1368,6 +1368,65 @@ let rivalRoomTests =
                 Expect.equal (hopsOf opened) (Some 1) "and one again once they lose it"
             }
 
+            test
+                "a room out of sight still joins its neighbours: the reach is counted over the ground (#617)" {
+                let square = squareWorld None false
+
+                // The two corners held, the rooms between them dark: their
+                // ground is read by name, as the shell reads any room's.
+                let corners =
+                    { square with
+                        Rooms =
+                            square.Rooms
+                            |> Map.filter (fun room _ -> room = "W15S28" || room = "W16S27")
+                        StrayGround = fun room -> Map.tryFind room square.Rooms
+                    }
+
+                let reach world =
+                    World.reachHops
+                        StandDown.none
+                        (JoinTable())
+                        Tuning.defaults
+                        world
+                        Tuning.defaults.MaxHops
+
+                Expect.isNone
+                    (World.hopsUnder
+                        StandDown.none
+                        (JoinTable())
+                        Tuning.defaults
+                        corners
+                        "W15S28"
+                        "W16S27")
+                    "the premise: no chain over the rooms the world holds"
+
+                Expect.equal
+                    (reach corners "W15S28" "W16S27")
+                    (Some 2)
+                    "two crossings through the dark rooms"
+
+                Expect.equal (reach square "W15S28" "W16S27") (Some 2) "as in sight"
+
+                let rival =
+                    { corners with
+                        Sightings = (squareWorld (Some "Trepidimous") false).Sightings
+                    }
+
+                Expect.equal
+                    (reach rival "W15S28" "W16S27")
+                    (Some 2)
+                    "round a dark room a rival owns"
+
+                Expect.isNone
+                    (reach
+                        { corners with
+                            StrayGround = fun _ -> None
+                        }
+                        "W15S28"
+                        "W16S27")
+                    "and none where no ground can be read"
+            }
+
             test "the Atlas routes round a rival's room too" {
                 let world = squareWorld None false
 

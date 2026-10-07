@@ -1507,9 +1507,10 @@ module ColonyView =
 
         // Each contested room another colony declares — a raider seen or
         // recalled there — within `Tuning.LaneHops` crossings of a fighter of
-        // this colony, with the rooms a walk to it crosses, projected as
-        // transit rooms: the room a world Brief may hand this colony's
-        // fighter must be one its Atlas prices. None in peace.
+        // this colony over the rooms' ground (`World.reachHops`, #617), with
+        // the rooms a walk of those crossings may cross, projected as transit
+        // rooms off their ground: the room a world Brief may hand this
+        // colony's fighter must be one its Atlas prices. None in peace.
         let contested =
             let fighting =
                 mine
@@ -1526,7 +1527,7 @@ module ColonyView =
             match fighting with
             | [] -> []
             | _ ->
-                let hops = World.hopsUnder gate joins tuning world
+                let hops = World.reachHops gate joins tuning world tuning.LaneHops
                 let held = Set.ofList scan.Scanned
 
                 colonies
@@ -1536,9 +1537,10 @@ module ColonyView =
                 |> Seq.filter (fun room -> not (held.Contains room) && raided room)
                 |> Seq.collect (fun room ->
                     fighting
-                    |> List.filter (fun at ->
-                        hops at room |> Option.exists (fun n -> n <= tuning.LaneHops))
-                    |> List.collect (fun at -> room :: RoomName.transitBetween at room))
+                    |> List.collect (fun at ->
+                        match hops at room with
+                        | Some n -> room :: RoomName.transitWithin n at room
+                        | None -> []))
                 |> Seq.filter (fun room -> not (held.Contains room))
                 |> Seq.distinct
                 |> List.ofSeq
@@ -1565,10 +1567,11 @@ module ColonyView =
             | [] -> []
             | walks ->
                 // Every chain the Atlas may walk it by, over the masked rings
-                // and round the rooms a rival owns (`World.reachesUnder`); one
-                // no chain joins inside the budget projects nothing, and the
-                // body walks to its holder's home.
-                let linked = World.reachesUnder gate joins tuning world
+                // of every room's ground and round the rooms a rival owns
+                // (`World.reachesOver`, #617); one no chain joins inside the
+                // budget projects nothing, and the body walks to its holder's
+                // home.
+                let linked = World.reachesOver gate joins tuning world
 
                 walks
                 |> List.distinct
@@ -1599,6 +1602,10 @@ module ColonyView =
         // rooms are.
         let stranded = Fresh.setOfSeq scan.Stranded
 
+        // The lane's rooms and the walks home, which may lie beyond
+        // `World.Rooms` (#617).
+        let laned = Set.ofList (contested @ homeward)
+
         // Each scanned room's facts and its memory (#151), in scan order. A
         // room the colony only **crosses** keeps neither, one rule and not
         // two (#271): `transiting` takes its every id out, and a memory of
@@ -1611,9 +1618,10 @@ module ColonyView =
             scanned
             |> List.map (fun room ->
                 // A stranded room beyond `World.Rooms` reads a stray's ground
-                // (#570).
+                // (#570), and a lane's or a walk home's room the ground its
+                // reach was read off.
                 let facts =
-                    if stranded.Contains room then
+                    if stranded.Contains room || laned.Contains room then
                         World.groundOf world room |> Option.defaultValue RoomFacts.empty
                     else
                         World.roomOf world room

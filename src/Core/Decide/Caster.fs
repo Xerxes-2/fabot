@@ -55,8 +55,9 @@ let private roomOf (task: Task) =
 /// wins, to any — but a home's own row casts no losing fight for it —, at
 /// least cost: its spawn time, the ticks its spawns are already queued for
 /// (`SpawnInfo.Remaining`, and the bodies handed it this tick), and the
-/// walk, a room's side a crossing (`hops`, the route's, else off the
-/// names; past the hop budget where neither prices it); then a colony
+/// walk, a room's side a crossing (`hops`, the route's over every room's
+/// ground, `World.reachHops`, else off the names; past the hop budget where
+/// neither prices it); then a colony
 /// asking it, then by home. A colony casts for any ask but its own — one it
 /// asks for itself, for a room that is no other colony's home it defends —
 /// only with a spawn, a bank at `Tuning.CasterFloor` and a stock at

@@ -461,11 +461,19 @@ let tickStart = performance.now();
 // the slice of the engine Bindings.fs declares over both.
 //
 // `unmodelled` is the scenario's answer for a room it did not build. The
-// engine has terrain for every room in the world, so a scenario that can
-// name one — the `stub` world's synthetic neighbours — hands back a grid
-// rather than throwing; a scenario whose rooms are the property under test
-// leaves it out, and a name it does not hold is the harness lying.
-function buildGame({ terrains, rooms, spawns, creeps, byId, unmodelled }) {
+// engine has terrain for every room in the world, and the bot reads a
+// fighter's reach over any room's ground (`World.reachHops`, #617), so a
+// room no scenario builds is answered too: solid rock by default, joined to
+// nothing, as a room the world does not hold was before. The reads are
+// counted and printed `(unmodelled)`.
+function buildGame({
+  terrains,
+  rooms,
+  spawns,
+  creeps,
+  byId,
+  unmodelled = () => ({ get: () => WALL }),
+}) {
   // One terrain object per room, handed back unchanged on every call, as
   // the engine does — and counted per room, so the per-room terrain memo
   // (ADR 0031, layered by ADR 0041) is checkable: the bot should read each
@@ -492,12 +500,6 @@ function buildGame({ terrains, rooms, spawns, creeps, byId, unmodelled }) {
       getRoomTerrain: (roomName) => {
         let terrain = terrains.get(roomName);
         if (!terrain) {
-          if (!unmodelled) {
-            throw new Error(
-              `the stub world holds no terrain for ${roomName} — ` +
-                `it knows ${[...terrains.keys()].join(", ")}`,
-            );
-          }
           // Memoised under its name like every modelled room, so the
           // engine's "the same object every call" holds for it too.
           terrain = unmodelled(roomName);
@@ -4866,9 +4868,8 @@ globalThis.__fabotDecideCalls = [];
 // *field* of a binding and not a binding, so the textual check below cannot
 // see it: renamed in `Tuning`, it would arrive here as `undefined`, no
 // outpost would clear the hop budget, and the derived set would collapse to
-// the seen rooms — which is precisely the "the stub world holds no terrain"
-// throw this ticket exists to delete. It is asserted numeric at load
-// instead. And the `seen` list is built out of the bundle's *own* list
+// the seen rooms, every declared room then answered as solid rock. It is
+// asserted numeric at load instead. And the `seen` list is built out of the bundle's *own* list
 // rather than by calling a Fable list constructor by name: `ofArray`,
 // `ofArray2`, `ofArray3`, `ofArrayWithTail` and `MapTreeModule_ofArray` all
 // live in this bundle under names esbuild hands out by collision order, so

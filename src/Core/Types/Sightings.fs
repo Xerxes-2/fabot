@@ -1633,19 +1633,28 @@ module World =
                     }
                     seeded)
 
-    /// `linked`'s terrain half: everything it asks but who owns the room.
-    /// What `linkedRecalling` files, because it is the half that never moves.
-    let private seamed (keeperMargin: int) (world: World) (fromRoom: string) (toRoom: string) =
+    /// `linked`'s terrain half: everything it asks but who owns the room,
+    /// over the two rooms' facts as `factsOf` reads them. What
+    /// `linkedRecalling` and `reachedRecalling` file, because it is the half
+    /// that never moves.
+    let private seamedOver
+        (keeperMargin: int)
+        (factsOf: string -> RoomFacts)
+        (fromRoom: string)
+        (toRoom: string)
+        =
         let walkableIn room =
-            ringWalkable keeperMargin room (roomOf world room).Border
+            ringWalkable keeperMargin room (factsOf room).Border
 
         Keepers.enterable toRoom
         && Seam.joinedBy
             (walkableIn fromRoom)
             (walkableIn toRoom)
-            (groundWalkable keeperMargin toRoom (roomOf world toRoom).Layer.Terrain)
+            (groundWalkable keeperMargin toRoom (factsOf toRoom).Layer.Terrain)
             fromRoom
             toRoom
+
+    let private seamed (keeperMargin: int) (world: World) = seamedOver keeperMargin (roomOf world)
 
     /// Whether a creep could step from one room into the other: the
     /// [[world]]'s own reading of a [[seam]] band, before any [[atlas]] grid
@@ -1761,6 +1770,86 @@ module World =
                 joins.Hops.[key] <- Option.defaultValue -1 hops
                 hops
 
+    /// `linkedRecalling` over every room's ground (`groundOf`) and not over
+    /// the rooms the world holds (#617): a room's exits are the engine's,
+    /// and vision decides only what stands in it. Who owns the far room is
+    /// still asked first. A pair either of whose ground cannot be read is
+    /// joined by nothing. Filed in the same table under the same key: where
+    /// both rooms are held, their ground is their facts' terrain.
+    let reachedRecalling
+        (joins: JoinTable)
+        (keeperMargin: int)
+        (world: World)
+        : string -> string -> bool =
+        fun fromRoom toRoom ->
+            if rivalHeld world toRoom then
+                false
+            else
+                let key = $"{keeperMargin}|{fromRoom}|{toRoom}"
+
+                if joins.Joins.ContainsKey key then
+                    joins.Joins.[key]
+                else
+                    match groundOf world fromRoom, groundOf world toRoom with
+                    | Some fromFacts, Some toFacts ->
+                        let joined =
+                            seamedOver
+                                keeperMargin
+                                (fun room -> if room = fromRoom then fromFacts else toFacts)
+                                fromRoom
+                                toRoom
+
+                        joins.Joins.[key] <- joined
+                        joined
+                    | _ -> false
+
+    /// `reachesUnder` over every room's ground (`reachedRecalling`, #617):
+    /// the predicate a fighter's reach and walk home are searched over.
+    let reachesOver (gate: StandDown) (joins: JoinTable) (tuning: Tuning) (world: World) =
+        reachedRecalling joins (Tuning.keeperMargin tuning) world
+        |> linkedAvoiding gate.Impassable
+
+    /// The crossings between two rooms inside `budget`, as `hopsUnder` counts
+    /// them but over every room's ground (`reachedRecalling`, #617): what the
+    /// fight's reach reads — the lane a colony projects another's contested
+    /// room over, a harassment room's caster, a cast's walk — so a room going
+    /// dark moves none of them. A declaration's chain stays `hopsUnder`'s:
+    /// it must be one the projection's Atlas prices.
+    let reachHops
+        (gate: StandDown)
+        (joins: JoinTable)
+        (tuning: Tuning)
+        (world: World)
+        (budget: int)
+        =
+        let reaches = reachesOver gate joins tuning world
+
+        let stamp =
+            String.concat
+                "|"
+                [
+                    "reach"
+                    string (Tuning.keeperMargin tuning)
+                    string budget
+                    String.concat "," gate.Impassable
+                    String.concat "," (rivalRooms world)
+                ]
+
+        fun (home: string) (room: string) ->
+            let key = stamp + "|" + home + "|" + room
+
+            if joins.Hops.ContainsKey key then
+                match joins.Hops.[key] with
+                | hops when hops < 0 -> None
+                | hops -> Some hops
+            else
+                if joins.Hops.Count >= 4096 then
+                    joins.Hops.Clear()
+
+                let hops = Declaration.hops reaches budget home room
+                joins.Hops.[key] <- Option.defaultValue -1 hops
+                hops
+
     /// The colony whose home bank holds the most, ties by home name.
     let private largestBank (world: World) (colonies: Colony list) : string option =
         colonies
@@ -1866,8 +1955,8 @@ module World =
 
     /// ADR-0081
     /// The colony that casts each [[harassment room]] this tick, by the
-    /// Caster's rule (`casterOf`), over the chain the room's projection
-    /// walks: the room is no colony's own, so its caster's bank and stock
+    /// Caster's rule (`casterOf`), over every room's ground (`reachHops`,
+    /// #617): the room is no colony's own, so its caster's bank and stock
     /// are past the floors, and its bank buys the room's (the blocks it is declared at,
     /// `Harass.blocks`, #457); None while no colony may. Stateless, and
     /// decided once for every colony, so exactly one
@@ -1884,7 +1973,7 @@ module World =
         (held: Map<string, string>)
         (world: World)
         : HarassCasting =
-        let hopsOf = hopsUnder StandDown.none joins tuning world
+        let hopsOf = reachHops StandDown.none joins tuning world tuning.MaxHops
         let living = living colonies world
         let owned = ownedRooms world
 
@@ -1939,11 +2028,11 @@ module World =
         match contested with
         | [] -> Map.empty
         | _ ->
-            let hopsOf = hopsUnder StandDown.none joins tuning world
+            let hopsOf = reachHops StandDown.none joins tuning world tuning.MaxHops
             let living = living colonies world
 
-            // Walked as a defended home's chain is, off the names where no
-            // route prices it (`defends`).
+            // Off the names where no route prices it, as a defended home's
+            // walk is (`defends`).
             let crossings from room =
                 hopsOf from room |> Option.orElse (RoomName.hopsBetween from room)
 

@@ -686,7 +686,8 @@ let private fullTick
     // The crossings a cast walks (`Caster.assign`) and an undeclared Task's
     // owner is ranked by, as a harassment room's caster is: the table built
     // only where it is read.
-    let hops = lazy (World.hopsUnder StandDown.none joins Tuning.defaults world)
+    let hops =
+        lazy (World.reachHops StandDown.none joins Tuning.defaults world Tuning.defaults.MaxHops)
 
     // The flood counters after a decision, cumulative like the clock beside
     // them.

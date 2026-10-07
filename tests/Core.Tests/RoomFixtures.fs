@@ -111,6 +111,10 @@ let private terrainOfMask mask =
     elif mask &&& 2 <> 0 then Swamp
     else Plain
 
+/// Whether a capture of the room is committed.
+let exists (roomName: string) : bool =
+    File.Exists(Path.Combine(roomsDirectory, roomName + ".room"))
+
 /// The committed capture of one room, by name.
 let load (roomName: string) : RoomCapture =
     let path = Path.Combine(roomsDirectory, roomName + ".room")

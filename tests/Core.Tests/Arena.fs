@@ -1372,6 +1372,31 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                     })
         }
 
+/// The ground of a room the arena does not place, off its committed capture
+/// where one is (`World.StrayGround`), as the shell reads any room's terrain
+/// without vision: read once a room, every arena sharing it.
+let private strayGrounds =
+    System.Collections.Concurrent.ConcurrentDictionary<string, RoomFacts option>()
+
+let private strayGround (name: string) : RoomFacts option =
+    strayGrounds.GetOrAdd(
+        name,
+        fun name ->
+            if RoomFixtures.exists name then
+                let capture = load name
+
+                Some
+                    { RoomFacts.empty with
+                        Layer =
+                            { RoomLayer.empty with
+                                Terrain = capture.Terrain
+                            }
+                        Border = capture.Border
+                    }
+            else
+                None
+    )
+
 /// This tick's World, read off the arena as `World.ofGame` reads the engine,
 /// with last tick's memory laid under it as `Main.fullTick` lays it.
 let worldOf (a: Arena) : World =
@@ -1413,7 +1438,7 @@ let worldOf (a: Arena) : World =
         Raiders = Map.empty
         ArmedSeen = Map.empty
         RivalControllers = Map.empty
-        StrayGround = fun _ -> None
+        StrayGround = strayGround
     }
     |> World.recalling a.Carried.Sightings
     |> World.latchTowers tuning a.Carried.Towered
@@ -1481,7 +1506,7 @@ let private cut (a: Arena) : World * (string -> string -> int option) * (Colony 
     // (`ColonyInputs.Hops`): `Entry.decideColonies` judges and aims them as
     // `Main` hands it them, every colony deciding every arena tick.
     world,
-    (fun home room -> World.hopsUnder StandDown.none joins tuning world home room),
+    World.reachHops StandDown.none joins tuning world tuning.MaxHops,
     living
     |> List.map (fun c ->
         c,
