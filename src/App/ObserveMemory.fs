@@ -2148,7 +2148,8 @@ let decodeCpu (wire: obj) : CpuState =
                                 // forced by one fact that replayed nobody, and
                                 // on every row written before #549;
                                 // `fightOnly` on a row no colony fought alone
-                                // on.
+                                // on; `replay` on every row written before
+                                // #581.
                                 Forced =
                                     if jsTypeof raw?forced = "string" then
                                         Some(
@@ -2157,6 +2158,7 @@ let decodeCpu (wire: obj) : CpuState =
                                                 Facts = max 1 (numberOrZero raw "facts")
                                                 Replayed = numberOrZero raw "replayed"
                                                 FightOnly = numberOrZero raw "fightOnly"
+                                                ReplayMs = floatOrZero raw "replay"
                                             }
                                             : Forcing
                                         )
@@ -2300,6 +2302,9 @@ let private encodeCpuSample (sample: CpuSample) : obj =
 
         if forcing.FightOnly > 0 then
             o?fightOnly <- forcing.FightOnly
+
+        if forcing.ReplayMs > 0.0 then
+            o?replay <- forcing.ReplayMs
     | None -> ()
 
     // Written only on a replan's row, as the floods are: one array per home.

@@ -2262,13 +2262,17 @@ module FloodCounts =
 /// fact as `LightTick.tag` spells it, how many facts forced it, and how many
 /// colonies replayed their plans instead of deciding — a partial tick's mean
 /// is not a whole one's — and how many decided their fight alone and
-/// replayed their economy, a fight-only tick (`LightTick.fightOnly`).
+/// replayed their economy, a fight-only tick (`LightTick.fightOnly`). And
+/// the ms of its `decide` phase the replay and the one movement pass spent
+/// after the deciding colonies decided (#581), zero where nothing replayed:
+/// the rest of the phase is the decides, a fight-only tick's the fight lane.
 type Forcing =
     {
         Reason: string
         Facts: int
         Replayed: int
         FightOnly: int
+        ReplayMs: float
     }
 
 /// What `Game.cpu.getUsed()` answered at each of the loop's phase boundaries,
@@ -2650,7 +2654,12 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
                     MemoRows = readings.MemoRows
                     ExternalMb = external
                     Light = readings.Light
-                    Forced = readings.Forced
+                    Forced =
+                        readings.Forced
+                        |> Option.map (fun forcing ->
+                            { forcing with
+                                ReplayMs = toMicrosecond forcing.ReplayMs
+                            })
                     Moved = readings.Moved
                 }
             ]

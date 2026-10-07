@@ -75,3 +75,44 @@ export function report(rows) {
       : "  not triggered")
   );
 }
+
+// Each kind of tick by phase (ADR 0091 W7), one line a kind, over the rows
+// that carry a split: a fight-only tick's decide apart from a whole one's,
+// and a forced tick's decide split into the decides (a fight-only tick's,
+// the fight lane) and the replay with the movement pass after them
+// (`replay`). Shared by `observe cpu` and the harness, which read the same
+// rows.
+export function kindPhases(rows) {
+  const kindOf = (row) =>
+    row.light === true
+      ? "light"
+      : typeof row.fightOnly === "number" && row.fightOnly > 0
+        ? "fight-only"
+        : typeof row.replayed === "number" && row.replayed > 0
+          ? "partial"
+          : "full";
+  const byKind = new Map();
+  for (const row of rows.filter((row) => typeof row.decide === "number")) {
+    const kind = kindOf(row);
+    if (!byKind.has(kind)) byKind.set(kind, []);
+    byKind.get(kind).push(row);
+  }
+  const mean = (rows, key) =>
+    rows.reduce((total, row) => total + (typeof row[key] === "number" ? row[key] : 0), 0) / rows.length;
+  return ["full", "partial", "fight-only", "light"]
+    .filter((kind) => byKind.has(kind))
+    .map((kind) => {
+      const rows = byKind.get(kind);
+      const split = rows.filter((row) => typeof row.replay === "number");
+      const lane =
+        split.length > 0
+          ? ` (${kind === "fight-only" ? "fight lane" : "decides"} ${(mean(split, "decide") - mean(split, "replay")).toFixed(2)}, ` +
+            `replay ${mean(split, "replay").toFixed(2)} over ${split.length})`
+          : "";
+      return (
+        `${kind}: ${rows.length} ticks, mean ${mean(rows, "ms").toFixed(2)} ms — snapshot ${mean(rows, "snapshot").toFixed(2)}  ` +
+        `decide ${mean(rows, "decide").toFixed(2)}${lane}  save ${mean(rows, "save").toFixed(2)}  ` +
+        `execute ${mean(rows, "execute").toFixed(2)}`
+      );
+    });
+}

@@ -1478,7 +1478,9 @@ let private dangerOf (a: Arena) =
 
 /// Every living colony's view cut from this tick's world, as
 /// `Main.fullTick` cuts them, beside the world and its crossings.
-let private cut (a: Arena) : World * (string -> string -> int option) * (Colony * ColonyView) list =
+let private cutsOf
+    (a: Arena)
+    : World * (string -> string -> int option) * (Colony * ColonyView.Cut) list =
     let world = worldOf a
     let tuning = Tuning.defaults
 
@@ -1523,7 +1525,7 @@ let private cut (a: Arena) : World * (string -> string -> int option) * (Colony 
     living
     |> List.map (fun c ->
         c,
-        ColonyView.ofWorldRecalling
+        ColonyView.cutOf
             joins
             tuning
             a.Colonies
@@ -1534,6 +1536,104 @@ let private cut (a: Arena) : World * (string -> string -> int option) * (Colony 
             watch
             world
             c)
+
+/// Each living colony's whole view, beside the world and its crossings.
+let private cut (a: Arena) : World * (string -> string -> int option) * (Colony * ColonyView) list =
+    let world, hops, cuts = cutsOf a
+    world, hops, cuts |> List.map (fun (c, cut) -> c, ColonyView.project None cut)
+
+/// The rooms each lane cut leaves out: for each living colony deciding alone,
+/// each other colony's whole view's rooms less its cut of the lane's.
+let laneLeaves (a: Arena) : (string * string * Set<string>) list =
+    let _, _, cuts = cutsOf a
+
+    let rooms (view: ColonyView) =
+        view.Spatial.Rooms |> Map.keys |> Set.ofSeq
+
+    cuts
+    |> List.collect (fun (deciding, cut) ->
+        let lane = ColonyView.lane [ cut ]
+
+        cuts
+        |> List.filter (fun (c, _) -> c.Home <> deciding.Home)
+        |> List.map (fun (c, other) ->
+            deciding.Home,
+            c.Home,
+            Set.difference
+                (rooms (ColonyView.project None other))
+                (rooms (ColonyView.project (Some lane) other))))
+
+/// The lane cut (#581), checked: each living colony decided alone, the others
+/// idle, off their whole views and off their cuts of the lane
+/// (`ColonyView.lane`), as `Main` projects a colony that decides nothing.
+/// Each colony whose decision the two differ in, with what differs.
+let laneBreaks (a: Arena) : string list =
+    let _, hops, cuts = cutsOf a
+
+    let decideAlone (home: string) (views: (Colony * ColonyView) list) =
+        let decided =
+            decideColonies
+                {
+                    Hops = hops
+                    Holding = a.Carried.Assignments
+                    Verbose = Set.empty
+                    PlanMemos = a.Carried.Memos
+                    Carries = Map.empty
+                    Idle =
+                        views
+                        |> List.map (fun (c, _) -> c.Home)
+                        |> List.filter ((<>) home)
+                        |> Set.ofList
+                    FightAlone = Set.empty
+                    TurnIndex = None
+                }
+                ignore
+                views
+
+        decided.Decided
+        |> List.tryPick (fun (c, _, decision, ()) ->
+            // The whole decision but its plan memo (Atlas tables): every
+            // act, Task, Verdict, move, step, aim and carry it hands on.
+            if c.Home = home then
+                Some(
+                    (decision.Intents, decision.Assignments, decision.Verdicts, decision.Movement),
+                    (decision.Quotas,
+                     decision.HaulOverflow,
+                     decision.OutpostRooms,
+                     decision.WaitingContainers),
+                    (decision.Steps, decision.Tracks, decision.Next, decision.Later, decision.Aims),
+                    (decision.Volleys,
+                     decision.Mired,
+                     decision.Drawn,
+                     decision.Fight,
+                     decision.Economy)
+                )
+            else
+                None)
+
+    match cuts with
+    | []
+    | [ _ ] -> []
+    | _ ->
+        cuts
+        |> List.choose (fun (deciding, cut) ->
+            let lane = ColonyView.lane [ cut ]
+
+            let whole = cuts |> List.map (fun (c, cut) -> c, ColonyView.project None cut)
+
+            let laned =
+                cuts
+                |> List.map (fun (c, other) ->
+                    c,
+                    ColonyView.project (if c.Home = deciding.Home then None else Some lane) other)
+
+            let wholly = decideAlone deciding.Home whole
+            let lanely = decideAlone deciding.Home laned
+
+            if wholly = lanely then
+                None
+            else
+                Some $"{deciding.Home} t{a.Time}: whole %A{wholly} against laned %A{lanely}")
 
 /// The view one living colony decides this tick off: judged and aimed as
 /// `Entry.decideColonies` lays them.

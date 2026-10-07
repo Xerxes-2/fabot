@@ -102,7 +102,7 @@ import { connect, fail } from "./screeps-api.mjs";
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { actionSummary, bodySummary, readHistory, usernamesOf } from "./room-history.mjs";
-import { MEAN_MS, TICK_MS, report as cpuReport } from "./cpu-trigger.mjs";
+import { MEAN_MS, TICK_MS, kindPhases, report as cpuReport } from "./cpu-trigger.mjs";
 import { switchesLine } from "./switches.mjs";
 import { SEGMENTS, SEGMENT_EVERY, readLog } from "./observe-segments.mjs";
 
@@ -2729,9 +2729,10 @@ if (command === "console") {
     // The intent mean is printed on a line of its own, under its own unit:
     // it is a count, and a sixth term on a line headed "mean ms" would read
     // as milliseconds — on the very readout this window is pasted from. The
-    // engine's 0.2 CPU an intent is multiplied out here rather than left to
-    // the reader, because that product is the candidate the local ruler
-    // cannot simulate and the whole reason the count is on the row.
+    // engine bills its 0.2 CPU an intent on the spot, so `Game.cpu.getUsed()`
+    // has it inside `execute` already (#581): the product is printed as the
+    // share of that phase the engine charges, which the local ruler does not
+    // simulate, and never as a cost on top of the total.
     if (split.length === 0) {
       console.log(
         `no row carries a phase split — the deployed bundle predates it, ` +
@@ -2745,8 +2746,9 @@ if (command === "console") {
       );
       console.log(
         `mean intents the engine accepted, per split row: ${mean("intents").toFixed(1)} — ` +
-          `a count, not milliseconds; ≈ ${(mean("intents") * 0.2).toFixed(2)} CPU at the ` +
-          "engine's 0.2 an intent, which the local ruler does not charge",
+          `a count, not milliseconds; ≈ ${(mean("intents") * 0.2).toFixed(2)} ms of the ` +
+          `${mean("execute").toFixed(2)} ms execute phase is the engine's 0.2 an intent, already ` +
+          "in every total here (getUsed bills it on the spot) and not charged by the local ruler",
       );
 
       // The margin, and the two ways it is read: where it stands now, and
@@ -2863,7 +2865,11 @@ if (command === "console") {
         console.log(
           "  head is the visible rooms enumerated and every creep grouped by where it stands; " +
             "the rest is the world's tail between the last room and the first projection — the " +
-            "sightings, the creep list, the Raid logs. Head, rooms and projections are read off " +
+            "sightings, the creep list, the Raid logs — and, since #581, the WorldView build, the " +
+            "forced tick's deciders (LightTick.deciders, fightOnly, resetSplit) and the lane, which " +
+            "run between the colonies' cuts and their projections; a colony's projection is its cut " +
+            "plus its projection, so the first colony's no longer carries the WorldView build. " +
+            "Head, rooms and projections are read off " +
             "the row and the rest is what the column has left over, so a negative rest means the " +
             "phase gained work this reading cannot see",
         );
@@ -2983,6 +2989,7 @@ if (command === "console") {
           `${fightOnlys}, mean ${fightOnlyMean}  ·  light ticks: ${lights}, mean ${lightMean}`,
       );
       if (forced) console.log(`  forced full: ${forced}`);
+      for (const line of kindPhases(ticks)) console.log(`  ${line}`);
       // The three leaves alone: the subtree whole is every creep's log.
       const leaves = ["switches", "cadence", "fightOnly"];
       const read = await Promise.all(leaves.map((leaf) => memoryGet(`fabot.observe.${leaf}`)));

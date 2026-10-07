@@ -1818,6 +1818,69 @@ let exitHoldViewTests =
         ]
 
 [<Tests>]
+let laneCutTests =
+    testList
+        "a colony's cut and its view over the lane (#581)"
+        [
+            test
+                "a cut names the rooms its whole view projects, and its lane view keeps the colony whole" {
+                let world = pairWorld
+                let holders = holdersOf world
+
+                let cuts =
+                    World.living declared world
+                    |> List.map (fun colony ->
+                        colony.Home,
+                        ColonyView.cutOf
+                            (JoinTable())
+                            Tuning.defaults
+                            declared
+                            HarassCasting.none
+                            StandDown.none
+                            holders
+                            (fun _ -> false)
+                            (WorldView.ofWorld declared [ StandDown.none ] world)
+                            world
+                            colony)
+
+                Expect.isGreaterThan (List.length cuts) 1 "the pair world has two colonies"
+
+                let rooms (view: ColonyView) =
+                    view.Spatial.Rooms |> Map.keys |> Set.ofSeq
+
+                for home, cut in cuts do
+                    let whole = ColonyView.project None cut
+
+                    Expect.equal
+                        (ColonyView.cutRooms cut |> Set.ofList)
+                        (rooms whole)
+                        $"{home}: the cut's rooms are its whole view's"
+
+                    for other, deciding in cuts |> List.filter (fun (h, _) -> h <> home) do
+                        let lane = ColonyView.lane [ deciding ]
+                        let laned = ColonyView.project (Some lane) cut
+
+                        Expect.equal
+                            (rooms laned)
+                            (rooms whole
+                             |> Set.filter (fun room -> room = home || lane.Contains room))
+                            $"{home} beside {other} deciding: the lane's rooms and its home"
+
+                        Expect.equal laned.Crossed whole.Crossed $"{home}: its crossings stay whole"
+
+                        Expect.equal
+                            (ColonyView.bodies laned |> List.map _.Name)
+                            (ColonyView.bodies whole |> List.map _.Name)
+                            $"{home}: and its bodies"
+
+                        Expect.equal
+                            (laned.Bank, laned.Spawns |> List.map _.Name)
+                            (whole.Bank, whole.Spawns |> List.map _.Name)
+                            $"{home}: and its bank and spawns"
+            }
+        ]
+
+[<Tests>]
 let worldViewTests =
     testList
         "the world layer's read, once a tick for every colony (#534)"

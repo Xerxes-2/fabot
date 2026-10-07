@@ -108,7 +108,7 @@ import { performance } from "node:perf_hooks";
 import { writeFileSync, readFileSync, mkdirSync, existsSync, statSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { report as cpuReport } from "./cpu-trigger.mjs";
+import { kindPhases, report as cpuReport } from "./cpu-trigger.mjs";
 
 const SCENARIOS = ["stub", "outpost", "young", "pair", "reactor", "siege"];
 // The scenarios `--raided` means anything for: a raid stands in an outpost,
@@ -5657,6 +5657,8 @@ if (!Array.isArray(cpuLine) || cpuLine.length === 0) {
         ? `; ${outside} more rows in the ring, outside the window, not compared`
         : ""),
   );
+  // Each kind of tick by phase, as `observe cpu` splits them.
+  for (const line of kindPhases(inWindow)) console.log(`  ${line}`);
 }
 
 // The fault ring (#628): a colony's throw is caught live and costs that

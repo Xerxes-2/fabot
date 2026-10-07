@@ -252,9 +252,7 @@ let crossRoomTests =
                     (Some 0)
                     "a target no room places is free, never unreachable"
 
-                Expect.isTrue
-                    (mayActFor atlas "w" (Harvest "src-far"))
-                    "and it blocks nothing (ADR 0004)"
+                Expect.isTrue (mayActFor atlas "w" (Harvest "src-far")) "and it blocks nothing"
 
                 // No room to cross to, so no Seam to aim at.
                 Expect.equal

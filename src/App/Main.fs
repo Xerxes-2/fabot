@@ -806,18 +806,40 @@ let private fullTick
     // projection is differenced against; what stands between the last room
     // and it is the world's own tail (sightings, creep list, Raid logs).
     let atProjects = Game.cpu.getUsed ()
-    let mutable projectedAt = []
+
+    // What each colony's cut and projection spent, in colony order: the
+    // `snapshot` column turned out to be mostly this (7.63 ms of it stood
+    // after the last room was swept, #370), and it is ours to cut, unlike
+    // the engine's `find` sweeps.
+    let mutable projectSpent: Map<string, float> = Map.empty
+
+    let timed (home: string) (step: unit -> 'a) : 'a =
+        let at = Game.cpu.getUsed ()
+        let result = step ()
+
+        projectSpent <-
+            Map.add
+                home
+                ((Map.tryFind home projectSpent |> Option.defaultValue 0.0)
+                 + (Game.cpu.getUsed () - at))
+                projectSpent
+
+        result
 
     // The world layer's read, once for every colony (`WorldView`): fresh each
     // tick, and its danger laid in once the views are cut (`WorldDanger`).
     let watch =
         WorldView.ofWorld Colony.declared (gates |> Map.toList |> List.map snd) world
 
-    let views =
+    // Each colony's cut (`ColonyView.cutOf`): the rooms it projects, which
+    // the forced tick's deciders and the reset split read before any view is
+    // projected.
+    let cuts =
         colonies
         |> List.map (fun colony ->
-            let view =
-                ColonyView.ofWorldRecalling
+            colony,
+            timed colony.Home (fun () ->
+                ColonyView.cutOf
                     joins
                     tuning
                     Colony.declared
@@ -827,20 +849,7 @@ let private fullTick
                     isFighterBody
                     watch
                     world
-                    colony
-
-            // The counter after each colony's projection, as `decide` reads it
-            // after each decision: the `snapshot` column turned out to be
-            // mostly this (7.63 ms of it stood after the last room was swept,
-            // #370), and it is ours to cut, unlike the engine's `find` sweeps.
-            projectedAt <- (colony.Home, Game.cpu.getUsed ()) :: projectedAt
-            colony, view)
-
-    // The projection boundary. The Raid logs' reads ride in this phase, not
-    // the prelude: the gate and the cut are one act, and splitting them would
-    // price a `find` sweep against a Memory read.
-    let atSnapshot = Game.cpu.getUsed ()
-    let verbose = ObserveMemory.loadVerbose ()
+                    colony))
 
     // Each colony decides its own tick with its movement left unarbitrated: a
     // room two colonies both work is one room, and half its traffic arbitrated
@@ -867,13 +876,10 @@ let private fullTick
     // Each colony with the rooms it answers for, as the reset split and the
     // forced tick's deciders read them.
     let answering () =
-        views
-        |> List.map (fun (colony, view) ->
+        cuts
+        |> List.map (fun (colony, cut) ->
             colony.Home,
-            view.Spatial.Rooms
-            |> Map.keys
-            |> Set.ofSeq
-            |> Set.union (Colony.declaredRooms colony))
+            ColonyView.cutRooms cut |> Set.ofList |> Set.union (Colony.declaredRooms colony))
 
     // A forced tick decides the colonies its facts are theirs (#549); the
     // others replay their plans as a light tick would, issue nothing else and
@@ -892,10 +898,7 @@ let private fullTick
             let colonies = answering ()
             let deciding = LightTick.deciders colonies holders last seen reasons
 
-            let fighters =
-                views
-                |> List.collect (fun (_, view) -> view.Fighters |> List.map _.Name)
-                |> Set.ofList
+            let fighters = cuts |> List.collect (snd >> ColonyView.cutFighters) |> Set.ofList
 
             let alone =
                 if fst (fightOnlyNow ()) then
@@ -911,7 +914,7 @@ let private fullTick
                 else
                     Set.empty
 
-            views
+            cuts
             |> List.map (fun (colony, _) -> colony.Home)
             |> List.filter (fun home -> not (Set.contains home deciding))
             |> Set.ofList,
@@ -936,6 +939,48 @@ let private fullTick
 
     // Every colony that does not decide this tick.
     let idle = Set.union waiting replaying
+
+    // One view per living colony (under test in `ViewTests`): whole for a
+    // colony that decides, and for one that does not, its cut of the lane
+    // alone (`ColonyView.lane`): the rooms the deciding colonies project and
+    // the rooms beside them, all a decide reads of another colony's cut
+    // (`ArenaLaneTests`, "arena lane cut").
+    let lane =
+        lazy
+            (cuts
+             |> List.filter (fun (colony, _) -> not (Set.contains colony.Home idle))
+             |> List.map snd
+             |> ColonyView.lane)
+
+    let views =
+        cuts
+        |> List.map (fun (colony, cut) ->
+            let within =
+                if Set.contains colony.Home idle then
+                    Some lane.Value
+                else
+                    None
+
+            colony, timed colony.Home (fun () -> ColonyView.project within cut))
+
+    // The projection boundary. The Raid logs' reads ride in this phase, not
+    // the prelude: the gate and the cut are one act, and splitting them would
+    // price a `find` sweep against a Memory read. So do the deciders, which
+    // read the cuts.
+    let atSnapshot = Game.cpu.getUsed ()
+    let verbose = ObserveMemory.loadVerbose ()
+
+    // Each colony's cut and projection summed as one reading, in colony
+    // order, cumulative off the boundary before the first: built, not read
+    // off the counter, since the deciders run between the cuts and the
+    // projections and fall to the phase's remainder.
+    let projectedAt =
+        colonies
+        |> List.scan
+            (fun (_, at) colony ->
+                colony.Home, at + (Map.tryFind colony.Home projectSpent |> Option.defaultValue 0.0))
+            ("", atProjects)
+        |> List.tail
 
     // The crossings a cast walks (`Caster.assign`) and an undeclared Task's
     // owner is ranked by, as a harassment room's caster is: the table built
@@ -1041,6 +1086,10 @@ let private fullTick
         | None -> Set.empty
 
     let replayHomes = Set.union replayedHomes faultReplay
+
+    // The decides' end and the replay's start, as a forced tick's row splits
+    // its `decide` phase (`Forcing.ReplayMs`).
+    let atReplay = Game.cpu.getUsed ()
 
     // The replayed acts and steps, off the glance as a light tick reads it,
     // the objects their acts name looked up, and the tiles they claim
@@ -1663,7 +1712,7 @@ let private fullTick
             RoomSnapshots = World.roomCosts
             AtRooms = World.roomsBegan
             AtProjects = atProjects
-            ColonyProjects = List.rev projectedAt
+            ColonyProjects = projectedAt
             Light = false
             Forced =
                 forcedBy
@@ -1675,6 +1724,11 @@ let private fullTick
                             Facts = List.length reasons
                             Replayed = Set.count replaying
                             FightOnly = Set.count fightOnly
+                            // Only where something replayed: on a forced
+                            // tick every colony decided, the span is the
+                            // movement pass alone.
+                            ReplayMs =
+                                if Set.isEmpty replayHomes then 0.0 else atDecide - atReplay
                         }
                         : Observe.Forcing)))
             Moved = moved

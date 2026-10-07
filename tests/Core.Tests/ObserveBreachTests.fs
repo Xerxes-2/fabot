@@ -549,6 +549,7 @@ let private cpuTick (light: bool) (forced: string option) (ms: float) (bucket: i
                     Facts = 1
                     Replayed = 0
                     FightOnly = 0
+                    ReplayMs = 0.0
                 })
         Moved = []
     }

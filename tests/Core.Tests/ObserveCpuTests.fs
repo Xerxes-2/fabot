@@ -85,6 +85,7 @@ let cpuSpanTests =
                                             Facts = 2
                                             Replayed = 3
                                             FightOnly = 0
+                                            ReplayMs = 4.12345678
                                         }
                             }
                             2, costing 30.0
@@ -94,9 +95,10 @@ let cpuSpanTests =
                     (state.Ticks
                      |> List.map (fun sample ->
                          sample.Tick,
-                         sample.Forced |> Option.map (fun f -> f.Reason, f.Facts, f.Replayed)))
-                    [ 1, Some("border", 2, 3); 2, None ]
-                    "the reason, its fact count and the colonies replayed ride the row it forced"
+                         sample.Forced
+                         |> Option.map (fun f -> f.Reason, f.Facts, f.Replayed, f.ReplayMs)))
+                    [ 1, Some("border", 2, 3, 4.123); 2, None ]
+                    "the reason, its fact count, the colonies replayed and the replay's ms (to the microsecond) ride the row it forced"
             }
 
             test "a span carries the worst tick of its window, not its mean" {

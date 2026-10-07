@@ -629,17 +629,20 @@ wire("cpu: a forced full tick's row round-trips its reason, and an off-shape one
   const partial = { ...full, t: 14, forced: "home W1N1 Invader", facts: 3, replayed: 5 };
   // And how many colonies decided their fight alone (`LightTick.fightOnly`).
   const fightOnly = { ...full, t: 16, forced: "home W1N1 Invader", fightOnly: 2 };
+  // And the ms of its decide the replay and the movement pass spent (ADR
+  // 0091 W7), the rest being the decides.
+  const replayed = { ...full, t: 18, forced: "hurt w-1", replayed: 4, replay: 6.25 };
 
-  globalThis.Memory = rootMemoryWith("cpu", { ticks: [full, forced, partial, fightOnly], spans: [] });
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [full, forced, partial, fightOnly, replayed], spans: [] });
   saveCpu(loadCpu());
   assert.equal(
     stable(globalThis.Memory.fabot.observe.cpu.ticks),
-    stable([full, forced, partial, fightOnly]),
-    "the forced rows keep their reason, facts, replayed and fight-only counts; the plain full row stays without the keys",
+    stable([full, forced, partial, fightOnly, replayed]),
+    "the forced rows keep their reason, facts, replayed and fight-only counts and replay ms; the plain full row stays without the keys",
   );
 
   globalThis.Memory = rootMemoryWith("cpu", {
-    ticks: [{ ...full, forced: "border", facts: 1, replayed: 0, fightOnly: 0 }],
+    ticks: [{ ...full, forced: "border", facts: 1, replayed: 0, fightOnly: 0, replay: 0 }],
     spans: [],
   });
   saveCpu(loadCpu());

@@ -2243,3 +2243,49 @@ let w17s26FarGuardsTests =
                         $"{guard} is not handed it\n{failure}"
             }
         ]
+
+/// The world epic's W7: a colony that decides nothing this tick is projected over
+/// the lane alone (`ColonyView.lane`), and every deciding colony decides the
+/// same off that cut as off its whole view, on every tick of every capture
+/// with more than one colony.
+[<Tests>]
+let arenaLaneCutTests =
+    testList
+        "arena lane cut"
+        [
+            // Each capture with whether a lane cut there leaves a room out:
+            // W15S28's far outposts and their walks, or W17S25's W17S26.
+            for label, start, narrows in
+                [
+                    "two raids beside W17S25", twoRaidsBesideW17S25, true
+                    "the shut outpost's cripple (#573)", shutOutpostCripple, true
+                    "the digger beside a held exit", diggerBesideHeldExit, true
+                    "the swaying trespassers (#558)", swayingTrespassers, true
+                    "the ranger into the melee", rangerIntoMelee, true
+                    "the slow melee's haulers", slowMeleeHaulers, true
+                    "Trepidimous entering W17S26",
+                    (fun () -> trepEntersW17S26 (Chase(Nearest, None))),
+                    false
+                ] do
+                test $"a deciding colony decides the same off the idle colonies' lane cuts: {label}" {
+                    let mutable a = start ()
+                    let mutable left = Set.empty
+
+                    for _ in 1..30 do
+                        Expect.isEmpty (laneBreaks a) "the lane cut moves no decision"
+
+                        left <-
+                            laneLeaves a
+                            |> List.fold
+                                (fun acc (_, idle, rooms) ->
+                                    Set.union acc (Set.map (fun r -> idle, r) rooms))
+                                left
+
+                        a <- fst (step a)
+
+                    Expect.equal
+                        (not (Set.isEmpty left))
+                        narrows
+                        $"the lane cut leaves out %A{left}"
+                }
+        ]

@@ -1454,20 +1454,41 @@ module ColonyView =
                 Name = $"Spawn{highest + 1 + i}"
             })
 
-    /// One colony's view of this tick: the rooms it works cut out of the
-    /// `World`, the bodies it holds, its own bank and controller, and the
-    /// explicit little it may take of a child's. **Pure, and that is the point
-    /// of it**: the shell reads the engine once (`World.ofGame`) and every
-    /// rule about which rooms a colony works, which creeps are its own and
-    /// what it may borrow is here, where a test can hand it a two-colony
-    /// world. Seven facts are handed in and none is decided here: the
-    /// tunables, the declaration, the [[stand-down]] gate (Memory's answer,
-    /// not the world's), the holders `World.creepColonies` cut over every
-    /// living colony at once, which of them is a fighter (`isFighterBody`,
-    /// the decision layer's), the world layer's read (`WorldView`, carried
-    /// whole) and the world. The join table is the shell's,
-    /// handed in for the life of the process (`JoinTable`).
-    let ofWorldRecalling
+    /// One colony's cut of this tick before it is projected (`project`): the
+    /// rooms its view projects (`cutRooms`, the view's `Spatial.Rooms`
+    /// whole), the bodies it holds, and the facts the projection was handed.
+    /// Lives within the tick.
+    [<NoEquality; NoComparison>]
+    type Cut =
+        private
+            {
+                Joins: JoinTable
+                Tuning: Tuning
+                Colonies: Colony list
+                Casting: HarassCasting
+                Gate: StandDown
+                Holders: Map<string, string>
+                Fighter: CreepInfo -> bool
+                Watch: WorldView
+                World: World
+                Colony: Colony
+                Stages: Map<string, ColonyStage>
+                Mine: WorldCreep list
+                Scan: World.ScanSet
+                Contested: string list
+                Homeward: string list
+                Rooms: string list
+            }
+
+    /// One colony's cut: the rooms it works and crosses out of the `World`,
+    /// and the bodies it holds. Seven facts are handed in and none is
+    /// decided here: the tunables, the declaration, the [[stand-down]] gate
+    /// (Memory's answer, not the world's), the holders `World.creepColonies`
+    /// cut over every living colony at once, which of them is a fighter
+    /// (`isFighterBody`, the decision layer's), the world layer's read
+    /// (`WorldView`, carried whole) and the world. The join table is the
+    /// shell's, handed in for the life of the process (`JoinTable`).
+    let cutOf
         (joins: JoinTable)
         (tuning: Tuning)
         (colonies: Colony list)
@@ -1479,7 +1500,7 @@ module ColonyView =
         (watch: WorldView)
         (world: World)
         (colony: Colony)
-        : ColonyView =
+        : Cut =
         let home = colony.Home
         let stages = World.stages tuning colonies world
 
@@ -1488,9 +1509,6 @@ module ColonyView =
         let mine =
             world.Creeps
             |> List.filter (fun creep -> Map.tryFind creep.Info.Name holders = Some home)
-
-        // Its fighters apart from its economy: the world's fight commands them.
-        let fighters, economy = mine |> List.map _.Info |> List.partition fighter
 
         // The declaration's narrowings and their union, off the one
         // derivation the creep adoption reads too (`World.scanRecalling`),
@@ -1507,18 +1525,6 @@ module ColonyView =
                 (mine |> List.map (fun creep -> creep.Room) |> Set.ofList)
                 world
                 colony
-
-        let outposts = scan.Outposts
-        let errands = scan.Errands
-        let salvageRooms = Set.ofList scan.Salvage
-
-        let harassEnemies =
-            scan.Harass |> List.map (fun h -> h.RoomName, h.Enemy) |> Map.ofList
-
-        let assaultRooms =
-            scan.Assaults |> List.map (fun assault -> assault.RoomName) |> Set.ofList
-
-        let bootstrap = scan.Borrowed
 
         // Each contested room another colony declares — a raider seen or
         // recalled there, or a raid its declarer's log holds or remembers
@@ -1598,7 +1604,82 @@ module ColonyView =
                 |> List.filter (held.Contains >> not)
                 |> List.distinct
 
-        let scanned = scan.Scanned @ contested @ homeward
+        {
+            Joins = joins
+            Tuning = tuning
+            Colonies = colonies
+            Casting = casting
+            Gate = gate
+            Holders = holders
+            Fighter = fighter
+            Watch = watch
+            World = world
+            Colony = colony
+            Stages = stages
+            Mine = mine
+            Scan = scan
+            Contested = contested
+            Homeward = homeward
+            Rooms = scan.Scanned @ contested @ homeward
+        }
+
+    /// The rooms a cut's view projects, in scan order: its `Spatial.Rooms`.
+    let cutRooms (cut: Cut) : string list = cut.Rooms
+
+    /// The fighters a cut's colony holds, by name: its view's `Fighters`.
+    let cutFighters (cut: Cut) : string list =
+        cut.Mine
+        |> List.filter (fun creep -> cut.Fighter creep.Info)
+        |> List.map (fun creep -> creep.Info.Name)
+
+    // ADR-0091
+    /// The lane of a tick some colonies decide nothing on: every room a
+    /// deciding colony projects and each room beside one, over which a
+    /// colony that decides nothing is projected (`project`).
+    let lane (deciding: Cut list) : Set<string> =
+        deciding
+        |> List.collect (fun cut -> cut.Rooms)
+        |> List.collect (fun room -> room :: RoomName.adjacent room)
+        |> Set.ofList
+
+    /// One colony's view of this tick off its cut: the rooms it works cut
+    /// out of the `World`, the bodies it holds, its own bank and controller,
+    /// and the explicit little it may take of a child's. **Pure, and that is
+    /// the point of it**: the shell reads the engine once (`World.ofGame`)
+    /// and every rule about which rooms a colony works, which creeps are its
+    /// own and what it may borrow is here, where a test can hand it a
+    /// two-colony world. `within`, a colony that decides nothing this tick:
+    /// only the rooms of the cut in the lane (`lane`) and its home are cut
+    /// out, each as the whole view cuts it; the colony's sets (its crossings,
+    /// borrowed rooms, declarations) stay the whole cut's.
+    let project (within: Set<string> option) (cut: Cut) : ColonyView =
+        let joins, tuning, colonies, casting =
+            cut.Joins, cut.Tuning, cut.Colonies, cut.Casting
+
+        let gate, holders, fighter, watch = cut.Gate, cut.Holders, cut.Fighter, cut.Watch
+        let world, colony, stages, mine = cut.World, cut.Colony, cut.Stages, cut.Mine
+        let scan, contested, homeward = cut.Scan, cut.Contested, cut.Homeward
+        let home = colony.Home
+
+        // Its fighters apart from its economy: the world's fight commands them.
+        let fighters, economy = mine |> List.map _.Info |> List.partition fighter
+
+        let outposts = scan.Outposts
+        let errands = scan.Errands
+        let salvageRooms = Set.ofList scan.Salvage
+
+        let harassEnemies =
+            scan.Harass |> List.map (fun h -> h.RoomName, h.Enemy) |> Map.ofList
+
+        let assaultRooms =
+            scan.Assaults |> List.map (fun assault -> assault.RoomName) |> Set.ofList
+
+        let bootstrap = scan.Borrowed
+
+        let scanned =
+            match within with
+            | None -> cut.Rooms
+            | Some lane -> cut.Rooms |> List.filter (fun room -> room = home || lane.Contains room)
 
         // The `elif` chain below reads this after the bootstrap and transit
         // branches and before the worked ones, which **presumes the two
@@ -1613,8 +1694,9 @@ module ColonyView =
 
         // The rooms in the set for the walk alone, derived by subtraction
         // because the union (`Colony.roomsProjected`) is the one place that
-        // rule is spelled.
-        let transit = scanned |> List.filter (scan.Worked.Contains >> not) |> Set.ofList
+        // rule is spelled. Off the whole cut: a room the lane leaves out is
+        // still one the colony crosses (`Crossed`).
+        let transit = cut.Rooms |> List.filter (scan.Worked.Contains >> not) |> Set.ofList
 
         // The rooms held for a stray body alone (#570), narrowed as transit
         // rooms are.
@@ -2113,6 +2195,22 @@ module ColonyView =
                 |> Map.ofList
             World = watch
         }
+
+    /// One colony's whole view of this tick (`project` of its `cutOf`).
+    let ofWorldRecalling
+        (joins: JoinTable)
+        (tuning: Tuning)
+        (colonies: Colony list)
+        (casting: HarassCasting)
+        (gate: StandDown)
+        (holders: Map<string, string>)
+        (fighter: CreepInfo -> bool)
+        (watch: WorldView)
+        (world: World)
+        (colony: Colony)
+        : ColonyView =
+        cutOf joins tuning colonies casting gate holders fighter watch world colony
+        |> project None
 
     /// `ofWorldRecalling` over a table of this call's own — the shape a test
     /// asks in, the way `Atlas.ofView` is `ofViewRecalling` over fresh tables.
