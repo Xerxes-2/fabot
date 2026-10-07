@@ -176,7 +176,10 @@ let builtKindTests =
                         Storage
                         Rampart
                         StructureKind.Extractor
+                        StructureKind.Terminal
+                        StructureKind.Spawn
                         StructureKind.Observer
+                        StructureKind.Lab
                      ]
                      |> List.map builtKindOfPlaceable)
                     [
@@ -187,7 +190,10 @@ let builtKindTests =
                         BuiltKind.Storage
                         BuiltKind.Rampart
                         BuiltKind.Extractor
+                        BuiltKind.Terminal
+                        BuiltKind.Spawn
                         BuiltKind.Observer
+                        BuiltKind.Lab
                     ]
                     "each placeable kind widens to its own built kind"
             }
@@ -600,7 +606,9 @@ let placementTests =
                         "and no tile a structure already stands on is planned for anything else"
                 }
 
-            test "below RCL2 no placement Intents are emitted" {
+            test "below RCL2 no clustered kind and no rampart is placed" {
+                // Containers have no RCL gate; `openRoom 3` has no source and
+                // no controller to seat one beside, so the list is empty.
                 let { Intents = intents } = decideOn (atLevel 1 (openRoom 3))
 
                 Expect.isEmpty
@@ -609,19 +617,20 @@ let placementTests =
             }
 
             test "unwalkable tiles are skipped" {
+                // (26,24) is the bare room's first extension.
                 let room = openRoom 3
 
                 let holed =
                     room
                     |> withHome (fun layer ->
                         { layer with
-                            Terrain = TerrainGrid.add { X = 24; Y = 24 } Wall layer.Terrain
+                            Terrain = TerrainGrid.add { X = 26; Y = 24 } Wall layer.Terrain
                         })
 
                 let { Intents = intents } = decideOn (atLevel 2 holed)
 
                 Expect.isFalse
-                    (List.contains { X = 24; Y = 24 } (placedTiles intents))
+                    (List.contains { X = 26; Y = 24 } (placedTiles intents))
                     "wall tile is never chosen"
 
                 Expect.hasLength
@@ -631,14 +640,15 @@ let placementTests =
             }
 
             test "occupied tiles are skipped" {
+                // (26,24) is the bare room's first extension.
                 let blocked =
                     openRoom 3
-                    |> withTargets [ "rock-1", { X = 24; Y = 24 }, Structure BuiltKind.Other ]
+                    |> withTargets [ "rock-1", { X = 26; Y = 24 }, Structure BuiltKind.Other ]
 
                 let { Intents = intents } = decideOn (atLevel 2 blocked)
 
                 Expect.isFalse
-                    (List.contains { X = 24; Y = 24 } (placedTiles intents))
+                    (List.contains { X = 26; Y = 24 } (placedTiles intents))
                     "occupied tile is never chosen"
 
                 Expect.hasLength
@@ -683,8 +693,15 @@ let placementTests =
 
                 let { Intents = intents } = decideOn (atLevel 2 room)
 
+                // (26,24) is the bare room's first extension: a controller
+                // there is a target on a tile the plan would take.
+                let onExtension =
+                    openRoom 3 |> withTargets [ "ctrl-1", { X = 26; Y = 24 }, Controller ]
+
                 Expect.isFalse
-                    (List.contains { X = 24; Y = 24 } (placedTiles intents))
+                    (List.contains
+                        { X = 26; Y = 24 }
+                        (placedTiles (decideOn (atLevel 2 onExtension)).Intents))
                     "a target's tile is never chosen"
 
                 // The controller's Upgrade Work Area is working ground, so the

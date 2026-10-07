@@ -122,11 +122,12 @@ let private raisedPair =
     ]
 
 /// What each colony projects, the way the shell derives it
-/// (`World.roomsProjected`): the home, the outposts that survive the
-/// stand-down gate and the rooms it bootstraps for a child. Adoption is
+/// (`World.roomsProjected`): the home, the outposts it works
+/// (`Colony.outpostsWorked`, which drops a room that is already a colony
+/// of ours, #471) and the rooms it bootstraps for a child. Adoption is
 /// decided over this table and not the declaration.
 ///
-/// The stages are handed in because the bootstrap half is read off them:
+/// The stages are handed in because both halves are read off them:
 /// `Map.empty` is the world in which no declared home is a colony
 /// anything can see.
 let private projectionsOf (stages: Map<string, ColonyStage>) (colonies: Colony list) =
@@ -134,7 +135,7 @@ let private projectionsOf (stages: Map<string, ColonyStage>) (colonies: Colony l
     |> List.map (fun colony ->
         colony.Home,
         Colony.roomsProjected
-            colony.Outposts
+            (Colony.outpostsWorked stages colony)
             colony.Errands
             colony.Salvage
             (Colony.bootstrapping stages colonies colony)
@@ -641,15 +642,17 @@ let twoColonyTests =
                     "and a declared home we do not own is a candidate colony, whatever stands in it"
             }
 
-            test
-                "the child runs the tick its spawn stands, while its mother still declares it an outpost" {
+            test "the child runs the tick its spawn stands, while its mother raises it" {
                 // The living rule is a fact about the world and fires on the tick the
-                // spawn is finished; the declaration is moved by a human, in a commit,
-                // some ticks later. Between the two the child is living and the mother
-                // still projects its room.
+                // spawn is finished, whatever the declaration still says. The mother's
+                // outpost entry stopped counting the tick the room was ours (#471);
+                // she projects the room as the child she is raising, until it is
+                // `Independent`.
                 //
                 // Pinned rather than closed: gating the child's `decide` on the
                 // human's commit would cost a colony its whole tick.
+                let stages = Map.ofList [ "W1N2", Bootstrapping ]
+
                 let homes =
                     Colony.living (Set.ofList [ "W1N1"; "W1N2" ]) [ "W1N1"; "W1N2" ] nurseryPair
                     |> List.map (fun colony -> colony.Home)
@@ -660,7 +663,7 @@ let twoColonyTests =
                     "both are living: the mother's declaration of the child as an outpost is not asked about here"
 
                 Expect.equal
-                    (projectionsOf Map.empty nurseryPair
+                    (projectionsOf stages nurseryPair
                      |> List.filter (fun (_, rooms) -> List.contains "W1N2" rooms)
                      |> List.map fst)
                     [ "W1N1"; "W1N2" ]
@@ -668,12 +671,12 @@ let twoColonyTests =
 
                 Expect.equal
                     (Colony.creepColonies
-                        (projectionsOf Map.empty nurseryPair)
+                        (projectionsOf stages nurseryPair)
                         pairSpawns
                         [ motherCast, Some "W1N2" ]
                      |> Map.tryFind motherCast)
                     (Some "W1N1")
-                    "adoption is inert there — two projectors name no single adopter — so the mother keeps her crews until the human's edit"
+                    "adoption is inert there — two projectors name no single adopter — so the mother keeps her crews while she raises it"
             }
 
             test "a mother two hops from her nursery projects the room between them" {
@@ -964,29 +967,29 @@ let twoColonyTests =
                 // The narrow half of the rule: adoption is for a creep its
                 // own colony cannot place, so a room that colony projects
                 // as well settles nothing. That is the ordinary arrangement
-                // while the child is a nursery — the mother works the room
+                // while the child is a nursery — the mother raises the room
                 // and the child is declared in it — and a rule that adopted
-                // there would hand the mother's whole outpost crew to a
-                // colony with no spawn to cast their successors from.
-                let placed colonies creep standing =
+                // there would hand the mother's whole crew to a colony with
+                // no spawn to cast their successors from.
+                let placed colonies stage creep standing =
                     Colony.creepColonies
-                        (projectionsOf Map.empty colonies)
+                        (projectionsOf (Map.ofList [ "W1N2", stage ]) colonies)
                         pairSpawns
                         [ creep, Some standing ]
                     |> Map.tryFind creep
 
                 Expect.equal
-                    (placed nurseryPair motherCast "W1N2")
+                    (placed nurseryPair Nursery motherCast "W1N2")
                     (Some "W1N1")
-                    "the mother projects the room as her outpost, so her creep standing in it stays hers"
+                    "the mother projects the room as her nursery, so her creep standing in it stays hers"
 
                 Expect.equal
-                    (placed splitPair motherCast "W1N2")
+                    (placed splitPair Independent motherCast "W1N2")
                     (Some "W1N2")
                     "and the same creep in the same room is adopted the tick she stops projecting it"
 
                 Expect.equal
-                    (placed nurseryPair childCast "W1N2")
+                    (placed nurseryPair Nursery childCast "W1N2")
                     (Some "W1N2")
                     "the child's own creep at home is the child's either way: adoption never takes one from its caster's own room"
             }

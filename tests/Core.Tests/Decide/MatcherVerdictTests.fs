@@ -525,12 +525,22 @@ let verdictTests =
                     }
 
                 let sticky = Map.ofList [ "w1", taskId (Harvest "src-far") ]
-                let { Verdicts = verdicts } = decideFrom sticky snapshot
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decideFrom sticky snapshot
 
                 Expect.equal
                     verdicts
                     [ Verdict.Kept("w1", taskId (Harvest "src-far")) ]
                     "anti-thrash speaks as Kept, never as a fresh Matched"
+
+                Expect.equal
+                    (Map.tryFind "w1" assignments)
+                    (Some(taskId (Harvest "src-far")))
+                    "a held source is kept against a cheaper same-rank one"
             }
 
             test "a Task that left the pool releases with TaskGone" {
@@ -777,7 +787,12 @@ let verdictTests =
                     }
 
                 let sticky = Map.ofList [ "w1", taskId (Harvest "src-a") ]
-                let { Verdicts = verdicts } = decideFrom sticky snapshot
+
+                let {
+                        Intents = intents
+                        Verdicts = verdicts
+                    } =
+                    decideFrom sticky snapshot
 
                 Expect.equal
                     verdicts
@@ -790,6 +805,11 @@ let verdictTests =
                         Verdict.Matched("w1", taskId (Refill("spawn-1", Energy)), MatchFactor.Rank)
                     ]
                     "the handover carries both halves: why released, what won next"
+
+                Expect.contains
+                    intents
+                    (TransferEnergyToStructure("w1", "spawn-1", Energy))
+                    "delivery intent emitted"
             }
 
             test "a body that cannot do its remembered Task releases as Inapplicable" {
@@ -803,7 +823,12 @@ let verdictTests =
                     }
 
                 let sticky = Map.ofList [ "hauler", taskId (Harvest "src-a") ]
-                let { Verdicts = verdicts } = decideFrom sticky snapshot
+
+                let {
+                        Assignments = assignments
+                        Verdicts = verdicts
+                    } =
+                    decideFrom sticky snapshot
 
                 Expect.contains
                     verdicts
@@ -813,6 +838,10 @@ let verdictTests =
                         ReleaseReason.Rejected RejectReason.Inapplicable
                     ))
                     "the missing Work part releases the assignment as Inapplicable"
+
+                Expect.isEmpty
+                    (Map.toList assignments)
+                    "applicability release covers parts the body lacks"
             }
 
             test "a walled-off Work Area releases with Unreachable" {

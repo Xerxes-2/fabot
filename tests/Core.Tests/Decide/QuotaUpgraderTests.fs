@@ -839,9 +839,9 @@ let quotaInputTests =
                 // child could absorb.
                 Expect.equal
                     (quotaOf (
-                        ferryMother Bootstrapping |> tunedBy (fun t -> { t with FerryLoads = 2 })
+                        ferryMother Bootstrapping |> tunedBy (fun t -> { t with FerryLoads = 3 })
                     ))
-                    2
+                    3
                     "and `Tuning.FerryLoads` is the whole of how much she lends"
             }
 
@@ -1102,12 +1102,12 @@ let quotaInputTests =
                 Expect.equal
                     (castRows (decideOn (pairedPostColony true 1500 40)).Intents)
                     [ "anchor" ]
-                    "a held rock: the successor is eight parts and forty ticks is inside its lead"
+                    "a held rock: the successor is ten parts and forty ticks is inside its lead"
 
                 Expect.equal
                     (castRows (decideOn (pairedPostColony false 1500 40)).Intents)
                     [ "worker" ]
-                    "an unheld one: the successor is five parts, the lead is shorter, and the incumbent still counts"
+                    "an unheld one: the successor is six parts, the lead is shorter, and the incumbent still counts"
             }
 
             test "a rival's room hires no reserver on the tick it is first seen held" {

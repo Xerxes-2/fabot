@@ -10,6 +10,44 @@ open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
 open Fabot.Core.Tests.Decide.ColonyFixtures
 
+/// A second outpost west of home: a container site in W2N1, the border
+/// ring that joins the rooms, home's western corridor made plain, and a
+/// crowd of four loaded workers in it on x = 3..6, a few tiles in from the
+/// Seam to W2N1 at home's x = 0 edge.
+let private withWestOutpost (colony: ColonyView) =
+    let west =
+        { RoomLayer.empty with
+            Terrain = TerrainGrid.ofList [ for x in 45..49 -> { X = x; Y = 2 }, Plain ]
+            TargetPositions = Map.ofList [ "site-west", { X = 48; Y = 2 } ]
+        }
+
+    { colony with
+        ConstructionSites =
+            colony.ConstructionSites
+            @ [
+                {
+                    Id = "site-west"
+                    Left = siteOwes
+                    Begun = false
+                }
+            ]
+        Creeps = [ for i in 1..4 -> worker $"w{i}" 50 0 ]
+        Spatial =
+            { colony.Spatial with
+                Borders = Map.add "W2N1" plainRing colony.Spatial.Borders
+                TargetKinds =
+                    Map.add "site-west" (Site BuiltKind.Container) colony.Spatial.TargetKinds
+            }
+            |> withNeighbour "W2N1" west
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain =
+                        (layer.Terrain, [ for x in 0..10 -> { X = x; Y = 2 } ])
+                        ||> List.fold (fun acc pos -> TerrainGrid.add pos Plain acc)
+                    CreepPositions = Map.ofList [ for i in 1..4 -> $"w{i}", { X = 2 + i; Y = 2 } ]
+                })
+    }
+
 /// The Claim tasks of a pool, by the controller each names.
 let private claimTasks tasks =
     tasks
@@ -591,12 +629,13 @@ let nurseryTests =
             }
 
             test "a claimed room still on the outpost list takes no place in the builders' queue" {
-                // While a human still names the child's room in the mother's
-                // `Outposts` list, `not (List.contains child.Home worked)` keeps it
-                // out of `BorrowedWork.Rooms`, and the room reaches the mother through
-                // the outpost reading, which asks no stage. So `isOutpostSite`'s
-                // borrowed-room clause is not the whole of "a room this colony merely
-                // mines", and #266's queue says the rest.
+                // Defensive: since #471 the shell drops a room that is ours from the
+                // outposts a colony works (`Colony.outpostsWorked`), so it no longer
+                // builds a claimed room reaching the mother through her `Outposts`
+                // list. This pins the Pool's own narrowing (`isMinedSite`) against
+                // that shape all the same: `isOutpostSite`'s borrowed-room clause is
+                // not the whole of "a room this colony merely mines", and #266's
+                // queue says the rest.
                 //
                 // That queue is scarce in places, not bodies: a claimed room's sites
                 // are feeding-tier by their own reading and capped by nothing, so a
@@ -799,13 +838,11 @@ let nurseryTests =
                 // Two outposts with one container site apiece; the west site is the
                 // near one, so its budget is read off how many of the four workers
                 // stop there.
-                let twoOutposts = withWestOutpost 2
-
                 let sites control =
                     northBorderColony { X = 10; Y = 38 }
                     |> withNorthOutpost None
                     |> withOutpostSite { X = 10; Y = 43 }
-                    |> twoOutposts
+                    |> withWestOutpost
                     |> control
 
                 let held colony =

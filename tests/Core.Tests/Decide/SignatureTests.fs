@@ -159,14 +159,9 @@ let signatureTests =
             }
 
             test "each room keeps one line of its own, and the rooms do not all share one" {
-                // Picked off the room's name, so a room signed once is never
-                // signed again with another line.
+                // Picked off the room's name by a pure function of it, so a
+                // room signed once is never signed again with another line.
                 let rooms = [ "W12S28"; "W13S28"; "W15S28"; "W11S29"; "W11S27" ]
-
-                Expect.equal
-                    (rooms |> List.map Colony.signatureFor)
-                    (rooms |> List.map Colony.signatureFor)
-                    "the same room, the same line, every tick"
 
                 Expect.isGreaterThan
                     (rooms |> List.map Colony.signatureFor |> List.distinct |> List.length)

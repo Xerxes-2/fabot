@@ -525,7 +525,7 @@ let tuningTests =
 
             test "VisionGrace is how long a held Task outlives the vision that carried it" {
                 // Pinned on the field and not on the shipped number: the
-                // boundary at the shipped 150 is `OutpostTests`' own case.
+                // boundary at the shipped 150 is `OutpostDeclarationTests`' own case.
                 let dark =
                     { bareRespawn with
                         Time = 1000

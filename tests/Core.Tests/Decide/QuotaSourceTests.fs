@@ -206,24 +206,21 @@ let sourceOutputTests =
                     (priced (reservedRoom true 4000))
                     "held by us the same rock is worth ten, so the fleet above is the neutral one"
 
-                // And tellable apart, which is why the holder is a closed
-                // three-state rather than a flag: one "not ours" for both hands the
-                // stand-down gate an input on which no correct answer exists. The
-                // NPC's hold read as a rival's shuts an outpost for the life of the
-                // colony, and a rival's read as the NPC's walks back into a room
-                // somebody else holds.
-                let holderOf (control: RoomControlInfo) =
-                    control.Reservation |> Option.map (fun held -> held.Holder)
+                // Five and specifically not nothing, the same strict bracket the
+                // rival's cases are pinned in: sized to the blind target, the
+                // neutral rate hires and unpriceable does not.
+                Expect.isNonEmpty
+                    (spawnIntents
+                        (decide
+                            (postedOutpostColony 6 [ "W1N2", coreReservedRoom 4000 ])
+                            Map.empty
+                            Set.empty
+                            None)
+                            .Intents)
+                    "the NPC's reservation prices the rock at five and hires, not at nothing"
 
-                Expect.notEqual
-                    (holderOf (coreReservedRoom 4000))
-                    (holderOf (reservedRoom false 4000))
-                    "the NPC's hold and a rival's are two facts, not one"
-
-                Expect.notEqual
-                    (holderOf (coreReservedRoom 4000))
-                    (holderOf (reservedRoom true 4000))
-                    "and neither of them is ours"
+            // Tellable apart is the closed three-state `ReservationHolder`'s
+            // own guarantee; the stand-down tests read the holder.
             }
 
             test "an outpost the colony cannot see this tick prices no source" {

@@ -1072,6 +1072,24 @@ let extractorTests =
                 let { Intents = intents } = decideOn colony
                 let containers = sitesOfKind Container intents
 
+                let near (a: Pos) (b: Pos) =
+                    max (abs (a.X - b.X)) (abs (a.Y - b.Y)) <= 1
+
+                let serving =
+                    containers
+                    |> List.filter (fun tile ->
+                        near tile { X = 15; Y = 25 } || near tile { X = 17; Y = 25 })
+
+                Expect.hasLength
+                    serving
+                    1
+                    "the premise: one container serves the rock and the deposit"
+
+                Expect.all
+                    serving
+                    (fun tile -> near tile { X = 15; Y = 25 } && near tile { X = 17; Y = 25 })
+                    "and it stands on a Seat the two share: the picks collide"
+
                 Expect.equal
                     (List.length containers)
                     (List.length (List.distinct containers))

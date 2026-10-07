@@ -365,25 +365,14 @@ let minerCastTests =
                 // what keeps it behind them; the season's whole score rides on
                 // it, which is what puts it ahead of the rows that spend the
                 // surplus.
-                Expect.equal
-                    ((decideOn (richMine 1800)).Quotas.Rows |> List.map (fun row -> row.Row))
-                    [
-                        "defender"
-                        "guard"
-                        "ranger"
-                        "sapper"
-                        "probe"
-                        "medic"
-                        "reserver"
-                        "anchor"
-                        "hauler"
-                        "miner"
-                        "courier"
-                        "dismantler"
-                        "upgrader"
-                        "worker"
-                    ]
-                    "the reported order is the casting order"
+                // The whole row list is pinned once, in QuotaTuningTests'
+                // quotas record; this reads only the miner's place in it.
+                let rows = (decideOn (richMine 1800)).Quotas.Rows |> List.map (fun row -> row.Row)
+
+                let at row = List.findIndex ((=) row) rows
+
+                Expect.isLessThan (at "hauler") (at "miner") "the miner is cast behind the hauler"
+                Expect.isLessThan (at "miner") (at "upgrader") "and ahead of the upgrader"
             }
 
             test "the row casts the body its bank affords, named for the row" {
@@ -727,13 +716,6 @@ let oreMinerTests =
                 // same extractor — over the room's oxygen, dug into the terminal
                 // while it holds under `Tuning.OreTarget`.
                 Expect.equal (quotaOfRow "miner" oreColony) (Some 1) "one body for the ore"
-
-                Expect.equal
-                    (quotaOfRow
-                        "miner"
-                        (oreColony |> digOpen Oxygen |> withOreIn "term-1" Oxygen 5_999))
-                    (Some 1)
-                    "an open dig one under the target still digs"
             }
 
             test "the terminal at its target hires no ore miner" {

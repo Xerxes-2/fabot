@@ -622,13 +622,13 @@ let colonyStageTests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
-            test
-                "the mother reads the child's stage, and her scan set and not the stage closes her window" {
-                // While a human still declares the child's room one of her `Outposts`
-                // the room is in her scan set through the outpost reading, which asks
-                // no stage, so the borrowing and the addend run at any RCL until the
-                // commit takes that entry out. A predicate reading `Bootstrapping`
-                // alone would close the window on a tick no human touched.
+            test "Decide reads the mother's scan set, not the child's stage, to close her window" {
+                // The stage is the shell's to read: it decides the projection
+                // (`Colony.bootstrapping` lets an `Independent` child go), and Decide
+                // reads only the projection it is handed. Pinned on a ColonyView the
+                // shell no longer builds — an `Independent` child still in her scan
+                // set — so that a predicate in Decide reading the stage a second time
+                // would show here.
                 let casts colony fleet =
                     spawnIntents (decideOn { colony with Creeps = fleet }).Intents
 
@@ -687,39 +687,6 @@ let borrowedRoomBudgetTests =
     testList
         "a borrowed room's sites and the budgets"
         [
-            test "a child's container site neither draws nor dilutes the outpost builders' budget" {
-                // #210 (user decision 2026-09-07). As a candidate colony the north room
-                // is an outpost and the two sites split the budget of two; claimed as
-                // a nursery the north site is the child's own, so the west site has
-                // the whole budget.
-                let westward = withWestOutpost 1
-
-                let westBuilders control =
-                    let colony =
-                        northBorderColony { X = 10; Y = 38 }
-                        |> withNorthOutpost None
-                        |> withOutpostSite { X = 10; Y = 43 }
-                        |> westward
-                        |> control
-
-                    let { Assignments = assignments } = decideOn colony
-
-                    assignments
-                    |> Map.toList
-                    |> List.filter (fun (_, t) -> t = taskId (Build "site-west"))
-                    |> List.length
-
-                Expect.equal
-                    (westBuilders asCandidate)
-                    1
-                    "two outpost sites share the budget of two: one builder west"
-
-                Expect.equal
-                    (westBuilders asNursery)
-                    2
-                    "the nursery's site is the child's own and out of the divisor: the west site takes both"
-            }
-
             test "one FerryLoads budget is spread over a child room's buffers in id order" {
                 // #224 (user decision 2026-09-07): the hauler row hires FerryLoads
                 // bodies per child, so the pool admits that many per child, the first

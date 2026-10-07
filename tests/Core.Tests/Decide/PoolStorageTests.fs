@@ -252,7 +252,7 @@ let stockGateTests =
             test "a load drawn from the Storage never goes back into it" {
                 // The other half of #530's flip: the sink filled under the
                 // hauler, and the one sink left was the store it had just
-                // emptied. Pairwise with "the accepted churn" below on where
+                // emptied. Pairwise with "a load not drawn from the stock" below on where
                 // the load came from alone.
                 let stores = Map.ofList [ "can-src", 0; "can-ctrl", 2000; "sto-1", 500 ]
                 let beside = { X = 16; Y = 10 }
@@ -1122,10 +1122,13 @@ let stockDrawTests =
                     "the tick it fills, the walk it was on is over"
             }
 
-            test "the accepted churn: a load the buffer will not take goes back to the stock" {
-                // The hauler filled from the stock while the buffer was
-                // hungry and the buffer filled while it walked: the stock is
-                // the only sink left, so the remainder goes back.
+            test
+                "a load not drawn from the stock, which the buffer will not take, goes into the stock" {
+                // The hauler carries no draw record (its load came from
+                // somewhere other than the stock) and the buffer filled while
+                // it walked: the stock is the only sink left, so the load goes
+                // there. A load that did come from the stock stays out of it
+                // (#530, above).
                 let stores = Map.ofList [ "can-src", 0; "can-ctrl", 2000; "sto-1", 500 ]
                 let loaded = creepWith "h1" 100 0 [ Carry; Carry; Move ]
 

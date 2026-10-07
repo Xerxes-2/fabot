@@ -1,7 +1,6 @@
 /// The colony suites' shared surface: the north room as a candidate, a
 /// nursery, a bootstrapped child and a room gone from the scan set, the
-/// child run as a colony of its own, and the second outpost west of home
-/// that more than one colony file reads. A helper one file alone reads stays
+/// child run as a colony of its own. A helper one file alone reads stays
 /// private there.
 module Fabot.Core.Tests.Decide.ColonyFixtures
 
@@ -10,47 +9,6 @@ open Fabot.Core.Types
 open Fabot.Core.Decide
 open Fabot.Core.Tests
 open Fabot.Core.Tests.Decide.Fixtures
-
-/// A second outpost west of home: a container site in W2N1, the border
-/// ring that joins the rooms, home's western corridor made plain, and a
-/// crowd of four loaded workers in it. Where the crowd stands is the
-/// caller's: the Seam to W2N1 is home's x = 0 edge, and whether the crowd
-/// stands *beside* that edge or one tile off it is what one of the two
-/// testLists that take this is about.
-let internal withWestOutpost (crowdX: int) (colony: ColonyView) =
-    let west =
-        { RoomLayer.empty with
-            Terrain = TerrainGrid.ofList [ for x in 45..49 -> { X = x; Y = 2 }, Plain ]
-            TargetPositions = Map.ofList [ "site-west", { X = 48; Y = 2 } ]
-        }
-
-    { colony with
-        ConstructionSites =
-            colony.ConstructionSites
-            @ [
-                {
-                    Id = "site-west"
-                    Left = siteOwes
-                    Begun = false
-                }
-            ]
-        Creeps = [ for i in 1..4 -> worker $"w{i}" 50 0 ]
-        Spatial =
-            { colony.Spatial with
-                Borders = Map.add "W2N1" plainRing colony.Spatial.Borders
-                TargetKinds =
-                    Map.add "site-west" (Site BuiltKind.Container) colony.Spatial.TargetKinds
-            }
-            |> withNeighbour "W2N1" west
-            |> withHome (fun layer ->
-                { layer with
-                    Terrain =
-                        (layer.Terrain, [ for x in 0..10 -> { X = x; Y = 2 } ])
-                        ||> List.fold (fun acc pos -> TerrainGrid.add pos Plain acc)
-                    CreepPositions =
-                        Map.ofList [ for i in 1..4 -> $"w{i}", { X = crowdX + i; Y = 2 } ]
-                })
-    }
 
 /// The north room with a **spawn** construction site of ours standing in
 /// it: the site a human places in a nursery by hand. Built beside

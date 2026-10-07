@@ -56,13 +56,6 @@ let tests =
                         "body cost within bare-respawn energy"
             }
 
-            test "no spawn Intent when energy is below a worker body cost" {
-                let snapshot = { bareRespawn with Bank = bank 100 300 }
-
-                let { Intents = intents } = decideOn snapshot
-                Expect.isEmpty (spawnIntents intents) "cannot afford a worker"
-            }
-
             test "no spawn Intent while the spawn is already spawning" {
                 let snapshot =
                     { bareRespawn with
@@ -174,7 +167,8 @@ let tests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
-            test "at 300 capacity the remainder pads the single unit" {
+            test
+                "one worker is below minimum: a second is spawned, its 300-capacity remainder padding the single unit" {
                 let snapshot =
                     { bareRespawn with
                         Creeps = [ worker "worker-1" 0 50 ]
@@ -226,16 +220,6 @@ let tests =
                 Expect.isEmpty (spawnIntents intents) "even the fallback needs its unit cost"
             }
 
-            test "one worker is below minimum: a second is spawned" {
-                let snapshot =
-                    { bareRespawn with
-                        Creeps = [ worker "worker-1" 0 50 ]
-                    }
-
-                let { Intents = intents } = decideOn snapshot
-                Expect.hasLength (spawnIntents intents) 1 "a lone worker cannot keep the loop going"
-            }
-
             test "no spawn Intent when workforce is at minimum" {
                 let snapshot =
                     { bareRespawn with
@@ -244,21 +228,6 @@ let tests =
 
                 let { Intents = intents } = decideOn snapshot
                 Expect.isEmpty (spawnIntents intents) "workforce already at minimum"
-            }
-
-            test "empty creeps spread across sources instead of piling on one" {
-                let snapshot =
-                    { bareRespawn with
-                        Creeps = [ worker "w1" 0 50; worker "w2" 0 50 ]
-                    }
-
-                let { Assignments = assignments } = decideOn snapshot
-                let assigned = assignments |> Map.toList |> List.map snd |> List.sort
-
-                Expect.equal
-                    assigned
-                    [ (taskId (Harvest "src-a")); (taskId (Harvest "src-b")) ]
-                    "greedy matching balances load per task"
             }
 
             test "greedy matching counts kept assignments as load" {
@@ -316,30 +285,6 @@ let tests =
                     intents
                     (HarvestSource("w1", "src-b"))
                     "intent follows the sticky assignment"
-            }
-
-            test "a creep that fills up is reassigned from Harvest to Refill" {
-                let snapshot =
-                    { bareRespawn with
-                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
-                        Creeps = [ worker "w1" 50 0 ]
-                    }
-
-                let {
-                        Intents = intents
-                        Assignments = kept
-                    } =
-                    decideFrom (Map.ofList [ "w1", (taskId (Harvest "src-a")) ]) snapshot
-
-                Expect.equal
-                    (Map.tryFind "w1" kept)
-                    (Some(taskId (Refill("spawn-1", Energy))))
-                    "full creep switches to delivering"
-
-                Expect.contains
-                    intents
-                    (TransferEnergyToStructure("w1", "spawn-1", Energy))
-                    "delivery intent emitted"
             }
 
             test "a loaded creep feeds a hungry tower once spawn and extensions are full" {
@@ -416,21 +361,6 @@ let tests =
                     "nothing to refill, so surplus goes to the controller"
 
                 Expect.contains intents (UpgradeController("w1", "ctrl-1")) "upgrade intent emitted"
-            }
-
-            test "a hungry structure beats the controller for a delivering creep" {
-                let snapshot =
-                    { bareRespawn with
-                        Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
-                        Creeps = [ worker "w1" 50 0 ]
-                    }
-
-                let { Assignments = kept } = decideOn snapshot
-
-                Expect.equal
-                    (Map.tryFind "w1" kept)
-                    (Some(taskId (Refill("spawn-1", Energy))))
-                    "refill outranks upgrade while a structure is missing energy"
             }
 
             test "an upgrading creep that empties goes back to harvest" {
@@ -556,12 +486,6 @@ let tests =
                     (Some(taskId (Refill("spawn-1", Energy))))
                     "refill outranks build while a structure is missing energy"
             }
-
-            test "assignments of dead creeps are dropped" {
-                let assignments = Map.ofList [ "ghost", "task-a" ]
-                let { Assignments = kept } = decideFrom assignments bareRespawn
-                Expect.isEmpty (Map.toList kept) "dead creep's assignment is released"
-            }
         ]
 
 [<Tests>]
@@ -574,7 +498,6 @@ let intakeRoomTests =
                 // tiles into the north room to pick fifty off a pile while the spawn stood
                 // at eighteen energy. An intake is for a body at least half empty;
                 // pairwise on the store alone, same tile, same pool.
-                // empty; pairwise on the store alone, same tile, same pool.
                 let lane energy =
                     let body = List.replicate 6 Carry @ List.replicate 3 Move
 

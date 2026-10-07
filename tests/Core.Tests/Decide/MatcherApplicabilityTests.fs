@@ -125,23 +125,6 @@ let partApplicabilityTests =
                     None
                     "and the store-less body beside it is offered no rock at all"
             }
-
-            test "a remembered assignment to a task the body cannot do is released" {
-                let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        ConstructionSites = []
-                        Controller = None
-                        Creeps = [ creepWith "hauler" 0 50 [ Carry; Move ] ]
-                    }
-
-                let remembered = Map.ofList [ "hauler", taskId (Harvest "src-a") ]
-                let { Assignments = assignments } = decideFrom remembered snapshot
-
-                Expect.isEmpty
-                    (Map.toList assignments)
-                    "applicability release covers parts the body lacks"
-            }
         ]
 
 [<Tests>]

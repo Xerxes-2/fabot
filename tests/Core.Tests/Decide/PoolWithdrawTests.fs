@@ -428,7 +428,7 @@ let pickupTaskTests =
                     "one tile, two stores: the decaying one first"
 
                 // The pairwise control: the same hauler, the same container,
-                // The pairwise control: the pile ten tiles down the lane. 150
+                // the pile ten tiles down the lane. 150
                 // is an eighth of the row's load, so the trip rung is not
                 // what this reads.
                 let { Assignments = apart } = decideOn (sameTilePileColony { X = 20; Y = 10 })
@@ -438,8 +438,7 @@ let pickupTaskTests =
                     (Some(taskId (Withdraw("can-a", Energy))))
                     "a pile ten tiles off moves nothing: the container underfoot is still the flow"
 
-                // And a *full* container outranks the pile on its own tile
-                // And a full container outranks the pile on its own tile: the
+                // And a *full* container outranks the pile on its own tile: the
                 // 2,000 is the flow, and the reflex takes the pile for free.
                 let full =
                     let colony = sameTilePileColony { X = 10; Y = 10 }
@@ -739,8 +738,8 @@ let pickupTaskTests =
                 // energy Withdraw, so a rungless ore draw loses every
                 // travel-cost tie to a Storage in the middle of the room. A
                 // tombstone drops its whole store as piles when it decays.
-                // Pairwise on the kind of store alone.
-                // same 175 units, under the contact cliff both times.
+                // Pairwise on the kind of store alone: the same 175 units,
+                // under the contact cliff both times.
                 let rankOf colony task =
                     poolOn colony
                     |> List.tryPick (fun pooled ->

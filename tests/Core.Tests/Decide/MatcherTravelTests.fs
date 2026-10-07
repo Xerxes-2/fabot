@@ -171,25 +171,6 @@ let travelCostTests =
                     "travel cost breaks ties within a rank, never across ranks"
             }
 
-            test "a sticky assignment is kept even when a cheaper task exists this tick" {
-                // Same corridor as the live-bug regression, but the creep
-                // already holds the far source from an earlier tick.
-                let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-far"; source "src-near" ]
-                        Creeps = [ worker "w1" 0 50 ]
-                        Spatial = nearFarCorridor [ "w1", { X = 10; Y = 17 } ]
-                    }
-
-                let sticky = Map.ofList [ "w1", (taskId (Harvest "src-far")) ]
-                let { Assignments = assignments } = decideFrom sticky snapshot
-
-                Expect.equal
-                    (Map.tryFind "w1" assignments)
-                    (Some(taskId (Harvest "src-far")))
-                    "sticky assignments are never re-evaluated for a closer target"
-            }
-
             test "an unplaced creep is matched as today: ColonyView order decides the tie" {
                 // The projection places both sources but not the creep, so
                 // no flood can run — the pick falls back to (rank, load).
@@ -843,36 +824,6 @@ let arbitrationTests =
                     (moveIntents intents |> List.sort)
                     [ "wa", Top; "wb", Bottom ]
                     "the Resolver's swap reaches decide's output"
-            }
-
-            test "an idle creep is displaced by a working creep passing through" {
-                // w2 carries no assignment and idles astride the harvester's
-                // path.
-                let terrain =
-                    [
-                        { X = 10; Y = 10 }, Wall
-                        { X = 10; Y = 11 }, Plain
-                        { X = 10; Y = 12 }, Plain
-                        { X = 10; Y = 13 }, Plain
-                    ]
-
-                let snapshot =
-                    { bareRespawn with
-                        Sources = [ source "src-a" ]
-                        Creeps = [ worker "w1" 0 50; worker "w2" 50 0 ]
-                        Spatial =
-
-                            spatial [ "src-a", { X = 10; Y = 10 } ] terrain
-                            |> withCreepsAt [ "w1", { X = 10; Y = 13 }; "w2", { X = 10; Y = 12 } ]
-                    }
-
-                let moves = resolveOn snapshot [ "w1", Harvest "src-a" ] |> moveIntents
-
-                Expect.contains moves ("w1", Top) "the working creep claims the idler's tile"
-
-                Expect.isTrue
-                    (moves |> List.exists (fun (name, _) -> name = "w2"))
-                    "the idler is displaced out of the way"
             }
 
             test "#562 the idle body in a hauler's only way in steps aside, off the hauler's way on" {

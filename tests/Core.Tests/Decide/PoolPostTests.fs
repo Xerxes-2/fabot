@@ -95,14 +95,21 @@ let containerPostTests =
 
             test "a full Anchor on a bare Seat digs nothing there" {
                 // (9,10) is a Seat with no container: the overflow would
-                // spill on the ground. The release here is the reachability
-                // gate's: the room is a one-tile corridor with the source
-                // walled into it, so the Post at (11,10) is on the far side
-                // of the rock and no walk reaches it.
+                // spill on the ground. One plain tile under the rock, (10,11),
+                // opens a walk from it round to the Post at (11,10), so the
+                // reachability gate releases nothing and the dig rule alone
+                // decides.
+                let room =
+                    haulRoom
+                    |> withHome (fun layer ->
+                        { layer with
+                            Terrain = TerrainGrid.add { X = 10; Y = 11 } Plain layer.Terrain
+                        })
+
                 let snapshot =
                     { haulColony with
                         Creeps = [ anchor "a1" 50 0 ]
-                        Spatial = haulRoom |> withCreepsAt [ "a1", { X = 9; Y = 10 } ]
+                        Spatial = room |> withCreepsAt [ "a1", { X = 9; Y = 10 } ]
                     }
 
                 let remembered = Map.ofList [ "a1", taskId (Harvest "src-a") ]
@@ -115,16 +122,17 @@ let containerPostTests =
 
                 Expect.contains
                     verdicts
-                    (Verdict.Released(
-                        "a1",
-                        taskId (Harvest "src-a"),
-                        ReleaseReason.Rejected RejectReason.Unreachable
-                    ))
-                    "no container underfoot and no walk to one either"
+                    (Verdict.Kept("a1", taskId (Harvest "src-a")))
+                    "the Post is a walk away: its work is still the rock"
 
                 Expect.isEmpty
                     (digIntentsFor "a1" intents)
-                    "and nothing is dug onto the ground where the overflow would spill"
+                    "nothing is dug onto the ground where the overflow would spill"
+
+                Expect.equal
+                    (moveIntentsFor "a1" intents)
+                    [ MoveCreep("a1", BottomRight) ]
+                    "the step is round the rock toward the container"
             }
 
             test "a full creep beside the built container digs nothing: adjacency is not the tile" {
