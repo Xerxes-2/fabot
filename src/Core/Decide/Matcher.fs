@@ -649,7 +649,9 @@ let matchAcross
                 ends
         | _ -> None
 
-    // A Guard its body loses (#602): it loses the room's exchange beside
+    // A Guard its body loses (#602): it neither kites the raid down
+    // (`Facts.kitedDown`, the brief's own test for taking it, #613) nor wins
+    // the room's exchange beside
     // every other fighter of ours at the fight, whatever each holds, and the
     // holders of the fight its walk lands while it still stands
     // (`Facts.winsBeside`); and its holder is struck this tick where it
@@ -688,7 +690,8 @@ let matchAcross
             let tid = taskId task
 
             let loses () =
-                not (
+                not (Facts.kitedDown ctx.View (partCount creep.Body) room)
+                && not (
                     Facts.winsBeside
                         ctx.View
                         room

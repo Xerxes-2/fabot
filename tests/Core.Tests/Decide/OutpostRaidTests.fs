@@ -2358,7 +2358,12 @@ let kiteTests =
                     (Some(taskId (Guard "W1N2")))
                     "the same blows on legs as quick as the ranger's are no chase"
 
-                Expect.notEqual
+                // #613 flipped this from "keeps the ranger's pace on a road":
+                // a road it ties on is the kite walk's to keep off, tile by
+                // tile, and read here it ruled Zero3956 (15 MOVE live under 17
+                // ATTACK, a step every second tick on plain) as quick as a
+                // ranger, which then never took the raid it out-paces.
+                Expect.equal
                     (assigned (
                         withRanger (
                             hostileIn
@@ -2368,7 +2373,24 @@ let kiteTests =
                         )
                     ))
                     (Some(taskId (Guard "W1N2")))
-                    "ten ATTACK on five MOVE is slower on plain but keeps the ranger's pace on a road"
+                    "ten ATTACK on five MOVE, slower on plain and quicker nowhere, is kited"
+            }
+
+            // #613: one fitness answer takes and keeps the Guard. The brief
+            // admits a ranger that kites the raid down; #602's release read
+            // the exchange alone, so a kiter the melee once caught lost the
+            // Guard it was taken for, walked off, and was admitted again.
+            test "a ranger kiting the raid down keeps its Guard the tick the melee strikes it" {
+                let colony =
+                    declaredRaid [ plodderAt { X = 25; Y = 44 } ]
+                    |> withGuards [ ranger "r-1", { X = 24; Y = 44 } ]
+
+                let held = Map.ofList [ "r-1", taskId (Guard "W1N2") ]
+
+                Expect.equal
+                    ((decide colony held Set.empty None).Assignments |> Map.tryFind "r-1")
+                    (Some(taskId (Guard "W1N2")))
+                    "struck beside the melee, it loses the exchange on paper and still kites it down"
             }
 
             test "the kite ground keeps out of a dead end the melee can pin the ranger in" {

@@ -62,18 +62,19 @@ module Gait =
         else
             Some(max 1 ((fatigue * gait.Weight + 2 * gait.Moves - 1) / (2 * gait.Moves)))
 
-    /// Whether one gait falls behind another on road and plain alike, roads
-    /// being common ground. A body with no MOVE acting steps nowhere of
-    /// itself: a puller walks it at the puller's pace, which is the puller's
-    /// to answer for.
+    /// Whether one gait falls behind another: strictly slower on plain, the
+    /// ground a kite runs on, and so, its weight a MOVE heavier, quicker on
+    /// none. A road where the two tie is the kite walk's to keep off, tile
+    /// by tile on the arrival flood (#613): read here, it ruled every melee
+    /// with half a MOVE a part as quick as a ranger, a 15-MOVE 17-ATTACK body
+    /// that steps every second tick on plain among them. A body with no MOVE
+    /// acting steps nowhere of itself: a puller walks it at the puller's
+    /// pace, which is the puller's to answer for.
     let fallsBehind (ours: Gait) (theirs: Gait) : bool =
-        let slower fatigue =
-            match ticks fatigue theirs, ticks fatigue ours with
-            | None, Some _ -> true
-            | Some t, Some o -> t > o
-            | _, None -> false
-
-        slower road && slower plain
+        match ticks plain theirs, ticks plain ours with
+        | None, Some _ -> true
+        | Some t, Some o -> t > o
+        | _, None -> false
 
     /// Whether a quarry's gait outruns a chaser's (#531): strictly quicker on
     /// every ground the chase crosses, road, plain and swamp. Equal pace, or

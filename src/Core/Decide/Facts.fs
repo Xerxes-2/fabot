@@ -807,7 +807,7 @@ let internal disturbs (view: ColonyView) (residentRooms: Set<string>) (hostile: 
 
 /// Whether a ranged body of these part counts holds the range on a hostile
 /// for as long as it likes (#510): the hostile shoots nothing, and falls
-/// behind ours on road and plain alike (`Gait.fallsBehind`), ours read off
+/// behind ours on plain (`Gait.fallsBehind`), ours read off
 /// its live parts, the hostile's among `side` (`HostileInfo.effectiveParts`).
 let internal cannotClose (side: HostileInfo list) (ours: BodyPart -> int) (hostile: HostileInfo) =
     not (HostileInfo.shoots side hostile)

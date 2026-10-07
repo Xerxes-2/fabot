@@ -7951,11 +7951,395 @@ let private idleRangerInReach () : Arena =
             }
     }
 
+// ---- arena capture w17s26-t1014100 -------------------------------------------
+// `npm run capture -- W17S26 1014100 --rooms W17S25`, read at live t1,014,280.
+//   W17S26  https://screeps.com/room-history/shardSeason/W17S26/1014100.json
+//   W17S25  https://screeps.com/room-history/shardSeason/W17S25/1014100.json
+// W17S26 is reserved by 2 to t1014110: the arena has no reservations.
+// Spawn11 is spawning guard-1014093-Spawn11 until t1014153: not placed.
+// Zero3956 walks its live tiles t1,014,101-149 (`observe history`), slowed to a
+// step every second tick from t1,014,117, when the guard's swings took its
+// three head MOVE, and swings at the core beside (13,23) from t1,014,149.
+
+/// #613: Trepidimous' Zero3956 (18M 17A, no heal) against the lone 6M 4RA 2H
+/// ranger W17S26's stand-down left idle at t1,014,093.
+let private zeroAtTheCore (zero: Behaviour) () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+    let odiodin = Side.Player "Odiodin"
+
+    let w17s26 =
+        room "W17S26"
+        |> withStructures
+            [
+                { structureOf "container" None 133_700 250_000 { X = 27; Y = 9 } with
+                    Energy = 163
+                }
+                structureOf
+                    "invaderCore"
+                    (Some(Side.Npc "Invader"))
+                    92_880
+                    100_000
+                    { X = 12; Y = 24 }
+            ]
+        |> withRoads
+            [
+                20, 1, 4_200
+                21, 2, 4_300
+                22, 3, 4_800
+                23, 4, 2_500
+                24, 5, 4_200
+                25, 6, 2_600
+                26, 7, 4_300
+                27, 8, 2_500
+            ]
+
+    let w17s25 =
+        room "W17S25"
+        |> withController Ownership.Ours None 5 3
+        |> withControllerClocks 0 0 79_938 52_681
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+        |> withStructures
+            [
+                for x, y in [ 9, 23; 9, 25; 9, 27; 9, 29; 11, 23; 13, 23 ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 50
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        10, 24
+                        10, 26
+                        10, 28
+                        10, 30
+                        11, 25
+                        11, 27
+                        12, 24
+                        12, 28
+                        12, 30
+                        13, 25
+                        13, 31
+                        14, 24
+                        14, 26
+                        14, 30
+                        15, 27
+                        15, 29
+                        15, 31
+                        16, 28
+                        16, 30
+                        16, 32
+                        17, 29
+                        17, 31
+                        18, 30
+                        19, 31
+                    ] -> structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y }
+            ]
+        |> withStructures
+            [
+                structureOf "container" None 145_800 250_000 { X = 16; Y = 34 }
+                { structureOf "container" None 145_000 250_000 { X = 17; Y = 20 } with
+                    Energy = 108
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 13; Y = 27 } with
+                    Energy = 6_069
+                }
+                towerOf Side.Ours { X = 11; Y = 29 } 1_000
+                towerOf Side.Ours { X = 13; Y = 29 } 1_000
+            ]
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        2, 15
+                        2, 16
+                        2, 17
+                        2, 18
+                        2, 19
+                        2, 20
+                        2, 23
+                        2, 24
+                        2, 25
+                        2, 26
+                        2, 27
+                        11, 29
+                        13, 27
+                        13, 29
+                        14, 28
+                        16, 44
+                        17, 20
+                        17, 44
+                        18, 44
+                        32, 31
+                        32, 32
+                    ] -> structureOf "rampart" (Some Side.Ours) 100_000 10_000_000 { X = x; Y = y }
+            ]
+
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W17S25" ])
+
+    let bodies: Body list =
+        [
+            { body
+                  "Zero3956"
+                  trepidimous
+                  (parts [ Move, 17; Attack, 17; Move, 1 ])
+                  (at "W17S26" 9 1)
+                  (Some zero) with
+                TicksToLive = 1_459
+            }
+            { body
+                  "ranger-1013698-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W17S26" 15 19)
+                  None with
+                TicksToLive = 1_132
+                Fatigue = 36
+            }
+            { body
+                  "ranger-1013734-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W17S26" 22 14)
+                  None with
+                TicksToLive = 1_168
+            }
+            { body
+                  "reserver-1013856-Spawn11"
+                  Side.Ours
+                  (parts [ BodyPart.Claim, 2; Move, 2 ])
+                  (at "W17S26" 10 22)
+                  None with
+                TicksToLive = 366
+            }
+            { body
+                  "anchor-1013881-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W17S26" 22 3)
+                  None with
+                TicksToLive = 1_309
+            }
+            { body
+                  "guard-1013931-Spawn11"
+                  Side.Ours
+                  (parts [ Tough, 2; Move, 10; Attack, 6; Heal, 2 ])
+                  (at "W17S26" 17 20)
+                  None with
+                TicksToLive = 1_389
+            }
+            { body
+                  "worker-1012533-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 9; Carry, 9; Move, 9 ])
+                  (at "W17S25" 2 17)
+                  None with
+                TicksToLive = 12
+                Energy = 450
+            }
+            { body
+                  "hauler-1012841-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 24; Move, 12 ])
+                  (at "W17S25" 12 26)
+                  None with
+                TicksToLive = 347
+            }
+            { body
+                  "anchor-1012949-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W17S25" 17 20)
+                  None with
+                TicksToLive = 371
+                Energy = 50
+            }
+            { body
+                  "hauler-1012989-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 24; Move, 12 ])
+                  (at "W17S25" 13 26)
+                  None with
+                TicksToLive = 495
+                Energy = 1_200
+            }
+            { body
+                  "upgrader-1013787-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 1; Move, 11 ])
+                  (at "W17S25" 19 34)
+                  None with
+                TicksToLive = 1_254
+            }
+            { body
+                  "scout-W17S22-1012929"
+                  odiodin
+                  (parts [ Move, 1 ])
+                  (at "W17S25" 14 14)
+                  (Some Hold) with
+                TicksToLive = 330
+            }
+        ]
+
+    let a = arena 1_014_101 [ w17s26; w17s25 ] colonies bodies
+
+    { a with
+        Carried =
+            { a.Carried with
+                Assignments =
+                    Map.ofList
+                        [
+                            "ranger-1013734-Spawn11", "guard:W19S25"
+                            "hauler-1012841-Spawn11", "withdraw:storage-13-27"
+                            "anchor-1012949-Spawn11", "harvest:6a8caa7cdd4872bccd318c75"
+                            "hauler-1012989-Spawn11", "withdraw:storage-13-27"
+                        ]
+                Towered = Set.ofList [ "W17S25" ]
+                Raids =
+                    Map.ofList
+                        [
+                            "W17S25",
+                            { Fabot.Core.Observe.RaidState.empty with
+                                Outposts =
+                                    [
+                                        {
+                                            RoomName = "W16S26"
+                                            Opened = 972_732
+                                            LastSeen = 1_014_100
+                                            Expiry = 1_045_681
+                                            Basis = StandDownBasis.CollapseTimer
+                                            Stronghold = true
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = false
+                                        }
+                                        {
+                                            RoomName = "W17S26"
+                                            Opened = 1_014_093
+                                            LastSeen = 1_014_100
+                                            Expiry = 1_014_293
+                                            Basis = StandDownBasis.PlayerRaidHold
+                                            Stronghold = false
+                                            Bounced = false
+                                            Raiders = Set.ofList [ "Zero3956" ]
+                                            PlayerSince = Some 1_014_093
+                                            Chased = false
+                                            HolderUnread = false
+                                        }
+                                        {
+                                            RoomName = "W18S29"
+                                            Opened = 986_839
+                                            LastSeen = 1_014_100
+                                            Expiry = 1_016_242
+                                            Basis = StandDownBasis.RivalReservation
+                                            Stronghold = false
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = false
+                                        }
+                                    ]
+                                Threatened =
+                                    Map.ofList
+                                        [
+                                            "W17S26",
+                                            ({ Until = 1_015_593 }: Fabot.Core.Observe.ThreatLatch)
+                                        ]
+                                HomeRaided = Some 1_013_957
+                            }
+                        ]
+            }
+    }
+
+/// Zero3956's live tiles, t1,014,101-149, to the core it swings at.
+let private zeroLiveTiles =
+    [
+        for x in 10..20 -> RoomPos.at "W17S26" { X = x; Y = 1 }
+        for x, y in
+            [
+                21, 2
+                22, 3
+                23, 4
+                24, 5
+                25, 6
+                26, 7
+                27, 8
+                26, 9
+                25, 10
+                24, 11
+                23, 12
+                22, 13
+                22, 14
+                21, 15
+                20, 16
+                19, 17
+                18, 18
+                18, 19
+                17, 20
+                16, 21
+                15, 21
+                14, 22
+                13, 23
+            ] -> RoomPos.at "W17S26" { X = x; Y = y }
+    ]
+
+/// An arena run a tick at a time: the trace, and one creep's Task at the end
+/// of every tick ("" for none).
+let private taskEachTick (creep: string) (ticks: int) (start: Arena) =
+    let rec go n (a: Arena) traces tasks =
+        if n = 0 then
+            List.rev traces |> List.concat, List.rev tasks
+        else
+            let next, trace = a |> run 1
+            let task = Map.tryFind creep next.Carried.Assignments |> Option.defaultValue ""
+            go (n - 1) next (trace :: traces) (task :: tasks)
+
+    go ticks start [] []
+
 [<Tests>]
 let arenaBorderTests =
     testList
         "arena border play"
         [
+            // #613 (live t1,014,093-291): the idle ranger walked in toward
+            // Zero3956 and off again for 200 ticks, and the one fit ranger
+            // went elsewhere: `Gait.fallsBehind` asked the melee to fall
+            // behind on road too, where 15 MOVE under 17 ATTACK ties a
+            // ranger, so no ranger kited the body that steps every second
+            // tick on plain, and #602's release kept no kiter it once caught.
+            // The live Zero3956 stood at the core it broke; here it walks its
+            // live tiles and then chases, as our pricing must assume it does.
+            // The capture parts from live at t16: the live guard stalled a
+            // tile short and traded 360 with the melee, slowing it from
+            // t1,014,117; here the guard flees untouched, the melee keeps its
+            // pace, and the idle ranger-1013698 is caught at t23 (live never).
+            test
+                "a lone ranger takes the Guard of a melee it out-paces on plain, keeps it, and kites it dead" {
+                let trace, tasks =
+                    zeroAtTheCore
+                        (Phases [ 50, Waypoints zeroLiveTiles; 0, Chase(Nearest, None) ])
+                        ()
+                    |> taskEachTick "ranger-1013734-Spawn11" 160
+
+                let guard = "guard:W17S26"
+                let died = diedOn "Zero3956" trace
+
+                Expect.isSome died $"Zero3956 dies to the kite\n{describe trace}"
+
+                let taken = tasks |> List.findIndex ((=) guard)
+
+                Expect.isTrue
+                    (tasks.[taken .. died.Value] |> List.forall ((=) guard))
+                    $"ranger-1013734 keeps the Guard from t{taken} until the melee dies: {tasks}"
+
+                Expect.isNone (diedOn "ranger-1013734-Spawn11" trace) "the kiter lives"
+                Expect.isNone (diedOn "ranger-1013698-Spawn11" trace) "and so does the idle one"
+            }
             // Live (t985,560-985,681) both rangers stood beside the core for
             // 100+ ticks shooting nothing: the core claimed the room ahead of
             // the hauler's kill. On main this capture reproduces that (both on
