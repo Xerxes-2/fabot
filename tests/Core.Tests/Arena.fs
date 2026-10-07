@@ -1558,8 +1558,8 @@ let private decideOurs (a: Arena) : Intent list * Carried =
 
     // Every colony decided as `Main` decides it, each on its own turn, then
     // the danger log folded through them in order.
-    let decisions =
-        (decideColonies
+    let decided =
+        decideColonies
             {
                 Hops = hops
                 Holding = a.Carried.Assignments
@@ -1571,9 +1571,17 @@ let private decideOurs (a: Arena) : Intent list * Carried =
                 TurnIndex = None
             }
             ignore
-            views)
-            .Decided
-        |> List.map (fun (c, view, decision, ()) -> c, view, decision)
+            views
+
+    // A colony's throw is isolated live (#628); in an arena it is a failure,
+    // never a colony quietly standing still.
+    match decided.Faulted with
+    | fault :: _ ->
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fault.Error).Throw()
+    | [] -> ()
+
+    let decisions =
+        decided.Decided |> List.map (fun (c, view, decision, ()) -> c, view, decision)
 
     // Characterisation (the world-first epic's W0): a fighter holds no economy
     // Task and an economy body no combat one, on every tick of every arena.

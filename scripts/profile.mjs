@@ -5647,6 +5647,17 @@ if (!Array.isArray(cpuLine) || cpuLine.length === 0) {
   );
 }
 
+// The fault ring (#628): a colony's throw is caught live and costs that
+// colony its tick, which a profile would otherwise read as a cheap tick.
+const faultRows = globalThis.Memory?.fabot?.observe?.faults?.rows;
+if (Array.isArray(faultRows) && faultRows.length > 0) {
+  for (const row of faultRows) {
+    console.error(`fault t${row.t} ${row.phase} ${row.colony || "(tick)"}: ${row.message} ${(row.frames ?? []).join(" < ")}`);
+  }
+  console.error(`the bundle caught ${faultRows.length} fault(s) in the run: this profile is not a clean one`);
+  process.exitCode = 1;
+}
+
 // What the bundle actually projected, against what the world holds. The
 // scan set is the spawn room plus every declared outpost the stand-down
 // gate leaves standing (ADR 0041, ADR 0043), so with the constant filled
@@ -5818,3 +5829,47 @@ if (unprojected.length) {
 console.log(
   `\nraw profile: ${path.relative(process.cwd(), profilePath)} (open in Chrome DevTools / speedscope)`,
 );
+
+// The Executor's per-Intent guard (#628), after everything measured: one
+// more tick on which the first engine call any creep makes throws. The tick
+// must finish, record that one Intent as an `execute` fault, and have the
+// engine take the rest of the plan.
+{
+  let thrown = false;
+  // The Executor's verbs only: a read the World makes must not be the one.
+  const verbs = new Set([
+    "harvest", "transfer", "withdraw", "build", "repair", "upgradeController", "reserveController",
+    "attackController", "claimController", "claimReactor", "signController", "attack", "heal",
+    "rangedHeal", "rangedAttack", "rangedMassAttack", "dismantle", "pickup", "drop", "move", "say",
+  ]);
+  for (const creep of Object.values(game.creeps)) {
+    for (const [verb, call] of Object.entries(creep)) {
+      if (typeof call !== "function" || !verbs.has(verb)) continue;
+      creep[verb] = (...args) => {
+        if (!thrown) {
+          thrown = true;
+          throw new Error(`the harness's ${verb} throws`);
+        }
+        return call.apply(creep, args);
+      };
+    }
+  }
+  game.time++;
+  globalThis.Memory.fabot.observe.faults = undefined;
+  loop();
+  const rows = globalThis.Memory.fabot.observe.faults?.rows ?? [];
+  const line = globalThis.Memory.fabot.observe.cpu?.ticks ?? [];
+  const accepted = line[line.length - 1]?.intents ?? 0;
+  const executed = rows.filter((row) => row.phase === "execute");
+  if (!thrown) {
+    console.error("executor guard: no engine call on the extra tick, so the guard went unchecked");
+    process.exitCode = 1;
+  } else if (executed.length === 1 && rows.length === 1 && accepted > 0) {
+    console.log(`executor guard: one Intent threw and was recorded; the engine took ${accepted} others`);
+  } else {
+    console.error(
+      `executor guard broken: ${executed.length} execute fault(s) of ${rows.length}, ${accepted} Intents taken`,
+    );
+    process.exitCode = 1;
+  }
+}

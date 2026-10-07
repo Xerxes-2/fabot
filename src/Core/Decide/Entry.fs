@@ -1618,6 +1618,19 @@ type ColonyInputs =
         TurnIndex: int option
     }
 
+/// A colony's own step that threw (#628): the colony decides nothing this
+/// tick and every other colony decides on. `Phase` names the step: `fight`
+/// and `open` its opening, `join` its share of the world's fight, `finish`
+/// its match and emit, `handed` a fight-only decide handed back whole.
+[<NoEquality; NoComparison>]
+type ColonyFault =
+    {
+        /// The faulted colony's home.
+        Colony: string
+        Phase: string
+        Error: exn
+    }
+
 /// One tick's decisions over every colony.
 type ColonyDecisions<'Stamp> =
     {
@@ -1632,9 +1645,40 @@ type ColonyDecisions<'Stamp> =
         /// The turn the whole decides were handed, -1 where it waits.
         Turn: int
         /// Whether the turn's colony decided no plan this tick, so the turn
-        /// stays its.
+        /// stays its. A colony that faulted on its turn spent it.
         TurnWaits: bool
+        /// The colonies whose own step threw, each with no decision this
+        /// tick, in the order they threw; then each whose towers' pass
+        /// threw too (`towers`).
+        Faulted: ColonyFault list
+        /// Each faulted colony's towers, safe mode and rampart doors
+        /// (`towersAlone`): no replay repeats a structure's fight.
+        Towers: (string * Intent list) list
     }
+
+/// One colony's step run alone: its throw is its own fault, handed back
+/// beside the other colonies' decisions rather than through them.
+let private alone (home: string) (phase: string) (step: unit -> 'a) : Result<'a, ColonyFault> =
+    try
+        Ok(step ())
+    with error ->
+        Error
+            {
+                Colony = home
+                Phase = phase
+                Error = error
+            }
+
+/// The steps that ran, and the faults of those that threw.
+let private sorted (results: Result<'a, ColonyFault> list) : 'a list * ColonyFault list =
+    results
+    |> List.choose (function
+        | Ok ran -> Some ran
+        | Error _ -> None),
+    results
+    |> List.choose (function
+        | Error fault -> Some fault
+        | Ok _ -> None)
 
 /// Each raided room's one verdict, priced once over the fleet and the
 /// world's vision and laid in each view (`Facts.judge`): a colony that does
@@ -1806,6 +1850,20 @@ let private worldFights
     |> Map.ofList,
     owned |> List.map (fun (task, (_, owner, _, _), _) -> task, owner) |> Map.ofList
 
+/// A faulted colony's structures' fight alone (#628): its towers' fire and
+/// heal, safe mode and the rampart doors, off its view and a fresh Atlas,
+/// as a whole decide's fight pass lays them (`fightPass`'s `Towers`). No
+/// memo is read: the faulted decide's may be what threw.
+let private towersAlone (view: ColonyView) (assignments: Assignments) : Intent list =
+    let view = ColonyView.fought (withDrawn view assignments)
+    let atlas = Atlas.ofView view
+    let held = heldTaskFacts view assignments
+
+    planSafeMode view atlas held
+    @ planFire view atlas
+    @ planTowerHeal view atlas
+    @ planRampartDoors view
+
 /// The world lane's tick: every deciding colony opened —
 /// the fight-only ones (`openFight`) off the judged views, every other whole
 /// (`openWhole`) off the aimed ones —, the world's fight laid in
@@ -1822,18 +1880,26 @@ let private decideWorld
     (colonies: (Colony * ColonyView) list)
     (judged: ColonyView list)
     : ColonyDecisions<'Stamp> =
-    let fought =
+    let fought, fightFaults =
         List.zip colonies judged
         |> List.filter (fun ((colony, _), _) -> Set.contains colony.Home inputs.FightAlone)
-        |> List.choose (fun ((colony, _), view) ->
-            Option.map2
-                (fun memo carry -> openFight view inputs.Holding inputs.Verbose memo carry)
-                (Map.tryFind colony.Home inputs.PlanMemos)
-                (Map.tryFind colony.Home inputs.Carries)
-            |> Option.flatten
-            |> Option.map (fun opening -> colony, view, opening))
+        |> List.map (fun ((colony, _), view) ->
+            alone colony.Home "fight" (fun () ->
+                Option.map2
+                    (fun memo carry -> openFight view inputs.Holding inputs.Verbose memo carry)
+                    (Map.tryFind colony.Home inputs.PlanMemos)
+                    (Map.tryFind colony.Home inputs.Carries)
+                |> Option.flatten
+                |> Option.map (fun opening -> colony, view, opening)))
+        |> sorted
+
+    let fought = List.choose id fought
 
     let fightOnly = fought |> List.map (fun (colony, _, _) -> colony.Home) |> Set.ofList
+
+    // A colony whose fight threw opens nothing whole either: it decides
+    // nothing this tick.
+    let fightFaulted = fightFaults |> List.map _.Colony |> Set.ofList
 
     let turnWaits =
         match inputs.TurnIndex with
@@ -1859,28 +1925,35 @@ let private decideWorld
     // `bool` last argument, the turn arrived as JavaScript `undefined`,
     // `not undefined` is `true`, and no layout was planned at all
     // (#357). Only `npm run profile` caught it.
-    let whole =
+    let whole, openFaults =
         views
         |> List.indexed
         |> List.filter (fun (_, (colony, _)) ->
             not (Set.contains colony.Home inputs.Idle)
-            && not (Set.contains colony.Home fightOnly))
+            && not (Set.contains colony.Home fightOnly)
+            && not (Set.contains colony.Home fightFaulted))
         |> List.map (fun (index, (colony, view)) ->
             let whose =
                 match inputs.TurnIndex with
                 | Some _ when index <> turn -> ReplanTurn.Waiting
                 | _ -> ReplanTurn.Now
 
-            colony,
-            view,
-            openWhole
-                view
-                inputs.Holding
-                inputs.Verbose
-                (Map.tryFind colony.Home inputs.PlanMemos)
-                whose)
+            alone colony.Home "open" (fun () ->
+                colony,
+                view,
+                openWhole
+                    view
+                    inputs.Holding
+                    inputs.Verbose
+                    (Map.tryFind colony.Home inputs.PlanMemos)
+                    whose))
+        |> sorted
 
     let opened = fought @ whole
+
+    // Every colony that opened no decide for a throw: its fighters keep
+    // their Tasks as an idle colony's do.
+    let unopened = fightFaults @ openFaults |> List.map _.Colony |> Set.ofList
 
     let fights, owners =
         worldFights inputs.Hops (opened |> List.map (fun (colony, _, opening) -> colony, opening))
@@ -1915,16 +1988,22 @@ let private decideWorld
                 Casts = Some(Map.tryFind home casts |> Option.defaultValue [])
             })
 
-    let joined =
+    let joined, joinFaults =
         opened
         |> List.map (fun (colony, view, opening) ->
-            colony, view, opening, opening.Join fights.[colony.Home])
+            alone colony.Home "join" (fun () ->
+                colony, view, opening, opening.Join fights.[colony.Home]))
+        |> sorted
 
     // The fighters of a colony that decides nothing keep their Tasks,
-    // counted against the world's caps.
+    // counted against the world's caps: an idle colony's, and one whose
+    // opening or join threw.
+    let unjoined = joinFaults |> List.map _.Colony |> Set.ofList |> Set.union unopened
+
     let bystanders =
         colonies
-        |> List.filter (fun (colony, _) -> Set.contains colony.Home inputs.Idle)
+        |> List.filter (fun (colony, _) ->
+            Set.contains colony.Home inputs.Idle || Set.contains colony.Home unjoined)
         |> List.collect (fun (_, view) -> ColonyView.bodies view |> List.filter isFighterBody)
 
     let seed =
@@ -1942,36 +2021,41 @@ let private decideWorld
             inputs.Holding
             inputs.Verbose
 
-    let finished =
+    // A colony whose finish throws has had its fighters matched in the one
+    // fleet match above: the Tasks they won there are lost with its
+    // decision, and the shell replays its last plan for them instead.
+    let finished, finishFaults =
         joined
         |> List.map (fun (colony, view, opening, joining) ->
-            let economy =
-                joining.Economy
-                |> Option.map (fun share ->
-                    let fighters =
-                        opening.Fighters
-                        |> List.choose (fun creep ->
-                            Map.tryFind creep.Name fleet.Assigned
-                            |> Option.map (fun tid -> creep.Name, tid))
-                        |> Map.ofList
+            alone colony.Home "finish" (fun () ->
+                let economy =
+                    joining.Economy
+                    |> Option.map (fun share ->
+                        let fighters =
+                            opening.Fighters
+                            |> List.choose (fun creep ->
+                                Map.tryFind creep.Name fleet.Assigned
+                                |> Option.map (fun tid -> creep.Name, tid))
+                            |> Map.ofList
 
-                    matchAcross
-                        [ joining.Context ]
-                        []
-                        fighters
-                        [ [ 0, share ] ]
-                        inputs.Holding
-                        inputs.Verbose)
+                        matchAcross
+                            [ joining.Context ]
+                            []
+                            fighters
+                            [ [ 0, share ] ]
+                            inputs.Holding
+                            inputs.Verbose)
 
-            let decision = joining.Finish(fleet :: Option.toList economy)
-            colony, view, decision, decision |> Option.map (fun _ -> stamp ()))
+                let decision = joining.Finish(fleet :: Option.toList economy)
+                colony, view, decision, decision |> Option.map (fun _ -> stamp ())))
+        |> sorted
 
     // A fight-only colony whose fighter's step an economy body stands in
     // is decided whole off the one match: its fighters keep what the
     // world's fight gave them, its economy is matched from the holdings
     // they left. Off its aimed view, which holds no look of its observer
     // this tick, and on the turn as it fell.
-    let handed =
+    let handed, handedFaults =
         views
         |> List.indexed
         |> List.filter (fun (_, (colony, _)) ->
@@ -1979,42 +2063,58 @@ let private decideWorld
             |> List.exists (fun (decided, _, decision, _) ->
                 decided.Home = colony.Home && Option.isNone decision))
         |> List.map (fun (index, (colony, view)) ->
-            let whose =
-                match inputs.TurnIndex with
-                | Some _ when index <> turn -> ReplanTurn.Waiting
-                | _ -> ReplanTurn.Now
+            alone colony.Home "handed" (fun () ->
+                let whose =
+                    match inputs.TurnIndex with
+                    | Some _ when index <> turn -> ReplanTurn.Waiting
+                    | _ -> ReplanTurn.Now
 
-            let opening =
-                openWhole
-                    view
-                    inputs.Holding
-                    inputs.Verbose
-                    (Map.tryFind colony.Home inputs.PlanMemos)
-                    whose
-
-            let joining = opening.Join fights.[colony.Home]
-
-            let fighters =
-                opening.Fighters
-                |> List.choose (fun creep ->
-                    Map.tryFind creep.Name fleet.Assigned
-                    |> Option.map (fun tid -> creep.Name, tid))
-                |> Map.ofList
-
-            let economy =
-                joining.Economy
-                |> Option.map (fun share ->
-                    matchAcross
-                        [ joining.Context ]
-                        []
-                        fighters
-                        [ [ 0, share ] ]
+                let opening =
+                    openWhole
+                        view
                         inputs.Holding
-                        inputs.Verbose)
+                        inputs.Verbose
+                        (Map.tryFind colony.Home inputs.PlanMemos)
+                        whose
 
-            match joining.Finish(fleet :: Option.toList economy) with
-            | Some decision -> colony, view, decision, stamp ()
-            | None -> invalidOp "A whole decide is never handed back")
+                let joining = opening.Join fights.[colony.Home]
+
+                let fighters =
+                    opening.Fighters
+                    |> List.choose (fun creep ->
+                        Map.tryFind creep.Name fleet.Assigned
+                        |> Option.map (fun tid -> creep.Name, tid))
+                    |> Map.ofList
+
+                let economy =
+                    joining.Economy
+                    |> Option.map (fun share ->
+                        matchAcross
+                            [ joining.Context ]
+                            []
+                            fighters
+                            [ [ 0, share ] ]
+                            inputs.Holding
+                            inputs.Verbose)
+
+                match joining.Finish(fleet :: Option.toList economy) with
+                | Some decision -> colony, view, decision, stamp ()
+                | None -> invalidOp "A whole decide is never handed back"))
+        |> sorted
+
+    let faults = fightFaults @ openFaults @ joinFaults @ finishFaults @ handedFaults
+
+    let faulted = faults |> List.map _.Colony |> Set.ofList
+
+    // Each faulted colony's towers and safe mode, under a guard of their own:
+    // a home under a raid keeps its structures' fight while its decide
+    // throws, and a throw here costs that pass alone.
+    let towers, towerFaults =
+        views
+        |> List.filter (fun (colony, _) -> Set.contains colony.Home faulted)
+        |> List.map (fun (colony, view) ->
+            alone colony.Home "towers" (fun () -> colony.Home, towersAlone view inputs.Holding))
+        |> sorted
 
     {
         Views = views
@@ -2029,22 +2129,29 @@ let private decideWorld
         FoughtAlone =
             handed
             |> List.fold (fun alone (colony, _, _, _) -> Set.remove colony.Home alone) fightOnly
+            |> fun alone -> Set.difference alone faulted
         Turn = turn
         TurnWaits = turnWaits
+        Faulted = faults @ towerFaults
+        Towers = towers
     }
 
 /// Every colony's tick decided: the views judged (`judgeColonies`), then the
 /// world's fight and each colony's economy (`decideWorld`), the fight-only
 /// colonies opened first, so the turn and the observers' looks read the
 /// colonies that did fight alone — the fight reads no observer's look.
-/// `stamp` is read after each decision.
+/// `stamp` is read after each decision. A colony's own step that throws
+/// costs that colony its decision (`Faulted`); a throw in a step every
+/// colony shares (the judging, the world's fight, the one match) is the
+/// tick's.
 let decideColonies
     (inputs: ColonyInputs)
     (stamp: unit -> 'Stamp)
     (colonies: (Colony * ColonyView) list)
     : ColonyDecisions<'Stamp> =
     // Every view on the one set of loose tiles the tick's room pass shoves
-    // for free.
+    // for free. Laid before any colony faults: a faulted colony's creeps may
+    // count as shovable here though they replay their plan's steps (#628).
     let loose =
         colonies
         |> List.map (fun (colony, view) -> colony.Home, view)

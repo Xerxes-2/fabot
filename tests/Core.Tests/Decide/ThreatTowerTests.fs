@@ -542,6 +542,59 @@ let fireReflexTests =
                 Expect.equal (fired (at 15 healed)) [ "tower-1", "h-1" ] "healed at range 5"
             }
 
+            test "a home whose decide throws still fires its towers (#628)" {
+                let snapshot =
+                    towerColony
+                        [ "tower-1", { X = 10; Y = 40 } ]
+                        [ hostileAt "h-1" { X = 15; Y = 40 } [ Attack; Move ] ]
+
+                let home = SpatialInfo.homeName snapshot.Spatial
+
+                let colony: Colony =
+                    {
+                        Home = home
+                        Outposts = []
+                        Errands = []
+                        Salvage = []
+                        Mother = None
+                        Consignee = None
+                        Perimeter = []
+                        RampartFloors = Map.empty
+                        FirstSpawn = None
+                        Assaults = []
+                    }
+
+                // A memo no decide of it survives: its opening throws.
+                let decided =
+                    decideColonies
+                        {
+                            Hops = fun _ _ -> None
+                            Holding = Map.empty
+                            Verbose = Set.empty
+                            PlanMemos = Map.ofList [ home, Unchecked.defaultof<PlanMemo> ]
+                            Carries = Map.empty
+                            Idle = Set.empty
+                            FightAlone = Set.empty
+                            TurnIndex = None
+                        }
+                        ignore
+                        [ colony, snapshot ]
+
+                Expect.equal
+                    (decided.Faulted |> List.map (fun fault -> fault.Colony, fault.Phase))
+                    [ home, "open" ]
+                    "the premise: its decide threw, and nothing else did"
+
+                Expect.isEmpty decided.Decided "it decided nothing"
+
+                Expect.equal
+                    (decided.Towers |> List.collect snd |> shots)
+                    (shots (decideOn snapshot).Intents)
+                    "and its towers fire as a whole decide fires them"
+
+                Expect.isNonEmpty (decided.Towers |> List.collect snd |> shots) "at the raider"
+            }
+
             test
                 "a held tower still shoots a healed raider hurting something of ours, or a claimer (#466)" {
                 let healed = [ Attack; Move ] @ List.replicate 20 Heal

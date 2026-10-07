@@ -12,6 +12,9 @@ type Outcome =
     | Ok
     | Failed of code: int
     | ActorMissing
+    /// The engine call itself threw (#628): this Intent is lost, the rest of
+    /// the plan runs.
+    | Threw of error: exn
 
 /// A placement Intent's kind as `createConstructionSite` spells it, through
 /// the Core's one kind-name table so no case drifts from the projection's.
@@ -158,13 +161,21 @@ let private execute (intent: Intent) : Outcome =
 let private replay (logged: bool) (plan: Fabot.Core.IntentPlan.Plan) : (Intent * Outcome) list =
     Fabot.Core.IntentPlan.intents plan
     |> List.map (fun intent ->
-        let outcome = execute intent
+        // One Intent's throw costs that Intent: V8 optimises a function
+        // holding a `try`, so the guard costs nothing on the calls that return.
+        let outcome =
+            try
+                execute intent
+            with error ->
+                Threw error
 
         if logged then
             match outcome with
             | Ok -> ()
             | Failed code -> JS.console.log $"%A{intent} failed: {code}"
             | ActorMissing -> JS.console.log $"%A{intent}: actor or target not found"
+            // The fault ring's writer logs a throw (`Main.recordFaults`).
+            | Threw _ -> ()
 
         intent, outcome)
 
@@ -191,6 +202,7 @@ let runQuiet (plan: Fabot.Core.IntentPlan.Plan) : (Intent * Outcome) list =
             match outcome with
             | Failed code when not (expected code) -> Some $"%A{intent} failed: {code}"
             | ActorMissing -> Some $"%A{intent}: actor or target not found"
+            | Threw _
             | Ok
             | Failed _ -> None)
 

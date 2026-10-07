@@ -1113,6 +1113,82 @@ wire("breaches: a row whose kind is not in the vocabulary costs its row", async 
   assert.equal(rows[0].subject, "pile-1");
 });
 
+// ---- the fault ring (#628) ---------------------------------------------
+
+const fault = (t, colony = "W1N2") => ({
+  t,
+  colony,
+  phase: "open",
+  message: "Conflicting creep intents",
+  frames: ["at openWhole (main:10:5)", "at decideWorld (main:20:3)"],
+});
+
+const faultsThrough = async (value) => {
+  const { loadFaults, saveFaults } = await import(MODULE);
+  globalThis.Memory = rootMemoryWith("faults", value);
+  saveFaults(loadFaults());
+  return globalThis.Memory.fabot.observe.faults;
+};
+
+for (const [name, leaf] of [
+  ["absent", undefined],
+  ["null", null],
+  ["a string", "Incorrect memory path"],
+  ["a number", 7],
+  ["an object whose rows are not an array", { rows: 7 }],
+]) {
+  wire(`faults: a leaf that is ${name} reads empty and writes empty`, async () => {
+    assert.equal(stable(await faultsThrough(leaf)), stable({ rows: [] }));
+  });
+}
+
+wire("faults: a well-formed ring round-trips unchanged, newest first", async () => {
+  const ring = { rows: [fault(20), fault(10, "")] };
+  assert.equal(stable(await faultsThrough(ring)), stable(ring));
+});
+
+wire("faults: a row off its shape costs its row, a frame that is no string costs its frame", async () => {
+  const { message, ...unsaid } = fault(30);
+  const rows = (
+    await faultsThrough({
+      rows: [unsaid, { ...fault(20), t: "20" }, { ...fault(10), frames: ["at f (main:1:1)", 7] }],
+    })
+  ).rows;
+
+  assert.equal(rows.length, 1, "the row with no message and the row with no tick are dropped");
+  assert.equal(rows[0].t, 10);
+  assert.deepEqual(rows[0].frames, ["at f (main:1:1)"]);
+});
+
+wire("faults: a tick's faults land before the ring's, which keeps the newest 20", async () => {
+  const { recordFaults, FaultRow, capFaults } = await import(MODULE);
+  const { ofArray } = await import(LIST);
+  const row = (t) => new FaultRow(t, "W1N1", "finish", "boom", ofArray(["at f (main:1:1)"]));
+
+  globalThis.Memory = rootMemoryWith("faults", { rows: Array.from({ length: capFaults }, (_, i) => fault(100 - i)) });
+  recordFaults(ofArray([row(200), row(200)]));
+  const rows = globalThis.Memory.fabot.observe.faults.rows;
+
+  assert.equal(rows.length, capFaults);
+  assert.deepEqual(
+    rows.slice(0, 3).map((r) => [r.t, r.colony]),
+    [
+      [200, "W1N1"],
+      [200, "W1N1"],
+      [100, "W1N2"],
+    ],
+  );
+  assert.equal(rows[capFaults - 1].t, 100 - (capFaults - 3), "the two oldest fell off the end");
+});
+
+wire("faults: a tick with no fault leaves the leaf unwritten", async () => {
+  const { recordFaults } = await import(MODULE);
+  const { ofArray } = await import(LIST);
+  globalThis.Memory = rootMemoryWith("cadence", 3);
+  recordFaults(ofArray([]));
+  assert.equal(globalThis.Memory.fabot.observe.faults, undefined);
+});
+
 // ---- the reactor reading and the positions leaf -------------------------
 
 // All seven fields are one sample, so this leaf degrades whole rather than

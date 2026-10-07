@@ -10,7 +10,10 @@
 // never refused. Outside a jj repo the version reads `unknown`.
 // `scripts/probe.mjs` appends `+probe` to the same line.
 import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { build } from "esbuild";
+
+const LIBRARY_PLACEHOLDER = "var __FABOT_LIBRARY_LINES__ = [];";
 
 const jj = (rev) =>
   execFileSync(
@@ -47,6 +50,26 @@ await build({
   bundle: true,
   format: "cjs",
   outfile: "dist/main.js",
-  banner: { js: `var __FABOT_VERSION__ = ${JSON.stringify(named)};` },
+  banner: { js: `var __FABOT_VERSION__ = ${JSON.stringify(named)};\n${LIBRARY_PLACEHOLDER}` },
 });
+
+// The bundle's fable-library line ranges (#628), filled into the second
+// banner line once the bundle is laid out, on that same line, so no line
+// moves: a fault's stack frames are picked past the library's own
+// (`Main.faultRow`), read off the `// build/fable/...` module comments
+// esbuild writes. Each range is [first, last] line, 1-based.
+const bundled = readFileSync("dist/main.js", "utf8");
+const lines = bundled.split("\n");
+const ranges = [];
+let open = null;
+lines.forEach((line, index) => {
+  if (!line.startsWith("// build/fable/")) return;
+  if (open !== null) ranges.push([open, index]);
+  open = line.includes("/fable_modules/") ? index + 1 : null;
+});
+if (open !== null) ranges.push([open, lines.length]);
+writeFileSync(
+  "dist/main.js",
+  bundled.replace(LIBRARY_PLACEHOLDER, () => `var __FABOT_LIBRARY_LINES__ = ${JSON.stringify(ranges)};`),
+);
 console.log(`bundled dist/main.js as ${named}`);

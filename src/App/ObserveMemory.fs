@@ -2440,6 +2440,72 @@ let appendCpu (state: CpuState) =
             saveCpu state
     | _ -> saveCpu state
 
+/// One throw the bot caught (#628): the tick, the colony it cost (empty
+/// where it cost the whole tick, or an intent), the step it threw in, its
+/// message and the top frames of its stack.
+type FaultRow =
+    {
+        Tick: int
+        Colony: string
+        Phase: string
+        Message: string
+        Frames: string list
+    }
+
+/// How many faults the ring keeps, newest first.
+let capFaults = 20
+
+let private encodeFault (row: FaultRow) =
+    let o = createEmpty<obj>
+    o?t <- row.Tick
+    o?colony <- row.Colony
+    o?phase <- row.Phase
+    o?message <- row.Message
+    o?frames <- row.Frames |> List.toArray
+    o
+
+let private decodeFault (raw: obj) : FaultRow option =
+    if
+        isNull raw
+        || jsTypeof raw <> "object"
+        || jsTypeof raw?colony <> "string"
+        || jsTypeof raw?phase <> "string"
+        || jsTypeof raw?message <> "string"
+        || not (JS.Constructors.Array.isArray raw?frames)
+    then
+        None
+    else
+        Some
+            {
+                Tick = numberOf raw "t"
+                Colony = unbox<string> raw?colony
+                Phase = unbox<string> raw?phase
+                Message = unbox<string> raw?message
+                Frames =
+                    raw?frames
+                    |> unbox<obj[]>
+                    |> Array.filter (fun frame -> jsTypeof frame = "string")
+                    |> Array.map unbox<string>
+                    |> Array.toList
+            }
+
+/// The fault ring at `Memory.fabot.observe.faults`, newest first, or empty
+/// when it is absent or unreadable.
+let loadFaults () : FaultRow list =
+    leafOr [] (fun () -> observeLeaf "faults") (fun faults -> faults?rows |> rowsOf decodeFault)
+
+/// Write the ring back whole, capped at `capFaults`.
+let saveFaults (rows: FaultRow list) =
+    let faults = createEmpty<obj>
+    faults?rows <- rows |> List.truncate capFaults |> List.map encodeFault |> List.toArray
+    writeObserveLeaf "faults" faults
+
+/// This tick's faults laid on the ring, newest first. Written only on a tick
+/// that caught one: a clean tick pays nothing for the leaf.
+let recordFaults (fresh: FaultRow list) =
+    if not (List.isEmpty fresh) then
+        saveFaults (fresh @ loadFaults ())
+
 /// The live-probe tool's sums (`scripts/probe.mjs`), dropped on the tick after
 /// a global reset: a clean bundle never writes them again, and every tick's
 /// Memory parse paid for them after the probe was undone (#538). A probed

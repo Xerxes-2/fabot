@@ -123,6 +123,12 @@ let private bannerVersion: string = jsNative
 // Read once, at module load: once per global reset.
 let private version = bannerVersion
 
+// The bundle's fable-library line ranges, [first, last], off the banner's
+// second line (`scripts/bundle.mjs`, #628); none in a bundle built any
+// other way.
+[<Emit("(typeof __FABOT_LIBRARY_LINES__ === 'object' ? __FABOT_LIBRARY_LINES__ : [])")>]
+let private libraryLines: int[][] = jsNative
+
 // The five process-lifetime slots, on the global for the console (#395):
 // `__fabot.sizes()` and `__fabot.drop.<slot>()`, so a heap that climbs with
 // every count flat can be attributed by dropping one slot, `gc()`, and
@@ -209,6 +215,10 @@ let private fightOnlyNow () =
 // `Game.time`, which with light ticks between would hand an even count of
 // colonies half the turns and the other half none.
 let mutable private fullTicks = 0
+
+// Each colony's run of consecutive faulted decides (`LightTick.faultRuns`,
+// #628): only the first fault of a run forces the next tick full.
+let mutable private faultRuns: Map<string, int> = Map.empty
 
 /// A creep's gait off `Game` (`Gait.walked`).
 let private gaitOf (c: ICreep) : Gait =
@@ -440,7 +450,87 @@ let private acceptedOf (outcomes: (Intent * Executor.Outcome) list) =
         match outcome with
         | Executor.Ok -> 1
         | Executor.Failed _
-        | Executor.ActorMissing -> 0)
+        | Executor.ActorMissing
+        | Executor.Threw _ -> 0)
+
+/// How much of a fault's message the ring keeps: a `%A` of a conflict can
+/// run to kilobytes.
+let private faultMessageCap = 300
+
+/// Whether a stack frame's line (`…:line:column`) is fable-library's: the
+/// frames worth keeping are the bot's own, which name the step that threw.
+let private inLibrary (frame: string) =
+    // The bundle's own lines alone: the module is `main` live, `main.js` in
+    // the harnesses.
+    let at =
+        System.Text.RegularExpressions.Regex.Match(frame, @"\bmain(?:\.js)?:(\d+):\d+\)?$")
+
+    at.Success
+    && (let line = int at.Groups.[1].Value
+
+        libraryLines
+        |> Array.exists (fun range -> range.[0] <= line && line <= range.[1]))
+
+/// A caught throw as the fault ring records it (#628): its message and the
+/// top three of the bot's own stack frames. The bundle is not minified, so a
+/// frame names the Fable function it threw in and no source map is needed.
+/// A JavaScript throw need not be an Error: a thrown value with no message
+/// is recorded as its text.
+let private faultRow (colony: string) (phase: string) (error: exn) : ObserveMemory.FaultRow =
+    let thrown = box error
+    let stack: obj = if isNull thrown then null else thrown?stack
+    let message: obj = if isNull thrown then null else thrown?message
+
+    {
+        Tick = Game.time
+        Colony = colony
+        Phase = phase
+        Message =
+            let text =
+                if jsTypeof message = "string" then
+                    unbox<string> message
+                else
+                    string thrown
+
+            if text.Length > faultMessageCap then
+                text.Substring(0, faultMessageCap) + "…"
+            else
+                text
+        Frames =
+            if jsTypeof stack = "string" then
+                (unbox<string> stack).Split('\n')
+                |> Array.map _.Trim()
+                |> Array.filter (fun frame -> frame.StartsWith "at " && not (inLibrary frame))
+                |> Array.truncate 3
+                |> Array.toList
+            else
+                []
+    }
+
+/// Faults written to the ring and to the console, which the engine no
+/// longer prints for a throw the bot caught.
+let private recordFaults (rows: ObserveMemory.FaultRow list) =
+    for row in rows do
+        let frames = String.concat " < " row.Frames
+        JS.console.log $"fault {row.Phase} {row.Colony}: {row.Message} {frames}"
+
+    ObserveMemory.recordFaults rows
+
+/// Each Intent whose engine call threw, as a fault of the execute.
+let private thrownOf (outcomes: (Intent * Executor.Outcome) list) =
+    outcomes
+    |> List.choose (fun (intent, outcome) ->
+        match outcome with
+        | Executor.Threw error ->
+            let row = faultRow "" "execute" error
+
+            Some
+                { row with
+                    Message = $"%A{intent}: {row.Message}"
+                }
+        | Executor.Ok
+        | Executor.Failed _
+        | Executor.ActorMissing -> None)
 
 /// The light tick: the last full tick's work and step plans replayed off the
 /// glance, the positions leaf, the CPU line, and nothing else.
@@ -458,7 +548,9 @@ let private lightTick (atEntry: float) (last: LightTick.LastFull) (seen: LightTi
     // `Moved` keeps meaning "moved since the last tick".
     World.positions () |> ObserveMemory.savePositions
     let atSave = Game.cpu.getUsed ()
-    let accepted = Executor.runQuiet plan |> acceptedOf
+    let outcomes = Executor.runQuiet plan
+    recordFaults (thrownOf outcomes)
+    let accepted = acceptedOf outcomes
     let heap, external = heapReading ()
 
     writeCpuLine
@@ -779,22 +871,52 @@ let private fullTick
     // Every colony's decision (`Entry.decideColonies`). The counter is read
     // after each colony's decision, cumulative, so the CPU line can say which
     // colony a spike came out of; `foldCpu` differences.
+    //
+    // A colony whose own step throws decides nothing this tick (#628): it
+    // replays its last plan as a replayed colony does (none, where it has
+    // none), keeps its memo, carry, Tasks and draw record as an idle colony
+    // does, and on the first fault of a run the record defers it, so the
+    // next tick decides it again as a reset tick's deferred colony is
+    // decided (`LightTick.faultRuns`). A throw every colony shares is the
+    // tick's, and still spends the turn.
     let colonyDecisions =
-        views
-        |> Decide.Entry.decideColonies
-            {
-                Hops = fun home room -> hops.Value home room
-                Holding = assignments
-                Verbose = verbose
-                PlanMemos = planMemos
-                Carries = economyCarries
-                Idle = idle
-                FightAlone = fightCandidates
-                TurnIndex = Some turn
-            }
-            (fun () -> Game.cpu.getUsed (), floodedNow ())
+        try
+            views
+            |> Decide.Entry.decideColonies
+                {
+                    Hops = fun home room -> hops.Value home room
+                    Holding = assignments
+                    Verbose = verbose
+                    PlanMemos = planMemos
+                    Carries = economyCarries
+                    Idle = idle
+                    FightAlone = fightCandidates
+                    TurnIndex = Some turn
+                }
+                (fun () -> Game.cpu.getUsed (), floodedNow ())
+        with error ->
+            fullTicks <- fullTicks + 1
+            raise error
 
     let fightOnly = colonyDecisions.FoughtAlone
+
+    let faulted = colonyDecisions.Faulted |> List.map _.Colony |> Set.ofList
+
+    colonyDecisions.Faulted
+    |> List.map (fun fault -> faultRow fault.Colony fault.Phase fault.Error)
+    |> recordFaults
+
+    let firstFaults =
+        let runs, first =
+            LightTick.faultRuns
+                faultRuns
+                faulted
+                (colonyDecisions.Decided
+                 |> List.map (fun (colony, _, _, _) -> colony.Home)
+                 |> Set.ofList)
+
+        faultRuns <- runs
+        first
 
     if not colonyDecisions.TurnWaits then
         fullTicks <- fullTicks + 1
@@ -817,13 +939,25 @@ let private fullTick
 
     let replayedHomes = Set.union replaying fightOnly
 
+    // The record this tick replays from: a forced tick's, and on any other
+    // full tick the last one's, which only a faulted colony replays.
+    let prior = lastFull |> Option.map snd
+
+    // Each faulted colony with a plan to replay.
+    let faultReplay =
+        match prior with
+        | Some last -> faulted |> Set.filter (fun home -> Map.containsKey home last.Plans)
+        | None -> Set.empty
+
+    let replayHomes = Set.union replayedHomes faultReplay
+
     // The replayed acts and steps, off the glance as a light tick reads it,
     // the objects their acts name looked up, and the tiles they claim
     // (`LightTick.forcedReplay`): a body a deciding colony holds is that
     // colony's to decide, and one whose plan another colony made stands.
     let replayed, claims =
-        match forcedBy, seen with
-        | Some(_, last, _), Some seen when not (Set.isEmpty replayedHomes) ->
+        match prior, seen with
+        | Some last, Some seen when not (Set.isEmpty replayHomes) ->
             let economy =
                 views
                 |> List.filter (fun (colony, _) -> Set.contains colony.Home fightOnly)
@@ -838,14 +972,14 @@ let private fullTick
                 |> Set.ofList
 
             LightTick.forcedReplay
-                replaying
+                (Set.union replaying faultReplay)
                 fightOnly
                 holders
                 economy
                 tired
                 last
                 { seen with
-                    Objects = standingOf (LightTick.only replayedHomes last)
+                    Objects = standingOf (LightTick.only replayHomes last)
                 }
         | _ -> [], Set.empty
 
@@ -897,11 +1031,12 @@ let private fullTick
 
     let replans = List.length moved
 
-    // A replayed colony keeps its memo for the tick it decides on.
+    // A replayed colony keeps its memo for the tick it decides on, and a
+    // faulted one for the tick it decides again on.
+    let keeping = Set.union replaying faulted
+
     planMemos <-
-        (planMemos
-         |> Map.filter (fun home _ -> Set.contains home replaying)
-         |> Map.toList)
+        (planMemos |> Map.filter (fun home _ -> Set.contains home keeping) |> Map.toList)
         @ (decisions
            |> List.map (fun (colony, _, decision, _, _) -> colony.Home, decision.Memo))
         // Not `Map.ofList` here (#401): its comparer would keep this tick's
@@ -911,7 +1046,7 @@ let private fullTick
     // And its economy's carry; a fight-only decide hands back the one it read.
     economyCarries <-
         (economyCarries
-         |> Map.filter (fun home _ -> Set.contains home replaying)
+         |> Map.filter (fun home _ -> Set.contains home keeping)
          |> Map.toList)
         @ (decisions
            |> List.map (fun (colony, _, decision, _, _) -> colony.Home, decision.Economy))
@@ -967,11 +1102,13 @@ let private fullTick
 
     // Memory writes land before the engine calls: a throw inside Executor.run
     // must not discard the tick's anti-thrash state. The colonies' answers are
-    // disjoint, so the union is the whole map; an idle colony's creeps keep
-    // the Tasks they were read with.
+    // disjoint, so the union is the whole map; an idle or a faulted colony's
+    // creeps keep the Tasks they were read with.
+    let undecided = Set.union idle faulted
+
     let kept =
         views
-        |> List.filter (fun (colony, _) -> Set.contains colony.Home idle)
+        |> List.filter (fun (colony, _) -> Set.contains colony.Home undecided)
         |> List.collect (fun (_, view) ->
             ColonyView.bodies view
             |> List.choose (fun creep ->
@@ -989,7 +1126,7 @@ let private fullTick
     // what they were read with.
     let keptDrawn =
         views
-        |> List.filter (fun (colony, _) -> Set.contains colony.Home idle)
+        |> List.filter (fun (colony, _) -> Set.contains colony.Home undecided)
         |> List.collect (fun (_, view) ->
             ColonyView.bodies view
             |> List.choose (fun creep ->
@@ -1105,6 +1242,16 @@ let private fullTick
         |> Observe.foldBreaches Observe.capBreaches Game.time view
         |> ObserveMemory.saveBreaches colony.Home
 
+    // A faulted colony's breaches read its view alone, and are folded; its
+    // Raid log and the world danger fold read its decision's outposts and
+    // intents, which it has none of, and stand as read, as an idle colony's
+    // do.
+    for colony, view in views do
+        if Set.contains colony.Home faulted then
+            ObserveMemory.loadBreaches colony.Home
+            |> Observe.foldBreaches Observe.capBreaches Game.time view
+            |> ObserveMemory.saveBreaches colony.Home
+
     // The world danger log, written every tick with this tick's exit watches,
     // and its latches with the room latches when either moved.
     let folded =
@@ -1157,18 +1304,23 @@ let private fullTick
             | Ok plan -> plan
             | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
 
+    // A faulted colony's towers and safe mode ride with the decided acts: no
+    // replay repeats them (#628).
     let decided =
         (decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Intents))
         @ moveIntents
+        @ (colonyDecisions.Towers |> List.collect snd)
         |> firstActivationOnly
 
     // The replayed colonies' acts on the channels the deciding ones leave
     // free, run as a light tick runs them: a refusal the replay expects is
     // not news.
-    let accepted =
-        (Executor.run (planOf decided) |> acceptedOf)
-        + (Executor.runQuiet (planOf (Fabot.Core.IntentPlan.beside decided replayed))
-           |> acceptedOf)
+    let outcomes =
+        Executor.run (planOf decided)
+        @ Executor.runQuiet (planOf (Fabot.Core.IntentPlan.beside decided replayed))
+
+    recordFaults (thrownOf outcomes)
+    let accepted = acceptedOf outcomes
 
     // The record the next tick replays: each deciding colony's plan off the
     // glance this tick began with — a fight-only colony's, its fighters'
@@ -1223,7 +1375,21 @@ let private fullTick
                         Map.tryFind home last.Plans |> Option.map (fun plan -> home, plan))
                 | _ -> Game.time, []
 
-            cadence, LightTick.ofPlans seen waiting (fresh @ carried))
+            // Each faulted colony's plan carried, the one it replayed or an
+            // empty one; on the first fault of its run it is deferred as the
+            // reset tick's waiting colonies are: the next tick is full and
+            // decides it.
+            let faultCarried =
+                faulted
+                |> Set.toList
+                |> List.map (fun home ->
+                    home,
+                    LightTick.faultedPlan
+                        seen
+                        (prior |> Option.bind (fun last -> Map.tryFind home last.Plans)))
+
+            cadence,
+            LightTick.ofPlans seen (Set.union waiting firstFaults) (fresh @ carried @ faultCarried))
 
     // The CPU line: measured, never budgeted; nothing in the bot reads it
     // back. The tick's total is the last reading, after the Executor, because
@@ -1273,8 +1439,8 @@ let private fullTick
 
     not (Set.isEmpty replayedHomes)
 
-// Exported as `loop` on the bundled `main` module; the engine calls it every tick.
-let loop () =
+/// One tick, light or full.
+let private runTick () =
     // The engine's counter is already running when `loop` is entered: this is
     // the engine's prelude alone. The Memory parse is not in it: `Memory`
     // deserializes on first touch, which is `loadRaids` on a full tick, so the
@@ -1331,3 +1497,18 @@ let loop () =
         | _ ->
             lightRun <- 0
             fullTick atEntry (Some seen) None |> ignore
+
+// Exported as `loop` on the bundled `main` module; the engine calls it every
+// tick. A throw no colony owns is still the tick's and still reaches the
+// engine, written to the fault ring first (#628).
+let loop () =
+    try
+        runTick ()
+    with error ->
+        // A ring that will not write must not hide the throw it records.
+        try
+            recordFaults [ faultRow "" "tick" error ]
+        with _ ->
+            ()
+
+        raise error

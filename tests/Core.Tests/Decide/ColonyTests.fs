@@ -1719,6 +1719,67 @@ let bootstrapTests =
             }
         ]
 
+/// The split pair decided as `Main` decides it on turn `turn`, the child
+/// handed `childMemo` (#628): a memo no step of its decide survives stands
+/// for a heap table gone bad.
+let private decidePair (turn: int) (childMemo: PlanMemo option) =
+    decideColonies
+        {
+            Hops = fun _ _ -> None
+            Holding = Map.empty
+            Verbose = Set.empty
+            PlanMemos =
+                childMemo
+                |> Option.map (fun memo -> "W1N2", memo)
+                |> Option.toList
+                |> Map.ofList
+            Carries = Map.empty
+            Idle = Set.empty
+            FightAlone = Set.empty
+            TurnIndex = Some turn
+        }
+        ignore
+        (List.zip
+            splitPair
+            [
+                motherColony [ motherCast, { X = 10; Y = 2 } ]
+                childColony [ childCast, { X = 10; Y = 44 } ]
+            ])
+
+/// The child's own memo, off a decide of it alone.
+let private childMemo () =
+    (decideUnarbitrated
+        (childColony [ childCast, { X = 10; Y = 44 } ])
+        Map.empty
+        Set.empty
+        None
+        ReplanTurn.Now)
+        .Memo
+
+/// That the child's fault, in `phase`, is the only one, and that the mother
+/// decides beside it what she decides beside a sound child.
+let private motherUnmoved
+    (phase: string)
+    (decided: ColonyDecisions<unit>)
+    (sound: ColonyDecisions<unit>)
+    =
+    Expect.equal
+        (decided.Faulted |> List.map (fun fault -> fault.Colony, fault.Phase))
+        [ "W1N2", phase ]
+        "the child's throw is the child's fault alone"
+
+    match decided.Decided, sound.Decided with
+    | [ colony, _, decision, () ], (_, _, beside, ()) :: _ ->
+        Expect.equal colony.Home "W1N1" "the mother decides her tick beside it"
+
+        Expect.equal
+            decision.Assignments
+            beside.Assignments
+            "as she decides it beside a sound child"
+
+        Expect.equal decision.Intents beside.Intents "and issues what she would"
+    | decided, _ -> failtest $"the mother's decision alone: %A{List.length decided}"
+
 [<Tests>]
 let twoColonyTests =
     testList
@@ -2186,6 +2247,62 @@ let twoColonyTests =
                 Expect.isFalse
                     (List.contains (taskId (Harvest "src-home")) child)
                     "nor the mother's in the child's"
+            }
+
+            test "a colony whose decide throws costs itself the tick and spends its turn" {
+                // #628: the child is handed a memo no decide of it survives
+                // (a null, where the heap's table went bad), on its turn.
+                let child = childColony [ childCast, { X = 10; Y = 44 } ]
+                let poisoned: PlanMemo = Unchecked.defaultof<_>
+
+                Expect.throws
+                    (fun () ->
+                        decideUnarbitrated child Map.empty Set.empty (Some poisoned) ReplanTurn.Now
+                        |> ignore)
+                    "the premise: the child's decide throws"
+
+                let decided = decidePair 1 (Some poisoned)
+                motherUnmoved "open" decided (decidePair 1 None)
+
+                Expect.equal decided.Turn 1 "the turn was handed to the child"
+
+                Expect.isFalse decided.TurnWaits "and its throw spends it, so the rotation moves on"
+            }
+
+            test "a colony that throws off its turn leaves the turn's colony its replan" {
+                let poisoned: PlanMemo = Unchecked.defaultof<_>
+                let decided = decidePair 0 (Some poisoned)
+                motherUnmoved "open" decided (decidePair 0 None)
+
+                Expect.equal decided.Turn 0 "the turn is the mother's"
+                Expect.isFalse decided.TurnWaits "and she took it"
+            }
+
+            test
+                "a colony whose join throws costs itself the tick, and the other colony decides as it would" {
+                // A recalled memo with no haul demand: the open recalls it
+                // whole, the share of the world's fight reads it.
+                let memo =
+                    { childMemo () with
+                        HaulerDemand = Unchecked.defaultof<_>
+                    }
+
+                motherUnmoved "join" (decidePair 1 (Some memo)) (decidePair 1 (Some(childMemo ())))
+            }
+
+            test
+                "a colony whose finish throws costs itself the tick, and the other colony decides as it would" {
+                // A recalled memo with no site intents: only the finish
+                // reads them.
+                let memo =
+                    { childMemo () with
+                        SiteIntents = Unchecked.defaultof<_>
+                    }
+
+                motherUnmoved
+                    "finish"
+                    (decidePair 1 (Some memo))
+                    (decidePair 1 (Some(childMemo ())))
             }
         ]
 

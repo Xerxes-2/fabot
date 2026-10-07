@@ -1603,6 +1603,45 @@ let recorded (fighters: Set<string> option) (decided: Plan) (carried: Plan optio
     | Some held, Some plan -> withFight held decided plan
     | _ -> decided
 
+/// Each colony's run of consecutive faulted decides (#628) after this tick:
+/// a faulted colony's grows, a colony that decided starts over, the rest
+/// stand. And the colonies the record defers (`LastFull.Deferred`): each on
+/// the first fault of its run alone, so a colony that throws every tick
+/// forces one full tick and then replays its plan until the cadence's next
+/// full tick.
+let faultRuns
+    (runs: Map<string, int>)
+    (faulted: Set<string>)
+    (decided: Set<string>)
+    : Map<string, int> * Set<string> =
+    let next =
+        faulted
+        |> Seq.fold
+            (fun acc home -> Map.add home (1 + (Map.tryFind home acc |> Option.defaultValue 0)) acc)
+            (runs |> Map.filter (fun home _ -> not (Set.contains home decided)))
+
+    next |> Map.toSeq |> Fresh.mapOfSeq,
+    faulted |> Set.filter (fun home -> Map.tryFind home next = Some 1)
+
+/// The plan a faulted colony's record carries (#628): its last, which it
+/// replays, or an empty one, which issues nothing and keeps it from
+/// `deciders`' planless colonies, decided on every forced tick. Carried
+/// without its structures' fight, nor its aims and their volleys and
+/// tracks: the one forces every light tick (`LightForce.Fought`), the others
+/// each tick a quarry steps off where it stood (`LightForce.Chase`), and
+/// either would decide the faulted colony again each tick, past
+/// `faultRuns`' bound. Its acts stand, a shot in reach among them.
+let faultedPlan (glance: Glance) (last: Plan option) : Plan =
+    match last with
+    | Some carried ->
+        { carried with
+            Fought = false
+            Aims = []
+            Volleys = Fresh.mapOfSeq Seq.empty
+            Tracks = Fresh.mapOfSeq Seq.empty
+        }
+    | None -> plan glance Set.empty Map.empty [] [] [] [] Map.empty Map.empty
+
 /// The bodies the plans aim (`Plan.Aims`): whose pace a glance reads
 /// (`GlanceCreep.Gait`).
 let aimers (last: LastFull) : Set<string> =

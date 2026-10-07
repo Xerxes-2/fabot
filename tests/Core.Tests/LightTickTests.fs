@@ -2832,6 +2832,107 @@ let decidersTests =
                     "W7N1 holds no plan"
             }
 
+            test
+                "a faulted colony is deferred on the first fault of a run alone, and a clean decide ends the run" {
+                // #628: a colony that throws every tick forces one full
+                // tick, then replays until the cadence's.
+                let runs, deferred =
+                    LightTick.faultRuns Map.empty (Set.ofList [ "W3N1" ]) (Set.ofList [ "W1N1" ])
+
+                Expect.equal deferred (Set.ofList [ "W3N1" ]) "the first fault defers"
+
+                let again, deferredAgain =
+                    LightTick.faultRuns runs (Set.ofList [ "W3N1" ]) (Set.ofList [ "W1N1" ])
+
+                Expect.isEmpty deferredAgain "the second in a row does not"
+                Expect.equal (Map.tryFind "W3N1" again) (Some 2) "the run counts on"
+
+                let idle, _ = LightTick.faultRuns again Set.empty Set.empty
+
+                Expect.equal
+                    (Map.tryFind "W3N1" idle)
+                    (Some 2)
+                    "a tick it does not decide stands the run"
+
+                let clean, _ = LightTick.faultRuns again Set.empty (Set.ofList [ "W3N1" ])
+                Expect.isEmpty clean "a clean decide ends it"
+
+                let _, afresh = LightTick.faultRuns clean (Set.ofList [ "W3N1" ]) Set.empty
+                Expect.equal afresh (Set.ofList [ "W3N1" ]) "and the next fault defers again"
+            }
+
+            test "a faulted colony's carried plan forces no tick for its fight or its chase" {
+                // A tower's fight forces its colony's next tick, and a chase
+                // whose quarry walks off forces its chaser's: carried, either
+                // would re-decide the faulted colony every tick.
+                let carry (record: LastFull) glance =
+                    LightTick.ofPlans
+                        glance
+                        Set.empty
+                        [ "", LightTick.faultedPlan glance (Some(solo record)) ]
+
+                let fought = LightTick.lastFull quiet Map.empty [ FireTower("tower", "h") ]
+
+                Expect.equal
+                    (LightTick.forced fought quiet)
+                    (Some(LightForce.Fought ""))
+                    "the premise: it forces"
+
+                Expect.isNone (LightTick.forced (carry fought quiet) quiet) "carried, it does not"
+
+                let chasing =
+                    { quiet with
+                        Creeps = Map.ofList [ "ranger", creepAt 12 10 1000 ]
+                        Hostiles = [ hostile 13 10 "Trepidimous" false ]
+                    }
+
+                let walkedOff =
+                    { chasing with
+                        Hostiles = [ hostile 14 10 "Trepidimous" false ]
+                    }
+
+                let chase =
+                    LightTick.lastFull chasing Map.empty [ RangedAttackCreep("ranger", "h-1") ]
+                    |> aiming [ RangedAttackCreep("ranger", "h-1") ] Map.empty
+
+                Expect.equal
+                    (LightTick.forced chase walkedOff)
+                    (Some(LightForce.Chase "ranger"))
+                    "the premise: the quarry walked off forces the chase"
+
+                Expect.isNone
+                    (LightTick.forced (carry chase chasing) walkedOff)
+                    "carried, it does not"
+            }
+
+            test
+                "a faulted colony with no plan carries an empty one, so a forced tick does not decide it for that" {
+                let carried =
+                    LightTick.ofPlans
+                        split
+                        Set.empty
+                        [ "W1N1", planned.Plans.["W1N1"]; "W7N1", LightTick.faultedPlan split None ]
+
+                Expect.equal
+                    (LightTick.deciders
+                        (pair @ [ "W7N1", Set.ofList [ "W7N1" ] ])
+                        holders
+                        carried
+                        split
+                        [ LightForce.Fought "W1N1" ])
+                    (Set.ofList [ "W1N1"; "W3N1" ])
+                    "W3N1 holds no plan and decides; W7N1's empty plan keeps it out"
+
+                Expect.isEmpty
+                    (LightTick.replay (Set.ofList [ "W7N1" ]) holders carried split)
+                    "and it replays nothing"
+
+                Expect.equal
+                    (LightTick.faultedPlan split (Some planned.Plans.["W3N1"]))
+                    planned.Plans.["W3N1"]
+                    "a colony with a plan carries the one it replays"
+            }
+
             test "a replayed colony issues its own plan for its own bodies, and its looks" {
                 Expect.equal
                     (LightTick.replay (Set.ofList [ "W3N1" ]) holders planned split)

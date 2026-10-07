@@ -70,6 +70,7 @@
 //                                       (gives up after 20 minutes)
 //   observe.mjs health [--colony <home>] [--samples K]
 //                                       one line per anomaly after a deploy:
+//                                       the faults the bot caught first, then
 //                                       idle creeps, creeps that did not move
 //                                       over K position samples, creeps outside
 //                                       their colony's rooms, stand-downs,
@@ -618,7 +619,7 @@ if (command === "console") {
   }
 
   const lines = [];
-  const counts = { idle: 0, still: 0, away: 0, standDown: 0, breach: 0 };
+  const counts = { idle: 0, still: 0, away: 0, standDown: 0, breach: 0, fault: 0 };
   const names = Object.keys(latest)
     .filter((name) => colonyArg === undefined || homeOf(name) === colonyArg)
     .sort();
@@ -695,6 +696,45 @@ if (command === "console") {
     }
   }
 
+  // The fault ring (#628), first: a throw the bot caught, one line per
+  // colony, step and message, newest first, with how often the ring holds it
+  // and its top frame. A colony faulting every tick fills the ring with one
+  // line's worth.
+  // Only the running bundle's faults are open: one written before its load
+  // (`observe.version.reset`, #634) is counted on one line, not listed.
+  const faultRows = Array.isArray(observe.faults?.rows) ? observe.faults.rows : [];
+  const loadedAt = typeof observe.version?.reset === "number" ? observe.version.reset : -Infinity;
+  const faults = new Map();
+  let olderFaults = 0;
+  for (const row of faultRows) {
+    if (typeof row?.t !== "number" || typeof row?.message !== "string") continue;
+    if (colonyArg !== undefined && row.colony !== colonyArg) continue;
+    if (row.t < loadedAt) {
+      olderFaults++;
+      continue;
+    }
+    counts.fault++;
+    const key = `${row.phase}\u0000${row.colony}\u0000${row.message}`;
+    const seen = faults.get(key);
+    if (seen) {
+      seen.count++;
+      seen.first = Math.min(seen.first, row.t);
+    } else {
+      faults.set(key, { row, count: 1, first: row.t });
+    }
+  }
+  for (const { row, count, first } of faults.values()) {
+    const span = count > 1 ? ` ×${count} since t${first}` : "";
+    const frame = Array.isArray(row.frames) && row.frames.length > 0 ? ` · ${row.frames[0]}` : "";
+    console.log(
+      `fault    ${row.phase} ${row.colony || "(tick)"} at t${row.t}, ${now - row.t} ticks ago${span}: ` +
+        `${row.message.split("\n")[0].slice(0, 200)}${frame}`,
+    );
+  }
+  if (olderFaults > 0) {
+    console.log(`fault    ${olderFaults} older fault(s) in the ring, from before this bundle's load at t${loadedAt}`);
+  }
+
   for (const line of lines) console.log(line);
 
   // The CPU line: its mean and the cadence's halves, and whether it is
@@ -723,7 +763,7 @@ if (command === "console") {
   console.log(
     `t${now} · ${homes.length} colon${homes.length === 1 ? "y" : "ies"} · ${names.length} creeps · ` +
       `idle ${counts.idle} · still ${counts.still} · away ${counts.away} · ` +
-      `stand-downs ${counts.standDown} · breaches ${counts.breach}` +
+      `stand-downs ${counts.standDown} · breaches ${counts.breach} · faults ${counts.fault}` +
       ` (away is a guess off the rooms Memory names)`,
   );
 } else if (command === "history") {
