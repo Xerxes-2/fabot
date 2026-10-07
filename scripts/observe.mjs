@@ -41,6 +41,12 @@
 //   observe.mjs verbose add <creep>     put a creep on the verbose list
 //   observe.mjs verbose remove <creep>  take a creep off the verbose list
 //   observe.mjs verbose clear           empty the verbose list
+//   observe.mjs draw               the draw list as stored: rooms and creeps
+//                                  whose creeps the room visuals overlay with
+//                                  Task, Verdict, acts and refusal (#638)
+//   observe.mjs draw add <room|creep>     overlay a room's creeps, or one creep
+//   observe.mjs draw remove <room|creep>  stop overlaying it
+//   observe.mjs draw clear                overlay nothing (costs nothing)
 //   observe.mjs cadence            the live cadence override as stored (ticks
 //                                  per full decide; unset, the tuned one and
 //                                  the bucket's rule decide)
@@ -183,7 +189,8 @@ const usage =
   "layout [--colony <home>] [--json] | quotas [--colony <home>] [--json] | " +
   "breaches [--colony <home>] [--json] | " +
   "reactor [--json] | cpu [--all] [--json] | " +
-  "verbose [add <creep> | remove <creep> | clear] [--json] | cadence [<2..4> | clear] | " +
+  "verbose [add <creep> | remove <creep> | clear] [--json] | " +
+  "draw [add <room|creep> | remove <room|creep> | clear] [--json] | cadence [<2..4> | clear] | " +
   "fight-only [on | off | clear] | " +
   "console --seconds N | eval '<expr>' [--seconds N] | room <name> [--json] | " +
   "wait --ticks N | health [--colony <home>] [--samples K] | " +
@@ -227,6 +234,7 @@ const ACCEPTS = {
   reactor: ["--json"],
   cpu: ["--json", "--all"],
   verbose: ["--json"],
+  draw: ["--json"],
   cadence: [],
   "fight-only": [],
   console: ["--seconds"],
@@ -258,7 +266,7 @@ const positiveInt = (flag) => {
 };
 
 if (command === "timeline" && !creepArg) fail(usage);
-if (command === "verbose" && action !== undefined) {
+if ((command === "verbose" || command === "draw") && action !== undefined) {
   if (!["add", "remove", "clear"].includes(action)) fail(usage);
   if (action !== "clear" && !actionName) fail(usage);
 }
@@ -1000,18 +1008,23 @@ if (command === "console") {
       );
     }
   }
-} else if (command === "verbose") {
-  // ---- verbose: the list beside the log, read and written in place ------
+} else if (command === "verbose" || command === "draw") {
+  // ---- verbose / draw: a name list, read and written in place ------------
+
+  // verbose: creeps owed full scoring; draw: rooms and creeps the room
+  // visuals overlay (#638).
+  const leaf = command === "verbose" ? "fabot.observe.verbose" : "fabot.observe.visuals";
+  const list = command === "verbose" ? "verbose list" : "draw list";
 
   // The stored list, tolerantly: the bot treats anything malformed as off,
   // and so does the CLI — a bad shape reads as empty and is overwritten
   // whole on the next write.
-  const stored = action === "clear" ? [] : await memoryGet("fabot.observe.verbose");
+  const stored = action === "clear" ? [] : await memoryGet(leaf);
   const current = Array.isArray(stored) ? stored.filter((n) => typeof n === "string") : [];
 
   if (action === undefined) {
     if (json) console.log(JSON.stringify(current, null, 2));
-    else if (current.length === 0) console.log("verbose list is empty");
+    else if (current.length === 0) console.log(`${list} is empty`);
     else for (const n of current) console.log(n);
   } else {
     const next =
@@ -1019,29 +1032,29 @@ if (command === "console") {
       action === "add" ? [...new Set([...current, actionName])] :
       current.filter((n) => n !== actionName);
 
-    const res = await api.userMemorySet("fabot.observe.verbose", next, shard).catch((err) => {
+    const res = await api.userMemorySet(leaf, next, shard).catch((err) => {
       fail(`memory write failed: ${err.message ?? err}`);
     });
     if (res.ok !== 1) fail(`memory write failed: ${JSON.stringify(res)}`);
 
     // The write is queued; Memory reads keep serving the old list until the
     // game applies it on a tick boundary. Poll until the read agrees, so the
-    // confirmation below is never ahead of what `verbose` would report.
+    // confirmation below is never ahead of what a read would report.
     const wanted = JSON.stringify([...next].sort());
     const deadline = Date.now() + 20_000;
     for (;;) {
-      const readBack = await memoryGet("fabot.observe.verbose");
+      const readBack = await memoryGet(leaf);
       const seen = Array.isArray(readBack) ? readBack.filter((n) => typeof n === "string") : [];
       if (JSON.stringify(seen.sort()) === wanted) break;
       if (Date.now() >= deadline) {
         fail(
           `write accepted but not visible after 20s; wanted [${next.join(", ")}], ` +
-            `still reading [${seen.join(", ")}] — check again with \`observe.mjs verbose\``,
+            `still reading [${seen.join(", ")}] — check again with \`observe.mjs ${command}\``,
         );
       }
       await new Promise((r) => setTimeout(r, 1000));
     }
-    console.log(`verbose list is now [${next.join(", ")}]`);
+    console.log(`${list} is now [${next.join(", ")}]`);
   }
 } else if (command === "cadence") {
   // ---- cadence: the live override of ticks per full decide --------------

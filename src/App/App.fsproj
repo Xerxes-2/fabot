@@ -8,6 +8,7 @@
     <Compile Include="World.fs" />
     <Compile Include="Executor.fs" />
     <Compile Include="ObserveMemory.fs" />
+    <Compile Include="Visuals.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
   <ItemGroup>

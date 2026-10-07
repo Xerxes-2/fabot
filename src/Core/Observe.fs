@@ -211,6 +211,80 @@ let forgetScorings (verbose: Set<string>) (state: ObserveState) : ObserveState =
                 name, log)
         |> Fresh.mapOfSeq
 
+/// A Verdict as the room visual's overlay words it (#638): the wire's
+/// spelling of its reason, without the creep it names.
+let verdictText =
+    function
+    | Verdict.Matched(_, _, factor) -> $"matched {matchFactorName factor}"
+    | Verdict.Kept _ -> "kept"
+    | Verdict.Released(_, _, reason) -> $"released {releaseReasonName reason}"
+    | Verdict.Unassigned(_, reason) -> $"idle {idleReasonName reason}"
+    | Verdict.Scoring(_, candidates) -> $"scored {List.length candidates}"
+    | Verdict.Grounded _ -> "grounded"
+    | Verdict.Yielded(_, counterpart) -> $"yields to {counterpart}"
+    | Verdict.Rerouted _ -> "rerouted"
+    | Verdict.Stalled _ -> "stalled"
+    | Verdict.Refused(_, _, code, count) -> $"refused {code} x{count}"
+
+/// A Verdict in a character or a few, for the say bubble after a Task's
+/// glyph (#638): a steady Kept and a scoring say nothing.
+let private sayCode =
+    function
+    | Verdict.Matched(_, _, factor) ->
+        "+"
+        + match factor with
+          | MatchFactor.OnlyCandidate -> "o"
+          | MatchFactor.Rank -> "r"
+          | MatchFactor.TravelCost -> "t"
+          | MatchFactor.Load -> "l"
+          | MatchFactor.PoolOrder -> "p"
+    | Verdict.Released(_, _, reason) ->
+        "-"
+        + match reason with
+          | ReleaseReason.TaskGone -> "gone"
+          | ReleaseReason.Outranked -> "out"
+          | ReleaseReason.Called -> "call"
+          | ReleaseReason.Refused -> "ref"
+          | ReleaseReason.Rejected RejectReason.Inapplicable -> "inap"
+          | ReleaseReason.Rejected RejectReason.CapacityFull -> "full"
+          | ReleaseReason.Rejected RejectReason.Unreachable -> "unr"
+          | ReleaseReason.Rejected RejectReason.Threatened -> "thr"
+          | ReleaseReason.Rejected(RejectReason.TooEarly _) -> "early"
+    | Verdict.Unassigned _ -> "?"
+    | Verdict.Refused(_, _, code, _) -> $"!{abs code}"
+    | Verdict.Grounded _ -> "g"
+    | Verdict.Yielded _ -> "y"
+    | Verdict.Rerouted _ -> "~"
+    | Verdict.Stalled _ -> "s"
+    | Verdict.Kept _
+    | Verdict.Scoring _ -> ""
+
+/// Each creep's say code off one tick's Verdicts (#638): its refusal, then
+/// its Task's story, then its step's, each in a character or a few.
+let sayCodes (verdicts: Verdict list) : Map<string, string> =
+    let rank verdict =
+        match verdict with
+        | Verdict.Refused _ -> 0
+        | _ when isMovement verdict -> 2
+        | _ -> 1
+
+    verdicts
+    |> List.groupBy creepOf
+    |> List.choose (fun (creep, own) ->
+        match own |> List.sortBy rank |> List.map sayCode |> String.concat "" with
+        | "" -> None
+        | code -> Some(creep, code))
+    |> Map.ofList
+
+/// The engine's cap on a say, in string length.
+let sayCap = 10
+
+/// A Task's glyph with its creep's say code after it, cut to the engine's
+/// cap: the glyph is never cut.
+let denser (glyph: string) (code: string) =
+    let room = max 0 (sayCap - glyph.Length)
+    glyph + (if code.Length > room then code.Substring(0, room) else code)
+
 /// One visible reading of the sector Reactor programme; `None` at the fold
 /// boundary means the room is blind.
 type ReactorReading =

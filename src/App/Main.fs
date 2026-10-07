@@ -1333,15 +1333,13 @@ let private fullTick
         |> List.filter (fun row -> row.Body && row.Fresh > 0 && decidedOn row)
         |> List.map (fun row -> Verdict.Refused(row.Actor, row.Task, row.Code, row.Fresh))
 
+    let verdicts =
+        refused
+        @ (decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Verdicts))
+        @ moveVerdicts
+
     let log =
-        Observe.fold
-            Observe.capPerCreep
-            Game.time
-            living
-            (refused
-             @ (decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Verdicts))
-             @ moveVerdicts)
-            priorLog
+        Observe.fold Observe.capPerCreep Game.time living verdicts priorLog
         |> Observe.forgetScorings verbose
 
     // The tick after a global reset encodes the log whole: the rows standing
@@ -1571,10 +1569,24 @@ let private fullTick
             | Ok plan -> plan
             | Error conflict -> invalidOp $"Conflicting creep intents: %A{conflict}"
 
+    // Each bubble's glyph with its creep's Verdicts this tick after it
+    // (#638): what the creep did, in the characters the say leaves.
+    let codes = Observe.sayCodes verdicts
+
+    let denser intent =
+        match intent with
+        | SayCreep(name, glyph) ->
+            match Map.tryFind name codes with
+            | Some code -> SayCreep(name, Observe.denser glyph code)
+            | None -> intent
+        | _ -> intent
+
     // A faulted colony's towers and safe mode ride with the decided acts: no
     // replay repeats them (#628).
     let decided =
-        (decisions |> List.collect (fun (_, _, decision, _, _) -> decision.Intents))
+        (decisions
+         |> List.collect (fun (_, _, decision, _, _) -> decision.Intents)
+         |> List.map denser)
         @ moveIntents
         @ (colonyDecisions.Towers |> List.collect snd)
         |> firstActivationOnly
@@ -1798,6 +1810,17 @@ let private runTick () =
         | _ ->
             lightRun <- 0
             fullTick atEntry (Some seen) None |> ignore
+
+    // The creep overlay (#638), off what the tick left on the heap: one
+    // Memory read when the draw list is empty.
+    Visuals.creeps
+        (ObserveMemory.loadVisuals ())
+        (lastFull
+         |> Option.map (fun (_, last) -> last.Plans)
+         |> Option.defaultValue Map.empty)
+        heldTasks
+        (observeLog |> Option.defaultValue Map.empty)
+        refusals
 
 // Exported as `loop` on the bundled `main` module; the engine calls it every
 // tick. A throw no colony owns is still the tick's and still reaches the

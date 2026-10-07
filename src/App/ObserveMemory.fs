@@ -792,23 +792,30 @@ let saveSwitches
     raw?fightOnlyFrom <- from (snd fightOnly)
     writeObserveLeaf "switches" raw
 
-/// The verbose list from `Memory.fabot.observe.verbose`: creep names owed
-/// full candidate scoring this tick. Read fresh each tick so a flip
+/// A list of names off one observe leaf, read fresh each tick so a flip
 /// through the Memory HTTP API takes effect on the next tick with no
 /// redeploy; absent or malformed means off.
-let loadVerbose () : Set<string> =
-    leafOr Set.empty (fun () -> observeLeaf "verbose") (fun verbose ->
-        if not (JS.Constructors.Array.isArray verbose) then
+let private nameList (leaf: string) : Set<string> =
+    leafOr Set.empty (fun () -> observeLeaf leaf) (fun names ->
+        if not (JS.Constructors.Array.isArray names) then
             Set.empty
         else
             // Malformed means off entry-wise too: anything but a string
             // array reads as the empty list, never as a repaired one.
-            let entries = verbose |> unbox<obj[]>
+            let entries = names |> unbox<obj[]>
 
             if entries |> Array.forall (fun e -> jsTypeof e = "string") then
                 entries |> Array.map unbox<string> |> Set.ofArray
             else
                 Set.empty)
+
+/// The verbose list from `Memory.fabot.observe.verbose`: creep names owed
+/// full candidate scoring this tick.
+let loadVerbose () : Set<string> = nameList "verbose"
+
+/// The draw list from `Memory.fabot.observe.visuals` (#638): rooms and
+/// creeps, by name, whose creeps the room visuals overlay this tick.
+let loadVisuals () : Set<string> = nameList "visuals"
 
 // ---- the operator-only logs' segments (#639) ------------------------------
 //

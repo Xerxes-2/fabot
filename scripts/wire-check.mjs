@@ -1430,6 +1430,24 @@ wire("verbose: a string list reads, and anything else reads as off", async () =>
   }
 });
 
+wire("visuals: the draw list reads as the verbose list does, off its own leaf", async () => {
+  const { loadVisuals } = await import(MODULE);
+
+  for (const [what, value, size] of [
+    ["absent", undefined, 0],
+    ["a room and a creep", ["W13S28", "ranger-1"], 2],
+    ["a list with a number in it", ["W13S28", 2], 0],
+    ["an object", { W13S28: true }, 0],
+    ["null", null, 0],
+  ]) {
+    globalThis.Memory = rootMemoryWith("visuals", value);
+    assert.equal(loadVisuals().size, size, `${what} reads as ${size} names`);
+  }
+
+  globalThis.Memory = rootMemoryWith("verbose", ["w1"]);
+  assert.equal(loadVisuals().size, 0, "the verbose list is not the draw list");
+});
+
 // ---- the live cadence ----------------------------------------------------
 
 wire("cadence: a whole number reads clamped to 2..4, and anything else reads as unset", async () => {

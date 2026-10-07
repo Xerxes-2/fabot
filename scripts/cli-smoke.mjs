@@ -53,6 +53,8 @@ refuses([], "usage:");
 refuses(["nope"], "usage:");
 refuses(["timeline"], "usage:");
 refuses(["verbose", "add"], "usage:");
+refuses(["draw", "add"], "usage:");
+refuses(["draw", "paint", "W13S28"], "usage:");
 refuses(["cadence", "5"], "cadence takes 2, 3 or 4");
 refuses(["cadence", "2.5"], "cadence takes 2, 3 or 4");
 refuses(["cadence", "3", "4"], "usage:");
@@ -90,6 +92,10 @@ for (const args of [
   ["cpu"],
   ["cpu", "--all", "--json"],
   ["verbose", "add", "worker-1-Spawn1"],
+  ["draw"],
+  ["draw", "add", "W13S28"],
+  ["draw", "remove", "ranger-1"],
+  ["draw", "clear", "--json"],
   ["cadence"],
   ["cadence", "3"],
   ["cadence", "clear"],

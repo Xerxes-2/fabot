@@ -391,3 +391,37 @@ let pruneTests =
                     "the first tick simply appends"
             }
         ]
+
+[<Tests>]
+let sayTests =
+    testList
+        "observe say codes"
+        [
+            test "a steady Kept says the glyph alone" {
+                Expect.equal
+                    (sayCodes [ Verdict.Kept("a", "t") ])
+                    Map.empty
+                    "no code for the steady state"
+            }
+
+            test "a creep's code reads its refusal, then its Task's story, then its step" {
+                let codes =
+                    sayCodes
+                        [
+                            Verdict.Stalled "a"
+                            Verdict.Released("a", "t1", ReleaseReason.TaskGone)
+                            Verdict.Matched("a", "t2", MatchFactor.TravelCost)
+                            Verdict.Refused("a", "t1", -9, 2)
+                            Verdict.Kept("b", "t")
+                        ]
+
+                Expect.equal codes (Map.ofList [ "a", "!9-gone+ts" ]) "each Verdict in its slot"
+            }
+
+            test "the glyph is never cut and the bubble stays within the engine's cap" {
+                let said = denser "⚔️" "!9-gone+ts-x"
+
+                Expect.equal said.Length sayCap "cut to the cap"
+                Expect.isTrue (said.StartsWith "⚔️") "the glyph stands whole"
+            }
+        ]
