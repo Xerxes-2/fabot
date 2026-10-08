@@ -724,10 +724,7 @@ let censusSignatureTests =
                                 {
                                     RoomName = "W1N2"
                                     Enemy = "rival"
-                                    Stand = RoomPos.at "W1N2" { X = 10; Y = 44 }
-                                    Controller = RoomPos.at "W1N2" { X = 10; Y = 42 }
                                     Via = []
-                                    Blocks = None
                                 }
                             ]
                     }

@@ -1315,10 +1315,7 @@ let private withFlavour (colony: ColonyView) flavour =
             {
                 RoomName = "W1N2"
                 Enemy = "Trepidimous"
-                Stand = RoomPos.at "W1N2" { X = 12; Y = 42 }
-                Controller = RoomPos.at "W1N2" { X = 30; Y = 48 }
                 Via = []
-                Blocks = None
             }
     | ChaseSeen ->
         { colony with
@@ -1388,13 +1385,9 @@ let guardPrecedenceTests =
                         // No store within five: the tiles beside the hauler.
                         Trespasser, Some(besideIn { X = 10; Y = 47 })
                         Resident, Some(besideIn { X = 6; Y = 46 })
-                        // Nobody at work: the Stand's seats, the Stand among them.
-                        Harassed,
-                        Some(
-                            Set.add
-                                (RoomPos.at "W1N2" { X = 12; Y = 42 })
-                                (besideIn { X = 12; Y = 42 })
-                        )
+                        // Nobody at work. Moved by #658: no ground of its own,
+                        // the declared source ring (it was the Stand's seats).
+                        Harassed, Some(tiles [ 24, 41; 25, 41; 26, 41 ])
                         // Three from the plodder, less the corners by the field's
                         // south edge, where too little room is left to back off.
                         // Movement S3 reads the escape room off the maps within
@@ -1486,7 +1479,6 @@ let guardPrecedenceTests =
                         [
                             "Kite", (Threats.briefOf threats "W1N2").Laid.Kite
                             "ResidentRing", (Threats.briefOf threats "W1N2").Laid.Resident
-                            "Stand", (Threats.briefOf threats "W1N2").Laid.Stand
                             "Prey", (Threats.briefOf threats "W1N2").Laid.Prey
                             "Ring", (Threats.briefOf threats "W1N2").Laid.Ring
                         ]
@@ -1564,7 +1556,9 @@ let guardPrecedenceTests =
                         // Takers are `decide`'s, which lays the sweep in: it
                         // works no room with nothing to kill, so nobody takes
                         // it (r-1 did); the Brief read beside it is unswept.
-                        [ Harassed ], row [ Harassed ] [ "Stand" ] OnTheTier one []
+                        // Its ground, read beside it, the declared source ring
+                        // (#658: no Stand).
+                        [ Harassed ], row [ Harassed ] [] OnTheTier one []
                         // Moved on purpose (#615 U3): #535's hold rule kept the
                         // guard holding the Guard while it could strike a target
                         // there; one fitness answer takes and keeps it now, and
@@ -1621,9 +1615,8 @@ let guardPrecedenceTests =
                         // candidate is none of the sweep's, and the room's
                         // other flavour takes its takers, the held exit's
                         // guard, and the core's guard and ranger (r-1 alone).
-                        [ Harassed; Hold ], row [ Harassed ] [ "Stand" ] OnTheTier one [ "g-1" ]
-                        [ Harassed; Core ],
-                        row [ Harassed ] [ "Stand" ] OnTheTier one [ "g-1"; "r-1" ]
+                        [ Harassed; Hold ], row [ Harassed ] [] OnTheTier one [ "g-1" ]
+                        [ Harassed; Core ], row [ Harassed ] [] OnTheTier one [ "g-1"; "r-1" ]
                         // Moved by #656: a body working a harassment room is
                         // its prey, a kill as a trespasser in our outpost is,
                         // on the tiles beside it and taken by either row (it

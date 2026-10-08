@@ -238,10 +238,6 @@ type Laid =
         /// Reactor's own ring (#414, #411), in a raised child's home its
         /// controller's while no armed Threat stands there (#447).
         Resident: Set<RoomPos> option
-        /// In a [[harassment room]] (#432), the declared `Stand`'s seats: the
-        /// ground of a contested room nobody works (#656), within reach of
-        /// every work spot of its source, off those spots where we mine it.
-        Stand: Set<RoomPos> option
         /// The walkable tiles within range 1 of a Threat standing in the room,
         /// less the tiles the Threats stand on — the guard's ground. In a room
         /// whose last Threat has gone, the ground beside the exit it left by
@@ -296,14 +292,14 @@ type Brief =
         /// (#451) first, so a melee guard's kind is never handed it; a
         /// resident its declared ground next; a contested room by its phase
         /// (#656): under its raid the room's `Ring`, its kite ground first
-        /// where a ranger answers it, its prey's own (#516), or, nobody
-        /// working a harassment room, the Stand's seats; a held exit and a
-        /// core the room's `Ring`; with none laid, the room's declared source
+        /// where a ranger answers it, or its prey's own (#516); a held exit and
+        /// a core the room's `Ring`; with none laid, the room's declared source
         /// ring (#366). None where none is. A Defend's, the perimeter ground
         /// (`defendGroundOf`); a squad's is per role, on its `Formation`.
         Ground: Set<RoomPos> option
         /// With no ground and no source placed, whether the walk in is to the
-        /// room's ground off the border: a chased room shut on its raid (#510).
+        /// room's ground off the border: a chased room shut on its raid (#510),
+        /// and the [[sweep]]'s room while nothing in it is in sight (#658).
         WalksIn: bool
         Avoid: Avoid
         Rung: Rung
@@ -643,7 +639,6 @@ module Brief =
             Kite = None
             Approach = lazy Set.empty
             Resident = None
-            Stand = None
             Ring = None
             Prey = None
         }
@@ -831,8 +826,8 @@ module Brief =
 
     /// A contested room's ground by its phase (#656): under its raid the
     /// ring, the kite ground ahead of it where a ranger answers the room
-    /// (`ranged`, #535); its prey's own; nobody working a harassment room,
-    /// the Stand's seats.
+    /// (`ranged`, #535); its prey's own; quiet, none of its own (the
+    /// [[sweep]]'s room out of sight is walked into, `Brief.WalksIn`, #658).
     let private groundOf (kind: BriefKind) (phase: Phase) (ranged: bool) (laid: Laid) =
         let ring = laid.Ring |> Option.filter (Set.isEmpty >> not)
 
@@ -845,7 +840,7 @@ module Brief =
                 | Phase.Raid when ranged -> laid.Kite |> Option.orElse ring
                 | Phase.Raid -> ring
                 | Phase.Prey -> laid.Prey
-                | Phase.Quiet -> laid.Stand
+                | Phase.Quiet -> None
             | BriefKind.ExitHold
             | BriefKind.Core -> ring
 
@@ -1253,7 +1248,11 @@ module Brief =
                 groundOf kind phase ranged laid
                 |> Option.orElseWith (fun () ->
                     Some(Atlas.sourceRingIn atlas room) |> Option.filter (Set.isEmpty >> not))
-            WalksIn = kind = BriefKind.Chase
+            WalksIn =
+                kind = BriefKind.Chase
+                || kind = BriefKind.Contested
+                   && phase = Phase.Quiet
+                   && Set.contains room (harassRooms view)
             Avoid =
                 match kind with
                 | BriefKind.Chase -> Avoid.Kite
@@ -3006,41 +3005,6 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         | Some score -> score.Value
         | None -> fun _ -> 0.0
 
-    // A harassment room's Stand (#432): its source's seats, where the enemy's
-    // bodies must stop, the ground of the room while nobody works it (#656:
-    // a body working it is the room's prey, a raid its ring). The seats are
-    // within reach of every work spot of the source.
-    let stand =
-        view.Harass
-        |> List.map (fun h ->
-            let room = h.RoomName
-
-            let inRoom = view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = room)
-
-            // A room we mine keeps its source's seats for our miners: the
-            // ranger stands off them, within reach of every one (W17S26,
-            // 2026-10-04: one seat, which the ranger outranked the anchor on).
-            let mined = Set.contains room view.MinedRooms
-
-            let seats =
-                if mined then
-                    [ Engine.rangedRange, RoomPos.pos h.Stand ]
-                else
-                    [ 1, RoomPos.pos h.Stand ]
-
-            let offTheSeats (tile: Pos) =
-                not mined || range tile (RoomPos.pos h.Stand) > 1
-
-            let standing =
-                inRoom |> List.map (fun hostile -> RoomPos.pos hostile.Pos) |> Set.ofList
-
-            room,
-            seats
-            |> List.collect (fun (radius, pos) -> Atlas.walkableWithinIn atlas room radius pos)
-            |> List.filter (fun tile -> not (Set.contains tile standing) && offTheSeats tile)
-            |> Set.ofList
-            |> RoomPos.setAt room)
-        |> Map.ofList
 
     let rangers = rangerRooms view
 
@@ -3639,13 +3603,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // Every room a source claimed or laid ground in; one no source claims is
     // the default kind's, `Contested`.
     let briefs =
-        [
-            Map.keys claimants
-            Map.keys rings
-            Map.keys residentRing
-            Map.keys stand
-            Map.keys kite
-        ]
+        [ Map.keys claimants; Map.keys rings; Map.keys residentRing; Map.keys kite ]
         |> Seq.concat
         |> Set.ofSeq
         |> Seq.map (fun room ->
@@ -3689,7 +3647,6 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                         |> Option.map snd
                         |> Option.defaultValue (lazy Set.empty)
                     Resident = Map.tryFind room residentRing
-                    Stand = Map.tryFind room stand
                     Ring = Map.tryFind room rings
                     Prey = preyLaid room
                 })

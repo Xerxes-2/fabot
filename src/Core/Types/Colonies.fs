@@ -682,8 +682,8 @@ module Salvage =
         rooms |> List.collect (fun room -> room :: RoomName.transitBetween home room)
 
 /// A [[harassment room]]: an enemy's remote, declared once for the whole
-/// bot and cast by whichever colony can best afford it this tick
-/// (`World.harassCasters`), never by a colony's own declaration.
+/// bot, a candidate of the one [[sweep]] (`World.harassCasters`), never a
+/// colony's own declaration.
 type Harass =
     {
         RoomName: string
@@ -691,30 +691,15 @@ type Harass =
         /// the username the engine spells. Nobody else's are: an ally's never,
         /// a third player's never, a Source Keeper never.
         Enemy: string
-        /// Where the ranger stands while the room holds no target, or is dark:
-        /// the enemy's source, which is where its miner comes back to.
-        Stand: RoomPos
-        /// The room's controller tile, where its reserver stands for the
-        /// whole reservation: the other work spot the ranger ambushes (#439).
-        Controller: RoomPos
         /// Rooms a human names for a detour the name rectangle
         /// (`RoomName.transitBetween`) does not hold, projected beside it so
         /// the chain search can find the walk. Empty where no detour is
         /// needed.
         Via: string list
-        /// The ranger blocks a human floors the room at, where what stands
-        /// there is known to be lighter than the escort `Tuning.HarassBlocks`
-        /// is sized for (#457); None for that default.
-        Blocks: int option
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Harass =
-    /// The ranger blocks the room is floored at: what its caster's bank must
-    /// buy (its cast is its fight's, #656).
-    let blocks (tuning: Tuning) (harass: Harass) : int =
-        harass.Blocks |> Option.defaultValue tuning.HarassBlocks
-
     /// The declarations worked this tick: the list, less every room a
     /// [[stand-down]] is withholding (`Outpost.worked`'s twin).
     let worked (shut: Set<string>) (harass: Harass list) : Harass list =
@@ -727,10 +712,10 @@ module Harass =
         harass
         |> List.collect (fun h -> h.RoomName :: h.Via @ RoomName.transitBetween home h.RoomName)
 
-/// The global harassment list as one tick reads it: the declarations, and
-/// the price of one ranger block (`Bodies.rangerBlockCost`), handed in
-/// because the ranger's block is `decide`'s to know. A room's floor is that
-/// price times its blocks (`Harass.blocks`).
+/// The global harassment list as one tick reads it: the sweep's candidates,
+/// and the price of one ranger block (`Bodies.rangerBlockCost`), handed in
+/// because the ranger's block is `decide`'s to know: a contested home's
+/// resident garrison body is counted in it (`HarassCasting.GarrisonFloor`).
 type Harassment = { Rooms: Harass list; BlockCost: int }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -738,13 +723,6 @@ module Harassment =
     /// No harassment room declared: the shape every caller outside the
     /// shipped tick asks in.
     let none: Harassment = { Rooms = []; BlockCost = 0 }
-
-    /// The least bank that casts any harassment room: the lowest floor
-    /// declared. With none declared, no bank does.
-    let leastFloor (tuning: Tuning) (harass: Harassment) : int =
-        match harass.Rooms with
-        | [] -> System.Int32.MaxValue
-        | rooms -> (rooms |> List.map (Harass.blocks tuning) |> List.min) * harass.BlockCost
 
 /// One colony's bid to cast an ask, as the Caster weighs it (`Caster.assign`,
 /// and before the views, `World.harassCasters` and `World.garrisonCasters`):
@@ -1269,20 +1247,16 @@ module Colony =
             "W9S26", "Kalgen" // RCL6
         ]
 
-    /// The enemy remotes a human has declared for harassment, kept for the
-    /// sweep that replaces stationary harassment (#615 U4 E) and for the tests
-    /// that read the declarations. Each Stand is the enemy's source tile off
-    /// the committed capture, and each Controller the controller's.
+    /// The enemy remotes a human has declared for the [[sweep]], kept for the
+    /// day the user switches it on (`harass`) and for the tests that read the
+    /// declarations.
     let harassDeclared: Harass list =
         [
             {
                 RoomName = "W18S27"
                 Enemy = "Trepidimous"
-                Stand = { Room = "W18S27"; X = 27; Y = 7 }
-                Controller = { Room = "W18S27"; X = 25; Y = 32 }
                 // W15S28's walk there dips south round a wall (#437).
                 Via = [ "W15S29"; "W16S29" ]
-                Blocks = None
             }
             // W17S26 left this list on 2026-10-05 (user): Trepidimous no
             // longer mines it, and it is W17S25's own outpost.
@@ -1292,13 +1266,7 @@ module Colony =
                 // west source (4,46) is unworked yet.
                 RoomName = "W19S26"
                 Enemy = "Trepidimous"
-                Stand = { Room = "W19S26"; X = 23; Y = 36 }
-                Controller = { Room = "W19S26"; X = 33; Y = 17 }
                 Via = []
-                // No towers, no armed creeps, one miner and three haulers at
-                // t885,888 (2026-10-02): two blocks kill an unarmed miner,
-                // and W17S29's RCL5 bank buys them (#457).
-                Blocks = Some 2
             }
             {
                 // User, 2026-10-04. Reserved by Trepidimous: miners on the
@@ -1308,32 +1276,25 @@ module Colony =
                 // stand-down (#441) shuts the room.
                 RoomName = "W19S25"
                 Enemy = "Trepidimous"
-                Stand = { Room = "W19S25"; X = 26; Y = 19 }
-                Controller = { Room = "W19S25"; X = 14; Y = 38 }
                 Via = []
-                Blocks = Some 2
             }
             {
                 // Given up as a colony at t880,418 after Trepidimous's siege;
-                // harassed again from 2026-10-02 while they mine it. Their
-                // 18M17A squad besieged it, so it keeps the full floor. Also
-                // W15S28's Claim again from 2026-10-03: the caster pools both
-                // until the Claim lands, then `harassCasters` drops it as ours.
+                // harassed again from 2026-10-02 while they mine it. Also
+                // W15S28's Claim again from 2026-10-03: a candidate until the
+                // Claim lands, then `harassCasters` drops it as ours.
                 RoomName = "W17S25"
                 Enemy = "Trepidimous"
-                Stand = { Room = "W17S25"; X = 18; Y = 19 }
-                Controller = { Room = "W17S25"; X = 15; Y = 36 }
                 Via = []
-                Blocks = None
             }
         ]
 
-    /// The harassment rooms the bot works: one list for the whole bot, each
-    /// room cast by the colony `World.harassCasters` names, or refused while
-    /// none can. Empty since 2026-10-08 (user): stationary harassment is
-    /// paused until the sweep replaces it (#615 U4 E); one ranger chasing
-    /// equal-pace haulers in W19S25 forced 42 of 100 ticks full and drained
-    /// the bucket.
+    /// The [[sweep]]'s live candidates: one list for the whole bot, run by
+    /// the colony `World.harassCasters` names, or refused while none can.
+    /// Empty, the live switch off (user, 2026-10-08: one stationary ranger
+    /// chasing equal-pace haulers in W19S25 forced 42 of 100 ticks full and
+    /// drained the bucket); switching the sweep on is setting it to
+    /// `harassDeclared`, or the rooms of it the user picks.
     let harass: Harass list = []
 
     /// The colonies a human has declared, moved by a human in a commit: an

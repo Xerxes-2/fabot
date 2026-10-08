@@ -1165,10 +1165,7 @@ let private harassing =
         {
             RoomName = harassRoom
             Enemy = "Trepidimous"
-            Stand = RoomPos.at harassRoom { X = 25; Y = 25 }
-            Controller = RoomPos.at harassRoom { X = 40; Y = 40 }
             Via = []
-            Blocks = None
         }
 
 /// The same room cast and shut: off the worked list, still in the cast set.

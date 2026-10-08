@@ -1271,10 +1271,7 @@ let private harassingBeyond hostiles =
         {
             RoomName = "W1N3"
             Enemy = "Trepidimous"
-            Stand = RoomPos.at "W1N3" { X = 25; Y = 44 }
-            Controller = RoomPos.at "W1N3" { X = 30; Y = 30 }
             Via = []
-            Blocks = None
         }
 
 [<Tests>]

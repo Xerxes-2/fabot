@@ -686,12 +686,6 @@ type Tuning =
         /// (#419): a relief cast on sight lands some 280 ticks later, after
         /// the fight, so the second body has to be there already.
         RangerResidents: int
-        /// The ranger blocks a caster's bank must buy for a [[harassment
-        /// room]] (#432) where its declaration names none (`Harass.blocks`):
-        /// three outheal and outshoot the enemy's `3M1RA1H` escort and kill an
-        /// unarmed miner in about seventeen ticks. Which colony casts, never
-        /// what: the room's cast is its fight's (#656).
-        HarassBlocks: int
         /// How long a [[harassment room]] stays shut after a squad the ranger
         /// cannot beat was last seen there (#441).
         HarassClearTicks: int
@@ -1072,7 +1066,6 @@ module Tuning =
             DeliveryLifeMargin = 25
             RangerResidentBlocks = 7
             RangerResidents = 2
-            HarassBlocks = 3
             HarassClearTicks = 50
             // A harassment room's clear-gap: long enough that one border bounce costs one walk.
             RaidBounceTicks = 50

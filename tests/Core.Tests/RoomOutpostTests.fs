@@ -411,23 +411,6 @@ let outpostDeclarationTests =
                      |> List.map (fun (h, caster) -> h.RoomName, caster))
                     (List.take 3 reached)
                     "the tick W17S25's Claim lands it is ours, and no colony casts it: the rest are cast as before"
-
-                for h in Colony.harassDeclared do
-                    Expect.contains
-                        (List.map snd (load h.RoomName).RealSources)
-                        (RoomPos.pos h.Stand)
-                        $"{h.RoomName}: the Stand is the enemy's source tile"
-
-                    Expect.equal
-                        h.Stand.Room
-                        h.RoomName
-                        $"{h.RoomName}: the Stand is a tile of its own room"
-
-                    Expect.equal
-                        (Some h.Controller)
-                        ((load h.RoomName).RealController
-                         |> Option.map (fun (_, pos) -> RoomPos.at h.RoomName pos))
-                        $"{h.RoomName}: the Controller is the capture's controller tile"
             }
 
             test "each declaration names its own capture's furniture, id and tile alike" {

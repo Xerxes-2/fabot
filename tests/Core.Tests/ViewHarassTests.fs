@@ -21,10 +21,7 @@ let private harassDeclared: Harass list =
         {
             RoomName = harassRoom
             Enemy = enemy
-            Stand = RoomPos.at harassRoom { X = 5; Y = 5 }
-            Controller = RoomPos.at harassRoom { X = 40; Y = 40 }
             Via = []
-            Blocks = None
         }
     ]
 
@@ -323,7 +320,7 @@ let harassViewTests =
                         BlockCost = Bodies.rangerBlockCost
                     }
 
-                let floorBanks = Tuning.defaults.HarassBlocks * Bodies.rangerBlockCost
+                let floorBanks = Tuning.defaults.CasterFloor
 
                 for motherBank, childBank in [ 2400, 300; 2400, 2700; floorBanks - 1, 300 ] do
                     let world = harassWorldAt (reservedFor enemy) motherBank childBank
@@ -405,10 +402,7 @@ let harassViewTests =
                                 {
                                     RoomName = near
                                     Enemy = enemy
-                                    Stand = RoomPos.at near { X = 5; Y = 5 }
-                                    Controller = RoomPos.at near { X = 40; Y = 40 }
                                     Via = []
-                                    Blocks = None
                                 }
                             ]
                         BlockCost = Bodies.rangerBlockCost
@@ -726,10 +720,7 @@ let harassViewTests =
                         {
                             RoomName = "W9N9"
                             Enemy = enemy
-                            Stand = RoomPos.at "W9N9" { X = 5; Y = 5 }
-                            Controller = RoomPos.at "W9N9" { X = 40; Y = 40 }
                             Via = []
-                            Blocks = None
                         }
                     ]
 
@@ -807,17 +798,13 @@ let harassViewTests =
             }
         ]
 
-/// The harassment room declared at these ranger blocks (None: the default
-/// floor), as no colony of ours has ever seen it (#457).
-let private declaredAt (blocks: int option) : Harass list =
-    harassDeclared |> List.map (fun h -> { h with Blocks = blocks })
-
-/// The tick's casting of the room declared at these blocks, with the mother's
-/// bank at this capacity and the child's below every floor.
-let private declaredCasting blocks motherBank =
+/// The tick's casting of the room, as no colony of ours has ever seen it,
+/// with the mother's bank at this capacity and the child's below every
+/// floor.
+let private declaredCasting motherBank =
     let harass: Harassment =
         {
-            Rooms = declaredAt blocks
+            Rooms = harassDeclared
             BlockCost = Bodies.rangerBlockCost
         }
 
@@ -832,14 +819,16 @@ let private declaredCasting blocks motherBank =
 
     casting.Casters |> List.map (fun (h, caster) -> h.RoomName, caster)
 
-// The floor decides which colony casts, never what is cast (#656: the room's
-// cast is its fight's; the view carried the floor to the ranger row).
+// Moved by #658: the sweep's caster is floored at the Caster's floor alone;
+// what it casts is the fight's to price (each declaration named its own
+// ranger-block floor, #457, and one with none was refused short of three
+// blocks).
 [<Tests>]
 let harassDeclaredFloorTests =
     testList
-        "a harassment room is floored at the ranger blocks it is declared at"
+        "the sweep's caster is floored at the Caster's floor alone"
         [
-            test "a room declared at two blocks is cast by a 1,800 bank with no sighting of it" {
+            test "a room no colony of ours has seen is cast at 1,800 and refused a tick under it" {
                 Expect.isFalse
                     (Map.containsKey
                         harassRoom
@@ -847,28 +836,12 @@ let harassDeclaredFloorTests =
                     "the premise: the room was never seen"
 
                 Expect.equal
-                    (declaredCasting (Some 2) 1800)
-                    [ harassRoom, [ mother ] ]
-                    "the mother's 1,800 buys two blocks"
-
-                Expect.equal
-                    (declaredCasting (Some 2) 1700)
-                    [ harassRoom, [] ]
-                    "a 1,700 bank buys them too, short of the Caster's floor: nobody casts it"
-            }
-
-            // Moved by #658: the sweep's caster is floored at the Caster's
-            // floor alone; what it casts is the fight's to price (a room
-            // declared with no blocks was refused at 1,800, short of three
-            // ranger blocks).
-            test "a room declared with no blocks is cast at the Caster's floor" {
-                Expect.equal
-                    (declaredCasting None Tuning.defaults.CasterFloor)
+                    (declaredCasting Tuning.defaults.CasterFloor)
                     [ harassRoom, [ mother ] ]
                     "cast at 1,800"
 
                 Expect.equal
-                    (declaredCasting None (Tuning.defaults.CasterFloor - 1))
+                    (declaredCasting (Tuning.defaults.CasterFloor - 1))
                     [ harassRoom, [] ]
                     "and refused a tick under it"
             }

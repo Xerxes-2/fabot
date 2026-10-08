@@ -548,15 +548,10 @@ let private sweepTwoRemotes () : Arena =
     let west = room "W13S28"
 
     let candidate (r: ArenaRoom) : Harass =
-        let outpost = outpostOf r.Capture
-
         {
             RoomName = r.Capture.RoomName
             Enemy = "Trepidimous"
-            Stand = snd (List.head outpost.Sources)
-            Controller = snd outpost.Controller
             Via = []
-            Blocks = None
         }
 
     let worker id roomName (minerAt: int * int) (haulerAt: int * int) =

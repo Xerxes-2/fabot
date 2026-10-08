@@ -17,20 +17,14 @@ let private harassRoom = "W1N2"
 
 let private enemy = "Trepidimous"
 
-/// The enemy's source tile, the ranger's ground while nothing stands there.
+/// The enemy's source tile.
 let private standTile = { X = 20; Y = 10 }
-
-/// The room's controller tile, where the enemy's reserver stands.
-let private controllerTile = { X = 30; Y = 40 }
 
 let private declarationOf room =
     {
         RoomName = room
         Enemy = enemy
-        Stand = RoomPos.at room standTile
-        Controller = RoomPos.at room controllerTile
         Via = []
-        Blocks = None
     }
 
 let private declaration = declarationOf harassRoom
@@ -601,16 +595,20 @@ let harassGuardTests =
                     "one it loses alone: it lets the Guard go, unstruck on its seat"
             }
 
-            test "with nobody working the room, the ranger's ground is the Stand's seats" {
+            // Moved by #658: the Stand is gone; a quiet room is the sweep's
+            // only while out of sight, and walked into (it was the Stand's
+            // seats beside the enemy's source).
+            test "with nobody working the room, it has no ground of its own and is walked into" {
                 let quiet = bareHome |> harassing
 
                 let ground (colony: ColonyView) =
                     Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) harassRoom
 
-                Expect.equal
-                    (ground quiet)
-                    (Some(within 1 standTile Set.empty))
-                    "an empty room: beside the enemy's source, within reach of whatever works it"
+                Expect.isNone (ground quiet) "an empty room: no ground of its own"
+
+                Expect.isTrue
+                    (Threats.briefOf (threatsOf quiet (Atlas.ofView quiet)) harassRoom).WalksIn
+                    "its holder walks in off the border"
 
                 // A claimer walking to the controller, five tiles short of it.
                 // Moved by #656: an economy body working the room is its
@@ -845,36 +843,6 @@ let harassContainerTests =
                     |> List.filter (fun task -> (taskId task).EndsWith $":{id}")
 
                 Expect.equal naming [ Dismantle id ] "no Withdraw, Refill or Repair of it"
-            }
-        ]
-
-[<Tests>]
-let minedHarassTests =
-    testList
-        "a harassment room we mine keeps its source's seats for our miners"
-        [
-            test "the ranger stands within reach of the source, never on a seat beside it" {
-                // W17S26, 2026-10-04: its one seat was the ranger's ground, and the
-                // Guard outranked the anchor walking to its Post there.
-                let quiet = bareHome |> harassing
-
-                let ground (colony: ColonyView) =
-                    Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) harassRoom
-
-                let seats = within 1 standTile Set.empty
-
-                Expect.equal
-                    (ground
-                        { quiet with
-                            MinedRooms = Set.singleton harassRoom
-                        })
-                    (Some(Set.difference (within Engine.rangedRange standTile Set.empty) seats))
-                    "within three of the source, less the seats"
-
-                Expect.equal
-                    (ground quiet)
-                    (Some seats)
-                    "a room nobody of ours mines: the seats, as before"
             }
         ]
 
