@@ -11,11 +11,13 @@ open Fabot.Core.Types
 /// a Reach to their work (#472), and Flee's beside a fighter's (#533). Not a
 /// Fighter, whose work is the fight, nor a Work-heavy body standing where it
 /// digs (the answer for its Post is a rampart); one walking anywhere runs like
-/// any other body (#515).
+/// any other body (#515). Work-heavy by its standing parts, not the row it was
+/// cast for: an Anchor shot to Work ≤ Move has nothing left to dig with worth
+/// dying for, so it runs, still counted in its row (#664).
 let internal runsFromThreats (view: ColonyView) atlas (creep: CreepInfo) =
     not (isFighterBody creep)
     && not (
-        Atlas.workHeavy atlas creep.Name
+        partCount creep.Body Work > partCount creep.Body Move
         && Atlas.standsWhereItDigs atlas (view.Sources |> List.map (fun s -> s.Id)) creep.Name
     )
 

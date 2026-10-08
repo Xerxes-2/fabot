@@ -7,30 +7,10 @@ module Fabot.Core.Decide.Spawns
 open Fabot.Core
 open Fabot.Core.Types
 
-/// The reserver row's living census: a CLAIM part, the one part no other row
-/// buys. `patternOfParts`' reserver arm is this same test, asked before the
-/// comparative tests: `[Claim; Carry; Move]` has no Work beside a Carry, so a
-/// cascade that reached the hauler arm first would read a reserver as a hauler.
-let private isReserverBody (creep: CreepInfo) = partCount creep.Body BodyPart.Claim > 0
-
-/// The hauler row's census: Carry parts and no Work.
-let private isHaulerBody (creep: CreepInfo) =
-    not (isNamedFor courierPattern creep.Name)
-    && partCount creep.Body Work = 0
-    && partCount creep.Body Carry > 0
-
 /// Whether a body still in the oven is Work-heavy — `Work > Move`, the reading
-/// a living creep gets from `Atlas.workHeavy`, which a body with no name yet
-/// cannot be looked up in.
+/// a living creep with no row's name gets from `Atlas.workHeavy`.
 let private castIsHeavy parts =
     partCount parts Work > partCount parts Move
-
-/// The pattern row a living body was cast from: its name's, for the rows read
-/// back that way (`patternByName`), and its parts' for every other.
-let private patternOf (tuning: Tuning) atlas (creep: CreepInfo) =
-    patternByName creep.Name
-    |> Option.defaultWith (fun () ->
-        patternOfParts tuning (Atlas.workHeavy atlas creep.Name) creep.Body)
 
 /// The row a body **still in the oven** was bought for: the same rule over the
 /// same name and counts. Preserving the name also prevents a 1,500-capacity
@@ -141,7 +121,7 @@ let private castBodyOf
 /// Geometry that prices nothing leads nobody, and a lead of 0 leaves every
 /// living creep counted.
 let private leadOf (view: ColonyView) atlas (sizing: RowSizing) (creep: CreepInfo) : int =
-    let pattern = patternOf view.Tuning atlas creep
+    let pattern = patternOf view.Tuning creep
 
     match Atlas.creepTile atlas creep.Name with
     | None -> 0
@@ -176,7 +156,7 @@ let private errandOverlap (view: ColonyView) atlas (creep: CreepInfo) =
 /// leaves one handover window early, which with `Reclaim`'s matching capacity
 /// lets both bodies stand at the remote seat for that window.
 let internal expiring (view: ColonyView) atlas (sizing: RowSizing) (creep: CreepInfo) =
-    if patternOf view.Tuning atlas creep = courierPattern then
+    if patternOf view.Tuning creep = courierPattern then
         // A courier is economically spent after one delivery slot even though
         // the shorter W15S28 route leaves physical life behind (#319): counting
         // the remainder would make the next load depend on a second Source
@@ -187,17 +167,17 @@ let internal expiring (view: ColonyView) atlas (sizing: RowSizing) (creep: Creep
         <= leadOf view atlas sizing creep + errandOverlap view atlas creep
 
 /// One specialist row of the spawn cascade, stated once: the name the `quotas`
-/// view files it under, the pattern it casts, how many bodies it wants, which
-/// living bodies answer to it, and what each seat of its gap returns on its
-/// cost (`Returns gap standing`, one a seat, None for a seat the fight casts
-/// ahead of every price). The gap, the report and the seats are each one pass
-/// over the list of these, so the three cannot drift apart.
+/// view files it under, the pattern it casts (and so the living bodies that
+/// answer to it, the ones cast for it: `patternOf`, #664), how many bodies it
+/// wants, and what each seat of its gap returns on its cost (`Returns gap
+/// standing`, one a seat, None for a seat the fight casts ahead of every
+/// price). The gap, the report and the seats are each one pass over the list
+/// of these, so the three cannot drift apart.
 type private SpecialistRow =
     {
         Name: string
         Pattern: BodyPattern
         Quota: int
-        Census: CreepInfo -> bool
         Returns: int -> int -> float option list
     }
 
@@ -209,6 +189,25 @@ let heldForDefender (pattern: BodyPattern) =
     not (isOwnRowPattern pattern)
     && pattern.Name <> guardPattern.Name
     && pattern.Name <> rangerPattern.Name
+
+/// What the Posts dig a tick: each manned one what its holder's standing Work
+/// takes of its rock's rate, a vacant one nothing. The parts that stand and
+/// not the row the holder was cast for (#664): a shot Anchor holds its Post
+/// at what it still delivers, and an Anchor cast under the rock's ceiling
+/// digs its own Work's worth.
+let postsDug (rateIn: string -> int) (posts: RoomPos list) (holders: CreepInfo list) atlas =
+    let standingWork =
+        holders
+        |> List.choose (fun creep ->
+            Atlas.creepTile atlas creep.Name
+            |> Option.map (fun tile -> tile, partCount creep.Body Work))
+        |> Map.ofList
+
+    posts
+    |> List.sumBy (fun tile ->
+        match Map.tryFind tile standingWork with
+        | Some work -> min (rateIn tile.Room) (work * Engine.harvestPerWork)
+        | None -> 0)
 
 /// The Anchors stranded off the projection (#506), out of the row's count:
 /// one on no Post that does not live to walk to a vacant one — the Pool's
@@ -311,7 +310,7 @@ let internal planSpawns
             let courierStands =
                 view.Creeps
                 |> List.exists (fun creep ->
-                    patternOf view.Tuning atlas creep = courierPattern
+                    patternOf view.Tuning creep = courierPattern
                     && not (expiring view atlas sizing creep))
                 || view.Casting
                    |> List.exists (fun cast -> patternOfCast view.Tuning cast = courierPattern)
@@ -328,14 +327,13 @@ let internal planSpawns
         // Read here: `rows` is the specialist table by the seats below.
         let upgraderFloored = rows.UpgraderFloored
 
-        // The miner row's cut: Work-heavy and no Carry, subtracted from the
-        // Anchor row's census because the Carry part is the whole of the
-        // difference between the two.
-        let isMinerBody (creep: CreepInfo) =
-            Atlas.workHeavy atlas creep.Name && partCount creep.Body Carry = 0
+        // Each row's census: the bodies it cast, by the row they were cast
+        // for (`patternOf`) and never the parts damage left standing (#664),
+        // so a shot Anchor still holds its Post and no duplicate is bought.
+        let castBy (pattern: BodyPattern) (creep: CreepInfo) = patternOf view.Tuning creep = pattern
 
-        let isAnchorBody (creep: CreepInfo) =
-            Atlas.workHeavy atlas creep.Name && not (isMinerBody creep)
+        let isMinerBody = castBy minerPattern
+        let isAnchorBody = castBy anchorPattern
 
         // An expiring creep is already outside the count, so its successor is
         // cast while it still works.
@@ -503,13 +501,11 @@ let internal planSpawns
         let haulerReturn =
             lazy
                 (let dug =
-                    sizing.AnchorPostCaps
-                    |> Map.toList
-                    |> List.sumBy (fun (tile, _) ->
-                        if Map.containsKey tile vacantPosts then
-                            0
-                        else
-                            rateIn tile.Room)
+                    postsDug
+                        rateIn
+                        (sizing.AnchorPostCaps |> Map.toList |> List.map fst)
+                        unexpiredGarrison
+                        atlas
 
                  returnOn
                      haulerPattern
@@ -603,7 +599,6 @@ let internal planSpawns
                     Name = pattern.Name
                     Pattern = pattern
                     Quota = Map.find role rows.Squad
-                    Census = fun creep -> squadRoleByName creep.Name = Some role
                     Returns = fightRow
                 })
 
@@ -618,15 +613,14 @@ let internal planSpawns
                     Name = "defender"
                     Pattern = defenderPattern
                     Quota = rows.Defender
-                    Census = fun creep -> isNamedFor defenderPattern creep.Name
                     Returns = fightRow
                 }
                 // Counted over the fleet against a quota derived per room,
                 // like the reserver row: which room each finished body works
-                // is the Matcher's. A guard that outlived its raid is still an
-                // ATTACK body, so the next raid inside its life reads a filled
-                // row. A raid's seat is the fight's; a trespass's kill is
-                // priced by what it lands (`fighterRow`).
+                // is the Matcher's. A guard that outlived its raid is still a
+                // guard, so the next raid inside its life reads a filled row.
+                // A raid's seat is the fight's; a trespass's kill is priced by
+                // what it lands (`fighterRow`).
                 {
                     Name = "guard"
                     Pattern = guardPattern
@@ -634,7 +628,6 @@ let internal planSpawns
                     // Priced at capacity like every row but the floor, so a
                     // bank that cannot hold 750 casts nothing here and yields
                     // to the next seat.
-                    Census = isGuardRowBody
                     Returns = fighterRow (CastRow.Fighter BodyTemplate.Melee)
                 }
                 // The errand room's ranged guard (#411), behind the melee one
@@ -643,19 +636,16 @@ let internal planSpawns
                     Name = "ranger"
                     Pattern = rangerPattern
                     Quota = rows.Ranger
-                    Census = isRangerRowBody
                     Returns = fighterRow (CastRow.Fighter BodyTemplate.Ranged)
                 }
                 // A pooled Assault's squad (#490), its roles in the order they
                 // cast: the sappers the medic walks behind, then the medic.
-                // Each row's census is its casts, by name.
                 yield! squadRows
                 {
                     Name = "reserver"
                     Pattern = reserverPattern
                     Quota = List.length rows.Reserver
                     // Sized at the largest outstanding demand, `rowSizing`.
-                    Census = isReserverBody
                     Returns = reserverReturns
                 }
                 {
@@ -664,14 +654,12 @@ let internal planSpawns
                     Quota = rows.Anchor
                     // Sized under the dearest vacancy's ceiling,
                     // `rowSizing`'s `AnchorCap`.
-                    Census = isAnchorBody
                     Returns = anchorReturns
                 }
                 {
                     Name = "hauler"
                     Pattern = haulerPattern
                     Quota = rows.Hauler
-                    Census = isHaulerBody
                     Returns = priced haulerReturn
                 }
                 // The season's score rides on this row: a miner returns what
@@ -681,7 +669,6 @@ let internal planSpawns
                     Name = "miner"
                     Pattern = minerPattern
                     Quota = rows.Miner
-                    Census = isMinerBody
                     Returns = scoreRow
                 }
                 // The courier carries the score (#319); `expiring` turns its
@@ -690,7 +677,6 @@ let internal planSpawns
                     Name = "courier"
                     Pattern = courierPattern
                     Quota = rows.Courier
-                    Census = fun creep -> patternOf view.Tuning atlas creep = courierPattern
                     Returns = scoreRow
                 }
                 // One body bought once: what it saves is CPU every tick the
@@ -699,19 +685,14 @@ let internal planSpawns
                     Name = "dismantler"
                     Pattern = dismantlerPattern
                     Quota = rows.Dismantler
-                    Census = fun creep -> patternOf view.Tuning atlas creep = dismantlerPattern
                     Returns = scoreRow
                 }
-                // Bodies and not names: `patternOf` rather than
-                // `isStandingBody` alone is what keeps the Anchor row out of
-                // it, since `6W/1C/1M` answers to both descriptions and the
-                // anchor arm claims it. A surplus mouth, cast after the
-                // workers below, never by a return.
+                // A surplus mouth, cast after the workers below, never by a
+                // return.
                 {
                     Name = "upgrader"
                     Pattern = upgraderPattern
                     Quota = rows.Upgrader
-                    Census = fun creep -> patternOf view.Tuning atlas creep = upgraderPattern
                     Returns = mouthRow
                 }
             ]
@@ -722,7 +703,7 @@ let internal planSpawns
         let filled =
             rows
             |> List.map (fun row ->
-                let alive = living |> List.filter row.Census |> List.length
+                let alive = living |> List.filter (castBy row.Pattern) |> List.length
                 let inOven = castOf row.Pattern
                 row, alive, inOven, row.Quota - alive - inOven |> max 0)
 

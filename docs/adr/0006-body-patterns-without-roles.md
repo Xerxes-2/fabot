@@ -1,6 +1,8 @@
 # Body patterns are colony facts; creeps still have no role
 
-> **Status:** amended by 0016, 0021, 0050, 0057, 0078, #515
+> **Status:** amended by 0016, 0021, 0050, 0057, 0078, #515, #664
+
+> **Amended by #664**: "the row is read back off the parts alone" becomes "off the name the cascade cast it under": every row is read off `{row}-{tick}-{spawn}` (`patternByName`), and its parts only for a body with no row's name (`patternOfParts`), because damage strips parts head-first and a body counts in the row it was cast for its whole life. What a counted body still delivers is read off its standing parts. The no-role axiom stands: the row says what a body was made of, never what it is assigned.
 
 > **Amended by #515**: "its single Move is the one-time price of walking to the seat" holds for a home Post only. An Anchor cast for an outpost's Post carries one Move per two Work (`anchorBodyFor`), because its one-time walk crosses rooms a raid crosses, and at a tile per six or seven ticks three Anchors died on it in one afternoon. A cast is legged when any vacant Post it may take is an outpost's (the finished body still chooses its Post by travel cost). Still Work-heavy (Work > Move), so the census and every heavy gate read it as before.
 

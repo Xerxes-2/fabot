@@ -178,7 +178,7 @@ The heavy-WORK [[body pattern]] cast for a [[post]]: Work up to the saturation o
 The repeating [Carry; Carry; Move] block hauler bodies are built from, at road parity, living in the [[withdraw]]→[[refill]] cycle. Its quota is the colony's whole haul — each source [[container]]'s round trip to the colony's sinks times its output over carry capacity — rounded up once, with each Thorium mine's haul rounded apart to a body of its own, and one body more while the **haul overflow** holds: the fill of the fullest source container whose haul prices a trip, the energy piled at its Seats counted in, smoothed over decided ticks, latched at 75% and dropped under 40% — never without a home [[storage]] with room for a load, never over a flow of zero (#508). Not the worker row's backlog term, which is construction. ADR-0012, ADR-0029, ADR-0030, ADR-0042, ADR-0049.
 
 ### Work-heavy body
-A living body with strictly more Work parts than Move — a predicate over the parts, never a row name. Its intake is digging from its [[post]], and it walks to nothing else. ADR-0003, ADR-0006, ADR-0016, ADR-0020, ADR-0024, ADR-0033, ADR-0048.
+A living body cast with strictly more Work parts than Move — the [[anchor]] and the [[miner]], read off the row its name says it was cast for and fixed for its life whatever damage strips (#664); a body with no row's name, off its standing parts. Its intake is digging from its [[post]], and it walks to nothing else. ADR-0003, ADR-0006, ADR-0016, ADR-0020, ADR-0024, ADR-0033, ADR-0048.
 
 ### Standing body
 A living body carrying fewer than one Carry part per four Work (`Carry × 4 < Work`): [[build]], [[repair]] and [[refill]] are inapplicable to it, and it fetches from the [[buffer]] alone. ADR-0006, ADR-0046.

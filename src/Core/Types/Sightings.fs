@@ -666,6 +666,61 @@ module CreepInfo =
     let carriesMineral (creep: CreepInfo) : bool =
         creep.Thorium > 0 || mineralsAboard creep > 0
 
+/// The names of the rows the spawn cascade casts, which it names every body
+/// by (`{row}-{tick}-{spawn}`): `Bodies`' patterns are named from these, and a
+/// reader before them (the Atlas's heavy set) reads a body's row off its name.
+[<RequireQualifiedAccess>]
+module RowName =
+    let worker = "worker"
+    let anchor = "anchor"
+    let hauler = "hauler"
+    let courier = "courier"
+    let reserver = "reserver"
+    let upgrader = "upgrader"
+    let guard = "guard"
+    let ranger = "ranger"
+    let defender = "defender"
+    let sapper = "sapper"
+    let probe = "probe"
+    let medic = "medic"
+    let miner = "miner"
+    let dismantler = "dismantler"
+
+    let private all =
+        [
+            worker
+            anchor
+            hauler
+            courier
+            reserver
+            upgrader
+            guard
+            ranger
+            defender
+            sapper
+            probe
+            medic
+            miner
+            dismantler
+        ]
+
+    /// Whether a name says its body was cast by this row.
+    let names (row: string) (name: string) = name.StartsWith(row + "-")
+
+    /// The row a body was cast for, off its name: fixed at the cast for its
+    /// whole life, whatever damage does to its standing parts (#664). None
+    /// for a name the cascade did not give.
+    let ofName (name: string) : string option =
+        all |> List.tryFind (fun row -> names row name)
+
+    /// Whether a body was cast heavy-Work (Work > Move): its name's row is the
+    /// anchor's or the miner's, the two rows that cast one; a body with no
+    /// row's name answers off its standing parts.
+    let castHeavy (creep: CreepInfo) : bool =
+        match ofName creep.Name with
+        | Some row -> row = anchor || row = miner
+        | None -> partCount creep.Body Work > partCount creep.Body Move
+
 /// A creep already paid for and still in a spawn's oven. Its generated name is
 /// retained because two rows may buy the same part counts (#319).
 type CastingInfo = { Name: string; Body: BodyPart list }

@@ -1,6 +1,8 @@
 # Heavy-Work bodies do not Withdraw: the first comparative applicability gate
 
-> **Status:** amended by 0048, #216 R5, #234
+> **Status:** amended by 0048, #216 R5, #234, #664
+
+> **Amended by #664** on which parts the comparative gate reads: the body as it was **cast**, not the parts damage left standing. The cascade names every body for its row (`{row}-{tick}-{spawn}`) and the [[anchor]] and the [[miner]] are the two rows that cast `Work > Move`, so the heavy set reads the row off the name (`RowName.castHeavy`), and a body with no row's name off its standing parts. Live t1042216 an Anchor shot to Work ≤ Move fell out of the gate, its Post read vacant and a second Anchor was cast for the seat the healed first one took back. Still what the creep is made of and never a Task it is bound to: the no-role axiom stands.
 
 > **Amended by #234** on the #216 R5 banner below, and in the direction that banner's own reason points: with every site in the [[home room]] a rung over the Upgrade beside it (ADR 0010's banner) there is no Build left at home that travel cost still thins, so the Work-heavy body's shut Build stopped asking the pooled Task's `Priority` and shuts unconditionally. What the condition was still covering is an ordinary site past the [[seam]], and that trip is refused outright anyway — a heavy body's work is its [[post]] and never a delivery (ADR 0020, ADR 0048), however short — so the gate reads the body alone rather than carrying a clause for it. #205's exception is untouched: a [[container]] site under the body's own feet is built where it stands, there being no walk to refuse. So is the comparative Withdraw gate this ADR decided. What it costs is the heavy body that stood *near* an ordinary site and used to raise it out of a short walk.
 

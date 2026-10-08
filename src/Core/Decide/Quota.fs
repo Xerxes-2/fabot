@@ -986,7 +986,7 @@ let internal upgraderWorkCeiling (sizing: RowSizing) =
 /// bound below `Engine.controllerMaxLevel`; at it, the engine's
 /// `maxUpgradePerTick` less the live Work of every other body holding the
 /// controller's Upgrade, since Work past the cap upgrades nothing.
-let internal upgraderWorkOf (view: ColonyView) atlas (held: HeldTaskFacts) : int option =
+let internal upgraderWorkOf (view: ColonyView) (held: HeldTaskFacts) : int option =
     match view.Controller with
     | Some controller when controller.Level >= Engine.controllerMaxLevel ->
         let holders =
@@ -996,8 +996,7 @@ let internal upgraderWorkOf (view: ColonyView) atlas (held: HeldTaskFacts) : int
             view.Creeps
             |> List.filter (fun creep ->
                 Set.contains creep.Name holders
-                && patternOfParts view.Tuning (Atlas.workHeavy atlas creep.Name) creep.Body
-                   <> upgraderPattern)
+                && patternOf view.Tuning creep <> upgraderPattern)
             |> List.sumBy (fun creep -> partCount creep.Body Work)
 
         Some(Engine.maxUpgradePerTick - others |> max 0)
@@ -1014,7 +1013,7 @@ let internal rowSizingOf
     let reserved, others = reserverClaimsOf view threats outposts
 
     {
-        UpgraderWork = upgraderWorkOf view atlas held
+        UpgraderWork = upgraderWorkOf view held
         AnchorPostCaps = postWorkCapsOf view atlas outposts.ReservableRooms
         ReserverClaims = reserved @ others
         ReservedRooms = List.length reserved

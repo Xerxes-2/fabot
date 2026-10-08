@@ -750,6 +750,36 @@ let private walkOf name (start: Pos) ticks (colonyAt: Pos -> ColonyView) =
         | [ MoveCreep(_, direction) ] -> stepFrom at direction
         | _ -> at)
 
+/// The border home with its spawn taken out and one body on the bare Seat
+/// (1,34) of a rock at (1,33), every Seat of it and the ground off them in
+/// the spilled Reach of an archer across the west border.
+let private seatUnderArcher (creep: CreepInfo) =
+    let border =
+        borderHome
+            true
+            []
+            [
+                { meleeWestAt { X = 48; Y = 34 } with
+                    Body = [ RangedAttack; Move ]
+                }
+            ]
+            [ creep, { X = 1; Y = 34 } ]
+
+    { border with
+        Sources = [ source "src-x" ]
+        Spatial =
+            { border.Spatial with
+                TargetKinds = border.Spatial.TargetKinds |> Map.remove "spawn-1"
+            }
+            |> withHome (fun layer ->
+                { layer with
+                    Terrain = layer.Terrain |> TerrainGrid.add { X = 1; Y = 33 } Wall
+                    TargetPositions = layer.TargetPositions |> Map.remove "spawn-1"
+                    Obstacles = Set.empty
+                })
+    }
+    |> withTarget "src-x" { X = 1; Y = 33 } Source
+
 [<Tests>]
 let acrossTheBorderTests =
     testList
@@ -1370,33 +1400,7 @@ let acrossTheBorderTests =
                 // would leave it there: with the spawn taken out its rock's
                 // Seats are the room's whole idle ground, and every tile off
                 // them is hot.
-                let border =
-                    borderHome
-                        true
-                        []
-                        [
-                            { meleeWestAt { X = 48; Y = 34 } with
-                                Body = [ RangedAttack; Move ]
-                            }
-                        ]
-                        [ anchor "a-1" 0 50, { X = 1; Y = 34 } ]
-
-                let colony =
-                    { border with
-                        Sources = [ source "src-x" ]
-                        Spatial =
-                            { border.Spatial with
-                                TargetKinds = border.Spatial.TargetKinds |> Map.remove "spawn-1"
-                            }
-                            |> withHome (fun layer ->
-                                { layer with
-                                    Terrain =
-                                        layer.Terrain |> TerrainGrid.add { X = 1; Y = 33 } Wall
-                                    TargetPositions = layer.TargetPositions |> Map.remove "spawn-1"
-                                    Obstacles = Set.empty
-                                })
-                    }
-                    |> withTarget "src-x" { X = 1; Y = 33 } Source
+                let colony = seatUnderArcher (anchor "a-1" 0 50)
 
                 Expect.isTrue
                     ([ 1, 34; 1, 35; 2, 33; 2, 34; 2, 35; 3, 33; 3, 34; 3, 35 ]
@@ -1418,6 +1422,32 @@ let acrossTheBorderTests =
                          | _ -> false)
                      && not (List.isEmpty step))
                     $"it steps inward: {step}"
+            }
+
+            test
+                "an Anchor shot to Work ≤ Move where it digs in the Reach flees, still its row's (#664)" {
+                // The row it counts in is the one it was cast for, but what
+                // runs is read off what still stands: one Work beside its
+                // Move has nothing left worth dying on the Seat for (live
+                // t1042216, the Anchor that fled, was healed and came back).
+                let crippled =
+                    { anchor "anchor-1-Spawn1" 0 50 with
+                        Body = Map.ofList [ Work, 1; Carry, 1; Move, 1 ]
+                    }
+
+                let decision = decideOn (seatUnderArcher crippled)
+
+                Expect.equal
+                    (Map.tryFind crippled.Name decision.Assignments)
+                    (Some(taskId Flee))
+                    "it takes Flee off the Seat it digs from"
+
+                Expect.equal
+                    (decision.Quotas.Rows
+                     |> List.tryFind (fun row -> row.Row = "anchor")
+                     |> Option.map _.Living)
+                    (Some 1)
+                    "and still counts in the anchor row"
             }
 
             test

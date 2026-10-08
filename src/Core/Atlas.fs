@@ -181,9 +181,10 @@ type Atlas =
             /// Each chaser's track this tick (`Resolver.chainOf`): where its
             /// chase assumed its quarry stands each tick after this one.
             Tracks: System.Collections.Generic.Dictionary<string, RoomPos list>
-            /// The creeps whose bodies carry more Work parts than Move, read from the
-            /// body and never a name. Three readers ask it, so the arithmetic lives
-            /// here once.
+            /// The creeps whose bodies were cast with more Work parts than Move
+            /// (`RowName.castHeavy`): the row they were cast for, never the parts
+            /// damage left standing, so a shot Anchor still holds its Post (#664).
+            /// Three readers ask it, so the arithmetic lives here once.
             Heavy: Set<string>
             /// Memoised controller-container census, built at most once per tick: the
             /// gate asks per creep and per candidate, and the answer is a colony
@@ -688,7 +689,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         Tracks = System.Collections.Generic.Dictionary()
         Heavy =
             creeps
-            |> List.filter (fun creep -> partCount creep.Body Work > partCount creep.Body Move)
+            |> List.filter RowName.castHeavy
             |> List.map (fun creep -> creep.Name)
             |> Set.ofList
         Buffers = None
@@ -756,8 +757,7 @@ let private creepAt (atlas: Atlas) (creep: string) : (string * Pos) option =
 /// the signature calls equal have to lay the same grid.
 let stepWeights (atlas: Atlas) (room: string) : int[] = Array.copy (weightsOf atlas room)
 
-/// Whether a creep's body was cast from a heavy-Work row: more Work parts than
-/// Move.
+/// Whether a creep's body was cast from a heavy-Work row.
 let workHeavy (atlas: Atlas) (creep: string) : bool = Set.contains creep atlas.Heavy
 
 /// A creep's fatigue factor; a creep the view does not carry prices
@@ -1819,10 +1819,10 @@ let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<RoomP
                 | _ -> workArea atlas task)
     // A deposit narrows to nothing for a light body either (#261): its bare
     // Seats are exactly the tiles a dig drops the Thorium on the ground from.
-    // The body this reaches is real: a `[16 Work; 4 Move]` miner loses Work
-    // parts head-first to damage, and at `[3 Work; 4 Move]` it is no longer
-    // `workHeavy`, still answers the Emitter's mineral arm, and would be
-    // steered deliberately off the container it was standing on.
+    // The body this reaches is a light one the Emitter's mineral arm still
+    // answers — a miner with no row's name, shot below `Work > Move` (a named
+    // one stays `workHeavy`, #664) — which would be steered deliberately off
+    // the container it was standing on.
     | Harvest rockId when isMineral atlas rockId -> Set.empty
     // A Post's Seat is the garrison's: a light body's Harvest Work Area is the
     // source's Seats less its Posts — the complement of the heavy arm above, so

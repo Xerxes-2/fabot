@@ -694,6 +694,163 @@ let dismantlerCensusTests =
             }
         ]
 
+/// A body shot down to `standing` of the `cast` parts it was cast with: the
+/// engine keeps a destroyed part in the array at zero hits, so the hits left
+/// are the standing parts'.
+let private shot name (cast: BodyPart list) (standing: BodyPart list) =
+    { creepWith name 0 50 standing with
+        Hits =
+            {
+                Hits = Engine.partHits * List.length standing
+                HitsMax = Engine.partHits * List.length cast
+            }
+    }
+
+[<Tests>]
+let castRowCensusTests =
+    testList
+        "the row a body counts in is the one it was cast for (#664)"
+        [
+            test
+                "an Anchor shot to Work ≤ Move still holds its row and its Post, and no Anchor is cast" {
+                // Live t1042216: anchor-1042000-Spawn1 (6W/1C/1M) was shot to
+                // one Work beside its Move; read off its standing parts it was
+                // no Anchor, its Post read vacant, and a second Anchor was
+                // cast for a seat the healed first one took back.
+                let cast = [ Work; Work; Work; Work; Work; Work; Carry; Move ]
+                let crippled = shot "anchor-1042000-Spawn1" cast [ Work; Carry; Move ]
+
+                let colony =
+                    { richIncomeColony with
+                        Creeps =
+                            [
+                                creepWith "anchor-1041000-Spawn2" 0 50 cast
+                                crippled
+                                hauler "hauler-1041000-Spawn3" 0 100
+                            ]
+                            @ [ for i in 1..4 -> worker $"worker-104100{i}-Spawn4" 0 50 ]
+                        Spatial =
+                            richIncomeColony.Spatial
+                            |> withCreepsAt
+                                [
+                                    "anchor-1041000-Spawn2", { X = 11; Y = 10 }
+                                    crippled.Name, { X = 29; Y = 10 }
+                                ]
+                    }
+
+                let decision = decideOn colony
+
+                Expect.isEmpty
+                    (anchorCastsBy colony)
+                    "no Anchor is cast for a Post its Anchor holds"
+
+                Expect.equal
+                    (decision.Quotas.Rows
+                     |> List.tryFind (fun row -> row.Row = "anchor")
+                     |> Option.map _.Living)
+                    (Some 2)
+                    "the shot Anchor counts in its row"
+
+                Expect.equal
+                    (Map.tryFind crippled.Name decision.Assignments)
+                    (Some(taskId (Harvest "src-b")))
+                    "and keeps digging at its Post with what still stands"
+            }
+
+            test "an Anchor shot to no Work at all still counts in the anchor row" {
+                // It holds its Post too: its relief waits on a recycle (#665).
+                let rows = livingByName [ "anchor-1042000-Spawn1", [ Move ] ]
+
+                Expect.equal (Map.tryFind "anchor" rows) (Some 1) "the anchor row's"
+                Expect.equal (Map.tryFind "worker" rows) (Some 0) "and not the generalist's"
+            }
+
+            test "an upgrader cast at four Work or fewer counts in the upgrader row" {
+                // `3W/1C/3M` is no standing body by its parts (1 × 4 ≥ 3), so
+                // read off them it was the generalist's; it was cast as an
+                // upgrader and counts as one.
+                let rows =
+                    livingByName
+                        [ "upgrader-1-Spawn1", [ Work; Work; Work; Carry; Move; Move; Move ] ]
+
+                Expect.equal (Map.tryFind "upgrader" rows) (Some 1) "the upgrader row's"
+                Expect.equal (Map.tryFind "worker" rows) (Some 0) "and not the generalist's"
+            }
+
+            test "a manned Post digs what its holder's standing Work takes of its rock" {
+                // The hauler row's return is priced off this: a whole 6W
+                // Anchor digs the held rock's ten, a 2W one its own four, one
+                // shot to a single Work two, and a vacant Post nothing.
+                let dugWith (holders: (string * BodyPart list * Pos) list) =
+                    let colony =
+                        { richIncomeColony with
+                            Creeps =
+                                holders
+                                |> List.map (fun (name, body, _) -> creepWith name 0 50 body)
+                            Spatial =
+                                richIncomeColony.Spatial
+                                |> withCreepsAt (
+                                    holders |> List.map (fun (name, _, at) -> name, at)
+                                )
+                        }
+
+                    let home = SpatialInfo.homeName colony.Spatial
+
+                    Spawns.postsDug
+                        (fun _ -> Engine.heldOutputPerTick)
+                        [ RoomPos.at home { X = 11; Y = 10 }; RoomPos.at home { X = 29; Y = 10 } ]
+                        colony.Creeps
+                        (Atlas.ofView colony)
+
+                let whole = List.replicate 6 Work @ [ Carry; Move ]
+
+                Expect.equal
+                    (dugWith
+                        [
+                            "anchor-1-Spawn1", whole, { X = 11; Y = 10 }
+                            "anchor-2-Spawn1", [ Work; Work; Carry; Move ], { X = 29; Y = 10 }
+                        ])
+                    14
+                    "ten off the whole Anchor's rock and four off the undersized one's"
+
+                Expect.equal
+                    (dugWith
+                        [
+                            "anchor-1-Spawn1", whole, { X = 11; Y = 10 }
+                            "anchor-2-Spawn1", [ Work; Carry; Move ], { X = 29; Y = 10 }
+                        ])
+                    12
+                    "two off the shot one's"
+
+                Expect.equal
+                    (dugWith [ "anchor-1-Spawn1", whole, { X = 11; Y = 10 } ])
+                    10
+                    "and nothing off a vacant Post"
+            }
+
+            test "a guard stripped of its ATTACK still counts in the guard row" {
+                // Damage takes the head first: TOUGH, every MOVE, then ATTACK.
+                let rows = livingByName [ "guard-972528-Spawn11", [ Heal ] ]
+
+                Expect.equal (Map.tryFind "guard" rows) (Some 1) "the guard row's"
+                Expect.equal (Map.tryFind "worker" rows) (Some 0) "and not the generalist's"
+            }
+
+            test "a reserver stripped of its CLAIM still counts in the reserver row" {
+                let rows = livingByName [ "reserver-985957-Spawn11", [ Move ] ]
+
+                Expect.equal (Map.tryFind "reserver" rows) (Some 1) "the reserver row's"
+                Expect.equal (Map.tryFind "worker" rows) (Some 0) "and not the generalist's"
+            }
+
+            test "a body with no row's name is still read off its parts" {
+                let rows = livingByName [ "c1", [ BodyPart.Claim; Move ]; "c2", [ Move ] ]
+
+                Expect.equal (Map.tryFind "reserver" rows) (Some 1) "the CLAIM body is a reserver"
+                Expect.equal (Map.tryFind "worker" rows) (Some 1) "the bare one a generalist"
+            }
+        ]
+
 [<Tests>]
 let squadRoleBodyTests =
     testList

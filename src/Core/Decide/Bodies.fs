@@ -21,7 +21,7 @@ let internal carryCapacityOf body =
 /// The generalist pattern: 200 energy, full speed empty, half speed loaded.
 let workerPattern =
     {
-        Name = "worker"
+        Name = RowName.worker
         Block = [ Work; Carry; Move ]
     }
 
@@ -30,7 +30,7 @@ let workerPattern =
 /// worker body) beside the Carry and Move that pay the walk to the seat.
 let anchorPattern =
     {
-        Name = "anchor"
+        Name = RowName.anchor
         Block = [ Work; Work; Carry; Move ]
     }
 
@@ -39,7 +39,7 @@ let anchorPattern =
 /// it lives in the Withdraw->Refill cycle.
 let haulerPattern =
     {
-        Name = "hauler"
+        Name = RowName.hauler
         Block = [ Carry; Carry; Move ]
     }
 
@@ -48,14 +48,14 @@ let haulerPattern =
 /// fixed body: a richer bank buys no useful capacity, and a poorer one yields.
 let courierPattern =
     {
-        Name = "courier"
+        Name = RowName.courier
         Block = List.replicate 20 Carry @ List.replicate 10 Move
     }
 
 /// The reserver row: the CLAIM body that holds an outpost's reservation.
 let reserverPattern =
     {
-        Name = "reserver"
+        Name = RowName.reserver
         Block = [ BodyPart.Claim; Move ]
     }
 
@@ -64,7 +64,7 @@ let reserverPattern =
 /// Withdraw from the buffer at its feet.
 let upgraderPattern =
     {
-        Name = "upgrader"
+        Name = RowName.upgrader
         Block = [ Work; Carry; Move ]
     }
 
@@ -76,7 +76,7 @@ let upgraderPattern =
 /// already standing on its target), then Attack, and Heal last.
 let guardPattern =
     {
-        Name = "guard"
+        Name = RowName.guard
         Block = [ Tough; Move; Move; Move; Move; Move; Attack; Attack; Attack; Heal ]
     }
 
@@ -92,7 +92,7 @@ let guardBlocksMost = Engine.maxBodyParts / List.length guardPattern.Block
 /// lets act beside a ranged attack.
 let rangerPattern =
     {
-        Name = "ranger"
+        Name = RowName.ranger
         Block = [ Move; Move; Move; RangedAttack; RangedAttack; Heal ]
     }
 
@@ -114,7 +114,7 @@ let bodyTemplates = [ BodyTemplate.Melee; BodyTemplate.Ranged ]
 /// it.
 let defenderPattern =
     {
-        Name = "defender"
+        Name = RowName.defender
         Block = [ Move; Attack ]
     }
 
@@ -122,7 +122,7 @@ let defenderPattern =
 /// the sapper it pre-heals.
 let medicPattern =
     {
-        Name = "medic"
+        Name = RowName.medic
         Block = List.replicate 18 Move @ List.replicate 18 Heal
     }
 
@@ -132,7 +132,7 @@ let medicPattern =
 /// apart from the salvage dismantler's.
 let sapperPattern =
     {
-        Name = "sapper"
+        Name = RowName.sapper
         Block = List.replicate 25 Move @ List.replicate 25 Work
     }
 
@@ -143,7 +143,7 @@ let sapperPattern =
 /// hits outlast W18S26's in, hit and out at 390 a tick; 990.
 let probePattern =
     {
-        Name = "probe"
+        Name = RowName.probe
         Block = List.replicate 4 Tough @ List.replicate 5 Work @ List.replicate 9 Move
     }
 
@@ -157,7 +157,7 @@ let probePattern =
 /// casts, and so the cut `patternOfParts` reads it back off.
 let minerPattern =
     {
-        Name = "miner"
+        Name = RowName.miner
         Block = [ Work; Work; Move ]
     }
 
@@ -168,7 +168,7 @@ let minerPattern =
 /// cut `patternOfParts` reads it back off.
 let dismantlerPattern =
     {
-        Name = "dismantler"
+        Name = RowName.dismantler
         Block = [ Work; Move ]
     }
 
@@ -254,7 +254,8 @@ let internal minerBodyFor perMove capacity =
 /// the reserver row, a Work-heavy body with no Carry the miner row, a
 /// Work-heavy body with one the anchor row, a standing body at or under that
 /// line the upgrader row, no Work beside a Carry the hauler row, and every
-/// other body the generalist. The dismantler is read off its name (#426).
+/// other body the generalist. Only the fallback for a body with no row's
+/// name: a named one is read off its name (`patternByName`, #664).
 ///
 /// Order matters between the miner and anchor arms and between the anchor and
 /// upgrader arms, and nowhere else. Miner before anchor: both are Work-heavy
@@ -287,28 +288,27 @@ let internal patternOfParts (tuning: Tuning) heavy parts =
     else
         workerPattern
 
-/// The rows whose casts are read back off the name the cascade gives them
-/// (`{row}-{tick}-{spawn}`) rather than their parts: the courier's 20C/10M is
-/// also a hauler, a defender is an ATTACK body as a guard is, a sapper and a
-/// probe a dismantler's, and a medic has no part a row reads. The dismantler's own
-/// `[W;M]` blocks are also a miner's once damage has stripped it to Work = Move
-/// (#426), so no reading of the standing parts can tell the two apart.
-let private namedRows =
-    [
-        courierPattern
-        dismantlerPattern
-        defenderPattern
-        sapperPattern
-        probePattern
-        medicPattern
-    ]
-
 /// Whether a creep's name says it was cast by this row.
-let isNamedFor (pattern: BodyPattern) (name: string) = name.StartsWith(pattern.Name + "-")
+let isNamedFor (pattern: BodyPattern) (name: string) = RowName.names pattern.Name name
 
-/// The row a creep's name says it was cast by, of the rows read that way.
+/// The row a creep's name says it was cast by (`{row}-{tick}-{spawn}`), of
+/// every row the table casts: the row a body counts in is fixed at its cast
+/// for its whole life (#664). Damage strips parts head-first, so no reading of
+/// the standing parts holds it — a shot Anchor at Work ≤ Move, a guard with
+/// no ATTACK left, a reserver with no CLAIM, a dismantler at a miner's Work =
+/// Move (#426) — and some casts no parts tell apart even whole: the courier's
+/// 20C/10M is also a hauler, a defender an ATTACK body as a guard is, a sapper
+/// and a probe a dismantler's, and a medic has no part a row reads.
 let patternByName (name: string) : BodyPattern option =
-    namedRows |> List.tryFind (fun pattern -> isNamedFor pattern name)
+    patternTable |> List.tryFind (fun pattern -> isNamedFor pattern name)
+
+/// The row a living body was cast for and counts in for its whole life: its
+/// name's, and its parts' (`patternOfParts`) for a body with no row's name.
+/// Every row's census reads this for who counts; what a counted body still
+/// delivers is its standing parts' (`CreepInfo.Body`).
+let internal patternOf (tuning: Tuning) (creep: CreepInfo) : BodyPattern =
+    patternByName creep.Name
+    |> Option.defaultWith (fun () -> patternOfParts tuning (RowName.castHeavy creep) creep.Body)
 
 /// The row that casts one squad role.
 let squadPatternOf (role: SquadRole) : BodyPattern =
@@ -343,10 +343,18 @@ let ownRowOnly (name: string) =
 let isOwnRowPattern (pattern: BodyPattern) =
     isSquadPattern pattern || pattern.Name = defenderPattern.Name
 
-/// The guard row's own cut, over a name and parts: an ATTACK body that
-/// answers to no row of its own (`ownRowOnly`).
+/// Whether a body was cast by a row: its name's row (`patternByName`), and
+/// for a name no row gives, the parts' reading `byParts`.
+let private castBy (pattern: BodyPattern) byParts (name: string) (parts: Map<BodyPart, int>) =
+    match patternByName name with
+    | Some cast -> cast.Name = pattern.Name
+    | None -> byParts parts
+
+/// The guard row's own cut, over a name and parts: a body the guard row cast,
+/// whatever ATTACK damage left it (#664), and an ATTACK body with no row's
+/// name.
 let internal isGuardRowCut (name: string) (parts: Map<BodyPart, int>) =
-    isGuardParts parts && not (ownRowOnly name)
+    castBy guardPattern isGuardParts name parts
 
 let internal isGuardRowBody (creep: CreepInfo) = isGuardRowCut creep.Name creep.Body
 
@@ -355,10 +363,10 @@ let internal isGuardRowBody (creep: CreepInfo) = isGuardRowCut creep.Name creep.
 let internal isRangerParts (parts: Map<BodyPart, int>) =
     partCount parts RangedAttack > 0 && partCount parts Attack = 0
 
-/// The ranger row's own cut: a ranger body that answers to no row of its own
-/// (`ownRowOnly`).
+/// The ranger row's own cut: a body the ranger row cast, and a ranger body
+/// with no row's name.
 let internal isRangerRowCut (name: string) (parts: Map<BodyPart, int>) =
-    isRangerParts parts && not (ownRowOnly name)
+    castBy rangerPattern isRangerParts name parts
 
 let internal isRangerRowBody (creep: CreepInfo) = isRangerRowCut creep.Name creep.Body
 
