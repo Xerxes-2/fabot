@@ -1373,10 +1373,12 @@ let forcedTests =
                     (Some(LightForce.Chase "ranger"))
                     "a quarry that turns off its track: decide the chase again"
 
-                Expect.equal
+                // Moved by #658 (the review's M3): a quarry at the chaser's
+                // pace out of its reach stays as far whatever a decide does,
+                // so it forces nothing (it forced the mark's chase again).
+                Expect.isNone
                     (LightTick.forced chained (at 14 16 [ scout 20 10 ]))
-                    (Some(LightForce.Chase "ranger"))
-                    "past its track, the chase is the mark's again"
+                    "past its track and out of reach at the ranger's pace: nothing a decide changes"
 
                 // A raider in sight of no plan, a MOVE a part, walking up the
                 // chain: three ticks to the next decide, a tile each, and its
@@ -1518,10 +1520,33 @@ let forcedTests =
                          | _ -> false))
                     "and it does not move"
 
-                Expect.equal
+                // Moved by #658 (the review's M3): the scout, at the ranger's
+                // pace, four off, is trailed for good (W19S25's drain: an
+                // equal-pace hauler at three or four forced 42 of 100 ticks);
+                // a slower one it closes on is decided again.
+                Expect.isNone
                     (LightTick.forced record (at 12 (scout 16)))
+                    "walked out of its reach at the ranger's pace: nothing forces"
+
+                let slow =
+                    { scout 16 with
+                        Gait = { Weight = 2; Moves = 1 }
+                    }
+
+                let rangerPaced (glance: Glance) =
+                    { glance with
+                        Creeps =
+                            glance.Creeps
+                            |> Map.map (fun _ creep ->
+                                { creep with
+                                    Gait = Some { Weight = 1; Moves = 1 }
+                                })
+                    }
+
+                Expect.equal
+                    (LightTick.forced record (rangerPaced (at 12 slow)))
                     (Some(LightForce.Chase "ranger"))
-                    "walked out of its reach past the track: decide the chase"
+                    "a slower quarry out of its reach: decide the chase"
             }
         ]
 

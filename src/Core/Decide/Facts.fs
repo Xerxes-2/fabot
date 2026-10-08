@@ -773,6 +773,11 @@ let internal trespasser (view: ColonyView) (engaged: Set<string>) (hostile: Host
     && (trespassRooms view hostile.Pos.Room
         || Set.contains hostile.Pos.Room engaged
         || harassTarget view hostile)
+    // In the sweep's room every unarmed body of the enemy's is prey, a
+    // cripple shot disarmed or bare among them: whether it is worth its kill
+    // against moving on is its kill score's and the sweep's price (#648,
+    // #658), not its parts' category.
+    || harassTarget view hostile && not (HostileInfo.armed view.Hostiles hostile)
 
 /// What a Guard in its room may shoot, every target reader's one predicate
 /// (`Emitter.strikeOrder`, the kite's head): a threat (`threatens`, a
@@ -3475,41 +3480,92 @@ let contestOf (view: ColonyView) (room: string) : Contest =
         |> List.filter (fun hostile ->
             hostile.Pos.Room = room && trespasser view (Set.singleton room) hostile)
 
+    // A body the sweep remembers out of sight counts at the odds it is still
+    // there (#658: no spawn for ghosts); where an observer of ours can look
+    // at the room, one not certain counts nothing until the look confirms
+    // it: the look lands within its rotation, a tick or a few of the body's
+    // take, where a cast spent on a body gone is the whole body.
+    let looked =
+        lazy
+            (view.World.Observers
+             |> List.exists (fun observer ->
+                 RoomName.tileRange
+                     (RoomPos.at observer { X = 25; Y = 25 })
+                     (RoomPos.at room { X = 25; Y = 25 })
+                 |> Option.exists (fun tiles -> tiles / Engine.roomSide <= Engine.observerRange)))
+
+    let odds hostile =
+        match stillThere view hostile with
+        | certain when certain >= 1.0 -> 1.0
+        | _ when looked.Value -> 0.0
+        | likely -> likely
+
     {
         Kept = float (roomTickWorth view room)
         Takes =
             prey
-            |> List.map (fun hostile -> hostile.Id, harmRate view hostile replacementWalk)
+            |> List.map (fun hostile ->
+                hostile.Id, harmRate view hostile replacementWalk * odds hostile)
             |> Map.ofList
         Values =
             prey
-            |> List.map (fun hostile -> hostile.Id, killValue view hostile)
+            |> List.map (fun hostile -> hostile.Id, killValue view hostile * odds hostile)
             |> Map.ofList
     }
 
-/// A [[sweep]] candidate as the sweep prices it (#658): the kill's pricing
-/// view (`killPricing`), and, in a room nothing sees this tick, the bodies
-/// it was last seen holding (`WorldView.PreySeen`), each at the life left it
-/// now, one that has died of age since gone.
-let private sweepPricing (view: ColonyView) (room: string) : ColonyView =
-    let priced = killPricing view room
+/// The [[sweep]]'s candidates as a view holds them (#658): in each candidate
+/// nothing sees this tick, the bodies it was last seen holding
+/// (`WorldView.PreySeen`) laid in, each at the life left it now, one dead of
+/// age since gone; listed beside the recalled raids (`RecalledRaiders`), so
+/// the raid log, which folds sightings alone, never reads one. One model for
+/// a room's price, its fight and its cast, each body counted at the odds it
+/// is still there (`stillThere`). A body already in the view is not laid
+/// again.
+let rememberedIn (view: ColonyView) : ColonyView =
+    let present = lazy (view.Hostiles |> List.map _.Id |> Set.ofList)
 
-    match Map.tryFind room view.World.PreySeen with
-    | None -> priced
-    | Some seen ->
-        let age = view.Time - seen.Tick
-        let present = priced.Hostiles |> List.map _.Id |> Set.ofList
+    let laid =
+        view.Harass
+        |> List.choose (fun h -> Map.tryFind h.RoomName view.World.PreySeen)
+        |> List.collect (fun seen ->
+            let age = view.Time - seen.Tick
 
-        { priced with
-            Hostiles =
-                priced.Hostiles
-                @ (seen.Bodies
-                   |> List.filter (fun h -> h.TicksToLive > age && not (present.Contains h.Id))
-                   |> List.map (fun h ->
-                       { h with
-                           TicksToLive = h.TicksToLive - age
-                       }))
+            seen.Bodies
+            |> List.filter (fun h -> h.TicksToLive > age && not (present.Value.Contains h.Id))
+            |> List.map (fun h ->
+                { h with
+                    TicksToLive = h.TicksToLive - age
+                }))
+
+    match laid with
+    | [] -> view
+    | laid ->
+        { view with
+            Hostiles = view.Hostiles @ laid
+            RecalledRaiders = view.RecalledRaiders @ laid
         }
+
+/// A [[sweep]] candidate as the sweep prices it (#658): the kill's pricing
+/// view (`killPricing`) over the bodies the view remembers (`rememberedIn`).
+let private sweepPricing (view: ColonyView) (room: string) : ColonyView =
+    killPricing (rememberedIn view) room
+
+/// The ticks a body standing at `from` walks to a room at its plain `pace`
+/// (#658): none in the room or on its border's doorstep (the tile beside it,
+/// where a crossing body stands one tick in and one out), else its tiles to
+/// the room's nearest edge off the names (`RoomName.tileRange` to the centre
+/// less half a room), a floor on the walk, never the route.
+/// `Int32.MaxValue` off the grid.
+let private doorTicks (from: RoomPos) (pace: int) (room: string) : int =
+    if from.Room = room then
+        0
+    else
+        match RoomName.tileRange from (RoomPos.at room { X = 25; Y = 25 }) with
+        | Some tiles ->
+            match max 0 (tiles - Engine.roomSide / 2) with
+            | edge when edge <= 1 -> 0
+            | edge -> edge * pace
+        | None -> System.Int32.MaxValue
 
 /// What working one [[sweep]] candidate is worth a tick of the group's
 /// effort (#658): the kills it lands there (`killsLanded`: each body's kill
@@ -3522,7 +3578,7 @@ let private sweepPricing (view: ColonyView) (room: string) : ColonyView =
 /// its `arrival`, the escort's kill (`killTicks`) and each economy body's
 /// together (`killTicksOf`), concentrated, one at a time. Nothing where an
 /// escort beats the group (exposure: the group moves on rather than stands
-/// off), and nothing in a room nobody works.
+/// off), and nothing in a room with nothing of theirs to kill.
 let sweepRate (view: ColonyView) (team: Fighter list) (arrival: int) (room: string) : float =
     let priced = sweepPricing view room
 
@@ -3530,12 +3586,12 @@ let sweepRate (view: ColonyView) (team: Fighter list) (arrival: int) (room: stri
         priced.Hostiles
         |> List.filter (fun h -> h.Pos.Room = room && trespasser priced (Set.singleton room) h)
 
-    match team, prey with
-    | [], _
-    | _, [] -> 0.0
-    | _ ->
-        let raid = raidersIn priced room
+    let raid = raidersIn priced room
 
+    match team, prey, raid with
+    | [], _, _
+    | _, [], [] -> 0.0
+    | _ ->
         let escort =
             match raid with
             | [] -> Some 0
@@ -3564,74 +3620,211 @@ let sweepRate (view: ColonyView) (team: Fighter list) (arrival: int) (room: stri
             killsLanded priced room team landing values / float (max 1 (landing + kills))
 
 /// A [[sweep]]'s group (#658): the bodies of this colony holding the Guard of
-/// one of its candidates, by last tick's Tasks (`held`), wherever they stand.
+/// one of its candidates, by last tick's Tasks (`held`), wherever they stand,
+/// and every armed one standing in a candidate.
 let sweepGroup (view: ColonyView) (held: Assignments) : CreepInfo list =
-    let guards =
-        view.Harass |> List.map (fun h -> taskId (Guard h.RoomName)) |> Set.ofList
+    let rooms = view.Harass |> List.map _.RoomName |> Set.ofList
+    let guards = rooms |> Set.map (fun room -> taskId (Guard room))
 
     ColonyView.bodies view
-    |> List.filter (fun creep -> Map.tryFind creep.Name held |> Option.exists guards.Contains)
+    |> List.filter (fun creep ->
+        Map.tryFind creep.Name held |> Option.exists guards.Contains
+        || (Fighter.ofCreep creep).Reach > 0
+           && SpatialInfo.creepPlacementOf view.Spatial creep.Name
+              |> Option.exists (fun at -> rooms.Contains at.Room))
 
-/// The [[sweep]]'s room (#658): of its candidates (`ColonyView.Harass`, the
-/// ones its caster works this tick), the one its group's effort lands the
-/// most kills a tick in (`sweepRate`), then by name; None where none pays.
-/// The group as it stands, its arrival its slowest body's walk there (none
-/// for a body already in the room); with no group, the biggest ranger the
-/// bank buys (`rangerBlocksReach`), its arrival its spawn time and its walk
-/// from home. The room the group stands in costs no walk, so it keeps the
-/// group until its kills there run out or another room's net of the walk
-/// pays more: no stored room, no hysteresis band.
-let sweepRoom (view: ColonyView) (held: Assignments) : string option =
-    match view.Harass with
+/// A fighter's plain pace, a tile a tick where it has none.
+let private paceOf (fighter: Fighter) =
+    Gait.ticks Gait.plain fighter.Gait |> Option.defaultValue 1
+
+/// The [[sweep]]'s whole group over every colony's view (#658, `sweepGroup`),
+/// each body once, with where it stands.
+let private sweepBodies (held: Assignments) (views: ColonyView list) =
+    views
+    |> List.collect (fun view ->
+        sweepGroup view held
+        |> List.choose (fun creep ->
+            placementOf view creep.Name |> Option.map (fun at -> creep, at)))
+    |> List.distinctBy (fun (creep, _) -> creep.Name)
+
+/// ADR-0093
+/// The [[sweep]]'s room (#658), one for every colony: of the candidates each
+/// view works (`ColonyView.Harass`), the one its group's effort lands the
+/// most kills a tick in (`sweepRate`, the best any colony's view prices it
+/// at), then by name; None where none pays. The group is every colony's
+/// (`sweepGroup`), its arrival its slowest body's walk to the room
+/// (`doorTicks`: none in it or on its doorstep); with no group, each
+/// colony's biggest ranger its bank buys (`rangerBlocksReach`), landed after
+/// its spawn time and walk from that home, the soonest's price the room's.
+/// An escort the group loses is no room for it, whatever a bigger cast would
+/// win: the cast is the fight's to price, and a room chosen for a body no
+/// cast buys would hold the group for ever. The room the group stands in
+/// costs no walk, so it keeps the group until its kills there run out or
+/// another room's net of the walk pays more: no stored room, no hysteresis
+/// band.
+let sweepChoice (held: Assignments) (views: ColonyView list) : string option =
+    match views |> List.filter (fun view -> not (List.isEmpty view.Harass)) with
     | [] -> None
-    | candidates ->
-        let centre room = RoomPos.at room { X = 25; Y = 25 }
+    | working ->
+        let placed =
+            sweepBodies held working
+            |> List.map (fun (creep, at) -> at, Fighter.ofCreep creep)
 
-        let walk (from: RoomPos) (pace: int) room =
-            if from.Room = room then
-                0
-            else
-                RoomName.tileRange from (centre room)
-                |> Option.map (fun tiles -> tiles * pace)
-                |> Option.defaultValue System.Int32.MaxValue
-
-        let paceOf (fighter: Fighter) =
-            Gait.ticks Gait.plain fighter.Gait |> Option.defaultValue 1
-
-        let team, arrival =
-            match sweepGroup view held with
-            | [] ->
-                let blocks = max 1 (rangerBlocksReach view)
+        let rateIn (view: ColonyView) (room: string) =
+            match placed, rangerBlocksReach view with
+            | [], blocks when blocks > 0 ->
                 let body = blocksFighter rangerPattern blocks
-                let home = centre (SpatialInfo.homeName view.Spatial)
+                let home = RoomPos.at (SpatialInfo.homeName view.Spatial) { X = 25; Y = 25 }
 
-                [ body ],
-                fun room -> castSpawnTicks BodyTemplate.Ranged blocks + walk home (paceOf body) room
-            | group ->
-                let placed =
-                    group
-                    |> List.choose (fun creep ->
-                        placementOf view creep.Name
-                        |> Option.map (fun at -> at, Fighter.ofCreep creep))
+                match doorTicks home (paceOf body) room with
+                | System.Int32.MaxValue -> 0.0
+                | walk ->
+                    sweepRate view [ body ] (castSpawnTicks BodyTemplate.Ranged blocks + walk) room
+            | [], _ -> 0.0
+            | placed, _ ->
+                let arrivals =
+                    placed |> List.map (fun (at, fighter) -> doorTicks at (paceOf fighter) room)
 
-                (placed |> List.map snd),
-                fun room ->
-                    placed
-                    |> List.map (fun (at, fighter) -> walk at (paceOf fighter) room)
-                    |> List.fold max 0
+                match List.max arrivals with
+                | System.Int32.MaxValue -> 0.0
+                | arrival -> sweepRate view (List.map snd placed) arrival room
 
-        candidates
-        |> List.map (fun h -> h.RoomName)
-        |> List.choose (fun room ->
-            match arrival room with
-            | System.Int32.MaxValue -> None
-            | ticks ->
-                match sweepRate view team ticks room with
-                | rate when rate > 0.0 -> Some(room, rate)
-                | _ -> None)
+        working
+        |> List.collect (fun view ->
+            view.Harass |> List.map (fun h -> h.RoomName, rateIn view h.RoomName))
+        |> List.groupBy fst
+        |> List.map (fun (room, rates) -> room, rates |> List.map snd |> List.max)
+        |> List.filter (fun (_, rate) -> rate > 0.0)
         |> List.sortBy (fun (room, rate) -> -rate, room)
         |> List.tryHead
         |> Option.map fst
+
+/// `sweepChoice` over one colony's view alone.
+let sweepRoom (view: ColonyView) (held: Assignments) : string option = sweepChoice held [ view ]
+
+/// The [[sweep]] laid in every colony's view (#658), before the world's
+/// verdicts are priced (`Entry.judgeColonies`): each view that works the
+/// sweep's one room (`sweepChoice`) keeps it in `Harass`, and no other
+/// candidate; the rest stay cast (`HarassCast`: projected, their stand-down
+/// read) but pool nothing. Every reader past this one — the verdicts, the
+/// Guard, its kill and its cast, the world's fight — reads the one room.
+/// The bodies remembered in each dark candidate are laid in
+/// (`rememberedIn`), and the dismantler's targets (`Dismantles`) narrowed to
+/// the sweep's room and the salvage rooms. `held` is last tick's Tasks, whose
+/// holders are the group.
+let sweepAll (held: Assignments) (views: ColonyView list) : ColonyView list =
+    let room = sweepChoice held views
+    let group = lazy (sweepBodies held views)
+
+    views
+    |> List.map (fun view ->
+        match view.Harass with
+        | [] -> view
+        | candidates ->
+            let remembered = rememberedIn view
+
+            // The dismantler's targets follow the sweep's room: an enemy
+            // container in a candidate it does not work is nobody's target
+            // this tick; a salvage room's, no candidate, stays.
+            let elsewhere =
+                candidates
+                |> List.map _.RoomName
+                |> List.filter (fun candidate -> Some candidate <> room)
+                |> Set.ofList
+
+            { remembered with
+                Harass = candidates |> List.filter (fun h -> Some h.RoomName = room)
+                Dismantles =
+                    remembered.Dismantles
+                    |> List.filter (fun id ->
+                        SpatialInfo.placementOf remembered.Spatial id
+                        |> Option.forall (fun at -> not (elsewhere.Contains at.Room)))
+                World =
+                    { remembered.World with
+                        SweepGroup = group.Value
+                    }
+            })
+
+/// `sweepAll` over one colony's view alone: the shape a decide of one
+/// colony asks in.
+let sweep (held: Assignments) (view: ColonyView) : ColonyView = sweepAll held [ view ] |> List.head
+
+/// The defence response a [[sweep]] prices its muster by where the rival's
+/// dossier holds none for the room: it answers at once, the worst case.
+let private instantResponse = 0
+
+/// Whether the [[sweep]]'s group waits for itself at the last crossing before
+/// its room (#658), priced and whatever the room's phase: where the loss the
+/// body landing first risks alone exceeds what waiting for the rest costs;
+/// else the first come strikes first. `group` is every colony's body holding
+/// the room's Guard, with where it stands. The spread is the ticks between
+/// the first body's arrival and the last's (`doorTicks`); none, and nothing
+/// waits. The first body alone is caught where a raid stands that it loses
+/// alone, or where the rival's defence answers (the dossier's fastest seen
+/// response there, `WorldView.Responses`; with none, `instantResponse`)
+/// sooner than the rest land: the loss is its body's energy. Waiting costs
+/// each prey's take (`harmRate`) over the spread, and the kills it lets walk
+/// off or die of age (`killsLanded` landed at once against landed after the
+/// spread), each body at the odds it is still there (`stillThere`).
+let sweepMusters (view: ColonyView) (room: string) (group: (CreepInfo * RoomPos) list) : bool =
+    let arrivals =
+        group
+        |> List.map (fun (creep, at) -> creep, doorTicks at (paceOf (Fighter.ofCreep creep)) room)
+        |> List.filter (fun (_, ticks) -> ticks < System.Int32.MaxValue)
+
+    match arrivals with
+    | []
+    | [ _ ] -> false
+    | arrivals ->
+        let first, landing =
+            arrivals |> List.minBy (fun (creep, ticks) -> ticks, creep.Name)
+
+        let spread = (arrivals |> List.map snd |> List.max) - landing
+
+        if spread <= 0 then
+            false
+        else
+            let priced = sweepPricing view room
+            let lone = [ Fighter.ofCreep first ]
+
+            let prey =
+                priced.Hostiles
+                |> List.filter (fun h ->
+                    h.Pos.Room = room && trespasser priced (Set.singleton room) h)
+
+            let raid = raidersIn priced room
+
+            let response =
+                Map.tryFind room view.World.Responses |> Option.defaultValue instantResponse
+
+            let caught =
+                (not (List.isEmpty raid) && not (won (exchangeIn priced room lone)))
+                || spread > response
+
+            let loss =
+                if caught then
+                    first.Body
+                    |> Map.toList
+                    |> List.collect (fun (part, n) -> List.replicate n part)
+                    |> bodyCost
+                    |> float
+                else
+                    0.0
+
+            let values =
+                prey
+                |> List.map (fun h -> h.Id, killValue priced h * stillThere priced h)
+                |> Map.ofList
+
+            let takes =
+                prey
+                |> List.sumBy (fun h -> harmRate priced h replacementWalk * stillThere priced h)
+
+            let waiting =
+                takes * float spread + killsLanded priced room lone landing values
+                - killsLanded priced room lone (landing + spread) values
+
+            loss > waiting
 
 /// The share of one body's energy a fight that holds it `ticks` spends of
 /// its life (`Engine.creepLifetime`, #654): a body that ends a fight
@@ -5047,10 +5240,13 @@ let internal rangersWin (view: ColonyView) (room: string) : int option =
 /// Guard, its economy being out, so any raid there the verdict does not lose
 /// is the chase, whichever row or rangers win it (#569, #571): the stand-down
 /// shuts the economy, never the kill. Read once a tick into the chase's
-/// `Brief`, off the room's `verdict` (`answered`).
+/// `Brief`, off the room's `verdict` (`answered`). Never a [[sweep]]
+/// candidate (#658): the sweep fights in the one it works and leaves the
+/// rest.
 let internal chased (view: ColonyView) (verdict: Answer * bool) (kept: bool) (room: string) : bool =
     room <> SpatialInfo.homeName view.Spatial
     && not (Set.contains room (rangerRooms view))
+    && not (Set.contains room view.HarassCast)
     && raided view room
     && (match verdict with
         | Answer.Lose, _ -> false
@@ -5942,8 +6138,8 @@ let private homeUnheld (view: ColonyView) atlas : bool =
 /// pooled with no body bought or a body cast with no Task: the declared
 /// outposts a threat or a level-0 core (#487) stands in, the errand rooms the
 /// ranger row keeps a body in (#414), the children's homes this colony raises
-/// (#447), the other homes it defends (#589), the harassment
-/// rooms it casts (#432), and its own home while a raid there is unheld
+/// (#447), the other homes it defends (#589), the [[sweep]]'s one room where
+/// it works it (#658), and its own home while a raid there is unheld
 /// (`homeUnheld`, #568). Each
 /// room once: a raised home that is beaten is one Guard and one row's count,
 /// not two. The Brief reads it too (#542): a kind claims a room only where its
@@ -5955,7 +6151,7 @@ let internal guardedRooms (view: ColonyView) atlas (declared: string list) (fuel
     // Raid or none, as an errand room is kept.
     @ (raisedHomes view |> Set.toList)
     @ defendedHomesOf view
-    // Target or none, as an errand room is kept.
+    // The sweep's room, which it works only while it holds a kill (#658).
     @ (harassRooms view |> Set.toList)
     @ (if homeUnheld view atlas then
            [ SpatialInfo.homeName view.Spatial ]
@@ -6004,11 +6200,11 @@ let defendsOthers (view: ColonyView) (room: string) : bool =
 /// Whether a colony's row is weighed for a room, by the Caster's
 /// eligibility for the asks it makes: a room of its own past no floor — its
 /// home, its declared outposts, its ranger rooms (`rangerRooms`, a raised or
-/// garrisoned home among them), the harassment rooms it casts, and the
-/// rooms of its own (`owns`) the stand-down shuts on a raid, whose row the
-/// stand-down, an economy gate, never withholds from the verdict —; another
-/// colony's home it defends (`defendsOthers`) only past the floor
-/// (`castsForOthers`). A colony that only could cast for a room, asking
+/// garrisoned home among them), and the rooms of its own (`owns`) the
+/// stand-down shuts on a raid, whose row the stand-down, an economy gate,
+/// never withholds from the verdict —; another colony's home it defends
+/// (`defendsOthers`) and a [[sweep]] candidate it projects, no colony's own
+/// (#658), only past the floor (`castsForOthers`). A colony that only could cast for a room, asking
 /// nothing there, is no row of its verdict: a cast on paper is no answer
 /// beside a body standing there (#573). Whose row the world's verdict weighs
 /// (`priceAmong`), a home's own only where no other colony raises or
@@ -6021,7 +6217,6 @@ let private castsInto (owns: Set<string>) (view: ColonyView) : string -> bool =
                     Set.singleton (SpatialInfo.homeName view.Spatial)
                     Set.ofList (declaredOutposts view)
                     rangerRooms view
-                    view.HarassCast
                     Set.intersect owns view.RaidedOutposts
                 ])
 
@@ -6033,7 +6228,7 @@ let private castsInto (owns: Set<string>) (view: ColonyView) : string -> bool =
     let floored = lazy (castsForOthers view)
 
     fun room ->
-        if defended.Contains room then
+        if defended.Contains room || view.HarassCast.Contains room then
             floored.Value
         else
             own.Value.Contains room

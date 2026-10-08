@@ -880,13 +880,16 @@ let private menaced (now: Glance) (tile: RoomPos) : bool =
     |> List.exists (fun hostile ->
         not (harmless now hostile) && strikesWithin Tuning.maxCadence [ tile ] hostile)
 
-/// Whether a chaser can close on its quarry: it stands within a step of its
-/// reach, or the quarry falls behind it on plain. A quarry at its pace and
-/// farther stays as far, decided or replayed.
+/// Whether a decide can still land shots on a chaser's quarry (#621's catch
+/// odds): it stands in the chaser's reach, where following keeps it struck,
+/// or it falls behind the chaser on plain. A quarry at the chaser's pace
+/// out of its reach stays as far, decided or replayed. Moved by #658: one a
+/// step past the reach forced the tick too, and an equal-pace hauler
+/// trailed at four forced most ticks full (W19S25, 42 of 100).
 let private closes (chaser: GlanceCreep) (quarry: GlanceHostile) (reach: int) : bool =
     match RoomPos.range chaser.Tile quarry.Tile with
     | Some gap ->
-        gap <= reach + 1
+        gap <= reach
         || chaser.Gait |> Option.exists (fun gait -> Gait.fallsBehind gait quarry.Gait)
     | None -> false
 

@@ -4181,7 +4181,8 @@ let private withAssaults
 /// that can be assembled lose: nothing coming wins it, so nobody waits for
 /// ever. A holder that wins alone engages at once, and the rest with it. An
 /// outpost's guards, a chase's lent residents and pursuers alike; a
-/// resident's and a harassment ranger's room keeps its own ground.
+/// resident's room keeps its own ground, and the [[sweep]]'s room musters by
+/// its price whatever its phase (`Facts.sweepMusters`, #658).
 let private withMusters
     (view: ColonyView)
     atlas
@@ -4282,6 +4283,52 @@ let private withMusters
                 else
                     holders |> List.map (fun creep -> creep.Name, rally) |> Map.ofList
 
+        // The sweep's room (#658): priced, whatever its phase
+        // (`Facts.sweepMusters`): while no body of its group, any colony's,
+        // stands in it or at its crossing, the holders wait on the rally
+        // ground where the first body alone risks more than the wait costs.
+        let sweeping = harassRooms view
+
+        let swept =
+            sweeping
+            |> Seq.choose (fun room ->
+                let holders =
+                    HeldTaskFacts.holdersOf held (taskId (Guard room))
+                    |> List.choose (fun name -> Map.tryFind name bodies)
+
+                let group = view.World.SweepGroup
+
+                let engaged =
+                    group
+                    |> List.exists (fun (_, at) ->
+                        at.Room = room || Formation.atCrossingInto room at)
+
+                match holders, Map.tryFind (Guard room) threats.Briefs with
+                | [], _
+                | _, None -> None
+                | _ when engaged -> None
+                | _, Some brief when Facts.sweepMusters view room group ->
+                    match
+                        Formation.rallyOn
+                            view
+                            atlas
+                            (Threats.reachIn threats)
+                            (Atlas.route atlas home room)
+                    with
+                    | rally when Set.isEmpty rally -> None
+                    | rally ->
+                        Some(
+                            Guard room,
+                            { brief with
+                                Stances =
+                                    holders
+                                    |> List.map (fun creep -> creep.Name, rally)
+                                    |> Map.ofList
+                            }
+                        )
+                | _ -> None)
+            |> List.ofSeq
+
         // Only the rooms a raider stands in, and only a Guard held there: the
         // Briefs map is rebuilt for none of the rest.
         let mustered =
@@ -4289,6 +4336,7 @@ let private withMusters
             |> List.filter (HostileInfo.raider view.Hostiles)
             |> List.map (fun hostile -> hostile.Pos.Room)
             |> List.distinct
+            |> List.filter (fun room -> not (Set.contains room sweeping))
             |> List.choose (fun room ->
                 let holders =
                     HeldTaskFacts.holdersOf held (taskId (Guard room))
@@ -4306,12 +4354,12 @@ let private withMusters
                         | stances -> Some(Guard room, { brief with Stances = stances })
                     | _ -> None)
 
-        match mustered with
+        match swept @ mustered with
         | [] -> threats
-        | _ ->
+        | waiting ->
             { threats with
                 Briefs =
-                    (threats.Briefs, mustered)
+                    (threats.Briefs, waiting)
                     ||> List.fold (fun briefs (task, brief) -> Map.add task brief briefs)
             }
 

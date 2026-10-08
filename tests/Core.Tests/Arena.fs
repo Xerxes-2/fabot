@@ -358,6 +358,7 @@ type Carried =
         Healers: Map<string, HealerSeen list>
         HostileSteps: Map<string, HostileStep>
         Raiders: Map<string, RaidSeen>
+        PreySeen: Map<string, BodiesSeen>
         ArmedSeen: Map<string, int>
         LastPositions: Map<string, RoomPos>
         /// The store each body's load was drawn from (#530).
@@ -914,6 +915,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 Healers = Map.empty
                 HostileSteps = Map.empty
                 Raiders = Map.empty
+                PreySeen = Map.empty
                 ArmedSeen = Map.empty
                 LastPositions = Map.empty
                 Drawn = Map.empty
@@ -1474,6 +1476,7 @@ let worldOf (a: Arena) : World =
     |> World.recallHealers tuning a.Carried.Healers
     |> World.recallHostiles a.Carried.HostileSteps
     |> World.recallRaiders a.Carried.Raiders
+    |> World.recallPrey (a.Harass |> List.map _.RoomName |> Set.ofList) a.Carried.PreySeen
     |> World.recallArmed tuning a.Carried.ArmedSeen
     |> World.recallRivalControllers a.Carried.RivalControllers
 
@@ -1757,6 +1760,7 @@ let private decideOurs (a: Arena) : Intent list * Carried =
         Healers = world.Healers
         HostileSteps = world.HostileSteps
         Raiders = world.Raiders
+        PreySeen = world.PreySeen
         ArmedSeen = world.ArmedSeen
         Raids = raids
         Danger =

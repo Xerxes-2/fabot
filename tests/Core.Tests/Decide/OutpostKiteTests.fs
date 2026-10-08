@@ -1217,9 +1217,34 @@ let kiteTests =
 
 /// The raided outpost floored out to its borders, and the colony harassing
 /// W1N3 beyond it, its ranger standing quiet there on the enemy's source.
+/// Moved by #658: the sweep works a candidate only where it has something to
+/// kill, so W1N3 holds the enemy's miner in the sweep's memory
+/// (`WorldView.PreySeen`), none in sight: its Guard is the ranger's quiet one.
 let private harassingBeyond hostiles =
     let colony = declaredRaid hostiles
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
+
+    let remembered =
+        { hostileIn "W1N3" { X = 25; Y = 44 } [ Work; Work; Move ] with
+            Id = "miner-w1n3"
+            Owner = "Trepidimous"
+        }
+
+    let colony =
+        { colony with
+            World =
+                { colony.World with
+                    PreySeen =
+                        Map.ofList
+                            [
+                                "W1N3",
+                                {
+                                    Bodies = [ remembered ]
+                                    Tick = colony.Time
+                                }
+                            ]
+                }
+        }
 
     let floor =
         TerrainGrid.ofList
@@ -1257,8 +1282,11 @@ let chaseCallTests =
     testList
         "a quiet ranger called to a chase (#510)"
         [
-            test
-                "a ranger holding a quiet room's Guard is let go for a chase within two rooms, and takes it" {
+            // Moved by #658: the sweep's room is never quiet; its remembered
+            // miner is laid in the view (one model for its price, its fight
+            // and its cast), so r-1 holds a kill there, which a chase does not
+            // call it off (it was a quiet harassment room's Guard, called).
+            test "a ranger holding the sweep's kill keeps it against a chase within two rooms" {
                 let held = Map.ofList [ "r-1", taskId (Guard "W1N3") ]
 
                 let quiet = decide (harassingBeyond []) held Set.empty None
@@ -1271,15 +1299,10 @@ let chaseCallTests =
                 let called =
                     decide (harassingBeyond [ crippledAt { X = 25; Y = 10 } ]) held Set.empty None
 
-                Expect.contains
-                    called.Verdicts
-                    (Verdict.Released("r-1", taskId (Guard "W1N3"), ReleaseReason.Called))
-                    "a crippled melee a walk away calls it off its quiet ground"
-
                 Expect.equal
                     (Map.tryFind "r-1" called.Assignments)
-                    (Some(taskId (Guard "W1N2")))
-                    "and it takes the chase"
+                    (Some(taskId (Guard "W1N3")))
+                    "a crippled melee a walk away calls it off no kill"
             }
 
             test "a chase already held calls nobody, whichever order the holders are walked in" {

@@ -4016,6 +4016,25 @@ module Rivals =
 
     let empty: Rivals = ofDossiers (Fresh.mapOfSeq Seq.empty)
 
+    /// Each rival room's defence response (`WorldView.Responses`, #658): the
+    /// fewest ticks from our first armed body there to its owner's first
+    /// armed body, over every visit it answered; `Int32.MaxValue` where it
+    /// was visited and never answered; no row where it was never visited.
+    let responses (rivals: Rivals) : Map<string, int> =
+        rivals.Dossiers
+        |> Map.toSeq
+        |> Seq.collect (fun (_, dossier) -> dossier.Rooms |> Map.toSeq)
+        |> Seq.choose (fun (room, held) ->
+            if held.Response.Episodes > 0 then
+                Some(room, held.Response.Shortest)
+            elif held.Unanswered.Count > 0 then
+                Some(room, System.Int32.MaxValue)
+            else
+                None)
+        |> Seq.groupBy fst
+        |> Seq.map (fun (room, rows) -> room, rows |> Seq.map snd |> Seq.min)
+        |> Fresh.mapOfSeq
+
 /// One shot of a rival tower at a body of ours, off the room's event log:
 /// the tower's id and our body's name.
 type TowerShot = { Tower: string; Target: string }

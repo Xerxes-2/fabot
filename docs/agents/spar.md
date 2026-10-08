@@ -29,6 +29,7 @@ Every scenario is hermetic. Its colonies are spelt out in `Spar.fs` and never re
 | `home-boosted-pass` | A T3-boosted 10T 15R 10M 15H neutral player walks through W12S28, north exit to west exit (ADR 0089 S0). 150 ticks. |
 | `outpost-equal-pace-melee` | The #625 shape: Trepidimous' Wolf0965 (18M 17A, MOVE first, no heal), a tile a tick on plain as our rangers are, walks down W17S26's north road at the anchor by the container and chases the nearest of ours. Our two 6M 4R 2H rangers stand south of the container; nothing casts. 150 ticks. |
 | `outpost-fleeing-hauler` | Two rangers vs a fleeing hauler (#619): Trepidimous' empty 23C23M hauler, shot to 2,480, walks past W17S26's container and out along the road to the west exit on Wolf6836's live tiles. Our two 6M 4R 2H rangers stand beside it at the start; nothing casts. 34 ticks, ending as it stands a step off the exit, so a later kill does not count. |
+| `sweep-two-remotes` | The sweep (#658, ADR 0093): W12S28 runs it over two of Trepidimous' remotes, W12S27 and W13S28, each worked by a 5W3M miner and a loaded 10C5M hauler, both in an observer's sight. A 10R 10H 20M escort no lone ranger beats waits in W12S26 and walks into W12S27 from t50. The ranger row casts. Cleared means every miner and hauler is dead. 800 ticks. |
 
 `<raid>` grows in size: `melee` (smallMelee), `melee-healer` (smallMelee + smallHealer), `ranged-healer` (2 smallRanged + smallHealer), `squad` (the W11S28 five: a mixed body, two shooters, two healers).
 

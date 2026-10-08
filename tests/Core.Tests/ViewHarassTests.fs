@@ -201,7 +201,7 @@ let harassViewTests =
         "a harassment room is cast by the nearest colony that affords it, and carries the ground and the enemy's containers"
         [
             test
-                "the nearest colony that buys the floor casts the room, and the other does not project it" {
+                "every colony past the floors casts the room, and one under them does not project it" {
                 let world = harassWorld (reservedFor enemy) 300
 
                 let mothers = harassView harassDeclared world mother
@@ -221,18 +221,17 @@ let harassViewTests =
                     "and does not project the room, though its chain reaches it"
 
                 // The child's 2,700 over the mother's 2,400: the mother is one
-                // crossing from the room, the child two.
+                // crossing from the room, the child two. Moved by #658: both
+                // past the floors project it, each body the Caster's (the
+                // nearer alone cast it).
                 let richer = harassWorld (reservedFor enemy) 2700
 
-                Expect.equal
-                    ((harassView harassDeclared richer mother).Harass
-                     |> List.map (fun h -> h.RoomName))
-                    [ harassRoom ]
-                    "the nearer colony keeps it at the smaller bank"
-
-                Expect.isEmpty
-                    (harassView harassDeclared richer child).Harass
-                    "and one colony only casts it"
+                for home in [ mother; child ] do
+                    Expect.equal
+                        ((harassView harassDeclared richer home).Harass
+                         |> List.map (fun h -> h.RoomName))
+                        [ harassRoom ]
+                        $"{home} past the floors casts it"
 
                 // The mother below the floor: the room goes to the child.
                 let poorMother = harassWorldAt (reservedFor enemy) 300 2700
@@ -241,7 +240,7 @@ let harassViewTests =
                     ((harassView harassDeclared poorMother child).Harass
                      |> List.map (fun h -> h.RoomName))
                     [ harassRoom ]
-                    "the caster is the nearest colony that affords the floor, whoever declared nothing"
+                    "a colony past the floors casts it, whoever declared nothing"
             }
 
             // #487, live t925,486: a level-4 stronghold's level-0 expansion
@@ -345,10 +344,12 @@ let harassViewTests =
                                 harassRoom
                                 (harassView harassDeclared world home).HarassCast)
 
+                    // Moved by #658: every colony casting it is one whose view
+                    // casts it (there was exactly one).
                     Expect.equal
                         (casting.Casters |> List.map (fun (h, caster) -> h.RoomName, caster))
-                        [ harassRoom, List.tryExactlyOne castBy ]
-                        $"banks {motherBank}/{childBank}: one caster, the one whose view casts it"
+                        [ harassRoom, List.sort castBy ]
+                        $"banks {motherBank}/{childBank}: the casters, each one whose view casts it"
             }
 
             test
@@ -374,7 +375,7 @@ let harassViewTests =
             }
 
             test
-                "the colony fewest crossings from the room casts it at any bank that buys the floor; the name breaks equal crossings, the bank never" {
+                "every colony past the Caster's floors within the hop budget projects a candidate, whatever its crossings or bank" {
                 // W13S29: one crossing from the child, two from the mother and
                 // from a third colony at W14S28.
                 let near = "W13S29"
@@ -435,55 +436,31 @@ let harassViewTests =
                         .Casters
                     |> List.map (fun (h, caster) -> h.RoomName, caster)
 
-                let casterAmong = casterHeld Map.empty
-                let casterAt = casterAmong []
+                let casterAt = casterHeld Map.empty []
 
+                // Moved by #658: no colony runs the sweep; every one past the
+                // Caster's floors within the hop budget projects the
+                // candidate, and each body is the Caster's to hand the colony
+                // landing it soonest (one colony cast it, the fewest crossings
+                // away, an incumbent kept against one a crossing nearer).
                 Expect.equal
                     (casterAt 2700 2400 2700)
-                    [ near, Some child ]
-                    "the child's one crossing over two, at the smaller bank"
+                    [ near, List.sort [ mother; child; third ] ]
+                    "each colony at the floors, whatever its crossings or bank"
 
-                // The one casting it now keeps it against a colony only one
-                // crossing nearer (`Tuning.CasterSwitchMargin`, two).
-                Expect.equal
-                    (casterAmong
-                        [ creepWithBody "ranger-950-Spawn1" near [ RangedAttack, 1 ] ]
-                        2700
-                        2400
-                        2700)
-                    [ near, Some mother ]
-                    "with the mother's ranger standing there, the child's one crossing nearer takes nothing"
-
-                // On its walk out too: the ranger holds the room's Guard from
-                // her home, the room not yet reached.
-                Expect.equal
-                    (casterHeld
-                        (Map.ofList [ "ranger-950-Spawn1", "guard:" + near ])
-                        [ creepWithBody "ranger-950-Spawn1" mother [ RangedAttack, 1 ] ]
-                        2700
-                        2400
-                        2700)
-                    [ near, Some mother ]
-                    "and with her ranger walking out to its Guard"
-
-                // The Caster's cost is the walk (`CastBid.choose`): a bigger
-                // bank lands the one body no sooner.
                 Expect.equal
                     (casterAt 2400 300 2700)
-                    [ near, Some mother ]
-                    "two crossings each: the name, over the larger bank"
-
-                Expect.equal
-                    (casterAt 2400 300 2400)
-                    [ near, Some mother ]
-                    "two crossings each and the banks tied: the name"
+                    [ near, List.sort [ mother; third ] ]
+                    "the child under the Caster's floor projects none"
             }
 
             test
-                "a colony whose bank cannot buy the harassment floor is no caster, however near: the room is refused until one can" {
-                let floorBanks = Tuning.defaults.HarassBlocks * Bodies.rangerBlockCost
+                "a colony whose bank is under the Caster's floor is no caster, however near: the room is refused until one is past it" {
+                // Moved by #658: the floor is the Caster's alone (it was three
+                // ranger blocks, the harassment floor).
+                let floorBanks = Tuning.defaults.CasterFloor
                 // The mother reaches the room and holds the larger bank, one
-                // energy short of three ranger blocks.
+                // energy short of the Caster's floor.
                 let poor = harassWorldAt (reservedFor enemy) (floorBanks - 1) 300
 
                 for home in [ mother; child ] do
@@ -519,7 +496,7 @@ let harassViewTests =
                 Expect.equal
                     (cast.Harass |> List.map (fun h -> h.RoomName))
                     [ harassRoom ]
-                    "the tick the bank buys three ranger blocks, the colony casts the room"
+                    "the tick the bank reaches the Caster's floor, the colony casts the room"
 
                 Expect.isEmpty cast.Refused "and the refusal is gone"
             }
@@ -871,22 +848,29 @@ let harassDeclaredFloorTests =
 
                 Expect.equal
                     (declaredCasting (Some 2) 1800)
-                    [ harassRoom, Some mother ]
+                    [ harassRoom, [ mother ] ]
                     "the mother's 1,800 buys two blocks"
 
                 Expect.equal
                     (declaredCasting (Some 2) 1700)
-                    [ harassRoom, None ]
+                    [ harassRoom, [] ]
                     "a 1,700 bank buys them too, short of the Caster's floor: nobody casts it"
             }
 
-            test "a room declared with no blocks keeps the default floor" {
-                Expect.equal (declaredCasting None 1800) [ harassRoom, None ] "refused at 1,800"
+            // Moved by #658: the sweep's caster is floored at the Caster's
+            // floor alone; what it casts is the fight's to price (a room
+            // declared with no blocks was refused at 1,800, short of three
+            // ranger blocks).
+            test "a room declared with no blocks is cast at the Caster's floor" {
+                Expect.equal
+                    (declaredCasting None Tuning.defaults.CasterFloor)
+                    [ harassRoom, [ mother ] ]
+                    "cast at 1,800"
 
                 Expect.equal
-                    (declaredCasting None (Tuning.defaults.HarassBlocks * Bodies.rangerBlockCost))
-                    [ harassRoom, Some mother ]
-                    "and cast the tick the bank buys the default blocks"
+                    (declaredCasting None (Tuning.defaults.CasterFloor - 1))
+                    [ harassRoom, [] ]
+                    "and refused a tick under it"
             }
         ]
 

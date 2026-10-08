@@ -1560,8 +1560,11 @@ let guardPrecedenceTests =
                         [ Resident ], unpooled [ Resident ] [ "ResidentRing" ]
                         // Moved by #656: a harassment room nobody works seats
                         // its holder alone, a contested room's count (it seated
-                        // a relief beside it, #439).
-                        [ Harassed ], row [ Harassed ] [ "Stand" ] OnTheTier one [ "r-1" ]
+                        // a relief beside it, #439). Moved by #658: the
+                        // Takers are `decide`'s, which lays the sweep in: it
+                        // works no room with nothing to kill, so nobody takes
+                        // it (r-1 did); the Brief read beside it is unswept.
+                        [ Harassed ], row [ Harassed ] [ "Stand" ] OnTheTier one []
                         // Moved on purpose (#615 U3): #535's hold rule kept the
                         // guard holding the Guard while it could strike a target
                         // there; one fitness answer takes and keeps it now, and
@@ -1614,8 +1617,13 @@ let guardPrecedenceTests =
                         // The guard holding it holds the trespass's fight (#535).
                         [ Resident; Trespasser ],
                         row [ Resident ] [ "ResidentRing" ] OnTheTier garrison [ "g-1"; "r-1" ]
-                        [ Harassed; Hold ], row [ Harassed ] [ "Stand" ] OnTheTier one [ "r-1" ]
-                        [ Harassed; Core ], row [ Harassed ] [ "Stand" ] OnTheTier one [ "r-1" ]
+                        // Moved by #658, as [ Harassed ]: swept, the quiet
+                        // candidate is none of the sweep's, and the room's
+                        // other flavour takes its takers, the held exit's
+                        // guard, and the core's guard and ranger (r-1 alone).
+                        [ Harassed; Hold ], row [ Harassed ] [ "Stand" ] OnTheTier one [ "g-1" ]
+                        [ Harassed; Core ],
+                        row [ Harassed ] [ "Stand" ] OnTheTier one [ "g-1"; "r-1" ]
                         // Moved by #656: a body working a harassment room is
                         // its prey, a kill as a trespasser in our outpost is,
                         // on the tiles beside it and taken by either row (it
@@ -1625,8 +1633,10 @@ let guardPrecedenceTests =
                         // The resident's ground and cap before the harassment's.
                         // Moved by #656, the quirk settled: its count is its own
                         // garrison's (it asked as the harassment, one ranger).
+                        // Moved by #658, as [ Harassed ]: swept, nobody takes
+                        // it, as [ Resident ] alone (r-1 did).
                         [ Resident; Harassed ],
-                        row [ Resident ] [ "ResidentRing" ] OnTheTier garrison [ "r-1" ]
+                        row [ Resident ] [ "ResidentRing" ] OnTheTier garrison []
                         // A chase in sight kites before the core, the held exit
                         // and the trespasser. Moved on purpose (#615 U2): beside
                         // a raid that can close, the ranger row trades with the

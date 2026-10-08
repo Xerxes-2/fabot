@@ -1612,7 +1612,7 @@ let decideFight
     (memo: PlanMemo)
     (carry: EconomyCarry)
     : Decision option =
-    openFight view assignments verbose memo carry
+    openFight (Facts.sweep assignments view) assignments verbose memo carry
     |> Option.bind (fun opening ->
         let joining = opening.Join ownFight
         joining.Finish [ matchAlone joining assignments verbose ])
@@ -1627,9 +1627,10 @@ let decide
     (memo: PlanMemo option)
     : Decision =
     // One colony alone is always its own turn to re-plan: the budget #357
-    // added staggers colonies against each other.
+    // added staggers colonies against each other. Its sweep laid in as the
+    // world's tick lays it (`judgeColonies`).
     let view =
-        { view with
+        { Facts.sweep assignments view with
             Leaving =
                 leavingTiles
                     assignments
@@ -1739,14 +1740,18 @@ let private sorted (results: Result<'a, ColonyFault> list) : 'a list * ColonyFau
 /// Each raided room's one verdict, priced once over the fleet and the
 /// world's vision and laid in each view (`Facts.judge`): a colony that does
 /// not decide (`idle`) sends only the bodies its plan already holds there.
-/// And each contested room's one danger (`WorldDanger.lay`).
+/// The [[sweep]]'s one room laid in first (`Facts.sweepAll`), so the
+/// verdicts price the room it works and no other candidate. And each
+/// contested room's one danger (`WorldDanger.lay`).
 let judgeColonies
     (assignments: Assignments)
     (idle: Set<string>)
     (colonies: (Colony * ColonyView) list)
     : ColonyView list =
-    colonies
-    |> List.map (fun (colony, view) ->
+    let swept = colonies |> List.map snd |> Facts.sweepAll assignments
+
+    List.zip colonies swept
+    |> List.map (fun ((colony, _), view) ->
         ({
             Cut = view
             Owns = Colony.declaredRooms colony

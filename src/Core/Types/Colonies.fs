@@ -777,12 +777,13 @@ module CastBid =
         (crossings |> Option.defaultValue (tuning.MaxHops + 1)) * Engine.roomSide
 
 /// The global harassment list as one tick decided it (`World.harassCasters`):
-/// each room beside the colony that casts it, None while no colony can.
-/// Decided once and handed to every colony's reading, so there is one answer
-/// to read and not one derivation per colony.
+/// each [[sweep]] candidate beside the colonies that project it, by home,
+/// none while no colony can (#658). Decided once and handed to every
+/// colony's reading, so there is one answer to read and not one derivation
+/// per colony.
 type HarassCasting =
     {
-        Casters: (Harass * string option) list
+        Casters: (Harass * string list) list
         /// The bank a contested home's resident garrison body costs
         /// (`Tuning.RangerResidentBlocks` ranger blocks): what its caster's
         /// bank buys (`World.garrisonCasters`).

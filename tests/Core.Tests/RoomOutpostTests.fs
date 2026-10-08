@@ -373,60 +373,35 @@ let outpostDeclarationTests =
                     (casting w13s28 w17s29).Casters
                     |> List.map (fun (h, caster) -> h.RoomName, caster)
 
+                // Moved by #658: no colony runs the sweep; every colony past
+                // the Caster's floors that reaches a candidate projects it, and
+                // each body is the Caster's (each room went to its own caster,
+                // whose bank bought its declared floor). W17S25, behind W18S26
+                // from W17S29, is W15S28's to work.
+                let reached =
+                    [
+                        "W18S27", [ "W15S28"; "W17S29" ]
+                        "W19S26", [ "W17S29" ]
+                        "W19S25", [ "W17S29" ]
+                        "W17S25", [ "W15S28" ]
+                    ]
+
                 Expect.equal
                     (casters 5_600 1_800)
-                    [
-                        "W18S27", Some "W15S28"
-                        "W19S26", Some "W17S29"
-                        "W19S25", Some "W17S29"
-                        "W17S25", Some "W15S28"
-                    ]
-                    "W15S28 casts W18S27 and W17S25, whose full floor W17S29 at RCL5 (2026-10-02) cannot buy; W17S29 casts W19S26 and W19S25 unseen, which W15S28 is past the budget of"
-
-                // The floors the casting buys (`Harass.blocks`; #656 dropped
-                // them off `HarassCasting`, read by no view since).
-                Expect.equal
-                    (Colony.harassDeclared
-                     |> List.map (fun h -> h.RoomName, Harass.blocks Tuning.defaults h)
-                     |> Map.ofList)
-                    (Map.ofList
-                        [
-                            "W18S27", Tuning.defaults.HarassBlocks
-                            "W19S26", 2
-                            "W19S25", 2
-                            "W17S25", Tuning.defaults.HarassBlocks
-                        ])
-                    "W18S27 and W17S25 (besieged by Trepidimous's 18M17A squad) keep the full floor; W19S26 and W19S25 are floored at their declared two blocks"
+                    reached
+                    "every colony at the Caster's floors that reaches a candidate projects it"
 
                 Expect.equal
                     (casters 5_650 1_800)
-                    [
-                        "W18S27", Some "W15S28"
-                        "W19S26", Some "W17S29"
-                        "W19S25", Some "W17S29"
-                        "W17S25", Some "W15S28"
-                    ]
-                    "and W13S28's larger bank does not take a room from the nearer W15S28"
+                    reached
+                    "and W13S28's larger bank reaches none of them"
 
                 Expect.equal
                     (casters 5_600 1_300)
-                    [
-                        "W18S27", Some "W15S28"
-                        "W19S26", None
-                        "W19S25", None
-                        "W17S25", Some "W15S28"
-                    ]
-                    "W17S29's RCL4 bank buys no floor, and W19S26 and W19S25 are refused"
+                    [ "W18S27", [ "W15S28" ]; "W19S26", []; "W19S25", []; "W17S25", [ "W15S28" ] ]
+                    "W17S29's RCL4 bank is under the Caster's floor: W19S26 and W19S25, which only it reaches, are refused"
 
-                Expect.equal
-                    (casters 5_600 2_300)
-                    [
-                        "W18S27", Some "W17S29"
-                        "W19S26", Some "W17S29"
-                        "W19S25", Some "W17S29"
-                        "W17S25", Some "W15S28"
-                    ]
-                    "W17S29's RCL6 bank buys the full floor: it casts W19S26, W19S25 and the nearer W18S27, and never W17S25 behind W18S26"
+                Expect.equal (casters 5_600 2_300) reached "W17S29's RCL6 bank: as at the floor"
 
                 // W17S25 is W15S28's Claim and a harassment room at once
                 // (2026-10-03): harassed until the Claim lands, then ours,
@@ -434,7 +409,7 @@ let outpostDeclarationTests =
                 Expect.equal
                     ((castingAfter true 5_600 1_800).Casters
                      |> List.map (fun (h, caster) -> h.RoomName, caster))
-                    [ "W18S27", Some "W15S28"; "W19S26", Some "W17S29"; "W19S25", Some "W17S29" ]
+                    (List.take 3 reached)
                     "the tick W17S25's Claim lands it is ours, and no colony casts it: the rest are cast as before"
 
                 for h in Colony.harassDeclared do

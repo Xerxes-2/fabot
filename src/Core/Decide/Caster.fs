@@ -242,8 +242,12 @@ let assign
             // its home or a room that is no other colony's home it defends
             // (`Facts.defendsOthers`); any other past the floor, as the
             // verdict weighs its row (`Facts.castsForOthers`).
+            // A [[sweep]]'s room is no colony's own, whoever asks for it
+            // (#658): each body past both floors, as for another's room.
             let own (bidder: Bidder) =
-                isAsker bidder && not (Facts.defendsOthers bidder.View room)
+                isAsker bidder
+                && not (Facts.defendsOthers bidder.View room)
+                && Facts.contestOurs bidder.View room
 
             // A trespass's kill is cast into a colony's own room only past
             // its bank's floor, the body paid for (#652): it is spent out of

@@ -1621,8 +1621,8 @@ if (command === "console") {
     // A harassment room's squad (#441): the room is ours to walk back into, so
     // the clock is the last sighting plus Tuning.HarassClearTicks, not the life.
     "harass-sighting":
-      "a squad the ranger cannot beat in a harassment room — the deadline is its " +
-      "last sighting plus 50 ticks (ADR 0081)",
+      "a squad the sweep cannot beat in one of its candidates — the deadline is its " +
+      "last sighting plus 50 ticks (ADR 0093)",
     // Every body of the raid seen dead, or (a player's) seen elsewhere (#507).
     "raid-gone":
       "every body of the raid was seen dead, or seen in another room after it left " +

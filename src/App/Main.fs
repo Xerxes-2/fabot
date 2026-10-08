@@ -78,6 +78,10 @@ let mutable private hostileSteps: Map<string, HostileStep> = Map.empty
 // falling back on the danger log's threat memory.
 let mutable private raiders: Map<string, RaidSeen> = Map.empty
 
+// Each sweep candidate's bodies as last seen (`World.PreySeen`, #658): heap
+// only, a reset pricing a dark candidate at nothing until it is seen again.
+let mutable private preySeen: Map<string, BodiesSeen> = Map.empty
+
 // The last tick an armed rival stood in each room (`World.ArmedSeen`, #485):
 // heap state seeded off the `rooms` leaf on a cold heap, so the deploy before
 // a walk does not forget the room the walk goes round.
@@ -774,6 +778,7 @@ let private fullTick
         |> World.recallHealers Tuning.defaults healers
         |> World.recallHostiles hostileSteps
         |> World.recallRaiders raiders
+        |> World.recallPrey (harassment.Rooms |> List.map _.RoomName |> Set.ofList) preySeen
         |> World.recallArmed Tuning.defaults armedSeen
         |> World.recallRivalControllers rivalControllers
         |> fun world -> { world with Refusals = refusals }
@@ -784,6 +789,7 @@ let private fullTick
     healers <- world.Healers
     hostileSteps <- world.HostileSteps
     raiders <- world.Raiders
+    preySeen <- world.PreySeen
     armedSeen <- world.ArmedSeen
     rivalControllers <- world.RivalControllers
 
@@ -876,8 +882,16 @@ let private fullTick
 
     // The world layer's read, once for every colony (`WorldView`): fresh each
     // tick, and its danger laid in once the views are cut (`WorldDanger`).
+    // The sweep's muster reads each rival room's defence response off last
+    // tick's dossier (#658).
     let watch =
-        WorldView.ofWorld Colony.declared (gates |> Map.toList |> List.map snd) world
+        { WorldView.ofWorld Colony.declared (gates |> Map.toList |> List.map snd) world with
+            Responses =
+                match rivalDossier with
+                | Some rivals when not (List.isEmpty harassment.Rooms) ->
+                    Observe.Rivals.responses rivals
+                | _ -> Map.empty
+        }
 
     // Each colony's cut (`ColonyView.cutOf`): the rooms it projects, which
     // the forced tick's deciders and the reset split read before any view is

@@ -1033,10 +1033,9 @@ let private worldRooms
             let salvage =
                 colony.Salvage |> List.filter (Declaration.withinHopBudget maxHops colony.Home)
 
-            // Every harassment room and its chain, for every home within the
-            // budget whose bank buys the lowest declared floor
-            // (`Harassment.leastFloor`): which of them casts
-            // it is read off the world this is choosing rooms for
+            // Every sweep candidate and its chain, for every home within the
+            // budget whose bank is at the Caster's floor: which of them runs
+            // the sweep is read off the world this is choosing rooms for
             // (`World.harassCasters`).
             let harassed =
                 if affords colony.Home then
@@ -1141,8 +1140,7 @@ let ofGame
             harass.Rooms
             (fun home ->
                 roomSeen home
-                |> Option.exists (fun room ->
-                    room.energyCapacityAvailable >= Harassment.leastFloor tuning harass))
+                |> Option.exists (fun room -> room.energyCapacityAvailable >= tuning.CasterFloor))
             seen
         |> List.map (fun roomName ->
             let facts =

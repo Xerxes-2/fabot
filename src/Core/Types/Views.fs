@@ -281,6 +281,18 @@ type WorldView =
         /// was last seen holding (`World.PreySeen`, #658): what the sweep
         /// prices a dark room by.
         PreySeen: Map<string, BodiesSeen>
+        /// Each rival room's defence response as its dossier saw it (#653):
+        /// the fewest ticks from our first armed body in the room to its
+        /// owner's first armed body there; `Int32.MaxValue` where it was
+        /// visited and never answered. What the [[sweep]] prices its muster
+        /// by (`Facts.sweepMusters`, #658); a room absent has no reading.
+        /// Laid by the shell off last tick's dossier; empty in a fixture.
+        Responses: Map<string, int>
+        /// The [[sweep]]'s group, every colony's body of it, with where it
+        /// stands (`Facts.sweepAll`, #658): what its muster waits for, the
+        /// bodies landing from other colonies among them. Empty until the
+        /// views are swept.
+        SweepGroup: (CreepInfo * RoomPos) list
         /// Each room a guard or ranger of ours was last lost in, the latest of
         /// every colony's raid log (`StandDown.FighterLost`), the larger cast
         /// on one tick: a room's recast cooldown is the room's, whichever
@@ -298,6 +310,8 @@ module WorldView =
             Danger = Set.empty
             RaidSeen = Map.empty
             PreySeen = Map.empty
+            Responses = Map.empty
+            SweepGroup = []
             FighterLost = Map.empty
             Questioned = Set.empty
             Observers = []
@@ -427,6 +441,8 @@ module WorldView =
                 |> Set.intersect watched
             RaidSeen = raidSeen
             PreySeen = world.PreySeen |> Map.filter (fun room _ -> not (World.seenNow world room))
+            Responses = Map.empty
+            SweepGroup = []
             FighterLost =
                 (Map.empty, gates)
                 ||> List.fold (fun lost gate ->

@@ -537,6 +537,78 @@ let private equalPaceMelee () : Arena =
                 (Some(Chase(Nearest, None)))
         ]
 
+/// The [[sweep]] (#658): W12S28 sweeping two of Trepidimous' remotes,
+/// W12S27 north and W13S28 west, each worked by a 5W3M miner on its source
+/// and a loaded 10C5M hauler beside it; an escort no lone ranger beats
+/// (10R 10H 20M) waits in W12S26 and walks into W12S27 from t50. Both
+/// candidates in an observer's sight every tick; the ranger row casts.
+let private sweepTwoRemotes () : Arena =
+    let trep = Side.Player "Trepidimous"
+    let north = room "W12S27"
+    let west = room "W13S28"
+
+    let candidate (r: ArenaRoom) : Harass =
+        let outpost = outpostOf r.Capture
+
+        {
+            RoomName = r.Capture.RoomName
+            Enemy = "Trepidimous"
+            Stand = snd (List.head outpost.Sources)
+            Controller = snd outpost.Controller
+            Via = []
+            Blocks = None
+        }
+
+    let worker id roomName (minerAt: int * int) (haulerAt: int * int) =
+        [
+            body
+                $"miner-{id}"
+                trep
+                (parts [ Work, 5; Move, 3 ])
+                (at roomName (fst minerAt) (snd minerAt))
+                (Some Hold)
+            { body
+                  $"hauler-{id}"
+                  trep
+                  (parts [ Carry, 10; Move, 5 ])
+                  (at roomName (fst haulerAt) (snd haulerAt))
+                  (Some Hold) with
+                Energy = 500
+            }
+        ]
+
+    let escort =
+        body
+            "escort"
+            trep
+            (parts [ Move, 20; RangedAttack, 10; Heal, 10 ])
+            (at "W12S26" 15 46)
+            (Some(Phases [ 50, Hold; 1_000, Sweep(at "W12S27" 16 40, Nearest, 3) ]))
+
+    let a =
+        arena
+            900_000
+            [ w12s28 (); north; west; room "W12S26" ]
+            [ colony "W12S28" ]
+            (homeCrew
+             @ worker "n" "W12S27" (16, 44) (12, 45)
+             @ worker "w" "W13S28" (15, 8) (13, 9)
+             @ [ escort ])
+        |> withCasts [ "ranger" ]
+        |> withHarass [ candidate north; candidate west ]
+
+    { a with
+        Lookout = set [ "W12S27"; "W13S28" ]
+    }
+
+/// No economy body of Trepidimous' stands in the arena: every miner and
+/// hauler of the sweep's remotes is dead.
+let private noRivalEconomy (a: Arena) =
+    a.Bodies
+    |> List.forall (fun b ->
+        b.Side <> Side.Player "Trepidimous"
+        || not (List.contains Work b.Parts || List.contains Carry b.Parts))
+
 /// No body of another side but a Source Keeper's stands in the arena.
 let private noHostile (a: Arena) =
     a.Bodies
@@ -616,6 +688,12 @@ let private scenarios () : Scenario list =
             Ticks = 150
             Start = equalPaceMelee
             Cleared = noHostile
+        }
+        {
+            Slug = "sweep-two-remotes"
+            Ticks = 800
+            Start = sweepTwoRemotes
+            Cleared = noRivalEconomy
         }
     ]
 
