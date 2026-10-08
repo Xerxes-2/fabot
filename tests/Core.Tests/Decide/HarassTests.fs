@@ -1418,17 +1418,61 @@ let sweepGroupTests =
                             }
                     }
 
+                let walking _ = false
+
                 Expect.isTrue
-                    (Facts.sweepMusters (answering 0) harassRoom group)
+                    (Facts.sweepMusters (answering 0) harassRoom group walking)
                     "the rival's escort is there at once: the near ranger alone risks its body, and waiting costs the miner nothing it would not lose anyway"
 
                 Expect.isFalse
-                    (Facts.sweepMusters (answering System.Int32.MaxValue) harassRoom group)
+                    (Facts.sweepMusters (answering System.Int32.MaxValue) harassRoom group walking)
                     "a rival that never answered: the first come strikes"
 
                 Expect.isFalse
-                    (Facts.sweepMusters (answering 0) harassRoom (List.take 1 group))
+                    (Facts.sweepMusters (answering 0) harassRoom (List.take 1 group) walking)
                     "a group of one waits for nobody"
+            }
+
+            // The #658 review (H1): two bodies on the rally ground a column
+            // and a row apart are a tick apart from the room's edge, and a
+            // muster that read that tick as a spread held them for ever.
+            test "a group all on its rally ground goes in, whatever its tiles' ticks to the room" {
+                let a = ranger "ranger-a"
+                let b = ranger "ranger-b"
+
+                let held =
+                    Map.ofList
+                        [ a.Name, taskId (Guard harassRoom); b.Name, taskId (Guard harassRoom) ]
+
+                let stancesWith (placed: (CreepInfo * RoomPos) list) =
+                    let colony = Facts.sweep held (sweeping placed [ northMiner ])
+
+                    (Threats.briefOf
+                        (threatsOfHeld colony (Atlas.ofView colony) (heldTaskFacts colony held))
+                        harassRoom)
+                        .Stances
+
+                let apart =
+                    stancesWith
+                        [
+                            a, RoomPos.at "W1N1" { X = 25; Y = 30 }
+                            b, RoomPos.at "W1N1" { X = 25; Y = 45 }
+                        ]
+
+                Expect.isNonEmpty
+                    apart
+                    "the premise: one body far behind the other, the pair musters"
+
+                let rally =
+                    Map.find a.Name apart |> Set.toList |> List.sortBy (fun tile -> tile.Y, tile.X)
+
+                let first = List.head rally
+
+                let second = rally |> List.find (fun tile -> tile.X <> first.X && tile.Y <> first.Y)
+
+                Expect.isEmpty
+                    (stancesWith [ a, first; b, second ])
+                    $"both on the rally ground ({first.X},{first.Y}) and ({second.X},{second.Y}): nobody waits"
             }
 
             // The review of #658 (M1) and the user (no spawn for ghosts): the

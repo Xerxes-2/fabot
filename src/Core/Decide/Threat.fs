@@ -4260,29 +4260,79 @@ let private withMusters
                     |> List.exists (fun (_, at) ->
                         at.Room = room || Formation.atCrossingInto room at)
 
+                // One crossing for the whole group, every colony's (#658):
+                // out of the room beside it the group stands nearest, none a
+                // rival's or a keeper's, so bodies of two colonies go in
+                // together and not one alone on each side. Off this colony's
+                // own chain where it does not hold that room's ground.
+                let shared =
+                    RoomName.adjacent room
+                    |> List.filter (fun beside ->
+                        not (Keepers.isKeeperRoom beside)
+                        && not (Set.contains beside view.Spatial.RivalRooms)
+                        && not (List.isEmpty (Atlas.seams atlas beside room)))
+                    |> List.sortBy (fun beside ->
+                        group
+                        |> List.sumBy (fun (_, at) ->
+                            RoomName.tileRange at (RoomPos.at beside { X = 25; Y = 25 })
+                            |> Option.defaultValue Engine.roomSide),
+                        beside)
+                    |> List.tryHead
+
+                let rally =
+                    lazy
+                        (match
+                            shared
+                            |> Option.map (fun beside ->
+                                Formation.rallyOn
+                                    view
+                                    atlas
+                                    (Threats.reachIn threats)
+                                    (Some [ beside; room ]))
+                         with
+                         | Some rally when not (Set.isEmpty rally) -> rally
+                         | _ ->
+                             Formation.rallyOn
+                                 view
+                                 atlas
+                                 (Threats.reachIn threats)
+                                 (Atlas.route atlas home room))
+
+                // A body on the rally ground has arrived, and so has one
+                // standing as near the room in a room beside it as the
+                // rally's farthest tile (another colony's rally, on its own
+                // chain): the muster waits for the rest, never for bodies
+                // already waiting.
+                let arrived =
+                    lazy
+                        (let depth =
+                            rally.Value
+                            |> Seq.map (fun tile ->
+                                RoomName.tileRange tile (RoomPos.at room { X = 25; Y = 25 })
+                                |> Option.defaultValue System.Int32.MaxValue)
+                            |> Seq.fold max 0
+
+                         fun (at: RoomPos) ->
+                             rally.Value.Contains at
+                             || RoomName.neighbouring at.Room room
+                                && RoomName.tileRange at (RoomPos.at room { X = 25; Y = 25 })
+                                   |> Option.exists (fun tiles -> tiles <= depth))
+
                 match holders, Map.tryFind (Guard room) threats.Briefs with
                 | [], _
                 | _, None -> None
                 | _ when engaged -> None
-                | _, Some brief when Facts.sweepMusters view room group ->
-                    match
-                        Formation.rallyOn
-                            view
-                            atlas
-                            (Threats.reachIn threats)
-                            (Atlas.route atlas home room)
-                    with
-                    | rally when Set.isEmpty rally -> None
-                    | rally ->
-                        Some(
-                            Guard room,
-                            { brief with
-                                Stances =
-                                    holders
-                                    |> List.map (fun creep -> creep.Name, rally)
-                                    |> Map.ofList
-                            }
-                        )
+                | _ when Set.isEmpty rally.Value -> None
+                | _, Some brief when Facts.sweepMusters view room group arrived.Value ->
+                    Some(
+                        Guard room,
+                        { brief with
+                            Stances =
+                                holders
+                                |> List.map (fun creep -> creep.Name, rally.Value)
+                                |> Map.ofList
+                        }
+                    )
                 | _ -> None)
             |> List.ofSeq
 

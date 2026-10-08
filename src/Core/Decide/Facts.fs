@@ -3765,11 +3765,24 @@ let private instantResponse = 0
 /// sooner than the rest land: the loss is its body's energy. Waiting costs
 /// each prey's take (`harmRate`) over the spread, and the kills it lets walk
 /// off or die of age (`killsLanded` landed at once against landed after the
-/// spread), each body at the odds it is still there (`stillThere`).
-let sweepMusters (view: ColonyView) (room: string) (group: (CreepInfo * RoomPos) list) : bool =
+/// spread), each body at the odds it is still there (`stillThere`). A body
+/// already waiting (`arrived`: on the rally ground, or as near as it) has
+/// landed, so a group all waiting has no spread and goes in: the muster
+/// never holds bodies that only wait for each other.
+let sweepMusters
+    (view: ColonyView)
+    (room: string)
+    (group: (CreepInfo * RoomPos) list)
+    (arrived: RoomPos -> bool)
+    : bool =
     let arrivals =
         group
-        |> List.map (fun (creep, at) -> creep, doorTicks at (paceOf (Fighter.ofCreep creep)) room)
+        |> List.map (fun (creep, at) ->
+            creep,
+            if arrived at then
+                0
+            else
+                doorTicks at (paceOf (Fighter.ofCreep creep)) room)
         |> List.filter (fun (_, ticks) -> ticks < System.Int32.MaxValue)
 
     match arrivals with

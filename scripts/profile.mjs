@@ -101,6 +101,12 @@
 // The same colony takes `--short N` (N of the level's extensions unbuilt, an
 // under-built room like #341's) and `--stock N` (its Storage's energy, empty
 // to full, default 200,000). Without either, every run is the one it was.
+//
+// `--sweep` (#658) runs the bundle with the sweep switched on, harness only:
+// `Colony.harass` set to `Colony.harassDeclared` in the probed copy, never
+// in `dist/main.js`, so the live switch stays a human's commit. Its
+// fingerprints differ from a run without it by design; compare it with
+// itself, and read its light and forced full tick counts.
 
 import { createRequire } from "node:module";
 import { Session } from "node:inspector/promises";
@@ -120,7 +126,7 @@ const RAIDABLE = ["outpost", "pair", "siege"];
 const USAGE =
   "usage: npm run profile -- [ticks] [top-N] [--census-every N]" +
   " [--scenario stub|outpost|young|pair|reactor|siege] [--level 1..8] [--raided] [--resets N]" +
-  " [--short N] [--stock N]" +
+  " [--short N] [--stock N] [--sweep]" +
   "  (positive integers)";
 
 // The controller level a scenario's colony is built at, and the one number
@@ -166,6 +172,8 @@ let levelArg = null;
 // which is one melee invader, and a scenario that stood five of them would
 // be profiling the 2% case as if it were the tick.
 let raided = false;
+// The sweep switched on in the probed copy alone (#658).
+let sweep = false;
 // How many cold resets the run ends on (#486): each loads a fresh copy of
 // the bundle over the run's last Memory and times its first tick.
 let resets = 5;
@@ -179,6 +187,7 @@ for (let i = 2; i < process.argv.length; i++) {
     censusEvery = Number(process.argv[++i]);
   else if (process.argv[i] === "--scenario") scenario = process.argv[++i];
   else if (process.argv[i] === "--raided") raided = true;
+  else if (process.argv[i] === "--sweep") sweep = true;
   else if (process.argv[i] === "--resets") resets = Number(process.argv[++i]);
   else if (process.argv[i] === "--short") shortArg = process.argv[++i];
   else if (process.argv[i] === "--stock") stockArg = process.argv[++i];
@@ -5056,7 +5065,18 @@ function loadBundle(file, dir = "probe") {
 // directory's copy, so neither Node's module cache nor V8's script cache
 // hands it the warm one.
 function writeProbed(file, dir) {
-  const source = readFileSync(file, "utf8");
+  const read = readFileSync(file, "utf8");
+  const SWITCH_OFF = "\nvar ColonyModule_harass = empty();";
+  if (sweep && read.indexOf(SWITCH_OFF) < 0) {
+    throw new Error(
+      `${path.relative(process.cwd(), file)} holds no \`${SWITCH_OFF.trim()}\`: --sweep switches ` +
+        "src/Core/Types/Colonies.fs's `Colony.harass` on by that line, and whatever renamed it " +
+        "or switched it on live is what this probe has to be re-pointed at",
+    );
+  }
+  const source = sweep
+    ? read.replace(SWITCH_OFF, "\nvar ColonyModule_harass = ColonyModule_harassDeclared;")
+    : read;
   for (const phase of ["openWhole", "joinWhole", "finishWhole"]) {
     const declarations = source.match(new RegExp(`^function ${phase}\\(`, "gm")) ?? [];
     if (declarations.length !== 1) {
