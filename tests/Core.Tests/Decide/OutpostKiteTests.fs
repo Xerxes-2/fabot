@@ -97,7 +97,7 @@ let private approachOf colony =
         |> Seq.map (RoomPos.at "W1N2")
         |> Set.ofSeq
 
-    (Threats.briefOf (threatsOf colony atlas) "W1N2").Laid.Approach.Value,
+    (Brief.approachOf (Threats.briefOf (threatsOf colony atlas) "W1N2")).Value,
     Set.difference walkable ground
 
 /// A ranger of `shots` RANGED_ATTACK on as many MOVE.

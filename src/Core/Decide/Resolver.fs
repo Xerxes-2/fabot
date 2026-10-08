@@ -19,7 +19,7 @@ type private Kiting =
     /// By tile index, what its walk keeps off (`Threats.kiteUnsafeFor`), and
     /// the soonest a class shorter than its reach strikes each tile, which a
     /// tie breaks toward the later.
-    /// With the kite ground's approach band (`Laid.Approach`), lazily.
+    /// With the kite ground's approach band (`Brief.approachOf`), lazily.
     | Keeps of unsafe: (int -> bool) * later: (int -> int) * approach: Lazy<Set<RoomPos>>
 
 /// One target a fighter strikes next, as its chase reads it.
@@ -1550,7 +1550,7 @@ let movementAmong
 
             let approach =
                 match Map.tryFind name assigned with
-                | Some(Guard room) -> (Threats.briefOf threats room).Laid.Approach
+                | Some(Guard room) -> Brief.approachOf (Threats.briefOf threats room)
                 | _ -> lazy Set.empty
 
             match Threats.kiteUnsafeFor view threats atlas creep camp with

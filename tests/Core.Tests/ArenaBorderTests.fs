@@ -1696,12 +1696,12 @@ let private taskEachTick (creep: string) (ticks: int) (start: Arena) =
 /// container out over the west border into W18S26 (seen where `lookout`
 /// names it) and back, twice. The ranger holds W17S26's Guard from taking
 /// it until the hauler dies or the run ends, and shoots it on its returns.
-let private hunterKeepsTheDancer (lookout: Set<string>) =
+let private hunterDancesWith (lookout: Set<string>) (adjust: Arena -> Arena) =
     let ranger = "ranger-1037139-Spawn11"
     let at roomName x y = RoomPos.at roomName { X = x; Y = y }
 
     let start =
-        let a = haulersAtTheContainer ()
+        let a = haulersAtTheContainer () |> adjust
 
         { a with
             Rooms = a.Rooms |> Map.add "W18S26" (room "W18S26")
@@ -1764,6 +1764,8 @@ let private hunterKeepsTheDancer (lookout: Set<string>) =
         (trace |> List.last |> hitsAt |> Option.defaultValue 0)
         (trace |> List.item (List.head out).Tick |> hitsAt |> Option.defaultValue 0)
         $"and it is shot on its returns\n{failure}"
+
+let private hunterKeepsTheDancer (lookout: Set<string>) = hunterDancesWith lookout id
 
 [<Tests>]
 let arenaBorderTests =
@@ -2860,6 +2862,28 @@ let arenaBorderTests =
             test
                 "#618: a hauler dancing out over a border into a room in sight stays the outpost's kill, and the ranger keeps its Guard" {
                 hunterKeepsTheDancer (Set.singleton "W18S26")
+            }
+
+            // The #663 S2 review's residual 2, owned by S5's jobs: the same
+            // dance with W18S26 a second outpost of W17S25's, so each step
+            // across lands the hauler in a room of the same colony, its own
+            // sighting there. The kill is one job, held in the room whose
+            // Guard the ranger holds: the hauler's crossings move no Task.
+            test
+                "#663 S5: a hauler dancing between two outposts of one colony stays one job, and the ranger keeps its Guard" {
+                hunterDancesWith (Set.singleton "W18S26") (fun a ->
+                    { a with
+                        Colonies =
+                            a.Colonies
+                            |> List.map (fun c ->
+                                if c.Home = "W17S25" then
+                                    { c with
+                                        Outposts =
+                                            c.Outposts @ [ outpostOf (room "W18S26").Capture ]
+                                    }
+                                else
+                                    c)
+                    })
             }
 
             // The same haulers with W13S28 a living colony. The ranger walks in

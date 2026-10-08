@@ -4128,6 +4128,24 @@ let sweepDancer
 
             dancer, entries)
 
+/// What camping a border dancer earns a tick (#663 M3): its kill value at the
+/// camp's odds (`campOdds`) over the ticks the team's kill of it takes
+/// (`killTicksOf`), priced as the [[sweep]] prices the room (`sweepPricing`);
+/// nothing for a kill the team never lands. `dancer` is the body as
+/// `sweepDancer` names it.
+let campValue (view: ColonyView) (room: string) (team: Fighter list) (dancer: HostileInfo) : float =
+    match team with
+    | [] -> 0.0
+    | fighter :: _ ->
+        let priced = sweepPricing view room
+        let healOn = healReachingWithin priced room priced.Tuning.ReachHorizon
+
+        match killTicksOf priced healOn team dancer with
+        | None -> 0.0
+        | Some kill ->
+            min 1.0 (campOdds priced fighter kill dancer) * killValue priced dancer
+            / float (max 1 kill)
+
 /// The ticks a body standing at `from` walks to a room at its plain `pace`
 /// (#658): none in the room or on its border's doorstep (the tile beside it,
 /// where a crossing body stands one tick in and one out), else its tiles to
@@ -4387,17 +4405,20 @@ let sweepChoice (held: Assignments) (views: ColonyView list) : string option =
         |> List.tryHead
         |> Option.map fst
 
-/// How many bodies the [[sweep]]'s room seats (#658): its whole group, every
-/// colony's (`WorldView.SweepGroup`), and one more where a body like its
-/// weakest, landing with its last, raises what the group earns a tick
-/// (`roomRate`, read as a cast: the seat is what a body is cast for): a
-/// free fighter joins the one group while concentrating pays, never a second
-/// room. One with no group seats one.
-let sweepSeats (view: ColonyView) (room: string) : int =
-    let placed =
-        view.World.SweepGroup |> List.map (fun (creep, at) -> at, Fighter.ofCreep creep)
+/// How many bodies a contested room's job seats for its group (#658, #663
+/// M3): the whole group, every body on it with where it stands (`group`),
+/// and one more where a body like its weakest, landing with its last, raises
+/// what the group earns there a tick (`roomRate`, read as a cast: the seat
+/// is what a body is cast for) by more than a tick of that body's life costs
+/// (its energy over `Engine.creepLifetime`) and more than a body of the
+/// group earns there a tick already (its share of the rate): a free fighter
+/// joins the one group while concentrating pays, never a second room, and
+/// the group stops where the next body would earn less than its share. No
+/// group seats none: the job's own count does.
+let seatsPaid (view: ColonyView) (room: string) (group: (CreepInfo * RoomPos) list) : int =
+    let placed = group |> List.map (fun (creep, at) -> at, Fighter.ofCreep creep)
 
-    let dismantle = dismantleOf (List.map fst view.World.SweepGroup)
+    let dismantle = dismantleOf (List.map fst group)
 
     let rateOf (team: (RoomPos * Fighter) list) =
         let arrival =
@@ -4411,21 +4432,40 @@ let sweepSeats (view: ColonyView) (room: string) : int =
             roomRate Quarry.Reading.Cast view (List.map snd team) dismantle arrival room
 
     match placed with
-    | [] -> 1
+    | [] -> 0
     | placed ->
-        let weakest =
-            placed
-            |> List.minBy (fun (_, fighter) ->
-                fighter.DamageAt Engine.rangedRange + fighter.DamageAt 1)
-            |> snd
+        let strength (fighter: Fighter) =
+            fighter.DamageAt Engine.rangedRange + fighter.DamageAt 1
+
+        let weakestCreep, _ =
+            group |> List.minBy (fun (creep, _) -> strength (Fighter.ofCreep creep))
+
+        let weakest = Fighter.ofCreep weakestCreep
 
         let last =
             placed
             |> List.maxBy (fun (at, fighter) -> doorTicks at (paceOf fighter) room)
             |> fst
 
+        // The seat pays where what the body adds a tick beats both what a
+        // tick of its life costs (its energy over its lifetime) and what a
+        // body of the group earns there a tick already: a body that would
+        // earn less than its share is worth more anywhere else, so the
+        // group stops growing where concentrating stops paying, never a
+        // body at a time for ever.
+        let lifeTick =
+            weakestCreep.Body
+            |> Map.toList
+            |> List.collect (fun (part, n) -> List.replicate n part)
+            |> bodyCost
+            |> float
+            |> fun energy -> energy / float Engine.creepLifetime
+
+        let now = rateOf placed
+        let share = now / float (List.length placed)
+
         List.length placed
-        + (if rateOf ((last, weakest) :: placed) > rateOf placed then
+        + (if rateOf ((last, weakest) :: placed) - now > max lifeTick share then
                1
            else
                0)
@@ -4493,80 +4533,87 @@ let sweepAll (held: Assignments) (views: ColonyView list) : ColonyView list =
 /// colony asks in.
 let sweep (held: Assignments) (view: ColonyView) : ColonyView = sweepAll held [ view ] |> List.head
 
-/// Whether the [[sweep]]'s group waits for itself at the last crossing before
-/// its room (#658), priced and whatever the room's phase, off the room's
-/// worth (`roomWorth`): where the loss the body landing first risks alone
-/// exceeds what waiting for the rest costs; else the first come strikes
-/// first. `group` is every colony's body holding the room's Guard, with
-/// where it stands. The spread is the ticks between the first body's
-/// arrival and the last's (`doorTicks`); none, and nothing waits. The first
-/// body alone is caught where an escort stands that it loses alone
-/// (`RoomWorth.Escort`), or where the rival's defence answers
-/// (`RoomWorth.Response`) sooner than the rest land: the loss is its body's
-/// energy. Waiting costs the income denied over the spread
-/// (`RoomWorth.denied`), and the prey's kills it lets walk off or die of age
-/// (`killsLanded` landed at once against landed after the spread), each body
-/// at the odds it is still there (its value to a group already standing). A
-/// body already waiting (`arrived`: on the rally ground, or as near as it)
-/// has landed, so a group all waiting has no spread and goes in: the muster
-/// never holds bodies that only wait for each other.
-let sweepMusters
-    (view: ColonyView)
-    (room: string)
-    (group: (CreepInfo * RoomPos) list)
-    (arrived: RoomPos -> bool)
-    : bool =
-    let arrivals =
-        group
-        |> List.map (fun (creep, at) ->
-            creep,
-            if arrived at then
-                0
-            else
-                doorTicks at (paceOf (Fighter.ofCreep creep)) room)
-        |> List.filter (fun (_, ticks) -> ticks < System.Int32.MaxValue)
+/// One body a muster weighs (#663 M3): its fight, the ticks it lands in the
+/// room (none for one already waiting), and its energy.
+type Mustering =
+    {
+        Fighter: Fighter
+        Lands: int
+        Energy: float
+    }
 
-    match arrivals with
+/// The ticks a body standing at `at` lands in a room at its plain pace
+/// (`doorTicks`): none in it or on its doorstep.
+let landsIn (at: RoomPos) (fighter: Fighter) (room: string) : int =
+    doorTicks at (paceOf fighter) room
+
+/// The one muster rule (#535, #658, #663 M3): whether a fight's group waits
+/// at its last crossing for the rest of it, priced off the room's worth
+/// (`roomWorth`) whatever the room's phase, and its price a tick where it
+/// does — what the first come would lose over the waiting it saves, over
+/// the spread. `group`: every body coming (`Mustering`), an armed one
+/// standing by or one still to be cast alike. Its vanguard is the bodies
+/// landing first, together; the spread, the ticks until the last lands. No
+/// muster with no spread (a group all waiting goes in: a muster never holds
+/// bodies that only wait for each other), nor where the whole group loses
+/// the room's escort (`RoomWorth.Escort`): nothing coming wins it, so nobody
+/// waits, and the room's verdict stands it down. The vanguard is caught
+/// where the escort beats it alone, or, in a room not ours to keep
+/// (`contestOurs`), where its owner's defence answers (`RoomWorth.Response`)
+/// before the rest land; caught, it loses its bodies' energy. Waiting costs
+/// nothing where the escort beats the vanguard (it would keep and kill
+/// nothing before it fell); else the room's economic delta over the spread
+/// (`RoomWorth.delta`: our income kept there and the rival's denied) and the
+/// prey's kills it lets walk off or age out (`killsLanded` at once against
+/// after the spread), each body at the odds it is still there. It waits
+/// where the loss exceeds the waiting.
+let muster (view: ColonyView) (room: string) (group: Mustering list) : float option =
+    let group = group |> List.filter (fun body -> body.Lands < System.Int32.MaxValue)
+
+    match group with
     | []
-    | [ _ ] -> false
-    | arrivals ->
-        let first, landing =
-            arrivals |> List.minBy (fun (creep, ticks) -> ticks, creep.Name)
-
-        let spread = (arrivals |> List.map snd |> List.max) - landing
+    | [ _ ] -> None
+    | group ->
+        let landing = group |> List.map _.Lands |> List.min
+        let spread = (group |> List.map _.Lands |> List.max) - landing
 
         if spread <= 0 then
-            false
+            None
         else
             let worth = roomWorth view room
             let priced = sweepPricing view room
-            let lone = [ Fighter.ofCreep first ]
+            let vanguard = group |> List.filter (fun body -> body.Lands = landing)
+            let lone = vanguard |> List.map _.Fighter
 
-            let caught =
-                (not (List.isEmpty worth.Escort) && not (won (exchangeIn priced room lone)))
-                || spread > worth.Response
+            let beats (team: Fighter list) =
+                not (List.isEmpty worth.Escort) && not (won (exchangeIn priced room team))
 
-            let loss =
-                if caught then
-                    first.Body
-                    |> Map.toList
-                    |> List.collect (fun (part, n) -> List.replicate n part)
-                    |> bodyCost
-                    |> float
+            if beats (group |> List.map _.Fighter) then
+                None
+            else
+                let beaten = beats lone
+
+                let caught = beaten || not (contestOurs view room) && spread > worth.Response
+
+                let loss = if caught then vanguard |> List.sumBy _.Energy else 0.0
+
+                // The prey's kills: the escort's is what the vanguard risks.
+                let values =
+                    RoomWorth.values Quarry.Reading.Value worth
+                    |> Map.filter (fun id _ -> worth.Takes.ContainsKey id)
+
+                let waiting =
+                    if beaten then
+                        0.0
+                    else
+                        RoomWorth.delta Quarry.Reading.Value worth * float spread
+                        + killsLanded priced room lone landing values
+                        - killsLanded priced room lone (landing + spread) values
+
+                if loss > waiting then
+                    Some((loss - waiting) / float spread)
                 else
-                    0.0
-
-            // The prey's kills: the escort's is what the lone body risks.
-            let values =
-                RoomWorth.values Quarry.Reading.Value worth
-                |> Map.filter (fun id _ -> worth.Takes.ContainsKey id)
-
-            let waiting =
-                RoomWorth.denied Quarry.Reading.Value worth * float spread
-                + killsLanded priced room lone landing values
-                - killsLanded priced room lone (landing + spread) values
-
-            loss > waiting
+                    None
 
 /// The share of one body's energy a fight that holds it `ticks` spends of
 /// its life (`Engine.creepLifetime`, #654): a body that ends a fight
@@ -6845,7 +6892,7 @@ let private coredOutpostsOf (view: ColonyView) (declared: string list) : string 
 /// ADR-0077
 /// The errand rooms the ranger row keeps a body in: every one this colony works
 /// this tick, raid or none — the ranger stands on the Reactor's ring and meets
-/// what comes (`Laid.Resident`), while there is ore to burn in it
+/// what comes (its Guard's `Resident` job), while there is ore to burn in it
 /// (`fuelledErrands`, #420). A held errand and a withdrawn one are out of
 /// `view.Errands` before this reads it.
 let private guardedErrandsOf (fuelled: Errand list) : string list =

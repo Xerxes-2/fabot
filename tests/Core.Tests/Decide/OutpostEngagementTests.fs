@@ -683,6 +683,82 @@ let engagementTests =
                     (not (Set.isEmpty rally) && rally |> Set.forall (fun tile -> tile.Room = "W1N1"))
                     $"on the rally ground short of the room: {rally}"
 
+                // #663 S5: the muster is a job ahead of the ring, priced by
+                // the one rule the sweep's group musters by (`Facts.muster`):
+                // the first come alone loses to the raid, so waiting costs
+                // nothing it would keep.
+                let muster = List.head apart.Jobs
+
+                Expect.equal
+                    (muster.Kind, muster.Tiles)
+                    (JobKind.Muster, rally)
+                    "its first job: the muster"
+
+                Expect.isGreaterThan
+                    muster.Value.Value
+                    0.0
+                    "the first come's loss over the wait, a tick"
+
+                // The rule alone: a first come the raid beats loses its body,
+                // and waiting costs nothing it would keep, however much the
+                // room yields; a group of one waits for nobody.
+                let one lands =
+                    {
+                        Facts.Fighter = Fighter.ofCreep (guard "g-1")
+                        Facts.Lands = lands
+                        Facts.Energy = 800.0
+                    }
+
+                Expect.equal
+                    (Facts.muster (colony atSpawn) "W1N2" [ one 0; one 10 ])
+                    (Some 80.0)
+                    "its 800 energy over the ten ticks the second takes"
+
+                Expect.isNone
+                    (Facts.muster (colony atSpawn) "W1N2" [ one 0 ])
+                    "alone, nobody to wait for"
+
+                // The review of #663 S5: a lone holder waits only for a body
+                // the facts say will land — one in an oven, or one an idle
+                // spawn the bank funds now. With the bank empty no cast
+                // begins, so nobody is coming and it does not wait for ever.
+                // The bank drained, its spawn idle: no cast begins.
+                let lone =
+                    { declared raid with
+                        Bank = bank 0 1500
+                    }
+                    |> withBodyAtHome (guard "g-1") { X = 25; Y = 30 }
+
+                Expect.isEmpty
+                    (heldBriefOf [ "g-1", Guard "W1N2" ] "W1N2" lone).Stances
+                    "the bank empty: no cast is coming, nobody waits"
+
+                // A second guard in the oven, ten ticks from standing: coming.
+                let ovened =
+                    { lone with
+                        Casting =
+                            [
+                                {
+                                    Name = "guard-oven"
+                                    Body = Bodies.guardPattern.Block
+                                }
+                            ]
+                        Spawns =
+                            lone.Spawns
+                            |> List.map (fun spawn ->
+                                { spawn with
+                                    IsSpawning = true
+                                    Remaining = 10
+                                })
+                    }
+
+                Expect.equal
+                    ((heldBriefOf [ "g-1", Guard "W1N2" ] "W1N2" ovened).Stances
+                     |> Map.keys
+                     |> List.ofSeq)
+                    [ "g-1" ]
+                    "a guard in the oven lands: the lone holder waits for it"
+
                 let decision =
                     decideFrom
                         (holding |> List.map (fun (name, task) -> name, taskId task) |> Map.ofList)
@@ -732,17 +808,33 @@ let engagementTests =
                     (heldBriefOf holding "W1N2" together).Stances
                     "once both stand on the rally ground they go in together"
 
-                // On the walk in, strung out as one file between the rally
-                // ground and the crossing, off both: launched, not pulled back
-                // (#491's rule for the squads).
+                // Moved by #663 S5 (one muster rule for #535 and the sweep's):
+                // a file strung out short of the rally ground walks on to it
+                // and waits there for its last (it went in as one file, #491's
+                // squad rule): the ground lies on its walk in, so nothing is
+                // pulled back, and the first come is not sent in alone.
                 let walking =
                     declared raid
                     |> withBodyAtHome (guard "g-1") { X = 25; Y = 7 }
                     |> withBodyAtHome (guard "g-2") { X = 25; Y = 9 }
 
+                Expect.equal
+                    ((heldBriefOf holding "W1N2" walking).Stances |> Map.keys |> Set.ofSeq)
+                    (set [ "g-1"; "g-2" ])
+                    "holders strung out short of the rally ground walk on to it and wait there"
+
+                // One on the ground and the other a step off it beside its
+                // partner have both landed (the #609 capture's crowded ground).
+                let beside =
+                    let tiles = rally |> Set.toList |> List.map RoomPos.pos
+
+                    declared raid
+                    |> withBodyAtHome (guard "g-1") tiles.[0]
+                    |> withBodyAtHome (guard "g-2") { tiles.[0] with Y = tiles.[0].Y + 2 }
+
                 Expect.isEmpty
-                    (heldBriefOf holding "W1N2" walking).Stances
-                    "holders strung out on the walk in are not pulled back"
+                    (heldBriefOf holding "W1N2" beside).Stances
+                    "a holder beside its partner on the rally ground has landed with it"
             }
 
             // Live t974,024 (W18S25): Bang590 and Sky320 priced against the

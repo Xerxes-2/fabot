@@ -207,54 +207,60 @@ type Selector =
         Band: string -> HostileInfo -> int
     }
 
-/// The ground each source laid in one room this tick, before the room's kind
-/// picks its own (`Brief.Ground`); None where it laid none.
-type Laid =
-    {
-        /// Under a raid or a rival's claimer (#451) in a ranger room
-        /// (`Facts.rangerRooms`), or in a chased room a raid stands in, the
-        /// ranger's ground there ahead of every other: under an armed raid,
-        /// our ramparts within three of the kill order's head (#467); else in
-        /// a resident room whose raid no ranger wins (`Facts.outmatched`), the
-        /// room's safe set, laid only while a ranger of ours stands there or
-        /// holds its Guard (`threatsOfHeld`); else, while a melee body stands
-        /// there, the kill order's head is a claimer, or in a resident room an
-        /// unarmed head its kill score prices worth the kill (#648), the kite
-        /// ground — the
-        /// tiles within three of that head, less every tile a melee body
-        /// reaches in a step and a swing, and less swamp near one. With a
-        /// melee body there and that empty, the tiles farthest from it, never
-        /// the threats' ring beside it.
-        Kite: Set<RoomPos> option
-        /// With a kite ground laid about the kill order's head, the tiles one
-        /// to three off it that a kiter with no safe walk onto it closes on
-        /// (#595): off the exits and the hostiles' tiles, a melee arriving
-        /// later than the tick after, with escape room at least half the
-        /// ground's widest, the ground's own tests. Empty with any other
-        /// ground.
-        Approach: Lazy<Set<RoomPos>>
-        /// In a resident room (`Facts.residentRooms`), the garrison's ground,
-        /// which it holds and shoots from: in a declared errand room the
-        /// Reactor's own ring (#414, #411), in a raised child's home its
-        /// controller's while no armed Threat stands there (#447).
-        Resident: Set<RoomPos> option
-        /// The walkable tiles within range 1 of a Threat standing in the room,
-        /// less the tiles the Threats stand on — the guard's ground. In a room
-        /// whose last Threat has gone, the ground beside the exit it left by
-        /// while that is held (#450); and a level-0 core's ring (#487).
-        Ring: Set<RoomPos> option
-        /// Where a trespasser stands (`Facts.trespasser`, #516: an economy
-        /// body we may strike in our room or a harassed one, #656) and no
-        /// kind ahead claims the room, the tiles beside each trespasser off
-        /// the exits, or a hauler's store ground: a contested room's prey.
-        Prey: Set<RoomPos> option
-        /// In the [[sweep]]'s room where its kill is a dancer on the border
-        /// (`Facts.sweepDancer`, #658), the camp: fixed tiles off the exits,
-        /// out of every armed body's reach, covering the tiles it steps in
-        /// on, the one it uses most first, one a holder (those it already
-        /// stands on first). The dancer's tile now never moves it.
-        Camp: Set<RoomPos> option
-    }
+/// What one job of a fight is (#663 M3): where its bodies stand and what
+/// they are there for. Every kind is priced in one currency, the energy a
+/// tick its bodies' effort earns (`Job.Value`).
+[<RequireQualifiedAccess>]
+type JobKind =
+    /// A kill: under a raid or a rival's claimer (#451) in a ranger room
+    /// (`Facts.rangerRooms`), or in a chased room a raid stands in, the
+    /// ranger's ground about the kill order's head — our ramparts within
+    /// three of it under an armed raid (#467); else in a resident room whose
+    /// raid no ranger wins (`Facts.outmatched`), the room's safe set, laid
+    /// only while a ranger of ours stands there or holds its Guard; else,
+    /// while a melee body stands there, the head is a claimer, or in a
+    /// resident room an unarmed head its kill score prices worth the kill
+    /// (#648), the kite ground: the tiles within three of that head, less
+    /// every tile a melee body reaches in a step and a swing, and less swamp
+    /// near one; with a melee body there and that empty, the tiles farthest
+    /// from it. Or a contested room's prey (#516, #656): where a trespasser
+    /// stands (`Facts.trespasser`) and no kind ahead claims the room, the
+    /// tiles beside each one off the exits, or a hauler's store ground.
+    /// Priced at its head's kill score (#621).
+    | Strike
+    /// The walkable tiles within range 1 of a Threat standing in the room,
+    /// less the tiles the Threats stand on — the guard's ground; and a
+    /// level-0 core's ring (#487). Priced at the room's economic delta a tick
+    /// it keeps (`RoomWorth.delta`).
+    | Ring
+    /// In a resident room (`Facts.residentRooms`), the garrison's ground,
+    /// which it holds and shoots from: in a declared errand room the
+    /// Reactor's own ring (#414, #411), in a raised child's home its
+    /// controller's while no armed Threat stands there (#447). Priced at our
+    /// income kept there.
+    | Resident
+    /// Where the kill is a dancer on the border (`Facts.sweepDancer`, #658):
+    /// fixed tiles off the exits, out of every armed body's reach, covering
+    /// the tiles it steps in on, the one it uses most first, one a holder
+    /// (those it already stands on first). The dancer's tile now never moves
+    /// it. Priced at its kill at the camp's odds over the kill's ticks
+    /// (`Facts.campValue`).
+    | Camp
+    /// The tile a quarry seen lingering across the border steps back in on
+    /// (#585). Priced at its kill score.
+    | Intercept
+    /// In a room whose last armed Threat has gone, the ground beside the exit
+    /// it left by (#450), until a look finds it gone (#585). Priced at the
+    /// room's economic delta a tick it keeps.
+    | HoldExit
+    /// The crossing the holders of a fight wait on for the rest of their
+    /// group (#535, #658, `Facts.musters`): priced at what the first come
+    /// alone would lose over the waiting it saves, a tick of the spread.
+    | Muster
+
+/// How many bodies one job seats this tick, and the rows that may sit them
+/// (#550, #558, #546); no rows, any row its Brief admits.
+type Seating = { Count: int; Rows: CastRow list }
 
 /// ADR-0085
 /// One combat Task this tick — a room's `guard:<room>`, the home's Defend or
@@ -292,16 +298,25 @@ type Brief =
         /// For a kill, how far a holder of another room's Guard is called off
         /// it (the Pool's `RecallPolicy.Kill`).
         Recall: Recall option
-        Laid: Laid
-        /// Its holder's ground: the first laid in the room from its kind down
-        /// `BriefKind.order`. A resident and a chase hold their kite ground
-        /// (#451) first, so a melee guard's kind is never handed it; a
-        /// resident its declared ground next; a contested room by its phase
-        /// (#656): under its raid the room's `Ring`, its kite ground first
-        /// where a ranger answers it, or its prey's own (#516); a held exit and
-        /// a core the room's `Ring`; with none laid, the room's declared source
-        /// ring (#366). None where none is. A Defend's, the perimeter ground
-        /// (`defendGroundOf`); a squad's is per role, on its `Formation`.
+        /// Its jobs (#663 M3), the one its holders do first: the jobs laid in
+        /// the room each kind reads, from its own kind down
+        /// `BriefKind.order`, each once. A resident and a chase hold their
+        /// kite `Strike` (#451) first, so a melee guard's kind is never
+        /// handed it; a resident its `Resident` next; a contested room by its
+        /// phase (#656): under its raid its `Ring`, its kite first where a
+        /// ranger answers it, else its `Camp` on a dancer or its prey's
+        /// `Strike` (#516); a held exit and a core the room's `Ring` and
+        /// `HoldExit`. A Guard's seats are its first job's, and its prey's
+        /// ranged `Strike` beside it where a ranger answers a trespasser
+        /// (#550), or a core's ranged `Ring` (#558); the rest is ground it
+        /// falls back on and seats nobody. A Defend's, one a row at the line
+        /// (#546); none for an Assault, whose squad is its `Formation`'s.
+        Jobs: Job list
+        /// Its holder's ground: its first job's tiles, every `Ring` and
+        /// `HoldExit` together where it is one; with none, the room's
+        /// declared source ring (#366). None where none is. A Defend's, the
+        /// perimeter ground (`defendGroundOf`); a squad's is per role, on its
+        /// `Formation`.
         Ground: Set<RoomPos> option
         /// With no ground and no source placed, whether the walk in is to the
         /// room's ground off the border: a chased room shut on its raid (#510),
@@ -313,8 +328,9 @@ type Brief =
         /// Defend, one a role a squad; none for a chase (#510), which no row
         /// casts for.
         Asks: RowAsk list
-        /// How many bodies it admits, off the row's own count, the tick's
-        /// Threats given.
+        /// How many bodies it admits, the tick's Threats given: every job's
+        /// seats summed (`Job.Seats`), each row a job names capped at the
+        /// seats of the jobs it may sit (`Brief.capacityOfJobs`).
         Capacity: Threats -> Capacity
         /// The room's verdict (`Facts.answer`), priced once a tick on first
         /// read; `Win` in a room no raider stands in, and for an Assault,
@@ -324,8 +340,8 @@ type Brief =
         /// single-body kind.
         Formation: Formation option
         /// A Guard's holders held off `Ground` this tick, each on its own:
-        /// the muster ground while the holders that do not win alone wait
-        /// for the rest (`withMusters`, #535). The home's Defend's: each body
+        /// its `Muster` job's crossing while they wait for the rest of their
+        /// group (`withMusters`, #535, #658). The home's Defend's: each body
         /// of the rows it asks on its own row's ground (#546). Empty for every
         /// other Task.
         Stances: Map<string, Set<RoomPos>>
@@ -341,6 +357,32 @@ type Brief =
         /// other `Ground`. Read after `Stances`, priced on first read. Empty
         /// for every other Task.
         Seats: Lazy<Map<string, Set<RoomPos>>>
+    }
+
+/// One job of a fight this tick (#663 M3): its kind, the tiles its bodies
+/// stand on — fixed off the quarry's trajectory where it has one (a camp on
+/// the tiles a dancer steps in on, a hold on the exit it left by), never its
+/// tile this tick —, how many bodies it seats, what it earns and on whom.
+/// Derived each tick, never stored; equal to nothing, as the Brief.
+and [<NoEquality; NoComparison>] Job =
+    {
+        Kind: JobKind
+        Tiles: Set<RoomPos>
+        /// A kite `Strike`'s approach band (#595): the tiles one to three off
+        /// its head that a kiter with no safe walk onto it closes on — off
+        /// the exits and the hostiles' tiles, a melee arriving later than the
+        /// tick after, with escape room at least half the ground's widest.
+        /// Empty for every other job.
+        Approach: Lazy<Set<RoomPos>>
+        /// How many bodies it seats and of which rows, the tick's Threats
+        /// given: none for a job its Brief only falls back on.
+        Seats: Threats -> Seating
+        /// What a tick of its bodies' effort earns, in energy (#663 M3), read
+        /// on first use.
+        Value: Lazy<float>
+        /// The hostiles it is about, by id: a kill's head or its prey, a
+        /// camp's dancer, a ring's raid, a muster's escort.
+        Quarry: string list
     }
 
 /// What one Brief asks a row for: the row, how many bodies, and the blocks
@@ -634,21 +676,91 @@ let internal rangedBlocks (floor: int) (view: ColonyView) (room: string) : int =
     |> min rangerBlocksMost
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Job =
+    /// A job laid in a room on these tiles, about these hostiles, at this
+    /// price, seating nobody until its Brief seats it.
+    let laid
+        (kind: JobKind)
+        (tiles: Set<RoomPos>)
+        (quarry: string list)
+        (value: Lazy<float>)
+        : Job =
+        {
+            Kind = kind
+            Tiles = tiles
+            Approach = lazy Set.empty
+            Seats = fun _ -> { Count = 0; Rows = [] }
+            Value = value
+            Quarry = quarry
+        }
+
+    /// Whether a job is ground beside a raid or the exit it left by: the
+    /// kinds a ring Brief stands on together.
+    let isRing (job: Job) =
+        job.Kind = JobKind.Ring || job.Kind = JobKind.HoldExit
+
+    /// These jobs with each one only once, the first kept: a kind further
+    /// down `BriefKind.order` reads ground a kind ahead read too.
+    let internal once (jobs: Job list) : Job list =
+        (jobs, [])
+        ||> List.foldBack (fun job kept ->
+            job
+            :: (kept |> List.filter (fun other -> not (obj.ReferenceEquals(other, job)))))
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Brief =
     /// How far a quiet ranger walks for a kill (#510), in travel cost (two
     /// units a tick): the reaction window of a lend, inside which no raid
     /// reaches the home it left (`Facts.homeHoldReleases`).
     let private killWalk = 2 * Reaction.lend
 
-    let private bare =
-        {
-            Kite = None
-            Approach = lazy Set.empty
-            Resident = None
-            Ring = None
-            Prey = None
-            Camp = None
-        }
+    /// Its ground off its jobs (#663 M3): the first job's tiles, every
+    /// `Ring` and `HoldExit` heading the list together; None with no job on
+    /// any tile.
+    let groundOfJobs (jobs: Job list) : Set<RoomPos> option =
+        match jobs |> List.filter (fun job -> not job.Tiles.IsEmpty) with
+        | [] -> None
+        | head :: _ as laid when Job.isRing head ->
+            Some(laid |> List.takeWhile Job.isRing |> List.map _.Tiles |> Set.unionMany)
+        | head :: _ -> Some head.Tiles
+
+    /// The room's ring under a Brief (#571, #558): every `Ring` about a
+    /// hostile — a raid, a core — and every `HoldExit` among its jobs,
+    /// together; None where it has none. The declared sources' post a Guard
+    /// with nothing laid stands on (#366) is about none, and no ring.
+    let ringOf (brief: Brief) : Set<RoomPos> option =
+        match
+            brief.Jobs
+            |> List.filter (fun job ->
+                job.Kind = JobKind.HoldExit || job.Kind = JobKind.Ring && not job.Quarry.IsEmpty)
+        with
+        | [] -> None
+        | rings -> Some(rings |> List.map _.Tiles |> Set.unionMany)
+
+    /// A kite's approach band (#595) under a Brief: its kite `Strike`'s;
+    /// empty with none.
+    let approachOf (brief: Brief) : Lazy<Set<RoomPos>> =
+        brief.Jobs
+        |> List.tryFind (fun job -> job.Kind = JobKind.Strike)
+        |> Option.map _.Approach
+        |> Option.defaultValue (lazy Set.empty)
+
+    /// Its capacity off its jobs (#663 M3): every job's seats summed, and
+    /// where a job names the rows that sit it, each row named capped at the
+    /// seats of the jobs naming it (`CapScope.Row`, which refuses a body of
+    /// no capped row).
+    let capacityOfJobs (jobs: Job list) (threats: Threats) : Capacity =
+        let seatings = jobs |> List.map (fun job -> job.Seats threats)
+
+        (Capacity.fighters (seatings |> List.sumBy _.Count),
+         seatings |> List.collect _.Rows |> List.distinct)
+        ||> List.fold (fun capacity row ->
+            let seats =
+                seatings
+                |> List.filter (fun seating -> List.contains row seating.Rows)
+                |> List.sumBy _.Count
+
+            Capacity.capping (CapScope.Row row) seats capacity)
 
     /// Whether a Brief is a kill (#510, #516): one body, a rung up, a quiet
     /// holder called to it; a chase cast for by no row, a contested room's
@@ -831,29 +943,6 @@ module Brief =
             Band = fun room -> rankIn view room None >> killBandOf
         }
 
-    /// A contested room's ground by its phase (#656): under its raid the
-    /// ring, the kite ground ahead of it where a ranger answers the room
-    /// (`ranged`, #535); its prey's own; quiet, none of its own (the
-    /// [[sweep]]'s room out of sight is walked into, `Brief.WalksIn`, #658).
-    let private groundOf (kind: BriefKind) (phase: Phase) (ranged: bool) (laid: Laid) =
-        let ring = laid.Ring |> Option.filter (Set.isEmpty >> not)
-
-        let own kind =
-            match kind with
-            | BriefKind.Resident -> laid.Kite |> Option.orElse laid.Resident
-            | BriefKind.Chase -> laid.Kite
-            | BriefKind.Contested ->
-                match phase with
-                | Phase.Raid when ranged -> laid.Kite |> Option.orElse ring
-                | Phase.Raid -> ring
-                | _ when laid.Camp.IsSome -> laid.Camp
-                | Phase.Prey -> laid.Prey
-                | Phase.Quiet -> None
-            | BriefKind.ExitHold
-            | BriefKind.Core -> ring
-
-        BriefKind.order |> List.skipWhile ((<>) kind) |> List.tryPick own
-
     /// A resident room's Guard is the ranger row's (#411); a contested
     /// room's the melee guard's, which holds the post where it cannot catch
     /// the raid (#531), but one a ranger answers (`ranged`: an outpost whose
@@ -1034,11 +1123,32 @@ module Brief =
             | Some _
             | None -> []
 
-    /// The bodies a kind's room admits and nobody else at all: its row ask's
-    /// count is the row's own arithmetic, read here a second time so the number
-    /// the cascade hires against and the number the Matcher counts holders
-    /// against are one number.
-    let private capacityOf
+    /// A contested room's group (#663 M3): the bodies of this colony holding
+    /// its Guard, where each stands, and where the [[sweep]] works the room,
+    /// every colony's body of the sweep's group (`WorldView.SweepGroup`):
+    /// the bodies on its jobs.
+    let private groupIn (view: ColonyView) (room: string) (holding: Set<string>) =
+        let own =
+            ColonyView.bodies view
+            |> List.filter (fun creep -> holding.Contains creep.Name)
+            |> List.choose (fun creep ->
+                SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                |> Option.map (fun at -> creep, at))
+
+        let swept =
+            if Set.contains room (harassRooms view) then
+                view.World.SweepGroup
+            else
+                []
+
+        own @ swept |> List.distinctBy (fun (creep, _) -> creep.Name)
+
+    /// A Guard's jobs seated (#663 M3): its first job seats the bodies its
+    /// kind's count admits, a row's ask's count read here a second time so
+    /// the number the cascade hires against and the number the Matcher
+    /// counts holders against are one number; the jobs after it seat
+    /// nobody. Its capacity is their sum (`capacityOfJobs`).
+    let private seated
         (kind: BriefKind)
         (phase: Phase)
         (room: string)
@@ -1048,172 +1158,186 @@ module Brief =
         (answered: Lazy<(CastRow * HostileInfo list) list>)
         (asks: RowAsk list)
         (view: ColonyView)
-        (threats: Threats)
-        : Capacity =
-        let wanted () =
+        (jobs: Job list)
+        : Job list =
+        let wanted (threats: Threats) =
             asks
             |> List.tryHead
             |> Option.map (fun a -> a.Wanted threats)
             |> Option.defaultValue 1
 
-        match kind with
-        // One over per garrison body in a resident room (#414, #419, #447): its
-        // rangers are resident, and each relief — cast at its incumbent's
-        // lead, two of them together when the garrison was cast together —
-        // must take the Task and walk three crossings while the incumbent
-        // still holds the ring. A Guard has no arrival price for a handover
-        // window to be read against, and the row's count, not this cap, is
-        // what buys bodies.
-        | BriefKind.Resident -> Capacity.fighters (wanted () + view.Tuning.RangerResidents)
-        // A kite seats as many rangers as kill what cannot close on them
-        // before it ages out, and every one at the fight (`Facts.kiteSeats`,
-        // #510, #596); a raid the rangers
-        // there and beside it win together takes as many as win it; one a row
-        // casts for, as many as it asks.
-        | BriefKind.Chase ->
-            match verdict.Value with
-            | Answer.Win when not (List.isEmpty asks) ->
-                Capacity.fighters (max (wanted ()) (rangers.Value |> Option.defaultValue 1))
-            | Answer.Win -> Capacity.fighters (rangers.Value |> Option.defaultValue 1)
-            | Answer.Kite -> Capacity.fighters (Facts.kiteSeats view room holding)
-            | Answer.Lose -> Capacity.fighters 1
-        // One body kills a contested room's prey, which strikes nothing back
-        // (#516): a seat a trespasser each template answers
-        // (`trespassSplit`, #550), at most `Engine.guardCap` a template, a
-        // melee body's at least one where a trespasser only bounces on the
-        // exit, and never fewer than the cast asks of its own (#654). Where a
-        // ranged body answers one, the melee bodies are capped at their own
-        // count and a ranged one takes any seat, as its shot reaches what a
-        // swing catches too: seats are who may stand, the cast what is bought.
-        | BriefKind.Contested when phase = Phase.Prey ->
-            let bouncing = answered.Value |> List.forall (snd >> List.isEmpty)
+        let any count = { Count = count; Rows = [] }
 
-            let cast row =
-                asks
-                |> List.filter (fun a -> a.Row = row)
-                |> List.sumBy (fun a -> a.Wanted threats)
+        let seat (seats: Threats -> Seating) (job: Job) = { job with Seats = seats }
 
-            let count row =
-                let seats =
-                    answered.Value
-                    |> List.filter (fun (answers, _) -> answers = row)
-                    |> List.sumBy (snd >> List.length)
-                    |> min Engine.guardCap
+        // A contested room's job seats its whole group, every colony's, and
+        // a free fighter more while concentrating pays (`Facts.seatsPaid`,
+        // #658): one group on one job, past the seats its own count gives
+        // (live t1,038,786: a free ranger idled beside W19S26's two seats).
+        let grouped = lazy (Facts.seatsPaid view room (groupIn view room holding))
 
-                let floor =
-                    if bouncing && row = CastRow.Fighter BodyTemplate.Melee then
-                        1
+        let melee, ranged =
+            CastRow.Fighter BodyTemplate.Melee, CastRow.Fighter BodyTemplate.Ranged
+
+        match jobs with
+        | [] -> []
+        | head :: rest ->
+            match kind with
+            // One over per garrison body in a resident room (#414, #419,
+            // #447): its rangers are resident, and each relief — cast at its
+            // incumbent's lead, two of them together when the garrison was
+            // cast together — must take the Task and walk three crossings
+            // while the incumbent still holds the ring. A Guard has no arrival
+            // price for a handover window to be read against, and the row's
+            // count, not this cap, is what buys bodies.
+            | BriefKind.Resident ->
+                seat (fun threats -> any (wanted threats + view.Tuning.RangerResidents)) head
+                :: rest
+            // A kite seats as many rangers as kill what cannot close on them
+            // before it ages out, and every one at the fight
+            // (`Facts.kiteSeats`, #510, #596); a raid the rangers there and
+            // beside it win together takes as many as win it; one a row
+            // casts for, as many as it asks.
+            | BriefKind.Chase ->
+                let count threats =
+                    match verdict.Value with
+                    | Answer.Win when not (List.isEmpty asks) ->
+                        max (wanted threats) (rangers.Value |> Option.defaultValue 1)
+                    | Answer.Win -> rangers.Value |> Option.defaultValue 1
+                    | Answer.Kite -> Facts.kiteSeats view room holding
+                    | Answer.Lose -> 1
+
+                seat (count >> any) head :: rest
+            // One body kills a contested room's prey, which strikes nothing
+            // back (#516): a seat a trespasser each template answers
+            // (`trespassSplit`, #550), at most `Engine.guardCap` a template, a
+            // melee body's at least one where a trespasser only bounces on
+            // the exit, and never fewer than the cast asks of its own (#654).
+            // Where a ranged body answers one, the melee bodies sit the first
+            // job, capped at their own count, and a ranged one sits either,
+            // as its shot reaches what a swing catches too: seats are who may
+            // stand, the cast what is bought.
+            | BriefKind.Contested when phase = Phase.Prey ->
+                let bouncing = answered.Value |> List.forall (snd >> List.isEmpty)
+
+                let split (threats: Threats) =
+                    let cast row =
+                        asks
+                        |> List.filter (fun a -> a.Row = row)
+                        |> List.sumBy (fun a -> a.Wanted threats)
+
+                    let count row =
+                        let seats =
+                            answered.Value
+                            |> List.filter (fun (answers, _) -> answers = row)
+                            |> List.sumBy (snd >> List.length)
+                            |> min Engine.guardCap
+
+                        let floor = if bouncing && row = melee then 1 else 0
+
+                        max seats floor
+
+                    let guards = max (count melee) (cast melee)
+
+                    guards, max (grouped.Value - guards) (max (count ranged) (cast ranged - guards))
+
+                let guards threats =
+                    match split threats with
+                    | guards, 0 -> any guards
+                    | guards, _ ->
+                        {
+                            Count = guards
+                            Rows = [ melee; ranged ]
+                        }
+
+                let rangers threats =
+                    match split threats with
+                    | _, 0 -> any 0
+                    | _, rangers -> { Count = rangers; Rows = [ ranged ] }
+
+                seat guards head :: seat rangers head :: rest
+            // The guard row's count, and a seat beside it for each ranger it
+            // admits standing in the room (#558), so a ranger never takes a
+            // guard's.
+            | BriefKind.Core ->
+                let standing =
+                    ColonyView.bodies view
+                    |> List.filter (fun creep ->
+                        isRangerRowBody creep
+                        && SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                           |> Option.exists (fun at -> at.Room = room))
+                    |> List.length
+
+                if standing = 0 then
+                    seat (wanted >> any) head :: rest
+                else
+                    seat
+                        (fun threats ->
+                            {
+                                Count = wanted threats
+                                Rows = [ melee ]
+                            })
+                        head
+                    :: seat (fun _ -> { Count = standing; Rows = [ ranged ] }) head
+                    :: rest
+            // The cast's count (#654), or the fighters holding the fight or
+            // standing in its room that do not win it alone and a seat beside
+            // them, at most `Engine.guardCap`: the cast is what is bought, not
+            // who may stand; a body the fight needs beside another is no body
+            // to evict (#272), and none takes the seat of the body cast to win
+            // it. A contested room's raid, harassed or ours, alike (#656):
+            // rangers that win it only together are seated together (#609).
+            | BriefKind.Contested
+            | BriefKind.ExitHold ->
+                // Bodies of the cast's template: the ones its kind admits.
+                let cut =
+                    match asks with
+                    | ask :: _ -> CastRow.cut ask.Row
+                    | [] -> fun _ _ -> false
+
+                let held =
+                    lazy
+                        (ColonyView.bodies view
+                         |> List.filter (fun creep ->
+                             cut creep.Name creep.Body
+                             && (holding.Contains creep.Name
+                                 || SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                                    |> Option.exists (fun at -> at.Room = room))))
+
+                let losers =
+                    lazy
+                        (held.Value
+                         |> List.filter (fun creep -> not (Facts.bodiesWin view room [ creep ]))
+                         |> List.length)
+
+                // A held exit's raid stands across it, where no exchange in
+                // the room reads it: its holders, the bodies that held the
+                // raid's Guard, keep their seats.
+                let keeping () =
+                    if kind = BriefKind.ExitHold then
+                        held.Value
+                        |> List.filter (fun creep -> holding.Contains creep.Name)
+                        |> List.length
                     else
                         0
 
-                max seats floor
+                let count threats =
+                    max
+                        grouped.Value
+                        (max
+                            (wanted threats)
+                            (min Engine.guardCap (max (keeping ()) (losers.Value + 1))))
 
-            let melee, ranged =
-                CastRow.Fighter BodyTemplate.Melee, CastRow.Fighter BodyTemplate.Ranged
-
-            let guards = max (count melee) (cast melee)
-
-            // The ranged seats take whatever the melee leaves of the total:
-            // a ranged body's shot reaches what a swing catches too. In the
-            // sweep's room, its whole group and a free body more while
-            // concentrating pays (`Facts.sweepSeats`, #658): one group, one
-            // room, past a seat a trespasser (live t1,038,786: a free ranger
-            // idled beside W19S26's two seats).
-            let swept =
-                if Set.contains room (harassRooms view) then
-                    Facts.sweepSeats view room - guards
-                else
-                    0
-
-            let rangers = max swept (max (count ranged) (cast ranged - guards))
-
-            let capacity = Capacity.fighters (guards + rangers)
-
-            if rangers = 0 then
-                capacity
-            else
-                capacity
-                |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Melee)) guards
-                |> Capacity.capping
-                    (CapScope.Row(CastRow.Fighter BodyTemplate.Ranged))
-                    (guards + rangers)
-        // The guard row's count, and a seat beside it for each ranger it
-        // admits standing in the room (#558), so a ranger never takes a
-        // guard's.
-        | BriefKind.Core ->
-            let guards = wanted ()
-
-            let seated =
-                ColonyView.bodies view
-                |> List.filter (fun creep ->
-                    isRangerRowBody creep
-                    && SpatialInfo.creepPlacementOf view.Spatial creep.Name
-                       |> Option.exists (fun at -> at.Room = room))
-                |> List.length
-
-            if seated = 0 then
-                Capacity.fighters guards
-            else
-                Capacity.fighters (guards + seated)
-                |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Melee)) guards
-                |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Ranged)) seated
-        // The cast's count (#654), or the fighters holding the fight or
-        // standing in its room that do not win it alone and a seat beside
-        // them, at most `Engine.guardCap`: the cast is what is bought, not who
-        // may stand; a body the fight needs beside another is no body to
-        // evict (#272), and none takes the seat of the body cast to win it.
-        // A contested room's raid, harassed or ours, alike (#656): rangers
-        // that win it only together are seated together (#609).
-        | BriefKind.Contested
-        | BriefKind.ExitHold ->
-            // Bodies of the cast's template: the ones its kind admits.
-            let cut =
-                match asks with
-                | ask :: _ -> CastRow.cut ask.Row
-                | [] -> fun _ _ -> false
-
-            let held =
-                ColonyView.bodies view
-                |> List.filter (fun creep ->
-                    cut creep.Name creep.Body
-                    && (holding.Contains creep.Name
-                        || SpatialInfo.creepPlacementOf view.Spatial creep.Name
-                           |> Option.exists (fun at -> at.Room = room)))
-
-            let losers =
-                held
-                |> List.filter (fun creep -> not (Facts.bodiesWin view room [ creep ]))
-                |> List.length
-
-            // A held exit's raid stands across it, where no exchange in the
-            // room reads it: its holders, the bodies that held the raid's
-            // Guard, keep their seats.
-            let keeping =
-                if kind = BriefKind.ExitHold then
-                    held |> List.filter (fun creep -> holding.Contains creep.Name) |> List.length
-                else
-                    0
-
-            // The sweep's room seats its whole group, every colony's, and a
-            // free fighter more while concentrating pays (`Facts.sweepSeats`,
-            // #658): one group, one room.
-            let swept =
-                if Set.contains room (harassRooms view) then
-                    Facts.sweepSeats view room
-                else
-                    0
-
-            Capacity.fighters (
-                max swept (max (wanted ()) (min Engine.guardCap (max keeping (losers + 1))))
-            )
+                seat (count >> any) head :: rest
 
     /// A Guard's own kind: the first of its claims, `Contested` where none
     /// claims the room.
-    let private kindOf (claims: BriefKind list) =
+    let internal kindOf (claims: BriefKind list) =
         List.tryHead claims |> Option.defaultValue BriefKind.Contested
 
     /// One room's Brief, off the kinds that claimed it down `BriefKind.order`
-    /// and the ground each source laid there. A kill (#510, a contested
+    /// and the jobs laid there its kind reads (`laid`, given whether a
+    /// ranger answers it), seated (`seated`). A kill (#510, a contested
     /// room's prey, #516) is stepped a rung up — its kill is the room's whole
     /// income back, and a quiet holder is let go for it — and calls that
     /// holder off within its walk. A raid's Guard two: a contested room's
@@ -1239,7 +1363,7 @@ module Brief =
         (holding: Set<string>)
         (claims: BriefKind list)
         (phase: Phase)
-        (laid: Laid)
+        (laid: bool -> Job list)
         : Brief =
         let kind = kindOf claims
 
@@ -1289,6 +1413,25 @@ module Brief =
 
         let ask = askOf kind contention ranged rowCast answered room view
 
+        // With no job laid on any tile, one on the ring of the room's
+        // declared sources, which `Outpost.Sources` places without vision
+        // (#366): off the builder's Atlas, so a body of another colony the
+        // world hands the Brief walks to it too (a transit room carries no
+        // source). A post to hold or a room to look into, priced at what a
+        // fight there keeps.
+        let jobs =
+            match laid ranged |> List.filter (fun job -> not job.Tiles.IsEmpty) with
+            | [] ->
+                [
+                    Job.laid
+                        JobKind.Ring
+                        (Atlas.sourceRingIn atlas room)
+                        []
+                        (lazy (RoomWorth.delta Quarry.Reading.Value (Facts.roomWorth view room)))
+                ]
+            | jobs -> jobs
+            |> seated kind phase room verdict rangers holding answered ask view
+
         {
             Duty = Duty.Guard kind
             BuiltBy = SpatialInfo.homeName view.Spatial
@@ -1298,15 +1441,8 @@ module Brief =
             Admits = admitsOf kind phase room ranged answered view atlas
             Ends = Facts.endsIn view room
             Recall = if kill then Some { Walk = killWalk } else None
-            Laid = laid
-            // With none laid, the ring of the room's declared sources, which
-            // `Outpost.Sources` places without vision (#366): off the
-            // builder's Atlas, so a body of another colony the world hands
-            // the Brief walks to it too (a transit room carries no source).
-            Ground =
-                groundOf kind phase ranged laid
-                |> Option.orElseWith (fun () ->
-                    Some(Atlas.sourceRingIn atlas room) |> Option.filter (Set.isEmpty >> not))
+            Jobs = jobs
+            Ground = groundOfJobs jobs
             WalksIn =
                 kind = BriefKind.Chase
                 || kind = BriefKind.Contested
@@ -1334,7 +1470,7 @@ module Brief =
                 | _ when kill -> OneRungUp
                 | _ -> OnTheTier
             Asks = ask
-            Capacity = capacityOf kind phase room verdict rangers holding answered ask view
+            Capacity = capacityOfJobs jobs
             Verdict = verdict
             Formation = None
             Stances = Map.empty
@@ -1386,7 +1522,7 @@ module Brief =
             Set.empty
             []
             Phase.Quiet
-            bare
+            (fun _ -> [])
 
     /// How many [[defender]]s the home wants this tick (#504): one a body of
     /// the raid at its line, at most `Tuning.DefenderCap`; none in a home
@@ -1526,10 +1662,25 @@ module Brief =
                     Prey = None
                 })
 
-        let capacity threats =
-            (Capacity.fighters (asks |> List.sumBy (fun ask -> ask.Wanted threats)), asks)
-            ||> List.fold (fun capacity ask ->
-                Capacity.capping (CapScope.Row ask.Row) (ask.Wanted threats) capacity)
+        // One job a row at the line (#546), on the perimeter ground, each
+        // seating its ask's bodies of its own row alone.
+        let home = SpatialInfo.homeName view.Spatial
+
+        let jobs =
+            List.zip answered asks
+            |> List.map (fun ((row, raid), ask) ->
+                { Job.laid
+                      JobKind.Ring
+                      (Option.defaultValue Set.empty ground)
+                      (raid |> List.map _.Id)
+                      (lazy (RoomWorth.delta Quarry.Reading.Value (Facts.roomWorth view home))) with
+                    Seats =
+                        fun threats ->
+                            {
+                                Count = ask.Wanted threats
+                                Rows = [ row ]
+                            }
+                })
 
         {
             Duty = Duty.Defend
@@ -1545,15 +1696,15 @@ module Brief =
             Admits =
                 fun creep ->
                     answered |> List.exists (fun (row, _) -> CastRow.cut row creep.Name creep.Body)
-            Ends = Facts.endsIn view (SpatialInfo.homeName view.Spatial)
+            Ends = Facts.endsIn view home
             Recall = None
-            Laid = bare
+            Jobs = jobs
             Ground = ground
             WalksIn = false
             Avoid = Avoid.Line avoid
             Rung = OnTheTier
             Asks = asks
-            Capacity = capacity
+            Capacity = capacityOfJobs jobs
             Verdict = verdict
             Formation = None
             Stances = stances
@@ -1598,7 +1749,7 @@ module Brief =
             Admits = fun creep -> Map.containsKey creep.Name formation.Roles
             Ends = fun _ -> None
             Recall = None
-            Laid = bare
+            Jobs = []
             Ground = None
             WalksIn = false
             Avoid = Avoid.Runner
@@ -1672,6 +1823,11 @@ module Formation =
             |> Option.map (fun (dx, dy) ->
                 max (abs (b.X + span * dx - a.X)) (abs (b.Y + span * dy - a.Y)))
 
+    /// Whether a body standing at `a` is with one at `b`: within two of it,
+    /// across a border too (`rangeAcross`).
+    let internal withEachOther (a: RoomPos) (b: RoomPos) =
+        rangeAcross a b |> Option.exists (fun r -> r <= squadSpread)
+
     /// Whether a tile stands at the crossing into a room from the room beside
     /// it: the room's own nearest tile, across the border, within a step of
     /// the exit.
@@ -1711,18 +1867,42 @@ module Formation =
             |> Set.ofList
             |> RoomPos.setAt from
 
-    /// A Guard's muster ground on its chain from home (`rallyHop`, #535);
-    /// empty where no chain reaches its room.
-    let internal rallyOn
+    /// A Guard's muster ground (#535, #658), one for its whole group, every
+    /// colony's (`group`, where each stands): beside the crossing out of the
+    /// room beside it the group stands nearest, none a rival's or a keeper's,
+    /// so bodies of two colonies go in together and not one alone on each
+    /// side; where that crossing lays none, on the chain from home
+    /// (`rallyHop`). Empty where neither does.
+    let internal musterGround
         (view: ColonyView)
         atlas
         (reachIn: string -> Set<Pos>)
-        (chain: string list option)
+        (room: string)
+        (group: RoomPos list)
         =
-        chain
-        |> Option.bind (rallyHop view.Spatial.RivalRooms)
-        |> Option.map (fun (from, into) -> besideCrossing atlas reachIn from into)
-        |> Option.defaultValue Set.empty
+        let onChain (chain: string list option) =
+            chain
+            |> Option.bind (rallyHop view.Spatial.RivalRooms)
+            |> Option.map (fun (from, into) -> besideCrossing atlas reachIn from into)
+            |> Option.defaultValue Set.empty
+
+        let shared =
+            RoomName.adjacent room
+            |> List.filter (fun beside ->
+                not (Keepers.isKeeperRoom beside)
+                && not (Set.contains beside view.Spatial.RivalRooms)
+                && not (List.isEmpty (Atlas.seams atlas beside room)))
+            |> List.sortBy (fun beside ->
+                group
+                |> List.sumBy (fun at ->
+                    RoomName.tileRange at (RoomPos.at beside { X = 25; Y = 25 })
+                    |> Option.defaultValue Engine.roomSide),
+                beside)
+            |> List.tryHead
+
+        match shared |> Option.map (fun beside -> onChain (Some [ beside; room ])) with
+        | Some rally when not (Set.isEmpty rally) -> rally
+        | _ -> onChain (Atlas.route atlas (SpatialInfo.homeName view.Spatial) room)
 
     /// An Assault's rally ground: at home, beside the crossing out toward the
     /// next room on its chain, off the idle ground (`Atlas.idleGroundIn`) —
@@ -2625,15 +2805,21 @@ module Threats =
         |> Option.map snd
         |> Option.defaultValue Set.empty
 
-    /// One room's range-1 ring (`Laid.Ring`), already joined to that room;
-    /// empty for a room no Threat stands in.
+    /// One room's range-1 ring (`Brief.ringOf`), already joined to that
+    /// room; empty for a room no Threat stands in.
     let ringIn (threats: Threats) (room: string) : Set<RoomPos> =
-        (briefOf threats room).Laid.Ring |> Option.defaultValue Set.empty
+        Brief.ringOf (briefOf threats room) |> Option.defaultValue Set.empty
 
-    /// The garrison's ground in one resident room (`Laid.Resident`), or None
-    /// for any other room (#414, #447).
+    /// The garrison's ground in one resident room (its `Resident` job), or
+    /// None for any other room (#414, #447).
     let residentRingIn (threats: Threats) (room: string) : Set<RoomPos> option =
-        (briefOf threats room).Laid.Resident
+        (briefOf threats room).Jobs
+        |> List.tryFind (fun job -> job.Kind = JobKind.Resident)
+        |> Option.map _.Tiles
+
+    /// One room's Guard's jobs (#663 M3); a room no source claims has its
+    /// unclaimed Brief's.
+    let jobsIn (threats: Threats) (room: string) : Job list = (briefOf threats room).Jobs
 
     /// One room's Guard ground (`Brief.Ground`).
     let guardGroundIn (threats: Threats) (room: string) : Set<RoomPos> option =
@@ -3324,7 +3510,18 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 if Set.isEmpty tiles then
                     None
                 else
-                    Some(room, (tiles, approach))))
+                    // A kill of the head (#663 M3), at its side's kill score.
+                    Some(
+                        room,
+                        { Job.laid
+                              JobKind.Strike
+                              tiles
+                              (head |> Option.map _.Id |> Option.toList)
+                              (lazy
+                                  (head |> Option.map (sideScore room) |> Option.defaultValue 0.0)) with
+                            Approach = approach
+                        }
+                    )))
         |> Map.ofList
 
     // The held exits' ground (#450): the tiles within a melee guard's reach of
@@ -3408,7 +3605,19 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // A trespasser on the exit row of a room beside one we mine is carried
     // into it next tick, and back if it is bouncing: keyed to that room, the
     // tiles beside where it lands, so the kill holds across the bounce.
+    //
+    // One job a quarry (#663 S5): a trespasser dancing between two rooms of
+    // ours, standing in one while its trajectory still holds it the other's
+    // (`Quarry.placed`: crossed out of it and lingering by the border), is
+    // kept in the other where a body of ours holds that room's Guard and
+    // none holds its own: keyed there, the tiles beside the one it crossed
+    // out from, so its hunter holds one Task across each crossing.
+    //
+    // Each room's ground, with the trespassers it is about.
     let trespassIn (open': string -> bool) =
+        let huntedIn room =
+            not (List.isEmpty (HeldTaskFacts.holdersOf held (taskId (Guard room))))
+
         let haulGround = 2
         let waitReach = haulGround + 1
 
@@ -3434,9 +3643,19 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             |> List.filter (fun tile -> tile.Room = room)
             |> List.map RoomPos.pos
 
-        let around (hostile: HostileInfo) : (string * Pos list) list =
+        let around (hostile: HostileInfo) : (string * Pos list * string) list =
             let room = hostile.Pos.Room
             let at = RoomPos.pos hostile.Pos
+
+            let heldElsewhere () =
+                if huntedIn room then
+                    None
+                else
+                    RoomName.adjacent room
+                    |> List.filter (fun other -> trespassRooms view other && huntedIn other)
+                    |> List.tryPick (fun other ->
+                        Quarry.placed other hostile.Pos (Map.tryFind hostile.Id view.Bounces)
+                        |> Option.map (fun tile -> other, RoomPos.pos tile))
 
             if trespasser view engaged hostile then
                 let beside () = Atlas.adjacentWalkableIn atlas room at
@@ -3463,7 +3682,10 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     else
                         beside ()
 
-                [ room, tiles ]
+                match heldElsewhere () with
+                | Some(other, came) ->
+                    [ other, Atlas.adjacentWalkableIn atlas other came, hostile.Id ]
+                | None -> [ room, tiles, hostile.Id ]
             elif
                 Seam.onRing at
                 && trespassingBody view.Hostiles hostile
@@ -3481,15 +3703,15 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                         |> List.collect (snd >> Atlas.adjacentWalkableIn atlas next)
                     with
                     | [] -> None
-                    | tiles -> Some(next, tiles))
+                    | tiles -> Some(next, tiles, hostile.Id))
             else
                 []
 
         view.Hostiles
         |> List.collect around
-        |> List.filter (fst >> open')
-        |> List.groupBy fst
-        |> List.choose (fun (room, tiles) ->
+        |> List.filter (fun (room, _, _) -> open' room)
+        |> List.groupBy (fun (room, _, _) -> room)
+        |> List.choose (fun (room, laid) ->
             let standing =
                 view.Hostiles
                 |> List.filter (fun hostile -> hostile.Pos.Room = room)
@@ -3497,15 +3719,19 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 |> Set.ofList
 
             let ground =
-                tiles
-                |> List.collect snd
+                laid
+                |> List.collect (fun (_, tiles, _) -> tiles)
                 |> List.filter (fun tile -> not (Seam.onRing tile || Set.contains tile standing))
                 |> Set.ofList
 
             if Set.isEmpty ground then
                 None
             else
-                Some(room, RoomPos.setAt room ground))
+                Some(
+                    room,
+                    (RoomPos.setAt room ground,
+                     laid |> List.map (fun (_, _, id) -> id) |> List.distinct)
+                ))
 
     // Whether a level-0 core in a room comes before its trespassers (#558):
     // where only the guard row answers them and its swing catches none of
@@ -3646,30 +3872,75 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     let laidBy kind = Map.find kind laid
 
-    // The raid's ring, and beside it each held exit's ground and each core's.
-    let rings =
-        (ring, laidBy BriefKind.ExitHold @ laidBy BriefKind.Core)
-        ||> List.fold (fun ring (room, ground) ->
-            Map.change
-                room
-                (fun prior -> Some(Set.union ground (Option.defaultValue Set.empty prior)))
-                ring)
+    // The jobs laid in each room (#663 M3), each once a room, its price read
+    // on first use: what a fight there keeps a tick (`RoomWorth.delta`) for
+    // a ring and a held exit.
+    let keeps room =
+        lazy (RoomWorth.delta Quarry.Reading.Value (Facts.roomWorth view room))
 
-    // A contested room's prey's ground where its prey is what it is fought
-    // over, and its claim was open (#656).
-    let preyLaid room =
-        match Map.tryFind room claimants with
-        | Some claims when List.contains BriefKind.Contested claims && phaseOf room = Phase.Prey ->
-            Map.tryFind room prey
-        | _ -> None
+    let ringJobs =
+        ring
+        |> Map.map (fun room tiles ->
+            let raid =
+                view.Hostiles
+                |> List.filter (fun h ->
+                    h.Pos.Room = room && Option.isSome (HostileInfo.weaponRange view.Hostiles h))
+                |> List.map _.Id
 
-    // The sweep's camp on a border dancer (#658, `Facts.sweepDancer`): tiles
-    // off the border ring and every armed body's reach, within the group's
-    // reach of the tiles the dancer steps in on, covering the most of them,
-    // the one it uses most first, then nearest it; one a holder, those a
-    // holder already stands on first (the walk spent is the camp's
-    // hysteresis). The dancer's tile now never enters the choice.
-    let campLaid room =
+            Job.laid JobKind.Ring tiles raid (keeps room))
+
+    // Each held exit's ground (#450) and each core's (#487), where open.
+    let holdJobs =
+        laidBy BriefKind.ExitHold
+        |> List.map (fun (room, ground) -> room, Job.laid JobKind.HoldExit ground [] (keeps room))
+        |> Map.ofList
+
+    let coreJobs =
+        laidBy BriefKind.Core
+        |> List.groupBy fst
+        |> List.map (fun (room, grounds) ->
+            let cores =
+                Facts.expansionCores view
+                |> List.filter (fun core -> core.RoomName = room)
+                |> List.map _.Id
+
+            room,
+            Job.laid JobKind.Ring (grounds |> List.map snd |> Set.unionMany) cores (keeps room))
+        |> Map.ofList
+
+    let residentJobs =
+        residentRing
+        |> Map.map (fun room tiles ->
+            Job.laid JobKind.Resident tiles [] (lazy (Facts.roomWorth view room).Kept))
+
+    // A contested room's prey where its prey is what it is fought over, and
+    // its claim was open (#656): a kill of each trespasser there, at the kill
+    // score of the one its side's score leads.
+    let preyJobs =
+        prey
+        |> Map.filter (fun room _ ->
+            match Map.tryFind room claimants with
+            | Some claims -> List.contains BriefKind.Contested claims && phaseOf room = Phase.Prey
+            | None -> false)
+        |> Map.map (fun room (tiles, ids) ->
+            Job.laid
+                JobKind.Strike
+                tiles
+                ids
+                (lazy
+                    (view.Hostiles
+                     |> List.filter (fun h -> List.contains h.Id ids)
+                     |> List.fold (fun best h -> max best (sideScore room h)) 0.0)))
+
+    // The camp on a border dancer in the [[sweep]]'s room (#658,
+    // `Facts.sweepDancer`): tiles off the border ring and every armed body's
+    // reach, within the group's reach of the tiles the dancer steps in on,
+    // covering the most of them, the one it uses most first, then nearest
+    // it; one a holder, those a holder already stands on first (the walk
+    // spent is the camp's hysteresis). The dancer's tile now never enters the
+    // choice: the tiles follow the trajectory it dances on. Priced at its
+    // kill at the camp's odds (`Facts.campValue`).
+    let campJob room =
         if not (Set.contains room (harassRooms view)) || phaseOf room = Phase.Raid then
             None
         else
@@ -3686,7 +3957,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             match Facts.sweepDancer view room team with
             | None
             | Some(_, []) -> None
-            | Some(_, entries) ->
+            | Some(dancer, entries) ->
                 let reach = team |> List.map _.Reach |> List.max
                 let used = List.head entries
 
@@ -3726,12 +3997,57 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     |> List.truncate (max 1 (List.length holders))
                 with
                 | [] -> None
-                | tiles -> Some(tiles |> Set.ofList |> RoomPos.setAt room)
+                | tiles ->
+                    Some(
+                        Job.laid
+                            JobKind.Camp
+                            (tiles |> Set.ofList |> RoomPos.setAt room)
+                            [ dancer.Id ]
+                            (lazy (Facts.campValue view room team dancer))
+                    )
+
+    // The jobs one room's Guard reads (#663 M3), from its kind down
+    // `BriefKind.order`, each kind's own in order, given whether a ranger
+    // answers the room: a resident its kite, then its garrison ground; a
+    // chase its kite; a contested room by its phase — under its raid its
+    // kite where a ranger answers it, then its rings; else its camp on a
+    // dancer, else its prey's kill —; a held exit and a core the rings: the
+    // raid's, each held exit's, each core's.
+    let jobsIn room (kind: BriefKind) (phase: Phase) (ranged: bool) : Job list =
+        let found (jobs: Map<string, Job>) = Map.tryFind room jobs |> Option.toList
+
+        let rings = found ringJobs @ found holdJobs @ found coreJobs
+
+        let own kind =
+            match kind with
+            | BriefKind.Resident -> found kite @ found residentJobs
+            | BriefKind.Chase -> found kite
+            | BriefKind.Contested ->
+                match phase with
+                | Phase.Raid when ranged -> found kite @ rings
+                | Phase.Raid -> rings
+                | Phase.Prey
+                | Phase.Quiet ->
+                    match campJob room with
+                    | Some camp -> [ camp ]
+                    | None when phase = Phase.Prey -> found preyJobs
+                    | None -> []
+            | BriefKind.ExitHold
+            | BriefKind.Core -> rings
+
+        BriefKind.order |> List.skipWhile ((<>) kind) |> List.collect own |> Job.once
 
     // Every room a source claimed or laid ground in; one no source claims is
     // the default kind's, `Contested`.
     let briefs =
-        [ Map.keys claimants; Map.keys rings; Map.keys residentRing; Map.keys kite ]
+        [
+            Map.keys claimants
+            Map.keys ring
+            Map.keys holdJobs
+            Map.keys coreJobs
+            Map.keys residentRing
+            Map.keys kite
+        ]
         |> Seq.concat
         |> Set.ofSeq
         |> Seq.map (fun room ->
@@ -3768,17 +4084,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 (HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList)
                 (claimsIn room)
                 (phaseOf room)
-                {
-                    Kite = Map.tryFind room kite |> Option.map fst
-                    Approach =
-                        Map.tryFind room kite
-                        |> Option.map snd
-                        |> Option.defaultValue (lazy Set.empty)
-                    Resident = Map.tryFind room residentRing
-                    Ring = Map.tryFind room rings
-                    Prey = preyLaid room
-                    Camp = campLaid room
-                })
+                (jobsIn room (Brief.kindOf (claimsIn room)) (phaseOf room)))
         |> Map.ofSeq
 
     // Every Guard's holders seated on its ground (`Brief.seatsAmong`, #650),
@@ -3801,7 +4107,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                      |> RoomPos.setAt room)
 
             let groundOf (creep: CreepInfo) =
-                match brief.Duty, brief.Laid.Ring with
+                match brief.Duty, Brief.ringOf brief with
                 | Duty.Guard BriefKind.Core, _ when isRangerRowBody creep ->
                     Some(coreRing.Value, true)
                 | Duty.Guard BriefKind.Chase, Some ring when
@@ -4255,20 +4561,12 @@ let private withAssaults
                     threats.Briefs
         }
 
-/// Engaging together (#535): a raided room's Guard won by the exchange (its
-/// verdict `Win`) none of whose holders wins alone (`Facts.bodiesWin`) or
-/// kites the raid down alone (`Facts.kitedDown`), and that the holders and
-/// the bodies its rows still cast win together, holds them all on the rally
-/// ground out of reach (`Formation.rallyOn`, on the chain from home) until
-/// they launch as a squad does (`Formation.launched`): every holder on it or
-/// with the others, and the holders together winning. Never once one stands
-/// in the room or at its crossing: the launch latches there without state,
-/// and a holder in reach is never pulled back. Never where even the bodies
-/// that can be assembled lose: nothing coming wins it, so nobody waits for
-/// ever. A holder that wins alone engages at once, and the rest with it. An
-/// outpost's guards, a chase's lent residents and pursuers alike; a
-/// resident's room keeps its own ground, and the [[sweep]]'s room musters by
-/// its price whatever its phase (`Facts.sweepMusters`, #658).
+/// Engaging together (#535, #658, #663 M3): a Guard whose group's first
+/// come would lose more alone than waiting for the rest costs
+/// (`Facts.muster`, the one rule) holds its holders on the group's crossing
+/// out of reach (`Formation.musterGround`), a `Muster` job ahead of its
+/// others, until the rest land. An outpost's guards, a chase's lent
+/// residents and pursuers, and the [[sweep]]'s group alike.
 let private withMusters
     (view: ColonyView)
     atlas
@@ -4285,212 +4583,199 @@ let private withMusters
             |> List.map (fun creep -> creep.Name, creep)
             |> Map.ofList
 
-        // The bodies the room's rows still cast for it beyond its holders,
-        // each at the row's blocks: what a muster may wait for.
-        let castable (brief: Brief) (holders: CreepInfo list) =
+        // The bodies the room's rows still cast for it beyond the group on it
+        // (`onIt`: its holders and the sweep's group), and only those the
+        // facts say will land, so a cast that never begins never holds a
+        // muster: each of the row in an oven, landing as the longest spawn
+        // under way finishes and its walk from home (`CastBid.walk`); and of
+        // the rest, one a spawn standing idle that the bank funds now, at
+        // the row's blocks, landing after its spawn time and its walk.
+        let castable (room: string) (brief: Brief) (onIt: int) : Facts.Mustering list =
+            let walk = CastBid.walk view.Tuning (RoomName.hopsBetween home room)
+
+            let underWay =
+                view.Spawns
+                |> List.filter _.IsSpawning
+                |> List.map _.Remaining
+                |> List.fold max 0
+
+            let idle =
+                view.Spawns |> List.filter (fun spawn -> not spawn.IsSpawning) |> List.length
+
             brief.Asks
             |> List.collect (fun ask ->
-                let block =
-                    match ask.Row with
-                    | CastRow.Fighter BodyTemplate.Ranged -> Some rangerPattern.Block
-                    | CastRow.Fighter BodyTemplate.Melee -> Some guardPattern.Block
-                    | _ -> None
+                match ask.Row with
+                | CastRow.Fighter template ->
+                    let oven =
+                        view.Casting
+                        |> List.filter (fun cast ->
+                            CastRow.cut ask.Row cast.Name (partsOf cast.Body))
+                        |> List.map (fun cast ->
+                            let parts = partsOf cast.Body
 
-                match block with
-                | Some block ->
+                            {
+                                Facts.Fighter =
+                                    Fighter.ofCounts
+                                        (fun part ->
+                                            Map.tryFind part parts |> Option.defaultValue 0)
+                                        (List.length cast.Body * Engine.partHits)
+                                Facts.Lands = underWay + walk
+                                Facts.Energy = float (bodyCost cast.Body)
+                            })
+
                     let blocks = ask.Blocks()
-                    let parts = partCountIn block
-                    let coming = ask.Wanted threats - List.length holders
+                    let pattern = patternOfTemplate template
+                    let cost = blocks * bodyCost pattern.Block
 
-                    List.replicate
-                        (max 0 coming)
-                        ((fun part -> blocks * parts part),
-                         blocks * Engine.partHits * List.length block)
-                | None -> [])
+                    let funded = if cost <= 0 then 0 else view.Bank.Available / cost
 
-        let stancesOf (room: string) (brief: Brief) (holders: CreepInfo list) =
-            // Launched, stateless: a holder in the room or at its crossing is
-            // engaged and is never pulled out of reach, nor the rest held.
-            let engagedHere =
-                holders
-                |> List.exists (fun creep ->
-                    SpatialInfo.creepPlacementOf view.Spatial creep.Name
-                    |> Option.exists (fun tile ->
-                        tile.Room = room || Formation.atCrossingInto room tile))
+                    let fresh =
+                        ask.Wanted threats - onIt - List.length oven
+                        |> min idle
+                        |> min funded
+                        |> max 0
 
-            // What the muster waits for, priced against the bodies that can
-            // be assembled: the holders and those still to be cast. Where
-            // even they lose, no body is coming that wins it, and nobody
-            // waits: the holders engage, and the room's own verdict stands
-            // it down when it loses.
-            let assembled =
-                lazy
-                    (exchangeWon
-                        view
-                        room
-                        ((holders |> List.map (fun creep -> partCount creep.Body, creep.Hits.Hits))
-                         @ castable brief holders))
+                    oven
+                    @ List.replicate
+                        fresh
+                        {
+                            Facts.Fighter = Facts.blocksFighter pattern blocks
+                            Facts.Lands = Facts.castSpawnTicks template blocks + walk
+                            Facts.Energy = float cost
+                        }
+                | _ -> [])
 
-            match holders with
-            | [] -> Map.empty
-            | _ when engagedHere -> Map.empty
-            | _ when holders |> List.exists (fun creep -> bodiesWin view room [ creep ]) ->
-                Map.empty
-            | _ when not assembled.Value -> Map.empty
-            | _ ->
-                let rally =
-                    Formation.rallyOn
-                        view
-                        atlas
-                        (Threats.reachIn threats)
-                        (Atlas.route atlas home room)
+        // A Guard's muster (#535, #658, `Facts.muster`): while no body of its
+        // group stands in the room or at its crossing — the launch latches
+        // there without state, and a body in reach is never pulled back —
+        // the holders wait on the group's crossing (`Formation.musterGround`)
+        // where the first come alone risks more than the waiting costs. A
+        // body on that ground has landed, so has one standing as near the
+        // room in a room beside it as the ground's farthest tile (another
+        // colony's crossing, on its own chain), and so has one with a body
+        // that has: the muster waits for the rest, never for bodies already
+        // waiting. A resident's room keeps its
+        // own ground, and a fight its verdict loses (`Lose`) is no fight to
+        // gather for.
+        let musterOf (room: string) (brief: Brief) =
+            let holders =
+                HeldTaskFacts.holdersOf held (taskId (Guard room))
+                |> List.choose (fun name -> Map.tryFind name bodies)
 
-                // The melee holders lead, then the ranged.
-                let members =
-                    holders
-                    |> List.sortBy (fun creep -> isRangerParts creep.Body, creep.Name)
-                    |> List.map _.Name
+            // A fight lost is no fight to gather for; a won one and a kited
+            // one are, its vanguard priced alone either way (`Facts.muster`).
+            let won =
+                match brief.Duty with
+                | Duty.Guard BriefKind.Resident -> false
+                | Duty.Guard _ -> brief.Verdict.Value <> Answer.Lose
+                | _ -> false
 
-                if
-                    Set.isEmpty rally
-                    || Formation.launched
-                        view
-                        room
-                        rally
-                        members
-                        (bodiesWin view room holders)
-                        // On the walk it launched on while the holders stand
-                        // as one file (#491's rule for the squads): strung out
-                        // between the rally ground and the crossing, they are
-                        // not pulled back.
-                        (Formation.linked view members)
-                then
-                    Map.empty
-                else
-                    holders |> List.map (fun creep -> creep.Name, rally) |> Map.ofList
-
-        // The sweep's room (#658): priced, whatever its phase
-        // (`Facts.sweepMusters`): while no body of its group, any colony's,
-        // stands in it or at its crossing, the holders wait on the rally
-        // ground where the first body alone risks more than the wait costs.
-        let sweeping = harassRooms view
-
-        let swept =
-            sweeping
-            |> Seq.choose (fun room ->
-                let holders =
-                    HeldTaskFacts.holdersOf held (taskId (Guard room))
-                    |> List.choose (fun name -> Map.tryFind name bodies)
-
-                let group = view.World.SweepGroup
+            if List.isEmpty holders || not won then
+                None
+            else
+                let group =
+                    (holders
+                     |> List.choose (fun creep ->
+                         SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                         |> Option.map (fun at -> creep, at)))
+                    @ (if Set.contains room (harassRooms view) then
+                           view.World.SweepGroup
+                       else
+                           [])
+                    |> List.distinctBy (fun (creep, _) -> creep.Name)
 
                 let engaged =
                     group
                     |> List.exists (fun (_, at) ->
                         at.Room = room || Formation.atCrossingInto room at)
 
-                // One crossing for the whole group, every colony's (#658):
-                // out of the room beside it the group stands nearest, none a
-                // rival's or a keeper's, so bodies of two colonies go in
-                // together and not one alone on each side. Off this colony's
-                // own chain where it does not hold that room's ground.
-                let shared =
-                    RoomName.adjacent room
-                    |> List.filter (fun beside ->
-                        not (Keepers.isKeeperRoom beside)
-                        && not (Set.contains beside view.Spatial.RivalRooms)
-                        && not (List.isEmpty (Atlas.seams atlas beside room)))
-                    |> List.sortBy (fun beside ->
-                        group
-                        |> List.sumBy (fun (_, at) ->
-                            RoomName.tileRange at (RoomPos.at beside { X = 25; Y = 25 })
-                            |> Option.defaultValue Engine.roomSide),
-                        beside)
-                    |> List.tryHead
-
                 let rally =
                     lazy
-                        (match
-                            shared
-                            |> Option.map (fun beside ->
-                                Formation.rallyOn
-                                    view
-                                    atlas
-                                    (Threats.reachIn threats)
-                                    (Some [ beside; room ]))
-                         with
-                         | Some rally when not (Set.isEmpty rally) -> rally
-                         | _ ->
-                             Formation.rallyOn
-                                 view
-                                 atlas
-                                 (Threats.reachIn threats)
-                                 (Atlas.route atlas home room))
+                        (Formation.musterGround
+                            view
+                            atlas
+                            (Threats.reachIn threats)
+                            room
+                            (List.map snd group))
 
-                // A body on the rally ground has arrived, and so has one
-                // standing as near the room in a room beside it as the
-                // rally's farthest tile (another colony's rally, on its own
-                // chain): the muster waits for the rest, never for bodies
-                // already waiting.
-                let arrived =
-                    lazy
-                        (let depth =
-                            rally.Value
-                            |> Seq.map (fun tile ->
-                                RoomName.tileRange tile (RoomPos.at room { X = 25; Y = 25 })
-                                |> Option.defaultValue System.Int32.MaxValue)
-                            |> Seq.fold max 0
+                if engaged || Set.isEmpty rally.Value then
+                    None
+                else
+                    let centre = RoomPos.at room { X = 25; Y = 25 }
 
-                         fun (at: RoomPos) ->
-                             rally.Value.Contains at
-                             || RoomName.neighbouring at.Room room
-                                && RoomName.tileRange at (RoomPos.at room { X = 25; Y = 25 })
-                                   |> Option.exists (fun tiles -> tiles <= depth))
+                    let depth =
+                        rally.Value
+                        |> Seq.map (fun tile ->
+                            RoomName.tileRange tile centre
+                            |> Option.defaultValue System.Int32.MaxValue)
+                        |> Seq.fold max 0
 
-                match holders, Map.tryFind (Guard room) threats.Briefs with
-                | [], _
-                | _, None -> None
-                | _ when engaged -> None
-                | _ when Set.isEmpty rally.Value -> None
-                | _, Some brief when Facts.sweepMusters view room group arrived.Value ->
-                    Some(
-                        Guard room,
-                        { brief with
-                            Stances =
-                                holders
-                                |> List.map (fun creep -> creep.Name, rally.Value)
-                                |> Map.ofList
-                        }
-                    )
-                | _ -> None)
-            |> List.ofSeq
+                    let onGround (at: RoomPos) =
+                        rally.Value.Contains at
+                        || RoomName.neighbouring at.Room room
+                           && RoomName.tileRange at centre
+                              |> Option.exists (fun tiles -> tiles <= depth)
 
-        // Only the rooms a raider stands in, and only a Guard held there: the
-        // Briefs map is rebuilt for none of the rest.
-        let mustered =
-            view.Hostiles
-            |> List.filter (HostileInfo.raider view.Hostiles)
-            |> List.map (fun hostile -> hostile.Pos.Room)
+                    // And one with a body that has, as a squad's member is
+                    // with its leader (live arena #609: a ranger a tile short
+                    // of a crowded ground beside its partner on it).
+                    let landed = group |> List.map snd |> List.filter onGround
+
+                    let arrived (at: RoomPos) =
+                        onGround at || landed |> List.exists (Formation.withEachOther at)
+
+                    let standing =
+                        group
+                        |> List.map (fun (creep, at) ->
+                            let fighter = Fighter.ofCreep creep
+
+                            {
+                                Facts.Fighter = fighter
+                                Facts.Lands =
+                                    if arrived at then 0 else Facts.landsIn at fighter room
+                                Facts.Energy =
+                                    creep.Body
+                                    |> Map.toList
+                                    |> List.collect (fun (part, n) -> List.replicate n part)
+                                    |> bodyCost
+                                    |> float
+                            })
+
+                    match
+                        Facts.muster view room (standing @ castable room brief (List.length group))
+                    with
+                    | None -> None
+                    | Some value ->
+                        let job =
+                            Job.laid
+                                JobKind.Muster
+                                rally.Value
+                                (brief.Jobs |> List.collect _.Quarry |> List.distinct)
+                                (lazy value)
+
+                        Some(
+                            Guard room,
+                            { brief with
+                                Jobs = job :: brief.Jobs
+                                Stances =
+                                    holders
+                                    |> List.map (fun creep -> creep.Name, rally.Value)
+                                    |> Map.ofList
+                            }
+                        )
+
+        // Only the rooms a raider stands in or the [[sweep]] works, and only
+        // a Guard held there: the Briefs map is rebuilt for none of the rest.
+        let waiting =
+            (view.Hostiles
+             |> List.filter (HostileInfo.raider view.Hostiles)
+             |> List.map (fun hostile -> hostile.Pos.Room))
+            @ Set.toList (harassRooms view)
             |> List.distinct
-            |> List.filter (fun room -> not (Set.contains room sweeping))
             |> List.choose (fun room ->
-                let holders =
-                    HeldTaskFacts.holdersOf held (taskId (Guard room))
-                    |> List.choose (fun name -> Map.tryFind name bodies)
+                Map.tryFind (Guard room) threats.Briefs |> Option.bind (musterOf room))
 
-                match holders, Map.tryFind (Guard room) threats.Briefs with
-                | [], _
-                | _, None -> None
-                | _, Some brief ->
-                    match brief.Duty with
-                    | Duty.Guard BriefKind.Resident -> None
-                    | Duty.Guard _ when brief.Verdict.Value = Answer.Win ->
-                        match stancesOf room brief holders with
-                        | stances when Map.isEmpty stances -> None
-                        | stances -> Some(Guard room, { brief with Stances = stances })
-                    | _ -> None)
-
-        match swept @ mustered with
+        match waiting with
         | [] -> threats
         | waiting ->
             { threats with

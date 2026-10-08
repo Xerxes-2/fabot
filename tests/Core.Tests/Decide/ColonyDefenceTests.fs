@@ -727,8 +727,8 @@ let raisedHomeGarrisonTests =
                 let unheld = { beaten with Creeps = [] }
 
                 Expect.isFalse
-                    (Option.isSome
-                        (Threats.briefOf (threatsOf unheld (Atlas.ofView unheld)) "W1N2").Laid.Kite)
+                    (Threats.jobsIn (threatsOf unheld (Atlas.ofView unheld)) "W1N2"
+                     |> List.exists (fun job -> job.Kind = JobKind.Strike))
                     "with no ranger of ours standing there, its two thousand tiles are never walked"
             }
 
@@ -761,8 +761,8 @@ let raisedHomeGarrisonTests =
                 let guarding = heldTaskFacts away (Map.ofList [ "ranger-1", taskId (Guard "W1N2") ])
 
                 Expect.isFalse
-                    (Option.isSome
-                        (Threats.briefOf (threatsHeld HeldTaskFacts.empty) "W1N2").Laid.Kite)
+                    (Threats.jobsIn (threatsHeld HeldTaskFacts.empty) "W1N2"
+                     |> List.exists (fun job -> job.Kind = JobKind.Strike))
                     "the premise: holding nothing, it is handed nothing"
 
                 let threats = threatsHeld guarding

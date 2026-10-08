@@ -1724,7 +1724,7 @@ let sweepGroupTests =
                     |> Facts.sweep held
 
                 Expect.isGreaterThanOrEqual
-                    (Facts.sweepSeats colony harassRoom)
+                    (Facts.seatsPaid colony harassRoom colony.World.SweepGroup)
                     3
                     "both holders, and a seat for a third: three bodies kill the room's three sooner"
 
@@ -1753,6 +1753,15 @@ let sweepGroupTests =
                         3
                         "every body of the group holds the one room"
                 | None -> failtest "the sweep's room is pooled"
+
+                // The review of #663 S5: a seat more only where the body adds
+                // more a tick than a tick of its life costs. Three rangers on
+                // one hauler: a fourth only shaves its kill, and no seat
+                // grows past the group.
+                Expect.equal
+                    (Facts.seatsPaid one harassRoom one.World.SweepGroup)
+                    3
+                    "the group seated, no body more"
             }
 
             // User 2026-10-08: no colony runs the sweep; its group may be
@@ -1808,18 +1817,29 @@ let sweepGroupTests =
                             }
                     }
 
-                let walking _ = false
+                // Each body walking in from where it stands, at a ranger
+                // block's energy.
+                let coming (placed: (CreepInfo * RoomPos) list) : Facts.Mustering list =
+                    placed
+                    |> List.map (fun (creep, at) ->
+                        let fighter = Fighter.ofCreep creep
 
-                Expect.isTrue
-                    (Facts.sweepMusters (answering 0) harassRoom group walking)
+                        {
+                            Facts.Fighter = fighter
+                            Facts.Lands = Facts.landsIn at fighter harassRoom
+                            Facts.Energy = float (bodyCost Bodies.rangerPattern.Block)
+                        })
+
+                Expect.isSome
+                    (Facts.muster (answering 0) harassRoom (coming group))
                     "the rival's escort is there at once: the near ranger alone risks its body, and waiting costs the miner nothing it would not lose anyway"
 
-                Expect.isFalse
-                    (Facts.sweepMusters (answering System.Int32.MaxValue) harassRoom group walking)
+                Expect.isNone
+                    (Facts.muster (answering System.Int32.MaxValue) harassRoom (coming group))
                     "a rival that never answered: the first come strikes"
 
-                Expect.isFalse
-                    (Facts.sweepMusters (answering 0) harassRoom (List.take 1 group) walking)
+                Expect.isNone
+                    (Facts.muster (answering 0) harassRoom (coming (List.take 1 group)))
                     "a group of one waits for nobody"
             }
 
@@ -1834,24 +1854,33 @@ let sweepGroupTests =
                     Map.ofList
                         [ a.Name, taskId (Guard harassRoom); b.Name, taskId (Guard harassRoom) ]
 
-                let stancesWith (placed: (CreepInfo * RoomPos) list) =
+                let briefWith (placed: (CreepInfo * RoomPos) list) =
                     let colony = Facts.sweep held (sweeping placed [ northMiner ])
 
-                    (Threats.briefOf
+                    Threats.briefOf
                         (threatsOfHeld colony (Atlas.ofView colony) (heldTaskFacts colony held))
-                        harassRoom)
-                        .Stances
+                        harassRoom
 
-                let apart =
-                    stancesWith
-                        [
-                            a, RoomPos.at "W1N1" { X = 25; Y = 30 }
-                            b, RoomPos.at "W1N1" { X = 25; Y = 45 }
-                        ]
+                let stancesWith placed = (briefWith placed).Stances
+
+                let apartAt =
+                    [
+                        a, RoomPos.at "W1N1" { X = 25; Y = 30 }
+                        b, RoomPos.at "W1N1" { X = 25; Y = 45 }
+                    ]
+
+                let apart = stancesWith apartAt
 
                 Expect.isNonEmpty
                     apart
                     "the premise: one body far behind the other, the pair musters"
+
+                // #663 S5: the one muster rule an outpost's guards wait by too,
+                // a job ahead of the room's own.
+                Expect.equal
+                    ((briefWith apartAt).Jobs |> List.map _.Kind |> List.tryHead)
+                    (Some JobKind.Muster)
+                    "the sweep's muster is its first job"
 
                 let rally =
                     Map.find a.Name apart |> Set.toList |> List.sortBy (fun tile -> tile.Y, tile.X)
@@ -2195,6 +2224,24 @@ let catchableFirstTests =
                          seat.X > 0
                          && range { X = 0; Y = 20 } (RoomPos.pos seat) <= Engine.rangedRange))
                     "every seat strikes the exit tile it stands on, none on the exit"
+
+                // #663 M3: the camp is a job of its own, about the dancer, at
+                // its kill at the camp's odds over the kill's ticks.
+                let camp = List.head brief.Jobs
+                let dancer, _ = (Facts.sweepDancer inRoom harassRoom team).Value
+
+                Expect.equal
+                    (camp.Kind, camp.Quarry)
+                    (JobKind.Camp, [ "dancer" ])
+                    "its first job: the camp"
+
+                Expect.floatClose
+                    Accuracy.high
+                    camp.Value.Value
+                    (Facts.campValue inRoom harassRoom team dancer)
+                    "priced at its kill at the camp's odds"
+
+                Expect.isGreaterThan camp.Value.Value 0.0 "which pays"
             }
         ]
 

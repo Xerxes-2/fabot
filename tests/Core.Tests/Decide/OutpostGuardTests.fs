@@ -1442,6 +1442,118 @@ let guardPrecedenceTests =
                     "each alone"
             }
 
+            // #663 S5: a Guard is its jobs. Its ground is its first job's (the
+            // rings together), its capacity every job's seats summed, each row
+            // a job names capped at the seats of the jobs naming it.
+            test "each mix's ground is its first job's, and its capacity its jobs' seats" {
+                let flavours =
+                    [ Raid; Core; Hold; Trespasser; Resident; Harassed; ChaseSeen; ChaseDark ]
+
+                let mixes =
+                    [
+                        for a in flavours -> [ a ]
+                        for i, a in List.indexed flavours do
+                            for b in List.skip (i + 1) flavours -> [ a; b ]
+                    ]
+
+                let read mix =
+                    let colony = List.fold withFlavour precedenceBasis mix
+                    let atlas = Atlas.ofView colony
+
+                    let threats =
+                        threatsOfHeld
+                            colony
+                            atlas
+                            (heldTaskFacts colony (Map.ofList [ "g-1", taskId (Guard "W1N2") ]))
+
+                    threats, Threats.briefOf threats "W1N2"
+
+                for mix in mixes do
+                    let threats, brief = read mix
+                    let seats = brief.Jobs |> List.map (fun job -> job.Seats threats)
+                    let caps = (brief.Capacity threats).Caps
+
+                    Expect.equal
+                        (Map.tryFind CapScope.Fighters caps)
+                        (Some(seats |> List.sumBy _.Count))
+                        $"{mix}: its fighters are its jobs' seats"
+
+                    for row in seats |> List.collect _.Rows |> List.distinct do
+                        Expect.equal
+                            (Map.tryFind (CapScope.Row row) caps)
+                            (Some(
+                                seats
+                                |> List.filter (fun seat -> List.contains row seat.Rows)
+                                |> List.sumBy _.Count
+                            ))
+                            $"{mix}: its {row} row, the seats of the jobs naming it"
+
+                    Expect.equal
+                        brief.Ground
+                        (brief.Jobs
+                         |> List.filter (fun job -> job.Kind <> JobKind.Muster)
+                         |> Brief.groundOfJobs)
+                        $"{mix}: its ground, its first job's"
+
+                Expect.equal
+                    (flavours
+                     |> List.map (fun flavour ->
+                         flavour, (snd (read [ flavour ])).Jobs |> List.map _.Kind |> List.tryHead))
+                    [
+                        Raid, Some JobKind.Ring
+                        Core, Some JobKind.Ring
+                        Hold, Some JobKind.HoldExit
+                        Trespasser, Some JobKind.Strike
+                        Resident, Some JobKind.Resident
+                        // Nothing laid: the post on its declared sources.
+                        Harassed, Some JobKind.Ring
+                        ChaseSeen, Some JobKind.Strike
+                        ChaseDark, Some JobKind.Ring
+                    ]
+                    "each alone, the job its holders do first"
+            }
+
+            // #663 M3: one currency, the energy a tick a job's effort earns.
+            test
+                "each job is priced by its kind: a ring and a held exit at what they keep, a kill at its score" {
+                let jobOf flavour =
+                    let colony = withFlavour precedenceBasis flavour
+                    let threats = threatsOf colony (Atlas.ofView colony)
+                    colony, Threats.briefOf threats "W1N2" |> _.Jobs |> List.head
+
+                let keeps (colony: ColonyView) =
+                    RoomWorth.delta Quarry.Reading.Value (Facts.roomWorth colony "W1N2")
+
+                for flavour in [ Raid; Hold ] do
+                    let colony, job = jobOf flavour
+
+                    Expect.floatClose
+                        Accuracy.high
+                        job.Value.Value
+                        (keeps colony)
+                        $"{flavour}: what a fight there keeps a tick"
+
+                let colony, raid = jobOf Raid
+
+                Expect.equal
+                    (Set.ofList raid.Quarry)
+                    (colony.Hostiles
+                     |> List.filter (fun h ->
+                         h.Pos.Room = "W1N2" && HostileInfo.armed colony.Hostiles h)
+                     |> List.map _.Id
+                     |> Set.ofList)
+                    "a ring is about the raid"
+
+                let colony, kill = jobOf Trespasser
+
+                Expect.isGreaterThan kill.Value.Value 0.0 "a trespasser's kill earns its score"
+
+                Expect.equal
+                    kill.Quarry
+                    (colony.Hostiles |> List.filter (fun h -> h.Pos.Room = "W1N2") |> List.map _.Id)
+                    "about the trespasser"
+            }
+
             // Characterisation (the Brief's S0): `guard:<room>` is one Task id over
             // every flavour, and which one answers is the precedence `threatsHeldBy`
             // writes across its exclusion lists and `guardGroundIn`'s order. Each
@@ -1480,12 +1592,26 @@ let guardPrecedenceTests =
                         |> List.filter (fun flavour ->
                             Option.isSome ground && groundAlone flavour = ground)
 
+                    // Each job the ground could be (#663 M3): a kill's
+                    // `Strike` is the kite's, or a contested room's prey's.
+                    let brief = Threats.briefOf threats "W1N2"
+
+                    let tilesOf kind =
+                        brief.Jobs
+                        |> List.tryFind (fun job -> job.Kind = kind)
+                        |> Option.map _.Tiles
+
+                    let strike =
+                        if brief.Contention |> Option.exists (fun c -> c.Phase = Phase.Prey) then
+                            "Prey"
+                        else
+                            "Kite"
+
                     let supplying =
                         [
-                            "Kite", (Threats.briefOf threats "W1N2").Laid.Kite
-                            "ResidentRing", (Threats.briefOf threats "W1N2").Laid.Resident
-                            "Prey", (Threats.briefOf threats "W1N2").Laid.Prey
-                            "Ring", (Threats.briefOf threats "W1N2").Laid.Ring
+                            strike, tilesOf JobKind.Strike
+                            "ResidentRing", tilesOf JobKind.Resident
+                            "Ring", Brief.ringOf brief
                         ]
                         |> List.filter (fun (_, field) -> Option.isSome ground && field = ground)
                         |> List.map fst
@@ -1682,7 +1808,7 @@ let guardPrecedenceTests =
                     let threats = threatsOf colony (Atlas.ofView colony)
 
                     List.contains BriefKind.ExitHold (Threats.briefOf threats "W1N2").Claims,
-                    (Threats.briefOf threats "W1N2").Laid.Ring
+                    Brief.ringOf (Threats.briefOf threats "W1N2")
 
                 let ringOf flavours = snd (laid flavours)
 

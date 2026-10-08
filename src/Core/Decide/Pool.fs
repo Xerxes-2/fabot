@@ -267,7 +267,7 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
             // A melee body on a chase swings from the ring beside the raid,
             // never the ranger's kite ground three off it (#571).
             let swing () =
-                match brief.Duty, brief.Laid.Ring with
+                match brief.Duty, Brief.ringOf brief with
                 | Duty.Guard BriefKind.Chase, Some ring when not (Set.isEmpty ring) ->
                     Threats.bodyOf threats creep
                     |> Option.filter isGuardRowBody
