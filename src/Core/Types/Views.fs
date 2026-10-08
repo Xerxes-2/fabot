@@ -277,9 +277,10 @@ type WorldView =
         /// how old the economy gate's memory of it is (`Facts.openToEconomy`,
         /// #605).
         RaidSeen: Map<string, int>
-        /// Each [[sweep]] candidate and outpost nothing sees this tick, with
-        /// the bodies it was last seen holding (`World.PreySeen`, #658): what
-        /// a dark room's bodies are priced by (`Facts.stillThere`).
+        /// Each [[sweep]] candidate and outpost with the bodies it was last
+        /// seen holding (`World.PreySeen`, #658), a dancer across its border
+        /// among them in a room in sight: what a body out of sight is priced
+        /// by (`Facts.stillThere`).
         PreySeen: Map<string, BodiesSeen>
         /// Each hostile's last tile and the full tick it was seen there
         /// (`World.HostileSteps`), one out of sight kept while it was last seen
@@ -454,7 +455,10 @@ module WorldView =
                 )
                 |> Set.intersect watched
             RaidSeen = raidSeen
-            PreySeen = world.PreySeen |> Map.filter (fun room _ -> not (World.seenNow world room))
+            // A room in sight too: a dancer across its border stays its own
+            // (`World.recallPrey`); a body standing in sight is never laid
+            // twice (`Facts.rememberedIn`).
+            PreySeen = world.PreySeen
             LastSteps = world.HostileSteps |> Map.map (fun _ step -> step.At, step.Seen)
             Responses = Map.empty
             SweepGroup = []

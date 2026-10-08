@@ -1659,3 +1659,118 @@ let w19s25StandDownPairTests =
                             $"t{t.Tick + 1}: no single shot beside the pair\n{failure}"
             }
         ]
+
+// ---- a dancer on the sweep's border (#658) --------------------------------
+// Live after c8a356c7 (W19S26): Trepidimous' 23C23M hauler stood on the
+// room's exit, carried across and back every other tick; our ranger walked
+// toward it and away, over and over, and never killed it. Here: W12S28
+// sweeping W12S27, the hauler on W12S27's north exit (10,0), carried into
+// W12S26 and back, nothing of ours seeing W12S26; an eight-block ranger
+// standing in W12S27. Nothing casts.
+
+let private dancerAcrossNorth () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+
+    let home =
+        room "W12S28"
+        |> withController Ownership.Ours None 7 6
+        |> withSpawn "Spawn1" { X = 12; Y = 40 } 5_600
+        |> withStructures
+            [
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 14; Y = 42 } with
+                    Energy = 30_000
+                }
+            ]
+
+    let ranger =
+        body
+            "ranger-1-Spawn1"
+            Side.Ours
+            (parts [ Move, 24; RangedAttack, 16; Heal, 8 ])
+            (at "W12S27" 14 10)
+            None
+
+    let dancer =
+        body
+            "dancer"
+            (Side.Player "Trepidimous")
+            (List.concat (List.replicate 23 [ Move; Carry ]))
+            (at "W12S27" 10 0)
+            (Some Hold)
+
+    arena 900_000 [ home; room "W12S27"; room "W12S26" ] [ colony "W12S28" ] [ ranger; dancer ]
+    |> withHarass
+        [
+            {
+                RoomName = "W12S27"
+                Enemy = "Trepidimous"
+                Via = []
+            }
+        ]
+
+[<Tests>]
+let borderCampTests =
+    testList
+        "arena a dancer on the sweep's border is camped"
+        [
+            // A healer of its owner across the border, beside the tile the
+            // dancer lands on, heals it whole each tick it is out (20 HEAL,
+            // 240 a tick, against what lands while it is in): no camp pays.
+            test
+                "with a healer across the border that out-heals what lands, the dancer is not camped" {
+                let a = dancerAcrossNorth ()
+
+                let healer =
+                    body
+                        "healer"
+                        (Side.Player "Trepidimous")
+                        (parts [ Move, 20; Heal, 20 ])
+                        (RoomPos.at "W12S26" { X = 10; Y = 48 })
+                        (Some Hold)
+
+                let healed =
+                    { a with
+                        Bodies = a.Bodies @ [ healer ]
+                        Lookout = set [ "W12S26" ]
+                    }
+
+                let _, trace = healed |> run 60
+                let failure = describe trace
+
+                Expect.isTrue (survived "dancer" trace) $"the dancer stands\n{failure}"
+
+                Expect.isFalse
+                    (pathOf "ranger-1-Spawn1" trace
+                     |> List.exists (fun (_, s) ->
+                         s.At.Room = "W12S27"
+                         && max (abs (s.At.X - 10)) s.At.Y <= Engine.rangedRange))
+                    $"and the ranger never camps its entry\n{failure}"
+            }
+
+            test
+                "the ranger stands on one tile covering the dancer's entry and kills it, never walking to and fro" {
+                let _, trace = dancerAcrossNorth () |> run 200
+                let failure = describe trace
+
+                let killed = diedOn "dancer" trace
+
+                Expect.isSome killed $"the dancer dies\n{failure}"
+
+                // From its first tick on a tile within three of the entry,
+                // until the kill: one tile.
+                let camped =
+                    pathOf "ranger-1-Spawn1" trace
+                    |> List.filter (fun (tick, _) -> tick < Option.get killed)
+                    |> List.skipWhile (fun (_, s) ->
+                        s.At.Room <> "W12S27"
+                        || max (abs (s.At.X - 10)) s.At.Y > Engine.rangedRange)
+                    |> List.map (fun (_, s) -> s.At)
+                    |> List.distinct
+
+                Expect.equal (List.length camped) 1 $"one camp tile, held: {camped}\n{failure}"
+
+                Expect.isTrue
+                    (camped |> List.forall (fun tile -> tile.Y > 0))
+                    $"off the exit\n{failure}"
+            }
+        ]

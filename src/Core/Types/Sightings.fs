@@ -920,8 +920,15 @@ type HostileStep =
 
 /// A hostile's crossings of a border (#658): the tile it was last seen on
 /// before its latest crossing, in the room it left, and the full ticks it
-/// was seen in another room than the one it was last seen in, newest first.
-and Crossing = { Came: RoomPos; Ticks: int list }
+/// was seen in another room than the one it was last seen in, newest first;
+/// and the tiles it crossed between, each crossing's tile it came onto and
+/// the tile it came from, newest first: the tiles it steps in and out on.
+and Crossing =
+    {
+        Came: RoomPos
+        Ticks: int list
+        Tiles: RoomPos list
+    }
 
 /// A body's dance on a border (#585, #658): how deep into a room a body
 /// that steps out and back turns at, read off the reach it fights from.
@@ -1646,15 +1653,43 @@ module World =
                     facts.Hostiles |> Seq.map (fun h -> h.Id, room))
                 |> Map.ofSeq
 
+            // A body last seen here that stands nowhere in sight now and that
+            // the one trajectory record keeps as stepped out over the border
+            // (`HostileSteps`, kept while last seen within a dance of it,
+            // `Dance.byBorder`, or lately crossing, #585, #658): a dancer
+            // across, still this room's while it bounces.
+            let bouncing room (h: HostileInfo) =
+                HostileInfo.crossesExits h
+                && not (Map.containsKey h.Id standing)
+                && not (Set.contains h.Id fallen)
+                && Map.tryFind h.Id world.HostileSteps
+                   |> Option.exists (fun step ->
+                       step.At.Room = room
+                       && step.Seen < world.Time
+                       && (step.Crossed.IsSome || Dance.byBorder step.At))
+
             let remember room =
                 if seen room then
+                    let across =
+                        Map.tryFind room previous
+                        |> Option.map (fun last ->
+                            last.Bodies
+                            |> List.filter (fun h ->
+                                last.Tick + h.TicksToLive > world.Time && bouncing room h)
+                            |> List.map (fun h ->
+                                { h with
+                                    TicksToLive = h.TicksToLive - (world.Time - last.Tick)
+                                }))
+                        |> Option.defaultValue []
+
                     match
-                        (roomOf world room).Hostiles
-                        |> List.filter (fun h ->
-                            not (Colony.isAlly h.Owner || HostileInfo.isKeeper h))
+                        ((roomOf world room).Hostiles
+                         |> List.filter (fun h ->
+                             not (Colony.isAlly h.Owner || HostileInfo.isKeeper h)))
+                        @ across
                     with
                     | [] -> None
-                    | now -> Some { Bodies = now; Tick = world.Time }
+                    | bodies -> Some { Bodies = bodies; Tick = world.Time }
                 else
                     Map.tryFind room previous
                     |> Option.map (fun last ->
@@ -1682,17 +1717,32 @@ module World =
     /// carried to the next tick.
     ///
     /// Each one's border crossings within `window` ticks are kept beside it
-    /// (`HostileStep.Crossings`, #658), and its record through `window` ticks
+    /// (`HostileStep.Crossed`, #658), and its record through `window` ticks
     /// out of sight, so a body that steps out over the border into a room
     /// nothing sees and comes back is known by the trip.
     let recallHostiles (window: int) (previous: Map<string, HostileStep>) (world: World) : World =
         let recent (crossed: Crossing option) =
             crossed
             |> Option.map (fun c ->
+                let ticks = c.Ticks |> List.filter (fun tick -> world.Time - tick <= window)
+
                 { c with
-                    Ticks = c.Ticks |> List.filter (fun tick -> world.Time - tick <= window)
+                    Ticks = ticks
+                    Tiles = List.truncate (2 * List.length ticks) c.Tiles
                 })
             |> Option.filter (fun c -> not (List.isEmpty c.Ticks))
+
+        // Where a body last seen on an exit tile stood across it: the tile it
+        // lands on in the room beyond (`Seam.landingOf`). An exit tile carries
+        // a body across, so one seen on it and next in the same room went
+        // out and came back, whether anything saw the room beyond or not
+        // (the research's rule for a dark border: missing is out).
+        let landing (tile: RoomPos) =
+            RoomName.adjacent tile.Room
+            |> List.tryPick (fun room ->
+                RoomName.offsetOf tile.Room room
+                |> Option.bind (fun offset -> Seam.landingOf offset (RoomPos.pos tile))
+                |> Option.map (RoomPos.at room))
 
         let present =
             world.Rooms
@@ -1700,6 +1750,19 @@ module World =
             |> Seq.collect (fun (_, facts) -> facts.Hostiles)
             |> Seq.map (fun h ->
                 let before = Map.tryFind h.Id previous
+
+                let missedAcross =
+                    match before with
+                    // A body the exits carry (never an Invader, nor a
+                    // keeper), back on the tile it left or beside it.
+                    | Some step when
+                        step.At.Room = h.Pos.Room
+                        && step.Seen < world.Time
+                        && HostileInfo.crossesExits h
+                        && RoomPos.range step.At h.Pos |> Option.exists (fun r -> r <= 1)
+                        ->
+                        landing step.At |> Option.map (fun far -> step, far)
+                    | _ -> None
 
                 let left =
                     before
@@ -1720,19 +1783,40 @@ module World =
                         | _ -> world.Time
                     Seen = world.Time
                     Crossed =
-                        match before with
-                        | Some step when step.At.Room <> h.Pos.Room ->
+                        match before, missedAcross with
+                        | _, Some(step, far) ->
+                            let kept = recent step.Crossed
+
+                            Some
+                                {
+                                    Came = far
+                                    Ticks =
+                                        world.Time
+                                        :: step.Seen + 1
+                                        :: (kept |> Option.map _.Ticks |> Option.defaultValue [])
+                                    Tiles =
+                                        h.Pos
+                                        :: far
+                                        :: far
+                                        :: step.At
+                                        :: (kept |> Option.map _.Tiles |> Option.defaultValue [])
+                                }
+                        | Some step, _ when step.At.Room <> h.Pos.Room ->
+                            let kept = recent step.Crossed
+
                             Some
                                 {
                                     Came = step.At
                                     Ticks =
                                         world.Time
-                                        :: (recent step.Crossed
-                                            |> Option.map _.Ticks
-                                            |> Option.defaultValue [])
+                                        :: (kept |> Option.map _.Ticks |> Option.defaultValue [])
+                                    Tiles =
+                                        h.Pos
+                                        :: step.At
+                                        :: (kept |> Option.map _.Tiles |> Option.defaultValue [])
                                 }
-                        | Some step -> recent step.Crossed
-                        | None -> None
+                        | Some step, _ -> recent step.Crossed
+                        | None, _ -> None
                 })
             |> List.ofSeq
 

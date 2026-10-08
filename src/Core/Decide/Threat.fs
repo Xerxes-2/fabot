@@ -248,6 +248,12 @@ type Laid =
         /// kind ahead claims the room, the tiles beside each trespasser off
         /// the exits, or a hauler's store ground: a contested room's prey.
         Prey: Set<RoomPos> option
+        /// In the [[sweep]]'s room where its kill is a dancer on the border
+        /// (`Facts.sweepDancer`, #658), the camp: fixed tiles off the exits,
+        /// out of every armed body's reach, covering the tiles it steps in
+        /// on, the one it uses most first, one a holder (those it already
+        /// stands on first). The dancer's tile now never moves it.
+        Camp: Set<RoomPos> option
     }
 
 /// ADR-0085
@@ -641,6 +647,7 @@ module Brief =
             Resident = None
             Ring = None
             Prey = None
+            Camp = None
         }
 
     /// Whether a Brief is a kill (#510, #516): one body, a rung up, a quiet
@@ -839,6 +846,7 @@ module Brief =
                 match phase with
                 | Phase.Raid when ranged -> laid.Kite |> Option.orElse ring
                 | Phase.Raid -> ring
+                | _ when laid.Camp.IsSome -> laid.Camp
                 | Phase.Prey -> laid.Prey
                 | Phase.Quiet -> None
             | BriefKind.ExitHold
@@ -3654,6 +3662,76 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             Map.tryFind room prey
         | _ -> None
 
+    // The sweep's camp on a border dancer (#658, `Facts.sweepDancer`): tiles
+    // off the border ring and every armed body's reach, within the group's
+    // reach of the tiles the dancer steps in on, covering the most of them,
+    // the one it uses most first, then nearest it; one a holder, those a
+    // holder already stands on first (the walk spent is the camp's
+    // hysteresis). The dancer's tile now never enters the choice.
+    let campLaid room =
+        if not (Set.contains room (harassRooms view)) || phaseOf room = Phase.Raid then
+            None
+        else
+            let holders =
+                HeldTaskFacts.holdersOf held (taskId (Guard room))
+                |> List.choose (fun name ->
+                    ColonyView.bodies view |> List.tryFind (fun creep -> creep.Name = name))
+
+            let team =
+                match holders with
+                | [] -> [ blocksFighter rangerPattern (max 1 (Facts.rangerBlocksReach view)) ]
+                | holders -> holders |> List.map Fighter.ofCreep
+
+            match Facts.sweepDancer view room team with
+            | None
+            | Some(_, []) -> None
+            | Some(_, entries) ->
+                let reach = team |> List.map _.Reach |> List.max
+                let used = List.head entries
+
+                let struck (tile: Pos) =
+                    view.Hostiles
+                    |> List.exists (fun h ->
+                        h.Pos.Room = room
+                        && HostileInfo.armed view.Hostiles h
+                        && (HostileInfo.weaponRange view.Hostiles h
+                            |> Option.exists (fun weapon ->
+                                range tile (RoomPos.pos h.Pos) <= weapon + 1)))
+
+                let standing =
+                    holders
+                    |> List.choose (fun creep ->
+                        SpatialInfo.creepPlacementOf view.Spatial creep.Name)
+                    |> List.filter (fun at -> at.Room = room)
+                    |> List.map RoomPos.pos
+                    |> Set.ofList
+
+                let covered (tile: Pos) =
+                    entries
+                    |> List.filter (fun entry -> range tile (RoomPos.pos entry) <= reach)
+                    |> List.length
+
+                match
+                    Atlas.walkableWithinIn atlas room reach (RoomPos.pos used)
+                    // Off the exit and the tile beside it a crossing lands
+                    // on: the ground a walk stops short of.
+                    |> List.filter (fun tile ->
+                        min
+                            (min tile.X tile.Y)
+                            (min (Seam.exitEdge - tile.X) (Seam.exitEdge - tile.Y))
+                        >= 2
+                        && not (struck tile))
+                    |> List.sortBy (fun tile ->
+                        not (standing.Contains tile),
+                        -(covered tile),
+                        range tile (RoomPos.pos used),
+                        tile.Y,
+                        tile.X)
+                    |> List.truncate (max 1 (List.length holders))
+                with
+                | [] -> None
+                | tiles -> Some(tiles |> Set.ofList |> RoomPos.setAt room)
+
     // Every room a source claimed or laid ground in; one no source claims is
     // the default kind's, `Contested`.
     let briefs =
@@ -3703,6 +3781,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     Resident = Map.tryFind room residentRing
                     Ring = Map.tryFind room rings
                     Prey = preyLaid room
+                    Camp = campLaid room
                 })
         |> Map.ofSeq
 

@@ -1869,6 +1869,123 @@ let internal pressedFor (view: ColonyView) (fighter: Fighter) (hostile: HostileI
 /// once it walks off (its last
 /// step took it toward the edge, `ColonyView.Stepped`, and the one before
 /// not away, `ColonyView.SteppedBack`) only from in reach, and then until it is off.
+/// A tile's steps to its room's nearest edge.
+let private toEdgeOf (tile: Pos) =
+    let edge = Engine.roomSide - 1
+    min (min tile.X tile.Y) (min (edge - tile.X) (edge - tile.Y))
+
+/// Whether a hostile dances on its room's border, by its trajectory (#658):
+/// within the depth our reach and its step out cover, it crossed the border
+/// lately (`ColonyView.Bounces`: out and back, either way, a few steps over
+/// or on the exit tile alike), or it steps back onto the tile it stood on
+/// two steps ago, or it is laid back on the tile it crossed out from
+/// (`sweepPricing`). A body that cannot walk off dances on nothing.
+let internal dancingOn (view: ColonyView) (hostile: HostileInfo) : bool =
+    let crossed = Map.containsKey hostile.Id view.Bounces
+
+    let inPlace =
+        Map.tryFind hostile.Id view.Stepped
+        |> Option.exists (fun last -> last = hostile.Pos)
+        || Map.tryFind hostile.Id view.SteppedBack = Some hostile.Pos
+
+    HostileInfo.crossesExits hostile
+    && not (HostileInfo.stationary view.Hostiles hostile)
+    && not (rootedAtWork view hostile)
+    && Dance.byBorder hostile.Pos
+    && (crossed || inPlace)
+
+/// The share of the ticks a dancer was watched that it stood in its room
+/// (#658), off its crossings (`ColonyView.Bounces`): between each crossing
+/// and the next it stood on one side, the side it stands on now after the
+/// latest (out, where it is laid back on the tile it crossed out from). A
+/// body watched dancing in place stands in all its time, but on the exit
+/// tile itself, which carries it across, half; one never watched long
+/// enough, half.
+let internal dancerInShare (view: ColonyView) (hostile: HostileInfo) : float =
+    match Map.tryFind hostile.Id view.Bounces with
+    | None when toEdgeOf (RoomPos.pos hostile.Pos) = 0 -> 0.5
+    | None -> 1.0
+    | Some crossed ->
+        let inNow = crossed.Came.Room <> hostile.Pos.Room
+        let bounds = view.Time :: crossed.Ticks
+
+        let spans =
+            List.pairwise bounds
+            |> List.mapi (fun i (later, earlier) -> (i % 2 = 0) = inNow, later - earlier)
+
+        let watched = spans |> List.sumBy snd
+
+        if watched <= 0 then
+            0.5
+        else
+            float (spans |> List.filter fst |> List.sumBy snd) / float watched
+
+/// The heal a dancer takes a tick while it stands out of its room (#658):
+/// each healer of its owner across the border within a ranged heal's reach
+/// of the tiles it crosses on (`Crossing.Tiles`), beside it its whole heal,
+/// farther its ranged heal. A heal never crosses a border, so it lands only
+/// while the dancer is out.
+let private healAcross (view: ColonyView) (hostile: HostileInfo) : int =
+    let room = hostile.Pos.Room
+
+    let tiles =
+        Map.tryFind hostile.Id view.Bounces
+        |> Option.map (fun crossed -> crossed.Tiles |> List.filter (fun tile -> tile.Room <> room))
+        |> Option.defaultValue []
+
+    match tiles with
+    | [] -> 0
+    | tiles ->
+        view.Hostiles
+        |> List.filter (fun h ->
+            h.Id <> hostile.Id
+            && h.Owner = hostile.Owner
+            && h.Pos.Room <> room
+            && RoomName.neighbouring h.Pos.Room room
+            && HostileInfo.heals view.Hostiles h)
+        |> List.sumBy (fun healer ->
+            let power = HostileInfo.effectivePower view.Hostiles healer Heal
+
+            match
+                tiles
+                |> List.choose (fun tile -> RoomName.tileRange healer.Pos tile)
+                |> List.sort
+            with
+            | near :: _ when near <= Engine.meleeRange -> power * Engine.healPower
+            | near :: _ when near <= Engine.rangedRange -> power * Engine.rangedHealPower
+            | _ -> 0)
+
+/// The odds a dancer's kill lands from a camp on a tile covering its way in
+/// (#658): the share of its watched time it stood in (`dancerInShare`),
+/// times the odds it keeps coming back over the camp's ticks, 1 − e^(−λ·T),
+/// λ its returns over the ticks it was watched in and T twice the kill (it
+/// is in reach about half its time); nothing where the heal it takes while
+/// out (`healAcross`) undoes what lands while it is in. A body that never
+/// left the room comes back for certain.
+let internal campOdds
+    (view: ColonyView)
+    (fighter: Fighter)
+    (kill: int)
+    (hostile: HostileInfo)
+    : float =
+    let share = dancerInShare view hostile
+
+    let returning =
+        match Map.tryFind hostile.Id view.Bounces with
+        | None -> 1.0
+        | Some crossed ->
+            let returns = float ((List.length crossed.Ticks + 1) / 2)
+            let watched = float (max 1 (view.Time - List.last crossed.Ticks + 1))
+            1.0 - exp (-(returns / watched) * 2.0 * float kill)
+
+    let heal = healAcross view hostile
+    let lands = fighter.DamageAt Engine.rangedRange
+
+    if float heal * (1.0 - share) >= float lands * share then
+        0.0
+    else
+        share * returning
+
 let private catchOdds
     (view: ColonyView)
     (fighter: Fighter)
@@ -1920,41 +2037,11 @@ let private catchOdds
                 && Map.tryFind hostile.Id view.SteppedBack
                    |> Option.forall (fun back -> back <> hostile.Pos))
 
-        // A body dancing on the border, by its trajectory (#658): within the
-        // depth our reach and its step out cover, it crossed the border
-        // lately (`ColonyView.Bounces`: out and back, either way, a few
-        // steps over or on the exit tile alike), or it steps back onto the
-        // tile it stood on two steps ago, or it is laid back on the tile it
-        // crossed out from (`sweepPricing`). Its camp's odds off that
-        // history: it stands in reach about half its time, and comes back at
-        // the rate it has (`λ`, its returns over the ticks they were seen
-        // in), so the kill lands, camped on a tile covering its way in, at
-        // that half, by the odds it keeps coming back over the camp's ticks
-        // (1 − e^(−λ·2·kill)); a body that never left the room comes back
-        // for certain.
-        let crossings =
-            Map.tryFind hostile.Id view.Bounces
-            |> Option.map _.Ticks
-            |> Option.defaultValue []
-
-        let inPlace =
-            Map.tryFind hostile.Id view.Stepped
-            |> Option.exists (fun last -> last = hostile.Pos)
-            || Map.tryFind hostile.Id view.SteppedBack = Some hostile.Pos
-
-        let shallow = toEdge at <= Engine.rangedRange + 1
-        let dancing = shallow && (not (List.isEmpty crossings) || inPlace)
-
-        let camp =
-            match crossings with
-            | [] -> 0.5
-            | ticks ->
-                let returns = float ((List.length ticks + 1) / 2)
-                let observed = float (max 1 (view.Time - List.last ticks + 1))
-                0.5 * (1.0 - exp (-(returns / observed) * 2.0 * float kill))
+        let dancing = dancingOn view hostile
 
         let window =
             match Gait.ticks Gait.plain fighter.Gait with
+            | _ when dancing -> kill
             | Some ours when ours > pace ->
                 if leaving && arrival > 0 then
                     0
@@ -1971,20 +2058,23 @@ let private catchOdds
             // room once the body is in reach: it turns for the edge before a
             // long kill lands (live t1,038,8xx, W19S26: two rangers trailed
             // a 23M23C hauler priced certain beside two seated miners).
-            // One dancing on the border (live, W19S26: haulers and a
-            // reserver stepping onto the exit and back dragged the group to
-            // and fro) is camped, at its camp's odds, and never chased
-            // across. One on or beside an exit walking out
+            // One dancing on the border (`dancingOn`) is camped, at its
+            // camp's odds (`campOdds`), and never chased across, whatever
+            // its pace. One on or beside an exit walking out
             // leaves in a step: caught only for what lands before it, from
             // in reach.
-            | _ when dancing -> int (camp * float kill)
             | _ when toEdge at <= 1 -> off + 1 - max 0 arrival
             | _ when not leaving && walking -> off - max 0 arrival
             | _ when not leaving -> kill
             | _ when arrival > 0 -> 0
             | _ -> off
 
-        min 1.0 (float (max 0 window) / float kill)
+        // A dancer's odds are its camp's, as a share and never rounded to a
+        // tick: a one-tick kill at a third's odds is a third, not none.
+        if dancing then
+            min 1.0 (campOdds view fighter kill hostile)
+        else
+            min 1.0 (float (max 0 window) / float kill)
 
 /// One room's kill scores (#621), the heal reaching each hostile found once:
 /// what killing a hostile is worth (`killValue`) per tick of a body's effort,
@@ -3756,23 +3846,15 @@ let private sweepPricing (view: ColonyView) (room: string) : ColonyView =
     let priced = killPricing (rememberedIn view) room
 
     // Out of the room by its latest crossing (`ColonyView.Bounces`), from a
-    // tile within the depth a dance turns back at, and still beside it.
-    let shallow (tile: RoomPos) =
-        let depth = Engine.rangedRange + 1
-        let edge = Engine.roomSide - 1
-
-        tile.X <= depth
-        || tile.Y <= depth
-        || tile.X >= edge - depth
-        || tile.Y >= edge - depth
-
+    // tile within the depth a dance turns back at (`Dance.byBorder`), and
+    // still lingering beside it (`Dance.besideOf`).
     let crossedOut (h: HostileInfo) =
-        if h.Pos.Room = room || not (RoomName.neighbouring h.Pos.Room room) then
+        if not (Dance.besideOf room h.Pos) then
             None
         else
             Map.tryFind h.Id view.Bounces
             |> Option.map _.Came
-            |> Option.filter (fun came -> came.Room = room && shallow came)
+            |> Option.filter (fun came -> came.Room = room && Dance.byBorder came)
 
     { priced with
         Hostiles =
@@ -3784,6 +3866,56 @@ let private sweepPricing (view: ColonyView) (room: string) : ColonyView =
         Stepped = view.Stepped
         SteppedBack = view.SteppedBack
     }
+
+/// The dancer the [[sweep]]'s group camps in its room (#658), and the tiles
+/// of the room it steps in and out on (`Crossing.Tiles`, its tile now
+/// beside them where it stands in), the most used first: where the body its
+/// kill score leads, the group's (`team`) over the room's prey as the sweep
+/// prices them (`sweepPricing`: a dancer across the border laid back), is a
+/// dancer (`dancingOn`) whose camp pays (`campOdds`). None where the head is
+/// a body caught where it stands, or nothing pays.
+let sweepDancer
+    (view: ColonyView)
+    (room: string)
+    (team: Fighter list)
+    : (HostileInfo * RoomPos list) option =
+    match team with
+    | [] -> None
+    | fighter :: _ ->
+        let priced = sweepPricing view room
+        let score = killScoresIn priced room team
+
+        priced.Hostiles
+        |> List.filter (fun h -> h.Pos.Room = room && trespasser priced (Set.singleton room) h)
+        |> List.map (fun h -> score fighter None 0 h, h)
+        |> List.filter (fun (worth, _) -> worth > 0.0)
+        |> List.sortBy (fun (worth, h) -> -worth, h.Id)
+        |> List.tryHead
+        |> Option.map snd
+        |> Option.filter (dancingOn priced)
+        |> Option.map (fun dancer ->
+            let crossed =
+                Map.tryFind dancer.Id priced.Bounces
+                |> Option.map (fun c -> c.Tiles)
+                |> Option.defaultValue []
+
+            let here =
+                if
+                    Map.tryFind dancer.Id priced.Bounces
+                    |> Option.forall (fun c -> c.Came.Room <> room)
+                then
+                    [ dancer.Pos ]
+                else
+                    []
+
+            let entries =
+                crossed @ here
+                |> List.filter (fun tile -> tile.Room = room)
+                |> List.countBy id
+                |> List.sortBy (fun (tile, uses) -> -uses, tile.Y, tile.X)
+                |> List.map fst
+
+            dancer, entries)
 
 /// The ticks a body standing at `from` walks to a room at its plain `pace`
 /// (#658): none in the room or on its border's doorstep (the tile beside it,

@@ -1815,6 +1815,13 @@ let catchableFirstTests =
                                     {
                                         Came = RoomPos.at "W2N2" { X = 48; Y = 20 }
                                         Ticks = [ laid.Time - 3; laid.Time - 6 ]
+                                        Tiles =
+                                            [
+                                                RoomPos.at harassRoom { X = 0; Y = 20 }
+                                                RoomPos.at "W2N2" { X = 48; Y = 20 }
+                                                RoomPos.at "W2N2" { X = 49; Y = 20 }
+                                                RoomPos.at harassRoom { X = 1; Y = 20 }
+                                            ]
                                     }
                                 ]
                     }
@@ -1883,6 +1890,11 @@ let catchableFirstTests =
                                     {
                                         Came = RoomPos.at harassRoom { X = 0; Y = 20 }
                                         Ticks = [ inRoom.Time; inRoom.Time - 2; inRoom.Time - 4 ]
+                                        Tiles =
+                                            [
+                                                RoomPos.at "W2N2" { X = 49; Y = 20 }
+                                                RoomPos.at harassRoom { X = 0; Y = 20 }
+                                            ]
                                     }
                                 ]
                     }

@@ -988,6 +988,13 @@ let borderTripTests =
                         {
                             Came = RoomPos.at "W13S29" { X = 49; Y = 20 }
                             Ticks = [ 103; 101 ]
+                            Tiles =
+                                [
+                                    RoomPos.at harassRoom { X = 1; Y = 20 }
+                                    RoomPos.at "W13S29" { X = 49; Y = 20 }
+                                    RoomPos.at "W13S29" { X = 49; Y = 20 }
+                                    RoomPos.at harassRoom { X = 0; Y = 20 }
+                                ]
                         })
                     "kept through the dark tick, each crossing counted"
             }
@@ -1010,7 +1017,9 @@ let borderTripTests =
                     [
                         bodyAt 100 (Some(harassRoom, 0, 20))
                         bodyAt 101 (Some("W13S29", 49, 20))
-                        bodyAt (101 + Tuning.defaults.RaidBounceTicks + 1) (Some("W13S29", 49, 21))
+                        // Inland, not back at the exit it left by: no trip
+                        // out and back read off the gap (#658).
+                        bodyAt (101 + Tuning.defaults.RaidBounceTicks + 1) (Some("W13S29", 45, 21))
                     ]
                     |> List.fold
                         (fun (previous: World) world ->
