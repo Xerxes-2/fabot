@@ -1793,6 +1793,21 @@ let private killTicksOf
             + max 1 ((HostileInfo.effectiveHits hostile + net - 1) / net)
         )
 
+/// The ticks a hostile a body of ours keeps off (`keepsOff`) presses it,
+/// the run-off its walk holds wherever it stands (#615): one as quick or
+/// quicker until the body's shots lame or disarm it (`pressesFor`); one that
+/// falls behind on plain, which closes on it only where its ground runs out,
+/// until the body alone kills it (`killTicksOf`). `Int32.MaxValue` where its
+/// damage never out-heals it.
+let internal pressedFor (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : int =
+    if Gait.fallsBehind fighter.Gait (HostileInfo.gait view.Hostiles hostile) then
+        let healOn = healReachingWithin view hostile.Pos.Room view.Tuning.ReachHorizon
+
+        killTicksOf view healOn [ fighter ] hostile
+    else
+        pressesFor view fighter hostile
+    |> Option.defaultValue System.Int32.MaxValue
+
 /// The odds a body of ours lands the whole of a kill (#621), as the share of
 /// its `kill` ticks the hostile stays in reach. Certain where it cannot walk
 /// off: penned in its room (an Invader), stationary or rooted at its work,

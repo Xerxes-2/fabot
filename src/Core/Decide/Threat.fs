@@ -2072,7 +2072,14 @@ module Threats =
     /// body reaches (#615 U1: a melee's, against a body that shoots) strikes
     /// the tile before the body could be on it and gone, its own legs, load,
     /// parts shot off and fatigue counted (`walkOf`), never sooner than the
-    /// tick after (a body that stays put moves again no sooner); and, about
+    /// tick after (a body that stays put moves again no sooner). A class it
+    /// keeps off (`Facts.keepsOff`, #615) makes a tile unsafe only where,
+    /// stepping off it, the body holds less run-off than the class presses it
+    /// (`Facts.pressedFor`, of its members in the body's room;
+    /// `Arrival.heldFor`), which a tile the class strikes before the body is
+    /// off it never holds: the reading the body is priced as keeping it off
+    /// by, so a kiter that keeps a raider off walks in as close as one that
+    /// closes, and never into a pocket. And, about
     /// `camp` (the exit a raid left by, `ColonyView.ExitHolds`), a step and a
     /// swing, and a step more for each tick past the first the tile holds the
     /// body. Off our ramparts. With it, the soonest such a map strikes each
@@ -2080,12 +2087,14 @@ module Threats =
     /// such map nor a camp it outranges stands in its room, or for a body the
     /// projection does not place.
     let kiteUnsafeFor
+        (view: ColonyView)
         (threats: Threats)
         atlas
         (creep: CreepInfo)
         (camp: Pos option)
         : ((int -> bool) * (int -> int)) option =
-        let _, shorter, camp = shorterIn threats atlas creep camp
+        let fighter, shorter, camp = shorterIn threats atlas creep camp
+        let kept, raced = shorter |> List.partition (stoodOff view fighter)
 
         if List.isEmpty shorter && Option.isNone camp then
             None
@@ -2103,11 +2112,63 @@ module Threats =
                 let soonest index =
                     Arrival.soonestAmong index shorter System.Int32.MaxValue
 
+                let gait = Arrival.gaitOf creep
+                let wait = Arrival.waitOf creep.Fatigue gait
+
+                // The run-off the body must hold against what it keeps off,
+                // walked from each tile as it stands there.
+                let held =
+                    lazy
+                        (let need =
+                            kept
+                            |> List.collect (fun map -> map.Members)
+                            |> List.choose (fun id ->
+                                view.Hostiles
+                                |> List.tryFind (fun h -> h.Id = id && h.Pos.Room = walk.Room))
+                            |> List.map (Facts.pressedFor view fighter)
+                            |> List.fold max 0
+
+                         match
+                             Map.tryFind walk.Room threats.Arrivals,
+                             Arrival.paceOf gait,
+                             Atlas.arrivalGroundIn atlas walk.Room false,
+                             Atlas.creepTile atlas creep.Name
+                         with
+                         | Some(maps, _), Some pace, Some ground, Some at ->
+                             Arrival.heldFor
+                                 ground
+                                 shorter
+                                 maps.Unseen
+                                 ramparts.Value
+                                 pace
+                                 (indexOf (RoomPos.pos at), wait)
+                                 need
+                         | _ -> Array.create tileCount -1)
+
+                // A raider it keeps off that stands where it stood the full
+                // tick before (`ColonyView.Parked`) is raced from the tick
+                // the body stands on the tile, its fatigue waited out: the
+                // walk is decided again each tick, and the raider's first
+                // step is seen before the body walks on. One on the move is
+                // raced from now.
+                let parked =
+                    kept
+                    |> List.forall (fun map ->
+                        map.Members |> List.forall (fun id -> Set.contains id view.Parked))
+
                 let unsafe index =
                     let leaves = Grid.at index walk.Leaves
 
+                    let from =
+                        if parked then
+                            max 0 (Grid.at index walk.Ticks - wait)
+                        else
+                            0
+
                     leaves < System.Int32.MaxValue
-                    && (soonest index <= max 1 leaves
+                    && (Arrival.soonestAmong index raced System.Int32.MaxValue <= max 1 leaves
+                        || not (List.isEmpty kept)
+                           && Grid.at index held.Value < max 1 (leaves - from)
                         || (match camp with
                             | Some exit ->
                                 range exit (posAt index)

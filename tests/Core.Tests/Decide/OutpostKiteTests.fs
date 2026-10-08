@@ -643,7 +643,7 @@ let kiteTests =
 
                     let atlas = Atlas.ofView colony
 
-                    match Threats.kiteUnsafeFor (threatsOf colony atlas) atlas body None with
+                    match Threats.kiteUnsafeFor colony (threatsOf colony atlas) atlas body None with
                     | Some(unsafe, _) -> unsafe (ring.X * Engine.roomSide + ring.Y)
                     | None -> failtest "the premise: its walk reads the plodder's map"
 

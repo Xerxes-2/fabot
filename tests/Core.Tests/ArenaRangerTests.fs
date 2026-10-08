@@ -2023,3 +2023,445 @@ let sharedGroundTests =
                         $"{ranger} steps back onto the tile it left the tick before\n{failure}"
             }
         ]
+
+// ---- arena capture w17s26-t1032680 (#615) ----------------------------------
+// `npm run capture -- W17S26 1032680 --rooms W17S25`, read at live t1,032,719.
+// The room-history replay at t1,032,680: arena tick 0 runs as t1,032,681.
+//   W17S26  https://screeps.com/room-history/shardSeason/W17S26/1032600.json
+//   W17S25  https://screeps.com/room-history/shardSeason/W17S25/1032600.json
+// Left out: Healers, ExitWatches and Sightings start empty; a hauler Spawn11
+// was spawning, 14 ruins.
+
+/// W17S26 at t1,032,680: ranger-1032623 (3M 2R 1H) holds the Guard against
+/// Trepidimous' Beam1970 (18M 17A, MOVE first, at 3,430 hits), idle on
+/// 12,24. Its shots lame Beam in fewer ticks than its run-off holds
+/// (`Facts.keepsOff`), so it kites; live it stood on 18,1 and never shot.
+/// `beam` drives Beam1970: it stood still live.
+let private beamIdle (beam: Behaviour) : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+
+    let w17s26 =
+        room "W17S26"
+        |> withStructures
+            [
+                { structureOf "container" None 96_000 250_000 { X = 27; Y = 9 } with
+                    Energy = 600
+                }
+            ]
+        |> withRoads
+            [
+                20, 1, 3_900
+                21, 2, 4_000
+                22, 3, 3_900
+                23, 4, 3_900
+                24, 5, 3_900
+                25, 6, 4_000
+                26, 7, 3_900
+                27, 8, 4_100
+            ]
+
+    let w17s25 =
+        room "W17S25"
+        |> withController Ownership.Ours None 5 3
+        |> withControllerClocks 0 0 80_000 241_551
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        9, 23
+                        9, 25
+                        10, 24
+                        10, 26
+                        11, 23
+                        11, 25
+                        11, 27
+                        12, 24
+                        12, 28
+                        13, 23
+                        13, 25
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 50
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        9, 27
+                        9, 29
+                        10, 28
+                        10, 30
+                        12, 30
+                        13, 31
+                        14, 24
+                        14, 26
+                        14, 30
+                        15, 27
+                        15, 29
+                        15, 31
+                        16, 28
+                        16, 30
+                        16, 32
+                        17, 29
+                        17, 31
+                        18, 30
+                        19, 31
+                    ] -> structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y }
+            ]
+        |> withStructures
+            [
+                { structureOf "container" None 151_500 250_000 { X = 16; Y = 34 } with
+                    Energy = 26
+                }
+                { structureOf "container" None 127_800 250_000 { X = 17; Y = 20 } with
+                    Energy = 420
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 13; Y = 27 } with
+                    Energy = 7_966
+                }
+                towerOf Side.Ours { X = 11; Y = 29 } 1_000
+                towerOf Side.Ours { X = 13; Y = 29 } 1_000
+            ]
+        |> withStructures
+            [
+                for x, y, hits, decay in
+                    [
+                        2, 15, 96_821, 1_032_723
+                        2, 16, 96_761, 1_032_704
+                        2, 17, 97_731, 1_032_707
+                        2, 18, 98_231, 1_032_712
+                        2, 19, 96_711, 1_032_684
+                        2, 20, 97_531, 1_032_686
+                        2, 23, 96_821, 1_032_711
+                        2, 24, 97_301, 1_032_772
+                        2, 25, 96_901, 1_032_690
+                        2, 26, 97_261, 1_032_705
+                        2, 27, 97_561, 1_032_753
+                        11, 29, 96_701, 1_032_687
+                        13, 27, 98_201, 1_032_704
+                        13, 29, 98_001, 1_032_689
+                        14, 28, 97_901, 1_032_764
+                        16, 44, 93_121, 1_032_752
+                        17, 20, 97_901, 1_032_710
+                        17, 44, 93_101, 1_032_754
+                        18, 44, 93_801, 1_032_750
+                        32, 31, 93_611, 1_032_763
+                        32, 32, 94_401, 1_032_682
+                    ] ->
+                    { structureOf "rampart" (Some Side.Ours) hits 10_000_000 { X = x; Y = y } with
+                        NextDecay = decay
+                    }
+            ]
+        |> withRoads
+            [
+                1, 16, 2_700
+                2, 17, 2_600
+                3, 18, 3_300
+                4, 19, 2_700
+                5, 20, 3_200
+                6, 21, 4_000
+                7, 22, 14_900
+                8, 23, 13_800
+                9, 24, 20_200
+                9, 26, 16_000
+                9, 28, 18_000
+                10, 23, 14_100
+                10, 25, 12_100
+                10, 27, 19_300
+                10, 29, 15_700
+                11, 24, 12_200
+                11, 26, 17_500
+                11, 28, 17_600
+                11, 30, 3_900
+                12, 23, 14_400
+                12, 25, 15_400
+                12, 27, 14_700
+                12, 29, 4_600
+                12, 31, 3_500
+                13, 24, 2_200
+                13, 26, 3_800
+                13, 28, 3_500
+                13, 30, 3_600
+                14, 23, 3_000
+                14, 25, 3_900
+                14, 27, 2_900
+                14, 29, 4_700
+                14, 31, 3_800
+                15, 22, 2_800
+                15, 28, 3_300
+                15, 30, 3_000
+                15, 32, 3_800
+                16, 21, 2_900
+                16, 29, 3_700
+                16, 31, 3_300
+                16, 33, 3_000
+                16, 35, 2_500
+                16, 37, 4_700
+                16, 38, 11_900
+                16, 39, 16_600
+                16, 41, 2_700
+                16, 43, 2_500
+                16, 44, 3_500
+                17, 20, 2_900
+                17, 30, 3_100
+                17, 32, 4_000
+                17, 34, 3_400
+                17, 36, 3_300
+                17, 38, 2_100
+                17, 39, 9_500
+                17, 40, 18_700
+                17, 42, 3_500
+                17, 45, 3_500
+                18, 29, 3_600
+                18, 31, 3_900
+                18, 35, 2_300
+                18, 37, 4_800
+                18, 39, 2_900
+                18, 41, 2_800
+                18, 46, 2_200
+                19, 30, 3_200
+                19, 34, 3_300
+                19, 36, 3_500
+                19, 38, 3_000
+                19, 40, 2_900
+                19, 47, 3_900
+                20, 31, 3_300
+                20, 33, 3_800
+                20, 35, 2_900
+                20, 37, 3_400
+                20, 39, 3_000
+                20, 48, 3_700
+                21, 32, 3_700
+                21, 34, 3_600
+                21, 36, 3_000
+                21, 38, 3_600
+                22, 33, 4_100
+                22, 35, 3_900
+                22, 37, 2_500
+                23, 34, 4_000
+                23, 36, 2_800
+                24, 35, 2_900
+                25, 34, 3_000
+                26, 33, 3_000
+                27, 32, 3_000
+                28, 31, 20_500
+                28, 33, 11_200
+                29, 32, 11_400
+                29, 34, 10_100
+                30, 31, 20_200
+                30, 33, 9_400
+                31, 32, 9_200
+                32, 31, 20_400
+                33, 30, 12_940
+                33, 32, 8_780
+            ]
+
+    // Spelt out as live: W17S25 alone, today's declaration.
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W17S25" ])
+
+    let bodies: Body list =
+        [
+            // Beam1970: live 18 MOVE, 17 ATTACK; no act.
+            { body
+                  "Beam1970"
+                  trepidimous
+                  (parts [ Move, 17; Attack, 17; Move, 1 ])
+                  (at "W17S26" 12 24)
+                  (Some beam) with
+                Hits = 3_430
+                TicksToLive = 893
+            }
+            { body
+                  "ranger-1032623-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 3; RangedAttack, 2; Heal, 1 ])
+                  (at "W17S26" 18 1)
+                  None with
+                TicksToLive = 1_459
+            }
+            { body
+                  "hauler-1031140-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 24; Move, 12 ])
+                  (at "W17S25" 13 24)
+                  None with
+                TicksToLive = 66
+                Energy = 360
+            }
+            { body
+                  "guard-1031308-Spawn11"
+                  Side.Ours
+                  (parts [ Tough, 2; Move, 10; Attack, 6; Heal, 2 ])
+                  (at "W17S25" 28 47)
+                  None with
+                TicksToLive = 186
+            }
+            { body
+                  "anchor-1031651-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W17S25" 17 20)
+                  None with
+                TicksToLive = 493
+                Energy = 50
+            }
+            { body
+                  "upgrader-1031877-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 1; Move, 11 ])
+                  (at "W17S25" 16 33)
+                  None with
+                TicksToLive = 764
+                Energy = 39
+            }
+            { body
+                  "upgrader-1032119-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 1; Move, 11 ])
+                  (at "W17S25" 17 34)
+                  None with
+                TicksToLive = 1_006
+                Energy = 39
+            }
+            { body
+                  "guard-1031248-Spawn11"
+                  Side.Ours
+                  (parts [ Tough, 2; Move, 10; Attack, 6; Heal, 2 ])
+                  (at "W17S25" 2 15)
+                  None with
+                TicksToLive = 126
+            }
+            { body
+                  "hauler-1031725-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 24; Move, 12 ])
+                  (at "W17S25" 9 24)
+                  None with
+                TicksToLive = 651
+                Energy = 982
+            }
+        ]
+
+    let a = arena 1_032_681 [ w17s26; w17s25 ] colonies bodies
+
+    { a with
+        Carried =
+            { a.Carried with
+                Assignments =
+                    Map.ofList
+                        [
+                            "ranger-1032623-Spawn11", "guard:W17S26"
+                            "hauler-1031140-Spawn11", "refill:spawn-Spawn11"
+                            "anchor-1031651-Spawn11", "harvest:6a8caa7cdd4872bccd318c75"
+                            "upgrader-1031877-Spawn11", "upgrade:6a8caa7cdd4872bccd318c76"
+                            "upgrader-1032119-Spawn11", "upgrade:6a8caa7cdd4872bccd318c76"
+                            "hauler-1031725-Spawn11", "refill:storage-13-27"
+                        ]
+                Towered = Set.ofList [ "W17S25" ]
+                Raids =
+                    Map.ofList
+                        [
+                            "W17S25",
+                            { Fabot.Core.Observe.RaidState.empty with
+                                Outposts =
+                                    [
+                                        {
+                                            Fabot.Core.Observe.OutpostEpisode.RoomName = "W16S26"
+                                            Opened = 972_732
+                                            LastSeen = 1_024_830
+                                            Expiry = 1_045_681
+                                            Basis = StandDownBasis.CollapseTimer
+                                            Stronghold = true
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = true
+                                        }
+                                        {
+                                            Fabot.Core.Observe.OutpostEpisode.RoomName = "W18S29"
+                                            Opened = 986_839
+                                            LastSeen = 1_031_053
+                                            Expiry = 1_033_310
+                                            Basis = StandDownBasis.RivalReservation
+                                            Stronghold = false
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = false
+                                        }
+                                        {
+                                            Fabot.Core.Observe.OutpostEpisode.RoomName = "W19S28"
+                                            Opened = 1_016_566
+                                            LastSeen = 1_031_037
+                                            Expiry = 1_032_980
+                                            Basis = StandDownBasis.RivalReservation
+                                            Stronghold = false
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = false
+                                        }
+                                    ]
+                                HomeRaided = Some 1_031_094
+                            }
+                        ]
+            }
+    }
+
+[<Tests>]
+let kiteKeepsOffTests =
+    testList
+        "arena a kiter that keeps a raider off walks in (#615)"
+        [
+            // Live t1,032,681 on: ranger-1032623 stood on 18,1 and never shot.
+            // Its walk raced Beam1970's arrival from where it stands against
+            // its own whole walk to the ground (every ground tile struck at
+            // t2-8, left at t22-34), so no tile was safe; the exchange priced
+            // it keeping Beam off (its shots lame it in 7 ticks, inside its
+            // run-off). Now the walk reads that same run-off: the parked
+            // raider is raced from the tick the ranger stands on a tile.
+            test
+                "#615 capture t1,032,680: the ranger walks in on the parked melee it keeps off and kills it untouched" {
+                let _, trace = beamIdle Hold |> run 200
+                let failure = describe trace
+
+                Expect.isLessThanOrEqual
+                    (diedOn "Beam1970" trace |> Option.defaultValue System.Int32.MaxValue)
+                    200
+                    $"Beam1970 dies by t200\n{failure}"
+
+                Expect.all
+                    (pathOf "ranger-1032623-Spawn11" trace)
+                    (fun (_, ranger) -> ranger.Hits = 600)
+                    $"the ranger is never struck\n{failure}"
+            }
+
+            // The same melee chasing the nearest of ours from the first tick:
+            // raced from now while it moves, and never onto a tile whose
+            // run-off falls short of its press (`Arrival.heldFor`). A walk
+            // that raced the parked melee alone led the ranger into the walled
+            // pocket at (21..24, 10..14), then the dead-end corridor at
+            // (32..34, 4..13), and it died there.
+            test
+                "#615 capture t1,032,680, chasing: the ranger keeps the melee off out of every pocket and shoots it down" {
+                let _, trace = beamIdle (Chase(Nearest, None)) |> run 250
+                let failure = describe trace
+
+                Expect.all
+                    (pathOf "ranger-1032623-Spawn11" trace)
+                    (fun (_, ranger) -> ranger.Hits = 600)
+                    $"the ranger is never struck\n{failure}"
+
+                Expect.isLessThanOrEqual
+                    (pathOf "Beam1970" trace |> List.map (fun (_, beam) -> beam.Hits) |> List.min)
+                    500
+                    $"and shoots Beam1970 down past its legs\n{failure}"
+            }
+        ]

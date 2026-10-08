@@ -395,7 +395,7 @@ let raisedHomeGarrisonTests =
                 // holds this body, no longer the room's ground's.
                 let index (tile: Pos) = tile.X * Engine.roomSide + tile.Y
 
-                match Threats.kiteUnsafeFor threats atlas ranger None with
+                match Threats.kiteUnsafeFor raided threats atlas ranger None with
                 | Some(unsafe, _) ->
                     Expect.isTrue
                         (unsafe (index swamp))

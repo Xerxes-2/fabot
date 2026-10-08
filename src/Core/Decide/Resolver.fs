@@ -1553,7 +1553,7 @@ let movementAmong
                 | Some(Guard room) -> (Threats.briefOf threats room).Laid.Approach
                 | _ -> lazy Set.empty
 
-            match Threats.kiteUnsafeFor threats atlas creep camp with
+            match Threats.kiteUnsafeFor view threats atlas creep camp with
             | Some(unsafe, soonest) when
                 not (Threats.standsOffNothing view threats atlas creep camp && closesNow creep)
                 ->

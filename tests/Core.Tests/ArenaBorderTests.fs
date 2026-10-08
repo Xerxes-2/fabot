@@ -1716,7 +1716,8 @@ let arenaBorderTests =
             // caught the idle ranger still catches a ranger there, now the
             // holder, struck once at t24 (486, as the idle one was) by the
             // lamed melee: it flees for a tick, stands two, and takes the
-            // Guard back.
+            // Guard back. Moved by #615 (the kite walk reads the run-off it is
+            // priced by): the kill is t82 (t81), the strike at t24 as before.
             test
                 "a lone ranger takes the Guard of a melee at its pace it lames, keeps it but for one strike, and kites it dead" {
                 let trace, tasks =
@@ -1729,7 +1730,7 @@ let arenaBorderTests =
                 let died = diedOn "Zero3956" trace
 
                 Expect.isSome died $"Zero3956 dies to the kite\n{describe trace}"
-                Expect.isLessThanOrEqual died.Value 81 "by t81"
+                Expect.isLessThanOrEqual died.Value 82 $"by t82\n{describe trace}"
 
                 let taken = tasks |> List.findIndex ((=) guard)
                 Expect.equal taken 0 "ranger-1013734 takes the Guard at once"
@@ -1992,7 +1993,7 @@ let arenaBorderTests =
                         (w17s25 2 17)
                         (Some(Retreat(760, refuge, 800, Follow "Brute1")))
 
-                let _, trace = nurseryWest [ ranger; melee; healer ] |> run 30
+                let _, trace = nurseryWest [ ranger; melee; healer ] |> run 40
 
                 // Moved by #625: the brute is at the ranger's pace, its legs
                 // last, and the ranger's 160 a tick take its ten head parts
@@ -2007,7 +2008,11 @@ let arenaBorderTests =
                 // the garrison's ground follows it off the controller's ring
                 // and the ranger shoots it dead where, before, it walked back
                 // to the ring and the medic healed the brute back over the
-                // border.
+                // border. Moved by #615 (the kite walk reads the run-off it
+                // is priced by): the ranger waits on its tile while the raid
+                // walks in, shoots from range three from t12 untouched, kills
+                // the medic at t21 and the brute at t31, past the 30 ticks
+                // this ran (now 40), where the medic lived.
                 Expect.isTrue
                     (trace
                      |> List.exists (fun t ->

@@ -695,6 +695,151 @@ let runOff
 
     run
 
+/// By tile index, the latest a body standing on the tile can step off it and
+/// still hold `need` ticks of run-off against `classes` and an unseen
+/// neighbour's risk, each class's clock started as it stands there (#615):
+/// stepping off every tile it walks onto, at `pace` over `walking`, before
+/// any of them strikes it, to a tile none strikes before `need` (it may
+/// stand there that long) or a refuge (none ever strikes it, or our
+/// rampart). `need` is held no longer than the body holds on the tile it
+/// stands on, `own` (its index, and the ticks its fatigue holds it there),
+/// so that tile always holds it. Below 0 where none is held: a pocket its
+/// retreat is struck in first, or a tile no body of ours stands on. No
+/// run-off is walked on from an exit, which carries the body over the
+/// border: there the latest before it is struck alone. One flood from
+/// `own`, then one pass over the room, latest first.
+let heldFor
+    (walking: int[])
+    (classes: ClassArrival list)
+    (unseen: int[] option)
+    (ramparts: Set<Pos>)
+    (pace: Pace)
+    (own: int * int)
+    (need: int)
+    : int[] =
+    let classes =
+        match unseen with
+        | None -> classes
+        | Some ticks ->
+            {
+                Class =
+                    {
+                        Strike = Engine.rangedRange
+                        Pace = None
+                    }
+                Members = []
+                Ticks = ticks
+            }
+            :: classes
+
+    let edge = Engine.roomSide - 1
+
+    // Its own tile, an exit it landed on among them.
+    let inside index =
+        let x = index / Engine.roomSide
+        let y = index % Engine.roomSide
+
+        index = fst own
+        || x > 0 && y > 0 && x < edge && y < edge && at index walking > 0
+
+    let struck =
+        Array.init tileCount (fun index ->
+            if Set.contains (posAt index) ramparts then
+                never
+            else
+                soonestAmong index classes never)
+
+    // What the body holds where it stands: the latest it is struck on a tile
+    // it reaches first, standing there until then.
+    let ownHeld =
+        let tile, wait = own
+
+        let ticks, leaves = floodWithDepartures walking (Some pace) false [ tile, 0, wait ]
+
+        let first =
+            reachedFirst
+                {
+                    Room = ""
+                    Ticks = ticks
+                    Leaves = leaves
+                }
+                classes
+                ramparts
+
+        let mutable most = -1
+
+        for index in 0 .. tileCount - 1 do
+            if first.[index] && inside index then
+                most <- max most (if struck.[index] = never then never else struck.[index] - 1)
+
+        most
+
+    // Past the latest any tile is struck, only a refuge holds it.
+    let latest =
+        struck |> Array.fold (fun most at -> if at < never then max most at else most) 0
+
+    let need = min latest (min need ownHeld)
+    let soonest index = struck.[index]
+    let ticks = stepTicks pace
+    let longest = max pace.Road (max pace.Plain pace.Swamp)
+    // A tile held `need` and a step more passes `need` on to every
+    // neighbour whatever the step costs: the buckets stop there.
+    let cap = max 0 need + longest
+    let held = Array.create tileCount -1
+    let buckets = Array.init (cap + 1) (fun _ -> ResizeArray<int>())
+
+    for index in 0 .. tileCount - 1 do
+        if inside index then
+            let struck = soonest index
+
+            if struck = never then
+                held.[index] <- never
+                buckets.[cap].Add index
+            elif struck - 1 >= max 0 need then
+                held.[index] <- struck - 1
+                buckets.[min cap (struck - 1)].Add index
+
+    for key in cap .. -1 .. 0 do
+        let bucket = buckets.[key]
+        let mutable i = 0
+
+        while i < bucket.Count do
+            let index = bucket.[i]
+            i <- i + 1
+
+            if min cap held.[index] = key then
+                // Its own tile is stepped back onto at plain's pace.
+                let weight = at index walking
+
+                let onto =
+                    held.[index]
+                    - (if weight > 0 && weight < ticks.Length then
+                           at weight ticks
+                       else
+                           pace.Plain)
+
+                let x = index / Engine.roomSide
+                let y = index % Engine.roomSide
+
+                for nx in max 0 (x - 1) .. min edge (x + 1) do
+                    for ny in max 0 (y - 1) .. min edge (y + 1) do
+                        let n = nx * Engine.roomSide + ny
+
+                        if n <> index && inside n then
+                            let from = min (soonest n - 1) onto
+
+                            if from >= 0 && from > held.[n] then
+                                held.[n] <- from
+                                buckets.[min cap from].Add n
+
+    // An exit carries the body over the border: no run-off is walked on from
+    // it, only its strike reads there.
+    for index in 0 .. tileCount - 1 do
+        if not (inside index) && at index walking > 0 then
+            held.[index] <- if struck.[index] = never then never else struck.[index] - 1
+
+    held
+
 /// One body of ours' arrival over its room by its gait (`gaitOf`: its live
 /// MOVE, its load and its parts shot off), and the fatigue it waits out now;
 /// None for a body the projection does not place.
