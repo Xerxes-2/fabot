@@ -29,6 +29,7 @@
     <Compile Include="Decide/Facts.fs" />
     <Compile Include="Decide/Threat.fs" />
     <Compile Include="Decide/Planner.fs" />
+    <Compile Include="Decide/Price.fs" />
     <Compile Include="Decide/Quota.fs" />
     <Compile Include="Decide/Caster.fs" />
     <Compile Include="Decide/Spawns.fs" />

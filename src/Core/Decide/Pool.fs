@@ -604,78 +604,6 @@ let private isHomeSite (view: ColonyView) atlas siteId =
 let private insideDowngradeDeadline (view: ColonyView) =
     view.Controller |> Option.exists insideDeadline
 
-/// ADR-0010. The tier of work a Task belongs to, once its target is taken into
-/// account — the ladder `planPool` sets each entry's priority off. Exported
-/// with the constants and `Rung` below because the ladder is one fact, and
-/// the test that walks every rank and rung of it (#237) reads it here.
-type Tier =
-    /// Flee, Guard, Defend and Assault: above every other tier and above the downgrade
-    /// deadline too, because no other work matters while a creep is being
-    /// killed.
-    | Safety
-    /// Feeding the economy: Harvest, a container's Withdraw, the Refill of a
-    /// spawn or an extension, Reserve, Claim, the outpost sites the builders'
-    /// budget has picked out this tick, and every site in a nursery.
-    | Feeding
-    /// The Storage's Withdraw: the colony's stock as an intake, one tier
-    /// below the source containers the flow fills.
-    | StockDraw
-    /// Surplus work: a tower Refill, Build, Repair and Upgrade.
-    | Surplus
-    /// The controller container's Refill: filled by bodies with no surplus
-    /// work of their own.
-    | UpgradeBuffer
-    /// The Storage's Refill: deeper than every sink that spends.
-    | Stock
-
-/// How far apart two tiers stand on the priority ladder. Ten and not one, so
-/// that a Task can be ordered against another inside its tier
-/// (`priorityStep`). A rung must stay inside the half-tier the Resolver rounds
-/// by, or it buys the Task a push weight its own tier does not have (#237):
-/// `weightOfRank` rounds a rank to its nearest tier and gives a tie to the
-/// deeper one, so a rung up may be `tierRungs / 2` at the most, and a rung
-/// down one less. `Rung` is the vocabulary that keeps the two in step.
-let tierRungs = 10
-
-/// The whole tier order, shallowest first — the one place the ordering lives.
-/// Exhaustive over Tier on purpose. The downgrade deadline is the one thing
-/// above the sequence rather than in it.
-let priorityOfTier =
-    function
-    // One tier beneath `deadlineRank`'s: a fleeing creep outbids even a
-    // controller about to downgrade.
-    | Safety -> -2 * tierRungs
-    | Feeding -> 0
-    | StockDraw -> tierRungs
-    | Surplus -> 2 * tierRungs
-    | UpgradeBuffer -> 3 * tierRungs
-    | Stock -> 4 * tierRungs
-
-/// One tier above the shallowest tier of work: where the downgrade deadline
-/// puts Upgrade. Not a tier of its own — an ordering imposed on the sequence.
-/// Exported for `Tier`'s reason (#237).
-let deadlineRank = -tierRungs
-
-/// The urgent band's rank (#530): the refill cluster while the colony is
-/// starved at it, the towers while the home is raided and a struck rampart's
-/// Repair (a rung over the band), over every intake's lift — a body with a
-/// load delivers these before it tops up. Half a tier over Feeding, the most a
-/// rung may lift and still round to Feeding's push weight; the struck rampart's
-/// rung over it pushes as the deadline tier does, as befits a breaking line.
-let urgentRank = priorityOfTier Feeding - tierRungs / 2
-
-/// The step a Task is moved by when it is ordered against another inside one
-/// tier: one rung of ten, so it never crosses a tier.
-let priorityStep = 1
-
-/// What a rung is worth on the ladder, exhaustive over `Rung` on purpose.
-let rankOfRung =
-    function
-    | OneRungDown -> priorityStep
-    | OnTheTier -> 0
-    | OneRungUp -> -priorityStep
-    | TwoRungsUp -> -2 * priorityStep
-
 /// The rungs a rank stands above its own tier: a rung steps a Task up by less
 /// than half a tier, so the distance down to the next tier is the lift. The
 /// one rung down lifts nothing and reads 0.
@@ -1128,7 +1056,7 @@ let planPoolHolding
         | sites -> view.Tuning.OutpostBuilders / List.length sites |> max 1
 
 
-    // The tier a Task sits in. Refill, Withdraw and Build are the three Tasks
+    // ADR-0010. The tier a Task sits in. Refill, Withdraw and Build are the three Tasks
     // whose tier layers by target. On Refill the Storage and the container
     // are each one projected kind and exclude each other by construction,
     // while a tower is read off the Refillables census, which can overlap

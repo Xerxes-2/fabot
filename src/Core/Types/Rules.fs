@@ -423,6 +423,22 @@ module Engine =
 
     let roadDecayTime = 1000
 
+    /// ROAD_HITS: a plain road's hits; a swamp road's are five times it, and
+    /// its build and decay with them.
+    let roadHits = 5000
+
+    /// CONTAINER_DECAY every CONTAINER_DECAY_TIME ticks, or every
+    /// CONTAINER_DECAY_TIME_OWNED in a room the player owns.
+    let containerDecayAmount = 5000
+
+    let containerDecayTime = 100
+
+    let containerDecayTimeOwned = 500
+
+    /// TOMBSTONE_DECAY_PER_PART: a tombstone stands five ticks a part of the
+    /// body that died, so `maxBodyParts` times it at the most.
+    let tombstoneDecayPerPart = 5
+
     /// RAMPART_DECAY_AMOUNT: what a rampart loses each RAMPART_DECAY_TIME.
     let rampartDecayAmount = 300
 

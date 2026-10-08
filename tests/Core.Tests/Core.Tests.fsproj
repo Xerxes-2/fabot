@@ -29,6 +29,7 @@
     <Compile Include="Decide/LayoutPlanTests.fs" />
     <Compile Include="Decide/LayoutMemoTests.fs" />
     <Compile Include="Decide/LayoutRoomTests.fs" />
+    <Compile Include="Decide/PriceTests.fs" />
     <Compile Include="Decide/PoolFixtures.fs" />
     <Compile Include="Decide/PoolSeatTests.fs" />
     <Compile Include="Decide/PoolPickupTests.fs" />
