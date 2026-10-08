@@ -2738,4 +2738,26 @@ let arenaBorderTests =
 
                 Expect.isTrue (survived ranger trace) $"and the ranger lives\n{failure}"
             }
+
+            // Live (t1,037,958-1,038,034) Trepidimous's haulers Synapse7330
+            // and Nova7626 stood at our W17S26 container while W17S25's one
+            // ranger idled across the border: Wraith7582 had killed our
+            // reserver, the observer's last look found it gone and the
+            // haulers there, and the next tick, dark, the room's kill left
+            // the pool (task-gone) until a reserver walked in 73 ticks later.
+            // Reproduced on 783fa815: the Guard at t0, gone at t1, the ranger
+            // idle at (16,47) as live. A body taking from a room we mine stays
+            // the room's kill until a look finds it gone (`World.preyRooms`).
+            test
+                "capture t1,037,961: the haulers the last look saw at our container stay the dark outpost's kill, and the ranger shoots one dead" {
+                let ranger = "ranger-1037139-Spawn11"
+                let trace, tasks = haulersAtTheContainer () |> taskEachTick ranger 150
+                let died = diedOn "Synapse7330" trace
+
+                Expect.isSome died $"Synapse7330 dies\n{describe trace}"
+
+                Expect.isTrue
+                    (tasks |> List.take died.Value |> List.forall ((=) "guard:W17S26"))
+                    $"""the ranger holds W17S26's Guard until it does: {String.concat "," tasks}"""
+            }
         ]

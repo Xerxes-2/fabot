@@ -2618,3 +2618,246 @@ let internal kiterAcrossHeldExit () : Arena =
                         ]
             }
     }
+
+// ---- arena capture w17s26-t1037961 ------------------------------------------
+// `npm run capture -- W17S26 1037961 --rooms W17S25`, read at live t1,038,085.
+// The room-history replay at t1,037,961, the state after that tick ran: arena
+// tick 0 runs as t1,037,962.
+//   W17S26  https://screeps.com/room-history/shardSeason/W17S26/1037900.json
+//   W17S25  https://screeps.com/room-history/shardSeason/W17S25/1037900.json
+// Left out, as the capture says: W17S26's reservation, Spawn11's
+// ranger-1037937 (spawning to t1,037,973), the ruins, a drop and a tombstone;
+// Healers, ExitWatches and Sightings start empty. The ramparts stand at one
+// round 95,000 (live 89,901-100,901) and the extensions empty but eight.
+
+/// W17S26 the tick Wraith7582 (R3H4M7) left it: Trepidimous's haulers
+/// Synapse7330 and Nova7626 (23M23C, 4,600 hits) stand at our container, the
+/// one ranger of W17S25 (6M4R2H) just across the border, its Guard let go.
+let internal haulersAtTheContainer () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+
+    let hauler =
+        [
+            for _ in 1..23 do
+                yield! [ Move; Carry ]
+        ]
+
+    let w17s26 =
+        room "W17S26"
+        |> withStructures
+            [
+                { structureOf "container" None 121_200 250_000 { X = 27; Y = 9 } with
+                    Energy = 1_036
+                }
+            ]
+        |> withRoads
+            [
+                20, 1, 3_100
+                21, 2, 3_200
+                22, 3, 3_100
+                23, 4, 3_100
+                24, 5, 3_100
+                25, 6, 3_200
+                26, 7, 3_100
+                27, 8, 3_400
+            ]
+
+    let w17s25 =
+        room "W17S25"
+        |> withController Ownership.Ours None 5 3
+        |> withControllerClocks 0 0 79_973 295_473
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+        |> withStructures
+            [
+                for x, y in [ 9, 23; 9, 25; 9, 27; 9, 29; 11, 23; 13, 23; 14, 24; 19, 31 ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 50
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        10, 24
+                        10, 26
+                        10, 28
+                        10, 30
+                        11, 25
+                        11, 27
+                        12, 24
+                        12, 28
+                        12, 30
+                        13, 25
+                        13, 31
+                    ] -> structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y }
+            ]
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        14, 26
+                        14, 30
+                        15, 27
+                        15, 29
+                        15, 31
+                        16, 28
+                        16, 30
+                        16, 32
+                        17, 29
+                        17, 31
+                        18, 30
+                    ] -> structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y }
+            ]
+        |> withStructures
+            [
+                structureOf "container" None 139_300 250_000 { X = 16; Y = 34 }
+                { structureOf "container" None 125_000 250_000 { X = 17; Y = 20 } with
+                    Energy = 682
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 13; Y = 27 } with
+                    Energy = 10_878
+                }
+                towerOf Side.Ours { X = 11; Y = 29 } 810
+                towerOf Side.Ours { X = 13; Y = 29 } 810
+            ]
+        |> withRamparts
+            Side.Ours
+            95_000
+            [
+                for x, y in
+                    [
+                        2, 15
+                        2, 16
+                        2, 17
+                        2, 18
+                        2, 19
+                        2, 20
+                        2, 23
+                        2, 24
+                        2, 25
+                        2, 26
+                        2, 27
+                        11, 29
+                        13, 27
+                    ] -> { X = x; Y = y }
+                for x, y in [ 13, 29; 14, 28; 16, 44; 17, 20; 17, 44; 18, 44; 32, 31; 32, 32 ] ->
+                    { X = x; Y = y }
+            ]
+
+    // W13S28's observer, which reaches W17S26: its colony is left out, so it
+    // aims at nothing, but a body remembered there counts at no value until a
+    // look confirms it (`Facts.contestOf`).
+    let w13s28 =
+        room "W13S28"
+        |> withController Ownership.Ours None 8 0
+        |> withStructures [ structureOf "observer" (Some Side.Ours) 500 500 { X = 23; Y = 5 } ]
+
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W17S25" ])
+
+    let bodies: Body list =
+        [
+            // Live: both stood at the container, no act seen, from t1,037,900
+            // to past t1,038,034.
+            { body "Synapse7330" trepidimous hauler (at "W17S26" 26 8) (Some Hold) with
+                TicksToLive = 1_005
+            }
+            { body "Nova7626" trepidimous hauler (at "W17S26" 27 8) (Some Hold) with
+                TicksToLive = 1_301
+            }
+            { body
+                  "anchor-1036485-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W17S25" 16 44)
+                  None with
+                TicksToLive = 52
+                Energy = 38
+            }
+            { body
+                  "worker-1036889-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 9; Carry, 9; Move, 9 ])
+                  (at "W17S25" 35 29)
+                  None with
+                TicksToLive = 507
+                Energy = 450
+            }
+            { body
+                  "upgrader-1037027-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 1; Move, 11 ])
+                  (at "W17S25" 19 35)
+                  None with
+                TicksToLive = 633
+            }
+            { body
+                  "ranger-1037139-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W17S25" 16 47)
+                  None with
+                TicksToLive = 712
+            }
+            { body
+                  "anchor-1037617-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W17S25" 17 20)
+                  None with
+                TicksToLive = 1_178
+                Energy = 50
+            }
+            { body
+                  "upgrader-1037709-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 1; Move, 11 ])
+                  (at "W17S25" 19 34)
+                  None with
+                TicksToLive = 1_315
+            }
+        ]
+
+    let a = arena 1_037_962 [ w17s26; w17s25; w13s28 ] colonies bodies
+
+    { a with
+        // W13S28's observer looked at W17S26 on t1,037,957-958, Wraith7582
+        // gone: the last look before the dark.
+        Observed = Set.singleton "W17S26"
+        Carried =
+            { a.Carried with
+                Assignments =
+                    Map.ofList
+                        [
+                            "worker-1036889-Spawn11", "refill:spawn-Spawn11"
+                            "anchor-1037617-Spawn11", "harvest:6a8caa7cdd4872bccd318c75"
+                        ]
+                ArmedSeen = Map.ofList [ "W17S25", 1_037_923; "W17S26", 1_037_951 ]
+                Towered = Set.ofList [ "W17S25" ]
+                Raids =
+                    Map.ofList
+                        [
+                            "W17S25",
+                            { Fabot.Core.Observe.RaidState.empty with
+                                Outposts =
+                                    [
+                                        {
+                                            Fabot.Core.Observe.OutpostEpisode.RoomName = "W16S26"
+                                            Opened = 972_732
+                                            LastSeen = 1_024_830
+                                            Expiry = 1_045_681
+                                            Basis = StandDownBasis.CollapseTimer
+                                            Stronghold = true
+                                            Bounced = false
+                                            Raiders = Set.empty
+                                            PlayerSince = None
+                                            Chased = false
+                                            HolderUnread = true
+                                        }
+                                    ]
+                                HomeRaided = Some 1_037_923
+                            }
+                        ]
+            }
+    }

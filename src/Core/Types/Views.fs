@@ -277,9 +277,9 @@ type WorldView =
         /// how old the economy gate's memory of it is (`Facts.openToEconomy`,
         /// #605).
         RaidSeen: Map<string, int>
-        /// Each [[sweep]] candidate nothing sees this tick, with the bodies it
-        /// was last seen holding (`World.PreySeen`, #658): what the sweep
-        /// prices a dark room by.
+        /// Each [[sweep]] candidate and outpost nothing sees this tick, with
+        /// the bodies it was last seen holding (`World.PreySeen`, #658): what
+        /// a dark room's bodies are priced by (`Facts.stillThere`).
         PreySeen: Map<string, BodiesSeen>
         /// Each rival room's defence response as its dossier saw it (#653):
         /// the fewest ticks from our first armed body in the room to its
@@ -719,9 +719,11 @@ type ColonyView =
         RecalledHealers: HostileInfo list
         /// The raid last seen in each room this colony works, or chases a
         /// raid in, that nothing sees this tick (`World.Raiders`, #569), at
-        /// its last tiles, its life counted down since: laid into `Hostiles`
-        /// too, so a raider stays the room's raid — its Guard, verdict and
-        /// targets — through the ticks between two looks. What the [[raid
+        /// its last tiles, its life counted down since, and each body last
+        /// seen in a dark outpost of its own (`World.PreySeen`): laid into
+        /// `Hostiles` too, so a raider stays the room's raid and a trespasser
+        /// its kill — its Guard, verdict and targets — through the ticks
+        /// between two looks. What the [[raid
         /// log]] folds is a sighting, so it reads `Hostiles` less these
         /// (`sightedOnly`).
         RecalledRaiders: HostileInfo list
@@ -1823,26 +1825,53 @@ module ColonyView =
         // or watches for a child of its own, where nothing sees it this tick
         // (#569): a raider is the room's raid until a sighting finds it gone.
         let recalled =
-            match world.Raiders with
-            | raiders when Map.isEmpty raiders -> []
-            | raiders ->
-                let childOutposts = Set.ofList scan.ChildOutposts
+            let raid =
+                match world.Raiders with
+                | raiders when Map.isEmpty raiders -> []
+                | raiders ->
+                    let childOutposts = Set.ofList scan.ChildOutposts
 
-                worked
-                |> List.filter (fun (room, _) ->
-                    (scan.Worked.Contains room && not (assaultRooms.Contains room)
-                     || gate.ChasedOutposts.Contains room
-                     || childOutposts.Contains room)
-                    && not (World.seenNow world room))
-                |> List.collect (fun (room, _) ->
-                    match Map.tryFind room raiders with
-                    | Some last ->
-                        last.Raid
-                        |> List.map (fun h ->
-                            { h with
-                                TicksToLive = h.TicksToLive - (world.Time - last.Tick)
-                            })
-                    | None -> [])
+                    worked
+                    |> List.filter (fun (room, _) ->
+                        (scan.Worked.Contains room && not (assaultRooms.Contains room)
+                         || gate.ChasedOutposts.Contains room
+                         || childOutposts.Contains room)
+                        && not (World.seenNow world room))
+                    |> List.collect (fun (room, _) ->
+                        match Map.tryFind room raiders with
+                        | Some last ->
+                            last.Raid
+                            |> List.map (fun h ->
+                                { h with
+                                    TicksToLive = h.TicksToLive - (world.Time - last.Tick)
+                                })
+                        | None -> [])
+
+            // And the bodies last seen in each outpost it works that nothing
+            // sees this tick (`World.PreySeen`): a rival's economy body
+            // taking from us stays the room's kill until a look finds it
+            // gone, as a raider stays its raid.
+            match world.PreySeen with
+            | prey when Map.isEmpty prey -> raid
+            | prey ->
+                let laid = raid |> List.map _.Id |> Set.ofList
+
+                let mined = outposts |> List.map (fun outpost -> outpost.RoomName) |> Set.ofList
+
+                raid
+                @ (worked
+                   |> List.filter (fun (room, _) ->
+                       mined.Contains room && not (World.seenNow world room))
+                   |> List.collect (fun (room, _) ->
+                       match Map.tryFind room prey with
+                       | Some last ->
+                           last.Bodies
+                           |> List.filter (fun h -> not (laid.Contains h.Id))
+                           |> List.map (fun h ->
+                               { h with
+                                   TicksToLive = h.TicksToLive - (world.Time - last.Tick)
+                               })
+                       | None -> []))
 
         // A child past its nursery: its rock is borrowed, never the mother's.
         let raised room =

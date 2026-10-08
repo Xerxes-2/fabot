@@ -1476,7 +1476,9 @@ let worldOf (a: Arena) : World =
     |> World.recallHealers tuning a.Carried.Healers
     |> World.recallHostiles a.Carried.HostileSteps
     |> World.recallRaiders a.Carried.Raiders
-    |> World.recallPrey (a.Harass |> List.map _.RoomName |> Set.ofList) a.Carried.PreySeen
+    |> World.recallPrey
+        (World.preyRooms a.Colonies (a.Harass |> List.map _.RoomName))
+        a.Carried.PreySeen
     |> World.recallArmed tuning a.Carried.ArmedSeen
     |> World.recallRivalControllers a.Carried.RivalControllers
 

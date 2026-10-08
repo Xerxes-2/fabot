@@ -1090,10 +1090,11 @@ type World =
         /// it gone (`World.recallRaiders`, #569): what a blind tick reads the
         /// raid off. Heap state in the shell, never Memory.
         Raiders: Map<string, RaidSeen>
-        /// Each [[sweep]] candidate's bodies as last seen, while no sighting
-        /// since has found them gone (`World.recallPrey`, #658): what the
-        /// sweep prices a room out of sight by. Heap state in the shell, never
-        /// Memory.
+        /// Each [[sweep]] candidate's and each outpost's bodies as last seen,
+        /// while no sighting since has found them gone (`World.recallPrey`,
+        /// #658): what the sweep prices a room out of sight by, and the
+        /// trespassers a dark outpost stays the kill of. Heap state in the
+        /// shell, never Memory.
         PreySeen: Map<string, BodiesSeen>
         /// The last tick an armed rival — not an ally, not a Source Keeper —
         /// stood in each room, kept for `Tuning.HostileRoomMemory` ticks
@@ -1554,7 +1555,18 @@ module World =
             Raiders = world.Rooms |> Map.toSeq |> Seq.choose remember |> Fresh.mapOfSeq
         }
 
-    /// This tick's world with each [[sweep]] candidate's bodies laid under it
+    /// The rooms whose bodies `recallPrey` keeps through the ticks nothing of
+    /// ours sees them: each [[sweep]] candidate (#658), and every room a
+    /// colony mines, where a rival's economy body last seen taking from us
+    /// stays the room's kill until a look finds it gone.
+    let preyRooms (colonies: Colony list) (candidates: string list) : Set<string> =
+        colonies
+        |> List.collect (fun colony ->
+            colony.Outposts |> List.map (fun outpost -> outpost.RoomName))
+        |> List.append candidates
+        |> Set.ofList
+
+    /// This tick's world with each room of `preyRooms`' bodies laid under it
     /// (#658): a candidate seen now keeps every hostile standing in it but an
     /// ally's and a Source Keeper, an empty room nothing; one out of sight
     /// keeps what it was last seen holding, less each body fallen or standing

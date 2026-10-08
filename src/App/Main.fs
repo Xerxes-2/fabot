@@ -778,7 +778,9 @@ let private fullTick
         |> World.recallHealers Tuning.defaults healers
         |> World.recallHostiles hostileSteps
         |> World.recallRaiders raiders
-        |> World.recallPrey (harassment.Rooms |> List.map _.RoomName |> Set.ofList) preySeen
+        |> World.recallPrey
+            (World.preyRooms Colony.declared (harassment.Rooms |> List.map _.RoomName))
+            preySeen
         |> World.recallArmed Tuning.defaults armedSeen
         |> World.recallRivalControllers rivalControllers
         |> fun world -> { world with Refusals = refusals }
