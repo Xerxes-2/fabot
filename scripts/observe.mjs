@@ -59,6 +59,10 @@
 //                                  tuned switch decides)
 //   observe.mjs fight-only on|off  set it: the bot reads it on its next tick
 //   observe.mjs fight-only clear   unset it
+//   observe.mjs op list            the operations (#663): each spec with its
+//                                  record (phase, since, ended), the kill
+//                                  switch, the refusals and the last events.
+//                                  Read only; S7a runs them dry
 //   observe.mjs console --seconds N     subscribe to the live console for N
 //                                       seconds, print what arrives, exit —
 //                                       the console keeps no history, so a
@@ -249,7 +253,7 @@ const usage =
   "reactor [--json] | cpu [--all] [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | " +
   "draw [add <room|creep> | remove <room|creep> | clear] [--json] | cadence [<2..4> | clear] | " +
-  "fight-only [on | off | clear] | " +
+  "fight-only [on | off | clear] | op list [--json] | " +
   "console --seconds N | eval '<expr>' [--seconds N] | room <name> [--json] | " +
   "wait --ticks N | health [--colony <home>] [--samples K] | " +
   "history <room> <tick> [--json] | probe [--json] | rivals [--json] | ledger [--json]";
@@ -295,6 +299,7 @@ const ACCEPTS = {
   draw: ["--json"],
   cadence: [],
   "fight-only": [],
+  op: ["--json"],
   console: ["--seconds"],
   eval: ["--seconds"],
   room: ["--json"],
@@ -341,6 +346,8 @@ if (command === "fight-only" && action !== undefined) {
   if (!["on", "off", "clear"].includes(action)) fail("fight-only takes on, off or clear");
   if (actionName !== undefined) fail(usage);
 }
+// `op add|cancel|off|on` come with S7e; S7a only reads.
+if (command === "op" && (action !== "list" || actionName !== undefined)) fail("op takes list");
 if (command === "console" && !(Number.isFinite(seconds) && seconds > 0)) {
   fail("console needs --seconds N (a positive number): the subscription must be bounded");
 }
@@ -1147,6 +1154,47 @@ if (command === "console") {
       await new Promise((r) => setTimeout(r, 1000));
     }
     console.log(`cadence override is now ${show(wanted)}`);
+  }
+} else if (command === "op") {
+  // ---- op list: the operations' leaf (#663), read only --------------------
+
+  // As the bot reads it (`ObserveMemory.loadOps`): no object is no operations.
+  const stored = await memoryGet("fabot.ops");
+  const ops = stored && typeof stored === "object" && !Array.isArray(stored) ? stored : undefined;
+  const rows = (key) => (Array.isArray(ops?.[key]) ? ops[key].filter((r) => r && typeof r === "object") : []);
+
+  if (json) {
+    console.log(JSON.stringify(ops ?? null, null, 2));
+  } else if (ops === undefined) {
+    console.log("no operations (Memory.fabot.ops is absent)");
+  } else {
+    const live = new Map(rows("live").map((r) => [r.i, r]));
+    // As the bot reads it: any truthy value is off.
+    console.log(`kill switch: ${ops.off ? "OFF — nothing moves" : "on"}`);
+    const specs = rows("specs");
+    if (specs.length === 0) console.log("no specs");
+    for (const spec of specs) {
+      const r = live.get(spec.id);
+      const state =
+        r === undefined ? "no record" :
+        r.x !== undefined ? `ended ${r.x} (the id stays ended; a new op takes a new id)` :
+        `${r.p} since t${r.a}, run from t${r.s}, spent ${r.e}, lost ${r.l}`;
+      console.log(
+        `${spec.id}  ${spec.template} vs ${spec.enemy} in ${(spec.rooms ?? []).join(",")}  ` +
+          `deadline t${spec.deadline ?? "?"}  — ${state}`,
+      );
+    }
+    for (const r of rows("refused")) console.log(`refused ${r.id}: ${r.why}`);
+    const events = rows("events");
+    if (events.length > 0) console.log("\nlast events:");
+    for (const e of events) {
+      const what =
+        e.k === "moved" ? `${e.f} -> ${e.p} (exit ${e.x})` :
+        e.k === "began" ? `began in ${e.p}` :
+        e.k === "ended" ? `ended ${e.e}` :
+        e.k === "recurred" ? `recurs at t${e.n}` : e.k;
+      console.log(`  t${e.t} ${e.i} ${what}${e.r ? ` [${e.r}]` : ""}`);
+    }
   }
 } else if (command === "fight-only") {
   // ---- fight-only: the live switch for a fight-only forced tick ----------

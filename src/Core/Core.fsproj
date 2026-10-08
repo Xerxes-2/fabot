@@ -20,6 +20,7 @@
     <Compile Include="Types/Tasks.fs" />
     <Compile Include="Types/Intents.fs" />
     <Compile Include="Types/Verdicts.fs" />
+    <Compile Include="Types/Operation.fs" />
     <Compile Include="IntentPlan.fs" />
     <Compile Include="Grid.fs" />
     <Compile Include="Atlas.fs" />
@@ -29,6 +30,7 @@
     <Compile Include="Decide/Fighter.fs" />
     <Compile Include="Decide/Labs.fs" />
     <Compile Include="Decide/Facts.fs" />
+    <Compile Include="Decide/Operations.fs" />
     <Compile Include="Decide/Threat.fs" />
     <Compile Include="Decide/Ledger.fs" />
     <Compile Include="Decide/Planner.fs" />

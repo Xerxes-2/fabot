@@ -737,6 +737,49 @@ let private harassment: Harassment =
         BlockCost = Bodies.rangerBlockCost
     }
 
+/// The operations' dry run (#663 S7a), once a full tick over the views as
+/// decided: the Memory specs admitted (`Operation.admit`), each record moved
+/// on (`Operations.step`), the records, refusals and events written back.
+/// Nothing reads them into a decision. With no ops leaf in Memory nothing
+/// runs and nothing is written.
+let private operationsDryRun (world: World) (views: ColonyView list) =
+    match ObserveMemory.loadOps () with
+    | None -> ()
+    // The kill switch: nothing admitted, moved or written.
+    | Some leaf when leaf.Off -> ()
+    | Some leaf ->
+        let declared = Colony.declared |> List.map Colony.declaredRooms |> Set.unionMany
+
+        // A rival's reservation the dossier saw standing at its last look.
+        let remembered (room: string) =
+            rivalDossier
+            |> Option.bind (fun rivals ->
+                rivals.Dossiers
+                |> Map.tryFindKey (fun _ dossier ->
+                    dossier.Rooms |> Map.tryFind room |> Option.exists _.Reserving))
+
+        let standing = Operations.standingOf Game.time declared remembered world
+        let admission = Operation.admit standing leaf.Live leaf.Specs
+
+        let admission =
+            { admission with
+                Kept = Set.union admission.Kept (leaf.Garbled |> List.map _.Id |> Set.ofList)
+            }
+
+        let facts = Operations.factsOf Game.time (Operations.warmSince loadedAt world) views
+
+        let records, events = Operations.step facts admission leaf.Live
+
+        let deadlines =
+            leaf.Specs
+            |> List.filter (fun wire -> Option.isNone wire.Deadline)
+            |> List.choose (fun wire ->
+                admission.Admitted
+                |> List.tryFind (fun spec -> spec.Id = wire.Id)
+                |> Option.map (fun spec -> spec.Id, spec.Limits.Deadline))
+
+        ObserveMemory.saveOps Game.time records (leaf.Garbled @ admission.Refused) events deadlines
+
 /// The full tick: the World, every colony's view and decision, the observe
 /// folds and every Memory leaf, and the record the light tick after it
 /// replays. `forcedBy`, a would-be light tick's cadence tick, record and the
@@ -1768,6 +1811,12 @@ let private fullTick
 
         ledgerForcings <- []
         ledgerFallen <- Fresh.setOfSeq Seq.empty
+
+    // The operations' dry run: a throw costs its tick and nothing else.
+    try
+        operationsDryRun world (colonyDecisions.Views |> List.map snd)
+    with error ->
+        recordFaults [ faultRow "" "ops" error ]
 
     // A given-up colony's leaf and the flat legacy log, which nothing writes:
     // every home neither declared nor living (an undeclared spawn room, when

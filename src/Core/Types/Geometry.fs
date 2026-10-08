@@ -249,6 +249,13 @@ module RoomName =
 
         axis "W" "E" x + axis "N" "S" y
 
+    /// Whether a name is a room's one spelling: inside the grammar and read
+    /// back to itself, so `W013S28` (which the grammar reads as `W13S28`) is
+    /// not a name.
+    let isCanonical (roomName: string) : bool =
+        worldCoordsOf roomName
+        |> Option.exists (fun (x, y) -> nameOfCoords x y = roomName)
+
     /// The four rooms a name grid puts next to this one, in a fixed order —
     /// north, east, south, west — whatever terrain has to say about them. The
     /// order is the order the route search *offers* its chains in; a search that

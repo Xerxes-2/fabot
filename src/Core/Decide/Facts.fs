@@ -5588,7 +5588,7 @@ let internal castFighters (cast: FighterCast) : Fighter list =
 /// #663 M4), read as a cast (`Quarry.Reading.Cast`), landed after its spawns
 /// (`spawnRounds`) and its slowest body's walk from the colony's home;
 /// nothing for a cast that ends no fight there or casts no body.
-let private castRateIn (view: ColonyView) (room: string) : float =
+let castRateIn (view: ColonyView) (room: string) : float =
     let cast = fighterCast view room bodyTemplates Engine.guardCap
     let team = castFighters cast
     let home = RoomPos.at (SpatialInfo.homeName view.Spatial) { X = 25; Y = 25 }

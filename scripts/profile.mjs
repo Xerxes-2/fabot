@@ -5234,6 +5234,11 @@ if (scenario === "reactor") {
   globalThis.Memory = {};
 }
 
+// `FABOT_OPS='<json>'` seeds `Memory.fabot.ops` (#663 S7a), harness only: the
+// operations' dry run measured, and shown to move no decision (every leaf
+// but `ops` the same as a run without it).
+if (process.env.FABOT_OPS) globalThis.Memory.fabot = { ops: JSON.parse(process.env.FABOT_OPS) };
+
 // Harness self-check, before a tick is ever run: the terrain query answers
 // by room name. Each room's grid is read back through
 // `Game.map.getRoomTerrain` and compared **tile by tile** against the ones
@@ -5806,6 +5811,8 @@ if (unprojected.length) {
           ]),
         ),
     ],
+    // The operations (#663): null in every scenario, none of which publishes one.
+    ["ops", globalThis.Memory?.fabot?.ops],
     ["cpu ticks", (observe.cpu?.ticks ?? []).map((row) => row.t)],
   ];
   console.log(

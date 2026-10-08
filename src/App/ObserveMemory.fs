@@ -3275,3 +3275,262 @@ let flushSegments (tick: int) : FaultRow list =
                     })
     else
         []
+
+// ---- the operations (#663 S7a) ----------------------------------------------
+//
+// `Memory.fabot.ops`: `specs` and `off` are the operator's (`observe op`),
+// `live`, `refused` and `events` the bot's. An absent leaf, or one that is
+// not an object, is no operations: nothing is read and nothing is written,
+// so a Memory with no ops leaf is today's Memory byte for byte.
+
+/// The ops leaf as read: every spec row that decodes, a refusal for each
+/// that does not, every record that decodes, and the kill switch.
+type OpsLeaf =
+    {
+        Specs: OpSpecWire list
+        Garbled: OpRefusal list
+        Live: OpRecord list
+        Off: bool
+    }
+
+let private phaseNames =
+    [
+        OpPhase.Muster, "muster"
+        OpPhase.Approach, "approach"
+        OpPhase.Execute, "execute"
+        OpPhase.Hold, "hold"
+        OpPhase.Retreat, "retreat"
+    ]
+
+let private endNames =
+    [
+        OpEnd.Done, "done"
+        OpEnd.Abandoned, "abandoned"
+        OpEnd.Expired, "expired"
+        OpEnd.Budget, "budget"
+    ]
+
+let private nameIn (names: ('a * string) list) (value: 'a) : string =
+    names |> List.find (fun (case, _) -> case = value) |> snd
+
+let private caseIn (names: ('a * string) list) (name: obj) : 'a option =
+    names |> List.tryFind (fun (_, spelt) -> box spelt = name) |> Option.map fst
+
+let private ops () : obj =
+    let fabot = Memory?fabot
+
+    if
+        isNull fabot
+        || jsTypeof fabot?ops <> "object"
+        || isNull fabot?ops
+        || JS.Constructors.Array.isArray fabot?ops
+    then
+        null
+    else
+        fabot?ops
+
+// A non-empty string off the wire, and a throw for anything else.
+let private textOf (raw: obj) (key: string) : string =
+    if jsTypeof raw?(key) = "string" && (unbox<string> raw?(key)).Length > 0 then
+        unbox<string> raw?(key)
+    else
+        failwith ("not a name: " + key)
+
+// A key absent or null reads as None, a whole number a 32-bit integer holds
+// as itself (so .NET and JavaScript read the same arithmetic off it);
+// anything else throws.
+let private numberOption (raw: obj) (key: string) : int option =
+    let value = raw?(key)
+
+    if isNull value then
+        None
+    elif
+        jsTypeof value = "number"
+        && emitJsExpr value "Number.isInteger($0) && Math.abs($0) <= 2147483647"
+    then
+        Some(unbox<int> value)
+    else
+        failwith ("not a whole number: " + key)
+
+let private specOf (raw: obj) : OpSpecWire =
+    let rooms = raw?rooms
+
+    if
+        not (JS.Constructors.Array.isArray rooms)
+        || not (unbox<obj[]> rooms |> Array.forall (fun room -> jsTypeof room = "string"))
+    then
+        failwith "not rooms"
+
+    {
+        Id = textOf raw "id"
+        Template = textOf raw "template"
+        Enemy = textOf raw "enemy"
+        Rooms = unbox<string[]> rooms |> List.ofArray
+        Deadline = numberOption raw "deadline"
+        MaxEnergy = numberOption raw "maxEnergy"
+        MaxBodies = numberOption raw "maxBodies"
+    }
+
+let private recordOf (raw: obj) : OpRecord option =
+    caseIn phaseNames raw?p
+    |> Option.bind (fun phase ->
+        let ended =
+            if isNull raw?x then
+                Some None
+            else
+                caseIn endNames raw?x |> Option.map Some
+
+        ended
+        |> Option.map (fun ended ->
+            {
+                Id = textOf raw "i"
+                Started = numberOf raw "s"
+                Phase = phase
+                Since = numberOf raw "a"
+                Spent = numberOf raw "e"
+                Lost = numberOf raw "l"
+                NextDue = numberOf raw "n"
+                Ended = ended
+            }))
+
+/// The ops leaf (`Memory.fabot.ops`), None where it is absent or no object:
+/// no operations, never a fault. A spec row that will not decode is refused
+/// as garbled, by its id where it has one; a record that will not decode is
+/// dropped; the switch is on only for `true`.
+let loadOps () : OpsLeaf option =
+    try
+        let raw = ops ()
+
+        if isNull raw then
+            None
+        else
+            let rows =
+                if JS.Constructors.Array.isArray raw?specs then
+                    unbox<obj[]> raw?specs |> List.ofArray
+                else
+                    []
+
+            let decoded =
+                rows
+                |> List.map (fun row ->
+                    try
+                        Ok(specOf row)
+                    with _ ->
+                        let id =
+                            if not (isNull row) && jsTypeof row?id = "string" then
+                                unbox<string> row?id
+                            else
+                                "?"
+
+                        Error { Id = id; Why = "garbled" })
+
+            Some
+                {
+                    Specs =
+                        decoded
+                        |> List.choose (function
+                            | Ok spec -> Some spec
+                            | Error _ -> None)
+                    Garbled =
+                        decoded
+                        |> List.choose (function
+                            | Error refusal -> Some refusal
+                            | Ok _ -> None)
+                    Live = rowsOf recordOf raw?live
+                    // Fails closed: any value JavaScript reads as true.
+                    Off = emitJsExpr raw?off "!!$0"
+                }
+    with _ ->
+        None
+
+let private recordWire (record: OpRecord) : obj =
+    let o =
+        createObj
+            [
+                "i" ==> record.Id
+                "s" ==> record.Started
+                "p" ==> nameIn phaseNames record.Phase
+                "a" ==> record.Since
+                "e" ==> record.Spent
+                "l" ==> record.Lost
+                "n" ==> record.NextDue
+            ]
+
+    record.Ended |> Option.iter (fun how -> o?x <- nameIn endNames how)
+    o
+
+let private eventWire (tick: int) (event: OpEvent) : obj =
+    let o = createObj [ "t" ==> tick ]
+
+    let target (room: string option) =
+        room |> Option.iter (fun room -> o?r <- room)
+
+    match event with
+    | OpEvent.Began(id, phase, room) ->
+        o?i <- id
+        o?k <- "began"
+        o?p <- nameIn phaseNames phase
+        target room
+    | OpEvent.Moved(id, from, into, exit, room) ->
+        o?i <- id
+        o?k <- "moved"
+        o?f <- nameIn phaseNames from
+        o?p <- nameIn phaseNames into
+        o?x <- exit
+        target room
+    | OpEvent.Recurred(id, due) ->
+        o?i <- id
+        o?k <- "recurred"
+        o?n <- due
+    | OpEvent.Ended(id, how) ->
+        o?i <- id
+        o?k <- "ended"
+        o?e <- nameIn endNames how
+    | OpEvent.Dropped id ->
+        o?i <- id
+        o?k <- "dropped"
+
+    o
+
+/// The bot's half of the ops leaf written back, onto a leaf `loadOps` read:
+/// the records, this tick's refusals, this tick's events after the last
+/// `Operation.eventCap` kept, and each defaulted deadline written into its
+/// spec once, so it never moves. Nothing where the leaf is gone.
+let saveOps
+    (tick: int)
+    (records: OpRecord list)
+    (refused: OpRefusal list)
+    (events: OpEvent list)
+    (deadlines: (string * int) list)
+    =
+    let raw = ops ()
+
+    if not (isNull raw) then
+        raw?live <- records |> List.map recordWire |> Array.ofList
+
+        raw?refused <-
+            refused
+            |> List.map (fun refusal -> createObj [ "id" ==> refusal.Id; "why" ==> refusal.Why ])
+            |> Array.ofList
+
+        let prior =
+            if JS.Constructors.Array.isArray raw?events then
+                unbox<obj[]> raw?events
+                |> Array.filter (fun row -> not (isNull row) && jsTypeof row = "object")
+            else
+                [||]
+
+        let all = Array.append prior (events |> List.map (eventWire tick) |> Array.ofList)
+
+        raw?events <-
+            Array.sub
+                all
+                (max 0 (all.Length - Operation.eventCap))
+                (min all.Length Operation.eventCap)
+
+        if not (List.isEmpty deadlines) && JS.Constructors.Array.isArray raw?specs then
+            for row in unbox<obj[]> raw?specs do
+                if not (isNull row) && jsTypeof row?id = "string" && isNull row?deadline then
+                    deadlines
+                    |> List.tryFind (fun (id, _) -> id = unbox<string> row?id)
+                    |> Option.iter (fun (_, deadline) -> row?deadline <- deadline)

@@ -72,6 +72,7 @@
     <Compile Include="Decide/ErrandTests.fs" />
     <Compile Include="Decide/SalvageTests.fs" />
     <Compile Include="Decide/HarassTests.fs" />
+    <Compile Include="Decide/OperationTests.fs" />
     <Compile Include="Decide/LabTests.fs" />
     <Compile Include="Decide/SignatureTests.fs" />
     <Compile Include="Decide/FighterTests.fs" />

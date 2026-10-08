@@ -207,57 +207,6 @@ type Selector =
         Band: string -> HostileInfo -> int
     }
 
-/// What one job of a fight is (#663 M3): where its bodies stand and what
-/// they are there for. Every kind is priced in one currency, the energy a
-/// tick its bodies' effort earns (`Job.Value`).
-[<RequireQualifiedAccess>]
-type JobKind =
-    /// A kill: under a raid or a rival's claimer (#451) in a ranger room
-    /// (`Facts.rangerRooms`), or in a chased room a raid stands in, the
-    /// ranger's ground about the kill order's head — our ramparts within
-    /// three of it under an armed raid (#467); else in a resident room whose
-    /// raid no ranger wins (`Facts.outmatched`), the room's safe set, laid
-    /// only while a ranger of ours stands there or holds its Guard; else,
-    /// while a melee body stands there, the head is a claimer, or in a
-    /// resident room an unarmed head its kill score prices worth the kill
-    /// (#648), the kite ground: the tiles within three of that head, less
-    /// every tile a melee body reaches in a step and a swing, and less swamp
-    /// near one; with a melee body there and that empty, the tiles farthest
-    /// from it. Or a contested room's prey (#516, #656): where a trespasser
-    /// stands (`Facts.trespasser`) and no kind ahead claims the room, the
-    /// tiles beside each one off the exits, or a hauler's store ground.
-    /// Priced at its head's kill score (#621).
-    | Strike
-    /// The walkable tiles within range 1 of a Threat standing in the room,
-    /// less the tiles the Threats stand on — the guard's ground; and a
-    /// level-0 core's ring (#487). Priced at the room's economic delta a tick
-    /// it keeps (`RoomWorth.delta`).
-    | Ring
-    /// In a resident room (`Facts.residentRooms`), the garrison's ground,
-    /// which it holds and shoots from: in a declared errand room the
-    /// Reactor's own ring (#414, #411), in a raised child's home its
-    /// controller's while no armed Threat stands there (#447). Priced at our
-    /// income kept there.
-    | Resident
-    /// Where the kill is a dancer on the border (`Facts.sweepDancer`, #658):
-    /// fixed tiles off the exits, out of every armed body's reach, covering
-    /// the tiles it steps in on, the one it uses most first, one a holder
-    /// (those it already stands on first). The dancer's tile now never moves
-    /// it. Priced at its kill at the camp's odds over the kill's ticks
-    /// (`Facts.campValue`).
-    | Camp
-    /// The tile a quarry seen lingering across the border steps back in on
-    /// (#585). Priced at its kill score.
-    | Intercept
-    /// In a room whose last armed Threat has gone, the ground beside the exit
-    /// it left by (#450), until a look finds it gone (#585). Priced at the
-    /// room's economic delta a tick it keeps.
-    | HoldExit
-    /// The crossing the holders of a fight wait on for the rest of their
-    /// group (#535, #658, `Facts.musters`): priced at what the first come
-    /// alone would lose over the waiting it saves, a tick of the spread.
-    | Muster
-
 /// How many bodies one job seats this tick, and the rows that may sit them
 /// (#550, #558, #546); no rows, any row its Brief admits.
 type Seating = { Count: int; Rows: CastRow list }

@@ -2614,6 +2614,175 @@ wire("ledger: written to its segment on the cadence, and a cold heap reads it ba
   assert.equal(stable(joinSegments(SEGMENTS.ledger.map((id) => raw.segments[id]))), stable(wireLedger));
 });
 
+// ---- the operations (#663 S7a) --------------------------------------------
+
+// `Memory.fabot.ops`: absent or no object is no operations, never a fault,
+// and nothing is written; the bot writes `live`, `refused` and `events`
+// back onto a leaf it read, and leaves the operator's `specs` and `off`.
+// Load, then save the records it read with no events, then compare. A leaf
+// whose switch is set is read as off, and the shell writes nothing onto it
+// (`Main.operationsDryRun`), which `opsThrough` mirrors.
+const opsThrough = async (ops, events = []) => {
+  const { loadOps, saveOps } = await import(MODULE);
+  const { ofArray, empty } = await import(LIST);
+  globalThis.Memory = ops === undefined ? { fabot: {} } : { fabot: { ops } };
+  const leaf = loadOps();
+  if (leaf != null && !leaf.Off) saveOps(77, leaf.Live, leaf.Garbled, ofArray(events), empty());
+  return { leaf, ops: globalThis.Memory.fabot.ops };
+};
+
+const opRecord = { i: "op1", s: 100, p: "execute", a: 120, e: 0, l: 0, n: 0 };
+const opSpec = { id: "op1", template: "sweep", enemy: "Trepidimous", rooms: ["W19S26"], deadline: 6000 };
+
+for (const [name, leaf] of [
+  ["absent", undefined],
+  ["null", null],
+  ["a string", "Incorrect memory path"],
+  ["a number", 7],
+  ["true", true],
+  ["an array", [{ id: "op1" }]],
+]) {
+  wire(`ops: a leaf that is ${name} is no operations and is left as it was`, async () => {
+    const { leaf: read, ops } = await opsThrough(leaf);
+    assert.equal(read, undefined, "no operations");
+    assert.equal(stable(ops), stable(leaf));
+  });
+}
+
+wire("ops: legacy Memory with every other leaf and no ops leaf gains none", async () => {
+  const { loadOps, saveOps } = await import(MODULE);
+  const { empty } = await import(LIST);
+  globalThis.Memory = { fabot: { assignments: { c1: "guard:W1N1" }, observe: { cadence: 3 } } };
+  const before = stable(globalThis.Memory);
+  assert.equal(loadOps(), undefined);
+  saveOps(77, empty(), empty(), empty(), empty());
+  assert.equal(stable(globalThis.Memory), before, "untouched");
+});
+
+wire("ops: an empty leaf reads as nothing and writes empty lists", async () => {
+  const { leaf, ops } = await opsThrough({});
+  assert.equal(leaf.Off, false);
+  assert.equal(stable(ops), stable({ events: [], live: [], refused: [] }));
+});
+
+wire("ops: a well-formed leaf round-trips, the operator's keys untouched", async () => {
+  const full = {
+    specs: [opSpec],
+    off: false,
+    live: [opRecord, { ...opRecord, i: "op2", x: "expired" }],
+    refused: [{ id: "old", why: "stale" }],
+    events: [{ t: 50, i: "op1", k: "began", p: "execute" }],
+  };
+  const { leaf, ops } = await opsThrough(structuredClone(full));
+  assert.equal(leaf.Off, false);
+  // Refusals are this tick's, rewritten each tick.
+  assert.equal(stable(ops), stable({ ...full, refused: [] }));
+});
+
+// Fails closed: any value JavaScript reads as true is off, and an off leaf
+// is left exactly as it stood. Before review, `"yes"` read on (a boolean
+// alone counted); it reads off now.
+for (const [name, off, reads] of [
+  ["true", true, true],
+  ['"yes"', "yes", true],
+  ["1", 1, true],
+  ["an object", {}, true],
+  ["false", false, false],
+  ["0", 0, false],
+  ['""', "", false],
+  ["null", null, false],
+]) {
+  wire(`ops: a switch that is ${name} reads ${reads ? "off, and nothing is written" : "on"}`, async () => {
+    const stood = { off, specs: [opSpec], live: [opRecord] };
+    const { leaf, ops } = await opsThrough(structuredClone(stood));
+    assert.equal(leaf.Off, reads);
+    if (reads) assert.equal(stable(ops), stable(stood), "untouched");
+    else assert.equal(stable(ops.live), stable([opRecord]));
+  });
+}
+
+wire("ops: a garbled spec row is refused as garbled, by its id where it has one", async () => {
+  const { leaf, ops } = await opsThrough({
+    specs: [
+      opSpec,
+      { id: "bad", template: "sweep", enemy: "Trepidimous", rooms: "W1N1" },
+      7,
+      { ...opSpec, id: "nodl", deadline: "soon" },
+      { ...opSpec, id: "frac", deadline: 6000.5 },
+      { ...opSpec, id: "huge", deadline: 1e20 },
+      { ...opSpec, id: "budget", maxEnergy: 2 ** 31 },
+    ],
+  });
+  assert.equal(
+    stable(ops.refused),
+    stable([
+      { id: "bad", why: "garbled" },
+      { id: "?", why: "garbled" },
+      { id: "nodl", why: "garbled" },
+      { id: "frac", why: "garbled" },
+      { id: "huge", why: "garbled" },
+      { id: "budget", why: "garbled" },
+    ]),
+  );
+  assert.equal([...leaf.Specs].length, 1, "the one whole spec");
+});
+
+wire("ops: a spec's whole numbers within 32 bits read as themselves", async () => {
+  const { leaf } = await opsThrough({
+    specs: [{ ...opSpec, deadline: 2 ** 31 - 1, maxEnergy: 0, maxBodies: -(2 ** 31 - 1) }],
+  });
+  const [spec] = leaf.Specs;
+  assert.deepEqual([spec.Deadline, spec.MaxEnergy, spec.MaxBodies], [2 ** 31 - 1, 0, -(2 ** 31 - 1)]);
+});
+
+wire("ops: a record off its shape costs its own row", async () => {
+  const { ops } = await opsThrough({
+    live: [opRecord, { ...opRecord, p: "dance" }, { ...opRecord, s: {} }, { ...opRecord, x: "won" }, null, { ...opRecord, i: "" }],
+  });
+  assert.equal(stable(ops.live), stable([opRecord]));
+});
+
+wire("ops: events append after the kept ones, the newest twenty kept", async () => {
+  const prior = Array.from({ length: 25 }, (_, t) => ({ t, i: "op1", k: "recurred", n: t }));
+  const { ops } = await opsThrough({ events: [...prior, 7, null] });
+  assert.equal(ops.events.length, 20);
+  assert.equal(ops.events[0].t, 5, "the oldest fell off");
+  assert.equal(ops.events[19].t, 24);
+});
+
+wire("ops: each event kind on the wire, stamped with its tick", async () => {
+  const { OpEvent, OpPhase, OpEnd } = await import("../build/fable/Core/Types/Operation.js");
+  const phase = (tag) => new OpPhase(tag, []);
+  const { ops } = await opsThrough({}, [
+    new OpEvent(0, ["op1", phase(2), undefined]),
+    new OpEvent(1, ["op1", phase(2), phase(3), 1, "W19S26"]),
+    new OpEvent(2, ["op1", 300]),
+    new OpEvent(3, ["op1", new OpEnd(3, [])]),
+    new OpEvent(4, ["op1"]),
+  ]);
+  assert.equal(
+    stable(ops.events),
+    stable([
+      { t: 77, i: "op1", k: "began", p: "execute" },
+      { t: 77, i: "op1", k: "moved", f: "execute", p: "hold", x: 1, r: "W19S26" },
+      { t: 77, i: "op1", k: "recurred", n: 300 },
+      { t: 77, i: "op1", k: "ended", e: "budget" },
+      { t: 77, i: "op1", k: "dropped" },
+    ]),
+  );
+});
+
+wire("ops: a defaulted deadline is written into its spec once, never over one given", async () => {
+  const { saveOps } = await import(MODULE);
+  const { ofArray, empty } = await import(LIST);
+  const { ...noDeadline } = opSpec;
+  delete noDeadline.deadline;
+  globalThis.Memory = { fabot: { ops: { specs: [noDeadline, { ...opSpec, id: "op2" }] } } };
+  saveOps(77, empty(), empty(), empty(), ofArray([["op1", 5077], ["op2", 9999]]));
+  assert.equal(globalThis.Memory.fabot.ops.specs[0].deadline, 5077);
+  assert.equal(globalThis.Memory.fabot.ops.specs[1].deadline, 6000, "a given deadline stands");
+});
+
 // ---- run ----------------------------------------------------------------
 
 let failed = 0;
