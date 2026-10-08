@@ -231,7 +231,7 @@ let private split: Glance =
                     Hits = 1000
                     Inward = []
                     Heals = 0
-                    Strikes = 0
+                    Reach = 0
                     Gait = None
                 }
             |> Map.add
@@ -241,7 +241,7 @@ let private split: Glance =
                     Hits = 500
                     Inward = []
                     Heals = 0
-                    Strikes = 0
+                    Reach = 0
                     Gait = None
                 }
     }
@@ -303,7 +303,7 @@ let decidersTests =
                 "a raider at a home decides its colony and every colony with a fighter standing there" {
                 // #552: W15S28's residents in W17S25 replayed a plan made
                 // before the healer bounced back in.
-                let standing strikes =
+                let standing reach =
                     { split with
                         Creeps =
                             split.Creeps
@@ -314,12 +314,12 @@ let decidersTests =
                                     Hits = 500
                                     Inward = []
                                     Heals = 0
-                                    Strikes = strikes
+                                    Reach = reach
                                     Gait = None
                                 }
                     }
 
-                let resident = standing 14
+                let resident = standing Engine.rangedRange
 
                 Expect.equal
                     (LightTick.deciders
@@ -369,7 +369,7 @@ let decidersTests =
                                     Hits = 900
                                     Inward = []
                                     Heals = 0
-                                    Strikes = 0
+                                    Reach = 0
                                     Gait = None
                                 }
                     }

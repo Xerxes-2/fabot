@@ -145,11 +145,14 @@ type Intent =
 /// target it aims at's band in its kill order (`Selector.Band`, #563), and
 /// what its blows are priced by (`Facts.blowTerms`, #651): each target's
 /// value a hit beside our other bodies' damage on it, and each healer's heal
-/// on each. A body that has left the room fires none.
+/// on each, and what one strike of it lands at its reach (a swing's or a
+/// shot's, `Fighter.DamageAt`, #671). A body that has left the room fires
+/// none.
 type Volley =
     {
         Room: string
         Guns: int
+        Strike: int
         Shields: Set<Pos>
         Bands: Map<string, int>
         Blows: Map<string, float * int>

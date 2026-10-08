@@ -350,12 +350,16 @@ let private glance () : LightTick.Glance =
                         c.body
                         |> Array.sumBy (fun part ->
                             if part.``type`` = "heal" && part.hits > 0 then 1 else 0)
-                    Strikes =
-                        c.body
-                        |> Array.sumBy (fun part ->
+                    // Whether a part of the kind still acts: all the reach
+                    // asks of a count, read without a part's lookup a tick.
+                    Reach =
+                        Fighter.reachOfPower (fun kind ->
+                            let name = partName kind
+
                             if
-                                (part.``type`` = "attack" || part.``type`` = "ranged_attack")
-                                && part.hits > 0
+                                c.body
+                                |> Array.exists (fun part ->
+                                    part.hits > 0 && part.``type`` = name)
                             then
                                 1
                             else

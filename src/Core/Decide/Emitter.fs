@@ -1373,10 +1373,11 @@ let internal aimOf
         | [] -> None
     | _ -> None
 
-/// Each aiming ranger's `Volley` (#537), for the light ticks' mass attack:
-/// a body that aims (`aims`) with a gun, in a room whose shields this view
-/// carries (`shields`), with the band of each hostile of the room it strikes
-/// (#563).
+/// Each aiming fighter's `Volley` (#537), for the light ticks' strike
+/// choice: a body that aims (`aims`), a swing's or a gun's (#671: a melee
+/// body prices its blows as a ranger does), in a room whose shields this
+/// view carries (`shields`), with the band of each hostile of the room it
+/// strikes (#563).
 let volleys (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task>) =
     match view.Hostiles with
     | [] -> Map.empty
@@ -1386,18 +1387,18 @@ let volleys (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, T
             match
                 strikesBy view atlas threats assigned creep, Atlas.creepRoom atlas creep.Name
             with
-            | Some(struck, targets, true), Some room when
-                gunsOf creep > 0 && not (mustering threats assigned creep)
-                ->
+            | Some(struck, targets, true), Some room when not (mustering threats assigned creep) ->
                 shields view room
                 |> Option.map (fun shields ->
                     let band = targets.Band struck
                     let blows, heals = Facts.blowTerms view struck creep
+                    let fighter = Fighter.ofCreep creep
 
                     creep.Name,
                     {
                         Room = room
                         Guns = gunsOf creep
+                        Strike = fighter.DamageAt fighter.Reach
                         Shields = shields
                         Bands =
                             ColonyView.inGlance view

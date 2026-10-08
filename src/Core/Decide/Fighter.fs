@@ -48,8 +48,9 @@ type Fighter =
 
 [<RequireQualifiedAccess>]
 module Fighter =
-    /// `Reach` of a body acting at `power`.
-    let private reachOfPower (power: BodyPart -> int) =
+    /// `Reach` of a body acting at `power`; the light tick's glance reads it
+    /// off a creep's live parts (`GlanceCreep.Reach`).
+    let reachOfPower (power: BodyPart -> int) =
         if power RangedAttack > 0 then Engine.rangedRange
         elif power Attack > 0 then Engine.meleeRange
         else 0

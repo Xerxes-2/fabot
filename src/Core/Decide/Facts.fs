@@ -789,6 +789,16 @@ let internal trespassRooms (view: ColonyView) (room: string) =
 /// make it ours to strike back anywhere: deferred, no hit memory yet (#535).
 let internal struckUsFirst (_hostile: HostileInfo) = false
 
+/// The share of `mayStrike` its owner alone settles, wherever the body
+/// stands: a declared enemy's or an Invader's, never a keeper's nor an
+/// ally's. What a light tick's glance, which holds no view, strikes of a body
+/// no full tick named (#671); a neutral's waits for a full tick's rooms and
+/// keep hits.
+let internal mayStrikeAnywhere (owner: string) =
+    not (HostileInfo.isKeeperOwner owner)
+    && not (Colony.isAlly owner)
+    && Colony.strikesAnywhere owner
+
 /// The one diplomacy rule every strike reads (#535, the user 2026-10-06):
 /// never a Source Keeper (not provoked) nor an ally; a declared enemy's and
 /// an NPC Invader's creep anywhere; any other armed one — a weapon on paper,
@@ -799,13 +809,13 @@ let internal struckUsFirst (_hostile: HostileInfo) = false
 /// one), never one crossing the home; and a neutral that struck us first
 /// (`struckUsFirst`).
 let internal mayStrike (view: ColonyView) (engaged: Set<string>) (hostile: HostileInfo) =
-    not (HostileInfo.isKeeper hostile)
-    && not (Colony.isAlly hostile.Owner)
-    && (Colony.strikesAnywhere hostile.Owner
-        || Option.isSome (HostileInfo.weaponRangeOf hostile.Body)
+    mayStrikeAnywhere hostile.Owner
+    || not (HostileInfo.isKeeper hostile)
+       && not (Colony.isAlly hostile.Owner)
+       && (Option.isSome (HostileInfo.weaponRangeOf hostile.Body)
            && (trespassRooms view hostile.Pos.Room || Set.contains hostile.Pos.Room engaged)
-        || dismantling view hostile
-        || struckUsFirst hostile)
+           || dismantling view hostile
+           || struckUsFirst hostile)
 
 /// Whether a hostile is a [[trespasser]] (#516): its body trespasses, we may
 /// strike it (`mayStrike`), and it stands in a room this colony kills

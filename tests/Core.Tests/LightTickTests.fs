@@ -268,6 +268,7 @@ let replayTests =
                             {
                                 Room = room
                                 Guns = 2
+                                Strike = 2 * Engine.rangedAttackPower
                                 Shields = Set.empty
                                 Bands = Map.ofList [ "h-1", 2; "h-2", 2 ]
                                 Blows = Map.empty
@@ -375,6 +376,7 @@ let replayTests =
                                 {
                                     Room = room
                                     Guns = 2
+                                    Strike = 2 * Engine.rangedAttackPower
                                     Shields = Set.empty
                                     Bands = Map.ofList [ "melee", 2; "hauler", 4 ]
                                     Blows = Map.empty
@@ -391,6 +393,280 @@ let replayTests =
                          | _ -> false))
                     [ RangedAttackCreep("ranger", "melee") ]
                     "the shot at the melee"
+            }
+
+            test
+                "an armed body nothing named reaches strikes the newcomer in its reach we may strike, wherever the owner settles it (#671)" {
+                // W17S26 t1052312: Midnight (23C23M) dances on the exit beside
+                // ranger-1051197, across the border on each full tick, so no
+                // aim names it; the light ticks between never shot it.
+                let armed name reach x y =
+                    { creepAt x y 1000 with Reach = reach } |> fun creep -> name, creep
+
+                let glance (ours: (string * GlanceCreep) list) hostiles =
+                    { quiet with
+                        Creeps = List.fold (fun m (n, c) -> Map.add n c m) quiet.Creeps ours
+                        Hostiles = hostiles
+                    }
+
+                let dancer owner =
+                    { hostile 0 6 owner false with
+                        Id = "dancer"
+                    }
+
+                let full aims =
+                    LightTick.lastFull quiet Map.empty [] |> aiming aims Map.empty
+
+                let strikesOf name record now =
+                    LightTick.intents record now
+                    |> List.filter (fun intent ->
+                        match intent with
+                        | RangedAttackCreep(who, _)
+                        | AttackCreep(who, _)
+                        | RangedMassAttack who -> who = name
+                        | MoveCreep(who, _) -> who = name
+                        | _ -> false)
+
+                let ranger = armed "ranger" Engine.rangedRange 1 5
+
+                Expect.equal
+                    (strikesOf "ranger" (full []) (glance [ ranger ] [ dancer "Trepidimous" ]))
+                    [ RangedAttackCreep("ranger", "dancer") ]
+                    "an enemy's dancer back on the exit, no aim held: the shot"
+
+                Expect.equal
+                    (strikesOf
+                        "ranger"
+                        (full [ RangedAttackCreep("ranger", "far") ])
+                        (glance
+                            [ ranger ]
+                            [
+                                dancer "Trepidimous"
+                                { hostile 20 20 "Trepidimous" true with
+                                    Id = "far"
+                                }
+                            ]))
+                    [ RangedAttackCreep("ranger", "dancer") ]
+                    "its aim out of reach: the dancer, not the refused shot at the head"
+
+                Expect.equal
+                    (strikesOf
+                        "ranger"
+                        (full [ RangedAttackCreep("ranger", "near") ])
+                        (glance
+                            [ ranger ]
+                            [
+                                dancer "Trepidimous"
+                                { hostile 3 5 "Trepidimous" true with
+                                    Id = "near"
+                                }
+                            ]))
+                    [ RangedAttackCreep("ranger", "near") ]
+                    "its aim in reach: the aim"
+
+                Expect.isEmpty
+                    (strikesOf "ranger" (full []) (glance [ ranger ] [ dancer "Odiodin" ]))
+                    "an ally's in reach: never"
+
+                Expect.isEmpty
+                    (strikesOf "ranger" (full []) (glance [ ranger ] [ dancer "Kalgen" ]))
+                    "a neutral's: its rooms and keep hits are a full tick's to read"
+
+                Expect.isEmpty
+                    (strikesOf "ranger" (full []) (glance [ ranger ] [ dancer "Source Keeper" ]))
+                    "a keeper's: never"
+
+                Expect.isEmpty
+                    (strikesOf
+                        "digger"
+                        (full [])
+                        (glance [ armed "digger" 0 1 5 ] [ dancer "Trepidimous" ]))
+                    "a body with no weapon strikes nothing"
+
+                Expect.equal
+                    (strikesOf
+                        "guard"
+                        (full [])
+                        (glance [ armed "guard" Engine.meleeRange 1 5 ] [ dancer "Invader" ]))
+                    [ AttackCreep("guard", "dancer") ]
+                    "a melee body swings at an Invader beside it, and keeps its plan's step"
+
+                let three =
+                    glance
+                        [ ranger ]
+                        [
+                            { hostile 2 7 "Trepidimous" false with
+                                Id = "hauler"
+                                Hits = 300
+                            }
+                            { hostile 3 3 "Trepidimous" true with
+                                Id = "melee"
+                            }
+                            { hostile 0 4 "Trepidimous" false with
+                                Id = "scout"
+                                Hits = 100
+                            }
+                        ]
+
+                // The full tick's blow terms (`Volley.Blows`): the hauler's
+                // kill value a hit four times the melee's; the scout, which
+                // no volley held, at their mean. A neutral's structure within
+                // three shields the mass attack, so one shot is picked.
+                let priced =
+                    LightTick.lastFull quiet Map.empty []
+                    |> aiming
+                        []
+                        (Map.ofList
+                            [
+                                "ranger",
+                                {
+                                    Room = room
+                                    Guns = 2
+                                    Strike = 2 * Engine.rangedAttackPower
+                                    Shields = Set.ofList [ { X = 1; Y = 7 } ]
+                                    Bands = Map.empty
+                                    Blows = Map.ofList [ "hauler", (2.0, 0); "melee", (0.5, 0) ]
+                                    Heals = []
+                                }
+                            ])
+
+                Expect.equal
+                    (strikesOf "ranger" priced three)
+                    [ RangedAttackCreep("ranger", "hauler") ]
+                    "of three newcomers, the blow worth most by the full tick's terms"
+
+                Expect.equal
+                    (strikesOf "ranger" (full []) three)
+                    [ RangedAttackCreep("ranger", "scout") ]
+                    "with no volley to price them, the one whose kill lands soonest"
+
+                // A guard's volley (#671 review: a swing priced at its own
+                // 90, not a gun's nought): two beside it, the hauler's blow
+                // worth four times the melee's.
+                let guarded =
+                    glance
+                        [ armed "guard" Engine.meleeRange 1 5 ]
+                        [
+                            { hostile 0 6 "Trepidimous" false with
+                                Id = "hauler"
+                            }
+                            { hostile 2 6 "Trepidimous" true with
+                                Id = "melee"
+                                Hits = 100
+                            }
+                        ]
+
+                let swung =
+                    LightTick.lastFull quiet Map.empty []
+                    |> aiming
+                        []
+                        (Map.ofList
+                            [
+                                "guard",
+                                {
+                                    Room = room
+                                    Guns = 0
+                                    Strike = 3 * Engine.attackPower
+                                    Shields = Set.empty
+                                    Bands = Map.empty
+                                    Blows = Map.ofList [ "hauler", (2.0, 0); "melee", (0.5, 0) ]
+                                    Heals = []
+                                }
+                            ])
+
+                Expect.equal
+                    (strikesOf "guard" swung guarded)
+                    [ AttackCreep("guard", "hauler") ]
+                    "a swing priced by its own damage: the hauler, not the melee nearer its kill"
+            }
+
+            test
+                "a camp's holder shoots its dancer on the light tick it steps onto the entry exit tile (#671)" {
+                // The camp (#663 M3) stands within reach of the tile the dancer
+                // steps in on. On the full tick the dancer stood across the
+                // border: no aim names it and its walk forces nothing (the camp
+                // forces off an aim's quarry it marked). On the light tick it
+                // is back on the exit tile, in this room's glance (the glance
+                // reads every hostile of a visible room, the ring too), and the
+                // holder shoots it.
+                let entry = tile 0 6
+
+                let camping =
+                    { quiet with
+                        Creeps =
+                            quiet.Creeps
+                            |> Map.add
+                                "camper"
+                                { creepAt 2 6 1000 with
+                                    Reach = Engine.rangedRange
+                                }
+                    }
+
+                let full =
+                    LightTick.lastFull camping Map.empty []
+                    |> fun record ->
+                        { record with
+                            Plans =
+                                record.Plans
+                                |> Map.map (fun _ plan ->
+                                    { plan with
+                                        Forces =
+                                            Map.ofList
+                                                [
+                                                    "camper",
+                                                    JobForce.Covers(
+                                                        Set.singleton (tile 2 6),
+                                                        Engine.rangedRange
+                                                    )
+                                                ]
+                                    })
+                        }
+
+                let dancing =
+                    { camping with
+                        Hostiles =
+                            [
+                                { hostile entry.X entry.Y "Trepidimous" false with
+                                    Id = "dancer"
+                                }
+                            ]
+                    }
+
+                Expect.contains
+                    (LightTick.intents full dancing)
+                    (RangedAttackCreep("camper", "dancer"))
+                    "the shot on the tick it appears"
+
+                // A swing reads its own reach, one: a guard beside the exit
+                // tile swings at the dancer on it, never steps onto the exit
+                // (`Emitter.glueStep`'s rule; a newcomer's step stays the
+                // plan's anyway), and one two off reaches nothing.
+                let guarding x =
+                    { dancing with
+                        Creeps =
+                            dancing.Creeps
+                            |> Map.remove "camper"
+                            |> Map.add
+                                "guard"
+                                { creepAt x 6 1000 with
+                                    Reach = Engine.meleeRange
+                                }
+                    }
+
+                let ofGuard now =
+                    LightTick.intents (LightTick.lastFull quiet Map.empty []) now
+                    |> List.filter (function
+                        | AttackCreep("guard", _)
+                        | RangedAttackCreep("guard", _)
+                        | MoveCreep("guard", _) -> true
+                        | _ -> false)
+
+                Expect.equal
+                    (ofGuard (guarding 1))
+                    [ AttackCreep("guard", "dancer") ]
+                    "a guard beside the exit tile swings at the dancer"
+
+                Expect.isEmpty (ofGuard (guarding 2)) "two off, a swing reaches nothing"
             }
 
             test

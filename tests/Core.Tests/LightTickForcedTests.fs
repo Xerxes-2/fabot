@@ -138,7 +138,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = []
                                     Heals = 0
-                                    Strikes = 0
+                                    Reach = 0
                                     Gait = None
                                 }
                     }
@@ -206,7 +206,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = []
                                     Heals = 0
-                                    Strikes = 0
+                                    Reach = 0
                                     Gait = None
                                 }
                             |> Map.add
@@ -216,7 +216,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = []
                                     Heals = 0
-                                    Strikes = 0
+                                    Reach = 0
                                     Gait = None
                                 }
                     }
@@ -280,7 +280,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = []
                                     Heals = 0
-                                    Strikes = 0
+                                    Reach = 0
                                     Gait = None
                                 }
                             |> Map.add
@@ -290,7 +290,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = []
                                     Heals = 0
-                                    Strikes = 0
+                                    Reach = 0
                                     Gait = None
                                 }
                     }
@@ -328,7 +328,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = []
                                     Heals = 0
-                                    Strikes = 0
+                                    Reach = 0
                                     Gait = None
                                 }
                     }
@@ -693,7 +693,7 @@ let forcedTests =
                                         Hits = 500
                                         Inward = []
                                         Heals = 0
-                                        Strikes = 0
+                                        Reach = 0
                                         Gait = None
                                     }
                         }
@@ -718,7 +718,7 @@ let forcedTests =
                                     Hits = 500
                                     Inward = [ Right ]
                                     Heals = 0
-                                    Strikes = 0
+                                    Reach = 0
                                     Gait = None
                                 }
                     }

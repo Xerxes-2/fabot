@@ -17,9 +17,10 @@ type GlanceCreep =
         Inward: Direction list
         /// Its HEAL parts with hits left: what it heals a tick.
         Heals: int
-        /// Its ATTACK and RANGED_ATTACK parts with hits left: a fighter's
-        /// weapons (#552).
-        Strikes: int
+        /// How far its weapons with hits left strike
+        /// (`Fighter.reachOfPower`), 0 with none: a fighter's (#552), and
+        /// what it shoots on a light tick (#671).
+        Reach: int
         /// Its gait (`Gait.walked`), read for a body the plans aim
         /// (`aimers`), None for any other: whether a chase out-paces its
         /// quarry (`LightForce.Chase`).
@@ -126,7 +127,8 @@ type Plan =
         /// (`Emitter.aims`), which a light tick issues again while the target
         /// is in sight (#528): a swing lands the tick a body steps beside it.
         Aims: Intent list
-        /// Each aiming ranger's guns and shields (`Emitter.volleys`, #537).
+        /// Each aiming fighter's guns, strike and shields (`Emitter.volleys`,
+        /// #537).
         Volleys: Map<string, Volley>
         /// The tiles about each melee glue body whose step holds it
         /// (`Emitter.mired`, #614), which its light tick glue keeps off.
@@ -1187,7 +1189,7 @@ let private scoping
     let standingIn = standingWhere (fun _ -> true)
 
     // A body with a live weapon or HEAL: a resident, never a worker passing.
-    let fightingIn = standingWhere (fun creep -> creep.Strikes > 0 || creep.Heals > 0)
+    let fightingIn = standingWhere (fun creep -> creep.Reach > 0 || creep.Heals > 0)
 
     let holderOf name =
         match Map.tryFind name holders with
@@ -1365,7 +1367,8 @@ let lookups (last: LastFull) : string list =
 /// actor and target still stand in the glance, wherever the body stands —
 /// the engine checks range, store and cooldown, and a refused act costs no
 /// CPU; a drop only from the tile it was decided on. A fighter strikes at
-/// its aim again the same way (#528), on a channel no act of its holds. A
+/// its aim again the same way (#528), on a channel no act of its holds, and
+/// an armed body nothing named reaches at a newcomer in its reach (#671). A
 /// creep standing on a tile of its step plan steps toward the next.
 let intents (record: LastFull) (now: Glance) : Intent list =
     let last = merged now record
@@ -1452,19 +1455,91 @@ let intents (record: LastFull) (now: Glance) : Intent list =
             // the first aim in reach, else the head, or the mass attack where
             // it deals the strike's band more (`Emitter.pickStrike`, the full
             // tick's bands, `Volley.Bands`) — never with a body within
-            // three that is none of its aims. It replaces the full tick's own
+            // three that is none of its order. It replaces the full tick's own
             // strike, which named the target in reach where the bodies stood
             // then.
             let volley =
                 Map.tryFind name last.Volleys
                 |> Option.filter (fun volley -> volley.Room = creep.Tile.Room)
 
-            let guns = volley |> Option.map (fun volley -> volley.Guns) |> Option.defaultValue 0
+            // Whether a strike reaches its target where the body stands now.
+            let reaches aim =
+                aimed aim
+                |> Option.bind (fun (tile, reach) ->
+                    RoomPos.range creep.Tile tile |> Option.map (fun r -> r <= reach))
+                |> Option.defaultValue false
+
+            let held = Map.tryFind name aims |> Option.defaultValue []
+
+            // What a shot deals its target, capped by its hits.
+            let strike =
+                volley |> Option.map (fun volley -> volley.Strike) |> Option.defaultValue 0
+
+            let dealt aim =
+                aimedAt aim
+                |> Option.bind (fun target -> Map.tryFind target hits)
+                |> Option.map (fun left -> min left strike)
+                |> Option.defaultValue 0
+
+            // Blows priced by the full tick's terms (`Volley.Blows`,
+            // `Volley.Heals`, #651): each target's kill value a hit, through
+            // its TOUGH, beside our other bodies' damage and the heal it
+            // takes; one the volley does not hold at the room's mean. With
+            // no volley, at their damage.
+            let priced blows =
+                match volley with
+                | Some volley ->
+                    blows
+                    |> List.choose (fun (aim, damage) ->
+                        aimedAt aim |> Option.map (fun target -> target, damage))
+                    |> Decide.Facts.blowsWorth volley.Blows volley.Heals
+                | None -> blows |> List.sumBy (snd >> float)
+
+            // Every armed body shoots the best target in its reach we may
+            // strike (#671): where nothing the full tick named for it, an aim
+            // or a replayed strike, reaches, each hostile in its reach the
+            // owner alone makes ours to strike (`Facts.mayStrikeAnywhere`)
+            // follows its aims in the order, the blow worth most first
+            // (`priced`, the full tick's price), then the one its kill lands
+            // soonest on (fewest hits: the glance reads no TOUGH or value of
+            // a body no volley held). A swing or a shot by the body's reach,
+            // as the full tick's `strikeAt`. Its step stays the plan's.
+            let newcomers =
+                let named = held |> List.choose aimedAt |> Set.ofList
+
+                let replayedReaches =
+                    Map.tryFind name acts
+                    |> Option.defaultValue []
+                    |> List.exists (fun act ->
+                        match act with
+                        | RangedMassAttack _ -> true
+                        | AttackCreep _
+                        | RangedAttackCreep _ -> reaches act
+                        | _ -> false)
+
+                if creep.Reach = 0 || replayedReaches || List.exists reaches held then
+                    []
+                else
+                    now.Hostiles
+                    |> List.filter (fun h ->
+                        not (Set.contains h.Id named)
+                        && Decide.Facts.mayStrikeAnywhere h.Owner
+                        && RoomPos.range creep.Tile h.Tile
+                           |> Option.exists (fun r -> r <= creep.Reach))
+                    |> List.map (fun h ->
+                        h,
+                        if creep.Reach > Engine.meleeRange then
+                            RangedAttackCreep(name, h.Id)
+                        else
+                            AttackCreep(name, h.Id))
+                    |> List.sortBy (fun (h, aim) -> -(priced [ aim, dealt aim ]), h.Hits, h.Id)
+                    |> List.map snd
 
             let pick =
-                Map.tryFind name aims
-                |> Option.bind (fun held ->
-                    let targets = held |> List.choose aimedAt |> Set.ofList
+                match held @ newcomers with
+                | [] -> None
+                | order ->
+                    let targets = order |> List.choose aimedAt |> Set.ofList
 
                     let mass =
                         volley
@@ -1479,17 +1554,10 @@ let intents (record: LastFull) (now: Glance) : Intent list =
                                     (RoomPos.inRoom volley.Room (Set.ofList now.PowerCreeps))))
                         |> Option.map (fun deals aim ->
                             match
-                                aimed aim,
-                                aimedAt aim |> Option.bind (fun t -> Map.tryFind t hits)
+                                aimed aim, aimedAt aim |> Option.bind (fun t -> Map.tryFind t hits)
                             with
                             | Some(tile, _), Some left -> deals tile left
                             | _ -> 0)
-
-                    let dealt aim =
-                        aimedAt aim
-                        |> Option.bind (fun target -> Map.tryFind target hits)
-                        |> Option.map (fun left -> min left (guns * Engine.rangedAttackPower))
-                        |> Option.defaultValue 0
 
                     let band aim =
                         Option.map2
@@ -1498,31 +1566,11 @@ let intents (record: LastFull) (now: Glance) : Intent list =
                             (aimedAt aim)
                         |> Option.flatten
 
-                    // Blows priced by the full tick's terms (`Volley.Blows`,
-                    // `Volley.Heals`, #651); with no volley at their damage.
-                    let priced blows =
-                        match volley with
-                        | Some volley ->
-                            blows
-                            |> List.choose (fun (aim, damage) ->
-                                aimedAt aim |> Option.map (fun target -> target, damage))
-                            |> Decide.Facts.blowsWorth volley.Blows volley.Heals
-                        | None -> blows |> List.sumBy (snd >> float)
-
-                    held
-                    |> Decide.Emitter.pickStrike
-                        (fun aim ->
-                            aimed aim
-                            |> Option.bind (fun (tile, reach) ->
-                                RoomPos.range creep.Tile tile |> Option.map (fun r -> r <= reach))
-                            |> Option.defaultValue false)
-                        dealt
-                        priced
-                        band
-                        mass
+                    order
+                    |> Decide.Emitter.pickStrike reaches dealt priced band mass
                     |> Option.map (function
                         | Decide.Emitter.At(aim, reaches) -> aim, reaches
-                        | Decide.Emitter.Mass -> RangedMassAttack name, true))
+                        | Decide.Emitter.Mass -> RangedMassAttack name, true)
 
             // The full tick's own priority (`IntentPlan.arbitrate`): its
             // chosen acts, the aim on a channel none of them holds, then a
@@ -1551,7 +1599,7 @@ let intents (record: LastFull) (now: Glance) : Intent list =
             // body while the target walks off, as not (#614).
             let glued =
                 match issued with
-                | Some(AttackCreep _ as aim, true) ->
+                | Some(AttackCreep _ as aim, true) when List.contains aim held ->
                     let melee =
                         now.Hostiles
                         |> List.filter (fun h -> h.Armed && h.Weapon = Some Engine.meleeRange)

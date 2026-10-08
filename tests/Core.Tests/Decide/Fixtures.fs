@@ -2651,6 +2651,6 @@ let glanceCreep (tile: RoomPos) (hits: int) : LightTick.GlanceCreep =
         Hits = hits
         Inward = []
         Heals = 0
-        Strikes = 0
+        Reach = 0
         Gait = None
     }
