@@ -709,7 +709,7 @@ let arenaScenarioTests =
             // the room. The owner's guard row wins it, so that row casts the
             // guard while the room is shut, and the guard hunts it down.
             test
-                "#571: a cripple in a shut outpost its owner's guard row wins is hunted by the guard that row casts" {
+                "#571: a cripple in a shut outpost its owner's row wins is hunted by the body that row casts" {
                 let home =
                     room "W12S28"
                     |> withController Ownership.Ours None 7 0
@@ -750,7 +750,7 @@ let arenaScenarioTests =
                 let start =
                     let a =
                         arena 900_000 [ home; outpost ] [ declared ] [ cripple; hauler ]
-                        |> withCasts [ "guard" ]
+                        |> withCasts [ "guard"; "ranger" ]
 
                     { a with
                         Lookout = Set.singleton "W12S27"
@@ -795,7 +795,13 @@ let arenaScenarioTests =
                             | Born id -> Some id
                             | _ -> None))
 
-                Expect.exists born (fun id -> id.StartsWith "guard-") $"a guard is cast\n{failure}"
+                // Moved by #654: the row cast a guard; the cheapest body that
+                // ends the cripple is a one-block ranger, which kites it down
+                // (its 20 a tick past the cripple's 12 of heal).
+                Expect.exists
+                    born
+                    (fun id -> id.StartsWith "ranger-")
+                    $"a ranger is cast\n{failure}"
 
                 Expect.isSome (diedOn "invader-cripple" trace) $"and the cripple dies\n{failure}"
             }

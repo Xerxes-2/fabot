@@ -1536,6 +1536,9 @@ let w17s29DismantlerTests =
                             "W17S29"
                     )
 
+                // W15S28's guard wins holding the post, cast unseated at a
+                // home of ours, which is fought for whatever the gate (ADR
+                // 0092's home exception).
                 Expect.equal
                     (wins "W17S29", wins "W15S28")
                     (false, true)

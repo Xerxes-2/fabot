@@ -356,6 +356,9 @@ let guardTaskTests =
 
                 let raid = declaredRaid (raiders @ healers 2)
 
+                // The fixture's 800 bank buys no two-block guard, so the cast
+                // is the two one-block bodies that hold together (#654: one
+                // two-block body where the bank buys it).
                 Expect.equal
                     (capOf (raid |> withGuards [ guard "g-1", beside ]))
                     (Some(Some 2))
@@ -1001,7 +1004,12 @@ let crossSeamThreatTests =
                 // Pairwise on the raid and on nothing else.
                 let atHome hostiles =
                     decide
-                        (declaredRaid hostiles |> withBodyAtHome (worker "w-home" 0 50) atSpawn)
+                        // The haul home's 700 bank, which sizes the haul the
+                        // worker is offered.
+                        ({ declaredRaid hostiles with
+                            Bank = bank 700 700
+                         }
+                         |> withBodyAtHome (worker "w-home" 0 50) atSpawn)
                         Map.empty
                         Set.empty
                         None
@@ -1627,7 +1635,9 @@ let guardPrecedenceTests =
                         [ ChaseSeen; Hold ], row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
                         [ ChaseSeen; Trespasser ],
                         row [ ChaseSeen ] [ "Kite" ] TwoRungsUp one [ "r-1" ]
-                        [ ChaseSeen; Raid ], row [] [ "Kite" ] TwoRungsUp one []
+                        // Moved by #654: the ranger standing in the room, which
+                        // loses the raid alone, takes a seat beside the cast's.
+                        [ ChaseSeen; Raid ], row [] [ "Kite" ] TwoRungsUp (Capacity.fighters 2) []
                         // Quirk, kept: a chase out of sight over a held exit takes
                         // the melee guard's range-1 exit ground, a rung up.
                         [ ChaseDark; Hold ], row [ Hold ] [ "Ring" ] OneRungUp one [ "r-1" ]
@@ -1772,14 +1782,20 @@ let guardPrecedenceTests =
             // there (the home's is the Defend), so the raid's claim gives way
             // to the digger's kill, where before it pooled nothing.
             test "a raid in the home pools no Guard, so the trespasser beside it is the home's kill" {
+                // A bank that buys no fighter, so no cast of the home's own
+                // wins its raid (`Facts.castPrice`) and the raid pools no
+                // Guard: at 800 the home's guard wins it (#654 chooses among
+                // the bodies the bank buys).
                 let colony =
-                    declaredRaid
-                        [
-                            diggerAt "W1N1" { X = 25; Y = 5 }
-                            { hostileIn "W1N1" { X = 25; Y = 8 } smallMelee with
-                                Id = "h-2"
-                            }
-                        ]
+                    { declaredRaid
+                          [
+                              diggerAt "W1N1" { X = 25; Y = 5 }
+                              { hostileIn "W1N1" { X = 25; Y = 8 } smallMelee with
+                                  Id = "h-2"
+                              }
+                          ] with
+                        Bank = bank 300 300
+                    }
 
                 Expect.equal
                     (heldBriefOf [] "W1N1" colony).Claims

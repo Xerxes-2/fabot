@@ -81,8 +81,8 @@ let guardPattern =
     }
 
 /// The most whole guard blocks one body can carry under the engine's part cap:
-/// the ceiling `guardBlocksFor` searches under and the size a caller holding
-/// no colony prices the row at.
+/// the ceiling a melee body is sized under and the size a caller holding no
+/// colony prices the row at.
 let guardBlocksMost = Engine.maxBodyParts / List.length guardPattern.Block
 
 /// ADR-0078
@@ -98,6 +98,16 @@ let rangerPattern =
 
 /// The most whole ranger blocks one body carries under the engine's part cap.
 let rangerBlocksMost = Engine.maxBodyParts / List.length rangerPattern.Block
+
+/// The pattern a fighter's template casts (#654).
+let patternOfTemplate (template: BodyTemplate) : BodyPattern =
+    match template with
+    | BodyTemplate.Melee -> guardPattern
+    | BodyTemplate.Ranged -> rangerPattern
+
+/// The fighter templates a fight's cast is chosen among (#654), in the
+/// order an equal price is broken by. A template is one more row here.
+let bodyTemplates = [ BodyTemplate.Melee; BodyTemplate.Ranged ]
 
 /// The home's [[defender]] (#504): MOVE and ATTACK one to one, a tile a tick
 /// on plain to its rampart, MOVE first so damage lames it before it disarms

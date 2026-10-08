@@ -786,10 +786,12 @@ let childOutpostTests =
                 let threats = threatsOf child (Atlas.ofView child)
                 let brief = Threats.briefOf threats "W1N4"
 
+                // Moved by #654: it asked the guard row; the cheapest body
+                // that ends a one-MOVE melee is a ranger, out of its swing.
                 Expect.equal
                     (brief.Asks |> List.map (fun ask -> ask.Row))
-                    [ CastRow.Fighter BodyTemplate.Melee ]
-                    "and her chase asks her guard row for the body that wins it"
+                    [ CastRow.Fighter BodyTemplate.Ranged ]
+                    "and her chase asks her row for the cheapest body that wins it"
 
                 Expect.isTrue (Threats.wants threats (Guard "W1N4") >= 1) "at least one"
             }
@@ -1267,12 +1269,24 @@ let childOutpostTests =
                     Answer.Win
                     "the premise: alone, the neighbour prices its own row's cast a Win"
 
-                Expect.equal (Facts.answer child "W1N3") Answer.Lose "and the child hers a Lose"
+                // Moved by #654's home exception (`Facts.fighterCast`): the child's 850
+                // bank buys one guard block, and a pair of them, which the
+                // slow 7M 13RA harasser cannot keep off, trades it down at
+                // home (it was a Lose: no melee pair was priced).
+                Expect.equal
+                    (Facts.answer child "W1N3")
+                    Answer.Win
+                    "and the child hers a Win, by its own melee pair"
 
                 Expect.equal
                     (Facts.answer (judgedBeside neighbour child) "W1N3")
-                    Answer.Lose
+                    Answer.Win
                     "the one verdict is the home's own colony's"
+
+                Expect.equal
+                    (Facts.verdictOf (judgedBeside neighbour child) "W1N3").Own
+                    (Set.singleton "W1N3")
+                    "the child's, not the neighbour's"
             }
 
             // A home is quiet for a lend while no hostile can reach striking

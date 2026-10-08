@@ -676,8 +676,12 @@ let kiteTests =
                             }
                     }
 
-                let judged hostile partners =
-                    let colony = declaredRaid [ hostile ] |> withGuards ((lamed, from) :: partners)
+                let judgedAt capacity hostile partners =
+                    let colony =
+                        { declaredRaid [ hostile ] with
+                            Bank = bank capacity capacity
+                        }
+                        |> withGuards ((lamed, from) :: partners)
 
                     let atlas = Atlas.ofView colony
                     let threats = threatsOf colony atlas
@@ -687,13 +691,21 @@ let kiteTests =
                     Threats.standsOffNothing colony threats atlas lamed None,
                     Resolver.closes colony threats assigned lamed
 
+                // The haul home's 700 bank.
+                let judged = judgedAt 700
+
                 let verdict, nothing, closes = judged (runnerAt at) []
                 Expect.equal verdict Answer.Lose "the premise: nothing of ours wins the runner"
                 Expect.isTrue nothing "the premise: the runner is the quicker on plain"
                 Expect.isFalse closes "under a Lose it keeps its kite walk"
 
+                // A bank that buys no fighter, so the room's answer is the
+                // bodies standing in it: since #654 the 700 buys a pair of
+                // rangers that trades the 2A melee down (a Win; the pair was
+                // weighed only where no swing caught a raider).
                 let verdict, nothing, closes =
-                    judged
+                    judgedAt
+                        300
                         (hostileIn "W1N2" at (List.replicate 2 Move @ List.replicate 2 Attack))
                         [
                             creepWith "r-2" 0 0 (bodyFor Bodies.rangerPattern 1950),
@@ -804,6 +816,86 @@ let kiteTests =
                 Expect.isFalse
                     (kitedDownFrom (withOpenField swamp) open' { X = 25; Y = 28 })
                     "its back to swamp the melee crosses quicker: not kited"
+            }
+
+            // #654: Trepidimous' 18M 17A (MOVE first, 3,500 hits, no heal) in
+            // an outpost of an 1,800 bank. The cast is the cheapest set that
+            // ends it by the exchange, and every body of it is one the gate
+            // seats; in open ground the ranger kites it down, its back to a
+            // dead end it does not.
+            test
+                "an equal-pace melee is cast for by the cheapest set that ends it, which fits and kites it" {
+                let trep (at: Pos) =
+                    { hostileIn "W1N2" at (List.replicate 18 Move @ List.replicate 17 Attack) with
+                        Owner = "Trepidimous"
+                    }
+
+                let castIn ground (at: Pos) =
+                    let colony =
+                        { declaredRaid [ trep at ] with
+                            Bank = bank 1800 1800
+                        }
+                        |> ground
+
+                    colony, Facts.fighterCast colony "W1N2" bodyTemplates Engine.guardCap
+
+                let colony, cast = castIn (withOpenField []) { X = 25; Y = 25 }
+
+                // One block's 20 a tick lames the MOVE-first body before the
+                // field's run-off runs out (#625), and kites it down at the
+                // least spent: no set trades it, so the verdict is the Kite
+                // (`rowAnswer`), answered by the rangers standing by.
+                Expect.equal
+                    (cast.Template, cast.Bodies, cast.Blocks, cast.Ends, cast.Trades)
+                    (BodyTemplate.Ranged, 1, 1, true, false)
+                    "in open ground the cheapest set is one one-block ranger, which kites it down"
+
+                let bodies =
+                    [
+                        for i in 1 .. cast.Bodies ->
+                            creepWith
+                                $"ranger-{i}"
+                                0
+                                0
+                                (bodyFor
+                                    (patternOfTemplate cast.Template)
+                                    (cast.Blocks * bodyCost (patternOfTemplate cast.Template).Block))
+                    ]
+
+                for body in bodies do
+                    let beside =
+                        bodies
+                        |> List.filter (fun other -> other.Name <> body.Name)
+                        |> List.map (fun other -> other, true, Some 0)
+
+                    Expect.isTrue
+                        (Facts.fits
+                            colony
+                            Stance.Standoff
+                            "W1N2"
+                            colony.Tuning.ReachHorizon
+                            false
+                            body
+                            beside)
+                        $"{body.Name} is a body the gate seats"
+
+                let kitedFrom ground (at: Pos) (from: Pos) =
+                    { kitedBy [ trep at ] (bodies |> List.map (fun body -> body, from)) with
+                        Bank = bank 1800 1800
+                    }
+                    |> ground
+                    |> kiteVerdict
+
+                Expect.isTrue
+                    (kitedFrom (withOpenField []) { X = 25; Y = 25 } { X = 25; Y = 28 })
+                    "and standing three off it, it kites it down"
+
+                // Its back to the dead end's wall, no set the bank buys ends
+                // it: the ranger has no ground to be lamed on, and the melee
+                // holding its post loses it.
+                let _, walled = castIn withDeadEnd { X = 31; Y = 44 }
+
+                Expect.isFalse walled.Ends "with no run-off ground nothing the bank buys ends it"
             }
 
             // #625: the lame window is read off the live body head first, as
@@ -1953,15 +2045,18 @@ let shutChaseTests =
 
                 let brief = Threats.briefOf (threatsOf shut (Atlas.ofView shut)) "W1N2"
 
+                // Moved by #654: the chase asked the guard row; the cheapest
+                // body that ends a one-MOVE melee is a ranger, which shoots it
+                // from out of its swing.
                 Expect.equal
                     (brief.Asks |> List.map (fun ask -> ask.Row))
-                    [ CastRow.Fighter BodyTemplate.Melee ]
-                    "the stand-down withholds no cast: the chase asks the guard row"
+                    [ CastRow.Fighter BodyTemplate.Ranged ]
+                    "the stand-down withholds no cast: the chase asks its row's cheapest body"
 
                 Expect.exists
                     (spawnIntents (decide shut Map.empty Set.empty None).Intents)
-                    (fun (_, _, name) -> name.StartsWith "guard-")
-                    "and the colony casts the guard"
+                    (fun (_, _, name) -> name.StartsWith "ranger-")
+                    "and the colony casts it"
             }
 
             test
@@ -1982,9 +2077,11 @@ let shutChaseTests =
 
                 let cooldown = shut.Tuning.RecastCooldown
 
+                // The row's cast is a ranger since #654: the cheapest body that
+                // ends a one-MOVE melee shoots it from out of its swing.
                 let guardsCast colony =
                     spawnIntents (decide colony Map.empty Set.empty None).Intents
-                    |> List.filter (fun (_, _, name) -> name.StartsWith "guard-")
+                    |> List.filter (fun (_, _, name) -> name.StartsWith "ranger-")
                     |> List.length
 
                 Expect.equal (Facts.answer shut "W1N2") Answer.Win "the premise: the row wins it"

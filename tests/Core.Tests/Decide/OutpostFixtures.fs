@@ -414,7 +414,11 @@ let internal declaredRaid hostiles =
     let colony = raidedOutpost hostiles
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
 
+    // A bank that buys one guard block (750, #654): the cast is chosen
+    // among the bodies the bank buys, and at the haul home's 700 the guard
+    // is none of them.
     { colony with
+        Bank = bank 800 800
         Spatial =
             { colony.Spatial with
                 TargetKinds = Map.add "ctl-out" Controller colony.Spatial.TargetKinds

@@ -2227,13 +2227,14 @@ let arenaBorderTests =
 
                 let _, threats, brief = briefIn "W17S25"
 
+                // Moved by #654: the split asked two guards and two rangers;
+                // the one cast that kills the most of the four, cheapest, is
+                // two rangers, which reach the haulers a swing never catches.
+                // The guard standing there keeps its seat (`trespassSplit`).
                 Expect.equal
                     (brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted threats))
-                    [
-                        CastRow.Fighter BodyTemplate.Melee, Engine.guardCap
-                        CastRow.Fighter BodyTemplate.Ranged, Engine.guardCap
-                    ]
-                    "its guards answer all four until a ranger holds the kill, and the two haulers ask the ranger row"
+                    [ CastRow.Fighter BodyTemplate.Ranged, Engine.guardCap ]
+                    "its one cast is the rangers that reach all four"
 
                 let mother, threats, brief = briefIn "W15S28"
 

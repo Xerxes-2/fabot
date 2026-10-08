@@ -1195,6 +1195,14 @@ let quotaOf snapshot =
 let rowOf name colony =
     (decideOn colony).Quotas.Rows |> List.tryFind (fun row -> row.Row = name)
 
+/// This tick's fighter casts (#654): each ask's template, bodies and blocks.
+let fighterCastsOf colony =
+    (decideOn colony).Quotas.Casts
+    |> List.choose (fun cast ->
+        match cast.Ask.Row with
+        | CastRow.Fighter template -> Some(template, cast.Ask.Wanted, cast.Ask.Blocks)
+        | _ -> None)
+
 let guardQuotaOf colony =
     rowOf "guard" colony |> Option.map (fun row -> row.Quota)
 

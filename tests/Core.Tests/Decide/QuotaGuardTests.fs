@@ -367,7 +367,10 @@ let guardRowTests =
                 // And vision overrules the memory in both directions, which is
                 // the half that keeps this from being a stand-down: the same
                 // room latched **and** seen answers off this tick's raid, so a
-                // two-healer raid still buys its second guard.
+                // two-healer raid is priced off the raid. Moved by #654: it
+                // bought a second two-block guard (one block loses, so the
+                // cap); the cheapest set that ends it is one body of the
+                // blocks that out-deal the heal.
                 let latched = Set.singleton "W1N2"
 
                 let blindAndLatched =
@@ -382,12 +385,12 @@ let guardRowTests =
                     "a raid nobody can see is priced at one body and never at the cap"
 
                 Expect.equal
-                    (guardQuotaOf
+                    (fighterCastsOf
                         { guardColony (raidOf 2) [] with
                             ThreatenedOutposts = latched
                         })
-                    (Some 2)
-                    "and the tick vision answers, the room is priced off the raid: two healers, two guards"
+                    [ BodyTemplate.Melee, 1, 2 ]
+                    "and the tick vision answers, the room is priced off the raid: two healers, one guard of two blocks"
 
                 Expect.equal
                     (guardQuotaOf
@@ -408,6 +411,48 @@ let guardRowTests =
                     (guardQuotaOf (guardColony [ hostileIn "W1N2" raidTile smallHealer ] []))
                     (Some 0)
                     "a lone healer is a hostile the raid log records and no threat at all"
+            }
+
+            // The fighter row's home exception (#654 review): a home's defence
+            // keeps its row's melee pair until pair coordination is priced.
+            // Two 6A6M raiders in a home with no tower and no rampart line:
+            // the biggest guard the 1,800 bank buys loses them alone, and
+            // two of them win. The pair is cast and the Guard is pooled;
+            // priced as an outpost (one melee body at most) the cast would
+            // end nothing and the home would drop its own Guard.
+            test "a home raid only a melee pair beats casts the pair, and pools the home's Guard" {
+                let colony = guardColony [] []
+
+                let raided =
+                    { colony with
+                        Hostiles =
+                            [
+                                for i in 1..2 ->
+                                    { hostileIn
+                                          "W1N1"
+                                          { X = 8; Y = 9 }
+                                          (List.replicate 6 Attack @ List.replicate 6 Move) with
+                                        Id = $"m-{i}"
+                                    }
+                            ]
+                        Spatial =
+                            { colony.Spatial with
+                                RoomName = Some "W1N1"
+                            }
+                    }
+
+                Expect.isFalse
+                    (Facts.blocksBeat guardPattern Stance.Standoff raided "W1N1" 2)
+                    "the premise: the two-block guard the bank buys loses alone"
+
+                Expect.equal
+                    (fighterCastsOf raided)
+                    [ BodyTemplate.Melee, 2, 2 ]
+                    "the home casts the pair of two-block guards"
+
+                Expect.isTrue
+                    (Map.containsKey (Guard "W1N1") (threatsOf raided (Atlas.ofView raided)).Briefs)
+                    "and pools its own Guard for them"
             }
 
             test "a raid at home its towers win hires no guard, and one they lose hires one" {
@@ -538,14 +583,16 @@ let guardRowTests =
 
                 Expect.equal (guardQuotaOf (breached 0)) (Some 0) "alone, the tower kills it"
 
+                // A home keeps its row's two bodies (#654's home
+                // exception), each of the blocks that win.
                 Expect.equal
-                    (guardQuotaOf (breached 2))
-                    (Some 2)
-                    "168 healed a tick against the tower's 150: the guard row answers it, sized to outpace the heal (two blocks' 180)"
+                    (fighterCastsOf (breached 2))
+                    [ BodyTemplate.Melee, 2, 2 ]
+                    "168 healed a tick against the tower's 150: the guard row answers it, sized to outpace the heal (two blocks' 180), two of them at home"
 
                 Expect.equal
-                    (guardQuotaOf (breachedBy "raider" true 2))
-                    (Some 2)
+                    (fighterCastsOf (breachedBy "raider" true 2))
+                    [ BodyTemplate.Melee, 2, 2 ]
                     "a neutral's caught dismantling: the same"
 
                 Expect.equal
@@ -570,9 +617,9 @@ let guardRowTests =
                     "90 and 90 struck back, 120 net, kill it in 9 ticks; its 40 and 30 back need 15"
 
                 Expect.equal
-                    (guardQuotaOf (raid 2))
-                    (Some 2)
-                    "120 healing leaves one block 60 net, 17 ticks, and without self-heal it dies in 15"
+                    (fighterCastsOf (raid 2))
+                    [ BodyTemplate.Melee, 1, 2 ]
+                    "120 healing leaves one block 60 net, 17 ticks, and without self-heal it dies in 15: two blocks (#654: two bodies)"
             }
 
             // #624, `_damage.js`: every swing at a creep carrying ATTACK is
@@ -692,7 +739,7 @@ let guardRowTests =
                     "behind 30,000 of rampart its 40 a tick outlasts the block, which takes nothing back off it"
             }
 
-            test "two attackers and no healer at all buy the second guard" {
+            test "two attackers and no healer at all buy the set that ends both" {
                 // #280, on the raid that found it: W13S29 took a `smallMelee`
                 // and a three-RANGED invader together — seventy a tick between
                 // them and nothing healing either. The rule this amends read
@@ -709,10 +756,13 @@ let guardRowTests =
                         Id = "ranged-1"
                     }
 
+                // Moved by #654: one block loses, and it bought two; the
+                // shooter keeps off a swing, so the cheapest set that ends
+                // the pair is two two-block rangers.
                 Expect.equal
-                    (guardQuotaOf (guardColony (raidOf 0 @ [ ranged ]) []))
-                    (Some 2)
-                    "two armed bodies out-live one block, so the room buys the second"
+                    (fighterCastsOf (guardColony (raidOf 0 @ [ ranged ]) []))
+                    [ BodyTemplate.Ranged, 2, 2 ]
+                    "two armed bodies out-live one block, so the room buys the set that ends both"
 
                 Expect.equal
                     (guardQuotaOf (guardColony (raidOf 0) []))
@@ -736,19 +786,21 @@ let guardRowTests =
                 let standing2 = standing 2
 
                 Expect.equal
-                    (guardQuotaOf (standing2 []))
-                    (Some 2)
-                    "the tick the raid is seen, before anything of ours has arrived"
+                    (fighterCastsOf (standing2 []))
+                    [ BodyTemplate.Melee, 1, 2 ]
+                    "the tick the raid is seen, before anything of ours has arrived: one two-block body (#654: two two-block bodies)"
 
                 Expect.equal
-                    (guardQuotaOf (standing2 [ guard "g-1", outpostSeat ]))
-                    (Some 2)
-                    "the tick the first guard stands, which used to be the only tick this read 2"
+                    (fighterCastsOf (standing2 [ guard "g-1", outpostSeat ]))
+                    (fighterCastsOf (standing2 []))
+                    "the tick the first guard stands, the same"
 
                 Expect.equal
-                    (guardQuotaOf (standing2 [ guard "g-1", outpostSeat; guard "g-2", secondSeat ]))
-                    (Some 2)
-                    "and the tick the second stands beside it, which used to retract to 1"
+                    (fighterCastsOf (
+                        standing2 [ guard "g-1", outpostSeat; guard "g-2", secondSeat ]
+                    ))
+                    (fighterCastsOf (standing2 []))
+                    "and the tick the second stands beside it, the same"
 
                 Expect.equal
                     (guardQuotaOf (standing 0 [ guard "g-1", outpostSeat ]))
@@ -762,27 +814,35 @@ let guardRowTests =
 
                 Expect.equal
                     (guardCasts (decideOn (standing2 [])).Intents |> List.length)
-                    2
+                    1
                     "so the escalation is bought on the tick the raid is seen, an oven earlier than a rule reading our own bodies could"
             }
 
-            test "the count is capped at two per outpost" {
-                // The bound: two guards die, 1,500 energy is spent, and the outpost
-                // falls back to the stand-down rather than feeding an unbounded stream
-                // of bodies into a raid we are losing. Four healers is 240 against one
-                // block's 90 and still asks for two.
+            test "the count is one priced body however many heal" {
+                // The bound: at most `Engine.guardCap` bodies, so the outpost falls
+                // back to the stand-down rather than feeding an unbounded stream of
+                // bodies into a raid we are losing. Moved by #654: two and four
+                // healers each bought the capped two two-block guards; the cheapest
+                // set that ends either is one two-block guard.
                 let raid healers = guardColony (raidOf healers) []
 
-                Expect.equal
-                    (guardQuotaOf (raid 2))
-                    (guardQuotaOf (raid 4))
-                    "twice the healing asks for the same two bodies"
+                Expect.equal (fighterCastsOf (raid 2)) [ BodyTemplate.Melee, 1, 2 ] "two healers"
 
-                Expect.equal (guardQuotaOf (raid 4)) (Some 2) "and two is the cap"
+                // Four healers' 240 a tick outheals a two-block guard's 180
+                // swing alone; the exchange still ends the raid because the
+                // healers strike nothing: it is over when the smallMelee, its
+                // one armed body, dies, and the melee's own swing at the
+                // guard is struck back by the guard's six ATTACK (`_damage.js`,
+                // #624), 180 + 180 a tick past the 240. One block's 90 + 90
+                // does not, so it is the two-block body, the healers left.
+                Expect.equal (fighterCastsOf (raid 4)) [ BodyTemplate.Melee, 1, 2 ] "and four"
+
+                Expect.isFalse
+                    (Facts.blocksBeat guardPattern Stance.Standoff (raid 4) "W1N2" 1)
+                    "one block's swing and hit back do not pass the four healers"
             }
 
-            test
-                "the damage the raid is priced against is one block, so the bank does not move the count" {
+            test "the cast's size reads the raid, and its count the bodies the bank buys" {
                 // The damage term is one `guardPattern` block, a constant of the row,
                 // and not the whole body this bank would cast (#272). The whole body
                 // grows with the bank while the row's `Living` counts the body that is
@@ -795,11 +855,20 @@ let guardRowTests =
                 let raid capacity =
                     guardColony (raidOf 2) [ guard "g-1", outpostSeat ] |> banked capacity
 
-                for capacity in [ 800; 1300; 1800; 2300 ] do
+                // Moved by #654: the cast is priced among the bodies the bank
+                // buys, so the count is two only where it buys no two-block
+                // body; the size reads the raid alone.
+                for capacity in [ 800; 1300 ] do
                     Expect.equal
-                        (guardQuotaOf (raid capacity))
-                        (Some 2)
-                        $"120 healed against one block's 90 hires the second at a {capacity} bank too"
+                        (fighterCastsOf (raid capacity))
+                        [ BodyTemplate.Melee, 2, 2 ]
+                        $"a {capacity} bank buys no two-block body: the two that hold together"
+
+                for capacity in [ 1800; 2300 ] do
+                    Expect.equal
+                        (fighterCastsOf (raid capacity))
+                        [ BodyTemplate.Melee, 1, 2 ]
+                        $"120 healed against one block's 90 asks one two-block body at a {capacity} bank (#654: it asked two)"
             }
 
             test "the count is summed over the declared outposts" {
@@ -870,7 +939,7 @@ let guardRowTests =
                     "two blocks, the healed room's, in every cast"
             }
 
-            test "the healing the second guard is priced against is the raided room's own" {
+            test "the healing the guard is sized against is the raided room's own" {
                 // The conjunct that keeps the count room-local: the healing term
                 // filters the raid by the room the threat stands in, and without it
                 // two healers forty tiles away in another outpost would price a fight
@@ -896,9 +965,9 @@ let guardRowTests =
                     { colony with Hostiles = raid }
 
                 Expect.equal
-                    (guardQuotaOf (twoOutposts "W1N2" raidTile))
-                    (Some 2)
-                    "the premise: 120 healed in the raided room against the 90 one block deals hires the second"
+                    (fighterCastsOf (twoOutposts "W1N2" raidTile))
+                    [ BodyTemplate.Melee, 1, 2 ]
+                    "the premise: 120 healed in the raided room against the 90 one block deals asks two blocks (#654: it asked a second body)"
 
                 Expect.equal
                     (guardQuotaOf (twoOutposts "W2N2" westSeat))
@@ -968,8 +1037,8 @@ let guardRowTests =
 
                 Expect.equal
                     (castsAgainst (raidOf 2))
-                    [ bodyFor guardPattern 1500; bodyFor guardPattern 1500 ]
-                    "two healers put one block under the healing, so the two guards the count buys are two blocks each"
+                    [ bodyFor guardPattern 1500 ]
+                    "two healers put one block under the healing, so the one guard the price buys is two blocks (#654)"
 
                 let blindAndLatched =
                     { guardColony [] [] with
@@ -1308,6 +1377,87 @@ let guardRowTests =
                 Expect.isEmpty
                     unseated
                     "no raid the row casts two rangers for refuses a fresh one beside the other"
+            }
+
+            // #654, the #647 invariant for the chooser: the row and the gate
+            // price alike, so every body of the cast `Facts.fighterCast`
+            // picks is one `Facts.fits` seats, fresh, beside the rest of its
+            // set, over a scan of raid shapes and banks.
+            test "every body of the chooser's cast is one the gate seats beside the rest of its set" {
+                let unseated =
+                    [
+                        for r in [ 0; 2; 5; 9 ] do
+                            for a in [ 0; 3; 6 ] do
+                                for h in [ 0; 2; 5 ] do
+                                    for capacity in [ 800; 1800; 5600 ] do
+                                        if r + a > 0 then
+                                            let body =
+                                                List.replicate (r + a + h) Move
+                                                @ List.replicate a Attack
+                                                @ List.replicate r RangedAttack
+                                                @ List.replicate h Heal
+
+                                            let colony =
+                                                guardColony [ hostileIn "W1N2" raidTile body ] []
+                                                |> banked capacity
+
+                                            let cast =
+                                                Facts.fighterCast
+                                                    colony
+                                                    "W1N2"
+                                                    bodyTemplates
+                                                    Engine.guardCap
+
+                                            if cast.Ends then
+                                                let pattern = patternOfTemplate cast.Template
+
+                                                let bodies =
+                                                    [
+                                                        for i in 1 .. cast.Bodies ->
+                                                            creepWith
+                                                                $"cast-{i}"
+                                                                0
+                                                                0
+                                                                (bodyFor
+                                                                    pattern
+                                                                    (cast.Blocks
+                                                                     * bodyCost pattern.Block))
+                                                    ]
+
+                                                let stance =
+                                                    if cast.Held then
+                                                        Stance.Hold
+                                                    else
+                                                        Stance.Standoff
+
+                                                for fresh in bodies do
+                                                    let beside =
+                                                        bodies
+                                                        |> List.filter (fun other ->
+                                                            other.Name <> fresh.Name)
+                                                        |> List.map (fun other ->
+                                                            other, true, Some 0)
+
+                                                    if
+                                                        not (
+                                                            Facts.fits
+                                                                colony
+                                                                stance
+                                                                "W1N2"
+                                                                colony.Tuning.ReachHorizon
+                                                                false
+                                                                fresh
+                                                                beside
+                                                        )
+                                                    then
+                                                        yield
+                                                            $"%d{r}R%d{a}A%d{h}H@%d{capacity}: %A{cast}"
+                    ]
+
+                Expect.equal
+                    unseated
+                    []
+                    "no body of a cast that ends its raid is refused by the gate"
             }
         ]
 

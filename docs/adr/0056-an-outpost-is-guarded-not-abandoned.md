@@ -1,6 +1,8 @@
 # An outpost is guarded and not abandoned: a melee guard cast on contact, and a stand-down clocked to the invader's own life
 
-> **Status:** amended by 0072, #272, #280, #282, #417, #507, #510, #516, #533
+> **Status:** amended by 0072, #272, #280, #282, #417, #507, #510, #516, #533, 0092
+
+> **Amended by ADR 0092** (#654): the guard count (one, two where one block loses) is superseded outside a home of ours: a fight casts the cheapest set of bodies that ends it, of either template (`Facts.fighterCast`). A home keeps the two.
 
 > **Amended by #533** on 2026-10-05 (live t973,267: a ranger whose Guard went `task-gone` beside an 8-ATTACK melee stood idle and died): decision 3's Fighter exemption from Flee becomes a fight Task's. A fighter holding no fight Task (Guard, Fight, Defend, Assault) fights nothing, so it runs like any body where the hostiles whose Reach covers its tile out-damage its own heal (`outDamaged`: its own heal only, the heal of ours reaching it left out, erring toward running, until the world and movement epics reuse #531's strength reading); one that holds such a Task, or is offered one it passes, keeps or takes the fight, which outranks Flee inside the Safety tier. An idle fighter walking home walks round the Reach.
 

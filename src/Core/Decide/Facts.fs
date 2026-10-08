@@ -1936,6 +1936,54 @@ let internal spawnTickWorth (view: ColonyView) : float =
 
     float income / float (max 1 (List.length view.Spawns))
 
+/// The spawn ticks one body of a template's `blocks` takes (#654).
+let internal castSpawnTicks (template: BodyTemplate) (blocks: int) : int =
+    blocks
+    * List.length (patternOfTemplate template).Block
+    * Engine.spawnTicksPerPart
+
+/// What one body of a template's `blocks` costs a colony (#652, #654): its
+/// energy, and its spawn time at what a tick of the colony's spawn is worth
+/// (`spawnTickWorth`). The one price of a cast body, the chooser's
+/// (`fighterCast`) and the Caster's (`castBodiesPaid`) alike.
+let internal castCost (view: ColonyView) (template: BodyTemplate) (blocks: int) : float =
+    float (blocks * bodyCost (patternOfTemplate template).Block)
+    + float (castSpawnTicks template blocks) * spawnTickWorth view
+
+/// A colony's view a kill's cast is priced in (#652): the world's vision of
+/// the room and the rooms beside it laid in, read as though no prey were
+/// walking off — a cast lands long after one step, and an ask that flipped
+/// on each step would cast and cancel.
+let private killPricing (view: ColonyView) (room: string) : ColonyView =
+    { ColonyView.lookingInto (room :: RoomName.adjacent room) view with
+        Stepped = Map.empty
+        SteppedBack = Map.empty
+    }
+
+/// The kills a team of ours lands in a room (#652, #654), landing in
+/// `landing` ticks: each hostile's value in `values` times the odds its
+/// first body catches it (`catchOdds`), killed by the team together at its
+/// standoff (`killTicksOf`), nothing of one that dies of age first.
+let private killsLanded
+    (priced: ColonyView)
+    (room: string)
+    (team: Fighter list)
+    (landing: int)
+    (values: Map<string, float>)
+    : float =
+    match team with
+    | [] -> 0.0
+    | body :: _ ->
+        let healOn = healReachingWithin priced room priced.Tuning.ReachHorizon
+
+        priced.Hostiles
+        |> List.filter (fun hostile -> hostile.Pos.Room = room)
+        |> List.sumBy (fun hostile ->
+            match Map.tryFind hostile.Id values, killTicksOf priced healOn team hostile with
+            | Some value, Some kill when hostile.TicksToLive > landing + kill ->
+                catchOdds priced body None landing kill hostile * value
+            | _ -> 0.0)
+
 /// How many bodies of a row cast for a trespass's kill pay for themselves
 /// (#652): the most `k` whose cost the kills they land cover. The kills:
 /// each prey's kill value (`prey`, priced once by the colony asking, so
@@ -1958,41 +2006,13 @@ let internal castBodiesPaid
     (prey: (string * float) list)
     : int =
     match row with
-    | CastRow.Fighter BodyTemplate.Melee
-    | CastRow.Fighter BodyTemplate.Ranged ->
-        let priced =
-            { ColonyView.lookingInto (room :: RoomName.adjacent room) view with
-                Stepped = Map.empty
-                SteppedBack = Map.empty
-            }
-
-        let pattern =
-            if row = CastRow.Fighter BodyTemplate.Ranged then
-                rangerPattern
-            else
-                guardPattern
-
-        let body = blocksFighter pattern blocks
-        let healOn = healReachingWithin priced room priced.Tuning.ReachHorizon
-        let values = Map.ofList prey
+    | CastRow.Fighter template ->
+        let body = blocksFighter (patternOfTemplate template) blocks
 
         let landed =
-            priced.Hostiles
-            |> List.filter (fun hostile -> hostile.Pos.Room = room)
-            |> List.sumBy (fun hostile ->
-                match
-                    Map.tryFind hostile.Id values, killTicksOf priced healOn [ body ] hostile
-                with
-                | Some value, Some kill when hostile.TicksToLive > landing + kill ->
-                    catchOdds priced body None landing kill hostile * value
-                | _ -> 0.0)
+            killsLanded (killPricing view room) room [ body ] landing (Map.ofList prey)
 
-        let spawnTicks = blocks * List.length pattern.Block * Engine.spawnTicksPerPart
-
-        let cost =
-            float (blocks * bodyCost pattern.Block) + float spawnTicks * spawnTickWorth view
-
-        int (landed / cost)
+        int (landed / castCost view template blocks)
     | CastRow.Defender
     | CastRow.Squad _ -> System.Int32.MaxValue
 
@@ -3113,8 +3133,8 @@ let private bodiesOutcome
 /// What the stand-down weighs a raid against. One body and never the row's two
 /// summed: `blocksBeat` grows about as the square of the blocks, and a
 /// raid focuses one body at a time while the second may arrive late, so the
-/// sum would call a fight won that each body loses alone — and each body is
-/// sized to win alone (`guardBlocksFor`).
+/// sum would call a fight won that each body loses alone — and a melee body
+/// is sized to win alone (`fighterCast`).
 let guardBlocksReach (view: ColonyView) : int =
     min guardBlocksMost (view.Bank.Capacity / bodyCost guardPattern.Block)
 
@@ -3226,6 +3246,473 @@ let private walkToRaid (view: ColonyView) (raid: HostileInfo list) (creep: Creep
         match raid |> List.choose (fun h -> RoomName.tileRange at h.Pos) with
         | [] -> None
         | tiles -> Some(max 0 (List.min tiles - reach)))
+
+/// One fight's cast as its price chose it (`fighterCast`, #654): `Bodies`
+/// bodies of `Blocks` blocks of one template.
+type FighterCast =
+    {
+        Template: BodyTemplate
+        Blocks: int
+        Bodies: int
+        /// Whether the set ends the fight: the raid by the exchange, a kill
+        /// by every trespasser it kills.
+        Ends: bool
+        /// Whether some set priced trades the raid down rather than kiting
+        /// it (`Trades`): the row's own win (`rowAnswer`).
+        Trades: bool
+        /// Whether the melee body is sized holding its post (`Stance.Hold`,
+        /// #531): the stance the gate prices it at, or no set ending the raid
+        /// at the standoff.
+        Held: bool
+    }
+
+/// The block counts of a template one body of which the bank buys
+/// (`castable`): one up to the most whole blocks under the part cap and the
+/// capacity; none where it buys no block.
+let private blocksBought (view: ColonyView) (template: BodyTemplate) : int list =
+    let pattern = patternOfTemplate template
+
+    if castable view pattern then
+        [
+            1 .. min
+                (Engine.maxBodyParts / List.length pattern.Block)
+                (view.Bank.Capacity / bodyCost pattern.Block)
+        ]
+    else
+        []
+
+/// The most whole blocks of a template one body carries.
+let private blocksMostOf (template: BodyTemplate) : int =
+    Engine.maxBodyParts / List.length (patternOfTemplate template).Block
+
+/// What a tick a raid stands in a room costs us (#654): the yield of our
+/// sources there at the rate the room is held at (`heldRateOf`), the
+/// economy the raid shuts while it stands; nothing where none of ours is.
+let private roomTickWorth (view: ColonyView) (room: string) : int =
+    let rate =
+        Map.tryFind room view.RoomControl
+        |> Option.map heldRateOf
+        |> Option.defaultValue Engine.neutralOutputPerTick
+
+    // A room we mine, or an outpost of ours a raid has shut or threatens.
+    let ours =
+        minesRoom view room
+        || view.RaidedOutposts.Contains room
+        || view.ThreatenedOutposts.Contains room
+
+    let sources =
+        if ours then
+            strikeTilesOf view room
+            |> Option.map (fun tiles -> List.length tiles.Sources)
+            |> Option.defaultValue 0
+        else
+            0
+
+    sources * rate
+
+/// The share of one body's energy a fight that holds it `ticks` spends of
+/// its life (`Engine.creepLifetime`, #654): a body that ends a fight
+/// sooner is free for the next one sooner.
+let private lifeSpent (template: BodyTemplate) (blocks: int) (ticks: int) =
+    float (blocks * bodyCost (patternOfTemplate template).Block)
+    * float (min ticks Engine.creepLifetime)
+    / float Engine.creepLifetime
+
+/// What `n` bodies of a template's `blocks` yet to be cast cost for a fight
+/// that holds them `ticks` from their birth (#654): the life it spends of
+/// each (`lifeSpent`), and their spawn time at what a tick of the colony's
+/// spawn is worth (`spawnTickWorth`).
+let private castSpent
+    (view: ColonyView)
+    (template: BodyTemplate)
+    (blocks: int)
+    (n: int)
+    (ticks: int)
+    =
+    float n
+    * (lifeSpent template blocks ticks
+       + float (castSpawnTicks template blocks) * spawnTickWorth view)
+
+/// The raid a fight's cast is priced against (#654): the raiders in the
+/// room, and in the home every body that endangers it (#429: a dismantler
+/// the exchange prices beside its healers).
+let private fightRaid (view: ColonyView) (room: string) : HostileInfo list =
+    raidersIn view room
+    @ (if room = SpatialInfo.homeName view.Spatial then
+           view.Hostiles
+           |> List.filter (fun h -> h.Pos.Room = room && endangersOurs view h)
+       else
+           [])
+    |> List.distinctBy _.Id
+
+/// The sets of bodies that end the fight in a room (#654), cheapest first,
+/// the last the answer where none does (`fighterCast` takes the first the
+/// gate seats): of the `templates` the colony's bank buys at its capacity,
+/// each set at most `bodies` bodies of one template and one block count.
+/// Priced as their
+/// spawn time and the share of their energy their walk and kill spend of
+/// their lives (`castSpent`), and every tick from the cast to the kill at
+/// what the fight costs a tick.
+///
+/// Against a raid: the sets whose exchange ends it, trading or kiting, at
+/// the stance the gate prices each body at — a melee body holding its post
+/// where a raider keeps off its swing, every other at the standoff
+/// (`blocksOutcome` alone, `bodiesOutcome` for more, the raid
+/// focusing one at a time), each priced its spent life, and its spawn time,
+/// the wait for its last body (its spawns cast a round at a time), its walk
+/// and kill (`killTicks`, a lifetime where it never kills) at the room's
+/// yield a tick (`roomTickWorth`); by least price, then the fewest parts,
+/// the fewest bodies, the template's order. Last, the melee body holding
+/// its post (`Stance.Hold`, #531): one body of the fewest blocks that hold
+/// it, ending it where the bank buys that body, `bodies` of them where the
+/// bank buys only smaller ones; else the most, `bodies` of them. A home of
+/// ours keeps its row's melee pair (#654's home exception): pairs of melee bodies are
+/// priced there, a melee body of more than one block is cast twice, and the
+/// last answer is the pair of the biggest body the bank buys where that
+/// pair ends the raid.
+///
+/// Against a kill, no raider standing there (nor, in the home, a body that
+/// endangers it): the sets that kill the most of
+/// its trespassers — a melee body those its swing catches
+/// (`strikesAtStandoff`), a ranged one any it strikes (`canStrike`), each
+/// killed (`killTicksOf`) before it ages out, landing after the body's
+/// spawn time and the walk —, then the most the kills land
+/// (`killsLanded`, each trespasser's `killValue`) less the work each does
+/// until its kill lands (`harmRate`) and the set's spent life over the walk
+/// and every kill in turn, then as a raid's: one set. A room where nothing
+/// is to be fought casts one melee block.
+let private castsByPrice
+    (view: ColonyView)
+    (room: string)
+    (templates: BodyTemplate list)
+    (bodies: int)
+    : FighterCast list =
+    let order (template: BodyTemplate) =
+        List.findIndex ((=) template) bodyTemplates
+
+    let quiet =
+        {
+            Template = List.head templates
+            Blocks = 1
+            Bodies = 1
+            Ends = true
+            Trades = true
+            Held = false
+        }
+
+    let parts (template: BodyTemplate) blocks n =
+        n * blocks * List.length (patternOfTemplate template).Block
+
+    let raid = fightRaid view room
+
+    let trespassers =
+        view.Hostiles
+        |> List.filter (fun hostile ->
+            hostile.Pos.Room = room && trespasser view (Set.singleton room) hostile)
+
+    let walk =
+        CastBid.walk view.Tuning (RoomName.hopsBetween (SpatialInfo.homeName view.Spatial) room)
+
+    // The colony's bodies of a template of at least `blocks` blocks already
+    // cast, standing or in an oven, worn or not: a body's blocks are its
+    // weapon and heal parts over one block's, the fewest of any.
+    let castAlready (template: BodyTemplate) (blocks: int) =
+        let pattern = patternOfTemplate template
+
+        let block =
+            partsOf pattern.Block
+            |> Map.filter (fun part _ -> part <> Move && part <> Tough)
+
+        let cut =
+            match template with
+            | BodyTemplate.Melee -> isGuardRowCut
+            | BodyTemplate.Ranged -> isRangerRowCut
+
+        let blocksIn (parts: Map<BodyPart, int>) =
+            block
+            |> Map.fold
+                (fun least part count -> min least (partCount parts part / count))
+                System.Int32.MaxValue
+
+        let standing =
+            ColonyView.bodies view
+            |> List.filter (fun creep -> cut creep.Name creep.Body && blocksIn creep.Body >= blocks)
+
+        let oven =
+            view.Casting
+            |> List.filter (fun cast ->
+                let parts = partsOf cast.Body
+                cut cast.Name parts && blocksIn parts >= blocks)
+
+        List.length standing + List.length oven
+
+    // The ticks the set's last body is spawned after its first: its spawns
+    // cast the bodies a round at a time, and the first waits for the last.
+    let waits (template: BodyTemplate) blocks n =
+        let spawns = max 1 (List.length view.Spawns)
+        castSpawnTicks template blocks * ((n + spawns - 1) / spawns - 1)
+
+    if not (List.isEmpty raid) then
+        let tick = float (roomTickWorth view room)
+        let home = (homesOfOurs view).Contains room
+
+        // The stance a body meets the raid at, as the gate prices it
+        // (`Brief.stanceOf`): a swing holds its post (`Stance.Hold`, #531)
+        // where a raider keeps off it at their standoff; every other body
+        // fights at the standoff.
+        let stanceOf (template: BodyTemplate) =
+            let fighter = blockFighter (patternOfTemplate template)
+
+            if
+                Fighter.glues fighter
+                && view.Hostiles
+                   |> List.exists (fun h ->
+                       h.Pos.Room = room
+                       && HostileInfo.raider view.Hostiles h
+                       && not (strikesAtStandoff view fighter h))
+            then
+                Stance.Hold
+            else
+                Stance.Standoff
+
+        let sets =
+            templates
+            |> List.collect (fun template ->
+                let pattern = patternOfTemplate template
+                let alone = blocksOutcome pattern (stanceOf template) view room
+
+                // More than one body only of a template that outranges a
+                // swing: `bodiesOutcome` is the shooters' pair (#609), and
+                // prices no swing struck back on the bodies the raid does not
+                // focus. A home of ours is the exception (`fighterCast`): its
+                // defence keeps the melee pair until pair coordination is
+                // priced.
+                let most =
+                    if Fighter.outranges (blockFighter pattern) || home then
+                        bodies
+                    else
+                        1
+
+                blocksBought view template
+                |> List.collect (fun blocks ->
+                    [ 1..most ]
+                    |> List.map (fun n ->
+                        let outcome =
+                            if n = 1 then
+                                alone blocks
+                            else
+                                bodiesOutcome pattern view room n blocks
+
+                        template, blocks, n, outcome)))
+
+        let trades = sets |> List.exists (fun (_, _, _, outcome) -> outcome = Trades)
+
+        let priceOf (template: BodyTemplate, blocks, n, _) =
+            let team = List.replicate n (blocksFighter (patternOfTemplate template) blocks)
+
+            let kill = killTicks view room team |> Option.defaultValue Engine.creepLifetime
+
+            // The bodies of it already standing or in an oven are cast: they
+            // spend only the life the walk and the kill take, and the set is
+            // spawned no tick longer for them.
+            let cast = min n (castAlready template blocks)
+            let fresh = n - cast
+            let wait = if fresh = 0 then 0 else waits template blocks fresh
+            let spawn = if fresh = 0 then 0 else castSpawnTicks template blocks
+
+            castSpent view template blocks fresh (wait + walk + kill)
+            + float cast * lifeSpent template blocks (walk + kill)
+            + float (spawn + wait + walk + kill) * tick,
+            parts template blocks n,
+            n,
+            order template
+
+        // More bodies of a template only where no one body of it ends it:
+        // the bodies of a set land one at a time, and the gate seats one
+        // only where it fits beside those landed (`fits`), so the first of a
+        // pair one body would have ended waits idle on the second; and a
+        // pair priced a hair under one body flips the ask on the raid's
+        // every step, stranding the body already cast.
+        let ending =
+            let ending = sets |> List.filter (fun (_, _, _, outcome) -> won outcome)
+
+            let alone (template: BodyTemplate) =
+                ending |> List.exists (fun (t, _, n, _) -> t = template && n = 1)
+
+            ending |> List.filter (fun (t, _, n, _) -> n = 1 || not (alone t))
+
+        let held =
+            let template =
+                if List.contains BodyTemplate.Melee templates then
+                    BodyTemplate.Melee
+                else
+                    List.head templates
+
+            let most = blocksMostOf template
+
+            let holds =
+                if template = BodyTemplate.Melee then
+                    [ 1..most ] |> List.tryFind (blocksBeat guardPattern Stance.Hold view room)
+                else
+                    None
+
+            // It ends the raid only where the bank buys the body that holds;
+            // where it buys only smaller ones, `bodies` of them hold together
+            // (the gate seats each beside the others); where it buys none,
+            // the one body waits for the bank.
+            let buys = blocksBought view template
+
+            let bought = holds |> Option.exists (fun blocks -> List.contains blocks buys)
+
+            // A home of ours (the home exception): the pair of the biggest body the
+            // bank buys, focused one at a time, as the home's row cast it.
+            let homePair =
+                home
+                && template = BodyTemplate.Melee
+                && not bought
+                && not (List.isEmpty buys)
+                && won (bodiesOutcome guardPattern view room bodies (List.last buys))
+
+            if homePair then
+                {
+                    Template = template
+                    Blocks = List.last buys
+                    Bodies = bodies
+                    Ends = true
+                    Trades = trades
+                    Held = true
+                }
+            else
+                {
+                    Template = template
+                    Blocks = holds |> Option.defaultValue most
+                    Bodies =
+                        if bought || List.isEmpty buys && Option.isSome holds then
+                            1
+                        else
+                            bodies
+                    Ends = bought
+                    Trades = trades
+                    Held = true
+                }
+
+        (ending
+         |> List.sortBy priceOf
+         |> List.map (fun (template, blocks, n, _) ->
+             {
+                 Template = template
+                 Blocks = blocks
+                 // A home of ours keeps the redundancy its row cast (ADR
+                 // 0092): where one block loses, two bodies of the blocks
+                 // that win, as one may land late or fall first.
+                 Bodies =
+                     if home && template = BodyTemplate.Melee && n = 1 && blocks > 1 then
+                         bodies
+                     else
+                         n
+                 Ends = true
+                 Trades = trades
+                 Held = stanceOf template = Stance.Hold
+             }))
+        @ [ held ]
+    elif not (List.isEmpty trespassers) then
+        let priced = killPricing view room
+        let healOn = healReachingWithin priced room priced.Tuning.ReachHorizon
+
+        let values =
+            trespassers |> List.map (fun hostile -> hostile.Id, killValue view hostile)
+
+        let sets =
+            templates
+            |> List.collect (fun template ->
+                let pattern = patternOfTemplate template
+
+                blocksBought view template
+                |> List.collect (fun blocks ->
+                    let body = blocksFighter pattern blocks
+
+                    let strikes (hostile: HostileInfo) =
+                        match template with
+                        | BodyTemplate.Melee -> strikesAtStandoff view body hostile
+                        | BodyTemplate.Ranged ->
+                            canStrike view (blocksOf pattern.Block blocks) hostile
+
+                    [ 1..bodies ]
+                    |> List.map (fun n ->
+                        let team = List.replicate n body
+
+                        let landing =
+                            castSpawnTicks template blocks + waits template blocks n + walk
+
+                        let kills =
+                            trespassers
+                            |> List.choose (fun hostile ->
+                                if strikes hostile then
+                                    killTicksOf priced healOn team hostile
+                                    |> Option.filter (fun kill ->
+                                        hostile.TicksToLive > landing + kill)
+                                    |> Option.map (fun kill -> hostile, kill)
+                                else
+                                    None)
+
+                        let killed =
+                            kills |> List.map (fun (hostile, _) -> hostile.Id) |> Set.ofList
+
+                        let landed =
+                            killsLanded
+                                priced
+                                room
+                                team
+                                landing
+                                (values |> List.filter (fst >> killed.Contains) |> Map.ofList)
+
+                        // Its work goes on until the kill lands: every tick
+                        // from the cast at what it takes a tick (`harmRate`).
+                        let meanwhile =
+                            kills
+                            |> List.sumBy (fun (hostile, kill) ->
+                                harmRate view hostile replacementWalk * float (landing + kill))
+
+                        // The set held the walk and every kill, one after
+                        // another.
+                        let spent =
+                            castSpent
+                                view
+                                template
+                                blocks
+                                n
+                                (waits template blocks n + walk + List.sumBy snd kills)
+
+                        (-killed.Count,
+                         -(landed - meanwhile - spent),
+                         parts template blocks n,
+                         n,
+                         order template),
+                        (template, blocks, n, killed.Count))))
+
+        match sets with
+        | [] ->
+            [
+                { quiet with
+                    Template = List.head templates
+                    Ends = false
+                }
+            ]
+        | _ ->
+            let template, blocks, n, killed = sets |> List.minBy fst |> snd
+
+            [
+                {
+                    Template = template
+                    Blocks = blocks
+                    Bodies = n
+                    Ends = killed > 0
+                    Trades = killed > 0
+                    Held = false
+                }
+            ]
+    else
+        [ quiet ]
 
 /// Whether a body this walk (`walkToRaid`) off its raid is at the fight: a
 /// kiter's dance about its range, three steps either way.
@@ -3571,6 +4058,83 @@ let fits
     List.isEmpty (raidersIn view room)
     || winsBeside view stance room soon holding creep beside
 
+/// The fresh bodies a cast is, at full hits and life, named for its
+/// template's row (`Bodies`' patterns, laid as the row casts them).
+let private castBodies (cast: FighterCast) : CreepInfo list =
+    let pattern = patternOfTemplate cast.Template
+
+    let body =
+        pattern.Block
+        |> List.countBy id
+        |> List.map (fun (part, count) -> part, count * cast.Blocks)
+        |> Map.ofList
+
+    let hits = Engine.partHits * cast.Blocks * List.length pattern.Block
+
+    [
+        for i in 1 .. cast.Bodies ->
+            {
+                Name = $"{pattern.Name}-cast-{i}"
+                TicksToLive = Engine.creepLifetime
+                Fatigue = 0
+                Hits = { Hits = hits; HitsMax = hits }
+                Energy = 0
+                Thorium = 0
+                Minerals = Map.empty
+                FreeCapacity = 0
+                Body = body
+                ShotOff = 0
+                Walking = false
+                DrawnFrom = None
+            }
+    ]
+
+/// ADR-0092
+/// The cheapest set of bodies that ends the fight in a room (#654), of the
+/// `templates` the colony's bank buys at its capacity (`castsByPrice`), at
+/// most `bodies` bodies: the first set ending it whose every body the gate
+/// seats fresh beside the rest of its set (`fits`, at the stance it prices
+/// it at) — the row and the gate price alike (#647) —, else the answer
+/// where none does, which ends nothing.
+let fighterCast
+    (view: ColonyView)
+    (room: string)
+    (templates: BodyTemplate list)
+    (bodies: int)
+    : FighterCast =
+    let casts = castsByPrice view room templates bodies
+
+    let seated (cast: FighterCast) =
+        let stance = if cast.Held then Stance.Hold else Stance.Standoff
+        let set = castBodies cast
+
+        set
+        |> List.forall (fun body ->
+            fits
+                view
+                stance
+                room
+                view.Tuning.ReachHorizon
+                false
+                body
+                (set
+                 |> List.filter (fun other -> other.Name <> body.Name)
+                 |> List.map (fun other -> other, true, Some 0)))
+
+    // The last is cast unseated, as before (#589's held guard): it ends
+    // nothing, but at a home of ours, where the melee pair it may be ends
+    // the raid (the home exception), and the home is fought for whatever the gate.
+    let last = List.last casts
+
+    casts
+    |> List.tryFind (fun cast -> cast.Ends && seated cast)
+    |> Option.defaultValue (
+        if last.Ends && (homesOfOurs view).Contains room then
+            last
+        else
+            { last with Ends = false }
+    )
+
 /// How a body of ours ends the raid standing in a room alone (#596): its
 /// walk there (`walkToRaid`) and then its kill (`killTicks`), the kill
 /// `Engine.creepLifetime` where it never kills the raid alone or ages out
@@ -3808,47 +4372,33 @@ let internal mayBeCalled
 
 /// A room's own row and its answer, the one reading `rangerAnswers` and the
 /// verdict share. A ranger room and one the colony harasses are the ranger's
-/// (#411). Any other is the melee guard's where its biggest body wins at the
-/// standoff (`blocksBeat`); else the ranger's where the biggest ranger, at
-/// least one block, wins; each only where the bank casts its block
-/// (`castable`, #546). Where neither wins alone and the guard strikes no
-/// raider there at its standoff (`strikesAtStandoff`), the ranger's where the
-/// `Engine.guardCap` bodies of its size it then casts win (`bodiesBeat`,
-/// `Threat.rangersWanted`, #609): a 3RA4H kiter out-heals the 4RA2H body an
-/// 1,800 bank buys and loses to two, and it went to the melee guard, which
-/// never catches it (W17S26, t1,012,579). Else still the guard's, which holds
-/// the post (`Stance.Hold`, #531) and wins while it outlasts the raid: no new
-/// stand-down for a raid of quick shooters no ranger wins either. Never a win
-/// in a child's outpost, which no row of this colony casts for (#517). A
-/// row wins here by trading (`Trades`): a raid its rangers only kite down is
-/// the verdict's Kite, answered after the rows (`priceAmong`).
+/// (#411). Any other is the template of its fight's cheapest cast
+/// (`fighterCast`, #654) where that cast ends the raid at the standoff and
+/// some set the bank buys trades it down (`Trades`): a raid the rangers only
+/// kite down is the verdict's Kite, answered after the rows (`priceAmong`).
+/// Else the guard's, which holds the post (`Stance.Hold`, #531) and wins
+/// while it outlasts the raid: no new stand-down for a raid of quick
+/// shooters no ranger wins either. Never a win in a child's outpost, which
+/// no row of this colony casts for (#517).
 let rowAnswer (view: ColonyView) (room: string) : RowAnswer =
     let rangers = max 1 (rangerBlocksReach view)
 
     let rangerWins () =
         blocksOutcome rangerPattern Stance.Standoff view room rangers = Trades
 
-    let swingStrikes () =
-        let guard = blockFighter guardPattern
-        raidersIn view room |> List.exists (strikesAtStandoff view guard)
+    let cast = lazy (fighterCast view room bodyTemplates Engine.guardCap)
 
     if List.contains room view.Borrowed.ChildOutposts then
         { Ranger = false; Wins = false }
     elif Set.contains room (rangerRooms view) || Set.contains room view.HarassCast then
         { Ranger = true; Wins = rangerWins () }
-    elif
-        castable view guardPattern
-        && blocksOutcome guardPattern Stance.Standoff view room (guardBlocksReach view) = Trades
-    then
+    elif List.isEmpty (fightRaid view room) then
         { Ranger = false; Wins = true }
-    elif castable view rangerPattern && rangerWins () then
-        { Ranger = true; Wins = true }
-    elif
-        castable view rangerPattern
-        && not (swingStrikes ())
-        && bodiesOutcome rangerPattern view room Engine.guardCap rangers = Trades
-    then
-        { Ranger = true; Wins = true }
+    elif not cast.Value.Held && cast.Value.Ends && cast.Value.Trades then
+        {
+            Ranger = cast.Value.Template = BodyTemplate.Ranged
+            Wins = true
+        }
     else
         {
             Ranger = false
@@ -3934,38 +4484,25 @@ type private Pricer =
         Holds: string -> bool
     }
 
-/// What one colony's cast of a guard or ranger row for a room comes to, as
-/// the Caster weighs it (`Caster.assign`, #589): whether it wins the raid
-/// there — its biggest body alone, or the `Engine.guardCap` bodies of that
-/// size where one loses, the raid killing them one at a time
-/// (`bodiesBeat`), a row whose block the bank buys not winning anything —
-/// and its spawn time: the least body of the row that wins alone, else its
-/// biggest. Priced in the colony's view with the world's vision of the room
-/// and the rooms beside it laid in. Any other row wins, and spawns in no
-/// time: it is never weighed between colonies.
+/// What one colony's cast of a fighter's template for a room comes to, as
+/// the Caster weighs it (`Caster.assign`, #589): whether the cheapest set of
+/// the template its bank buys ends the fight there (`fighterCast`, #654), a
+/// template whose block the bank buys not winning anything, and one body's
+/// spawn time at that set's blocks, at most the biggest the bank buys.
+/// Priced in the colony's view with the world's vision of the room and the
+/// rooms beside it laid in. Any other row wins, and spawns in no time: it is
+/// never weighed between colonies.
 let castPrice (view: ColonyView) (row: CastRow) (room: string) : bool * int =
     match row with
-    | CastRow.Fighter BodyTemplate.Melee
-    | CastRow.Fighter BodyTemplate.Ranged ->
+    | CastRow.Fighter template ->
         let priced = ColonyView.lookingInto (room :: RoomName.adjacent room) view
-        let ranger = row = CastRow.Fighter BodyTemplate.Ranged
+        let pattern = patternOfTemplate template
+        let cast = fighterCast priced room [ template ] Engine.guardCap
 
-        let pattern, most, beat =
-            if ranger then
-                rangerPattern,
-                max 1 (rangerBlocksReach priced),
-                blocksBeat rangerPattern Stance.Standoff priced room
-            else
-                guardPattern,
-                guardBlocksReach priced,
-                blocksBeat guardPattern Stance.Hold priced room
+        let most =
+            max 1 (min (blocksMostOf template) (priced.Bank.Capacity / bodyCost pattern.Block))
 
-        let blocks =
-            seq { 1 .. max 1 most } |> Seq.tryFind beat |> Option.defaultValue (max 1 most)
-
-        castable priced pattern
-        && (beat most || won (bodiesOutcome pattern priced room Engine.guardCap most)),
-        blocks * List.length pattern.Block * Engine.spawnTicksPerPart
+        castable priced pattern && cast.Ends, castSpawnTicks template (min most cast.Blocks)
     | CastRow.Defender
     | CastRow.Squad _ -> true, 0
 

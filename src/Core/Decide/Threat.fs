@@ -559,65 +559,50 @@ let private flightsOf (threats: Threats) (atlas: Atlas.Atlas) : Flights =
             Costs = System.Collections.Generic.Dictionary()
         })
 
-/// ADR-0056
-/// How many guards one guarded room wants: one, two where one block loses
-/// the exchange. The count reads the raid and never our own answer to it
-/// (#272): priced against the guards standing in the room it was not monotone,
-/// and the reinforcement it bought was evicted on arrival. Vision, and the raid
-/// last seen through the blind ticks since (`ColonyView.RecalledRaiders`,
-/// #569), is the whole of what this reads. A room remembered as threatened
-/// with no raid recalled is one guard (#366): a room with no `RoomControl`
-/// entry contributes no hostile of its own to the view, so neither number of
-/// the two-guard clause exists. Written as its own clause rather than left to
-/// `blocksBeat`'s zero-damage arm: that one is a statement about a
-/// visible raid dealing nothing.
-let internal guardsWanted (view: ColonyView) (room: string) : int =
-    if
-        Set.contains room view.ThreatenedOutposts
-        && not (Map.containsKey room view.RoomControl)
-        && not (view.RecalledRaiders |> List.exists (fun h -> h.Pos.Room = room))
-    then
-        1
-    elif blocksBeat guardPattern Stance.Hold view room 1 then
-        1
-    else
-        Engine.guardCap
+/// The fighter row's ask for one room's fight (#654): the bodies, blocks and
+/// template of its cheapest cast among `templates` (`Facts.fighterCast`),
+/// read off the raid and never our own answer to it (#272), the raid last
+/// seen through the blind ticks since (`ColonyView.RecalledRaiders`, #569);
+/// a room with no raid seen or recalled casts one melee block, enough to go
+/// and look (#366). A melee body in a room holding a level-0 core is the
+/// biggest the bank buys (#487): one block's 90 a tick spends most of a
+/// body's life on the core's 100,000 hits. Priced on first read where the
+/// template is given.
+let internal fighterAsk
+    (view: ColonyView)
+    (room: string)
+    (templates: BodyTemplate list)
+    (prey: (string * float) list option)
+    : RowAsk =
+    let cast = lazy (Facts.fighterCast view room templates Engine.guardCap)
 
-/// ADR-0072
-/// The whole guard blocks one raided room's exchange takes to win: the
-/// smallest count `blocksBeat` answers yes to holding its post, the largest body where
-/// none wins. A room the colony is blind in prices its raid as last seen
-/// (#569), or at one where none is recalled: enough to go and look. A room holding a
-/// level-0 core takes the biggest body the bank buys (#487): one block's 90 a
-/// tick spends most of a body's life on the core's 100,000 hits.
-let internal guardBlocksFor (view: ColonyView) (room: string) : int =
-    let fight =
-        [ 1..guardBlocksMost ]
-        |> List.tryFind (blocksBeat guardPattern Stance.Hold view room)
-        |> Option.defaultValue guardBlocksMost
+    let template =
+        match templates with
+        | [ one ] -> one
+        | _ -> cast.Value.Template
 
-    if Facts.expansionCores view |> List.exists (fun core -> core.RoomName = room) then
-        max fight (guardBlocksReach view)
-    else
-        fight
+    let cored () =
+        template = BodyTemplate.Melee
+        && Facts.expansionCores view |> List.exists (fun core -> core.RoomName = room)
 
-/// The rangers one room's raid takes, `guardsWanted`'s twin: one where the
-/// biggest ranger the bank buys wins it alone, else `Engine.guardCap`, the
-/// count the row's verdict prices (`Facts.rowAnswer`, #589). One body a
-/// raid out-heals is fed to it one at a time.
-let internal rangersWanted (view: ColonyView) (room: string) : int =
-    if blocksBeat rangerPattern Stance.Standoff view room (max 1 (rangerBlocksReach view)) then
-        1
-    else
-        Engine.guardCap
+    {
+        Row = CastRow.Fighter template
+        Wanted = fun _ -> cast.Value.Bodies
+        Blocks =
+            fun () ->
+                if cored () then
+                    max cast.Value.Blocks (guardBlocksReach view)
+                else
+                    cast.Value.Blocks
+        Prey = prey
+    }
 
-/// The ranger blocks one ranger room wants (#411): the smallest body that wins
-/// its raid alone, never below the room's floor, and the largest body where
-/// none wins.
-let internal rangerBlocksFor (floor: int) (view: ColonyView) (room: string) : int =
-    [ 1..rangerBlocksMost ]
-    |> List.tryFind (blocksBeat rangerPattern Stance.Standoff view room)
-    |> Option.defaultValue rangerBlocksMost
+/// The ranger blocks one ranger room or rampart row wants (#411): the
+/// smallest one ranger the bank buys that wins its raid alone
+/// (`Facts.fighterCast`, one body), never below the room's floor, and the
+/// largest body where none wins.
+let internal rangedBlocks (floor: int) (view: ColonyView) (room: string) : int =
+    (Facts.fighterCast view room [ BodyTemplate.Ranged ] 1).Blocks
     |> max floor
     |> min rangerBlocksMost
 
@@ -934,18 +919,16 @@ module Brief =
                         Map.tryFind room view.HarassFloors
                         |> Option.defaultValue view.Tuning.HarassBlocks
 
-                    rangerBlocksFor floor view room
+                    rangedBlocks floor view room
             Prey = None
         }
 
-    /// What each kind asks its row for. A ranger kind the ranger row's, never
-    /// below `Tuning.RangerResidentBlocks` for a resident, the resident a raid
-    /// meets first; a chase nothing; every other kind the guard row's
-    /// `guardsWanted`, at `guardBlocksFor`; a trespass one body a trespasser
-    /// of the row that answers it (`trespassSplit`, #550), up to
-    /// `Engine.guardCap` a row, the guards never
-    /// fewer than `guardsWanted` where they answer one or the trespasser only
-    /// bounces on the exit into the room.
+    /// What each kind asks the fighter row for. A ranger kind ranged bodies,
+    /// never below `Tuning.RangerResidentBlocks` for a resident, the resident
+    /// a raid meets first; a chase nothing but its own row's cast; every
+    /// other kind its fight's cheapest cast (`fighterAsk`, #654): a ring's of
+    /// melee bodies, an outpost a ranger answers of ranged ones, a trespass's
+    /// of either.
     let private askOf
         (kind: BriefKind)
         (ranged: bool)
@@ -974,100 +957,40 @@ module Brief =
                             if Set.contains room (harassRooms view) then
                                 (harassAsk view room).Blocks()
                             else
-                                rangerBlocksFor view.Tuning.RangerResidentBlocks view room
+                                rangedBlocks view.Tuning.RangerResidentBlocks view room
                     Prey = None
                 }
             ]
         | BriefKind.Harass -> [ harassAsk view room ]
-        // An outpost a ranger answers (#535): the smallest that wins it
-        // alone, or the pair where none the bank buys does (`rangersWanted`).
-        | BriefKind.Outpost when ranged ->
-            [
-                {
-                    Row = CastRow.Fighter BodyTemplate.Ranged
-                    Wanted = fun _ -> rangersWanted view room
-                    Blocks = fun () -> rangerBlocksFor 1 view room
-                    Prey = None
-                }
-            ]
+        // An outpost a ranger answers (#535): its cheapest ranged cast.
+        | BriefKind.Outpost when ranged -> [ fighterAsk view room [ BodyTemplate.Ranged ] None ]
+        // A trespass's kill (#654): one ask, the cheapest set that kills the
+        // most of its trespassers, of whichever template; its prey every one
+        // of them that is the enemy's economy, priced where the cast is
+        // (#652). A trespasser only bouncing on the exit is met by one melee
+        // block.
         | BriefKind.Trespass ->
-            let bouncing = answered.Value |> List.forall (snd >> List.isEmpty)
-
-            // A priced cast's prey is the enemy's economy alone, and what
-            // the ranger row answers is no guard's: one body a trespasser,
-            // never two (#652).
-            let shot =
+            let prey =
                 answered.Value
-                |> List.collect (fun (row, trespassers) ->
-                    if row = CastRow.Fighter BodyTemplate.Ranged then
-                        trespassers
-                    else
-                        [])
+                |> List.collect snd
+                |> List.distinctBy _.Id
+                |> List.filter (Facts.enemyEconomy view.Hostiles)
+                |> List.map (fun hostile -> hostile.Id, Facts.killValue view hostile)
 
-            answered.Value
-            |> List.map (fun (row, trespassers) ->
-                {
-                    Row = row
-                    // At most `Engine.guardCap` a row: bodies that strike
-                    // nothing back never buy more spawns than a raid's room.
-                    Wanted =
-                        fun _ ->
-                            match row, trespassers with
-                            | CastRow.Fighter BodyTemplate.Melee, [] when not bouncing -> 0
-                            | CastRow.Fighter BodyTemplate.Melee, _ ->
-                                max (guardsWanted view room) (List.length trespassers)
-                                |> min Engine.guardCap
-                            | _ -> min Engine.guardCap (List.length trespassers)
-                    Blocks =
-                        fun () ->
-                            if row = CastRow.Fighter BodyTemplate.Ranged then
-                                rangerBlocksFor 1 view room
-                            else
-                                guardBlocksFor view room
-                    Prey =
-                        trespassers
-                        |> List.filter (fun hostile ->
-                            Facts.enemyEconomy view.Hostiles hostile
-                            && (row = CastRow.Fighter BodyTemplate.Ranged
-                                || not (List.contains hostile shot)))
-                        |> List.map (fun hostile -> hostile.Id, Facts.killValue view hostile)
-                        |> Some
-                })
+            [ fighterAsk view room bodyTemplates (Some prey) ]
+        // A ring's post is held with a swing (`admitsOf`): its cheapest
+        // melee cast.
         | BriefKind.Outpost
         | BriefKind.Core
-        | BriefKind.ExitHold ->
-            [
-                {
-                    Row = CastRow.Fighter BodyTemplate.Melee
-                    Wanted = fun _ -> guardsWanted view room
-                    Blocks = fun () -> guardBlocksFor view room
-                    Prey = None
-                }
-            ]
+        | BriefKind.ExitHold -> [ fighterAsk view room [ BodyTemplate.Melee ] None ]
         // A chase is cast for by nobody, but in a room shut on a raid the
         // colony's own row wins (`rowCast`, #571): the stand-down shuts that
         // room's Guard out of the pool, never the row's cast, so the chase
         // carries the row's ask.
         | BriefKind.Chase ->
             match rowCast.Value with
-            | Some(CastRow.Fighter BodyTemplate.Ranged) ->
-                [
-                    {
-                        Row = CastRow.Fighter BodyTemplate.Ranged
-                        Wanted = fun _ -> rangersWanted view room
-                        Blocks = fun () -> rangerBlocksFor 1 view room
-                        Prey = None
-                    }
-                ]
-            | Some _ ->
-                [
-                    {
-                        Row = CastRow.Fighter BodyTemplate.Melee
-                        Wanted = fun _ -> guardsWanted view room
-                        Blocks = fun () -> guardBlocksFor view room
-                        Prey = None
-                    }
-                ]
+            | Some(CastRow.Fighter template) -> [ fighterAsk view room [ template ] None ]
+            | Some _
             | None -> []
 
     /// The bodies a kind's room admits and nobody else at all: its row ask's
@@ -1080,6 +1003,7 @@ module Brief =
         (verdict: Lazy<Answer>)
         (rangers: Lazy<int option>)
         (holding: Set<string>)
+        (answered: Lazy<(CastRow * HostileInfo list) list>)
         (asks: RowAsk list)
         (view: ColonyView)
         (threats: Threats)
@@ -1123,19 +1047,45 @@ module Brief =
             | Answer.Win -> Capacity.fighters (rangers.Value |> Option.defaultValue 1)
             | Answer.Kite -> Capacity.fighters (Facts.kiteSeats view room holding)
             | Answer.Lose -> Capacity.fighters 1
-        // One body kills a trespasser, which strikes nothing back (#516): its
-        // row asks summed (#550). Where the ranger row answers one, the guards
-        // are capped at their own row's count and a ranger takes any seat, as
-        // its shot reaches what a swing catches too.
+        // One body kills a trespasser, which strikes nothing back (#516): a
+        // seat a trespasser each template answers (`trespassSplit`, #550), at
+        // most `Engine.guardCap` a template, a melee body's at least one where
+        // a trespasser only bounces on the exit, and never fewer than the
+        // cast asks of its own (#654). Where a ranged body answers one, the
+        // melee bodies are capped at their own count and a ranged one takes
+        // any seat, as its shot reaches what a swing catches too: seats are
+        // who may stand, the cast what is bought.
         | BriefKind.Trespass ->
-            let count row =
+            let bouncing = answered.Value |> List.forall (snd >> List.isEmpty)
+
+            let cast row =
                 asks
                 |> List.filter (fun a -> a.Row = row)
                 |> List.sumBy (fun a -> a.Wanted threats)
 
-            let guards, rangers =
-                count (CastRow.Fighter BodyTemplate.Melee),
-                count (CastRow.Fighter BodyTemplate.Ranged)
+            let count row =
+                let seats =
+                    answered.Value
+                    |> List.filter (fun (answers, _) -> answers = row)
+                    |> List.sumBy (snd >> List.length)
+                    |> min Engine.guardCap
+
+                let floor =
+                    if bouncing && row = CastRow.Fighter BodyTemplate.Melee then
+                        1
+                    else
+                        0
+
+                max seats floor
+
+            let melee, ranged =
+                CastRow.Fighter BodyTemplate.Melee, CastRow.Fighter BodyTemplate.Ranged
+
+            let guards = max (count melee) (cast melee)
+
+            // The ranged seats take whatever the melee leaves of the total:
+            // a ranged body's shot reaches what a swing catches too.
+            let rangers = max (count ranged) (cast ranged - guards)
 
             let capacity = Capacity.fighters (guards + rangers)
 
@@ -1167,8 +1117,33 @@ module Brief =
                 Capacity.fighters (guards + seated)
                 |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Melee)) guards
                 |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Ranged)) seated
+        // The cast's count (#654), or the fighters holding the fight or
+        // standing in its room that do not win it alone and a seat beside
+        // them, at most `Engine.guardCap`: the cast is what is bought, not who
+        // may stand; a body the fight needs beside another is no body to
+        // evict (#272), and none takes the seat of the body cast to win it.
         | BriefKind.Outpost
-        | BriefKind.ExitHold -> Capacity.fighters (wanted ())
+        | BriefKind.ExitHold ->
+            // Bodies of the cast's template: the ones its kind admits.
+            let cut =
+                match asks with
+                | ask :: _ -> CastRow.cut ask.Row
+                | [] -> fun _ _ -> false
+
+            let held =
+                ColonyView.bodies view
+                |> List.filter (fun creep ->
+                    cut creep.Name creep.Body
+                    && (holding.Contains creep.Name
+                        || SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                           |> Option.exists (fun at -> at.Room = room)))
+
+            let losers =
+                held
+                |> List.filter (fun creep -> not (Facts.bodiesWin view room [ creep ]))
+                |> List.length
+
+            Capacity.fighters (max (wanted ()) (min Engine.guardCap (losers + 1)))
 
     /// A Guard's own kind: the first of its claims, `Outpost` where none
     /// claims the room.
@@ -1253,7 +1228,7 @@ module Brief =
                 | _ when kill -> OneRungUp
                 | _ -> OnTheTier
             Asks = ask
-            Capacity = capacityOf kind room verdict rangers holding ask view
+            Capacity = capacityOf kind room verdict rangers holding answered ask view
             Verdict = verdict
             Formation = None
             Stances = Map.empty
@@ -1432,7 +1407,7 @@ module Brief =
                     Blocks =
                         fun () ->
                             if row = CastRow.Fighter BodyTemplate.Ranged then
-                                rangerBlocksFor 1 view (SpatialInfo.homeName view.Spatial)
+                                rangedBlocks 1 view (SpatialInfo.homeName view.Spatial)
                             else
                                 view.Tuning.DefenderBlocks
                     Prey = None

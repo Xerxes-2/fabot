@@ -653,13 +653,15 @@ let trespassTests =
                 let lending colony =
                     colony |> withGuards [ ranger "r-9", { X = 28; Y = 47 } ]
 
+                // Moved by #654: the split asked each row for its own
+                // trespassers (two guards and a ranger here); the one cast is
+                // the cheapest set that kills the most of them, two rangers,
+                // which reach the hauler a swing never catches. The guards'
+                // seats are still the split's (the cap below).
                 Expect.equal
                     (asksOf (declaredRaid [ hauler; seatedDigger ]))
-                    [
-                        CastRow.Fighter BodyTemplate.Melee, 2
-                        CastRow.Fighter BodyTemplate.Ranged, 1
-                    ]
-                    "the digger asks the guard row, the hauler at its pace the ranger's, and the guard's too while no ranger holds the kill"
+                    [ CastRow.Fighter BodyTemplate.Ranged, 2 ]
+                    "one cast for both, of the template that reaches both"
 
                 Expect.equal
                     (asksOf
@@ -667,27 +669,21 @@ let trespassTests =
                             Bank = bank 550 550
                         })
                     [ CastRow.Fighter BodyTemplate.Melee, 1 ]
-                    "with no ranger block castable and none to lend, the guard's alone"
+                    "with no block castable, one melee block, as the split asked"
 
                 Expect.equal
-                    (readHolding [ "r-9" ] (declaredRaid [ hauler; seatedDigger ] |> lending))
-                    ([
-                        CastRow.Fighter BodyTemplate.Melee, 1
-                        CastRow.Fighter BodyTemplate.Ranged, 1
-                     ],
-                     Some 1)
-                    "a ranger holding the kill takes the hauler off the guard row"
+                    (snd (readHolding [ "r-9" ] (declaredRaid [ hauler; seatedDigger ] |> lending)))
+                    (Some 1)
+                    "a ranger holding the kill takes the hauler off the guards' seats"
 
                 Expect.equal
-                    (readHolding
-                        []
-                        (declaredRaid [ hauler ] |> withBodyAtHome (ranger "r-9") atSpawn))
-                    ([
-                        CastRow.Fighter BodyTemplate.Melee, 1
-                        CastRow.Fighter BodyTemplate.Ranged, 1
-                     ],
-                     Some 1)
-                    "a lendable ranger elsewhere takes nothing off the guard row"
+                    (snd (
+                        readHolding
+                            []
+                            (declaredRaid [ hauler ] |> withBodyAtHome (ranger "r-9") atSpawn)
+                    ))
+                    (Some 1)
+                    "a lendable ranger elsewhere takes nothing off the guards' seats"
 
                 // The ranger's lend reads its home's quiet and where it stands,
                 // which may flip tick to tick; the guard's seat reads neither.
@@ -700,11 +696,8 @@ let trespassTests =
 
                 Expect.equal
                     (asksOf (declaredRaid haulers))
-                    [
-                        CastRow.Fighter BodyTemplate.Melee, Engine.guardCap
-                        CastRow.Fighter BodyTemplate.Ranged, Engine.guardCap
-                    ]
-                    "four haulers buy no more than a raid's room of bodies a row"
+                    [ CastRow.Fighter BodyTemplate.Ranged, Engine.guardCap ]
+                    "four haulers buy no more than a raid's room of bodies (#654: a row each)"
 
                 let holders held colony =
                     (decide colony held Set.empty None).Assignments
@@ -905,20 +898,20 @@ let trespassTests =
             // row casting for a trespass and no holder within the kill's
             // walk.
             test
-                "a miner and a hauler worth their casts in an outpost no body reaches: a guard is cast for the miner, a ranger for the hauler, and each takes the kill" {
+                "a miner and a hauler worth their casts in an outpost no body reaches: one ranger is cast for both, and a body of either template takes the kill" {
                 let trespassers = [ seatedDigger; haulerOf "hauler-1" { X = 27; Y = 44 } ]
                 let colony = paying (declaredRaid trespassers)
 
                 // The kill is shown by `Facts.castBodiesPaid`'s own
                 // `killTicksOf` (the body alone at its standoff); this pins
                 // the casts and the seat, the arena the kill's ticks.
+                // Moved by #654 (the issue's own case): the split cast a guard
+                // for the miner and a ranger for the hauler; one ranger kills
+                // both, the cheapest set that kills the most.
                 Expect.equal
                     (killCasts "W1N2" (decideOn colony))
-                    [
-                        CastRow.Fighter BodyTemplate.Melee, 1, Some [ "d-1" ]
-                        CastRow.Fighter BodyTemplate.Ranged, 1, Some [ "hauler-1" ]
-                    ]
-                    "one guard for the miner its swing catches, one ranger for the hauler at its pace"
+                    [ CastRow.Fighter BodyTemplate.Ranged, 1, Some [ "d-1"; "hauler-1" ] ]
+                    "one ranger for the miner and the hauler at its pace"
 
                 // The bodies those casts are, standing at the spawn: each
                 // is matched to the kill's seat (#647: the cast and the seat

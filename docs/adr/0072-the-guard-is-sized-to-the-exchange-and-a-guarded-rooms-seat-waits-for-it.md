@@ -1,6 +1,8 @@
 # The guard is sized to the exchange, and a guarded room's reserver seat waits for it
 
-> **Status:** accepted, amended by 0077, 0078, 0083
+> **Status:** accepted, amended by 0077, 0078, 0083, 0092
+
+> **Amended by ADR 0092** (#654): the guard's blocks are the cheapest set's (`Facts.fighterCast`), priced among the bodies the bank buys, at the stance the gate prices the body at; the reserver seat's wait is unchanged.
 
 > **0083 superseded by 0090** (#564) on 2026-10-07: no squad is mustered, so "one body and never the row's two summed" stands everywhere again.
 

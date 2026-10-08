@@ -506,7 +506,7 @@ let private briefAsks (threats: Threats) (row: CastRow) : (Task * RowAsk) list =
 /// priced a Win, the price that killed it, so recasting the cast that lost
 /// would feed the same error. An ask for more bodies than stood there
 /// (#612) is a cast the exchange prices a win where that one's fewer lose
-/// (`Threat.rangersWanted`, `guardsWanted` ask the fewest that win), and
+/// (`Facts.fighterCast` asks one body where one ends it), and
 /// casts. A home of ours fights on (#602); a Kite or a Lose asks as it would.
 let private recastCooling
     (view: ColonyView)
