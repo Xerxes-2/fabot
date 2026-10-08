@@ -1,6 +1,8 @@
 # An enemy remote is harassed by the colony that can best afford it
 
-> **Status:** amended by #437, #439, #441, ADR 0091 W6 S3
+> **Status:** amended by #437, #439, #441, ADR 0091 W6 S3, #656
+
+> **Amended by #656** (ADR 0085's banner of the same issue): decision 4's work is a contested room's. The ranger's ground is the room's by what it is fought over: an armed raid's ring (its kite ground first), the tiles beside each of the `Enemy`'s economy bodies working it (the prey, a kill a rung up, a holder seated within reach of the body its kill score leads), and `Stand`'s seats while nobody works it; #439's ambush and its relief seat are gone. The row wants no fixed ranger at `Tuning.HarassBlocks`: the room's cast is the fight chooser's (ADR 0092), priced by what it lands against its cost (`Facts.castBodiesPaid`), so a room nobody works casts nothing and a raid no ranger wins casts nothing. Decisions 1, 2, 3 and 5 stand: the caster, its floor and the stand-down are unchanged (the floor now only decides which colony casts). Stationary harassment stays paused (`Colony.harass = []`); the sweep (#615 U4 E) replaces it.
 
 > **Accepted 2026-09-29** on #432, after Trepidimous (W18S26, one spawn) raided W17S29 three times. The user's decision: before any siege, harass their remotes, and allocate the work globally rather than per colony.
 

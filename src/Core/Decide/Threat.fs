@@ -47,15 +47,41 @@ type Formation =
 /// the first in `BriefKind.order` whose claim pools a Task this tick.
 [<RequireQualifiedAccess>]
 type BriefKind =
-    /// The melee guard on a raid's ring, or walked to a threatened outpost
-    /// the colony is blind in (#366): every Guard no other kind claims.
-    | Outpost
+    /// A [[contested room]] (#656): one our economy and a rival's meet in —
+    /// our outpost a raid or a rival's economy body works, a rival's remote
+    /// we harass, a threatened outpost the colony is blind in (#366) — one
+    /// fight whatever it is over this tick (`Phase`), priced by the room's
+    /// economic delta (`Facts.Contest`); every Guard no other kind claims.
+    | Contested
     | Core
     | ExitHold
     | Resident
-    | Harass
     | Chase
-    | Trespass
+
+/// What a contested room is fought over this tick (#656), off its facts.
+[<RequireQualifiedAccess>]
+type Phase =
+    /// A raid whose Guard pools stands there (`Facts.guardedRooms`, or a body
+    /// of ours holds it beside a hostile): the raid first, on its ring.
+    | Raid
+    /// No raid whose Guard pools, and an economy body we may strike works it
+    /// (`Facts.trespasser`), and no held exit keeps the room over it (its
+    /// holders not back in time, `Facts.preyBeforeReturn`): a kill, a rung
+    /// up, a quiet holder called to it.
+    | Prey
+    /// Neither: a blind outpost's look (#366), or a rival's remote with
+    /// nobody working it.
+    | Quiet
+
+/// A contested room's Guard (#656): what it is fought over, whether it is
+/// ours to keep (`Facts.contestOurs`), and its price, read on first use.
+[<NoEquality; NoComparison>]
+type Contention =
+    {
+        Phase: Phase
+        Ours: bool
+        Value: Lazy<Contest>
+    }
 
 /// Which combat Task a `Brief` describes: a room's Guard, of its flavour, or
 /// a Task of its own — the home's Defend, an Assault.
@@ -68,53 +94,46 @@ type Duty =
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module BriefKind =
     /// The order a room's flavour is read in, written once: a resident room,
-    /// a [[harassment room]], a chase (#510), a raid's ring, a held exit
-    /// (#450), a trespass's kill (#516), a level-0 core (#487): a creep that
-    /// can step away is struck before a core that stands, which takes the room
-    /// back once the creep is gone (#558). The order
-    /// decides only among claims that pool a Task this tick (#542): the first
-    /// of those is the room's kind, and a claim that pools nothing shuts no
-    /// kind out. A kind claims only a room still open to it (`opens`), so a
-    /// held exit, a trespass and a core lay no ground under a pooling kind
-    /// ahead of them (`threatsHeldBy`); and a Guard's ground is the first laid
-    /// in its room from its kind down (`Brief.Ground`).
+    /// a chase (#510), a contested room (#656), a held exit (#450), a level-0
+    /// core (#487): a creep that can step away is struck before a core that
+    /// stands, which takes the room back once the creep is gone (#558), and
+    /// an economy body working the room before the exit a raid left by where
+    /// the exit's holders kill it and are back before the raid that left by
+    /// it is (`Facts.preyBeforeReturn`), else the hold first. The
+    /// order decides only among claims that pool a Task this tick (#542): the
+    /// first of those is the room's kind, and a claim that pools nothing
+    /// shuts no kind out. A kind claims only a room still open to it
+    /// (`opens`), so a held exit and a core lay no ground under a pooling
+    /// kind ahead of them (`threatsHeldBy`); and a Guard's ground is the
+    /// first laid in its room from its kind down (`Brief.Ground`).
     let order =
         [
             BriefKind.Resident
-            BriefKind.Harass
             BriefKind.Chase
-            BriefKind.Outpost
+            BriefKind.Contested
             BriefKind.ExitHold
-            BriefKind.Trespass
             BriefKind.Core
         ]
 
-    /// The kinds whose ground is the room's `Ring`.
+    /// The kinds whose ground is the room's `Ring`: a contested room's under
+    /// its raid.
     let laysRing (kind: BriefKind) =
         match kind with
-        | BriefKind.Outpost
+        | BriefKind.Contested
         | BriefKind.ExitHold
         | BriefKind.Core -> true
         | _ -> false
 
     /// Whether a room a pooling kind ahead claims is still open to `kind`:
-    /// only a ring kind under a chase. Two halves. Load-bearing: a chase in sight is
-    /// always a raid's room, so the raid still claims it as `Outpost`, and
-    /// that claim shuts the held exit, the core and the trespass out of it.
-    /// Quirk, kept (the Brief's S0): out of sight no raid claims it, so a held
-    /// exit or a core lays its ring there, and the chase, with no kite
-    /// ground, takes that melee guard's ring.
+    /// only a ring kind under a chase, and a contested room only for its raid
+    /// (`threatsHeldBy`). Two halves. Load-bearing: a chase in sight is
+    /// always a raid's room, so the raid still claims it as `Contested`, and
+    /// that claim shuts the held exit and the core out of it. Quirk, kept
+    /// (the Brief's S0): out of sight no raid claims it, so a held exit or a
+    /// core lays its ring there, and the chase, with no kite ground, takes
+    /// that melee guard's ring.
     let opens (ahead: BriefKind) (kind: BriefKind) =
         ahead = BriefKind.Chase && laysRing kind
-
-    /// A kill (#510, #516): one body, a rung up, and a quiet holder called to
-    /// it; a chase cast for by no row, a trespass only where its cast pays
-    /// (#652).
-    let isKill (kind: BriefKind) =
-        match kind with
-        | BriefKind.Chase
-        | BriefKind.Trespass -> true
-        | _ -> false
 
 /// The rungs a Task may be stepped by inside its tier, a union rather than an
 /// int for the reason `Tier` is one (#237): the Resolver's `weightOfRank` has
@@ -219,22 +238,20 @@ type Laid =
         /// Reactor's own ring (#414, #411), in a raised child's home its
         /// controller's while no armed Threat stands there (#447).
         Resident: Set<RoomPos> option
-        /// In a [[harassment room]] (#432), the ranger's: an ambush (#439) —
-        /// beside every armed target, and only there while a holder fits its
-        /// fight (#611); the walkable tiles within ranged reach of the enemy
-        /// creep on a work spot, or caught off one, that the side's kill
-        /// score leads (#621); and the declared `Stand`'s seats while
-        /// neither stands there.
-        Harass: Set<RoomPos> option
+        /// In a [[harassment room]] (#432), the declared `Stand`'s seats: the
+        /// ground of a contested room nobody works (#656), within reach of
+        /// every work spot of its source, off those spots where we mine it.
+        Stand: Set<RoomPos> option
         /// The walkable tiles within range 1 of a Threat standing in the room,
         /// less the tiles the Threats stand on — the guard's ground. In a room
         /// whose last Threat has gone, the ground beside the exit it left by
         /// while that is held (#450); and a level-0 core's ring (#487).
         Ring: Set<RoomPos> option
-        /// Where a trespasser stands (`Facts.trespasser`, #516) and no kind
-        /// ahead claims the room, the tiles beside each trespasser off the
-        /// exits, or a hauler's store ground.
-        Trespass: Set<RoomPos> option
+        /// Where a trespasser stands (`Facts.trespasser`, #516: an economy
+        /// body we may strike in our room or a harassed one, #656) and no
+        /// kind ahead claims the room, the tiles beside each trespasser off
+        /// the exits, or a hauler's store ground: a contested room's prey.
+        Prey: Set<RoomPos> option
     }
 
 /// ADR-0085
@@ -256,6 +273,9 @@ type Brief =
         /// held exit (#450) among them is where the Planner keeps a living
         /// guard's Guard pooled, and hires for none. None for a Task of its own.
         Claims: BriefKind list
+        /// A contested room's (#656): its phase, whose economy it is and its
+        /// price. None for every other Task.
+        Contention: Contention option
         /// What its holder shoots (`Emitter.guardTarget`); a defender, the
         /// raid at the line, fewest hits first (`Emitter.defendIntent`).
         Targets: Selector
@@ -272,10 +292,13 @@ type Brief =
         Recall: Recall option
         Laid: Laid
         /// Its holder's ground: the first laid in the room from its kind down
-        /// `BriefKind.order`. A ranger's kind and a chase hold their kite
-        /// ground (#451) first, so a melee guard's kind is never handed it; a
-        /// ranger's declared ground next; a ring kind the room's `Ring`; a
-        /// trespass its own (#516); with none laid, the room's declared source
+        /// `BriefKind.order`. A resident and a chase hold their kite ground
+        /// (#451) first, so a melee guard's kind is never handed it; a
+        /// resident its declared ground next; a contested room by its phase
+        /// (#656): under its raid the room's `Ring`, its kite ground first
+        /// where a ranger answers it, its prey's own (#516), or, nobody
+        /// working a harassment room, the Stand's seats; a held exit and a
+        /// core the room's `Ring`; with none laid, the room's declared source
         /// ring (#366). None where none is. A Defend's, the perimeter ground
         /// (`defendGroundOf`); a squad's is per role, on its `Formation`.
         Ground: Set<RoomPos> option
@@ -310,8 +333,9 @@ type Brief =
         /// is a ranged holder of a level-0 core's Guard the core's range-3
         /// ring, out of the swing of a melee body breaking the core (#558);
         /// a melee holder of a chase the ring beside the raid (#571); a
-        /// trespass's holder the tiles of the ground within its reach of the
-        /// body its kill score leads, where it reaches one (#621); every
+        /// holder of a contested room's prey the tiles of the ground within
+        /// its reach of the body its kill score leads, where it reaches one
+        /// (#621); every
         /// other `Ground`. Read after `Stances`, priced on first read. Empty
         /// for every other Task.
         Seats: Lazy<Map<string, Set<RoomPos>>>
@@ -320,19 +344,19 @@ type Brief =
 /// What one Brief asks a row for: the row, how many bodies, and the blocks
 /// each must carry to win the room alone. The guard and ranger rows sum the
 /// Guards' over the guarded rooms (`OutpostFacts.Guarded`), so a held exit's
-/// ask is read only where its room is guarded too, and a trespass's
-/// elsewhere only priced (`Prey`, #652); the defender and squad rows every
-/// other Brief's.
+/// ask is read only where its room is guarded too, and a contested room's
+/// prey elsewhere only priced (`Prey`, #652, #656); the defender and squad
+/// rows every other Brief's.
 and [<NoEquality; NoComparison>] RowAsk =
     {
         Row: CastRow
         /// How many bodies, the tick's Threats given.
         Wanted: Threats -> int
         Blocks: unit -> int
-        /// A trespass's kill's: each trespasser the row answers
-        /// (`trespassSplit`) by id, with its kill value (`Facts.killValue`),
-        /// which prices its cast outside the guarded rooms (#652). None for
-        /// every other ask.
+        /// A contested room's kill: each trespasser the row answers
+        /// (`trespassSplit`) by id, with its kill value (`Contest.Values`),
+        /// which prices its cast wherever no economy of ours is guarded there
+        /// (#652, #656). None for every other ask.
         Prey: (string * float) list option
     }
 
@@ -567,12 +591,13 @@ let private flightsOf (threats: Threats) (atlas: Atlas.Atlas) : Flights =
 /// and look (#366). A melee body in a room holding a level-0 core is the
 /// biggest the bank buys (#487): one block's 90 a tick spends most of a
 /// body's life on the core's 100,000 hits. Priced on first read where the
-/// template is given.
+/// template is given. None wanted where the cast does not pay (`pays`).
 let internal fighterAsk
     (view: ColonyView)
     (room: string)
     (templates: BodyTemplate list)
     (prey: (string * float) list option)
+    (pays: FighterCast -> bool)
     : RowAsk =
     let cast = lazy (Facts.fighterCast view room templates Engine.guardCap)
 
@@ -587,7 +612,7 @@ let internal fighterAsk
 
     {
         Row = CastRow.Fighter template
-        Wanted = fun _ -> cast.Value.Bodies
+        Wanted = fun _ -> if pays cast.Value then cast.Value.Bodies else 0
         Blocks =
             fun () ->
                 if cored () then
@@ -618,10 +643,17 @@ module Brief =
             Kite = None
             Approach = lazy Set.empty
             Resident = None
-            Harass = None
+            Stand = None
             Ring = None
-            Trespass = None
+            Prey = None
         }
+
+    /// Whether a Brief is a kill (#510, #516): one body, a rung up, a quiet
+    /// holder called to it; a chase cast for by no row, a contested room's
+    /// prey only where its cast pays (#652, #656).
+    let isKill (brief: Brief) : bool =
+        brief.Duty = Duty.Guard BriefKind.Chase
+        || brief.Contention |> Option.exists (fun c -> c.Phase = Phase.Prey)
 
     /// One fight's ground divided into seats (#650): each holder's own
     /// ground, the tiles it reaches by its arrival (`arrival`, None for
@@ -797,34 +829,40 @@ module Brief =
             Band = fun room -> rankIn view room None >> killBandOf
         }
 
-    /// An outpost a ranger answers (`ranged`, #535) holds the kite ground
-    /// ahead of the ring, as a ranger's kind does.
-    let private groundOf (kind: BriefKind) (ranged: bool) (laid: Laid) =
+    /// A contested room's ground by its phase (#656): under its raid the
+    /// ring, the kite ground ahead of it where a ranger answers the room
+    /// (`ranged`, #535); its prey's own; nobody working a harassment room,
+    /// the Stand's seats.
+    let private groundOf (kind: BriefKind) (phase: Phase) (ranged: bool) (laid: Laid) =
         let ring = laid.Ring |> Option.filter (Set.isEmpty >> not)
 
         let own kind =
             match kind with
             | BriefKind.Resident -> laid.Kite |> Option.orElse laid.Resident
-            | BriefKind.Harass -> laid.Kite |> Option.orElse laid.Harass
             | BriefKind.Chase -> laid.Kite
-            | BriefKind.Outpost when ranged -> laid.Kite |> Option.orElse ring
-            | BriefKind.Outpost
+            | BriefKind.Contested ->
+                match phase with
+                | Phase.Raid when ranged -> laid.Kite |> Option.orElse ring
+                | Phase.Raid -> ring
+                | Phase.Prey -> laid.Prey
+                | Phase.Quiet -> laid.Stand
             | BriefKind.ExitHold
             | BriefKind.Core -> ring
-            | BriefKind.Trespass -> laid.Trespass
 
         BriefKind.order |> List.skipWhile ((<>) kind) |> List.tryPick own
 
-    /// A resident room's Guard is the ranger row's (#411), and a harassment
-    /// room's (#432); every ring kind's the melee guard's, which holds the
-    /// post where it cannot catch the raid (#531), but an outpost a ranger
-    /// answers (`ranged`, #535) is the ranger row's alone: the guard brings
-    /// nothing to bear there. A kill admits only a body that strikes every
+    /// A resident room's Guard is the ranger row's (#411); a contested
+    /// room's the melee guard's, which holds the post where it cannot catch
+    /// the raid (#531), but one a ranger answers (`ranged`: an outpost whose
+    /// raid a ranger answers, #535, a harassment room, #432) the ranger
+    /// row's alone: the guard brings nothing to bear there; and its prey's
+    /// (#656) is a kill's. A kill admits only a body that strikes every
     /// target it counts (`Facts.strikesEvery`), the rule its verdict prices
     /// the rangers by. Whether the body fits the fight is no kind's: the
     /// Matcher asks it of every Guard (`Facts.fits`, #615 U3).
     let private admitsOf
         (kind: BriefKind)
+        (phase: Phase)
         (room: string)
         (ranged: bool)
         (answered: Lazy<(CastRow * HostileInfo list) list>)
@@ -836,8 +874,7 @@ module Brief =
             Facts.strikesEvery view (partCount creep.Body) counts room
 
         match kind with
-        | BriefKind.Resident
-        | BriefKind.Harass -> isRangerRowBody creep
+        | BriefKind.Resident -> isRangerRowBody creep
         // In sight, any fighting row's body that strikes every raider
         // (#516), whichever row cast it; HomeHold the match's gate
         // (`Matcher`). A stand-down shuts the economy, never the kill (#571).
@@ -847,12 +884,13 @@ module Brief =
             (isRangerRowBody creep || isGuardRowBody creep)
             && (Facts.raided view room || Fighter.outranges (Fighter.ofCreep creep))
             && strikes (HostileInfo.raider view.Hostiles)
-        // A trespass's kill (#516): the guard row's body that strikes every
-        // trespasser its row answers (`trespassSplit`, #550), or a ranger
-        // that strikes them all, whichever colony cast it: a mother's guard
-        // hunts in her child's outpost too (#616). Defence first is the
-        // rank's: a raid's Guard outranks it (`claimed`, #528).
-        | BriefKind.Trespass ->
+        // A contested room's prey (#516, #656): the guard row's body that
+        // strikes every trespasser its row answers (`trespassSplit`, #550),
+        // or a ranger that strikes them all, whichever colony cast it and
+        // whoever's room it is: a mother's guard hunts in her child's outpost
+        // too (#616). Defence first is the rank's: a raid's Guard outranks it
+        // (`claimed`, #528).
+        | BriefKind.Contested when phase = Phase.Prey ->
             if isRangerRowBody creep then
                 strikes (Facts.trespasser view (Set.singleton room))
             else
@@ -861,7 +899,7 @@ module Brief =
                    |> List.forall (fun (row, trespassers) ->
                        row <> CastRow.Fighter BodyTemplate.Melee
                        || trespassers |> List.forall (Facts.canStrike view (partCount creep.Body)))
-        | BriefKind.Outpost when ranged -> isRangerRowBody creep
+        | BriefKind.Contested when ranged -> isRangerRowBody creep
         // A level-0 core is the guard row's to break (#487), and a ranger's
         // already standing in its room with nothing better to strike (#558),
         // on a seat of its own.
@@ -875,7 +913,7 @@ module Brief =
                    | None ->
                        Map.tryFind room view.World.Bodies.Value
                        |> Option.exists (List.exists (fun (body, _) -> body.Name = creep.Name)))
-        | BriefKind.Outpost
+        | BriefKind.Contested
         | BriefKind.ExitHold -> isGuardRowBody creep
 
     /// How many rangers one resident room wants: the standing garrison
@@ -906,90 +944,82 @@ module Brief =
         else
             view.Tuning.RangerResidents
 
-    /// A harassment room's ranger (#432), one: a raid that one loses is the
-    /// room's [[stand-down]]. Its floor is the one it was cast at
-    /// (`ColonyView.HarassFloors`, #457).
-    let private harassAsk (view: ColonyView) (room: string) : RowAsk =
-        {
-            Row = CastRow.Fighter BodyTemplate.Ranged
-            Wanted = fun _ -> 1
-            Blocks =
-                fun () ->
-                    let floor =
-                        Map.tryFind room view.HarassFloors
-                        |> Option.defaultValue view.Tuning.HarassBlocks
-
-                    rangedBlocks floor view room
-            Prey = None
-        }
-
-    /// What each kind asks the fighter row for. A ranger kind ranged bodies,
-    /// never below `Tuning.RangerResidentBlocks` for a resident, the resident
-    /// a raid meets first; a chase nothing but its own row's cast; every
-    /// other kind its fight's cheapest cast (`fighterAsk`, #654): a ring's of
-    /// melee bodies, an outpost a ranger answers of ranged ones, a trespass's
-    /// of either.
+    /// What each kind asks the fighter row for. A resident ranged bodies,
+    /// never below `Tuning.RangerResidentBlocks`, the resident a raid meets
+    /// first; a chase nothing but its own row's cast; every other kind its
+    /// fight's cheapest cast (`fighterAsk`, #654): a held exit's and a core's
+    /// of melee bodies; a contested room's (#656) of the template its row
+    /// answers with under its raid or nobody working it, of either for its
+    /// prey, whose kills price the cast where no economy of ours is guarded
+    /// (#652). A room that is not ours to keep — a rival's remote we harass —
+    /// asks only a cast that ends its fight, and only while a fight there
+    /// moves its economic delta (`Contest.delta`) or lands a kill: there is
+    /// no post of ours to hold (#531), no raid there is ours to look for
+    /// (#366), and the room's value is what a fight denies the rival.
     let private askOf
         (kind: BriefKind)
+        (contention: Contention option)
         (ranged: bool)
         (rowCast: Lazy<CastRow option>)
         (answered: Lazy<(CastRow * HostileInfo list) list>)
         (room: string)
         (view: ColonyView)
         : RowAsk list =
-        match kind with
-        // Quirk, kept (the Brief's S0), for the B-stage to settle: a resident
-        // room that is a harassment room too is the resident's kind, ground
-        // and cap, but casts as the harassment: one ranger, not the garrison,
-        // at the harassment's floor.
-        | BriefKind.Resident ->
+        match kind, contention with
+        | BriefKind.Resident, _ ->
             [
                 {
                     Row = CastRow.Fighter BodyTemplate.Ranged
-                    Wanted =
-                        fun threats ->
-                            if Set.contains room (harassRooms view) then
-                                (harassAsk view room).Wanted threats
-                            else
-                                residentsWanted room view threats
-                    Blocks =
-                        fun () ->
-                            if Set.contains room (harassRooms view) then
-                                (harassAsk view room).Blocks()
-                            else
-                                rangedBlocks view.Tuning.RangerResidentBlocks view room
+                    Wanted = residentsWanted room view
+                    Blocks = fun () -> rangedBlocks view.Tuning.RangerResidentBlocks view room
                     Prey = None
                 }
             ]
-        | BriefKind.Harass -> [ harassAsk view room ]
-        // An outpost a ranger answers (#535): its cheapest ranged cast.
-        | BriefKind.Outpost when ranged -> [ fighterAsk view room [ BodyTemplate.Ranged ] None ]
-        // A trespass's kill (#654): one ask, the cheapest set that kills the
-        // most of its trespassers, of whichever template; its prey every one
-        // of them that is the enemy's economy, priced where the cast is
-        // (#652). A trespasser only bouncing on the exit is met by one melee
-        // block.
-        | BriefKind.Trespass ->
+        // A contested room's prey (#654): one ask, the cheapest set that
+        // kills the most of its trespassers, of whichever template; its prey
+        // every one of them that is the enemy's economy, at its kill value
+        // (`Contest.Values`). A trespasser only bouncing on the exit is met by
+        // one melee block.
+        | BriefKind.Contested, Some contention when contention.Phase = Phase.Prey ->
+            let values = contention.Value.Value.Values
+
             let prey =
                 answered.Value
                 |> List.collect snd
                 |> List.distinctBy _.Id
                 |> List.filter (Facts.enemyEconomy view.Hostiles)
-                |> List.map (fun hostile -> hostile.Id, Facts.killValue view hostile)
+                |> List.map (fun hostile ->
+                    hostile.Id,
+                    Map.tryFind hostile.Id values
+                    |> Option.defaultWith (fun () -> Facts.killValue view hostile))
 
-            [ fighterAsk view room bodyTemplates (Some prey) ]
-        // A ring's post is held with a swing (`admitsOf`): its cheapest
-        // melee cast.
-        | BriefKind.Outpost
-        | BriefKind.Core
-        | BriefKind.ExitHold -> [ fighterAsk view room [ BodyTemplate.Melee ] None ]
+            [ fighterAsk view room bodyTemplates (Some prey) (fun _ -> true) ]
+        // Under its raid, or nobody working it: the cheapest cast of its
+        // row's template, a ranger's where a ranger answers it (#535), else a
+        // swing holding the post (`admitsOf`).
+        | BriefKind.Contested, contention ->
+            let template = if ranged then BodyTemplate.Ranged else BodyTemplate.Melee
+
+            let pays (cast: FighterCast) =
+                match contention with
+                | Some contention when not contention.Ours ->
+                    cast.Ends
+                    && (Contest.delta contention.Value.Value > 0.0
+                        || not (Map.isEmpty contention.Value.Value.Values))
+                | _ -> true
+
+            [ fighterAsk view room [ template ] None pays ]
+        | BriefKind.Core, _
+        | BriefKind.ExitHold, _ ->
+            [ fighterAsk view room [ BodyTemplate.Melee ] None (fun _ -> true) ]
         // A chase is cast for by nobody, but in a room shut on a raid the
         // colony's own row wins (`rowCast`, #571): the stand-down shuts that
         // room's Guard out of the pool, never the row's cast, so the chase
         // carries the row's ask.
-        | BriefKind.Chase ->
+        | BriefKind.Chase, _ ->
             match rowCast.Value with
-            | Some(CastRow.Fighter template) -> [ fighterAsk view room [ template ] None ]
+            | Some(CastRow.Fighter template) ->
+                [ fighterAsk view room [ template ] None (fun _ -> true) ]
             | Some _
             | None -> []
 
@@ -999,6 +1029,7 @@ module Brief =
     /// against are one number.
     let private capacityOf
         (kind: BriefKind)
+        (phase: Phase)
         (room: string)
         (verdict: Lazy<Answer>)
         (rangers: Lazy<int option>)
@@ -1023,18 +1054,6 @@ module Brief =
         // window to be read against, and the row's count, not this cap, is
         // what buys bodies.
         | BriefKind.Resident -> Capacity.fighters (wanted () + view.Tuning.RangerResidents)
-        // One ranger per harassment room (#439), and its relief beside it
-        // (`Capacity.Relieved`).
-        // A raid one ranger loses seats the rangers that win it together
-        // (`Facts.rangersWin`, #609): one seat left the second at the
-        // harassment room beside it while the first bounced on the border.
-        | BriefKind.Harass ->
-            let seats =
-                match verdict.Value with
-                | Answer.Win -> max (wanted ()) (rangers.Value |> Option.defaultValue 1)
-                | _ -> wanted ()
-
-            Capacity.fighters seats |> Capacity.relieving
         // A kite seats as many rangers as kill what cannot close on them
         // before it ages out, and every one at the fight (`Facts.kiteSeats`,
         // #510, #596); a raid the rangers
@@ -1047,15 +1066,15 @@ module Brief =
             | Answer.Win -> Capacity.fighters (rangers.Value |> Option.defaultValue 1)
             | Answer.Kite -> Capacity.fighters (Facts.kiteSeats view room holding)
             | Answer.Lose -> Capacity.fighters 1
-        // One body kills a trespasser, which strikes nothing back (#516): a
-        // seat a trespasser each template answers (`trespassSplit`, #550), at
-        // most `Engine.guardCap` a template, a melee body's at least one where
-        // a trespasser only bounces on the exit, and never fewer than the
-        // cast asks of its own (#654). Where a ranged body answers one, the
-        // melee bodies are capped at their own count and a ranged one takes
-        // any seat, as its shot reaches what a swing catches too: seats are
-        // who may stand, the cast what is bought.
-        | BriefKind.Trespass ->
+        // One body kills a contested room's prey, which strikes nothing back
+        // (#516): a seat a trespasser each template answers
+        // (`trespassSplit`, #550), at most `Engine.guardCap` a template, a
+        // melee body's at least one where a trespasser only bounces on the
+        // exit, and never fewer than the cast asks of its own (#654). Where a
+        // ranged body answers one, the melee bodies are capped at their own
+        // count and a ranged one takes any seat, as its shot reaches what a
+        // swing catches too: seats are who may stand, the cast what is bought.
+        | BriefKind.Contested when phase = Phase.Prey ->
             let bouncing = answered.Value |> List.forall (snd >> List.isEmpty)
 
             let cast row =
@@ -1122,7 +1141,9 @@ module Brief =
         // them, at most `Engine.guardCap`: the cast is what is bought, not who
         // may stand; a body the fight needs beside another is no body to
         // evict (#272), and none takes the seat of the body cast to win it.
-        | BriefKind.Outpost
+        // A contested room's raid, harassed or ours, alike (#656): rangers
+        // that win it only together are seated together (#609).
+        | BriefKind.Contested
         | BriefKind.ExitHold ->
             // Bodies of the cast's template: the ones its kind admits.
             let cut =
@@ -1145,23 +1166,25 @@ module Brief =
 
             Capacity.fighters (max (wanted ()) (min Engine.guardCap (losers + 1)))
 
-    /// A Guard's own kind: the first of its claims, `Outpost` where none
+    /// A Guard's own kind: the first of its claims, `Contested` where none
     /// claims the room.
     let private kindOf (claims: BriefKind list) =
-        List.tryHead claims |> Option.defaultValue BriefKind.Outpost
+        List.tryHead claims |> Option.defaultValue BriefKind.Contested
 
     /// One room's Brief, off the kinds that claimed it down `BriefKind.order`
-    /// and the ground each source laid there. A kill (#510, #516) is stepped a
-    /// rung up — its kill is the room's whole income back, and a quiet holder
-    /// is let go for it — and calls that holder off within its walk. A raid's
-    /// Guard two: the melee guard's ring, or a garrison's or a chase's where
-    /// a Threat stands (`raided`). Defence first, so a body the raid wants
-    /// never goes to a kill, and only one the raid leaves free does (#528).
-    /// A harassment room's Threat is the enemy's own. The room's verdict, the
-    /// rangers that win it (`Facts.rangersWin`) and whether a ranger answers
-    /// it (`Facts.rangerAnswers`, read for an outpost alone) and whether the
-    /// colony's own row casts for its chase (`casts`) come priced lazily,
-    /// once a tick. Its answers read the view and Atlas given.
+    /// and the ground each source laid there. A kill (#510, a contested
+    /// room's prey, #516) is stepped a rung up — its kill is the room's whole
+    /// income back, and a quiet holder is let go for it — and calls that
+    /// holder off within its walk. A raid's Guard two: a contested room's
+    /// raid, or a garrison's or a chase's where a Threat stands (`raided`);
+    /// and a room of ours nobody works, the remembered raid's (#366).
+    /// Defence first, so a body the raid wants never goes to a kill, and only
+    /// one the raid leaves free does (#528). The room's verdict, the rangers
+    /// that win it (`Facts.rangersWin`) and whether a ranger answers it
+    /// (`Facts.rangerAnswers`, or the room is a harassment room) and whether
+    /// the colony's own row casts for its chase (`casts`) come priced lazily,
+    /// once a tick; a contested room's `phase` and its price (`contest`)
+    /// beside them. Its answers read the view and Atlas given.
     let internal claimed
         (view: ColonyView)
         (atlas: Atlas.Atlas)
@@ -1174,11 +1197,28 @@ module Brief =
         (answered: Lazy<(CastRow * HostileInfo list) list>)
         (holding: Set<string>)
         (claims: BriefKind list)
+        (phase: Phase)
         (laid: Laid)
         : Brief =
         let kind = kindOf claims
-        let kill = BriefKind.isKill kind
-        let ranged = kind = BriefKind.Outpost && ranger.Value
+
+        let contention =
+            if kind = BriefKind.Contested then
+                let value = lazy (Facts.contestOf view room)
+
+                Some
+                    {
+                        Phase = phase
+                        Ours = Facts.contestOurs view room
+                        Value = value
+                    }
+            else
+                None
+
+        let kill =
+            kind = BriefKind.Chase || kind = BriefKind.Contested && phase = Phase.Prey
+
+        let ranged = kind = BriefKind.Contested && ranger.Value
 
         let rowCast =
             lazy
@@ -1192,14 +1232,15 @@ module Brief =
                  else
                      None)
 
-        let ask = askOf kind ranged rowCast answered room view
+        let ask = askOf kind contention ranged rowCast answered room view
 
         {
             Duty = Duty.Guard kind
             BuiltBy = SpatialInfo.homeName view.Spatial
             Claims = claims
+            Contention = contention
             Targets = guardTargets view atlas holding
-            Admits = admitsOf kind room ranged answered view atlas
+            Admits = admitsOf kind phase room ranged answered view atlas
             Ends = Facts.endsIn view room
             Recall = if kill then Some { Walk = killWalk } else None
             Laid = laid
@@ -1208,27 +1249,33 @@ module Brief =
             // builder's Atlas, so a body of another colony the world hands
             // the Brief walks to it too (a transit room carries no source).
             Ground =
-                groundOf kind ranged laid
+                groundOf kind phase ranged laid
                 |> Option.orElseWith (fun () ->
                     Some(Atlas.sourceRingIn atlas room) |> Option.filter (Set.isEmpty >> not))
             WalksIn = kind = BriefKind.Chase
             Avoid =
                 match kind with
                 | BriefKind.Chase -> Avoid.Kite
-                | BriefKind.Trespass -> Avoid.Reach
+                | _ when kill -> Avoid.Reach
                 | _ -> Avoid.Runner
             Rung =
                 match kind with
-                | BriefKind.Outpost -> TwoRungsUp
+                // A contested room's raid, harassed or ours (#609, #656): a
+                // ranger idling on a quiet Guard is sent to it; and a room
+                // nobody works pooled for the raid remembered there (#366).
+                // A harassment room nobody works is worked target or none,
+                // on the tier.
+                | BriefKind.Contested when
+                    phase = Phase.Raid
+                    || phase = Phase.Quiet && not (Set.contains room (harassRooms view))
+                    ->
+                    TwoRungsUp
                 | BriefKind.Resident
                 | BriefKind.Chase when raided -> TwoRungsUp
-                // A raid in a harassment room our side wins is the raid's
-                // rung, a ranger idling on a quiet Guard sent to it (#609).
-                | BriefKind.Harass when raided && verdict.Value = Answer.Win -> TwoRungsUp
                 | _ when kill -> OneRungUp
                 | _ -> OnTheTier
             Asks = ask
-            Capacity = capacityOf kind room verdict rangers holding answered ask view
+            Capacity = capacityOf kind phase room verdict rangers holding answered ask view
             Verdict = verdict
             Formation = None
             Stances = Map.empty
@@ -1240,10 +1287,15 @@ module Brief =
     /// come to to hurt our work, where its post is all it can hold — a held
     /// exit, or a raider it does not strike at their standoff
     /// (`Facts.strikesAtStandoff`: one that keeps off a swing); every other
-    /// body fights where it goes, at the standoff.
+    /// body fights where it goes, at the standoff, a contested room's prey's
+    /// holder among them.
     let stanceOf (view: ColonyView) (room: string) (brief: Brief) (creep: CreepInfo) : Stance =
         match brief.Duty with
-        | Duty.Guard kind when BriefKind.laysRing kind && Fighter.glues (Fighter.ofCreep creep) ->
+        | Duty.Guard kind when
+            BriefKind.laysRing kind
+            && not (isKill brief)
+            && Fighter.glues (Fighter.ofCreep creep)
+            ->
             let fighter = Fighter.ofCreep creep
 
             let caught (h: HostileInfo) =
@@ -1257,9 +1309,10 @@ module Brief =
                 Stance.Standoff
         | _ -> Stance.Standoff
 
-    /// A room no source claims or lays ground in: a melee guard's `Outpost`
-    /// on no ground, the one a remembered raid pools in a room the colony is
-    /// blind in (#366). No raider stands in it, so its verdict is `Win`.
+    /// A room no source claims or lays ground in: a quiet contested room on
+    /// no ground, the one a remembered raid pools in a room the colony is
+    /// blind in (#366), a melee guard's. No raider stands in it, so its
+    /// verdict is `Win`.
     let unclaimed (view: ColonyView) (atlas: Atlas.Atlas) (room: string) : Brief =
         claimed
             view
@@ -1268,11 +1321,12 @@ module Brief =
             false
             (lazy Answer.Win)
             (lazy None)
-            (lazy false)
+            (lazy (Set.contains room (harassRooms view)))
             (lazy false)
             (lazy [])
             Set.empty
             []
+            Phase.Quiet
             bare
 
     /// How many [[defender]]s the home wants this tick (#504): one a body of
@@ -1422,6 +1476,7 @@ module Brief =
             Duty = Duty.Defend
             BuiltBy = SpatialInfo.homeName view.Spatial
             Claims = []
+            Contention = None
             Targets =
                 {
                     Shoots = fun _ _ hostile -> Set.contains hostile.Id line
@@ -1479,6 +1534,7 @@ module Brief =
             Duty = duty
             BuiltBy = SpatialInfo.homeName view.Spatial
             Claims = []
+            Contention = None
             Targets = guardTargets view atlas (formation.Roles |> Map.keys |> Set.ofSeq)
             Admits = fun creep -> Map.containsKey creep.Name formation.Roles
             Ends = fun _ -> None
@@ -2523,11 +2579,6 @@ module Threats =
     let residentRingIn (threats: Threats) (room: string) : Set<RoomPos> option =
         (briefOf threats room).Laid.Resident
 
-    /// The ranger's ground in one harassment room (`Laid.Harass`), or None for
-    /// any other room.
-    let harassRingIn (threats: Threats) (room: string) : Set<RoomPos> option =
-        (briefOf threats room).Laid.Harass
-
     /// One room's Guard ground (`Brief.Ground`).
     let guardGroundIn (threats: Threats) (room: string) : Set<RoomPos> option =
         (briefOf threats room).Ground
@@ -2954,29 +3005,16 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         | Some score -> score.Value
         | None -> fun _ -> 0.0
 
-    // A work spot is where the enemy's bodies must stop: within two of the
-    // source, where a hauler draws from the miner's pile, and around the
-    // controller, within three because a reserver shuffles about it. The
-    // source's come first, and while an enemy miner is anywhere in the room
-    // the ranger holds the Stand's seats rather than turn to the controller:
-    // the miner steps just out of reach and back, and ground that followed
-    // it off the source turned the ranger between it and the reserver, out
-    // of reach of both (W18S27, t840,6xx-8xx). The seats are within reach of
-    // every work spot of the source.
-    let harassRing =
+    // A harassment room's Stand (#432): its source's seats, where the enemy's
+    // bodies must stop, the ground of the room while nobody works it (#656:
+    // a body working it is the room's prey, a raid its ring). The seats are
+    // within reach of every work spot of the source.
+    let stand =
         view.Harass
         |> List.map (fun h ->
             let room = h.RoomName
 
             let inRoom = view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = room)
-
-            let within (spot: RoomPos) reach (hostile: HostileInfo) =
-                RoomPos.range spot hostile.Pos |> Option.exists (fun r -> r <= reach)
-
-            let armedTargets, unarmedTargets =
-                inRoom
-                |> List.filter (guardShoots view resident Set.empty)
-                |> List.partition (HostileInfo.armed inRoom)
 
             // A room we mine keeps its source's seats for our miners: the
             // ranger stands off them, within reach of every one (W17S26,
@@ -2992,97 +3030,11 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             let offTheSeats (tile: Pos) =
                 not mined || range tile (RoomPos.pos h.Stand) > 1
 
-            // Our shooters in the room, where they stand.
-            let shooters =
-                ColonyView.bodies view
-                |> List.filter (fun creep -> partCount creep.Body RangedAttack > 0)
-                |> List.choose (fun creep -> Atlas.creepTile atlas creep.Name)
-                |> List.filter (fun tile -> tile.Room = room)
-
-            // A body off the work spots is chased when the ranger catches it
-            // (user, 2026-10-04): slower than a ranger's step a tick on plain
-            // (`HostileInfo.gait`), or already a step from a shooter's reach,
-            // where a chase at one pace keeps it under fire.
-            let catchable (hostile: HostileInfo) =
-                Gait.ticks Gait.plain (HostileInfo.gait inRoom hostile)
-                |> Option.forall (fun ticks -> ticks > 1)
-                || shooters
-                   |> List.exists (fun tile -> within tile (Engine.rangedRange + 1) hostile)
-
-            let chased =
-                unarmedTargets
-                |> List.filter (fun hostile ->
-                    not (within h.Stand 2 hostile)
-                    && not (within h.Controller 3 hostile)
-                    && catchable hostile)
-
-            // The one body at the source or caught off it worth most a tick
-            // of the side's effort (`sideScore`, #621), which the shot's kill
-            // order leads with too. Ground round two bodies turned the ranger
-            // between them: a hauler stepping on and off the source's work
-            // spot and a slow miner at the room's other source (W19S25,
-            // t943,777).
-            let atSource = unarmedTargets |> List.filter (within h.Stand 2)
-            let digs = HostileInfo.works inRoom
-            let score = sideScore room
-
-            let reachOf targets =
-                targets
-                |> List.map (fun (hostile: HostileInfo) ->
-                    Engine.rangedRange, RoomPos.pos hostile.Pos)
-
-            let working =
-                match atSource @ chased with
-                | _ :: _ as caught ->
-                    caught
-                    |> List.sortBy (fun hostile -> -(score hostile), hostile.Id)
-                    |> List.truncate 1
-                    |> reachOf
-                | [] when unarmedTargets |> List.exists digs -> seats
-                | [] -> unarmedTargets |> List.filter (within h.Controller 3) |> reachOf
-
-            // An armed target turns the ambush into its fight where a holder
-            // of the Guard fits that fight beside the others (`Facts.fits`,
-            // #611): the ground is beside it alone, and the work spots wait
-            // for the room to empty of it. Where none fits, the harassment
-            // carries on beside it, and its verdict stands it down or not.
-            let fought =
-                lazy
-                    (let holders = HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList
-
-                     let holding =
-                         ColonyView.bodies view
-                         |> List.filter (fun creep -> holders.Contains creep.Name)
-
-                     holding
-                     |> List.exists (fun creep ->
-                         Facts.fits
-                             view
-                             Stance.Standoff
-                             room
-                             view.Tuning.ReachHorizon
-                             true
-                             creep
-                             (holding
-                              |> List.filter (fun other -> other.Name <> creep.Name)
-                              |> List.map (fun other -> other, true, Some 0))))
-
-            let besideArmed =
-                armedTargets |> List.map (fun hostile -> 1, RoomPos.pos hostile.Pos)
-
-            let ambushed =
-                match armedTargets with
-                | [] -> working
-                | _ when fought.Value -> besideArmed
-                | _ -> besideArmed @ working
-
-            let around = if List.isEmpty ambushed then seats else ambushed
-
             let standing =
                 inRoom |> List.map (fun hostile -> RoomPos.pos hostile.Pos) |> Set.ofList
 
             room,
-            around
+            seats
             |> List.collect (fun (radius, pos) -> Atlas.walkableWithinIn atlas room radius pos)
             |> List.filter (fun tile -> not (Set.contains tile standing) && offTheSeats tile)
             |> Set.ofList
@@ -3527,31 +3479,6 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             else
                 Some(room, RoomPos.setAt room ground))
 
-    // Whether a kind's claim on a room pools a Task this tick, as `planTasks`
-    // pools it (#542): a kill always; any kind where the room's Guard is
-    // pooled whatever claims it (`Facts.guardedRooms`), or where a body of
-    // ours holds that Guard beside a hostile (`engaged`, the held fight); a
-    // held exit where a body holds its Guard. `engaged` is a superset of the
-    // Planner's `fought` (which also asks `holdsFight` — circular here, as it
-    // reads the Brief): where they differ the kill pools a tick later, never
-    // stalls. The guarded rooms are derived
-    // only where a claim ahead would otherwise shut a later one out.
-    let guarded =
-        lazy
-            (Facts.guardedRooms view atlas (Facts.declaredOutposts view) (Facts.fuelledErrands view)
-             |> Set.ofList)
-
-    let pools kind room =
-        BriefKind.isKill kind
-        || Set.contains room engaged
-        || kind = BriefKind.ExitHold && Set.contains (taskId (Guard room)) held.All
-        || Set.contains room guarded.Value
-
-    // Each kind's claim, down `BriefKind.order`, on the rooms still open to
-    // it: the first four claim their rooms outright, a held exit, a core and
-    // a trespass only the rooms they lay ground in. A claim that pools nothing
-    // shuts nobody out. Per room, its claimants in that order; per kind, the
-    // ground it laid.
     // Whether a level-0 core in a room comes before its trespassers (#558):
     // where only the guard row answers them and its swing catches none of
     // them, a trespass kill would hold the guard where it strikes nothing, and
@@ -3568,6 +3495,72 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                    trespassers |> List.forall (Facts.strikesAtStandoff view guard >> not)
                | _ -> List.isEmpty trespassers)
 
+    // Whether a held exit keeps its room over its prey (#656): its holders
+    // would not kill a trespasser and be back at the exit before the raid
+    // that left by it is (`Facts.preyBeforeReturn`).
+    let holdKeeps room =
+        match Map.tryFind room view.ExitHolds with
+        | Some hold ->
+            let holders =
+                HeldTaskFacts.holdersOf held (taskId (Guard room))
+                |> List.choose (fun name ->
+                    ColonyView.bodies view |> List.tryFind (fun creep -> creep.Name = name))
+
+            not (Facts.preyBeforeReturn view room hold holders)
+        | None -> false
+
+    // A contested room's prey's ground (#516, #656): about every trespasser
+    // in a room of ours or a harassed one, never a chased room's, whose
+    // chase claims it first, nor a cored room's the core comes first in,
+    // nor a held exit's its holders would not be back at in time.
+    let prey =
+        trespassIn (fun room ->
+            not (Set.contains room chasedRooms)
+            && not (coreFirst room)
+            && not (holdKeeps room))
+        |> Map.ofList
+
+    // Whether a kind's claim on a room pools a Task this tick, as `planTasks`
+    // pools it (#542): a kill always (a chase, a contested room's prey);
+    // any kind where the room's Guard is pooled whatever claims it
+    // (`Facts.guardedRooms`), or where a body of ours holds that Guard
+    // beside a hostile (`engaged`, the held fight); a held exit where a body
+    // holds its Guard. `engaged` is a superset of the Planner's `fought`
+    // (which also asks `holdsFight` — circular here, as it reads the Brief):
+    // where they differ the kill pools a tick later, never stalls. The
+    // guarded rooms are derived only where a claim ahead would otherwise
+    // shut a later one out.
+    let guarded =
+        lazy
+            (Facts.guardedRooms view atlas (Facts.declaredOutposts view) (Facts.fuelledErrands view)
+             |> Set.ofList)
+
+    let raidPools room =
+        Set.contains room engaged || Set.contains room guarded.Value
+
+    let pools kind room =
+        kind = BriefKind.Chase
+        || kind = BriefKind.Contested && Map.containsKey room prey
+        || raidPools room
+        || kind = BriefKind.ExitHold && Set.contains (taskId (Guard room)) held.All
+
+    // A contested room's phase (#656): its raid where that pools, or where
+    // no prey works it; else its prey; else quiet.
+    let phaseOf room =
+        if Map.containsKey room ring && (raidPools room || not (Map.containsKey room prey)) then
+            Phase.Raid
+        elif Map.containsKey room prey then
+            Phase.Prey
+        else
+            Phase.Quiet
+
+    // Each kind's claim, down `BriefKind.order`, on the rooms still open to
+    // it: a resident and a chase claim their rooms outright; a contested
+    // room its raid's rooms outright, open under a chase as a ring is, and
+    // the rooms its prey works or that we harass, not under one; a held exit
+    // and a core only the rooms they lay ground in. A claim that pools
+    // nothing shuts nobody out. Per room, its claimants in that order; per
+    // kind, the ground it laid.
     let claimants, laid =
         let outright rooms open' =
             rooms |> Seq.filter open' |> Seq.map (fun room -> room, Set.empty) |> List.ofSeq
@@ -3575,13 +3568,23 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         let claimOf kind =
             match kind with
             | BriefKind.Resident -> outright resident
-            | BriefKind.Harass -> outright (harassRooms view)
             | BriefKind.Chase -> outright chasedRooms
-            | BriefKind.Outpost -> outright ring.Keys
+            | BriefKind.Contested ->
+                fun open' ->
+                    let unchased room =
+                        open' room && not (Set.contains room chasedRooms)
+
+                    Seq.concat
+                        [
+                            ring.Keys |> Seq.filter open'
+                            prey.Keys |> Seq.filter unchased
+                            harassRooms view |> Seq.filter unchased
+                        ]
+                    |> Seq.distinct
+                    |> Seq.map (fun room -> room, Set.empty)
+                    |> List.ofSeq
             | BriefKind.ExitHold -> holdsIn
             | BriefKind.Core -> coresIn
-            | BriefKind.Trespass ->
-                fun open' -> trespassIn (fun room -> open' room && not (coreFirst room))
 
         ((Map.empty, Map.empty), BriefKind.order)
         ||> List.fold (fun (claimants: Map<string, BriefKind list>, laid) kind ->
@@ -3624,18 +3627,23 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 (fun prior -> Some(Set.union ground (Option.defaultValue Set.empty prior)))
                 ring)
 
-    let trespass = laidBy BriefKind.Trespass |> Map.ofList
+    // A contested room's prey's ground where its prey is what it is fought
+    // over, and its claim was open (#656).
+    let preyLaid room =
+        match Map.tryFind room claimants with
+        | Some claims when List.contains BriefKind.Contested claims && phaseOf room = Phase.Prey ->
+            Map.tryFind room prey
+        | _ -> None
 
     // Every room a source claimed or laid ground in; one no source claims is
-    // the default kind's, `Outpost`.
+    // the default kind's, `Contested`.
     let briefs =
         [
             Map.keys claimants
             Map.keys rings
             Map.keys residentRing
-            Map.keys harassRing
+            Map.keys stand
             Map.keys kite
-            Map.keys trespass
         ]
         |> Seq.concat
         |> Set.ofSeq
@@ -3653,7 +3661,9 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 (Map.containsKey room ring)
                 verdict
                 winners
-                (lazy (answeredByRanger room))
+                // A harassment room is the ranger's, a hostile in it or none
+                // (#432).
+                (lazy (answeredByRanger room || Set.contains room (harassRooms view)))
                 (lazy
                     (Set.contains room view.RaidedOutposts
                      && Map.tryFind room judged
@@ -3665,6 +3675,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                         room))
                 (HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList)
                 (claimsIn room)
+                (phaseOf room)
                 {
                     Kite = Map.tryFind room kite |> Option.map fst
                     Approach =
@@ -3672,9 +3683,9 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                         |> Option.map snd
                         |> Option.defaultValue (lazy Set.empty)
                     Resident = Map.tryFind room residentRing
-                    Harass = Map.tryFind room harassRing
+                    Stand = Map.tryFind room stand
                     Ring = Map.tryFind room rings
-                    Trespass = Map.tryFind room trespass
+                    Prey = preyLaid room
                 })
         |> Map.ofSeq
 
@@ -3731,8 +3742,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             let scores = lazy (sideScoresIn view holders room)
 
             let seatGroundOf (creep: CreepInfo) =
-                match brief.Duty, groundOf creep with
-                | Duty.Guard BriefKind.Trespass, Some(ground, false) ->
+                match groundOf creep with
+                | Some(ground, false) when Brief.isKill brief && brief.Contention.IsSome ->
                     let score = scoreOf atlas scores.Value creep
                     let reach = Fighter.reachOf creep
                     let arrival = arrivalOf creep
@@ -3762,7 +3773,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                         Some(near, true)
                     else
                         Some(ground, false)
-                | _, seated -> seated
+                | seated -> seated
 
             holders
             |> List.choose (fun creep ->
@@ -4282,8 +4293,7 @@ let private withMusters
                 | _, None -> None
                 | _, Some brief ->
                     match brief.Duty with
-                    | Duty.Guard BriefKind.Resident
-                    | Duty.Guard BriefKind.Harass -> None
+                    | Duty.Guard BriefKind.Resident -> None
                     | Duty.Guard _ when brief.Verdict.Value = Answer.Win ->
                         match stancesOf room brief holders with
                         | stances when Map.isEmpty stances -> None

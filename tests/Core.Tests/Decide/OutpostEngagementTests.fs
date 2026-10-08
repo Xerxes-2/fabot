@@ -219,9 +219,9 @@ let killAdmissionTests =
                 let brief = Threats.briefOf (threatsOf colony atlas) "W1N2"
 
                 Expect.equal
-                    brief.Duty
-                    (Duty.Guard BriefKind.Trespass)
-                    "the premise: a trespass's kill"
+                    (brief.Duty, Brief.isKill brief)
+                    (Duty.Guard BriefKind.Contested, true)
+                    "the premise: a contested room's prey, a kill"
 
                 Expect.isFalse
                     (brief.Admits slow)

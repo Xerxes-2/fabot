@@ -763,12 +763,16 @@ let internal mayStrike (view: ColonyView) (engaged: Set<string>) (hostile: Hosti
 /// Whether a hostile is a [[trespasser]] (#516): its body trespasses, we may
 /// strike it (`mayStrike`), and it stands in a room this colony kills
 /// trespassers in, or one whose fight it holds (`engaged`, #535): a cripple
-/// left there is the fight's to finish. The body is asked first, so a tick
-/// with no such body walks no source.
+/// left there is the fight's to finish; or it is the declared enemy's in the
+/// harassment room that names it (`harassTarget`): one economic war over a
+/// room, ours or theirs (#656). The body is asked first, so a tick with no
+/// such body walks no source.
 let internal trespasser (view: ColonyView) (engaged: Set<string>) (hostile: HostileInfo) =
     trespassingBody view.Hostiles hostile
     && mayStrike view engaged hostile
-    && (trespassRooms view hostile.Pos.Room || Set.contains hostile.Pos.Room engaged)
+    && (trespassRooms view hostile.Pos.Room
+        || Set.contains hostile.Pos.Room engaged
+        || harassTarget view hostile)
 
 /// What a Guard in its room may shoot, every target reader's one predicate
 /// (`Emitter.strikeOrder`, the kite's head): a threat (`threatens`, a
@@ -1989,6 +1993,90 @@ let private killsLanded
             | Some value, Some kill when hostile.TicksToLive > landing + kill ->
                 catchOdds priced body None landing kill hostile * value
             | _ -> 0.0)
+
+/// Whether the holders of a held exit (#450) kill a trespasser in its room
+/// and walk back to the exit before the raid that left by it is back
+/// (#656). The raid's return: the soonest armed body seen across the border
+/// reaches the exit tile in its tiles there at its plain pace; with none in
+/// sight (the rooms across are mostly dark), the raid that left is expected
+/// back no sooner than it has been gone (the hold's ticks since it left,
+/// `Tuning.ExitHoldTicks` before it lapses): a raid bouncing on the border
+/// is back at once, one long gone is not — the stand-in until the exit watch
+/// learns a raid's bounce. The holders reach a trespasser in their straight
+/// tiles to their reach at the slowest one's pace, kill it together at their
+/// standoff (`killTicksOf`) and walk back its tiles to the exit. With no
+/// holder, nothing leaves the exit.
+let preyBeforeReturn
+    (view: ColonyView)
+    (room: string)
+    (hold: ExitHold)
+    (holders: CreepInfo list)
+    : bool =
+    let exit = hold.Exit
+    let exitTile = RoomPos.at room exit
+    let beside = RoomName.adjacent room
+
+    let paceOf gait =
+        Gait.ticks Gait.plain gait |> Option.defaultValue System.Int32.MaxValue
+
+    // The world's vision of the rooms across, which a colony's cut may not
+    // project.
+    let across = (ColonyView.lookingInto (room :: beside) view).Hostiles
+
+    let seen =
+        across
+        |> List.filter (fun h -> List.contains h.Pos.Room beside && HostileInfo.armed across h)
+        |> List.choose (fun h ->
+            RoomName.tileRange h.Pos exitTile
+            |> Option.map (fun tiles ->
+                let pace = paceOf (HostileInfo.gait across h)
+
+                if pace = System.Int32.MaxValue then
+                    System.Int32.MaxValue
+                else
+                    tiles * pace))
+
+    let due =
+        match seen with
+        | [] -> [ max 0 (view.Time - (hold.Until - view.Tuning.ExitHoldTicks)) ]
+        | seen -> seen
+
+    match holders with
+    | [] -> true
+    | holders ->
+        let deadline = List.min due
+        let team = holders |> List.map Fighter.ofCreep
+        let pace = team |> List.map (fun f -> paceOf f.Gait) |> List.max
+        let reach = team |> List.map _.Reach |> List.max
+        let healOn = healReachingWithin view room view.Tuning.ReachHorizon
+
+        let from =
+            holders
+            |> List.choose (fun creep -> SpatialInfo.creepPlacementOf view.Spatial creep.Name)
+
+        let tilesTo (target: RoomPos) =
+            from
+            |> List.choose (fun at -> RoomName.tileRange at target)
+            |> function
+                | [] -> None
+                | tiles -> Some(List.min tiles)
+
+        pace < System.Int32.MaxValue
+        && view.Hostiles
+           |> List.exists (fun h ->
+               h.Pos.Room = room
+               && trespasser view (Set.singleton room) h
+               && (match
+                       tilesTo h.Pos,
+                       killTicksOf view healOn team h,
+                       RoomName.tileRange h.Pos exitTile
+                   with
+                   | Some walk, Some kill, Some back ->
+                       int64 (max 0 (walk - reach)) * int64 pace
+                       + int64 kill
+                       + int64 back * int64 pace
+                       <= int64 deadline
+                   | _ -> false))
 
 /// How many bodies of a row cast for a trespass's kill pay for themselves
 /// (#652): the most `k` whose cost the kills they land cover. The kills:
@@ -3291,6 +3379,24 @@ let private blocksBought (view: ColonyView) (template: BodyTemplate) : int list 
 let private blocksMostOf (template: BodyTemplate) : int =
     Engine.maxBodyParts / List.length (patternOfTemplate template).Block
 
+/// Whether our economy works a room (#656): one we mine, a child's outpost
+/// we watch (`trespassRooms`), or an outpost of ours a raid has shut or
+/// threatens. Any other room a fight is had in is a rival's.
+let private economyOurs (view: ColonyView) (room: string) : bool =
+    trespassRooms view room
+    || view.RaidedOutposts.Contains room
+    || view.ThreatenedOutposts.Contains room
+
+/// Whether a contested room is ours to keep (#656): every room but a
+/// rival's remote we harass that no colony of ours mines (`MinedRooms`) and
+/// our economy does not work. A home, an outpost, another colony's home we
+/// defend: a fight there keeps what is ours; in a rival's remote it only
+/// denies.
+let contestOurs (view: ColonyView) (room: string) : bool =
+    economyOurs view room
+    || view.MinedRooms.Contains room
+    || not (Set.contains room (harassRooms view))
+
 /// What a tick a raid stands in a room costs us (#654): the yield of our
 /// sources there at the rate the room is held at (`heldRateOf`), the
 /// economy the raid shuts while it stands; nothing where none of ours is.
@@ -3411,7 +3517,9 @@ let private fightRaid (view: ColonyView) (room: string) : HostileInfo list =
 /// focusing one at a time), each priced its spent life, and its spawn time,
 /// the wait for its last body (its spawns cast a round at a time), its walk
 /// and kill (`killTicks`, a lifetime where it never kills) at the room's
-/// yield a tick (`Contest.Kept`, #656); by least price, then the fewest parts,
+/// economic delta a tick (`Contest.delta`, #656: our yield there kept and
+/// the take of the rival's economy bodies working beside the raid denied);
+/// by least price, then the fewest parts,
 /// the fewest bodies, the template's order. Last, the melee body holding
 /// its post (`Stance.Hold`, #531): one body of the fewest blocks that hold
 /// it, ending it where the bank buys that body, `bodies` of them where the
@@ -3507,7 +3615,7 @@ let private castsByPrice
         castSpawnTicks template blocks * ((n + spawns - 1) / spawns - 1)
 
     if not (List.isEmpty raid) then
-        let tick = contest.Value.Kept
+        let tick = Contest.delta contest.Value
         let home = (homesOfOurs view).Contains room
 
         // The stance a body meets the raid at, as the gate prices it

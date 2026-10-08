@@ -470,12 +470,23 @@ let internal homeHolds (view: ColonyView) (room: string) : bool =
     |> Option.defaultValue []
     |> List.exists (fun creep -> bodiesWin view room [ creep ])
 
+/// Whether a room's Guard is a contested room's kill whose cast its kills
+/// pay for (#652, #656): no economy of ours is guarded there — the room is
+/// outside the guarded rooms, or a rival's remote we harass — so the kill's
+/// value is all that buys a body.
+let private pricedKill (outposts: OutpostFacts) (room: string) (brief: Brief) : bool =
+    Brief.isKill brief
+    && (match brief.Contention with
+        | Some contention -> not contention.Ours || not (List.contains room outposts.Guarded)
+        | None -> false)
+
 /// The guarded rooms a fighting row asks for, each with its Brief's row ask
 /// (#411): read off `Threats.briefOf`, so a guarded room no source claims —
 /// an outpost the colony is blind in (#366) — asks as `Brief.unclaimed`'s
 /// melee guard. A chased room (#510) asks neither row but where its own row
-/// wins a room the stand-down shuts (`chaseAsks`). Every colony asks for
-/// its own rooms; which colony casts is the Caster's (`Caster.assign`).
+/// wins a room the stand-down shuts (`chaseAsks`), and a kill its kills pay
+/// for asks priced (`pricedKill`, `killAsks`). Every colony asks for its own
+/// rooms; which colony casts is the Caster's (`Caster.assign`).
 let private guardedAsks
     (threats: Threats)
     (outposts: OutpostFacts)
@@ -483,9 +494,14 @@ let private guardedAsks
     : (string * RowAsk) list =
     outposts.Guarded
     |> List.collect (fun room ->
-        (Threats.briefOf threats room).Asks
-        |> List.filter (fun ask -> ask.Row = row)
-        |> List.map (fun ask -> room, ask))
+        let brief = Threats.briefOf threats room
+
+        if pricedKill outposts room brief then
+            []
+        else
+            brief.Asks
+            |> List.filter (fun ask -> ask.Row = row)
+            |> List.map (fun ask -> room, ask))
 
 /// Every other Brief's ask of a row, with its Task — the home's Defend's
 /// (#504), each Assault's per squad role —: a Brief exists only while its
@@ -543,11 +559,13 @@ let private chaseAsks
             |> List.map (fun ask -> task, ask)
         | _ -> [])
 
-/// The trespass kills outside the guarded rooms that a row is asked for
-/// (#652), each with the trespassers its row answers (`RowAsk.Prey`): a
-/// kill no holder of another Guard is called to (`calls`, the Matcher's
-/// own selection, `Pool.killCalls`), whose cast the Caster prices against
-/// what it lands (`Facts.castBodiesPaid`). One a holder is called to asks
+/// The contested rooms' kills a row is asked for priced (#652, #656), each
+/// with the trespassers its row answers (`RowAsk.Prey`): a kill no economy
+/// of ours is guarded beside (a room outside the guarded rooms, or a
+/// rival's remote we harass, which only the kill's value pays for) and no
+/// holder of another Guard is called to (`calls`, the Matcher's own
+/// selection, `Pool.killCalls`), whose cast the Caster prices against what
+/// it lands (`Facts.castBodiesPaid`). One a holder is called to asks
 /// nothing: the holder is the cheaper body, already standing.
 let private killAsks
     (threats: Threats)
@@ -559,11 +577,7 @@ let private killAsks
     |> Map.toList
     |> List.collect (fun (task, brief) ->
         match task with
-        | Guard room when
-            brief.Duty = Duty.Guard BriefKind.Trespass
-            && not (List.contains room outposts.Guarded)
-            && not (calls room)
-            ->
+        | Guard room when pricedKill outposts room brief && not (calls room) ->
             brief.Asks
             |> List.filter (fun ask -> ask.Row = row)
             |> List.map (fun ask -> task, ask)

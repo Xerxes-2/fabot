@@ -175,6 +175,47 @@ let harassGuardTests =
     testList
         "a harassment room's Guard: the ranger's, and the enemy's creeps its targets"
         [
+            // #656: a rival's remote is the same economic war as our outpost,
+            // seen from the other side: nothing of ours to keep, the rival's
+            // take to deny.
+            test
+                "a harassment room is a contested room that is not ours: its delta is the take denied" {
+                let colony =
+                    { (bareHome |> harassing) with
+                        Hostiles =
+                            [
+                                miner "miner" { X = 19; Y = 11 }
+                                theirs "hauler" enemy { X = 30; Y = 30 } [ Carry; Move ]
+                            ]
+                    }
+
+                let contest = Facts.contestOf colony harassRoom
+
+                Expect.isFalse
+                    (Facts.contestOurs colony harassRoom)
+                    "a rival's remote we do not mine"
+
+                Expect.equal contest.Kept 0.0 "nothing of ours to keep"
+
+                Expect.equal
+                    (contest.Takes |> Map.keys |> List.ofSeq)
+                    [ "hauler"; "miner" ]
+                    "each economy body of the enemy's, its take ours to deny"
+
+                Expect.equal
+                    (Contest.delta contest)
+                    (Contest.denied contest)
+                    "the delta: the take denied alone"
+
+                Expect.isTrue
+                    (Facts.contestOurs
+                        { colony with
+                            MinedRooms = Set.singleton harassRoom
+                        }
+                        harassRoom)
+                    "unless it is a room a colony of ours mines, ours to keep"
+            }
+
             test "a quiet harassment room still pools its Guard, and only the ranger holds it" {
                 let colony =
                     { (bareHome |> harassing) with
@@ -200,9 +241,13 @@ let harassGuardTests =
                     "the ranged body holds it; a melee one is an outpost's"
             }
 
-            // Characterisation (the Brief's S0): the harassment Guard's rank,
-            // capacity and rows, beside the takers, ground and act pinned around it.
-            test "its Guard ranks on the tier, a miner there or none, for one ranger and its relief" {
+            // The harassment Guard's rank, capacity and rows. Moved by #656:
+            // a harassment room is a contested room, priced by what a fight
+            // there denies the rival (it ranked on the tier and cast one
+            // ranger and a relief whatever stood there, the overrun included,
+            // the #615 test audit's question).
+            test
+                "its Guard ranks by what it is fought over, and casts only what the fight there pays for" {
                 let quiet =
                     { (bareHome |> harassing) with
                         Bank = bank 2100 2100
@@ -213,9 +258,7 @@ let harassGuardTests =
                         Hostiles = [ miner "miner" { X = 19; Y = 11 } ]
                     }
 
-                // Nine 17-ATTACK bodies: a raid no ranger of any size wins. The
-                // harassment room still wants its one: its row ask never reads
-                // `outmatched`.
+                // Nine 17-ATTACK bodies: a raid no ranger of any size wins.
                 let overrun =
                     { quiet with
                         Hostiles =
@@ -229,21 +272,26 @@ let harassGuardTests =
                             ]
                     }
 
-                for label, colony in
+                // Nobody works it: nothing to deny, on the tier. A miner off
+                // any seat it digs (the room's source unprojected): its kill,
+                // a rung up, its 350 paying for no body. A raid no ranger wins:
+                // the raid's rung, and no cast into it, no post of ours there to
+                // hold.
+                for label, colony, rung in
                     [
-                        "quiet", quiet
-                        "a miner at the source", worked
-                        "a raid no ranger wins", overrun
+                        "quiet", quiet, OnTheTier
+                        "a miner off the seats", worked, OneRungUp
+                        "a raid no ranger wins", overrun, TwoRungsUp
                     ] do
                     Expect.equal
                         (pooledHolding [] (Guard harassRoom) colony)
-                        (Some(safetyRank OnTheTier, Capacity.fighters 1 |> Capacity.relieving))
-                        $"{label}: on the Safety tier, never a kill's rung, one ranger and a relief"
+                        (Some(safetyRank rung, Capacity.fighters 1))
+                        $"{label}: its rung, and one seat"
 
                     Expect.equal
                         (rowOf "ranger" colony |> Option.map (fun row -> row.Quota))
-                        (Some 1)
-                        $"{label}: the ranger row casts its one"
+                        (Some 0)
+                        $"{label}: the ranger row casts none"
 
                     Expect.equal (guardQuotaOf colony) (Some 0) $"{label}: and the guard row none"
             }
@@ -268,9 +316,12 @@ let harassGuardTests =
                             creepWith "ranger-b" 0 0 pair, { X = 27; Y = 30 }
                         ]
 
+                // Moved by #656: no relief seat beside them (#439's), a
+                // contested room's raid seating the rangers that lose it alone
+                // and win it together, as an outpost's does.
                 Expect.equal
                     (pooledHolding [] (Guard harassRoom) colony)
-                    (Some(safetyRank TwoRungsUp, Capacity.fighters 2 |> Capacity.relieving))
+                    (Some(safetyRank TwoRungsUp, Capacity.fighters 2))
                     "the raid's rung, and a seat for each ranger that wins it"
             }
 
@@ -506,7 +557,7 @@ let harassGuardTests =
                 let held = Map.ofList [ holder.Name, taskId (Guard harassRoom) ]
 
                 let groundHeld (colony: ColonyView) =
-                    Threats.harassRingIn
+                    Threats.guardGroundIn
                         (threatsOfHeld colony (Atlas.ofView colony) (heldTaskFacts colony held))
                         harassRoom
 
@@ -528,10 +579,13 @@ let harassGuardTests =
                         @ List.replicate 4 Heal
                     )
 
-                Expect.isTrue
-                    (groundHeld escort
-                     |> Option.exists (Set.contains (RoomPos.at harassRoom standTile)))
-                    "one no holder fits stops no harassment: the work spots stay ground"
+                // Moved by #656: a contested room under a raid is the raid's
+                // ring, whoever fits it, as an outpost is (one no holder fit
+                // left the work spots ground beside it).
+                Expect.equal
+                    (groundHeld escort)
+                    (Some(within 1 raiderTile (Set.singleton raiderTile)))
+                    "one no holder fits: the ground is still beside the raider"
 
                 Expect.notEqual
                     (Map.tryFind holder.Name (decideFrom held escort).Assignments)
@@ -539,155 +593,95 @@ let harassGuardTests =
                     "one it loses alone: it lets the Guard go, unstruck on its seat"
             }
 
-            test "with no enemy on a work spot, the ranger's ground is the Stand's seats" {
+            test "with nobody working the room, the ranger's ground is the Stand's seats" {
                 let quiet = bareHome |> harassing
 
                 let ground (colony: ColonyView) =
-                    Threats.harassRingIn (threatsOf colony (Atlas.ofView colony)) harassRoom
+                    Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) harassRoom
 
                 Expect.equal
                     (ground quiet)
                     (Some(within 1 standTile Set.empty))
                     "an empty room: beside the enemy's source, within reach of whatever works it"
 
-                // A claimer walking to the controller, five tiles short of it,
-                // as fast as the ranger: chased, it is never caught.
+                // A claimer walking to the controller, five tiles short of it.
+                // Moved by #656: an economy body working the room is its
+                // prey, a contested room's kill, on the tiles beside it as a
+                // trespasser in our outpost is (#516, #619); whether it is
+                // caught is its kill score's (#621). It left the Stand's seats
+                // the ground.
+                let claimerTile = { X = 30; Y = 35 }
+
                 let passing =
                     { quiet with
-                        Hostiles =
-                            [ theirs "claimer" enemy { X = 30; Y = 35 } [ BodyPart.Claim; Move ] ]
+                        Hostiles = [ theirs "claimer" enemy claimerTile [ BodyPart.Claim; Move ] ]
                     }
 
                 Expect.equal
                     (ground passing)
-                    (ground quiet)
-                    "a moving enemy creep does not pull the ground; it is shot if it comes into reach"
+                    (Some(within 1 claimerTile (Set.singleton claimerTile)))
+                    "a claimer in the room: the tiles beside it"
             }
 
+            // Moved by #656: a body working a harassment room is its prey, the
+            // contested room's kill, on the ground a trespasser in our outpost
+            // has: the tiles beside each (#516, #619). The ambush ground of
+            // its own (within three of the one body at a work spot, the
+            // reserver and a walker left out of it) is gone into it; what keeps
+            // the ranger from being turned between two bodies (W18S27,
+            // t840,7xx-8xx; W19S25, t943,777) is its seat, within its reach of
+            // the one body its kill score leads (#621).
             test
-                "an enemy creep on a work spot pulls the ranger's ground to within ranged reach of it" {
-                let quiet = bareHome |> harassing
-
-                let ground (colony: ColonyView) =
-                    Threats.harassRingIn (threatsOf colony (Atlas.ofView colony)) harassRoom
-
-                // Beside the source, and a walker the ground ignores.
+                "a body working the room is its prey: the ground beside each, the holder seated by the one it leads" {
                 let minerTile = { X = 19; Y = 11 }
-                let walker = theirs "walker" enemy { X = 40; Y = 20 } [ Carry; Move ]
-
-                Expect.equal
-                    (ground
-                        { quiet with
-                            Hostiles = [ miner "miner" minerTile; walker ]
-                        })
-                    (Some(within Engine.rangedRange minerTile (Set.ofList [ minerTile ])))
-                    "the miner beside the source: the ranger stands within three of it"
-
-                // Beside the controller: the reserver stops there for its whole
-                // reservation.
                 let reserverTile = { X = 31; Y = 39 }
 
-                Expect.equal
-                    (ground
-                        { quiet with
-                            Hostiles =
-                                [
-                                    theirs "reserver" enemy reserverTile [ BodyPart.Claim; Move ]
-                                    walker
-                                ]
-                        })
-                    (Some(within Engine.rangedRange reserverTile (Set.ofList [ reserverTile ])))
-                    "the reserver at the controller: the ranger stands within three of it"
-
-                // Two from the source: where a hauler stands to draw from the
-                // miner's pile or container (W18S27's Oni986 at (25,7)).
-                let haulerTile = { X = 18; Y = 10 }
+                let worked =
+                    { (bareHome |> harassing) with
+                        Hostiles =
+                            [
+                                miner "miner" minerTile
+                                theirs "reserver" enemy reserverTile [ BodyPart.Claim; Move ]
+                            ]
+                    }
 
                 Expect.equal
-                    (ground
-                        { quiet with
-                            Hostiles = [ theirs "hauler" enemy haulerTile [ Carry; Move ]; walker ]
-                        })
-                    (Some(within Engine.rangedRange haulerTile (Set.ofList [ haulerTile ])))
-                    "the hauler two from the source: the ranger stands within three of it"
+                    (Threats.guardGroundIn (threatsOf worked (Atlas.ofView worked)) harassRoom)
+                    (Some(
+                        Set.union
+                            (within 1 minerTile (Set.ofList [ minerTile ]))
+                            (within 1 reserverTile (Set.ofList [ reserverTile ]))
+                    ))
+                    "the tiles beside the miner and beside the reserver"
 
-                // A reserver shuffles around the controller rather than
-                // standing beside it (W18S27's Infinity271: 26,31 → 25,30 →
-                // 24,29), and ground that dropped it at two flipped every step.
-                let claimerAt tile =
-                    ground
-                        { quiet with
-                            Hostiles = [ theirs "claimer" enemy tile [ BodyPart.Claim; Move ] ]
-                        }
+                let holder = ranger "ranger-r"
+                let held = Map.ofList [ holder.Name, taskId (Guard harassRoom) ]
 
-                let threeOff = { X = 33; Y = 43 }
+                let seats =
+                    let colony = worked |> standingThere [ holder, { X = 25; Y = 25 } ]
 
-                Expect.equal
-                    (claimerAt threeOff)
-                    (Some(within Engine.rangedRange threeOff (Set.ofList [ threeOff ])))
-                    "three from the controller is still on it"
+                    (Threats.briefOf
+                        (threatsOfHeld colony (Atlas.ofView colony) (heldTaskFacts colony held))
+                        harassRoom)
+                        .Seats.Value
+                    |> Map.tryFind holder.Name
+                    |> Option.defaultValue Set.empty
 
-                Expect.equal (claimerAt { X = 34; Y = 40 }) (ground quiet) "four from it is not"
+                let near (tile: Pos) (seat: RoomPos) =
+                    range tile (RoomPos.pos seat) <= Engine.rangedRange
 
-                // Both at once: the reserver kept its distance from the ranger
-                // while the miner harvested on, and ground round both turned the
-                // ranger between them (W18S27, t840,7xx).
-                Expect.equal
-                    (ground
-                        { quiet with
-                            Hostiles =
-                                [
-                                    miner "miner" minerTile
-                                    theirs "reserver" enemy reserverTile [ BodyPart.Claim; Move ]
-                                ]
-                        })
-                    (Some(within Engine.rangedRange minerTile (Set.ofList [ minerTile ])))
-                    "a miner at the source and a reserver at the controller: the ground is the miner's alone"
+                Expect.isNonEmpty seats "the holder is seated"
 
-                // The miner stepped just out of reach, off the source, and
-                // back: ground that turned to the reserver as it did turned the
-                // ranger between the two (W18S27, t840,8xx). A miner slower than
-                // the ranger is chased instead (user, 2026-10-04), and the
-                // reserver stays out of the ground.
-                let offSource = { X = 15; Y = 7 }
-
-                Expect.equal
-                    (ground
-                        { quiet with
-                            Hostiles =
-                                [
-                                    miner "miner" offSource
-                                    theirs "reserver" enemy reserverTile [ BodyPart.Claim; Move ]
-                                ]
-                        })
-                    (Some(within Engine.rangedRange offSource (Set.ofList [ offSource ])))
-                    "a slow miner off the source: the ranger chases it, never the reserver"
-
-                // A worker as fast as the ranger, far from it: not caught, so the
-                // ranger holds the source's seats (W19S26's Convex791, 10M10W10C).
-                Expect.equal
-                    (ground
-                        { quiet with
-                            Hostiles =
-                                [
-                                    theirs
-                                        "worker"
-                                        enemy
-                                        offSource
-                                        (List.replicate 10 Move
-                                         @ List.replicate 10 Work
-                                         @ List.replicate 10 Carry)
-                                ]
-                        })
-                    (ground quiet)
-                    "a worker at a ranger's pace and out of reach: the seats"
+                Expect.isTrue
+                    (Set.forall (near minerTile) seats || Set.forall (near reserverTile) seats)
+                    "within its reach of one of the two, never between them"
             }
         ]
 
 [<Tests>]
 let harassSeatTests =
     testList
-        "one ranger per harassment room, and its relief beside it only inside its lead"
+        "one ranger per harassment room nobody works"
         [
             test "two fresh rangers and two harassment rooms: one each" {
                 // Both stand nearer the north room, so the nearer seat alone
@@ -710,141 +704,112 @@ let harassSeatTests =
                     "each room holds one ranger"
             }
 
-            test
-                "a fresh ranger is admitted beside an incumbent inside its lead, and not beside one outside it" {
-                let relief = ranger "ranger-new", RoomPos.at "W1N1" { X = 25; Y = 3 }
-
-                let decided ticksToLive =
-                    let incumbent =
-                        { ranger "ranger-old" with
-                            TicksToLive = ticksToLive
-                        }
-
-                    castingFrom
-                        [ declaration ]
-                        [ incumbent, RoomPos.at harassRoom standTile; relief ]
-                    |> decideFrom (Map.ofList [ "ranger-old", taskId (Guard harassRoom) ])
-                    |> fun decision -> decision.Assignments
-
-                let dying = decided 5
-
-                Expect.equal
-                    (Map.tryFind "ranger-old" dying, Map.tryFind "ranger-new" dying)
-                    (Some(taskId (Guard harassRoom)), Some(taskId (Guard harassRoom)))
-                    "inside the lead: the relief takes the seat beside the incumbent"
-
-                let fresh = decided 1500
-
-                Expect.equal
-                    (Map.tryFind "ranger-old" fresh, Map.tryFind "ranger-new" fresh)
-                    (Some(taskId (Guard harassRoom)), None)
-                    "outside it: a second body buys nothing"
-            }
-
-            test
-                "a held relief is kept beside its incumbent once the lead no longer covers the incumbent, and a third body is still refused" {
-                let relief = ranger "ranger-new", RoomPos.at "W1N1" { X = 25; Y = 3 }
-                let third = ranger "ranger-third", RoomPos.at "W1N1" { X = 26; Y = 3 }
-
-                // Both held, as after the tick the relief was admitted; the
-                // lead the incumbent was inside has since shrunk below it.
-                let decided ticksToLive =
-                    let incumbent =
-                        { ranger "ranger-old" with
-                            TicksToLive = ticksToLive
-                        }
-
-                    castingFrom
-                        [ declaration ]
-                        [ incumbent, RoomPos.at harassRoom standTile; relief; third ]
-                    |> decideFrom (
-                        Map.ofList
-                            [
-                                "ranger-old", taskId (Guard harassRoom)
-                                "ranger-new", taskId (Guard harassRoom)
-                            ]
-                    )
-                    |> fun decision ->
-                        [ "ranger-old"; "ranger-new"; "ranger-third" ]
-                        |> List.map (fun name -> Map.tryFind name decision.Assignments)
-
+            // Moved by #656: a harassment room nobody works seats its holder
+            // alone, a contested room's count, however short the holder's life
+            // (#439 admitted a relief beside an incumbent inside its lead and
+            // kept a held one once the lead had passed).
+            test "a second body beside the holder buys nothing, whatever the holder's life" {
+                let second = ranger "ranger-new", RoomPos.at "W1N1" { X = 25; Y = 3 }
                 let guard = Some(taskId (Guard harassRoom))
 
-                Expect.equal
-                    (decided 600)
-                    [ guard; guard; None ]
-                    "a generation apart: the relief stays, and the third body buys nothing"
+                let decided ticksToLive (held: string list) =
+                    let incumbent =
+                        { ranger "ranger-old" with
+                            TicksToLive = ticksToLive
+                        }
 
-                // Whichever of the two the fold keeps: a Guard's holders tie on
-                // the walk, so its order is their names'.
+                    castingFrom
+                        [ declaration ]
+                        [ incumbent, RoomPos.at harassRoom standTile; second ]
+                    |> decideFrom (
+                        held |> List.map (fun name -> name, taskId (Guard harassRoom)) |> Map.ofList
+                    )
+                    |> fun decision ->
+                        [ "ranger-old"; "ranger-new" ]
+                        |> List.map (fun name -> Map.tryFind name decision.Assignments)
+
+                for life in [ 5; 600; 1500 ] do
+                    Expect.equal
+                        (decided life [ "ranger-old" ])
+                        [ guard; None ]
+                        $"{life} ticks left: the incumbent holds it alone"
+
+                // Both held: one is released, but an expiring holder, kept over
+                // capacity as every holder is (the Matcher's escape).
+                for life in [ 600; 1500 ] do
+                    Expect.equal
+                        (decided life [ "ranger-old"; "ranger-new" ] |> List.choose id)
+                        [ taskId (Guard harassRoom) ]
+                        $"{life} ticks left, both held: one is released"
+
                 Expect.equal
-                    (decided 1400 |> List.choose id)
-                    [ taskId (Guard harassRoom) ]
-                    "two bodies of one generation are no relief: one is released, and the third buys nothing"
+                    (decided 5 [ "ranger-old"; "ranger-new" ])
+                    [ guard; guard ]
+                    "5 ticks left, both held: the expiring incumbent is kept beside the other"
             }
         ]
 
 [<Tests>]
 let harassRowTests =
     testList
-        "the ranger row for a harassment room"
+        "the fighting rows for a harassment room"
         [
-            test "one ranger, and never under three blocks" {
-                // A hauler already stands, so the supply floor casts nothing and
-                // the seat open is the ranger's. The bank buys eight blocks.
-                let colony =
-                    { (bareHome |> harassing) with
-                        Bank = bank 5600 5600
-                        Creeps = [ creepWith "h" 0 100 [ Carry; Carry; Move ] ]
-                        Tuning =
-                            { Tuning.defaults with
-                                MinWorkforce = 0
-                            }
-                    }
-
-                let decision = decideOn colony
-
-                Expect.equal
-                    (decision.Quotas.Rows
-                     |> List.tryFind (fun row -> row.Row = "ranger")
-                     |> Option.map (fun row -> row.Quota))
-                    (Some 1)
-                    "one ranger works the room"
-
-                let rangedParts =
-                    spawnIntents decision.Intents
-                    |> List.map (fun (_, body, _) ->
-                        body |> List.filter ((=) RangedAttack) |> List.length)
-                    |> List.filter (fun parts -> parts > 0)
-
-                Expect.equal
-                    rangedParts
-                    [ 2 * Tuning.defaults.HarassBlocks ]
-                    "cast at the harassment floor, three blocks, not the errand garrison's seven"
-            }
-
+            // Moved by #656: the room's cast is priced by what a fight there
+            // denies the rival (it cast one ranger, never under the harassment
+            // floor's three blocks or its declared two, whatever stood there).
             test
-                "a room declared at two blocks casts its ranger at the floor it was cast at, two blocks" {
-                // The room was cast at its declared two blocks (#457); the
-                // bank buys eight, so two is the floor's answer and not the bank's.
-                let colony =
+                "a room nobody works casts nothing; a digger on its seat casts the body its kill pays for" {
+                // A hauler already stands, so the supply floor casts nothing and
+                // the seat open is the fighter's. The bank buys eight blocks.
+                let quiet =
                     { (bareHome |> harassing) with
                         Bank = bank 5600 5600
                         Creeps = [ creepWith "h" 0 100 [ Carry; Carry; Move ] ]
-                        HarassFloors = Map.ofList [ harassRoom, 2 ]
                         Tuning =
                             { Tuning.defaults with
                                 MinWorkforce = 0
                             }
                     }
 
-                let rangedParts =
+                let fighters (colony: ColonyView) =
                     spawnIntents (decideOn colony).Intents
-                    |> List.map (fun (_, body, _) ->
-                        body |> List.filter ((=) RangedAttack) |> List.length)
-                    |> List.filter (fun parts -> parts > 0)
+                    |> List.map (fun (_, body, _) -> body)
+                    |> List.filter (fun body ->
+                        List.contains RangedAttack body || List.contains Attack body)
 
-                Expect.equal rangedParts [ 2 * 2 ] "one ranger of two blocks"
+                Expect.isEmpty (fighters quiet) "nothing works it: nothing to deny, no cast"
+
+                // Raptor865's 5W3M, seated on the enemy's source, its dig and
+                // its replacement worth more than a body's cost.
+                let layer = SpatialInfo.layerOf quiet.Spatial harassRoom
+
+                let worked =
+                    { quiet with
+                        Hostiles =
+                            [
+                                theirs
+                                    "digger"
+                                    enemy
+                                    { X = 19; Y = 11 }
+                                    (List.replicate 5 Work @ List.replicate 3 Move)
+                            ]
+                        Spatial =
+                            { quiet.Spatial with
+                                TargetKinds =
+                                    quiet.Spatial.TargetKinds |> Map.add "src-enemy" Source
+                            }
+                            |> withNeighbour
+                                harassRoom
+                                { layer with
+                                    TargetPositions =
+                                        Map.add "src-enemy" standTile layer.TargetPositions
+                                }
+                    }
+
+                Expect.equal
+                    (fighters worked |> List.length)
+                    1
+                    "one body, the cheapest that kills the digger"
             }
         ]
 
@@ -876,7 +841,7 @@ let minedHarassTests =
                 let quiet = bareHome |> harassing
 
                 let ground (colony: ColonyView) =
-                    Threats.harassRingIn (threatsOf colony (Atlas.ofView colony)) harassRoom
+                    Threats.guardGroundIn (threatsOf colony (Atlas.ofView colony)) harassRoom
 
                 let seats = within 1 standTile Set.empty
 
@@ -1083,25 +1048,40 @@ let diggerFirstTests =
                 // W19S25, t943,777: a hauler stepping on and off the source's work
                 // spot turned the ground between it and a miner at the room's other
                 // source, and the ranger stood between the two.
-                let quiet = bareHome |> harassing
-
-                let ground (colony: ColonyView) =
-                    Threats.harassRingIn (threatsOf colony (Atlas.ofView colony)) harassRoom
-
+                // Moved by #656: the ground is beside each body, the room's
+                // prey; the holder's seat is within its reach of the one its
+                // kill score leads (#621), the miner (it was the ground itself).
                 let haulerTile = { X = 18; Y = 10 }
                 let minerTile = { X = 6; Y = 30 }
+                let holder = ranger "ranger-r"
 
-                Expect.equal
-                    (ground
-                        { quiet with
-                            Hostiles =
-                                [
-                                    theirs "hauler" enemy haulerTile [ Carry; Move ]
-                                    miner "miner" minerTile
-                                ]
-                        })
-                    (Some(within Engine.rangedRange minerTile (Set.ofList [ minerTile ])))
-                    "the miner, wherever it digs; the hauler only when no digger is caught"
+                let colony =
+                    { (bareHome |> harassing) with
+                        Hostiles =
+                            [
+                                theirs "hauler" enemy haulerTile [ Carry; Move ]
+                                miner "miner" minerTile
+                            ]
+                    }
+                    |> standingThere [ holder, { X = 12; Y = 20 } ]
+
+                let held = Map.ofList [ holder.Name, taskId (Guard harassRoom) ]
+
+                let seats =
+                    (Threats.briefOf
+                        (threatsOfHeld colony (Atlas.ofView colony) (heldTaskFacts colony held))
+                        harassRoom)
+                        .Seats.Value
+                    |> Map.tryFind holder.Name
+                    |> Option.defaultValue Set.empty
+
+                Expect.isNonEmpty seats "the holder is seated"
+
+                Expect.isTrue
+                    (seats
+                     |> Set.forall (fun seat ->
+                         range minerTile (RoomPos.pos seat) <= Engine.rangedRange))
+                    "the miner's, wherever it digs"
             }
 
             // Moved by #621 (ADR 0085's B1, superseded): the shot and the ground
@@ -1126,12 +1106,27 @@ let diggerFirstTests =
                     }
                     |> standingThere [ shooter, here ]
 
-                Expect.equal
-                    (Threats.harassRingIn (threatsOf colony (Atlas.ofView colony)) harassRoom)
-                    (Some(
-                        within Engine.rangedRange minerTile (Set.ofList [ minerTile; haulerTile ])
-                    ))
-                    "the ground is the miner's"
+                // Moved by #656: the ground is beside each body, the room's
+                // prey, the hauler's tiles all within three of the miner here;
+                // a holder's seat (else that ground) is the miner's.
+                let held = Map.ofList [ shooter.Name, taskId (Guard harassRoom) ]
+
+                let brief =
+                    Threats.briefOf
+                        (threatsOfHeld colony (Atlas.ofView colony) (heldTaskFacts colony held))
+                        harassRoom
+
+                let seats =
+                    Map.tryFind shooter.Name brief.Seats.Value
+                    |> Option.orElse brief.Ground
+                    |> Option.defaultValue Set.empty
+
+                Expect.isTrue
+                    (not (Set.isEmpty seats)
+                     && seats
+                        |> Set.forall (fun seat ->
+                            range minerTile (RoomPos.pos seat) <= Engine.rangedRange))
+                    "the seat is the miner's"
 
                 Expect.equal
                     (emitOn colony [ shooter.Name, Guard harassRoom ]

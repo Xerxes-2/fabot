@@ -352,8 +352,8 @@ let invaderCoreTests =
 
                 Expect.equal
                     (kindOf (colony [ hauler; digger ]))
-                    (Duty.Guard BriefKind.Trespass)
-                    "a digger it catches is still struck first"
+                    (Duty.Guard BriefKind.Contested)
+                    "a digger it catches is still struck first: the contested room's prey"
             }
         ]
 

@@ -774,16 +774,17 @@ let trespassTests =
 
                 let dutyIn hostiles =
                     let colony = raisingBeyond hostiles
-                    (Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2").Duty
+                    let brief = Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2"
+                    brief.Duty, Brief.isKill brief
 
                 Expect.equal
                     (dutyIn [ healer ])
-                    (Duty.Guard BriefKind.Trespass)
-                    "the premise: alone, it is the trespass's kill"
+                    (Duty.Guard BriefKind.Contested, true)
+                    "the premise: alone, it is the contested room's prey, a kill"
 
                 Expect.notEqual
                     (dutyIn [ healer; raider ])
-                    (Duty.Guard BriefKind.Trespass)
+                    (Duty.Guard BriefKind.Contested, true)
                     "with a ranged raider next door no trespass kill sends a guard into its reach"
             }
 
@@ -1256,11 +1257,12 @@ let trespassTests =
                     |> withGuards [ guard "g-1", { X = 25; Y = 47 } ]
 
                 let atlas = Atlas.ofView colony
+                let brief = Threats.briefOf (threatsOf colony atlas) "W1N2"
 
                 Expect.equal
-                    ((Threats.briefOf (threatsOf colony atlas) "W1N2").Duty)
-                    (Duty.Guard BriefKind.Trespass)
-                    "its Guard is the trespass's kill"
+                    (brief.Duty, Brief.isKill brief)
+                    (Duty.Guard BriefKind.Contested, true)
+                    "its Guard is the contested room's prey, a kill"
 
                 Expect.isSome (pooledOf colony |> entryFor (Guard "W1N2")) "pooled"
 
@@ -1336,10 +1338,12 @@ let trespassTests =
                     declaredRaid [ remnant "Invader" ]
                     |> withGuards [ guard "g-1", { X = 25; Y = 47 } ]
 
+                let brief = Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2"
+
                 Expect.equal
-                    ((Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2").Duty)
-                    (Duty.Guard BriefKind.Trespass)
-                    "an Invader's healer with no live HEAL is the trespass's kill"
+                    (brief.Duty, Brief.isKill brief)
+                    (Duty.Guard BriefKind.Contested, true)
+                    "an Invader's healer with no live HEAL is the contested room's prey, a kill"
 
                 Expect.equal
                     (Map.tryFind "g-1" (decideOn colony).Assignments)

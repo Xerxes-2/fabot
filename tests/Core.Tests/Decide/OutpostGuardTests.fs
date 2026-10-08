@@ -1208,10 +1208,12 @@ let guardFlavourTests =
                     (Some(safetyRank OneRungUp))
                     "its Guard is a kill's, one rung up"
 
+                let brief = Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2"
+
                 Expect.equal
-                    ((Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2").Duty)
-                    (Duty.Guard BriefKind.Trespass)
-                    "a trespass's"
+                    (brief.Duty, Brief.isKill brief)
+                    (Duty.Guard BriefKind.Contested, true)
+                    "a contested room's prey, a kill"
             }
 
             // The Brief's S7, rule 1: healing reaches it, so its parts come back
@@ -1484,8 +1486,8 @@ let guardPrecedenceTests =
                         [
                             "Kite", (Threats.briefOf threats "W1N2").Laid.Kite
                             "ResidentRing", (Threats.briefOf threats "W1N2").Laid.Resident
-                            "HarassRing", (Threats.briefOf threats "W1N2").Laid.Harass
-                            "Trespass", (Threats.briefOf threats "W1N2").Laid.Trespass
+                            "Stand", (Threats.briefOf threats "W1N2").Laid.Stand
+                            "Prey", (Threats.briefOf threats "W1N2").Laid.Prey
                             "Ring", (Threats.briefOf threats "W1N2").Laid.Ring
                         ]
                         |> List.filter (fun (_, field) -> Option.isSome ground && field = ground)
@@ -1510,7 +1512,6 @@ let guardPrecedenceTests =
                 // The residents and a relief each.
                 let garrison = Capacity.fighters (2 * precedenceBasis.Tuning.RangerResidents)
                 let one = Capacity.fighters 1
-                let relieved = one |> Capacity.relieving
 
                 let hauled =
                     Capacity.fighters 2
@@ -1555,9 +1556,12 @@ let guardPrecedenceTests =
                         // pace, asks a ranger seat beside the guard's, which
                         // stays until a ranger holds the kill: r-1 takes it.
                         [ Trespasser ],
-                        row [ Trespasser ] [ "Trespass" ] OneRungUp hauled [ "g-1"; "r-1" ]
+                        row [ Trespasser ] [ "Prey" ] OneRungUp hauled [ "g-1"; "r-1" ]
                         [ Resident ], unpooled [ Resident ] [ "ResidentRing" ]
-                        [ Harassed ], row [ Harassed ] [ "HarassRing" ] OnTheTier relieved [ "r-1" ]
+                        // Moved by #656: a harassment room nobody works seats
+                        // its holder alone, a contested room's count (it seated
+                        // a relief beside it, #439).
+                        [ Harassed ], row [ Harassed ] [ "Stand" ] OnTheTier one [ "r-1" ]
                         // Moved on purpose (#615 U3): #535's hold rule kept the
                         // guard holding the Guard while it could strike a target
                         // there; one fitness answer takes and keeps it now, and
@@ -1576,15 +1580,23 @@ let guardPrecedenceTests =
                         // purpose (#609): one our side wins is the raid's rung,
                         // two up, so a ranger on a quiet Guard is sent to it.
                         [ Raid; Resident ], row [] [ "Kite" ] TwoRungsUp garrison [ "g-1"; "r-1" ]
-                        [ Raid; Harassed ], row [] [ "Kite" ] TwoRungsUp relieved [ "g-1" ]
+                        // Moved by #656: a contested room's raid seats, beside
+                        // the cast's, the ranger standing there that loses it
+                        // alone, as an outpost's raid does (it seated one and
+                        // a relief, #439).
+                        [ Raid; Harassed ],
+                        row [] [ "Kite" ] TwoRungsUp (Capacity.fighters 2) [ "g-1"; "r-1" ]
                         // The held exit before the trespasser, the trespasser
                         // before the core. Moved on purpose (#558): the
                         // trespasser, which can step away, is struck before
-                        // the core, which stands (it was the core's).
+                        // the core, which stands (it was the core's). Kept by
+                        // #656's priced hold (`Facts.preyBeforeReturn`): g-1
+                        // holds the exit fifty ticks after the raid left, and
+                        // would not kill the hauler and be back by then.
                         [ Hold; Core ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         [ Hold; Trespasser ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         [ Core; Trespasser ],
-                        row [ Trespasser ] [ "Trespass" ] OneRungUp hauled [ "g-1"; "r-1" ]
+                        row [ Trespasser ] [ "Prey" ] OneRungUp hauled [ "g-1"; "r-1" ]
                         [ Hold; Core; Trespasser ], row [ Hold ] [ "Ring" ] OnTheTier one [ "g-1" ]
                         // A ranger room's declared ground before all three,
                         // where it pools. Moved by #542: an errand with no ore
@@ -1602,23 +1614,19 @@ let guardPrecedenceTests =
                         // The guard holding it holds the trespass's fight (#535).
                         [ Resident; Trespasser ],
                         row [ Resident ] [ "ResidentRing" ] OnTheTier garrison [ "g-1"; "r-1" ]
-                        [ Harassed; Hold ],
-                        row [ Harassed ] [ "HarassRing" ] OnTheTier relieved [ "r-1" ]
-                        [ Harassed; Core ],
-                        row [ Harassed ] [ "HarassRing" ] OnTheTier relieved [ "r-1" ]
+                        [ Harassed; Hold ], row [ Harassed ] [ "Stand" ] OnTheTier one [ "r-1" ]
+                        [ Harassed; Core ], row [ Harassed ] [ "Stand" ] OnTheTier one [ "r-1" ]
+                        // Moved by #656: a body working a harassment room is
+                        // its prey, a kill as a trespasser in our outpost is,
+                        // on the tiles beside it and taken by either row (it
+                        // was the harassment's ground, one ranger and a relief).
                         [ Harassed; Trespasser ],
-                        row [ Harassed ] [ "HarassRing" ] OnTheTier relieved [ "g-1" ]
-                        // Quirk, kept: the resident's ground and cap before the
-                        // harassment's, but the cap's count is the row ask's,
-                        // which asks as the harassment: one ranger, not the
-                        // garrison, plus the reliefs.
+                        row [ Trespasser ] [ "Prey" ] OneRungUp hauled [ "g-1"; "r-1" ]
+                        // The resident's ground and cap before the harassment's.
+                        // Moved by #656, the quirk settled: its count is its own
+                        // garrison's (it asked as the harassment, one ranger).
                         [ Resident; Harassed ],
-                        row
-                            [ Resident ]
-                            [ "ResidentRing" ]
-                            OnTheTier
-                            (Capacity.fighters (1 + precedenceBasis.Tuning.RangerResidents))
-                            [ "r-1" ]
+                        row [ Resident ] [ "ResidentRing" ] OnTheTier garrison [ "r-1" ]
                         // A chase in sight kites before the core, the held exit
                         // and the trespasser. Moved on purpose (#615 U2): beside
                         // a raid that can close, the ranger row trades with the
@@ -1713,35 +1721,38 @@ let guardPrecedenceTests =
                     let colony = List.fold withFlavour precedenceBasis flavours
                     (Threats.briefOf (threatsOf colony (Atlas.ofView colony)) "W1N2").Duty
 
+                // One kind for an outpost's raid, a trespass's kill and a
+                // harassment room (#656): the contested room.
                 let rows =
                     [
-                        [ Raid ], BriefKind.Outpost
+                        [ Raid ], BriefKind.Contested
                         [ Core ], BriefKind.Core
                         [ Hold ], BriefKind.ExitHold
-                        [ Trespasser ], BriefKind.Trespass
+                        [ Trespasser ], BriefKind.Contested
                         [ Resident ], BriefKind.Resident
-                        [ Harassed ], BriefKind.Harass
+                        [ Harassed ], BriefKind.Contested
                         [ ChaseSeen ], BriefKind.Chase
                         [ ChaseDark ], BriefKind.Chase
-                        [ Raid; Hold ], BriefKind.Outpost
-                        [ Raid; Core ], BriefKind.Outpost
-                        [ Raid; Trespasser ], BriefKind.Outpost
+                        [ Raid; Hold ], BriefKind.Contested
+                        [ Raid; Core ], BriefKind.Contested
+                        [ Raid; Trespasser ], BriefKind.Contested
                         [ Raid; Resident ], BriefKind.Resident
-                        [ Raid; Harassed ], BriefKind.Harass
-                        // Kept by #558: the core guards the room, so the hold
-                        // pools, and a held exit is defence, ahead of a kill
-                        // (#528), its target the raid that left by it.
-                        [ Hold; Core; Trespasser ], BriefKind.ExitHold
+                        [ Raid; Harassed ], BriefKind.Contested
+                        // Moved by #656: the economy body working the room
+                        // before the exit a raid left by (it was the held
+                        // exit's, #558): the contested room's prey pools as a
+                        // kill ahead of the hold.
+                        [ Hold; Core; Trespasser ], BriefKind.Contested
                         // #542: nobody holds the exit, so its claim pools
                         // nothing and the trespass's kill is the room's.
-                        [ Hold; Trespasser ], BriefKind.Trespass
+                        [ Hold; Trespasser ], BriefKind.Contested
                         // Moved by #558: the trespass's kill before the core.
-                        [ Core; Trespasser ], BriefKind.Trespass
+                        [ Core; Trespasser ], BriefKind.Contested
                         [ Resident; Core ], BriefKind.Resident
-                        [ Harassed; Trespasser ], BriefKind.Harass
+                        [ Harassed; Trespasser ], BriefKind.Contested
                         [ Resident; Harassed ], BriefKind.Resident
                         [ ChaseSeen; Core ], BriefKind.Chase
-                        [ ChaseSeen; Raid ], BriefKind.Outpost
+                        [ ChaseSeen; Raid ], BriefKind.Contested
                         [ ChaseDark; Hold ], BriefKind.Chase
                         [ ChaseDark; Trespasser ], BriefKind.Chase
                     ]
@@ -1758,11 +1769,12 @@ let guardPrecedenceTests =
             test
                 "a held exit nobody holds claims nothing, so the trespasser beside it is the room's kill" {
                 let colony = List.fold withFlavour precedenceBasis [ Hold; Trespasser ]
+                let brief = heldBriefOf [] "W1N2" colony
 
                 Expect.equal
-                    (heldBriefOf [] "W1N2" colony).Duty
-                    (Duty.Guard BriefKind.Trespass)
-                    "the trespass's Guard"
+                    (brief.Duty, Brief.isKill brief)
+                    (Duty.Guard BriefKind.Contested, true)
+                    "the contested room's prey's Guard"
 
                 // Moved on purpose (#550): the flavour's hauler, at the guard's
                 // pace, asks the ranger row too, and the guard's until a
@@ -1797,10 +1809,15 @@ let guardPrecedenceTests =
                         Bank = bank 300 300
                     }
 
+                // Moved by #656: one contested claim, fought over its prey
+                // while its raid pools nothing (it was the trespass's claim
+                // ahead of the raid's).
+                let brief = heldBriefOf [] "W1N1" colony
+
                 Expect.equal
-                    (heldBriefOf [] "W1N1" colony).Claims
-                    [ BriefKind.Trespass; BriefKind.Outpost ]
-                    "the kill first, the raid's claim after it"
+                    (brief.Claims, Brief.isKill brief)
+                    ([ BriefKind.Contested ], true)
+                    "the kill: the contested room's prey, its raid's Guard pooling nothing"
 
                 Expect.equal
                     (pooledHolding [] (Guard "W1N1") colony)
@@ -1808,8 +1825,71 @@ let guardPrecedenceTests =
                     "pooled as the kill"
             }
 
-            test "a held exit a guard holds keeps the room over the trespasser" {
-                let colony = List.fold withFlavour precedenceBasis [ Hold; Trespasser ]
+            // #656 (live W17S26 t1,020,580-921: a ranger kept the held exit
+            // for ~300 ticks while a claimer and two haulers worked the room),
+            // the hold priced (`Facts.preyBeforeReturn`): a digger two tiles
+            // from the guard holding the exit is its kill where the guard
+            // kills it and is back at the exit before the raid that left by
+            // it is due — gone most of the hold, not just gone.
+            test "a digger beside a held exit is the room's kill once the raid has long been gone" {
+                let holding = [ "g-1", Guard "W1N2" ]
+
+                let left ago =
+                    let colony = precedenceBasis |> heldWest
+
+                    { colony with
+                        Hostiles = [ diggerAt "W1N2" { X = 5; Y = 45 } ]
+                        ExitHolds =
+                            colony.ExitHolds
+                            |> Map.map (fun _ hold ->
+                                { hold with
+                                    Until = colony.Time + colony.Tuning.ExitHoldTicks - ago
+                                })
+                    }
+
+                let briefAt ago =
+                    let brief = heldBriefOf holding "W1N2" (left ago)
+                    brief.Duty, Brief.isKill brief
+
+                Expect.equal
+                    (briefAt 99)
+                    (Duty.Guard BriefKind.Contested, true)
+                    "gone 99 ticks: the contested room's prey, a kill"
+
+                Expect.equal
+                    (pooledHolding holding (Guard "W1N2") (left 99) |> Option.map fst)
+                    (Some(safetyRank OneRungUp))
+                    "pooled as its kill, a rung up"
+
+                Expect.equal
+                    (briefAt 1)
+                    (Duty.Guard BriefKind.ExitHold, false)
+                    "gone a tick: the held exit's, the raid as likely back at once"
+            }
+
+            // #656, the hold priced (`Facts.preyBeforeReturn`): a Trepidimous
+            // R3H4M7 kiter bouncing two tiles across the held exit is back
+            // before the guard could kill the hauler and walk back, so the
+            // hold keeps the room and its holder on the exit.
+            test "a raider seen across the held exit keeps the hold over the trespasser" {
+                let kiter =
+                    { hostileIn
+                          "W2N2"
+                          { X = 48; Y = 44 }
+                          (List.replicate 3 RangedAttack
+                           @ List.replicate 4 Heal
+                           @ List.replicate 7 Move) with
+                        Id = "kiter"
+                        Owner = "Trepidimous"
+                    }
+
+                let colony =
+                    let flavoured = List.fold withFlavour precedenceBasis [ Hold; Trespasser ]
+
+                    { flavoured with
+                        Hostiles = flavoured.Hostiles @ [ kiter ]
+                    }
+
                 let holding = [ "g-1", Guard "W1N2" ]
 
                 Expect.equal
@@ -1818,8 +1898,8 @@ let guardPrecedenceTests =
                     "the held exit's Guard"
 
                 Expect.equal
-                    (pooledHolding holding (Guard "W1N2") colony)
-                    (Some(safetyRank OnTheTier, Capacity.fighters 1))
+                    (pooledHolding holding (Guard "W1N2") colony |> Option.map fst)
+                    (Some(safetyRank OnTheTier))
                     "pooled on the tier for its holder"
             }
         ]

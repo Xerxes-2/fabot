@@ -2189,6 +2189,82 @@ let arenaBorderTests =
                 Expect.isSome (diedOn "Specter836" trace) $"and Specter836 dies\n{describe trace}"
             }
 
+            // #656: a held exit gives way to the room's prey only where its
+            // holder kills a trespasser and is back before the raid that left
+            // by it is due (`Facts.preyBeforeReturn`). Live (t1,020,780-830)
+            // ranger-1019663 stood on (1,42)-(1,45) while Virtual9490, which
+            // left by (0,40) ~35 ticks before and bounced just across, out of
+            // our sight, came back in at t1,020,800: reproduced, the ranger
+            // keeps the exit, the prey (the nearest, Dragon9899, ~40 tiles off,
+            // 2,060 hits to its 40 a tick) out of reach of a kill and a walk
+            // back inside that. Once the hold has lapsed, the prey is its kill.
+            test
+                "#656 capture t1,020,780: the ranger keeps the exit a kiter just left by, and goes for the prey once the hold lapses" {
+                let ranger = "ranger-1019663-Spawn11"
+
+                let tilesOf (trace: TickTrace list) =
+                    trace
+                    |> List.choose (fun t ->
+                        t.Bodies |> List.tryFind (fun b -> b.Id = ranger) |> Option.map _.At)
+
+                // The room's Guard as W17S25 reads it, its holder the ranger.
+                let briefOf (a: Arena) =
+                    let view = viewOf a "W17S25"
+                    let atlas = Fabot.Core.Atlas.ofView view
+
+                    let threats =
+                        Fabot.Core.Decide.Threat.threatsOfHeld
+                            view
+                            atlas
+                            (Fabot.Core.Decide.Facts.heldTaskFacts view a.Carried.Assignments)
+
+                    let brief = Fabot.Core.Decide.Threat.Threats.briefOf threats "W17S26"
+                    brief.Duty, Fabot.Core.Decide.Threat.Brief.isKill brief
+
+                let start = kiterAcrossHeldExit ()
+
+                Expect.equal
+                    (briefOf start)
+                    (Fabot.Core.Decide.Threat.Duty.Guard Fabot.Core.Decide.Threat.BriefKind.ExitHold,
+                     false)
+                    "the kiter gone ~35 ticks: the held exit's Guard"
+
+                let held, trace = start |> run 30
+
+                Expect.equal
+                    (Map.tryFind ranger held.Carried.Assignments)
+                    (Some "guard:W17S26")
+                    $"it keeps W17S26's Guard\n{describe trace}"
+
+                Expect.isTrue
+                    (tilesOf trace
+                     |> List.forall (fun at -> at.Room = "W17S26" && at.X <= 3 && at.Y >= 38))
+                    $"and stands by the west exit's run, as live: {tilesOf trace}"
+
+                let lapsed =
+                    { start with
+                        Carried =
+                            { start.Carried with
+                                ExitWatches = Map.empty
+                            }
+                    }
+
+                Expect.equal
+                    (briefOf lapsed)
+                    (Fabot.Core.Decide.Threat.Duty.Guard
+                        Fabot.Core.Decide.Threat.BriefKind.Contested,
+                     true)
+                    "the hold lapsed: the contested room's prey, a kill"
+
+                let _, trace = lapsed |> run 30
+
+                // Off the run, along the west edge north to Dragon9899 at (8,2),
+                // the prey nearest it.
+                Expect.isTrue
+                    (tilesOf trace |> List.last |> (fun at -> at.Y < 35))
+                    $"the hold lapsed, it walks off the exit's run to the prey: {tilesOf trace}"
+            }
+
             // Live (t979,593-980,050) guard-978780 stood on Gambit229's store
             // ring at (26,7), counted itself arrived, and struck nothing for
             // ~450 ticks (#550). Beside Onyx632, slower than the guard, the

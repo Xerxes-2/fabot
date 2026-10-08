@@ -383,8 +383,9 @@ let planFightTasks
     // And one per chased room (#510): an outpost shut on a raid a ranger
     // kites down pools its chase and nothing else.
     //
-    // And one per room a trespasser stands in (#516): its kill, for a body
-    // a holder called to it or a cast it pays for brings (#652).
+    // And one per contested room a trespasser works (#516, #656: ours or a
+    // harassed one): its kill, for a body a holder called to it or a cast it
+    // pays for brings (#652).
     let guards =
         let briefed (claimed: Brief -> bool) =
             threats.Briefs
@@ -410,10 +411,10 @@ let planFightTasks
             |> Set.toList
 
         let killing =
-            [ BriefKind.Chase; BriefKind.Trespass ]
+            [ BriefKind.Chase; BriefKind.Contested ]
             |> List.collect (fun kind ->
                 Set.difference
-                    (briefed (fun brief -> brief.Duty = Duty.Guard kind))
+                    (briefed (fun brief -> brief.Duty = Duty.Guard kind && Brief.isKill brief))
                     (Set.ofList (guardedRooms @ holding))
                 |> Set.toList)
 

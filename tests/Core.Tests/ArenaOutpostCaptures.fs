@@ -2371,3 +2371,250 @@ let internal haulerBesideCore () : Arena =
                         ]
             }
     }
+
+// ---- arena capture kiter-across-held-exit (#656) ----------------------------
+// `npm run capture -- W17S26 1020780 --rooms W17S25,W18S26 --name w17s26-held-exit-prey`,
+// read at live t1,035,725. The room-history replay at t1,020,780, the state
+// after that tick ran: arena tick 0 runs as t1,020,781.
+//   W17S26  https://screeps.com/room-history/shardSeason/W17S26/1020700.json
+//   W17S25  https://screeps.com/room-history/shardSeason/W17S25/1020700.json
+//   W18S26  https://screeps.com/room-history/shardSeason/W18S26/1020700.json
+// Read too late for live Memory and for the Transition log: the Raid log,
+// ArmedSeen, Healers and Sightings start empty; the ranger's Guard and the
+// ExitWatch are seeded below (heap only), off the replay. Trimmed: W18S26 is
+// Trepidimous' home, laid as its controller and towers alone, and of its
+// bodies only the two armed ones by the border stand; its haulers, diggers and
+// healers deep in their own room bear on nothing here. W17S26 is reserved by
+// us to t1023906 (the arena has no reservations); Spawn11's hauler in its
+// oven, 10 ruins and 2 tombstones are not placed.
+
+/// W17S26 at t1,020,780 (#615's live case, t1,020,580-921): ranger-1019663
+/// holds the Guard on the west exit, three tiles from Trepidimous' Virtual9490
+/// (2R 5M 3H), which left by (0,40) at ~t1,020,745 and bounces just across in
+/// W18S26, while Infinity0537 (5W3M) digs beside our anchor, Hammer0709
+/// (3CLAIM) walks to the controller and the haulers Dragon9899 and Kang0228
+/// load the room. Live the ranger stood on (1,42)-(1,45) through t1,020,830,
+/// the kiter coming back in at t1,020,800 and leaving again.
+let internal kiterAcrossHeldExit () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+    let hauling = List.replicate 23 [ Move, 1; Carry, 1 ] |> List.concat
+
+    let w17s26 =
+        room "W17S26"
+        |> withStructures
+            [
+                { structureOf "container" None 128_200 250_000 { X = 27; Y = 9 } with
+                    Energy = 362
+                }
+            ]
+        |> withRoads
+            [
+                20, 1, 3_100
+                21, 2, 3_100
+                22, 3, 3_700
+                23, 4, 3_200
+                24, 5, 3_000
+                25, 6, 3_300
+                26, 7, 3_200
+                27, 8, 3_400
+            ]
+
+    let w17s25 =
+        room "W17S25"
+        |> withController Ownership.Ours None 5 3
+        |> withControllerClocks 0 0 80_000 131_824
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        9, 23
+                        9, 25
+                        9, 27
+                        9, 29
+                        10, 24
+                        10, 26
+                        10, 28
+                        10, 30
+                        11, 23
+                        11, 25
+                        11, 27
+                        12, 24
+                        12, 28
+                        12, 30
+                        13, 23
+                        13, 25
+                        13, 31
+                        14, 24
+                        14, 26
+                        14, 30
+                        15, 27
+                        15, 29
+                        15, 31
+                        16, 28
+                        16, 30
+                        16, 32
+                        17, 29
+                        17, 31
+                        18, 30
+                        19, 31
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 50
+                    }
+            ]
+        |> withStructures
+            [
+                structureOf "container" None 155_900 250_000 { X = 16; Y = 34 }
+                { structureOf "container" None 125_000 250_000 { X = 17; Y = 20 } with
+                    Energy = 660
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 13; Y = 27 } with
+                    Energy = 9_239
+                }
+                towerOf Side.Ours { X = 11; Y = 29 } 1_000
+                towerOf Side.Ours { X = 13; Y = 29 } 1_000
+            ]
+
+    let w18s26 =
+        room "W18S26"
+        |> withController Ownership.Rival (Some "Trepidimous") 6 4
+        |> withControllerClocks 0 0 120_000 2_000_304
+        |> withStructures
+            [
+                towerOf trepidimous { X = 18; Y = 8 } 1_000
+                towerOf trepidimous { X = 22; Y = 8 } 1_000
+            ]
+
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W17S25" ])
+
+    let bodies: Body list =
+        [
+            { body "Dragon9899" trepidimous (parts hauling) (at "W17S26" 8 2) (Some Hold) with
+                Hits = 2_060
+                TicksToLive = 755
+                Fatigue = 2
+                Energy = 550
+            }
+            // Infinity0537: live: harvest beside the anchor.
+            { body
+                  "Infinity0537"
+                  trepidimous
+                  (parts [ Move, 3; Work, 5 ])
+                  (at "W17S26" 26 9)
+                  (Some Hold) with
+                TicksToLive = 1_279
+            }
+            { body
+                  "ranger-1019663-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W17S26" 1 43)
+                  None with
+                TicksToLive = 417
+            }
+            { body
+                  "anchor-1019739-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W17S26" 27 9)
+                  None with
+                TicksToLive = 487
+                Energy = 50
+            }
+            { body
+                  "reserver-1020243-Spawn11"
+                  Side.Ours
+                  (parts [ BodyPart.Claim, 2; Move, 2 ])
+                  (at "W17S26" 9 22)
+                  None with
+                TicksToLive = 73
+            }
+            { body "Kang0228" trepidimous (parts hauling) (at "W17S26" 26 8) (Some Hold) with
+                Hits = 4_396
+                TicksToLive = 1_084
+            }
+            { body
+                  "Hammer0709"
+                  trepidimous
+                  (parts [ Move, 3; BodyPart.Claim, 3 ])
+                  (at "W17S26" 21 2)
+                  (Some Hold) with
+                TicksToLive = 545
+            }
+            { body
+                  "worker-1019528-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 9; Carry, 9; Move, 9 ])
+                  (at "W17S25" 16 33)
+                  None with
+                TicksToLive = 327
+                Energy = 108
+            }
+            { body
+                  "upgrader-1020051-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 1; Move, 11 ])
+                  (at "W17S25" 19 35)
+                  None with
+                TicksToLive = 838
+            }
+            { body
+                  "anchor-1020501-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W17S25" 17 20)
+                  None with
+                TicksToLive = 1_243
+                Energy = 50
+            }
+            { body
+                  "upgrader-1020525-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 1; Move, 11 ])
+                  (at "W17S25" 19 34)
+                  None with
+                TicksToLive = 1_312
+            }
+            // Midnight0651: live: healed itself at the south road.
+            { body
+                  "Midnight0651"
+                  trepidimous
+                  (parts [ RangedAttack, 3; Move, 6; Heal, 4; Move, 1 ])
+                  (at "W18S26" 28 48)
+                  (Some Hold) with
+                TicksToLive = 1_411
+            }
+            // Virtual9490: live: holds 1-3 tiles across W17S26's west exit,
+            // stepping back in at t1,020,800.
+            { body
+                  "Virtual9490"
+                  trepidimous
+                  (parts [ RangedAttack, 2; Move, 4; Heal, 3; Move, 1 ])
+                  (at "W18S26" 48 41)
+                  (Some Hold) with
+                TicksToLive = 238
+            }
+        ]
+
+    let a = arena 1_020_781 [ w17s26; w17s25; w18s26 ] colonies bodies
+
+    { a with
+        Carried =
+            { a.Carried with
+                Assignments = Map.ofList [ "ranger-1019663-Spawn11", "guard:W17S26" ]
+                ExitWatches =
+                    Map.ofList
+                        [
+                            "W17S26",
+                            ExitWatch.Held
+                                {
+                                    Run = [ for y in 36..48 -> { X = 0; Y = y } ]
+                                    Exit = { X = 0; Y = 40 }
+                                    Until = 1_020_845
+                                }
+                        ]
+            }
+    }

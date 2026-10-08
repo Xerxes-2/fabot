@@ -629,10 +629,21 @@ and [<NoEquality; NoComparison>] private Joining =
         Finish: MatchOutcome list -> Decision option
     }
 
-/// A Brief's place down `BriefKind.order`, a Task of its own first.
+/// A Brief's place down `BriefKind.order`, a Task of its own first; a
+/// contested room's prey after its raid or its quiet look (#656), as one
+/// colony's raid there was ahead of another's kill.
 let private kindRank (brief: Brief) =
     match brief.Duty with
-    | Duty.Guard kind -> BriefKind.order |> List.tryFindIndex ((=) kind) |> Option.defaultValue 0
+    | Duty.Guard kind ->
+        let place = BriefKind.order |> List.tryFindIndex ((=) kind) |> Option.defaultValue 0
+
+        let prey =
+            if Brief.isKill brief && kind = BriefKind.Contested then
+                1
+            else
+                0
+
+        2 * place + prey
     | _ -> 0
 
 /// The Threats a colony's fighters are priced, emitted and moved in: its
