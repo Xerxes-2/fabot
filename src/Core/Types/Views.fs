@@ -105,7 +105,8 @@ type RoomVerdict =
         /// it (`Facts.rowAnswer`).
         Own: Set<string>
         /// Those of `Own` whose row casts for the room, not only binds it
-        /// through a fighter of theirs that takes the raid.
+        /// through a fighter of theirs that takes the raid; under a `Kite`,
+        /// the casters whose biggest ranger the verdict counted (#655).
         Casting: Set<string>
         /// The fewest rangers that win the raid together, of every colony
         /// that sees it and would send them, standing in the room or lent to

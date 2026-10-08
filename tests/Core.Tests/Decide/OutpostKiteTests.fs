@@ -902,6 +902,55 @@ let kiteTests =
                 Expect.isFalse walled.Ends "with no run-off ground nothing the bank buys ends it"
             }
 
+            // #655 (live t~1,035,974: Tension5531, 18M17A, held W17S26 while
+            // W17S25 asked no fight, no ranger alive, its guards idle): the
+            // Kite verdict counted a ranger the colony did not have, and a
+            // kite asked a cast only of a room shut on its raid. A verdict
+            // that counts a body casts it: the row's cheapest ranged set.
+            test
+                "an equal-pace melee with no ranger standing by casts the ranger its Kite counts, which takes the Guard" {
+                let trep =
+                    { hostileIn
+                          "W1N2"
+                          { X = 25; Y = 25 }
+                          (List.replicate 18 Move @ List.replicate 17 Attack) with
+                        Owner = "Trepidimous"
+                    }
+
+                let colony =
+                    { declaredRaid [ trep ] with
+                        Bank = bank 1800 1800
+                    }
+                    |> withOpenField []
+
+                Expect.equal
+                    (Facts.answer colony "W1N2")
+                    Answer.Kite
+                    "the premise: the verdict is the Kite"
+
+                let rangers (decision: Decision) =
+                    spawnIntents decision.Intents
+                    |> List.map (fun (_, body, _) -> body)
+                    |> List.filter (List.contains RangedAttack)
+
+                let decision = decideOn colony
+
+                Expect.equal
+                    (rangers decision |> List.length)
+                    1
+                    $"one ranger is cast for the kite\n{spawnIntents decision.Intents}"
+
+                // The body cast, landed at home: it fits and takes the Guard.
+                let cast = creepWith "ranger-cast" 0 0 (rangers decision |> List.head)
+
+                let landed = colony |> withGuards [ cast, { X = 25; Y = 47 } ]
+
+                Expect.equal
+                    (Map.tryFind "ranger-cast" (decideOn landed).Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "and the ranger takes the room's Guard"
+            }
+
             // #625: the lame window is read off the live body head first, as
             // the engine destroys it. The same twenty parts with the MOVE
             // first fall behind on plain once one MOVE is shot off; with the

@@ -4799,19 +4799,38 @@ let private priceAmong (placed: string -> string option) (pricers: Pricer list) 
             }
         else
             // A kite: a caster's biggest ranger, or any colony's ranger
-            // standing by that kites it down with its live parts.
-            match
-                (casters
-                 |> List.filter (fun (_, priced) ->
-                     kitedDown
-                         priced
-                         (blocksFighter rangerPattern (max 1 (rangerBlocksReach priced)))
-                         room)
-                 |> List.map fst)
-                @ (seeing |> List.filter kites)
-                |> List.distinctBy (fun p -> p.Home)
-            with
-            | _ :: _ -> verdict Answer.Kite rows Set.empty []
+            // standing by that kites it down with its live parts. A verdict
+            // that counts a body it does not have casts it (#655): each
+            // caster whose biggest ranger kites the raid down, and that may
+            // cast for the room, is the Kite's `Casting`.
+            // Only a ranger its bank buys is counted (`castable`): a body it
+            // cannot cast is no answer.
+            let castKiting =
+                casters
+                |> List.filter (fun (_, priced) ->
+                    castable priced rangerPattern
+                    && kitedDown
+                        priced
+                        (blocksFighter rangerPattern (max 1 (rangerBlocksReach priced)))
+                        room)
+                |> List.map fst
+
+            let standing = seeing |> List.filter kites
+
+            match castKiting @ standing |> List.distinctBy (fun p -> p.Home) with
+            | _ :: _ ->
+                { verdict Answer.Kite rows Set.empty [] with
+                    // Cast only where no ranger already standing by kites it:
+                    // that one is the body counted.
+                    Casting =
+                        if List.isEmpty standing then
+                            castKiting
+                            |> List.filter (fun p -> p.Casts room)
+                            |> List.map (fun p -> p.Home)
+                            |> Set.ofList
+                        else
+                            Set.empty
+                }
             | [] ->
                 match rangers.Value with
                 | Some taken -> verdict Answer.Win rows Set.empty taken

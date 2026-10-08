@@ -1224,7 +1224,8 @@ module Brief =
             lazy
                 (if kind = BriefKind.Chase && casts.Value then
                      Some(
-                         if ranger.Value then
+                         // A kite is the ranger's the verdict counted (#655).
+                         if ranger.Value || verdict.Value = Answer.Kite then
                              CastRow.Fighter BodyTemplate.Ranged
                          else
                              CastRow.Fighter BodyTemplate.Melee
@@ -3664,10 +3665,15 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 // A harassment room is the ranger's, a hostile in it or none
                 // (#432).
                 (lazy (answeredByRanger room || Set.contains room (harassRooms view)))
+                // Its chase cast for by this colony's row: a room shut on a
+                // raid that row wins (#571), or a kite its biggest ranger is
+                // counted for (#655: a verdict casts the body it counts).
                 (lazy
-                    (Set.contains room view.RaidedOutposts
-                     && Map.tryFind room judged
-                        |> Option.exists (fun verdict -> verdict.Value.Casting.Contains home)))
+                    (Map.tryFind room judged
+                     |> Option.exists (fun verdict ->
+                         verdict.Value.Casting.Contains home
+                         && (Set.contains room view.RaidedOutposts
+                             || verdict.Value.Answer = Answer.Kite))))
                 (lazy
                     (Brief.trespassSplit
                         view
