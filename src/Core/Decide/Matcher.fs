@@ -802,12 +802,49 @@ let matchAcross
                 let holding = Map.tryFind creep.Name assignments = Some tid
                 let stance = Brief.stanceOf ctx.View room brief
 
+                // The bodies cast by the colonies the room's verdict casts for
+                // it, each landing once born (its spawns' longest wait) and
+                // walked in off its home (`CastBid.walk`): a relief cast is a
+                // partner as a free body walking in is, so the side it
+                // relieves fights on while it comes, and the bodies overlap
+                // rather than gap (live t1,038,674: the pair let the Wraith
+                // heal back while the relief was cast).
+                let ovens =
+                    lazy
+                        (let casting = (Facts.verdictOf ctx.View room).Casting
+
+                         contexts
+                         |> Array.toList
+                         |> List.filter (fun c ->
+                             casting.Contains(SpatialInfo.homeName c.View.Spatial))
+                         |> List.collect (fun c ->
+                             let born = c.View.Spawns |> List.map _.Remaining |> List.fold max 0
+
+                             let walk =
+                                 CastBid.walk
+                                     c.View.Tuning
+                                     (RoomName.hopsBetween
+                                         (SpatialInfo.homeName c.View.Spatial)
+                                         room)
+
+                             c.View.Casting
+                             |> List.map (fun cast -> Facts.ovenBody cast, born + walk))
+                         |> List.filter (fun (body, _) -> isFighterBody body))
+
+                let ovenLands =
+                    lazy
+                        (ovens.Value
+                         |> List.map (fun (body, ticks) -> body.Name, ticks)
+                         |> Map.ofList)
+
                 let landing (other: CreepInfo) (holder: bool) =
                     match landsIn other.Name task with
                     | _ when holder && mustered -> Some 0
                     | Some ticks -> Some(max 0 (ticks - mine.Value))
                     | None when named.Value.Contains other.Name -> Some 0
-                    | None -> None
+                    | None ->
+                        Map.tryFind other.Name ovenLands.Value
+                        |> Option.map (fun ticks -> max 0 (ticks - mine.Value))
 
                 // The named bodies this match does not hold: another colony's,
                 // where the world's fleet stands them.
@@ -824,7 +861,8 @@ let matchAcross
                         |> List.distinctBy _.Name
 
                 let others =
-                    fighters.Value @ lent () |> List.filter (fun other -> other.Name <> creep.Name)
+                    fighters.Value @ lent () @ List.map fst ovens.Value
+                    |> List.filter (fun other -> other.Name <> creep.Name)
 
                 // Who holds this fight now: they are coming.
                 let holders, rest =
@@ -846,10 +884,22 @@ let matchAcross
                                 Facts.mayBeCalled ctx.View (Set.singleton room) from room other
                             | _ -> false)
 
-                let seats =
-                    match brief.Capacity ctx.Threats |> Capacity.capOf CapScope.Fighters with
-                    | Some cap -> cap - List.length holders - 1
-                    | None -> System.Int32.MaxValue
+                // The seats an arriving body finds open when it lands
+                // (the overlap `holdersAt` counts the capacity gate by): a
+                // holder takes one only while it outlives that landing, so a
+                // relief is seated beside the holder it relieves.
+                let cap = brief.Capacity ctx.Threats |> Capacity.capOf CapScope.Fighters
+
+                let seated (taken: (int * CreepInfo) list) (ticks: int) =
+                    match cap with
+                    | Some cap ->
+                        let staying =
+                            holders
+                            |> List.filter (fun holder -> holder.TicksToLive > ticks + mine.Value)
+                            |> List.length
+
+                        staying + List.length taken + 1 < cap
+                    | None -> true
 
                 let arriving =
                     rest
@@ -867,7 +917,13 @@ let matchAcross
                     |> List.choose (fun other ->
                         landing other false |> Option.map (fun t -> t, other))
                     |> List.sortBy (fun (ticks, other) -> ticks, other.Name)
-                    |> List.truncate (max 0 seats)
+                    |> List.fold
+                        (fun taken (ticks, other) ->
+                            if seated taken ticks then
+                                taken @ [ ticks, other ]
+                            else
+                                taken)
+                        []
 
                 not (
                     Facts.fits

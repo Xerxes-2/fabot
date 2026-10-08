@@ -894,7 +894,8 @@ module Brief =
                    |> List.forall (fun (row, trespassers) ->
                        row <> CastRow.Fighter BodyTemplate.Melee
                        || trespassers |> List.forall (Facts.canStrike view (partCount creep.Body)))
-        | BriefKind.Contested when ranged -> isRangerRowBody creep
+        | BriefKind.Contested
+        | BriefKind.ExitHold when ranged -> isRangerRowBody creep
         // A level-0 core is the guard row's to break (#487), and a ranger's
         // already standing in its room with nothing better to strike (#558),
         // on a seat of its own.
@@ -1004,6 +1005,9 @@ module Brief =
                 | _ -> true
 
             [ fighterAsk view room [ template ] None pays ]
+        // A held exit held by a ranger is the ranger's (`claimed`).
+        | BriefKind.ExitHold, _ when ranged ->
+            [ fighterAsk view room [ BodyTemplate.Ranged ] None (fun _ -> true) ]
         | BriefKind.Core, _
         | BriefKind.ExitHold, _ ->
             [ fighterAsk view room [ BodyTemplate.Melee ] None (fun _ -> true) ]
@@ -1169,6 +1173,15 @@ module Brief =
                 |> List.filter (fun creep -> not (Facts.bodiesWin view room [ creep ]))
                 |> List.length
 
+            // A held exit's raid stands across it, where no exchange in the
+            // room reads it: its holders, the bodies that held the raid's
+            // Guard, keep their seats.
+            let keeping =
+                if kind = BriefKind.ExitHold then
+                    held |> List.filter (fun creep -> holding.Contains creep.Name) |> List.length
+                else
+                    0
+
             // The sweep's room seats its whole group, every colony's, and a
             // free fighter more while concentrating pays (`Facts.sweepSeats`,
             // #658): one group, one room.
@@ -1178,7 +1191,9 @@ module Brief =
                 else
                     0
 
-            Capacity.fighters (max swept (max (wanted ()) (min Engine.guardCap (losers + 1))))
+            Capacity.fighters (
+                max swept (max (wanted ()) (min Engine.guardCap (max keeping (losers + 1))))
+            )
 
     /// A Guard's own kind: the first of its claims, `Contested` where none
     /// claims the room.
@@ -1232,7 +1247,20 @@ module Brief =
         let kill =
             kind = BriefKind.Chase || kind = BriefKind.Contested && phase = Phase.Prey
 
-        let ranged = kind = BriefKind.Contested && ranger.Value
+        // A held exit is the row's that held the raid's Guard: a ranger
+        // holding it keeps it while the raid bounces across the exit (live
+        // W17S26 t1,038,737-1,039,037: Wraith7582 stepped in and out of
+        // W18S26, and the rangers holding the Guard were let go
+        // "inapplicable" each time it stepped out and taken back each time it
+        // stepped in).
+        let heldByRanger =
+            lazy
+                (ColonyView.bodies view
+                 |> List.exists (fun creep -> holding.Contains creep.Name && isRangerRowBody creep))
+
+        let ranged =
+            kind = BriefKind.Contested && ranger.Value
+            || kind = BriefKind.ExitHold && heldByRanger.Value
 
         let rowCast =
             lazy

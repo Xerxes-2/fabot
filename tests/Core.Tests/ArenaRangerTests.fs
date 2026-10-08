@@ -2941,32 +2941,166 @@ let partnerAgesOutTests =
             // Live t1,038,641-674 the pair fought on, ranger-1037139 aged out
             // with Wraith7582 at 512, and the relief was cast only on its death
             // (born t1,038,710); the Wraith healed to 1,400 and walked off.
-            // Now the elder, which ages out before the pair's kill lands, is
-            // no partner: the pair lets the fight go at once, its relief is
-            // cast at t2 (born t38, 32 ticks before live's), and ranger-1037937
-            // and the relief kill the Wraith at t134 (live: never).
+            // The elder, which ages out before the pair's kill lands, answers
+            // nothing in the verdict either, so the fight is no chase and its
+            // relief is asked for and cast at t0 (born t36; #615's first fix
+            // cast it at t2, once the pair had let go). The relief in its
+            // oven is a partner landing at its birth and walk, so
+            // ranger-1037937 takes the Guard back at t1 and fights on beside
+            // the elder while the relief comes, and the two kill the Wraith
+            // at t118 (t134 before, live never).
             test
-                "#615 capture t1,038,640: a partner that ages out before the kill is no partner, and the relief that is cast kills the kiter" {
+                "#615 capture t1,038,640: a partner that ages out before the kill is relieved at once, and the side fights on while the relief comes" {
                 let start = wraithPartnerAgesOut () |> withCasts [ "ranger"; "guard" ]
+                let first, _ = step start
+
+                Expect.exists
+                    first.Ovens
+                    (fun oven -> oven.Name.StartsWith "ranger-")
+                    "the relief is in the oven after the first tick"
+
                 let held = start |> heldEachTick "ranger-1037937-Spawn11" 31
 
                 Expect.all
-                    held
-                    (fun (_, task) -> task <> Some "guard:W17S26")
-                    $"ranger-1037937 does not keep a kill its partner dies before\n%A{held}"
-
-                let beforeTheElderDies, _ = start |> run 31
-
-                Expect.exists
-                    beforeTheElderDies.Ovens
-                    (fun oven -> oven.Name.StartsWith "ranger-")
-                    "its relief is cast before the elder ages out (t32)"
+                    (List.skip 1 held)
+                    (fun (_, task) -> task = Some "guard:W17S26")
+                    $"ranger-1037937 holds the Guard from t1 while the relief comes\n%A{held}"
 
                 let _, trace = start |> run 160
 
                 Expect.isLessThanOrEqual
                     (diedOn "Wraith7582" trace |> Option.defaultValue System.Int32.MaxValue)
-                    150
-                    $"the ranger and its relief kill Wraith7582 by t150\n{describe trace}"
+                    125
+                    $"the ranger and its relief kill Wraith7582 by t125\n{describe trace}"
+            }
+
+            // The same pair with the elder 60 ticks to live: inside its relief's
+            // lead (spawn 36 and the walk), but past the pair's kill (~39
+            // ticks), so it carries the kill and nothing is cast for it.
+            test
+                "#615 capture t1,038,640, the elder with life to spare: a partner that lives through the kill is no relief's" {
+                let start =
+                    let a = wraithPartnerAgesOut () |> withCasts [ "ranger"; "guard" ]
+
+                    { a with
+                        Bodies =
+                            a.Bodies
+                            |> List.map (fun b ->
+                                if b.Id = "ranger-1037139-Spawn11" then
+                                    { b with TicksToLive = 60 }
+                                else
+                                    b)
+                    }
+
+                let rec ovensOver n (a: Arena) =
+                    if n = 0 then
+                        []
+                    else
+                        let next, _ = step a
+                        next.Ovens @ ovensOver (n - 1) next
+
+                Expect.isEmpty
+                    (ovensOver 20 start |> List.filter (fun oven -> oven.Name.StartsWith "ranger-"))
+                    "no ranger is cast while the elder carries the kill"
+            }
+        ]
+
+/// W17S26 at t1,038,736 (#615): Wraith7582 at full hits on the west exit,
+/// stepping into Trepidimous' W18S26 and back on its live tiles, with
+/// ranger-1037937 and its relief ranger-1038674 holding guard:W17S26. Live
+/// both were let go "inapplicable" each time it stepped out (the room's
+/// Guard became the held exit, which admitted the melee guard row alone and
+/// asked a melee block) and taken back each time it stepped in, every 6-14
+/// ticks from t1,038,737 to t1,039,037.
+let private wraithAcrossTheExit () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+
+    let wraith =
+        [
+            "W18S26", 48, 21
+            "W18S26", 48, 22
+            "W18S26", 48, 23
+            "W18S26", 48, 24
+            "W18S26", 48, 25
+            "W18S26", 49, 26
+            "W17S26", 1, 25
+        ]
+        |> List.mapi (fun i (r, x, y) -> i + 1, GoTo(at r x y))
+        |> Phases
+
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W17S25" ])
+
+    let bodies: Body list =
+        [
+            { body
+                  "Wraith7582"
+                  trepidimous
+                  (parts [ RangedAttack, 3; Move, 6; Heal, 4; Move, 1 ])
+                  (at "W17S26" 0 20)
+                  (Some wraith) with
+                TicksToLive = 386
+            }
+            { body
+                  "ranger-1037937-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W17S26" 1 16)
+                  None with
+                Hits = 1_188
+                TicksToLive = 735
+            }
+            { body
+                  "ranger-1038674-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W17S26" 10 5)
+                  None with
+                TicksToLive = 1_473
+            }
+        ]
+
+    let a = arena 1_038_737 (wraithRooms () @ [ room "W18S26" ]) colonies bodies
+
+    { a with
+        Carried =
+            wraithMemory
+                a.Carried
+                [
+                    "ranger-1037937-Spawn11", "guard:W17S26"
+                    "ranger-1038674-Spawn11", "guard:W17S26"
+                ]
+    }
+
+[<Tests>]
+let heldExitTests =
+    testList
+        "arena a held exit keeps the rangers that held the raid (#615)"
+        [
+            // Now a held exit a ranger holds is the ranger's: it admits the
+            // ranger row, asks a ranger (the one holding it), and seats the
+            // bodies that held the raid's Guard, so both keep it while the
+            // Wraith is across the exit and nothing is cast.
+            test
+                "#615 capture t1,038,736: both rangers keep the Guard while the kiter bounces across the exit, and no guard is cast" {
+                let start = wraithAcrossTheExit () |> withCasts [ "guard"; "ranger" ]
+
+                for name in [ "ranger-1037937-Spawn11"; "ranger-1038674-Spawn11" ] do
+                    let held = start |> heldEachTick name 15
+
+                    Expect.all
+                        held
+                        (fun (_, task) -> task = Some "guard:W17S26")
+                        $"{name} holds guard:W17S26 every tick\n%A{held}"
+
+                let rec ovensOver n (a: Arena) =
+                    if n = 0 then
+                        []
+                    else
+                        let next, _ = step a
+                        next.Ovens @ ovensOver (n - 1) next
+
+                Expect.isEmpty (ovensOver 15 start) "and nothing is cast for the held exit"
             }
         ]

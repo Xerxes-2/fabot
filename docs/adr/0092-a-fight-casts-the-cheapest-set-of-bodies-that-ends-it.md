@@ -1,6 +1,8 @@
 # A fight casts the cheapest set of bodies that ends it
 
-> **Status:** accepted
+> **Status:** accepted, amended by #615
+
+> **Amended by #615** (live W17S26 t1,038,641–710: a ranger pair shot Wraith7582 down from 1,248 hits while one of the pair, 33 ticks to live, could not live through the ~39-tick kill; the elder aged out with the Wraith at 512, its relief was cast only on its death and the Wraith healed back to 1,400). A fighter's relief overlaps it, as an economy row's successor does (ADR 0026's arrival rule, extended to the fight): **a body counts toward a fight only while it lives through the kill it is counted for.** The chooser's bodies already cast (`castsByPrice`'s `castAlready`) count a standing body only while its life exceeds the set's spawn time, walk and kill; the rangers that answer a room (`rangersAmong`) only while each outlives their kill, so a fight its holders cannot finish is no chase and asks for its cast; the gate's partners (`winsBeside`) only while each outlives the side's kill from the last one's landing. And a body in an oven is a partner at the gate, landing at its birth and its walk (`Matcher.unfitNow`), seated where the holder it relieves is dead by then (the capacity's arrival overlap), so the side fights on while the relief comes instead of letting go and coming back. Arena captures t1,038,640 and t1,038,682 in `ArenaRangerTests`.
 
 > **Accepted 2026-10-08** on #654 (#615 U4 slice C). Supersedes ADR 0085's #550 **Rows** amendment (the trespass's per-row split) and the fixed counts and sizes of the guard and ranger rows (`guardsWanted` one-or-`Engine.guardCap`, `guardBlocksFor`, `rangersWanted`, `rangerBlocksFor`).
 

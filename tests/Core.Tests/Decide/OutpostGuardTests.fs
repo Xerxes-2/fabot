@@ -1139,10 +1139,14 @@ let guardFlavourTests =
                     |> heldWest
                     |> decideFrom (Map.ofList [ "r-1", taskId (Guard "W1N2") ])
 
-                Expect.notEqual
+                // Moved by #615 (live W17S26 t1,038,737-1,039,037): a held exit
+                // is the row's that held the raid's Guard, so a ranger holding
+                // it keeps it while its raid bounces across the exit, where it
+                // was let go and taken back on each bounce.
+                Expect.equal
                     (Map.tryFind "r-1" rangerHeld.Assignments)
                     (Some(taskId (Guard "W1N2")))
-                    "a ranger holding the hold, the only body there, is let go of it"
+                    "a ranger holding the hold, the only body there, keeps it"
 
                 Expect.isFalse
                     (decision.Intents

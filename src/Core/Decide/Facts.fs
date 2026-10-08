@@ -4085,9 +4085,12 @@ let private castsByPrice
         CastBid.walk view.Tuning (RoomName.hopsBetween (SpatialInfo.homeName view.Spatial) room)
 
     // The colony's bodies of a template of at least `blocks` blocks already
-    // cast, standing or in an oven, worn or not: a body's blocks are its
-    // weapon and heal parts over one block's, the fewest of any.
-    let castAlready (template: BodyTemplate) (blocks: int) =
+    // cast, worn or not, in an oven or standing past `life` ticks: a body's
+    // blocks are its weapon and heal parts over one block's, the fewest of
+    // any. A standing body that ages out before the set's fight is over is
+    // no body of it, so its relief is priced cast, as an expiring body leaves
+    // its row's count (`Spawns.expiring`).
+    let castAlready (template: BodyTemplate) (blocks: int) (life: int) =
         let pattern = patternOfTemplate template
 
         let block =
@@ -4107,7 +4110,10 @@ let private castsByPrice
 
         let standing =
             ColonyView.bodies view
-            |> List.filter (fun creep -> cut creep.Name creep.Body && blocksIn creep.Body >= blocks)
+            |> List.filter (fun creep ->
+                cut creep.Name creep.Body
+                && blocksIn creep.Body >= blocks
+                && creep.TicksToLive > life)
 
         let oven =
             view.Casting
@@ -4185,8 +4191,11 @@ let private castsByPrice
 
             // The bodies of it already standing or in an oven are cast: they
             // spend only the life the walk and the kill take, and the set is
-            // spawned no tick longer for them.
-            let cast = min n (castAlready template blocks)
+            // spawned no tick longer for them. A standing one counts only
+            // while it outlives the set's cast, walk and kill.
+            let cast =
+                min n (castAlready template blocks (castSpawnTicks template blocks + walk + kill))
+
             let fresh = n - cast
             let wait = if fresh = 0 then 0 else waits template blocks fresh
             let spawn = if fresh = 0 then 0 else castSpawnTicks template blocks
@@ -4564,8 +4573,9 @@ let private winsBeside
             | _ -> None)
 
     // A partner counts only while it lives through the kill it is counted
-    // for: the side's kill (`killTicks`) lands after its landing and before
-    // it ages out. One that ages out first deals damage the raid heals back
+    // for: the side's kill (`killTicks`), struck once the last of it lands
+    // (the exchange prices the side whole from then), ends before it ages
+    // out. One that ages out first deals damage the raid heals back
     // once it is gone, so the side is priced without it, and its kill again
     // (live t1,038,641: ranger-1037139, 33 ticks left, beside ranger-1037937
     // against Wraith7582's 1,248 hits, out-healed 48 a tick, a kill of ~39
@@ -4576,7 +4586,7 @@ let private winsBeside
 
         match killTicks view room (me :: List.map (fst >> Fighter.ofCreep) side) with
         | Some kill ->
-            match side |> List.filter (fun (other, ticks) -> other.TicksToLive > ticks + kill) with
+            match side |> List.filter (fun (other, _) -> other.TicksToLive > waits + kill) with
             | kept when List.length kept = List.length side -> side
             | kept -> livesThrough kept
         | None -> side
@@ -4754,6 +4764,26 @@ let fits
     : bool =
     List.isEmpty (raidersIn view room)
     || winsBeside view stance room soon holding creep beside
+
+/// A body in an oven of ours as it will stand once born: its parts at full
+/// hits and a whole life.
+let internal ovenBody (cast: CastingInfo) : CreepInfo =
+    let hits = Engine.partHits * List.length cast.Body
+
+    {
+        Name = cast.Name
+        TicksToLive = Engine.creepLifetime
+        Fatigue = 0
+        Hits = { Hits = hits; HitsMax = hits }
+        Energy = 0
+        Thorium = 0
+        Minerals = Map.empty
+        FreeCapacity = 0
+        Body = partsOf cast.Body
+        ShotOff = 0
+        Walking = false
+        DrawnFrom = None
+    }
 
 /// The fresh bodies a cast is, at full hits and life, named for its
 /// template's row (`Bodies`' patterns, laid as the row casts them).
@@ -5146,6 +5176,13 @@ let private rangersAmong
     (lenders: (string * ColonyView * (CreepInfo -> bool)) list)
     (room: string)
     : (string * string) list option =
+    // Each lives through the set's kill (`killTicks`), as a partner the gate
+    // counts does (`winsBeside`): a ranger that ages out first answers
+    // nothing, so a fight it holds is no chase and its relief is asked for.
+    let livesThrough (taken: CreepInfo list) =
+        killTicks pricing.Value room (List.map Fighter.ofCreep taken)
+        |> Option.forall (fun kill -> taken |> List.forall (fun creep -> creep.TicksToLive > kill))
+
     let rec wins taken named rest =
         match rest with
         | [] -> None
@@ -5153,7 +5190,7 @@ let private rangersAmong
             let taken = creep :: taken
             let named = (creep.Name, home) :: named
 
-            if bodiesWin pricing.Value room taken then
+            if bodiesWin pricing.Value room taken && livesThrough taken then
                 Some(List.rev named)
             else
                 wins taken named rest

@@ -1,6 +1,8 @@
 # Expiring creeps: the workforce and a Task's capacity are counted at arrival
 
-> **Status:** amended by 0053, #216 R4, #216 R5, #230, #269
+> **Status:** amended by 0053, #216 R4, #216 R5, #230, #269, #615
+
+> **Extended by #615** to the fighting rows, whose count is a fight's and not a row's: a fighter counts only while it lives through the kill it is counted for, and a relief in its oven is a partner from its landing. ADR 0092's #615 banner has the rules.
 
 > **Amended by #230** on the premise two clauses below argue from, and on nothing this ADR decided: **the release fold no longer walks creep names in order.** A bounded Task's holders are sorted nearest-first off `Atlas.walkTicks` — the same walk this ADR has capacity counted at — so a cap that shrinks gives up the body furthest from the Task. Both clauses survive, because both are about what the name order must *not* be allowed to decide, and neither reasoned from what it *does* decide: an [[expiring]] creep is still never released over capacity, so a successor judged first still cannot take the slot its predecessor's arrival-priced death frees and leave the incumbent reading its own Post as full; and the window is still read from both ends, so no candidate a cast-and-walk away discounts a garrison nowhere near its own lead. Where those clauses say "the fold's name order cannot decide", read: there is no longer a name order for it to decide from — two holders of one capped Task are ordered by distance, and the name breaks a tie between equals alone. ADR 0024's declined tie-break and ADR 0054's [[refill cluster]], where the price was observed, carry the same banner.
 
