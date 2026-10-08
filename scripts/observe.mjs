@@ -150,6 +150,52 @@ const breachLine = (row, whose, now) =>
       ? ` of ${row.window}, pending`
       : "");
 
+// Whether an incoming nuke's `nuke` object is on the wire shape
+// `ObserveMemory.encodeImpact` writes (#657).
+const nukeShaped = (nuke) =>
+  nuke !== null &&
+  typeof nuke === "object" &&
+  ["x", "y", "lands"].every((key) => typeof nuke[key] === "number") &&
+  typeof nuke.launch === "string" &&
+  Array.isArray(nuke.creeps) &&
+  nuke.creeps.every((name) => typeof name === "string") &&
+  Array.isArray(nuke.exposed) &&
+  nuke.exposed.every(
+    (row) =>
+      row !== null &&
+      typeof row === "object" &&
+      typeof row.id === "string" &&
+      typeof row.kind === "string" &&
+      ["x", "y", "hits", "blast", "rampart", "shortfall"].every((key) => typeof row[key] === "number"),
+  );
+
+// The hits as an operator reads them: 5.0M, 300K, 900.
+const hitsText = (n) =>
+  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 1_000)}K` : `${n}`;
+
+// An incoming nuke's impact, a line each (#657): where and when, then each
+// structure in the 5×5 — its hits against the blast and the rampart on its
+// tile, and the rampart hits it still lacks — then the creeps the landing
+// kills if they stand in the room.
+const nukeLines = (row) => {
+  const n = row.nuke;
+  const lost = n.exposed.filter((e) => e.shortfall > 0);
+  const lines = [
+    `nuke     ${row.room} (${n.x},${n.y}) lands t${n.lands} in ${row.amount} ticks` +
+      `${n.launch ? ` from ${n.launch}` : ""}: ${lost.length} of ${n.exposed.length} structures lost, ` +
+      `${n.creeps.length} creeps in the room die`,
+  ];
+  for (const e of n.exposed) {
+    lines.push(
+      `           ${e.kind.padEnd(10)} (${e.x},${e.y}) ${e.id}  hits ${hitsText(e.hits)} vs blast ${hitsText(e.blast)}` +
+        (e.kind === "rampart" ? "" : `, rampart ${hitsText(e.rampart)}`) +
+        (e.shortfall > 0 ? ` — lost, short ${hitsText(e.shortfall)} of rampart` : " — stands"),
+    );
+  }
+  if (n.creeps.length > 0) lines.push(`           creeps: ${n.creeps.join(", ")}`);
+  return lines;
+};
+
 // The engine's result codes a refusal row carries (#629), by the name the
 // API documents them under; a code missing here prints as its number.
 const ERR_NAME = {
@@ -688,8 +734,19 @@ if (command === "console") {
   );
   const pendingBreaches = [];
   let openBreaches = 0;
+  // An incoming nuke ahead of every other line (#657): a home-danger fact.
   for (const [whose, leaf] of breachLeaves) {
     for (const row of breachRowsOf(leaf)) {
+      if (row.kind === "incoming-nuke" && breachOpen(row, breachClock)) {
+        openBreaches++;
+        console.log(breachLine(row, whose, breachClock));
+        if (nukeShaped(row.nuke)) for (const line of nukeLines(row)) console.log(line);
+      }
+    }
+  }
+  for (const [whose, leaf] of breachLeaves) {
+    for (const row of breachRowsOf(leaf)) {
+      if (row.kind === "incoming-nuke" && breachOpen(row, breachClock)) continue;
       if (breachOpen(row, breachClock)) {
         openBreaches++;
         console.log(breachLine(row, whose, breachClock));
@@ -2263,7 +2320,7 @@ if (command === "console") {
   // ---- breaches: the live invariant violations, oldest first ------------
 
   // The wire shape written by ObserveMemory.fs:
-  //   { rows: [{ kind, room, subject, amount, first, last }] }
+  //   { rows: [{ kind, room, subject, amount, first, last, window?, nuke? }] }
   // One row per violation **standing right now**, oldest first, each
   // carrying the tick it opened on and the tick the bot last confirmed it
   // (#278). A breach that clears drops out of the leaf entirely: this
@@ -2328,6 +2385,10 @@ if (command === "console") {
     "reactor-lost":
       "0 — the declared Reactor's own row says it is not ours, so what is delivered there scores " +
       "for whoever holds it",
+    "incoming-nuke":
+      "the ticks until a nuke (the subject) lands in that room of ours (#657); the lines under it " +
+      "name the impact: 10M on the centre, 5M within range 2, a rampart on a tile taking it first, " +
+      "and every creep in the room dead on landing",
   };
 
   // A row off the wire shape stops the command and is quoted, never
@@ -2351,7 +2412,8 @@ if (command === "console") {
         typeof row.amount !== "number" ||
         typeof row.first !== "number" ||
         typeof row.last !== "number" ||
-        (row.window !== undefined && typeof row.window !== "number")
+        (row.window !== undefined && typeof row.window !== "number") ||
+        (row.nuke !== undefined && !nukeShaped(row.nuke))
       ) {
         fail(
           `a row at ${place}.rows is off the wire shape: ` +
@@ -2398,6 +2460,12 @@ if (command === "console") {
       // courier is three ticks from picking up and a pile that is bleeding
       // read exactly alike without it.
       printBreaches(rows, ticks, tickOf);
+    }
+    // An incoming nuke's impact, under the rows (#657).
+    const nukeRows = [...worldRows, ...rows].filter((row) => row.nuke !== undefined);
+    if (nukeRows.length > 0) console.log("");
+    for (const row of nukeRows) {
+      for (const line of nukeLines(row)) console.log(line);
     }
     // What each kind that actually appeared means, once rather than per
     // row: the rows are the priority list and stay one line each, and the

@@ -1379,6 +1379,75 @@ let rivalReadings
     |> Map.ofList,
     logs |> List.map (fun (room, _, _, struck) -> room, struck) |> Map.ofList
 
+/// The nukes in flight at the rooms of ours (#657), read on a full tick: one
+/// `FIND_NUKES` per room of `covered` in sight, and only beside a nuke the
+/// structures within its impact area and our creeps in the room.
+let nukeWatch (covered: Set<string>) : Fabot.Core.Observe.NukeWatch =
+    let seen =
+        covered
+        |> Seq.choose (fun room -> roomSeen room |> Option.map (fun r -> room, r))
+        |> Seq.toList
+
+    let nukes =
+        seen
+        |> List.collect (fun (room, engineRoom) ->
+            match engineRoom.find findNukes with
+            | [||] -> []
+            | found ->
+                let structures = engineRoom.find findStructures |> Array.map unbox<IStructure>
+
+                let creeps =
+                    engineRoom.find findMyCreeps
+                    |> Array.map (fun o -> (unbox<ICreep> o).name)
+                    |> Array.toList
+
+                found
+                |> Array.map (fun o ->
+                    let nuke = unbox<INuke> o
+                    let centre = posOf nuke.pos
+
+                    ({
+                        Nuke = nuke.id
+                        Aimed = room
+                        Centre = centre
+                        LandsAt = Game.time + nuke.timeToLand
+                        Launch =
+                            if jsTypeof nuke.launchRoomName = "string" then
+                                nuke.launchRoomName
+                            else
+                                ""
+                        // A rival's structure is not ours to lose, and one
+                        // with no hits (a controller) takes no damage.
+                        Inside =
+                            structures
+                            |> Array.filter (fun s ->
+                                jsTypeof (box s.hits) = "number"
+                                && not (
+                                    jsTypeof (box s)?my = "boolean"
+                                    && not (unbox<bool> (box s)?my)
+                                )
+                                && max (abs (s.pos.x - centre.X)) (abs (s.pos.y - centre.Y))
+                                   <= Engine.nukeRadius)
+                            |> Array.map (fun s ->
+                                ({
+                                    Structure = s.id
+                                    Built = s.structureType
+                                    Square = posOf s.pos
+                                    HitsLeft = s.hits
+                                }
+                                : Fabot.Core.Observe.NukeTarget))
+                            |> Array.toList
+                        Doomed = creeps
+                    }
+                    : Fabot.Core.Observe.NukeSighting))
+                |> Array.toList)
+
+    {
+        Covered = covered
+        Sighted = seen |> List.map fst |> Set.ofList
+        Nukes = nukes
+    }
+
 /// Where every creep of ours stands this tick, for next tick's
 /// `CreepInfo.Walking`. Here so it shares `ofGame`'s gestating filter.
 let positions () : (string * RoomPos) list =

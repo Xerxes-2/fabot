@@ -427,6 +427,37 @@ let private standingOf (last: LightTick.LastFull) : Set<string> =
 [<Emit("typeof RoomVisual === 'function' && new RoomVisual($0).text($1, 1, $2, { align: 'left', font: 0.6, color: '#ffffff', stroke: '#000000', strokeWidth: 0.12 })")>]
 let private visualText (_room: string) (_text: string) (_y: float) : unit = jsNative
 
+[<Emit("typeof RoomVisual === 'function' && new RoomVisual($0).rect($1 - 0.5, $2 - 0.5, $3, $3, { fill: '#ff0000', opacity: 0.15, stroke: '#ff0000', strokeWidth: 0.08 })")>]
+let private visualSquare (_room: string) (_left: int) (_top: int) (_side: int) : unit = jsNative
+
+[<Emit("typeof RoomVisual === 'function' && new RoomVisual($0).text($1, $2, $3, { font: 0.5, color: '#ff4444', stroke: '#000000', strokeWidth: 0.1 })")>]
+let private visualMark (_room: string) (_text: string) (_x: float) (_y: float) : unit = jsNative
+
+/// An incoming nuke's impact area (#657), drawn in its target room on every
+/// tick while its breach stands: the 5×5 square, the centre, and each
+/// structure a rampart would still not keep standing.
+let private drawNuke (room: string) (impact: Observe.NukeImpact) =
+    let r = Engine.nukeRadius
+    let side = 2 * r + 1
+    visualSquare room (impact.GroundZero.X - r) (impact.GroundZero.Y - r) side
+    visualSquare room impact.GroundZero.X impact.GroundZero.Y 1
+
+    let from =
+        if impact.Launcher = "" then
+            ""
+        else
+            $" from %s{impact.Launcher}"
+
+    visualMark
+        room
+        $"nuke in %d{impact.Lands - Game.time} (t%d{impact.Lands})%s{from}"
+        (float impact.GroundZero.X)
+        (float (impact.GroundZero.Y - r) - 0.8)
+
+    for row in impact.Priced do
+        if row.Shortfall > 0 then
+            visualMark room "✖" (float row.Exposed.Square.X) (float row.Exposed.Square.Y + 0.2)
+
 /// The bucket and the tick's cost in the top-left corner of every room we
 /// own (#638): the season client shows no bucket, and a room visual reaches
 /// only our own client.
@@ -457,7 +488,19 @@ let private drawCpu (line: Observe.CpuState) =
     let draw room (top: float) (rows: Observe.Breach list) =
         rows
         |> List.iteri (fun i b ->
-            visualText room $"breach {b.Kind} {b.Subject} {b.Amount}" (top + 0.8 * float i))
+            match b.Impact with
+            | Some impact ->
+                let short =
+                    impact.Priced |> List.filter (fun row -> row.Shortfall > 0) |> List.length
+
+                visualText
+                    room
+                    $"breach {b.Kind} lands in {impact.Lands - Game.time}, {short} of {List.length impact.Priced} structures lost, {List.length impact.Killed} creeps die"
+                    (top + 0.8 * float i)
+
+                drawNuke room impact
+            | None ->
+                visualText room $"breach {b.Kind} {b.Subject} {b.Amount}" (top + 0.8 * float i))
 
     let worldTop = 2.6
     let mutable owned = Set.empty
@@ -1494,12 +1537,21 @@ let private fullTick
                     Faults = faultsOf colony.Home
                 }
 
-    // The world's breach log: the CPU line's and the throws no colony owns.
+    // The world's breach log: the CPU line's, the throws no colony owns and
+    // the nukes in flight at every home and declared outpost.
     // The line ends at the tick before this one, which writes its row last.
     let world' =
         cpuLine
         |> Option.map (fun line ->
-            ObserveMemory.loadWorldBreaches ()
+            let prior = ObserveMemory.loadWorldBreaches ()
+
+            let covered =
+                colonies
+                |> List.collect (fun colony ->
+                    colony.Home :: (colony.Outposts |> List.map _.RoomName))
+                |> Set.ofList
+
+            prior
             |> Observe.foldBreaches
                 Observe.capBreaches
                 Game.time
@@ -1516,7 +1568,9 @@ let private fullTick
                              else
                                  None)
                         Faults = faultsOf ""
-                    }))
+                        Nukes = World.nukeWatch covered
+                    }
+                    prior))
 
     world' |> Option.iter ObserveMemory.saveWorldBreaches
 

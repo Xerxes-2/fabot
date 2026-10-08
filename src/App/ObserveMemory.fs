@@ -1630,9 +1630,11 @@ let private breachKindName =
     | BreachKind.ReactorRunningDry -> "reactor-running-dry"
     | BreachKind.ReactorStarved -> "reactor-starved"
     | BreachKind.ReactorLost -> "reactor-lost"
+    | BreachKind.IncomingNuke -> "incoming-nuke"
 
 let private breachKindOf name =
     match name with
+    | "incoming-nuke" -> Some BreachKind.IncomingNuke
     | "light-starved" -> Some BreachKind.LightStarved
     | "bucket-falling" -> Some BreachKind.BucketFalling
     | "fault" -> Some BreachKind.Fault
@@ -1646,10 +1648,90 @@ let private breachKindOf name =
     | "reactor-lost" -> Some BreachKind.ReactorLost
     | _ -> None
 
+// An incoming nuke's impact on the wire (#657): its centre, landing tick and
+// launch room, each structure inside the 5×5 priced, and our creeps in the
+// room.
+let private encodeImpact (impact: NukeImpact) =
+    let o = createEmpty<obj>
+    o?x <- impact.GroundZero.X
+    o?y <- impact.GroundZero.Y
+    o?lands <- impact.Lands
+    o?launch <- impact.Launcher
+
+    o?exposed <-
+        impact.Priced
+        |> List.map (fun row ->
+            let e = createEmpty<obj>
+            e?id <- row.Exposed.Structure
+            e?kind <- row.Exposed.Built
+            e?x <- row.Exposed.Square.X
+            e?y <- row.Exposed.Square.Y
+            e?hits <- row.Exposed.HitsLeft
+            e?blast <- row.Blast
+            e?rampart <- row.Rampart
+            e?shortfall <- row.Shortfall
+            e)
+        |> List.toArray
+
+    o?creeps <- List.toArray impact.Killed
+    o
+
+// The impact back off the wire; a throw for any key off its shape, which
+// costs the row (`rowsOf`), and the next full tick writes it back.
+let private decodeImpact (raw: obj) : NukeImpact =
+    let text (o: obj) (key: string) =
+        if jsTypeof o?(key) = "string" then
+            unbox<string> o?(key)
+        else
+            failwith ("not a string: " + key)
+
+    let array (key: string) =
+        if JS.Constructors.Array.isArray raw?(key) then
+            unbox<obj[]> raw?(key) |> Array.toList
+        else
+            failwith ("not an array: " + key)
+
+    {
+        GroundZero =
+            {
+                X = numberOf raw "x"
+                Y = numberOf raw "y"
+            }
+        Lands = numberOf raw "lands"
+        Launcher = text raw "launch"
+        Priced =
+            array "exposed"
+            |> List.map (fun e ->
+                {
+                    Exposed =
+                        {
+                            Structure = text e "id"
+                            Built = text e "kind"
+                            Square =
+                                {
+                                    X = numberOf e "x"
+                                    Y = numberOf e "y"
+                                }
+                            HitsLeft = numberOf e "hits"
+                        }
+                    Blast = numberOf e "blast"
+                    Rampart = numberOf e "rampart"
+                    Shortfall = numberOf e "shortfall"
+                })
+        Killed =
+            array "creeps"
+            |> List.map (fun name ->
+                if jsTypeof name = "string" then
+                    unbox<string> name
+                else
+                    failwith "not a string: creeps")
+    }
+
 // One standing breach on the wire. Both ticks ride, though `last` is always
 // this tick: it lets a reader with no game clock compute an age and tell
 // whether the bundle that wrote the row is still running. `window` rides only
-// on a row that has one (#630), so a row with none keeps its old wire.
+// on a row that has one (#630), and `nuke` only on an incoming nuke's (#657),
+// so a row with neither keeps its old wire.
 let private encodeBreach (row: StandingBreach) =
     let o = createEmpty<obj>
     o?kind <- breachKindName row.Breach.Kind
@@ -1661,6 +1743,8 @@ let private encodeBreach (row: StandingBreach) =
 
     if row.Breach.Window > 0 then
         o?window <- row.Breach.Window
+
+    row.Breach.Impact |> Option.iter (fun impact -> o?nuke <- encodeImpact impact)
 
     o
 
@@ -1695,6 +1779,11 @@ let private decodeBreach (raw: obj) : StandingBreach option =
                                 Subject = unbox<string> raw?subject
                                 Amount = unbox<int> raw?amount
                                 Window = if isNull raw?window then 0 else unbox<int> raw?window
+                                Impact =
+                                    if isNull raw?nuke then
+                                        None
+                                    else
+                                        Some(decodeImpact raw?nuke)
                             }
                     }
 

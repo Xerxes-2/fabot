@@ -337,8 +337,8 @@ let observerTableTests =
             }
 
             test "the breach kinds the script can name are all of them" {
-                // Eleven kinds today: six the bot reads itself by (#630, #629), two about ore that
-                // cannot be spent and three about the Reactor.
+                // Twelve kinds today: six the bot reads itself by (#630, #629), two about ore that
+                // cannot be spent, three about the Reactor and an incoming nuke (#657).
                 let spelt =
                     casesOf<Observe.BreachKind> ()
                     |> Seq.map (fun kind -> kebabOf (string kind))

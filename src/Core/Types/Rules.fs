@@ -57,6 +57,17 @@ module Engine =
     /// top of the deficit the reserver row sizes off.
     let reservationCap = 5000
 
+    /// NUKE_DAMAGE: what a landing nuke deals its centre tile, and every
+    /// other tile within `nukeRadius` of it (`processor/intents/nukes/tick.js`);
+    /// a rampart on a tile takes it first and passes on what its hits did not
+    /// stop.
+    let nukeDamageCentre = 10_000_000
+
+    let nukeDamageRing = 5_000_000
+
+    /// The Chebyshev range of a nuke's impact area: a 5×5 square.
+    let nukeRadius = 2
+
     /// CONTAINER_CAPACITY: what a container's store holds — the line past
     /// which a buffer needs no Refill.
     let containerCapacity = 2000

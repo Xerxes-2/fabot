@@ -68,6 +68,12 @@ let findTombstones = 118
 /// store with a clock on it.
 let findRuins = 123
 
+/// Screeps `FIND_NUKES` constant: every nuke in flight at the room.
+let findNukes = 117
+
+/// Screeps `FIND_MY_CREEPS` constant.
+let findMyCreeps = 102
+
 /// Screeps `TERRAIN_MASK_WALL` constant.
 let terrainMaskWall = 1
 
@@ -95,6 +101,15 @@ type IRoomPosition =
     /// light tick's glance reads it off `Game.structures`, whose structures
     /// carry no room of their own on this binding.
     abstract roomName: string
+
+/// A nuke in flight (`FIND_NUKES`): its position is the landing tile.
+type INuke =
+    abstract id: string
+    abstract pos: IRoomPosition
+    /// Ticks until it lands.
+    abstract timeToLand: int
+    /// The room it was launched from.
+    abstract launchRoomName: string
 
 type ISource =
     abstract id: string

@@ -2835,6 +2835,95 @@ type BreachKind =
     /// CLAIM body in, or the re-claimer died before its relief arrived. Every
     /// tonne delivered while that stands scores for whoever holds the flag.
     | ReactorLost
+    /// A nuke in flight at a room of ours (a home or a declared outpost),
+    /// from first sight to landing (#657): `Room` is its target, `Subject`
+    /// the nuke, `Amount` the ticks until it lands, and `Impact` what of ours
+    /// stands in it. World-wide, being read for every room of ours on every
+    /// full tick whichever colony decided; a target out of sight keeps its
+    /// row until the landing tick it was seen with. Observation only.
+    | IncomingNuke
+
+/// One structure standing within a nuke's impact area, as the shell read it.
+///
+/// Field names here are unique in the codebase on purpose: a record declared
+/// later with `Id`, `X` or `Hits` would take over those labels' inference
+/// from every record declared before it.
+type NukeTarget =
+    {
+        /// The structure's id.
+        Structure: string
+        /// The engine's STRUCTURE_* spelling.
+        Built: string
+        Square: Pos
+        HitsLeft: int
+    }
+
+/// A nuke in flight seen in a room of ours (`FIND_NUKES`), with what of ours
+/// stands to take it.
+type NukeSighting =
+    {
+        /// The nuke's id.
+        Nuke: string
+        /// The room it is aimed at.
+        Aimed: string
+        Centre: Pos
+        /// The tick it lands on: this tick plus its `timeToLand`.
+        LandsAt: int
+        /// The room it was launched from, empty when the engine names none.
+        Launch: string
+        /// Every structure within `Engine.nukeRadius` of the centre that no
+        /// rival owns, ramparts included.
+        Inside: NukeTarget list
+        /// Our creeps standing anywhere in the room: the landing kills every
+        /// creep in the room, not only those inside the area.
+        Doomed: string list
+    }
+
+/// The nukes in flight at the rooms of ours, and which of those rooms were in
+/// sight to be read.
+type NukeWatch =
+    {
+        /// Every home and declared outpost.
+        Covered: Set<string>
+        /// The rooms of `Covered` in vision this tick.
+        Sighted: Set<string>
+        Nukes: NukeSighting list
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module NukeWatch =
+    let none =
+        {
+            Covered = Set.empty
+            Sighted = Set.empty
+            Nukes = []
+        }
+
+/// One structure inside a nuke's impact area, priced: the damage its tile
+/// takes (`Blast`), the rampart hits standing on that tile before it
+/// (`Rampart`), and the hits a rampart there still lacks to keep the
+/// structure standing (`Shortfall`, 0: it stands). A rampart is its own
+/// shield: its row reads `Rampart` 0 and lacks what its own hits fall short
+/// of the blast.
+type NukeExposed =
+    {
+        Exposed: NukeTarget
+        Blast: int
+        Rampart: int
+        Shortfall: int
+    }
+
+/// What an incoming nuke will do: its centre, landing tick and launch room,
+/// each structure of ours inside the 5×5 priced, and the creeps of ours in
+/// the room it will kill if they stand there when it lands.
+type NukeImpact =
+    {
+        GroundZero: Pos
+        Lands: int
+        Launcher: string
+        Priced: NukeExposed list
+        Killed: string list
+    }
 
 /// One violation as this tick reads it: what broke, where, on which engine
 /// object, and the one number that makes it actionable — T on the floor, T
@@ -2854,6 +2943,8 @@ type Breach =
         /// 0 for a kind whose fact already carries its own duration, and the
         /// row before that is pending, folded for its age alone.
         Window: int
+        /// An `IncomingNuke` row's impact; None on every other kind.
+        Impact: NukeImpact option
     }
 
 /// One breach as the log carries it. The age is the whole reason this channel
@@ -2919,6 +3010,7 @@ let private breachesIn (view: ColonyView) : Breach list =
                     Subject = id
                     Amount = SpatialInfo.heldIn view.Spatial Thorium id
                     Window = 0
+                    Impact = None
                 }))
 
     let reactors = declaredReactors view
@@ -2954,6 +3046,7 @@ let private breachesIn (view: ColonyView) : Breach list =
                             Subject = creep.Name
                             Amount = stranded
                             Window = 0
+                            Impact = None
                         }
                 else
                     None))
@@ -3014,6 +3107,7 @@ let private breachesIn (view: ColonyView) : Breach list =
                 // says how long nobody has answered.
                 Amount = reactor.Thorium
                 Window = 0
+                Impact = None
             })
 
     // A Reactor of ours standing dry: the one kind that is routinely
@@ -3029,6 +3123,7 @@ let private breachesIn (view: ColonyView) : Breach list =
                 Subject = reactor.Id
                 Amount = 0
                 Window = 0
+                Impact = None
             })
 
     // A declared Reactor whose row says the flag on it is not ours, the
@@ -3043,6 +3138,7 @@ let private breachesIn (view: ColonyView) : Breach list =
                 Subject = reactor.Id
                 Amount = 0
                 Window = 0
+                Impact = None
             })
 
     decayingOre @ unplaceable @ runningDry @ starved @ lost
@@ -3108,6 +3204,8 @@ type WorldBreachFacts =
         /// The fault ring's rows since the bundle's load that cost no one
         /// colony (a tick's, an intent's, a segment's), as (step, tick).
         Faults: (string * int) list
+        /// The nukes in flight at the rooms of ours (#657).
+        Nukes: NukeWatch
     }
 
 /// How long a step's last throw keeps its `Fault` row open: a creep's life,
@@ -3129,6 +3227,7 @@ let private faultBreaches (tick: int) (room: string) (faults: (string * int) lis
             Subject = phase
             Amount = List.length rows
             Window = 0
+            Impact = None
         })
 
 /// The longest cast a spawn makes: a full-size body at three ticks a part,
@@ -3163,6 +3262,7 @@ let private refusalStorm (view: ColonyView) : Breach list =
                 |> System.Math.Round
                 |> int
             Window = halfLife
+            Impact = None
         })
 
 /// Each spawn free beside a full bank that cast nothing this tick, while the
@@ -3197,6 +3297,7 @@ let private spawnIdle
                     Subject = spawn.Name
                     Amount = seats
                     Window = spawnIdleWindow
+                    Impact = None
                 }))
 
 /// The ticks a body lives: a CLAIM part's shorter life, else the creep's.
@@ -3308,6 +3409,7 @@ let private bodyIdle (facts: ColonyBreachFacts) (view: ColonyView) : Breach list
                     Subject = creep.Name
                     Amount = idle
                     Window = 0
+                    Impact = None
                 })
         | _ -> None)
 
@@ -3373,6 +3475,7 @@ let private lightStarved
                     Subject = reason
                     Amount = List.length forced
                     Window = 0
+                    Impact = None
                 }
             ]
         else
@@ -3407,19 +3510,113 @@ let private bucketFalling (tuning: Tuning) (line: CpuState) : Breach list =
                     Subject = "bucket"
                     Amount = int toEmpty
                     Window = 0
+                    Impact = None
                 }
             ]
         else
             []
 
+/// The damage a nuke deals a tile at Chebyshev `range` from its centre.
+let nukeBlastAt (range: int) =
+    if range = 0 then Engine.nukeDamageCentre
+    elif range <= Engine.nukeRadius then Engine.nukeDamageRing
+    else 0
+
+/// A sighting priced as the engine lands it (`processor/intents/nukes/tick.js`):
+/// each tile's rampart takes the blast first and passes on what its hits did
+/// not stop, a structure on that tile standing while its hits exceed the
+/// rest; every creep in the room dies whatever tile it stands on.
+let nukeImpact (sighting: NukeSighting) : NukeImpact =
+    let rampart = builtKindName BuiltKind.Rampart
+
+    let rampartOn =
+        sighting.Inside
+        |> List.filter (fun target -> target.Built = rampart)
+        |> List.map (fun target -> target.Square, target.HitsLeft)
+        |> Map.ofList
+
+    let priced =
+        sighting.Inside
+        |> List.choose (fun target ->
+            let range =
+                max
+                    (abs (target.Square.X - sighting.Centre.X))
+                    (abs (target.Square.Y - sighting.Centre.Y))
+
+            let blast = nukeBlastAt range
+
+            if blast = 0 then
+                None
+            else
+                let shield =
+                    if target.Built = rampart then
+                        0
+                    else
+                        Map.tryFind target.Square rampartOn |> Option.defaultValue 0
+
+                Some
+                    {
+                        Exposed = target
+                        Blast = blast
+                        Rampart = shield
+                        Shortfall = max 0 (blast + 1 - shield - target.HitsLeft)
+                    })
+        |> List.sortBy (fun row -> -row.Shortfall, row.Exposed.Built, row.Exposed.Structure)
+
+    {
+        GroundZero = sighting.Centre
+        Lands = sighting.LandsAt
+        Launcher = sighting.Launch
+        Priced = priced
+        Killed = List.sort sighting.Doomed
+    }
+
+/// One `IncomingNuke` row per nuke in flight at a room of ours: each one in
+/// sight priced afresh, and one the prior log holds whose target is still
+/// ours but out of sight standing until the landing tick it was seen with.
+/// A target in sight that no longer shows it means it landed: the row closes.
+let private incomingNukes (time: int) (watch: NukeWatch) (prior: BreachState) : Breach list =
+    let seen =
+        watch.Nukes
+        |> List.map (fun sighting ->
+            {
+                Kind = BreachKind.IncomingNuke
+                Room = sighting.Aimed
+                Subject = sighting.Nuke
+                Amount = sighting.LandsAt - time
+                Window = 0
+                Impact = Some(nukeImpact sighting)
+            })
+
+    let blind =
+        prior.Standing
+        |> Map.toList
+        |> List.choose (fun (_, row) ->
+            match row.Breach.Kind, row.Breach.Impact with
+            | BreachKind.IncomingNuke, Some impact when
+                Set.contains row.Breach.Room watch.Covered
+                && not (Set.contains row.Breach.Room watch.Sighted)
+                && impact.Lands > time
+                ->
+                Some
+                    { row.Breach with
+                        Amount = impact.Lands - time
+                    }
+            | _ -> None)
+
+    seen @ blind
+
 /// This tick's violations that belong to no one colony: the CPU line's two,
-/// cause before symptom, and the throws no colony owns.
+/// cause before symptom, the throws no colony owns, and the nukes in flight
+/// at any room of ours, read for all of them on every full tick whichever
+/// colony decided; `prior` is the log they fold onto, read for a nuke whose
+/// target is out of sight.
 /// Both CPU windows read the line from after a global reset's first cadence:
 /// the reset tick runs several limits (470 ms live) and the colonies it
 /// defers decide on the ticks after, so a window holding them reads a deploy
 /// as a starved or falling bucket while it refills (#627). A window the
 /// settled line does not reach back over has not seen a cadence fail.
-let worldBreaches (tuning: Tuning) (facts: WorldBreachFacts) : Breach list =
+let worldBreaches (tuning: Tuning) (facts: WorldBreachFacts) (prior: BreachState) : Breach list =
     let settled =
         { facts.Line with
             Ticks =
@@ -3431,10 +3628,12 @@ let worldBreaches (tuning: Tuning) (facts: WorldBreachFacts) : Breach list =
     lightStarved tuning facts.Limit facts.Cadence settled
     @ bucketFalling tuning settled
     @ faultBreaches facts.Time "" facts.Faults
+    @ incomingNukes facts.Time facts.Nukes prior
 
 /// Trim the log to the cap: a pending row before an open one, a `BodyIdle`
 /// row before any other kind (a colony's idle bodies can number dozens, and
-/// must never evict the Reactor or the ore), then newest `FirstSeen` dropped
+/// must never evict the Reactor or the ore), an `IncomingNuke` row after
+/// every other kind, then newest `FirstSeen` dropped
 /// first, since the row that has stood longest is the one bleeding longest
 /// (every surviving row ties on `LastSeen`). The remaining tie is broken on
 /// kind and subject so the eviction is a function of the state and not of
@@ -3450,6 +3649,7 @@ let private capStanding (cap: int) (rows: Map<BreachKind * string, StandingBreac
         |> List.sortBy (fun ((kind, subject), row) ->
             isOpen row.LastSeen row,
             kind <> BreachKind.BodyIdle,
+            kind = BreachKind.IncomingNuke,
             row.LastSeen,
             -row.FirstSeen,
             kind,

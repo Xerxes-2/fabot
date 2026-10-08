@@ -1057,7 +1057,54 @@ wire("breaches: a row whose window is not a number costs its row", async () => {
   assert.equal(rows[0].subject, "guard-1");
 });
 
-// ---- the fault ring (#628) ---------------------------------------------
+// An incoming nuke's row (#657): the world's log, its impact riding as `nuke`.
+const nukeRow = {
+  kind: "incoming-nuke",
+  room: "W1N1",
+  subject: "nuke-1",
+  amount: 49_900,
+  first: 100,
+  last: 200,
+  nuke: {
+    x: 25,
+    y: 25,
+    lands: 50_100,
+    launch: "W20S20",
+    exposed: [
+      { id: "spawn-1", kind: "spawn", x: 25, y: 25, hits: 5000, blast: 10_000_000, rampart: 8_000_000, shortfall: 1_995_001 },
+      { id: "rampart-1", kind: "rampart", x: 25, y: 25, hits: 8_000_000, blast: 10_000_000, rampart: 0, shortfall: 2_000_001 },
+    ],
+    creeps: ["worker-1", "worker-2"],
+  },
+};
+
+wire("breaches: an incoming-nuke row round-trips with its impact", async () => {
+  const { loadWorldBreaches, saveWorldBreaches } = await import(MODULE);
+
+  globalThis.Memory = rootMemoryWith("breaches", { rows: [nukeRow] });
+  saveWorldBreaches(loadWorldBreaches());
+  assert.equal(stable(globalThis.Memory.fabot.observe.breaches), stable({ rows: [nukeRow] }));
+});
+
+for (const [name, nuke] of [
+  ["a string", "boom"],
+  ["missing its landing tick", { ...nukeRow.nuke, lands: undefined }],
+  ["an exposed row without hits", { ...nukeRow.nuke, exposed: [{ ...nukeRow.nuke.exposed[0], hits: "5000" }] }],
+  ["creeps that are not names", { ...nukeRow.nuke, creeps: [7] }],
+]) {
+  wire(`breaches: an incoming-nuke row whose impact is ${name} costs its row`, async () => {
+    const { loadWorldBreaches, saveWorldBreaches } = await import(MODULE);
+
+    globalThis.Memory = rootMemoryWith("breaches", { rows: [{ ...nukeRow, nuke }, selfRows["bucket-falling"]] });
+    saveWorldBreaches(loadWorldBreaches());
+    const rows = globalThis.Memory.fabot.observe.breaches.rows;
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].subject, "bucket");
+  });
+}
+
+// ---- the fault ring (#628)---------------------------------------------
 
 const fault = (t, colony = "W1N2") => ({
   t,

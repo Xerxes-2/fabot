@@ -561,7 +561,7 @@ let private lineOf (n: int) (reading: int -> CpuReadings) =
 
 /// The world's breaches on one tick, as (kind, room, subject, amount) rows.
 let private worldOn (facts: WorldBreachFacts) =
-    worldBreaches Tuning.defaults facts
+    worldBreaches Tuning.defaults facts BreachState.empty
     |> List.map (fun breach -> breach.Kind, breach.Room, breach.Subject, breach.Amount)
 
 /// The world at t100 under a 20 ms allowance, the bundle loaded long before
@@ -574,6 +574,7 @@ let private worldFacts line =
         Limit = 20.0
         LoadedAt = -1_000
         Faults = []
+        Nukes = NukeWatch.none
     }
 
 /// The facts of a colony whose economy decided whole, quiet and unheld.
@@ -830,6 +831,7 @@ let selfBreachTests =
                                     Subject = "Spawn1"
                                     Amount = 2
                                     Window = spawnIdleWindow
+                                    Impact = None
                                 }
                         }
                      ],
@@ -922,6 +924,7 @@ let selfBreachTests =
                             Subject = "claimer-1"
                             Amount = 1
                             Window = halfLife
+                            Impact = None
                         }
                      ],
                      [])
@@ -1102,6 +1105,7 @@ let selfBreachTests =
                         Subject = $"worker-{n}"
                         Amount = 150
                         Window = 0
+                        Impact = None
                     }
 
                 let pile =
@@ -1111,6 +1115,7 @@ let selfBreachTests =
                         Subject = "pile-1"
                         Amount = 915
                         Window = 0
+                        Impact = None
                     }
 
                 let state =
@@ -1122,5 +1127,162 @@ let selfBreachTests =
                     (breachRows state |> List.map _.Breach.Subject)
                     "pile-1"
                     "the newest row survives when it is the ore and the older ones idle bodies"
+            }
+        ]
+
+/// A structure of ours inside a nuke's area.
+let private target id built x y hits : NukeTarget =
+    {
+        Structure = id
+        Built = built
+        Square = { X = x; Y = y }
+        HitsLeft = hits
+    }
+
+/// A nuke at (25, 25) of `room`, landing at t50,100, over a spawn on the
+/// centre under a rampart, a tower on the ring, a road outside the area.
+let private nukeAt room : NukeSighting =
+    {
+        Nuke = "nuke-1"
+        Aimed = room
+        Centre = { X = 25; Y = 25 }
+        LandsAt = 50_100
+        Launch = "W20S20"
+        Inside =
+            [
+                target "spawn-1" "spawn" 25 25 5_000
+                target "rampart-1" "rampart" 25 25 8_000_000
+                target "tower-1" "tower" 27 24 3_000
+                target "road-1" "road" 28 25 5_000
+            ]
+        Doomed = [ "worker-2"; "worker-1" ]
+    }
+
+/// The world's log folded on tick `t` over `watch`, from `prior`.
+let private foldNukes t (watch: NukeWatch) (prior: BreachState) =
+    let facts =
+        { worldFacts CpuState.empty with
+            Time = t
+            Nukes = watch
+        }
+
+    foldBreaches capBreaches t (worldBreaches Tuning.defaults facts prior) prior
+
+[<Tests>]
+let incomingNukeTests =
+    testList
+        "an incoming nuke is a breach from first sight to landing"
+        [
+            test "the impact prices each structure in the 5×5 against the rampart on its tile" {
+                let impact = nukeImpact (nukeAt "W1N1")
+
+                let priced =
+                    impact.Priced
+                    |> List.map (fun row ->
+                        row.Exposed.Structure, (row.Blast, row.Rampart, row.Shortfall))
+                    |> Map.ofList
+
+                Expect.equal
+                    priced["spawn-1"]
+                    (Engine.nukeDamageCentre, 8_000_000, 2_000_000 - 5_000 + 1)
+                    "the centre's 10M less the rampart's 8M leaves 2M on a 5K spawn"
+
+                Expect.equal
+                    priced["rampart-1"]
+                    (Engine.nukeDamageCentre, 0, 2_000_001)
+                    "the rampart takes the whole blast itself"
+
+                Expect.equal
+                    priced["tower-1"]
+                    (Engine.nukeDamageRing, 0, 5_000_000 - 3_000 + 1)
+                    "the ring deals 5M"
+
+                Expect.isFalse (priced.ContainsKey "road-1") "a tile at range 3 takes nothing"
+
+                Expect.equal
+                    impact.Killed
+                    [ "worker-1"; "worker-2" ]
+                    "every creep of ours in the room dies"
+
+                Expect.equal impact.Lands 50_100 "the landing tick rides"
+                Expect.equal impact.Launcher "W20S20" "the launching room rides"
+            }
+
+            test "a rampart thick enough keeps the structure under it standing" {
+                let sighting =
+                    { nukeAt "W1N1" with
+                        Inside =
+                            [
+                                target "spawn-1" "spawn" 25 25 5_000
+                                target "rampart-1" "rampart" 25 25 20_000_000
+                            ]
+                    }
+
+                Expect.isTrue
+                    ((nukeImpact sighting).Priced |> List.forall (fun row -> row.Shortfall = 0))
+                    "20M of rampart over the centre stops all 10M"
+            }
+
+            test "the row stands from first sight, counts down, and closes when the nuke lands" {
+                let room = "W1N1"
+
+                let watching nukes =
+                    {
+                        Covered = Set.ofList [ room ]
+                        Sighted = Set.ofList [ room ]
+                        Nukes = nukes
+                    }
+
+                let first = BreachState.empty |> foldNukes 100 (watching [ nukeAt room ])
+                let later = first |> foldNukes 200 (watching [ nukeAt room ])
+
+                match breachRows later with
+                | [ row ] ->
+                    Expect.equal row.Breach.Kind BreachKind.IncomingNuke "an incoming nuke"
+                    Expect.equal row.Breach.Room room "aimed at the room"
+                    Expect.equal row.Breach.Amount 49_900 "the ticks until it lands"
+                    Expect.equal row.FirstSeen 100 "it keeps the tick first seen"
+                    Expect.isTrue (isOpen 200 row) "open at once: no window"
+                | rows -> failtest $"one row, not %A{rows}"
+
+                let landed = later |> foldNukes 50_101 (watching [])
+
+                Expect.isEmpty (breachRows landed) "a room in sight that shows no nuke saw it land"
+            }
+
+            test "a target out of sight keeps its row until the landing tick it was seen with" {
+                let room = "W1N1"
+
+                let seen =
+                    BreachState.empty
+                    |> foldNukes
+                        100
+                        {
+                            Covered = Set.ofList [ room ]
+                            Sighted = Set.ofList [ room ]
+                            Nukes = [ nukeAt room ]
+                        }
+
+                let blind =
+                    {
+                        Covered = Set.ofList [ room ]
+                        Sighted = Set.empty
+                        Nukes = []
+                    }
+
+                let dark = seen |> foldNukes 300 blind
+
+                Expect.equal
+                    (breachRows dark |> List.map (fun row -> row.Breach.Amount, row.FirstSeen))
+                    [ 49_800, 100 ]
+                    "the blind row counts down off the landing tick and keeps its age"
+
+                Expect.isEmpty
+                    (breachRows (dark |> foldNukes 50_100 blind))
+                    "it closes at the landing tick"
+
+                Expect.isEmpty
+                    (breachRows (seen |> foldNukes 300 { blind with Covered = Set.empty }))
+                    "a room no longer ours keeps no row"
             }
         ]
