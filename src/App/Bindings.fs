@@ -459,6 +459,15 @@ let removeSite (_site: obj) : int = jsNative
 [<Emit("$0.observeRoom($1)")>]
 let observeRoom (_observer: obj) (_room: string) : int = jsNative
 
+/// `room.getEventLog` (`game/rooms.js`): the room's events of the tick
+/// before, each `{ event, objectId, data }`, parsed once a room a tick.
+[<Emit("$0.getEventLog()")>]
+let eventLog (_room: IRoom) : obj[] = jsNative
+
+/// EVENT_ATTACK: `data` holds `targetId`, `damage` and `attackType`; a
+/// tower's shot is one, under the tower's id.
+let eventAttack = 1
+
 /// `lab.runReaction` (`game/structures.js`): ERR_TIRED on cooldown,
 /// ERR_NOT_IN_RANGE past range 2 of either reagent lab,
 /// ERR_NOT_ENOUGH_RESOURCES or ERR_INVALID_ARGS for the wrong reagents.

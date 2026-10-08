@@ -346,6 +346,33 @@ smoke("observe outposts reads the world danger log (ADR 0086 S2) and the latches
   assert.equal(json.outposts[0].room, "W2N1");
 });
 
+smoke("observe rivals prints each rival's dossier (#653) beside the controllers", () => {
+  const file = join(dir, "rivals.json");
+  const dossier = {
+    since: 10,
+    latest: 990,
+    aim: { shots: [5, 980], alone: 1, near: [4, 1], weak: [4, 3], heal: [0, 0], armed: [3, 3], edge: [0, 0] },
+    safe: [1, 100],
+    acts: [{ room: "W3N1", at: 100, noticed: 110, rcl: 6, ours: 3, armed: 2, since: 20, struck: { spawn: 5 } }],
+    cool: 70100,
+    armed: [2, 900],
+    shapes: { "2A2M": 2 },
+    rooms: { W3N1: { seen: 990, tReads: 2, tLow: 120, tLast: 1900, resp: [1, 12, 12, 12, 112], fireGain: 300, fireTicks: 10 } },
+  };
+  writeFileSync(file, JSON.stringify({ fabot: { observe: { rivals: { Trepidimous: dossier } } } }));
+  const res = spawnSync(process.execPath, [script("observe.mjs"), "rivals"], {
+    env: { ...process.env, SCREEPS_TOKEN: "", OBSERVE_MEMORY: file, OBSERVE_TIME: "1000" },
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /^Trepidimous {2}seen t10\.\.t990 \(10 ago\)/m);
+  assert.match(res.stdout, /tower shots 5 .*nearest 1\/4, weakest 3\/4, attacker 3\/3/);
+  assert.match(res.stdout, /W3N1 raised t100 .*our armed there 20 before; struck spawn 5 before/);
+  assert.match(res.stdout, /W3N1 seen t990: towers low 120.*answered our armed body 1× avg 12/);
+  assert.match(res.stdout, /no rival controllers/);
+});
+
 smoke("observe outposts refuses a declared list off its shape", () => {
   const { code, err } = runOutposts(raidsMemory({ ...quietRaids, declared: [7] }));
   assert.equal(code, 1, err);

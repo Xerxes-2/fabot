@@ -827,10 +827,13 @@ let loadVisuals () : Set<string> = nameList "visuals"
 
 /// The segment ids each log's JSON is cut across, in order: room for twice
 /// the live size of each (the Transition log 198 KB, the CPU line 56 KB, on
-/// 2026-10-08), six of the engine's ten a tick.
+/// 2026-10-08), and the rival dossier's, whose caps (`Observe.capRivals`)
+/// keep it inside them at 139 KB: eight of the engine's ten a tick.
 let creepSegments = [| 0; 1; 2; 3 |]
 let cpuSegments = [| 4; 5 |]
-let private segmentIds = Array.append creepSegments cpuSegments
+let rivalSegments = [| 6; 7 |]
+
+let private segmentIds = Array.concat [ creepSegments; cpuSegments; rivalSegments ]
 
 /// The engine's cap on one segment, in string length.
 let private segmentCap = 100 * 1024
@@ -844,6 +847,10 @@ let segmentEvery = 10
 // below appends to and the segments are written from.
 let mutable private creepsWire: obj = null
 let mutable private cpuWire: obj = null
+
+// The rival dossiers on the heap, None until restored: encoded only on a
+// tick the segments are written.
+let mutable private rivalsHeld: Map<string, Dossier> option = None
 
 // The tick a fault was last recorded on, which writes the segments that tick.
 let mutable private faultedAt = -1
@@ -2539,6 +2546,257 @@ let saveVersion (build: string) (reset: int) =
     raw?reset <- reset
     writeObserveLeaf "version" raw
 
+// ---- the rival dossier (#653) ---------------------------------------------
+//
+// One object keyed by rival username, read by `observe.mjs rivals` alone.
+// A tally is `[count, last]`, a span `[episodes, sum, shortest, longest,
+// ended]`, an aim `[open, hit]`. A key absent reads as the zero it means;
+// one present and off its shape costs its rival's dossier and no more.
+
+let private numbers (count: int) (raw: obj) : int[] =
+    if not (JS.Constructors.Array.isArray raw) then
+        failwith "not an array"
+
+    let items = unbox<obj[]> raw
+
+    if items.Length <> count then
+        failwith "off its length"
+
+    items
+    |> Array.map (fun item ->
+        match numberValue item with
+        | Some number -> number
+        | None -> failwith "not a number")
+
+// A key a reader may find absent: the zero, else its decode.
+let private orZero (zero: 'a) (decode: obj -> 'a) (raw: obj) (key: string) : 'a =
+    if jsTypeof raw?(key) = "undefined" then
+        zero
+    else
+        decode raw?(key)
+
+let private encodeTally (tally: Tally) : obj =
+    box [| box tally.Count; box tally.Last |]
+
+let private decodeTally (raw: obj) : Tally =
+    let n = numbers 2 raw
+    { Count = n.[0]; Last = n.[1] }
+
+let private encodeSpan (span: Span) : obj =
+    box
+        [|
+            box span.Episodes
+            box span.Sum
+            box span.Shortest
+            box span.Longest
+            box span.Ended
+        |]
+
+let private decodeSpan (raw: obj) : Span =
+    let n = numbers 5 raw
+
+    {
+        Episodes = n.[0]
+        Sum = n.[1]
+        Shortest = n.[2]
+        Longest = n.[3]
+        Ended = n.[4]
+    }
+
+let private encodeAim (aim: Aim) : obj = box [| box aim.Open; box aim.Hit |]
+
+let private decodeAim (raw: obj) : Aim =
+    let n = numbers 2 raw
+    { Open = n.[0]; Hit = n.[1] }
+
+let private tallyAt = orZero Tally.zero decodeTally
+let private spanAt = orZero Span.zero decodeSpan
+let private aimAt = orZero Aim.zero decodeAim
+
+let private encodeRivalRoom (row: RivalRoom) : obj =
+    let o = createEmpty<obj>
+    o?seen <- row.Seen
+    o?res <- row.Reserving
+    o?tReads <- row.TowerReads
+    o?tLow <- row.TowerLow
+    o?tLast <- row.TowerLast
+    o?refills <- encodeTally row.Refills
+    o?fireGain <- row.FireGain
+    o?fireTicks <- row.FireTicks
+    o?peaceGain <- row.PeaceGain
+    o?peaceTicks <- row.PeaceTicks
+    o?lowFirst <- encodeAim row.LowestFirst
+    o?resp <- encodeSpan row.Response
+    o?unans <- encodeTally row.Unanswered
+    o?standing <- encodeTally row.Standing
+    o?killed <- row.KilledAt
+    o?unworked <- encodeSpan row.Unworked
+    o?lapsed <- row.LapsedAt
+    o?rereserve <- encodeSpan row.Rereserved
+    o
+
+let private decodeRivalRoom (raw: obj) : RivalRoom =
+    {
+        Seen = numberOf raw "seen"
+        Reserving =
+            match jsTypeof raw?res with
+            | "undefined" -> false
+            | "boolean" -> unbox<bool> raw?res
+            | _ -> failwith "not a boolean: res"
+        TowerReads = numberOrZero raw "tReads"
+        TowerLow = numberOrZero raw "tLow"
+        TowerLast = numberOrZero raw "tLast"
+        Refills = tallyAt raw "refills"
+        FireGain = floatOrZero raw "fireGain"
+        FireTicks = floatOrZero raw "fireTicks"
+        PeaceGain = floatOrZero raw "peaceGain"
+        PeaceTicks = floatOrZero raw "peaceTicks"
+        LowestFirst = aimAt raw "lowFirst"
+        Response = spanAt raw "resp"
+        Unanswered = tallyAt raw "unans"
+        Standing = tallyAt raw "standing"
+        KilledAt = numberOrZero raw "killed"
+        Unworked = spanAt raw "unworked"
+        LapsedAt = numberOrZero raw "lapsed"
+        Rereserved = spanAt raw "rereserve"
+    }
+
+let private encodeActivation (seen: SafeModeSeen) : obj =
+    let o = createEmpty<obj>
+    o?room <- seen.Room
+    o?at <- seen.At
+    o?noticed <- seen.Noticed
+    o?rcl <- seen.Level
+    o?ours <- seen.Ours
+    o?armed <- seen.OursArmed
+    seen.Since |> Option.iter (fun since -> o?since <- since)
+    o?struck <- hashOf box seen.Struck
+    o
+
+let private decodeActivation (raw: obj) : SafeModeSeen option =
+    if isNull raw || jsTypeof raw?room <> "string" then
+        None
+    else
+        Some
+            {
+                Room = unbox<string> raw?room
+                At = numberOf raw "at"
+                Noticed = numberOf raw "noticed"
+                Level = numberOrZero raw "rcl"
+                Ours = numberOrZero raw "ours"
+                OursArmed = numberOrZero raw "armed"
+                Since = numberValue raw?since
+                Struck = intMapOf raw?struck |> Map.toList
+            }
+
+let private encodeDossier (dossier: Dossier) : obj =
+    let aim = createEmpty<obj>
+    aim?shots <- encodeTally dossier.Aim.Shots
+    aim?alone <- dossier.Aim.Alone
+    aim?near <- encodeAim dossier.Aim.Nearest
+    aim?weak <- encodeAim dossier.Aim.Weakest
+    aim?heal <- encodeAim dossier.Aim.Healer
+    aim?armed <- encodeAim dossier.Aim.Attacker
+    aim?edge <- encodeAim dossier.Aim.Edge
+    let o = createEmpty<obj>
+    o?since <- dossier.Since
+    o?latest <- dossier.Latest
+    o?aim <- aim
+    o?safe <- encodeTally dossier.SafeModes
+    o?acts <- dossier.Activations |> List.map encodeActivation |> List.toArray
+    o?cool <- dossier.CooldownUntil
+    o?armed <- encodeTally dossier.Armed
+    o?shapes <- hashOf box (Map.toSeq dossier.Shapes)
+    o?cross <- encodeTally dossier.Crossings
+    o?sortie <- encodeTally dossier.Sorties
+    o?stayed <- encodeTally dossier.Stayed
+    o?fled <- encodeTally dossier.Fled
+    o?fell <- encodeTally dossier.Fell
+
+    o?homeRaid <-
+        dossier.HomeRaiders
+        |> Map.toSeq
+        |> Seq.map (fun (level, tally) -> string level, tally)
+        |> hashOf encodeTally
+
+    o?outRaid <- encodeTally dossier.OutpostRaiders
+    o?rooms <- dossier.Rooms |> Map.toSeq |> hashOf encodeRivalRoom
+    o
+
+let private decodeDossier (raw: obj) : Dossier =
+    let aim = if isNull raw?aim then createEmpty<obj> else raw?aim
+
+    let entries (key: string) =
+        if isNull raw?(key) || jsTypeof raw?(key) <> "object" then
+            [||]
+        else
+            objectEntries raw?(key)
+
+    {
+        Since = numberOf raw "since"
+        Latest = numberOf raw "latest"
+        Aim =
+            {
+                Shots = tallyAt aim "shots"
+                Alone = numberOrZero aim "alone"
+                Nearest = aimAt aim "near"
+                Weakest = aimAt aim "weak"
+                Healer = aimAt aim "heal"
+                Attacker = aimAt aim "armed"
+                Edge = aimAt aim "edge"
+            }
+        SafeModes = tallyAt raw "safe"
+        Activations = rowsOf decodeActivation raw?acts |> List.truncate capActivations
+        CooldownUntil = numberOrZero raw "cool"
+        Armed = tallyAt raw "armed"
+        Shapes = intMapOf raw?shapes |> Map.toSeq |> Fresh.mapOfSeq
+        Crossings = tallyAt raw "cross"
+        Sorties = tallyAt raw "sortie"
+        Stayed = tallyAt raw "stayed"
+        Fled = tallyAt raw "fled"
+        Fell = tallyAt raw "fell"
+        HomeRaiders =
+            entries "homeRaid"
+            |> Array.map (fun (level, tally) ->
+                match System.Int32.TryParse level with
+                | true, number -> number, decodeTally tally
+                | _ -> failwith ("not a level: " + level))
+            |> Fresh.mapOfArray
+        OutpostRaiders = tallyAt raw "outRaid"
+        Rooms =
+            entries "rooms"
+            |> Array.map (fun (room, row) -> room, decodeRivalRoom row)
+            |> Fresh.mapOfArray
+    }
+
+/// The rival dossiers off their wire, or none when it is absent or
+/// unreadable; a rival's that will not decode costs that rival alone.
+let decodeRivals (wire: obj) : Map<string, Dossier> =
+    leafOr (Fresh.mapOfSeq Seq.empty) (fun () -> wire) (fun rivals ->
+        if jsTypeof rivals <> "object" || JS.Constructors.Array.isArray rivals then
+            Fresh.mapOfSeq Seq.empty
+        else
+            objectEntries rivals
+            |> Array.choose (fun (owner, raw) ->
+                try
+                    if isNull raw then None else Some(owner, decodeDossier raw)
+                with _ ->
+                    None)
+            |> Fresh.mapOfArray)
+
+/// Every rival's dossier on the wire.
+let encodeRivals (dossiers: Map<string, Dossier>) : obj =
+    dossiers |> Map.toSeq |> hashOf encodeDossier
+
+/// The stored dossiers on a cold heap (`restoreWire`), the fold's heap state
+/// from nothing; None while their segment is not active yet.
+let restoreRivals () : Rivals option =
+    restoreWire "rivals" rivalSegments
+    |> Option.map (decodeRivals >> Rivals.ofDossiers)
+
+/// Hold the dossiers on the heap for the next segment write.
+let saveRivals (rivals: Rivals) = rivalsHeld <- Some rivals.Dossiers
+
 /// A log's JSON cut into `count` chunks in order, each within the segment cap
 /// and never between the two halves of a surrogate pair, the unused ones
 /// empty; None when it does not fit.
@@ -2576,7 +2834,11 @@ let flushSegments (tick: int) : FaultRow list =
     if tick % segmentEvery = 0 || faultedAt = tick || migrated then
         migrated <- false
 
-        [ "creeps", creepSegments, creepsWire; "cpu", cpuSegments, cpuWire ]
+        [
+            "creeps", creepSegments, creepsWire
+            "cpu", cpuSegments, cpuWire
+            "rivals", rivalSegments, (rivalsHeld |> Option.map encodeRivals |> Option.toObj)
+        ]
         |> List.filter (fun (_, _, wire) -> not (isNull wire))
         |> List.choose (fun (leaf, ids, wire) ->
             let text: string = JS.JSON.stringify wire

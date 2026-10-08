@@ -2026,7 +2026,7 @@ const rawMemoryWith = (segments) => {
   return raw;
 };
 const allEmpty = () =>
-  Object.fromEntries([...SEGMENTS.creeps, ...SEGMENTS.cpu].map((id) => [id, ""]));
+  Object.fromEntries([...SEGMENTS.creeps, ...SEGMENTS.cpu, ...SEGMENTS.rivals].map((id) => [id, ""]));
 
 // A Transition log of `creeps` creeps, `entries` rows each, as the wire holds it.
 const bigLog = (creeps, entries) =>
@@ -2041,12 +2041,13 @@ const bigLog = (creeps, entries) =>
   );
 
 wire("segments: the ids and the cadence are the ones observe.mjs reads", async () => {
-  const { creepSegments, cpuSegments, segmentEvery } = await import(MODULE);
+  const { creepSegments, cpuSegments, rivalSegments, segmentEvery } = await import(MODULE);
 
   assert.deepEqual(Array.from(creepSegments), SEGMENTS.creeps);
   assert.deepEqual(Array.from(cpuSegments), SEGMENTS.cpu);
+  assert.deepEqual(Array.from(rivalSegments), SEGMENTS.rivals);
   assert.equal(segmentEvery, SEGMENT_EVERY);
-  assert.ok([...SEGMENTS.creeps, ...SEGMENTS.cpu].length <= 10, "never more than the engine's ten a tick");
+  assert.ok([...SEGMENTS.creeps, ...SEGMENTS.cpu, ...SEGMENTS.rivals].length <= 10, "never more than the engine's ten a tick");
 });
 
 wire("segments: a cold heap reads the legacy Memory leaf once and deletes it", async () => {
@@ -2094,7 +2095,7 @@ wire("segments: not active, a cold heap asks for them and starts from nothing", 
   globalThis.Memory = {};
   assert.equal(restoreLog(), undefined, "None: not an empty log, which would be written over the stored one");
   assert.ok(Array.isArray(raw.asked), "a plain array: the engine refuses a typed one");
-  assert.deepEqual(raw.asked, [...SEGMENTS.creeps, ...SEGMENTS.cpu]);
+  assert.deepEqual(raw.asked, [...SEGMENTS.creeps, ...SEGMENTS.cpu, ...SEGMENTS.rivals]);
 
   // Active and never written: an empty log, and nothing asked.
   const fresh = rawMemoryWith(allEmpty());
@@ -2146,6 +2147,145 @@ wire("segments: a log past its segments' room is not written, and is one fault a
   assert.equal([...flushSegments(SEGMENT_EVERY * 6)].length, 0, "and not again on this heap");
   // The heap wire is the module's: leave it small for any case after this.
   save(decodeLog({}));
+});
+
+// ---- the rival dossier (#653) -------------------------------------------
+
+// One room of a rival's dossier, every key written.
+const rivalRoom = (n = 1) => ({
+  seen: 1000 * n,
+  res: true,
+  tReads: 4 * n,
+  tLow: 120,
+  tLast: 1900,
+  refills: [2, 990],
+  fireGain: 15000.5,
+  fireTicks: 300,
+  peaceGain: 800,
+  peaceTicks: 1200,
+  lowFirst: [3, 2],
+  resp: [2, 30, 12, 18, 950],
+  unans: [1, 700],
+  standing: [1, 640],
+  killed: 0,
+  unworked: [1, 45, 45, 45, 500],
+  lapsed: 980,
+  rereserve: [1, 45, 45, 45, 500],
+});
+
+const activation = {
+  room: "W20S20",
+  at: 100,
+  noticed: 110,
+  rcl: 6,
+  ours: 3,
+  armed: 2,
+  since: 20,
+  struck: { spawn: 5, rampart: 1 },
+};
+
+const dossier = {
+  since: 10,
+  latest: 1000,
+  aim: { shots: [5, 999], alone: 1, near: [4, 1], weak: [4, 3], heal: [2, 0], armed: [3, 3], edge: [1, 0] },
+  safe: [1, 100],
+  acts: [activation],
+  cool: 70100,
+  armed: [6, 998],
+  shapes: { "2A2M": 4, "10R5H15M": 2 },
+  cross: [3, 997],
+  sortie: [1, 997],
+  stayed: [1, 960],
+  fled: [2, 940],
+  fell: [1, 930],
+  homeRaid: { 4: [2, 500] },
+  outRaid: [1, 600],
+  rooms: { W20S20: rivalRoom(1), W21S20: rivalRoom(2) },
+};
+
+const rivalsThrough = async (wire) => {
+  const { decodeRivals, encodeRivals } = await import(MODULE);
+  return encodeRivals(decodeRivals(wire));
+};
+
+wire("rivals: a well-formed dossier round-trips unchanged", async () => {
+  const full = { Trepidimous: dossier, giaco: { ...dossier, acts: [{ ...activation, since: undefined }] } };
+  const back = await rivalsThrough(JSON.parse(JSON.stringify(full)));
+  assert.equal(stable(back), stable(JSON.parse(JSON.stringify(full))));
+  assert.equal(Object.hasOwn(back.giaco.acts[0], "since"), false, "a safe mode with no visit before it has no since");
+});
+
+for (const [name, leaf] of [
+  ["absent", undefined],
+  ["null", null],
+  ["a string", "Incorrect memory path"],
+  ["an array", [dossier]],
+]) {
+  wire(`rivals: a wire that is ${name} reads empty`, async () => {
+    assert.equal(stable(await rivalsThrough(leaf)), stable({}));
+  });
+}
+
+wire("rivals: a dossier off its shape costs that rival alone, and an absent key reads as zero", async () => {
+  const back = await rivalsThrough({
+    good: dossier,
+    badTally: { ...dossier, armed: [1] },
+    badRoom: { ...dossier, rooms: { W1N1: { ...rivalRoom(), res: "yes" } } },
+    noSince: { ...dossier, since: "10" },
+    sparse: { since: 5, latest: 6, rooms: { W2N2: { seen: 6 } } },
+  });
+  assert.deepEqual(Object.keys(back).sort(), ["good", "sparse"]);
+  assert.deepEqual(back.sparse.armed, [0, 0], "a tally absent is none");
+  assert.deepEqual(back.sparse.aim.near, [0, 0], "an aim absent is none");
+  assert.deepEqual(back.sparse.rooms.W2N2.resp, [0, 0, 0, 0, 0], "a span absent is none");
+  assert.equal(back.sparse.rooms.W2N2.res, false);
+});
+
+wire("rivals: the dossier at its caps fits its segment", async () => {
+  const { capRivals, capRivalRooms, capShapes, capActivations } = await import("../build/fable/Core/Observe.js");
+  const big = 9_999_999;
+  const room = Object.fromEntries(
+    Object.entries(rivalRoom()).map(([key, value]) => [
+      key,
+      Array.isArray(value) ? value.map(() => big) : typeof value === "number" ? big + 0.5 : value,
+    ]),
+  );
+  const full = {
+    ...dossier,
+    since: big,
+    latest: big,
+    acts: Array.from({ length: capActivations }, (_, i) => ({
+      ...activation,
+      room: `W${100 + i}S100`,
+      at: big,
+      noticed: big,
+      struck: Object.fromEntries(["spawn", "storage", "tower", "rampart", "extension", "terminal", "lab", "link"].map((k) => [k, big])),
+    })),
+    shapes: Object.fromEntries(Array.from({ length: capShapes }, (_, i) => [`${i}T10A10R10H10W10C10L25M`, big])),
+    homeRaid: Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map((level) => [level, [big, big]])),
+    rooms: Object.fromEntries(Array.from({ length: capRivalRooms }, (_, i) => [`W${100 + i}S${100 + i}`, room])),
+  };
+  const all = Object.fromEntries(Array.from({ length: capRivals }, (_, i) => [`a-rival-named-${i}-long`, full]));
+  const text = JSON.stringify(await rivalsThrough(all));
+  assert.ok(text.length <= 100 * 1024 * SEGMENTS.rivals.length, `${text.length} past its segments`);
+});
+
+wire("rivals: written to its segment on the cadence, and a cold heap reads it back", async () => {
+  const { restoreRivals, saveRivals, flushSegments, encodeRivals } = await import(MODULE);
+  const wireRivals = { Trepidimous: dossier };
+
+  globalThis.Memory = {};
+  const raw = rawMemoryWith({ ...allEmpty(), [SEGMENTS.rivals[0]]: JSON.stringify(wireRivals) });
+  const restored = restoreRivals();
+  assert.notEqual(restored, undefined, "restored");
+  assert.equal(stable(encodeRivals(restored.Dossiers)), stable(wireRivals), "the segment's dossier is the heap's");
+
+  saveRivals(restored);
+  raw.segments[SEGMENTS.rivals[0]] = "";
+  flushSegments(SEGMENT_EVERY * 9 + 1);
+  assert.equal(raw.segments[SEGMENTS.rivals[0]], "", "not a write tick: nothing written");
+  flushSegments(SEGMENT_EVERY * 9);
+  assert.equal(stable(joinSegments(SEGMENTS.rivals.map((id) => raw.segments[id]))), stable(wireRivals));
 });
 
 // ---- run ----------------------------------------------------------------

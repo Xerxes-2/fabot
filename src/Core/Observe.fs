@@ -3508,3 +3508,1011 @@ let standing (tick: int) (state: BreachState) : (Breach * int) list =
 /// pending rows left out.
 let openRows (tick: int) (state: BreachState) : StandingBreach list =
     breachRows state |> List.filter (isOpen tick)
+
+// ---- the rival dossier (#653) ---------------------------------------------
+//
+// What each rival's code was seen to do, folded on a full tick off what the
+// world already holds of the rooms in sight, and the few facts of those rooms
+// the shell reads beside it (`RivalSight`). No decision reads it.
+
+/// How often one fact was seen of a rival, and the tick it last was.
+type Tally = { Count: int; Last: int }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Tally =
+    let zero: Tally = { Count = 0; Last = 0 }
+
+    let addMany (tick: int) (count: int) (tally: Tally) : Tally =
+        if count <= 0 then
+            tally
+        else
+            {
+                Count = tally.Count + count
+                Last = tick
+            }
+
+    let add (tick: int) (tally: Tally) : Tally = addMany tick 1 tally
+
+/// A duration measured over episodes: how many, their sum, the shortest and
+/// the longest, and the tick the last one ended on.
+type Span =
+    {
+        Episodes: int
+        Sum: int
+        Shortest: int
+        Longest: int
+        Ended: int
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Span =
+    let zero: Span =
+        {
+            Episodes = 0
+            Sum = 0
+            Shortest = 0
+            Longest = 0
+            Ended = 0
+        }
+
+    let add (tick: int) (ticks: int) (span: Span) : Span =
+        {
+            Episodes = span.Episodes + 1
+            Sum = span.Sum + ticks
+            Shortest = (if span.Episodes = 0 then ticks else min span.Shortest ticks)
+            Longest = max span.Longest ticks
+            Ended = tick
+        }
+
+/// One question a choice answers about the policy behind it: the choices
+/// whose candidates differed on it (`Open`), and of those, the ones whose
+/// pick had it (`Hit`). A pick among candidates alike on it says nothing.
+type Aim = { Open: int; Hit: int }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Aim =
+    let zero: Aim = { Open = 0; Hit = 0 }
+
+    /// One pick read: whether the pick had it, and whether each candidate,
+    /// the pick among them, did.
+    let read (picked: bool) (candidates: bool list) (aim: Aim) : Aim =
+        if List.contains true candidates && List.contains false candidates then
+            {
+                Open = aim.Open + 1
+                Hit = aim.Hit + (if picked then 1 else 0)
+            }
+        else
+            aim
+
+/// Which of our bodies a rival's towers shot, read against the bodies of
+/// ours standing in the room: the nearest to the tower, the lowest hits
+/// before the shot, a healer, an attacker, one on the edge.
+type TowerAim =
+    {
+        Shots: Tally
+        /// Shots at the one body of ours in the room: no pick to read.
+        Alone: int
+        Nearest: Aim
+        Weakest: Aim
+        Healer: Aim
+        Attacker: Aim
+        Edge: Aim
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module TowerAim =
+    let zero: TowerAim =
+        {
+            Shots = Tally.zero
+            Alone = 0
+            Nearest = Aim.zero
+            Weakest = Aim.zero
+            Healer = Aim.zero
+            Attacker = Aim.zero
+            Edge = Aim.zero
+        }
+
+/// One room a rival holds, owned or reserved, as its dossier keeps it.
+type RivalRoom =
+    {
+        /// The tick it was last seen held by the rival.
+        Seen: int
+        /// Its reservation stood here at the last look.
+        Reserving: bool
+        /// Its towers' energy: readings taken, the lowest one tower held, the
+        /// sum the last reading found, and the readings that found a tower
+        /// fuller than the one before.
+        TowerReads: int
+        TowerLow: int
+        TowerLast: int
+        Refills: Tally
+        /// Rampart hits gained, summed over its ramparts, and the
+        /// rampart-ticks they were gained over: under fire (an armed body of
+        /// ours in the room at either reading) and at peace. A gain is the
+        /// rise between two readings, so a rampart we struck meanwhile
+        /// reads less than was repaired.
+        FireGain: float
+        FireTicks: float
+        PeaceGain: float
+        PeaceTicks: float
+        /// Whether the rampart gaining the most had the lowest hits before.
+        LowestFirst: Aim
+        /// Ticks from our first armed body in the room to its first armed
+        /// body there; the visits it never answered; the visits it stood
+        /// armed when we arrived.
+        Response: Span
+        Unanswered: Tally
+        Standing: Tally
+        /// The tick a worker of its fell here before its time, no worker of
+        /// its left at work; 0 while none is pending.
+        KilledAt: int
+        /// Ticks from that fall to a worker of its seen here again.
+        Unworked: Span
+        /// The tick its reservation was first seen gone; 0 while none is.
+        LapsedAt: int
+        /// Ticks from that lapse to its reservation seen again.
+        Rereserved: Span
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module RivalRoom =
+    let empty: RivalRoom =
+        {
+            Seen = 0
+            Reserving = false
+            TowerReads = 0
+            TowerLow = 0
+            TowerLast = 0
+            Refills = Tally.zero
+            FireGain = 0.0
+            FireTicks = 0.0
+            PeaceGain = 0.0
+            PeaceTicks = 0.0
+            LowestFirst = Aim.zero
+            Response = Span.zero
+            Unanswered = Tally.zero
+            Standing = Tally.zero
+            KilledAt = 0
+            Unworked = Span.zero
+            LapsedAt = 0
+            Rereserved = Span.zero
+        }
+
+/// One safe mode a rival raised, and what stood around it: the room, the
+/// tick it was raised (its end less the engine's duration), the tick we saw
+/// it, the controller's level, our bodies and armed bodies in the room then,
+/// how long our armed bodies had stood there before it (None for none), and
+/// each kind of its structures our bodies struck there by the ticks before
+/// it they last did.
+type SafeModeSeen =
+    {
+        Room: string
+        At: int
+        Noticed: int
+        Level: int
+        Ours: int
+        OursArmed: int
+        Since: int option
+        Struck: (string * int) list
+    }
+
+/// One rival's dossier.
+type Dossier =
+    {
+        /// The first and the last tick anything of it was seen.
+        Since: int
+        Latest: int
+        Aim: TowerAim
+        /// Its safe modes, the tally's `Last` the latest raised; the newest
+        /// few with their surroundings; the latest cooldown end seen.
+        SafeModes: Tally
+        Activations: SafeModeSeen list
+        CooldownUntil: int
+        /// Its armed bodies, each counted once, and their shapes by count.
+        Armed: Tally
+        Shapes: Map<string, int>
+        /// An armed body seen in another room than the one it was last
+        /// seen in, and of those the ones that left a room it holds for one
+        /// it does not.
+        Crossings: Tally
+        Sorties: Tally
+        /// Its workers standing in a room it holds when our armed body
+        /// arrived: still there when we left, walked off, fell.
+        Stayed: Tally
+        Fled: Tally
+        Fell: Tally
+        /// Its armed bodies first seen in a home of ours, by that home's
+        /// level, and in a room we reserve.
+        HomeRaiders: Map<int, Tally>
+        OutpostRaiders: Tally
+        Rooms: Map<string, RivalRoom>
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Dossier =
+    let opened (tick: int) : Dossier =
+        {
+            Since = tick
+            Latest = tick
+            Aim = TowerAim.zero
+            SafeModes = Tally.zero
+            Activations = []
+            CooldownUntil = 0
+            Armed = Tally.zero
+            Shapes = Fresh.mapOfSeq Seq.empty
+            Crossings = Tally.zero
+            Sorties = Tally.zero
+            Stayed = Tally.zero
+            Fled = Tally.zero
+            Fell = Tally.zero
+            HomeRaiders = Fresh.mapOfSeq Seq.empty
+            OutpostRaiders = Tally.zero
+            Rooms = Fresh.mapOfSeq Seq.empty
+        }
+
+/// Our armed body's visit to a room a rival holds, open while one stands
+/// there: whose room, the tick it began, whether an armed body of the
+/// rival's has stood there since, and the rival's workers standing there
+/// when it began that have not yet left or fallen.
+type RivalVisit =
+    {
+        Holder: string
+        Began: int
+        Answered: bool
+        Workers: Set<string>
+    }
+
+/// One rival body as last seen: its owner, its room, the tick its life runs
+/// out on, and whether it is armed or works.
+type RivalBody =
+    {
+        Holder: string
+        Room: string
+        Ends: int
+        Armed: bool
+        Works: bool
+    }
+
+/// What the dossier's fold carries across full ticks beside the dossiers,
+/// on the heap and never written: a reset starts each from nothing.
+type RivalGlance =
+    {
+        /// Each rival room's towers' energy at its last reading, and its tick.
+        Towers: Map<string, int * Map<string, int>>
+        /// Each rival room's ramparts at its last reading: the tick, whether
+        /// an armed body of ours stood there, and the hits by tile.
+        Ramparts: Map<string, int * bool * Map<Pos, int>>
+        Visits: Map<string, RivalVisit>
+        Bodies: Map<string, RivalBody>
+        /// Each rival room's structure kinds our bodies struck, by the tick
+        /// they last did.
+        Struck: Map<string, Map<string, int>>
+    }
+
+/// The dossiers and the fold's heap state.
+type Rivals =
+    {
+        Dossiers: Map<string, Dossier>
+        Glance: RivalGlance
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Rivals =
+    let glanceEmpty: RivalGlance =
+        {
+            Towers = Fresh.mapOfSeq Seq.empty
+            Ramparts = Fresh.mapOfSeq Seq.empty
+            Visits = Fresh.mapOfSeq Seq.empty
+            Bodies = Fresh.mapOfSeq Seq.empty
+            Struck = Fresh.mapOfSeq Seq.empty
+        }
+
+    /// The dossiers as read back, the heap state from nothing.
+    let ofDossiers (dossiers: Map<string, Dossier>) : Rivals =
+        {
+            Dossiers = dossiers
+            Glance = glanceEmpty
+        }
+
+    let empty: Rivals = ofDossiers (Fresh.mapOfSeq Seq.empty)
+
+/// One shot of a rival tower at a body of ours, off the room's event log:
+/// the tower's id and our body's name.
+type TowerShot = { Tower: string; Target: string }
+
+/// What the dossier reads on one full tick: the world's rooms in sight and
+/// our bodies in them, our homes' levels, every rival controller as
+/// remembered, and what the shell reads beside the world in the rival rooms
+/// in sight — each tower's energy by id, the towers' shots at our bodies,
+/// the damage every attack in those logs dealt each body of ours by name,
+/// and the kinds of the rival's structures our bodies struck.
+type RivalSight =
+    {
+        Tick: int
+        Rooms: Map<string, WorldRoom>
+        Bodies: Map<string, (CreepInfo * Pos) list>
+        Homes: Map<string, int>
+        Controllers: Map<string, RivalController>
+        TowerEnergy: Map<string, int>
+        Shots: Map<string, TowerShot list>
+        Hurt: Map<string, int>
+        Struck: Map<string, string list>
+    }
+
+/// The most rivals the dossier keeps, the latest seen; the rooms a rival's
+/// row keeps, the latest seen; its body shapes, the most seen; and its safe
+/// modes kept whole, the newest. Together they keep the whole dossier inside
+/// its memory segments (`ObserveMemory.rivalSegments`; a wire-check case
+/// writes it full).
+let capRivals = 24
+let capRivalRooms = 8
+let capShapes = 8
+let capActivations = 5
+
+/// SAFE_MODE_DURATION: a safe mode's end less this is the tick it was raised.
+let private safeModeDuration = 20_000
+
+/// A player's body or room the dossier reads: not the NPCs, not an ally.
+let private isRivalPlayer (owner: string) =
+    owner <> "Invader"
+    && not (HostileInfo.isKeeperOwner owner)
+    && not (Colony.isAlly owner)
+
+/// How long the fold's heap keeps a room's last tower, rampart or strike
+/// reading unrefreshed: a body's lifetime, past which the defence it read is
+/// another one, and the reading a baseline for nothing.
+let private glanceMargin = Engine.creepLifetime
+
+/// Whether a count read off the engine is a number: a body still spawning
+/// answers `undefined` for the ticks it has to live.
+[<Fable.Core.Emit("Number.isFinite($0)")>]
+let private finite (ticks: int) : bool = ticks = ticks
+
+/// A rival player's body standing in the world, not one still spawning: a
+/// body in the oven is counted once it stands.
+let private rivalBody (hostile: HostileInfo) =
+    isRivalPlayer hostile.Owner && finite hostile.TicksToLive
+
+let private hasPart (part: BodyPart) (body: BodyPart list) = body |> List.exists (samePart part)
+
+let private armedBody (body: BodyPart list) =
+    hasPart Attack body || hasPart RangedAttack body
+
+/// An unarmed body at a room's economy: a digger, a carrier, a reserver.
+let private workerBody (body: BodyPart list) =
+    not (armedBody body)
+    && (hasPart Work body || hasPart Carry body || hasPart BodyPart.Claim body)
+
+let private armedCreep (creep: CreepInfo) =
+    partCount creep.Body Attack + partCount creep.Body RangedAttack > 0
+
+/// A body's shape, its part counts in a fixed order: "2T10A10M".
+let shapeOf (body: BodyPart list) : string =
+    let parts = partsOf body
+
+    [
+        Tough, "T"
+        Attack, "A"
+        RangedAttack, "R"
+        Heal, "H"
+        Work, "W"
+        Carry, "C"
+        BodyPart.Claim, "L"
+        Move, "M"
+    ]
+    |> List.choose (fun (part, letter) ->
+        match partCount parts part with
+        | 0 -> None
+        | count -> Some(string count + letter))
+    |> String.concat ""
+
+/// On the room's border ring or the tile in from it: a step from leaving.
+let private onEdge (tile: Pos) =
+    tile.X <= 1 || tile.X >= 48 || tile.Y <= 1 || tile.Y >= 48
+
+/// One tower shot read against our bodies standing in the room.
+let private aimShot
+    (tick: int)
+    (from: Pos)
+    (target: CreepInfo)
+    (at: Pos)
+    (hurt: Map<string, int>)
+    (ours: (CreepInfo * Pos) list)
+    (aim: TowerAim)
+    : TowerAim =
+    let aim =
+        { aim with
+            Shots = Tally.add tick aim.Shots
+        }
+
+    match ours with
+    | [ _ ] -> { aim with Alone = aim.Alone + 1 }
+    | _ ->
+        let nearest = ours |> List.map (fun (_, tile) -> range from tile) |> List.min
+
+        // The hits each stood at before the tick's attacks: every body's own
+        // damage back, nothing healed since counted.
+        let before (creep: CreepInfo) =
+            creep.Hits.Hits + (Map.tryFind creep.Name hurt |> Option.defaultValue 0)
+
+        let weakest = ours |> List.map (fun (creep, _) -> before creep) |> List.min
+        let healer (creep: CreepInfo) = partCount creep.Body Heal > 0
+
+        { aim with
+            Nearest =
+                Aim.read
+                    (range from at = nearest)
+                    (ours |> List.map (fun (_, tile) -> range from tile = nearest))
+                    aim.Nearest
+            Weakest =
+                Aim.read
+                    (before target = weakest)
+                    (ours |> List.map (fun (creep, _) -> before creep = weakest))
+                    aim.Weakest
+            Healer = Aim.read (healer target) (ours |> List.map (fst >> healer)) aim.Healer
+            Attacker =
+                Aim.read (armedCreep target) (ours |> List.map (fst >> armedCreep)) aim.Attacker
+            Edge = Aim.read (onEdge at) (ours |> List.map (snd >> onEdge)) aim.Edge
+        }
+
+/// One interval between two rampart readings: the hits gained over the
+/// ramparts standing at both, the rampart-ticks, and whether the rampart
+/// gaining the most stood lowest before.
+let private rampartGain
+    (ticks: int)
+    (before: Map<Pos, int>)
+    (now: Map<Pos, int>)
+    : (float * float * (bool * bool list) option) option =
+    let common =
+        before
+        |> Map.toList
+        |> List.choose (fun (tile, was) ->
+            Map.tryFind tile now |> Option.map (fun hits -> was, max 0 (hits - was)))
+
+    if List.isEmpty common then
+        None
+    else
+        let gained = common |> List.sumBy snd
+        let lowest = common |> List.map fst |> List.min
+        let most = common |> List.map snd |> List.max
+
+        let order =
+            if gained > 0 then
+                Some(
+                    common |> List.exists (fun (was, gain) -> gain = most && was = lowest),
+                    common |> List.map (fun (was, _) -> was = lowest)
+                )
+            else
+                None
+
+        Some(float gained, float (List.length common * ticks), order)
+
+let private capDossier (dossier: Dossier) : Dossier =
+    let rooms =
+        if Map.count dossier.Rooms <= capRivalRooms then
+            dossier.Rooms
+        else
+            dossier.Rooms
+            |> Map.toList
+            |> List.sortByDescending (fun (room, row) -> row.Seen, room)
+            |> List.truncate capRivalRooms
+            |> Fresh.mapOfList
+
+    let shapes =
+        if Map.count dossier.Shapes <= capShapes then
+            dossier.Shapes
+        else
+            dossier.Shapes
+            |> Map.toList
+            |> List.sortByDescending (fun (shape, count) -> count, shape)
+            |> List.truncate capShapes
+            |> Fresh.mapOfList
+
+    { dossier with
+        Rooms = rooms
+        Shapes = shapes
+        Activations = List.truncate capActivations dossier.Activations
+    }
+
+/// One full tick folded into the dossiers. Each room in sight a rival holds
+/// — owns, by its controller seen this tick, or reserves — moves that
+/// rival's row for it: towers, ramparts, our visit and its answer, its
+/// workers' flight and falls, its reservation's lapse. Every rival body in
+/// sight moves its owner's body counts; every rival controller in sight its
+/// safe modes.
+let foldRivals (sight: RivalSight) (prior: Rivals) : Rivals =
+    let tick = sight.Tick
+    let dossiers = ref prior.Dossiers
+    let glance = ref prior.Glance
+
+    let touch (owner: string) (change: Dossier -> Dossier) =
+        let dossier =
+            Map.tryFind owner dossiers.Value
+            |> Option.defaultWith (fun () -> Dossier.opened tick)
+
+        dossiers.Value <- Map.add owner { change dossier with Latest = tick } dossiers.Value
+
+    let rowOf (owner: string) (room: string) =
+        Map.tryFind owner dossiers.Value
+        |> Option.bind (fun dossier -> Map.tryFind room dossier.Rooms)
+
+    let touchRoom (owner: string) (room: string) (change: RivalRoom -> RivalRoom) =
+        touch owner (fun dossier ->
+            let row = Map.tryFind room dossier.Rooms |> Option.defaultValue RivalRoom.empty
+
+            { dossier with
+                Rooms = Map.add room (change row) dossier.Rooms
+            })
+
+    // A room the rival holds: its controller as remembered, or its
+    // reservation at its row's last look.
+    let holds (owner: string) (room: string) =
+        Map.tryFind room sight.Controllers
+        |> Option.exists (fun controller -> controller.Owner = owner)
+        || rowOf owner room |> Option.exists (fun row -> row.Reserving)
+
+    for KeyValue(room, seen) in sight.Rooms do
+        let ownedBy =
+            Map.tryFind room sight.Controllers
+            |> Option.filter (fun controller ->
+                controller.Seen = tick && isRivalPlayer controller.Owner)
+            |> Option.map (fun controller -> controller.Owner)
+
+        let reservation = seen.Control.Reservation
+
+        let reservedBy =
+            reservation
+            |> Option.filter (fun held ->
+                (held.Holder = ReservationHolder.Rival || held.Holder = ReservationHolder.Enemy)
+                && isRivalPlayer held.Username)
+            |> Option.map (fun held -> held.Username)
+
+        let ourReserve =
+            reservation |> Option.exists (fun held -> held.Holder = ReservationHolder.Ours)
+
+        let holder = Option.orElse reservedBy ownedBy
+        let ours = Map.tryFind room sight.Bodies |> Option.defaultValue []
+        let oursArmed = ours |> List.filter (fst >> armedCreep) |> List.length
+
+        let rivals = seen.Hostiles |> List.filter rivalBody
+
+        // A reservation its row saw that stands no longer.
+        for KeyValue(owner, dossier) in dossiers.Value do
+            match Map.tryFind room dossier.Rooms with
+            | Some row when row.Reserving && reservedBy <> Some owner ->
+                touchRoom owner room (fun row ->
+                    { row with
+                        Reserving = false
+                        LapsedAt = tick
+                    })
+            | _ -> ()
+
+        holder
+        |> Option.iter (fun owner ->
+            touchRoom owner room (fun row ->
+                if reservedBy = Some owner then
+                    { row with
+                        Seen = tick
+                        Reserving = true
+                        LapsedAt = 0
+                        Rereserved =
+                            if row.LapsedAt > 0 then
+                                Span.add tick (tick - row.LapsedAt) row.Rereserved
+                            else
+                                row.Rereserved
+                    }
+                else
+                    { row with Seen = tick }))
+
+        // Each kind of the rival's structures our bodies struck here.
+        match Map.tryFind room sight.Struck with
+        | Some kinds when not (List.isEmpty kinds) ->
+            let held =
+                Map.tryFind room glance.Value.Struck
+                |> Option.defaultWith (fun () -> Fresh.mapOfSeq Seq.empty)
+
+            glance.Value <-
+                { glance.Value with
+                    Struck =
+                        Map.add
+                            room
+                            (kinds |> List.fold (fun held kind -> Map.add kind tick held) held)
+                            glance.Value.Struck
+                }
+        | _ -> ()
+
+        ownedBy
+        |> Option.iter (fun owner ->
+            // Its towers' energy, and their shots at our bodies.
+            let energies =
+                seen.Towers
+                |> List.choose (fun (id, _) ->
+                    Map.tryFind id sight.TowerEnergy |> Option.map (fun energy -> id, energy))
+
+            if not (List.isEmpty energies) then
+                let was = Map.tryFind room glance.Value.Towers |> Option.map snd
+
+                let refilled =
+                    energies
+                    |> List.exists (fun (id, energy) ->
+                        was
+                        |> Option.bind (Map.tryFind id)
+                        |> Option.exists (fun before -> energy > before))
+
+                let low = energies |> List.map snd |> List.min
+
+                touchRoom owner room (fun row ->
+                    { row with
+                        TowerReads = row.TowerReads + 1
+                        TowerLow = (if row.TowerReads = 0 then low else min row.TowerLow low)
+                        TowerLast = energies |> List.sumBy snd
+                        Refills = if refilled then Tally.add tick row.Refills else row.Refills
+                    })
+
+                glance.Value <-
+                    { glance.Value with
+                        Towers = Map.add room (tick, Fresh.mapOfList energies) glance.Value.Towers
+                    }
+
+            for shot in Map.tryFind room sight.Shots |> Option.defaultValue [] do
+                match
+                    seen.Towers |> List.tryFind (fun (id, _) -> id = shot.Tower),
+                    ours |> List.tryFind (fun (creep, _) -> creep.Name = shot.Target)
+                with
+                | Some(_, from), Some(target, at) ->
+                    touch owner (fun dossier ->
+                        { dossier with
+                            Aim = aimShot tick from target at sight.Hurt ours dossier.Aim
+                        })
+                | _ -> ()
+
+            // Its ramparts' gain since the last reading.
+            let now = seen.RivalRamparts
+            let underFire = oursArmed > 0
+
+            match Map.tryFind room glance.Value.Ramparts with
+            | Some(was, fired, before) when tick > was ->
+                match rampartGain (tick - was) before now with
+                | Some(gained, rampartTicks, order) ->
+                    touchRoom owner room (fun row ->
+                        let row =
+                            if fired || underFire then
+                                { row with
+                                    FireGain = row.FireGain + gained
+                                    FireTicks = row.FireTicks + rampartTicks
+                                }
+                            else
+                                { row with
+                                    PeaceGain = row.PeaceGain + gained
+                                    PeaceTicks = row.PeaceTicks + rampartTicks
+                                }
+
+                        match order with
+                        | Some(picked, candidates) ->
+                            { row with
+                                LowestFirst = Aim.read picked candidates row.LowestFirst
+                            }
+                        | None -> row)
+                | None -> ()
+            | _ -> ()
+
+            glance.Value <-
+                { glance.Value with
+                    Ramparts =
+                        if Map.isEmpty now then
+                            Map.remove room glance.Value.Ramparts
+                        else
+                            Map.add
+                                room
+                                (tick, underFire, Fresh.mapOfSeq (Map.toSeq now))
+                                glance.Value.Ramparts
+                })
+
+        // Our armed body's visit, the rival's answer and its workers' flight.
+        match Map.tryFind room glance.Value.Visits, holder with
+        | None, Some owner when oursArmed > 0 ->
+            let answered =
+                rivals
+                |> List.exists (fun hostile -> hostile.Owner = owner && armedBody hostile.Body)
+
+            if answered then
+                touchRoom owner room (fun row ->
+                    { row with
+                        Standing = Tally.add tick row.Standing
+                    })
+
+            glance.Value <-
+                { glance.Value with
+                    Visits =
+                        Map.add
+                            room
+                            ({
+                                Holder = owner
+                                Began = tick
+                                Answered = answered
+                                Workers =
+                                    rivals
+                                    |> List.filter (fun hostile ->
+                                        hostile.Owner = owner && workerBody hostile.Body)
+                                    |> List.map _.Id
+                                    |> Fresh.setOfSeq
+                            }
+                            : RivalVisit)
+                            glance.Value.Visits
+                }
+        | Some visit, _ ->
+            let present = rivals |> List.map _.Id |> Set.ofList
+            let fallen = Set.ofList seen.Fallen
+
+            // Fallen before its life ran out; one that died of age left the
+            // count without fleeing or falling to anyone.
+            let fell =
+                visit.Workers
+                |> Set.filter (fun id ->
+                    fallen.Contains id
+                    && Map.tryFind id glance.Value.Bodies
+                       |> Option.exists (fun body -> tick < body.Ends))
+
+            let fled =
+                visit.Workers
+                |> Set.filter (fun id -> not (present.Contains id || fallen.Contains id))
+
+            let left = visit.Workers |> Set.filter present.Contains
+
+            let answered =
+                rivals
+                |> List.exists (fun hostile ->
+                    hostile.Owner = visit.Holder && armedBody hostile.Body)
+
+            let answers = not visit.Answered && answered
+            let ends = oursArmed = 0
+
+            if not (Set.isEmpty fell && Set.isEmpty fled) || answers || ends then
+                touch visit.Holder (fun dossier ->
+                    { dossier with
+                        Fell = Tally.addMany tick fell.Count dossier.Fell
+                        Fled = Tally.addMany tick fled.Count dossier.Fled
+                        Stayed =
+                            if ends then
+                                Tally.addMany tick left.Count dossier.Stayed
+                            else
+                                dossier.Stayed
+                    })
+
+            if answers then
+                touchRoom visit.Holder room (fun row ->
+                    { row with
+                        Response = Span.add tick (tick - visit.Began) row.Response
+                    })
+            elif ends && not visit.Answered then
+                touchRoom visit.Holder room (fun row ->
+                    { row with
+                        Unanswered = Tally.add tick row.Unanswered
+                    })
+
+            glance.Value <-
+                { glance.Value with
+                    Visits =
+                        if ends then
+                            Map.remove room glance.Value.Visits
+                        else
+                            Map.add
+                                room
+                                { visit with
+                                    Answered = visit.Answered || answered
+                                    Workers =
+                                        if Set.count left = Set.count visit.Workers then
+                                            visit.Workers
+                                        else
+                                            Fresh.setOfSeq left
+                                }
+                                glance.Value.Visits
+                }
+        | _ -> ()
+
+        // Every rival body here: its first sighting, its crossing, its work.
+        for hostile in rivals do
+            let armed = armedBody hostile.Body
+            let works = hasPart Work hostile.Body
+
+            match Map.tryFind hostile.Id glance.Value.Bodies with
+            | None when armed ->
+                touch hostile.Owner (fun dossier ->
+                    let shape = shapeOf hostile.Body
+
+                    let dossier =
+                        { dossier with
+                            Armed = Tally.add tick dossier.Armed
+                            Shapes =
+                                Map.add
+                                    shape
+                                    ((Map.tryFind shape dossier.Shapes |> Option.defaultValue 0)
+                                     + 1)
+                                    dossier.Shapes
+                        }
+
+                    match Map.tryFind room sight.Homes with
+                    | Some level ->
+                        { dossier with
+                            HomeRaiders =
+                                Map.add
+                                    level
+                                    (Map.tryFind level dossier.HomeRaiders
+                                     |> Option.defaultValue Tally.zero
+                                     |> Tally.add tick)
+                                    dossier.HomeRaiders
+                        }
+                    | None when ourReserve ->
+                        { dossier with
+                            OutpostRaiders = Tally.add tick dossier.OutpostRaiders
+                        }
+                    | None -> dossier)
+            | Some body when armed && body.Room <> room ->
+                let sortie = holds hostile.Owner body.Room && not (holds hostile.Owner room)
+
+                touch hostile.Owner (fun dossier ->
+                    { dossier with
+                        Crossings = Tally.add tick dossier.Crossings
+                        Sorties =
+                            if sortie then
+                                Tally.add tick dossier.Sorties
+                            else
+                                dossier.Sorties
+                    })
+            | _ -> ()
+
+            glance.Value <-
+                { glance.Value with
+                    Bodies =
+                        Map.add
+                            hostile.Id
+                            ({
+                                Holder = hostile.Owner
+                                Room = room
+                                Ends = tick + hostile.TicksToLive
+                                Armed = armed
+                                Works = works
+                            }
+                            : RivalBody)
+                            glance.Value.Bodies
+                }
+
+            if works then
+                match rowOf hostile.Owner room with
+                | Some row when row.KilledAt > 0 && tick > row.KilledAt ->
+                    touchRoom hostile.Owner room (fun row ->
+                        { row with
+                            Unworked = Span.add tick (tick - row.KilledAt) row.Unworked
+                            KilledAt = 0
+                        })
+                | _ -> ()
+
+        // A worker fallen before its time in a room its owner's row holds,
+        // none of its owner's left at work: the room's work stops until one
+        // is seen again. The row and not this tick's holder, as the kill may
+        // take the reservation with it.
+        for id in seen.Fallen do
+            match Map.tryFind id glance.Value.Bodies with
+            | Some body ->
+                glance.Value <-
+                    { glance.Value with
+                        Bodies = Map.remove id glance.Value.Bodies
+                    }
+
+                let working =
+                    rivals
+                    |> List.exists (fun hostile ->
+                        hostile.Owner = body.Holder && hasPart Work hostile.Body)
+
+                if
+                    body.Works
+                    && tick < body.Ends
+                    && Option.isSome (rowOf body.Holder room)
+                    && not working
+                then
+                    touchRoom body.Holder room (fun row ->
+                        if row.KilledAt = 0 then
+                            { row with KilledAt = tick }
+                        else
+                            row)
+            | None -> ()
+
+        // Its safe mode, and what stood around it when it was raised.
+        match Map.tryFind room sight.Controllers with
+        | Some controller when controller.Seen = tick && isRivalPlayer controller.Owner ->
+            let owner = controller.Owner
+            let dossier = Map.tryFind owner dossiers.Value
+
+            let raised =
+                if controller.SafeModeUntil > tick then
+                    let at = controller.SafeModeUntil - safeModeDuration
+
+                    if dossier |> Option.forall (fun dossier -> at > dossier.SafeModes.Last) then
+                        Some at
+                    else
+                        None
+                else
+                    None
+
+            let cooler =
+                dossier
+                |> Option.forall (fun dossier ->
+                    controller.SafeModeCooldownUntil > dossier.CooldownUntil)
+
+            if Option.isSome raised || cooler then
+                touch owner (fun dossier ->
+                    let dossier =
+                        { dossier with
+                            CooldownUntil =
+                                max dossier.CooldownUntil controller.SafeModeCooldownUntil
+                        }
+
+                    match raised with
+                    | Some at ->
+                        let raisedSeen: SafeModeSeen =
+                            {
+                                Room = room
+                                At = at
+                                Noticed = tick
+                                Level = controller.Level
+                                Ours = List.length ours
+                                OursArmed = oursArmed
+                                Since =
+                                    Map.tryFind room glance.Value.Visits
+                                    |> Option.filter (fun visit -> visit.Holder = owner)
+                                    |> Option.map (fun visit -> at - visit.Began)
+                                Struck =
+                                    Map.tryFind room glance.Value.Struck
+                                    |> Option.map (fun kinds ->
+                                        kinds
+                                        |> Map.toList
+                                        |> List.filter (fun (_, last) -> last <= at)
+                                        |> List.map (fun (kind, last) -> kind, at - last))
+                                    |> Option.defaultValue []
+                            }
+
+                        { dossier with
+                            SafeModes = Tally.add at dossier.SafeModes
+                            Activations = raisedSeen :: dossier.Activations
+                        }
+                    | None -> dossier)
+        | _ -> ()
+
+    // Every rival seen this tick, its last-seen tick.
+    for owner in
+        sight.Rooms
+        |> Map.toSeq
+        |> Seq.collect (fun (_, seen) -> seen.Hostiles |> Seq.filter rivalBody |> Seq.map _.Owner)
+        |> Seq.distinct do
+        touch owner id
+
+    let dossiers = dossiers.Value
+
+    let dossiers =
+        if Map.count dossiers <= capRivals then
+            dossiers |> Map.map (fun _ dossier -> capDossier dossier)
+        else
+            dossiers
+            |> Map.toList
+            |> List.sortByDescending (fun (owner, dossier) -> dossier.Latest, owner)
+            |> List.truncate capRivals
+            |> List.map (fun (owner, dossier) -> owner, capDossier dossier)
+            |> Fresh.mapOfList
+
+    let fresh (read: int) = tick - read <= glanceMargin
+
+    {
+        Dossiers = dossiers
+        Glance =
+            { glance.Value with
+                Bodies = glance.Value.Bodies |> Map.filter (fun _ body -> body.Ends >= tick)
+                Visits =
+                    glance.Value.Visits
+                    |> Map.filter (fun room _ -> Map.containsKey room sight.Rooms)
+                Towers = glance.Value.Towers |> Map.filter (fun _ (read, _) -> fresh read)
+                Ramparts = glance.Value.Ramparts |> Map.filter (fun _ (read, _, _) -> fresh read)
+                Struck =
+                    glance.Value.Struck
+                    |> Map.filter (fun _ kinds -> kinds |> Map.exists (fun _ last -> fresh last))
+            }
+    }

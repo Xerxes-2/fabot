@@ -3,6 +3,7 @@
 // objects; what one colony makes of them is `ColonyView.ofWorld`'s, in Core.
 module Fabot.World
 
+open Fable.Core.JsInterop
 open Fabot.Bindings
 open Fabot.Core.Types
 
@@ -1254,6 +1255,129 @@ let ofGame
                 : WorldCreep)
     }
 
+
+// Whether an engine object answered by id is ours: `my` is undefined, not
+// false, on an object nobody owns.
+let private isMine (o: obj) =
+    not (isNull o) && jsTypeof o?my = "boolean" && unbox<bool> o?my
+
+/// What the rival dossier reads beside the world (#653), on a full tick and
+/// off objects already in sight: each tower's energy in the rival rooms in
+/// sight, by id, and in each of those rooms a body of ours stands in, the
+/// room's events of the tick before — its towers' shots at our bodies, every
+/// attack's damage on each body of ours by name, and the kinds of its
+/// structures our bodies struck.
+let rivalReadings
+    (watch: WorldView)
+    : Map<string, int> *
+      Map<string, Fabot.Core.Observe.TowerShot list> *
+      Map<string, int> *
+      Map<string, string list>
+    =
+    let rivalRooms =
+        watch.Rooms
+        |> Map.toList
+        |> List.filter (fun (room, _) ->
+            Map.tryFind room watch.Facts
+            |> Option.bind _.RivalController
+            |> Option.exists (fun controller -> not (Colony.isAlly controller.Owner)))
+
+    let energy =
+        rivalRooms
+        |> List.collect (fun (_, seen) ->
+            seen.Towers
+            |> List.choose (fun (id, _) ->
+                let tower = Game.getObjectById id
+
+                if isNull tower then
+                    None
+                else
+                    Some(
+                        id,
+                        (unbox<IStructure> tower).store.getUsedCapacity (resourceName Energy)
+                    )))
+        |> Map.ofList
+
+    // Our bodies by room, forced only where a rival room is in sight.
+    let oursIn (room: string) =
+        Map.containsKey room (watch.Bodies.Force())
+
+    let logs =
+        rivalRooms
+        |> List.filter (fun (room, _) -> oursIn room)
+        |> List.choose (fun (room, seen) ->
+            match roomSeen room with
+            | None -> None
+            | Some engineRoom ->
+                let towers = seen.Towers |> List.map fst |> Set.ofList
+
+                // A server without the log (the profile harness's stub)
+                // reads as one with no events.
+                let events =
+                    try
+                        eventLog engineRoom
+                    with _ ->
+                        [||]
+
+                let attacks =
+                    events |> Array.filter (fun event -> unbox<int> event?event = eventAttack)
+
+                // Every attack on a body of ours: who struck, its name, the
+                // damage.
+                let onOurs =
+                    attacks
+                    |> Array.choose (fun event ->
+                        let target = Game.getObjectById (unbox<string> event?data?targetId)
+
+                        if isMine target && not (isNull target?body) then
+                            Some(
+                                unbox<string> event?objectId,
+                                unbox<string> target?name,
+                                unbox<int> event?data?damage
+                            )
+                        else
+                            None)
+
+                let shots =
+                    onOurs
+                    |> Array.filter (fun (by, _, _) -> towers.Contains by)
+                    |> Array.map (fun (by, name, _) ->
+                        ({ Tower = by; Target = name }: Fabot.Core.Observe.TowerShot))
+                    |> Array.toList
+
+                let hurt =
+                    onOurs |> Array.map (fun (_, name, damage) -> name, damage) |> Array.toList
+
+                let struck =
+                    attacks
+                    |> Array.choose (fun event ->
+                        if not (isMine (Game.getObjectById (unbox<string> event?objectId))) then
+                            None
+                        else
+                            let target = Game.getObjectById (unbox<string> event?data?targetId)
+
+                            if
+                                isNull target
+                                || isNull target?structureType
+                                || isNull target?owner
+                                || isMine target
+                            then
+                                None
+                            else
+                                Some(unbox<string> target?structureType))
+                    |> Array.distinct
+                    |> Array.toList
+
+                Some(room, shots, hurt, struck))
+
+    energy,
+    logs |> List.map (fun (room, shots, _, _) -> room, shots) |> Map.ofList,
+    logs
+    |> List.collect (fun (_, _, hurt, _) -> hurt)
+    |> List.groupBy fst
+    |> List.map (fun (name, hits) -> name, List.sumBy snd hits)
+    |> Map.ofList,
+    logs |> List.map (fun (room, _, _, struck) -> room, struck) |> Map.ofList
 
 /// Where every creep of ours stands this tick, for next tick's
 /// `CreepInfo.Walking`. Here so it shares `ofGame`'s gestating filter.

@@ -114,6 +114,11 @@ let private joins = JoinTable()
 // heap and encoded one changed creep at a time (`ObserveMemory.saveChanged`).
 let mutable private observeLog: Observe.ObserveState option = None
 
+// The rival dossier on the heap (#653), restored off its segment on a cold
+// heap and None until it is read: folded on full ticks, written with the
+// segments.
+let mutable private rivalDossier: Observe.Rivals option = None
+
 [<Emit("globalThis")>]
 let private globalThis: obj = jsNative
 
@@ -1539,6 +1544,44 @@ let private fullTick
         Tuning.defaults.QuietGap
         (logs |> Map.toList |> List.collect (fun (_, log) -> log.Episodes))
     |> ObserveMemory.saveRoster
+
+    // The rival dossier (#653): what each rival's code was seen to do, off
+    // the rooms in sight. Read by `observe.mjs rivals` and by nothing here.
+    // Folded onto nothing while its segment is not read yet, it is dropped.
+    match rivalDossier |> Option.orElseWith ObserveMemory.restoreRivals with
+    | Some prior ->
+        // A throw costs this tick's reading and the heap state, never the
+        // dossiers: a glance that threw once may throw again.
+        try
+            let energy, shots, hurt, struck = World.rivalReadings watch
+
+            let folded =
+                Observe.foldRivals
+                    {
+                        Tick = world.Time
+                        Rooms = watch.Rooms
+                        Bodies = watch.Bodies.Force()
+                        Homes =
+                            world.Rooms
+                            |> Map.toSeq
+                            |> Seq.choose (fun (room, facts) ->
+                                facts.Controller
+                                |> Option.map (fun controller -> room, controller.Level))
+                            |> Map.ofSeq
+                        Controllers = world.RivalControllers
+                        TowerEnergy = energy
+                        Shots = shots
+                        Hurt = hurt
+                        Struck = struck
+                    }
+                    prior
+
+            rivalDossier <- Some folded
+            ObserveMemory.saveRivals folded
+        with error ->
+            recordFaults [ faultRow "" "rivals" error ]
+            rivalDossier <- Some(Observe.Rivals.ofDossiers prior.Dossiers)
+    | None -> ()
 
     // A given-up colony's leaf and the flat legacy log, which nothing writes:
     // every home neither declared nor living (an undeclared spawn room, when

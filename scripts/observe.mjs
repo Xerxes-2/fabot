@@ -95,7 +95,11 @@
 //                                       (#489): owner, level, safe mode, cooldown,
 //                                       stock, upgrade block, downgrade timer,
 //                                       how old the sighting is, and whether its
-//                                       owner can raise safe mode there now
+//                                       owner can raise safe mode there now;
+//                                       then each rival's dossier (#653): its
+//                                       towers' picks and energy, rampart
+//                                       upkeep, safe modes, defence response,
+//                                       its workers' flight, its raids
 // Every read takes --json to emit the raw stored structure for jq.
 //
 // `raids`, `outposts`, `layout`, `quotas` and `breaches` are one colony's
@@ -958,54 +962,31 @@ if (command === "console") {
   // `rooms.controllers`: room -> { o owner, l level, s safe mode until,
   // c cooldown until, a stock, b upgrade blocked until, d ticks to
   // downgrade as seen, t tick seen }. Every `until` is an absolute tick.
-  const stored = (await memoryGet("fabot.observe.rooms"))?.controllers;
-  if (stored == null || typeof stored !== "object" || Array.isArray(stored)) {
+  const held = (await memoryGet("fabot.observe.rooms"))?.controllers;
+  const stored = held != null && typeof held === "object" && !Array.isArray(held) ? held : undefined;
+  // The rival dossier (#653), off its memory segments.
+  const read = await logLeaf("rivals");
+  const dossiers = read != null && typeof read === "object" && !Array.isArray(read) ? read : undefined;
+  if (stored === undefined && dossiers === undefined) {
     fail(
-      "no rival controllers at Memory.fabot.observe.rooms.controllers — " +
-        "the deployed bundle predates #489, or it has seen no rival controller yet",
+      "no rival controllers at Memory.fabot.observe.rooms.controllers and no rival dossier in " +
+        `${logPlace("rivals")} — the deployed bundle predates #489 and #653, or it has seen no rival yet`,
     );
   }
   if (json) {
-    console.log(JSON.stringify(stored, null, 2));
+    console.log(JSON.stringify({ controllers: stored ?? {}, dossiers: dossiers ?? {} }, null, 2));
   } else {
-    const now = await gameTime();
-    // A mirror of `RivalSafeMode.canActivate` (src/Core/Types/Rooms.fs), the
-    // bot's own answer, with `Tuning.RivalIntelTicks` and CONTROLLER_DOWNGRADE.
-    const STALE = 1500;
-    const DOWNGRADE = { 1: 20000, 2: 10000, 3: 20000, 4: 40000, 5: 80000, 6: 120000, 7: 150000, 8: 200000 };
-    const rooms = Object.entries(stored);
-    const gate = (room, c) => {
-      const running = c.s > now ? room : rooms.find(([, o]) => o.o === c.o && o.s > now)?.[0];
-      if (running) return `no: busy (safe mode in ${running})`;
-      if (c.c > now) return "no: cooldown";
-      if (c.b > now) return "no: upgrade blocked";
-      if (now - c.t >= STALE) return "unknown: stale";
-      if (c.a <= 0) return "no: no stock";
-      if (c.d < (DOWNGRADE[c.l] ?? 0) / 2 - 5000) return "no: below the downgrade line";
-      return "YES";
-    };
-    const left = (until) => (until > now ? `${until - now}` : "—");
-    console.log(`rival controllers at t${now}`);
-    console.log(
-      ["room", "owner", "rcl", "safe mode", "cooldown", "stock", "blocked", "ttd", "seen ago", "can activate"]
-        .map((h, i) => (i < 2 ? h.padEnd(12) : h.padStart(9)))
-        .join(" "),
-    );
-    for (const [room, c] of rooms.sort((a, b) => a[1].o.localeCompare(b[1].o) || a[0].localeCompare(b[0]))) {
-      console.log(
-        [
-          room.padEnd(12),
-          c.o.padEnd(12),
-          `${c.l}`.padStart(9),
-          left(c.s).padStart(9),
-          left(c.c).padStart(9),
-          `${c.a}`.padStart(9),
-          left(c.b).padStart(9),
-          `${c.d}`.padStart(9),
-          `${now - c.t}`.padStart(9),
-          ` ${gate(room, c)}`,
-        ].join(" "),
-      );
+    const now = offline ? Number(process.env.OBSERVE_TIME ?? 0) : await gameTime();
+    if (stored === undefined) {
+      console.log("no rival controllers at Memory.fabot.observe.rooms.controllers");
+    } else {
+      printControllers(stored, now);
+    }
+    console.log("");
+    if (dossiers === undefined) {
+      console.log(`no rival dossier in ${logPlace("rivals")} — the deployed bundle predates #653`);
+    } else {
+      printDossiers(dossiers, now);
     }
   }
 } else if (command === "verbose" || command === "draw") {
@@ -3240,6 +3221,129 @@ if (command === "console") {
       for (const entry of record.log) {
         console.log(`${String(entry.t).padStart(width)}  ${describeVerdict(entry.v)}`);
       }
+    }
+  }
+}
+
+// The rival controllers' table (#489).
+function printControllers(stored, now) {
+  // A mirror of `RivalSafeMode.canActivate` (src/Core/Types/Rooms.fs), the
+  // bot's own answer, with `Tuning.RivalIntelTicks` and CONTROLLER_DOWNGRADE.
+  const STALE = 1500;
+  const DOWNGRADE = { 1: 20000, 2: 10000, 3: 20000, 4: 40000, 5: 80000, 6: 120000, 7: 150000, 8: 200000 };
+  const rooms = Object.entries(stored);
+  const gate = (room, c) => {
+    const running = c.s > now ? room : rooms.find(([, o]) => o.o === c.o && o.s > now)?.[0];
+    if (running) return `no: busy (safe mode in ${running})`;
+    if (c.c > now) return "no: cooldown";
+    if (c.b > now) return "no: upgrade blocked";
+    if (now - c.t >= STALE) return "unknown: stale";
+    if (c.a <= 0) return "no: no stock";
+    if (c.d < (DOWNGRADE[c.l] ?? 0) / 2 - 5000) return "no: below the downgrade line";
+    return "YES";
+  };
+  const left = (until) => (until > now ? `${until - now}` : "—");
+  console.log(`rival controllers at t${now}`);
+  console.log(
+    ["room", "owner", "rcl", "safe mode", "cooldown", "stock", "blocked", "ttd", "seen ago", "can activate"]
+      .map((h, i) => (i < 2 ? h.padEnd(12) : h.padStart(9)))
+      .join(" "),
+  );
+  for (const [room, c] of rooms.sort((a, b) => a[1].o.localeCompare(b[1].o) || a[0].localeCompare(b[0]))) {
+    console.log(
+      [
+        room.padEnd(12),
+        c.o.padEnd(12),
+        `${c.l}`.padStart(9),
+        left(c.s).padStart(9),
+        left(c.c).padStart(9),
+        `${c.a}`.padStart(9),
+        left(c.b).padStart(9),
+        `${c.d}`.padStart(9),
+        `${now - c.t}`.padStart(9),
+        ` ${gate(room, c)}`,
+      ].join(" "),
+    );
+  }
+}
+
+// The rival dossier (#653), one block a rival, latest first. The wire is
+// `ObserveMemory.encodeRivals`': a tally `[count, last]`, a span `[episodes,
+// sum, shortest, longest, ended]`, an aim `[open, hit]` — of the picks whose
+// candidates differed on a question, the ones that picked the body that had
+// it.
+function printDossiers(dossiers, now) {
+  const tally = (t, what) => (Array.isArray(t) && t[0] > 0 ? `${what} ${t[0]} (last t${t[1]})` : undefined);
+  const span = (s, what) =>
+    Array.isArray(s) && s[0] > 0
+      ? `${what} ${s[0]}× avg ${(s[1] / s[0]).toFixed(0)} (${s[2]}–${s[3]}, last t${s[4]})`
+      : undefined;
+  const aim = (a, what) => (Array.isArray(a) && a[0] > 0 ? `${what} ${a[1]}/${a[0]}` : undefined);
+  const join = (parts) => parts.filter((p) => p !== undefined).join(", ");
+  const rate = (gain, ticks) => (ticks > 0 ? `${(gain / ticks).toFixed(1)}/rampart-tick over ${ticks}` : undefined);
+  const rows = Object.entries(dossiers).sort((a, b) => (b[1].latest ?? 0) - (a[1].latest ?? 0));
+  console.log(`rival dossiers at t${now} (${rows.length})`);
+  for (const [owner, d] of rows) {
+    console.log(`\n${owner}  seen t${d.since}..t${d.latest} (${now - d.latest} ago)`);
+    const a = d.aim ?? {};
+    const picks = join([
+      aim(a.near, "nearest"),
+      aim(a.weak, "weakest"),
+      aim(a.heal, "healer"),
+      aim(a.armed, "attacker"),
+      aim(a.edge, "edge"),
+    ]);
+    if (a.shots?.[0] > 0) {
+      console.log(
+        `  tower shots ${a.shots[0]} (last t${a.shots[1]}, ${a.alone ?? 0} at a lone body)` +
+          (picks ? `; picked, of the shots that could tell: ${picks}` : ""),
+      );
+    }
+    const safe = tally(d.safe, "safe modes raised");
+    if (safe || d.cool > now) {
+      console.log(`  ${join([safe, d.cool > now ? `cooldown ${d.cool - now} more` : undefined])}`);
+    }
+    for (const act of d.acts ?? []) {
+      const struck = Object.entries(act.struck ?? {})
+        .map(([kind, ago]) => `${kind} ${ago} before`)
+        .join(", ");
+      console.log(
+        `    ${act.room} raised t${act.at} (seen t${act.noticed}) rcl${act.rcl}: ours ${act.ours} (${act.armed} armed)` +
+          (act.since !== undefined ? `, our armed there ${act.since} before` : ", no armed visit of ours") +
+          (struck ? `; struck ${struck}` : ""),
+      );
+    }
+    const shapes = Object.entries(d.shapes ?? {})
+      .sort((x, y) => y[1] - x[1])
+      .map(([shape, count]) => `${shape}×${count}`)
+      .join(" ");
+    const armed = join([tally(d.armed, "armed bodies"), shapes ? `shapes ${shapes}` : undefined]);
+    if (armed) console.log(`  ${armed}`);
+    const moves = join([tally(d.cross, "crossings"), tally(d.sortie, "sorties out of its rooms")]);
+    if (moves) console.log(`  ${moves}`);
+    const flight = join([tally(d.stayed, "stayed"), tally(d.fled, "fled"), tally(d.fell, "fell")]);
+    if (flight) console.log(`  its workers when our armed body came: ${flight}`);
+    const homes = Object.entries(d.homeRaid ?? {})
+      .map(([level, t]) => `RCL${level}×${t[0]} (last t${t[1]})`)
+      .join(" ");
+    const raids = join([homes ? `in our homes ${homes}` : undefined, tally(d.outRaid, "in our outposts")]);
+    if (raids) console.log(`  armed bodies ${raids}`);
+    for (const [room, r] of Object.entries(d.rooms ?? {}).sort((x, y) => y[1].seen - x[1].seen)) {
+      const facts = join([
+        r.tReads > 0 ? `towers low ${r.tLow}, last ${r.tLast} over ${r.tReads} reads` : undefined,
+        tally(r.refills, "refills"),
+        rate(r.fireGain, r.fireTicks) && `ramparts under fire +${rate(r.fireGain, r.fireTicks)}`,
+        rate(r.peaceGain, r.peaceTicks) && `at peace +${rate(r.peaceGain, r.peaceTicks)}`,
+        aim(r.lowFirst, "lowest rampart first"),
+        span(r.resp, "answered our armed body"),
+        tally(r.unans, "unanswered"),
+        tally(r.standing, "already armed"),
+        span(r.unworked, "unworked after a kill"),
+        r.killed > 0 ? `unworked since t${r.killed}` : undefined,
+        span(r.rereserve, "re-reserved after a lapse"),
+        r.lapsed > 0 ? `lapsed since t${r.lapsed}` : undefined,
+      ]);
+      console.log(`  ${room}${r.res ? " (reserved)" : ""} seen t${r.seen}${facts ? `: ${facts}` : ""}`);
     }
   }
 }
