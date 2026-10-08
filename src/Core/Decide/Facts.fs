@@ -4269,7 +4269,8 @@ let internal atFight (walk: int) = walk <= Engine.rangedRange
 /// later strikes nothing beside it, whatever a verdict counted it for.
 /// Before #609 a friend farther than `soon` was never counted, so a ranger
 /// that outlasts a 3RA4H kiter by two hundred ticks ran from it, and the
-/// pair never met. A partner counts only while it lives to land (#615 U3).
+/// pair never met. A partner counts only while it lives to land and then
+/// through the side's kill (#615 U3).
 let private winsBeside
     (view: ColonyView)
     (stance: Stance)
@@ -4413,7 +4414,7 @@ let private winsBeside
 
         go 0 shield start
 
-    let counted =
+    let landing =
         beside
         |> List.choose (fun (other, holds, ticks) ->
             match walkToRaid view raid other, ticks with
@@ -4425,6 +4426,30 @@ let private winsBeside
             | Some walk, None when holds && other.TicksToLive > walk && atFight (walk - soon) ->
                 Some(other, walk - Engine.rangedRange)
             | _ -> None)
+
+    // A partner counts only while it lives through the kill it is counted
+    // for: the side's kill (`killTicks`) lands after its landing and before
+    // it ages out. One that ages out first deals damage the raid heals back
+    // once it is gone, so the side is priced without it, and its kill again
+    // (live t1,038,641: ranger-1037139, 33 ticks left, beside ranger-1037937
+    // against Wraith7582's 1,248 hits, out-healed 48 a tick, a kill of ~39
+    // ticks; it aged out with the Wraith at 512 and the Wraith healed back).
+    let rec livesThrough (side: (CreepInfo * int) list) =
+        let waits = side |> List.map snd |> List.fold max 0
+        let me = Fighter.atHits creep (after waits)
+
+        match killTicks view room (me :: List.map (fst >> Fighter.ofCreep) side) with
+        | Some kill ->
+            match side |> List.filter (fun (other, ticks) -> other.TicksToLive > ticks + kill) with
+            | kept when List.length kept = List.length side -> side
+            | kept -> livesThrough kept
+        | None -> side
+
+    let counted =
+        if List.isEmpty landing then
+            landing
+        else
+            livesThrough landing
 
     let waits = counted |> List.map snd |> List.fold max 0
 

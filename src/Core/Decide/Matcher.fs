@@ -772,7 +772,7 @@ let matchAcross
 
                 // The raid strikes it only once it is at the fight: off it, a
                 // partner lands its walk past this body's own (#535's muster
-                // waits for it), and one no walk prices lands with it.
+                // waits for it).
                 let waits =
                     lazy
                         (match ending k creep.Name task with
@@ -788,7 +788,16 @@ let matchAcross
 
                 // Held on the muster ground (`Brief.Stances`), it goes in with
                 // the last of the fight's holders; any other partner lands by
-                // its walk past this body's own.
+                // its walk past this body's own. One no colony's walk prices
+                // lands with this body where the room's verdict names it (the
+                // world's answer counts it), and by none where it does not,
+                // the fight counting it only once it is there (`Facts.fits`'
+                // own straight walk): either wherever this body stands, so a
+                // body walking in and the same body at the fight read one side
+                // (live t1,038,683: a free ranger of W17S29's, named by no
+                // verdict, two rooms off and never coming, landed "with"
+                // ranger-1037937 while it walked in and by none once it stood
+                // there, and the Guard was taken and let go every 2-6 ticks).
                 let mustered = brief.Stances.ContainsKey creep.Name
                 let holding = Map.tryFind creep.Name assignments = Some tid
                 let stance = Brief.stanceOf ctx.View room brief
@@ -797,7 +806,7 @@ let matchAcross
                     match landsIn other.Name task with
                     | _ when holder && mustered -> Some 0
                     | Some ticks -> Some(max 0 (ticks - mine.Value))
-                    | None when waits.Value -> Some 0
+                    | None when named.Value.Contains other.Name -> Some 0
                     | None -> None
 
                 // The named bodies this match does not hold: another colony's,

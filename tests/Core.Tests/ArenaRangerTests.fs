@@ -2465,3 +2465,508 @@ let kiteKeepsOffTests =
                     $"and shoots Beam1970 down past its legs\n{failure}"
             }
         ]
+
+// ---- arena captures w17s26-t1038640 and w17s26-t1038682 (#615) -------------
+// `npm run capture -- W17S26 1038640 --rooms W17S25` and
+// `npm run capture -- W17S26 1038682 --rooms W17S25,W17S27,W18S27,W19S26,W17S29`.
+// The room-history replays at t1,038,640 and t1,038,682: arena tick 0 runs as
+// t1,038,641 and t1,038,683.
+//   W17S26  https://screeps.com/room-history/shardSeason/W17S26/1038600.json
+//   W17S25  https://screeps.com/room-history/shardSeason/W17S25/1038600.json
+//   W18S27  https://screeps.com/room-history/shardSeason/W18S27/1038600.json
+//   W17S29  https://screeps.com/room-history/shardSeason/W17S29/1038600.json
+// Left out: roads, ramparts, ruins and tombstones; W17S29's economy, its
+// extensions and both its other fighters; W17S27 and W19S26, which hold no
+// body of the fight; Healers, ExitWatches and Sightings start empty.
+
+/// Wraith7582 (Trepidimous, 3 RANGED_ATTACK 7 MOVE 4 HEAL, 48 heal a tick)
+/// on its live tiles from t1,038,641 to 700, one a tick, from `tick` on.
+let private wraithFrom (tick: int) : Behaviour =
+    [
+        18, 23
+        19, 24
+        20, 24
+        19, 25
+        19, 26
+        19, 27
+        20, 28
+        20, 28
+        20, 28
+        20, 28
+        20, 28
+        20, 27
+        20, 27
+        20, 27
+        20, 27
+        20, 27
+        19, 26
+        20, 25
+        20, 24
+        20, 24
+        19, 23
+        19, 23
+        18, 22
+        18, 22
+        19, 21
+        19, 21
+        19, 20
+        19, 20
+        18, 19
+        18, 19
+        18, 19
+        18, 18
+        18, 18
+        18, 18
+        18, 18
+        18, 19
+        18, 19
+        18, 19
+        18, 19
+        17, 20
+        17, 20
+        17, 20
+        16, 21
+        16, 21
+        15, 21
+        15, 21
+        14, 22
+        14, 22
+        13, 23
+        13, 23
+        12, 24
+        12, 25
+        12, 26
+        12, 27
+        11, 28
+        10, 29
+        9, 30
+        8, 31
+        7, 32
+        6, 33
+    ]
+    |> List.skip (tick - 1_038_641)
+    |> List.mapi (fun i (x, y) -> i + 1, GoTo(RoomPos.at "W17S26" { X = x; Y = y }))
+    |> Phases
+
+/// W17S26 and its home W17S25 at t1,038,640.
+let private wraithRooms () : ArenaRoom list =
+    let w17s26 =
+        room "W17S26"
+        |> withStructures
+            [
+                { structureOf "container" None 120_000 250_000 { X = 27; Y = 9 } with
+                    Energy = 830
+                }
+            ]
+
+    let w17s25 =
+        room "W17S25"
+        |> withController Ownership.Ours None 5 3
+        |> withControllerClocks 0 0 80_000 301_378
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        9, 23
+                        9, 25
+                        9, 27
+                        9, 29
+                        10, 26
+                        11, 23
+                        11, 25
+                        11, 27
+                        13, 23
+                        13, 25
+                        14, 24
+                        16, 32
+                        18, 30
+                        19, 31
+                    ] ->
+                    { structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y } with
+                        Energy = 50
+                    }
+            ]
+        |> withStructures
+            [
+                for x, y in
+                    [
+                        10, 24
+                        10, 28
+                        10, 30
+                        12, 24
+                        12, 28
+                        12, 30
+                        13, 31
+                        14, 26
+                        14, 30
+                        15, 27
+                        15, 29
+                        15, 31
+                        16, 28
+                        16, 30
+                        17, 29
+                        17, 31
+                    ] -> structureOf "extension" (Some Side.Ours) 1_000 1_000 { X = x; Y = y }
+            ]
+        |> withStructures
+            [
+                { structureOf "container" None 129_300 250_000 { X = 16; Y = 34 } with
+                    Energy = 1_989
+                }
+                { structureOf "container" None 125_000 250_000 { X = 17; Y = 20 } with
+                    Energy = 588
+                }
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 13; Y = 27 } with
+                    Energy = 12_404
+                }
+                towerOf Side.Ours { X = 11; Y = 29 } 1_000
+                towerOf Side.Ours { X = 13; Y = 29 } 1_000
+            ]
+
+    [ w17s26; w17s25 ]
+
+/// W17S25's live Memory as the capture read it: its tower, its last armed
+/// sighting, and its stand-downs open at the tick.
+let private wraithMemory (carried: Carried) (assignments: (string * string) list) : Carried =
+    let episode
+        room
+        opened
+        lastSeen
+        expiry
+        basis
+        stronghold
+        unread
+        : Fabot.Core.Observe.OutpostEpisode =
+        {
+            RoomName = room
+            Opened = opened
+            LastSeen = lastSeen
+            Expiry = expiry
+            Basis = basis
+            Stronghold = stronghold
+            Bounced = false
+            Raiders = Set.empty
+            PlayerSince = None
+            Chased = false
+            HolderUnread = unread
+        }
+
+    { carried with
+        Assignments = Map.ofList assignments
+        ArmedSeen = Map.ofList [ "W17S25", 1_037_923 ]
+        Towered = Set.ofList [ "W17S25" ]
+        Raids =
+            Map.ofList
+                [
+                    "W17S25",
+                    { Fabot.Core.Observe.RaidState.empty with
+                        Outposts =
+                            [
+                                episode
+                                    "W16S26"
+                                    972_732
+                                    1_024_830
+                                    1_045_681
+                                    StandDownBasis.CollapseTimer
+                                    true
+                                    true
+                                episode
+                                    "W18S29"
+                                    1_038_409
+                                    1_038_640
+                                    1_041_538
+                                    StandDownBasis.RivalReservation
+                                    false
+                                    false
+                                episode
+                                    "W19S28"
+                                    1_038_411
+                                    1_038_640
+                                    1_041_286
+                                    StandDownBasis.RivalReservation
+                                    false
+                                    false
+                            ]
+                        HomeRaided = Some 1_038_124
+                    }
+                ]
+    }
+
+/// W17S26 at t1,038,640 (#615): ranger-1037139 (6M 4R 2H) with 33 ticks to
+/// live and ranger-1037937 (6M 4R 2H) shooting Wraith7582 down from 1,248
+/// hits, out-healed 48 a tick: 32 a tick between them, a kill of ~39 ticks
+/// the elder never lives to see. Live the pair fought on, the elder aged out
+/// at t1,038,674 with the Wraith at 512, the other alone (40 < 48) gave up,
+/// its relief was cast only then (born t1,038,710) and the Wraith healed back
+/// to 1,400 and walked off.
+let private wraithPartnerAgesOut () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W17S25" ])
+
+    let bodies: Body list =
+        [
+            { body
+                  "Wraith7582"
+                  trepidimous
+                  (parts [ RangedAttack, 3; Move, 6; Heal, 4; Move, 1 ])
+                  (at "W17S26" 17 22)
+                  (Some(wraithFrom 1_038_641)) with
+                Hits = 1_248
+                TicksToLive = 482
+            }
+            { body
+                  "ranger-1037937-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W17S26" 19 17)
+                  None with
+                TicksToLive = 831
+            }
+            { body
+                  "ranger-1037139-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W17S26" 18 19)
+                  None with
+                Hits = 1_180
+                TicksToLive = 33
+            }
+            { body
+                  "anchor-1038034-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 3 ])
+                  (at "W17S26" 20 1)
+                  None with
+                TicksToLive = 922
+                Energy = 50
+            }
+            { body
+                  "anchor-1037617-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 6; Carry, 1; Move, 1 ])
+                  (at "W17S25" 17 20)
+                  None with
+                TicksToLive = 499
+                Energy = 50
+            }
+            { body
+                  "upgrader-1037709-Spawn11"
+                  Side.Ours
+                  (parts [ Work, 11; Carry, 1; Move, 11 ])
+                  (at "W17S25" 17 34)
+                  None with
+                TicksToLive = 636
+                Energy = 39
+            }
+            { body
+                  "hauler-1038078-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 24; Move, 12 ])
+                  (at "W17S25" 10 25)
+                  None with
+                TicksToLive = 1_044
+                Energy = 1_000
+            }
+            { body
+                  "hauler-1038224-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 24; Move, 12 ])
+                  (at "W17S25" 16 33)
+                  None with
+                TicksToLive = 1_190
+                Energy = 407
+            }
+            { body
+                  "hauler-1037829-Spawn11"
+                  Side.Ours
+                  (parts [ Carry, 24; Move, 12 ])
+                  (at "W17S25" 16 38)
+                  None with
+                TicksToLive = 795
+            }
+            { body
+                  "reserver-1038625-Spawn11"
+                  Side.Ours
+                  (parts [ BodyPart.Claim, 2; Move, 2 ])
+                  (at "W17S25" 16 31)
+                  None with
+                TicksToLive = 595
+            }
+        ]
+
+    let a = arena 1_038_641 (wraithRooms ()) colonies bodies
+
+    { a with
+        Carried =
+            wraithMemory
+                a.Carried
+                [
+                    "ranger-1037937-Spawn11", "guard:W17S26"
+                    "ranger-1037139-Spawn11", "guard:W17S26"
+                    "anchor-1038034-Spawn11", "harvest:6a8caa7ddd4872bccd318c78"
+                    "anchor-1037617-Spawn11", "harvest:6a8caa7cdd4872bccd318c75"
+                    "upgrader-1037709-Spawn11", "upgrade:6a8caa7cdd4872bccd318c76"
+                    "hauler-1038078-Spawn11", "refill:spawn-Spawn11"
+                    "hauler-1038224-Spawn11", "refill:container-16-34"
+                    "hauler-1037829-Spawn11", "withdraw:container-27-9"
+                    "reserver-1038625-Spawn11", "reserve:6a8caa7ddd4872bccd318c79"
+                ]
+    }
+
+/// W17S26 at t1,038,682 (#615): ranger-1037937 alone at 23,12 after its
+/// partner aged out, Wraith7582 at 704 hits healing 48 a tick, the relief
+/// ranger-1038674 in W17S25's spawn until t1,038,710, and ranger-1038434 of
+/// W17S29's (9M 6R 3H) free two rooms off in W18S27, which no walk of any
+/// colony's prices to W17S26 and no verdict names. Live ranger-1037937 took
+/// guard:W17S26 at t1,038,683, was let go at 687 ("threatened"), took it at
+/// 689, let go at 693, ... every 2-6 ticks until the relief was born.
+let private freeRangerTwoRoomsOff () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+
+    let w17s29 =
+        room "W17S29"
+        |> withController Ownership.Ours None 6 4
+        |> withControllerClocks 0 0 120_000 2_721_406
+        |> withSpawn "Spawn9" { X = 24; Y = 40 } 2_300
+        |> withStructures
+            [
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 23; Y = 39 } with
+                    Energy = 20_760
+                }
+                towerOf Side.Ours { X = 21; Y = 39 } 1_000
+                towerOf Side.Ours { X = 23; Y = 41 } 1_000
+            ]
+
+    let colonies =
+        Colony.declared
+        |> List.filter (fun c -> List.contains c.Home [ "W17S25"; "W17S29" ])
+
+    let bodies: Body list =
+        [
+            { body
+                  "Wraith7582"
+                  trepidimous
+                  (parts [ RangedAttack, 3; Move, 6; Heal, 4; Move, 1 ])
+                  (at "W17S26" 17 20)
+                  (Some(wraithFrom 1_038_683)) with
+                Hits = 704
+                TicksToLive = 440
+            }
+            { body
+                  "ranger-1037937-Spawn11"
+                  Side.Ours
+                  (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                  (at "W17S26" 23 12)
+                  None with
+                TicksToLive = 789
+            }
+            { body
+                  "ranger-1038434-Spawn9"
+                  Side.Ours
+                  (parts [ Move, 9; RangedAttack, 6; Heal, 3 ])
+                  (at "W18S27" 35 28)
+                  None with
+                TicksToLive = 1_304
+            }
+        ]
+
+    let a = arena 1_038_683 (wraithRooms () @ [ room "W18S27"; w17s29 ]) colonies bodies
+
+    { a with
+        Ovens =
+            [
+                {
+                    Spawn = "spawn-Spawn11"
+                    Room = "W17S25"
+                    Name = "ranger-1038674-Spawn11"
+                    Parts = parts [ Move, 6; RangedAttack, 4; Heal, 2 ]
+                    Done = 1_038_710
+                }
+            ]
+        Carried = wraithMemory a.Carried []
+    }
+
+/// Each tick's Task of a body, from the arena's carried assignments.
+let private heldEachTick (name: string) (ticks: int) (start: Arena) : (int * string option) list =
+    let rec go n (a: Arena) acc =
+        if n = 0 then
+            List.rev acc
+        else
+            let next, _ = step a
+            go (n - 1) next ((a.Tick, Map.tryFind name next.Carried.Assignments) :: acc)
+
+    go ticks start []
+
+/// How many times a body took a Task it did not hold the tick before.
+let private takes (task: string) (held: (int * string option) list) =
+    held
+    |> List.map snd
+    |> List.pairwise
+    |> List.filter (fun (before, after) -> before <> Some task && after = Some task)
+    |> List.length
+
+[<Tests>]
+let partnerAgesOutTests =
+    testList
+        "arena a partner ages out mid-kill (#615)"
+        [
+            // Live t1,038,683-710: a free ranger of another colony, two rooms
+            // off and never coming, landed "with" ranger-1037937 while it
+            // walked in, so it was a fresh candidate beside a partner, and by
+            // none once it stood at the fight, so the holder was alone and
+            // refused: taken and let go eight times in 27 ticks. Now a partner
+            // no walk prices and no verdict names lands by none in both
+            // readings: the ranger waits off the fight for its relief and
+            // takes the Guard once, when the relief is born (t27).
+            test
+                "#615 capture t1,038,682: the lone ranger beside a free ranger two rooms off takes the Guard once, with its relief" {
+                let held = freeRangerTwoRoomsOff () |> heldEachTick "ranger-1037937-Spawn11" 40
+
+                Expect.isLessThanOrEqual
+                    (takes "guard:W17S26" held)
+                    1
+                    $"the Guard is taken at most once in 40 ticks\n%A{held}"
+
+                Expect.equal
+                    (List.last held |> snd)
+                    (Some "guard:W17S26")
+                    $"and held with the relief beside it\n%A{held}"
+            }
+
+            // Live t1,038,641-674 the pair fought on, ranger-1037139 aged out
+            // with Wraith7582 at 512, and the relief was cast only on its death
+            // (born t1,038,710); the Wraith healed to 1,400 and walked off.
+            // Now the elder, which ages out before the pair's kill lands, is
+            // no partner: the pair lets the fight go at once, its relief is
+            // cast at t2 (born t38, 32 ticks before live's), and ranger-1037937
+            // and the relief kill the Wraith at t134 (live: never).
+            test
+                "#615 capture t1,038,640: a partner that ages out before the kill is no partner, and the relief that is cast kills the kiter" {
+                let start = wraithPartnerAgesOut () |> withCasts [ "ranger"; "guard" ]
+                let held = start |> heldEachTick "ranger-1037937-Spawn11" 31
+
+                Expect.all
+                    held
+                    (fun (_, task) -> task <> Some "guard:W17S26")
+                    $"ranger-1037937 does not keep a kill its partner dies before\n%A{held}"
+
+                let beforeTheElderDies, _ = start |> run 31
+
+                Expect.exists
+                    beforeTheElderDies.Ovens
+                    (fun oven -> oven.Name.StartsWith "ranger-")
+                    "its relief is cast before the elder ages out (t32)"
+
+                let _, trace = start |> run 160
+
+                Expect.isLessThanOrEqual
+                    (diedOn "Wraith7582" trace |> Option.defaultValue System.Int32.MaxValue)
+                    150
+                    $"the ranger and its relief kill Wraith7582 by t150\n{describe trace}"
+            }
+        ]
