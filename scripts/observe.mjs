@@ -3023,6 +3023,13 @@ if (command === "console") {
               `over ${ms.length} tick${ms.length === 1 ? "" : "s"}`,
           );
         }
+        if (homes.includes("world")) {
+          console.log(
+            "  `world` is the lane every colony shares (#666): the judging, the observers' aim, the " +
+              "world's fight, the casting and the one fleet match; a colony's line is its own opening, " +
+              "join and finish",
+          );
+        }
         console.log(
           "  the sum falls short of the `decide` column by the movement arbitration and the " +
             "two Memory reads `decide` is handed, which is why neither is derived from the other",

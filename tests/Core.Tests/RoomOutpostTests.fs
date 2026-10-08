@@ -118,17 +118,14 @@ let outpostDeclarationTests =
             test "a chain of real border rings joins every declared salvage room to its home" {
                 // The outpost case above, over the third declaration kind, the salvage,
                 // through the same shipped predicates: a salvage room no chain
-                // reaches is refused, and its dismantler is never cast.
+                // reaches is refused, and its dismantler is never cast. None is
+                // declared since W11S29 left (#666); this holds the next one to it.
                 let linked =
                     shippedLinked (
                         Colony.declared
                         |> List.collect (fun colony ->
                             colony.Home :: Salvage.roomsProjected colony.Salvage colony.Home)
                     )
-
-                Expect.isNonEmpty
-                    (Colony.declared |> List.collect (fun colony -> colony.Salvage))
-                    "a declaration nobody made is nothing to check"
 
                 let unreachable =
                     Colony.declared
@@ -140,14 +137,6 @@ let outpostDeclarationTests =
                 Expect.isEmpty
                     unreachable
                     $"""every declared salvage room is joined to its home by a chain of Seams: {String.concat "; " unreachable}"""
-
-                // W11S29 from W12S28: two crossings, by W12S29. W11S28 is the other
-                // room a shortest walk could cross, and its seam with W11S29 has no
-                // tile to cross by.
-                Expect.equal
-                    (RoomName.routesBy linked Tuning.defaults.MaxHops "W12S28" "W11S29")
-                    [ [ "W12S28"; "W12S29"; "W11S29" ] ]
-                    "W11S29 is two crossings from W12S28, by W12S29"
             }
 
             test

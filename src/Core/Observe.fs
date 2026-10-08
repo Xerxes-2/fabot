@@ -2387,6 +2387,13 @@ module FloodCounts =
             Pops = a.Pops - b.Pops
         }
 
+    let plus (a: FloodCounts) (b: FloodCounts) =
+        {
+            Floods = a.Floods + b.Floods
+            Free = a.Free + b.Free
+            Pops = a.Pops + b.Pops
+        }
+
     /// The tick's pops over its colonies — the one sum a reader takes, for
     /// the span's worst tick.
     let totalPops (rows: (string * FloodCounts) list) =
@@ -2480,8 +2487,9 @@ type CpuReadings =
         Forced: Forcing option
         /// Each colony that re-planned this tick and what moved its signature
         /// (#463, `signatureMoves`): rooms by name, the head's parts as
-        /// `home`, `level` or `stages`, and `reset` for a plan paid with no
-        /// prior memo.
+        /// `home`, `level` or `stages`, `reset` for a plan paid with no
+        /// prior memo, and `seen` for one paid while a room was dark and
+        /// owed since it was seen (#666).
         Moved: (string * string list) list
     }
 
@@ -2631,6 +2639,19 @@ let capCpuSpans = 200
 /// nothing a reader could act on is rounded away.
 let private toMicrosecond (ms: float) = floor (ms * 1000.0 + 0.5) / 1000.0
 
+/// Each name's spans summed, in the order the name first appears (#666): a
+/// colony's opening and join are read apart from its finish, the world
+/// lane's steps between them, and the wire keys a split by name.
+let private summedBy (add: 'a -> 'a -> 'a) (rows: (string * 'a) list) : (string * 'a) list =
+    let order, sums =
+        (([], Map.empty), rows)
+        ||> List.fold (fun (order, sums) (name, spent) ->
+            match Map.tryFind name sums with
+            | Some held -> order, Map.add name (add held spent) sums
+            | None -> name :: order, Map.add name spent sums)
+
+    order |> List.rev |> List.map (fun name -> name, Map.find name sums)
+
 /// Whether a row carries none of the per-name splits `capCpuDetail` keeps.
 let private isBare (sample: CpuSample) =
     List.isEmpty sample.Colonies
@@ -2688,11 +2709,12 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
     let colonies =
         readings.ColonyDecides
         |> List.fold
-            (fun (spent, at) (home, reading) ->
-                (home, toMicrosecond (reading - at)) :: spent, reading)
+            (fun (spent, at) (home, reading) -> (home, reading - at) :: spent, reading)
             ([], readings.AtSnapshot)
         |> fst
         |> List.rev
+        |> summedBy (+)
+        |> List.map (fun (home, ms) -> home, toMicrosecond ms)
 
     // The snapshot's rooms, differenced against the phase's own start — which
     // is the prelude's reading, `AtEntry`, because nothing runs between them.
@@ -2716,7 +2738,9 @@ let foldCpu (cap: int) (tick: int) (readings: CpuReadings) (prior: CpuState) : C
 
     let ms = toMicrosecond readings.AtExecute
 
-    let floods = FloodCounts.differenced readings.ColonyFloods
+    let floods =
+        FloodCounts.differenced readings.ColonyFloods |> summedBy FloodCounts.plus
+
     let pops = FloodCounts.totalPops floods
     // A tenth of a megabyte: finer than the climb this reads, and Memory
     // pays for every digit two hundred times.

@@ -1224,13 +1224,19 @@ let private fullTick
             match Map.tryFind colony.Home planMemos with
             // A deferred plan keeps the stale signature on purpose, so it
             // compares equal and is not a replan.
-            | Some prior when prior.Signature <> decision.Memo.Signature ->
+            | Some prior when
+                prior.Signature <> decision.Memo.Signature || prior.Paid <> decision.Memo.Paid
+                ->
                 // `PlanMemo.deferred`'s empty signature: the first plan since
                 // a reset, which moved everything at once.
                 if prior.Signature = "" then
                     Some(colony.Home, [ "reset" ])
                 else
-                    Some(colony.Home, signatureMoves prior.Signature decision.Memo.Signature)
+                    // The same signature paid again: a plan paid while a room
+                    // was dark, owed since it was seen (#666).
+                    match signatureMoves prior.Signature decision.Memo.Signature with
+                    | [] -> Some(colony.Home, [ "seen" ])
+                    | moves -> Some(colony.Home, moves)
             | Some _ -> None
             // No prior at all is a global reset, and only the colony whose
             // turn it was paid; the rest were handed `PlanMemo.deferred`.
@@ -1835,12 +1841,16 @@ let private fullTick
             Intents = accepted
             Bucket = Game.cpu.bucket
             Replans = replans
-            // In the order decided: the readings are cumulative.
+            // In the order taken: the readings are cumulative. The world
+            // lane's and each colony's opening and join come first (#666),
+            // and `foldCpu` sums each name's.
             ColonyDecides =
-                decidedInOrder |> List.map (fun (colony, _, _, at, _) -> colony.Home, at)
+                (colonyDecisions.Lane |> List.map (fun (whose, (at, _)) -> whose, at))
+                @ (decidedInOrder |> List.map (fun (colony, _, _, at, _) -> colony.Home, at))
             ColonyFloods =
-                decidedInOrder
-                |> List.map (fun (colony, _, _, _, flooded) -> colony.Home, flooded)
+                (colonyDecisions.Lane |> List.map (fun (whose, (_, flooded)) -> whose, flooded))
+                @ (decidedInOrder
+                   |> List.map (fun (colony, _, _, _, flooded) -> colony.Home, flooded))
             HeapMb = heap
             ExternalMb = external
             MemoRows = memoRows ()

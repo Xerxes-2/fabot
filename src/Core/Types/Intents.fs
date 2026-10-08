@@ -171,12 +171,18 @@ type FatigueFactor =
         Whole: bool
     }
 
+/// One entry of the `WalkTable`: the distances, and every room the chains
+/// it was cast along crossed (#666), which is what a room leaving the
+/// projection evicts it by: the tick a room leaves, `routes` no longer names
+/// the chains through it. A plain list, for it outlives the tick (#401).
+type CastWalk = { Ticks: int[]; Crossed: string list }
+
 /// ADR-0032. The spawn-origin walk table: the traffic-blind walk out of the
 /// tiles beside a spawner, for a body's fatigue factor, as whole-tick
 /// distances per tile index of one room. Filled on demand by the Atlas and
 /// handed to the next tick's while the census signature holds. Mutable, and
 /// heap-only like the memo carrying it.
-type WalkTable = System.Collections.Generic.Dictionary<Pos * FatigueFactor * string, int[]>
+type WalkTable = System.Collections.Generic.Dictionary<Pos * FatigueFactor * string, CastWalk>
 
 /// What a step costs a body, as the flood prices it. It lives here beside the
 /// tables keyed on it rather than in `Grid`: a record the host holds across
@@ -254,8 +260,9 @@ type CreepFloodTable =
 /// Held across ticks on the plan memo like `WalkTable` and for the same
 /// reason: every input it reads is signed by the census signature — the
 /// walking grid of each room in the chain, and the Seam bands. A controller's
-/// tile is either the declaration's furniture or a fact of vision, and vision
-/// moving in a projected room moves that room's entry in the signature.
+/// tile is either the declaration's furniture or a fact of vision: a room out
+/// of sight is signed by its last sighting, and a field flooded over it dark
+/// goes on its next one (`FarFieldMemo.DarkRead`).
 ///
 /// The key is the field's whole derivation, including the origins the flood
 /// is seeded from, because two callers hand different ones under the same
@@ -339,6 +346,12 @@ type FarFieldMemo =
         RoadFloods: RoadFloodTable
         /// The placed creeps' own floods, on their own key's terms.
         CreepFloods: CreepFloodTable
+        /// The rooms out of sight an entry of the census-keyed tables was
+        /// flooded over since vision last answered for them (#666): a dark
+        /// room's grid holds none of its roads or obstacles, and its stamp
+        /// holds what was last seen there, so its next sighting evicts it
+        /// (`Atlas.litRooms`).
+        DarkRead: System.Collections.Generic.HashSet<string>
     }
 
 [<RequireQualifiedAccess>]
@@ -369,6 +382,7 @@ module FarFieldMemo =
             Lines = LineTable()
             RoadFloods = RoadFloodTable()
             CreepFloods = creepFloods ()
+            DarkRead = System.Collections.Generic.HashSet()
         }
 
 /// What a Link footing is held beside: each planned source container, the
@@ -497,6 +511,11 @@ type HaulDemandRow =
         Demand: int
     }
 
+/// What vision last read of one projected room, as the census signature
+/// signs it (#666): its own census within its per-room signature, and the
+/// controller's rate and holder the flat signature reads.
+type RoomCensus = { Census: string; Held: string }
+
 /// ADR-0017. The census-keyed plan memo: the census signature beside the plans
 /// derived from exactly that census. Held by the host in heap across ticks,
 /// never written to Memory: a global reset discards it and the next tick
@@ -517,10 +536,19 @@ type PlanMemo =
         /// and moved back would otherwise recall tables flooded under the
         /// intermediate one (#372).
         RoomSignatures: Map<string, string>
-        /// The rooms a rival held when those tables were filled
-        /// (`SpatialInfo.RivalRooms`, #444), stamped with them: what the next
-        /// tick's `Atlas.evictRooms` tells a room newly taken by.
-        RivalRooms: Set<string>
+        /// What vision last read of each projected room, stamped every tick
+        /// whatever the plan did: what a room out of sight is signed by
+        /// (#666), so our vision of it going moves no memo.
+        RoomCensuses: Map<string, RoomCensus>
+        /// The rooms out of sight, signed by their last sighting, when this
+        /// plan was paid (#666): the plan read none of what stands there.
+        PaidDark: Set<string>
+        /// Whether one of `PaidDark` has been seen since: the plan is owed,
+        /// and the colony's next turn pays it, lit or dark.
+        Due: bool
+        /// The tick the plan was paid on, -1 for none: what tells a plan paid
+        /// again under the same signature (`Due`) from one recalled.
+        Paid: int
         /// The rooms a non-fighter went round when those tables were filled
         /// (`SpatialInfo.AvoidRooms`, #485), stamped with them: what the next
         /// tick's `Atlas.evictAvoided` reads a moved set off. Never in the
@@ -566,6 +594,9 @@ type PlanMemo =
         RoadFloods: RoadFloodTable
         /// The placed creeps' own floods (#553), on their own key's terms.
         CreepFloods: CreepFloodTable
+        /// The rooms out of sight those tables were flooded over
+        /// (`FarFieldMemo.DarkRead`), on the same terms.
+        DarkRead: System.Collections.Generic.HashSet<string>
     }
 
 /// Whether this tick is a colony's turn to re-plan its layout (#357), and a DU
@@ -597,25 +628,24 @@ module PlanMemo =
     /// stamped with the signature it declined to plan against would be served
     /// forever.
     ///
-    /// The seven tables are handed in and not defaulted: a deferred colony
+    /// The tables are handed in and not defaulted: a deferred colony
     /// declines to plan, not to price. The per-room signatures come with them
     /// because they say which census the tables were filled under, and that
     /// is this tick's, whatever the plan's is (#372).
     let deferred
         (roomSignatures: Map<string, string>)
+        (roomCensuses: Map<string, RoomCensus>)
         (walks: WalkTable)
-        (seamWalks: SeamWalkTable)
-        (farFields: FarFieldTable)
-        (narrowed: NarrowedFieldTable)
-        (lines: LineTable)
-        (roadFloods: RoadFloodTable)
-        (creepFloods: CreepFloodTable)
+        (tables: FarFieldMemo)
         : PlanMemo =
         {
             Signature = ""
             RoomSignatures = roomSignatures
+            RoomCensuses = roomCensuses
+            PaidDark = Set.empty
+            Due = false
+            Paid = -1
             // Stamped by the caller, with the tables.
-            RivalRooms = Set.empty
             AvoidRooms = Set.empty
             SiteIntents = []
             UnservedFootings = []
@@ -627,10 +657,11 @@ module PlanMemo =
             HaulerDemand = []
             HaulerLoad = 0
             Walks = walks
-            SeamWalks = seamWalks
-            FarFields = farFields
-            Narrowed = narrowed
-            Lines = lines
-            RoadFloods = roadFloods
-            CreepFloods = creepFloods
+            SeamWalks = tables.SeamWalks
+            FarFields = tables.PerCensus
+            Narrowed = tables.Narrowed
+            Lines = tables.Lines
+            RoadFloods = tables.RoadFloods
+            CreepFloods = tables.CreepFloods
+            DarkRead = tables.DarkRead
         }

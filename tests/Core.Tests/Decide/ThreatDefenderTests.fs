@@ -1521,7 +1521,7 @@ let acrossTheBorderTests =
                     "the recalled ground lays the shelter a fresh one does"
 
                 let moved = tick ()
-                Atlas.evictRooms moved Set.empty (Set.singleton "W1N1")
+                Atlas.evictRooms moved (Set.singleton "W1N1")
                 let relaid = Atlas.outsideLine moved colony.Perimeter
 
                 Expect.isFalse

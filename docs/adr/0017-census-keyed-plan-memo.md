@@ -1,6 +1,8 @@
 # Census-derived plans recompute only when their census signature changes
 
-> **Status:** amended by 0044
+> **Status:** amended by 0044, #666
+
+> **Amended by #666** on "derived mechanically from the same census queries the plan reads": for a projected room out of sight (vision answered for it before, not this tick) the signature signs the room's **last sighting** — its census and controller hold as the memo last stamped them (`PlanMemo.RoomCensuses`) — and not the dark projection the plan reads, so our vision coming and going moves no memo. The gap that opens is closed beside the signature rather than in it: a plan paid while such a room is dark records it (`PlanMemo.PaidDark`) and is owed from the room's next sighting, whichever colony's turn that falls on (`PlanMemo.Due`).
 
 > **Revised by ADR 0044** on the admission test: "the hauler quota rides the same memo only because its input set is a subset of the Layout's" stopped holding at #149, when the quota began folding every projected room while the Layout stayed anchored at home — neither input set contains the other — and was overtaken again at #169, when the spawn walk table's far leg became the memo's second cross-room reader. The signature signs the *union* of what its readers read, so "anything census-derived added later may join" is read as "anything census-derived may join, and the signature widens to its inputs". The memo, its mechanical derivation, the refusal of a timed fallback refresh and the bar on anything reading creep state all stand unchanged.
 

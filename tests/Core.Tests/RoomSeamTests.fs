@@ -1460,22 +1460,37 @@ let rivalRoomTests =
                     "a body standing in it walks out"
             }
 
-            test
-                "only a room newly taken drops every cross-room walk; a census moving in a held one does not" {
-                // A walk to W16S27 priced by W15S27 never read W16S28. The tick a
-                // rival takes W16S28, `routes` stops naming the chains through it,
-                // so every cross-room walk goes; a later census change in the room
-                // they already held moves no chain at all.
-                let evictedOver (wasRival: Set<string>) =
+            test "a room leaving the chains drops the walks cast through it and no other (#666)" {
+                // Two walks to W16S27, one cast through W16S28 and one by
+                // W15S27. The tick W16S28 leaves every chain — a rival takes
+                // it, or the projection lets it go — `routes` no longer names
+                // the chains through it, and the walk's own record of the rooms
+                // it crossed is what finds it. The walk by W15S27 never read
+                // W16S28 and stays.
+                let factor =
+                    {
+                        FatigueParts = 1
+                        MoveParts = 1
+                        Whole = false
+                    }
+
+                let through = { X = 25; Y = 25 }, factor, "W16S27"
+                let round = { X = 26; Y = 25 }, factor, "W16S27"
+
+                let keptAfter (spatial: SpatialInfo -> SpatialInfo) =
                     let walks = FarFieldMemo.walks ()
 
-                    walks.[({ X = 25; Y = 25 },
-                            {
-                                FatigueParts = 1
-                                MoveParts = 1
-                                Whole = false
-                            },
-                            "W16S27")] <- Array.empty
+                    walks.[through] <-
+                        {
+                            Ticks = Array.empty
+                            Crossed = [ "W15S28"; "W16S28"; "W16S27" ]
+                        }
+
+                    walks.[round] <-
+                        {
+                            Ticks = Array.empty
+                            Crossed = [ "W15S28"; "W15S27"; "W16S27" ]
+                        }
 
                     let world = squareWorld None false
 
@@ -1484,20 +1499,29 @@ let rivalRoomTests =
                             RoomName = Some "W15S28"
                             Rooms = world.Rooms |> Map.map (fun _ facts -> facts.Layer)
                             Borders = world.Rooms |> Map.map (fun _ facts -> facts.Border)
-                            RivalRooms = Set.singleton "W16S28"
                         }
+                        |> spatial
                         |> AtlasFixtures.snapshotWith []
                         |> ofViewRecalling walks (FarFieldMemo.empty ())
 
-                    evictRooms atlas wasRival (Set.singleton "W16S28")
-                    walks.Count
-
-                Expect.equal (evictedOver Set.empty) 0 "newly taken: the cross-room walk goes"
+                    evictRooms atlas (Set.singleton "W16S28")
+                    walks.Keys |> List.ofSeq
 
                 Expect.equal
-                    (evictedOver (Set.singleton "W16S28"))
-                    1
-                    "already held: the walk that never read it stays"
+                    (keptAfter (fun spatial ->
+                        { spatial with
+                            RivalRooms = Set.singleton "W16S28"
+                        }))
+                    [ round ]
+                    "taken by a rival: the walk through it goes, the one round it stays"
+
+                Expect.equal
+                    (keptAfter (fun spatial ->
+                        { spatial with
+                            Rooms = Map.remove "W16S28" spatial.Rooms
+                        }))
+                    [ round ]
+                    "gone from the projection: the same"
             }
 
             test "a declared rival's room no sighting reached is routed round (#459)" {

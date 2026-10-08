@@ -285,7 +285,10 @@ let sentinelMemo snapshot =
     {
         Signature = censusSignature snapshot
         RoomSignatures = roomSignatures snapshot
-        RivalRooms = snapshot.Spatial.RivalRooms
+        RoomCensuses = roomCensuses snapshot
+        PaidDark = Set.empty
+        Due = false
+        Paid = -1
         AvoidRooms = snapshot.Spatial.AvoidRooms
         SiteIntents = [ PlaceConstructionSite(RoomPos.at "W1N1" { X = 1; Y = 1 }, Tower) ]
         UnservedFootings = []
@@ -303,6 +306,7 @@ let sentinelMemo snapshot =
         Lines = LineTable()
         RoadFloods = RoadFloodTable()
         CreepFloods = FarFieldMemo.creepFloods ()
+        DarkRead = System.Collections.Generic.HashSet()
     }
 
 /// Two rooms whose coordinates collide on purpose. At home:

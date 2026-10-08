@@ -851,6 +851,14 @@ module ColonyView =
     /// terminal: its errand rooms, held or not, less a stood-down one.
     let oreRooms (view: ColonyView) : Set<string> = view.OreRooms
 
+    /// Whether vision answered for a room before and not this tick (#666):
+    /// the world's last sighting of it is older than the tick. A room never
+    /// seen is not dark by this reading: it projects the same every tick.
+    let dark (view: ColonyView) (room: string) : bool =
+        match Map.tryFind room view.Seen with
+        | Some sighting -> sighting.Tick < view.Time
+        | None -> false
+
     /// Every body this colony holds, its economy's and the fighters the
     /// world's fight prices in its Atlas: what a fight rule reads of ours.
     let bodies (view: ColonyView) : CreepInfo list =

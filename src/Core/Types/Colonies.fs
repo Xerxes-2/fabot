@@ -1326,11 +1326,11 @@ module Colony =
                     @ [ Outpost.w11s28 ]
                 // The sector Reactor is six crossings away.
                 Errands = []
-                // W11S29, unclaimed at t807,948 with a spawn, forty extensions,
-                // two towers, a storage and a terminal still standing: each is
-                // vision, and vision is a sweep of the room every tick. Two
-                // crossings by W12S29. Out of this list once the room is dark.
-                Salvage = [ "W11S29" ]
+                // W11S29 was salvage from t807,948 until t1,043,975, when
+                // nothing of the colony that left it still stood (#666): a
+                // declaration with no work in it only kept the room projected
+                // and an observer looking into it.
+                Salvage = []
                 Mother = None
                 // 19,848 T banked here with no walk to spend it on; the
                 // terminal stood on 2026-09-17 at (11,43). W15S28 is the one

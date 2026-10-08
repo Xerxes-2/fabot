@@ -135,6 +135,10 @@ type Atlas =
             /// a lead prices a replacement not yet cast, whose factor is in no creep's
             /// entry.
             Walks: WalkTable
+            /// The projected rooms out of sight this tick (`ColonyView.dark`):
+            /// an entry of the census-keyed tables flooded over one is noted
+            /// in `FarFieldMemo.DarkRead` (#666).
+            Dark: Set<string>
             /// Work Area per Task, built at most once per tick and shared by every
             /// query that stands a creep in one — a mutable table because the key set
             /// is one the view does not carry; the Atlas is rebuilt every tick, so it
@@ -679,6 +683,12 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         FarFields = farFields
         RoadFloodsAsked = System.Collections.Generic.HashSet()
         Walks = walks
+        Dark =
+            spatial.Rooms
+            |> Map.toSeq
+            |> Seq.map fst
+            |> Seq.filter (ColonyView.dark view)
+            |> Set.ofSeq
         WorkAreas = System.Collections.Generic.Dictionary()
         HeavyAreas = System.Collections.Generic.Dictionary()
         LightAreas = System.Collections.Generic.Dictionary()
@@ -1417,6 +1427,15 @@ let private memoised
         table.[key] <- value
         value
 
+/// Note the rooms out of sight among those an entry of the census-keyed
+/// tables was just flooded over (`FarFieldMemo.DarkRead`, #666). Called from
+/// inside a build, so a recalled entry notes nothing.
+let private readDark (atlas: Atlas) (rooms: string list) : unit =
+    if not atlas.Dark.IsEmpty then
+        for room in rooms do
+            if atlas.Dark.Contains room then
+                atlas.FarFields.DarkRead.Add room |> ignore
+
 /// Work Area of a Task, body-blind: the passable tiles within the action's
 /// range of its target. The base geometry `posts` is itself derived from, so it
 /// stays a pure function of the Task; readers that hold a creep want
@@ -2126,42 +2145,42 @@ let walkerOf (task: Task) : Walker =
 /// The table with only the entries `keep` answers for, in place. Keys are
 /// collected before anything is removed: a `Dictionary` may not be mutated
 /// under its own enumeration.
-let private retain (table: System.Collections.Generic.Dictionary<'k, 'v>) (keep: 'k -> bool) =
+let private retainBy
+    (table: System.Collections.Generic.Dictionary<'k, 'v>)
+    (keep: 'k -> 'v -> bool)
+    =
     let stale = ResizeArray()
 
-    for KeyValue(key, _) in table do
-        if not (keep key) then
+    for KeyValue(key, value) in table do
+        if not (keep key value) then
             stale.Add key
 
     for key in stale do
         table.Remove key |> ignore
 
+/// `retainBy` asking the key alone.
+let private retain (table: System.Collections.Generic.Dictionary<'k, 'v>) (keep: 'k -> bool) =
+    retainBy table (fun key _ -> keep key)
+
 /// ADR-0032
 /// Drop, from the five census-keyed tables this Atlas was handed, every
 /// entry that read a room whose census moved — in place, because the tables
-/// are the plan memo's. A spawn walk reads home and every room of every chain
-/// `routes` answers to its goal; since `routes` answers a chain only while the
-/// projection carries every room of it, a departed room drops every
-/// cross-room spawn walk. A Seam walk reads its first room and is evicted on
-/// either, over-invalidating being the cheap error. A far field reads exactly
-/// its chain, and a home's line its home.
-let evictRooms (atlas: Atlas) (wasRival: Set<string>) (moved: Set<string>) : unit =
+/// are the plan memo's. A spawn walk reads home and every room its chains
+/// crossed when it was cast (`CastWalk.Crossed`), which a room that has left
+/// the chains since — gone from the projection, or taken by a rival — is
+/// still found in; and every room of every chain `routes` answers to its
+/// goal now, which a room that has joined them since is found in. So a room
+/// leaving drops the walks through it and no other (#666). A Seam walk reads
+/// its first room and is evicted on either, over-invalidating being the cheap
+/// error. A far field reads exactly its chain, and a home's line its home.
+let evictRooms (atlas: Atlas) (moved: Set<string>) : unit =
     let touches (rooms: string list) = rooms |> List.exists moved.Contains
 
-    // A room a rival has taken since `wasRival` (the tables' own stamp) has
-    // left every chain as surely, and this tick's `routes` no longer names
-    // the chains that crossed it. One they already held moves no chain.
-    let departed =
-        moved
-        |> Set.exists (fun room ->
-            not (Map.containsKey room atlas.Spatial.Rooms)
-            || (Set.contains room atlas.Spatial.RivalRooms && not (Set.contains room wasRival)))
-
-    retain atlas.Walks (fun (_, _, goalRoom) ->
+    retainBy atlas.Walks (fun (_, _, goalRoom) walk ->
         if goalRoom = atlas.Home then
             not (moved.Contains atlas.Home)
         else
-            not departed
+            not (touches walk.Crossed)
             && not (
                 touches (atlas.Home :: goalRoom :: List.concat (routes atlas atlas.Home goalRoom))
             ))
@@ -2170,6 +2189,24 @@ let evictRooms (atlas: Atlas) (wasRival: Set<string>) (moved: Set<string>) : uni
     retain atlas.FarFields.PerCensus (fun (chain, _, _, _, _, _) -> not (touches chain))
     retain atlas.FarFields.Narrowed (fun (chain, _, _, _, _) -> not (touches chain))
     retain atlas.FarFields.Lines (fun home -> not (moved.Contains home))
+
+/// The rooms an entry was flooded over out of sight (`FarFieldMemo.DarkRead`)
+/// that are out of sight no more — seen this tick, or gone from the
+/// projection —, taken out of the set and handed back for `evictRooms`
+/// (#666): the entry priced ground with none of the room's roads.
+let litRooms (atlas: Atlas) : Set<string> =
+    let darkRead = atlas.FarFields.DarkRead
+
+    if darkRead.Count = 0 then
+        Set.empty
+    else
+        let lit =
+            darkRead |> Seq.filter (fun room -> not (atlas.Dark.Contains room)) |> Set.ofSeq
+
+        for room in lit do
+            darkRead.Remove room |> ignore
+
+        lit
 
 /// Drop every far field whose Task is not in `live` (#392): a Task carries an
 /// object id, so a quiet census leaks one field per Task that ever priced a
@@ -2321,6 +2358,7 @@ let private planningWalk = pricingOf noTraffic planningFactor Walk
 /// itself.
 let private seamWalkFlood (atlas: Atlas) (fromRoom: string) (toRoom: string) : int[] =
     memoised atlas.SeamWalks (fromRoom, toRoom) (fun () ->
+        readDark atlas [ fromRoom; toRoom ]
         let weights = weightsOf atlas fromRoom
         let stepPrices, traffic = planningWalk
 
@@ -2531,6 +2569,8 @@ let rec private farFieldAlong
         | other -> other
 
     let flood () =
+        readDark atlas chain
+
         match chain with
         | first :: (next :: _ as suffix) ->
             let onward = farFieldAlong atlas table keyed creep task suffix origins
@@ -3770,20 +3810,24 @@ let private castTable
     (goalRoom: string)
     : int[] option =
     let near () =
-        memoised atlas.Walks (from, factor, atlas.Home) (fun () ->
+        (memoised atlas.Walks (from, factor, atlas.Home) (fun () ->
             let dist, _ =
                 walkFloodFromAll
                     (weightsOf atlas atlas.Home)
                     factor
                     (adjacentWalkableIn atlas atlas.Home from)
 
-            dist)
+            {
+                Ticks = dist
+                Crossed = [ atlas.Home ]
+            }))
+            .Ticks
 
     if goalRoom = atlas.Home then
         Some(near ())
     else
         match atlas.Walks.TryGetValue((from, factor, goalRoom)) with
-        | true, table -> Some table
+        | true, walk -> Some walk.Ticks
         | _ ->
             match routes atlas atlas.Home goalRoom with
             | [] -> None
@@ -3799,7 +3843,9 @@ let private castTable
                     |> List.map (castAlong atlas factor (near ()))
                     |> List.reduce (Array.map2 min)
 
-                atlas.Walks.[(from, factor, goalRoom)] <- table
+                let crossed = List.concat chains |> List.distinct
+                readDark atlas crossed
+                atlas.Walks.[(from, factor, goalRoom)] <- { Ticks = table; Crossed = crossed }
                 Some table
 
 /// The walk in whole ticks a freshly cast body needs to stand on a tile — the

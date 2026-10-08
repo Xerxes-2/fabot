@@ -1,6 +1,8 @@
 # The plan memo signs the union of what its readers read, not the widest single reader
 
-> **Status:** accepted
+> **Status:** accepted; amended by #666
+
+> **Amended by #666**: the union is of what the readers read **of what stands there**. A room out of sight is signed by its last sighting rather than by the dark projection the readers read (ADR 0017's #666 amendment), and the difference is made up beside the signature: `PlanMemo.PaidDark` for the plan, `FarFieldMemo.DarkRead` for the tables.
 
 ADR 0017 admitted the hauler quota to the census memo on a **containment** argument, and wrote that argument into its Consequences as the admission test for everything after it: *"The hauler quota rides the same memo only because its input set is a subset of the Layout's; anything census-derived added later may join, anything reading creep state may not."* That sentence stopped holding at #149 and was overtaken a second time at #169. The memo is still **right** — an unchanged signature still proves every plan riding it unchanged, which is the whole of ADR 0017's claim — but the reason it is right changed from containment to union, and the admission test as written would now reject the two readers already on the memo. We record the succession: **`Decide.censusSignature` signs the union of what its readers read, and a census-derived plan is admitted by widening the signature to its own inputs.** ADR 0017's third Consequence is now read as *"anything census-derived may join, and the signature widens to its inputs"*; the clause it keeps unchanged is *"anything reading creep state may not"*.
 

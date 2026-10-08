@@ -575,6 +575,29 @@ wire("cpu: an absent leaf reads empty, and a well-formed one round-trips", async
   assert.equal(stable(globalThis.Memory.fabot.observe.cpu), stable(sample));
 });
 
+wire("cpu: the world lane's split rides beside the colonies' under `world` (#666)", async () => {
+  const { loadCpu, saveCpu } = await logCodec();
+
+  const row = {
+    t: 10,
+    ms: 60.5,
+    entry: 0.1,
+    snapshot: 14,
+    decide: 40,
+    save: 3,
+    execute: 3.4,
+    intents: 90,
+    bucket: 10000,
+    replans: 0,
+    colonies: { world: 21.5, W12S28: 9.25 },
+    floods: { world: [40, 2, 31000], W12S28: [3, 1, 900] },
+  };
+
+  globalThis.Memory = rootMemoryWith("cpu", { ticks: [row], spans: [] });
+  saveCpu(loadCpu());
+  assert.equal(stable(globalThis.Memory.fabot.observe.cpu.ticks), stable([row]));
+});
+
 for (const [name, leaf] of [
   ["null", null],
   ["a string", "Incorrect memory path"],

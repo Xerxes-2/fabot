@@ -15,9 +15,9 @@ open Fabot.Core.Tests.Decide.LayoutFixtures
 /// the same array, and one it evicted and re-ran is a new one.
 let private touchingRoom (room: string) (memo: PlanMemo) : int[] list =
     [
-        for KeyValue((_, _, goalRoom), flood) in memo.Walks do
+        for KeyValue((_, _, goalRoom), walk) in memo.Walks do
             if goalRoom = room then
-                flood
+                walk.Ticks
         for KeyValue((fromRoom, toRoom), flood) in memo.SeamWalks do
             if fromRoom = room || toRoom = room then
                 flood
@@ -29,9 +29,9 @@ let private touchingRoom (room: string) (memo: PlanMemo) : int[] list =
 /// The spawn walks flooded over the home room alone.
 let private homeWalks (memo: PlanMemo) : int[] list =
     [
-        for KeyValue((_, _, goalRoom), flood) in memo.Walks do
+        for KeyValue((_, _, goalRoom), walk) in memo.Walks do
             if goalRoom = "W1N1" then
-                flood
+                walk.Ticks
     ]
 
 /// The north-border colony with its outpost rock across the Seam and a spawn
@@ -1075,13 +1075,6 @@ let planMemoTests =
                     (Map.find "W1N1" (roomSignatures taken))
                     (Map.find "W1N1" (roomSignatures open'))
                     "and the home room's does not"
-
-                // What the next tick's eviction compares against, so that only
-                // a room newly taken drops every cross-room walk.
-                Expect.equal
-                    (decideOn taken).Memo.RivalRooms
-                    (Set.singleton "W1N2")
-                    "the memo carries the rooms held by a rival when its tables were filled"
             }
 
             test "an outpost's census moving keeps the home room's walks and drops the outpost's" {
@@ -1626,5 +1619,290 @@ let outpostRoadMemoTests =
                     decide { colony with PlayerSites = ceiling } Map.empty Set.empty (Some sentinel)
 
                 Expect.isNonEmpty full.Memo.OutpostRoads "reaching the ceiling replans"
+            }
+        ]
+
+/// A sighting taken at `tick`, as `World.Sightings` holds one.
+let private sightingAt (tick: int) : RoomSighting =
+    {
+        Tick = tick
+        Targets = lazy Set.empty
+        Rival = None
+    }
+
+/// `colony` at tick `time`, its home seen then and W1N2 last seen at
+/// `seenAt`.
+let private sightedAt (time: int) (seenAt: int) (colony: ColonyView) : ColonyView =
+    { colony with
+        Time = time
+        Seen = Map.ofList [ "W1N1", sightingAt time; "W1N2", sightingAt seenAt ]
+    }
+
+/// `colony` at tick `time` with W1N2 in sight.
+let private litAt (time: int) (colony: ColonyView) : ColonyView = sightedAt time time colony
+
+/// `colony` at tick `time` with W1N2 out of sight since tick 90: projected
+/// as the world projects a dark room, its rock off the declaration, no
+/// structure of it standing and no hold read.
+let private darkAt (time: int) (colony: ColonyView) : ColonyView =
+    let standing =
+        colony.Spatial.Rooms
+        |> Map.tryFind "W1N2"
+        |> Option.map (fun layer ->
+            layer.TargetPositions
+            |> Map.filter (fun id _ ->
+                match Map.tryFind id colony.Spatial.TargetKinds with
+                | Some(Structure _)
+                | Some(Site _) -> true
+                | _ -> false)
+            |> Map.keys
+            |> Set.ofSeq)
+        |> Option.defaultValue Set.empty
+
+    { colony with
+        RoomControl = Map.remove "W1N2" colony.RoomControl
+        Spatial =
+            { colony.Spatial with
+                TargetKinds =
+                    colony.Spatial.TargetKinds
+                    |> Map.filter (fun id _ -> not (standing.Contains id))
+                Rooms =
+                    colony.Spatial.Rooms
+                    |> Map.change
+                        "W1N2"
+                        (Option.map (fun layer ->
+                            { layer with
+                                TargetPositions =
+                                    layer.TargetPositions
+                                    |> Map.filter (fun id _ -> not (standing.Contains id))
+                            }))
+            }
+    }
+    |> sightedAt time 90
+
+/// The memo with its tables emptied in place, so the next tick floods every
+/// entry it asks for afresh.
+let private emptied (memo: PlanMemo) : PlanMemo =
+    memo.Walks.Clear()
+    memo.SeamWalks.Clear()
+    memo.FarFields.Clear()
+    memo.Narrowed.Clear()
+    memo
+
+/// An extension built at home, a census change W1N2 has no part in.
+let private extended (colony: ColonyView) : ColonyView =
+    colony |> withTarget "ext-3" { X = 10; Y = 20 } (Structure BuiltKind.Extension)
+
+/// One tick of a colony whose turn to re-plan has not come (#357).
+let private waitingOn (memo: PlanMemo) (colony: ColonyView) =
+    decideUnarbitrated colony Map.empty Set.empty (Some memo) ReplanTurn.Waiting
+
+[<Tests>]
+let darkRoomMemoTests =
+    testList
+        "a room out of sight"
+        [
+            test
+                "a room going dark and coming back as it was moves no signature, replans and evicts nothing (#666)" {
+                let seen = litAt 100 (roadedColony ())
+                let dark = darkAt 101 (roadedColony ())
+
+                Expect.notEqual
+                    (censusSignature dark)
+                    (censusSignature seen)
+                    "the premise: the dark projection signs differently from the seen one"
+
+                let first = decideOn seen
+                let outpostFloods = touchingRoom "W1N2" first.Memo
+
+                Expect.isNonEmpty
+                    outpostFloods
+                    "the premise: the first tick flooded something that reads the outpost"
+
+                let second = decide dark Map.empty Set.empty (Some first.Memo)
+
+                Expect.equal
+                    second.Memo.Signature
+                    first.Memo.Signature
+                    "out of sight: the plan is recalled on the signature it was paid under"
+
+                Expect.equal
+                    second.Memo.RoomSignatures
+                    first.Memo.RoomSignatures
+                    "and the room's stamp is the last sighting's"
+
+                let seenAgain = litAt 102 (roadedColony ())
+                let third = decide seenAgain Map.empty Set.empty (Some second.Memo)
+
+                Expect.equal
+                    (third.Memo.Signature, third.Memo.Paid)
+                    (first.Memo.Signature, 100)
+                    "seen again as it was: still the plan paid at the first tick"
+
+                for flood in outpostFloods do
+                    Expect.isTrue
+                        (touchingRoom "W1N2" third.Memo
+                         |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
+                        "and every entry that read the outpost seen rode the dark tick out, unflooded"
+
+                Expect.equal
+                    third.Intents
+                    (decideOn seenAgain).Intents
+                    "a recalled memo decides exactly what a fresh one does"
+            }
+
+            test "a room seen again with its census moved still evicts and replans" {
+                let first = decideOn (litAt 100 (roadedColony ()))
+                let outpostFloods = touchingRoom "W1N2" first.Memo
+
+                let second =
+                    decide (darkAt 101 (roadedColony ())) Map.empty Set.empty (Some first.Memo)
+
+                // The road is gone when vision comes back.
+                let unroaded = litAt 102 (borderedColony (Some(reservedRoom true 4000)))
+                let third = decide unroaded Map.empty Set.empty (Some second.Memo)
+
+                Expect.equal
+                    third.Memo.Signature
+                    (censusSignature unroaded)
+                    "the plan is paid again, under the census seen"
+
+                Expect.notEqual
+                    third.Memo.Signature
+                    first.Memo.Signature
+                    "which is not the one it was paid under"
+
+                for flood in outpostFloods do
+                    Expect.isFalse
+                        (touchingRoom "W1N2" third.Memo
+                         |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
+                        "and nothing that read the outpost survived its census moving"
+            }
+
+            test "an entry flooded over a room out of sight goes on the room's next sighting" {
+                // A dark room's grid holds none of its roads: what a dark tick
+                // floods over it is kept while it stays dark and not past the
+                // tick vision returns, though its census has not moved.
+                let first = decideOn (litAt 100 (roadedColony ()))
+
+                let second =
+                    decide
+                        (darkAt 101 (roadedColony ()))
+                        Map.empty
+                        Set.empty
+                        (Some(emptied first.Memo))
+
+                let darkFloods = touchingRoom "W1N2" second.Memo
+
+                Expect.isNonEmpty darkFloods "the premise: the dark tick flooded over the outpost"
+
+                Expect.isTrue (second.Memo.DarkRead.Contains "W1N2") "and the memo says it did"
+
+                let stillDark =
+                    decide (darkAt 102 (roadedColony ())) Map.empty Set.empty (Some second.Memo)
+
+                for flood in darkFloods do
+                    Expect.isTrue
+                        (touchingRoom "W1N2" stillDark.Memo
+                         |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
+                        "kept while the room stays dark"
+
+                let homeNow = homeWalks stillDark.Memo
+
+                let third =
+                    decide (litAt 103 (roadedColony ())) Map.empty Set.empty (Some stillDark.Memo)
+
+                Expect.equal
+                    third.Memo.Signature
+                    first.Memo.Signature
+                    "seen again as it was: no replan"
+
+                for flood in darkFloods do
+                    Expect.isFalse
+                        (touchingRoom "W1N2" third.Memo
+                         |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
+                        "but every entry flooded over it dark is gone"
+
+                for flood in homeNow do
+                    Expect.isTrue
+                        (homeWalks third.Memo
+                         |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
+                        "and the home room's walks are not"
+
+                Expect.isFalse (third.Memo.DarkRead.Contains "W1N2") "and the note is spent"
+            }
+
+            test
+                "a plan paid while a room is out of sight is owed from its next sighting, and the next turn pays it lit or dark" {
+                // The plan reads the projection, and a dark room's holds no
+                // container or road of it. The sighting may fall on a tick
+                // that is not the colony's turn; the turn after pays it.
+                let first = decideOn (litAt 100 (roadedColony ()))
+
+                let second =
+                    decide
+                        (darkAt 101 (extended (roadedColony ())))
+                        Map.empty
+                        Set.empty
+                        (Some first.Memo)
+
+                Expect.equal
+                    (second.Memo.Paid, second.Memo.PaidDark)
+                    (101, Set.singleton "W1N2")
+                    "a census moving at home replans while the outpost is dark, and says so"
+
+                let third = litAt 102 (extended (roadedColony ())) |> waitingOn second.Memo
+
+                Expect.equal
+                    (third.Memo.Paid, third.Memo.Due)
+                    (101, true)
+                    "the outpost seen on a tick not the colony's turn: the plan is served and owed"
+
+                let fourth =
+                    decide
+                        (darkAt 103 (extended (roadedColony ())))
+                        Map.empty
+                        Set.empty
+                        (Some third.Memo)
+
+                Expect.equal
+                    (fourth.Memo.Paid, fourth.Memo.Due, fourth.Memo.Signature)
+                    (103, false, second.Memo.Signature)
+                    "the next turn pays it though the outpost is dark again, under the same signature"
+
+                let fifth =
+                    decide
+                        (darkAt 104 (extended (roadedColony ())))
+                        Map.empty
+                        Set.empty
+                        (Some fourth.Memo)
+
+                Expect.equal fifth.Memo.Paid 103 "and once paid, a dark tick recalls it"
+            }
+
+            test "a change seen on a tick not the colony's turn stays owed once the room goes dark" {
+                // The hold and the census a lit tick reads are stamped
+                // whatever the turn, and a dark tick signs the room by them,
+                // not by the stale plan's line.
+                let first = decideOn (litAt 100 (roadedColony ()))
+                let unroaded = litAt 101 (borderedColony (Some(reservedRoom false 4000)))
+                let second = unroaded |> waitingOn first.Memo
+
+                Expect.equal
+                    second.Memo.Signature
+                    first.Memo.Signature
+                    "the premise: a waiting colony serves its stale plan"
+
+                let third =
+                    decide
+                        (darkAt 102 (borderedColony (Some(reservedRoom false 4000))))
+                        Map.empty
+                        Set.empty
+                        (Some second.Memo)
+
+                Expect.equal
+                    (third.Memo.Signature, third.Memo.Paid)
+                    (censusSignature unroaded, 102)
+                    "dark on its turn: the plan is paid for what was last seen"
             }
         ]

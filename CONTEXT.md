@@ -406,7 +406,7 @@ A reader's ask for eyes on a room (#660, `Layout.LookRequest`): the room, the en
 The reasoned outcome a decision step returns beside its decision — data, never a log line: the [[matcher]]'s says which Task won a creep and why, what was kept, released or refused (a too-early refusal carrying the [[walk]] and the [[restock]] wait), and the [[resolver]]'s what became of its movement. Manufactured evidence is computed only for the [[verbose list]]. ADR-0009, ADR-0018, ADR-0025, ADR-0029.
 
 ### Census signature
-The fingerprint of everything a census-derived plan reads — every standing structure, pending site and rival site tile named with its room, the [[home room]]'s level and name, and the rate every projected room's sources are priced at — under which the [[layout]], the hauler quota and the recalled [[walk]] tables are held. Heap only. ADR-0017, ADR-0032, ADR-0044.
+The fingerprint of everything a census-derived plan reads — every standing structure, pending site and rival site tile named with its room, the [[home room]]'s level and name, and the rate every projected room's sources are priced at — under which the [[layout]], the hauler quota and the recalled [[walk]] tables are held. A projected room out of sight is signed by its last sighting, so vision coming and going moves nothing; a plan paid while it is dark is owed from its next sighting (`PlanMemo.PaidDark`), and a table entry flooded over it dark goes then too (`FarFieldMemo.DarkRead`). Heap only. ADR-0017, ADR-0032, ADR-0044.
 
 ### Verbose list
 The creep names owed full candidate scoring and reroute attribution, stored under `Memory.fabot.observe` and flipped from the terminal; empty, absent or malformed means off. ADR-0018, ADR-0030.

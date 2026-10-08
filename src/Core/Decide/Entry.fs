@@ -117,6 +117,41 @@ let private signedCensusOf
         signedCensuses <- Map.add key signed kept
         signed
 
+/// A flat signature's parts by name: the head's three, then each room's.
+let private signatureParts (signature: string) : Map<string, string> =
+    match signature.Split('\n') |> List.ofArray with
+    | head :: rooms ->
+        let headParts =
+            match head.Split('|') with
+            | [| home; level; stages |] -> [ "home", home; "level", level; "stages", stages ]
+            | _ -> [ "head", head ]
+
+        let roomParts =
+            rooms
+            |> List.map (fun line ->
+                let at = line.IndexOf '='
+
+                if at < 0 then
+                    line, ""
+                else
+                    line.Substring(0, at), line.Substring(at + 1))
+
+        Map.ofList (headParts @ roomParts)
+    | [] -> Map.empty
+
+/// One colony's census signed (`signaturesOf`).
+type private Signed =
+    {
+        /// The per-room half (`PlanMemo.RoomSignatures`).
+        Rooms: Map<string, string>
+        /// What vision read of each room (`PlanMemo.RoomCensuses`).
+        Censuses: Map<string, RoomCensus>
+        /// The flat signature.
+        Signature: string
+        /// The dark rooms signed by their last sighting (`PlanMemo.PaidDark`).
+        Remembered: Set<string>
+    }
+
 /// ADR-0017
 /// ADR-0044
 /// The census signature: a string over exactly the inputs the census-derived
@@ -133,9 +168,19 @@ let private signedCensusOf
 /// walk tables beside it read one room's grid each and are evicted per room
 /// (`PlanMemo.RoomSignatures`, `Atlas.evictRooms`). One walk builds both; what
 /// a reader compares is equality, so the layout of the string is free.
-let private signaturesOf (view: ColonyView) : Map<string, string> * string =
+///
+/// A room out of sight (#666) is signed by what stood there when it was last
+/// seen, so our vision coming and going moves no memo: its census and its
+/// controller's hold as the memo last stamped them (`PlanMemo.RoomCensuses`),
+/// everything the colony decides of it — its stage, a rival's hold, whether
+/// it is only crossed — read fresh. The projection stays dark — no decision
+/// reads a remembered structure —, so a plan paid while such a room is dark
+/// is owed again once it is seen (`PlanMemo.PaidDark`). A room never seen
+/// signs what it projects, which no flip moves.
+let private signaturesOf (view: ColonyView) (memo: PlanMemo option) : Signed =
     let spatial = view.Spatial
     let home = SpatialInfo.homeName spatial
+    let dark = ColonyView.dark view
 
     // The home controller's level: it gates the allowance the placement
     // filters on and, derived, the horizon the clustered placement is sized
@@ -170,12 +215,32 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
     // A room held for a stray alone (#570) is signed by neither half: no
     // plan or walk table of the colony's reads it, and its coming and going
     // replans nothing.
-    let rooms =
+    // The rate a room's sources are priced at, and the empty rate for a room
+    // vision answered for not at all — a third answer, different from either
+    // rate. In the flat signature alone: the hauler quota reads it, no walk
+    // table does, and in the per-room half a crossed room's vision coming and
+    // going evicted W15S28's spawn walks every tick (82% of its pops,
+    // 2026-10-05). A dark room the memo remembers reads its last sighting's.
+    // Beside it, whether somebody else holds the controller, which an outpost
+    // road's sites wait on (#548) and its payback reads (who holds it).
+    let held room =
+        Map.tryFind room view.RoomControl
+        |> Option.map (fun control ->
+            let other =
+                RoomControlInfo.heldByOther control
+                |> Option.map (fun hold -> $"/{hold.Holder}")
+                |> Option.defaultValue ""
+
+            $"{heldRateOf control}{other}")
+        |> Option.defaultValue ""
+
+    // Each room's per-room signature, what vision read of it — the last
+    // sighting's for a dark room the memo remembers — and whether it was.
+    let signedRooms =
         spatial.Rooms
         |> Map.toList
         |> List.filter (fun (room, _) -> not (Set.contains room spatial.StrayRooms))
         |> List.map (fun (room, layer) ->
-            room,
             // The Thorium deposits on their tiles: the Layout reads them
             // twice (the extractor's tile and the mineral container's Seats)
             // and `Atlas.workingGroundIn` at every level. The mod deletes an
@@ -207,27 +272,28 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
             // changing moves every route the walk tables were priced along.
             let taken = if Set.contains room spatial.RivalRooms then "Taken" else ""
 
-            $"{home}|{level}|{stage}|{taken}|{signed.Standing}|{signed.Pending}|{rivals}|{signed.Minerals}")
+            let projected = $"{signed.Standing}|{signed.Pending}|{rivals}|{signed.Minerals}"
+
+            let remembered =
+                match memo |> Option.bind (fun m -> Map.tryFind room m.RoomCensuses) with
+                | Some last when dark room -> Some last
+                | _ -> None
+
+            let census =
+                remembered
+                |> Option.defaultWith (fun () -> { Census = projected; Held = held room })
+
+            room, $"{home}|{level}|{stage}|{taken}|{census.Census}", census, remembered.IsSome)
+
+    let rooms =
+        signedRooms
+        |> List.map (fun (room, signature, _, _) -> room, signature)
         |> Fresh.mapOfList
 
-    // The rate a room's sources are priced at, and the empty rate for a room
-    // vision answered for not at all — a third answer, different from either
-    // rate. In the flat signature alone: the hauler quota reads it, no walk
-    // table does, and in the per-room half a crossed room's vision coming and
-    // going evicted W15S28's spawn walks every tick (82% of its pops,
-    // 2026-10-05).
-    // Beside it, whether somebody else holds the controller, which an outpost
-    // road's sites wait on (#548) and its payback reads (who holds it).
-    let held room =
-        Map.tryFind room view.RoomControl
-        |> Option.map (fun control ->
-            let other =
-                RoomControlInfo.heldByOther control
-                |> Option.map (fun hold -> $"/{hold.Holder}")
-                |> Option.defaultValue ""
-
-            $"{heldRateOf control}{other}")
-        |> Option.defaultValue ""
+    let censuses =
+        signedRooms
+        |> List.map (fun (room, _, census, _) -> room, census)
+        |> Fresh.mapOfList
 
     // A room the colony only crosses or harasses (#463) signs its census per
     // room, for the walk tables, and in the flat signature only
@@ -249,14 +315,13 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
     // the room set itself is signed by the join, and `signatureMoves` reads
     // the parts back.
     let flat =
-        rooms
-        |> Map.toList
-        |> List.map (fun (room, signature) ->
+        signedRooms
+        |> List.map (fun (room, signature, census, _) ->
             if Set.contains room unplanned then
                 let taken = if Set.contains room spatial.RivalRooms then "Taken" else ""
                 $"\n{room}={taken}"
             else
-                $"\n{room}={held room}|{signature}")
+                $"\n{room}={census.Held}|{signature}")
         |> String.concat ""
 
     // Whether the player's sites stand at the outpost roads' ceiling (#548):
@@ -272,31 +337,17 @@ let private signaturesOf (view: ColonyView) : Map<string, string> * string =
     // is, so no other home's signature moves.
     let labs = if Facts.labsFunded view then "\n~labs" else ""
 
-    rooms, $"{home}|{level}|{stages}{flat}\n~sites={full}\n~ore={ore}{labs}"
+    {
+        Rooms = rooms
+        Censuses = censuses
+        Signature = $"{home}|{level}|{stages}{flat}\n~sites={full}\n~ore={ore}{labs}"
+        Remembered =
+            signedRooms
+            |> List.choose (fun (room, _, _, remembered) -> if remembered then Some room else None)
+            |> Fresh.setOfSeq
+    }
 
-let censusSignature (view: ColonyView) : string = snd (signaturesOf view)
-
-/// A flat signature's parts by name: the head's three, then each room's.
-let private signatureParts (signature: string) : Map<string, string> =
-    match signature.Split('\n') |> List.ofArray with
-    | head :: rooms ->
-        let headParts =
-            match head.Split('|') with
-            | [| home; level; stages |] -> [ "home", home; "level", level; "stages", stages ]
-            | _ -> [ "head", head ]
-
-        let roomParts =
-            rooms
-            |> List.map (fun line ->
-                let at = line.IndexOf '='
-
-                if at < 0 then
-                    line, ""
-                else
-                    line.Substring(0, at), line.Substring(at + 1))
-
-        Map.ofList (headParts @ roomParts)
-    | [] -> Map.empty
+let censusSignature (view: ColonyView) : string = (signaturesOf view None).Signature
 
 /// What moved between two flat signatures (#463): the head's parts by name
 /// (`home`, `level`, `stages`), then the rooms, a room on one side only
@@ -318,7 +369,11 @@ let signatureMoves (before: string) (after: string) : string list =
 /// The per-room half of the census signature (#388): what
 /// `PlanMemo.RoomSignatures` carries and `Atlas.evictRooms` is told the
 /// difference of.
-let roomSignatures (view: ColonyView) : Map<string, string> = fst (signaturesOf view)
+let roomSignatures (view: ColonyView) : Map<string, string> = (signaturesOf view None).Rooms
+
+/// What vision read of each room, as the signature signs it
+/// (`PlanMemo.RoomCensuses`).
+let roomCensuses (view: ColonyView) : Map<string, RoomCensus> = (signaturesOf view None).Censuses
 
 /// The view with where each body's load came from settled, before anything
 /// reads a body.
@@ -378,7 +433,8 @@ let leavingTiles
 /// room's evicted where its census moved, beside the per-room and flat
 /// signatures and the tables handed to it.
 let private recallAtlas (view: ColonyView) (memo: PlanMemo option) =
-    let signedRooms, signature = signaturesOf view
+    let signed = signaturesOf view memo
+    let signedRooms = signed.Rooms
 
     // ADR-0032
     // The memo's tables go to the Atlas whatever the plan's signature did:
@@ -402,41 +458,56 @@ let private recallAtlas (view: ColonyView) (memo: PlanMemo option) =
                 Lines = m.Lines
                 RoadFloods = m.RoadFloods
                 CreepFloods = m.CreepFloods
+                DarkRead = m.DarkRead
             }
         | None -> FarFieldMemo.walks (), FarFieldMemo.empty ()
 
     let atlas = Atlas.ofViewRecalling walks farFields view
 
     // The rooms whose census moved since the tables were filled, including a
-    // room on one side only. Evicted before any flood is forced. Read off the
-    // memo's per-room stamp and not settled by the plan's recall: on a
-    // deferred turn the two are different ticks', and a recalled plan
-    // carrying tables a dark tick filled is exactly #372.
+    // room on one side only, and every room an entry was flooded over out of
+    // sight that vision answers for again (#666). Evicted before any flood is
+    // forced. Read off the memo's per-room stamp and not settled by the
+    // plan's recall: on a deferred turn the two are different ticks', and a
+    // recalled plan carrying tables a dark tick filled is exactly #372.
     match memo with
-    | Some m when m.RoomSignatures <> signedRooms ->
-        let moved =
-            Set.union (Map.keys m.RoomSignatures |> Set.ofSeq) (Map.keys signedRooms |> Set.ofSeq)
-            |> Set.filter (fun room ->
-                Map.tryFind room m.RoomSignatures <> Map.tryFind room signedRooms)
+    | Some m ->
+        let censused =
+            if m.RoomSignatures = signedRooms then
+                Set.empty
+            else
+                Set.union
+                    (Map.keys m.RoomSignatures |> Set.ofSeq)
+                    (Map.keys signedRooms |> Set.ofSeq)
+                |> Set.filter (fun room ->
+                    Map.tryFind room m.RoomSignatures <> Map.tryFind room signedRooms)
+
+        let moved = Set.union censused (Atlas.litRooms atlas)
 
         if not moved.IsEmpty then
-            Atlas.evictRooms atlas m.RivalRooms moved
-    | _ -> ()
+            Atlas.evictRooms atlas moved
 
-    memo |> Option.iter (fun m -> Atlas.evictAvoided atlas m.AvoidRooms)
+        Atlas.evictAvoided atlas m.AvoidRooms
+    | None -> ()
 
-    signedRooms, signature, walks, farFields, atlas
+    signed, walks, farFields, atlas
 
-/// A memo handed on with this tick's stamps: the per-room signatures, the
-/// rooms a rival holds and the rooms a non-fighter goes round.
-let private stamped
-    (view: ColonyView)
-    (signedRooms: Map<string, string>)
-    (memo: PlanMemo)
-    : PlanMemo =
+/// Whether the memo's plan is owed for a room it was paid blind to (#666):
+/// one of `PaidDark` is out of sight no more, this tick or since. Latched on
+/// every memo handed on, whatever the turn, so the colony's next turn pays it
+/// though the room be dark again by then.
+let private dueOf (view: ColonyView) (memo: PlanMemo) : bool =
+    memo.Due
+    || memo.PaidDark |> Set.exists (fun room -> not (ColonyView.dark view room))
+
+/// A memo handed on with this tick's stamps: the per-room signatures, what
+/// vision read of each room, whether its plan is owed, and the rooms a
+/// non-fighter goes round.
+let private stamped (view: ColonyView) (signed: Signed) (memo: PlanMemo) : PlanMemo =
     { memo with
-        RoomSignatures = signedRooms
-        RivalRooms = view.Spatial.RivalRooms
+        RoomSignatures = signed.Rooms
+        RoomCensuses = signed.Censuses
+        Due = dueOf view memo
         AvoidRooms = view.Spatial.AvoidRooms
     }
 
@@ -764,14 +835,16 @@ let rec private openWhole
     // The signature is read before the Atlas is built, because the Atlas is
     // one of the things it decides: the plan is recalled whole on the flat
     // signature, the tables beside it per room on the per-room half.
-    let signedRooms, signature, walks, farFields, atlas = recallAtlas view memo
-    let recalled = memo |> Option.filter (fun m -> m.Signature = signature)
+    let signed, walks, farFields, atlas = recallAtlas view memo
 
-    // The rooms a rival holds, and the rooms a non-fighter goes round, stamped
-    // beside the per-room signatures on every memo handed on: the tables are
-    // this tick's whatever the plan is.
-    let rivals = view.Spatial.RivalRooms
-    let avoided = view.Spatial.AvoidRooms
+    let recalled =
+        memo
+        |> Option.filter (fun m -> m.Signature = signed.Signature && not (dueOf view m))
+
+    // The per-room signatures, the census each signs and the rooms a
+    // non-fighter goes round, stamped on every memo handed on: the tables
+    // are this tick's whatever the plan is.
+    let stampedOn = stamped view signed
 
     // Whose turn it is to re-plan (#357, `turn`). A stale memo is not a
     // wrong plan, only an old one — the reservations are level-blind and a
@@ -787,12 +860,7 @@ let rec private openWhole
         // a census returns after a deferred turn (#372) the stamp is the dark
         // tick's, and handed on as it was it would evict and re-flood that
         // room every tick until the next replan.
-        | Some m ->
-            { m with
-                RoomSignatures = signedRooms
-                RivalRooms = rivals
-                AvoidRooms = avoided
-            }
+        | Some m -> stampedOn m
         // A colony whose turn has not come (#357) serves its stale plan but
         // carries the tick's own tables on it, stamped with this tick's
         // per-room signatures: a census that moves and moves back recalls the
@@ -800,34 +868,20 @@ let rec private openWhole
         | None when turn = ReplanTurn.Waiting ->
             match memo with
             | Some stale ->
-                { stale with
-                    RoomSignatures = signedRooms
-                    RivalRooms = rivals
-                    AvoidRooms = avoided
-                    Walks = walks
-                    SeamWalks = farFields.SeamWalks
-                    FarFields = farFields.PerCensus
-                    Narrowed = farFields.Narrowed
-                    Lines = farFields.Lines
-                    RoadFloods = farFields.RoadFloods
-                    CreepFloods = farFields.CreepFloods
-                }
-            | None ->
-                let deferred =
-                    PlanMemo.deferred
-                        signedRooms
-                        walks
-                        farFields.SeamWalks
-                        farFields.PerCensus
-                        farFields.Narrowed
-                        farFields.Lines
-                        farFields.RoadFloods
-                        farFields.CreepFloods
-
-                { deferred with
-                    RivalRooms = rivals
-                    AvoidRooms = avoided
-                }
+                stampedOn
+                    { stale with
+                        Walks = walks
+                        SeamWalks = farFields.SeamWalks
+                        FarFields = farFields.PerCensus
+                        Narrowed = farFields.Narrowed
+                        Lines = farFields.Lines
+                        RoadFloods = farFields.RoadFloods
+                        CreepFloods = farFields.CreepFloods
+                        DarkRead = farFields.DarkRead
+                    }
+            | None -> stampedOn (PlanMemo.deferred signed.Rooms signed.Censuses walks farFields)
+        // A plan paid this tick read a dark room's projection, not its last
+        // sighting (#666): it is owed again once the room is seen.
         | None ->
             let (siteIntents,
                  servedFootings,
@@ -841,10 +895,13 @@ let rec private openWhole
             let quota, demandRows, load = haulerDemandOf economy atlas
 
             {
-                Signature = signature
-                RoomSignatures = signedRooms
-                RivalRooms = rivals
-                AvoidRooms = avoided
+                Signature = signed.Signature
+                RoomSignatures = signed.Rooms
+                RoomCensuses = signed.Censuses
+                PaidDark = signed.Remembered
+                Due = false
+                Paid = view.Time
+                AvoidRooms = view.Spatial.AvoidRooms
                 SiteIntents = siteIntents
                 UnservedFootings = unservedFootings
                 ServedFootings = servedFootings
@@ -861,6 +918,7 @@ let rec private openWhole
                 Lines = farFields.Lines
                 RoadFloods = farFields.RoadFloods
                 CreepFloods = farFields.CreepFloods
+                DarkRead = farFields.DarkRead
             }
 
     // The narrow facts the Planner reads about the colony's own decisions:
@@ -1405,7 +1463,7 @@ let rec private openFight
         None
     else
 
-        let signedRooms, _, _, _, atlas = recallAtlas view (Some memo)
+        let signed, _, _, atlas = recallAtlas view (Some memo)
         let held = heldTaskFacts view assignments
 
         // `outpostFactsOf`'s guarded rooms, off the two facts of the chain they
@@ -1445,17 +1503,7 @@ let rec private openFight
                     FightTasks = fight.Tasks
                     Casts = lazy (castsOf view threats guarded calls)
                     Fighters = fighters
-                    Join =
-                        joinFight
-                            view
-                            economy
-                            assignments
-                            verbose
-                            memo
-                            carry
-                            signedRooms
-                            atlas
-                            fight
+                    Join = joinFight view economy assignments verbose memo carry signed atlas fight
                 }
 
 /// A fight-only decide joined to the world's fight (`Joining`): every body's
@@ -1467,7 +1515,7 @@ and private joinFight
     (verbose: Set<string>)
     (memo: PlanMemo)
     (carry: EconomyCarry)
-    (signedRooms: Map<string, string>)
+    (signed: Signed)
     atlas
     (fight: FightPass)
     (world: WorldFight)
@@ -1563,7 +1611,7 @@ and private joinFight
                                 Map.add name tid acc
                             else
                                 acc)
-                    Memo = stamped view signedRooms memo
+                    Memo = stamped view signed memo
                     Verdicts = verdicts
                     Movement = movement
                     Quotas = Quotas.silent
@@ -1688,6 +1736,11 @@ type ColonyFault =
         Error: exn
     }
 
+/// The name the world lane's own steps are stamped under
+/// (`ColonyDecisions.Lane`): no room is named it.
+[<Literal>]
+let worldLane = "world"
+
 /// One tick's decisions over every colony.
 type ColonyDecisions<'Stamp> =
     {
@@ -1697,6 +1750,13 @@ type ColonyDecisions<'Stamp> =
         /// Each decision in the order it was made — the fight-only ones
         /// first —, with the view it read and the stamp taken after it.
         Decided: (Colony * ColonyView * Decision * 'Stamp) list
+        /// The stamps taken before the first decision was made (#666), in
+        /// the order taken: the world's own steps under `worldLane` — the
+        /// judging, the observers' aim, the world's fight, the casting and
+        /// the one fleet match —, each colony's opening and join under its
+        /// home. Without them every one of these was charged to the first
+        /// colony to decide.
+        Lane: (string * 'Stamp) list
         /// The colonies that decided their fight alone.
         FoughtAlone: Set<string>
         /// The turn the whole decides were handed, -1 where it waits.
@@ -1941,17 +2001,28 @@ let private decideWorld
     (colonies: (Colony * ColonyView) list)
     (judged: ColonyView list)
     : ColonyDecisions<'Stamp> =
+    // The world lane's stamps, observe-only: the judging before this is the
+    // world's.
+    let lane = ResizeArray<string * 'Stamp>()
+    let stampAs (whose: string) = lane.Add((whose, stamp ()))
+    stampAs worldLane
+
     let fought, fightFaults =
         List.zip colonies judged
         |> List.filter (fun ((colony, _), _) -> Set.contains colony.Home inputs.FightAlone)
         |> List.map (fun ((colony, _), view) ->
-            alone colony.Home "fight" (fun () ->
-                Option.map2
-                    (fun memo carry -> openFight view inputs.Holding inputs.Verbose memo carry)
-                    (Map.tryFind colony.Home inputs.PlanMemos)
-                    (Map.tryFind colony.Home inputs.Carries)
-                |> Option.flatten
-                |> Option.map (fun opening -> colony, view, opening)))
+            let opened =
+                alone colony.Home "fight" (fun () ->
+                    Option.map2
+                        (fun memo carry ->
+                            openFight view inputs.Holding inputs.Verbose memo carry)
+                        (Map.tryFind colony.Home inputs.PlanMemos)
+                        (Map.tryFind colony.Home inputs.Carries)
+                    |> Option.flatten
+                    |> Option.map (fun opening -> colony, view, opening))
+
+            stampAs colony.Home
+            opened)
         |> sorted
 
     let fought = List.choose id fought
@@ -1981,6 +2052,8 @@ let private decideWorld
         |> Layout.aimObservers (Set.union inputs.Idle fightOnly)
         |> List.zip (colonies |> List.map fst)
 
+    stampAs worldLane
+
     // The turn is bound and is a DU (`ReplanTurn`), because the first
     // shape shipped broken: as an expression inside the call with a
     // `bool` last argument, the turn arrived as JavaScript `undefined`,
@@ -1999,15 +2072,19 @@ let private decideWorld
                 | Some _ when index <> turn -> ReplanTurn.Waiting
                 | _ -> ReplanTurn.Now
 
-            alone colony.Home "open" (fun () ->
-                colony,
-                view,
-                openWhole
-                    view
-                    inputs.Holding
-                    inputs.Verbose
-                    (Map.tryFind colony.Home inputs.PlanMemos)
-                    whose))
+            let opened =
+                alone colony.Home "open" (fun () ->
+                    colony,
+                    view,
+                    openWhole
+                        view
+                        inputs.Holding
+                        inputs.Verbose
+                        (Map.tryFind colony.Home inputs.PlanMemos)
+                        whose)
+
+            stampAs colony.Home
+            opened)
         |> sorted
 
     let opened = fought @ whole
@@ -2018,6 +2095,8 @@ let private decideWorld
 
     let fights, owners =
         worldFights inputs.Hops (opened |> List.map (fun (colony, _, opening) -> colony, opening))
+
+    stampAs worldLane
 
     // Who casts each of the world's fight asks (`Caster.assign`): every
     // colony's fleet and oven read, an idle colony asking nothing. A
@@ -2042,6 +2121,8 @@ let private decideWorld
                 })
         |> Caster.assign inputs.Hops inputs.Holding owners
 
+    stampAs worldLane
+
     let fights =
         fights
         |> Map.map (fun home fight ->
@@ -2052,8 +2133,12 @@ let private decideWorld
     let joined, joinFaults =
         opened
         |> List.map (fun (colony, view, opening) ->
-            alone colony.Home "join" (fun () ->
-                colony, view, opening, opening.Join fights.[colony.Home]))
+            let joining =
+                alone colony.Home "join" (fun () ->
+                    colony, view, opening, opening.Join fights.[colony.Home])
+
+            stampAs colony.Home
+            joining)
         |> sorted
 
     // The fighters of a colony that decides nothing keep their Tasks,
@@ -2081,6 +2166,8 @@ let private decideWorld
             [ joined |> List.mapi (fun k (_, _, _, joining) -> k, joining.Fight) ]
             inputs.Holding
             inputs.Verbose
+
+    stampAs worldLane
 
     // A colony whose finish throws has had its fighters matched in the one
     // fleet match above: the Tasks they won there are lost with its
@@ -2187,6 +2274,7 @@ let private decideWorld
                      decision
                      stamped))
             @ handed
+        Lane = List.ofSeq lane
         FoughtAlone =
             handed
             |> List.fold (fun alone (colony, _, _, _) -> Set.remove colony.Home alone) fightOnly

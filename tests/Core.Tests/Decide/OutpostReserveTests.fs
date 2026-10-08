@@ -769,6 +769,7 @@ let standDownGateTests =
                                 Lines = withoutLook.Memo.Lines
                                 RoadFloods = withoutLook.Memo.RoadFloods
                                 CreepFloods = withoutLook.Memo.CreepFloods
+                                DarkRead = withoutLook.Memo.DarkRead
                             }
                     }
                     withoutLook

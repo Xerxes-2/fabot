@@ -53,7 +53,8 @@ let invaderCoreTests =
                 // so their references are swapped in and their contents compared beside.
                 let walkRows (memo: PlanMemo) =
                     memo.Walks
-                    |> Seq.map (fun entry -> entry.Key, List.ofArray entry.Value)
+                    |> Seq.map (fun entry ->
+                        entry.Key, (List.ofArray entry.Value.Ticks, entry.Value.Crossed))
                     |> List.ofSeq
                     |> List.sortBy fst
 
@@ -83,6 +84,7 @@ let invaderCoreTests =
                                     Lines = untroubled.Memo.Lines
                                     RoadFloods = untroubled.Memo.RoadFloods
                                     CreepFloods = untroubled.Memo.CreepFloods
+                                    DarkRead = untroubled.Memo.DarkRead
                                 }
                         }
                         untroubled
