@@ -435,6 +435,12 @@ module Engine =
 
     let containerDecayTimeOwned = 500
 
+    /// CONSTRUCTION_COST container: what a container's site takes whole.
+    let containerBuildCost = 5_000
+
+    /// CONTAINER_HITS: a container's hits, whole.
+    let containerHits = 250_000
+
     /// TOMBSTONE_DECAY_PER_PART: a tombstone stands five ticks a part of the
     /// body that died, so `maxBodyParts` times it at the most.
     let tombstoneDecayPerPart = 5

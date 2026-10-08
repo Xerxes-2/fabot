@@ -2865,9 +2865,9 @@ let arenaBorderTests =
             // The same haulers with W13S28 a living colony. The ranger walks in
             // at t1 and sees them; taken out of the room and the clock moved on
             // six ticks, the room is dark and the haulers only remembered,
-            // counted nothing where an observer can look (`Facts.contestOf`),
-            // so the kill asks the observer for that look (#660,
-            // `Facts.unconfirmedPrey`) once its sighting is `Facts.lookStride`
+            // counted nothing where an observer can look (`Facts.roomWorth`,
+            // read for a cast), so the kill asks the observer for that look
+            // (#660, `RoomWorth.unseen`) once its sighting is `Facts.lookStride`
             // old — before, nothing asked: W17S26 wanted no eyes once its raid
             // was gone, and the observer looked at the rival room it watches.
             test

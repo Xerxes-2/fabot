@@ -183,7 +183,7 @@ let harassGuardTests =
                             ]
                     }
 
-                let contest = Facts.contestOf colony harassRoom
+                let contest = Facts.roomWorth colony harassRoom
 
                 Expect.isFalse
                     (Facts.contestOurs colony harassRoom)
@@ -197,8 +197,8 @@ let harassGuardTests =
                     "each economy body of the enemy's, its take ours to deny"
 
                 Expect.equal
-                    (Contest.delta contest)
-                    (Contest.denied contest)
+                    (RoomWorth.delta Quarry.Reading.Cast contest)
+                    (RoomWorth.denied Quarry.Reading.Cast contest)
                     "the delta: the take denied alone"
 
                 Expect.isTrue
@@ -1229,10 +1229,11 @@ let sweepRoomTests =
                         ]
 
                 Expect.equal
-                    (Facts.sweepRate
+                    (Facts.roomRate
                         Quarry.Reading.Value
                         colony
                         [ Fighter.ofCreep (ranger "ranger-r") ]
+                        0
                         0
                         westRoom)
                     0.0
@@ -1274,7 +1275,7 @@ let sweepRoomTests =
                     }
 
                 let rate owner =
-                    Facts.sweepRate
+                    Facts.roomRate
                         Quarry.Reading.Value
                         (sweeping
                             []
@@ -1291,6 +1292,7 @@ let sweepRoomTests =
                                     (Bodies.rangerPattern.Block @ Bodies.rangerPattern.Block)
                             )
                         ]
+                        0
                         0
                         westRoom
 
@@ -1369,10 +1371,11 @@ let sweepRoomTests =
                                 }
                         }
 
-                    Facts.sweepRate
+                    Facts.roomRate
                         reading
                         colony
                         [ Fighter.ofCreep (ranger "ranger-r") ]
+                        0
                         0
                         westRoom
 
@@ -1390,6 +1393,178 @@ let sweepRoomTests =
                     (rate Quarry.Reading.Cast false)
                     0.0
                     "none reaches it: a cast at its odds"
+            }
+        ]
+
+[<Tests>]
+let roomWorthTests =
+    testList
+        "a room's worth: one price per room, and the one rate the sweep reads (#663)"
+        [
+            // The take denied is always a term of the rate (#663 M2; the old
+            // sweep rate read kills alone): the rival income that stops for
+            // our holding the room. A body that works on until its kill is
+            // denied nothing before it; its kill value carries the loss after.
+            test
+                "a body caught where it works is denied nothing before its kill; one its owner walks off is denied for the hold" {
+                let holder = ranger "ranger-r"
+                let at = RoomPos.at westRoom { X = 25; Y = 25 }
+
+                let colony tile =
+                    sweeping [ holder, at ] [ hauler westRoom "hauler-w" tile ]
+
+                let fleeing share (view: ColonyView) =
+                    { view with
+                        World =
+                            { view.World with
+                                Flees = Map.ofList [ enemy, share ]
+                            }
+                    }
+
+                let caught = colony { X = 22; Y = 20 }
+                let worth = Facts.roomWorth caught westRoom
+
+                // 10C5M, 1,500 hits, under the block's two RANGED_ATTACK:
+                // a 75-tick kill.
+                let kill = 1500.0 / float (2 * Engine.rangedAttackPower)
+
+                let rate view =
+                    Facts.roomRate Quarry.Reading.Value view [ Fighter.ofCreep holder ] 0 0 westRoom
+
+                Expect.floatClose
+                    Accuracy.medium
+                    (rate caught)
+                    (worth.Values.["hauler-w"] / kill)
+                    "caught where it stands: its kill alone"
+
+                Expect.floatClose
+                    Accuracy.medium
+                    (rate (fleeing 1.0 caught))
+                    (worth.Values.["hauler-w"] / kill)
+                    "however often its owner's workers walk off: its kill value carries the loss"
+
+                // On the exit's doorstep it slips the group but for two of
+                // its 75 ticks: the rest of its take stops while we hold.
+                let slipping = colony { X = 1; Y = 20 }
+
+                Expect.isGreaterThan
+                    (rate slipping)
+                    (rate (fleeing 0.0 slipping))
+                    "slipping the group, its load a tick is denied over the hold"
+
+                Expect.floatClose
+                    Accuracy.medium
+                    (rate (fleeing 0.5 slipping) - rate (fleeing 0.0 slipping))
+                    ((rate slipping - rate (fleeing 0.0 slipping)) / 2.0)
+                    "an owner whose workers walk off half the time: half the uncaught take"
+            }
+
+            test "an escort the group beats never makes its room out-earn the same room unescorted" {
+                let holder = ranger "ranger-r"
+                let at = RoomPos.at westRoom { X = 25; Y = 25 }
+
+                let escort =
+                    { theirsIn westRoom "escort" { X = 26; Y = 20 } [ Move; RangedAttack ] with
+                        Owner = "Invader"
+                    }
+
+                let room hostiles =
+                    let colony = sweeping [ holder, at ] hostiles
+
+                    { colony with
+                        World =
+                            { colony.World with
+                                Flees = Map.ofList [ enemy, 1.0 ]
+                            }
+                    }
+
+                let rate view =
+                    Facts.roomRate Quarry.Reading.Value view [ Fighter.ofCreep holder ] 0 0 westRoom
+
+                let worker = hauler westRoom "hauler-w" { X = 22; Y = 20 }
+
+                Expect.isGreaterThan
+                    (rate (room [ worker; escort ]))
+                    0.0
+                    "the group beats the escort"
+
+                Expect.isLessThan
+                    (rate (room [ worker; escort ]))
+                    (rate (room [ worker ]))
+                    "the escort's kill is time spent, never income denied"
+            }
+
+            // #659 S1: the way out is the room's walkable exits through its
+            // ground, not the straight steps to the nearest edge.
+            test
+                "a body backed against a walled edge is a walk from its way out: caught where an open edge lets it slip" {
+                let holder = ranger "ranger-r"
+                let at = RoomPos.at harassRoom { X = 25; Y = 25 }
+                let fleeing = hauler harassRoom "hauler-n" { X = 1; Y = 25 }
+                let colony = sweeping [ holder, at ] [ fleeing ]
+
+                let walled =
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Borders =
+                                    colony.Spatial.Borders
+                                    |> Map.add
+                                        harassRoom
+                                        (plainRing
+                                         |> Map.map (fun tile terrain ->
+                                             if tile.X = 0 then Wall else terrain))
+                            }
+                    }
+
+                let rate view =
+                    Facts.roomRate
+                        Quarry.Reading.Value
+                        view
+                        [ Fighter.ofCreep holder ]
+                        0
+                        0
+                        harassRoom
+
+                Expect.isGreaterThan
+                    (rate walled)
+                    (rate colony)
+                    "the walled west edge leaves it twenty-four steps from an exit, not one"
+            }
+
+            // #661: priced now; the dismantler that takes them is S7's.
+            test
+                "the enemy's container is priced at its rebuild: no crew without WORK takes it down, a dismantler where it pays" {
+                let colony = bareHome |> harassing
+                let worth = Facts.roomWorth colony harassRoom
+
+                Expect.equal
+                    worth.Structures
+                    (Map.ofList
+                        [
+                            fst container,
+                            {
+                                Rebuild = Engine.containerBuildCost
+                                Hits = Engine.containerHits
+                            }
+                        ])
+                    "its container, at its build"
+
+                let rate dismantle =
+                    Facts.roomRate
+                        Quarry.Reading.Value
+                        colony
+                        [ Fighter.ofCreep (ranger "r") ]
+                        dismantle
+                        0
+                        harassRoom
+
+                Expect.equal (rate 0) 0.0 "a ranger alone takes nothing down"
+
+                Expect.isGreaterThan
+                    (rate (25 * Engine.dismantlePower))
+                    0.0
+                    "twenty-five WORK take it down in two hundred ticks: its rebuild over them"
             }
         ]
 
@@ -1708,10 +1883,11 @@ let sweepGroupTests =
                     }
 
                 let rateOf owner =
-                    Facts.sweepRate
+                    Facts.roomRate
                         Quarry.Reading.Value
                         (sweeping [] [ { cripple with Owner = owner } ])
                         [ Fighter.ofCreep (ranger "r") ]
+                        0
                         0
                         harassRoom
 
@@ -1861,10 +2037,11 @@ let catchableFirstTests =
                     "the tripper is camped at its odds; the miner on its seat is certain"
 
                 Expect.isGreaterThan
-                    (Facts.sweepRate
+                    (Facts.roomRate
                         Quarry.Reading.Value
                         (colony [ tripper ])
                         [ Fighter.ofCreep bigRanger ]
+                        0
                         0
                         harassRoom)
                     0.0
@@ -1936,12 +2113,12 @@ let catchableFirstTests =
                 let team = [ Fighter.ofCreep holder ]
 
                 Expect.isGreaterThan
-                    (Facts.sweepRate Quarry.Reading.Value inRoom team 0 harassRoom)
+                    (Facts.roomRate Quarry.Reading.Value inRoom team 0 0 harassRoom)
                     0.0
                     "in the room: its camp pays"
 
                 Expect.isGreaterThan
-                    (Facts.sweepRate Quarry.Reading.Value across team 0 harassRoom)
+                    (Facts.roomRate Quarry.Reading.Value across team 0 0 harassRoom)
                     0.0
                     "across the border: the room's price holds, the group is not pulled out"
 

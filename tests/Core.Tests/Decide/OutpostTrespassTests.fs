@@ -1475,7 +1475,7 @@ let contestTests =
             test "a digger and a hauler in our outpost: our yield kept, their take denied" {
                 let colony = declaredRaid [ seatedDigger; haulerOf "h-2" { X = 27; Y = 43 } ]
 
-                let contest = Facts.contestOf colony "W1N2"
+                let contest = Facts.roomWorth colony "W1N2"
 
                 // Seated, the digger takes its five WORK's dig up to the held
                 // rock's output; the empty hauler a load a round trip of a
@@ -1495,7 +1495,7 @@ let contestTests =
                     "each economy body's take"
 
                 Expect.equal
-                    (Contest.delta contest)
+                    (RoomWorth.delta Quarry.Reading.Cast contest)
                     (contest.Kept + dug + hauled)
                     "the delta: ours kept and theirs denied"
 
@@ -1531,11 +1531,21 @@ let contestTests =
                     }
 
                 let valueOf colony id =
-                    (Facts.contestOf colony "W1N2").Values
+                    RoomWorth.values Quarry.Reading.Cast (Facts.roomWorth colony "W1N2")
                     |> Map.tryFind id
                     |> Option.defaultValue 0.0
 
-                let seen = valueOf (declaredRaid [ seatedDigger ]) "d-1"
+                // The same body seen now, with the twenty ticks of life it
+                // has spent since: a kill is worth the life left it (#663).
+                let seen =
+                    valueOf
+                        (declaredRaid
+                            [
+                                { seatedDigger with
+                                    TicksToLive = seatedDigger.TicksToLive - 20
+                                }
+                            ])
+                        "d-1"
 
                 Expect.equal
                     (valueOf (remembered false false seatedDigger) "d-1")
@@ -1556,10 +1566,10 @@ let contestTests =
             }
 
             test "a raid alone, or a neutral's hauler, denies nothing" {
-                let raid = Facts.contestOf (declaredRaid raiders) "W1N2"
+                let raid = Facts.roomWorth (declaredRaid raiders) "W1N2"
 
                 let neutral =
-                    Facts.contestOf
+                    Facts.roomWorth
                         (declaredRaid
                             [
                                 { haulerOf "h-2" { X = 27; Y = 43 } with
@@ -1569,8 +1579,123 @@ let contestTests =
                         "W1N2"
 
                 Expect.isEmpty raid.Takes "an Invader's raid takes none of our economy itself"
-                Expect.equal (Contest.delta raid) raid.Kept "the raid's delta is our yield alone"
+
+                Expect.equal
+                    (RoomWorth.delta Quarry.Reading.Cast raid)
+                    raid.Kept
+                    "the raid's delta is our yield alone"
+
                 Expect.isEmpty neutral.Takes "a neutral's body is nobody's to deny"
+            }
+
+            // #663 (the user's addendum on #621): only the unspent part of a
+            // body is lost, and its work was ending at its death anyway.
+            test
+                "a kill is worth the life left it: its body by its share of life, its work no longer than it lives" {
+                let valueOf (body: HostileInfo) =
+                    (Facts.roomWorth (declaredRaid [ body ]) "W1N2").Values.[body.Id]
+
+                let digger life =
+                    valueOf { seatedDigger with TicksToLive = life }
+
+                // Its work's replacement (spawn and walk) is far under 375
+                // ticks: the dig lost is the same at each of these lives.
+                let body = 2.0 * (digger 1500 - digger 750)
+
+                Expect.floatClose
+                    Accuracy.medium
+                    (digger 750 - digger 375)
+                    (body / 4.0)
+                    "half the life left, half the body"
+
+                // Ten ticks left: a tenth of a hundred and fiftieth of its
+                // body, and its seat's dig (ten a tick) for those ten alone.
+                Expect.floatClose
+                    Accuracy.medium
+                    (digger 10)
+                    (body * 10.0 / float Engine.creepLifetime + 10.0 * 10.0)
+                    "its dig only while it lives"
+
+                let claimer life =
+                    valueOf
+                        { claimerOf "c-1" { X = 30; Y = 46 } with
+                            TicksToLive = life
+                        }
+
+                // 3M3C: 1,950 a whole CLAIM life of 600.
+                Expect.floatClose
+                    Accuracy.medium
+                    (claimer Engine.claimLifetime - claimer (Engine.claimLifetime / 2))
+                    (1950.0 / 2.0)
+                    "a CLAIM body's life is its shorter one"
+            }
+
+            // #663 M2: one room, one price, whichever colony reads it.
+            test
+                "a room's worth is the world's: the colony that mines it prices it for one that does not" {
+                let miner = declaredRaid [ seatedDigger ]
+
+                let other =
+                    { miner with
+                        Sources = []
+                        RaidedOutposts = Set.empty
+                        ThreatenedOutposts = Set.empty
+                    }
+
+                Expect.equal
+                    (Facts.roomWorth other "W1N2").Kept
+                    0.0
+                    "alone, a colony that mines nothing there keeps nothing there"
+
+                let swept = Facts.sweepAll Map.empty [ other; miner ] |> List.head
+
+                Expect.equal
+                    (Facts.roomWorth swept "W1N2").Kept
+                    (float Engine.heldOutputPerTick)
+                    "laid with the miner's: its held source's yield, for every colony"
+            }
+
+            // #663 M2, the review: the prey is the world's, never the owner's
+            // own verdict. The miner's outpost is stood down (out of its
+            // projection); a neighbour projects it and mines nothing there.
+            test
+                "a stood-down outpost projected only by a colony that does not mine it still prices the miner's trespass kill" {
+                let watcher =
+                    { declaredRaid [ seatedDigger ] with
+                        Sources = []
+                        RaidedOutposts = Set.empty
+                        ThreatenedOutposts = Set.empty
+                    }
+
+                let miner =
+                    let colony = declaredRaid []
+
+                    { colony with
+                        Sources =
+                            colony.Sources
+                            |> List.filter (fun source ->
+                                SpatialInfo.roomOf colony.Spatial source.Id <> Some "W1N2")
+                        RaidedOutposts = Set.singleton "W1N2"
+                        MinedRooms = Set.singleton "W1N2"
+                        Spatial =
+                            { colony.Spatial with
+                                Rooms = Map.remove "W1N2" colony.Spatial.Rooms
+                            }
+                    }
+
+                Expect.isEmpty
+                    (Facts.roomWorth watcher "W1N2").Values
+                    "alone, the watcher's room is no economy of ours"
+
+                let swept = Facts.sweepAll Map.empty [ watcher; miner ] |> List.head
+                let worth = Facts.roomWorth swept "W1N2"
+
+                Expect.equal
+                    (worth.Values |> Map.keys |> List.ofSeq)
+                    [ "d-1" ]
+                    "laid with the miner's: its trespasser is prey"
+
+                Expect.equal worth.Kept (float Engine.heldOutputPerTick) "its held source's yield"
             }
         ]
 

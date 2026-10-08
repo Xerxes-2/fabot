@@ -1691,10 +1691,13 @@ let private harmRate (view: ColonyView) (hostile: HostileInfo) (walk: int) : flo
 let private loadedGait (view: ColonyView) (hostile: HostileInfo) : Gait =
     Quarry.loadedGait view.Hostiles (cargoOf view hostile) hostile
 
-/// What killing a hostile is worth, in energy (#621): its body (every part,
-/// destroyed ones too, and each boost a lab spent on it), what it carries,
+/// What killing a hostile is worth, in energy (#621, by its remaining life,
+/// #663): the share of its body (every part, destroyed ones too, and each
+/// boost a lab spent on it) its life has left to spend — its ticks to live
+/// over a lifetime, a CLAIM body's shorter one —, what it carries, whole,
 /// and its work lost until its owner replaces it — its spawn time and its
-/// walk back (`replacementWalk` at its loaded pace) at its rate (`harmRate`).
+/// walk back (`replacementWalk` at its loaded pace) at its rate (`harmRate`),
+/// never past its life, where its work was ending anyway.
 let internal killValue (view: ColonyView) (hostile: HostileInfo) : float =
     let boosted =
         hostile.Boosts |> List.filter (fun boost -> boost <> Unboosted) |> List.length
@@ -1704,12 +1707,31 @@ let internal killValue (view: ColonyView) (hostile: HostileInfo) : float =
     let walk = replacementWalk * pace
     let replaced = Engine.spawnTicksPerPart * List.length hostile.Body + walk
 
+    let lifetime =
+        if List.contains BodyPart.Claim hostile.Body then
+            Engine.claimLifetime
+        else
+            Engine.creepLifetime
+
+    // A spawning body reads no life (the engine leaves it undefined, which
+    // compares false either way): it has its whole lifetime ahead of it. A
+    // life read at none or under is spent.
+    let life =
+        if hostile.TicksToLive >= 1 then
+            min lifetime hostile.TicksToLive
+        elif hostile.TicksToLive <= 0 then
+            0
+        else
+            lifetime
+
     float (
         bodyCost hostile.Body
         + boosted * (Engine.boostEnergyPerPart + Engine.boostMineralPerPart)
-        + cargoOf view hostile
     )
-    + harmRate view hostile walk * float replaced
+    * float life
+    / float lifetime
+    + float (cargoOf view hostile)
+    + harmRate view hostile walk * float (min life replaced)
 
 /// Whether an observer of ours reaches a room (`Engine.observerRange`).
 let internal observerReaches (view: ColonyView) (room: string) : bool =
@@ -1956,6 +1978,15 @@ let private healAcross (view: ColonyView) (hostile: HostileInfo) : int =
             | near :: _ when near <= Engine.rangedRange -> power * Engine.rangedHealPower
             | _ -> 0)
 
+/// Whether the heal a dancer takes while out (`healAcross`) undoes what a
+/// body of ours lands while it is in (#658): it stays on the border and our
+/// camp never wears it down.
+let private outHealsCamp (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : bool =
+    let share = dancerInShare view hostile
+
+    float (healAcross view hostile) * (1.0 - share)
+    >= float (fighter.DamageAt Engine.rangedRange) * share
+
 /// The odds a dancer's kill lands from a camp on a tile covering its way in
 /// (#658): the share of its watched time it stood in (`dancerInShare`),
 /// times the odds it keeps coming back over the camp's ticks, 1 − e^(−λ·T),
@@ -1976,19 +2007,114 @@ let private campOdds
         | None -> 1.0
         | Some crossed -> 1.0 - exp (-(Quarry.returnRate view.Time crossed) * 2.0 * float kill)
 
-    let heal = healAcross view hostile
-    let lands = fighter.DamageAt Engine.rangedRange
-
-    if float heal * (1.0 - share) >= float lands * share then
+    if outHealsCamp view fighter hostile then
         0.0
     else
         share * returning
+
+/// Each tile's steps through a room's ground to its nearest walkable exit
+/// tile (#659 S1), by tile index: the border's exit tiles that are no wall,
+/// and every tile of ground a step at a time from them; -1 for a tile no
+/// step reaches.
+let private exitStepsIn (border: Map<Pos, Terrain>, terrain: TerrainGrid) : int[] =
+    let steps = Array.create tileCount -1
+    let queue = Array.zeroCreate tileCount
+    let mutable head = 0
+    let mutable tail = 0
+
+    for KeyValue(tile, ground) in border do
+        if Seam.isExit tile && ground <> Wall && inGrid tile then
+            steps.[indexOf tile] <- 0
+            queue.[tail] <- indexOf tile
+            tail <- tail + 1
+
+    while head < tail do
+        let index = queue.[head]
+        head <- head + 1
+
+        for next in neighbours (posAt index) do
+            if inGrid next && steps.[indexOf next] < 0 then
+                match TerrainGrid.tryFind next terrain with
+                | Some Plain
+                | Some Swamp ->
+                    steps.[indexOf next] <- steps.[index] + 1
+                    queue.[tail] <- indexOf next
+                    tail <- tail + 1
+                | Some Wall
+                | None -> ()
+
+    steps
+
+/// One room's exit steps as derived, beside the border and terrain read.
+type private ExitStepsKept =
+    {
+        Border: Map<Pos, Terrain>
+        Terrain: TerrainGrid
+        Steps: int[]
+    }
+
+/// Each room's exit steps across ticks: the terrain never changes, and the
+/// shell reads each room's once a heap (`World.terrainOf`), so one entry a
+/// room holds until a reset. An entry is kept only for the very border and
+/// terrain it was derived off (a fixture's room of the same name lays its
+/// own); built walls and ramparts are no terrain and stay out of it. Swapped
+/// whole, never mutated, so a reader on another thread sees an entry whole.
+let mutable private exitStepsKept: Map<string, ExitStepsKept> = Fresh.mapOfList []
+
+let private exitStepsOf (room: string) (border: Map<Pos, Terrain>) (terrain: TerrainGrid) : int[] =
+    match Map.tryFind room exitStepsKept with
+    | Some kept when
+        obj.ReferenceEquals(kept.Border, border)
+        && obj.ReferenceEquals(kept.Terrain, terrain)
+        ->
+        kept.Steps
+    | _ ->
+        let steps = exitStepsIn (border, terrain)
+
+        exitStepsKept <-
+            Map.add
+                room
+                {
+                    Border = border
+                    Terrain = terrain
+                    Steps = steps
+                }
+                exitStepsKept
+
+        steps
+
+/// A tile's steps to the way out of its room a body walks (#659 S1): through
+/// the room's ground to its nearest walkable exit (`exitStepsIn`), off the
+/// border and terrain this view projects or the world holds, so a body
+/// backed into a dead end or behind a walled edge is as far out as its walk.
+/// The straight steps to the nearest edge (`Dance.toEdge`) where neither
+/// holds the room's border, or no step of its ground reaches the tile.
+let internal exitSteps (view: ColonyView) (tile: RoomPos) : int =
+    let room = tile.Room
+    let at = RoomPos.pos tile
+
+    let ground =
+        match Map.tryFind room view.Spatial.Borders with
+        | Some border when not border.IsEmpty ->
+            Some(border, (SpatialInfo.layerOf view.Spatial room).Terrain)
+        | _ ->
+            Map.tryFind room view.World.Facts
+            |> Option.filter (fun facts -> not facts.Border.IsEmpty)
+            |> Option.map (fun facts -> facts.Border, facts.Layer.Terrain)
+
+    match ground with
+    | Some(border, terrain) when inGrid at ->
+        match (exitStepsOf room border terrain).[indexOf at] with
+        | -1 -> Dance.toEdge at
+        | steps -> steps
+    | _ -> Dance.toEdge at
 
 /// The odds a body of ours lands the whole of a kill (#621), as the share of
 /// its `kill` ticks the hostile stays in reach. Certain where it cannot walk
 /// off: penned in its room (an Invader), stationary or rooted at its work,
 /// behind the body on plain (#613), or kept off. Else it walks for the
-/// room's edge at its pace, the nearer side of the room its way out: one
+/// room's way out at its pace, its steps to the nearest walkable exit
+/// through the room's ground (`exitSteps`, #659): one
 /// quicker on plain stays in reach only until it opens the gap past the
 /// body's reach, from where they stand or, coming in, from the reach; one at
 /// the body's pace is caught at its work; walking elsewhere in the room, only
@@ -2016,9 +2142,9 @@ let private catchOdds
     then
         1.0
     else
-        let at = RoomPos.pos hostile.Pos
         let pace = Gait.ticks Gait.plain theirs |> Option.defaultValue 1
-        let off = Dance.toEdge at * pace
+        let out = exitSteps view hostile.Pos
+        let off = out * pace
 
         let left = Map.tryFind hostile.Id view.Stepped
         let back = Map.tryFind hostile.Id view.SteppedBack
@@ -2056,7 +2182,7 @@ let private catchOdds
             // its pace. One on or beside an exit walking out
             // leaves in a step: caught only for what lands before it, from
             // in reach.
-            | _ when Dance.toEdge at <= 1 -> off + 1 - max 0 arrival
+            | _ when out <= 1 -> off + 1 - max 0 arrival
             | _ when not leaving && walking -> off - max 0 arrival
             | _ when not leaving -> kill
             | _ when arrival > 0 -> 0
@@ -2169,10 +2295,13 @@ let private killsLanded
         priced.Hostiles
         |> List.filter (fun hostile -> hostile.Pos.Room = room)
         |> List.sumBy (fun hostile ->
-            match Map.tryFind hostile.Id values, killTicksOf priced healOn team hostile with
-            | Some value, Some kill when hostile.TicksToLive > landing + kill ->
-                catchOdds priced body None landing kill hostile * value
-            | _ -> 0.0)
+            match Map.tryFind hostile.Id values with
+            | Some value ->
+                match killTicksOf priced healOn team hostile with
+                | Some kill when hostile.TicksToLive > landing + kill ->
+                    catchOdds priced body None landing kill hostile * value
+                | _ -> 0.0
+            | None -> 0.0)
 
 /// Whether the holders of a held exit (#450) kill a trespasser in its room
 /// and walk back to the exit before the raid that left by it is back
@@ -3593,102 +3722,6 @@ let contestOurs (view: ColonyView) (room: string) : bool =
     || view.MinedRooms.Contains room
     || not (Set.contains room (harassRooms view))
 
-/// What a tick a raid stands in a room costs us (#654): the yield of our
-/// sources there at the rate the room is held at (`heldRateOf`), the
-/// economy the raid shuts while it stands; nothing where none of ours is.
-let private roomTickWorth (view: ColonyView) (room: string) : int =
-    let rate =
-        Map.tryFind room view.RoomControl
-        |> Option.map heldRateOf
-        |> Option.defaultValue Engine.neutralOutputPerTick
-
-    // A room we mine, or an outpost of ours a raid has shut or threatens.
-    let ours =
-        minesRoom view room
-        || view.RaidedOutposts.Contains room
-        || view.ThreatenedOutposts.Contains room
-
-    let sources = if ours then sourcesIn view room else 0
-
-    sources * rate
-
-/// One room as the economic war over it (#656): every room our economy and
-/// a rival's meet in — our outpost a rival works or raids, a rival's remote
-/// we harass — priced by one measure, the room's economic delta a tick a
-/// fight there moves.
-type Contest =
-    {
-        /// Our income a tick a fight there keeps: our sources' yield there at
-        /// the rate the room is held at (`roomTickWorth`), the economy a raid
-        /// shuts while it stands.
-        Kept: float
-        /// The income a tick each economy body we may strike there takes
-        /// (`harmRate`, #621), by id: a digger's dig on its seat, a carrier's
-        /// load a round trip, a CLAIM body's reservation. Ours to deny.
-        Takes: Map<string, float>
-        /// Each of those bodies' kill value (`killValue`, #621), by id: what
-        /// its kill lands once.
-        Values: Map<string, float>
-    }
-
-[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
-module Contest =
-    /// The rival's income a tick a fight there denies: every take summed.
-    let denied (contest: Contest) : float =
-        contest.Takes |> Map.fold (fun total _ take -> total + take) 0.0
-
-    /// The room's economic delta a tick a fight there moves: our income
-    /// kept and the rival's denied.
-    let delta (contest: Contest) : float = contest.Kept + denied contest
-
-/// One room's contest (#656, `Contest`), read off this view: its prey the
-/// trespassers standing in it (`trespasser`), each priced at its take and
-/// its kill value as the kill score prices them (#621).
-let contestOf (view: ColonyView) (room: string) : Contest =
-    let prey =
-        view.Hostiles
-        |> List.filter (fun hostile ->
-            hostile.Pos.Room = room && trespasser view (Set.singleton room) hostile)
-
-    // What the contest prices is cast (#658: no spawn for ghosts): a body
-    // remembered out of sight at its odds read for a cast, nothing where a
-    // look that confirms it is coming — an outpost's asks for that look
-    // (`unconfirmedPrey`, #660), a candidate's comes in its rotation.
-    let odds = odds view Quarry.Reading.Cast
-
-    {
-        Kept = float (roomTickWorth view room)
-        Takes =
-            prey
-            |> List.map (fun hostile ->
-                hostile.Id, harmRate view hostile replacementWalk * odds hostile)
-            |> Map.ofList
-        Values =
-            prey
-            |> List.map (fun hostile -> hostile.Id, killValue view hostile * odds hostile)
-            |> Map.ofList
-    }
-
-/// Each dark room this colony kills trespassers in whose remembered
-/// trespassers a look would confirm (#660, #585): the bodies out of sight the
-/// view lays there (`RecalledRaiders`, `Quarry.ghosts`), a rooted one among
-/// them, with their kills at the odds they are still there (`killValue`,
-/// `odds` read for its value) summed: what the look is worth. `contestOf`
-/// counts any of them nothing for a cast where an observer can look, so
-/// without the look the room's kill waits on a body walking in.
-let internal unconfirmedPrey (view: ColonyView) : (string * float) list =
-    view.RecalledRaiders
-    |> List.filter (fun hostile ->
-        not (WorldView.sees view.World hostile.Pos.Room)
-        && trespassRooms view hostile.Pos.Room
-        && trespasser view (Set.singleton hostile.Pos.Room) hostile)
-    |> List.map (fun hostile ->
-        hostile.Pos.Room, killValue view hostile * odds view Quarry.Reading.Value hostile)
-    |> List.groupBy fst
-    |> List.map (fun (room, values) -> room, List.sumBy snd values)
-    |> List.filter (fun (_, value) -> value > 0.0)
-    |> List.sortBy fst
-
 /// What a tick of a declared outpost open is worth (#585): its sources'
 /// yield, reserved, off the declaration (`Colony.declared`), whether or not
 /// a stand-down projects the room this tick. Nothing for a room no colony
@@ -3766,25 +3799,7 @@ let holdSpan (income: float) (crew: float) (trip: int) (evidence: int) : int =
 /// the rest. What a stand-down's evidence waits on where an observer reaches.
 let lookStride = 5
 
-/// How long a player's raid holds the outpost it was last seen standing in
-/// shut past that sighting (#585), where no look has found it gone
-/// (`holdSpan`): over its slowest body's round trip (`WorldView.raidTrip`),
-/// the outpost's crew (`outpostCrewWorth`) against its income
-/// (`outpostTickWorth`), the evidence a look every `lookStride` ticks where
-/// an observer reaches the room, else none before the trip is out.
-let internal raidHoldSpan (view: ColonyView) (room: string) (raid: HostileInfo list) : int =
-    let trip = WorldView.raidTrip raid
-
-    holdSpan
-        (float (outpostTickWorth room))
-        (outpostCrewWorth room)
-        trip
-        (if observerReaches view room then
-             min lookStride trip
-         else
-             trip)
-
-/// A [[sweep]] candidate as the sweep prices it (#658): the kill's pricing
+/// A room as its worth prices it (#658, #663): the kill's pricing
 /// view (`killPricing`), the bodies out of sight the world remembers among
 /// its hostiles (`Quarry.ghosts`), with each body's last steps kept: the
 /// group is there or close by, so a carrier walking off is priced at the
@@ -3794,8 +3809,9 @@ let internal raidHoldSpan (view: ColonyView) (room: string) (raid: HostileInfo l
 /// quarry on (`Quarry.placed`): a dancer standing across the border on the
 /// tile it crossed out from, so the room's price holds through the tick it
 /// is out (its camp, `catchOdds`), and the group is not pulled from the room
-/// and back.
-let private sweepPricing (view: ColonyView) (room: string) : ColonyView =
+/// and back. Built once a tick per view and room (`pricingMemo`): the
+/// worth, the rate, the muster and the camp read one.
+let private pricingOf (view: ColonyView, room: string) : ColonyView =
     let priced = killPricing view room
 
     { priced with
@@ -3811,6 +3827,249 @@ let private sweepPricing (view: ColonyView) (room: string) : ColonyView =
         Stepped = view.Stepped
         SteppedBack = view.SteppedBack
     }
+
+/// Whether two views price a room alike (`pricingOf`): the same hostiles,
+/// projection, candidates, steps and world rooms, whatever else a copy of
+/// the view changed (the worths or the group laid in, `sweepAll`). The
+/// priced view keeps the first asker's world: a reader takes the world's
+/// readings past these (`Worths`, `Responses`, `Flees`) off its own view.
+/// It also reads RecalledHealers, Sources, RaidedOutposts, MinedRooms,
+/// Borrowed, World.Facts and our own bodies, fixed at cut time: a copy that
+/// changes one of them must join the key.
+let private pricesAlike (view: ColonyView, room: string) (view': ColonyView, room': string) =
+    room = room'
+    && (obj.ReferenceEquals(view, view')
+        || obj.ReferenceEquals(view.Hostiles, view'.Hostiles)
+           && obj.ReferenceEquals(view.Spatial, view'.Spatial)
+           && obj.ReferenceEquals(view.Harass, view'.Harass)
+           && obj.ReferenceEquals(view.Bounces, view'.Bounces)
+           && obj.ReferenceEquals(view.Stepped, view'.Stepped)
+           && obj.ReferenceEquals(view.SteppedBack, view'.SteppedBack)
+           && obj.ReferenceEquals(view.RoomControl, view'.RoomControl)
+           && obj.ReferenceEquals(view.Tuning, view'.Tuning)
+           && obj.ReferenceEquals(view.World.Rooms, view'.World.Rooms)
+           && obj.ReferenceEquals(view.World.Quarries, view'.World.Quarries)
+           && obj.ReferenceEquals(view.World.Observers, view'.World.Observers)
+           && obj.ReferenceEquals(view.World.Answers, view'.World.Answers)
+           && obj.ReferenceEquals(view.World.Dangers, view'.World.Dangers)
+           && view.Time = view'.Time)
+
+let private pricingMemo: TickMemo.Memo<ColonyView * string, ColonyView> =
+    TickMemo.create 16 pricesAlike
+
+let private sweepPricing (view: ColonyView) (room: string) : ColonyView =
+    TickMemo.recall pricingMemo (view, room) pricingOf
+
+/// The defence response a room's worth prices where the rival's dossier
+/// holds none for it: it answers at once, the worst case.
+let private instantResponse = 0
+
+/// What the world's worths are read over (#663 M2), of every colony alike:
+/// the rooms our economy works — every home of ours and every room a colony
+/// mines, raises, defends or watches for a child, every declared outpost —,
+/// the [[sweep]] candidates by the enemy each names, and the rival
+/// structures the dismantlers are handed.
+type private WorthScope =
+    {
+        Ours: Set<string>
+        Candidates: Map<string, string>
+        Dismantles: string list
+    }
+
+let private scopeOf (views: ColonyView list) : WorthScope =
+    {
+        Ours =
+            views
+            |> List.collect (fun view ->
+                (view.Sources
+                 |> List.choose (fun source -> SpatialInfo.roomOf view.Spatial source.Id))
+                @ Set.toList (homesOfOurs view)
+                @ view.Borrowed.Rooms
+                @ view.Borrowed.Defended
+                @ view.Borrowed.ChildOutposts
+                @ Set.toList view.MinedRooms)
+            |> Set.ofList
+        Candidates =
+            views
+            |> List.collect (fun view -> view.Harass |> List.map (fun h -> h.RoomName, h.Enemy))
+            |> Map.ofList
+        Dismantles = views |> List.collect _.Dismantles |> List.distinct
+    }
+
+/// A room's prey, of the world's (#663 M2): in a room our economy works or a
+/// candidate, a body that trespasses wherever it stands (`trespassingBody`)
+/// we may strike there (`mayStrike`, the room's fight ours); and in a
+/// candidate every unarmed body of the enemy it names, a cripple shot
+/// disarmed or bare among them — whether it is worth its kill is its price's
+/// (#648).
+let private preyOf (scope: WorthScope) (priced: ColonyView) (room: string) (hostile: HostileInfo) =
+    hostile.Pos.Room = room
+    && ((scope.Ours.Contains room || scope.Candidates.ContainsKey room)
+        && trespassingBody priced.Hostiles hostile
+        && mayStrike priced (Set.singleton room) hostile
+        || Map.tryFind room scope.Candidates = Some hostile.Owner
+           && not (HostileInfo.armed priced.Hostiles hostile))
+
+/// Our income a tick a fight keeps in a room (#663 M2): what we earn there
+/// while we hold it, each of its sources at its held yield (reserved or
+/// owned) — the projection's sources, or where it projects none (a
+/// stand-down withholds the room), the declared outpost's
+/// (`outpostTickWorth`) —; nothing in a room our economy does not work.
+let private keptIn (scope: WorthScope) (view: ColonyView) (room: string) : float =
+    if not (scope.Ours.Contains room) then
+        0.0
+    else
+        match sourcesIn view room with
+        | 0 -> float (outpostTickWorth room)
+        | sources -> float (sources * Engine.heldOutputPerTick)
+
+/// One room's worth (#663 M2, `RoomWorth`), over the world's scope
+/// (`WorthScope`) and read off one view of the room as its worth prices it
+/// (`sweepPricing`): its prey (`preyOf`), each at its take (`harmRate`) and
+/// its kill value (`killValue`, #621), and the candidate's enemy's escort at
+/// its kill — an Invader's or a third player's escort only gates the
+/// exchange (we do not defend his remote for him) —, each at the odds it
+/// still stands there, read for its value and for a cast (`odds`); our
+/// income kept there (`keptIn`); the rival containers the dismantlers are
+/// handed there at their rebuild over the hits they stand at; its raiders
+/// as the escort; and its owner's answer (`WorldView.Responses`, else
+/// `instantResponse`).
+let private worthOf (scope: WorthScope) (view: ColonyView) (room: string) : RoomWorth =
+    let priced = sweepPricing view room
+
+    let prey = priced.Hostiles |> List.filter (preyOf scope priced room)
+
+    let escort = raidersIn priced room
+
+    let valued =
+        prey
+        @ (escort
+           |> List.filter (fun h -> Map.tryFind room scope.Candidates = Some h.Owner))
+        |> List.distinctBy _.Id
+
+    // A container's hits as the world or the projection read them, else
+    // whole.
+    let hitsOf (id: string) =
+        Map.tryFind room view.World.Facts
+        |> Option.bind (fun facts -> Map.tryFind id facts.Hits)
+        |> Option.orElse (Map.tryFind id view.Spatial.Hits)
+        |> Option.map _.Hits
+        |> Option.defaultValue Engine.containerHits
+
+    {
+        Kept = keptIn scope view room
+        Takes =
+            prey
+            |> List.map (fun h -> h.Id, harmRate priced h replacementWalk)
+            |> Map.ofList
+        Values = valued |> List.map (fun h -> h.Id, killValue priced h) |> Map.ofList
+        Odds =
+            valued
+            |> List.map (fun h ->
+                h.Id, (odds priced Quarry.Reading.Value h, odds priced Quarry.Reading.Cast h))
+            |> Map.ofList
+        Dark =
+            valued
+            |> List.filter (fun h ->
+                Map.tryFind h.Id view.World.Quarries
+                |> Option.exists (fun track -> track.Seen < view.Time))
+            |> List.map _.Id
+            |> Set.ofList
+        Structures =
+            scope.Dismantles
+            |> List.filter (fun id ->
+                SpatialInfo.placementOf view.Spatial id
+                |> Option.exists (fun at -> at.Room = room))
+            |> List.map (fun id ->
+                id,
+                {
+                    Rebuild = Engine.containerBuildCost
+                    Hits = hitsOf id
+                })
+            |> Map.ofList
+        Exits = 0.0
+        Escort = escort
+        Response = Map.tryFind room view.World.Responses |> Option.defaultValue instantResponse
+    }
+
+let private worthMemo: TickMemo.Memo<ColonyView * string, RoomWorth> =
+    TickMemo.create 16 (fun (view, room) (view', room') ->
+        obj.ReferenceEquals(view, view') && room = room')
+
+/// A room's worth this tick (#663 M2): the world's, laid once for every
+/// colony (`WorldView.Worths`, `sweepAll`), else priced off this view once a
+/// tick (`worthOf`).
+let roomWorth (view: ColonyView) (room: string) : RoomWorth =
+    match view.World.Worths |> Option.bind (Map.tryFind room) with
+    | Some worth -> worth.Value
+    | None ->
+        TickMemo.recall worthMemo (view, room) (fun (view, room) ->
+            worthOf (scopeOf [ view ]) view room)
+
+/// The view a room is priced off (`sweepPricing`), of the views laid
+/// together, whatever their order: the colony that mines it, else one that
+/// works it as a [[sweep]] candidate, else one that projects it; of equals,
+/// the first home by name. Its worth's scope is the world's either way, so
+/// only the bodies its cut lays and the tiles it projects follow the choice.
+let private worthOwner (views: ColonyView list) (room: string) : ColonyView option =
+    let first (fits: ColonyView -> bool) =
+        views
+        |> List.filter fits
+        |> List.sortBy (fun view -> SpatialInfo.homeName view.Spatial)
+        |> List.tryHead
+
+    first (fun view -> minesRoom view room)
+    |> Option.orElse (first (fun view -> view.Harass |> List.exists (fun h -> h.RoomName = room)))
+    |> Option.orElse (first (fun view -> Map.containsKey room view.Spatial.Rooms))
+
+/// Every room any of the views projects or works as a candidate, its worth
+/// priced on first read over the world's scope (`scopeOf`) off its owner's
+/// view (`worthOwner`) as it stands when read (`current`: the views with the
+/// table laid in), once for all.
+let private worthTable
+    (views: ColonyView list)
+    (current: unit -> ColonyView list)
+    : Map<string, Lazy<RoomWorth>> =
+    let scope = scopeOf views
+
+    let ownedBy (home: string) =
+        current ()
+        |> List.tryFind (fun view -> SpatialInfo.homeName view.Spatial = home)
+
+    views
+    |> List.collect (fun view ->
+        (view.Spatial.Rooms |> Map.keys |> List.ofSeq)
+        @ (view.Harass |> List.map _.RoomName)
+        @ Set.toList view.HarassCast)
+    |> List.distinct
+    |> List.choose (fun room ->
+        worthOwner views room
+        |> Option.map (fun owner ->
+            room,
+            lazy
+                (worthOf
+                    scope
+                    (ownedBy (SpatialInfo.homeName owner.Spatial) |> Option.defaultValue owner)
+                    room)))
+    |> Map.ofList
+
+/// How long a player's raid holds the outpost it was last seen standing in
+/// shut past that sighting (#585), where no look has found it gone
+/// (`holdSpan`): over its slowest body's round trip (`WorldView.raidTrip`),
+/// the outpost's crew (`outpostCrewWorth`) against the income a fight there
+/// keeps (`RoomWorth.Kept`), the evidence a look every `lookStride` ticks
+/// where an observer reaches the room, else none before the trip is out.
+let internal raidHoldSpan (view: ColonyView) (room: string) (raid: HostileInfo list) : int =
+    let trip = WorldView.raidTrip raid
+
+    holdSpan
+        (roomWorth view room).Kept
+        (outpostCrewWorth room)
+        trip
+        (if observerReaches view room then
+             min lookStride trip
+         else
+             trip)
 
 /// The dancer the [[sweep]]'s group camps in its room (#658), and the tiles
 /// of the room it steps in and out on (`Crossing.Tiles`, its tile now
@@ -3879,40 +4138,89 @@ let private doorTicks (from: RoomPos) (pace: int) (room: string) : int =
             | edge -> edge * pace
         | None -> System.Int32.MaxValue
 
-/// What working one [[sweep]] candidate is worth a tick of the group's
-/// effort (#658): the kills it lands there (`killsLanded`: each body's kill
-/// value, #621, times the odds the group catches it, nothing of one that
-/// dies of age first), the declared enemy's economy bodies
-/// (`trespasser`) and, where the group wins the exchange against an escort
-/// there, the enemy's escort too, which unguards the rest (anybody else's
-/// armed body only gates the exchange); each body out of sight at the odds
-/// it is still there (`odds`, read as `reading`: a cast's, or a standing
-/// group's); over the ticks they cost:
-/// its `arrival`, the escort's kill (`killTicks`) and each economy body's
-/// together (`killTicksOf`), concentrated, one at a time. Nothing where an
-/// escort beats the group (exposure: the group moves on rather than stands
-/// off), and nothing in a room with nothing of theirs to kill.
-let sweepRate
+/// The rival structures of a room's worth a crew takes down where it pays
+/// (#661), against the rate its fight earns without them (`gained` over
+/// `ticks`): each at its rebuild, over the ticks its hits take at the crew's
+/// `dismantle` a tick, taken the best first while it raises the rate. The
+/// rebuild taken and the ticks it costs; nothing for a crew that dismantles
+/// nothing.
+let private structuresTaken
+    (worth: RoomWorth)
+    (dismantle: int)
+    (gained: float)
+    (ticks: int)
+    : float * int =
+    if dismantle <= 0 then
+        0.0, 0
+    else
+        worth.Structures
+        |> Map.toList
+        |> List.map (fun (_, standing) ->
+            float standing.Rebuild, (standing.Hits + dismantle - 1) / dismantle)
+        |> List.sortByDescending (fun (rebuild, cost) -> rebuild / float (max 1 cost))
+        |> List.fold
+            (fun (taken, spent) (rebuild, cost) ->
+                if
+                    rebuild * float (max 1 (ticks + spent)) > (gained + taken) * float (max 1 cost)
+                then
+                    taken + rebuild, spent + cost
+                else
+                    taken, spent)
+            (0.0, 0)
+
+/// The odds a body's work stops for our holding its room (#663 M2): none for
+/// one that stays and out-heals the crew (never killed, or a dancer whose
+/// heal across the border undoes the camp, `outHealsCamp`); else the odds it
+/// slips the crew (one caught is priced by its kill instead), times its
+/// owner's flee share as its dossier saw it (`WorldView.Flees`), if any.
+let private stopsWorking
+    (view: ColonyView)
+    (priced: ColonyView)
+    (body: Fighter)
+    (hostile: HostileInfo)
+    (kill: int option)
+    (catch: float)
+    =
+    match kill with
+    | None -> 0.0
+    | Some _ when dancingOn priced hostile && outHealsCamp priced body hostile -> 0.0
+    | Some _ ->
+        Map.tryFind hostile.Owner view.World.Flees
+        |> Option.defaultValue 1.0
+        |> (*) (1.0 - catch)
+
+/// The one rate a crew of ours earns in a room a tick of its effort (#663
+/// M2), off the room's worth (`roomWorth`). What it earns: the kills it
+/// lands there (each body's kill value at its odds read as `reading`, a
+/// cast's or a standing group's, times the odds the crew catches it,
+/// `catchOdds`, nothing of one that dies of age first); and over the ticks
+/// it holds the room clear, its kills past the escort's, our income kept
+/// there (`RoomWorth.Kept`) and the rival income that stops for our holding
+/// it — each economy body's take at its odds (`RoomWorth.takes`) times the
+/// odds its work stops while we hold (`stopsWorking`): a body that keeps
+/// working until its kill lands is denied nothing before it, its kill value
+/// carrying the loss after; and the structures it takes down where they pay
+/// (`structuresTaken`, its `dismantle` a tick). Over the ticks they cost: its
+/// `arrival`, the escort's kill (`killTicks`) and each economy body's
+/// together (`killTicksOf`), concentrated, one at a time, and the
+/// structures'. Nothing where the escort beats the crew (exposure: it moves
+/// on rather than stands off), and nothing for no crew.
+let roomRate
     (reading: Quarry.Reading)
     (view: ColonyView)
     (team: Fighter list)
+    (dismantle: int)
     (arrival: int)
     (room: string)
     : float =
-    let priced = sweepPricing view room
+    match team with
+    | [] -> 0.0
+    | body :: _ ->
+        let worth = roomWorth view room
+        let priced = sweepPricing view room
 
-    let prey =
-        priced.Hostiles
-        |> List.filter (fun h -> h.Pos.Room = room && trespasser priced (Set.singleton room) h)
-
-    let raid = raidersIn priced room
-
-    match team, prey, raid with
-    | [], _, _
-    | _, [], [] -> 0.0
-    | _ ->
         let escort =
-            match raid with
+            match worth.Escort with
             | [] -> Some 0
             | _ when won (exchangeIn priced room team) -> killTicks priced room team
             | _ -> None
@@ -3922,21 +4230,53 @@ let sweepRate
         | Some escortTicks ->
             let healOn = healReachingWithin priced room priced.Tuning.ReachHorizon
             let landing = max 0 arrival + escortTicks
+            let values = RoomWorth.values reading worth
+            let takes = RoomWorth.takes reading worth
+
+            // Each body the worth values, its kill and the odds the crew
+            // lands it, read once.
+            let bodies =
+                priced.Hostiles
+                |> List.filter (fun h -> h.Pos.Room = room && values.ContainsKey h.Id)
+                |> List.map (fun h ->
+                    let kill = killTicksOf priced healOn team h
+
+                    let catch =
+                        match kill with
+                        | Some kill when h.TicksToLive > landing + kill ->
+                            catchOdds priced body None landing kill h
+                        | _ -> 0.0
+
+                    h, kill, catch)
 
             let kills =
-                prey
-                |> List.sumBy (fun h -> killTicksOf priced healOn team h |> Option.defaultValue 0)
+                bodies
+                |> List.sumBy (fun (h, kill, _) ->
+                    if takes.ContainsKey h.Id then
+                        Option.defaultValue 0 kill
+                    else
+                        0)
 
-            // Only the declared enemy's bodies are worth a kill here: an
-            // Invader or a third player's escort gates the exchange and adds
-            // nothing (we do not defend his remote for him). A body
-            // remembered out of sight at the odds it is still there.
-            let values =
-                prey @ (raid |> List.filter (harassTarget priced))
-                |> List.map (fun h -> h.Id, killValue priced h * odds priced reading h)
-                |> Map.ofList
+            let landed = bodies |> List.sumBy (fun (h, _, catch) -> catch * values.[h.Id])
 
-            killsLanded priced room team landing values / float (max 1 (landing + kills))
+            let denied =
+                bodies
+                |> List.sumBy (fun (h, kill, catch) ->
+                    match Map.tryFind h.Id takes with
+                    | Some take -> take * stopsWorking view priced body h kill catch
+                    | None -> 0.0)
+
+            let gained = landed + (worth.Kept + denied) * float kills
+
+            let taken, broken = structuresTaken worth dismantle gained (landing + kills)
+
+            (gained + taken) / float (max 1 (landing + kills + broken))
+
+/// What a crew of these creeps dismantles a tick: its live WORK at the
+/// engine's dismantle power.
+let private dismantleOf (creeps: CreepInfo list) : int =
+    creeps
+    |> List.sumBy (fun creep -> partCount creep.Body Work * Engine.dismantlePower)
 
 /// A [[sweep]]'s group (#658): the bodies of this colony holding the Guard of
 /// one of its candidates, by last tick's Tasks (`held`), wherever they stand,
@@ -3967,59 +4307,74 @@ let private sweepBodies (held: Assignments) (views: ColonyView list) =
     |> List.distinctBy (fun (creep, _) -> creep.Name)
 
 /// ADR-0093
-/// The [[sweep]]'s room (#658), one for every colony: of the candidates each
-/// view works (`ColonyView.Harass`), the one its group's effort lands the
-/// most kills a tick in (`sweepRate`, the best any colony's view prices it
-/// at), then by name; None where none pays. The group is every colony's
-/// (`sweepGroup`), its arrival its slowest body's walk to the room
-/// (`doorTicks`: none in it or on its doorstep); with no group, each
-/// colony's biggest ranger its bank buys (`rangerBlocksReach`), landed after
-/// its spawn time and walk from that home, the soonest's price the room's,
-/// read as a cast (`Quarry.Reading.Cast`: no spawn for a body a look is about
-/// to confirm or not); a group standing reads each body at its odds.
-/// An escort the group loses is no room for it, whatever a bigger cast would
-/// win: the cast is the fight's to price, and a room chosen for a body no
-/// cast buys would hold the group for ever. The room the group stands in
-/// costs no walk, so it keeps the group until its kills there run out or
-/// another room's net of the walk pays more: no stored room, no hysteresis
-/// band.
+/// The [[sweep]]'s room (#658), one for every colony: of the candidates the
+/// views work (`ColonyView.Harass`), the one its group's effort earns the
+/// most in a tick (`roomRate`, priced once per room off its worth's owner,
+/// `worthOwner`, the room's worth the world's), then by name; None where none
+/// pays. The group is every colony's (`sweepGroup`), its arrival its slowest
+/// body's walk to the room (`doorTicks`: none in it or on its doorstep);
+/// with no group, each colony's biggest ranger its bank buys
+/// (`rangerBlocksReach`), landed after its spawn time and walk from that
+/// home, the best colony's price the room's, read as a cast
+/// (`Quarry.Reading.Cast`: no spawn for a body a look is about to confirm or
+/// not); a group standing reads each body at its odds. An escort the group
+/// loses is no room for it, whatever a bigger cast would win: the cast is
+/// the fight's to price, and a room chosen for a body no cast buys would
+/// hold the group for ever. The room the group stands in costs no walk, so
+/// it keeps the group until what it earns there runs out or another room's
+/// net of the walk pays more: no stored room, no hysteresis band.
 let sweepChoice (held: Assignments) (views: ColonyView list) : string option =
     match views |> List.filter (fun view -> not (List.isEmpty view.Harass)) with
     | [] -> None
     | working ->
-        let placed =
-            sweepBodies held working
-            |> List.map (fun (creep, at) -> at, Fighter.ofCreep creep)
+        let group = sweepBodies held working
+        let placed = group |> List.map (fun (creep, at) -> at, Fighter.ofCreep creep)
+        let dismantle = dismantleOf (List.map fst group)
 
-        let rateIn (view: ColonyView) (room: string) =
-            match placed, rangerBlocksReach view with
-            | [], blocks when blocks > 0 ->
+        let castIn (view: ColonyView) (room: string) =
+            match rangerBlocksReach view with
+            | blocks when blocks > 0 ->
                 let body = blocksFighter rangerPattern blocks
                 let home = RoomPos.at (SpatialInfo.homeName view.Spatial) { X = 25; Y = 25 }
 
                 match doorTicks home (paceOf body) room with
                 | System.Int32.MaxValue -> 0.0
                 | walk ->
-                    sweepRate
+                    roomRate
                         Quarry.Reading.Cast
                         view
                         [ body ]
+                        0
                         (castSpawnTicks BodyTemplate.Ranged blocks + walk)
                         room
-            | [], _ -> 0.0
-            | placed, _ ->
+            | _ -> 0.0
+
+        let rateIn (room: string) =
+            let workers =
+                working
+                |> List.filter (fun view -> view.Harass |> List.exists (fun h -> h.RoomName = room))
+
+            match placed with
+            | [] -> workers |> List.map (fun view -> castIn view room) |> List.max
+            | placed ->
                 let arrivals =
                     placed |> List.map (fun (at, fighter) -> doorTicks at (paceOf fighter) room)
 
                 match List.max arrivals with
                 | System.Int32.MaxValue -> 0.0
-                | arrival -> sweepRate Quarry.Reading.Value view (List.map snd placed) arrival room
+                | arrival ->
+                    roomRate
+                        Quarry.Reading.Value
+                        (worthOwner views room |> Option.defaultValue (List.head workers))
+                        (List.map snd placed)
+                        dismantle
+                        arrival
+                        room
 
         working
-        |> List.collect (fun view ->
-            view.Harass |> List.map (fun h -> h.RoomName, rateIn view h.RoomName))
-        |> List.groupBy fst
-        |> List.map (fun (room, rates) -> room, rates |> List.map snd |> List.max)
+        |> List.collect (fun view -> view.Harass |> List.map _.RoomName)
+        |> List.distinct
+        |> List.map (fun room -> room, rateIn room)
         |> List.filter (fun (_, rate) -> rate > 0.0)
         |> List.sortBy (fun (room, rate) -> -rate, room)
         |> List.tryHead
@@ -4027,13 +4382,15 @@ let sweepChoice (held: Assignments) (views: ColonyView list) : string option =
 
 /// How many bodies the [[sweep]]'s room seats (#658): its whole group, every
 /// colony's (`WorldView.SweepGroup`), and one more where a body like its
-/// weakest, landing with its last, raises the kills it lands a tick
-/// (`sweepRate`, read as a cast: the seat is what a body is cast for): a
+/// weakest, landing with its last, raises what the group earns a tick
+/// (`roomRate`, read as a cast: the seat is what a body is cast for): a
 /// free fighter joins the one group while concentrating pays, never a second
 /// room. One with no group seats one.
 let sweepSeats (view: ColonyView) (room: string) : int =
     let placed =
         view.World.SweepGroup |> List.map (fun (creep, at) -> at, Fighter.ofCreep creep)
+
+    let dismantle = dismantleOf (List.map fst view.World.SweepGroup)
 
     let rateOf (team: (RoomPos * Fighter) list) =
         let arrival =
@@ -4044,7 +4401,7 @@ let sweepSeats (view: ColonyView) (room: string) : int =
         if arrival = System.Int32.MaxValue then
             0.0
         else
-            sweepRate Quarry.Reading.Cast view (List.map snd team) arrival room
+            roomRate Quarry.Reading.Cast view (List.map snd team) dismantle arrival room
 
     match placed with
     | [] -> 1
@@ -4077,8 +4434,24 @@ let sweepRoom (view: ColonyView) (held: Assignments) : string option = sweepChoi
 /// Guard, its kill and its cast, the world's fight — reads the one room.
 /// The dismantler's targets (`Dismantles`) are narrowed to the sweep's room
 /// and the salvage rooms. `held` is last tick's Tasks, whose
-/// holders are the group.
+/// holders are the group. Every room's worth is laid first, one table for
+/// every view (`WorldView.Worths`, `worthTable`): the choice and every reader
+/// after it price a room once.
 let sweepAll (held: Assignments) (views: ColonyView list) : ColonyView list =
+    // The table prices each room off its owner's view as laid, the one the
+    // choice reads too: one pricing a candidate.
+    let laid = ref views
+    let worths = Some(worthTable views (fun () -> laid.Value))
+
+    let views =
+        views
+        |> List.map (fun view ->
+            { view with
+                World = { view.World with Worths = worths }
+            })
+
+    laid.Value <- views
+
     let room = sweepChoice held views
     let group = lazy (sweepBodies held views)
 
@@ -4113,25 +4486,22 @@ let sweepAll (held: Assignments) (views: ColonyView list) : ColonyView list =
 /// colony asks in.
 let sweep (held: Assignments) (view: ColonyView) : ColonyView = sweepAll held [ view ] |> List.head
 
-/// The defence response a [[sweep]] prices its muster by where the rival's
-/// dossier holds none for the room: it answers at once, the worst case.
-let private instantResponse = 0
-
 /// Whether the [[sweep]]'s group waits for itself at the last crossing before
-/// its room (#658), priced and whatever the room's phase: where the loss the
-/// body landing first risks alone exceeds what waiting for the rest costs;
-/// else the first come strikes first. `group` is every colony's body holding
-/// the room's Guard, with where it stands. The spread is the ticks between
-/// the first body's arrival and the last's (`doorTicks`); none, and nothing
-/// waits. The first body alone is caught where a raid stands that it loses
-/// alone, or where the rival's defence answers (the dossier's fastest seen
-/// response there, `WorldView.Responses`; with none, `instantResponse`)
-/// sooner than the rest land: the loss is its body's energy. Waiting costs
-/// each prey's take (`harmRate`) over the spread, and the kills it lets walk
-/// off or die of age (`killsLanded` landed at once against landed after the
-/// spread), each body at the odds it is still there (`odds`, its value to a
-/// group already standing). A body already waiting (`arrived`: on the rally ground, or as near as it) has
-/// landed, so a group all waiting has no spread and goes in: the muster
+/// its room (#658), priced and whatever the room's phase, off the room's
+/// worth (`roomWorth`): where the loss the body landing first risks alone
+/// exceeds what waiting for the rest costs; else the first come strikes
+/// first. `group` is every colony's body holding the room's Guard, with
+/// where it stands. The spread is the ticks between the first body's
+/// arrival and the last's (`doorTicks`); none, and nothing waits. The first
+/// body alone is caught where an escort stands that it loses alone
+/// (`RoomWorth.Escort`), or where the rival's defence answers
+/// (`RoomWorth.Response`) sooner than the rest land: the loss is its body's
+/// energy. Waiting costs the income denied over the spread
+/// (`RoomWorth.denied`), and the prey's kills it lets walk off or die of age
+/// (`killsLanded` landed at once against landed after the spread), each body
+/// at the odds it is still there (its value to a group already standing). A
+/// body already waiting (`arrived`: on the rally ground, or as near as it)
+/// has landed, so a group all waiting has no spread and goes in: the muster
 /// never holds bodies that only wait for each other.
 let sweepMusters
     (view: ColonyView)
@@ -4161,22 +4531,13 @@ let sweepMusters
         if spread <= 0 then
             false
         else
+            let worth = roomWorth view room
             let priced = sweepPricing view room
             let lone = [ Fighter.ofCreep first ]
 
-            let prey =
-                priced.Hostiles
-                |> List.filter (fun h ->
-                    h.Pos.Room = room && trespasser priced (Set.singleton room) h)
-
-            let raid = raidersIn priced room
-
-            let response =
-                Map.tryFind room view.World.Responses |> Option.defaultValue instantResponse
-
             let caught =
-                (not (List.isEmpty raid) && not (won (exchangeIn priced room lone)))
-                || spread > response
+                (not (List.isEmpty worth.Escort) && not (won (exchangeIn priced room lone)))
+                || spread > worth.Response
 
             let loss =
                 if caught then
@@ -4188,16 +4549,14 @@ let sweepMusters
                 else
                     0.0
 
-            let still = odds priced Quarry.Reading.Value
-
+            // The prey's kills: the escort's is what the lone body risks.
             let values =
-                prey |> List.map (fun h -> h.Id, killValue priced h * still h) |> Map.ofList
-
-            let takes =
-                prey |> List.sumBy (fun h -> harmRate priced h replacementWalk * still h)
+                RoomWorth.values Quarry.Reading.Value worth
+                |> Map.filter (fun id _ -> worth.Takes.ContainsKey id)
 
             let waiting =
-                takes * float spread + killsLanded priced room lone landing values
+                RoomWorth.denied Quarry.Reading.Value worth * float spread
+                + killsLanded priced room lone landing values
                 - killsLanded priced room lone (landing + spread) values
 
             loss > waiting
@@ -4253,7 +4612,7 @@ let private fightRaid (view: ColonyView) (room: string) : HostileInfo list =
 /// focusing one at a time), each priced its spent life, and its spawn time,
 /// the wait for its last body (its spawns cast a round at a time), its walk
 /// and kill (`killTicks`, a lifetime where it never kills) at the room's
-/// economic delta a tick (`Contest.delta`, #656: our yield there kept and
+/// economic delta a tick (`RoomWorth.delta`, #656: our yield there kept and
 /// the take of the rival's economy bodies working beside the raid denied);
 /// by least price, then the fewest parts,
 /// the fewest bodies, the template's order. Last, the melee body holding
@@ -4304,9 +4663,10 @@ let private castsByPrice
         |> List.filter (fun hostile ->
             hostile.Pos.Room = room && trespasser view (Set.singleton room) hostile)
 
-    // The room's economic war (#656): what each tick of the fight costs and
-    // what each kill lands, one price for a raid and a kill alike.
-    let contest = lazy (contestOf view room)
+    // The room's worth (#656, #663): what each tick of the fight costs and
+    // what each kill lands, one price for a raid and a kill alike, read for
+    // a cast.
+    let worth = lazy (roomWorth view room)
 
     let walk =
         CastBid.walk view.Tuning (RoomName.hopsBetween (SpatialInfo.homeName view.Spatial) room)
@@ -4357,7 +4717,7 @@ let private castsByPrice
         castSpawnTicks template blocks * ((n + spawns - 1) / spawns - 1)
 
     if not (List.isEmpty raid) then
-        let tick = Contest.delta contest.Value
+        let tick = RoomWorth.delta Quarry.Reading.Cast worth.Value
         let home = (homesOfOurs view).Contains room
 
         // The stance a body meets the raid at, as the gate prices it
@@ -4526,7 +4886,8 @@ let private castsByPrice
         let priced = killPricing view room
         let healOn = healReachingWithin priced room priced.Tuning.ReachHorizon
 
-        let values = contest.Value.Values
+        let values = RoomWorth.values Quarry.Reading.Cast worth.Value
+        let takes = RoomWorth.takes Quarry.Reading.Cast worth.Value
 
         let sets =
             templates
@@ -4577,8 +4938,7 @@ let private castsByPrice
                         let meanwhile =
                             kills
                             |> List.sumBy (fun (hostile, kill) ->
-                                (Map.tryFind hostile.Id contest.Value.Takes
-                                 |> Option.defaultValue 0.0)
+                                (Map.tryFind hostile.Id takes |> Option.defaultValue 0.0)
                                 * float (landing + kill))
 
                         // The set held the walk and every kill, one after

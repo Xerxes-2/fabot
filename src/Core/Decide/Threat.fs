@@ -51,7 +51,7 @@ type BriefKind =
     /// our outpost a raid or a rival's economy body works, a rival's remote
     /// we harass, a threatened outpost the colony is blind in (#366) — one
     /// fight whatever it is over this tick (`Phase`), priced by the room's
-    /// economic delta (`Facts.Contest`); every Guard no other kind claims.
+    /// worth (`RoomWorth`); every Guard no other kind claims.
     | Contested
     | Core
     | ExitHold
@@ -80,7 +80,7 @@ type Contention =
     {
         Phase: Phase
         Ours: bool
-        Value: Lazy<Contest>
+        Value: Lazy<RoomWorth>
     }
 
 /// Which combat Task a `Brief` describes: a room's Guard, of its flavour, or
@@ -356,7 +356,7 @@ and [<NoEquality; NoComparison>] RowAsk =
         Wanted: Threats -> int
         Blocks: unit -> int
         /// A contested room's kill: each trespasser the row answers
-        /// (`trespassSplit`) by id, with its kill value (`Contest.Values`),
+        /// (`trespassSplit`) by id, with its kill value (`RoomWorth.values`),
         /// which prices its cast wherever no economy of ours is guarded there
         /// (#652, #656). None for every other ask.
         Prey: (string * float) list option
@@ -957,7 +957,7 @@ module Brief =
     /// prey, whose kills price the cast where no economy of ours is guarded
     /// (#652). A room that is not ours to keep — a rival's remote we harass —
     /// asks only a cast that ends its fight, and only while a fight there
-    /// moves its economic delta (`Contest.delta`) or lands a kill: there is
+    /// moves its economic delta (`RoomWorth.delta`) or holds prey: there is
     /// no post of ours to hold (#531), no raid there is ours to look for
     /// (#366), and the room's value is what a fight denies the rival.
     let private askOf
@@ -982,10 +982,10 @@ module Brief =
         // A contested room's prey (#654): one ask, the cheapest set that
         // kills the most of its trespassers, of whichever template; its prey
         // every one of them that is the enemy's economy, at its kill value
-        // (`Contest.Values`). A trespasser only bouncing on the exit is met by
-        // one melee block.
+        // (`RoomWorth.values`, read for a cast). A trespasser only bouncing
+        // on the exit is met by one melee block.
         | BriefKind.Contested, Some contention when contention.Phase = Phase.Prey ->
-            let values = contention.Value.Value.Values
+            let values = RoomWorth.values Quarry.Reading.Cast contention.Value.Value
 
             let prey =
                 answered.Value
@@ -1004,12 +1004,16 @@ module Brief =
         | BriefKind.Contested, contention ->
             let template = if ranged then BodyTemplate.Ranged else BodyTemplate.Melee
 
+            // The room's delta, or its prey (each one taking, `Takes`): the
+            // escort's own kill buys no cast for a room not ours.
             let pays (cast: FighterCast) =
                 match contention with
                 | Some contention when not contention.Ours ->
+                    let worth = contention.Value.Value
+
                     cast.Ends
-                    && (Contest.delta contention.Value.Value > 0.0
-                        || not (Map.isEmpty contention.Value.Value.Values))
+                    && (RoomWorth.delta Quarry.Reading.Cast worth > 0.0
+                        || not (Map.isEmpty worth.Takes))
                 | _ -> true
 
             [ fighterAsk view room [ template ] None pays ]
@@ -1241,7 +1245,7 @@ module Brief =
 
         let contention =
             if kind = BriefKind.Contested then
-                let value = lazy (Facts.contestOf view room)
+                let value = lazy (Facts.roomWorth view room)
 
                 Some
                     {

@@ -132,9 +132,9 @@
     "towerSpent": 60
   },
   "outpost-ranged-healer": {
-    "castEnergy": 2800,
-    "cleared": 159,
-    "hurt": 1260,
+    "castEnergy": 3500,
+    "cleared": 158,
+    "hurt": 1000,
     "kills": 3,
     "ourDeaths": 1,
     "safeMode": false,

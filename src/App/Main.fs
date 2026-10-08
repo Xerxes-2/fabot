@@ -885,7 +885,8 @@ let private fullTick
     // The world layer's read, once for every colony (`WorldView`): fresh each
     // tick, and its danger laid in once the views are cut (`WorldDanger`).
     // The sweep's muster reads each rival room's defence response off last
-    // tick's dossier (#658).
+    // tick's dossier (#658), and a room's worth each rival's flee share
+    // (#663).
     let watch =
         { WorldView.ofWorld Colony.declared (gates |> Map.toList |> List.map snd) world with
             Responses =
@@ -893,6 +894,10 @@ let private fullTick
                 | Some rivals when not (List.isEmpty harassment.Rooms) ->
                     Observe.Rivals.responses rivals
                 | _ -> Map.empty
+            Flees =
+                match rivalDossier with
+                | Some rivals -> Observe.Rivals.flees rivals
+                | None -> Map.empty
         }
 
     // Each colony's cut (`ColonyView.cutOf`): the rooms it projects, which

@@ -1266,14 +1266,14 @@ let private tierRequests (view: ColonyView) (watched: string list) : LookRequest
        |> List.map (lookRequest LookBand.Box 1))
 
 /// The requests one colony prices (#660, #585), each a room that wants eyes:
-/// every raid's stand-down, worth the outpost's income a tick
-/// (`Facts.outpostTickWorth`) over the ticks it has left, which a look
+/// every raid's stand-down, worth the income a fight there keeps a tick
+/// (`RoomWorth.Kept`) over the ticks it has left, which a look
 /// finding the raid gone ends (`Observe.strikeGone`), open until its expiry,
 /// re-read one look in `dangerStride` — and as much each room beside it a
 /// body out of sight may only have stepped across to (`Dance`), since the
 /// look that strikes it needs that room seen too; and every dark outpost
 /// whose remembered trespassers a look confirms, worth their kills at the
-/// odds they are still there (`Facts.unconfirmedPrey`), one look in
+/// odds they are still there (`RoomWorth.unseen`), one look in
 /// `dangerStride`, so a kill out of sight shares the observer with the rest.
 let private pricedRequests (view: ColonyView) : LookRequest list =
     // The rooms a body last seen in `room` and out of sight now may linger in
@@ -1292,16 +1292,16 @@ let private pricedRequests (view: ColonyView) : LookRequest list =
         view.RaidedUntil
         |> Map.toList
         |> List.collect (fun (room, until) ->
-            let worth = Facts.outpostTickWorth room * (until - view.Time)
+            let worth = (Facts.roomWorth view room).Kept * float (until - view.Time)
 
-            if worth > 0 then
+            if worth > 0.0 then
                 room :: lingering room
                 |> List.distinct
                 |> List.map (fun looked ->
                     {
                         Room = looked
                         Band = LookBand.Danger
-                        Value = float worth
+                        Value = worth
                         Tolerates = dangerStride
                         Until = Some until
                     })
@@ -1309,15 +1309,24 @@ let private pricedRequests (view: ColonyView) : LookRequest list =
                 [])
 
     let prey =
-        Facts.unconfirmedPrey view
-        |> List.map (fun (room, value) ->
-            {
-                Room = room
-                Band = LookBand.Danger
-                Value = value
-                Tolerates = dangerStride
-                Until = None
-            })
+        view.RecalledRaiders
+        |> List.map _.Pos.Room
+        |> List.distinct
+        |> List.filter (fun room ->
+            not (WorldView.sees view.World room) && Facts.trespassRooms view room)
+        |> List.sort
+        |> List.choose (fun room ->
+            match RoomWorth.unseen (Facts.roomWorth view room) with
+            | value when value > 0.0 ->
+                Some
+                    {
+                        Room = room
+                        Band = LookBand.Danger
+                        Value = value
+                        Tolerates = dangerStride
+                        Until = None
+                    }
+            | _ -> None)
 
     standDowns @ prey
 

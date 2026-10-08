@@ -4078,6 +4078,21 @@ module Rivals =
         |> Seq.map (fun (room, rows) -> room, rows |> Seq.map snd |> Seq.min)
         |> Fresh.mapOfSeq
 
+    /// Each rival's share of its workers that walked off a room it holds
+    /// while our armed body stood there, of those that walked off or stayed
+    /// (`WorldView.Flees`, #663): how often its work stops for our holding the
+    /// room. One that fell is its kill's, in neither count. No row for a
+    /// rival none of whose workers was ever watched so.
+    let flees (rivals: Rivals) : Map<string, float> =
+        rivals.Dossiers
+        |> Map.toSeq
+        |> Seq.choose (fun (rival, dossier) ->
+            match dossier.Fled.Count + dossier.Stayed.Count with
+            | 0 -> None
+            // Laplace-smoothed: one worker that walked off is no certainty.
+            | watched -> Some(rival, float (dossier.Fled.Count + 1) / float (watched + 2)))
+        |> Fresh.mapOfSeq
+
 /// One shot of a rival tower at a body of ours, off the room's event log:
 /// the tower's id and our body's name.
 type TowerShot = { Tower: string; Target: string }

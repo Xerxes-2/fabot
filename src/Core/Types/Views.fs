@@ -286,9 +286,21 @@ type WorldView =
         /// the fewest ticks from our first armed body in the room to its
         /// owner's first armed body there; `Int32.MaxValue` where it was
         /// visited and never answered. What the [[sweep]] prices its muster
-        /// by (`Facts.sweepMusters`, #658); a room absent has no reading.
+        /// by (`RoomWorth.Response`, #658); a room absent has no reading.
         /// Laid by the shell off last tick's dossier; empty in a fixture.
         Responses: Map<string, int>
+        /// Each rival's share of its workers that walked off a room it holds
+        /// while our armed body stood there (#663, `Observe.Rivals.flees`):
+        /// the odds a body of its stops working while we hold a room, which
+        /// its take denied is priced by (`Facts.roomRate`). A rival absent
+        /// has no reading. Laid by the shell off last tick's dossier; empty
+        /// in a fixture.
+        Flees: Map<string, float>
+        /// Each room's worth this tick (`RoomWorth`, #663), built on first
+        /// read off the colony whose economy it is, once for every colony
+        /// (`Facts.sweepAll`). None until the views are swept, and in a
+        /// fixture that prices a room off its own view (`Facts.roomWorth`).
+        Worths: Map<string, Lazy<RoomWorth>> option
         /// The [[sweep]]'s group, every colony's body of it, with where it
         /// stands (`Facts.sweepAll`, #658): what its muster waits for, the
         /// bodies landing from other colonies among them. Empty until the
@@ -312,6 +324,8 @@ module WorldView =
             RaidSeen = Map.empty
             Quarries = Map.empty
             Responses = Map.empty
+            Flees = Map.empty
+            Worths = None
             SweepGroup = []
             FighterLost = Map.empty
             Questioned = Set.empty
@@ -445,6 +459,8 @@ module WorldView =
             RaidSeen = raidSeen
             Quarries = world.Quarries
             Responses = Map.empty
+            Flees = Map.empty
+            Worths = None
             SweepGroup = []
             FighterLost =
                 (Map.empty, gates)

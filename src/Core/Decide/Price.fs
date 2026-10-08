@@ -228,7 +228,7 @@ let constructionCost (kind: BuiltKind) : int =
     | BuiltKind.Extension -> 3_000
     | BuiltKind.Tower -> 5_000
     | BuiltKind.Road -> Engine.roadBuildCost
-    | BuiltKind.Container -> 5_000
+    | BuiltKind.Container -> Engine.containerBuildCost
     | BuiltKind.Storage -> 30_000
     | BuiltKind.Link -> 5_000
     | BuiltKind.Rampart -> 1

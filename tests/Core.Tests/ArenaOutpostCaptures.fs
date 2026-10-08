@@ -2747,7 +2747,7 @@ let internal haulersAtTheContainer () : Arena =
 
     // W13S28's observer, which reaches W17S26: its colony is left out, so it
     // aims at nothing, but a body remembered there counts at no value until a
-    // look confirms it (`Facts.contestOf`).
+    // look confirms it (`Facts.roomWorth`, read for a cast).
     let w13s28 =
         room "W13S28"
         |> withController Ownership.Ours None 8 0

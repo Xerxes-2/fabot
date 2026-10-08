@@ -845,7 +845,7 @@ let kiteTests =
                 // run-off runs out (#625), and kites it down: no set trades
                 // it, so the verdict is the Kite (`rowAnswer`), answered by
                 // the rangers standing by. Moved by #656: the fight's ticks
-                // cost the outpost's held source (`Contest.Kept`), which the
+                // cost the outpost's held source (`RoomWorth.Kept`), which the
                 // chooser read as none on a room's first asks a tick, so two
                 // blocks killing in half the ticks are the cheaper set (it
                 // was one block).

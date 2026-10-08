@@ -2252,8 +2252,13 @@ let w17s26FarGuardsTests =
             // a hundred ticks, the claimer standing. The bodies hold where
             // live stood them (the skeleton's script): the pin reads the
             // order on the live bodies and ground, not their live walks.
+            //
+            // #663: a kill is worth the life left it. The ranger lands at
+            // t142, when the claimer has 267 of its 600 ticks left (its body
+            // worth 868, not 1,950) and the miner 1,008 of 1,500: the miner
+            // on its seat leads by its kill score, the claimer after it.
             test
-                "#621 capture t1,015,956: the ranger kills the claimer, then the miner, before the hauler" {
+                "#621 capture t1,015,956: the ranger kills the miner, then the claimer its life has spent, before the hauler" {
                 let _, trace = w17s26FarGuards () |> run 250
 
                 let diedAt who =
@@ -2273,7 +2278,7 @@ let w17s26FarGuardsTests =
 
                 match diedAt "Dragon5749", diedAt "Genetic5584" with
                 | Some claimer, Some miner ->
-                    Expect.isLessThan claimer miner $"the claimer first\n{failure}"
+                    Expect.isLessThan miner claimer $"the miner first\n{failure}"
                 | claimer, miner ->
                     failtest $"both die: the claimer at {claimer}, the miner at {miner}\n{failure}"
 
