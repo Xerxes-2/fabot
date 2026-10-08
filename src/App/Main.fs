@@ -1504,6 +1504,7 @@ let private fullTick
                         Time = Game.time
                         Line = line
                         Limit = float Game.cpu?limit
+                        LoadedAt = loadedAt
                         Cadence =
                             (if Tuning.defaults.LightTicks then
                                  Some tuning.Cadence

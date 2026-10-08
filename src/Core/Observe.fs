@@ -3102,6 +3102,9 @@ type WorldBreachFacts =
         Cadence: int option
         /// `Game.cpu.limit`: what a tick may spend without drawing the bucket.
         Limit: float
+        /// The tick the bundle loaded on (`observe.version.reset`): a global
+        /// reset, whose tick and first cadence neither window reads.
+        LoadedAt: int
         /// The fault ring's rows since the bundle's load that cost no one
         /// colony (a tick's, an intent's, a segment's), as (step, tick).
         Faults: (string * int) list
@@ -3411,9 +3414,22 @@ let private bucketFalling (tuning: Tuning) (line: CpuState) : Breach list =
 
 /// This tick's violations that belong to no one colony: the CPU line's two,
 /// cause before symptom, and the throws no colony owns.
+/// Both CPU windows read the line from after a global reset's first cadence:
+/// the reset tick runs several limits (470 ms live) and the colonies it
+/// defers decide on the ticks after, so a window holding them reads a deploy
+/// as a starved or falling bucket while it refills (#627). A window the
+/// settled line does not reach back over has not seen a cadence fail.
 let worldBreaches (tuning: Tuning) (facts: WorldBreachFacts) : Breach list =
-    lightStarved tuning facts.Limit facts.Cadence facts.Line
-    @ bucketFalling tuning facts.Line
+    let settled =
+        { facts.Line with
+            Ticks =
+                facts.Line.Ticks
+                |> List.filter (fun sample ->
+                    sample.Tick > facts.LoadedAt + Option.defaultValue 1 facts.Cadence)
+        }
+
+    lightStarved tuning facts.Limit facts.Cadence settled
+    @ bucketFalling tuning settled
     @ faultBreaches facts.Time "" facts.Faults
 
 /// Trim the log to the cap: a pending row before an open one, a `BodyIdle`

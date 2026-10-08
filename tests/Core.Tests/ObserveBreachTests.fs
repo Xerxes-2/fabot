@@ -564,13 +564,15 @@ let private worldOn (facts: WorldBreachFacts) =
     worldBreaches Tuning.defaults facts
     |> List.map (fun breach -> breach.Kind, breach.Room, breach.Subject, breach.Amount)
 
-/// The world at t100 under a 20 ms allowance.
+/// The world at t100 under a 20 ms allowance, the bundle loaded long before
+/// the line begins.
 let private worldFacts line =
     {
         Time = 100
         Line = line
         Cadence = Some Tuning.defaults.Cadence
         Limit = 20.0
+        LoadedAt = -1_000
         Faults = []
     }
 
@@ -712,6 +714,52 @@ let selfBreachTests =
                         )
                     ))
                     "a ring short of full is too short to tell a dip from a fall"
+            }
+
+            test "a deploy's reset tick and first cadence starve no window of light ticks" {
+                // Live t1,030,363: light-starved opened on two deploys running while
+                // the window was a net refill; its mean held the 470 ms reset tick.
+                // Reset at t11; every tick after forced at 15 ms of 20, the bucket full.
+                let deploy (n: int) (ms: float) =
+                    lineOf n (fun tick ->
+                        cpuTick false (Some "chase") (if tick = 11 then 470.0 else ms) 9_000)
+
+                Expect.equal
+                    (worldOn (worldFacts (deploy 30 15.0)))
+                    [ BreachKind.LightStarved, "", "chase", 20 ]
+                    "read from before the reset, the reset tick alone puts the window over"
+
+                Expect.isEmpty
+                    (worldOn
+                        { worldFacts (deploy 30 15.0) with
+                            LoadedAt = 11
+                        })
+                    "the reset tick and its first cadence are no window's"
+
+                Expect.equal
+                    (worldOn
+                        { worldFacts (deploy 40 30.0) with
+                            LoadedAt = 11
+                        })
+                    [ BreachKind.LightStarved, "", "chase", 20 ]
+                    "a window wholly after the settle starves as it would on any tick"
+            }
+
+            test "a deploy's draw on the bucket is no fall" {
+                // The reset at t97 draws 470 off a bucket of 2,000 and the level stays
+                // lower: over a ring reaching back before it the slope reads a fall.
+                let line =
+                    lineOf capCpuTicks (fun tick ->
+                        cpuTick true None 10.0 (if tick >= 97 then 1_530 else 2_000))
+
+                Expect.equal
+                    (worldOn (worldFacts line) |> List.map (fun (kind, _, _, _) -> kind))
+                    [ BreachKind.BucketFalling ]
+                    "read from before the reset, the reset's draw is a slope"
+
+                Expect.isEmpty
+                    (worldOn { worldFacts line with LoadedAt = 97 })
+                    "a ring not wholly after the reset's first cadence is too short to tell"
             }
 
             test

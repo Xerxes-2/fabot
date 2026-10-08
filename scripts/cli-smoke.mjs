@@ -593,6 +593,68 @@ smoke("arena-skeleton banks active extensions, suffixes a clashing site, clamps 
   assert.ok(!text.includes("let at roomName"), "no unused position helper when no body is placed");
 });
 
+// A record the skeleton spells out whole fails to compile the day its F#
+// type gains a field (`OutpostEpisode.HolderUnread` did, #627): each such
+// literal's top-level fields must be its type's, read off the source.
+const repo = new URL("../", import.meta.url).pathname;
+const fieldsOfType = (file, name) => {
+  const lines = readFileSync(join(repo, file), "utf8").split("\n");
+  const start = lines.findIndex((l) => l === `type ${name} =`);
+  assert.ok(start >= 0 && lines[start + 1] === "    {", `type ${name} is not a record in ${file}`);
+  const fields = [];
+  for (const line of lines.slice(start + 2)) {
+    if (line === "    }") return fields.sort();
+    const field = /^ {8}(\w+):/.exec(line);
+    if (field) fields.push(field[1]);
+  }
+  assert.fail(`type ${name} in ${file} never closes`);
+};
+// The top-level field names of one `{ ... }` literal, strings and nested
+// records dropped.
+const fieldsOfLiteral = (literal) => {
+  let depth = 0;
+  let flat = "";
+  for (const ch of literal.replace(/"(?:[^"\\]|\\.)*"/g, '""')) {
+    if (ch === "{") depth++;
+    if (depth === 1) flat += ch;
+    if (ch === "}") depth--;
+  }
+  return [...flat.matchAll(/(?:\{|;|\n)\s*(?:[\w.]+\.)?(\w+) =/g)].map((m) => m[1]).sort();
+};
+smoke("arena-skeleton spells every field of each record it writes whole", () => {
+  const site = (id) => ({ _id: id, type: "constructionSite", structureType: "extension", x: 20, y: 20, user: "me", progress: 10, progressTotal: 3000 });
+  const rooms = [
+    { name: "W17S25", href: "h", hasFixture: true, objects: { a: site("a") } },
+    { name: "W18S25", href: "h", hasFixture: true, objects: { b: site("b") } },
+  ];
+  const live = {
+    readAt: 1100,
+    rooms: {},
+    raids: {
+      W17S25: {
+        outposts: [{ room: "W18S25", opened: 980, last: 980, expiry: 1080, basis: "reservation", read: true }],
+        threatened: { W18S25: { until: 2490 } },
+        fought: { W17S25: { seen: 995, raiders: ["x"] } },
+      },
+    },
+  };
+  const text = skeleton({ rooms, tick: 1000, ourId: "me", usernames: new Map(), assignments: null, live, slug: "shape", command: "c", liveTick: 1100 });
+  const literal = (re) => {
+    const m = re.exec(text);
+    assert.ok(m, `no ${re} in:\n${text}`);
+    return m[1];
+  };
+  for (const [type, file, re] of [
+    ["OutpostEpisode", "src/Core/Observe.fs", /(\{ Fabot\.Core\.Observe\.OutpostEpisode\.[^}]*\})/],
+    ["ThreatLatch", "src/Core/Observe.fs", /\((\{[^()]*\}): Fabot\.Core\.Observe\.ThreatLatch\)/],
+    ["FightRecord", "src/Core/Types/Colonies.fs", /\((\{[^()]*\}): FightRecord\)/],
+    ["ArenaSite", "tests/Core.Tests/Arena.fs", /@ \[ (\{.*\}) \]/],
+  ]) {
+    assert.deepEqual(fieldsOfLiteral(literal(re)), fieldsOfType(file, type), `${type}: the skeleton's fields drifted from ${file}`);
+  }
+  assert.ok(text.includes("HolderUnread = false"), "a row whose holder a look read is seated read");
+});
+
 smoke("arena-skeleton runs a deployed stronghold: core-focus towers, its clocks, a Defend defender", () => {
   const collapse = [{ effect: 1002, power: 1002, endTime: 1045681, duration: 67951 }];
   const objects = {

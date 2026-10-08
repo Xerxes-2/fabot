@@ -517,7 +517,9 @@ function liveFields(live, tick, rooms) {
           `          Bounced = ${o.bounced === true}`,
           `          Raiders = ${idSet(o.raiders)}`,
           `          PlayerSince = ${o.player == null ? "None" : `Some ${fsInt(o.player)}`}`,
-          `          Chased = ${o.chased === true} }`,
+          `          Chased = ${o.chased === true}`,
+          // The wire writes `read` only once a look has read the holder (#604).
+          `          HolderUnread = ${o.read !== true} }`,
         );
       }
       parts.push("    ]");
