@@ -2126,8 +2126,9 @@ let internal exitSteps (view: ColonyView) (tile: RoomPos) : int =
 /// the body's pace is caught at its work; walking elsewhere in the room, only
 /// until its ticks to the edge, from when the body is in reach (#658); and
 /// once it walks off (its last
-/// step took it toward the edge, `ColonyView.Stepped`, and the one before
-/// not away, `ColonyView.SteppedBack`) only from in reach, and then until it is off.
+/// step took it nearer that way out, `ColonyView.Stepped`, and the one
+/// before not farther, `ColonyView.SteppedBack`, `Quarry.leaving`) only from
+/// in reach, and then until it is off.
 let private catchOdds
     (view: ColonyView)
     (fighter: Fighter)
@@ -2159,7 +2160,7 @@ let private catchOdds
         // (live t1,030,4xx, W19S25: two haulers on one four-step dance,
         // each read leaving off one step every other tick, turned the
         // ranger between them for 100+ ticks).
-        let leaving = Quarry.leaving hostile.Pos left back
+        let leaving = Quarry.leaving (exitSteps view) hostile.Pos left back
         let walking = Quarry.walking hostile.Pos left back
 
         let dancing = dancingOn view hostile

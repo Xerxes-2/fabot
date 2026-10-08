@@ -350,17 +350,24 @@ let lastIn (room: string) (quarries: Map<string, Track>) : (Track * RoomPos) lis
 
     Map.tryFind room index |> Option.defaultValue []
 
-/// Whether a body's last step took it toward its room's edge and the one
-/// before not away from it (#619): it walks off, off its tile now, the tile
-/// it left (`HostileStep.Left`) and the one before (`HostileStep.Back`).
-let leaving (at: RoomPos) (left: RoomPos option) (back: RoomPos option) : bool =
+/// Whether a body's last step took it nearer its room's way out and the one
+/// before not farther (#619): it walks off, off its tile now, the tile it
+/// left (`HostileStep.Left`) and the one before (`HostileStep.Back`), each
+/// tile's distance out read off `out` — the steps through the room's ground
+/// to its nearest walkable exit (`Facts.exitSteps`, #663 S5), so a body
+/// walking for the real exit along a walled edge is leaving and one stepping
+/// toward a walled edge is not.
+let leaving
+    (out: RoomPos -> int)
+    (at: RoomPos)
+    (left: RoomPos option)
+    (back: RoomPos option)
+    : bool =
     left
     |> Option.exists (fun last ->
         last.Room = at.Room
-        && Dance.toEdge (RoomPos.pos at) < Dance.toEdge (RoomPos.pos last)
-        && back
-           |> Option.forall (fun back ->
-               Dance.toEdge (RoomPos.pos last) <= Dance.toEdge (RoomPos.pos back)))
+        && out at < out last
+        && back |> Option.forall (fun back -> out last <= out back))
 
 /// Whether a body stepped in its room since the full tick before, and not
 /// back onto the tile it stood on before that (a dance in place is its work).

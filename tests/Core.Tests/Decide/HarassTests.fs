@@ -1532,6 +1532,59 @@ let roomWorthTests =
                     "the walled west edge leaves it twenty-four steps from an exit, not one"
             }
 
+            // #663 S5 (the S3 review's note): whether a body walks off reads
+            // the same exit field as its way out, never the straight edge.
+            test
+                "a body stepping along a walled edge toward the room's exits walks off; one stepping onto the walled edge does not" {
+                let holder = ranger "ranger-r"
+                let at = RoomPos.at harassRoom { X = 25; Y = 25 }
+
+                let walledAfter (from: Pos) (now: Pos) =
+                    let colony = sweeping [ holder, at ] [ hauler harassRoom "hauler-n" now ]
+
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                Borders =
+                                    colony.Spatial.Borders
+                                    |> Map.add
+                                        harassRoom
+                                        (plainRing
+                                         |> Map.map (fun tile terrain ->
+                                             if tile.X = 0 then Wall else terrain))
+                            }
+                        Stepped = Map.ofList [ "hauler-n", RoomPos.at harassRoom from ]
+                    }
+
+                // The kill the holder lands from five ticks off, its owner's
+                // workers never walking off so nothing is denied beside it: a
+                // body walking off is caught only from in reach, so it lands
+                // nothing; one walking in the room, while it is still there.
+                let score (view: ColonyView) =
+                    Facts.roomRate
+                        Quarry.Reading.Value
+                        { view with
+                            World =
+                                { view.World with
+                                    Flees = Map.ofList [ enemy, 0.0 ]
+                                }
+                        }
+                        [ Fighter.ofCreep holder ]
+                        0
+                        5
+                        harassRoom
+
+                Expect.equal
+                    (score (walledAfter { X = 1; Y = 10 } { X = 1; Y = 9 }))
+                    0.0
+                    "north along the walled west edge, a step nearer the north exits: walking off"
+
+                Expect.isGreaterThan
+                    (score (walledAfter { X = 2; Y = 25 } { X = 1; Y = 25 }))
+                    0.0
+                    "west onto the walled edge, no nearer any exit: not walking off, caught while it is in the room"
+            }
+
             // #661: priced now; the dismantler that takes them is S7's.
             test
                 "the enemy's container is priced at its rebuild: no crew without WORK takes it down, a dismantler where it pays" {
