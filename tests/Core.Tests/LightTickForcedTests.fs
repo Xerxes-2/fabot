@@ -1396,6 +1396,90 @@ let forcedTests =
                 Expect.isNone
                     (LightTick.forced chained (at 11 13 [ scout 16 10; raider 21 ]))
                     "one that reaches it after: nothing forces"
+
+                // #663 S5 (its review): a job's rule decides only whether its
+                // quarry's walk forces; an armed body newly reaching the walk
+                // forces every job.
+                let waiting =
+                    { chained with
+                        Plans =
+                            chained.Plans
+                            |> Map.map (fun _ plan ->
+                                LightTick.holding (Map.ofList [ "ranger", JobForce.Waits ]) plan)
+                    }
+
+                Expect.equal
+                    (LightTick.forced waiting (at 11 13 [ scout 16 10; raider 20 ]))
+                    (Some(LightForce.Chase "ranger"))
+                    "a waiting job, a raider reaching its walk: forced"
+
+                Expect.isNone
+                    (LightTick.forced waiting (at 11 13 [ scout 16 11 ]))
+                    "its quarry turning off the track forces a waiting job nothing"
+            }
+
+            // #663 S5: each job declares its light-tick force rule. The same
+            // walk off that forces a kill's chase forces a camp only once the
+            // quarry steps onto a tile the camp covers, and a muster or a held
+            // exit never.
+            test
+                "a camp forces only as its quarry steps onto the tiles it covers; a muster never by its walk" {
+                let scout x y : GlanceHostile =
+                    { hostile x y "Trepidimous" false with
+                        Id = "scout"
+                    }
+
+                let at time quarry =
+                    { quiet with
+                        Creeps =
+                            Map.ofList
+                                [
+                                    "ranger",
+                                    { creepAt 12 10 1000 with
+                                        Gait = Some { Weight = 1; Moves = 1 }
+                                    }
+                                ]
+                        Hostiles = quarry
+                        Time = time
+                    }
+
+                let aims = [ RangedAttackCreep("ranger", "scout") ]
+
+                let before forces =
+                    let last =
+                        LightTick.lastFull (at 9 [ scout 14 10 ]) Map.empty aims
+                        |> aiming aims Map.empty
+
+                    { last with
+                        Plans = last.Plans |> Map.map (fun _ plan -> LightTick.holding forces plan)
+                    }
+
+                let kill = before Map.empty
+
+                Expect.equal
+                    (LightTick.forcing kill (at 10 [ scout 15 10 ]))
+                    [ LightForce.Chase "ranger" ]
+                    "the premise: a kill's quarry walked off, forced"
+
+                // Its camp seat at (20,10), covering three about it: the
+                // quarry at (14,10) stood within none of it.
+                let camp =
+                    before (Map.ofList [ "ranger", JobForce.Covers(Set.singleton (tile 20 10), 3) ])
+
+                Expect.isEmpty
+                    (LightTick.forcing camp (at 10 [ scout 15 10 ]))
+                    "a camp's quarry walking off where it covers nothing: replayed"
+
+                Expect.equal
+                    (LightTick.forcing camp (at 10 [ scout 17 10 ]))
+                    [ LightForce.Chase "ranger" ]
+                    "stepping onto a tile it covers: forced"
+
+                let waits = before (Map.ofList [ "ranger", JobForce.Waits ])
+
+                Expect.isEmpty
+                    (LightTick.forcing waits (at 10 [ scout 15 10 ]))
+                    "a muster's or a held exit's quarry walks where it likes: replayed"
             }
 
             test

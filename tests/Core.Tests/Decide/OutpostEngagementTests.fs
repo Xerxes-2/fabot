@@ -699,6 +699,25 @@ let engagementTests =
                     0.0
                     "the first come's loss over the wait, a tick"
 
+                // Its light-tick rule: a mustering holder waits; only a new
+                // armed body in reach forces a decide.
+                let waiting = colony atSpawn
+
+                Expect.equal
+                    (Emitter.forces
+                        waiting
+                        (threatsOfHeld
+                            waiting
+                            (Atlas.ofView waiting)
+                            (heldTaskFacts
+                                waiting
+                                (holding
+                                 |> List.map (fun (name, task) -> name, taskId task)
+                                 |> Map.ofList)))
+                        (Map.ofList holding))
+                    (Map.ofList [ "g-1", JobForce.Waits; "g-2", JobForce.Waits ])
+                    "both wait"
+
                 // The rule alone: a first come the raid beats loses its body,
                 // and waiting costs nothing it would keep, however much the
                 // room yields; a group of one waits for nobody.

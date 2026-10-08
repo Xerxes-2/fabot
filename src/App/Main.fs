@@ -1786,6 +1786,7 @@ let private fullTick
                             decision.Volleys
                             decision.Mired
                         |> LightTick.tracking seen decision.Tracks
+                        |> LightTick.holding decision.Forces
 
                     colony.Home,
                     LightTick.recorded

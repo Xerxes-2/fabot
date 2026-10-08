@@ -1320,6 +1320,28 @@ let aims (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
                 strikeOrder view atlas targets fighting creep room |> List.map (strikeAt creep)
             | _ -> [])
 
+/// Each fighter's light-tick force rule (#663 M3), off the job its Guard's
+/// holders do first: a muster's or a held exit's waits for a new armed body
+/// in reach; a camp's covers the tiles within the holder's reach of its
+/// own; a kill's (`JobForce.Closes`) is the default, and no entry.
+let forces
+    (view: ColonyView)
+    (threats: Threats)
+    (assigned: Map<string, Task>)
+    : Map<string, JobForce> =
+    view.Creeps
+    |> List.choose (fun creep ->
+        match Map.tryFind creep.Name assigned with
+        | Some(Guard room) ->
+            match (Threats.briefOf threats room).Jobs with
+            | job :: _ when job.Kind = JobKind.Muster || job.Kind = JobKind.HoldExit ->
+                Some(creep.Name, JobForce.Waits)
+            | job :: _ when job.Kind = JobKind.Camp ->
+                Some(creep.Name, JobForce.Covers(job.Tiles, reachOf creep))
+            | _ -> None
+        | _ -> None)
+    |> Map.ofList
+
 /// What one fighter strikes next where it stands (`aims`), with how far it
 /// strikes: the head of its kill order, then every other target of it in
 /// its reach, which a light tick's `pickStrike` shoots first. What a chase

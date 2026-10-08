@@ -1382,6 +1382,7 @@ and private finishWhole (tail: WholeTail) (outcomes: MatchOutcome list) : Decisi
         WaitingContainers = waitingContainers
         Steps = steps
         Tracks = Atlas.tracks atlas
+        Forces = forces view threats assigned
         Next = nextPours @ List.choose List.head arrivals
         Later =
             [
@@ -1674,6 +1675,7 @@ and private joinFight
                         |> Seq.filter (fun (name, _) -> Set.contains name fighting)
                         |> Fresh.mapOfSeq
                     Tracks = Atlas.tracks atlas
+                    Forces = forces view threats assigned
                     Next = []
                     Later = []
                     Aims = aims view atlas threats assigned

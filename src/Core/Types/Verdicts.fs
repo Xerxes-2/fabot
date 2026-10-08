@@ -606,6 +606,22 @@ type EconomyCarry =
         Unfled: Set<string>
     }
 
+/// What a fighter's job lets the light ticks replay (#663 M3), declared by
+/// the job its Guard's holders do first. A kill (`Closes`) is the default
+/// and is never written.
+[<RequireQualifiedAccess>]
+type JobForce =
+    /// A kill: forced while its quarry walks off where the plan put it and
+    /// the fighter closes on it (`LightForce.Chase`).
+    | Closes
+    /// A camp: its tiles fixed on the quarry's trajectory, forced only once
+    /// the quarry steps onto a tile within `reach` of one of them that it
+    /// did not stand within as the plan was made.
+    | Covers of tiles: Set<RoomPos> * reach: int
+    /// A muster or a held exit: never by its quarry's walk; only a new armed
+    /// body in reach forces it (`LightForce.Hostile`).
+    | Waits
+
 /// What one tick of deciding returns: the Intents to execute, the
 /// Assignments to remember for next tick, the plan memo to hold in heap
 /// for next tick, the Verdicts explaining them, and this colony's move
@@ -642,6 +658,9 @@ type Decision =
         /// its unarmed quarry stands each tick after this one, walking on in
         /// its heading (#626). A light tick re-decides it only off it.
         Tracks: Map<string, RoomPos list>
+        /// Each fighter whose job is no kill, its light-tick force rule
+        /// (`JobForce`, `Emitter.forces`).
+        Forces: Map<string, JobForce>
         /// The light tick's planned acts, never issued on this tick: each
         /// refiller that poured this tick and stands beside another hungry
         /// member of the refill cluster, its transfer into that one; and each

@@ -2242,6 +2242,15 @@ let catchableFirstTests =
                     "priced at its kill at the camp's odds"
 
                 Expect.isGreaterThan camp.Value.Value 0.0 "which pays"
+
+                // Its light-tick rule: forced only as the dancer steps onto a
+                // tile the camp covers, never by its dance across the border.
+                let threats = threatsOfHeld inRoom (Atlas.ofView inRoom) (heldTaskFacts inRoom held)
+
+                Expect.equal
+                    (Emitter.forces inRoom threats (Map.ofList [ holder.Name, Guard harassRoom ]))
+                    (Map.ofList [ holder.Name, JobForce.Covers(camp.Tiles, Fighter.reachOf holder) ])
+                    "the camp's holder covers its reach of the camp"
             }
         ]
 

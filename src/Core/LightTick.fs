@@ -135,6 +135,11 @@ type Plan =
         /// tile, then where the decide's chase assumed its quarry stands each
         /// tick on, walking on in its heading (`Resolver.chainOf`).
         Tracks: Map<string, int * RoomPos list>
+        /// Each fighter whose job is no kill, what forces its replay
+        /// (`Decision.Forces`, #663 M3): a camp only once its quarry steps
+        /// onto a tile it covers, a muster or a held exit never by its
+        /// quarry's walk (`LightForce.Chase`).
+        Forces: Map<string, JobForce>
     }
 
 /// What the last full tick left for the ticks after it: every colony's plan,
@@ -469,7 +474,22 @@ let plan
             |> Seq.map (fun (name, tiles) -> name, Fresh.setOfSeq tiles)
             |> Fresh.mapOfSeq
         Tracks = Fresh.mapOfSeq Seq.empty
+        Forces = Fresh.mapOfSeq Seq.empty
     }
+
+/// A plan with its fighters' force rules (`Decision.Forces`, #663 M3), for
+/// the bodies it holds.
+let holding (forces: Map<string, JobForce>) (plan: Plan) : Plan =
+    if Map.isEmpty forces then
+        plan
+    else
+        { plan with
+            Forces =
+                forces
+                |> Map.toSeq
+                |> Seq.filter (fun (name, _) -> Set.contains name plan.Creeps)
+                |> Fresh.mapOfSeq
+        }
 
 /// A plan with its chasers' tracks (`Decision.Tracks`), off the glance the
 /// decide began with: each from the tick after it, for a body it holds.
@@ -612,6 +632,7 @@ let private without (claimed: Set<string>) (plan: Plan) : Plan =
             Volleys = plan.Volleys |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
             Mired = plan.Mired |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
             Tracks = plan.Tracks |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
+            Forces = plan.Forces |> Map.toSeq |> Seq.filter (fst >> mine) |> Fresh.mapOfSeq
         }
 
 /// The record of the plans by home, each body claimed by the first plan that
@@ -700,6 +721,7 @@ let private merged (now: Glance) (last: LastFull) : Plan =
             Volleys = mapOf _.Volleys
             Mired = mapOf _.Mired
             Tracks = mapOf _.Tracks
+            Forces = mapOf _.Forces
         }
 
 /// The rooms the plans' volleys stand in (`Glance.PowerCreeps`).
@@ -1080,13 +1102,32 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
                         && Map.tryFind name plan.Standing
                            |> Option.exists (fun from -> pursues reach mark from creep.Tile)
 
-                exposed ()
-                || not quarry.Armed
-                   && not (harmless now quarry)
-                   && RoomPos.range creep.Tile quarry.Tile |> Option.forall (fun r -> r > glues)
-                   && lost ()
-                   && closes creep quarry reach
-                   && not (menaced now creep.Tile)
+                // An armed body newly reaching its walk forces every job.
+                // Its quarry's walk forces by its job's own rule (#663 M3):
+                // a camp only once its quarry steps onto a tile it covers; a
+                // muster, a held exit or its intercept never; a kill as
+                // above.
+                let walked () =
+                    match Map.tryFind name plan.Forces with
+                    | Some JobForce.Waits -> false
+                    | Some(JobForce.Covers(tiles, covers)) ->
+                        let covered (tile: RoomPos) =
+                            tiles
+                            |> Set.exists (fun seat ->
+                                RoomPos.range seat tile |> Option.exists (fun r -> r <= covers))
+
+                        covered quarry.Tile && not (covered mark)
+                    | Some JobForce.Closes
+                    | None ->
+                        not quarry.Armed
+                        && not (harmless now quarry)
+                        && RoomPos.range creep.Tile quarry.Tile
+                           |> Option.forall (fun r -> r > glues)
+                        && lost ()
+                        && closes creep quarry reach
+                        && not (menaced now creep.Tile)
+
+                exposed () || walked ()
             | _ -> false)
         |> List.map (fun (name, _, _, _) -> LightForce.Chase name)
 
@@ -1302,6 +1343,7 @@ let withFight (fighters: Set<string>) (fresh: Plan) (carried: Plan) : Plan =
         Volleys = joined _.Volleys
         Mired = joined _.Mired
         Tracks = joined _.Tracks
+        Forces = joined _.Forces
     }
 
 /// The ids the last full tick's acts name, for the glance to look up
