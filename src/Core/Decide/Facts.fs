@@ -1851,7 +1851,9 @@ let internal pressedFor (view: ColonyView) (fighter: Fighter) (hostile: HostileI
 /// room's edge at its pace, the nearer side of the room its way out: one
 /// quicker on plain stays in reach only until it opens the gap past the
 /// body's reach, from where they stand or, coming in, from the reach; one at
-/// the body's pace is caught at its work, but once it walks off (its last
+/// the body's pace is caught at its work; walking elsewhere in the room, only
+/// until its ticks to the edge, from when the body is in reach (#658); and
+/// once it walks off (its last
 /// step took it toward the edge, `ColonyView.Stepped`, and the one before
 /// not away, `ColonyView.SteppedBack`) only from in reach, and then until it is off.
 let private catchOdds
@@ -1896,6 +1898,48 @@ let private catchOdds
                    |> Option.forall (fun back ->
                        toEdge (RoomPos.pos last) <= toEdge (RoomPos.pos back)))
 
+        // A body that stepped since the full tick before, not back onto the
+        // tile it stood on before that (a dance in place is its work).
+        let walking =
+            Map.tryFind hostile.Id view.Stepped
+            |> Option.exists (fun last ->
+                last.Room = hostile.Pos.Room
+                && Map.tryFind hostile.Id view.SteppedBack
+                   |> Option.forall (fun back -> back <> hostile.Pos))
+
+        // A body dancing on the border, by its trajectory (#658): within the
+        // depth our reach and its step out cover, it crossed the border
+        // lately (`ColonyView.Bounces`: out and back, either way, a few
+        // steps over or on the exit tile alike), or it steps back onto the
+        // tile it stood on two steps ago, or it is laid back on the tile it
+        // crossed out from (`sweepPricing`). Its camp's odds off that
+        // history: it stands in reach about half its time, and comes back at
+        // the rate it has (`λ`, its returns over the ticks they were seen
+        // in), so the kill lands, camped on a tile covering its way in, at
+        // that half, by the odds it keeps coming back over the camp's ticks
+        // (1 − e^(−λ·2·kill)); a body that never left the room comes back
+        // for certain.
+        let crossings =
+            Map.tryFind hostile.Id view.Bounces
+            |> Option.map _.Ticks
+            |> Option.defaultValue []
+
+        let inPlace =
+            Map.tryFind hostile.Id view.Stepped
+            |> Option.exists (fun last -> last = hostile.Pos)
+            || Map.tryFind hostile.Id view.SteppedBack = Some hostile.Pos
+
+        let shallow = toEdge at <= Engine.rangedRange + 1
+        let dancing = shallow && (not (List.isEmpty crossings) || inPlace)
+
+        let camp =
+            match crossings with
+            | [] -> 0.5
+            | ticks ->
+                let returns = float ((List.length ticks + 1) / 2)
+                let observed = float (max 1 (view.Time - List.last ticks + 1))
+                0.5 * (1.0 - exp (-(returns / observed) * 2.0 * float kill))
+
         let window =
             match Gait.ticks Gait.plain fighter.Gait with
             | Some ours when ours > pace ->
@@ -1909,6 +1953,20 @@ let private catchOdds
                         |> min fighter.Reach
 
                     min off ((fighter.Reach - range + 1) * ours * pace / (ours - pace))
+            // One walking, not at its work and not yet toward the edge (a
+            // hauler on its way in), is caught only while it is still in the
+            // room once the body is in reach: it turns for the edge before a
+            // long kill lands (live t1,038,8xx, W19S26: two rangers trailed
+            // a 23M23C hauler priced certain beside two seated miners).
+            // One dancing on the border (live, W19S26: haulers and a
+            // reserver stepping onto the exit and back dragged the group to
+            // and fro) is camped, at its camp's odds, and never chased
+            // across. One on or beside an exit walking out
+            // leaves in a step: caught only for what lands before it, from
+            // in reach.
+            | _ when dancing -> int (camp * float kill)
+            | _ when toEdge at <= 1 -> off + 1 - max 0 arrival
+            | _ when not leaving && walking -> off - max 0 arrival
             | _ when not leaving -> kill
             | _ when arrival > 0 -> 0
             | _ -> off
@@ -3546,9 +3604,47 @@ let rememberedIn (view: ColonyView) : ColonyView =
         }
 
 /// A [[sweep]] candidate as the sweep prices it (#658): the kill's pricing
-/// view (`killPricing`) over the bodies the view remembers (`rememberedIn`).
+/// view (`killPricing`) over the bodies the view remembers (`rememberedIn`),
+/// with each body's last steps kept: the group is there or close by, so a
+/// carrier walking off is priced at the share of its kill landed before it
+/// is gone (`catchOdds`), never as certain as a digger on its seat (a cast,
+/// landing long after one step, reads none, #652).
+/// A body dancing on the room's border that stands across it this tick is
+/// priced back on the tile it crossed out from, so the room's price holds
+/// through the tick it is out (its camp, `catchOdds`), and the group is not
+/// pulled from the room and back.
 let private sweepPricing (view: ColonyView) (room: string) : ColonyView =
-    killPricing (rememberedIn view) room
+    let priced = killPricing (rememberedIn view) room
+
+    // Out of the room by its latest crossing (`ColonyView.Bounces`), from a
+    // tile within the depth a dance turns back at, and still beside it.
+    let shallow (tile: RoomPos) =
+        let depth = Engine.rangedRange + 1
+        let edge = Engine.roomSide - 1
+
+        tile.X <= depth
+        || tile.Y <= depth
+        || tile.X >= edge - depth
+        || tile.Y >= edge - depth
+
+    let crossedOut (h: HostileInfo) =
+        if h.Pos.Room = room || not (RoomName.neighbouring h.Pos.Room room) then
+            None
+        else
+            Map.tryFind h.Id view.Bounces
+            |> Option.map _.Came
+            |> Option.filter (fun came -> came.Room = room && shallow came)
+
+    { priced with
+        Hostiles =
+            priced.Hostiles
+            |> List.map (fun h ->
+                match crossedOut h with
+                | Some last -> { h with Pos = last }
+                | None -> h)
+        Stepped = view.Stepped
+        SteppedBack = view.SteppedBack
+    }
 
 /// The ticks a body standing at `from` walks to a room at its plain `pace`
 /// (#658): none in the room or on its border's doorstep (the tile beside it,
@@ -3698,6 +3794,46 @@ let sweepChoice (held: Assignments) (views: ColonyView list) : string option =
         |> List.sortBy (fun (room, rate) -> -rate, room)
         |> List.tryHead
         |> Option.map fst
+
+/// How many bodies the [[sweep]]'s room seats (#658): its whole group, every
+/// colony's (`WorldView.SweepGroup`), and one more where a body like its
+/// weakest, landing with its last, raises the kills it lands a tick
+/// (`sweepRate`): a free fighter joins the one group while concentrating
+/// pays, never a second room. One with no group seats one.
+let sweepSeats (view: ColonyView) (room: string) : int =
+    let placed =
+        view.World.SweepGroup |> List.map (fun (creep, at) -> at, Fighter.ofCreep creep)
+
+    let rateOf (team: (RoomPos * Fighter) list) =
+        let arrival =
+            team
+            |> List.map (fun (at, fighter) -> doorTicks at (paceOf fighter) room)
+            |> List.max
+
+        if arrival = System.Int32.MaxValue then
+            0.0
+        else
+            sweepRate view (List.map snd team) arrival room
+
+    match placed with
+    | [] -> 1
+    | placed ->
+        let weakest =
+            placed
+            |> List.minBy (fun (_, fighter) ->
+                fighter.DamageAt Engine.rangedRange + fighter.DamageAt 1)
+            |> snd
+
+        let last =
+            placed
+            |> List.maxBy (fun (at, fighter) -> doorTicks at (paceOf fighter) room)
+            |> fst
+
+        List.length placed
+        + (if rateOf ((last, weakest) :: placed) > rateOf placed then
+               1
+           else
+               0)
 
 /// `sweepChoice` over one colony's view alone.
 let sweepRoom (view: ColonyView) (held: Assignments) : string option = sweepChoice held [ view ]

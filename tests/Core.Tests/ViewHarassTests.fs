@@ -934,3 +934,94 @@ let preyMemoryTests =
                     "the live switch off costs nothing"
             }
         ]
+
+// ---- a hostile's trips across a border (#658) ----------------------------
+
+/// The world on `tick` with one body seen in these rooms at these tiles
+/// (none: nothing seen anywhere).
+let private bodyAt tick (seen: (string * int * int) option) : World =
+    let rooms =
+        match seen with
+        | Some(room, x, y) ->
+            [
+                room,
+                { RoomFacts.empty with
+                    Hostiles =
+                        [
+                            { harassHostile "tripper" enemy [ Carry; Move ] with
+                                Pos = RoomPos.at room { X = x; Y = y }
+                            }
+                        ]
+                }
+            ]
+        | None -> []
+
+    { World.empty with
+        Time = tick
+        Rooms = Map.ofList rooms
+    }
+
+[<Tests>]
+let borderTripTests =
+    testList
+        "a hostile's trips across a border are kept, out of sight too"
+        [
+            test "out over the border, dark a tick, and back: two crossings, the tile it came from" {
+                let carried =
+                    [
+                        bodyAt 100 (Some(harassRoom, 0, 20))
+                        bodyAt 101 (Some("W13S29", 49, 20))
+                        bodyAt 102 None
+                        bodyAt 103 (Some(harassRoom, 1, 20))
+                    ]
+                    |> List.fold
+                        (fun (previous: World) world ->
+                            World.recallHostiles
+                                Tuning.defaults.RaidBounceTicks
+                                previous.HostileSteps
+                                world)
+                        World.empty
+
+                Expect.equal
+                    (Map.tryFind "tripper" carried.HostileSteps |> Option.bind _.Crossed)
+                    (Some
+                        {
+                            Came = RoomPos.at "W13S29" { X = 49; Y = 20 }
+                            Ticks = [ 103; 101 ]
+                        })
+                    "kept through the dark tick, each crossing counted"
+            }
+
+            test
+                "a body last seen inland that went out of sight is forgotten; past the window, its crossings too" {
+                let inland =
+                    [ bodyAt 100 (Some(harassRoom, 25, 25)); bodyAt 101 None ]
+                    |> List.fold
+                        (fun (previous: World) world ->
+                            World.recallHostiles
+                                Tuning.defaults.RaidBounceTicks
+                                previous.HostileSteps
+                                world)
+                        World.empty
+
+                Expect.isFalse (Map.containsKey "tripper" inland.HostileSteps) "no trip to keep"
+
+                let stale =
+                    [
+                        bodyAt 100 (Some(harassRoom, 0, 20))
+                        bodyAt 101 (Some("W13S29", 49, 20))
+                        bodyAt (101 + Tuning.defaults.RaidBounceTicks + 1) (Some("W13S29", 49, 21))
+                    ]
+                    |> List.fold
+                        (fun (previous: World) world ->
+                            World.recallHostiles
+                                Tuning.defaults.RaidBounceTicks
+                                previous.HostileSteps
+                                world)
+                        World.empty
+
+                Expect.isNone
+                    (Map.tryFind "tripper" stale.HostileSteps |> Option.bind _.Crossed)
+                    "a crossing past the bounce window is no dance"
+            }
+        ]

@@ -69,6 +69,7 @@ let quiet: ColonyView =
         Parked = Set.empty
         Stepped = Map.empty
         SteppedBack = Map.empty
+        Bounces = Map.empty
         Leaving = Set.empty
         Refusals = []
         Borrowed = BorrowedWork.empty

@@ -902,13 +902,24 @@ type BodiesSeen = { Bodies: HostileInfo list; Tick: int }
 /// and the first full tick it was seen on `At` (#552): one seen there on two
 /// is parked. `Back`: the tile of that room it left on the step before
 /// `Left`, which tells a body walking off from one milling in place.
+/// `Seen`: the last full tick it was seen. `Crossed`: its trajectory across
+/// a border within the bounce window (#658), a body that walks a few steps
+/// out and back counted as surely as one bouncing on the exit tile, the
+/// record kept through the window while it is out of sight.
 type HostileStep =
     {
         At: RoomPos
         Left: RoomPos option
         Back: RoomPos option
         Since: int
+        Seen: int
+        Crossed: Crossing option
     }
+
+/// A hostile's crossings of a border (#658): the tile it was last seen on
+/// before its latest crossing, in the room it left, and the full ticks it
+/// was seen in another room than the one it was last seen in, newest first.
+and Crossing = { Came: RoomPos; Ticks: int list }
 
 /// `World.linkedRecalling`'s memo: `(keeper margin, from, to)` to whether a
 /// crossing joins the pair. Mutable and heap-only, like `WalkTable`, and the
@@ -1630,32 +1641,86 @@ module World =
     /// it stood on the full tick before when that is not where it stands.
     /// Bounded by this tick's hostiles, and built by `Fresh`, the map being
     /// carried to the next tick.
-    let recallHostiles (previous: Map<string, HostileStep>) (world: World) : World =
-        { world with
-            HostileSteps =
-                world.Rooms
-                |> Map.toSeq
-                |> Seq.collect (fun (_, facts) -> facts.Hostiles)
-                |> Seq.map (fun h ->
-                    let left =
-                        Map.tryFind h.Id previous
-                        |> Option.map (fun step -> step.At)
-                        |> Option.filter (fun at -> at <> h.Pos && at.Room = h.Pos.Room)
+    ///
+    /// Each one's border crossings within `window` ticks are kept beside it
+    /// (`HostileStep.Crossings`, #658), and its record through `window` ticks
+    /// out of sight, so a body that steps out over the border into a room
+    /// nothing sees and comes back is known by the trip.
+    let recallHostiles (window: int) (previous: Map<string, HostileStep>) (world: World) : World =
+        let recent (crossed: Crossing option) =
+            crossed
+            |> Option.map (fun c ->
+                { c with
+                    Ticks = c.Ticks |> List.filter (fun tick -> world.Time - tick <= window)
+                })
+            |> Option.filter (fun c -> not (List.isEmpty c.Ticks))
 
-                    h.Id,
-                    {
-                        At = h.Pos
-                        Left = left
-                        Back =
-                            match left, Map.tryFind h.Id previous with
-                            | Some _, Some step -> step.Left
-                            | _ -> None
-                        Since =
-                            match Map.tryFind h.Id previous with
-                            | Some step when step.At = h.Pos -> step.Since
-                            | _ -> world.Time
-                    })
-                |> Fresh.mapOfSeq
+        let present =
+            world.Rooms
+            |> Map.toSeq
+            |> Seq.collect (fun (_, facts) -> facts.Hostiles)
+            |> Seq.map (fun h ->
+                let before = Map.tryFind h.Id previous
+
+                let left =
+                    before
+                    |> Option.map (fun step -> step.At)
+                    |> Option.filter (fun at -> at <> h.Pos && at.Room = h.Pos.Room)
+
+                h.Id,
+                {
+                    At = h.Pos
+                    Left = left
+                    Back =
+                        match left, before with
+                        | Some _, Some step -> step.Left
+                        | _ -> None
+                    Since =
+                        match before with
+                        | Some step when step.At = h.Pos -> step.Since
+                        | _ -> world.Time
+                    Seen = world.Time
+                    Crossed =
+                        match before with
+                        | Some step when step.At.Room <> h.Pos.Room ->
+                            Some
+                                {
+                                    Came = step.At
+                                    Ticks =
+                                        world.Time
+                                        :: (recent step.Crossed
+                                            |> Option.map _.Ticks
+                                            |> Option.defaultValue [])
+                                }
+                        | Some step -> recent step.Crossed
+                        | None -> None
+                })
+            |> List.ofSeq
+
+        let seen = present |> List.map fst |> Set.ofList
+
+        let absent =
+            previous
+            |> Map.toSeq
+            |> Seq.filter (fun (id, step) ->
+                not (seen.Contains id)
+                && world.Time - step.Seen <= window
+                // Only a body last seen by a border, or one that crossed one
+                // lately: the rest walked off inland and are no trip.
+                && (Option.isSome (recent step.Crossed)
+                    || step.At.X <= 1
+                    || step.At.Y <= 1
+                    || step.At.X >= Engine.roomSide - 2
+                    || step.At.Y >= Engine.roomSide - 2))
+            |> Seq.map (fun (id, step) ->
+                id,
+                { step with
+                    Crossed = recent step.Crossed
+                })
+            |> List.ofSeq
+
+        { world with
+            HostileSteps = present @ absent |> Fresh.mapOfSeq
         }
 
     /// This tick's world with the armed-room memory laid under it (#485):

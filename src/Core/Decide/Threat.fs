@@ -1098,8 +1098,18 @@ module Brief =
             let guards = max (count melee) (cast melee)
 
             // The ranged seats take whatever the melee leaves of the total:
-            // a ranged body's shot reaches what a swing catches too.
-            let rangers = max (count ranged) (cast ranged - guards)
+            // a ranged body's shot reaches what a swing catches too. In the
+            // sweep's room, its whole group and a free body more while
+            // concentrating pays (`Facts.sweepSeats`, #658): one group, one
+            // room, past a seat a trespasser (live t1,038,786: a free ranger
+            // idled beside W19S26's two seats).
+            let swept =
+                if Set.contains room (harassRooms view) then
+                    Facts.sweepSeats view room - guards
+                else
+                    0
+
+            let rangers = max swept (max (count ranged) (cast ranged - guards))
 
             let capacity = Capacity.fighters (guards + rangers)
 
@@ -1159,7 +1169,16 @@ module Brief =
                 |> List.filter (fun creep -> not (Facts.bodiesWin view room [ creep ]))
                 |> List.length
 
-            Capacity.fighters (max (wanted ()) (min Engine.guardCap (losers + 1)))
+            // The sweep's room seats its whole group, every colony's, and a
+            // free fighter more while concentrating pays (`Facts.sweepSeats`,
+            // #658): one group, one room.
+            let swept =
+                if Set.contains room (harassRooms view) then
+                    Facts.sweepSeats view room
+                else
+                    0
+
+            Capacity.fighters (max swept (max (wanted ()) (min Engine.guardCap (losers + 1))))
 
     /// A Guard's own kind: the first of its claims, `Contested` where none
     /// claims the room.
@@ -3009,12 +3028,19 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     let rangers = rangerRooms view
 
     // The rooms a hostile stands in whose Guard a living body of ours holds
-    // (`Threats.Engaged`, #535).
+    // (`Threats.Engaged`, #535). Never a sweep candidate the sweep is not
+    // working (#658): the sweep's one room is its fight, and a body held to
+    // another is let go to it, not latched where it stood (live t1,038,786:
+    // a ranger engaged in W18S27 kept that room pooled and cast for beside
+    // the sweep's W19S26).
     let engaged =
+        let sweeping = harassRooms view
+
         view.Hostiles
         |> List.map (fun hostile -> hostile.Pos.Room)
         |> List.filter (fun room ->
-            not (List.isEmpty (HeldTaskFacts.holdersOf held (taskId (Guard room)))))
+            not (List.isEmpty (HeldTaskFacts.holdersOf held (taskId (Guard room))))
+            && (sweeping.Contains room || not (view.HarassCast.Contains room)))
         |> Set.ofList
 
     // Each room a hostile stands in: this colony's own row there

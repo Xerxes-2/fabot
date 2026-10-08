@@ -792,11 +792,11 @@ let colonyViewTests =
 
                 let before =
                     seeing 1000 [ stranger "sway" (10, 10); stranger "still" (20, 20) ]
-                    |> World.recallHostiles Map.empty
+                    |> World.recallHostiles Tuning.defaults.RaidBounceTicks Map.empty
 
                 let now =
                     seeing 1001 [ stranger "sway" (11, 10); stranger "still" (20, 20) ]
-                    |> World.recallHostiles before.HostileSteps
+                    |> World.recallHostiles Tuning.defaults.RaidBounceTicks before.HostileSteps
 
                 Expect.equal
                     (viewOf now child).Foreign

@@ -213,8 +213,12 @@ let harassGuardTests =
             // Moved by #658: the sweep works a candidate only where it has
             // something to kill (a quiet room pooled its Guard, target or
             // none, as an errand room is, and the ranger held it).
+            // Moved again by #658's concentrate fix: every armed body of the
+            // group standing in the sweep's room is seated there
+            // (`Facts.sweepSeats`), the melee one beside the ranger (it was
+            // left an outpost's, one seat a trespasser).
             test
-                "a quiet harassment room pools nothing; a worked one is the ranger's, not the melee's" {
+                "a quiet harassment room pools nothing; a worked one is held by the whole group standing there" {
                 let colony =
                     { (bareHome |> harassing) with
                         Bank = bank 2100 2100
@@ -237,8 +241,8 @@ let harassGuardTests =
                         { colony with
                             Hostiles = [ miner "miner" { X = 30; Y = 30 } ]
                         })
-                    (Some(taskId (Guard harassRoom)), None)
-                    "the enemy's miner there: the ranged body holds it; a melee one is an outpost's"
+                    (Some(taskId (Guard harassRoom)), Some(taskId (Guard harassRoom)))
+                    "the enemy's miner there: the ranged body and the melee one both hold it"
             }
 
             // The harassment Guard's rank, capacity and rows. Moved by #656:
@@ -1365,6 +1369,131 @@ let sweepGroupTests =
     testList
         "the sweep's group over every colony, and its muster"
         [
+            // Live t1,038,786 (#658): W17S29's ranger engaged a miner in
+            // W18S27 kept that Guard pooled (the held fight's latch) and
+            // W15S28 cast for it, while the sweep worked W19S26: two rooms.
+            test
+                "a body engaged in a candidate the sweep left is let go to the sweep's room, and nobody casts for the other" {
+                let west = ranger "ranger-west"
+                let north = ranger "ranger-north"
+
+                let northBodies =
+                    [
+                        theirsIn harassRoom "miner-n1" { X = 20; Y = 20 } [ Work; Work; Move ]
+                        theirsIn harassRoom "miner-n2" { X = 30; Y = 20 } [ Work; Work; Move ]
+                        hauler harassRoom "hauler-n1" { X = 22; Y = 22 }
+                        hauler harassRoom "hauler-n2" { X = 28; Y = 22 }
+                    ]
+
+                let westMiner = theirsIn westRoom "miner-w" { X = 21; Y = 20 } [ Work; Work; Move ]
+
+                // Two colonies' views, one body each: W1N1's in the west room
+                // beside its miner, the other's in the north room.
+                let first =
+                    sweeping
+                        [ west, RoomPos.at westRoom { X = 20; Y = 20 } ]
+                        (westMiner :: northBodies)
+
+                let second =
+                    sweeping
+                        [ north, RoomPos.at harassRoom { X = 25; Y = 25 } ]
+                        (westMiner :: northBodies)
+
+                let held =
+                    Map.ofList
+                        [
+                            west.Name, taskId (Guard westRoom)
+                            north.Name, taskId (Guard harassRoom)
+                        ]
+
+                let swept = Facts.sweepAll held [ first; second ]
+
+                Expect.equal
+                    (swept |> List.map (fun view -> view.Harass |> List.map _.RoomName))
+                    [ [ harassRoom ]; [ harassRoom ] ]
+                    "the premise: both colonies sweep the north room, its four bodies"
+
+                let firstSwept = List.head swept
+
+                Expect.isNone
+                    (pooledHolding [ west.Name, Guard westRoom ] (Guard westRoom) firstSwept)
+                    "the west room's Guard is pooled for nobody, its holder beside its miner or not"
+
+                Expect.isSome
+                    (pooledHolding [ west.Name, Guard westRoom ] (Guard harassRoom) firstSwept)
+                    "the sweep's room is"
+
+                let decision = decideFrom held (List.head swept)
+
+                Expect.equal
+                    (Map.tryFind west.Name decision.Assignments)
+                    (Some(taskId (Guard harassRoom)))
+                    "the west room's holder takes the sweep's room"
+
+                Expect.isFalse
+                    (decision.Quotas.Casts |> List.exists (fun cast -> cast.For = Guard westRoom))
+                    "and nobody casts for the west room"
+            }
+
+            test
+                "the sweep's room seats its whole group, and a free body more while concentrating pays" {
+                let a = ranger "ranger-a"
+                let b = ranger "ranger-b"
+                let c = ranger "ranger-c"
+
+                let northBodies =
+                    [
+                        theirsIn harassRoom "miner-n1" { X = 20; Y = 20 } [ Work; Work; Move ]
+                        hauler harassRoom "hauler-n1" { X = 22; Y = 22 }
+                        hauler harassRoom "hauler-n2" { X = 28; Y = 22 }
+                    ]
+
+                let held =
+                    Map.ofList
+                        [ a.Name, taskId (Guard harassRoom); b.Name, taskId (Guard harassRoom) ]
+
+                let colony =
+                    sweeping
+                        [
+                            a, RoomPos.at harassRoom { X = 20; Y = 24 }
+                            b, RoomPos.at harassRoom { X = 24; Y = 24 }
+                            c, RoomPos.at "W1N1" { X = 25; Y = 20 }
+                        ]
+                        northBodies
+                    |> Facts.sweep held
+
+                Expect.isGreaterThanOrEqual
+                    (Facts.sweepSeats colony harassRoom)
+                    3
+                    "both holders, and a seat for a third: three bodies kill the room's three sooner"
+
+                // One prey, the whole group standing in the room: a kill's
+                // own count seats one body a trespasser and at most a pair
+                // that lose; the sweep's room seats all three.
+                let one =
+                    sweeping
+                        [
+                            a, RoomPos.at harassRoom { X = 20; Y = 24 }
+                            b, RoomPos.at harassRoom { X = 24; Y = 24 }
+                            c, RoomPos.at harassRoom { X = 22; Y = 26 }
+                        ]
+                        [ hauler harassRoom "hauler-n1" { X = 22; Y = 22 } ]
+                    |> Facts.sweep held
+
+                match
+                    pooledHolding
+                        [ a.Name, Guard harassRoom; b.Name, Guard harassRoom ]
+                        (Guard harassRoom)
+                        one
+                with
+                | Some(_, capacity) ->
+                    Expect.isGreaterThanOrEqual
+                        (Map.tryFind CapScope.Fighters capacity.Caps |> Option.defaultValue 0)
+                        3
+                        "every body of the group holds the one room"
+                | None -> failtest "the sweep's room is pooled"
+            }
+
             // User 2026-10-08: no colony runs the sweep; its group may be
             // several colonies' bodies, working one room.
             test "two colonies' bodies are one group, working one room" {
@@ -1595,5 +1724,200 @@ let sweepGroupTests =
                     (Facts.sweep Map.empty laid).Dismantles
                     [ "can-n"; "salvaged" ]
                     "the north room is the sweep's; the west room's container waits; the salvage room's stays"
+            }
+        ]
+
+/// Trepidimous' 23C23M hauler, at a ranger's pace on plain while empty.
+let private bigHauler id pos =
+    theirs id enemy pos (List.replicate 23 Carry @ List.replicate 23 Move)
+
+/// A 5W3M miner seated beside the enemy's source (`standTile`).
+let private seatedMiner =
+    theirs "miner" enemy { X = 19; Y = 11 } (List.replicate 5 Work @ List.replicate 3 Move)
+
+/// A colony as `remoteWith` lays it, with these bodies' last steps.
+let private stepping
+    (ranger: Pos)
+    (hostiles: HostileInfo list)
+    (cargo: (string * int) list)
+    (steps: (string * Pos * Pos) list)
+    =
+    { remoteWith ranger hostiles cargo with
+        Stepped =
+            steps
+            |> List.map (fun (id, last, _) -> id, RoomPos.at harassRoom last)
+            |> Map.ofList
+        SteppedBack =
+            steps
+            |> List.map (fun (id, _, back) -> id, RoomPos.at harassRoom back)
+            |> Map.ofList
+    }
+
+[<Tests>]
+let catchableFirstTests =
+    testList
+        "the group goes for the kill it can land, never trailed nor dragged by a body it cannot catch (#658)"
+        [
+            // Live W19S26: two 23M23C haulers at the rangers' pace and two
+            // seated miners; the group trailed the haulers.
+            test
+                "two equal-pace loaded haulers walking about the room and a seated miner: the miner first" {
+                let colony =
+                    stepping
+                        { X = 30; Y = 13 }
+                        [
+                            bigHauler "hauler-a" { X = 31; Y = 10 }
+                            bigHauler "hauler-b" { X = 33; Y = 11 }
+                            seatedMiner
+                        ]
+                        [ "hauler-a", 1150; "hauler-b", 1150 ]
+                        [
+                            "hauler-a", { X = 31; Y = 9 }, { X = 31; Y = 8 }
+                            "hauler-b", { X = 33; Y = 10 }, { X = 33; Y = 9 }
+                        ]
+
+                Expect.equal
+                    (bigRangerOrder colony |> List.head)
+                    "miner"
+                    "each hauler turns for the edge before its 29-tick kill lands; the miner on its seat is certain"
+            }
+
+            // Live W19S26: haulers and a reserver bouncing on the exit dragged
+            // the group to and fro.
+            test "a hauler dancing on the exit and a seated miner: the miner first" {
+                let colony =
+                    stepping
+                        { X = 3; Y = 20 }
+                        [ bigHauler "dancer" { X = 0; Y = 20 }; seatedMiner ]
+                        []
+                        [ "dancer", { X = 1; Y = 20 }, { X = 0; Y = 20 } ]
+
+                Expect.equal
+                    (bigRangerOrder colony |> List.head)
+                    "miner"
+                    "the dancer stands in reach every other tick: the miner's kill pays more a tick"
+            }
+
+            // User 2026-10-08: a dancer walks a step or two over the border,
+            // or a few into ours, and comes back: known by its trajectory.
+            test
+                "a hauler that walked two steps out over the border and back, beside a seated miner: the miner first; alone, camped" {
+                let tripper = bigHauler "tripper" { X = 2; Y = 20 }
+
+                let colony hostiles =
+                    let laid = stepping { X = 5; Y = 20 } hostiles [] []
+
+                    { laid with
+                        Bounces =
+                            Map.ofList
+                                [
+                                    "tripper",
+                                    {
+                                        Came = RoomPos.at "W2N2" { X = 48; Y = 20 }
+                                        Ticks = [ laid.Time - 3; laid.Time - 6 ]
+                                    }
+                                ]
+                    }
+
+                Expect.equal
+                    (bigRangerOrder (colony [ tripper; seatedMiner ]) |> List.head)
+                    "miner"
+                    "the tripper is camped at its odds; the miner on its seat is certain"
+
+                Expect.isGreaterThan
+                    (Facts.sweepRate (colony [ tripper ]) [ Fighter.ofCreep bigRanger ] 0 harassRoom)
+                    0.0
+                    "alone, its camp pays: it came back within three ticks"
+            }
+
+            test "a hauler dancing on the exit and a slow worker walking in: the worker first" {
+                // 4W1C1M: five times a ranger's ticks a tile, never off the
+                // room before its kill lands.
+                let worker =
+                    theirs "worker" enemy { X = 6; Y = 22 } [ Work; Work; Work; Work; Carry; Move ]
+
+                let colony =
+                    stepping
+                        { X = 3; Y = 20 }
+                        [ bigHauler "dancer" { X = 0; Y = 20 }; worker ]
+                        []
+                        [
+                            "dancer", { X = 1; Y = 20 }, { X = 0; Y = 20 }
+                            "worker", { X = 5; Y = 22 }, { X = 4; Y = 22 }
+                        ]
+
+                Expect.equal
+                    (bigRangerOrder colony |> List.head)
+                    "worker"
+                    "the other prey, which the group catches, before the dancer"
+            }
+
+            test
+                "a lone dancer is camped: the room keeps its price the tick it is across, and the seats cover its exit off the border" {
+                let holder = bigRanger
+                let held = Map.ofList [ holder.Name, taskId (Guard harassRoom) ]
+
+                let inRoom =
+                    stepping
+                        { X = 3; Y = 20 }
+                        [ bigHauler "dancer" { X = 0; Y = 20 } ]
+                        []
+                        [ "dancer", { X = 1; Y = 20 }, { X = 0; Y = 20 } ]
+
+                let across =
+                    { inRoom with
+                        Hostiles =
+                            [
+                                { bigHauler "dancer" { X = 0; Y = 20 } with
+                                    Pos = RoomPos.at "W2N2" { X = 49; Y = 20 }
+                                }
+                            ]
+                        Stepped = Map.empty
+                        SteppedBack = Map.empty
+                        // Out over the border on its latest crossing, in on
+                        // the one before: a round trip and a half.
+                        Bounces =
+                            Map.ofList
+                                [
+                                    "dancer",
+                                    {
+                                        Came = RoomPos.at harassRoom { X = 0; Y = 20 }
+                                        Ticks = [ inRoom.Time; inRoom.Time - 2; inRoom.Time - 4 ]
+                                    }
+                                ]
+                    }
+
+                let team = [ Fighter.ofCreep holder ]
+
+                Expect.isGreaterThan
+                    (Facts.sweepRate inRoom team 0 harassRoom)
+                    0.0
+                    "in the room: its camp pays"
+
+                Expect.isGreaterThan
+                    (Facts.sweepRate across team 0 harassRoom)
+                    0.0
+                    "across the border: the room's price holds, the group is not pulled out"
+
+                let brief =
+                    Threats.briefOf
+                        (threatsOfHeld inRoom (Atlas.ofView inRoom) (heldTaskFacts inRoom held))
+                        harassRoom
+
+                // Its own seat, else the room's ground, as `Pool.areaFor`
+                // reads it.
+                let seats =
+                    Map.tryFind holder.Name brief.Seats.Value
+                    |> Option.orElse brief.Ground
+                    |> Option.defaultValue Set.empty
+
+                Expect.isNonEmpty seats "the holder has ground"
+
+                Expect.isTrue
+                    (seats
+                     |> Set.forall (fun seat ->
+                         seat.X > 0
+                         && range { X = 0; Y = 20 } (RoomPos.pos seat) <= Engine.rangedRange))
+                    "every seat strikes the exit tile it stands on, none on the exit"
             }
         ]

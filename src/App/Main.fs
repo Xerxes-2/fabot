@@ -776,7 +776,7 @@ let private fullTick
         |> World.latchTowers Tuning.defaults towered
         |> World.watchExits Tuning.defaults exitWatches
         |> World.recallHealers Tuning.defaults healers
-        |> World.recallHostiles hostileSteps
+        |> World.recallHostiles Tuning.defaults.RaidBounceTicks hostileSteps
         |> World.recallRaiders raiders
         |> World.recallPrey
             (World.preyRooms Colony.declared (harassment.Rooms |> List.map _.RoomName))

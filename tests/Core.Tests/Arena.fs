@@ -1474,7 +1474,7 @@ let worldOf (a: Arena) : World =
     |> World.latchTowers tuning a.Carried.Towered
     |> World.watchExits tuning a.Carried.ExitWatches
     |> World.recallHealers tuning a.Carried.Healers
-    |> World.recallHostiles a.Carried.HostileSteps
+    |> World.recallHostiles tuning.RaidBounceTicks a.Carried.HostileSteps
     |> World.recallRaiders a.Carried.Raiders
     |> World.recallPrey
         (World.preyRooms a.Colonies (a.Harass |> List.map _.RoomName))

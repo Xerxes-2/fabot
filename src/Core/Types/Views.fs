@@ -768,6 +768,10 @@ type ColonyView =
         /// Of those, each with the tile it left on the step before
         /// (`HostileStep.Back`): whether it walks on or mills in place.
         SteppedBack: Map<string, RoomPos>
+        /// The hostiles that crossed a border within the bounce window, each
+        /// with its crossings (`HostileStep.Crossed`, #658): the bodies
+        /// dancing on a border, by their trajectory.
+        Bounces: Map<string, Crossing>
         /// The tiles, world-wide, of our bodies that leave them this tick
         /// (`Entry.leavingTiles`, #649): on the border ring, or rested and on
         /// the move (`CreepInfo.Walking`) or shoved for free by the
@@ -2206,6 +2210,14 @@ module ColonyView =
                     |> Option.bind (fun step -> step.Back)
                     |> Option.map (fun back -> h.Id, back))
                 |> Map.ofList
+            // Every hostile's, in this cut or across its border: a body
+            // dancing on it stands on either side.
+            Bounces =
+                world.HostileSteps
+                |> Map.toSeq
+                |> Seq.choose (fun (id, step) ->
+                    step.Crossed |> Option.map (fun crossed -> id, crossed))
+                |> Map.ofSeq
             Leaving = Set.empty
             Borrowed =
                 {
