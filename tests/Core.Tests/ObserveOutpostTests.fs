@@ -417,23 +417,29 @@ let outpostTests =
 
             // #513. Live t954,065-958,574: W18S25 held three player raids 735-1,168
             // ticks each because one body retreated into a room we cannot see.
+            // Moved by #585: held its priced span past the tick after its last
+            // sighting — with no observer in reach, its whole round trip, 100
+            // (`Facts.holdSpan`) — not 200 past its opening.
             test
-                "a player's raid nobody sees leave holds the outpost PlayerRaidHold past its opening" {
+                "a player's raid nobody sees leave holds the outpost its round trip past its last sighting" {
                 let trep = squadIn outpostRoom "Trepidimous"
 
+                let blind =
+                    { trep with
+                        Hostiles = []
+                        RoomControl = Map.remove outpostRoom trep.RoomControl
+                    }
+
                 let state =
-                    RaidState.empty
-                    |> raidTick 100 trep
-                    |> raidTick 250 trep
-                    |> raidTick 260 { trep with Hostiles = [] }
+                    RaidState.empty |> raidTick 100 trep |> raidTick 150 trep |> raidTick 160 blind
 
                 Expect.equal
                     (standDowns state)
-                    [ outpostRoom, 100, 250, 300, StandDownBasis.PlayerRaidHold ]
-                    "opened plus 200, however long the squad stood in view"
+                    [ outpostRoom, 100, 150, 251, StandDownBasis.PlayerRaidHold ]
+                    "the tick after its last sighting plus its round trip, read afresh at each sighting"
 
                 Expect.equal
-                    (shutAt 299 state, shutAt 300 state)
+                    (shutAt 250 state, shutAt 251 state)
                     (Set.singleton outpostRoom, Set.empty)
                     "and the room is worked again on the window's last tick"
             }
@@ -510,6 +516,8 @@ let outpostTests =
                     "a later sighting of the squad still ends on the hold"
             }
 
+            // Moved by #585: the window is the last sighting's plus the round
+            // trip (100), not the first's plus 200.
             test "a short-lived first squad's reinforcements stay inside its window" {
                 let trep = squadIn outpostRoom "Trepidimous"
 
@@ -522,15 +530,16 @@ let outpostTests =
                                 trep.Hostiles
                                 |> List.map (fun hostile -> { hostile with TicksToLive = 150 })
                         }
-                    |> raidTick 200 trep
-                    |> raidTick 210 { trep with Hostiles = [] }
+                    |> raidTick 180 trep
+                    |> raidTick 190 { trep with Hostiles = [] }
 
                 Expect.equal
                     (standDowns state)
-                    [ outpostRoom, 100, 200, 300, StandDownBasis.PlayerRaidHold ]
-                    "first sighting plus 200, not the reinforcements' life"
+                    [ outpostRoom, 100, 180, 281, StandDownBasis.PlayerRaidHold ]
+                    "last sighting plus its round trip, not the reinforcements' life"
             }
 
+            // Moved by #585 as above: 150 plus 100, not plus 200.
             test "a player's raid joining a row another clock opened gets its own window" {
                 let reserved =
                     quiet
@@ -549,8 +558,8 @@ let outpostTests =
 
                 Expect.equal
                     (standDowns state)
-                    [ outpostRoom, 100, 150, 350, StandDownBasis.PlayerRaidHold ]
-                    "the squad's first sighting plus 200"
+                    [ outpostRoom, 100, 150, 251, StandDownBasis.PlayerRaidHold ]
+                    "the tick after the squad's last sighting plus its round trip"
             }
 
             test
@@ -663,6 +672,62 @@ let outpostTests =
                     "the WORK body nobody saw leave holds the row"
             }
 
+            test "a player's raid's hold is priced: evidence, trip, crew and income (#585)" {
+                let span = Fabot.Core.Decide.Facts.holdSpan
+
+                Expect.equal
+                    (span 10.0 0.0 100 5)
+                    5
+                    "nothing to send back: reopened on the first look"
+
+                Expect.equal
+                    (span 100.0 400.0 100 5)
+                    5
+                    "a crew worth less than one wait's income: reopened on the first look, never before"
+
+                Expect.equal (span 10.0 5_000.0 100 100) 100 "no observer in reach: the whole trip"
+
+                Expect.isLessThan
+                    (span 10.0 5_000.0 100 5)
+                    (span 10.0 5_000.0 200 5)
+                    "a slower raid is held longer"
+
+                Expect.isLessThan
+                    (span 10.0 1_000.0 100 5)
+                    (span 10.0 5_000.0 100 5)
+                    "a dearer crew is held longer"
+
+                Expect.isLessThan
+                    (span 40.0 5_000.0 100 5)
+                    (span 10.0 5_000.0 100 5)
+                    "a richer room reopens sooner"
+            }
+
+            test
+                "a player's raid in sight shuts its declared outpost past the next tick, an observer in reach or not (#585)" {
+                let trep = squadIn outpostRoom "Trepidimous"
+
+                let observed =
+                    { trep with
+                        World =
+                            { trep.World with
+                                Observers = [ "W12S28" ]
+                            }
+                    }
+
+                for colony, name in [ trep, "unobserved"; observed, "observed" ] do
+                    let state = RaidState.empty |> raidTick 100 colony
+
+                    Expect.isTrue
+                        (state.Outposts
+                         |> List.exists (fun row ->
+                             row.RoomName = outpostRoom
+                             && row.Expiry >= 100 + 1 + Fabot.Core.Decide.Facts.lookStride))
+                        $"{name}: shut at least past the next tick and the first look"
+
+                    Expect.contains (shutAt 101 state) outpostRoom $"{name}: the gate reads it shut"
+            }
+
             test "a player's raid back after its window shuts the outpost again" {
                 let trep = squadIn outpostRoom "Trepidimous"
 
@@ -674,8 +739,8 @@ let outpostTests =
 
                 Expect.equal
                     (standDowns state |> List.last)
-                    (outpostRoom, 350, 350, 550, StandDownBasis.PlayerRaidHold)
-                    "a fresh row with a window of its own"
+                    (outpostRoom, 350, 350, 451, StandDownBasis.PlayerRaidHold)
+                    "a fresh row with a window of its own (#585: the next tick plus its round trip)"
 
                 Expect.equal (shutAt 351 state) (Set.singleton outpostRoom) "shut on sight"
             }

@@ -481,8 +481,9 @@ type OutpostEpisode =
         /// empties (#507). Empty on a row no raid clocks, and on one spent.
         Raiders: Set<string>
         /// The tick a raid of a player's bodies alone was first seen standing
-        /// in this outpost while the row stood (#513): the row runs no later
-        /// than this plus `Tuning.PlayerRaidHold`, nor short of a rival's hold.
+        /// in this outpost while the row stood (#513): while it is set, each
+        /// sighting cuts the row to that tick plus its priced hold
+        /// (`Decide.Facts.raidHoldSpan`, #585), never short of a rival's hold.
         /// A fact beside the basis, which a later deadline overwrites. None
         /// once an Invader stands among the bodies, and on any other row.
         PlayerSince: int option
@@ -1034,12 +1035,16 @@ let private bounceFloor (view: ColonyView) (episode: OutpostEpisode) =
 /// beside it, is (re-)enrolled, beaten or not; a scout never holds a row, nor
 /// a WORK body left alone with no weapon, which no Guard answers. One is
 /// struck when seen as neither, or absent from the room and seen dead
-/// anywhere the colony sees or, a player's, standing in another room. Never
-/// on an absence, so a raid nobody sees go keeps its life; an Invader seen
-/// elsewhere is not gone, its clock being its life. A player's raid in a
-/// declared outpost is cut to its first sighting plus `Tuning.PlayerRaidHold`
-/// (#513, `PlayerSince`). Neither cut runs past the clock, nor short of a
-/// rival's hold on the room (`rivalHolds`).
+/// anywhere the colony sees or, a player's, standing in another room, or
+/// absent from the room on a tick vision answers for it — a look, an
+/// observer's included, is the evidence it went (#585) — and from every room
+/// beyond a border it was last seen within a dance of (`Dance`); one standing
+/// that close across the border is not gone. Never on a blind absence, so a
+/// raid nobody sees go keeps its life; an Invader seen elsewhere is not gone,
+/// its clock being its life. A player's raid in a declared outpost is cut, at
+/// each sighting, to the next tick plus its priced hold
+/// (`Facts.raidHoldSpan`, #585, `PlayerSince`). Neither cut runs past
+/// the clock, nor short of a rival's hold on the room (`rivalHolds`).
 let private strikeGone
     (view: ColonyView)
     (declared: string list)
@@ -1062,14 +1067,36 @@ let private strikeGone
         HostileInfo.raider view.Hostiles hostile
         || HostileInfo.hurts view.Hostiles hostile && Set.contains hostile.Pos.Room raided
 
+    // Vision of a room this tick, the colony's or the world's, an observer's
+    // look included.
+    let sees room =
+        Map.containsKey room view.RoomControl || WorldView.sees view.World room
+
     let gone room id =
         match Map.tryFind id whereNow with
         // A body that is no raid any more is gone, wherever it stands; a heal
-        // that brings a weapon back is a fresh sighting.
+        // that brings a weapon back is a fresh sighting. One across a border
+        // within a dance of it (`Dance.besideOf`) has stepped out, not left.
         | Some hostile ->
             not (raiding hostile)
-            || hostile.Pos.Room <> room && HostileInfo.crossesExits hostile
-        | None -> Set.contains id fallen
+            || hostile.Pos.Room <> room
+               && HostileInfo.crossesExits hostile
+               && not (Dance.besideOf room hostile.Pos)
+        // Out of this view: seen dead, or its room seen this tick without it —
+        // a look that answers for the room is the evidence it went (#585) —
+        // unless the world sees it this tick lingering across the border, or
+        // it was last seen within a dance of a border or lingering across one
+        // (`WorldView.LastSteps`, kept the bounce window) and a room it may
+        // have stepped into is not seen too.
+        | None ->
+            Set.contains id fallen
+            || sees room
+               && (match Map.tryFind id view.World.LastSteps with
+                   | Some(at, seen) when seen >= view.Time ->
+                       at.Room <> room && not (Dance.besideOf room at)
+                   | Some(at, _) when at.Room = room -> Dance.beyond at |> List.forall sees
+                   | Some(at, _) when Dance.besideOf room at -> sees at.Room
+                   | _ -> true)
 
     episodes
     |> List.map (fun episode ->
@@ -1118,10 +1145,15 @@ let private strikeGone
                     Some view.Time
                 | None -> None
 
+            // While a player's raid alone stands there, each sighting reads its
+            // hold afresh past the next tick (`Facts.raidHoldSpan`, #585), the
+            // first the gate reads this tick's log on, so a raid in sight
+            // always shuts its room; a blind tick keeps the last one's.
             let windowed =
-                match playerSince with
-                | Some since ->
-                    let ends = since + view.Tuning.PlayerRaidHold
+                match playerSince, standing with
+                | Some _, _ :: _ ->
+                    let ends = view.Time + 1 + Decide.Facts.raidHoldSpan view room standing
+
                     let until = holdPast ends
 
                     match until with
@@ -1141,7 +1173,7 @@ let private strikeGone
                         { episode with
                             PlayerSince = playerSince
                         }
-                | None ->
+                | _ ->
                     { episode with
                         PlayerSince = playerSince
                     }
@@ -1241,6 +1273,19 @@ let private rivalReserved (tick: int) (state: RaidState) : Set<string> =
     |> List.map (fun episode -> episode.RoomName)
     |> Set.ofList
 
+/// The standing rows on a clock read off a raid's bodies, not a core's, a
+/// reservation's or the fallback's: the gate's `RaidedOutposts`.
+let private raidedRows (tick: int) (state: RaidState) : OutpostEpisode list =
+    state.Outposts
+    |> List.filter (fun episode ->
+        standingDown tick episode
+        && (match episode.Basis with
+            | StandDownBasis.InvaderRaid
+            | StandDownBasis.PlayerRaidHold
+            | StandDownBasis.RaidGone
+            | StandDownBasis.HarassSighting -> true
+            | _ -> false))
+
 /// The stand-down gate's answer for this colony this tick, read off the
 /// previous tick's log: the one reader that acts on the Raid log. `Shut` is
 /// dropped from the declarations the shell works; `Rechecked` has its
@@ -1291,20 +1336,14 @@ let standDown (tuning: Tuning) (tick: int) (state: RaidState) : StandDown =
             |> List.filter (fun (_, latch) -> tick < latch.Until)
             |> List.map fst
             |> Set.ofList
-        // A clock read off a raid's bodies, not a core's, a reservation's or
-        // the fallback's.
         RaidedOutposts =
-            state.Outposts
-            |> List.filter (fun episode ->
-                standingDown tick episode
-                && (match episode.Basis with
-                    | StandDownBasis.InvaderRaid
-                    | StandDownBasis.PlayerRaidHold
-                    | StandDownBasis.RaidGone
-                    | StandDownBasis.HarassSighting -> true
-                    | _ -> false))
+            raidedRows tick state
             |> List.map (fun episode -> episode.RoomName)
             |> Set.ofList
+        RaidedUntil =
+            raidedRows tick state
+            |> List.map (fun episode -> episode.RoomName, episode.Expiry)
+            |> Map.ofList
         // A standing raid row a ranger chases (#510).
         ChasedOutposts =
             state.Outposts

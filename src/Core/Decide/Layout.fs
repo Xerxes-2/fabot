@@ -1086,48 +1086,79 @@ let internal planRampartDoors (view: ColonyView) : Intent list =
                 None
         | _ -> None)
 
-/// The rooms an observer may look at, by tier, highest first (#484).
-type ObserverTiers =
+/// The readers a look is asked by, highest first (#484, #660 S1): the
+/// observer's tiers, folded into the requests as their bands. A request is
+/// served by its band, then by its value, so a reader that prices its look
+/// orders its band's rooms and a reader that prices none keeps its tier's
+/// turn; the bands stand until every reader prices its look in one measure.
+[<RequireQualifiedAccess>]
+type LookBand =
+    /// A room that wants eyes: one some colony stands down from on a raid, or
+    /// remembers an armed threat in, or shuts on a reservation whose holder
+    /// is to be read (`WorldView.Danger`, `WorldView.Questioned`), and a dark
+    /// outpost whose remembered trespassers a look confirms.
+    | Danger
+    /// A declared colony room not yet ours, or a nursery.
+    | Claim
+    /// A rival's room, or a room on our chains.
+    | Watched
+    /// A harassment room.
+    | Harassed
+    /// A colony's scan set, its transit rectangles included.
+    | Box
+
+/// One reader's ask for eyes on a room (#660 S1). Read-is-request: a reader
+/// whose last sighting of the room is older than it tolerates asks, and any
+/// vision of ours answers it — a body of ours standing or passing there is a
+/// sighting as much as an observer's look, and resets the clock. Stateless
+/// like every decision: a reader asks while its question stands, so a look
+/// that ends the question (a stand-down's raid seen gone) ends the asking,
+/// and a continuous watch is a question that never ends.
+type LookRequest =
     {
-        /// The rooms that want eyes (`WorldView.Danger`, #534) whose look is
-        /// this observer's (`WorldView.lookerOf`): a room some colony stands
-        /// down from on a raid, or remembers an armed threat in, or shuts on
-        /// a reservation whose holder is to be read (`WorldView.Questioned`,
-        /// #604), looked at once its last sighting is `dangerStride` old.
-        Danger: string list
-        /// Declared colony rooms not yet ours, and our nurseries: looked at
-        /// while nothing of ours sees them.
-        Claims: string list
-        /// The rivals' rooms and the rooms on our chains: looked at once
-        /// their last sighting is `Tuning.ObserveStaleTicks` old.
-        Watched: string list
-        /// The harassment rooms: looked at while no creep of ours is there.
-        Harassed: string list
-        /// The colony's scan set, its transit rectangles included: the rest
-        /// of the observer's ticks.
-        Box: string list
+        Room: string
+        Band: LookBand
+        /// The energy the decision the look unlocks is worth; 0 from a reader
+        /// that prices none yet.
+        Value: float
+        /// How old a sighting of the room the reader still acts on: it asks
+        /// once the last one is this many ticks old (1: any tick no vision
+        /// of ours answers for the room).
+        Tolerates: int
+        /// The last tick the look still unlocks the decision (a stand-down's
+        /// expiry); None for a continuous watch.
+        Until: int option
     }
 
-/// How old a room of `ObserverTiers.Danger`'s last sighting is before the
-/// observer looks again (#534): one look in five re-reads a raid row's clock
-/// and chase well inside a melee's walk across a room (~50 ticks), and leaves
-/// four ticks in five to the claims, the safe-mode clocks and the box.
-let private dangerStride = 5
+/// How old a room that wants eyes' last sighting is before the observer
+/// looks again (`Facts.lookStride`, #534).
+let private dangerStride = Facts.lookStride
+
+/// A request of a reader that prices no look (value 0) and watches on.
+let lookRequest (band: LookBand) (tolerates: int) (room: string) : LookRequest =
+    {
+        Room = room
+        Band = band
+        Value = 0.0
+        Tolerates = tolerates
+        Until = None
+    }
 
 /// Where every observer looks this tick, one room each and no room twice
-/// (#484, #559), given each observer's room and its tiers. Every room of a
-/// tier in `Engine.observerRange` of an observer holding it that wants a look
-/// is ranked by its tier, then longest unseen (`lastSeen` None first), then
-/// the fewest free observers holding it in reach, then by name, and each in
-/// turn goes to the nearest observer holding it still free, ties by room name. Longest unseen is the round robin: the look itself is
-/// the next tick's sighting. A room seen this tick wants none, and an
-/// observer's own room is never its look. One observer alone looks at the
-/// first tier's best room in its reach.
+/// (#484, #559, #660), given every request and the observers' rooms. Every
+/// request still open (`Until` not passed) whose room's last sighting is as
+/// old as it tolerates (`lastSeen` None: never seen) and lies in
+/// `Engine.observerRange` of an observer is ranked by its band, then its
+/// value, highest first, then longest unseen, then the fewest free observers
+/// reaching it, then by name, and each in turn goes to the nearest observer
+/// still free, ties by room name. Longest unseen is the round robin: the look
+/// itself is the next tick's sighting. An observer's own room is never its
+/// look. Which observer serves a room is the ranking's alone: any in reach.
 let assignLooks
     (time: int)
-    (staleAfter: int)
     (lastSeen: string -> int option)
-    (observers: (string * ObserverTiers) list)
+    (observers: string list)
+    (requests: LookRequest list)
     : Map<string, string> =
     let reach from room =
         if room = from then
@@ -1137,33 +1168,23 @@ let assignLooks
             |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
             |> Option.filter (fun distance -> distance <= Engine.observerRange)
 
-    let unseen room = lastSeen room <> Some time
-
-    let olderThan stride room =
-        lastSeen room |> Option.forall (fun tick -> time - tick >= stride)
-
-    let ranked (tiers: ObserverTiers) =
-        [
-            tiers.Danger, olderThan dangerStride
-            tiers.Claims, unseen
-            tiers.Watched, olderThan staleAfter
-            tiers.Harassed, unseen
-            tiers.Box, unseen
-        ]
+    let wants (request: LookRequest) =
+        request.Until |> Option.forall (fun until -> time <= until)
+        && lastSeen request.Room
+           |> Option.forall (fun tick -> time - tick >= request.Tolerates)
 
     let wanted =
-        observers
-        |> List.collect (fun (from, tiers) ->
-            ranked tiers
-            |> List.indexed
-            |> List.collect (fun (tier, (rooms, wants)) ->
-                rooms
-                |> List.choose (fun room ->
-                    reach from room
-                    |> Option.filter (fun _ -> wants room)
-                    |> Option.map (fun distance -> (tier, lastSeen room, room), (distance, from)))))
+        requests
+        |> List.filter wants
+        |> List.collect (fun request ->
+            observers
+            |> List.choose (fun from ->
+                reach from request.Room
+                |> Option.map (fun distance ->
+                    (request.Band, -request.Value, lastSeen request.Room, request.Room),
+                    (distance, from))))
         |> List.groupBy fst
-        |> List.map (fun (key, holders) -> key, List.map snd holders)
+        |> List.map (fun (key, holders) -> key, holders |> List.map snd |> List.distinct)
 
     // Each pick re-reads who is still free: of the rooms ranked alike, the one
     // the fewest free observers reach goes first, so the only observer that
@@ -1171,22 +1192,23 @@ let assignLooks
     let rec pick (looks: Map<string, string>) wanted =
         let servable =
             wanted
-            |> List.choose (fun ((tier, seen, room), holders) ->
+            |> List.choose (fun ((band, value, seen, room), holders) ->
                 match
                     holders |> List.filter (fun (_, from) -> not (Map.containsKey from looks))
                 with
                 | [] -> None
-                | free -> Some((tier, seen, List.length free, room), free))
+                | free -> Some((band, value, seen, List.length free, room), free))
 
         match servable with
         | [] -> looks
         | _ ->
-            let (_, _, _, room), free = List.minBy fst servable
+            let (_, _, _, _, room), free = List.minBy fst servable
             let _, from = List.min free
 
             servable
-            |> List.filter (fun ((_, _, _, other), _) -> other <> room)
-            |> List.map (fun ((tier, seen, _, other), holders) -> (tier, seen, other), holders)
+            |> List.filter (fun ((_, _, _, _, other), _) -> other <> room)
+            |> List.map (fun ((band, value, seen, _, other), holders) ->
+                (band, value, seen, other), holders)
             |> pick (Map.add from room looks)
 
     pick Map.empty wanted
@@ -1195,12 +1217,11 @@ let assignLooks
 /// other observer.
 let aimObserver
     (time: int)
-    (staleAfter: int)
     (from: string)
     (lastSeen: string -> int option)
-    (tiers: ObserverTiers)
+    (requests: LookRequest list)
     : string option =
-    assignLooks time staleAfter lastSeen [ from, tiers ] |> Map.tryFind from
+    assignLooks time lastSeen [ from ] requests |> Map.tryFind from
 
 /// The observer's watched tier: `Colony.rivals`, every other room a sighting
 /// names a rival's, not an ally's (#489: their controllers' safe-mode clocks),
@@ -1222,46 +1243,115 @@ let private observerOf (view: ColonyView) : string option =
     SpatialInfo.idsOfKind view.Spatial (Structure BuiltKind.Observer)
     |> List.tryFind (fun id -> SpatialInfo.roomOf view.Spatial id = Some home)
 
-/// A colony's observer's tiers (#484): the rooms that want eyes whose look is
-/// its (`WorldView.lookerOf`), the declared rooms not yet colonies of ours or
-/// still nurseries, the `watched` rooms, `Colony.harass`, and its scan set.
-let private observerTiers (view: ColonyView) (watched: string list) : ObserverTiers =
-    let home = SpatialInfo.homeName view.Spatial
+/// The requests of the readers that price no look, asked where a colony holds
+/// an observer (#484's tiers): the declared rooms not yet colonies of ours or
+/// still nurseries and the harassment rooms while no vision of ours answers
+/// for them, the `watched` rooms once their sighting is
+/// `Tuning.ObserveStaleTicks` old, and the colony's scan set, the rest of the
+/// observer's ticks.
+let private tierRequests (view: ColonyView) (watched: string list) : LookRequest list =
+    (view.Declared
+     |> List.filter (fun room ->
+         match Map.tryFind room view.Stages with
+         | None
+         | Some Nursery -> true
+         | Some _ -> false)
+     |> List.map (lookRequest LookBand.Claim 1))
+    @ (watched |> List.map (lookRequest LookBand.Watched view.Tuning.ObserveStaleTicks))
+    @ (Colony.harassDeclared
+       |> List.map (fun h -> lookRequest LookBand.Harassed 1 h.RoomName))
+    @ (view.Spatial.Rooms
+       |> Map.keys
+       |> List.ofSeq
+       |> List.map (lookRequest LookBand.Box 1))
 
-    {
-        Danger =
-            Set.union view.World.Danger view.World.Questioned
-            |> Set.filter (fun room -> WorldView.lookerOf view.World room = Some home)
-            |> Set.toList
-        Claims =
-            view.Declared
-            |> List.filter (fun room ->
-                match Map.tryFind room view.Stages with
-                | None
-                | Some Nursery -> true
-                | Some _ -> false)
-        Watched = watched
-        Harassed = Colony.harassDeclared |> List.map (fun h -> h.RoomName)
-        Box = view.Spatial.Rooms |> Map.keys |> List.ofSeq
-    }
+/// The requests one colony prices (#660, #585), each a room that wants eyes:
+/// every raid's stand-down, worth the outpost's income a tick
+/// (`Facts.outpostTickWorth`) over the ticks it has left, which a look
+/// finding the raid gone ends (`Observe.strikeGone`), open until its expiry,
+/// re-read one look in `dangerStride` — and as much each room beside it a
+/// body out of sight may only have stepped across to (`Dance`), since the
+/// look that strikes it needs that room seen too; and every dark outpost
+/// whose remembered trespassers a look confirms, worth their kills at the
+/// odds they are still there (`Facts.unconfirmedPrey`), one look in
+/// `dangerStride`, so a kill out of sight shares the observer with the rest.
+let private pricedRequests (view: ColonyView) : LookRequest list =
+    // The rooms a body last seen in `room` and out of sight now may linger in
+    // across a border, or the room beside it it was last seen lingering in.
+    let lingering room =
+        view.World.LastSteps
+        |> Map.toList
+        |> List.collect (fun (_, (at, seen)) ->
+            if seen >= view.Time then []
+            elif at.Room = room then Dance.beyond at
+            elif Dance.besideOf room at then [ at.Room ]
+            else [])
+
+    let standDowns =
+        view.RaidedUntil
+        |> Map.toList
+        |> List.collect (fun (room, until) ->
+            let worth = Facts.outpostTickWorth room * (until - view.Time)
+
+            if worth > 0 then
+                room :: lingering room
+                |> List.distinct
+                |> List.map (fun looked ->
+                    {
+                        Room = looked
+                        Band = LookBand.Danger
+                        Value = float worth
+                        Tolerates = dangerStride
+                        Until = Some until
+                    })
+            else
+                [])
+
+    let prey =
+        Facts.unconfirmedPrey view
+        |> List.map (fun (room, value) ->
+            {
+                Room = room
+                Band = LookBand.Danger
+                Value = value
+                Tolerates = dangerStride
+                Until = None
+            })
+
+    standDowns @ prey
 
 /// The looks of the colonies' observers, aimed together (`assignLooks`) off
-/// the first view's clock and sightings, which every view shares.
+/// the first view's clock and sightings, which every view shares: the rooms
+/// that want eyes world-wide (`WorldView.Danger`, `Questioned`), every
+/// colony's priced requests, and the tiers of each colony holding an
+/// observer.
 let private looksOf (views: ColonyView list) (watched: string list) : Map<string, string> =
-    match views with
-    | [] -> Map.empty
-    | first :: _ ->
+    let observing = views |> List.filter (fun view -> Option.isSome (observerOf view))
+
+    match views, observing with
+    | [], _
+    | _, [] -> Map.empty
+    | first :: _, _ ->
         let lastSeen room =
             Map.tryFind room first.Seen |> Option.map (fun sighting -> sighting.Tick)
 
-        views
-        |> List.filter (fun view -> Option.isSome (observerOf view))
-        |> List.map (fun view -> SpatialInfo.homeName view.Spatial, observerTiers view watched)
-        |> assignLooks first.Time first.Tuning.ObserveStaleTicks lastSeen
+        let danger =
+            Set.union first.World.Danger first.World.Questioned
+            |> Set.toList
+            |> List.map (lookRequest LookBand.Danger dangerStride)
 
-/// The world aims every observer once a tick (#559): one ranking over every
-/// colony's tiers, the watched rooms the union of every colony's crossings
-/// beside the rivals, each colony's box its own observer's, laid in every
+        danger
+        @ (views |> List.collect pricedRequests)
+        @ (observing |> List.collect (fun view -> tierRequests view watched))
+        |> List.distinct
+        |> assignLooks
+            first.Time
+            lastSeen
+            (observing |> List.map (fun view -> SpatialInfo.homeName view.Spatial))
+
+/// The world aims every observer once a tick (#559, #660): one ranking over
+/// every colony's requests, the watched rooms the union of every colony's
+/// crossings beside the rivals, laid in every
 /// view as `WorldView.Looks`. The colonies of `idle` (homes that replay or
 /// wait this tick, and look at nothing of the world's choosing) hold no look,
 /// so a room they would take goes to the next observer free. The observer

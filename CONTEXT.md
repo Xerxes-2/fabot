@@ -387,6 +387,9 @@ _Avoid_: spawning creep, unborn body, pending creep
 ### Lead
 The time a creep's replacement needs to stand on its tile: the successor body's cast time plus its [[walk]] from beside the spawner, for the body its row would cast for this creep's own [[post]], recalled on the [[census signature]]. ADR-0026, ADR-0029, ADR-0030, ADR-0032, ADR-0053.
 
+### Look request
+A reader's ask for eyes on a room (#660, `Layout.LookRequest`): the room, the energy the decision the look unlocks is worth, how old a sighting it still acts on, and the tick past which the look unlocks nothing. Read-is-request: a reader asks while its question stands and its last sighting of the room is older than it tolerates; any vision of ours answers it, a body of ours standing or passing there as much as an observer's look. Each full tick every observer serves the open requests in its reach by band (today's tiers: rooms that want eyes, claims, watched, harassment rooms, the box), then value, then longest unseen, one room each; whichever observer reaches a room serves it. Priced readers, one look in five each: a raid's [[stand-down]] (the outpost's income over the ticks it has left), for its room and the rooms beyond a border its raid may only have stepped across, and a dark outpost's remembered [[trespasser]]s (their kills at the odds they are still there). Scouts serve none yet.
+
 ### Verdict
 The reasoned outcome a decision step returns beside its decision — data, never a log line: the [[matcher]]'s says which Task won a creep and why, what was kept, released or refused (a too-early refusal carrying the [[walk]] and the [[restock]] wait), and the [[resolver]]'s what became of its movement. Manufactured evidence is computed only for the [[verbose list]]. ADR-0009, ADR-0018, ADR-0025, ADR-0029.
 
@@ -472,9 +475,9 @@ An [[outpost]] or [[errand]] withdrawn from — out of the [[spatial projection]
 - a [[stronghold]]'s core: its collapse (a level-0 core opens none: a guard kills it, #487), or 2,500 ticks where none can be read;
 - a neutral's or an ally's reservation: its end (a declared enemy's opens none: it is a raid, contested, and our reserver attacks it off, #604);
 - a raid (bodies with an ATTACK, RANGED_ATTACK or WORK part in effect) nothing of ours wins — neither the biggest body its casters' row casts (the colonies whose rows cast for it, its own colony's however the stand-down shuts it), nor a ranger of theirs kiting it ([[chase]]), nor the rangers standing in it with those called from beside it, of every colony that sees the raid and would send them, each lent by its own colony's rule (the room's one verdict, priced once a tick over our fleet and the world's vision and read by every colony, ADR-0091): its longest remaining life; a body that can barely move opens none (#510);
-- a player's raid alone in an outpost: at most `Tuning.PlayerRaidHold` (200) past its first sighting, never short of a rival's hold (#513);
+- a player's raid alone in an outpost: a priced span past the tick after its last sighting (`Facts.raidHoldSpan`, #585) — the odds it is still there fall over its slowest body's round trip, and the room reopens once the outpost's own crew at those odds is worth less than one wait for evidence's income, never before a look can come (one in five where an observer reaches, else the whole trip) — never short of a rival's hold;
 - a squad in a [[harassment room]]: fifty ticks past its last sighting;
-- any raid, sooner: the tick every body is seen gone — dead, disarmed, or a player's in another room the colony projects (#507).
+- any raid, sooner: the tick every body is seen gone — dead, disarmed, a player's in another room the colony projects (#507), or absent from the room on a tick vision answers for it, an observer's [[look request]] included, and from the rooms beyond a border it was last seen within a dance of (#585); one lingering that close across the border is not gone.
 
 A rival's ownership is clockless and re-looked at every `Tuning.RivalRecheck`. Recorded in the [[danger log]], one row a room for every colony, so a room is shut, or impassable, for each colony alike; each colony's stand-down is its projection of that log onto the rooms it works. Not a route lock except for a [[stronghold]], which is impassable. ADR-0043, ADR-0065, ADR-0066, ADR-0074, ADR-0077, ADR-0086.
 

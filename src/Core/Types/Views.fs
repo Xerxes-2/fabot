@@ -239,8 +239,8 @@ type WorldView =
         /// eyes ask whose the hold is, and an enemy's ends the row. The observer's, beside `Danger`; no walk
         /// reads it.
         Questioned: Set<string>
-        /// The rooms of ours an observer stands in: whose look each room of
-        /// `Danger` is (`lookerOf`).
+        /// The rooms of ours an observer stands in: what a dark room's
+        /// remembered body waits on a look from (`Facts.contestOf`).
         Observers: string list
         /// Each observer's room and the one room it looks at this tick, aimed
         /// once over every colony (`Layout.aimObservers`). None until the
@@ -281,6 +281,12 @@ type WorldView =
         /// the bodies it was last seen holding (`World.PreySeen`, #658): what
         /// a dark room's bodies are priced by (`Facts.stillThere`).
         PreySeen: Map<string, BodiesSeen>
+        /// Each hostile's last tile and the full tick it was seen there
+        /// (`World.HostileSteps`), one out of sight kept while it was last seen
+        /// within a dance of a border (`Dance.byBorder`) or crossed one lately:
+        /// whether a raid a look finds gone may only have stepped across
+        /// (`Observe.strikeGone`, #585). Empty in a fixture.
+        LastSteps: Map<string, RoomPos * int>
         /// Each rival room's defence response as its dossier saw it (#653):
         /// the fewest ticks from our first armed body in the room to its
         /// owner's first armed body there; `Int32.MaxValue` where it was
@@ -310,6 +316,7 @@ module WorldView =
             Danger = Set.empty
             RaidSeen = Map.empty
             PreySeen = Map.empty
+            LastSteps = Map.empty
             Responses = Map.empty
             SweepGroup = []
             FighterLost = Map.empty
@@ -322,20 +329,6 @@ module WorldView =
             Facts = Map.empty
             Dangers = None
         }
-
-    /// The one observer whose look a room of `Danger` is: the nearest in
-    /// `Engine.observerRange`, ties by room name. One and not every observer
-    /// in reach, so two colonies' observers never spend one tick on one room
-    /// and both leave their other rooms unlooked.
-    let lookerOf (watch: WorldView) (room: string) : string option =
-        watch.Observers
-        |> List.choose (fun from ->
-            RoomName.offsetOf from room
-            |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy), from))
-        |> List.filter (fun (reach, from) -> reach <= Engine.observerRange && from <> room)
-        |> List.sort
-        |> List.tryHead
-        |> Option.map snd
 
     /// Whether vision answers for a room this tick, whoever's.
     let sees (watch: WorldView) (room: string) : bool = Map.containsKey room watch.Rooms
@@ -368,15 +361,35 @@ module WorldView =
                     |> Option.map (fun tile -> id, tile)
                 | _ -> None)
 
+    /// The ticks a raid that walked off unseen may still stand in, or come
+    /// back to, the room it was last seen in (#585): its slowest body's round
+    /// trip, a room's side each way at its pace, over which the odds it is
+    /// still there fall to nothing (`Facts.stillThere`'s walk) — a body that
+    /// cannot walk, or would not be back before it ages out, for the life it
+    /// has left, so the slower a body the longer, to its life. A room's round
+    /// trip where nothing is known of the raid.
+    let raidTrip (raid: HostileInfo list) : int =
+        match raid with
+        | [] -> 2 * Engine.roomSide
+        | _ ->
+            raid
+            |> List.map (fun hostile ->
+                let life = max 1 hostile.TicksToLive
+
+                match Gait.ticks Gait.plain (HostileInfo.gait raid hostile) with
+                | Some pace -> min life (2 * Engine.roomSide * pace)
+                | None -> life)
+            |> List.max
+
     /// Whether a raid body recalled through blind ticks, last seen on `seen`,
     /// still shuts its room to the economy (#605): an Invader for its life,
-    /// which never leaves the room; a player's body no longer than
-    /// `Tuning.PlayerRaidHold`, #513's trade of a re-shut on its return for
-    /// the hours nobody sees it go. Only a body we strike wherever it stands
-    /// (`Colony.strikesAnywhere`) shuts a room at all.
-    let recallShuts (tuning: Tuning) (time: int) (seen: int) (hostile: HostileInfo) =
+    /// which never leaves the room; a player's body for `span` ticks, the
+    /// hold its stand-down is priced at (`Facts.raidHoldSpan`, #585) — a look
+    /// finding it gone ends the recall before. Only a body we strike
+    /// wherever it stands (`Colony.strikesAnywhere`) shuts a room at all.
+    let recallShuts (span: int) (time: int) (seen: int) (hostile: HostileInfo) =
         Colony.strikesAnywhere hostile.Owner
-        && (not (HostileInfo.crossesExits hostile) || time - seen < tuning.PlayerRaidHold)
+        && (not (HostileInfo.crossesExits hostile) || time - seen < span)
 
     /// The world's read off this tick's `World` and every colony's
     /// stand-down gate. A room with a `Control` entry is one something of ours
@@ -422,8 +435,9 @@ module WorldView =
                         }))
                 |> Map.ofList
             Watched = watched
-            // And each watched room a recalled raid still shuts to the economy
-            // (`recallShuts`, #605): nothing else of ours walks in to look.
+            // And each watched room a recalled raid may still stand in
+            // (`recallShuts` over its round trip, #605, #585): nothing else of
+            // ours walks in to look.
             Danger =
                 gates
                 |> List.map (fun gate ->
@@ -433,14 +447,15 @@ module WorldView =
                 |> Set.union (
                     raidSeen
                     |> Map.filter (fun room seen ->
-                        world.Raiders.[room].Raid
-                        |> List.exists (recallShuts Tuning.defaults world.Time seen))
+                        let raid = world.Raiders.[room].Raid
+                        raid |> List.exists (recallShuts (raidTrip raid) world.Time seen))
                     |> Map.keys
                     |> Set.ofSeq
                 )
                 |> Set.intersect watched
             RaidSeen = raidSeen
             PreySeen = world.PreySeen |> Map.filter (fun room _ -> not (World.seenNow world room))
+            LastSteps = world.HostileSteps |> Map.map (fun _ step -> step.At, step.Seen)
             Responses = Map.empty
             SweepGroup = []
             FighterLost =
@@ -594,6 +609,9 @@ type ColonyView =
         /// (`StandDown.RaidedOutposts`, #514): what lays the home's shelter
         /// while a raid beside it is out of sight.
         RaidedOutposts: Set<string>
+        /// Each of those rooms with the tick its row runs to
+        /// (`StandDown.RaidedUntil`): what the observer prices its look by.
+        RaidedUntil: Map<string, int>
         /// The shut outposts a ranger chases a raid in
         /// (`StandDown.ChasedOutposts`, #510).
         ChasedOutposts: Set<string>
@@ -1991,6 +2009,7 @@ module ColonyView =
             HeldOutposts = gate.HeldOutposts
             ThreatenedOutposts = gate.ThreatenedOutposts
             RaidedOutposts = gate.RaidedOutposts
+            RaidedUntil = gate.RaidedUntil
             ChasedOutposts = gate.ChasedOutposts
             Fought = gate.Fought
             HomeRaided = gate.HomeRaided

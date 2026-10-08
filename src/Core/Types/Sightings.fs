@@ -571,15 +571,17 @@ type StandDownBasis =
     /// by every later one. The room is ours to walk back into, so a squad that
     /// crosses it once shuts it briefly and not for its whole life.
     | HarassSighting
-    /// A raid every body of which is gone from the room (#507): seen dead, or,
-    /// a player's, seen in another room after its last sighting here. The
+    /// A raid every body of which is gone from the room (#507, #585): seen
+    /// dead, or, a player's, seen in another room after its last sighting
+    /// here, or not seen in the room on a tick vision answers for it. The
     /// clock ends on the tick the last one went. An Invader seen elsewhere is
     /// not gone, so a live NPC raid keeps its life.
     | RaidGone
-    /// A raid of a player's bodies alone, cut to its first sighting plus
-    /// `Tuning.PlayerRaidHold` (#513, `OutpostEpisode.PlayerSince`): a squad
-    /// that walks off unseen is no evidence it stays, and a return shuts the
-    /// room again on sight. The printed reason; the fact is the row's.
+    /// A raid of a player's bodies alone, cut to its last sighting plus its
+    /// priced hold (`Facts.raidHoldSpan`, #585, `OutpostEpisode.PlayerSince`):
+    /// a squad that walks off unseen is no evidence it stays, and a return
+    /// shuts the room again on sight. The printed reason; the fact is the
+    /// row's.
     | PlayerRaidHold
 
 /// Where a body's energy load was drawn from, and the tick it drew there
@@ -920,6 +922,43 @@ type HostileStep =
 /// before its latest crossing, in the room it left, and the full ticks it
 /// was seen in another room than the one it was last seen in, newest first.
 and Crossing = { Came: RoomPos; Ticks: int list }
+
+/// A body's dance on a border (#585, #658): how deep into a room a body
+/// that steps out and back turns at, read off the reach it fights from.
+[<RequireQualifiedAccess>]
+module Dance =
+    /// The tiles in from a border a dance turns back within: a ranged
+    /// body's reach and the step to keep it.
+    let depth = Engine.rangedRange + 1
+
+    /// Whether a tile stands within the dance depth of any border of its
+    /// room.
+    let byBorder (tile: RoomPos) : bool =
+        let edge = Engine.roomSide - 1
+
+        tile.X <= depth
+        || tile.Y <= depth
+        || tile.X >= edge - depth
+        || tile.Y >= edge - depth
+
+    /// The rooms across the borders a tile stands within the dance depth of:
+    /// where a body last seen on it may have stepped out to.
+    let beyond (tile: RoomPos) : string list =
+        let edge = Engine.roomSide - 1
+
+        RoomName.adjacent tile.Room
+        |> List.filter (fun next ->
+            match RoomName.offsetOf tile.Room next with
+            | Some(-1, 0) -> tile.X <= depth
+            | Some(1, 0) -> tile.X >= edge - depth
+            | Some(0, -1) -> tile.Y <= depth
+            | Some(0, 1) -> tile.Y >= edge - depth
+            | _ -> false)
+
+    /// Whether a body standing outside `room` lingers on its border: in a
+    /// room beside it, within the dance depth of the border they share.
+    let besideOf (room: string) (tile: RoomPos) : bool =
+        tile.Room <> room && List.contains room (beyond tile)
 
 /// `World.linkedRecalling`'s memo: `(keeper margin, from, to)` to whether a
 /// crossing joins the pair. Mutable and heap-only, like `WalkTable`, and the
@@ -1705,13 +1744,10 @@ module World =
             |> Seq.filter (fun (id, step) ->
                 not (seen.Contains id)
                 && world.Time - step.Seen <= window
-                // Only a body last seen by a border, or one that crossed one
-                // lately: the rest walked off inland and are no trip.
-                && (Option.isSome (recent step.Crossed)
-                    || step.At.X <= 1
-                    || step.At.Y <= 1
-                    || step.At.X >= Engine.roomSide - 2
-                    || step.At.Y >= Engine.roomSide - 2))
+                // Only a body last seen within a dance of a border, or one that
+                // crossed one lately: the rest walked off inland and are no
+                // trip (#585: where a stand-down's look finds it gone from).
+                && (Option.isSome (recent step.Crossed) || Dance.byBorder step.At))
             |> Seq.map (fun (id, step) ->
                 id,
                 { step with

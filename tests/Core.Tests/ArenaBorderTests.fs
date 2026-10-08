@@ -2760,4 +2760,229 @@ let arenaBorderTests =
                     (tasks |> List.take died.Value |> List.forall ((=) "guard:W17S26"))
                     $"""the ranger holds W17S26's Guard until it does: {String.concat "," tasks}"""
             }
+
+            // The same haulers with W13S28 a living colony. The ranger walks in
+            // at t1 and sees them; taken out of the room and the clock moved on
+            // six ticks, the room is dark and the haulers only remembered,
+            // counted nothing where an observer can look (`Facts.contestOf`),
+            // so the kill asks the observer for that look (#660,
+            // `Facts.unconfirmedPrey`) once its sighting is `Facts.lookStride`
+            // old — before, nothing asked: W17S26 wanted no eyes once its raid
+            // was gone, and the observer looked at the rival room it watches.
+            test
+                "capture t1,037,961: a dark outpost's remembered haulers ask the observer for a look (#660)" {
+                let lit, _ = haulersAtTheContainerObserved () |> step
+
+                let dark =
+                    { lit with
+                        Time = lit.Time + 6
+                        Bodies =
+                            lit.Bodies
+                            |> List.filter (fun b -> b.Side <> Side.Ours || b.At.Room <> "W17S26")
+                    }
+
+                let lookOf (a: Arena) =
+                    (viewOf a "W13S28").World.Looks |> Option.bind (Map.tryFind "W13S28")
+
+                Expect.equal
+                    (lookOf dark)
+                    (Some "W17S26")
+                    "dark, its remembered haulers ask W13S28's observer to look"
+
+                Expect.notEqual
+                    (lookOf
+                        { dark with
+                            Carried =
+                                { dark.Carried with
+                                    PreySeen = Map.empty
+                                }
+                        })
+                    (Some "W17S26")
+                    "the premise: with nothing remembered there, nothing asks"
+            }
+
+            // Live t1,037,139-345 (#585): Trepidimous's Dragon6090 and
+            // Stochastic6048 (R3H4M7) stood at W17S26's west edge, the room
+            // stood down off them and held the fixed 200 ticks past the first
+            // sighting (#513), to t1,037,345, its anchor home, though the pair
+            // were gone west by t1,037,210 and W13S28's observer reaches the
+            // room. Reproduced: the row opens at t4 as the second harasser
+            // steps in, the anchor and the reserver walk home (live, the same);
+            // the arena's harassers keep their live tiles but walk them slower,
+            // out by t112 where live was ~t70. A look finding the room without
+            // them is the evidence they went: the row ends on it, and the
+            // anchor goes back.
+            test
+                "capture t1,037,139: two harassers that walked off W17S26 end its stand-down on the observer's next look, and the anchor goes back" {
+                let anchor = "anchor-1036485-Spawn11"
+
+                let rowOf (a: Arena) =
+                    Map.tryFind "W17S25" a.Carried.Raids
+                    |> Option.bind (fun raids ->
+                        raids.Outposts |> List.tryFind (fun row -> row.RoomName = "W17S26"))
+
+                let standing (a: Arena) =
+                    rowOf a |> Option.exists (fun row -> Fabot.Core.Observe.standingDown a.Time row)
+
+                let harassed (a: Arena) =
+                    a.Bodies |> List.exists (fun b -> b.Side <> Side.Ours && b.At.Room = "W17S26")
+
+                let opened, toOpen = harassersAtTheEdge () |> runUntil standing 10
+
+                Expect.isTrue
+                    (standing opened)
+                    $"the premise: the pair at the edge stand W17S26 down\n{describe toOpen}"
+
+                let left, toLeave = opened |> runUntil (harassed >> not) 150
+
+                Expect.isFalse
+                    (harassed left)
+                    $"the premise: the pair walk off west\n{describe toLeave}"
+
+                Expect.isFalse
+                    (left.Bodies |> List.exists (fun b -> b.Id = anchor && b.At.Room = "W17S26"))
+                    "the premise: the anchor went home while the room was shut"
+
+                let reopened, toReopen = left |> runUntil (standing >> not) 7
+
+                Expect.isFalse
+                    (standing reopened)
+                    $"the row ends on the observer's next look, one in five, not 200 ticks past the first sighting\n{describe toReopen}"
+
+                Expect.equal
+                    (rowOf reopened |> Option.map _.Basis)
+                    (Some StandDownBasis.RaidGone)
+                    "ended as a raid gone"
+
+                Expect.isLessThan
+                    reopened.Time
+                    1_037_344
+                    "well inside #513's window (t1,037,144 plus 200)"
+
+                let back, toBack =
+                    reopened
+                    |> runUntil
+                        (fun a ->
+                            a.Bodies
+                            |> List.exists (fun b -> b.Id = anchor && b.At.Room = "W17S26"))
+                        60
+
+                Expect.isTrue
+                    (back.Bodies |> List.exists (fun b -> b.Id = anchor && b.At.Room = "W17S26"))
+                    $"and the anchor walks back to its rock\n{describe toBack}"
+            }
+
+            // #585's other half: a look finding the room without the pair is
+            // no evidence they went where they only stepped across the border
+            // into W18S26, a room nothing of ours sees, or stand a step or
+            // two inside it (`Dance`). The same capture, the pair dancing a
+            // tile out and back from t8.
+            test
+                "capture t1,037,139: two harassers dancing one step into an unseen room and back keep W17S26 shut" {
+                let dance (back: RoomPos) =
+                    Some(
+                        Phases
+                            [
+                                8, GoTo back
+                                14, GoTo(RoomPos.at "W18S26" { X = 48; Y = back.Y })
+                                22, GoTo back
+                                30, GoTo(RoomPos.at "W18S26" { X = 48; Y = back.Y })
+                                38, GoTo back
+                                46, GoTo(RoomPos.at "W18S26" { X = 47; Y = back.Y })
+                                10_000, GoTo back
+                            ]
+                    )
+
+                let start =
+                    let a = harassersAtTheEdge ()
+
+                    { a with
+                        Bodies =
+                            a.Bodies
+                            |> List.map (fun b ->
+                                match b.Id with
+                                | "Dragon6090" ->
+                                    { b with
+                                        Script = dance (RoomPos.at "W17S26" { X = 1; Y = 33 })
+                                    }
+                                | "Stochastic6048" ->
+                                    { b with
+                                        Script = dance (RoomPos.at "W17S26" { X = 1; Y = 31 })
+                                    }
+                                | _ -> b)
+                    }
+
+                let standing (a: Arena) =
+                    Map.tryFind "W17S25" a.Carried.Raids
+                    |> Option.bind (fun raids ->
+                        raids.Outposts |> List.tryFind (fun row -> row.RoomName = "W17S26"))
+                    |> Option.exists (fun row -> Fabot.Core.Observe.standingDown a.Time row)
+
+                let opened, toOpen = start |> runUntil standing 10
+
+                Expect.isTrue (standing opened) $"the premise: the row opens\n{describe toOpen}"
+
+                let rec watch n (a: Arena) shutEvery =
+                    if n = 0 then
+                        shutEvery
+                    else
+                        let next, _ = step a
+                        watch (n - 1) next (shutEvery && standing next)
+
+                Expect.isTrue
+                    (watch 50 opened true)
+                    "W17S26 stays shut every tick the pair dances on its border"
+            }
+
+            // #585: a raid-shut outpost's trespassers stay ours to kill, but
+            // not under the raid. The same capture with a Trepidimous hauler
+            // at our container: while the pair the verdict loses stands in
+            // W17S26, no body of ours is sent at the hauler (no Guard of the
+            // room held); the bodies there walk home. `Facts.trespassRooms`
+            // admits a shut room only once no raider stands there; the kill
+            // score casts nothing against a kill a raider stands beside either,
+            // so this pins the outcome both keep.
+            test
+                "capture t1,037,139: a hauler at a shut outpost's container is no kill while the raid holds the room" {
+                let start =
+                    let a = harassersAtTheEdge ()
+
+                    { a with
+                        Bodies =
+                            a.Bodies
+                            @ [
+                                { body
+                                      "Hauler4242"
+                                      (Side.Player "Trepidimous")
+                                      (List.replicate 10 Carry @ List.replicate 10 Move)
+                                      (RoomPos.at "W17S26" { X = 26; Y = 8 })
+                                      (Some Hold) with
+                                    TicksToLive = 1_000
+                                }
+                            ]
+                    }
+
+                let raided (a: Arena) =
+                    a.Bodies
+                    |> List.exists (fun b ->
+                        b.At.Room = "W17S26" && (b.Id = "Dragon6090" || b.Id = "Stochastic6048"))
+
+                let rec watch n (a: Arena) sent =
+                    if n = 0 || not (raided a) then
+                        sent
+                    else
+                        let next, _ = step a
+
+                        let guards =
+                            next.Carried.Assignments
+                            |> Map.filter (fun _ task -> task = "guard:W17S26")
+                            |> Map.keys
+                            |> List.ofSeq
+
+                        watch (n - 1) next (sent @ guards)
+
+                Expect.isEmpty
+                    (watch 60 start [] |> List.distinct)
+                    "nobody holds W17S26's Guard while the raid stands there"
+            }
         ]

@@ -283,8 +283,10 @@ let economyEntryTests =
                     reserving
                     "and recalled through the blind ticks, until a sighting finds it gone"
 
-                // #513's trade: a player's raid nobody sees go holds the room
-                // no longer than `Tuning.PlayerRaidHold` past its last sighting.
+                // A player's raid nobody sees go holds the room no longer than
+                // its priced hold past its last sighting (#585, was #513's
+                // fixed `Tuning.PlayerRaidHold`): W1N2 is declared by no
+                // colony, its income nothing, so the whole round trip.
                 let lastSeen ago (colony: ColonyView) =
                     { recalled colony with
                         World =
@@ -293,7 +295,7 @@ let economyEntryTests =
                             }
                     }
 
-                let hold = Tuning.defaults.PlayerRaidHold
+                let hold = WorldView.raidTrip [ melee ]
 
                 Expect.notEqual
                     (Map.tryFind

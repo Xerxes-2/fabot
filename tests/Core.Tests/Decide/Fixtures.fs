@@ -183,6 +183,7 @@ let bareRespawn =
         HeldOutposts = Set.empty
         ThreatenedOutposts = Set.empty
         RaidedOutposts = Set.empty
+        RaidedUntil = Map.empty
         ChasedOutposts = Set.empty
         Fought = Map.empty
         HomeRaided = None

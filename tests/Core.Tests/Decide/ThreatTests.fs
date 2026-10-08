@@ -1888,26 +1888,31 @@ let rangerGroundTests =
             }
         ]
 
+/// The requests of the readers that price no look, by band, as a colony
+/// holding an observer asks them (`Layout.tierRequests`).
+let private claim = lookRequest LookBand.Claim 1
+let private watched = lookRequest LookBand.Watched Tuning.defaults.ObserveStaleTicks
+let private harassed = lookRequest LookBand.Harassed 1
+let private boxed = lookRequest LookBand.Box 1
+
+/// A room that wants eyes, one look in five (`Layout.dangerStride`).
+let private danger = lookRequest LookBand.Danger 5
+
 /// One room of each tier around W13S28, none of them seen.
-let private tiers: ObserverTiers =
-    {
-        Danger = []
-        Claims = [ "W17S25" ]
-        Watched = [ "W18S26" ]
-        Harassed = [ "W17S26" ]
-        Box = [ "W14S28"; "W13S27" ]
-    }
+let private tiers: LookRequest list =
+    [
+        claim "W17S25"
+        watched "W18S26"
+        harassed "W17S26"
+        boxed "W14S28"
+        boxed "W13S27"
+    ]
 
 /// The aim at tick 1,000 off W13S28, given when each room was last seen.
-let private aimAt (seen: (string * int) list) (tiers: ObserverTiers) =
+let private aimAt (seen: (string * int) list) (requests: LookRequest list) =
     let seen = Map.ofList seen
 
-    aimObserver
-        1_000
-        Tuning.defaults.ObserveStaleTicks
-        "W13S28"
-        (fun room -> Map.tryFind room seen)
-        tiers
+    aimObserver 1_000 "W13S28" (fun room -> Map.tryFind room seen) requests
 
 [<Tests>]
 let observerAimTests =
@@ -1938,7 +1943,7 @@ let observerAimTests =
             // round while W18S25, shut on a raid, wanted eyes.
             test
                 "a room some colony stands down from on a raid outranks every other tier, one look in five, and the others keep their turns (#534)" {
-                let wanting = { tiers with Danger = [ "W18S25" ] }
+                let wanting = danger "W18S25" :: tiers
 
                 Expect.equal (aimAt [] wanting) (Some "W18S25") "the room that wants eyes first"
 
@@ -1954,35 +1959,10 @@ let observerAimTests =
                     "five ticks on, the room again"
             }
 
-            test
-                "a room that wants eyes is one observer's look, the nearest's, so two never pile onto it (#534)" {
-                let watch =
-                    { WorldView.empty with
-                        Observers = [ "W13S28"; "W15S28"; "W40N40" ]
-                    }
-
-                Expect.equal
-                    (WorldView.lookerOf watch "W17S25")
-                    (Some "W15S28")
-                    "the nearer of the two in reach"
-
-                Expect.equal
-                    (WorldView.lookerOf watch "W14S27")
-                    (Some "W13S28")
-                    "a tie goes by name"
-
-                Expect.isNone (WorldView.lookerOf watch "W30S10") "none in reach, nobody's"
-            }
-
             test "a watched room is aimed at only once its sighting is N ticks old (#484)" {
                 let n = Tuning.defaults.ObserveStaleTicks
 
-                let only =
-                    { tiers with
-                        Claims = []
-                        Harassed = []
-                        Box = []
-                    }
+                let only = [ watched "W18S26" ]
 
                 Expect.isNone (aimAt [ "W18S26", 1_000 - n + 1 ] only) "younger than N: left alone"
                 Expect.equal (aimAt [ "W18S26", 1_000 - n ] only) (Some "W18S26") "N old: aimed at"
@@ -1990,22 +1970,13 @@ let observerAimTests =
                 Expect.equal
                     (aimAt
                         [ "W18S26", 1_000 - n; "W17S24", 1_000 - 2 * n ]
-                        { only with
-                            Watched = [ "W18S26"; "W17S24" ]
-                        })
+                        (watched "W17S24" :: only))
                     (Some "W17S24")
                     "the stalest of the tier first"
             }
 
             test "the box is a round robin: the room longest unseen first (#484)" {
-                let box =
-                    {
-                        Danger = []
-                        Claims = []
-                        Watched = []
-                        Harassed = []
-                        Box = [ "W14S28"; "W13S27"; "W12S28" ]
-                    }
+                let box = [ boxed "W14S28"; boxed "W13S27"; boxed "W12S28" ]
 
                 let seen = [ "W14S28", 990; "W13S27", 995; "W12S28", 1_000 ]
 
@@ -2025,21 +1996,14 @@ let observerAimTests =
             test "no room past OBSERVER_RANGE, nor the observer's own, is aimed at (#484)" {
                 // W13S28 is (-14, 28): W24S28 is eleven columns west, W23S38
                 // ten rows south.
-                let far =
-                    {
-                        Danger = []
-                        Claims = [ "W24S28"; "W13S28" ]
-                        Watched = []
-                        Harassed = []
-                        Box = [ "W23S38" ]
-                    }
+                let claims = [ claim "W24S28"; claim "W13S28" ]
 
                 Expect.equal
-                    (aimAt [] far)
+                    (aimAt [] (boxed "W23S38" :: claims))
                     (Some "W23S38")
                     "range is Chebyshev over the room grid, 10 inclusive"
 
-                Expect.isNone (aimAt [] { far with Box = [] }) "eleven away and the home: nothing"
+                Expect.isNone (aimAt [] claims) "eleven away and the home: nothing"
             }
 
             test
@@ -2089,35 +2053,23 @@ let private reaches (from: string) (room: string) =
     && RoomName.offsetOf from room
        |> Option.exists (fun (dx, dy) -> max (abs dx) (abs dy) <= Engine.observerRange)
 
-/// Each observer's tiers off one world: the shared lists every observer is
-/// handed, `Danger` cut to the room's looker (`WorldView.lookerOf`), its own box.
+/// The world's requests off each observer's room and box, the rooms that
+/// want eyes and the shared requests: the observers, and every request.
 let private worldTiers
     (observers: (string * string list) list)
-    (danger: string list)
-    (shared: ObserverTiers)
+    (wanting: string list)
+    (shared: LookRequest list)
     =
-    let watch =
-        { WorldView.empty with
-            Observers = observers |> List.map fst
-        }
-
-    observers
-    |> List.map (fun (from, box) ->
-        from,
-        { shared with
-            Danger = danger |> List.filter (fun room -> WorldView.lookerOf watch room = Some from)
-            Box = box
-        })
+    observers |> List.map fst,
+    (wanting |> List.map danger)
+    @ shared
+    @ (observers |> List.collect (fun (_, box) -> box |> List.map boxed))
 
 /// The world's looks at tick 1,000, given when each room was last seen.
-let private looksAt (seen: (string * int) list) observers =
+let private looksAt (seen: (string * int) list) (observers: string list, requests) =
     let seen = Map.ofList seen
 
-    assignLooks
-        1_000
-        Tuning.defaults.ObserveStaleTicks
-        (fun room -> Map.tryFind room seen)
-        observers
+    assignLooks 1_000 (fun room -> Map.tryFind room seen) observers requests
 
 /// No two observers look at one room, and each looks within its reach.
 let private distinctAndInReach (looks: Map<string, string>) =
@@ -2131,14 +2083,14 @@ let private distinctAndInReach (looks: Map<string, string>) =
 
 /// The rivals every colony's watched tier shares (`Colony.rivals` and the
 /// sighted ones), around W13S28 and W12S28.
-let private sharedTiers: ObserverTiers =
-    {
-        Danger = []
-        Claims = [ "W17S25" ]
-        Watched = [ "W18S26"; "W17S24"; "W22S28" ]
-        Harassed = [ "W17S26" ]
-        Box = []
-    }
+let private sharedTiers: LookRequest list =
+    [
+        claim "W17S25"
+        watched "W18S26"
+        watched "W17S24"
+        watched "W22S28"
+        harassed "W17S26"
+    ]
 
 [<Tests>]
 let worldObserverTests =
@@ -2170,8 +2122,12 @@ let worldObserverTests =
                     "each its own box"
             }
 
+            // Moved by #660: a room that wanted eyes was its nearest observer's
+            // alone (`WorldView.lookerOf`), so W12S28 spent its look on the
+            // claim while W17S27 waited on W13S28. A request is any observer's
+            // in reach, and the ranking alone keeps two off one room.
             test
-                "the danger split is unchanged: a room that wants eyes is its looker's alone (#559)" {
+                "two rooms that want eyes are looked at by two observers, the second going to the one free (#559, #660)" {
                 // W18S25 is five from W13S28 and six from W12S28; W17S27 four
                 // and five.
                 let observers =
@@ -2186,28 +2142,12 @@ let worldObserverTests =
                 Expect.equal
                     (Map.tryFind "W13S28" looks)
                     (Some "W18S25")
-                    "the looker takes the room never seen first"
+                    "the nearest takes the room never seen first"
 
                 Expect.equal
                     (Map.tryFind "W12S28" looks)
-                    (Some "W17S25")
-                    "the other observer takes no room of the looker's danger, and spends its look on the claim"
-
-                let alone =
-                    observers
-                    |> List.map (fun (from, tiers) ->
-                        from,
-                        aimObserver
-                            1_000
-                            Tuning.defaults.ObserveStaleTicks
-                            from
-                            (fun room -> if room = "W17S27" then Some 990 else None)
-                            tiers)
-
-                Expect.equal
-                    alone
-                    [ "W13S28", Some "W18S25"; "W12S28", Some "W17S25" ]
-                    "aimed one at a time, the same danger looks"
+                    (Some "W17S27")
+                    "the other takes the second room that wants eyes, before the claim"
             }
 
             test "three observers in reach of one another each take a room of their own (#559)" {
@@ -2215,9 +2155,7 @@ let worldObserverTests =
                     worldTiers
                         [ "W13S28", [ "W14S28" ]; "W12S28", [ "W11S28" ]; "W15S28", [ "W16S28" ] ]
                         []
-                        { sharedTiers with
-                            Watched = [ "W18S26" ]
-                        }
+                        [ claim "W17S25"; watched "W18S26"; harassed "W17S26" ]
 
                 let looks = looksAt [] observers
                 distinctAndInReach looks
@@ -2248,7 +2186,7 @@ let worldObserverTests =
                         [ "W17S25", 1_000; "W18S26", 1_000; "W17S26", 1_000 ]
                     ] do
                     Expect.equal
-                        (looksAt seen [ "W13S28", tiers ] |> Map.tryFind "W13S28")
+                        (looksAt seen ([ "W13S28" ], tiers) |> Map.tryFind "W13S28")
                         (aimAt seen tiers)
                         $"seen {seen}"
             }
@@ -2316,16 +2254,7 @@ let worldObserverTests =
                 // W23S28 is ten from W13S28 and eleven from W12S28: only
                 // W13S28 reaches it. W14S28 both reach, and W13S28 is nearer.
                 let observers =
-                    worldTiers
-                        [ "W13S28", []; "W12S28", [] ]
-                        []
-                        {
-                            Danger = []
-                            Claims = [ "W14S28"; "W23S28" ]
-                            Watched = []
-                            Harassed = []
-                            Box = []
-                        }
+                    worldTiers [ "W13S28", []; "W12S28", [] ] [] [ claim "W14S28"; claim "W23S28" ]
 
                 let looks = looksAt [] observers
                 distinctAndInReach looks
@@ -2334,5 +2263,69 @@ let worldObserverTests =
                     looks
                     (Map.ofList [ "W13S28", "W23S28"; "W12S28", "W14S28" ])
                     "the only observer reaching W23S28 is not spent on W14S28"
+            }
+
+            test
+                "within a band an observer serves the request worth most first, and a request past its deadline wants none (#660)" {
+                // Two stand-downs W13S28 reaches, never seen: the one whose
+                // look unlocks more income goes first, whatever the names say.
+                let standDown room value until =
+                    { danger room with
+                        Value = value
+                        Until = Some until
+                    }
+
+                let requests =
+                    [
+                        claim "W17S25"
+                        standDown "W17S26" 2_000.0 1_100
+                        standDown "W16S26" 3_860.0 1_200
+                    ]
+
+                Expect.equal
+                    (aimAt [] requests)
+                    (Some "W16S26")
+                    "the dearer look first, though W17S26 sorts first by name"
+
+                Expect.equal
+                    (aimAt [ "W16S26", 1_000 ] requests)
+                    (Some "W17S26")
+                    "W16S26 seen this tick: the next request of the band"
+
+                Expect.equal
+                    (aimAt
+                        [ "W16S26", 1_000 ]
+                        (standDown "W17S26" 2_000.0 999 :: requests.Head :: []))
+                    (Some "W17S25")
+                    "a stand-down past its expiry unlocks nothing: the claim"
+
+                Expect.equal
+                    (aimAt [] (danger "W18S25" :: requests))
+                    (Some "W16S26")
+                    "an unpriced room that wants eyes waits behind the priced ones of its band"
+            }
+
+            test
+                "a body of ours passing through a room is its look: the request wants none until the sighting is as old as it tolerates (#660)" {
+                // W17S26's stand-down asks one look in five. Our hauler
+                // crossed it at t998: that sighting answers the request.
+                let requests =
+                    [
+                        claim "W17S25"
+                        { danger "W17S26" with
+                            Value = 2_000.0
+                            Until = Some 1_200
+                        }
+                    ]
+
+                Expect.equal
+                    (aimAt [ "W17S26", 998 ] requests)
+                    (Some "W17S25")
+                    "seen two ticks ago by the hauler: the observer spends its tick on the claim"
+
+                Expect.equal
+                    (aimAt [ "W17S26", 995 ] requests)
+                    (Some "W17S26")
+                    "five ticks on, the observer looks"
             }
         ]

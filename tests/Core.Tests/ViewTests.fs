@@ -2001,7 +2001,9 @@ let worldViewTests =
                     let watch = WorldView.ofWorld declared [ StandDown.none ] world
                     Set.contains outpost watch.Danger, Map.tryFind outpost watch.RaidSeen
 
-                let hold = Tuning.defaults.PlayerRaidHold
+                // Moved by #585 from `Tuning.PlayerRaidHold` (200): the raid's
+                // round trip, a room's side each way at its pace (100).
+                let hold = WorldView.raidTrip [ raider "Trepidimous" ]
 
                 Expect.equal
                     (dangerAfter (hold - 1) "Trepidimous")

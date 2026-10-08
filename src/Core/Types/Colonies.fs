@@ -1020,6 +1020,9 @@ type StandDown =
         /// a raid nobody can see any more, the last body out having taken our
         /// vision with it, which may walk on to the home beside it.
         RaidedOutposts: Set<string>
+        /// Each room of `RaidedOutposts` with the tick its row runs to: what a
+        /// look finding the raid gone saves (#660's priced stand-down look).
+        RaidedUntil: Map<string, int>
         /// The rooms of `RaidedOutposts` whose raid, last seen, the verdict
         /// does not lose (`OutpostEpisode.Chased`, `Facts.chased`, #510,
         /// #571): projected still as a transit room, where the chase is
@@ -1076,6 +1079,7 @@ module StandDown =
             HeldOutposts = Set.empty
             ThreatenedOutposts = Set.empty
             RaidedOutposts = Set.empty
+            RaidedUntil = Map.empty
             ChasedOutposts = Set.empty
             Fought = Map.empty
             Taken = Set.empty

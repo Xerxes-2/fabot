@@ -734,9 +734,22 @@ let internal minesRoom (view: ColonyView) (room: string) =
 
 /// Whether a trespasser in a room is this colony's to kill: a room it mines
 /// (#516), or a child's outpost it watches for the residents next door
-/// (`BorrowedWork.ChildOutposts`, #517).
+/// (`BorrowedWork.ChildOutposts`, #517), or an outpost of ours a raid has
+/// shut once no raider stands there in sight or recalled (#585): the
+/// stand-down withholds the economy's work there, never the kill of a body
+/// taking it, and while the raid stands the room is its fight's — a chase
+/// where the verdict does not lose it (`chased`), nobody's where it does —
+/// so no body is cast or seated at the prey under the raid. Read off the
+/// raid and not the verdict, which prices trespassers itself.
 let internal trespassRooms (view: ColonyView) (room: string) =
-    minesRoom view room || List.contains room view.Borrowed.ChildOutposts
+    minesRoom view room
+    || List.contains room view.Borrowed.ChildOutposts
+    || view.RaidedOutposts.Contains room
+       && view.MinedRooms.Contains room
+       && not (
+           view.Hostiles
+           |> List.exists (fun h -> h.Pos.Room = room && HostileInfo.raider view.Hostiles h)
+       )
 
 /// Whether a neutral player's creep struck one of ours first, which would
 /// make it ours to strike back anywhere: deferred, no hit memory yet (#535).
@@ -3541,8 +3554,9 @@ let contestOf (view: ColonyView) (room: string) : Contest =
     // A body the sweep remembers out of sight counts at the odds it is still
     // there (#658: no spawn for ghosts); where an observer of ours can look
     // at the room, one not certain counts nothing until the look confirms
-    // it: the look lands within its rotation, a tick or a few of the body's
-    // take, where a cast spent on a body gone is the whole body.
+    // it: an outpost's asks for that look (`unconfirmedPrey`, #660), a
+    // candidate's comes in its rotation, a tick or a few of the body's take,
+    // where a cast spent on a body gone is the whole body.
     let looked =
         lazy
             (view.World.Observers
@@ -3570,6 +3584,131 @@ let contestOf (view: ColonyView) (room: string) : Contest =
             |> List.map (fun hostile -> hostile.Id, killValue view hostile * odds hostile)
             |> Map.ofList
     }
+
+/// Each dark outpost this colony mines whose remembered trespassers a look
+/// would confirm (#660, #585): the bodies `World.PreySeen` lays in a room
+/// nothing sees this tick, each not certain still there (`stillThere`), with
+/// their kills at those odds (`killValue`) summed: what the look is worth.
+/// `contestOf` counts such a body nothing where an observer can look, so
+/// without the look the room's kill waits on a body walking in.
+let internal unconfirmedPrey (view: ColonyView) : (string * float) list =
+    view.World.PreySeen
+    |> Map.toList
+    |> List.choose (fun (room, seen) ->
+        if trespassRooms view room then
+            let value =
+                seen.Bodies
+                |> List.filter (trespasser view (Set.singleton room))
+                |> List.sumBy (fun hostile ->
+                    match stillThere view hostile with
+                    | certain when certain >= 1.0 -> 0.0
+                    | odds -> killValue view hostile * odds)
+
+            if value > 0.0 then Some(room, value) else None
+        else
+            None)
+
+/// What a tick of a declared outpost open is worth (#585): its sources'
+/// yield, reserved, off the declaration (`Colony.declared`), whether or not
+/// a stand-down projects the room this tick. Nothing for a room no colony
+/// declares an outpost.
+let internal outpostTickWorth (room: string) : int =
+    Colony.declared
+    |> List.tryPick (fun colony ->
+        colony.Outposts |> List.tryFind (fun outpost -> outpost.RoomName = room))
+    |> Option.map (fun outpost -> List.length outpost.Sources * Engine.heldOutputPerTick)
+    |> Option.defaultValue 0
+
+/// What a reopen sends back into an outpost (#585): the crew its declaration
+/// asks for, priced off the body patterns — per source an anchor that drains
+/// it and the haul of its yield over a round trip home, and a two-CLAIM
+/// reserver — and the room's income lost while they are cast and walk back
+/// (`outpostTickWorth`). Nothing for a room no colony declares an outpost.
+let internal outpostCrewWorth (room: string) : float =
+    let declared =
+        Colony.declared
+        |> List.tryPick (fun colony ->
+            colony.Outposts
+            |> List.tryFind (fun outpost -> outpost.RoomName = room)
+            |> Option.map (fun outpost -> colony.Home, outpost))
+
+    match declared with
+    | None -> 0.0
+    | Some(home, outpost) ->
+        let walk =
+            Engine.roomSide
+            * (RoomName.hopsBetween home room |> Option.defaultValue 1 |> max 1)
+
+        // The pattern repeated until it holds `needed` of `part`.
+        let sized (pattern: BodyPattern) (part: BodyPart) (needed: int) =
+            let per = pattern.Block |> List.filter ((=) part) |> List.length |> max 1
+            List.replicate ((needed + per - 1) / per) pattern.Block |> List.concat
+
+        let drain = Engine.heldOutputPerTick
+
+        let anchor =
+            sized anchorPattern Work ((drain + Engine.harvestPerWork - 1) / Engine.harvestPerWork)
+
+        let hauler =
+            sized
+                haulerPattern
+                Carry
+                ((drain * 2 * walk + Engine.carryPartCapacity - 1) / Engine.carryPartCapacity)
+
+        let reserver = sized reserverPattern BodyPart.Claim 2
+
+        let crew =
+            (List.replicate (List.length outpost.Sources) (anchor @ hauler) |> List.concat)
+            @ reserver
+
+        let respawn = Engine.spawnTicksPerPart * List.length crew + walk
+
+        float (bodyCost crew) + float (outpostTickWorth room * respawn)
+
+/// How many ticks a hold runs past a raid's last sighting (#585), off what it
+/// weighs: the odds the raid still stands there or is back fall in a line
+/// from certain to nothing over its round trip, `trip`; a reopen at that age
+/// risks the crew it sends back, `crew`, at those odds; and a look that would
+/// end the hold comes within `evidence` ticks, each such wait costing the
+/// room's `income` a tick. The room reopens once the risk falls under one
+/// wait's income, never before the evidence can come: longer for a slower
+/// raid or a dearer crew, shorter for a richer room.
+let holdSpan (income: float) (crew: float) (trip: int) (evidence: int) : int =
+    if crew <= 0.0 then
+        evidence
+    else
+        max evidence (int (ceil (float trip * (1.0 - income * float evidence / crew))))
+
+/// How often a room that wants eyes is looked at again (#534): one look in
+/// five re-reads a raid row's clock and chase well inside a melee's walk
+/// across a room (~50 ticks), and leaves an observer four ticks in five for
+/// the rest. What a stand-down's evidence waits on where an observer reaches.
+let lookStride = 5
+
+/// Whether an observer of ours reaches a room (`Engine.observerRange`).
+let internal observerReaches (view: ColonyView) (room: string) : bool =
+    view.World.Observers
+    |> List.exists (fun observer ->
+        RoomName.offsetOf observer room
+        |> Option.exists (fun (dx, dy) -> max (abs dx) (abs dy) <= Engine.observerRange))
+
+/// How long a player's raid holds the outpost it was last seen standing in
+/// shut past that sighting (#585), where no look has found it gone
+/// (`holdSpan`): over its slowest body's round trip (`WorldView.raidTrip`),
+/// the outpost's crew (`outpostCrewWorth`) against its income
+/// (`outpostTickWorth`), the evidence a look every `lookStride` ticks where
+/// an observer reaches the room, else none before the trip is out.
+let internal raidHoldSpan (view: ColonyView) (room: string) (raid: HostileInfo list) : int =
+    let trip = WorldView.raidTrip raid
+
+    holdSpan
+        (float (outpostTickWorth room))
+        (outpostCrewWorth room)
+        trip
+        (if observerReaches view room then
+             min lookStride trip
+         else
+             trip)
 
 /// The [[sweep]]'s candidates as a view holds them (#658): in each candidate
 /// nothing sees this tick, the bodies it was last seen holding
@@ -5514,12 +5653,22 @@ let internal openToEconomy
     let seen = Map.tryFind room view.World.RaidSeen |> Option.defaultValue view.Time
 
     let raid =
-        raidersIn view room
+        let raiders =
+            raidersIn view room
+            |> List.filter (fun h ->
+                Colony.strikesAnywhere h.Owner && not (HostileInfo.stationary view.Hostiles h))
+
+        let span =
+            lazy
+                (raidHoldSpan
+                    view
+                    room
+                    (raiders |> List.filter (fun h -> Set.contains h.Id recalled)))
+
+        raiders
         |> List.filter (fun h ->
-            Colony.strikesAnywhere h.Owner
-            && not (HostileInfo.stationary view.Hostiles h)
-            && (not (Set.contains h.Id recalled)
-                || WorldView.recallShuts view.Tuning view.Time seen h))
+            not (Set.contains h.Id recalled)
+            || WorldView.recallShuts span.Value view.Time seen h)
 
     let near = Set.ofList (room :: RoomName.adjacent room)
 

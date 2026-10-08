@@ -1354,7 +1354,9 @@ let harassStandDownTests =
                     "a core's clock is the core's, and the squad does not cut it short"
             }
 
-            test "an outpost under a harassing squad is held the player window past its opening" {
+            // Moved by #585: held its round trip past its last sighting (the
+            // squad's pace is 1, so 100), not #513's fixed 200 past its opening.
+            test "an outpost under a harassing squad is held its round trip past its last sighting" {
                 // A bank of four guard blocks. The live 5,600 bank's five
                 // blocks now win this raid, so that outpost is no longer
                 // stood down (#624, a behaviour change): each swing is
@@ -1370,14 +1372,16 @@ let harassStandDownTests =
                     |> raidTick 100 colony
                     |> raidTick 101 { colony with Hostiles = [] }
 
+                let trip = WorldView.raidTrip trepidimousSquad
+
                 Expect.contains
-                    (shutAt 299 state)
+                    (shutAt (100 + trip) state)
                     harassRoom
                     "withdrawn past the harassment clear (#513)"
 
                 Expect.isFalse
-                    (Set.contains harassRoom (shutAt 300 state))
-                    "and worked again at its opening plus 200, the squad still alive"
+                    (Set.contains harassRoom (shutAt (101 + trip) state))
+                    "and worked again the tick after its last sighting plus its round trip, the squad still alive"
 
                 Expect.equal
                     (standDowns state |> List.map (fun (_, _, _, _, basis) -> basis))

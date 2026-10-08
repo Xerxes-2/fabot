@@ -692,10 +692,6 @@ type Tuning =
         /// How long a stand-down a raid's return reopens soon after its bodies
         /// were all gone holds at least (#507): a squad bouncing on the border.
         RaidBounceTicks: int
-        /// How long a player's raid holds an outpost shut at most (#513),
-        /// counted from its first sighting: a body that walks off unseen
-        /// leaves no evidence it went.
-        PlayerRaidHold: int
         /// The energy a terminal is kept stocked with, to pay `send`'s fee out
         /// of (#349). Sized off the job and not off the store: about 95
         /// energy a thousand units over three rooms, so 4,000 ships the whole
@@ -1069,8 +1065,6 @@ module Tuning =
             HarassClearTicks = 50
             // A harassment room's clear-gap: long enough that one border bounce costs one walk.
             RaidBounceTicks = 50
-            // Under Trepidimous' 300-500-tick crossing cadence; since #512 an early reopen only costs a walk.
-            PlayerRaidHold = 200
             TerminalEnergy = 4_000
             // A lab chain's inputs, not a hoard (user, 2026-10-07).
             OreTarget = 6_000
