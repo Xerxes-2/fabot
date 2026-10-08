@@ -1565,6 +1565,128 @@ let contestTests =
                 Expect.isLessThan dancing inSight "but at its round trip's odds, not certain"
             }
 
+            // #663 S4, the pursuit: a dark outpost's remembered trespasser
+            // asks its look of every room it may stand in (`Quarry.region`),
+            // worth its kill and the take a fight denies it over the stride.
+            test
+                "a dark outpost's remembered hauler by a border asks a look of the outpost and of the room beyond, each worth what the look confirms" {
+                let hauler = haulerOf "h-2" { X = 2; Y = 30 }
+
+                let colony =
+                    declaredRaid []
+                    |> fun c -> c |> remembering (c.Time - 3) [ hauler ]
+                    |> fun c ->
+                        { c with
+                            World =
+                                { c.World with
+                                    Quarries =
+                                        c.World.Quarries
+                                        |> Map.map (fun _ track ->
+                                            { track with
+                                                Trail = [ track.Seen, track.Body.Pos ]
+                                            })
+                                }
+                        }
+
+                let worth = Facts.roomWorth colony "W1N2"
+
+                let value = worth.Values.["h-2"] + float Facts.lookStride * worth.Takes.["h-2"]
+
+                Expect.equal
+                    (lookRequests [ colony ] []
+                     |> List.filter (fun request -> request.Band = LookBand.Pursuit)
+                     |> List.map (fun request -> request.Room, request.Value, request.Tolerates))
+                    [ "W1N2", value, Facts.lookStride; "W2N2", value, Facts.lookStride ]
+                    "the outpost and the room across its west border, one look in five"
+            }
+
+            // #663 S4 review: a kill a look may unlock is priced over the
+            // body's life, a stand-down over the ticks of hold it can end;
+            // until the two share a horizon, defence is never outranked by a
+            // pursuit (`LookBand.Pursuit` below `Danger`).
+            test
+                "two observers, three rooms wanting eyes: the stand-down's look goes before a rival remote's remembered hauler, worth more as it is" {
+                let candidate = "W2N2"
+
+                let hauler =
+                    { haulerOf "h-9" { X = 1; Y = 20 } with
+                        Pos = RoomPos.at candidate { X = 1; Y = 20 }
+                    }
+
+                let colony =
+                    let raided =
+                        { declaredRaid [] with
+                            Harass =
+                                [
+                                    {
+                                        RoomName = candidate
+                                        Enemy = "Trepidimous"
+                                        Via = []
+                                    }
+                                ]
+                            HarassCast = Set.singleton candidate
+                        }
+
+                    let remembered =
+                        { raided with
+                            RaidedUntil = Map.ofList [ "W1N2", raided.Time + 10 ]
+                        }
+                        |> remembering (raided.Time - 3) [ hauler ]
+
+                    { remembered with
+                        World =
+                            { remembered.World with
+                                Observers = [ "W4N4"; "W5N5" ]
+                                Quarries =
+                                    remembered.World.Quarries
+                                    |> Map.map (fun _ track ->
+                                        { track with
+                                            Trail = [ track.Seen, track.Body.Pos ]
+                                        })
+                            }
+                    }
+
+                let requests = lookRequests [ colony ] []
+
+                let valueOf band room =
+                    requests
+                    |> List.tryFind (fun request -> request.Band = band && request.Room = room)
+                    |> Option.map _.Value
+
+                let standDown = valueOf LookBand.Danger "W1N2"
+
+                Expect.equal
+                    standDown
+                    (Some((Facts.roomWorth colony "W1N2").Kept * 10.0))
+                    "the stand-down: the outpost's income over the ten ticks it has left"
+
+                Expect.isTrue
+                    (valueOf LookBand.Pursuit candidate
+                     |> Option.exists (fun v -> Some v > standDown))
+                    "the premise: the hauler's look is priced above it"
+
+                Expect.equal
+                    (requests
+                     |> List.filter (fun request ->
+                         request.Band <> LookBand.Box && request.Value > 0.0)
+                     |> List.map _.Room
+                     |> List.sort)
+                    [ "W1N2"; candidate; "W3N2" ]
+                    "the premise: three rooms want eyes"
+
+                let looks =
+                    requests
+                    |> List.filter (fun request -> request.Value > 0.0)
+                    |> assignLooks colony.Time (fun _ -> None) [ "W4N4"; "W5N5" ]
+
+                Expect.contains
+                    (Map.values looks |> List.ofSeq)
+                    "W1N2"
+                    "the stand-down is looked at"
+
+                Expect.equal looks.Count 2 "both observers look"
+            }
+
             test "a raid alone, or a neutral's hauler, denies nothing" {
                 let raid = Facts.roomWorth (declaredRaid raiders) "W1N2"
 

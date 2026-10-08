@@ -2867,7 +2867,7 @@ let arenaBorderTests =
             // six ticks, the room is dark and the haulers only remembered,
             // counted nothing where an observer can look (`Facts.roomWorth`,
             // read for a cast), so the kill asks the observer for that look
-            // (#660, `RoomWorth.unseen`) once its sighting is `Facts.lookStride`
+            // (#660, `RoomWorth.unseenBodies`) once its sighting is `Facts.lookStride`
             // old — before, nothing asked: W17S26 wanted no eyes once its raid
             // was gone, and the observer looked at the rival room it watches.
             test

@@ -2144,3 +2144,145 @@ let catchableFirstTests =
                     "every seat strikes the exit tile it stands on, none on the exit"
             }
         ]
+
+/// The look requests the colony's readers ask (`Layout.lookRequests`), by
+/// band, as (room, value, tolerance).
+let private asked (band: LookBand) (colony: ColonyView) =
+    Layout.lookRequests [ colony ] []
+    |> List.filter (fun request -> request.Band = band)
+    |> List.map (fun request -> request.Room, request.Value, request.Tolerates)
+    |> List.sort
+
+/// The colony remembering `body` out of sight since `ago` ticks back, on a
+/// trip (`Track.Trail`) or not.
+let private rememberingFor (ago: int) (trip: bool) (body: HostileInfo) (colony: ColonyView) =
+    let remembered = colony |> remembering (colony.Time - ago) [ body ]
+
+    { remembered with
+        World =
+            { remembered.World with
+                Quarries =
+                    remembered.World.Quarries
+                    |> Map.map (fun _ track ->
+                        if trip then
+                            { track with
+                                Trail = [ track.Seen, track.Body.Pos ]
+                            }
+                        else
+                            track)
+            }
+    }
+
+[<Tests>]
+let sweepVisionTests =
+    testList
+        "the sweep's eyes: a candidate's look, priced (#663 S4)"
+        [
+            // #663 M5: the candidates asked through an unpriced tier (value
+            // 0, the declared list, any tick unseen); a dark candidate's look
+            // is now worth what it confirms, and a candidate with nothing
+            // remembered is the dossier's watch alone.
+            test
+                "a dark candidate's remembered body asks a look worth its kill and its take over the stride, at its odds" {
+                let colony =
+                    sweeping [] []
+                    |> rememberingFor 10 false (hauler westRoom "hauler-w" { X = 22; Y = 20 })
+
+                let worth = Facts.roomWorth colony westRoom
+                let odds = RoomWorth.oddsOf Quarry.Reading.Value worth "hauler-w"
+
+                Expect.isTrue (odds > 0.0 && odds < 1.0) "the premise: a carrier ten ticks gone"
+
+                Expect.equal
+                    (asked LookBand.Pursuit colony)
+                    [
+                        westRoom,
+                        (worth.Values.["hauler-w"]
+                         + float Facts.lookStride * worth.Takes.["hauler-w"])
+                        * odds,
+                        Facts.lookStride
+                    ]
+                    "the west room alone, priced; the north room remembers nothing"
+
+                // The dossier reads the declared candidates the live switch
+                // has on, cast or not; the case's own are cast but undeclared.
+                Expect.equal
+                    (asked LookBand.Watched colony)
+                    (Colony.harass
+                     |> List.map (fun h -> h.RoomName, 0.0, Facts.lookStride)
+                     |> List.sort)
+                    "the dossier's watches, worth nothing priced"
+            }
+
+            // A body two rooms price (the room it stands in and the room it
+            // crossed out of) is one body: once in each room it may stand in.
+            test "a dancer two candidates both price counts once in each room it may stand in" {
+                let across = "W3N1"
+
+                let colony =
+                    let cast = castingFrom [ declarationOf westRoom; declarationOf across ] []
+                    let body = hauler across "hauler-w" { X = 48; Y = 20 }
+                    let remembered = cast |> remembering (cast.Time - 3) [ body ]
+
+                    let crossed =
+                        {
+                            Came = RoomPos.at westRoom { X = 1; Y = 20 }
+                            Ticks = [ remembered.Time - 3 ]
+                            Tiles = []
+                        }
+
+                    { remembered with
+                        Bounces = Map.ofList [ "hauler-w", crossed ]
+                        World =
+                            { remembered.World with
+                                Quarries =
+                                    remembered.World.Quarries
+                                    |> Map.map (fun _ track ->
+                                        { track with
+                                            Trail = [ track.Seen, track.Body.Pos ]
+                                            Crossings = Some crossed
+                                        })
+                            }
+                    }
+
+                let pricings =
+                    [ westRoom; across ]
+                    |> List.choose (fun room ->
+                        RoomWorth.unseenBodies Facts.lookStride (Facts.roomWorth colony room)
+                        |> Map.tryFind "hauler-w")
+
+                Expect.equal pricings.Length 2 "the premise: both candidates price it"
+
+                let value = List.max pricings
+
+                Expect.equal
+                    (asked LookBand.Pursuit colony)
+                    [ westRoom, value, Facts.lookStride; across, value, Facts.lookStride ]
+                    "each of its two rooms asks for it once"
+            }
+
+            // The pursuit: a body last seen by a border, its trip kept, may
+            // stand across it; the room beyond is asked as much as the
+            // candidate (`Quarry.region`).
+            test "a remembered dancer by a border asks a look of the room beyond it too" {
+                let colony =
+                    sweeping [] []
+                    |> rememberingFor 3 true (hauler westRoom "hauler-w" { X = 2; Y = 20 })
+
+                let worth = Facts.roomWorth colony westRoom
+
+                let value =
+                    worth.Values.["hauler-w"] + float Facts.lookStride * worth.Takes.["hauler-w"]
+
+                Expect.equal
+                    (asked LookBand.Pursuit colony)
+                    [ westRoom, value, Facts.lookStride; "W3N1", value, Facts.lookStride ]
+                    "on a trip, certain: the candidate and the room across its west border"
+            }
+
+            test "a candidate in sight asks nothing priced" {
+                let colony = sweeping [] [ hauler westRoom "hauler-w" { X = 22; Y = 20 } ]
+
+                Expect.isEmpty (asked LookBand.Pursuit colony) "nothing out of sight to confirm"
+            }
+        ]

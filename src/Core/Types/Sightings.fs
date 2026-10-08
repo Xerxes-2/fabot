@@ -1017,9 +1017,28 @@ module Dance =
     let besideOf (room: string) (tile: RoomPos) : bool =
         tile.Room <> room && List.contains room (beyond tile)
 
+    /// Whether a room's border ring opens onto the room beside it that
+    /// `offset` names: a walkable exit tile on that border
+    /// (`Seam.pairsAcross`). A border no exit crosses — solid wall, or the
+    /// world's edge — opens onto nothing.
+    let opensOnto (border: Map<Pos, Terrain>) (offset: int * int) : bool =
+        Seam.pairsAcross offset
+        |> List.exists (fun (tile, _) ->
+            Map.tryFind tile border |> Option.exists (fun t -> t <> Wall))
+
+    /// `opensOnto` over a room's ring as a reader holds it, from `room` into
+    /// `next`: true where the reader holds no ring of the room (the worst
+    /// case: a body may have crossed).
+    let crosses (border: Map<Pos, Terrain> option) (room: string) (next: string) : bool =
+        match border, RoomName.offsetOf room next with
+        | Some ring, Some offset when not ring.IsEmpty -> opensOnto ring offset
+        | _ -> true
+
 /// How a [[quarry]] out of sight is known gone (#663): its tombstone was
 /// seen, its life ran out, or a look at the room it was last seen in found
-/// it standing nowhere in sight with no trip of it across a border left.
+/// it standing nowhere in sight with no trip of it across a border left —
+/// or, on a trip, every room it may stand in (`Quarry.region`) has been
+/// seen since without it (`SeenGone` both).
 [<RequireQualifiedAccess>]
 type Gone =
     | Fallen

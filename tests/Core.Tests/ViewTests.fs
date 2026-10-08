@@ -2158,6 +2158,108 @@ let quarryTests =
                     "its room in sight, the room across dark: it may only have stepped out"
             }
 
+            // #663 S4: a look must be able to fade a pursuit. A trip was never
+            // seen gone, so a crossing hauler asked full-price looks of two
+            // rooms through its whole window.
+            test "a trip every room of which has been seen since without it is seen gone (#663)" {
+                let seen = sightAt 100 [ quarryRoom, [ quarryBody 1000 (quarryRoom, 1, 20) ] ] []
+                let looked = sightAt 101 [ quarryRoom, [] ] []
+
+                // The world keeps each room's last sighting: W12S29's at 101.
+                let across =
+                    let world = sightAt 102 [ "W13S29", [] ] []
+
+                    { world with
+                        Sightings = Map.add quarryRoom looked.Sightings.[quarryRoom] world.Sightings
+                    }
+
+                Expect.equal
+                    (goneOf (quarriesThrough [ seen; looked ]))
+                    (Some None)
+                    "its room seen at 101, the room across dark: it may only have stepped out"
+
+                Expect.equal
+                    (goneOf (quarriesThrough [ seen; looked; across ]))
+                    (Some(Some Gone.SeenGone))
+                    "the room across seen at 102 too: nowhere it may stand"
+
+                // W12S29's west border solid wall: the trip opens onto nothing.
+                let walled (world: World) =
+                    { world with
+                        Rooms =
+                            world.Rooms
+                            |> Map.map (fun _ facts ->
+                                { facts with
+                                    Border =
+                                        Seam.pairsAcross (-1, 0)
+                                        |> List.map (fun (tile, _) -> tile, Wall)
+                                        |> Map.ofList
+                                })
+                    }
+
+                Expect.equal
+                    (goneOf (quarriesThrough [ walled seen; walled looked ]))
+                    (Some(Some Gone.SeenGone))
+                    "a border no exit crosses: its room seen is the whole of it"
+            }
+
+            test
+                "the rooms a body out of sight may stand in shrink with every look that finds it nowhere (#663)" {
+                let at = quarryBody 1000 (quarryRoom, 25, 25)
+
+                let track (x, y) crossed =
+                    {
+                        Body =
+                            { at with
+                                Pos = RoomPos.at quarryRoom { X = x; Y = y }
+                            }
+                        Seen = 100
+                        Cargo = 0
+                        Trail = [ 100, RoomPos.at quarryRoom { X = x; Y = y } ]
+                        Crossings = crossed
+                        Gone = None
+                    }
+
+                let opens _ _ = true
+                let never _ = None
+
+                Expect.equal
+                    (Quarry.region opens never 101 (track (1, 20) None))
+                    [ quarryRoom; "W13S29" ]
+                    "by the west border: its room and the room across"
+
+                Expect.equal
+                    (Quarry.region (fun _ _ -> false) never 101 (track (1, 20) None))
+                    [ quarryRoom ]
+                    "a border that opens onto nothing names no room beyond"
+
+                Expect.equal
+                    (Quarry.region
+                        opens
+                        (fun room -> if room = quarryRoom then Some 103 else None)
+                        104
+                        (track (1, 20) None))
+                    [ "W13S29" ]
+                    "its room seen at 103 without it: the room across alone"
+
+                let came =
+                    Some
+                        {
+                            Came = RoomPos.at "W12S28" { X = 25; Y = 0 }
+                            Ticks = [ 99 ]
+                            Tiles = []
+                        }
+
+                Expect.equal
+                    (Quarry.region opens never 101 (track (25, 49) came))
+                    [ quarryRoom; "W12S30"; "W12S28" ]
+                    "by the south border, and the room its crossing in the window came from"
+
+                Expect.isEmpty
+                    (Quarry.region opens never 100 (track (1, 20) None))
+                    "in sight: nowhere to look"
+            }
+
             test "a tombstone marks it fallen" {
                 let seen = sightAt 100 [ quarryRoom, [ quarryBody 1000 (quarryRoom, 25, 25) ] ] []
 

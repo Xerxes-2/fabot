@@ -1892,8 +1892,11 @@ let rangerGroundTests =
 /// holding an observer asks them (`Layout.tierRequests`).
 let private claim = lookRequest LookBand.Claim 1
 let private watched = lookRequest LookBand.Watched Tuning.defaults.ObserveStaleTicks
-let private harassed = lookRequest LookBand.Harassed 1
 let private boxed = lookRequest LookBand.Box 1
+
+/// The rival dossier's watch on a live [[sweep]] candidate, one look in
+/// five (`Layout.dossierRequests`): no decision priced, in the watched band.
+let private candidate = lookRequest LookBand.Watched 5
 
 /// A room that wants eyes, one look in five (`Layout.dangerStride`).
 let private danger = lookRequest LookBand.Danger 5
@@ -1903,7 +1906,7 @@ let private tiers: LookRequest list =
     [
         claim "W17S25"
         watched "W18S26"
-        harassed "W17S26"
+        candidate "W17S26"
         boxed "W14S28"
         boxed "W13S27"
     ]
@@ -1919,19 +1922,30 @@ let observerAimTests =
     testList
         "the observer's aim"
         [
+            // Moved by #663 S4: the harassment tier is gone; a candidate is a
+            // rival remote the dossier watches, ranked with the rival rooms by
+            // longest unseen (here seen six ticks ago, so after the rival
+            // room never seen).
             test
-                "a claim under no vision comes first, then a stale watched room, a harassment room, the box (#484)" {
-                Expect.equal (aimAt [] tiers) (Some "W17S25") "the claim first"
+                "a claim under no vision comes first, then the dossier's watches longest unseen first, the box (#484, #663)" {
+                let candidateSeen = "W17S26", 994
+
+                Expect.equal (aimAt [ candidateSeen ] tiers) (Some "W17S25") "the claim first"
 
                 Expect.equal
-                    (aimAt [ "W17S25", 1_000 ] tiers)
+                    (aimAt [ candidateSeen; "W17S25", 1_000 ] tiers)
                     (Some "W18S26")
-                    "the claim seen this tick: the watched room"
+                    "the claim seen this tick: the rival room never seen"
 
                 Expect.equal
-                    (aimAt [ "W17S25", 1_000; "W18S26", 1_000 ] tiers)
+                    (aimAt [ candidateSeen; "W17S25", 1_000; "W18S26", 1_000 ] tiers)
                     (Some "W17S26")
-                    "both seen: the harassment room"
+                    "both seen: the candidate, its sighting as old as the stride"
+
+                Expect.equal
+                    (aimAt [ "W17S25", 1_000; "W18S26", 1_000; "W17S26", 996 ] tiers)
+                    (Some "W13S27")
+                    "the candidate seen four ticks ago, inside its stride: the box"
 
                 Expect.equal
                     (aimAt [ "W17S25", 1_000; "W18S26", 1_000; "W17S26", 1_000 ] tiers)
@@ -2089,7 +2103,7 @@ let private sharedTiers: LookRequest list =
         watched "W18S26"
         watched "W17S24"
         watched "W22S28"
-        harassed "W17S26"
+        candidate "W17S26"
     ]
 
 [<Tests>]
@@ -2155,9 +2169,11 @@ let worldObserverTests =
                     worldTiers
                         [ "W13S28", [ "W14S28" ]; "W12S28", [ "W11S28" ]; "W15S28", [ "W16S28" ] ]
                         []
-                        [ claim "W17S25"; watched "W18S26"; harassed "W17S26" ]
+                        [ claim "W17S25"; watched "W18S26"; candidate "W17S26" ]
 
-                let looks = looksAt [] observers
+                // The candidate seen six ticks ago: the dossier's watch, after
+                // the rival room never seen (#663 S4: once the harassment tier).
+                let looks = looksAt [ "W17S26", 994 ] observers
                 distinctAndInReach looks
                 Expect.equal looks.Count 3 "every observer looks"
 
@@ -2174,7 +2190,7 @@ let worldObserverTests =
                 Expect.equal
                     (Map.tryFind "W12S28" looks)
                     (Some "W17S26")
-                    "the harassment room to the last"
+                    "the candidate to the last"
             }
 
             test "one observer alone is aimed as `aimObserver` aims it (#559)" {
@@ -2327,5 +2343,75 @@ let worldObserverTests =
                     (aimAt [ "W17S26", 995 ] requests)
                     (Some "W17S26")
                     "five ticks on, the observer looks"
+            }
+
+            // #663 S4: every priced reader in one band, served by value; the
+            // dearest look the observer cannot reach, or one seen inside its
+            // stride, gives way to the next.
+            test
+                "the observer serves the dearest priced look it reaches whose sighting is as old as it tolerates (#663)" {
+                let priced room value = { danger room with Value = value }
+
+                // W24S28 is eleven columns west of W13S28: out of reach.
+                let requests =
+                    [
+                        priced "W24S28" 9_000.0
+                        priced "W18S27" 4_000.0
+                        priced "W19S26" 2_500.0
+                        claim "W17S25"
+                    ]
+
+                Expect.equal
+                    (aimAt [] requests)
+                    (Some "W18S27")
+                    "the dearest in reach, past the dearer one out of it"
+
+                Expect.equal
+                    (aimAt [ "W18S27", 997 ] requests)
+                    (Some "W19S26")
+                    "seen three ticks ago, inside its stride: the next dearest"
+
+                Expect.equal
+                    (aimAt [ "W18S27", 997; "W19S26", 1_000 ] requests)
+                    (Some "W17S25")
+                    "no priced look open: the claim"
+            }
+
+            // #663 S4: the harassment tier asked a look of every declared
+            // harassment room any tick unseen, live or not, priced at nothing.
+            // The dossier watches the declared candidates the live switch has
+            // on, whether a colony casts them or not.
+            test
+                "a declared harassment room the switch has off asks no look; one it has on is the dossier's watch (#663)" {
+                let colony =
+                    atLevel 8 (openRoom 6)
+                    |> withTarget "observer-1" { X = 30; Y = 30 } (Structure BuiltKind.Observer)
+
+                let live = Colony.harass |> List.map _.RoomName |> Set.ofList
+
+                let off =
+                    Colony.harassDeclared
+                    |> List.map _.RoomName
+                    |> List.filter (live.Contains >> not)
+                    |> Set.ofList
+
+                let requests = lookRequests [ colony ] []
+
+                Expect.isNonEmpty requests "the premise: the observer's colony asks its tiers"
+
+                Expect.isEmpty
+                    (requests |> List.filter (fun request -> off.Contains request.Room))
+                    "no request names a declared harassment room switched off"
+
+                Expect.equal
+                    (requests
+                     |> List.filter (fun request -> live.Contains request.Room)
+                     |> List.map (fun request ->
+                         request.Room, request.Band, request.Value, request.Tolerates)
+                     |> List.sort)
+                    (live
+                     |> Set.toList
+                     |> List.map (fun room -> room, LookBand.Watched, 0.0, Facts.lookStride))
+                    "each one switched on: the dossier's watch, one look in five, worth nothing priced"
             }
         ]

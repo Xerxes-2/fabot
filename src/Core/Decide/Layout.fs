@@ -1095,15 +1095,18 @@ let internal planRampartDoors (view: ColonyView) : Intent list =
 type LookBand =
     /// A room that wants eyes: one some colony stands down from on a raid, or
     /// remembers an armed threat in, or shuts on a reservation whose holder
-    /// is to be read (`WorldView.Danger`, `WorldView.Questioned`), and a dark
-    /// outpost whose remembered trespassers a look confirms.
+    /// is to be read (`WorldView.Danger`, `WorldView.Questioned`): what a look
+    /// there protects is ours, so no kill a look elsewhere may unlock
+    /// outranks it while the two are priced on different horizons.
     | Danger
+    /// Every room a body out of sight a room's worth prices may stand in, a
+    /// dark outpost's or a [[sweep]] candidate's: the kill a look may unlock.
+    | Pursuit
     /// A declared colony room not yet ours, or a nursery.
     | Claim
-    /// A rival's room, or a room on our chains.
+    /// A rival's room or remote (the rival dossier's watch, the live
+    /// [[sweep]] candidates among them), or a room on our chains.
     | Watched
-    /// A harassment room.
-    | Harassed
     /// A colony's scan set, its transit rectangles included.
     | Box
 
@@ -1147,8 +1150,8 @@ let lookRequest (band: LookBand) (tolerates: int) (room: string) : LookRequest =
 /// Where every observer looks this tick, one room each and no room twice
 /// (#484, #559, #660), given every request and the observers' rooms. Every
 /// request still open (`Until` not passed) whose room's last sighting is as
-/// old as it tolerates (`lastSeen` None: never seen) and lies in
-/// `Engine.observerRange` of an observer is ranked by its band, then its
+/// old as it tolerates (`lastSeen` None: never seen) and an observer reaches
+/// (`Facts.observerReach`) is ranked by its band, then its
 /// value, highest first, then longest unseen, then the fewest free observers
 /// reaching it, then by name, and each in turn goes to the nearest observer
 /// still free, ties by room name. Longest unseen is the round robin: the look
@@ -1161,12 +1164,7 @@ let assignLooks
     (requests: LookRequest list)
     : Map<string, string> =
     let reach from room =
-        if room = from then
-            None
-        else
-            RoomName.offsetOf from room
-            |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
-            |> Option.filter (fun distance -> distance <= Engine.observerRange)
+        if room = from then None else Facts.observerReach from room
 
     let wants (request: LookRequest) =
         request.Until |> Option.forall (fun until -> time <= until)
@@ -1245,10 +1243,9 @@ let private observerOf (view: ColonyView) : string option =
 
 /// The requests of the readers that price no look, asked where a colony holds
 /// an observer (#484's tiers): the declared rooms not yet colonies of ours or
-/// still nurseries and the harassment rooms while no vision of ours answers
-/// for them, the `watched` rooms once their sighting is
-/// `Tuning.ObserveStaleTicks` old, and the colony's scan set, the rest of the
-/// observer's ticks.
+/// still nurseries while no vision of ours answers for them, the `watched`
+/// rooms once their sighting is `Tuning.ObserveStaleTicks` old, and the
+/// colony's scan set, the rest of the observer's ticks.
 let private tierRequests (view: ColonyView) (watched: string list) : LookRequest list =
     (view.Declared
      |> List.filter (fun room ->
@@ -1258,35 +1255,61 @@ let private tierRequests (view: ColonyView) (watched: string list) : LookRequest
          | Some _ -> false)
      |> List.map (lookRequest LookBand.Claim 1))
     @ (watched |> List.map (lookRequest LookBand.Watched view.Tuning.ObserveStaleTicks))
-    @ (Colony.harassDeclared
-       |> List.map (fun h -> lookRequest LookBand.Harassed 1 h.RoomName))
     @ (view.Spatial.Rooms
        |> Map.keys
        |> List.ofSeq
        |> List.map (lookRequest LookBand.Box 1))
 
-/// The requests one colony prices (#660, #585), each a room that wants eyes:
-/// every raid's stand-down, worth the income a fight there keeps a tick
-/// (`RoomWorth.Kept`) over the ticks it has left, which a look
-/// finding the raid gone ends (`Observe.strikeGone`), open until its expiry,
-/// re-read one look in `dangerStride` — and as much each room beside it a
-/// body out of sight may only have stepped across to (`Dance`), since the
-/// look that strikes it needs that room seen too; and every dark outpost
-/// whose remembered trespassers a look confirms, worth their kills at the
-/// odds they are still there (`RoomWorth.unseen`), one look in
-/// `dangerStride`, so a kill out of sight shares the observer with the rest.
+/// The [[sweep]] candidates one colony casts (`ColonyView.HarassCast`, the
+/// shut ones included, beside the one the sweep narrowed `Harass` to): every
+/// room whose worth the world's table prices as a candidate.
+let private candidatesOf (view: ColonyView) : string list =
+    view.Harass
+    |> List.map _.RoomName
+    |> Set.ofList
+    |> Set.union view.HarassCast
+    |> Set.toList
+
+/// The requests one colony prices (#660, #585, #663 M5), each a room that
+/// wants eyes, one look in `dangerStride`:
+/// - every raid's stand-down, worth the income a fight there keeps a tick
+///   (`RoomWorth.Kept`) over the ticks it has left, which a look finding the
+///   raid gone ends (`Observe.strikeGone`), open until its expiry — and as
+///   much every room a body out of sight that may stand in it may stand in
+///   instead (`Quarry.region`), since the look that strikes it needs that
+///   room seen too;
+/// - in its own band below them (`LookBand.Pursuit`), every body out of
+///   sight the worth of a dark outpost holding remembered trespassers or of
+///   a live [[sweep]] candidate prices (`RoomWorth.unseenBodies`: its kill
+///   and its take over the stride, at the odds it still stands there), once
+///   whichever rooms price it, asked of every room it may stand in
+///   (`Quarry.region`, which a look at a room finding it nowhere shrinks),
+///   each room's request the sum of the bodies that may stand there — the
+///   pursuit of a remembered body and the candidate's evidence in one price.
 let private pricedRequests (view: ColonyView) : LookRequest list =
-    // The rooms a body last seen in `room` and out of sight now may linger in
-    // across a border, or the room beside it it was last seen lingering in.
+    let looking (band: LookBand) (until: int option) (room: string, value: float) =
+        {
+            Room = room
+            Band = band
+            Value = value
+            Tolerates = dangerStride
+            Until = until
+        }
+
+    let region =
+        Quarry.region
+            (fun room next -> Dance.crosses (Map.tryFind room view.Spatial.Borders) room next)
+            (fun room -> Map.tryFind room view.Seen |> Option.map _.Tick)
+            view.Time
+
+    // Every room a body out of sight that may stand in `room` may stand in.
     let lingering room =
         view.World.Quarries
         |> Map.toList
-        |> List.choose (fun (_, track) -> Quarry.step track)
-        |> List.collect (fun { At = at; Seen = seen } ->
-            if seen >= view.Time then []
-            elif at.Room = room then Dance.beyond at
-            elif Dance.besideOf room at then [ at.Room ]
-            else [])
+        |> List.collect (fun (_, track) ->
+            match region track with
+            | rooms when List.contains room rooms -> rooms
+            | _ -> [])
 
     let standDowns =
         view.RaidedUntil
@@ -1297,44 +1320,81 @@ let private pricedRequests (view: ColonyView) : LookRequest list =
             if worth > 0.0 then
                 room :: lingering room
                 |> List.distinct
-                |> List.map (fun looked ->
-                    {
-                        Room = looked
-                        Band = LookBand.Danger
-                        Value = worth
-                        Tolerates = dangerStride
-                        Until = Some until
-                    })
+                |> List.map (fun looked -> looking LookBand.Danger (Some until) (looked, worth))
             else
                 [])
 
-    let prey =
+    let darkOutposts =
         view.RecalledRaiders
         |> List.map _.Pos.Room
         |> List.distinct
         |> List.filter (fun room ->
             not (WorldView.sees view.World room) && Facts.trespassRooms view room)
-        |> List.sort
-        |> List.choose (fun room ->
-            match RoomWorth.unseen (Facts.roomWorth view room) with
-            | value when value > 0.0 ->
-                Some
-                    {
-                        Room = room
-                        Band = LookBand.Danger
-                        Value = value
-                        Tolerates = dangerStride
-                        Until = None
-                    }
-            | _ -> None)
 
-    standDowns @ prey
+    // One body is one look's worth wherever it is priced: a dancer that is
+    // the quarry of two rooms counts once in each room it may stand in.
+    let pursued =
+        darkOutposts @ candidatesOf view
+        |> List.distinct
+        |> List.collect (fun room ->
+            RoomWorth.unseenBodies dangerStride (Facts.roomWorth view room)
+            |> Map.toList
+            |> List.map (fun (id, value) -> id, (room, value)))
+        |> List.groupBy fst
+        |> List.collect (fun (id, pricings) ->
+            let value = pricings |> List.map (snd >> snd) |> List.max
+
+            let rooms =
+                match Map.tryFind id view.World.Quarries with
+                | Some track -> region track
+                | None -> pricings |> List.map (snd >> fst) |> List.distinct
+
+            rooms |> List.map (fun looked -> looked, value))
+        |> List.groupBy fst
+        |> List.map (fun (room, values) -> room, List.sumBy snd values)
+        |> List.filter (fun (_, value) -> value > 0.0)
+        |> List.sort
+        |> List.map (looking LookBand.Pursuit None)
+
+    standDowns @ pursued
+
+/// The rival dossier's watch on the rival remotes we know (#663 M5): every
+/// declared [[sweep]] candidate the live switch has on (`Colony.harass`),
+/// whether or not a colony can cast it this tick, worth no decision priced
+/// yet, so its band (`Watched`) serves it only on a tick no priced request
+/// nor claim takes the observer, once its sighting is `dangerStride` old:
+/// the sweep's evidence of a room with nothing remembered in it.
+let private dossierRequests: LookRequest list =
+    Colony.harass
+    |> List.map (fun h -> lookRequest LookBand.Watched dangerStride h.RoomName)
+
+/// Every look the colonies' readers ask this tick, off the first view's
+/// world, which every view shares: the rooms that want eyes world-wide
+/// (`WorldView.Danger`, `Questioned`), every colony's priced requests
+/// (`pricedRequests`), the dossier's watch (`dossierRequests`), and the tiers
+/// of each colony holding an observer (`tierRequests`).
+let lookRequests (views: ColonyView list) (watched: string list) : LookRequest list =
+    match views with
+    | [] -> []
+    | first :: _ ->
+        let danger =
+            Set.union first.World.Danger first.World.Questioned
+            |> Set.toList
+            |> List.map (lookRequest LookBand.Danger dangerStride)
+
+        danger
+        @ (views |> List.collect pricedRequests)
+        @ dossierRequests
+        @ (views
+           |> List.filter (fun view -> Option.isSome (observerOf view))
+           |> List.collect (fun view -> tierRequests view watched))
+        |> List.distinct
 
 /// The looks of the colonies' observers, aimed together (`assignLooks`) off
 /// the first view's clock and sightings, which every view shares: the rooms
 /// that want eyes world-wide (`WorldView.Danger`, `Questioned`), every
-/// colony's priced requests, and the tiers of each colony holding an
-/// observer.
+/// colony's priced requests, the dossier's watch, and the tiers of each
+/// colony holding an observer (`lookRequests`).
 let private looksOf (views: ColonyView list) (watched: string list) : Map<string, string> =
     let observing = views |> List.filter (fun view -> Option.isSome (observerOf view))
 
@@ -1345,15 +1405,7 @@ let private looksOf (views: ColonyView list) (watched: string list) : Map<string
         let lastSeen room =
             Map.tryFind room first.Seen |> Option.map (fun sighting -> sighting.Tick)
 
-        let danger =
-            Set.union first.World.Danger first.World.Questioned
-            |> Set.toList
-            |> List.map (lookRequest LookBand.Danger dangerStride)
-
-        danger
-        @ (views |> List.collect pricedRequests)
-        @ (observing |> List.collect (fun view -> tierRequests view watched))
-        |> List.distinct
+        lookRequests views watched
         |> assignLooks
             first.Time
             lastSeen

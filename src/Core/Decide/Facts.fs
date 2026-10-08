@@ -1733,12 +1733,18 @@ let internal killValue (view: ColonyView) (hostile: HostileInfo) : float =
     + float (cargoOf view hostile)
     + harmRate view hostile walk * float (min life replaced)
 
-/// Whether an observer of ours reaches a room (`Engine.observerRange`).
+/// The rooms an observer in `from` looks across to `room`, Chebyshev over
+/// the room grid, while within `Engine.observerRange`; None past it. The one
+/// observer-range rule: every reader of an observer's reach reads it.
+let internal observerReach (from: string) (room: string) : int option =
+    RoomName.offsetOf from room
+    |> Option.map (fun (dx, dy) -> max (abs dx) (abs dy))
+    |> Option.filter (fun distance -> distance <= Engine.observerRange)
+
+/// Whether an observer of ours reaches a room (`observerReach`).
 let internal observerReaches (view: ColonyView) (room: string) : bool =
     view.World.Observers
-    |> List.exists (fun observer ->
-        RoomName.offsetOf observer room
-        |> Option.exists (fun (dx, dy) -> max (abs dx) (abs dy) <= Engine.observerRange))
+    |> List.exists (fun observer -> Option.isSome (observerReach observer room))
 
 /// The odds a body still stands where the view lays it (#663): certain in
 /// sight, or where the world keeps no track of it (a fixture's); out of

@@ -73,6 +73,36 @@ let private ring (window: int) (now: int) (steps: (int * RoomPos) list) =
         a :: b :: c :: List.takeWhile (fun (tick, _) -> now - tick <= window) older
     | _ -> steps
 
+/// The rooms a body out of sight may stand in (#663 M1, #585): the room it
+/// was last seen in and, while its trip is kept (`Track.Trail`), every room
+/// across a border it stood within the dance depth of that the border opens
+/// onto (`Dance.beyond`, `opens`), and the room its latest crossing in the
+/// window came from (`Track.Crossings`) — less every room seen since it was
+/// (`lastSeen`: a room's last sighting), which found it nowhere. Nothing for
+/// a body in sight this tick or known gone; nothing once every room it may
+/// stand in has been seen without it (`recall` knows it gone then).
+let region
+    (opens: string -> string -> bool)
+    (lastSeen: string -> int option)
+    (now: int)
+    (track: Track)
+    : string list =
+    if track.Seen >= now || track.Gone.IsSome then
+        []
+    else
+        let at = track.Body.Pos
+
+        let trip =
+            if List.isEmpty track.Trail then
+                []
+            else
+                (Dance.beyond at |> List.filter (opens at.Room))
+                @ (track.Crossings |> Option.map _.Came.Room |> Option.toList)
+
+        at.Room :: trip
+        |> List.distinct
+        |> List.filter (fun room -> lastSeen room |> Option.forall (fun tick -> tick <= track.Seen))
+
 /// This tick's world with every foreign body's track laid under it (#663),
 /// and the step memory read off them (`World.HostileSteps`, #551): every
 /// body standing in a room this tick, at its tile and as read now; and each
@@ -85,7 +115,8 @@ let private ring (window: int) (now: int) (steps: (int * RoomPos) list) =
 ///
 /// Each one's border crossings within `window` ticks are kept beside it
 /// (`Track.Crossings`, #658), so a body that steps out over the border into a
-/// room nothing sees and comes back is known by the trip.
+/// room nothing sees and comes back is known by the trip. A trip whose every
+/// room has been seen since without it is known gone (`region`).
 let recall
     (window: int)
     (watched: Set<string>)
@@ -209,6 +240,24 @@ let recall
                 && world.Time - track.Seen <= window
                 && (Option.isSome crossed || Dance.byBorder track.Body.Pos)
 
+            // A trip every room of which vision has answered for since the
+            // body was seen, finding it nowhere (`region`): it walked on, out
+            // of every room it may stand in.
+            let faded =
+                trip
+                && track.Gone.IsNone
+                && List.isEmpty (
+                    region
+                        (fun room next ->
+                            Dance.crosses
+                                (World.groundOf world room |> Option.map _.Border)
+                                room
+                                next)
+                        (fun room -> Map.tryFind room world.Sightings |> Option.map _.Tick)
+                        world.Time
+                        { track with Crossings = crossed }
+                )
+
             if trip || (track.Gone.IsNone && Set.contains track.Body.Pos.Room watched) then
                 Some(
                     id,
@@ -220,6 +269,8 @@ let recall
                                 Some Gone.Fallen
                             elif track.Seen + lifeOf track.Body <= world.Time then
                                 Some Gone.Aged
+                            elif faded then
+                                Some Gone.SeenGone
                             // A body on a trip may only have stepped across:
                             // its room in sight finds it nowhere, not gone.
                             elif

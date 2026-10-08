@@ -1819,6 +1819,111 @@ let darkRoomMemoTests =
                     "a recalled memo decides exactly what a fresh one does"
             }
 
+            // #663 S4: the observer's looks are priced, so a dark room with a
+            // body remembered in it is looked at one tick in five; a look
+            // lighting it must cost no plan (#666, #667).
+            test
+                "a priced look lighting a dark outpost or a sweep candidate moves no signature, replans and evicts nothing (#663)" {
+                let haulerIn owner room =
+                    { hostileIn
+                          room
+                          { X = 20; Y = 20 }
+                          (List.replicate 10 Carry @ List.replicate 5 Move) with
+                        Id = "h-1"
+                        Owner = owner
+                    }
+
+                let pricedLooks (colony: ColonyView) =
+                    lookRequests [ colony ] []
+                    |> List.filter (fun request ->
+                        request.Band = LookBand.Pursuit && request.Value > 0.0)
+                    |> List.map _.Room
+
+                // The outpost: seen at 100, dark at 101 with the hauler the
+                // last look saw remembered, looked at again at 102 and found
+                // without it.
+                let first = decideOn (litAt 100 (roadedColony ()))
+                let outpostFloods = touchingRoom "W1N2" first.Memo
+
+                let dark =
+                    darkAt 101 (roadedColony ())
+                    |> remembering 100 [ haulerIn "Trepidimous" "W1N2" ]
+
+                Expect.equal
+                    (pricedLooks dark)
+                    [ "W1N2" ]
+                    "the premise: the remembered hauler asks the look"
+
+                let second = decide dark Map.empty Set.empty (Some first.Memo)
+
+                let third =
+                    decide (litAt 102 (roadedColony ())) Map.empty Set.empty (Some second.Memo)
+
+                Expect.equal
+                    (third.Memo.Signature, third.Memo.Paid)
+                    (first.Memo.Signature, 100)
+                    "the outpost looked at: still the plan paid at the first tick"
+
+                for flood in outpostFloods do
+                    Expect.isTrue
+                        (touchingRoom "W1N2" third.Memo
+                         |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
+                        "and every entry that read the outpost rode the look out, unflooded"
+
+                // The candidate, projected for the fight alone as the view
+                // projects one (`SpatialInfo.FightRooms`): the rival's
+                // reservation read only when a look lights it.
+                let candidate control =
+                    let crossed = crossedColony control
+
+                    { crossed with
+                        Harass =
+                            [
+                                {
+                                    RoomName = "W1N2"
+                                    Enemy = "rival"
+                                    Via = []
+                                }
+                            ]
+                        HarassCast = Set.singleton "W1N2"
+                        Spatial =
+                            { crossed.Spatial with
+                                FightRooms = Set.add "W1N2" crossed.Spatial.FightRooms
+                            }
+                    }
+
+                let candidateFirst = decideOn (candidate None)
+
+                let candidateDark =
+                    candidate None
+                    |> fun c -> c |> remembering (c.Time - 3) [ haulerIn "rival" "W1N2" ]
+
+                Expect.equal
+                    (pricedLooks candidateDark)
+                    [ "W1N2" ]
+                    "the premise: the candidate's remembered hauler asks the look"
+
+                let candidateDarkDecided =
+                    decide candidateDark Map.empty Set.empty (Some candidateFirst.Memo)
+
+                let candidateLit =
+                    decide
+                        (candidate (Some(reservedRoom false 4000)))
+                        Map.empty
+                        Set.empty
+                        (Some candidateDarkDecided.Memo)
+
+                Expect.equal
+                    candidateLit.Memo.Signature
+                    candidateFirst.Memo.Signature
+                    "the candidate looked at: no signature moves"
+
+                Expect.equal
+                    candidateLit.Memo.Paid
+                    candidateFirst.Memo.Paid
+                    "and no plan is paid again"
+            }
+
             test "a room seen again with its census moved still evicts and replans" {
                 let first = decideOn (litAt 100 (roadedColony ()))
                 let outpostFloods = touchingRoom "W1N2" first.Memo
@@ -1898,6 +2003,70 @@ let darkRoomMemoTests =
                         "and the home room's walks are not"
 
                 Expect.isFalse (third.Memo.DarkRead.Contains "W1N2") "and the note is spent"
+            }
+
+            // #663 S4 review: the observer now looks at a dark outpost one
+            // tick in five while a body is remembered there. What dark ticks
+            // built and paid is redone once, on the first look, and never on
+            // the looks after it.
+            test
+                "a look every five ticks at a dark outpost re-floods and re-pays once, then costs nothing (#663)" {
+                let colony () = extended (roadedColony ())
+                let first = decideOn (litAt 100 (roadedColony ()))
+
+                // Dark at 101, its tables emptied and a census moving at
+                // home: the floods over the outpost are built dark and the
+                // plan is paid dark.
+                let paidDark =
+                    decide (darkAt 101 (colony ())) Map.empty Set.empty (Some(emptied first.Memo))
+
+                Expect.equal
+                    (paidDark.Memo.Paid,
+                     paidDark.Memo.PaidDark,
+                     paidDark.Memo.DarkRead.Contains "W1N2")
+                    (101, Set.singleton "W1N2", true)
+                    "the premise: paid and flooded dark"
+
+                let darkFloods = touchingRoom "W1N2" paidDark.Memo
+
+                // The first look, then four dark ticks and a look, twice.
+                let ticks =
+                    [ 102..112 ]
+                    |> List.scan
+                        (fun (_, (memo: PlanMemo)) tick ->
+                            let view =
+                                if (tick - 102) % Facts.lookStride = 0 then
+                                    litAt tick (colony ())
+                                else
+                                    darkAt tick (colony ())
+
+                            let decided = decide view Map.empty Set.empty (Some memo)
+                            tick, decided.Memo)
+                        (101, paidDark.Memo)
+                    |> List.tail
+
+                let _, looked = List.head ticks
+
+                Expect.equal looked.Paid 102 "the first look re-pays the plan paid dark, once"
+
+                for flood in darkFloods do
+                    Expect.isFalse
+                        (touchingRoom "W1N2" looked
+                         |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
+                        "and evicts every entry built dark, once"
+
+                let litFloods = touchingRoom "W1N2" looked
+
+                Expect.isNonEmpty litFloods "the premise: the look's tick floods the outpost afresh"
+
+                for tick, memo in List.tail ticks do
+                    Expect.equal memo.Paid 102 $"t{tick}: no plan paid again"
+
+                    for flood in litFloods do
+                        Expect.isTrue
+                            (touchingRoom "W1N2" memo
+                             |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
+                            $"t{tick}: every entry the look's tick built rides on"
             }
 
             test

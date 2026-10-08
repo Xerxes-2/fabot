@@ -91,10 +91,14 @@ module RoomWorth =
     let delta (reading: Quarry.Reading) (worth: RoomWorth) : float =
         worth.Kept + denied reading worth
 
-    /// What a look at the room is worth (#660): the kills of the bodies out
-    /// of sight there, each at the odds it still stands there.
-    let unseen (worth: RoomWorth) : float =
+    /// What a look confirms of each body out of sight there (#660, #663
+    /// M5), by id: its kill, and the take a fight there denies it over the
+    /// `stride` ticks the look answers for, at the odds it still stands
+    /// there.
+    let unseenBodies (stride: int) (worth: RoomWorth) : Map<string, float> =
+        let denied = takes Quarry.Reading.Value worth
+
         values Quarry.Reading.Value worth
-        |> Map.fold
-            (fun total id value -> if worth.Dark.Contains id then total + value else total)
-            0.0
+        |> Map.filter (fun id _ -> worth.Dark.Contains id)
+        |> Map.map (fun id kill ->
+            kill + float stride * (Map.tryFind id denied |> Option.defaultValue 0.0))
