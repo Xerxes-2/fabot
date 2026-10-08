@@ -1174,27 +1174,56 @@ let private tileOfPair (raw: obj) : Pos =
 // One exit watch on the wire (#450, #542): `{ seen: [{ id, x, y, dies }] }`
 // while its armed bodies stand, `{ run, exit, until }` once their exit is
 // held. `id` came with #561: a row without it reads as no id, written so.
+// One armed Threat as seen: `{ id?, x, y, dies, trip }`.
+let private encodeSeenThreat (threat: SeenThreat) =
+    let t = createEmpty<obj>
+
+    if threat.Id <> "" then
+        t?id <- threat.Id
+
+    t?x <- threat.At.X
+    t?y <- threat.At.Y
+    t?dies <- threat.Dies
+    t?trip <- threat.Trip
+    t
+
+// A checker: an id that is no string or a tick that is no number costs the
+// watch it stands in.
+let private decodeSeenThreat (threat: obj) : SeenThreat =
+    {
+        Id =
+            match jsTypeof threat?id with
+            | "undefined" -> ""
+            | "string" -> unbox<string> threat?id
+            | _ -> failwith "not a string: id"
+        At =
+            {
+                X = numberOf threat "x"
+                Y = numberOf threat "y"
+            }
+        Dies = numberOf threat "dies"
+        // A row a bundle before #663 S5 wrote carries no trip: a room's
+        // round trip, what nothing known of a raid is held for
+        // (`WorldView.raidTrip`).
+        Trip =
+            match jsTypeof threat?trip with
+            | "undefined" -> 2 * Engine.roomSide
+            | _ -> numberOf threat "trip"
+    }
+
 let private encodeWatch (watch: ExitWatch) =
     let o = createEmpty<obj>
 
     match watch with
-    | ExitWatch.Seen threats ->
-        o?seen <-
-            threats
-            |> List.map (fun threat ->
-                let t = createEmpty<obj>
-
-                if threat.Id <> "" then
-                    t?id <- threat.Id
-
-                t?x <- threat.At.X
-                t?y <- threat.At.Y
-                t?dies <- threat.Dies
-                t)
-            |> List.toArray
+    | ExitWatch.Seen threats -> o?seen <- threats |> List.map encodeSeenThreat |> List.toArray
     | ExitWatch.Held hold ->
         o?run <- hold.Run |> List.map pairOf |> List.toArray
         o?exit <- pairOf hold.Exit
+        o?left <- hold.Left
+
+        if not hold.Leavers.IsEmpty then
+            o?leavers <- hold.Leavers |> List.map encodeSeenThreat |> List.toArray
+
         o?until <- hold.Until
 
     o
@@ -1207,28 +1236,30 @@ let private decodeWatch (raw: obj) : ExitWatch =
     elif JS.Constructors.Array.isArray raw?seen then
         raw?seen
         |> unbox<obj[]>
-        |> Array.map (fun threat ->
-            {
-                Id =
-                    match jsTypeof threat?id with
-                    | "undefined" -> ""
-                    | "string" -> unbox<string> threat?id
-                    | _ -> failwith "not a string: id"
-                At =
-                    {
-                        X = numberOf threat "x"
-                        Y = numberOf threat "y"
-                    }
-                Dies = numberOf threat "dies"
-            })
+        |> Array.map decodeSeenThreat
         |> List.ofArray
         |> ExitWatch.Seen
     elif JS.Constructors.Array.isArray raw?run then
+        let until = numberOf raw "until"
+
         ExitWatch.Held
             {
                 Run = raw?run |> unbox<obj[]> |> Array.map tileOfPair |> List.ofArray
                 Exit = tileOfPair raw?exit
-                Until = numberOf raw "until"
+                // A hold a bundle before #663 S5 wrote carries neither when
+                // its bodies left nor which: left at its last tick (back at
+                // once, `Facts.preyBeforeReturn`), and no look decides it.
+                Left =
+                    match jsTypeof raw?left with
+                    | "undefined" -> until
+                    | _ -> numberOf raw "left"
+                Leavers =
+                    match raw?leavers with
+                    | leavers when JS.Constructors.Array.isArray leavers ->
+                        leavers |> unbox<obj[]> |> Array.map decodeSeenThreat |> List.ofArray
+                    | leavers when jsTypeof leavers = "undefined" -> []
+                    | _ -> failwith "not a list: leavers"
+                Until = until
             }
     else
         failwith "not a watch"

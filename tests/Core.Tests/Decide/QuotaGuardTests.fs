@@ -286,6 +286,8 @@ let guardRowTests =
                                     {
                                         Run = [ for y in 38..42 -> { X = 0; Y = y } ]
                                         Exit = { X = 0; Y = 40 }
+                                        Left = colony.Time - 50
+                                        Leavers = []
                                         Until = colony.Time + 50
                                     }
                                 ]

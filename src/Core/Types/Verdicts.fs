@@ -618,8 +618,8 @@ type JobForce =
     /// the quarry steps onto a tile within `reach` of one of them that it
     /// did not stand within as the plan was made.
     | Covers of tiles: Set<RoomPos> * reach: int
-    /// A muster or a held exit: never by its quarry's walk; only a new armed
-    /// body in reach forces it (`LightForce.Hostile`).
+    /// A muster, a held exit or its intercept: never by its quarry's walk;
+    /// only a new armed body in reach forces it (`LightForce.Hostile`).
     | Waits
 
 /// What one tick of deciding returns: the Intents to execute, the

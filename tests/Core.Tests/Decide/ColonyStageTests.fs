@@ -294,6 +294,8 @@ let colonyStageTests =
                         {
                             Run = [ { X = 0; Y = 10 } ]
                             Exit = { X = 0; Y = 10 }
+                            Left = filled.Time - 50
+                            Leavers = []
                             Until = filled.Time + 50
                         }
 

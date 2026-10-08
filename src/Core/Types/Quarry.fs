@@ -436,29 +436,6 @@ let rooted (beside: TargetKind -> bool) (side: HostileInfo list) (body: HostileI
     && beside Source
     || HostileInfo.claims side body && beside Controller
 
-/// A body's gait as the engine walks it loaded (#621, `Gait.walked`): its
-/// gait (`HostileInfo.gait`, CARRY read empty) and a live CARRY's weight for
-/// each 50 of `cargo`.
-let loadedGait (side: HostileInfo list) (cargo: int) (body: HostileInfo) : Gait =
-    let gait = HostileInfo.gait side body
-    let carry = HostileInfo.effectivePower side body Carry
-
-    { gait with
-        Weight = gait.Weight + min carry ((cargo + 49) / 50)
-    }
-
-/// The ticks a body out of sight may be gone from the room it was last seen
-/// in and back (#585): a room's side out at its plain pace loaded with
-/// `cargo`, and back empty, to the life it had left when seen. None for one
-/// that cannot walk, which stays.
-let roundTrip (side: HostileInfo list) (cargo: int) (body: HostileInfo) : int option =
-    match
-        Gait.ticks Gait.plain (loadedGait side cargo body),
-        Gait.ticks Gait.plain (HostileInfo.gait side body)
-    with
-    | Some out, Some back -> Some(min (max 1 body.TicksToLive) (Engine.roomSide * (out + back)))
-    | _ -> None
-
 /// How a remembered body's odds are read (#663): what a cast is spent on, or
 /// what it is worth where it stands.
 [<RequireQualifiedAccess>]
@@ -476,7 +453,7 @@ type Reading =
 /// seen), unable to walk, or on a trip `recall` keeps (a dance across the
 /// border: how much of its time it stands in is its catch's, `inShare`);
 /// any other falls in a line from certain when last seen to nothing over its
-/// round trip (`roundTrip`). Its age is the body's own, from the last tick it
+/// round trip (`HostileInfo.roundTrip`). Its age is the body's own, from the last tick it
 /// was seen, never a look at its room that found it gone.
 let odds (side: HostileInfo list) (rooted: bool) (now: int) (track: Track) : float =
     match track.Gone with
@@ -487,7 +464,7 @@ let odds (side: HostileInfo list) (rooted: bool) (now: int) (track: Track) : flo
         if age <= 0 || rooted || not (List.isEmpty track.Trail) then
             1.0
         else
-            match roundTrip side track.Cargo track.Body with
+            match HostileInfo.roundTrip side track.Cargo track.Body with
             | None -> 1.0
             | Some trip -> max 0.0 (1.0 - float age / float trip)
 

@@ -288,8 +288,17 @@ const dangerThrough = async (leaf) => {
 
 const hold = { holder: "invader", until: 900 };
 const threat = { until: 800 };
-const heldWatch = { run: [[0, 20], [0, 21]], exit: [0, 20], until: 950 };
-const seenWatch = { seen: [{ id: "h-1", x: 10, y: 11, dies: 1400 }] };
+const heldWatch = {
+  run: [[0, 20], [0, 21]],
+  exit: [0, 20],
+  left: 850,
+  leavers: [
+    { id: "h-1", x: 1, y: 20, dies: 1400, trip: 100 },
+    { id: "h-2", x: 1, y: 22, dies: 900, trip: 150 },
+  ],
+  until: 950,
+};
+const seenWatch = { seen: [{ id: "h-1", x: 10, y: 11, dies: 1400, trip: 100 }] };
 
 for (const [name, leaf] of [
   ["absent", undefined],
@@ -315,6 +324,28 @@ wire("danger: a well-formed leaf round-trips unchanged", async () => {
   };
 
   assert.equal(stable(await dangerThrough(full)), stable(full));
+});
+
+// #663 S5: an exit watch a bundle before the evidence-ended hold wrote
+// carries no trip, no left tick and no leavers: a seen threat reads a
+// room's round trip, a hold left at its last tick with no body a look
+// decides it on. Leavers that are no list, or a leaver off its shape, cost
+// the watch.
+wire("danger: a legacy exit watch reads a room's trip and a hold left at its end", async () => {
+  const written = await dangerThrough({
+    W1N2: { watch: { run: [[0, 20]], exit: [0, 20], until: 950 } },
+    W1N3: { watch: { seen: [{ id: "h-1", x: 10, y: 11, dies: 1400 }] } },
+    W1N4: { watch: { run: [[0, 20]], exit: [0, 20], leavers: "h-1", until: 950 } },
+    W1N5: { watch: { run: [[0, 20]], exit: [0, 20], leavers: [{ id: 7, x: 1, y: 20, dies: 9 }], until: 950 } },
+  });
+
+  assert.equal(
+    stable(written),
+    stable({
+      W1N2: { watch: { run: [[0, 20]], exit: [0, 20], left: 950, until: 950 } },
+      W1N3: { watch: { seen: [{ id: "h-1", x: 10, y: 11, dies: 1400, trip: 100 }] } },
+    }),
+  );
 });
 
 // #604: a declared enemy's hold is its own holder on the wire.
@@ -398,13 +429,14 @@ wire("danger: a part off its shape costs that part, and a room left with none is
 });
 
 wire("danger: a seen threat without an id (before #561) reads as none and round-trips without one; one whose id is no string costs the watch", async () => {
+  // Written back with the room's round trip a row before #663 S5 lacks.
   const legacy = { seen: [{ x: 10, y: 11, dies: 1400 }] };
   const written = await dangerThrough({
     W1N3: { watch: legacy },
     W1N4: { watch: { seen: [{ id: 7, x: 10, y: 11, dies: 1400 }] } },
   });
 
-  assert.equal(stable(written), stable({ W1N3: { watch: legacy } }));
+  assert.equal(stable(written), stable({ W1N3: { watch: { seen: [{ x: 10, y: 11, dies: 1400, trip: 100 }] } } }));
 });
 
 wire("danger: a row filed under a room is that room's, whatever it names", async () => {

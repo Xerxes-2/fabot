@@ -675,6 +675,8 @@ let internal heldWest (colony: ColonyView) =
                     {
                         Run = westRun
                         Exit = { X = 0; Y = 44 }
+                        Left = colony.Time - 50
+                        Leavers = []
                         Until = colony.Time + 50
                     }
                 ]

@@ -2534,6 +2534,8 @@ let worldDangerTests =
                         {
                             Run = [ { X = 0; Y = 20 }; { X = 0; Y = 21 } ]
                             Exit = { X = 0; Y = 20 }
+                            Left = 50
+                            Leavers = []
                             Until = 150
                         }
 
@@ -2565,6 +2567,7 @@ let worldDangerTests =
                                             Id = "h-1"
                                             At = { X = 10; Y = 10 }
                                             Dies = 130
+                                            Trip = 100
                                         }
                                     ]
                             ]

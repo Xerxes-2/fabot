@@ -1484,7 +1484,7 @@ let worldOf (a: Arena) : World =
     }
     |> World.recalling a.Carried.Sightings
     |> World.latchTowers tuning a.Carried.Towered
-    |> World.watchExits tuning a.Carried.ExitWatches
+    |> World.watchExits a.Carried.ExitWatches
     |> World.recallHealers tuning a.Carried.Healers
     |> World.recallRaiders a.Carried.Raiders
     |> fun world ->

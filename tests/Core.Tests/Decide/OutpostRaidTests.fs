@@ -604,7 +604,13 @@ let private withWestSeen hostiles (world: World) : World =
             |> Map.add
                 "W2N2"
                 { RoomFacts.empty with
-                    Hostiles = hostiles
+                    // Standing there, whatever room the fixture built them in.
+                    Hostiles =
+                        hostiles
+                        |> List.map (fun h ->
+                            { h with
+                                Pos = RoomPos.at "W2N2" (RoomPos.pos h.Pos)
+                            })
                 }
         Sightings =
             world.Sightings
@@ -623,7 +629,7 @@ let private watchOf (world: World) = Map.tryFind "W1N2" world.ExitWatches
 let private watchThrough (worlds: World list) : World =
     worlds
     |> List.fold
-        (fun (previous: World) world -> World.watchExits Tuning.defaults previous.ExitWatches world)
+        (fun (previous: World) world -> World.watchExits previous.ExitWatches world)
         World.empty
 
 /// The hold the watch has standing, if any.
@@ -719,11 +725,10 @@ let exitHoldTests =
         [
             test "a threat leaving by the west exit is held at the run it left by" {
                 let seen =
-                    World.watchExits
-                        Tuning.defaults
-                        Map.empty
-                        (watched 100 [ kiterAt { X = 1; Y = 22 } 1500 ])
+                    World.watchExits Map.empty (watched 100 [ kiterAt { X = 1; Y = 22 } 1500 ])
 
+                // A tile a tick on plain out and back, across a room's side:
+                // a hundred ticks.
                 Expect.equal
                     (watchOf seen)
                     (Some(
@@ -733,12 +738,13 @@ let exitHoldTests =
                                     Id = "h-1"
                                     At = { X = 1; Y = 22 }
                                     Dies = 1600
+                                    Trip = 100
                                 }
                             ]
                     ))
-                    "while it stands there the world remembers where, and when it dies"
+                    "while it stands there the world remembers where, when it dies, and its round trip"
 
-                let gone = World.watchExits Tuning.defaults seen.ExitWatches (watched 101 [])
+                let gone = World.watchExits seen.ExitWatches (watched 101 [])
 
                 Expect.equal
                     (watchOf gone)
@@ -747,30 +753,43 @@ let exitHoldTests =
                             {
                                 Run = [ for y in 20..24 -> { X = 0; Y = y } ]
                                 Exit = { X = 0; Y = 22 }
-                                Until = 101 + Tuning.defaults.ExitHoldTicks
+                                Left = 101
+                                Leavers =
+                                    [
+                                        {
+                                            Id = "h-1"
+                                            At = { X = 1; Y = 22 }
+                                            Dies = 1600
+                                            Trip = 100
+                                        }
+                                    ]
+                                Until = 101 + 100
                             }
                     ))
-                    "the tick vision finds it gone, the whole west run beside it is held"
+                    "the tick vision finds it gone, the whole west run beside it is held for its round trip"
             }
 
-            test "the hold ends at ExitHoldTicks, and at the threat's remembered death if sooner" {
+            // Moved by #663 S5 (#585): the hold's clock is the leaver's own
+            // round trip, the odds it is back falling to nothing over it, not
+            // the fixed `ExitHoldTicks` (gone); a body a tile a tick reads the
+            // hundred it was.
+            test "the hold ends at the threat's round trip, and at its remembered death if sooner" {
                 let holdAfter ttl =
                     watchThrough [ watched 100 [ kiterAt { X = 1; Y = 22 } ttl ]; watched 101 [] ]
 
                 let long = holdAfter 1500
-                let until = 101 + Tuning.defaults.ExitHoldTicks
+                let until = 101 + 100
 
                 Expect.isSome
-                    (World.watchExits Tuning.defaults long.ExitWatches (watched (until - 1) [])
-                     |> watchOf)
+                    (World.watchExits long.ExitWatches (watched (until - 1) []) |> watchOf)
                     "the hold stands to its last tick"
 
                 Expect.isNone
-                    (World.watchExits Tuning.defaults long.ExitWatches (watched until []) |> watchOf)
-                    "and ends at ExitHoldTicks"
+                    (World.watchExits long.ExitWatches (watched until []) |> watchOf)
+                    "and ends with the round trip"
 
                 Expect.isSome
-                    (World.watchExits Tuning.defaults long.ExitWatches (dark 150) |> watchOf)
+                    (World.watchExits long.ExitWatches (dark 150) |> watchOf)
                     "out of sight it keeps its clock"
 
                 Expect.equal
@@ -877,6 +896,177 @@ let exitHoldTests =
                     "last seen on the ring, the room across seen and it not there: it died"
             }
 
+            // #585 (#663 S5): a hold ends on evidence, not a clock. A look
+            // into the room across the exit finding the leaver walked off, or
+            // not there at all, ends it; finding it lingering by the border
+            // keeps it; out of sight it keeps its clock.
+            test
+                "a look across the exit ends the hold where the leaver walked off, and keeps it where it lingers" {
+                let held =
+                    watchThrough [ watched 100 [ kiterAt { X = 1; Y = 22 } 1500 ]; watched 101 [] ]
+
+                Expect.isSome (holdOf held) "the premise: held, the room across dark"
+
+                let lookAcross across =
+                    World.watchExits held.ExitWatches (watched 110 [] |> withWestSeen across)
+                    |> holdOf
+
+                Expect.isSome
+                    (lookAcross [ kiterAt { X = 47; Y = 22 } 1400 ])
+                    "seen two tiles over the border: it may step back in, held"
+
+                Expect.isNone
+                    (lookAcross [ kiterAt { X = 30; Y = 22 } 1400 ])
+                    "seen walked off into the room across: the hold ends"
+
+                Expect.isNone (lookAcross []) "the room across seen without it: the hold ends"
+
+                Expect.isSome
+                    (World.watchExits held.ExitWatches (watched 110 []) |> holdOf)
+                    "the room across dark: it keeps its clock"
+
+                // Seen lingering past its round trip, it may still step back
+                // in: the look keeps the hold, its clock restarted from it.
+                Expect.equal
+                    (World.watchExits
+                        held.ExitWatches
+                        (watched 250 [] |> withWestSeen [ kiterAt { X = 47; Y = 22 } 1400 ])
+                     |> holdOf
+                     |> Option.map _.Until)
+                    (Some(250 + 100))
+                    "lingering at t250, past its round trip: held another round trip"
+
+                // The review of #663 S5: every leaver, not the one nearest
+                // the exit. Two leave; one walks off, the other lingers.
+                let pair =
+                    watchThrough
+                        [
+                            watched
+                                100
+                                [
+                                    kiterAt { X = 1; Y = 22 } 1500
+                                    { kiterAt { X = 1; Y = 23 } 1500 with
+                                        Id = "h-2"
+                                    }
+                                ]
+                            watched 101 []
+                        ]
+
+                Expect.equal
+                    (holdOf pair |> Option.map (fun hold -> hold.Leavers |> List.map _.Id))
+                    (Some [ "h-1"; "h-2" ])
+                    "the premise: both are the hold's leavers"
+
+                Expect.isSome
+                    (World.watchExits
+                        pair.ExitWatches
+                        (watched 110 []
+                         |> withWestSeen
+                             [
+                                 kiterAt { X = 30; Y = 22 } 1400
+                                 { kiterAt { X = 48; Y = 23 } 1400 with
+                                     Id = "h-2"
+                                 }
+                             ])
+                     |> holdOf)
+                    "the leader walked off, the second lingers: held"
+
+                Expect.isNone
+                    (World.watchExits
+                        pair.ExitWatches
+                        (watched 110 []
+                         |> withWestSeen
+                             [
+                                 kiterAt { X = 30; Y = 22 } 1400
+                                 { kiterAt { X = 25; Y = 23 } 1400 with
+                                     Id = "h-2"
+                                 }
+                             ])
+                     |> holdOf)
+                    "both walked off: the hold ends"
+            }
+
+            // #585 (#663 S5): the held exit's job follows its leaver. Seen
+            // lingering across the border, the hold intercepts the tile it
+            // steps back in by; seen walked off, or unseen, it holds the run.
+            test "a leaver seen lingering across the exit is intercepted where it steps back in" {
+                let across (at: Pos) =
+                    { kiterAt at 1400 with
+                        Id = "h-x"
+                        Pos = RoomPos.at "W2N2" at
+                    }
+
+                let colony leaver =
+                    let held = declaredRaid [] |> westField |> heldWest
+
+                    { held with
+                        Hostiles = leaver |> Option.toList
+                        ExitHolds =
+                            held.ExitHolds
+                            |> Map.map (fun _ hold ->
+                                { hold with
+                                    Leavers =
+                                        [
+                                            {
+                                                Id = "h-x"
+                                                At = { X = 1; Y = 44 }
+                                                Dies = held.Time + 1400
+                                                Trip = 100
+                                            }
+                                        ]
+                                })
+                    }
+
+                let jobOf leaver =
+                    let view = colony leaver
+
+                    Threats.jobsIn
+                        (threatsOfHeld
+                            view
+                            (Atlas.ofView view)
+                            (heldTaskFacts view (Map.ofList [ "g-1", taskId (Guard "W1N2") ])))
+                        "W1N2"
+                    |> List.head
+
+                let lingering = jobOf (Some(across { X = 47; Y = 47 }))
+
+                Expect.equal
+                    (lingering.Kind, lingering.Quarry)
+                    (JobKind.Intercept, [ "h-x" ])
+                    "lingering two tiles over: an intercept on the leaver"
+
+                Expect.isTrue
+                    (not lingering.Tiles.IsEmpty
+                     && lingering.Tiles
+                        |> Set.forall (fun tile ->
+                            range (RoomPos.pos tile) { X = 0; Y = 47 } <= Engine.rangedRange))
+                    $"within a shot of (0,47), where it steps back in: {lingering.Tiles}"
+
+                // Its price is the kill the hold's holder lands on it where
+                // it stands, across the border (the review of #663 S5: read
+                // in the hold's own room, it was nothing).
+                Expect.isGreaterThan lingering.Value.Value 0.0 "priced at its kill score"
+
+                // Lingering beside another border of the room beside it is
+                // no way back in by this exit.
+                let elsewhere =
+                    { across { X = 47; Y = 47 } with
+                        Pos = RoomPos.at "W2N2" { X = 20; Y = 48 }
+                    }
+
+                Expect.equal
+                    (jobOf (Some elsewhere)).Kind
+                    JobKind.HoldExit
+                    "by W2N2's south border, not ours: the run held"
+
+                Expect.equal
+                    (jobOf (Some(across { X = 30; Y = 47 }))).Kind
+                    JobKind.HoldExit
+                    "walked off past the border's depth: the run held"
+
+                Expect.equal (jobOf None).Kind JobKind.HoldExit "unseen: the run held"
+            }
+
             test "W17S26 (#561): Beam715 dead at 1,6 beside the west run holds no exit" {
                 let beam =
                     { kiterAt { X = 1; Y = 6 } 800 with
@@ -902,7 +1092,6 @@ let exitHoldTests =
 
                 Expect.equal
                     (World.watchExits
-                        Tuning.defaults
                         held.ExitWatches
                         (watched 102 [ kiterAt { X = 0; Y = 22 } 1400 ])
                      |> watchOf)
@@ -913,6 +1102,7 @@ let exitHoldTests =
                                     Id = "h-1"
                                     At = { X = 0; Y = 22 }
                                     Dies = 1502
+                                    Trip = 100
                                 }
                             ]
                     ))

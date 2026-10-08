@@ -773,7 +773,7 @@ let private fullTick
             (ObserveMemory.loadDrawn ())
         |> World.recalling sightings
         |> World.latchTowers Tuning.defaults towered
-        |> World.watchExits Tuning.defaults exitWatches
+        |> World.watchExits exitWatches
         |> World.recallHealers Tuning.defaults healers
         |> World.recallRaiders raiders
         |> fun world ->

@@ -1778,6 +1778,8 @@ let exitHoldViewTests =
                         {
                             Run = [ { X = 0; Y = 20 } ]
                             Exit = { X = 0; Y = 20 }
+                            Left = until - 100
+                            Leavers = []
                             Until = until
                         }
 
@@ -1808,6 +1810,7 @@ let exitHoldViewTests =
                                             Id = "h-1"
                                             At = { X = 1; Y = 20 }
                                             Dies = 1500
+                                            Trip = 100
                                         }
                                     ]
                             ])

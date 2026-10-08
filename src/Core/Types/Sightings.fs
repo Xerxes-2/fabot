@@ -480,6 +480,28 @@ module HostileInfo =
     let stationary (side: HostileInfo list) (hostile: HostileInfo) : bool =
         Gait.stationary (gait side hostile)
 
+    /// A body's gait carrying `cargo` (#621): its gait (`gait`, CARRY read
+    /// empty) and a live CARRY's weight for each 50 of `cargo`.
+    let loadedGait (side: HostileInfo list) (cargo: int) (body: HostileInfo) : Gait =
+        let gait = gait side body
+        let carry = effectivePower side body Carry
+
+        { gait with
+            Weight = gait.Weight + min carry ((cargo + 49) / 50)
+        }
+
+    /// The ticks a body out of sight may be gone from the room it was last
+    /// seen in and back (#585): a room's side out at its plain pace loaded
+    /// with `cargo`, and back empty, to the life it had left when seen. None
+    /// for one that cannot walk, which stays.
+    let roundTrip (side: HostileInfo list) (cargo: int) (body: HostileInfo) : int option =
+        match
+            Gait.ticks Gait.plain (loadedGait side cargo body),
+            Gait.ticks Gait.plain (gait side body)
+        with
+        | Some out, Some back -> Some(min (max 1 body.TicksToLive) (Engine.roomSide * (out + back)))
+        | _ -> None
+
 /// An NPC invader core standing in a room the colony works this tick. A
 /// **structure**, not a creep, so it reaches the projection through neither
 /// `Hostiles` nor the fire reflex, whose sweep is `FIND_HOSTILE_CREEPS`. It is
@@ -902,9 +924,22 @@ type RoomSighting =
         Rival: string option
     }
 
-/// The exit a room's last armed Threat left by, and how long its Guard holds
-/// it (#450): attacks do not cross a border, so a body re-entering lands on
-/// the edge tile beside a guard standing there.
+/// One armed Threat as the full tick saw it: which creep, where it stood, the
+/// tick its `ticksToLive` runs out, and its round trip out of the room and
+/// back (`HostileInfo.roundTrip`, read as seen). `Id` is the creep's id, the one
+/// its tombstone names (`RoomFacts.Fallen`); empty for a row a bundle before
+/// #561 wrote, which no tombstone matches.
+type SeenThreat =
+    {
+        Id: string
+        At: Pos
+        Dies: int
+        Trip: int
+    }
+
+/// The exit a room's last armed Threats left by, and how long its Guard
+/// holds it (#450): attacks do not cross a border, so a body re-entering
+/// lands on the edge tile beside a guard standing there.
 type ExitHold =
     {
         /// The walkable exit tiles of one side, contiguous, through the one
@@ -914,9 +949,16 @@ type ExitHold =
         /// keeps three from it, beyond the step and swing of a body camping
         /// across.
         Exit: Pos
-        /// The first tick the hold no longer stands: `Tuning.ExitHoldTicks`
-        /// after it left, or the tick its remembered `ticksToLive` runs out if
-        /// sooner.
+        /// The first tick the room was seen without them: when they left.
+        Left: int
+        /// Every armed body that left the room, each as last seen (#585):
+        /// what a look ends the hold on — all of them walked off or nowhere
+        /// in the rooms they may stand in. Empty where unknown.
+        Leavers: SeenThreat list
+        /// The first tick the hold no longer stands where no look decides it
+        /// first (#585): the slowest leaver's round trip from its last
+        /// sighting by the border (the odds it is back fall to nothing over
+        /// it, `Quarry.odds`), each capped by its remembered death.
         Until: int
     }
 
@@ -925,11 +967,12 @@ module ExitHold =
     /// Whether the hold still stands at `time`.
     let stands (time: int) (hold: ExitHold) = hold.Until > time
 
-/// One armed Threat as the full tick saw it: which creep, where it stood, and
-/// the tick its `ticksToLive` runs out. `Id` is the creep's id, the one its
-/// tombstone names (`RoomFacts.Fallen`); empty for a row a bundle before #561
-/// wrote, which no tombstone matches.
-type SeenThreat = { Id: string; At: Pos; Dies: int }
+    /// The room across a hold's exit, beside `room`.
+    let across (room: string) (hold: ExitHold) : string option =
+        RoomName.adjacent room
+        |> List.tryFind (fun next ->
+            RoomName.offsetOf room next
+            |> Option.exists (fun offset -> Seam.landingOf offset hold.Exit |> Option.isSome))
 
 /// What the world remembers of one room's armed Threats across ticks
 /// (`World.watchExits`, #450). Heap state only: a reset costs one hold.
@@ -1055,7 +1098,7 @@ type Track =
         /// The last full tick it was seen.
         Seen: int
         /// What it carried then (`RoomFacts.HostileCargo`): the load its
-        /// walk home is weighed by (`Quarry.roundTrip`).
+        /// walk home is weighed by (`HostileInfo.roundTrip`).
         Cargo: int
         /// Its steps, newest first: each tile it stood on, by the first and
         /// the last full tick of each run of sightings on it (one entry for
@@ -1538,16 +1581,63 @@ module World =
         Map.tryFind room world.Sightings
         |> Option.exists (fun sighting -> sighting.Tick = world.Time)
 
-    /// This tick's world with the exit watch laid under it (#450): a room
-    /// vision finds an armed Threat in is `Seen`; the next full tick vision
-    /// finds them gone, the run the nearest of them to an exit left by is
-    /// `Held` until `Tuning.ExitHoldTicks` or that one's remembered death. A
-    /// room out of sight keeps a hold until its clock runs out, and forgets a
-    /// sighting: where a Threat went in the dark is not known. Bounded by this
-    /// tick's rooms, as `recalling` is, and built by `Fresh`, the map being
-    /// carried to the next tick.
-    let watchExits (tuning: Tuning) (previous: Map<string, ExitWatch>) (world: World) : World =
+    /// This tick's world with the exit watch laid under it (#450, #585): a
+    /// room vision finds an armed Threat in is `Seen`; the next full tick
+    /// vision finds them gone, the run the nearest of them to an exit left by
+    /// is `Held`, about every one that left (`ExitHold.Leavers`), for the
+    /// slowest one's round trip (`HostileInfo.roundTrip`, read as seen), each
+    /// capped by its remembered death. The evidence decides first, a leaver
+    /// at a time: seen anywhere within the dance depth of the room's border
+    /// (`Dance.besideOf`), it lingers and may step back in, which keeps the
+    /// hold and restarts its clock from that sighting; seen past it, or
+    /// nowhere while every room it may stand in (its region: the rooms across
+    /// the borders it last stood within the dance depth of, those the border
+    /// opens onto) is seen, it is gone. The hold ends when every leaver is
+    /// gone. The clock alone decides only what no look answers. A room out of
+    /// sight keeps a hold until its clock runs out, and forgets a sighting:
+    /// where a Threat went in the dark is not known. Bounded by this tick's
+    /// rooms, as `recalling` is, and built by `Fresh`, the map being carried
+    /// to the next tick.
+    let watchExits (previous: Map<string, ExitWatch>) (world: World) : World =
         let seen = seenNow world
+
+        // Where each body stands this tick, in a room vision answers for.
+        let standing =
+            lazy
+                (world.Rooms
+                 |> Map.toSeq
+                 |> Seq.filter (fst >> seen)
+                 |> Seq.collect (fun (_, facts) -> facts.Hostiles |> Seq.map (fun h -> h.Id, h.Pos))
+                 |> Fresh.mapOfSeq)
+
+        // A hold's evidence: None where every leaver is gone (the hold
+        // ends), else the hold kept, its clock restarted from each leaver
+        // seen lingering.
+        let judged (room: string) (border: Map<Pos, Terrain>) (hold: ExitHold) : ExitHold option =
+            let readings =
+                hold.Leavers
+                |> List.map (fun leaver ->
+                    match Map.tryFind leaver.Id standing.Value with
+                    | Some at when Dance.besideOf room at ->
+                        Some(Some(min leaver.Dies (world.Time + leaver.Trip)))
+                    | Some _ -> None
+                    | None ->
+                        let region =
+                            Dance.beyond (RoomPos.at room leaver.At)
+                            |> List.filter (Dance.crosses (Some border) room)
+
+                        if region |> List.forall seen then None else Some None)
+
+            match readings with
+            | [] -> Some hold
+            | _ when readings |> List.forall Option.isNone -> None
+            | _ ->
+                let lingering = readings |> List.choose (Option.bind id)
+
+                Some
+                    { hold with
+                        Until = lingering |> List.fold max hold.Until
+                    }
 
         // Only a Threat that left holds the run, never one that died (#561):
         // its tombstone lies here, or every room it could have crossed into
@@ -1597,27 +1687,43 @@ module World =
                                 Id = h.Id
                                 At = RoomPos.pos h.Pos
                                 Dies = world.Time + h.TicksToLive
+                                Trip =
+                                    HostileInfo.roundTrip armed 0 h
+                                    |> Option.defaultValue (max 1 h.TicksToLive)
                             })
                     )
                 )
             | true, [], Some(ExitWatch.Seen last) ->
-                last
-                |> List.filter (fun threat -> not (died room facts threat))
-                |> List.choose (fun threat ->
-                    exitRunFrom facts.Border threat.At |> Option.map (fun run -> run, threat.Dies))
+                let leavers =
+                    last
+                    |> List.filter (fun threat -> not (died room facts threat))
+                    |> List.choose (fun threat ->
+                        exitRunFrom facts.Border threat.At |> Option.map (fun run -> run, threat))
+
+                leavers
                 |> List.sortBy (fun (run, _) -> distanceOf run)
                 |> List.tryHead
-                |> Option.map (fun (run, dies) ->
+                |> Option.map (fun (run, _) ->
                     {
                         Run = run.Run
                         Exit = run.Through
-                        Until = min dies (world.Time + tuning.ExitHoldTicks)
+                        Left = world.Time
+                        Leavers = List.map snd leavers
+                        Until =
+                            leavers
+                            |> List.map (fun (_, threat) ->
+                                min threat.Dies (world.Time + threat.Trip))
+                            |> List.max
                     })
+                |> Option.bind (judged room facts.Border)
                 |> Option.filter (ExitHold.stands world.Time)
                 |> Option.map (fun hold -> room, ExitWatch.Held hold)
-            | false, _, Some(ExitWatch.Held hold)
-            | true, [], Some(ExitWatch.Held hold) when ExitHold.stands world.Time hold ->
+            | false, _, Some(ExitWatch.Held hold) when ExitHold.stands world.Time hold ->
                 Some(room, ExitWatch.Held hold)
+            | true, [], Some(ExitWatch.Held hold) ->
+                judged room facts.Border hold
+                |> Option.filter (ExitHold.stands world.Time)
+                |> Option.map (fun hold -> room, ExitWatch.Held hold)
             | _ -> None
 
         { world with

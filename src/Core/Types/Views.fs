@@ -371,7 +371,7 @@ module WorldView =
 
     /// The ticks a raid that walked off unseen may still stand in, or come
     /// back to, the room it was last seen in (#585): its slowest body's round
-    /// trip empty (`Quarry.roundTrip`: a raid carries nothing), over which the odds it is still there fall
+    /// trip empty (`HostileInfo.roundTrip`: a raid carries nothing), over which the odds it is still there fall
     /// to nothing (`Quarry.odds`) — a body that cannot walk for the life it
     /// has left. A room's round trip where nothing is known of the raid.
     let raidTrip (raid: HostileInfo list) : int =
@@ -380,7 +380,7 @@ module WorldView =
         | _ ->
             raid
             |> List.map (fun hostile ->
-                Quarry.roundTrip raid 0 hostile
+                HostileInfo.roundTrip raid 0 hostile
                 |> Option.defaultValue (max 1 hostile.TicksToLive))
             |> List.max
 

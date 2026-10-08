@@ -1192,6 +1192,8 @@ let kiteTests =
                                     {
                                         Run = [ for x in 1..48 -> { X = x; Y = 0 } ]
                                         Exit = { X = 25; Y = 0 }
+                                        Left = home.Time - 50
+                                        Leavers = []
                                         Until = home.Time + 50
                                     }
                                 ]

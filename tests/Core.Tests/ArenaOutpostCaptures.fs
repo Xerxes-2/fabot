@@ -1857,6 +1857,8 @@ let internal diggerBesideHeldExit () : Arena =
                                 {
                                     Run = [ for x in 3..21 -> { X = x; Y = 0 } ]
                                     Exit = { X = 6; Y = 0 }
+                                    Left = 976_872
+                                    Leavers = []
                                     Until = 976_972
                                 }
                         ]
@@ -2613,6 +2615,8 @@ let internal kiterAcrossHeldExit () : Arena =
                                 {
                                     Run = [ for y in 36..48 -> { X = 0; Y = y } ]
                                     Exit = { X = 0; Y = 40 }
+                                    Left = 1_020_745
+                                    Leavers = []
                                     Until = 1_020_845
                                 }
                         ]

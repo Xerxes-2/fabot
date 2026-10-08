@@ -894,10 +894,6 @@ type Tuning =
         /// is itself that look. The cost is a guard hired for a room that went
         /// quiet unseen, 750 energy a block.
         ThreatMemory: int
-        /// How long a Guard holds the exit its room's last armed Threat left by
-        /// (#450), at most: 100, long enough for a kiter's step out and back,
-        /// short enough that one gone for good costs the guard little.
-        ExitHoldTicks: int
         /// How long a room an armed rival was seen in is walked round
         /// (`World.ArmedSeen`, #485), counted from the last tick vision showed
         /// one: 1,500, the longest the body seen can still be standing there,
@@ -1136,7 +1132,6 @@ module Tuning =
             OutpostRoadSiteCeiling = 70
             StandDownFallback = 2500
             ThreatMemory = Engine.creepLifetime
-            ExitHoldTicks = 100
             HostileRoomMemory = Engine.creepLifetime
             // A creep's lifetime: a strike is staged inside one, and a
             // level-up in the dark is rarer still.

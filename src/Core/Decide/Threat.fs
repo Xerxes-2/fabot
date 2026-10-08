@@ -694,10 +694,12 @@ module Job =
             Quarry = quarry
         }
 
-    /// Whether a job is ground beside a raid or the exit it left by: the
-    /// kinds a ring Brief stands on together.
+    /// Whether a job is ground beside a raid or the exit it left by (its
+    /// intercept included): the kinds a ring Brief stands on together.
     let isRing (job: Job) =
-        job.Kind = JobKind.Ring || job.Kind = JobKind.HoldExit
+        job.Kind = JobKind.Ring
+        || job.Kind = JobKind.HoldExit
+        || job.Kind = JobKind.Intercept
 
     /// These jobs with each one only once, the first kept: a kind further
     /// down `BriefKind.order` reads ground a kind ahead read too.
@@ -725,14 +727,15 @@ module Brief =
         | head :: _ -> Some head.Tiles
 
     /// The room's ring under a Brief (#571, #558): every `Ring` about a
-    /// hostile — a raid, a core — and every `HoldExit` among its jobs,
-    /// together; None where it has none. The declared sources' post a Guard
-    /// with nothing laid stands on (#366) is about none, and no ring.
+    /// hostile — a raid, a core — and every `HoldExit` or `Intercept` among
+    /// its jobs, together; None where it has none. The declared sources'
+    /// post a Guard with nothing laid stands on (#366) is about none, and no
+    /// ring.
     let ringOf (brief: Brief) : Set<RoomPos> option =
         match
             brief.Jobs
             |> List.filter (fun job ->
-                job.Kind = JobKind.HoldExit || job.Kind = JobKind.Ring && not job.Quarry.IsEmpty)
+                Job.isRing job && (job.Kind <> JobKind.Ring || not job.Quarry.IsEmpty))
         with
         | [] -> None
         | rings -> Some(rings |> List.map _.Tiles |> Set.unionMany)
@@ -3890,9 +3893,66 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             Job.laid JobKind.Ring tiles raid (keeps room))
 
     // Each held exit's ground (#450) and each core's (#487), where open.
+    // A held exit is about the bodies that left (#585). One seen lingering
+    // across the hold's own border, its way back in is the hold's: an
+    // intercept on the hold's ground within a ranged reach of the exit tile
+    // it steps back in by — the run's tile its place along that border
+    // meets — priced at the kill score the hold's holders land on it where
+    // it stands (`scoreAmong`, read in its room). Else the ground beside the
+    // whole run, at what the room keeps.
     let holdJobs =
         laidBy BriefKind.ExitHold
-        |> List.map (fun (room, ground) -> room, Job.laid JobKind.HoldExit ground [] (keeps room))
+        |> List.map (fun (room, ground) ->
+            let hold = Map.tryFind room view.ExitHolds
+
+            let quarry =
+                hold
+                |> Option.map (fun hold -> hold.Leavers |> List.map _.Id)
+                |> Option.defaultValue []
+
+            let lingering =
+                hold
+                |> Option.bind (fun hold ->
+                    ExitHold.across room hold
+                    |> Option.bind (fun across ->
+                        view.Hostiles
+                        |> List.filter (fun h ->
+                            List.contains h.Id quarry
+                            && h.Pos.Room = across
+                            && Dance.besideOf room h.Pos)
+                        |> List.sortBy (fun h -> Dance.toEdge (RoomPos.pos h.Pos), h.Id)
+                        |> List.tryHead)
+                    |> Option.map (fun h -> hold, h))
+
+            match lingering with
+            | Some(hold, h) ->
+                let along (tile: Pos) =
+                    if hold.Exit.X = 0 || hold.Exit.X = Engine.roomSide - 1 then
+                        abs (tile.Y - h.Pos.Y)
+                    else
+                        abs (tile.X - h.Pos.X)
+
+                let back = hold.Run |> List.minBy (fun tile -> along tile, tile.Y, tile.X)
+
+                let holders = HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList
+
+                let side =
+                    ColonyView.bodies view
+                    |> List.filter (fun creep -> holders.Contains creep.Name)
+
+                match
+                    ground
+                    |> Set.filter (fun tile -> range (RoomPos.pos tile) back <= Engine.rangedRange)
+                with
+                | seats when not seats.IsEmpty ->
+                    room,
+                    Job.laid
+                        JobKind.Intercept
+                        seats
+                        quarry
+                        (lazy (scoreAmong view atlas side side h.Pos.Room h))
+                | _ -> room, Job.laid JobKind.HoldExit ground quarry (keeps room)
+            | None -> room, Job.laid JobKind.HoldExit ground quarry (keeps room))
         |> Map.ofList
 
     let coreJobs =

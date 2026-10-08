@@ -1975,10 +1975,7 @@ let guardPrecedenceTests =
                         Hostiles = [ diggerAt "W1N2" { X = 5; Y = 45 } ]
                         ExitHolds =
                             colony.ExitHolds
-                            |> Map.map (fun _ hold ->
-                                { hold with
-                                    Until = colony.Time + colony.Tuning.ExitHoldTicks - ago
-                                })
+                            |> Map.map (fun _ hold -> { hold with Left = colony.Time - ago })
                     }
 
                 let briefAt ago =

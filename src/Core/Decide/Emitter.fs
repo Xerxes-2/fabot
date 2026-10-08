@@ -1321,7 +1321,7 @@ let aims (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, Task
             | _ -> [])
 
 /// Each fighter's light-tick force rule (#663 M3), off the job its Guard's
-/// holders do first: a muster's or a held exit's waits for a new armed body
+/// holders do first: a muster's, a held exit's or its intercept's waits for a new armed body
 /// in reach; a camp's covers the tiles within the holder's reach of its
 /// own; a kill's (`JobForce.Closes`) is the default, and no entry.
 let forces
@@ -1334,7 +1334,11 @@ let forces
         match Map.tryFind creep.Name assigned with
         | Some(Guard room) ->
             match (Threats.briefOf threats room).Jobs with
-            | job :: _ when job.Kind = JobKind.Muster || job.Kind = JobKind.HoldExit ->
+            | job :: _ when
+                job.Kind = JobKind.Muster
+                || job.Kind = JobKind.HoldExit
+                || job.Kind = JobKind.Intercept
+                ->
                 Some(creep.Name, JobForce.Waits)
             | job :: _ when job.Kind = JobKind.Camp ->
                 Some(creep.Name, JobForce.Covers(job.Tiles, reachOf creep))

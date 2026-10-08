@@ -1689,7 +1689,7 @@ let private harmRate (view: ColonyView) (hostile: HostileInfo) (walk: int) : flo
 /// each 50 it carries (`cargoOf`). The score's alone: every other reader keeps
 /// the empty reading, the safe side for a threat's pace.
 let private loadedGait (view: ColonyView) (hostile: HostileInfo) : Gait =
-    Quarry.loadedGait view.Hostiles (cargoOf view hostile) hostile
+    HostileInfo.loadedGait view.Hostiles (cargoOf view hostile) hostile
 
 /// What killing a hostile is worth, in energy (#621, by its remaining life,
 /// #663): the share of its body (every part, destroyed ones too, and each
@@ -2316,7 +2316,7 @@ let private killsLanded
 /// reaches the exit tile in its tiles there at its plain pace; with none in
 /// sight (the rooms across are mostly dark), the raid that left is expected
 /// back no sooner than it has been gone (the hold's ticks since it left,
-/// `Tuning.ExitHoldTicks` before it lapses): a raid bouncing on the border
+/// `ExitHold.Left`): a raid bouncing on the border
 /// is back at once, one long gone is not — the stand-in until the exit watch
 /// learns a raid's bounce. The holders reach a trespasser in their straight
 /// tiles to their reach at the slowest one's pace, kill it together at their
@@ -2354,7 +2354,7 @@ let preyBeforeReturn
 
     let due =
         match seen with
-        | [] -> [ max 0 (view.Time - (hold.Until - view.Tuning.ExitHoldTicks)) ]
+        | [] -> [ max 0 (view.Time - hold.Left) ]
         | seen -> seen
 
     match holders with
