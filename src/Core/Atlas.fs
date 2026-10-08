@@ -3679,12 +3679,12 @@ let standingAt (atlas: Atlas) (creep: string) (tile: RoomPos) (read: unit -> 'a)
 let recordStep (atlas: Atlas) (creep: string) (at: RoomPos, step: RoomPos) =
     atlas.Steps.[creep] <- [ at; step ]
 
-/// Cuts a creep's step plan to its first `count` tiles: a chaser's light
-/// ticks walking no farther than its chase keeps (#614).
-let keepSteps (atlas: Atlas) (creep: string) (count: int) =
-    match atlas.Steps.TryGetValue creep with
-    | true, plan -> atlas.Steps.[creep] <- List.truncate count plan
-    | _ -> ()
+/// Sets a creep's step plan to the share of it its chase keeps, ending on
+/// the tile it traded the rest for (#614, #606): what a chaser's light ticks
+/// walk.
+let keepSteps (atlas: Atlas) (creep: string) (kept: RoomPos list) =
+    if atlas.Steps.ContainsKey creep then
+        atlas.Steps.[creep] <- kept
 
 /// Drops a creep's step plan: a body the mover walks nowhere this tick,
 /// whatever an earlier reading filed for it.

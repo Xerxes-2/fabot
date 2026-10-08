@@ -1969,6 +1969,167 @@ let kiteStepTests =
                     (plan |> List.exists (fun tile -> Set.contains (RoomPos.pos tile) band))
                     $"its plan walks onto the band: {plan}"
             }
+
+            // #606, W17S26 replay (light ticks replaying the full tick's
+            // plan, `chasePlan`, which weighs each of its steps as the full
+            // tick's `chaseStep` does): t1052716 ranger-1051197 (6M 4R 2H)
+            // stepped from (14,1) onto the swamp (13,2) after Onyx, two off
+            // from both it and the plain (13,1); held there to t720, Onyx
+            // walked out of reach. t1052782 ranger-1052323 (3M 2R 1H) from
+            // (15,26) onto (16,25) after Midnight with (16,26) as close. Both
+            // quarries walk a tile a tick: no tile keeps them within the
+            // losing step's bar, so only the hold tells the tiles apart.
+            test
+                "a chaser's step onto swamp gives way to a tile held less no farther from its quarry, whatever it loses" {
+                let p x y = { X = x; Y = y }
+                // The live swamp about both steps.
+                let swamp =
+                    set
+                        [
+                            yield! [ p 13 2; p 14 2; p 7 3; p 6 4; p 6 5; p 9 5 ]
+                            for x in 12..15 -> p x 3
+                            for x in 11..15 -> p x 4
+                            for x in 11..14 -> p x 5
+                            for x in 15..17 -> p x 25
+                        ]
+                // A swamp holds both bodies four ticks past the one they step on.
+                let held tile =
+                    if Set.contains tile swamp then 4 else 0
+
+                let besideOf (from: Pos) =
+                    [
+                        for dx in -1 .. 1 do
+                            for dy in -1 .. 1 do
+                                let tile = p (from.X + dx) (from.Y + dy)
+
+                                if tile <> from && tile.Y > 0 then
+                                    yield tile
+                    ]
+
+                // A step at the end of its plan (the quarry's ground).
+                let trade (from: Pos) (wanted: Pos) (quarry: Pos) =
+                    let gap tile = range tile quarry
+                    // The quarry walks off a tile a tick until the body can step.
+                    let apart tile = gap tile + held tile + 1
+
+                    Resolver.lighterStep
+                        held
+                        gap
+                        apart
+                        (fun _ -> None)
+                        (fun _ -> true)
+                        from
+                        wanted
+                        None
+                        (besideOf from)
+
+                Expect.equal
+                    (trade (p 14 1) (p 13 2) (p 11 3))
+                    (Some(p 13 1))
+                    "t1052716: the plain (13,1), not the swamp (13,2)"
+
+                Expect.equal
+                    (trade (p 15 26) (p 16 25) (p 18 25))
+                    (Some(p 16 26))
+                    "t1052782: the plain (16,26), not the swamp (16,25)"
+
+                Expect.isNone (trade (p 14 1) (p 13 1) (p 11 3)) "a plain step is never weighed"
+
+                Expect.isNone
+                    (trade (p 14 4) (p 13 3) (p 10 2))
+                    "a swamp step that closes where every plain tile beside it is farther is kept"
+
+                Expect.equal
+                    (trade (p 12 2) (p 12 3) (p 10 3))
+                    (Some(p 11 2))
+                    "two off already: the plain tile nearer, not the swamp no nearer than where it stands"
+
+                // The rule reads the body's own hold and its targets' range,
+                // never its weapon: a melee chaser two off its quarry, whose
+                // swing lands only beside it, takes the plain tile beside the
+                // quarry over the swamp one beside it too.
+                Expect.equal
+                    (trade (p 15 1) (p 14 2) (p 13 1))
+                    (Some(p 14 1))
+                    "a melee two off: the plain (14,1) beside its quarry, not the swamp (14,2)"
+            }
+
+            // #606 review: no farther by the walk, never by a range blind to
+            // walls, and the body's own tile only where it strikes from it.
+            // A ranger four off its quarry across a wall walks round it; its
+            // next step, along the wall, is swamp. Its own tile is as near by
+            // range as that step, and standing on it would hold it there for
+            // good.
+            test
+                "a chaser behind a wall never stands for a swamp step it must take, and trades it only for a tile its walk goes on from" {
+                let p x y = { X = x; Y = y }
+                let pos, quarry, wanted, after = p 10 10, p 10 14, p 11 10, p 12 11
+
+                let trade (swamp: Set<Pos>) =
+                    let held tile =
+                        if Set.contains tile swamp then 4 else 0
+
+                    let gap tile = range tile quarry
+
+                    Resolver.lighterStep
+                        held
+                        gap
+                        (fun tile -> gap tile + held tile + 1)
+                        (fun _ -> None)
+                        (fun _ -> true)
+                        pos
+                        wanted
+                        (Some after)
+                        [ p 9 9; p 10 9; p 11 9; p 9 10; p 11 10; p 9 11; p 10 11; p 11 11 ]
+
+                Expect.isNone
+                    (trade (set [ p 11 10; p 11 11 ]))
+                    "every tile its walk goes on from is swamp: it keeps the step, never stands"
+
+                Expect.equal
+                    (trade (set [ p 11 10 ]))
+                    (Some(p 11 11))
+                    "the plain (11,11), beside the walk's next tile"
+            }
+
+            // #606 review: a kite's step backs off; a tile it is traded for is
+            // no nearer its targets and one its walk may stand on, its own
+            // included.
+            test "a kiter's swamp step gives way only to a safe tile no nearer its target" {
+                let p x y = { X = x; Y = y }
+                let pos, target, wanted = p 20 20, p 23 20, p 19 20
+
+                let trade (unsafe: Set<Pos>) =
+                    let held tile = if tile = wanted then 4 else 0
+                    let gap tile = range tile target
+
+                    Resolver.lighterStep
+                        held
+                        gap
+                        (fun tile -> gap tile + held tile + 1)
+                        (fun _ -> None)
+                        (fun tile -> not (Set.contains tile unsafe))
+                        pos
+                        wanted
+                        None
+                        [
+                            for dx in -1 .. 1 do
+                                for dy in -1 .. 1 do
+                                    let tile = p (pos.X + dx) (pos.Y + dy)
+
+                                    if tile <> pos then
+                                        yield tile
+                        ]
+
+                Expect.equal
+                    (trade (set [ pos; p 19 19 ]))
+                    (Some(p 19 21))
+                    "the safe (19,21), as far off it; never its own unsafe tile, nor nearer it"
+
+                Expect.isNone
+                    (trade (set [ pos; p 19 19; p 19 21 ]))
+                    "no safe tile as far off: it keeps the step"
+            }
         ]
 
 [<Tests>]

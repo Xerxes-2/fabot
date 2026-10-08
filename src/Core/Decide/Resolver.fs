@@ -96,14 +96,67 @@ let private loses (aim: Aim) (walk: Arrival.BodyArrival) (from: Pos) (wanted: Po
     let held, apart = readingOf aim walk
     held wanted > 0 && apart wanted > max aim.Reach (gapOf aim from)
 
-/// `chaseStep`'s weighing: the step wanted is kept unless it `loses` the
-/// targets; else the tile that keeps one within the bar, held less and
-/// struck no sooner. None to keep it; Some None to stand.
+/// A chaser's step from `pos` onto `wanted`, a tile that holds it (`held`,
+/// the ticks past the one it stands there), against the tiles `beside` it and
+/// its own (#606: a body never steps onto a tile that holds it longer when a
+/// tile held less brings it no farther from its goal). No farther by the
+/// walk: where its plan goes on past `wanted` (`after`), a tile beside that
+/// next tile, which the walk reaches in as many steps; at the plan's end, one
+/// no farther from the targets (`gap`) on a closing step, and no nearer them
+/// on a step that holds its standoff or backs off. Never its own tile:
+/// standing walks it no nearer, and a body in reach or behind a wall would
+/// stand for good for a step it must take (`weighed`'s losing-step trade
+/// alone stands one where it strikes from). Every tile one it may stand on
+/// (`safe`: a kiter's walk keeps off what it keeps off) and struck no sooner
+/// (`struck`). Of those, the least held, then the nearest by the tick it
+/// could step off (`apart`), then the nearest now. None where none is.
+let lighterStep
+    (held: Pos -> int)
+    (gap: Pos -> int)
+    (apart: Pos -> int)
+    (struck: Pos -> int option)
+    (safe: Pos -> bool)
+    (pos: Pos)
+    (wanted: Pos)
+    (after: Pos option)
+    (beside: Pos list)
+    : Pos option =
+    if held wanted <= 0 then
+        None
+    else
+        let closing = gap wanted <= gap pos
+
+        let onward tile =
+            match after with
+            | Some next -> range tile next <= 1
+            | None when closing -> gap tile <= gap wanted
+            | None -> gap tile >= gap wanted
+
+        beside
+        |> List.filter (fun tile ->
+            tile <> wanted
+            && tile <> pos
+            && safe tile
+            && held tile < held wanted
+            && struck tile >= struck wanted
+            && onward tile)
+        |> List.sortBy (fun tile -> held tile, apart tile, gap tile, tile)
+        |> List.tryHead
+
+/// `chaseStep`'s weighing: a step onto a tile held longer than a tile beside
+/// it no farther from the targets gives way to it (`lighterStep`; against a
+/// quarry at its pace the test below never fires, and a swamp step beside an
+/// equally close plain one held the body five ticks). Else the step is kept
+/// unless it `loses` the targets, and then traded for the tile that keeps one
+/// within the bar, held less and struck no sooner. Every tile it trades for
+/// one it may stand on (`safe`). None to keep it; Some None to stand.
 let private weighed
     (aim: Aim)
     (walk: Arrival.BodyArrival)
+    (safe: Pos -> bool)
     (pos: Pos)
     (wanted: Pos)
+    (after: Pos option)
     (beside: Pos list)
     (later: (int -> int) option)
     : Pos option option =
@@ -114,15 +167,19 @@ let private weighed
     let struck tile =
         later |> Option.map (fun soonest -> soonest (indexOf tile))
 
-    if loses aim walk pos wanted then
+    match lighterStep held gap apart struck safe pos wanted after beside with
+    | Some traded -> Some(Some traded)
+    | None when loses aim walk pos wanted ->
         (if gap pos <= aim.Reach then pos :: beside else beside)
         |> List.filter (fun tile ->
-            held tile < held wanted && apart tile <= bar && struck tile >= struck wanted)
+            safe tile
+            && held tile < held wanted
+            && apart tile <= bar
+            && struck tile >= struck wanted)
         |> List.sortBy (fun tile -> apart tile, gap tile, (if tile = pos then 0 else 1), tile)
         |> List.tryHead
         |> Option.map (fun tile -> if tile = pos then None else Some tile)
-    else
-        None
+    | None -> None
 
 /// A chaser's step, its own gait and its targets' next steps counted: a body
 /// aiming at a target in its room (its kill order's head, or any other in its
@@ -132,7 +189,9 @@ let private weighed
 /// tick it could step again (#614: a melee three off stepped onto swamp),
 /// where it can step instead onto a tile held less that keeps one within that
 /// by then, and no sooner struck than the step it was given, or stand where
-/// it strikes one now. By the tick a body can next step off a tile it stands
+/// it strikes one now; nor, whatever it loses, a step onto a tile held longer
+/// than a tile beside it, or its own, no farther from them (#606). By the
+/// tick a body can next step off a tile it stands
 /// that far from where the nearest target can have walked; ties to the
 /// nearer, then to standing. None to keep the step it was given; Some None to
 /// stand. One rule at any reach (#615 U1): a body closes to its reach, and
@@ -141,33 +200,41 @@ let private weighed
 /// (`kiteStep`), and its step is weighed here too.
 let private chaseStep
     (chase: Chase)
+    (safe: Pos -> bool)
     (at: RoomPos)
     (beside: Pos list)
     (later: (int -> int) option)
     (step: RoomPos option)
+    (after: RoomPos option)
     : RoomPos option option =
     match step with
     | Some next when next.Room = at.Room && chase.Holds(RoomPos.pos next) ->
         match chase.Aim.Value, chase.Walk.Value with
         | Some aim, Some walk when walk.Room = at.Room ->
-            weighed aim walk (RoomPos.pos at) (RoomPos.pos next) beside later
+            let after =
+                after
+                |> Option.filter (fun tile -> tile.Room = at.Room)
+                |> Option.map RoomPos.pos
+
+            weighed aim walk safe (RoomPos.pos at) (RoomPos.pos next) after beside later
             |> Option.map (Option.map (RoomPos.at at.Room))
         | _ -> None
     | _ -> None
 
-/// How much of a chaser's step plan (its step, then the light ticks' tiles)
-/// the light ticks walk: up to the first tile past its step that holds the
-/// body and that the full tick, standing on the tile before it, would trade
-/// for another (`weighed`), so a light tick replays no step the full tick
-/// would refuse (#614); a losing step with nothing better beside it is kept,
-/// as the full tick keeps it. None to keep it whole.
+/// The step plan (its step, then the light ticks' tiles) a chaser's light
+/// ticks walk: up to the first tile past its step that holds the body and
+/// that the full tick, standing on the tile before it, would trade for
+/// another (`weighed`), then that other, so a light tick replays no step the
+/// full tick would refuse (#614, #606); a losing step with nothing better
+/// beside it is kept, as the full tick keeps it. None to keep it whole.
 let private chasePlan
     atlas
     (chase: Chase)
+    (safe: Pos -> bool)
     (at: RoomPos)
     (later: (int -> int) option)
     (plan: RoomPos list)
-    : int option =
+    : RoomPos list option =
     match plan with
     | step :: ahead when
         ahead
@@ -177,20 +244,30 @@ let private chasePlan
         | Some aim, Some walk when walk.Room = at.Room ->
             (step :: ahead)
             |> List.pairwise
-            |> List.tryFindIndex (fun (from, tile) ->
+            |> List.indexed
+            |> List.tryPick (fun (i, (from, tile)) ->
                 let from = RoomPos.pos from
 
-                tile.Room = at.Room
-                && chase.Holds(RoomPos.pos tile)
-                && weighed
-                    aim
-                    walk
-                    from
-                    (RoomPos.pos tile)
-                    (Atlas.adjacentWalkableIn atlas at.Room from)
-                    later
-                   |> Option.isSome)
-            |> Option.map ((+) 1)
+                if tile.Room = at.Room && chase.Holds(RoomPos.pos tile) then
+                    let after =
+                        List.tryItem (i + 2) plan
+                        |> Option.filter (fun next -> next.Room = at.Room)
+                        |> Option.map RoomPos.pos
+
+                    weighed
+                        aim
+                        walk
+                        safe
+                        from
+                        (RoomPos.pos tile)
+                        after
+                        (Atlas.adjacentWalkableIn atlas at.Room from)
+                        later
+                    |> Option.map (fun traded ->
+                        List.truncate (i + 1) plan
+                        @ (traded |> Option.map (RoomPos.at at.Room) |> Option.toList))
+                else
+                    None)
         | _ -> None
     | _ -> None
 
@@ -265,7 +342,14 @@ let glueChases (view: ColonyView) atlas (threats: Threats) (assigned: Map<string
         | Some chase ->
             let beside = Atlas.adjacentWalkableIn atlas from.Room (RoomPos.pos from)
 
-            chaseStep chase from beside (Threats.soonestIn threats from.Room) (Some target)
+            chaseStep
+                chase
+                (fun _ -> true)
+                from
+                beside
+                (Threats.soonestIn threats from.Room)
+                (Some target)
+                None
             |> Option.isNone
         | None -> true
 
@@ -1014,7 +1098,20 @@ let private moveIntentFor
                         | Some(Kiting.Keeps _) -> ()
                         | _ -> layChain atlas creep chase later at step extend
 
-                    match chaseStep chase at beside later step with
+                    // The tile its walk takes after the step, where its plan
+                    // names one (`chaseStep` weighs a trade by the walk).
+                    let after =
+                        match Atlas.stepPlanOf atlas creep with
+                        | Some(first :: next :: _) when Some first = step -> Some next
+                        | _ -> None
+
+                    let safe =
+                        match kite with
+                        | Some(Kiting.Keeps(unsafe, _, _)) ->
+                            fun tile -> not (unsafe (indexOf tile))
+                        | _ -> fun _ -> true
+
+                    match chaseStep chase safe at beside later step after with
                     | Some kept ->
                         match kept with
                         | Some tile -> Atlas.recordStep atlas creep (at, tile)
@@ -1026,10 +1123,10 @@ let private moveIntentFor
                         match
                             Atlas.stepPlanOf atlas creep
                             |> Option.filter (fun plan -> step.IsSome && List.tryHead plan = step)
-                            |> Option.bind (chasePlan atlas chase at later)
+                            |> Option.bind (chasePlan atlas chase safe at later)
                         with
-                        | Some count ->
-                            Atlas.keepSteps atlas creep count
+                        | Some kept ->
+                            Atlas.keepSteps atlas creep kept
                             chained step false
                         | None -> chained step true
 
@@ -1648,22 +1745,34 @@ let movementAmong
                 | None when task = Flee -> fleeStep threats atlas name at area (laterOf name at)
                 | None -> stepToward atlas name task area
 
-            // A chaser's, weighed as the full tick weighs it (`chaseStep`).
-            let chased step =
+            // A chaser's, weighed as the full tick weighs it (`chaseStep`),
+            // by the walk its step began.
+            let chased (step, plan) =
                 match chaseOf name at with
                 | Some chase ->
-                    let beside =
-                        Atlas.adjacentWalkableIn atlas at.Room (RoomPos.pos at)
-                        |> List.filter (fun tile ->
-                            match kiting with
-                            | Some(unsafe, _, _) -> not (unsafe (indexOf tile))
-                            | None -> true)
+                    let safe tile =
+                        match kiting with
+                        | Some(unsafe, _, _) -> not (unsafe (indexOf tile))
+                        | None -> true
 
-                    chaseStep chase at beside (laterOf name at) step |> Option.defaultValue step
+                    let beside =
+                        Atlas.adjacentWalkableIn atlas at.Room (RoomPos.pos at) |> List.filter safe
+
+                    let after =
+                        match plan with
+                        | Some(first :: next :: _) when Some first = step -> Some next
+                        | _ -> None
+
+                    chaseStep chase safe at beside (laterOf name at) step after
+                    |> Option.defaultValue step
                 | None -> step
 
+            let walked () =
+                let step = walk ()
+                step, Atlas.stepPlanOf atlas name
+
             if not (Set.contains at area && standsSafe) then
-                match Atlas.withoutRecording atlas name walk |> chased with
+                match Atlas.withoutRecording atlas name walked |> chased with
                 | Some step when step.Room = at.Room && step <> at ->
                     Atlas.recordStep atlas name (at, step)
                 | _ -> ()
