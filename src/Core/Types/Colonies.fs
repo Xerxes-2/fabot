@@ -1291,13 +1291,14 @@ module Colony =
 
     /// The [[sweep]]'s live candidates: one list for the whole bot, run by
     /// the colony `World.harassCasters` names, or refused while none can.
-    /// Switched on for W18S27 and W19S26 (user, 2026-10-08), after the sweep
-    /// replaced stationary harassment (it was off since one stationary ranger
-    /// chasing equal-pace haulers in W19S25 forced 42 of 100 ticks full and
-    /// drained the bucket). Off is `[]`; all of it is `harassDeclared`.
+    /// Switched on for W18S27 and W19S26, then W19S25 (user, 2026-10-08),
+    /// after the sweep replaced stationary harassment (it was off since one
+    /// stationary ranger chasing equal-pace haulers in W19S25 forced 42 of 100
+    /// ticks full and drained the bucket). Off is `[]`; all of it is
+    /// `harassDeclared`.
     let harass: Harass list =
-        harassDeclared
-        |> List.filter (fun h -> h.RoomName = "W18S27" || h.RoomName = "W19S26")
+        let on = set [ "W18S27"; "W19S26"; "W19S25" ]
+        harassDeclared |> List.filter (fun h -> on.Contains h.RoomName)
 
     /// The colonies a human has declared, moved by a human in a commit: an
     /// entry in this list is the whole of "I mean to take that room", and an
