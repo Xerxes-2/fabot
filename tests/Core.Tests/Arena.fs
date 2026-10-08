@@ -356,7 +356,7 @@ type Carried =
         Towered: Set<string>
         ExitWatches: Map<string, ExitWatch>
         Healers: Map<string, HealerSeen list>
-        HostileSteps: Map<string, HostileStep>
+        Quarries: Map<string, Track>
         Raiders: Map<string, RaidSeen>
         PreySeen: Map<string, BodiesSeen>
         ArmedSeen: Map<string, int>
@@ -913,7 +913,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 Towered = Set.empty
                 ExitWatches = Map.empty
                 Healers = Map.empty
-                HostileSteps = Map.empty
+                Quarries = Map.empty
                 Raiders = Map.empty
                 PreySeen = Map.empty
                 ArmedSeen = Map.empty
@@ -1430,6 +1430,7 @@ let private strayGround (name: string) : RoomFacts option =
 let worldOf (a: Arena) : World =
     let tuning = Tuning.defaults
     let rooms = a.Rooms |> Map.map (fun name r -> factsOf a name r)
+    let candidates = a.Harass |> List.map _.RoomName
 
     let sightings =
         a.Rooms
@@ -1462,6 +1463,7 @@ let worldOf (a: Arena) : World =
         Towered = Set.empty
         ExitWatches = Map.empty
         Healers = Map.empty
+        Quarries = Map.empty
         HostileSteps = Map.empty
         Raiders = Map.empty
         PreySeen = Map.empty
@@ -1474,11 +1476,14 @@ let worldOf (a: Arena) : World =
     |> World.latchTowers tuning a.Carried.Towered
     |> World.watchExits tuning a.Carried.ExitWatches
     |> World.recallHealers tuning a.Carried.Healers
-    |> World.recallHostiles tuning.RaidBounceTicks a.Carried.HostileSteps
     |> World.recallRaiders a.Carried.Raiders
-    |> World.recallPrey
-        (World.preyRooms a.Colonies (a.Harass |> List.map _.RoomName))
-        a.Carried.PreySeen
+    |> fun world ->
+        Quarry.recall
+            tuning.RaidBounceTicks
+            (Quarry.watched a.Colonies candidates world)
+            a.Carried.Quarries
+            world
+    |> World.recallPrey (World.preyRooms a.Colonies candidates) a.Carried.PreySeen
     |> World.recallArmed tuning a.Carried.ArmedSeen
     |> World.recallRivalControllers a.Carried.RivalControllers
 
@@ -1760,7 +1765,7 @@ let private decideOurs (a: Arena) : Intent list * Carried =
         Towered = world.Towered
         ExitWatches = world.ExitWatches
         Healers = world.Healers
-        HostileSteps = world.HostileSteps
+        Quarries = world.Quarries
         Raiders = world.Raiders
         PreySeen = world.PreySeen
         ArmedSeen = world.ArmedSeen

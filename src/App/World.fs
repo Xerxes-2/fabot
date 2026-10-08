@@ -1186,7 +1186,8 @@ let ofGame
         ExitWatches = Map.empty
         // And the healer memory `World.recallHealers`' (#480).
         Healers = Map.empty
-        // And each hostile's last step `World.recallHostiles`' (#551).
+        // And the quarry memory and its steps `Quarry.recall`'s (#663).
+        Quarries = Map.empty
         HostileSteps = Map.empty
         // And the raid memory `World.recallRaiders`' (#569).
         Raiders = Map.empty

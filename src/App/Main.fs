@@ -70,9 +70,9 @@ let mutable private exitWatches: Map<string, ExitWatch> = Map.empty
 // heap only, a reset forgetting a handful of ticks.
 let mutable private healers: Map<string, HealerSeen list> = Map.empty
 
-// Each hostile in sight and the tile it left (`World.HostileSteps`, #551):
-// heap only, a reset forgetting one step.
-let mutable private hostileSteps: Map<string, HostileStep> = Map.empty
+// Each foreign body by id, its trajectory and crossings (`World.Quarries`,
+// #663): heap only, a reset forgetting every trip.
+let mutable private quarries: Map<string, Track> = Map.empty
 
 // Each room's raid as last seen (`World.Raiders`, #569): heap only, a reset
 // falling back on the danger log's threat memory.
@@ -760,6 +760,9 @@ let private fullTick
             Rivals = written.Latched
         }
 
+    // The sweep's candidates: rooms whose bodies the world keeps out of sight.
+    let candidates = harassment.Rooms |> List.map _.RoomName
+
     // The tick's World, read out of the engine once, with the previous tick's
     // sightings, tower latch, exit watch and healer memory laid under it.
     let world =
@@ -776,11 +779,14 @@ let private fullTick
         |> World.latchTowers Tuning.defaults towered
         |> World.watchExits Tuning.defaults exitWatches
         |> World.recallHealers Tuning.defaults healers
-        |> World.recallHostiles Tuning.defaults.RaidBounceTicks hostileSteps
         |> World.recallRaiders raiders
-        |> World.recallPrey
-            (World.preyRooms Colony.declared (harassment.Rooms |> List.map _.RoomName))
-            preySeen
+        |> fun world ->
+            Quarry.recall
+                Tuning.defaults.RaidBounceTicks
+                (Quarry.watched Colony.declared candidates world)
+                quarries
+                world
+        |> World.recallPrey (World.preyRooms Colony.declared candidates) preySeen
         |> World.recallArmed Tuning.defaults armedSeen
         |> World.recallRivalControllers rivalControllers
         |> fun world -> { world with Refusals = refusals }
@@ -789,7 +795,7 @@ let private fullTick
     towered <- world.Towered
     exitWatches <- world.ExitWatches
     healers <- world.Healers
-    hostileSteps <- world.HostileSteps
+    quarries <- world.Quarries
     raiders <- world.Raiders
     preySeen <- world.PreySeen
     armedSeen <- world.ArmedSeen

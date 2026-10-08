@@ -4165,8 +4165,7 @@ let shapeOf (body: BodyPart list) : string =
     |> String.concat ""
 
 /// On the room's border ring or the tile in from it: a step from leaving.
-let private onEdge (tile: Pos) =
-    tile.X <= 1 || tile.X >= 48 || tile.Y <= 1 || tile.Y >= 48
+let private onEdge (tile: Pos) = Dance.toEdge tile <= 1
 
 /// One tower shot read against our bodies standing in the room.
 let private aimShot

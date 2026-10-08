@@ -1652,10 +1652,6 @@ module Formation =
     /// keeps clear of both, so a body there has left it.
     let private crossingGap = 1
 
-    /// Tiles from a tile to the nearest edge of its room.
-    let internal edgeGap (tile: Pos) =
-        min (min tile.X (Engine.roomSide - 1 - tile.X)) (min tile.Y (Engine.roomSide - 1 - tile.Y))
-
     /// The range between two tiles across a border too: a member a step
     /// behind its leader over a crossing is beside it. The exit tiles either
     /// side of a border are one tile, the engine carrying a body from one to
@@ -1706,7 +1702,8 @@ module Formation =
             let reach = reachIn from
 
             Atlas.walkableWithinIn atlas from rallyReach middle
-            |> List.filter (fun tile -> edgeGap tile > crossingGap && not (Set.contains tile reach))
+            |> List.filter (fun tile ->
+                Dance.toEdge tile > crossingGap && not (Set.contains tile reach))
             |> Set.ofList
             |> RoomPos.setAt from
 
@@ -1873,7 +1870,7 @@ module Formation =
             tile.Room <> at.Room
             || besideIn atlas tile
                |> Set.exists (fun step ->
-                   edgeGap (RoomPos.pos step) > 0
+                   Dance.toEdge (RoomPos.pos step) > 0
                    && not (Set.contains step held)
                    && not (Set.contains step front)
                    && RoomPos.range step at < RoomPos.range tile at)
@@ -3715,12 +3712,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     Atlas.walkableWithinIn atlas room reach (RoomPos.pos used)
                     // Off the exit and the tile beside it a crossing lands
                     // on: the ground a walk stops short of.
-                    |> List.filter (fun tile ->
-                        min
-                            (min tile.X tile.Y)
-                            (min (Seam.exitEdge - tile.X) (Seam.exitEdge - tile.Y))
-                        >= 2
-                        && not (struck tile))
+                    |> List.filter (fun tile -> Dance.toEdge tile >= 2 && not (struck tile))
                     |> List.sortBy (fun tile ->
                         not (standing.Contains tile),
                         -(covered tile),
@@ -4183,7 +4175,7 @@ let private withAssaults
                         else
                             front
                             |> Seq.collect besideIn
-                            |> Seq.filter (fun step -> Formation.edgeGap (RoomPos.pos step) > 0)
+                            |> Seq.filter (fun step -> Dance.toEdge (RoomPos.pos step) > 0)
                             |> Set.ofSeq
                             |> Set.add tile
 

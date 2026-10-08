@@ -976,9 +976,10 @@ let borderTripTests =
                     ]
                     |> List.fold
                         (fun (previous: World) world ->
-                            World.recallHostiles
+                            Quarry.recall
                                 Tuning.defaults.RaidBounceTicks
-                                previous.HostileSteps
+                                Set.empty
+                                previous.Quarries
                                 world)
                         World.empty
 
@@ -1005,9 +1006,10 @@ let borderTripTests =
                     [ bodyAt 100 (Some(harassRoom, 25, 25)); bodyAt 101 None ]
                     |> List.fold
                         (fun (previous: World) world ->
-                            World.recallHostiles
+                            Quarry.recall
                                 Tuning.defaults.RaidBounceTicks
-                                previous.HostileSteps
+                                Set.empty
+                                previous.Quarries
                                 world)
                         World.empty
 
@@ -1023,9 +1025,10 @@ let borderTripTests =
                     ]
                     |> List.fold
                         (fun (previous: World) world ->
-                            World.recallHostiles
+                            Quarry.recall
                                 Tuning.defaults.RaidBounceTicks
-                                previous.HostileSteps
+                                Set.empty
+                                previous.Quarries
                                 world)
                         World.empty
 

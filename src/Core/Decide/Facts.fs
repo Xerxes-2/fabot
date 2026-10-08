@@ -1891,23 +1891,6 @@ let internal pressedFor (view: ColonyView) (fighter: Fighter) (hostile: HostileI
         pressesFor view fighter hostile
     |> Option.defaultValue System.Int32.MaxValue
 
-/// The odds a body of ours lands the whole of a kill (#621), as the share of
-/// its `kill` ticks the hostile stays in reach. Certain where it cannot walk
-/// off: penned in its room (an Invader), stationary or rooted at its work,
-/// behind the body on plain (#613), or kept off. Else it walks for the
-/// room's edge at its pace, the nearer side of the room its way out: one
-/// quicker on plain stays in reach only until it opens the gap past the
-/// body's reach, from where they stand or, coming in, from the reach; one at
-/// the body's pace is caught at its work; walking elsewhere in the room, only
-/// until its ticks to the edge, from when the body is in reach (#658); and
-/// once it walks off (its last
-/// step took it toward the edge, `ColonyView.Stepped`, and the one before
-/// not away, `ColonyView.SteppedBack`) only from in reach, and then until it is off.
-/// A tile's steps to its room's nearest edge.
-let private toEdgeOf (tile: Pos) =
-    let edge = Engine.roomSide - 1
-    min (min tile.X tile.Y) (min (edge - tile.X) (edge - tile.Y))
-
 /// Whether a hostile dances on its room's border, by its trajectory (#658):
 /// within the depth our reach and its step out cover, it crossed the border
 /// lately (`ColonyView.Bounces`: out and back, either way, a few steps over
@@ -1937,7 +1920,7 @@ let internal dancingOn (view: ColonyView) (hostile: HostileInfo) : bool =
 /// enough, half.
 let internal dancerInShare (view: ColonyView) (hostile: HostileInfo) : float =
     match Map.tryFind hostile.Id view.Bounces with
-    | None when toEdgeOf (RoomPos.pos hostile.Pos) = 0 -> 0.5
+    | None when Dance.toEdge (RoomPos.pos hostile.Pos) = 0 -> 0.5
     | None -> 1.0
     | Some crossed ->
         let inNow = crossed.Came.Room <> hostile.Pos.Room
@@ -2020,6 +2003,18 @@ let internal campOdds
     else
         share * returning
 
+/// The odds a body of ours lands the whole of a kill (#621), as the share of
+/// its `kill` ticks the hostile stays in reach. Certain where it cannot walk
+/// off: penned in its room (an Invader), stationary or rooted at its work,
+/// behind the body on plain (#613), or kept off. Else it walks for the
+/// room's edge at its pace, the nearer side of the room its way out: one
+/// quicker on plain stays in reach only until it opens the gap past the
+/// body's reach, from where they stand or, coming in, from the reach; one at
+/// the body's pace is caught at its work; walking elsewhere in the room, only
+/// until its ticks to the edge, from when the body is in reach (#658); and
+/// once it walks off (its last
+/// step took it toward the edge, `ColonyView.Stepped`, and the one before
+/// not away, `ColonyView.SteppedBack`) only from in reach, and then until it is off.
 let private catchOdds
     (view: ColonyView)
     (fighter: Fighter)
@@ -2040,14 +2035,9 @@ let private catchOdds
     then
         1.0
     else
-        let edge = Engine.roomSide - 1
-
-        let toEdge (tile: Pos) =
-            min (min tile.X tile.Y) (min (edge - tile.X) (edge - tile.Y))
-
         let at = RoomPos.pos hostile.Pos
         let pace = Gait.ticks Gait.plain theirs |> Option.defaultValue 1
-        let off = toEdge at * pace
+        let off = Dance.toEdge at * pace
 
         // A body stepping back and forth in place is caught at its work
         // (live t1,030,4xx, W19S25: two haulers on one four-step dance,
@@ -2057,10 +2047,10 @@ let private catchOdds
             Map.tryFind hostile.Id view.Stepped
             |> Option.exists (fun last ->
                 last.Room = hostile.Pos.Room
-                && toEdge at < toEdge (RoomPos.pos last)
+                && Dance.toEdge at < Dance.toEdge (RoomPos.pos last)
                 && Map.tryFind hostile.Id view.SteppedBack
                    |> Option.forall (fun back ->
-                       toEdge (RoomPos.pos last) <= toEdge (RoomPos.pos back)))
+                       Dance.toEdge (RoomPos.pos last) <= Dance.toEdge (RoomPos.pos back)))
 
         // A body that stepped since the full tick before, not back onto the
         // tile it stood on before that (a dance in place is its work).
@@ -2097,7 +2087,7 @@ let private catchOdds
             // its pace. One on or beside an exit walking out
             // leaves in a step: caught only for what lands before it, from
             // in reach.
-            | _ when toEdge at <= 1 -> off + 1 - max 0 arrival
+            | _ when Dance.toEdge at <= 1 -> off + 1 - max 0 arrival
             | _ when not leaving && walking -> off - max 0 arrival
             | _ when not leaving -> kill
             | _ when arrival > 0 -> 0

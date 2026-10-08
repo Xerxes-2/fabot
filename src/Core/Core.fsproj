@@ -14,6 +14,7 @@
     <Compile Include="Types/Projection.fs" />
     <Compile Include="Types/Colonies.fs" />
     <Compile Include="Types/Sightings.fs" />
+    <Compile Include="Types/Quarry.fs" />
     <Compile Include="Types/Views.fs" />
     <Compile Include="Types/Tasks.fs" />
     <Compile Include="Types/Intents.fs" />

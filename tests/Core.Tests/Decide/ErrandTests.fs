@@ -741,6 +741,7 @@ let errandStandDownTests =
                         Towered = Set.empty
                         ExitWatches = Map.empty
                         Healers = Map.empty
+                        Quarries = Map.empty
                         HostileSteps = Map.empty
                         Raiders = Map.empty
                         PreySeen = Map.empty

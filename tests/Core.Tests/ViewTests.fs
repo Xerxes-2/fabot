@@ -792,11 +792,11 @@ let colonyViewTests =
 
                 let before =
                     seeing 1000 [ stranger "sway" (10, 10); stranger "still" (20, 20) ]
-                    |> World.recallHostiles Tuning.defaults.RaidBounceTicks Map.empty
+                    |> Quarry.recall Tuning.defaults.RaidBounceTicks Set.empty Map.empty
 
                 let now =
                     seeing 1001 [ stranger "sway" (11, 10); stranger "still" (20, 20) ]
-                    |> World.recallHostiles Tuning.defaults.RaidBounceTicks before.HostileSteps
+                    |> Quarry.recall Tuning.defaults.RaidBounceTicks Set.empty before.Quarries
 
                 Expect.equal
                     (viewOf now child).Foreign
@@ -2018,5 +2018,191 @@ let worldViewTests =
                 Expect.isTrue (fst (dangerAfter (10 * hold) "Invader")) "an Invader's, for its life"
 
                 Expect.isFalse (fst (dangerAfter 1 "giaco")) "a neutral's shuts nothing"
+            }
+        ]
+
+// ---- the quarry memory (#663) --------------------------------------------
+
+/// The watched room the quarry is seen in, and the dark room west of it
+/// across its X = 0 border.
+let private quarryRoom = "W12S29"
+
+/// One body of a rival's, at a tile, with this life left.
+let private quarryBody (ttl: int) (room: string, x, y) : HostileInfo =
+    {
+        Id = "quarry"
+        Owner = "Trepidimous"
+        Pos = RoomPos.at room { X = x; Y = y }
+        Body = [ Carry; Move ]
+        Boosts = []
+        Hits = 2 * Engine.partHits
+        TicksToLive = ttl
+    }
+
+/// The world on `tick` with these rooms in sight, each with what stands in
+/// it, and these tombstones in the first; every other room dark.
+let private sightAt (tick: int) (rooms: (string * HostileInfo list) list) (fallen: string list) =
+    { World.empty with
+        Time = tick
+        Rooms =
+            rooms
+            |> List.mapi (fun i (room, hostiles) ->
+                room,
+                { RoomFacts.empty with
+                    Hostiles = hostiles
+                    Fallen = if i = 0 then fallen else []
+                })
+            |> Map.ofList
+        Sightings =
+            rooms
+            |> List.map (fun (room, _) ->
+                room,
+                {
+                    Tick = tick
+                    Targets = lazy Set.empty
+                    Rival = None
+                })
+            |> Map.ofList
+    }
+
+/// The world after these ticks folded from none, `quarryRoom` watched.
+let private quarriesThrough (worlds: World list) : World =
+    worlds
+    |> List.fold
+        (fun (previous: World) world ->
+            Quarry.recall
+                Tuning.defaults.RaidBounceTicks
+                (Set.singleton quarryRoom)
+                previous.Quarries
+                world)
+        World.empty
+
+let private goneOf (world: World) =
+    Map.tryFind "quarry" world.Quarries |> Option.map _.Gone
+
+[<Tests>]
+let quarryTests =
+    testList
+        "a foreign body is remembered by id until it is known gone"
+        [
+            test
+                "a body in a dark watched room is kept until its life runs out, then aged, then dropped" {
+                let seen = sightAt 100 [ quarryRoom, [ quarryBody 100 (quarryRoom, 25, 25) ] ] []
+                let dark tick = sightAt tick [] []
+
+                Expect.equal (goneOf (quarriesThrough [ seen; dark 150 ])) (Some None) "dark, kept"
+
+                Expect.equal
+                    (goneOf (quarriesThrough [ seen; dark 150; dark 200 ]))
+                    (Some(Some Gone.Aged))
+                    "its life out: aged"
+
+                Expect.isNone
+                    (goneOf (quarriesThrough [ seen; dark 150; dark 200; dark 201 ]))
+                    "dropped the fold after"
+            }
+
+            test "a body whose life could not be read lives a whole lifetime from its sighting" {
+                // The engine leaves a spawning body's `ticksToLive` undefined;
+                // read as no positive number (0 here, where .NET has no undefined).
+                let seen = sightAt 100 [ quarryRoom, [ quarryBody 0 (quarryRoom, 25, 25) ] ] []
+                let dark tick = sightAt tick [] []
+
+                Expect.equal
+                    (goneOf (quarriesThrough [ seen; dark 150 ]))
+                    (Some None)
+                    "not aged at once"
+
+                Expect.equal
+                    (goneOf (quarriesThrough [ seen; dark (100 + Engine.creepLifetime) ]))
+                    (Some(Some Gone.Aged))
+                    "aged a lifetime on"
+            }
+
+            test
+                "a look that finds it nowhere marks it seen gone and drops it after; seen again, it is back" {
+                let seen = sightAt 100 [ quarryRoom, [ quarryBody 1000 (quarryRoom, 25, 25) ] ] []
+                let empty tick = sightAt tick [ quarryRoom, [] ] []
+
+                Expect.equal
+                    (goneOf (quarriesThrough [ seen; empty 101 ]))
+                    (Some(Some Gone.SeenGone))
+                    "its room in sight, it stands nowhere"
+
+                Expect.isNone
+                    (goneOf (quarriesThrough [ seen; empty 101; empty 102 ]))
+                    "dropped after"
+
+                Expect.equal
+                    (goneOf (
+                        quarriesThrough
+                            [
+                                seen
+                                empty 101
+                                sightAt
+                                    102
+                                    [ quarryRoom, [ quarryBody 998 (quarryRoom, 24, 25) ] ]
+                                    []
+                            ]
+                    ))
+                    (Some None)
+                    "seen again, not gone"
+            }
+
+            test "a body dancing one step over the border is not seen gone while its trip lasts" {
+                let seen = sightAt 100 [ quarryRoom, [ quarryBody 1000 (quarryRoom, 1, 20) ] ] []
+
+                Expect.equal
+                    (goneOf (quarriesThrough [ seen; sightAt 101 [ quarryRoom, [] ] [] ]))
+                    (Some None)
+                    "its room in sight, the room across dark: it may only have stepped out"
+            }
+
+            test "a tombstone marks it fallen" {
+                let seen = sightAt 100 [ quarryRoom, [ quarryBody 1000 (quarryRoom, 25, 25) ] ] []
+
+                Expect.equal
+                    (goneOf (quarriesThrough [ seen; sightAt 101 [ quarryRoom, [] ] [ "quarry" ] ]))
+                    (Some(Some Gone.Fallen))
+                    "its tombstone read"
+            }
+
+            test "a trip that ends leaves no steps, and the body seen again starts afresh" {
+                let seen = sightAt 100 [ quarryRoom, [ quarryBody 1000 (quarryRoom, 2, 20) ] ] []
+                let ended = 100 + Tuning.defaults.RaidBounceTicks + 1
+
+                let back tick =
+                    sightAt tick [ quarryRoom, [ quarryBody 900 (quarryRoom, 3, 20) ] ] []
+
+                let over = quarriesThrough [ seen; sightAt ended [] [] ]
+
+                Expect.equal
+                    (Map.tryFind "quarry" over.Quarries |> Option.map _.Trail)
+                    (Some [])
+                    "kept for its watched room, its trail forgotten"
+
+                Expect.isFalse (Map.containsKey "quarry" over.HostileSteps) "no step memory"
+
+                Expect.equal
+                    (Map.tryFind "quarry" (quarriesThrough [ seen; back 120 ]).HostileSteps
+                     |> Option.bind _.Left)
+                    (Some(RoomPos.at quarryRoom { X = 2; Y = 20 }))
+                    "inside the trip, the tile it left"
+
+                Expect.equal
+                    (Map.tryFind
+                        "quarry"
+                        (quarriesThrough [ seen; sightAt ended [] []; back (ended + 1) ])
+                            .HostileSteps)
+                    (Some
+                        {
+                            At = RoomPos.at quarryRoom { X = 3; Y = 20 }
+                            Left = None
+                            Back = None
+                            Since = ended + 1
+                            Seen = ended + 1
+                            Crossed = None
+                        })
+                    "after it, afresh"
             }
         ]
