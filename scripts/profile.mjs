@@ -5794,6 +5794,18 @@ if (unprojected.length) {
     ["world", observe.world],
     ["positions", observe.positions],
     ["reactor", observe.reactor],
+    // The operation ledger (#662), off the heap as the two logs are; its
+    // forced CPU is milliseconds, fingerprinted out.
+    [
+      "ledger",
+      observe.ledger &&
+        Object.fromEntries(
+          Object.entries(observe.ledger).map(([part, rows]) => [
+            part,
+            Array.isArray(rows) ? rows.map(({ forced, ...row }) => ({ ...row, forced: forced?.[0] })) : rows,
+          ]),
+        ),
+    ],
     ["cpu ticks", (observe.cpu?.ticks ?? []).map((row) => row.t)],
   ];
   console.log(

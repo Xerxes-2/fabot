@@ -4,9 +4,10 @@
 // the bundle's own constants.
 
 /// Each log's segment ids, in order (`ObserveMemory.creepSegments`,
-/// `ObserveMemory.cpuSegments`, and the rival dossier's
-/// `ObserveMemory.rivalSegments`, #653).
-export const SEGMENTS = { creeps: [0, 1, 2, 3], cpu: [4, 5], rivals: [6, 7] };
+/// `ObserveMemory.cpuSegments`, the rival dossier's
+/// `ObserveMemory.rivalSegments`, #653, and the operation ledger's
+/// `ObserveMemory.ledgerSegments`, #662).
+export const SEGMENTS = { creeps: [0, 1, 2, 3], cpu: [4, 5], rivals: [6, 7], ledger: [8] };
 
 /// Ticks between two segment writes (`ObserveMemory.segmentEvery`): how
 /// stale a log read off the segments may be on a healthy bot.

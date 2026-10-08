@@ -100,6 +100,14 @@
 //                                       towers' picks and energy, rampart
 //                                       upkeep, safe modes, defence response,
 //                                       its workers' flight, its raids
+//   observe.mjs ledger [--json]         the operation ledger (#662): each open
+//                                       and recent sweep spell, camp, trespass
+//                                       kill and defended raid — our spend
+//                                       (casts, losses, forced ticks) against
+//                                       the rival's loss (kills, remote
+//                                       downtime, answering defenders), their
+//                                       ratio, and the rate predicted at its
+//                                       open against the one realised
 // Every read takes --json to emit the raw stored structure for jq.
 //
 // `raids`, `outposts`, `layout`, `quotas` and `breaches` are one colony's
@@ -244,7 +252,7 @@ const usage =
   "fight-only [on | off | clear] | " +
   "console --seconds N | eval '<expr>' [--seconds N] | room <name> [--json] | " +
   "wait --ticks N | health [--colony <home>] [--samples K] | " +
-  "history <room> <tick> [--json] | probe [--json] | rivals [--json]";
+  "history <room> <tick> [--json] | probe [--json] | rivals [--json] | ledger [--json]";
 
 const rawArgs = process.argv.slice(2);
 const json = rawArgs.includes("--json");
@@ -295,6 +303,7 @@ const ACCEPTS = {
   history: ["--json"],
   probe: ["--json"],
   rivals: ["--json"],
+  ledger: ["--json"],
 };
 
 if (!Object.hasOwn(ACCEPTS, command ?? "")) fail(usage);
@@ -1045,6 +1054,21 @@ if (command === "console") {
     } else {
       printDossiers(dossiers, now);
     }
+  }
+} else if (command === "ledger") {
+  // ---- ledger: the operation ledger (#662) ------------------------------
+
+  // The wire `ObserveMemory.encodeLedger` writes to its memory segment:
+  // { open: [row], closed: [row] }, open oldest first, closed newest first.
+  const read = await logLeaf("ledger");
+  const ledger = read != null && typeof read === "object" && !Array.isArray(read) ? read : undefined;
+  if (ledger === undefined) {
+    fail(`no operation ledger in ${logPlace("ledger")} — the deployed bundle predates #662`);
+  }
+  if (json) {
+    console.log(JSON.stringify(ledger, null, 2));
+  } else {
+    printLedger(ledger);
   }
 } else if (command === "verbose" || command === "draw") {
   // ---- verbose / draw: a name list, read and written in place ------------
@@ -3347,6 +3371,61 @@ function printControllers(stored, now) {
 // sum, shortest, longest, ended]`, an aim `[open, hit]` — of the picks whose
 // candidates differed on a question, the ones that picked the body that had
 // it.
+// The operation ledger (#662), a line a row: our spend against the rival's
+// loss, their ratio, and the price read at the open against the one
+// realised. Spend is the energy of the bodies cast for it and the life the
+// lent bodies it lost had left (the replacement each loss forces; a cast
+// body's loss is in its energy already); loss is the kill value of its
+// bodies that fell, the income its remote stood unworked while we held it,
+// and the cost of the answering defenders not killed (a killed one is a
+// kill). The realised rate is the kills and the downtime over the ticks it
+// ran, the predicted the room's rate for its group at the open. A sweep's
+// camp is a sub-line of its row. The forced ticks' CPU is those whole
+// ticks' by the fold, not the forcing's margin.
+function printLedger(ledger) {
+  const rows = (part) => (Array.isArray(ledger[part]) ? ledger[part] : []);
+  const open = rows("open");
+  const closed = rows("closed");
+  const n = (array, i) => (Array.isArray(array) && typeof array[i] === "number" ? array[i] : 0);
+  const fixed = (value, digits = 0) => (typeof value === "number" ? value.toFixed(digits) : "-");
+  const evicted = typeof ledger.evicted === "number" && ledger.evicted > 0 ? `, ${ledger.evicted} evicted` : "";
+  console.log(`ledger   ${open.length} open, ${closed.length} closed${evicted} (${logPlace("ledger")})`);
+  const line = (row) => {
+    const ran = Math.max(1, (row.e ?? row.l) - row.s);
+    const spend = n(row.cast, 1) + n(row.lostLent, 2);
+    const loss = n(row.kills, 1) + n(row.down, 1) + n(row.ans, 1);
+    const ratio = spend > 0 ? (loss / spend).toFixed(2) : loss > 0 ? "inf" : "-";
+    const realised = (n(row.kills, 1) + n(row.down, 1)) / ran;
+    const p = row.p ?? {};
+    const answered =
+      n(row.ans, 0) > 0 ? `, answered ${n(row.ans, 0)} = ${n(row.ans, 1)}${row.resp != null ? ` in ${row.resp}t` : ""}` : "";
+    const camp =
+      typeof p.odds === "number" || n(row.camp, 0) > 0
+        ? `\n      camp  odds ${fixed(p.odds, 2)}, kills ${n(row.camp, 0)} = ${fixed(n(row.camp, 1))}`
+        : "";
+    return (
+      `  ${String(row.k).padEnd(8)} ${String(row.r).padEnd(7)} t${row.s} +${ran}` +
+      `${row.e != null ? ` closed t${row.e}` : ""}\n` +
+      `      spend ${fixed(spend)}: cast ${n(row.cast, 0)} = ${n(row.cast, 1)}e/${n(row.cast, 2)}t, ` +
+      `lent ${row.join ?? 0}, lost cast ${n(row.lostCast, 0)} = ${n(row.lostCast, 1)}e, ` +
+      `lost lent ${n(row.lostLent, 0)} = ${n(row.lostLent, 1)}e (${fixed(n(row.lostLent, 2))} life)\n` +
+      `      loss  ${fixed(loss)}: kills ${n(row.kills, 0)} = ${fixed(n(row.kills, 1))}, ` +
+      `down ${n(row.down, 0)}t = ${fixed(n(row.down, 1))}${answered}${camp}\n` +
+      `      ratio ${ratio}  rate ${fixed(p.rate, 2)} predicted / ${realised.toFixed(2)} realised` +
+      `  value ${fixed(p.value, 2)}` +
+      `  forced ${n(row.forced, 0)}, tick CPU ${fixed(n(row.forced, 1), 1)} ms`
+    );
+  };
+  if (open.length > 0) {
+    console.log("open");
+    for (const row of open) console.log(line(row));
+  }
+  if (closed.length > 0) {
+    console.log("recent");
+    for (const row of closed.slice(0, 20)) console.log(line(row));
+  }
+}
+
 function printDossiers(dossiers, now) {
   const tally = (t, what) => (Array.isArray(t) && t[0] > 0 ? `${what} ${t[0]} (last t${t[1]})` : undefined);
   const span = (s, what) =>

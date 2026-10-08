@@ -380,6 +380,10 @@ and [<NoEquality; NoComparison>] Job =
         /// What a tick of its bodies' effort earns, in energy (#663 M3), read
         /// on first use.
         Value: Lazy<float>
+        /// The odds its value is priced at, where it is priced at any (a
+        /// camp's, `Facts.campPrice`), read with it: what the operation
+        /// ledger records once the value is read (#662).
+        Odds: Lazy<float option>
         /// The hostiles it is about, by id: a kill's head or its prey, a
         /// camp's dancer, a ring's raid, a muster's escort.
         Quarry: string list
@@ -691,6 +695,7 @@ module Job =
             Approach = lazy Set.empty
             Seats = fun _ -> { Count = 0; Rows = [] }
             Value = value
+            Odds = lazy None
             Quarry = quarry
         }
 
@@ -4045,12 +4050,16 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 with
                 | [] -> None
                 | tiles ->
+                    let price = lazy (Facts.campPrice view room team dancer)
+
                     Some(
-                        Job.laid
-                            JobKind.Camp
-                            (tiles |> Set.ofList |> RoomPos.setAt room)
-                            [ dancer.Id ]
-                            (lazy (Facts.campValue view room team dancer))
+                        { Job.laid
+                              JobKind.Camp
+                              (tiles |> Set.ofList |> RoomPos.setAt room)
+                              [ dancer.Id ]
+                              (lazy (fst price.Value)) with
+                            Odds = lazy (snd price.Value)
+                        }
                     )
 
     // The jobs one room's Guard reads (#663 M3), from its kind down

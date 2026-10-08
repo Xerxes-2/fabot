@@ -1824,6 +1824,14 @@ type ColonyDecisions<'Stamp> =
         /// Each faulted colony's towers, safe mode and rampart doors
         /// (`towersAlone`): no replay repeats a structure's fight.
         Towers: (string * Intent list) list
+        /// Whether every colony opened a whole decide this tick: none
+        /// replayed, none fought alone, none threw. Only such a tick is
+        /// folded into the operation ledger.
+        Whole: bool
+        /// What the operation ledger reads of this tick's decide
+        /// (`Ledger.observe`), on first read: the shell's alone, after
+        /// every decision, on a tick every colony fought.
+        Operations: Lazy<Ledger.Observed>
     }
 
 /// One colony's step run alone: its throw is its own fault, handed back
@@ -1883,11 +1891,12 @@ let judgeColonies
 /// handed the owner's Brief of each such Task it pools none of in a room it
 /// projects. An Assault stays its declarer's alone. Beside each colony's
 /// fight, each Task's owner, whose ask the Caster weighs (`Caster.assign`);
-/// no colony's casts yet.
+/// no colony's casts yet. And each Task's owner's Brief with its view, as
+/// the operation ledger reads them (`Ledger.observe`).
 let private worldFights
     (hops: string -> string -> int option)
     (openings: (Colony * Opening) list)
-    : Map<string, WorldFight> * Map<Task, string> =
+    : Map<string, WorldFight> * Map<Task, string> * (Task * Brief * ColonyView) list =
     let claims =
         openings
         |> List.collect (fun (colony, opening) ->
@@ -2022,7 +2031,12 @@ let private worldFights
             Casts = None
         })
     |> Map.ofList,
-    owned |> List.map (fun (task, (_, owner, _, _), _) -> task, owner) |> Map.ofList
+    owned |> List.map (fun (task, (_, owner, _, _), _) -> task, owner) |> Map.ofList,
+    owned
+    |> List.choose (fun (task, (_, owner, brief, _), _) ->
+        openings
+        |> List.tryFind (fun (colony, _) -> colony.Home = owner)
+        |> Option.map (fun (_, opening) -> task, brief, opening.View))
 
 /// A faulted colony's structures' fight alone (#628): its towers' fire and
 /// heal, safe mode and the rampart doors, off its view and a fresh Atlas,
@@ -2146,7 +2160,7 @@ let private decideWorld
     // their Tasks as an idle colony's do.
     let unopened = fightFaults @ openFaults |> List.map _.Colony |> Set.ofList
 
-    let fights, owners =
+    let fights, owners, briefs =
         worldFights inputs.Hops (opened |> List.map (fun (colony, _, opening) -> colony, opening))
 
     stampAs worldLane
@@ -2336,6 +2350,8 @@ let private decideWorld
         TurnWaits = turnWaits
         Faulted = faults @ towerFaults
         Towers = towers
+        Whole = List.length whole = List.length colonies
+        Operations = lazy (Ledger.observe judged briefs fleet.Assigned)
     }
 
 /// Every colony's tick decided: the views judged (`judgeColonies`), then the

@@ -30,6 +30,7 @@
     <Compile Include="Decide/Labs.fs" />
     <Compile Include="Decide/Facts.fs" />
     <Compile Include="Decide/Threat.fs" />
+    <Compile Include="Decide/Ledger.fs" />
     <Compile Include="Decide/Planner.fs" />
     <Compile Include="Decide/Price.fs" />
     <Compile Include="Decide/Quota.fs" />

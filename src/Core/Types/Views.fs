@@ -306,6 +306,11 @@ type WorldView =
         /// bodies landing from other colonies among them. Empty until the
         /// views are swept.
         SweepGroup: (CreepInfo * RoomPos) list
+        /// The rate the [[sweep]]'s choice priced its room at
+        /// (`Facts.sweepChoice`, #662): what the operation ledger reads as a
+        /// sweep's price. Nothing until the views are swept, or where no
+        /// room pays.
+        SweepRate: float
         /// Each room a guard or ranger of ours was last lost in, the latest of
         /// every colony's raid log (`StandDown.FighterLost`), the larger cast
         /// on one tick: a room's recast cooldown is the room's, whichever
@@ -327,6 +332,7 @@ module WorldView =
             Flees = Map.empty
             Worths = None
             SweepGroup = []
+            SweepRate = 0.0
             FighterLost = Map.empty
             Questioned = Set.empty
             Observers = []
@@ -462,6 +468,7 @@ module WorldView =
             Flees = Map.empty
             Worths = None
             SweepGroup = []
+            SweepRate = 0.0
             FighterLost =
                 (Map.empty, gates)
                 ||> List.fold (fun lost gate ->

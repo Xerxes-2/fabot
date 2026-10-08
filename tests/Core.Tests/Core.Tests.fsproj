@@ -80,6 +80,7 @@
     <Compile Include="Decide/ThreatTowerTests.fs" />
     <Compile Include="Decide/ThreatSafeModeTests.fs" />
     <Compile Include="Decide/ThreatDefenderTests.fs" />
+    <Compile Include="Decide/LedgerTests.fs" />
     <Compile Include="Decide/AnchorFixtures.fs" />
     <Compile Include="Decide/AnchorPinTests.fs" />
     <Compile Include="Decide/AnchorPostTests.fs" />
@@ -124,6 +125,7 @@
     <Compile Include="ArenaReactorTests.fs" />
     <Compile Include="ArenaClaimTests.fs" />
     <Compile Include="ArenaStrongholdTests.fs" />
+    <Compile Include="ArenaLedgerTests.fs" />
     <Compile Include="Spar.fs" />
     <Compile Include="ParallelSafetyTests.fs" />
   </ItemGroup>

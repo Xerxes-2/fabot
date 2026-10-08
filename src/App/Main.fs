@@ -119,6 +119,21 @@ let mutable private observeLog: Observe.ObserveState option = None
 // segments.
 let mutable private rivalDossier: Observe.Rivals option = None
 
+// The operation ledger on the heap (#662), on the dossier's terms: restored
+// off its segment on a cold heap, None until it is read, folded on full
+// ticks and written with the segments.
+let mutable private ledger: Decide.Ledger.Ledger option = None
+
+// The ledger's faults this heap has recorded, by row and message: a throw
+// that recurs every full tick is recorded once, so it neither floods the
+// fault ring nor writes the segments every tick.
+let mutable private ledgerFaults: Set<string> = Fresh.setOfSeq Seq.empty
+
+// What the forced ticks since the ledger's last fold carry to its next: their
+// forcings, and the bodies they saw fall.
+let mutable private ledgerForcings: Decide.Ledger.Forcing list = []
+let mutable private ledgerFallen: Set<string> = Fresh.setOfSeq Seq.empty
+
 [<Emit("globalThis")>]
 let private globalThis: obj = jsNative
 
@@ -1663,6 +1678,96 @@ let private fullTick
             recordFaults [ faultRow "" "rivals" error ]
             rivalDossier <- Some(Observe.Rivals.ofDossiers prior.Dossiers)
     | None -> ()
+
+    // The operation ledger (#662): what each sweep, camp, trespass kill and
+    // defended raid cost us and the rival, off what this tick's decide
+    // priced. Read by `observe.mjs ledger` and by nothing here. A row whose
+    // fold throws stands as it was (`Ledger.fold`); a throw outside the rows
+    // costs this tick's fold, never the rows. Each is recorded once a heap.
+    let ledgerFault (where: string) (message: string) =
+        let key = where + "|" + message
+
+        if not (ledgerFaults.Contains key) then
+            ledgerFaults <- Fresh.setOfSeq (Seq.append ledgerFaults [ key ])
+
+            recordFaults
+                [
+                    faultRow
+                        ""
+                        "ledger"
+                        (exn (if where = "" then message else $"{where}: {message}"))
+                ]
+
+    // This tick's forcing, kept for the next whole tick's fold.
+    let forcing: Decide.Ledger.Forcing list =
+        forcedBy
+        |> Option.map (fun (_, _, reasons) ->
+            ({
+                Rooms =
+                    reasons
+                    |> List.choose (function
+                        | LightTick.LightForce.Home(room, _)
+                        | LightTick.LightForce.Hostile(room, _) -> Some room
+                        | _ -> None)
+                    |> Set.ofList
+                Creeps =
+                    reasons
+                    |> List.collect (function
+                        | LightTick.LightForce.Chase creep
+                        | LightTick.LightForce.HitsLost creep
+                        | LightTick.LightForce.OnBorder creep -> [ creep ]
+                        | LightTick.LightForce.CreepsChanged creeps -> creeps
+                        | _ -> [])
+                    |> Set.ofList
+                Cpu = Game.cpu.getUsed ()
+            }
+            : Decide.Ledger.Forcing))
+        |> Option.toList
+
+    // Only a whole tick folds (`ColonyDecisions.Whole`): on a forced tick a
+    // colony replayed or fought alone, and its Briefs are not the world's.
+    // Such a tick keeps its forcing and the bodies it saw fall, a few
+    // entries, for the next whole tick.
+    if not colonyDecisions.Whole then
+        // Bounded by the cadence; the cap only guards a run of forced ticks.
+        ledgerForcings <- forcing @ ledgerForcings |> List.truncate Decide.Ledger.capOpen
+
+        ledgerFallen <-
+            world.Quarries
+            |> Map.toSeq
+            |> Seq.choose (fun (id, track) ->
+                if track.Gone = Some Gone.Fallen then Some id else None)
+            |> Seq.append ledgerFallen
+            |> Fresh.setOfSeq
+    else
+        match ledger |> Option.orElseWith ObserveMemory.restoreLedger with
+        | Some prior ->
+            try
+                let folded, faults =
+                    Decide.Ledger.fold
+                        {
+                            Time = world.Time
+                            Window = Tuning.defaults.RaidBounceTicks
+                            Living = living
+                            Quarries = world.Quarries
+                            Fallen = ledgerFallen
+                            Forcing = forcing @ ledgerForcings
+                            Observed = colonyDecisions.Operations.Force()
+                        }
+                        prior
+
+                for key, message in faults do
+                    ledgerFault $"{key.Kind} {key.Room} t{key.Start}" message
+
+                ledger <- Some folded
+                ObserveMemory.saveLedger folded
+            with error ->
+                ledgerFault "" error.Message
+                ledger <- Some prior
+        | None -> ()
+
+        ledgerForcings <- []
+        ledgerFallen <- Fresh.setOfSeq Seq.empty
 
     // A given-up colony's leaf and the flat legacy log, which nothing writes:
     // every home neither declared nor living (an undeclared spawn room, when

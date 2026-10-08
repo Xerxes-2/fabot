@@ -4254,25 +4254,49 @@ let sweepDancer
 
             dancer, entries)
 
-/// What camping a border dancer earns a tick (#663 M3): its kill value at the
-/// camp's odds (`campOdds`, its best body's: the camp lands while any body
-/// of the team strikes it) over the ticks the team's kill of it takes
-/// (`killTicksOf`), priced as the [[sweep]] prices the room (`sweepPricing`);
-/// nothing for a kill the team never lands, or no team. `dancer` is the
-/// body as `sweepDancer` names it.
-let campValue (view: ColonyView) (room: string) (team: Fighter list) (dancer: HostileInfo) : float =
+/// The odds a camp on a border dancer lands (#663 M3) and the ticks the
+/// team's kill of it takes (`killTicksOf`): its best body's odds
+/// (`campOdds`: the camp lands while any body of the team strikes it),
+/// priced as the [[sweep]] prices the room (`sweepPricing`); none for a kill
+/// the team never lands, or no team. `dancer` is the body as `sweepDancer`
+/// names it.
+let private campChance
+    (view: ColonyView)
+    (room: string)
+    (team: Fighter list)
+    (dancer: HostileInfo)
+    : (float * int) option =
     let priced = sweepPricing view room
     let healOn = healReachingWithin priced room priced.Tuning.ReachHorizon
 
     match team, killTicksOf priced healOn team dancer with
     | [], _
-    | _, None -> 0.0
+    | _, None -> None
     | team, Some kill ->
         let odds =
             team
             |> List.fold (fun best fighter -> max best (campOdds priced fighter kill dancer)) 0.0
 
-        min 1.0 odds * killValue priced dancer / float (max 1 kill)
+        Some(min 1.0 odds, kill)
+
+/// What camping a border dancer earns a tick (#663 M3), and the camp's odds
+/// it is priced at (`campChance`): its kill value at those odds over the
+/// ticks its kill takes; nothing for a kill the team never lands, or no
+/// team, at no odds.
+let campPrice
+    (view: ColonyView)
+    (room: string)
+    (team: Fighter list)
+    (dancer: HostileInfo)
+    : float * float option =
+    match campChance view room team dancer with
+    | None -> 0.0, None
+    | Some(odds, kill) ->
+        odds * killValue (sweepPricing view room) dancer / float (max 1 kill), Some odds
+
+/// `campPrice`'s value.
+let campValue (view: ColonyView) (room: string) (team: Fighter list) (dancer: HostileInfo) : float =
+    campPrice view room team dancer |> fst
 
 /// The ticks a body standing at `from` walks to a room at its plain `pace`
 /// (#658): none in the room or on its border's doorstep (the tile beside it,
@@ -5560,6 +5584,75 @@ let fighterCast
 let internal castFighters (cast: FighterCast) : Fighter list =
     List.replicate cast.Bodies (blocksFighter (patternOfTemplate cast.Template) cast.Blocks)
 
+/// What the chooser's cast for a room earns there a tick (`fighterCast`,
+/// #663 M4), read as a cast (`Quarry.Reading.Cast`), landed after its spawns
+/// (`spawnRounds`) and its slowest body's walk from the colony's home;
+/// nothing for a cast that ends no fight there or casts no body.
+let private castRateIn (view: ColonyView) (room: string) : float =
+    let cast = fighterCast view room bodyTemplates Engine.guardCap
+    let team = castFighters cast
+    let home = RoomPos.at (SpatialInfo.homeName view.Spatial) { X = 25; Y = 25 }
+
+    match team with
+    | _ when not cast.Ends -> 0.0
+    | [] -> 0.0
+    | team ->
+        match doorTicks home (team |> List.map paceOf |> List.max) room with
+        | System.Int32.MaxValue -> 0.0
+        | walk ->
+            roomRate
+                Quarry.Reading.Cast
+                view
+                team
+                0
+                (spawnRounds view cast.Template cast.Blocks cast.Bodies + walk)
+                room
+
+/// What a group standing where it stands earns in a room a tick
+/// (`roomRate`, each body at its odds), its arrival its slowest body's walk
+/// (`doorTicks`); nothing off the grid.
+let private groupRateIn
+    (view: ColonyView)
+    (placed: (RoomPos * Fighter) list)
+    (dismantle: int)
+    (room: string)
+    : float =
+    match placed |> List.map (fun (at, fighter) -> doorTicks at (paceOf fighter) room) with
+    | [] -> 0.0
+    | arrivals ->
+        match List.max arrivals with
+        | System.Int32.MaxValue -> 0.0
+        | arrival -> roomRate Quarry.Reading.Value view (List.map snd placed) dismantle arrival room
+
+/// Each candidate the views work with the rate its group earns there
+/// (`sweepChoice`), in the order the views name them.
+let private sweepRates (held: Assignments) (views: ColonyView list) : (string * float) list =
+    match views |> List.filter (fun view -> not (List.isEmpty view.Harass)) with
+    | [] -> []
+    | working ->
+        let group = sweepBodies held working
+        let placed = group |> List.map (fun (creep, at) -> at, Fighter.ofCreep creep)
+        let dismantle = dismantleOf (List.map fst group)
+
+        let rateIn (room: string) =
+            let workers =
+                working
+                |> List.filter (fun view -> view.Harass |> List.exists (fun h -> h.RoomName = room))
+
+            match placed with
+            | [] -> workers |> List.map (fun view -> castRateIn view room) |> List.max
+            | placed ->
+                groupRateIn
+                    (worthOwner views room |> Option.defaultValue (List.head workers))
+                    placed
+                    dismantle
+                    room
+
+        working
+        |> List.collect (fun view -> view.Harass |> List.map _.RoomName)
+        |> List.distinct
+        |> List.map (fun room -> room, rateIn room)
+
 /// ADR-0093
 /// The [[sweep]]'s room (#658), one for every colony: of the candidates the
 /// views work (`ColonyView.Harass`), the one its group's effort earns the
@@ -5578,63 +5671,15 @@ let internal castFighters (cast: FighterCast) : Fighter list =
 /// cast is the fight's to price. The room the group stands in costs no walk, so
 /// it keeps the group until what it earns there runs out or another room's
 /// net of the walk pays more: no stored room, no hysteresis band.
+let private sweepPick (held: Assignments) (views: ColonyView list) : (string * float) option =
+    sweepRates held views
+    |> List.filter (fun (_, rate) -> rate > 0.0)
+    |> List.sortBy (fun (room, rate) -> -rate, room)
+    |> List.tryHead
+
+/// `sweepPick`'s room.
 let sweepChoice (held: Assignments) (views: ColonyView list) : string option =
-    match views |> List.filter (fun view -> not (List.isEmpty view.Harass)) with
-    | [] -> None
-    | working ->
-        let group = sweepBodies held working
-        let placed = group |> List.map (fun (creep, at) -> at, Fighter.ofCreep creep)
-        let dismantle = dismantleOf (List.map fst group)
-
-        let castIn (view: ColonyView) (room: string) =
-            let cast = fighterCast view room bodyTemplates Engine.guardCap
-            let team = castFighters cast
-            let home = RoomPos.at (SpatialInfo.homeName view.Spatial) { X = 25; Y = 25 }
-
-            if not cast.Ends then
-                0.0
-            else
-                match doorTicks home (team |> List.map paceOf |> List.max) room with
-                | System.Int32.MaxValue -> 0.0
-                | walk ->
-                    roomRate
-                        Quarry.Reading.Cast
-                        view
-                        team
-                        0
-                        (spawnRounds view cast.Template cast.Blocks cast.Bodies + walk)
-                        room
-
-        let rateIn (room: string) =
-            let workers =
-                working
-                |> List.filter (fun view -> view.Harass |> List.exists (fun h -> h.RoomName = room))
-
-            match placed with
-            | [] -> workers |> List.map (fun view -> castIn view room) |> List.max
-            | placed ->
-                let arrivals =
-                    placed |> List.map (fun (at, fighter) -> doorTicks at (paceOf fighter) room)
-
-                match List.max arrivals with
-                | System.Int32.MaxValue -> 0.0
-                | arrival ->
-                    roomRate
-                        Quarry.Reading.Value
-                        (worthOwner views room |> Option.defaultValue (List.head workers))
-                        (List.map snd placed)
-                        dismantle
-                        arrival
-                        room
-
-        working
-        |> List.collect (fun view -> view.Harass |> List.map _.RoomName)
-        |> List.distinct
-        |> List.map (fun room -> room, rateIn room)
-        |> List.filter (fun (_, rate) -> rate > 0.0)
-        |> List.sortBy (fun (room, rate) -> -rate, room)
-        |> List.tryHead
-        |> Option.map fst
+    sweepPick held views |> Option.map fst
 
 /// `sweepChoice` over one colony's view alone.
 let sweepRoom (view: ColonyView) (held: Assignments) : string option = sweepChoice held [ view ]
@@ -5665,7 +5710,9 @@ let sweepAll (held: Assignments) (views: ColonyView list) : ColonyView list =
 
     laid.Value <- views
 
-    let room = sweepChoice held views
+    let pick = sweepPick held views
+    let room = pick |> Option.map fst
+    let rate = pick |> Option.map snd |> Option.defaultValue 0.0
     let group = lazy (sweepBodies held views)
 
     views
@@ -5692,6 +5739,7 @@ let sweepAll (held: Assignments) (views: ColonyView list) : ColonyView list =
                 World =
                     { view.World with
                         SweepGroup = group.Value
+                        SweepRate = rate
                     }
             })
 

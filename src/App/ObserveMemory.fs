@@ -12,6 +12,8 @@ open Fabot.Bindings
 open Fabot.Core.Types
 open Fabot.Core.Observe
 
+module Ledger = Fabot.Core.Decide.Ledger
+
 // Body parts ride the Core's own part-name table in both directions, so a
 // case added without its wire name fails a test rather than decoding silently.
 let private partOf = reverseOf partName allBodyParts
@@ -828,12 +830,16 @@ let loadVisuals () : Set<string> = nameList "visuals"
 /// The segment ids each log's JSON is cut across, in order: room for twice
 /// the live size of each (the Transition log 198 KB, the CPU line 56 KB, on
 /// 2026-10-08), and the rival dossier's, whose caps (`Observe.capRivals`)
-/// keep it inside them at 139 KB: eight of the engine's ten a tick.
+/// keep it inside them at 139 KB; and the operation ledger's (#662), whose
+/// caps (`Ledger.capClosed`) keep it inside one: nine of the engine's ten a
+/// tick.
 let creepSegments = [| 0; 1; 2; 3 |]
 let cpuSegments = [| 4; 5 |]
 let rivalSegments = [| 6; 7 |]
+let ledgerSegments = [| 8 |]
 
-let private segmentIds = Array.concat [ creepSegments; cpuSegments; rivalSegments ]
+let private segmentIds =
+    Array.concat [ creepSegments; cpuSegments; rivalSegments; ledgerSegments ]
 
 /// The engine's cap on one segment, in string length.
 let private segmentCap = 100 * 1024
@@ -852,6 +858,10 @@ let mutable private cpuWire: obj = null
 // tick the segments are written.
 let mutable private rivalsHeld: Map<string, Dossier> option = None
 
+// The operation ledger on the heap, None until restored: encoded only on a
+// tick the segments are written.
+let mutable private ledgerHeld: Ledger.Ledger option = None
+
 // The tick a fault was last recorded on, which writes the segments that tick.
 let mutable private faultedAt = -1
 
@@ -861,11 +871,6 @@ let mutable private migrated = false
 
 // The logs found past their segments' room on this heap, each reported once.
 let mutable private oversized: Set<string> = Fresh.setOfSeq Seq.empty
-
-/// Both wires as the heap holds them, for the console and the profile
-/// harness (`__fabot.wire()`); read by nothing in the loop.
-let wires () : obj =
-    createObj [ "creeps" ==> creepsWire; "cpu" ==> cpuWire ]
 
 // Whether every segment the logs ride is active, and so readable, this tick.
 let private segmentsVisible () =
@@ -2917,6 +2922,292 @@ let restoreRivals () : Rivals option =
 /// Hold the dossiers on the heap for the next segment write.
 let saveRivals (rivals: Rivals) = rivalsHeld <- Some rivals.Dossiers
 
+// ---- the operation ledger (#662) ------------------------------------------
+
+/// Each operation kind's wire name, both ways.
+let private kindName =
+    function
+    | Ledger.OperationKind.Sweep -> "sweep"
+    | Ledger.OperationKind.Camp -> "camp"
+    | Ledger.OperationKind.Trespass -> "trespass"
+    | Ledger.OperationKind.Hold -> "hold"
+
+let private kindOf =
+    reverseOf
+        kindName
+        [
+            Ledger.OperationKind.Sweep
+            Ledger.OperationKind.Camp
+            Ledger.OperationKind.Trespass
+            Ledger.OperationKind.Hold
+        ]
+
+// A fraction to the hundredth: the wire's, read back as written.
+let private hundredths (value: float) : float = System.Math.Round(value, 2)
+
+// A row's counts ride arrays, each read whole or as zeros where absent; one
+// present and off its shape costs the row.
+let private countsAt (raw: obj) (key: string) (length: int) : float[] =
+    let value = raw?(key)
+
+    if jsTypeof value = "undefined" then
+        Array.zeroCreate length
+    elif
+        JS.Constructors.Array.isArray value
+        && (unbox<obj[]> value).Length = length
+        && unbox<obj[]> value |> Array.forall (fun n -> jsTypeof n = "number")
+    then
+        unbox<float[]> value
+    else
+        failwith ("not counts: " + key)
+
+let private encodeRow (row: Ledger.Row) : obj =
+    let o = createEmpty<obj>
+    o?k <- kindName row.Key.Kind
+    o?r <- row.Key.Room
+    o?s <- row.Key.Start
+    o?l <- row.Last
+    o?act <- row.Active
+    o?lk <- row.Looked
+    row.Ended |> Option.iter (fun ended -> o?e <- ended)
+    let p = createEmpty<obj>
+    row.Predicted.Rate |> Option.iter (fun rate -> p?rate <- hundredths rate)
+    row.Predicted.Value |> Option.iter (fun value -> p?value <- hundredths value)
+    row.Predicted.Odds |> Option.iter (fun odds -> p?odds <- hundredths odds)
+    o?p <- p
+    o?cast <- [| box row.Cast; box row.CastEnergy; box row.SpawnTicks |]
+    o?join <- row.Joined
+    o?lostCast <- [| box row.CastLost; box row.CastLostCost; box (hundredths row.CastLostLife) |]
+
+    o?lostLent <- [| box row.LentLost; box row.LentLostCost; box (hundredths row.LentLostLife) |]
+
+    o?forced <- [| box row.Forced; box (hundredths row.ForcedCpu) |]
+    o?kills <- [| box row.Kills; box (hundredths row.KillValue) |]
+    o?camp <- [| box row.CampKills; box (hundredths row.CampValue) |]
+    o?down <- [| box row.Downtime; box (hundredths row.DowntimeValue) |]
+    o?ans <- [| box row.Answered; box row.AnsweredCost |]
+    row.Response |> Option.iter (fun ticks -> o?resp <- ticks)
+
+    if not row.Roster.IsEmpty then
+        o?roster <-
+            row.Roster
+            |> Map.toSeq
+            |> hashOf (fun (body: Ledger.Enlisted) ->
+                box
+                    [|
+                        box body.Cost
+                        box body.Life
+                        box body.Seen
+                        box (if body.Holds then 1 else 0)
+                        box (if body.Cast then 1 else 0)
+                    |])
+
+    if not row.Marks.IsEmpty then
+        o?marks <- row.Marks |> Map.toSeq |> hashOf (hundredths >> box)
+
+    if not row.Camped.IsEmpty then
+        o?camped <- row.Camped |> Set.toArray
+
+    if not row.Answers.IsEmpty then
+        o?answers <-
+            row.Answers
+            |> Map.toSeq
+            |> hashOf (fun (body: Ledger.Armed) -> box [| box body.Began; box body.Cost |])
+
+    row.AnswerFloor |> Option.iter (fun floor -> o?afloor <- floor)
+    row.RosterFloor |> Option.iter (fun floor -> o?rfloor <- floor)
+
+    o
+
+let private decodeRow (raw: obj) : Ledger.Row option =
+    if isNull raw || jsTypeof raw?r <> "string" || jsTypeof raw?k <> "string" then
+        None
+    else
+        let p = raw?p
+
+        if isNull p || jsTypeof p <> "object" then
+            failwith "no prediction"
+
+        let cast = countsAt raw "cast" 3
+        let lostCast = countsAt raw "lostCast" 3
+        let lostLent = countsAt raw "lostLent" 3
+        let forced = countsAt raw "forced" 2
+        let kills = countsAt raw "kills" 2
+        let camp = countsAt raw "camp" 2
+        let last = numberOf raw "l"
+        let down = countsAt raw "down" 2
+        let ans = countsAt raw "ans" 2
+
+        let entries (key: string) =
+            if isNull raw?(key) || jsTypeof raw?(key) <> "object" then
+                [||]
+            else
+                objectEntries raw?(key)
+
+        let numbers (length: int) (value: obj) =
+            JS.Constructors.Array.isArray value
+            && (unbox<obj[]> value).Length = length
+            && unbox<obj[]> value |> Array.forall (fun n -> jsTypeof n = "number")
+
+        // A later key absent reads as the last fold's tick.
+        let tickOr (key: string) =
+            if jsTypeof raw?(key) = "undefined" then
+                last
+            else
+                numberOf raw key
+
+        // A price absent is one the decide did not read; present, it must.
+        let priceOf (key: string) =
+            if jsTypeof p?(key) = "undefined" then
+                None
+            else
+                Some(floatOf p key)
+
+        // A floor absent is none risen; present, it must read.
+        let floorOf (key: string) =
+            if jsTypeof raw?(key) = "undefined" then
+                None
+            else
+                Some(numberOf raw key)
+
+        let ids (key: string) =
+            if JS.Constructors.Array.isArray raw?(key) then
+                unbox<obj[]> raw?(key)
+                |> Array.choose (fun id ->
+                    if jsTypeof id = "string" then
+                        Some(unbox<string> id)
+                    else
+                        None)
+                |> Fresh.setOfSeq
+            else
+                Fresh.setOfSeq Seq.empty
+
+        let enlisted (name: string, value: obj) =
+            if numbers 5 value then
+                let n = unbox<int[]> value
+
+                Some(
+                    name,
+                    ({
+                        Cost = n.[0]
+                        Life = n.[1]
+                        Seen = n.[2]
+                        Holds = n.[3] = 1
+                        Cast = n.[4] = 1
+                    }
+                    : Ledger.Enlisted)
+                )
+            else
+                None
+
+        Some
+            {
+                Key =
+                    {
+                        Kind =
+                            match kindOf (unbox<string> raw?k) with
+                            | Some kind -> kind
+                            | None -> failwith ("not a kind: " + unbox<string> raw?k)
+                        Room = unbox<string> raw?r
+                        Start = numberOf raw "s"
+                    }
+                Last = last
+                Active = tickOr "act"
+                Looked = tickOr "lk"
+                Ended = numberValue raw?e
+                Predicted =
+                    {
+                        Rate = priceOf "rate"
+                        Value = priceOf "value"
+                        Odds = priceOf "odds"
+                    }
+                Cast = int cast.[0]
+                CastEnergy = int cast.[1]
+                SpawnTicks = int cast.[2]
+                Joined = numberOrZero raw "join"
+                CastLost = int lostCast.[0]
+                CastLostCost = int lostCast.[1]
+                CastLostLife = lostCast.[2]
+                LentLost = int lostLent.[0]
+                LentLostCost = int lostLent.[1]
+                LentLostLife = lostLent.[2]
+                Forced = int forced.[0]
+                ForcedCpu = forced.[1]
+                Kills = int kills.[0]
+                KillValue = kills.[1]
+                CampKills = int camp.[0]
+                CampValue = camp.[1]
+                Downtime = int down.[0]
+                DowntimeValue = down.[1]
+                Answered = int ans.[0]
+                AnsweredCost = int ans.[1]
+                Response = numberValue raw?resp
+                Roster = entries "roster" |> Array.choose enlisted |> Fresh.mapOfArray
+                RosterFloor = floorOf "rfloor"
+                Marks =
+                    entries "marks"
+                    |> Array.choose (fun (id, value) ->
+                        if jsTypeof value = "number" then
+                            Some(id, unbox<float> value)
+                        else
+                            None)
+                    |> Fresh.mapOfArray
+                Camped = ids "camped"
+                Answers =
+                    entries "answers"
+                    |> Array.choose (fun (id, value) ->
+                        if numbers 2 value then
+                            let n = unbox<int[]> value
+                            Some(id, ({ Began = n.[0]; Cost = n.[1] }: Ledger.Armed))
+                        else
+                            None)
+                    |> Fresh.mapOfArray
+                AnswerFloor = floorOf "afloor"
+            }
+
+/// The ledger off its wire, or empty when the wire is absent or unreadable;
+/// a row that will not decode costs that row alone.
+let decodeLedger (wire: obj) : Ledger.Ledger =
+    leafOr Ledger.empty (fun () -> wire) (fun raw ->
+        if jsTypeof raw <> "object" || JS.Constructors.Array.isArray raw then
+            Ledger.empty
+        else
+            {
+                Open = rowsOf decodeRow raw?``open`` |> List.truncate Ledger.capOpen
+                Closed = rowsOf decodeRow raw?closed |> List.truncate Ledger.capClosed
+                Evicted = numberOrZero raw "evicted"
+            })
+
+/// The ledger on the wire: the open rows, oldest first, then the closed,
+/// newest first, and the evictions.
+let encodeLedger (ledger: Ledger.Ledger) : obj =
+    let o = createEmpty<obj>
+    o?``open`` <- ledger.Open |> List.map encodeRow |> List.toArray
+    o?closed <- ledger.Closed |> List.map encodeRow |> List.toArray
+    o?evicted <- ledger.Evicted
+    o
+
+/// The stored ledger on a cold heap (`restoreWire`), the fold's state from
+/// nothing; None while its segment is not active yet.
+let restoreLedger () : Ledger.Ledger option =
+    restoreWire "ledger" ledgerSegments |> Option.map decodeLedger
+
+/// Hold the ledger on the heap for the next segment write.
+let saveLedger (ledger: Ledger.Ledger) = ledgerHeld <- Some ledger
+
+// A key whose value is read only when asked for: the harness asks for the
+// CPU line every tick, and the ledger's wire once.
+[<Emit("Object.defineProperty($0, $1, { get: $2, enumerable: true })")>]
+let private lazyKey (_target: obj) (_key: string) (_read: unit -> obj) : unit = jsNative
+
+/// The logs' wires as the heap holds them, for the console and the profile
+/// harness (`__fabot.wire()`); read by nothing in the loop. The ledger's is
+/// encoded only when read.
+let wires () : obj =
+    let o = createObj [ "creeps" ==> creepsWire; "cpu" ==> cpuWire ]
+    lazyKey o "ledger" (fun () -> ledgerHeld |> Option.map encodeLedger |> Option.toObj)
+    o
+
 /// A log's JSON cut into `count` chunks in order, each within the segment cap
 /// and never between the two halves of a surrogate pair, the unused ones
 /// empty; None when it does not fit.
@@ -2958,6 +3249,7 @@ let flushSegments (tick: int) : FaultRow list =
             "creeps", creepSegments, creepsWire
             "cpu", cpuSegments, cpuWire
             "rivals", rivalSegments, (rivalsHeld |> Option.map encodeRivals |> Option.toObj)
+            "ledger", ledgerSegments, (ledgerHeld |> Option.map encodeLedger |> Option.toObj)
         ]
         |> List.filter (fun (_, _, wire) -> not (isNull wire))
         |> List.choose (fun (leaf, ids, wire) ->

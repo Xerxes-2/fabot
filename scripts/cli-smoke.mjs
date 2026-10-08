@@ -79,6 +79,7 @@ refuses(["history", "W1N1"], "history needs a tick");
 refuses(["history", "W1N1", "12.5"], "history needs a tick");
 refuses(["probe", "--all"], "usage:");
 refuses(["rivals", "--all"], "usage:");
+refuses(["ledger", "--all"], "usage:");
 
 for (const args of [
   ["tasks"],
@@ -112,6 +113,8 @@ for (const args of [
   ["history", "W15S28", "877000", "--json"],
   ["probe"],
   ["rivals", "--json"],
+  ["ledger"],
+  ["ledger", "--json"],
 ]) {
   parses(args);
 }
@@ -197,6 +200,24 @@ const cpuMemory = {
         fightOnlyFrom: "override",
       },
       fightOnly: false,
+      // The operation ledger (#662): one sweep open, one hold closed.
+      ledger: {
+        open: [
+          {
+            k: "sweep", r: "W19S26", s: 1000, l: 1200, p: { rate: 12.5, value: 3, odds: 0.62 },
+            cast: [2, 1400, 90], join: 1, lostCast: [1, 700, 350], lostLent: [1, 650, 350], forced: [3, 31.5],
+            kills: [2, 1500], camp: [1, 800], down: [40, 400], ans: [1, 1300], resp: 60,
+          },
+        ],
+        closed: [
+          {
+            k: "hold", r: "W12S27", s: 900, l: 950, e: 950, p: { rate: 0, value: 10 },
+            cast: [0, 0, 0], join: 1, lostCast: [0, 0, 0], lostLent: [0, 0, 0], forced: [0, 0], kills: [1, 600],
+            down: [0, 0], ans: [0, 0],
+          },
+        ],
+        evicted: 2,
+      },
       cpu: {
         ticks: [
           ...Array.from({ length: 5 }, (_, i) => ({ ...cpuRow(i + 1), pops: 9001 + i })),
@@ -247,6 +268,21 @@ smoke("observe cpu reads the trimmed rows and the positional spans (#538)", () =
   assert.match(out, /the long record: 2 spans over 125 ticks, t1-125/, "a keyed span and a positional one both read");
   assert.match(out, /worst single tick 480\.5 ms in t101-125/);
   assert.match(out, /max {2}481 ms {2}mean {2}75 ms {2}bucket floor {3}9000 {2}replans 1 {2}max pops {3}9020/);
+});
+
+smoke("observe ledger prints each row's spend, loss, ratio and rate predicted against realised (#662)", () => {
+  const { code, out, err } = runOffline(["ledger"]);
+  assert.equal(code, 0, err);
+  assert.ok(!crashed(err), err);
+  assert.match(out, /^ledger {3}1 open, 1 closed, 2 evicted/m);
+  assert.match(out, /^open\n {2}sweep {4}W19S26 {2}t1000 \+200$/m);
+  // The cast body lost is in its energy already: only the lent one's life adds.
+  assert.match(out, /spend 1750: cast 2 = 1400e\/90t, lent 1, lost cast 1 = 700e, lost lent 1 = 650e \(350 life\)/);
+  assert.match(out, /loss {2}3200: kills 2 = 1500, down 40t = 400, answered 1 = 1300 in 60t/);
+  assert.match(out, /^ {6}camp {2}odds 0\.62, kills 1 = 800$/m);
+  assert.match(out, /ratio 1\.83 {2}rate 12\.50 predicted \/ 9\.50 realised {2}value 3\.00 {2}forced 3, tick CPU 31\.5 ms/);
+  assert.match(out, /^recent\n {2}hold {5}W12S27 {2}t900 \+50 closed t950$/m);
+  assert.match(out, /ratio inf {2}rate 0\.00 predicted \/ 12\.00 realised/);
 });
 
 smoke("observe cpu names each switch in effect and its source, a standing override flagged (#575)", () => {

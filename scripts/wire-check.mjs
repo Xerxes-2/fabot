@@ -2127,8 +2127,8 @@ const rawMemoryWith = (segments) => {
   globalThis.RawMemory = raw;
   return raw;
 };
-const allEmpty = () =>
-  Object.fromEntries([...SEGMENTS.creeps, ...SEGMENTS.cpu, ...SEGMENTS.rivals].map((id) => [id, ""]));
+const allSegments = () => [...SEGMENTS.creeps, ...SEGMENTS.cpu, ...SEGMENTS.rivals, ...SEGMENTS.ledger];
+const allEmpty = () => Object.fromEntries(allSegments().map((id) => [id, ""]));
 
 // A Transition log of `creeps` creeps, `entries` rows each, as the wire holds it.
 const bigLog = (creeps, entries) =>
@@ -2143,13 +2143,15 @@ const bigLog = (creeps, entries) =>
   );
 
 wire("segments: the ids and the cadence are the ones observe.mjs reads", async () => {
-  const { creepSegments, cpuSegments, rivalSegments, segmentEvery } = await import(MODULE);
+  const { creepSegments, cpuSegments, rivalSegments, ledgerSegments, segmentEvery } = await import(MODULE);
 
   assert.deepEqual(Array.from(creepSegments), SEGMENTS.creeps);
   assert.deepEqual(Array.from(cpuSegments), SEGMENTS.cpu);
   assert.deepEqual(Array.from(rivalSegments), SEGMENTS.rivals);
+  assert.deepEqual(Array.from(ledgerSegments), SEGMENTS.ledger);
   assert.equal(segmentEvery, SEGMENT_EVERY);
-  assert.ok([...SEGMENTS.creeps, ...SEGMENTS.cpu, ...SEGMENTS.rivals].length <= 10, "never more than the engine's ten a tick");
+  assert.ok(allSegments().length <= 10, "never more than the engine's ten a tick");
+  assert.equal(new Set(allSegments()).size, allSegments().length, "no segment two logs'");
 });
 
 wire("segments: a cold heap reads the legacy Memory leaf once and deletes it", async () => {
@@ -2197,7 +2199,7 @@ wire("segments: not active, a cold heap asks for them and starts from nothing", 
   globalThis.Memory = {};
   assert.equal(restoreLog(), undefined, "None: not an empty log, which would be written over the stored one");
   assert.ok(Array.isArray(raw.asked), "a plain array: the engine refuses a typed one");
-  assert.deepEqual(raw.asked, [...SEGMENTS.creeps, ...SEGMENTS.cpu, ...SEGMENTS.rivals]);
+  assert.deepEqual(raw.asked, allSegments());
 
   // Active and never written: an empty log, and nothing asked.
   const fresh = rawMemoryWith(allEmpty());
@@ -2388,6 +2390,228 @@ wire("rivals: written to its segment on the cadence, and a cold heap reads it ba
   assert.equal(raw.segments[SEGMENTS.rivals[0]], "", "not a write tick: nothing written");
   flushSegments(SEGMENT_EVERY * 9);
   assert.equal(stable(joinSegments(SEGMENTS.rivals.map((id) => raw.segments[id]))), stable(wireRivals));
+});
+
+// ---- the operation ledger (#662) ----------------------------------------
+
+// One open row, every key written: the fold's own state beside the counts.
+const ledgerRow = {
+  k: "sweep",
+  r: "W19S26",
+  s: 1000,
+  l: 1200,
+  act: 1198,
+  lk: 1196,
+  p: { rate: 12.5, value: 3.25, odds: 0.62 },
+  cast: [2, 1400, 90],
+  join: 1,
+  lostCast: [1, 700, 350.5],
+  lostLent: [1, 650, 120.25],
+  forced: [3, 31.5],
+  kills: [2, 1500.25],
+  camp: [1, 800.5],
+  down: [40, 400],
+  ans: [1, 1300],
+  resp: 60,
+  roster: { "ranger-1-Spawn1": [700, 1200, 1200, 1, 1], "ranger-2-Spawn1": [700, 0, 1100, 0, 0] },
+  rfloor: 450,
+  marks: { digger: 300.5 },
+  camped: ["dancer"],
+  answers: { defender: [1100, 1300] },
+  afloor: 1050,
+};
+
+// A closed row: no odds, no response, none of the fold's state.
+const closedRow = {
+  k: "hold",
+  r: "W12S27",
+  s: 900,
+  l: 950,
+  act: 950,
+  lk: 950,
+  e: 950,
+  p: { rate: 0, value: 10 },
+  cast: [0, 0, 0],
+  join: 1,
+  lostCast: [0, 0, 0],
+  lostLent: [0, 0, 0],
+  forced: [0, 0],
+  kills: [1, 600],
+  camp: [0, 0],
+  down: [0, 0],
+  ans: [0, 0],
+};
+
+const ledgerThrough = async (wire) => {
+  const { decodeLedger, encodeLedger } = await import(MODULE);
+  return encodeLedger(decodeLedger(wire));
+};
+
+wire("ledger: a well-formed ledger round-trips unchanged", async () => {
+  const full = {
+    open: [ledgerRow],
+    closed: [closedRow, { ...closedRow, k: "camp", s: 800, e: 850, l: 850, act: 850, lk: 850 }],
+    evicted: 3,
+  };
+  const back = await ledgerThrough(JSON.parse(JSON.stringify(full)));
+  assert.equal(stable(back), stable(full));
+  assert.equal(Object.hasOwn(back.closed[0], "resp"), false, "a row never answered has no response");
+  assert.equal(Object.hasOwn(back.closed[0].p, "odds"), false, "and a row no camp priced no odds");
+  assert.equal(Object.hasOwn(back.closed[0], "afloor"), false, "and no floor where none rose");
+});
+
+wire("ledger: a row's later keys absent read as its last fold's tick, and as none", async () => {
+  const { act, lk, lostLent, camp, camped, answers, afloor, rfloor, ...bare } = ledgerRow;
+  const back = await ledgerThrough({ open: [bare], closed: [] });
+  assert.equal(back.open[0].act, bare.l, "seen or held last on its last fold");
+  assert.equal(back.open[0].lk, bare.l, "looked at last on its last fold");
+  assert.deepEqual(back.open[0].lostLent, [0, 0, 0]);
+  assert.deepEqual(back.open[0].camp, [0, 0]);
+  assert.equal(Object.hasOwn(back.open[0], "answers"), false);
+  assert.equal(Object.hasOwn(back.open[0], "rfloor"), false);
+  assert.equal(back.evicted, 0, "and a ledger with no evictions counted, none");
+});
+
+for (const [name, leaf] of [
+  ["absent", undefined],
+  ["null", null],
+  ["a string", "Incorrect memory path"],
+  ["an array", [ledgerRow]],
+]) {
+  wire(`ledger: a wire that is ${name} reads empty`, async () => {
+    assert.equal(stable(await ledgerThrough(leaf)), stable({ open: [], closed: [], evicted: 0 }));
+  });
+}
+
+wire("ledger: a row off its shape costs that row alone, and an absent count reads as zero", async () => {
+  const back = await ledgerThrough({
+    open: [
+      ledgerRow,
+      { ...ledgerRow, k: "siege" },
+      { ...ledgerRow, cast: [1, 2] },
+      { ...ledgerRow, s: "1000" },
+      { ...ledgerRow, p: undefined },
+      { k: "trespass", r: "W1N1", s: 5, l: 6, p: { rate: 1, value: 2 } },
+    ],
+    closed: [null, closedRow],
+  });
+  assert.deepEqual(back.open.map((row) => row.k), ["sweep", "trespass"]);
+  assert.deepEqual(back.open[1].cast, [0, 0, 0], "counts absent are none");
+  assert.equal(back.open[1].join, 0);
+  assert.deepEqual(back.closed.map((row) => row.k), ["hold"]);
+});
+
+wire("ledger: a roster entry, a mark, a camped id or an answer off its shape costs itself", async () => {
+  const back = await ledgerThrough({
+    open: [
+      {
+        ...ledgerRow,
+        roster: { good: [1, 2, 3, 1, 0], short: [1, 2], text: ["1", 2, 3, 1, 0] },
+        marks: { good: 5, bad: "5" },
+        camped: ["good", 7],
+        answers: { good: [1, 2], short: [1], text: ["1", 2] },
+      },
+    ],
+    closed: [],
+  });
+  assert.deepEqual(Object.keys(back.open[0].roster), ["good"]);
+  assert.deepEqual(Object.keys(back.open[0].marks), ["good"]);
+  assert.deepEqual(back.open[0].camped, ["good"]);
+  assert.deepEqual(Object.keys(back.open[0].answers), ["good"]);
+});
+
+wire("ledger: a price the decide did not read is absent, and one off its shape costs the row", async () => {
+  const back = await ledgerThrough({
+    open: [{ ...ledgerRow, p: {} }, { ...ledgerRow, p: { rate: "x" } }, { ...ledgerRow, p: { value: null } }],
+    closed: [],
+  });
+  assert.equal(back.open.length, 1);
+  assert.deepEqual(back.open[0].p, {}, "no rate, value nor odds");
+});
+
+wire("ledger: a later count off its shape, or a floor not a number, costs the row", async () => {
+  const back = await ledgerThrough({
+    open: [
+      ledgerRow,
+      { ...ledgerRow, lostLent: [1] },
+      { ...ledgerRow, camp: "x" },
+      { ...ledgerRow, act: "1" },
+      { ...ledgerRow, afloor: "x" },
+      { ...ledgerRow, rfloor: null },
+    ],
+    closed: [],
+  });
+  assert.equal(back.open.length, 1);
+});
+
+wire("ledger: the ledger at its caps fits its segment", async () => {
+  const { capOpen, capClosed, capRoster, capMarks } = await import("../build/fable/Core/Decide/Ledger.js");
+  const big = 9_999_999;
+  const row = (i) => ({
+    ...ledgerRow,
+    r: `W${100 + i}S${100 + i}`,
+    s: big,
+    l: big,
+    e: big,
+    act: big,
+    lk: big,
+    p: { rate: big + 0.25, value: big + 0.25, odds: 0.99 },
+    cast: [big, big, big],
+    join: big,
+    lostCast: [big, big, big + 0.25],
+    lostLent: [big, big, big + 0.25],
+    forced: [big, big + 0.25],
+    kills: [big, big + 0.25],
+    camp: [big, big + 0.25],
+    down: [big, big + 0.25],
+    ans: [big, big],
+    resp: big,
+    // The roster never past its cap: past it, holders go too, under the
+    // floor (`Ledger.fold`'s muster).
+    roster: Object.fromEntries(
+      Array.from({ length: capRoster }, (_, j) => [`ranger-${big}-Spawn${j}`, [big, 1500, big, 1, 1]]),
+    ),
+    rfloor: big,
+    marks: Object.fromEntries(Array.from({ length: capMarks }, (_, j) => [`5a${j}`.padEnd(24, "f"), big + 0.25])),
+    // In id order, as a set writes them.
+    camped: Array.from({ length: capMarks }, (_, j) => `5c${String(j).padStart(2, "0")}`.padEnd(24, "f")),
+    answers: Object.fromEntries(Array.from({ length: capMarks }, (_, j) => [`5b${j}`.padEnd(24, "f"), [big, big]])),
+    afloor: big,
+  });
+  // A closed row keeps no marks nor camped bodies (`Ledger.fold`), and
+  // through the window its roster and answers.
+  const full = {
+    open: Array.from({ length: capOpen }, (_, i) => row(i)),
+    closed: Array.from({ length: capClosed }, (_, i) => {
+      const { marks, camped, ...closed } = row(capOpen + i);
+      return closed;
+    }),
+    evicted: big,
+  };
+  const back = await ledgerThrough(full);
+  assert.equal(back.open.length, capOpen);
+  assert.equal(back.closed.length, capClosed);
+  assert.equal(stable(back), stable(full), "nothing dropped: this is the worst case the bot writes");
+  const text = JSON.stringify(back);
+  assert.ok(text.length <= 100 * 1024 * SEGMENTS.ledger.length, `${text.length} past its segment`);
+});
+
+wire("ledger: written to its segment on the cadence, and a cold heap reads it back", async () => {
+  const { restoreLedger, saveLedger, flushSegments, encodeLedger } = await import(MODULE);
+  const wireLedger = { open: [ledgerRow], closed: [closedRow], evicted: 2 };
+
+  globalThis.Memory = {};
+  const raw = rawMemoryWith({ ...allEmpty(), [SEGMENTS.ledger[0]]: JSON.stringify(wireLedger) });
+  const restored = restoreLedger();
+  assert.notEqual(restored, undefined, "restored");
+  assert.equal(stable(encodeLedger(restored)), stable(wireLedger), "the segment's ledger is the heap's");
+
+  saveLedger(restored);
+  raw.segments[SEGMENTS.ledger[0]] = "";
+  flushSegments(SEGMENT_EVERY * 11 + 1);
+  assert.equal(raw.segments[SEGMENTS.ledger[0]], "", "not a write tick: nothing written");
+  flushSegments(SEGMENT_EVERY * 11);
+  assert.equal(stable(joinSegments(SEGMENTS.ledger.map((id) => raw.segments[id]))), stable(wireLedger));
 });
 
 // ---- run ----------------------------------------------------------------

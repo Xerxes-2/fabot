@@ -374,6 +374,9 @@ type Carried =
         /// a part), as `World.seenFacts` reads `FIND_TOMBSTONES` (#663: a
         /// body seen dead is known gone).
         Fallen: Map<string, string * int>
+        /// The operation ledger (`Ledger.fold`, #662), folded every tick as
+        /// `Main` folds it on a full one.
+        Ledger: Ledger.Ledger
     }
 
 /// The arena's whole state between ticks.
@@ -926,6 +929,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 Danger = None
                 RivalControllers = Map.empty
                 Fallen = Map.empty
+                Ledger = Ledger.empty
             }
         Scores = Map.empty
         Ovens = []
@@ -1784,6 +1788,23 @@ let private decideOurs (a: Arena) : Intent list * Carried =
             |> Observe.Danger.watching world.ExitWatches
             |> Some
         RivalControllers = world.RivalControllers
+        Ledger =
+            // A row's throw is quarantined live; in an arena it is a failure.
+            match
+                Ledger.fold
+                    {
+                        Time = a.Time
+                        Window = Tuning.defaults.RaidBounceTicks
+                        Living = alive
+                        Quarries = world.Quarries
+                        Fallen = Set.empty
+                        Forcing = []
+                        Observed = decided.Operations.Force()
+                    }
+                    a.Carried.Ledger
+            with
+            | ledger, [] -> ledger
+            | _, faults -> invalidOp $"t{a.Time}: the ledger's fold threw: %A{faults}"
     }
 
 // ---------------------------------------------------------------------------
