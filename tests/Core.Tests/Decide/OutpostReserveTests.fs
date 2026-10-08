@@ -572,9 +572,10 @@ let standDownGateTests =
                     castRows anchors haulers workers (Set.singleton "W1N2")
 
                 // The Anchor row counts Posts and the withheld room's container was one.
+                // The Anchor's seat is cast first, its return the dearer (#622).
                 Expect.equal
                     (gated 3 3 40)
-                    ([ "reserver"; "reserver"; "anchor" ], [ "reserver" ])
+                    ([ "anchor"; "reserver"; "reserver" ], [ "reserver" ])
                     "the fourth Post goes with the room, and the Anchor it would have hired goes with it"
 
                 // The workforce target counts each posted source's output.

@@ -930,6 +930,35 @@ let trespassTests =
                         $"the cast {body.Name} takes the outpost's kill"
             }
 
+            // #622 (b): a trespass's kill is a seat priced by what it lands
+            // on its cost (`Facts.castReturn`, the Caster's own price), cast
+            // after the economy's seats that return more — where the fighting
+            // rows once cast ahead of every economy row, so two trespass
+            // guards jumped a home Anchor's refill and the home lost income.
+            test
+                "a trespass's kill is cast after the seats that return more: the empty Post, the reservation" {
+                let colony = paying (declaredRaid [ seatedDigger ])
+
+                let first colony =
+                    spawnIntents (decideOn colony).Intents
+                    |> List.map (fun (_, _, name: string) -> name.Split('-').[0])
+
+                Expect.equal
+                    (killCasts "W1N2" (decideOn colony))
+                    [ CastRow.Fighter BodyTemplate.Melee, 1, Some [ "d-1" ] ]
+                    "the premise: the miner on its seat is a kill worth its guard"
+
+                Expect.equal
+                    (first
+                        { colony with
+                            Creeps = colony.Creeps |> List.filter (fun c -> c.Name <> "a-out")
+                        })
+                    [ "anchor" ]
+                    "the outpost's Post standing empty, its Anchor is cast before the guard"
+
+                Expect.equal (first colony) [ "reserver" ] "and with it manned, the reservation is"
+            }
+
             test
                 "a body worth less than its cast, a bare scout or a body shot disarmed is cast for by no row" {
                 let cheap =

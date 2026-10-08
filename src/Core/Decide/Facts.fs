@@ -2299,19 +2299,42 @@ let preyBeforeReturn
                        <= int64 deadline
                    | _ -> false))
 
+/// What one body of a row cast for a trespass's kill returns on its cost
+/// (#652): the kills it lands over what it costs. The kills: each prey's
+/// kill value (`prey`, priced once by the colony asking, so every colony
+/// weighing the cast values it alike) times the odds one body, landing in
+/// `landing` ticks (its spawn time, its spawns' queue and its walk, as the
+/// Caster bids it), catches it (`catchOdds`, read as though no prey were
+/// walking off: a cast lands long after one step, and an ask that flipped on
+/// each step would cast and cancel), killed by the body alone at its
+/// standoff (`killTicksOf`), nothing of one that dies of age first. A body's
+/// cost: its `blocks` blocks of the row and its spawn time at what a tick of
+/// this colony's spawn is worth (`spawnTickWorth`). Priced with the world's
+/// vision of the room laid in, as `castPrice` is. The one return the Caster
+/// casts a kill by (`castBodiesPaid`) and the spawn cascade orders its seat
+/// by (`Spawns.planSpawns`). None for a row no kill prices.
+let internal castReturn
+    (view: ColonyView)
+    (row: CastRow)
+    (blocks: int)
+    (room: string)
+    (landing: int)
+    (prey: (string * float) list)
+    : float option =
+    match row with
+    | CastRow.Fighter template ->
+        let body = blocksFighter (patternOfTemplate template) blocks
+
+        let landed =
+            killsLanded (killPricing view room) room [ body ] landing (Map.ofList prey)
+
+        Some(landed / castCost view template blocks)
+    | CastRow.Defender
+    | CastRow.Squad _ -> None
+
 /// How many bodies of a row cast for a trespass's kill pay for themselves
-/// (#652): the most `k` whose cost the kills they land cover. The kills:
-/// each prey's kill value (`prey`, priced once by the colony asking, so
-/// every colony weighing the cast values it alike) times the odds one body,
-/// landing in `landing` ticks (its spawn time, its spawns' queue and its
-/// walk, as the Caster bids it), catches it (`catchOdds`, read as though no
-/// prey were walking off: a cast lands long after one step, and an ask that
-/// flipped on each step would cast and cancel), killed by the body alone
-/// at its standoff (`killTicksOf`), nothing of one that dies of age first.
-/// A body's cost: its `blocks` blocks of the row and its spawn time at what
-/// a tick of this colony's spawn is worth (`spawnTickWorth`). Priced with
-/// the world's vision of the room laid in, as `castPrice` is. Any other row
-/// pays for every body.
+/// (#652): the most `k` whose cost the kills they land cover, off one body's
+/// return (`castReturn`). Any other row pays for every body.
 let internal castBodiesPaid
     (view: ColonyView)
     (row: CastRow)
@@ -2320,16 +2343,9 @@ let internal castBodiesPaid
     (landing: int)
     (prey: (string * float) list)
     : int =
-    match row with
-    | CastRow.Fighter template ->
-        let body = blocksFighter (patternOfTemplate template) blocks
-
-        let landed =
-            killsLanded (killPricing view room) room [ body ] landing (Map.ofList prey)
-
-        int (landed / castCost view template blocks)
-    | CastRow.Defender
-    | CastRow.Squad _ -> System.Int32.MaxValue
+    match castReturn view row blocks room landing prey with
+    | Some paid -> int paid
+    | None -> System.Int32.MaxValue
 
 /// The kill order's leading key for one room's targets (#451), smallest
 /// first; the caller breaks ties. Outside a ranger's room (an outpost's

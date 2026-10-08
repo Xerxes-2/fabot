@@ -1,6 +1,8 @@
 # The outpost layer: a reservation, a container, and what an unposted outpost source is worth
 
-> **Status:** amended by 0053, #205, #208, #216 R4, #243, #244, #266, 0087
+> **Status:** amended by 0053, #205, #208, #216 R4, #243, #244, #266, 0087, 0095
+
+> **Amended by ADR 0095** on "the reserver row casts before the Anchor row": a seat is cast by what its body returns on its cost, so an empty Post's Anchor (its rock's ten a tick over a life) comes before the reserver (five a source over a CLAIM body's). The reserver's quota and its deficit-shaped sizing stand.
 
 > **Amended by ADR 0087**: the outpost no longer gets "a container and nothing else". Each outpost source with a container also gets a road from the home's drop point, along the haulers' route, where the haul pays for it. And #266's builders' queue below no longer holds a road site, hand-laid or ours: an outpost road site is a surplus Build on a rung of its own (ADR 0087 decision 8), and the queue keeps the container and every other kind.
 

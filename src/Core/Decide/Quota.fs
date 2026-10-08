@@ -652,31 +652,35 @@ let castsOf
                 Prey = prey
             }))
 
+/// When this colony's cast of a row lands in a room, as the Caster bids it:
+/// its spawn time (`Facts.castPrice`), its spawns' queue and its walk, a
+/// room's side a crossing off the room names.
+let private castLanding (view: ColonyView) (row: CastRow) (room: string) : int =
+    let home = SpatialInfo.homeName view.Spatial
+
+    let queued =
+        (view.Spawns |> List.sumBy _.Remaining) / max 1 (List.length view.Spawns)
+
+    snd (Facts.castPrice view row room)
+    + queued
+    + CastBid.walk view.Tuning (RoomName.hopsBetween home room)
+
 /// What a colony casts for alone in the world (a fixture): its own asks
 /// (`castsOf`), a trespass's kill only past its bank's floor
 /// (`CastBid.paysOwn`) and only as many bodies as its own cast pays
-/// for (`Facts.castBodiesPaid`), landed as the Caster bids it: its spawn
-/// time (`Facts.castPrice`), its spawns' queue and its walk, a room's side a
-/// crossing off the room names.
+/// for (`Facts.castBodiesPaid`), landed as the Caster bids it
+/// (`castLanding`).
 let ownCasts
     (view: ColonyView)
     (threats: Threats)
     (guarded: string list)
     (calls: string -> bool)
     : Cast list =
-    let home = SpatialInfo.homeName view.Spatial
-
-    let queued =
-        (view.Spawns |> List.sumBy _.Remaining) / max 1 (List.length view.Spawns)
-
     castsOf view threats guarded calls
     |> List.choose (fun cast ->
         match cast.Prey, cast.For with
         | Some prey, Guard room ->
-            let landing =
-                snd (Facts.castPrice view cast.Ask.Row room)
-                + queued
-                + CastBid.walk view.Tuning (RoomName.hopsBetween home room)
+            let landing = castLanding view cast.Ask.Row room
 
             let paid =
                 if CastBid.paysOwn view.Tuning view.Bank.Capacity then
@@ -733,6 +737,39 @@ let internal rowQuota
     | None ->
         unpricedAsks view threats outposts row
         |> List.sumBy (fun (_, ask) -> ask.Wanted threats)
+
+/// A fighting row's quota ask by ask (`rowQuota`'s addends), each beside what
+/// one body of it returns on its cost where a kill prices it: a contested
+/// room's prey, the trespassers its Brief's ask answers (`RowAsk.Prey`) or
+/// the Caster's priced kill, at `Facts.castReturn`, landed as the Caster bids
+/// it (`castLanding`). None where it answers a raid, the home's line or a
+/// squad's slot — no price, the fight's own. What the spawn cascade orders
+/// the row's seats by (`Spawns.planSpawns`).
+let internal rowAskReturns
+    (view: ColonyView)
+    (threats: Threats)
+    (outposts: OutpostFacts)
+    (row: CastRow)
+    : (int * float option) list =
+    let briefPrey task =
+        Map.tryFind task threats.Briefs
+        |> Option.bind (fun brief ->
+            brief.Asks |> List.tryPick (fun ask -> if ask.Row = row then ask.Prey else None))
+
+    let priced task blocks prey =
+        match prey |> Option.orElse (briefPrey task), task with
+        | Some prey, Guard room ->
+            Facts.castReturn view row blocks room (castLanding view row room) prey
+        | _ -> None
+
+    match outposts.Casts with
+    | Some casts ->
+        casts
+        |> List.filter (fun cast -> cast.Ask.Row = row)
+        |> List.map (fun cast -> cast.Ask.Wanted, priced cast.For cast.Ask.Blocks cast.Prey)
+    | None ->
+        unpricedAsks view threats outposts row
+        |> List.map (fun (task, ask) -> ask.Wanted threats, priced task (ask.Blocks()) None)
 
 /// The blocks a fighting row casts this tick: the worst of its casts'
 /// answers, the row's floor where it has none — one guard block, the
@@ -853,11 +890,14 @@ let internal minerQuota (view: ColonyView) atlas : int * int =
 /// it: the reserver is the only body such a room ever holds, so a read off
 /// vision alone would go dark the tick the last one died and hire the next
 /// (`Planner.reservableControllers`).
+///
+/// In two halves: the reservations, and the candidate claims and errand
+/// re-claimers behind them; `RowSizing.ReserverClaims` joins them.
 let internal reserverClaimsOf
     (view: ColonyView)
     (threats: Threats)
     (outposts: OutpostFacts)
-    : int list =
+    : int list * int list =
     let heldTicks room =
         view.RoomControl
         |> Map.tryFind room
@@ -900,7 +940,7 @@ let internal reserverClaimsOf
             ]
 
     if view.Bank.Capacity < bodyCost reserverPattern.Block then
-        []
+        [], []
     else
         let reserved =
             outposts.ReservableRooms
@@ -908,8 +948,8 @@ let internal reserverClaimsOf
             |> List.map (fun room ->
                 ceilDiv (Engine.reservationCap - heldTicks room) Engine.claimLifetime |> max 1)
 
-        reserved
-        @ (claims |> List.map (fun _ -> 1))
+        reserved,
+        (claims |> List.map (fun _ -> 1))
         // The re-claimer, the row's third face: one resident per declared
         // errand, one block each. `patternOfParts` reads a `[Claim; Move]`
         // back as a reserver whatever it was bought for, so a row of its own
@@ -971,11 +1011,13 @@ let internal rowSizingOf
     (held: HeldTaskFacts)
     : RowSizing =
     let miners, oreMiners = minerQuota view atlas
+    let reserved, others = reserverClaimsOf view threats outposts
 
     {
         UpgraderWork = upgraderWorkOf view atlas held
         AnchorPostCaps = postWorkCapsOf view atlas outposts.ReservableRooms
-        ReserverClaims = reserverClaimsOf view threats outposts
+        ReserverClaims = reserved @ others
+        ReservedRooms = List.length reserved
         MinerWorkPerMove = view.Tuning.MinerWorkPerMove
         GuardBlocks = rowBlocksWanted view threats outposts (CastRow.Fighter BodyTemplate.Melee)
         RangerBlocks = rowBlocksWanted view threats outposts (CastRow.Fighter BodyTemplate.Ranged)

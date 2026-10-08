@@ -90,6 +90,7 @@ let guardTaskTests =
                     {
                         AnchorPostCaps = Map.empty
                         ReserverClaims = []
+                        ReservedRooms = 0
                         MinerWorkPerMove = 1
                         GuardBlocks = 1
                         RangerBlocks = 1

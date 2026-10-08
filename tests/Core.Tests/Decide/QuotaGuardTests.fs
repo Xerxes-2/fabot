@@ -1601,14 +1601,19 @@ let supplyFloorTests =
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
 
-            test "a row the bank cannot pay for yields the tick to the row below it" {
+            test
+                "the dearer return is cast first whatever the bank holds: the empty Post before the reservation" {
                 // Where the floor is disarmed: the fleet holds four haulers, so
                 // nothing here is the supply floor. One outpost declared and unheld
                 // is a reserver gap of one at `[2Claim;2Move]` = 1,300; one Anchor
                 // against the home room's two Posts is an Anchor gap of one at
                 // `6W/1C/1M` = 700; every other row is over quota. Pairwise on the
-                // bank alone, and the second reading is why this is not "skip the
-                // reserver": at 1,300 the head row is affordable and it is cast.
+                // bank alone. Until #622 the reserver row was the head row and the
+                // Anchor cast at 700 only by its yield; now the Anchor's seat is the
+                // dearer return (ten a tick over a life against five a source over
+                // a CLAIM body's), so it is the head at either bank. The yield rule
+                // itself is the guard row's to show (`a bank that cannot afford a
+                // block yields the tick`).
                 let castsAt available =
                     let colony = reserverColony [ northOutpost false ] (surplusFleet 1) []
 
@@ -1624,23 +1629,20 @@ let supplyFloorTests =
 
                 match castsAt 700 with
                 | [ (_, body, creepName) ] ->
-                    Expect.stringStarts
-                        creepName
-                        "anchor-"
-                        "the head row is 600 short, so the empty Post below it is filled instead"
+                    Expect.stringStarts creepName "anchor-" "at 700 the empty Post is filled"
 
                     Expect.equal
                         body
                         [ Work; Work; Work; Work; Work; Work; Carry; Move ]
-                        "and at the Anchor row's own capacity-sized body, unchanged by the fall"
+                        "at the Anchor row's own capacity-sized body"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
 
                 match castsAt 1300 with
                 | [ (_, _, creepName) ] ->
                     Expect.stringStarts
                         creepName
-                        "reserver-"
-                        "and the tick the bank affords it, the same head row is first again"
+                        "anchor-"
+                        "and at 1,300, where the reservation is affordable too, the Post is still first"
                 | other -> failtest $"expected exactly one SpawnCreep intent, got %A{other}"
             }
         ]

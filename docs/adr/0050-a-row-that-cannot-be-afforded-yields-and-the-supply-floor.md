@@ -1,6 +1,8 @@
 # A row that cannot be afforded yields the tick, and a colony that cannot refill an extension hires the body that can
 
-> **Status:** amended by 0072, #216 R4, #460
+> **Status:** amended by 0072, #216 R4, #460, 0095
+
+> **Amended by ADR 0095** on the order the cascade is asked in: after the two floors and the fight's own seats, a specialist seat is cast by what its body returns on its cost, the dearest first, and no longer in a fixed row order. A seat the bank cannot pay for still yields the tick to the next, and both floors stand.
 
 > **Amended by #375** (ADR 0072) at the seam this ADR's fourth rejected option pointed to. The yield stands; what it let happen — the reserver row buying a 650 body into a raided room every time the bank reached 650, while the guard priced at 2,250 never cast — is closed from the other side: a guarded room's reserver seat is withheld while the guard row has a gap, and the guard is sized to its fight rather than to the bank.
 

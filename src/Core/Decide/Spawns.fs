@@ -187,15 +187,18 @@ let internal expiring (view: ColonyView) atlas (sizing: RowSizing) (creep: Creep
         <= leadOf view atlas sizing creep + errandOverlap view atlas creep
 
 /// One specialist row of the spawn cascade, stated once: the name the `quotas`
-/// view files it under, the pattern it casts, how many bodies it wants and
-/// which living bodies answer to it. The gap, the report and the seats are each
-/// one pass over the list of these, so the three orders cannot drift apart.
+/// view files it under, the pattern it casts, how many bodies it wants, which
+/// living bodies answer to it, and what each seat of its gap returns on its
+/// cost (`Returns gap standing`, one a seat, None for a seat the fight casts
+/// ahead of every price). The gap, the report and the seats are each one pass
+/// over the list of these, so the three cannot drift apart.
 type private SpecialistRow =
     {
         Name: string
         Pattern: BodyPattern
         Quota: int
         Census: CreepInfo -> bool
+        Returns: int -> int -> float option list
     }
 
 
@@ -433,9 +436,9 @@ let internal planSpawns
 
         let anchorLegs = anchorLegsFor view (vacantPosts |> Map.toSeq |> Seq.map fst)
 
-        // The casting order is the row list's below and nowhere else: the
-        // seats are cast in it, the `quotas` view reports in it, and the
-        // worker row subtracts the sum of it. Each specialist gap is that
+        // The row list below is the `quotas` view's order and the worker
+        // row subtracts the sum of it; the casting order is its seats'
+        // returns (`pricedSeats`). Each specialist gap is that
         // row's own unfilled quota, never taken out of the deficit: an empty
         // Post is a fact about the ground, and the row does not stop hiring
         // because the headcount overshot some other row's arithmetic.
@@ -454,6 +457,143 @@ let internal planSpawns
                 DefenderBlocks = view.Tuning.DefenderBlocks
             }
 
+        // ADR-0095. What one more body of a row returns on its cost: the
+        // energy it yields over its life, over its energy and its spawn time
+        // at what a tick of the colony's spawn is worth (`Price.bodyReturn`,
+        // the Caster's price of a cast, `Facts.castCost`). The cascade casts
+        // the dearest return first.
+        let tickWorth = Facts.spawnTickWorth view
+
+        let returnOn (pattern: BodyPattern) (lifetimeValue: float) =
+            let body = sizedBodyFor rowSizing pattern view.Bank.Capacity
+
+            bodyReturn
+                lifetimeValue
+                (bodyCost body)
+                (Engine.spawnTicksPerPart * List.length body)
+                tickWorth
+
+        let rateIn room =
+            Map.tryFind room view.RoomControl
+            |> Option.map Facts.heldRateOf
+            |> Option.defaultValue Engine.heldOutputPerTick
+
+        // An Anchor's seat: the rock of the Post it is bought for digs its
+        // rate over a life — the vacancies richest first, as the ceiling it
+        // is sized under is the dearest vacancy's.
+        let anchorReturns gap _ =
+            let rates =
+                vacantPosts
+                |> Map.toList
+                |> List.map (fun (tile, _) -> rateIn tile.Room)
+                |> List.sortDescending
+
+            List.init gap (fun i ->
+                let rate =
+                    rates
+                    |> List.tryItem i
+                    |> Option.orElse (List.tryLast rates)
+                    |> Option.defaultValue Engine.heldOutputPerTick
+
+                Some(returnOn anchorPattern (float (rate * Engine.creepLifetime))))
+
+        // A hauler's: its share of what the manned Posts dig, over a life —
+        // the haul moves what a garrison digs, so a colony whose Posts stand
+        // vacant buys their Anchors first.
+        let haulerReturn =
+            lazy
+                (let dug =
+                    sizing.AnchorPostCaps
+                    |> Map.toList
+                    |> List.sumBy (fun (tile, _) ->
+                        if Map.containsKey tile vacantPosts then
+                            0
+                        else
+                            rateIn tile.Room)
+
+                 returnOn
+                     haulerPattern
+                     (float (dug * Engine.creepLifetime) / float (max 1 haulerQuota)))
+
+        // A reserver's: what the reservation adds to a reservable room's
+        // sources, on the average of those rooms, over a CLAIM body's life.
+        let reserverReturn =
+            lazy
+                (let rooms = outposts.ReservableRooms
+
+                 let sources =
+                     view.Sources
+                     |> List.filter (fun s ->
+                         Atlas.targetRoom atlas s.Id
+                         |> Option.exists (fun room -> List.contains room rooms))
+                     |> List.length
+
+                 returnOn
+                     reserverPattern
+                     (float (
+                         sources
+                         * (Engine.heldOutputPerTick - Engine.neutralOutputPerTick)
+                         * Engine.claimLifetime
+                      )
+                      / float (max 1 (List.length rooms))))
+
+        let priced (value: Lazy<float>) gap _ = List.replicate gap (Some value.Value)
+
+        // The reserver row's seats: a candidate colony's claim and an
+        // errand's re-claimer (a second colony, the season's whole score)
+        // have no energy price and are cast ahead of every priced seat, as
+        // the pool anchors their Tasks at the flow; only a reservation is
+        // priced (`reserverReturn`). Which bodies standing hold which is not
+        // on the census, so the claims are read as the unfilled seats first.
+        let reserverReturns gap _ =
+            let claims = List.length sizing.ReserverClaims - sizing.ReservedRooms |> max 0
+            let unpriced = min gap claims
+
+            List.replicate unpriced None
+            @ List.replicate (gap - unpriced) (Some reserverReturn.Value)
+
+        // The season's score, the Reactor's courier and a salvage room's
+        // dismantler have no energy price: they return what they cost, after
+        // every row that returns more and before the surplus's mouths.
+        let scoreRow gap _ = List.replicate gap (Some 1.0)
+
+        // The fight's own seats, ahead of every price: the home's line, a
+        // raid's answer, a squad's slot.
+        let fightRow gap _ = List.replicate gap None
+
+        // The upgrader row is the surplus's mouth: its seats are cast after
+        // the workers (`upgraderSeats`, the deadline's floor before them) and
+        // never by a return, so `pricedSeats` never reads this.
+        let mouthRow (_: int) (_: int) : float option list = []
+
+        // A fighting row's seats: an ask that answers a raid or the home's
+        // line is the fight's, and the bodies standing answer it first; one
+        // a kill prices returns what its kills land on its cost
+        // (`Quota.rowAskReturns`, the Caster's own price), the richest first.
+        let fighterRow (row: CastRow) gap standing =
+            if gap = 0 then
+                []
+            else
+                let asks = rowAskReturns view threats outposts row
+
+                let defence =
+                    asks |> List.sumBy (fun (wanted, ret) -> if ret.IsNone then wanted else 0)
+
+                let kills =
+                    asks
+                    |> List.collect (fun (wanted, ret) ->
+                        match ret with
+                        | Some r -> List.replicate wanted r
+                        | None -> [])
+                    |> List.sortDescending
+
+                let fight = defence - standing |> max 0 |> min gap
+                let covered = standing - defence |> max 0
+
+                List.replicate fight None
+                @ List.init (gap - fight) (fun i ->
+                    kills |> List.tryItem (covered + i) |> Option.orElse (List.tryLast kills))
+
         let squadRows: SpecialistRow list =
             SquadRole.all
             |> List.map (fun role ->
@@ -464,40 +604,47 @@ let internal planSpawns
                     Pattern = pattern
                     Quota = Map.find role rows.Squad
                     Census = fun creep -> squadRoleByName creep.Name = Some role
+                    Returns = fightRow
                 })
 
+        // The rows in the order the `quotas` view reports them, and the
+        // order a tie between two returns keeps; which seat is cast first is
+        // its return's (`Returns`, below).
         let rows: SpecialistRow list =
             [
-                // The home's own rampart defender (#504), ahead of every row:
-                // the line it stands on is what every other row lives behind.
+                // The home's own rampart defender (#504), the fight's: the
+                // line it stands on is what every other row lives behind.
                 {
                     Name = "defender"
                     Pattern = defenderPattern
                     Quota = rows.Defender
                     Census = fun creep -> isNamedFor defenderPattern creep.Name
+                    Returns = fightRow
                 }
                 // Counted over the fleet against a quota derived per room,
                 // like the reserver row: which room each finished body works
                 // is the Matcher's. A guard that outlived its raid is still an
                 // ATTACK body, so the next raid inside its life reads a filled
-                // row.
+                // row. A raid's seat is the fight's; a trespass's kill is
+                // priced by what it lands (`fighterRow`).
                 {
                     Name = "guard"
                     Pattern = guardPattern
                     Quota = rows.Guard
                     // Priced at capacity like every row but the floor, so a
                     // bank that cannot hold 750 casts nothing here and yields
-                    // to the reserver behind it.
+                    // to the next seat.
                     Census = isGuardRowBody
+                    Returns = fighterRow (CastRow.Fighter BodyTemplate.Melee)
                 }
                 // The errand room's ranged guard (#411), behind the melee one
-                // and for the same reason: a fight is cast before the seats it
-                // protects.
+                // and for the same reason.
                 {
                     Name = "ranger"
                     Pattern = rangerPattern
                     Quota = rows.Ranger
                     Census = isRangerRowBody
+                    Returns = fighterRow (CastRow.Fighter BodyTemplate.Ranged)
                 }
                 // A pooled Assault's squad (#490), its roles in the order they
                 // cast: the sappers the medic walks behind, then the medic.
@@ -509,6 +656,7 @@ let internal planSpawns
                     Quota = List.length rows.Reserver
                     // Sized at the largest outstanding demand, `rowSizing`.
                     Census = isReserverBody
+                    Returns = reserverReturns
                 }
                 {
                     Name = "anchor"
@@ -517,50 +665,54 @@ let internal planSpawns
                     // Sized under the dearest vacancy's ceiling,
                     // `rowSizing`'s `AnchorCap`.
                     Census = isAnchorBody
+                    Returns = anchorReturns
                 }
                 {
                     Name = "hauler"
                     Pattern = haulerPattern
                     Quota = rows.Hauler
                     Census = isHaulerBody
+                    Returns = priced haulerReturn
                 }
-                // Behind the rows that make and carry the colony's energy and
-                // ahead of the two that spend it: a miner bought before the
-                // anchor that feeds it spends 2,200 on a resource nothing in
-                // the colony eats, and the season's score rides on this row
-                // where an upgrade mouth is the surplus by construction.
+                // The season's score rides on this row: a miner returns what
+                // it costs (`scoreRow`), after the anchor that feeds the colony
+                // it spends 2,200 of.
                 {
                     Name = "miner"
                     Pattern = minerPattern
                     Quota = rows.Miner
                     Census = isMinerBody
+                    Returns = scoreRow
                 }
-                // The courier follows the rows that make and carry income and
-                // precedes the two surplus mouths (#319); `expiring` turns its
+                // The courier carries the score (#319); `expiring` turns its
                 // cadence into the same living-count seam every row uses.
                 {
                     Name = "courier"
                     Pattern = courierPattern
                     Quota = rows.Courier
                     Census = fun creep -> patternOf view.Tuning atlas creep = courierPattern
+                    Returns = scoreRow
                 }
-                // One body bought once, ahead of the surplus mouths: what it
-                // saves is CPU every tick the salvage room still stands.
+                // One body bought once: what it saves is CPU every tick the
+                // salvage room still stands.
                 {
                     Name = "dismantler"
                     Pattern = dismantlerPattern
                     Quota = rows.Dismantler
                     Census = fun creep -> patternOf view.Tuning atlas creep = dismantlerPattern
+                    Returns = scoreRow
                 }
                 // Bodies and not names: `patternOf` rather than
                 // `isStandingBody` alone is what keeps the Anchor row out of
                 // it, since `6W/1C/1M` answers to both descriptions and the
-                // anchor arm claims it.
+                // anchor arm claims it. A surplus mouth, cast after the
+                // workers below, never by a return.
                 {
                     Name = "upgrader"
                     Pattern = upgraderPattern
                     Quota = rows.Upgrader
                     Census = fun creep -> patternOf view.Tuning atlas creep = upgraderPattern
+                    Returns = mouthRow
                 }
             ]
 
@@ -715,6 +867,27 @@ let internal planSpawns
                     (seat row.Pattern (fun bank ->
                         sizedBodyFor rowSizing row.Pattern bank.Capacity)))
 
+        // The specialist seats in casting order: the fight's own first, in
+        // the rows' order, then every priced seat by its return, the dearest
+        // first, a tie kept in the rows' order (a stable sort). A seat's
+        // return is read only where the row has a gap.
+        let pricedSeats (rows: (SpecialistRow * int * int * int) list) =
+            let returned =
+                rows
+                |> List.filter (fun (row, _, _, _) -> owed row)
+                |> List.collect (fun (row, alive, inOven, gap) ->
+                    let one =
+                        seat row.Pattern (fun bank ->
+                            sizedBodyFor rowSizing row.Pattern bank.Capacity)
+
+                    row.Returns gap (alive + inOven) |> List.map (fun ret -> ret, one))
+
+            (returned |> List.choose (fun (ret, s) -> if ret.IsNone then Some s else None))
+            @ (returned
+               |> List.choose (fun (ret, s) -> ret |> Option.map (fun r -> r, s))
+               |> List.sortBy (fun (r, _) -> -r)
+               |> List.map snd)
+
         // The upgrader row casts after the workers (user, 2026-10-05): W17S25
         // held its one remaining worker's seat behind an upgrader the bank
         // could not yet pay while its west line lay broken, and the idle
@@ -743,7 +916,7 @@ let internal planSpawns
                 // Sized from `Available` like the harvest floor (with the disaster
                 // fallback inside `castFromBank`, for the same reason).
                 (seat haulerPattern (fun bank -> bodyFor haulerPattern bank.Available))
-            @ rowSeats otherRows
+            @ pricedSeats otherRows
             @ floorSeats
             @ List.replicate
                 (if defenderOwed then

@@ -534,8 +534,12 @@ type RowSizing =
     {
         /// `postWorkCapsOf`'s answer this tick, keyed by the Post's own tile.
         AnchorPostCaps: Map<RoomPos, int>
-        /// `reserverClaimsOf`'s answer this tick.
+        /// `reserverClaimsOf`'s answer this tick, its two halves joined.
         ReserverClaims: int list
+        /// How many of `ReserverClaims` are reservations, its leading
+        /// entries; the rest are candidate claims and errand re-claimers,
+        /// which the spawn cascade prices apart (#622).
+        ReservedRooms: int
         /// `Tuning.MinerWorkPerMove`, carried through to `BodySizing`.
         MinerWorkPerMove: int
         /// `rowBlocksWanted`'s guard answer this tick, carried through to

@@ -111,6 +111,42 @@ let reserverRowTests =
                     "declared a colony, the same room hires one body of one block, and no reserver beside it"
             }
 
+            test "a claimer's seat has no energy price and is cast ahead of every priced seat" {
+                // #622 review: the claim and the re-claimer ride the reserver
+                // row, but a second colony (and the season's score) is no
+                // reservation, so their seats stand ahead of an empty Post's
+                // Anchor, as the pool anchors their Tasks at the flow. One home
+                // Post stands empty here.
+                let colony =
+                    reserverColony
+                        [ northOutpost false ]
+                        (surplusFleet 1)
+                        [ "W1N2", reservedRoom true 1000 ]
+
+                let castsWith declared =
+                    { colony with
+                        Declared =
+                            if declared then
+                                [ SpatialInfo.homeName colony.Spatial; "W1N2" ]
+                            else
+                                []
+                    }
+                    |> decideOn
+                    |> fun result ->
+                        spawnIntents result.Intents
+                        |> List.map (fun (_, body, name) -> name.Split('-').[0], body = oneBlock)
+
+                Expect.equal
+                    (castsWith true |> List.truncate 2)
+                    [ "reserver", true; "anchor", false ]
+                    "declared a colony: the claimer's one block, then the empty Post"
+
+                Expect.equal
+                    (castsWith false |> List.map fst |> List.truncate 2)
+                    [ "anchor"; "reserver" ]
+                    "an outpost's reservation is priced, behind the Anchor"
+            }
+
             test "a claimer beside a slipping reservation is cast at the row's largest demand" {
                 // The half a one-outpost fixture cannot show: the claim's entry is one
                 // block, but every body cast this tick is sized at the largest demand
@@ -235,9 +271,22 @@ let reserverRowTests =
                         "and the row under it casts rather than the colony freezing"
                 | [] -> failtest "expected the rows under the reserver to cast"
 
+                // At 650 the row hires: its seat is cast behind the empty
+                // Post's Anchor, whose return is the dearer (#622), so the
+                // row's own count reads it.
                 Expect.equal
-                    (reserverCasts (intentsAt 650))
-                    [ oneBlock ]
+                    ((decideOn (
+                        { reserverColony
+                              [ northOutpost false ]
+                              [ worker "w1" 0 50 ]
+                              [ "W1N2", neutralRoom ] with
+                            Bank = bank 650 650
+                        }
+                     ))
+                         .Quotas.Rows
+                     |> List.tryPick (fun row ->
+                         if row.Row = "reserver" then Some row.Quota else None))
+                    (Some 1)
                     "one block's worth of capacity is where the row starts hiring"
             }
 
@@ -312,10 +361,16 @@ let reserverRowTests =
                     "inside its lead it is already outside the count, so the successor is cast"
             }
 
-            test "the reserver row casts in front of the Anchor, hauler and worker rows" {
-                // The other three rows spend income and this one decides whether the
-                // income is five a tick or ten, and it is the cheapest body on the
-                // table. The fleet is short in every row at once: two Anchors against
+            test
+                "the seats are cast by their return: the empty Post's Anchor, the reservation, the hauler, the generalist" {
+                // #622: the order was the rows' — the reserver first, for it
+                // decides whether a room's income is five a tick or ten. Now
+                // each seat is cast by what one body returns on its energy
+                // and spawn time: the Anchor digs its rock's ten a tick over a
+                // life, the reserver adds five a source over its shorter one,
+                // the hauler moves its share of what the standing Anchors dig,
+                // and the generalist is the surplus's, cast after every price.
+                // The fleet is short in every row at once: two Anchors against
                 // three Posts, no hauler against the one-body quota the two home
                 // containers come to at this bank, and a whole-fleet deficit under all
                 // of it. Four idle spawns cast one body each, so the whole order is
@@ -329,17 +384,11 @@ let reserverRowTests =
                         [ anchor "a1" 0 50; anchor "a2" 0 50; worker "w1" 0 50 ]
                         [ "W1N2", reservedRoom true 5000 ]
 
-                match spawnIntents (decideOn colony).Intents with
-                | [ (_, firstBody, firstName)
-                    (_, _, secondName)
-                    (_, _, thirdName)
-                    (_, _, fourthName) ] ->
-                    Expect.stringStarts firstName "reserver-" "the reservation is cast for first"
-                    Expect.equal firstBody oneBlock "at the deficit's own body, not the bank's"
-                    Expect.stringStarts secondName "anchor-" "then the empty Post"
-                    Expect.stringStarts thirdName "hauler-" "then the throughput quota"
-                    Expect.stringStarts fourthName "worker-" "and the generalist last"
-                | other -> failtest $"expected exactly four SpawnCreep intents, got %A{other}"
+                Expect.equal
+                    (spawnIntents (decideOn colony).Intents
+                     |> List.map (fun (_, body, name) -> name.Split('-').[0], body = oneBlock))
+                    [ "anchor", false; "reserver", true; "hauler", false; "worker", false ]
+                    "the Post first, then the reservation at the deficit's own body, the haul and the generalist last"
             }
 
             test "the body grows by a CLAIM part for every 600 ticks the reservation has lost" {
