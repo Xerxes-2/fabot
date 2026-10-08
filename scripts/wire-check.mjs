@@ -1869,14 +1869,14 @@ wire("quotas: the haul overflow (#508) writes its fill and whether the extra bod
 wire("quotas: the asks (#580) write each cast's task, row, bodies and blocks", async () => {
   const { saveQuotas } = await import(MODULE);
   const { QuotasModule_silent, Quotas, Cast, CastAsk } = await import("../build/fable/Core/Types/Verdicts.js");
-  const { CastRow, SquadRole } = await import("../build/fable/Core/Types/Tasks.js");
+  const { BodyTemplate, CastRow, SquadRole } = await import("../build/fable/Core/Types/Tasks.js");
   const { Task } = await import("../build/fable/Core/Types/Vocabulary.js");
   const { ofArray } = await import(LIST);
   const s = QuotasModule_silent;
   const casts = ofArray([
-    new Cast(new Task(12, ["W1N2"]), new CastAsk(CastRow.Ranger, 2, 3)),
+    new Cast(new Task(12, ["W1N2"]), new CastAsk(new CastRow(0, [BodyTemplate.Ranged]), 2, 3)),
     new Cast(new Task(13, ["W1N1"]), new CastAsk(CastRow.Defender, 1, 1)),
-    new Cast(new Task(14, ["W2N2"]), new CastAsk(new CastRow(3, [new SquadRole(2, [])]), 1, 2)),
+    new Cast(new Task(14, ["W2N2"]), new CastAsk(new CastRow(2, [new SquadRole(2, [])]), 1, 2)),
   ]);
   const quotas = new Quotas(
     s.Target,

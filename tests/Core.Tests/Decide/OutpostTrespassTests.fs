@@ -644,7 +644,9 @@ let trespassTests =
                     brief.Asks
                     |> List.map (fun ask -> ask.Row, ask.Wanted threats)
                     |> List.filter (fun (_, wanted) -> wanted > 0),
-                    Map.tryFind (CapScope.Row CastRow.Guard) (brief.Capacity threats).Caps
+                    Map.tryFind
+                        (CapScope.Row(CastRow.Fighter BodyTemplate.Melee))
+                        (brief.Capacity threats).Caps
 
                 let asksOf colony = fst (readHolding [] colony)
 
@@ -653,7 +655,10 @@ let trespassTests =
 
                 Expect.equal
                     (asksOf (declaredRaid [ hauler; seatedDigger ]))
-                    [ CastRow.Guard, 2; CastRow.Ranger, 1 ]
+                    [
+                        CastRow.Fighter BodyTemplate.Melee, 2
+                        CastRow.Fighter BodyTemplate.Ranged, 1
+                    ]
                     "the digger asks the guard row, the hauler at its pace the ranger's, and the guard's too while no ranger holds the kill"
 
                 Expect.equal
@@ -661,19 +666,27 @@ let trespassTests =
                         { declaredRaid [ hauler ] with
                             Bank = bank 550 550
                         })
-                    [ CastRow.Guard, 1 ]
+                    [ CastRow.Fighter BodyTemplate.Melee, 1 ]
                     "with no ranger block castable and none to lend, the guard's alone"
 
                 Expect.equal
                     (readHolding [ "r-9" ] (declaredRaid [ hauler; seatedDigger ] |> lending))
-                    ([ CastRow.Guard, 1; CastRow.Ranger, 1 ], Some 1)
+                    ([
+                        CastRow.Fighter BodyTemplate.Melee, 1
+                        CastRow.Fighter BodyTemplate.Ranged, 1
+                     ],
+                     Some 1)
                     "a ranger holding the kill takes the hauler off the guard row"
 
                 Expect.equal
                     (readHolding
                         []
                         (declaredRaid [ hauler ] |> withBodyAtHome (ranger "r-9") atSpawn))
-                    ([ CastRow.Guard, 1; CastRow.Ranger, 1 ], Some 1)
+                    ([
+                        CastRow.Fighter BodyTemplate.Melee, 1
+                        CastRow.Fighter BodyTemplate.Ranged, 1
+                     ],
+                     Some 1)
                     "a lendable ranger elsewhere takes nothing off the guard row"
 
                 // The ranger's lend reads its home's quiet and where it stands,
@@ -687,7 +700,10 @@ let trespassTests =
 
                 Expect.equal
                     (asksOf (declaredRaid haulers))
-                    [ CastRow.Guard, Engine.guardCap; CastRow.Ranger, Engine.guardCap ]
+                    [
+                        CastRow.Fighter BodyTemplate.Melee, Engine.guardCap
+                        CastRow.Fighter BodyTemplate.Ranged, Engine.guardCap
+                    ]
                     "four haulers buy no more than a raid's room of bodies a row"
 
                 let holders held colony =
@@ -898,7 +914,10 @@ let trespassTests =
                 // the casts and the seat, the arena the kill's ticks.
                 Expect.equal
                     (killCasts "W1N2" (decideOn colony))
-                    [ CastRow.Guard, 1, Some [ "d-1" ]; CastRow.Ranger, 1, Some [ "hauler-1" ] ]
+                    [
+                        CastRow.Fighter BodyTemplate.Melee, 1, Some [ "d-1" ]
+                        CastRow.Fighter BodyTemplate.Ranged, 1, Some [ "hauler-1" ]
+                    ]
                     "one guard for the miner its swing catches, one ranger for the hauler at its pace"
 
                 // The bodies those casts are, standing at the spawn: each
@@ -989,7 +1008,7 @@ let trespassTests =
 
                 Expect.equal
                     (killCasts "W1N2" (decideOn colony) |> List.map (fun (row, _, _) -> row))
-                    [ CastRow.Guard ]
+                    [ CastRow.Fighter BodyTemplate.Melee ]
                     "the same miner with no holder to call is cast for"
             }
 
@@ -1021,7 +1040,7 @@ let trespassTests =
 
                 Expect.equal
                     (killCasts "W1N2" called)
-                    [ CastRow.Guard, 1, Some [ "d-1" ] ]
+                    [ CastRow.Fighter BodyTemplate.Melee, 1, Some [ "d-1" ] ]
                     "and the other outpost's miner is cast for"
             }
 
@@ -1049,7 +1068,7 @@ let trespassTests =
 
                 Expect.equal
                     (killCasts "W1N2" called)
-                    [ CastRow.Guard, 1, Some [ "d-1" ] ]
+                    [ CastRow.Fighter BodyTemplate.Melee, 1, Some [ "d-1" ] ]
                     "and the outpost's miner is cast for"
             }
 
@@ -1066,7 +1085,7 @@ let trespassTests =
 
                 Expect.equal
                     (killCasts outpost (decisionOf child))
-                    [ CastRow.Guard, 1, Some [ "raptor-out" ] ]
+                    [ CastRow.Fighter BodyTemplate.Melee, 1, Some [ "raptor-out" ] ]
                     "the child, past both floors, is handed the guard for the miner"
 
                 Expect.isEmpty

@@ -688,7 +688,7 @@ let internal planSpawns
                 brief.Asks
                 |> List.exists (fun ask ->
                     let pattern =
-                        if ask.Row = CastRow.Ranger then
+                        if ask.Row = CastRow.Fighter BodyTemplate.Ranged then
                             rangerPattern
                         else
                             defenderPattern

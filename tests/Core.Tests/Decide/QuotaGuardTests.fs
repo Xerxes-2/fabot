@@ -1265,7 +1265,12 @@ let guardRowTests =
                                         guardColony [ hostileIn "W1N2" raidTile body ] []
                                         |> banked 1800
 
-                                    let wins, _ = Facts.castPrice colony CastRow.Ranger "W1N2"
+                                    let wins, _ =
+                                        Facts.castPrice
+                                            colony
+                                            (CastRow.Fighter BodyTemplate.Ranged)
+                                            "W1N2"
+
                                     let blocks = max 1 (Facts.rangerBlocksReach colony)
                                     let energy = blocks * bodyCost rangerPattern.Block
                                     let a = creepWith "ranger-a" 0 0 (bodyFor rangerPattern energy)

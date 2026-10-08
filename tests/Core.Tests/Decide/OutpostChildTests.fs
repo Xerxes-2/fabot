@@ -788,7 +788,7 @@ let childOutpostTests =
 
                 Expect.equal
                     (brief.Asks |> List.map (fun ask -> ask.Row))
-                    [ CastRow.Guard ]
+                    [ CastRow.Fighter BodyTemplate.Melee ]
                     "and her chase asks her guard row for the body that wins it"
 
                 Expect.isTrue (Threats.wants threats (Guard "W1N4") >= 1) "at least one"

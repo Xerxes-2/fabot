@@ -1955,7 +1955,7 @@ let shutChaseTests =
 
                 Expect.equal
                     (brief.Asks |> List.map (fun ask -> ask.Row))
-                    [ CastRow.Guard ]
+                    [ CastRow.Fighter BodyTemplate.Melee ]
                     "the stand-down withholds no cast: the chase asks the guard row"
 
                 Expect.exists

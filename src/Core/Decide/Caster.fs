@@ -100,8 +100,8 @@ let assign
     let weighed (cast: Cast) =
         match cast.Ask.Row with
         | CastRow.Squad _ -> false
-        | CastRow.Guard
-        | CastRow.Ranger
+        | CastRow.Fighter BodyTemplate.Melee
+        | CastRow.Fighter BodyTemplate.Ranged
         | CastRow.Defender -> Option.isSome (roomOf cast.For)
 
     // Each Task's ask, once: its owner's where the owner asks it, else the
@@ -163,7 +163,11 @@ let assign
             Supply =
                 bidders
                 |> List.collect (fun bidder ->
-                    [ CastRow.Guard; CastRow.Ranger; CastRow.Defender ]
+                    [
+                        CastRow.Fighter BodyTemplate.Melee
+                        CastRow.Fighter BodyTemplate.Ranged
+                        CastRow.Defender
+                    ]
                     |> List.map (fun row -> (bidder.Home, row), fleetOf bidder row))
                 |> Map.ofList
             HeldFor =
@@ -173,7 +177,11 @@ let assign
                     |> List.choose (fun creep ->
                         fightOf creep
                         |> Option.bind (fun tid ->
-                            [ CastRow.Guard; CastRow.Ranger; CastRow.Defender ]
+                            [
+                                CastRow.Fighter BodyTemplate.Melee
+                                CastRow.Fighter BodyTemplate.Ranged
+                                CastRow.Defender
+                            ]
                             |> List.tryFind (fun row -> CastRow.cut row creep.Name creep.Body)
                             |> Option.map (fun row -> bidder.Home, tid, row))))
                 |> List.countBy id

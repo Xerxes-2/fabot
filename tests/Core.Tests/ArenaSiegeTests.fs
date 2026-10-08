@@ -1530,7 +1530,10 @@ let w17s29DismantlerTests =
 
                 let wins home =
                     fst (
-                        Fabot.Core.Decide.Facts.castPrice (viewOf start home) CastRow.Guard "W17S29"
+                        Fabot.Core.Decide.Facts.castPrice
+                            (viewOf start home)
+                            (CastRow.Fighter BodyTemplate.Melee)
+                            "W17S29"
                     )
 
                 Expect.equal

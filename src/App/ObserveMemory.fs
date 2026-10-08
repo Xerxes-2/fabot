@@ -1492,8 +1492,8 @@ let saveQuotas (home: string) (quotas: Quotas) =
 
             a?row <-
                 match cast.Ask.Row with
-                | CastRow.Guard -> "guard"
-                | CastRow.Ranger -> "ranger"
+                | CastRow.Fighter BodyTemplate.Melee -> "guard"
+                | CastRow.Fighter BodyTemplate.Ranged -> "ranger"
                 | CastRow.Defender -> "defender"
                 | CastRow.Squad Sapper -> "sapper"
                 | CastRow.Squad Probe -> "probe"

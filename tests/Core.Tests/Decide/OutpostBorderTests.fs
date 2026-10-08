@@ -197,8 +197,8 @@ let invaderCoreTests =
                     (Some(
                         safetyRank OnTheTier,
                         Capacity.fighters 2
-                        |> Capacity.capping (CapScope.Row CastRow.Guard) 1
-                        |> Capacity.capping (CapScope.Row CastRow.Ranger) 1
+                        |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Melee)) 1
+                        |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Ranged)) 1
                     ))
                     "one Guard on the Safety tier, for one guard and the ranger standing in the room"
 

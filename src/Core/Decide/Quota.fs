@@ -616,7 +616,7 @@ let castsOf
     threats.Briefs
     |> Map.toList
     |> List.collect (fun (_, brief) -> brief.Asks |> List.map _.Row)
-    |> List.append [ CastRow.Guard; CastRow.Ranger ]
+    |> List.append [ CastRow.Fighter BodyTemplate.Melee; CastRow.Fighter BodyTemplate.Ranged ]
     |> List.distinct
     |> List.collect (fun row ->
         asksFor view threats outposts calls row
@@ -740,8 +740,8 @@ let internal rowBlocksWanted
     with
     | [] ->
         match row with
-        | CastRow.Ranger -> view.Tuning.RangerResidentBlocks
-        | CastRow.Guard
+        | CastRow.Fighter BodyTemplate.Ranged -> view.Tuning.RangerResidentBlocks
+        | CastRow.Fighter BodyTemplate.Melee
         | CastRow.Defender
         | CastRow.Squad _ -> 1
     | blocks -> List.max blocks
@@ -873,14 +873,14 @@ let internal reserverClaimsOf
 
         Set.unionMany
             [
-                (if castRowStands view threats outposts CastRow.Guard then
+                (if castRowStands view threats outposts (CastRow.Fighter BodyTemplate.Melee) then
                      Set.empty
                  else
-                     castFor CastRow.Guard)
-                (if castRowStands view threats outposts CastRow.Ranger then
+                     castFor (CastRow.Fighter BodyTemplate.Melee))
+                (if castRowStands view threats outposts (CastRow.Fighter BodyTemplate.Ranged) then
                      Set.empty
                  else
-                     castFor CastRow.Ranger)
+                     castFor (CastRow.Fighter BodyTemplate.Ranged))
                 lost
                 shutToEconomy view
             ]
@@ -963,8 +963,8 @@ let internal rowSizingOf
         AnchorPostCaps = postWorkCapsOf view atlas outposts.ReservableRooms
         ReserverClaims = reserverClaimsOf view threats outposts
         MinerWorkPerMove = view.Tuning.MinerWorkPerMove
-        GuardBlocks = rowBlocksWanted view threats outposts CastRow.Guard
-        RangerBlocks = rowBlocksWanted view threats outposts CastRow.Ranger
+        GuardBlocks = rowBlocksWanted view threats outposts (CastRow.Fighter BodyTemplate.Melee)
+        RangerBlocks = rowBlocksWanted view threats outposts (CastRow.Fighter BodyTemplate.Ranged)
         MinerQuota = miners
         OreMinerQuota = oreMiners
         CourierQuota = if courierProgrammeOpen view atlas then 1 else 0
@@ -1228,8 +1228,8 @@ let internal quotaRowsOf
     {
         Reserver = sizing.ReserverClaims
         Defender = rowQuota view threats outposts CastRow.Defender
-        Guard = rowQuota view threats outposts CastRow.Guard
-        Ranger = rowQuota view threats outposts CastRow.Ranger
+        Guard = rowQuota view threats outposts (CastRow.Fighter BodyTemplate.Melee)
+        Ranger = rowQuota view threats outposts (CastRow.Fighter BodyTemplate.Ranged)
         Squad =
             SquadRole.all
             |> List.map (fun role -> role, squadQuota threats role)

@@ -1958,15 +1958,19 @@ let internal castBodiesPaid
     (prey: (string * float) list)
     : int =
     match row with
-    | CastRow.Guard
-    | CastRow.Ranger ->
+    | CastRow.Fighter BodyTemplate.Melee
+    | CastRow.Fighter BodyTemplate.Ranged ->
         let priced =
             { ColonyView.lookingInto (room :: RoomName.adjacent room) view with
                 Stepped = Map.empty
                 SteppedBack = Map.empty
             }
 
-        let pattern = if row = CastRow.Ranger then rangerPattern else guardPattern
+        let pattern =
+            if row = CastRow.Fighter BodyTemplate.Ranged then
+                rangerPattern
+            else
+                guardPattern
 
         let body = blocksFighter pattern blocks
         let healOn = healReachingWithin priced room priced.Tuning.ReachHorizon
@@ -3941,10 +3945,10 @@ type private Pricer =
 /// time: it is never weighed between colonies.
 let castPrice (view: ColonyView) (row: CastRow) (room: string) : bool * int =
     match row with
-    | CastRow.Guard
-    | CastRow.Ranger ->
+    | CastRow.Fighter BodyTemplate.Melee
+    | CastRow.Fighter BodyTemplate.Ranged ->
         let priced = ColonyView.lookingInto (room :: RoomName.adjacent room) view
-        let ranger = row = CastRow.Ranger
+        let ranger = row = CastRow.Fighter BodyTemplate.Ranged
 
         let pattern, most, beat =
             if ranger then
@@ -5036,7 +5040,15 @@ let private homeUnheld (view: ColonyView) atlas : bool =
             match Map.tryFind home rows with
             | Some row ->
                 Map.count rows > 1
-                || fst (castPrice view (if row.Ranger then CastRow.Ranger else CastRow.Guard) home)
+                || fst (
+                    castPrice
+                        view
+                        (if row.Ranger then
+                             CastRow.Fighter BodyTemplate.Ranged
+                         else
+                             CastRow.Fighter BodyTemplate.Melee)
+                        home
+                )
             | None -> false)
 
 /// The rooms whose Guard `planTasks` pools whatever kind claims them, and the

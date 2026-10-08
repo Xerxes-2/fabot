@@ -1014,7 +1014,7 @@ let selfBreachTests =
                                                 For = Guard "W13S29"
                                                 Ask =
                                                     {
-                                                        Row = CastRow.Guard
+                                                        Row = CastRow.Fighter BodyTemplate.Melee
                                                         Wanted = 1
                                                         Blocks = 1
                                                     }

@@ -2229,7 +2229,10 @@ let arenaBorderTests =
 
                 Expect.equal
                     (brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted threats))
-                    [ CastRow.Guard, Engine.guardCap; CastRow.Ranger, Engine.guardCap ]
+                    [
+                        CastRow.Fighter BodyTemplate.Melee, Engine.guardCap
+                        CastRow.Fighter BodyTemplate.Ranged, Engine.guardCap
+                    ]
                     "its guards answer all four until a ranger holds the kill, and the two haulers ask the ranger row"
 
                 let mother, threats, brief = briefIn "W15S28"
@@ -2251,7 +2254,8 @@ let arenaBorderTests =
 
                 Expect.isFalse
                     (brief.Asks
-                     |> List.exists (fun ask -> ask.Row = CastRow.Ranger && ask.Wanted threats > 0))
+                     |> List.exists (fun ask ->
+                         ask.Row = CastRow.Fighter BodyTemplate.Ranged && ask.Wanted threats > 0))
                     "and her ranger row is asked for nothing there"
 
                 let _, trace = start |> run 90

@@ -206,7 +206,7 @@ let rampartDefenderTests =
 
                 Expect.equal
                     (defendAsks colony)
-                    [ CastRow.Defender, 0; CastRow.Ranger, 1 ]
+                    [ CastRow.Defender, 0; CastRow.Fighter BodyTemplate.Ranged, 1 ]
                     "the ranger's ask alone"
 
                 Expect.equal
@@ -237,7 +237,7 @@ let rampartDefenderTests =
                 // whole list is the claim.
                 Expect.equal
                     (defendAsks onExit)
-                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
+                    [ CastRow.Defender, 1; CastRow.Fighter BodyTemplate.Ranged, 1 ]
                     "the melee on the exit tile is answered, by both rows"
 
                 let medic =
@@ -247,7 +247,7 @@ let rampartDefenderTests =
 
                 Expect.equal
                     (defendAsks (defenderHome defendedLine [ medic ] []))
-                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
+                    [ CastRow.Defender, 1; CastRow.Fighter BodyTemplate.Ranged, 1 ]
                     "so is the healer alone there"
             }
 
@@ -262,7 +262,7 @@ let rampartDefenderTests =
 
                 Expect.equal
                     (defendAsks (defenderHome defendedLine [ across ] []))
-                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
+                    [ CastRow.Defender, 1; CastRow.Fighter BodyTemplate.Ranged, 1 ]
                     "the melee on W2N1's exit tile, carried onto ours next tick, as on ours"
 
                 let remembered =
@@ -277,7 +277,7 @@ let rampartDefenderTests =
 
                 Expect.equal
                     (defendAsks remembered)
-                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
+                    [ CastRow.Defender, 1; CastRow.Fighter BodyTemplate.Ranged, 1 ]
                     "the healer remembered off the exit tile"
 
                 Expect.isEmpty
@@ -301,7 +301,7 @@ let rampartDefenderTests =
 
                 Expect.equal
                     (defendAsks colony)
-                    [ CastRow.Defender, 1; CastRow.Ranger, 0 ]
+                    [ CastRow.Defender, 1; CastRow.Fighter BodyTemplate.Ranged, 0 ]
                     "walking in, it is the defender's alone: no ranger holds the economy for it"
 
                 Expect.equal
@@ -309,7 +309,7 @@ let rampartDefenderTests =
                         { colony with
                             Parked = Set.singleton "h-1"
                         })
-                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
+                    [ CastRow.Defender, 1; CastRow.Fighter BodyTemplate.Ranged, 1 ]
                     "parked there, both rows: the melee may come to the defender, the ranger reaches it now"
 
                 Expect.equal
@@ -317,7 +317,7 @@ let rampartDefenderTests =
                         defenderHome defendedLine [ raidMeleeAt "h-1" { X = 19; Y = 34 } ] []
                         |> fun c -> { c with Parked = Set.singleton "h-1" }
                     ))
-                    [ CastRow.Defender, 1; CastRow.Ranger, 0 ]
+                    [ CastRow.Defender, 1; CastRow.Fighter BodyTemplate.Ranged, 0 ]
                     "parked in the defender's swing, the ranger is not asked"
             }
 
@@ -331,7 +331,7 @@ let rampartDefenderTests =
 
                 Expect.equal
                     (defendAsks (defenderHome defendedLine [ medic ] []))
-                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
+                    [ CastRow.Defender, 1; CastRow.Fighter BodyTemplate.Ranged, 1 ]
                     "both rows"
             }
 
@@ -365,22 +365,22 @@ let rampartDefenderTests =
 
                 Expect.equal
                     (asksHeld [ homeRanger.Name ] (lent shooter))
-                    [ CastRow.Defender, 0; CastRow.Ranger, 0 ]
+                    [ CastRow.Defender, 0; CastRow.Fighter BodyTemplate.Ranged, 0 ]
                     "the kiter is the resident's"
 
                 Expect.equal
                     (asksHeld [ homeRanger.Name ] (lent thin))
-                    [ CastRow.Defender, 0; CastRow.Ranger, 0 ]
+                    [ CastRow.Defender, 0; CastRow.Fighter BodyTemplate.Ranged, 0 ]
                     "and stays the ranger row's where the bank casts no ranger"
 
                 Expect.equal
                     (asksHeld [] (lent shooter))
-                    [ CastRow.Defender, 0; CastRow.Ranger, 1 ]
+                    [ CastRow.Defender, 0; CastRow.Fighter BodyTemplate.Ranged, 1 ]
                     "one passing through, holding nothing there, suppresses no cast"
 
                 Expect.equal
                     (asksHeld [] (lent thin))
-                    [ CastRow.Defender, 1; CastRow.Ranger, 0 ]
+                    [ CastRow.Defender, 1; CastRow.Fighter BodyTemplate.Ranged, 0 ]
                     "nor keeps a kiter no ranger answers off the defender"
             }
 
@@ -463,7 +463,7 @@ let rampartDefenderTests =
 
                 Expect.equal
                     (defendAsks colony)
-                    [ CastRow.Defender, 1; CastRow.Ranger, 0 ]
+                    [ CastRow.Defender, 1; CastRow.Fighter BodyTemplate.Ranged, 0 ]
                     "the defender's ask alone"
             }
 
@@ -476,7 +476,7 @@ let rampartDefenderTests =
 
                 Expect.equal
                     (defendAsks (defenderHome defendedLine raid []))
-                    [ CastRow.Defender, 1; CastRow.Ranger, 1 ]
+                    [ CastRow.Defender, 1; CastRow.Fighter BodyTemplate.Ranged, 1 ]
                     "one ask a row, each for the raider it can strike"
 
                 Expect.equal
@@ -528,7 +528,7 @@ let rampartDefenderTests =
 
                 Expect.equal
                     (defendAsks colony)
-                    [ CastRow.Defender, 1; CastRow.Ranger, 0 ]
+                    [ CastRow.Defender, 1; CastRow.Fighter BodyTemplate.Ranged, 0 ]
                     "a ranger's 700 is out of a 550 bank"
 
                 Expect.equal
@@ -670,7 +670,7 @@ let rampartDefenderTests =
                         safetyRank OnTheTier,
                         Capacity.fighters 2
                         |> Capacity.capping (CapScope.Row CastRow.Defender) 2
-                        |> Capacity.capping (CapScope.Row CastRow.Ranger) 0
+                        |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Ranged)) 0
                     ))
                     "one Defend for the home, on the Safety tier, capped at the raid at its line, row by row (#546)"
 

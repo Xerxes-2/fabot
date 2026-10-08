@@ -46,13 +46,19 @@ module SquadRole =
     let slots (role: SquadRole) (roles: SquadRole list) =
         roles |> List.filter ((=) role) |> List.length
 
-/// The fighting row a Brief asks: the melee guard's, the ranger's (#411), the
-/// home's defender's (#504), or one squad role's (#452). Who stands in each
-/// is `Threat.CastRow.cut`'s.
+/// The body patterns a fight's cast is chosen among (#654): the melee guard's
+/// block and the ranger's (#411), each a `Bodies` pattern.
+[<RequireQualifiedAccess>]
+type BodyTemplate =
+    | Melee
+    | Ranged
+
+/// The fighting row a Brief asks: a fighter of the template its fight's
+/// price chose (`Facts.fighterCast`, #654), the home's defender's (#504), or
+/// one squad role's (#452). Who stands in each is `Threat.CastRow.cut`'s.
 [<RequireQualifiedAccess>]
 type CastRow =
-    | Guard
-    | Ranger
+    | Fighter of BodyTemplate
     | Defender
     | Squad of SquadRole
 

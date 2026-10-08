@@ -80,7 +80,9 @@ let casterTests =
                     (bodiesFor
                         (Guard "W4N1")
                         [
-                            bidder (rich "W1N1") [ ask (Guard "W4N1") CastRow.Guard 1 ]
+                            bidder
+                                (rich "W1N1")
+                                [ ask (Guard "W4N1") (CastRow.Fighter BodyTemplate.Melee) 1 ]
                             bidder (rich "W5N1") []
                         ])
                     (Map.ofList [ "W5N1", 1 ])
@@ -88,7 +90,10 @@ let casterTests =
             }
 
             test "a colony casts another's ask only past both floors, its bank's and its stock's" {
-                let asking = bidder (rich "W1N1") [ ask (Guard "W4N1") CastRow.Guard 1 ]
+                let asking =
+                    bidder
+                        (rich "W1N1")
+                        [ ask (Guard "W4N1") (CastRow.Fighter BodyTemplate.Melee) 1 ]
 
                 let near capacity stock =
                     bodiesFor (Guard "W4N1") [ asking; bidder (colonyAt "W5N1" capacity stock) [] ]
@@ -113,7 +118,11 @@ let casterTests =
                 Expect.equal
                     (bodiesFor
                         (Guard "W2N1")
-                        [ bidder (colonyAt "W1N1" 5_600 0) [ ask (Guard "W2N1") CastRow.Guard 1 ] ])
+                        [
+                            bidder
+                                (colonyAt "W1N1" 5_600 0)
+                                [ ask (Guard "W2N1") (CastRow.Fighter BodyTemplate.Melee) 1 ]
+                        ])
                     (Map.ofList [ "W1N1", 1 ])
                     "a colony with no stock casts for its own room"
             }
@@ -133,7 +142,11 @@ let casterTests =
                 let asked stock =
                     bodiesFor
                         (Guard "W2N1")
-                        [ bidder (defending stock) [ ask (Guard "W2N1") CastRow.Guard 1 ] ]
+                        [
+                            bidder
+                                (defending stock)
+                                [ ask (Guard "W2N1") (CastRow.Fighter BodyTemplate.Melee) 1 ]
+                        ]
 
                 Expect.isEmpty
                     (asked (Tuning.defaults.CasterReserve - 1))
@@ -167,7 +180,9 @@ let casterTests =
                     (bodiesFor
                         (Guard "W2N1")
                         [
-                            bidder (rich "W1N1") [ ask (Guard "W2N1") CastRow.Guard 2 ]
+                            bidder
+                                (rich "W1N1")
+                                [ ask (Guard "W2N1") (CastRow.Fighter BodyTemplate.Melee) 2 ]
                             bidder (rich "W3N1") []
                         ])
                     (Map.ofList [ "W1N1", 1; "W3N1", 1 ])
@@ -181,8 +196,12 @@ let casterTests =
                         Map.empty
                         Map.empty
                         [
-                            bidder (rich "W1N1") [ ask (Guard "W4N1") CastRow.Guard 1 ]
-                            bidder (rich "W9N1") [ ask (Guard "W6N1") CastRow.Guard 1 ]
+                            bidder
+                                (rich "W1N1")
+                                [ ask (Guard "W4N1") (CastRow.Fighter BodyTemplate.Melee) 1 ]
+                            bidder
+                                (rich "W9N1")
+                                [ ask (Guard "W6N1") (CastRow.Fighter BodyTemplate.Melee) 1 ]
                             bidder (rich "W5N1") []
                         ]
 
@@ -199,7 +218,7 @@ let casterTests =
             // has moved since.
             test "a body of the row in an oven or standing answers the ask: nobody casts another" {
                 let asking (view: ColonyView) =
-                    bidder view [ ask (Guard "W4N1") CastRow.Guard 1 ]
+                    bidder view [ ask (Guard "W4N1") (CastRow.Fighter BodyTemplate.Melee) 1 ]
 
                 let baking =
                     { rich "W1N1" with
@@ -235,7 +254,7 @@ let casterTests =
                 // Its value as the asker priced it (`Cast.Prey`): what every
                 // colony weighing the cast reads, seeing the room or not.
                 let worth value =
-                    { ask (Guard "W4N1") CastRow.Ranger 1 with
+                    { ask (Guard "W4N1") (CastRow.Fighter BodyTemplate.Ranged) 1 with
                         Prey = Some [ trespasser.Id, value ]
                     }
 
@@ -269,7 +288,7 @@ let casterTests =
 
                 // Each worth less than one 1,060 body, together more.
                 let kill =
-                    { ask (Guard "W4N1") CastRow.Ranger 2 with
+                    { ask (Guard "W4N1") (CastRow.Fighter BodyTemplate.Ranged) 2 with
                         Prey = Some [ trespasser.Id, 650.0; second.Id, 650.0 ]
                     }
 
@@ -287,7 +306,7 @@ let casterTests =
                 let hauler = haulerIn "W2N1"
 
                 let kill =
-                    { ask (Guard "W2N1") CastRow.Ranger 1 with
+                    { ask (Guard "W2N1") (CastRow.Fighter BodyTemplate.Ranged) 1 with
                         Prey = Some [ hauler.Id, 2_300.0 ]
                     }
 

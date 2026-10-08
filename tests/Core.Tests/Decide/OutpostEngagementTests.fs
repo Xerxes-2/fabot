@@ -394,7 +394,7 @@ let engagementTests =
 
                 Expect.equal
                     (brief.Asks |> List.map (fun ask -> ask.Row))
-                    [ CastRow.Ranger ]
+                    [ CastRow.Fighter BodyTemplate.Ranged ]
                     "the guard's swing reaches no shooter, so the ranger row is asked"
 
                 Expect.equal
@@ -416,7 +416,7 @@ let engagementTests =
                 Expect.equal
                     ((Threats.briefOf (threatsOf mixedOnly (Atlas.ofView mixedOnly)) "W1N2").Asks
                      |> List.map (fun ask -> ask.Row))
-                    [ CastRow.Guard ]
+                    [ CastRow.Fighter BodyTemplate.Melee ]
                     "a raid that closes on the guard is still the guard's"
 
                 let poor =
@@ -427,7 +427,7 @@ let engagementTests =
                 Expect.equal
                     ((Threats.briefOf (threatsOf poor (Atlas.ofView poor)) "W1N2").Asks
                      |> List.map (fun ask -> ask.Row))
-                    [ CastRow.Guard ]
+                    [ CastRow.Fighter BodyTemplate.Melee ]
                     "a bank that casts no ranger block is never asked for one (#546): the guard's"
             }
 
@@ -447,7 +447,7 @@ let engagementTests =
 
                 Expect.equal
                     (brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted threats))
-                    [ CastRow.Ranger, Engine.guardCap ]
+                    [ CastRow.Fighter BodyTemplate.Ranged, Engine.guardCap ]
                     "the ranger row is asked, for the pair the verdict prices"
 
                 Expect.equal
@@ -478,7 +478,7 @@ let engagementTests =
 
                 Expect.equal
                     (brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted threats))
-                    [ CastRow.Ranger, Engine.guardCap ]
+                    [ CastRow.Fighter BodyTemplate.Ranged, Engine.guardCap ]
                     "its row's ask is the pair"
             }
 
@@ -583,7 +583,7 @@ let engagementTests =
 
                 Expect.equal
                     (brief.Asks |> List.map (fun ask -> ask.Row))
-                    [ CastRow.Ranger ]
+                    [ CastRow.Fighter BodyTemplate.Ranged ]
                     "the guard's swing reaches no Invader shooter, so the ranger row is asked"
 
                 Expect.isFalse (brief.Admits(guard "g-1")) "and a melee guard is not sent into it"
@@ -596,7 +596,7 @@ let engagementTests =
                 Expect.equal
                     ((Threats.briefOf (threatsOf mixedOnly (Atlas.ofView mixedOnly)) "W1N2").Asks
                      |> List.map (fun ask -> ask.Row))
-                    [ CastRow.Guard ]
+                    [ CastRow.Fighter BodyTemplate.Melee ]
                     "an Invader carrying ATTACK closes, so it is still the guard's"
             }
 

@@ -1506,15 +1506,15 @@ let guardPrecedenceTests =
 
                 let hauled =
                     Capacity.fighters 2
-                    |> Capacity.capping (CapScope.Row CastRow.Guard) 1
-                    |> Capacity.capping (CapScope.Row CastRow.Ranger) 2
+                    |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Melee)) 1
+                    |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Ranged)) 2
 
                 // The guard's seat at a core, and one beside it for the
                 // ranger standing in the room (#558).
                 let cored =
                     Capacity.fighters 2
-                    |> Capacity.capping (CapScope.Row CastRow.Guard) 1
-                    |> Capacity.capping (CapScope.Row CastRow.Ranger) 1
+                    |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Melee)) 1
+                    |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Ranged)) 1
 
                 let row ground from rung capacity takers =
                     {
@@ -1762,8 +1762,8 @@ let guardPrecedenceTests =
                     (Some(
                         safetyRank OneRungUp,
                         Capacity.fighters 2
-                        |> Capacity.capping (CapScope.Row CastRow.Guard) 1
-                        |> Capacity.capping (CapScope.Row CastRow.Ranger) 2
+                        |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Melee)) 1
+                        |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Ranged)) 2
                     ))
                     "pooled as its kill"
             }

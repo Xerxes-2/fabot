@@ -156,8 +156,8 @@ module CastRow =
     /// The row's own cut over a name and parts: who stands in it.
     let internal cut (row: CastRow) (name: string) (parts: Map<BodyPart, int>) : bool =
         match row with
-        | CastRow.Guard -> isGuardRowCut name parts
-        | CastRow.Ranger -> isRangerRowCut name parts
+        | CastRow.Fighter BodyTemplate.Melee -> isGuardRowCut name parts
+        | CastRow.Fighter BodyTemplate.Ranged -> isRangerRowCut name parts
         | CastRow.Defender -> isNamedFor defenderPattern name
         | CastRow.Squad role -> squadRoleByName name = Some role
 
@@ -744,8 +744,9 @@ module Brief =
         let asked = not (List.isEmpty rest) && (castable view rangerPattern || rangerMay ())
 
         [
-            CastRow.Guard, (if asked && rangerHolds then caught else trespassers)
-            CastRow.Ranger, (if asked then rest else [])
+            CastRow.Fighter BodyTemplate.Melee,
+            (if asked && rangerHolds then caught else trespassers)
+            CastRow.Fighter BodyTemplate.Ranged, (if asked then rest else [])
         ]
 
     /// Every kind's targets today: what `Facts.guardShoots` passes, in the kill
@@ -873,7 +874,7 @@ module Brief =
                 isGuardRowBody creep
                 && answered.Value
                    |> List.forall (fun (row, trespassers) ->
-                       row <> CastRow.Guard
+                       row <> CastRow.Fighter BodyTemplate.Melee
                        || trespassers |> List.forall (Facts.canStrike view (partCount creep.Body)))
         | BriefKind.Outpost when ranged -> isRangerRowBody creep
         // A level-0 core is the guard row's to break (#487), and a ranger's
@@ -925,7 +926,7 @@ module Brief =
     /// (`ColonyView.HarassFloors`, #457).
     let private harassAsk (view: ColonyView) (room: string) : RowAsk =
         {
-            Row = CastRow.Ranger
+            Row = CastRow.Fighter BodyTemplate.Ranged
             Wanted = fun _ -> 1
             Blocks =
                 fun () ->
@@ -961,7 +962,7 @@ module Brief =
         | BriefKind.Resident ->
             [
                 {
-                    Row = CastRow.Ranger
+                    Row = CastRow.Fighter BodyTemplate.Ranged
                     Wanted =
                         fun threats ->
                             if Set.contains room (harassRooms view) then
@@ -983,7 +984,7 @@ module Brief =
         | BriefKind.Outpost when ranged ->
             [
                 {
-                    Row = CastRow.Ranger
+                    Row = CastRow.Fighter BodyTemplate.Ranged
                     Wanted = fun _ -> rangersWanted view room
                     Blocks = fun () -> rangerBlocksFor 1 view room
                     Prey = None
@@ -998,7 +999,10 @@ module Brief =
             let shot =
                 answered.Value
                 |> List.collect (fun (row, trespassers) ->
-                    if row = CastRow.Ranger then trespassers else [])
+                    if row = CastRow.Fighter BodyTemplate.Ranged then
+                        trespassers
+                    else
+                        [])
 
             answered.Value
             |> List.map (fun (row, trespassers) ->
@@ -1009,14 +1013,14 @@ module Brief =
                     Wanted =
                         fun _ ->
                             match row, trespassers with
-                            | CastRow.Guard, [] when not bouncing -> 0
-                            | CastRow.Guard, _ ->
+                            | CastRow.Fighter BodyTemplate.Melee, [] when not bouncing -> 0
+                            | CastRow.Fighter BodyTemplate.Melee, _ ->
                                 max (guardsWanted view room) (List.length trespassers)
                                 |> min Engine.guardCap
                             | _ -> min Engine.guardCap (List.length trespassers)
                     Blocks =
                         fun () ->
-                            if row = CastRow.Ranger then
+                            if row = CastRow.Fighter BodyTemplate.Ranged then
                                 rangerBlocksFor 1 view room
                             else
                                 guardBlocksFor view room
@@ -1024,7 +1028,8 @@ module Brief =
                         trespassers
                         |> List.filter (fun hostile ->
                             Facts.enemyEconomy view.Hostiles hostile
-                            && (row = CastRow.Ranger || not (List.contains hostile shot)))
+                            && (row = CastRow.Fighter BodyTemplate.Ranged
+                                || not (List.contains hostile shot)))
                         |> List.map (fun hostile -> hostile.Id, Facts.killValue view hostile)
                         |> Some
                 })
@@ -1033,7 +1038,7 @@ module Brief =
         | BriefKind.ExitHold ->
             [
                 {
-                    Row = CastRow.Guard
+                    Row = CastRow.Fighter BodyTemplate.Melee
                     Wanted = fun _ -> guardsWanted view room
                     Blocks = fun () -> guardBlocksFor view room
                     Prey = None
@@ -1045,10 +1050,10 @@ module Brief =
         // carries the row's ask.
         | BriefKind.Chase ->
             match rowCast.Value with
-            | Some CastRow.Ranger ->
+            | Some(CastRow.Fighter BodyTemplate.Ranged) ->
                 [
                     {
-                        Row = CastRow.Ranger
+                        Row = CastRow.Fighter BodyTemplate.Ranged
                         Wanted = fun _ -> rangersWanted view room
                         Blocks = fun () -> rangerBlocksFor 1 view room
                         Prey = None
@@ -1057,7 +1062,7 @@ module Brief =
             | Some _ ->
                 [
                     {
-                        Row = CastRow.Guard
+                        Row = CastRow.Fighter BodyTemplate.Melee
                         Wanted = fun _ -> guardsWanted view room
                         Blocks = fun () -> guardBlocksFor view room
                         Prey = None
@@ -1128,15 +1133,20 @@ module Brief =
                 |> List.filter (fun a -> a.Row = row)
                 |> List.sumBy (fun a -> a.Wanted threats)
 
-            let guards, rangers = count CastRow.Guard, count CastRow.Ranger
+            let guards, rangers =
+                count (CastRow.Fighter BodyTemplate.Melee),
+                count (CastRow.Fighter BodyTemplate.Ranged)
+
             let capacity = Capacity.fighters (guards + rangers)
 
             if rangers = 0 then
                 capacity
             else
                 capacity
-                |> Capacity.capping (CapScope.Row CastRow.Guard) guards
-                |> Capacity.capping (CapScope.Row CastRow.Ranger) (guards + rangers)
+                |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Melee)) guards
+                |> Capacity.capping
+                    (CapScope.Row(CastRow.Fighter BodyTemplate.Ranged))
+                    (guards + rangers)
         // The guard row's count, and a seat beside it for each ranger it
         // admits standing in the room (#558), so a ranger never takes a
         // guard's.
@@ -1155,8 +1165,8 @@ module Brief =
                 Capacity.fighters guards
             else
                 Capacity.fighters (guards + seated)
-                |> Capacity.capping (CapScope.Row CastRow.Guard) guards
-                |> Capacity.capping (CapScope.Row CastRow.Ranger) seated
+                |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Melee)) guards
+                |> Capacity.capping (CapScope.Row(CastRow.Fighter BodyTemplate.Ranged)) seated
         | BriefKind.Outpost
         | BriefKind.ExitHold -> Capacity.fighters (wanted ())
 
@@ -1198,7 +1208,12 @@ module Brief =
         let rowCast =
             lazy
                 (if kind = BriefKind.Chase && casts.Value then
-                     Some(if ranger.Value then CastRow.Ranger else CastRow.Guard)
+                     Some(
+                         if ranger.Value then
+                             CastRow.Fighter BodyTemplate.Ranged
+                         else
+                             CastRow.Fighter BodyTemplate.Melee
+                     )
                  else
                      None)
 
@@ -1372,9 +1387,12 @@ module Brief =
                        |> Option.exists (fun at -> at.Room = home)))
 
         if castable view rangerPattern || held || lentRangers view holders > 0 then
-            [ CastRow.Defender, met; CastRow.Ranger, atLine |> List.filter neverStruck ]
+            [
+                CastRow.Defender, met
+                CastRow.Fighter BodyTemplate.Ranged, atLine |> List.filter neverStruck
+            ]
         else
-            [ CastRow.Defender, atLine; CastRow.Ranger, [] ]
+            [ CastRow.Defender, atLine; CastRow.Fighter BodyTemplate.Ranged, [] ]
 
     /// The home's Defend (#504), off the raid at its line (`Facts.raidAtLine`)
     /// as `defendSplit` shares it between the rows: one ask a row, for the
@@ -1407,13 +1425,13 @@ module Brief =
                     Row = row
                     Wanted =
                         fun _ ->
-                            if row = CastRow.Ranger then
+                            if row = CastRow.Fighter BodyTemplate.Ranged then
                                 max 0 (defendersWanted raid view - lent)
                             else
                                 defendersWanted raid view
                     Blocks =
                         fun () ->
-                            if row = CastRow.Ranger then
+                            if row = CastRow.Fighter BodyTemplate.Ranged then
                                 rangerBlocksFor 1 view (SpatialInfo.homeName view.Spatial)
                             else
                                 view.Tuning.DefenderBlocks
@@ -2755,7 +2773,7 @@ let private defendGroundOf
     | [] -> None
     | raid ->
         let reach =
-            if row = CastRow.Ranger then
+            if row = CastRow.Fighter BodyTemplate.Ranged then
                 Engine.rangedRange
             else
                 Engine.meleeRange
@@ -3570,7 +3588,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         && Brief.trespassSplit view (HeldTaskFacts.holdersOf held (taskId (Guard room))) room
            |> List.forall (fun (row, trespassers) ->
                match row with
-               | CastRow.Guard ->
+               | CastRow.Fighter BodyTemplate.Melee ->
                    let guard = Facts.blockFighter guardPattern
                    trespassers |> List.forall (Facts.strikesAtStandoff view guard >> not)
                | _ -> List.isEmpty trespassers)
@@ -4195,8 +4213,8 @@ let private withMusters
             |> List.collect (fun ask ->
                 let block =
                     match ask.Row with
-                    | CastRow.Ranger -> Some rangerPattern.Block
-                    | CastRow.Guard -> Some guardPattern.Block
+                    | CastRow.Fighter BodyTemplate.Ranged -> Some rangerPattern.Block
+                    | CastRow.Fighter BodyTemplate.Melee -> Some guardPattern.Block
                     | _ -> None
 
                 match block with
