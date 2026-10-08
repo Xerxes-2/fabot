@@ -144,8 +144,8 @@
     "towerSpent": 0
   },
   "outpost-squad": {
-    "castEnergy": 4900,
-    "cleared": 222,
+    "castEnergy": 5600,
+    "cleared": 229,
     "hurt": 1000,
     "kills": 5,
     "ourDeaths": 1,

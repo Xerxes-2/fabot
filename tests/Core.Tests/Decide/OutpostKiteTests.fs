@@ -841,14 +841,18 @@ let kiteTests =
 
                 let colony, cast = castIn (withOpenField []) { X = 25; Y = 25 }
 
-                // One block's 20 a tick lames the MOVE-first body before the
-                // field's run-off runs out (#625), and kites it down at the
-                // least spent: no set trades it, so the verdict is the Kite
-                // (`rowAnswer`), answered by the rangers standing by.
+                // A ranger lames the MOVE-first body before the field's
+                // run-off runs out (#625), and kites it down: no set trades
+                // it, so the verdict is the Kite (`rowAnswer`), answered by
+                // the rangers standing by. Moved by #656: the fight's ticks
+                // cost the outpost's held source (`Contest.Kept`), which the
+                // chooser read as none on a room's first asks a tick, so two
+                // blocks killing in half the ticks are the cheaper set (it
+                // was one block).
                 Expect.equal
                     (cast.Template, cast.Bodies, cast.Blocks, cast.Ends, cast.Trades)
-                    (BodyTemplate.Ranged, 1, 1, true, false)
-                    "in open ground the cheapest set is one one-block ranger, which kites it down"
+                    (BodyTemplate.Ranged, 1, 2, true, false)
+                    "in open ground the cheapest set is one two-block ranger, which kites it down"
 
                 let bodies =
                     [

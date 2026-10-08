@@ -1412,6 +1412,65 @@ let trespassTests =
         ]
 
 [<Tests>]
+let contestTests =
+    testList
+        "an outpost as the economic war over it (#656)"
+        [
+            // The W17S26 pair (#550, #652) in our reserved outpost: its delta
+            // is our yield kept and what the pair takes a tick, denied.
+            test "a digger and a hauler in our outpost: our yield kept, their take denied" {
+                let colony = declaredRaid [ seatedDigger; haulerOf "h-2" { X = 27; Y = 43 } ]
+
+                let contest = Facts.contestOf colony "W1N2"
+
+                // Seated, the digger takes its five WORK's dig up to the held
+                // rock's output; the empty hauler a load a round trip of a
+                // room's side each way.
+                let dug = float (min (5 * Engine.harvestPerWork) Engine.heldOutputPerTick)
+
+                let hauled = float (23 * Engine.carryPartCapacity) / float (2 * Engine.roomSide)
+
+                Expect.equal
+                    contest.Kept
+                    (float Engine.heldOutputPerTick)
+                    "its one held source's yield, kept"
+
+                Expect.equal
+                    contest.Takes
+                    (Map.ofList [ "d-1", dug; "h-2", hauled ])
+                    "each economy body's take"
+
+                Expect.equal
+                    (Contest.delta contest)
+                    (contest.Kept + dug + hauled)
+                    "the delta: ours kept and theirs denied"
+
+                Expect.equal
+                    (contest.Values |> Map.keys |> List.ofSeq)
+                    [ "d-1"; "h-2" ]
+                    "each priced at its kill value too"
+            }
+
+            test "a raid alone, or a neutral's hauler, denies nothing" {
+                let raid = Facts.contestOf (declaredRaid raiders) "W1N2"
+
+                let neutral =
+                    Facts.contestOf
+                        (declaredRaid
+                            [
+                                { haulerOf "h-2" { X = 27; Y = 43 } with
+                                    Owner = "Somebody"
+                                }
+                            ])
+                        "W1N2"
+
+                Expect.isEmpty raid.Takes "an Invader's raid takes none of our economy itself"
+                Expect.equal (Contest.delta raid) raid.Kept "the raid's delta is our yield alone"
+                Expect.isEmpty neutral.Takes "a neutral's body is nobody's to deny"
+            }
+        ]
+
+[<Tests>]
 let residentChaseTests =
     testList
         "a resident lent to a chase beside its home (#516)"

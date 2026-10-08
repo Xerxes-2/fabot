@@ -864,6 +864,17 @@ let private strikeTilesMemo: TickMemo.Memo<SpatialInfo * string, StrikeTiles> =
 let private strikeTilesOf (view: ColonyView) (room: string) : StrikeTiles option =
     TickMemo.recallAfter strikeTilesAsks strikeTilesMemo (view.Spatial, room) strikeTilesIn
 
+/// How many sources a room holds, off its projection: the memo's where it is
+/// derived (`strikeTilesOf`), else the direct count, so a room's first asks
+/// a tick read its sources as its later ones do (#656: they read none).
+let private sourcesIn (view: ColonyView) (room: string) : int =
+    match strikeTilesOf view room with
+    | Some tiles -> List.length tiles.Sources
+    | None ->
+        (SpatialInfo.layerOf view.Spatial room).TargetPositions
+        |> Map.filter (fun id _ -> Map.tryFind id view.Spatial.TargetKinds = Some Source)
+        |> Map.count
+
 /// Whether a hostile stands within a step of a target of this kind in its room.
 let private besideTargetOf (view: ColonyView) (kind: TargetKind) (hostile: HostileInfo) =
     let beside (tiles: Pos list) =
@@ -1607,12 +1618,7 @@ let private harmRate (view: ColonyView) (hostile: HostileInfo) (walk: int) : flo
 
     let reserves =
         if power BodyPart.Claim > 0 then
-            let sources =
-                strikeTilesOf view room
-                |> Option.map (fun tiles -> List.length tiles.Sources)
-                |> Option.defaultValue 0
-
-            sources
+            sourcesIn view room
             * (if minesRoom view room then
                    Engine.heldOutputPerTick
                else
@@ -3300,15 +3306,59 @@ let private roomTickWorth (view: ColonyView) (room: string) : int =
         || view.RaidedOutposts.Contains room
         || view.ThreatenedOutposts.Contains room
 
-    let sources =
-        if ours then
-            strikeTilesOf view room
-            |> Option.map (fun tiles -> List.length tiles.Sources)
-            |> Option.defaultValue 0
-        else
-            0
+    let sources = if ours then sourcesIn view room else 0
 
     sources * rate
+
+/// One room as the economic war over it (#656): every room our economy and
+/// a rival's meet in — our outpost a rival works or raids, a rival's remote
+/// we harass — priced by one measure, the room's economic delta a tick a
+/// fight there moves.
+type Contest =
+    {
+        /// Our income a tick a fight there keeps: our sources' yield there at
+        /// the rate the room is held at (`roomTickWorth`), the economy a raid
+        /// shuts while it stands.
+        Kept: float
+        /// The income a tick each economy body we may strike there takes
+        /// (`harmRate`, #621), by id: a digger's dig on its seat, a carrier's
+        /// load a round trip, a CLAIM body's reservation. Ours to deny.
+        Takes: Map<string, float>
+        /// Each of those bodies' kill value (`killValue`, #621), by id: what
+        /// its kill lands once.
+        Values: Map<string, float>
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Contest =
+    /// The rival's income a tick a fight there denies: every take summed.
+    let denied (contest: Contest) : float =
+        contest.Takes |> Map.fold (fun total _ take -> total + take) 0.0
+
+    /// The room's economic delta a tick a fight there moves: our income
+    /// kept and the rival's denied.
+    let delta (contest: Contest) : float = contest.Kept + denied contest
+
+/// One room's contest (#656, `Contest`), read off this view: its prey the
+/// trespassers standing in it (`trespasser`), each priced at its take and
+/// its kill value as the kill score prices them (#621).
+let contestOf (view: ColonyView) (room: string) : Contest =
+    let prey =
+        view.Hostiles
+        |> List.filter (fun hostile ->
+            hostile.Pos.Room = room && trespasser view (Set.singleton room) hostile)
+
+    {
+        Kept = float (roomTickWorth view room)
+        Takes =
+            prey
+            |> List.map (fun hostile -> hostile.Id, harmRate view hostile replacementWalk)
+            |> Map.ofList
+        Values =
+            prey
+            |> List.map (fun hostile -> hostile.Id, killValue view hostile)
+            |> Map.ofList
+    }
 
 /// The share of one body's energy a fight that holds it `ticks` spends of
 /// its life (`Engine.creepLifetime`, #654): a body that ends a fight
@@ -3361,7 +3411,7 @@ let private fightRaid (view: ColonyView) (room: string) : HostileInfo list =
 /// focusing one at a time), each priced its spent life, and its spawn time,
 /// the wait for its last body (its spawns cast a round at a time), its walk
 /// and kill (`killTicks`, a lifetime where it never kills) at the room's
-/// yield a tick (`roomTickWorth`); by least price, then the fewest parts,
+/// yield a tick (`Contest.Kept`, #656); by least price, then the fewest parts,
 /// the fewest bodies, the template's order. Last, the melee body holding
 /// its post (`Stance.Hold`, #531): one body of the fewest blocks that hold
 /// it, ending it where the bank buys that body, `bodies` of them where the
@@ -3410,6 +3460,10 @@ let private castsByPrice
         |> List.filter (fun hostile ->
             hostile.Pos.Room = room && trespasser view (Set.singleton room) hostile)
 
+    // The room's economic war (#656): what each tick of the fight costs and
+    // what each kill lands, one price for a raid and a kill alike.
+    let contest = lazy (contestOf view room)
+
     let walk =
         CastBid.walk view.Tuning (RoomName.hopsBetween (SpatialInfo.homeName view.Spatial) room)
 
@@ -3453,7 +3507,7 @@ let private castsByPrice
         castSpawnTicks template blocks * ((n + spawns - 1) / spawns - 1)
 
     if not (List.isEmpty raid) then
-        let tick = float (roomTickWorth view room)
+        let tick = contest.Value.Kept
         let home = (homesOfOurs view).Contains room
 
         // The stance a body meets the raid at, as the gate prices it
@@ -3619,8 +3673,7 @@ let private castsByPrice
         let priced = killPricing view room
         let healOn = healReachingWithin priced room priced.Tuning.ReachHorizon
 
-        let values =
-            trespassers |> List.map (fun hostile -> hostile.Id, killValue view hostile)
+        let values = contest.Value.Values
 
         let sets =
             templates
@@ -3664,14 +3717,16 @@ let private castsByPrice
                                 room
                                 team
                                 landing
-                                (values |> List.filter (fst >> killed.Contains) |> Map.ofList)
+                                (values |> Map.filter (fun id _ -> killed.Contains id))
 
                         // Its work goes on until the kill lands: every tick
-                        // from the cast at what it takes a tick (`harmRate`).
+                        // from the cast at what it takes a tick (`Takes`).
                         let meanwhile =
                             kills
                             |> List.sumBy (fun (hostile, kill) ->
-                                harmRate view hostile replacementWalk * float (landing + kill))
+                                (Map.tryFind hostile.Id contest.Value.Takes
+                                 |> Option.defaultValue 0.0)
+                                * float (landing + kill))
 
                         // The set held the walk and every kill, one after
                         // another.
