@@ -100,6 +100,23 @@ let private crossedColony (control: RoomControlInfo option) =
             | None -> Map.remove "W1N2" colony.RoomControl
     }
 
+/// `colony` with W1N3, past its outpost, projected for the fight alone (a
+/// sweep candidate it casts) and gone round, an armed rival seen there lately.
+let private withSweepRoom (colony: ColonyView) =
+    { colony with
+        Spatial =
+            { colony.Spatial with
+                Borders = Map.add "W1N3" plainRing colony.Spatial.Borders
+                AvoidRooms = Set.add "W1N3" colony.Spatial.AvoidRooms
+                FightRooms = Set.add "W1N3" colony.Spatial.FightRooms
+            }
+            |> withNeighbour
+                "W1N3"
+                { RoomLayer.empty with
+                    Terrain = TerrainGrid.ofList (corridor 10 1 48)
+                }
+    }
+
 [<Tests>]
 let censusSignatureTests =
     testList
@@ -1137,6 +1154,57 @@ let planMemoTests =
                     "a recalled home walk decides exactly what a fresh flood decides"
             }
 
+            test
+                "a room the fight alone projects coming and going moves no plan and evicts no economy walk (#667)" {
+                let held = borderedColony (Some(reservedRoom true 4000))
+                let swept = withSweepRoom held
+
+                Expect.notEqual
+                    (censusSignature
+                        { swept with
+                            Spatial =
+                                { swept.Spatial with
+                                    FightRooms = Set.empty
+                                }
+                        })
+                    (censusSignature held)
+                    "the premise: projected for the economy, the room's coming moves the plan"
+
+                Expect.equal
+                    (censusSignature swept)
+                    (censusSignature held)
+                    "projected for the fight alone, it does not"
+
+                let first = decideOn held
+                let economyFloods = touchingRoom "W1N2" first.Memo @ homeWalks first.Memo
+
+                Expect.isNonEmpty
+                    (touchingRoom "W1N2" first.Memo)
+                    "the premise: the first tick flooded something that reads the outpost"
+
+                let keptOn (memo: PlanMemo) (what: string) =
+                    Expect.equal
+                        (memo.Signature, memo.Paid)
+                        (first.Memo.Signature, first.Memo.Paid)
+                        $"{what}: the plan paid at the first tick is recalled"
+
+                    for flood in economyFloods do
+                        Expect.isTrue
+                            (touchingRoom "W1N2" memo @ homeWalks memo
+                             |> List.exists (fun kept -> obj.ReferenceEquals(kept, flood)))
+                            $"{what}: every economy entry the first tick laid is still there, unflooded"
+
+                let second =
+                    decide { swept with Time = held.Time + 1 } Map.empty Set.empty (Some first.Memo)
+
+                keptOn second.Memo "the room come"
+
+                let third =
+                    decide { held with Time = held.Time + 2 } Map.empty Set.empty (Some second.Memo)
+
+                keptOn third.Memo "and gone"
+            }
+
             test "the far fields ride the memo on the walk table's own terms" {
                 // A far field is kept while every room its chain names holds.
                 // The Harvest across the north border floods two fields here,
@@ -1878,6 +1946,36 @@ let darkRoomMemoTests =
                         (Some fourth.Memo)
 
                 Expect.equal fifth.Memo.Paid 103 "and once paid, a dark tick recalls it"
+            }
+
+            test
+                "a plan paid while a room it does not read is out of sight owes nothing on its sighting; one it reads still does (#667)" {
+                // A crossed room signs only whether a rival holds it in the
+                // flat signature, read fresh: its sighting moves nothing the
+                // plan read.
+                let crossing =
+                    { crossedColony (Some neutralRoom) with
+                        Crossed = Set.singleton "W1N2"
+                    }
+
+                let paidDark (colony: ColonyView) =
+                    let first = decideOn (litAt 100 colony)
+
+                    let second =
+                        decide (darkAt 101 (extended colony)) Map.empty Set.empty (Some first.Memo)
+
+                    let third = litAt 102 (extended colony) |> waitingOn second.Memo
+                    second.Memo.Paid, second.Memo.PaidDark, third.Memo.Due
+
+                Expect.equal
+                    (paidDark crossing)
+                    (101, Set.empty, false)
+                    "crossed: replanned while it was dark, and owed nothing once it is seen"
+
+                Expect.equal
+                    (paidDark (roadedColony ()))
+                    (101, Set.singleton "W1N2", true)
+                    "the outpost: owed from its sighting"
             }
 
             test "a change seen on a tick not the colony's turn stays owed once the room goes dark" {

@@ -1524,6 +1524,165 @@ let rivalRoomTests =
                     "gone from the projection: the same"
             }
 
+            test
+                "a chain between two of the economy's rooms enters no room the fight alone projects (#667)" {
+                // W16S28 projected for a sweep alone: a round trip between
+                // the economy's rooms never reads it, so its coming and going
+                // moves no plan and no walk of the economy's.
+                let world = squareWorld None false
+
+                let atlasOver (fight: Set<string>) =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W15S28"
+                        Rooms = world.Rooms |> Map.map (fun _ facts -> facts.Layer)
+                        Borders = world.Rooms |> Map.map (fun _ facts -> facts.Border)
+                        FightRooms = fight
+                    }
+                    |> AtlasFixtures.snapshotWith []
+                    |> ofView
+
+                Expect.equal
+                    (routes (atlasOver Set.empty) "W15S28" "W16S27" |> List.length)
+                    2
+                    "the premise: two chains while W16S28 is the economy's"
+
+                let swept = atlasOver (Set.singleton "W16S28")
+
+                for walker in [ Walker.Wary; Walker.Bold ] do
+                    Expect.equal
+                        (routesFor swept walker "W15S28" "W16S27")
+                        [ [ "W15S28"; "W15S27"; "W16S27" ] ]
+                        $"{walker}: between the economy's rooms, round the fight's"
+
+                Expect.equal
+                    (routes swept "W15S28" "W16S28")
+                    [ [ "W15S28"; "W16S28" ] ]
+                    "a walk into it enters it"
+
+                Expect.equal
+                    (routes swept "W16S28" "W16S27")
+                    [ [ "W16S28"; "W16S27" ] ]
+                    "and a body standing in it walks out"
+
+                let walled =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W15S28"
+                        Rooms = world.Rooms |> Map.map (fun _ facts -> facts.Layer)
+                        Borders = world.Rooms |> Map.map (fun _ facts -> facts.Border)
+                        FightRooms = Set.singleton "W16S28"
+                        RivalRooms = Set.singleton "W15S27"
+                    }
+                    |> AtlasFixtures.snapshotWith []
+                    |> ofView
+
+                Expect.equal
+                    (routes walled "W15S28" "W16S27")
+                    [ [ "W15S28"; "W16S28"; "W16S27" ] ]
+                    "where no chain of the economy's joins them, the fight's room is crossed as before"
+            }
+
+            test
+                "a room changing side drops the walks cast through it and to it, and no other (#667)" {
+                // W16S28 flips from the economy's transit to the fight's alone,
+                // its census unchanged: no per-room signature moves, and the
+                // walk cast through it is one no economy chain takes now.
+                let factor =
+                    {
+                        FatigueParts = 1
+                        MoveParts = 1
+                        Whole = false
+                    }
+
+                let through = { X = 25; Y = 25 }, factor, "W16S27"
+                let round = { X = 26; Y = 25 }, factor, "W16S27"
+                let into = { X = 25; Y = 25 }, factor, "W16S28"
+                let walks = FarFieldMemo.walks ()
+
+                walks.[through] <-
+                    {
+                        Ticks = Array.empty
+                        Crossed = [ "W15S28"; "W16S28"; "W16S27" ]
+                    }
+
+                walks.[round] <-
+                    {
+                        Ticks = Array.empty
+                        Crossed = [ "W15S28"; "W15S27"; "W16S27" ]
+                    }
+
+                walks.[into] <-
+                    {
+                        Ticks = Array.empty
+                        Crossed = [ "W15S28"; "W16S28" ]
+                    }
+
+                let world = squareWorld None false
+
+                let atlas =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W15S28"
+                        Rooms = world.Rooms |> Map.map (fun _ facts -> facts.Layer)
+                        Borders = world.Rooms |> Map.map (fun _ facts -> facts.Border)
+                        FightRooms = Set.singleton "W16S28"
+                    }
+                    |> AtlasFixtures.snapshotWith []
+                    |> ofViewRecalling walks (FarFieldMemo.empty ())
+
+                evictSides atlas Set.empty
+
+                Expect.equal
+                    (walks.Keys |> List.ofSeq)
+                    [ round ]
+                    "the walk through it and the walk to it go, the one round it stays"
+            }
+
+            test "a room coming to be gone round drops only the walks cast through it (#667)" {
+                // A sweep room comes into the projection gone round (an armed
+                // rival was seen there lately), with its cast: the whole
+                // table of cross-room walks went with it every time.
+                let factor =
+                    {
+                        FatigueParts = 1
+                        MoveParts = 1
+                        Whole = false
+                    }
+
+                let through = { X = 25; Y = 25 }, factor, "W16S27"
+                let round = { X = 26; Y = 25 }, factor, "W16S27"
+                let walks = FarFieldMemo.walks ()
+
+                walks.[through] <-
+                    {
+                        Ticks = Array.empty
+                        Crossed = [ "W15S28"; "W16S28"; "W16S27" ]
+                    }
+
+                walks.[round] <-
+                    {
+                        Ticks = Array.empty
+                        Crossed = [ "W15S28"; "W15S27"; "W16S27" ]
+                    }
+
+                let world = squareWorld None false
+
+                let atlas =
+                    { SpatialInfo.empty with
+                        RoomName = Some "W15S28"
+                        Rooms = world.Rooms |> Map.map (fun _ facts -> facts.Layer)
+                        Borders = world.Rooms |> Map.map (fun _ facts -> facts.Border)
+                        AvoidRooms = Set.singleton "W16S28"
+                    }
+                    |> AtlasFixtures.snapshotWith []
+                    |> ofViewRecalling walks (FarFieldMemo.empty ())
+
+                evictAvoided atlas Set.empty
+
+                Expect.equal
+                    (walks.Keys |> List.ofSeq)
+                    [ round ]
+                    "the walk through it goes, the one round it stays"
+            }
+
             test "a declared rival's room no sighting reached is routed round (#459)" {
                 // ranger-887026-Spawn9 walked home from W19S26 east into
                 // W18S26, which nothing of ours had ever seen, and died to its

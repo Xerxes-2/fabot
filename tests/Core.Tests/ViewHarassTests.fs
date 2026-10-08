@@ -449,6 +449,75 @@ let harassViewTests =
             }
 
             test
+                "one sweep, one caster: a ranger working any candidate holds its colony's bid on every one (#667)" {
+                // Two candidates beside the mother, her stock a shade under
+                // the reserve and over the hold (W17S29 at ~20.8k live): with
+                // her ranger in one, the other's bid flipped with the stock,
+                // and with it W17S29's projection and plan.
+                let east = "W11S28"
+
+                let harass: Harassment =
+                    {
+                        Rooms =
+                            [
+                                harassDeclared.Head
+                                {
+                                    RoomName = east
+                                    Enemy = enemy
+                                    Via = []
+                                }
+                            ]
+                        BlockCost = Bodies.rangerBlockCost
+                    }
+
+                let ranger = "ranger-950-Spawn1"
+
+                let castersWith (held: Map<string, string>) (standing: string option) =
+                    let world = harassWorldAt (reservedFor enemy) 2400 300
+
+                    let world =
+                        { world with
+                            Creeps =
+                                (standing
+                                 |> Option.map (fun room ->
+                                     creepWithBody ranger room [ RangedAttack, 1 ])
+                                 |> Option.toList)
+                                @ world.Creeps
+                            Rooms =
+                                world.Rooms
+                                |> Map.add east (snd (roomOf east Ownership.Unowned []))
+                                |> Map.change
+                                    mother
+                                    (Option.map (withStock (Tuning.defaults.CasterReserve - 1)))
+                        }
+
+                    (World.harassCasters (JoinTable()) Tuning.defaults declared harass held world)
+                        .Casters
+                    |> List.map (fun (h, casters) -> h.RoomName, casters)
+
+                Expect.equal
+                    (castersWith Map.empty None)
+                    [ harassRoom, []; east, [] ]
+                    "the premise: under the reserve and working neither, she bids on neither"
+
+                for room in [ harassRoom; east ] do
+                    Expect.equal
+                        (castersWith Map.empty (Some room))
+                        [ harassRoom, [ mother ]; east, [ mother ] ]
+                        $"her ranger standing in {room}: she holds both"
+
+                Expect.equal
+                    (castersWith (Map.ofList [ ranger, "guard:" + east ]) (Some mother))
+                    [ harassRoom, [ mother ]; east, [ mother ] ]
+                    "on the walk out to one's Guard: both"
+
+                Expect.equal
+                    (castersWith Map.empty (Some mother))
+                    [ harassRoom, []; east, [] ]
+                    "and at home with no Guard, neither"
+            }
+
+            test
                 "a colony whose bank is under the Caster's floor is no caster, however near: the room is refused until one is past it" {
                 // Moved by #658: the floor is the Caster's alone (it was three
                 // ranger blocks, the harassment floor).

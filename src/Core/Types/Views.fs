@@ -2132,6 +2132,8 @@ module ColonyView =
 
                         worked |> List.map fst |> List.filter avoided.Contains |> Fresh.setOfSeq
                     StrayRooms = stranded
+                    FightRooms =
+                        cut.Rooms |> List.filter (scan.Economy.Contains >> not) |> Fresh.setOfSeq
                 }
                 // The declared furniture and the errands' targets go in last,
                 // over the whole assembled projection: a declared id and tile

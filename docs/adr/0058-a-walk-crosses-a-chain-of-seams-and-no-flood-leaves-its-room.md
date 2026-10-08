@@ -1,6 +1,8 @@
 # A walk crosses a chain of Seams, and no flood leaves its room
 
-> **Status:** amended by 0059, 0060, 0070, 0081, #326, #517
+> **Status:** amended by 0059, 0060, 0070, 0081, #326, #517, #667
+
+> **Amended by #667**: a chain between two [[economy room]]s enters no room the fight alone projects (`SpatialInfo.FightRooms`: a sweep candidate with its `Via`, a walk home, a stranded body's room and the like); a chain with an end in one may cross any. Where no chain over the economy's rooms joins the two at run time (a room taken or impassable since, a body caught by a room changing side), the fight's rooms are crossed as before, so no walk that had a chain loses it. Over the captures, every declared outpost, errand and child of the live declaration is joined to its home, both ways, over its economy's rooms alone, and projecting the harassment rooms and their `Via` beside them changes none of those chains (`RoomOutpostTests`).
 
 > **Amended by #517** on 2026-10-05: a transit room is no longer only a room a walk crosses. A mother projects a raised child's outpost beside its home as one, and a [[trespasser]]'s or [[chase]]'s kill is pooled there for her residents; nothing else is (ADR 0047's #517 note).
 

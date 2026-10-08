@@ -115,6 +115,76 @@ let outpostDeclarationTests =
                     "W12S26's west and north outposts are one crossing out, straight over the seam"
             }
 
+            test
+                "every declared outpost, errand and child is joined to its home over its own rooms, and no sweep room gives it another chain (#667)" {
+                // The economy's chains enter no room the fight alone projects
+                // (`Atlas.routes`). Over the captures, that takes no chain
+                // from a round trip of the live declaration: the sweep rooms
+                // and their Via projected beside it, each economy chain is
+                // the one the economy's own rooms answer.
+                let moved =
+                    Colony.declared
+                    |> List.collect (fun colony ->
+                        let economy =
+                            Colony.roomsProjected
+                                colony.Outposts
+                                colony.Errands
+                                colony.Salvage
+                                []
+                                []
+                                colony.Home
+
+                        let sweep =
+                            Harass.roomsProjected
+                                (Colony.harassDeclared
+                                 |> List.filter (fun h ->
+                                     Declaration.withinHopBudget
+                                         Tuning.defaults.MaxHops
+                                         colony.Home
+                                         h.RoomName))
+                                colony.Home
+
+                        // The children it may borrow or defend, with the
+                        // rooms between: the declared mother's pairs.
+                        let children =
+                            Colony.declared
+                            |> List.filter (fun child -> child.Mother = Some colony.Home)
+                            |> List.map _.Home
+
+                        let economy =
+                            economy
+                            @ (children
+                               |> List.collect (fun child ->
+                                   child :: RoomName.transitBetween colony.Home child))
+                            |> List.distinct
+
+                        let alone = shippedLinked economy
+                        let beside = shippedLinked (economy @ sweep)
+
+                        (colony.Outposts |> List.map _.RoomName)
+                        @ (colony.Errands |> List.map _.RoomName)
+                        @ children
+                        |> List.collect (fun room -> [ colony.Home, room; room, colony.Home ])
+                        |> List.choose (fun (fromRoom, toRoom) ->
+                            let own =
+                                RoomName.routesBy alone Tuning.defaults.MaxHops fromRoom toRoom
+
+                            if List.isEmpty own then
+                                Some $"{fromRoom} -> {toRoom}: no chain over its own rooms"
+                            elif
+                                RoomName.routesBy beside Tuning.defaults.MaxHops fromRoom toRoom
+                                <> own
+                            then
+                                Some
+                                    $"{fromRoom} -> {toRoom}: another chain beside the sweep's rooms"
+                            else
+                                None))
+
+                Expect.isEmpty
+                    moved
+                    $"""every economy chain is its own rooms': {String.concat "; " moved}"""
+            }
+
             test "a chain of real border rings joins every declared salvage room to its home" {
                 // The outpost case above, over the third declaration kind, the salvage,
                 // through the same shipped predicates: a salvage room no chain

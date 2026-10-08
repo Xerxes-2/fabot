@@ -554,6 +554,11 @@ type PlanMemo =
         /// tick's `Atlas.evictAvoided` reads a moved set off. Never in the
         /// plan's signature, so a raid seen in a transit room replans nothing.
         AvoidRooms: Set<string>
+        /// The rooms the fight alone projected when those tables were filled
+        /// (`SpatialInfo.FightRooms`, #667), stamped with them: a chain
+        /// between the economy's rooms enters none, so a room changing side
+        /// moves the walks `Atlas.evictSides` reads off it.
+        FightRooms: Set<string>
         SiteIntents: Intent list
         /// The footing targets this plan left unserved (#77). Empty is the
         /// healthy answer and rides here all the same: a channel that says
@@ -647,6 +652,7 @@ module PlanMemo =
             Paid = -1
             // Stamped by the caller, with the tables.
             AvoidRooms = Set.empty
+            FightRooms = Set.empty
             SiteIntents = []
             UnservedFootings = []
             ServedFootings = []

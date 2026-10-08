@@ -160,9 +160,12 @@ type private Signed =
 /// each projected room, and every colony's stage. Creeps, stores, hits, piles,
 /// hostiles, the bank and the tick are invisible to it. The hold is signed as
 /// the *rate* and not the reservation's `TicksToEnd`, which decays every tick.
-/// It signs every projected room, because the hauler quota reads every one and
-/// the round trip floods that room's grid; the pending census spans every room
-/// too, because the walk table's far leg floods the goal room's grid.
+/// The flat signature signs every room of the economy's (#667: a room the
+/// fight alone projects, `SpatialInfo.FightRooms`, no plan reads), because the
+/// hauler quota reads every one and the round trip floods that room's grid;
+/// the per-room signatures sign every projected room but a stray's, the
+/// pending census included, because a walk table's far leg floods its goal
+/// room's grid, the fight's tables among them.
 ///
 /// Per room first, flat second (#388): the plan reads the whole census, but the
 /// walk tables beside it read one room's grid each and are evicted per room
@@ -311,11 +314,19 @@ let private signaturesOf (view: ColonyView) (memo: PlanMemo option) : Signed =
         Set.union view.Crossed (Facts.harassRooms view)
         |> Set.filter (fun room -> not (Set.contains room priced))
 
+    // The economy's rooms alone (#667): the plan's chains enter no room the
+    // fight alone projects (`Atlas.routes`), and its pricing reads none, so
+    // a sweep cast or a walk home coming and going replans nothing. Its
+    // per-room signature stays, for the fight's walk tables.
+    let economic =
+        signedRooms
+        |> List.filter (fun (room, _, _, _) -> not (spatial.FightRooms.Contains room))
+
     // The head and then the rooms, one to a line, which no field can carry:
     // the room set itself is signed by the join, and `signatureMoves` reads
     // the parts back.
     let flat =
-        signedRooms
+        economic
         |> List.map (fun (room, signature, census, _) ->
             if Set.contains room unplanned then
                 let taken = if Set.contains room spatial.RivalRooms then "Taken" else ""
@@ -341,9 +352,15 @@ let private signaturesOf (view: ColonyView) (memo: PlanMemo option) : Signed =
         Rooms = rooms
         Censuses = censuses
         Signature = $"{home}|{level}|{stages}{flat}\n~sites={full}\n~ore={ore}{labs}"
+        // Only a room whose census the flat signature reads (#667): a crossed
+        // room's is its Taken alone, read fresh, so its sighting owes nothing.
         Remembered =
-            signedRooms
-            |> List.choose (fun (room, _, _, remembered) -> if remembered then Some room else None)
+            economic
+            |> List.choose (fun (room, _, _, remembered) ->
+                if remembered && not (Set.contains room unplanned) then
+                    Some room
+                else
+                    None)
             |> Fresh.setOfSeq
     }
 
@@ -488,6 +505,7 @@ let private recallAtlas (view: ColonyView) (memo: PlanMemo option) =
             Atlas.evictRooms atlas moved
 
         Atlas.evictAvoided atlas m.AvoidRooms
+        Atlas.evictSides atlas m.FightRooms
     | None -> ()
 
     signed, walks, farFields, atlas
@@ -501,14 +519,15 @@ let private dueOf (view: ColonyView) (memo: PlanMemo) : bool =
     || memo.PaidDark |> Set.exists (fun room -> not (ColonyView.dark view room))
 
 /// A memo handed on with this tick's stamps: the per-room signatures, what
-/// vision read of each room, whether its plan is owed, and the rooms a
-/// non-fighter goes round.
+/// vision read of each room, whether its plan is owed, the rooms a
+/// non-fighter goes round and the rooms the fight alone projects.
 let private stamped (view: ColonyView) (signed: Signed) (memo: PlanMemo) : PlanMemo =
     { memo with
         RoomSignatures = signed.Rooms
         RoomCensuses = signed.Censuses
         Due = dueOf view memo
         AvoidRooms = view.Spatial.AvoidRooms
+        FightRooms = view.Spatial.FightRooms
     }
 
 /// The row sizing as the fight-only ticks after it carry it: rebuilt by
@@ -902,6 +921,7 @@ let rec private openWhole
                 Due = false
                 Paid = view.Time
                 AvoidRooms = view.Spatial.AvoidRooms
+                FightRooms = view.Spatial.FightRooms
                 SiteIntents = siteIntents
                 UnservedFootings = unservedFootings
                 ServedFootings = servedFootings

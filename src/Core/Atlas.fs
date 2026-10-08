@@ -2067,8 +2067,10 @@ let pricedWalksFrom
 /// search stays inside the rooms `RoomName.transitBetween` (and a harassment
 /// room's `Via`) put in the world. A room another player owns is entered by
 /// no chain (`SpatialInfo.RivalRooms`), and left by one; a room held for a
-/// stray body alone (`SpatialInfo.StrayRooms`) by a chain from one alone.
-/// Memoised per ordered pair, the empty answer included.
+/// stray body alone (`SpatialInfo.StrayRooms`) by a chain from one alone; a
+/// room the fight alone projects (`SpatialInfo.FightRooms`) by a chain with
+/// an end in one, or where no chain between the economy's rooms joins the
+/// two without it. Memoised per ordered pair, the empty answer included.
 ///
 /// **Which chain is walked is not decided here** (#288): two chains of the
 /// same hop length are not the same number of ticks — the corner an L-shaped
@@ -2091,19 +2093,29 @@ let routesFor
         let stray = atlas.Spatial.StrayRooms
         let fromStray = Set.contains fromRoom stray
 
-        let entered there =
+        // A chain between two of the economy's rooms stays in them where one
+        // does (#667): the round trips the plan is priced along then read no
+        // room the fight alone projects, so its coming and going moves
+        // neither. Where none does — a room taken or impassable since, a
+        // body caught by a room changing side — the fight's rooms are
+        // crossed as before, so no walk that had a chain loses it.
+        let fight = atlas.Spatial.FightRooms
+        let economyEnds = not (fight.Contains fromRoom || fight.Contains toRoom)
+
+        let entered (economic: bool) there =
             (not (Set.contains there atlas.Spatial.RivalRooms)
              || walker = Walker.Siege && there = toRoom)
             && (fromStray || not (Set.contains there stray))
+            && not (economic && fight.Contains there)
 
         // An assault's room from its declared entry alone, for a siege.
         let fromEntry here there =
             walker <> Walker.Siege
             || Map.tryFind there atlas.Entries |> Option.forall ((=) here)
 
-        let linked here there =
+        let linked economic here there =
             Keepers.enterable there
-            && entered there
+            && entered economic there
             && fromEntry here there
             && Seam.joinedBy
                 (ringWalkable atlas here)
@@ -2118,16 +2130,25 @@ let routesFor
             |> Option.orElse (Map.tryFind fromRoom atlas.SiegeHops)
             |> Option.defaultValue atlas.Tuning.MaxHops
 
-        match walker with
-        | Walker.Bold -> RoomName.routesBy linked atlas.Tuning.MaxHops fromRoom toRoom
-        | Walker.Siege -> RoomName.routesBy linked siegeHops fromRoom toRoom
-        | Walker.Wary ->
-            RoomName.routesAvoiding
-                linked
-                atlas.Spatial.AvoidRooms.Contains
-                atlas.Tuning.MaxHops
-                fromRoom
-                toRoom)
+        let search economic =
+            match walker with
+            | Walker.Bold ->
+                RoomName.routesBy (linked economic) atlas.Tuning.MaxHops fromRoom toRoom
+            | Walker.Siege -> RoomName.routesBy (linked economic) siegeHops fromRoom toRoom
+            | Walker.Wary ->
+                RoomName.routesAvoiding
+                    (linked economic)
+                    atlas.Spatial.AvoidRooms.Contains
+                    atlas.Tuning.MaxHops
+                    fromRoom
+                    toRoom
+
+        match economyEnds && not fight.IsEmpty with
+        | true ->
+            match search true with
+            | [] -> search false
+            | chains -> chains
+        | false -> search false)
 
 /// A non-fighter's chains: `routesFor` a `Wary` walker.
 let routes (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list list =
@@ -2215,15 +2236,37 @@ let evictFarFieldsExcept (atlas: Atlas) (live: Set<Task>) : unit =
     retain atlas.FarFields.PerCensus (fun (_, task, _, _, _, _) -> Set.contains task live)
     retain atlas.FarFields.Narrowed (fun (_, task, _, _, _) -> Set.contains task live)
 
-/// Drop every cross-room spawn walk when the rooms a non-fighter goes round
-/// have moved since `wasAvoided` (the tables' own stamp, #485): a walk is
-/// cast along `routes`, and a room going in or out of the set can move a
-/// chain onto rooms no chain of the old set named. Rare — a room enters on a
-/// raid's first sighting and leaves `Tuning.HostileRoomMemory` later — so
-/// the whole of them and not a reckoning of which.
+/// The cross-room spawn walks a room in one of `was` and `now` alone can
+/// have moved, dropped: a walk to it, or one whose chains crossed it or
+/// whose chains to their goal now enter it.
+let private evictFlipped (atlas: Atlas) (was: Set<string>) (now: Set<string>) : unit =
+    if was <> now then
+        let flipped = Set.difference (Set.union was now) (Set.intersect was now)
+        let touches (rooms: string list) = rooms |> List.exists flipped.Contains
+
+        retainBy atlas.Walks (fun (_, _, goalRoom) walk ->
+            goalRoom = atlas.Home
+            || not (flipped.Contains goalRoom)
+               && not (touches walk.Crossed)
+               && not (touches (List.concat (routes atlas atlas.Home goalRoom))))
+
+/// Drop the cross-room spawn walks a move in the rooms a non-fighter goes
+/// round since `wasAvoided` (the tables' own stamp, #485) can have moved: a
+/// walk is cast along `routes`. A room gone round now moves only a walk whose
+/// chains crossed it (`CastWalk.Crossed`), and a room no longer gone round
+/// only one whose chains to its goal now enter it, so the rest stand (#667):
+/// a sweep room comes into the projection already gone round, with its cast,
+/// and the whole table went with it.
 let evictAvoided (atlas: Atlas) (wasAvoided: Set<string>) : unit =
-    if wasAvoided <> atlas.Spatial.AvoidRooms then
-        retain atlas.Walks (fun (_, _, goalRoom) -> goalRoom = atlas.Home)
+    evictFlipped atlas wasAvoided atlas.Spatial.AvoidRooms
+
+/// The same over the rooms the fight alone projects since `wasFight` (the
+/// tables' own stamp, #667): a chain between the economy's rooms enters
+/// none of them, so a room changing side moves the walks through it, the
+/// walks whose chains now enter it, and the walks to it. Neither the
+/// per-room signature nor its census says which side a room is on.
+let evictSides (atlas: Atlas) (wasFight: Set<string>) : unit =
+    evictFlipped atlas wasFight atlas.Spatial.FightRooms
 
 /// The first of a fighter's chains, or `None` where there is none — what a
 /// reader with no price to choose one with takes: a squad's rally, aimed at

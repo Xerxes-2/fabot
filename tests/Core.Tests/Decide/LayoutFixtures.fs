@@ -290,6 +290,7 @@ let sentinelMemo snapshot =
         Due = false
         Paid = -1
         AvoidRooms = snapshot.Spatial.AvoidRooms
+        FightRooms = snapshot.Spatial.FightRooms
         SiteIntents = [ PlaceConstructionSite(RoomPos.at "W1N1" { X = 1; Y = 1 }, Tower) ]
         UnservedFootings = []
         ServedFootings = []

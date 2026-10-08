@@ -394,6 +394,15 @@ type SpatialInfo =
         /// a chain that starts in one — the stray's own walk out — and the
         /// plan's census signs none.
         StrayRooms: Set<string>
+        /// The rooms of this projection carried for the fight alone (#667,
+        /// `World.ScanSet.Economy` is the rest): a sweep candidate with its
+        /// `Via` and transit, an assault's walk, a garrisoned home's, a
+        /// contested room, a walk home, a stranded or evacuating body's
+        /// room, a chased outpost's. `Atlas.routes` enters none on a chain
+        /// whose two ends are not among them while one round them joins the
+        /// two, and the plan's flat signature signs none, so their coming and
+        /// going moves no plan and no economy walk.
+        FightRooms: Set<string>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -415,6 +424,7 @@ module SpatialInfo =
             RivalRooms = Set.empty
             AvoidRooms = Set.empty
             StrayRooms = Set.empty
+            FightRooms = Set.empty
         }
 
     /// The name the projection's own room is filed under: `RoomName`, and the

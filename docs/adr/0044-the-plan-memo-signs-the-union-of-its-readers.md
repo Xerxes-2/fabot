@@ -1,6 +1,8 @@
 # The plan memo signs the union of what its readers read, not the widest single reader
 
-> **Status:** accepted; amended by #666
+> **Status:** accepted; amended by #666, #667
+
+> **Amended by #667**: the readers read the [[economy room]]s alone. A chain between two of them enters no room the fight alone projects (ADR 0058's #667 amendment), so the flat signature signs none of those rooms, and their coming and going with a sweep's cast, a walk home or a stray replans nothing. Their per-room signatures stay, for the fight's walk tables. A plan paid blind is owed again only for a dark room whose census the flat signature reads.
 
 > **Amended by #666**: the union is of what the readers read **of what stands there**. A room out of sight is signed by its last sighting rather than by the dark projection the readers read (ADR 0017's #666 amendment), and the difference is made up beside the signature: `PlanMemo.PaidDark` for the plan, `FarFieldMemo.DarkRead` for the tables.
 

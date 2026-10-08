@@ -2145,12 +2145,14 @@ module World =
     /// it. The projection follows the choice, so it holds still across the
     /// band a cast dips the stock through, read off the world and last
     /// tick's Tasks, kept nowhere: the **incumbent**, a colony that cast a
-    /// ranger standing in the room or a fighter holding its Guard (`held`: on
-    /// the walk out too), keeps it down to `Tuning.CasterReserveHold` and
-    /// bids its walk `Tuning.CasterSwitchMargin` short; a colony with a
-    /// ranger in its oven is read at the hold too, the body not yet holding
-    /// the Guard it was cast for. Any other comes in at
-    /// `Tuning.CasterReserve`. The spawns' queue is not read.
+    /// ranger standing in any room of the operation the room is one of
+    /// (`operation`: every candidate of the one [[sweep]], #667) or a fighter
+    /// holding a Guard of one (`held`: on the walk out too), keeps every one
+    /// down to `Tuning.CasterReserveHold` and bids its walk
+    /// `Tuning.CasterSwitchMargin` short; a colony with a ranger in its oven
+    /// is read at the hold too, the body not yet holding the Guard it was
+    /// cast for. Any other comes in at `Tuning.CasterReserve`. The spawns'
+    /// queue is not read.
     let private castBids
         (hopsOf: string -> string -> int option)
         (tuning: Tuning)
@@ -2159,17 +2161,18 @@ module World =
         (held: Map<string, string>)
         (except: string)
         (floor: int)
+        (operation: Set<string>)
         (room: string)
         : CastBid list =
-        // The Guard's id as `Tasks.taskId` spells it.
-        let guard = "guard:" + room
+        // The Guards' ids as `Tasks.taskId` spells them.
+        let guards = operation |> Set.map (fun worked -> "guard:" + worked)
 
         let incumbents =
             match
                 world.Creeps
                 |> List.filter (fun creep ->
-                    creep.Room = room && Map.containsKey RangedAttack creep.Info.Body
-                    || Map.tryFind creep.Info.Name held = Some guard)
+                    operation.Contains creep.Room && Map.containsKey RangedAttack creep.Info.Body
+                    || Map.tryFind creep.Info.Name held |> Option.exists guards.Contains)
             with
             | [] -> Set.empty
             | standing ->
@@ -2229,7 +2232,8 @@ module World =
         (floor: int)
         (room: string)
         : string option =
-        castBids hopsOf tuning living world held except floor room |> CastBid.choose
+        castBids hopsOf tuning living world held except floor (Set.singleton room) room
+        |> CastBid.choose
 
     /// The colonies that project each [[sweep]] candidate this tick (#658):
     /// every one past the Caster's floors that reaches it (`castBids`, over
@@ -2259,12 +2263,16 @@ module World =
         let rooms =
             harass.Rooms |> List.filter (fun h -> not (Set.contains h.RoomName owned))
 
+        // One sweep, one caster (#667): a colony's ranger working any
+        // candidate holds its bid on every one.
+        let sweep = rooms |> List.map _.RoomName |> Set.ofList
+
         {
             Casters =
                 rooms
                 |> List.map (fun h ->
                     h,
-                    castBids hopsOf tuning living world held "" 0 h.RoomName
+                    castBids hopsOf tuning living world held "" 0 sweep h.RoomName
                     |> List.map _.Home
                     |> List.sort)
             GarrisonFloor = tuning.RangerResidentBlocks * harass.BlockCost
@@ -2370,6 +2378,12 @@ module World =
             /// stand-down shuts stays in it, as a transit room: a ranger
             /// standing there is still placed, and walks home.
             Scanned: string list
+            /// The rooms of `Scanned` the economy's plan is signed and priced
+            /// over (#667): home, its worked outposts, errands and salvage,
+            /// its borrowed and defended homes, and the transit rooms of
+            /// each. Every other room is the fight's
+            /// (`SpatialInfo.FightRooms`).
+            Economy: Set<string>
             /// The rooms of `Scanned` this colony works — home, its worked
             /// declarations, its borrowed and garrisoned homes, the harassment
             /// rooms and assaults it runs. Every other scanned room is a
@@ -2501,14 +2515,16 @@ module World =
 
         let assaults = Assault.worked colony.Assaults
 
+        // The economy's rooms (#667); a garrisoned home is the Caster's, as
+        // a sweep candidate is, and comes and goes with its bid. Its chain
+        // walked as a defended home's is.
+        let economy =
+            Colony.roomsProjected outposts errands salvage borrowed defended colony.Home
+
         let scanned =
-            Colony.roomsProjected
-                outposts
-                errands
-                salvage
-                borrowed
-                (defended @ garrisoned)
-                colony.Home
+            economy
+            @ (garrisoned
+               |> List.collect (fun room -> room :: RoomName.transitBetween colony.Home room))
             @ Harass.roomsProjected cast colony.Home
             @ Assault.roomsProjected assaults colony.Home
             |> List.distinct
@@ -2614,6 +2630,7 @@ module World =
             Uncast = casting.Casters |> List.filter (snd >> List.isEmpty) |> List.map fst
             Assaults = assaults
             Scanned = scanned @ evacuating @ chasing @ childOutposts @ stranded |> List.distinct
+            Economy = Set.ofList economy
             Worked = worked
             Evacuating = evacuating @ stranded |> List.distinct
             ChildOutposts = childOutposts

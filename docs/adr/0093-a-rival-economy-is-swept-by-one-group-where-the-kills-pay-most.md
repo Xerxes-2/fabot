@@ -1,6 +1,8 @@
 # A rival's economy is swept by one group, working the room where its kills pay most
 
-> **Status:** accepted
+> **Status:** accepted; amended by #667
+
+> **Amended by #667** on decision 2's incumbent band: one sweep, one caster. A colony whose ranger stands in any candidate, or holds any candidate's Guard, keeps its bid on every candidate down to `CasterReserveHold`, not on the room it stands in alone; per room, a stock hovering at the reserve flipped the other candidates in and out of its projection and replanned it.
 
 > **Accepted 2026-10-08** on #658 (#615 U4 slice E), the user's design on #615: a sweep in place of stationary harassment, and concentrated force for kills over pressure spread across rooms, even where the rival mines a while longer. The user's decisions on the first draft: no single caster (each body the Caster's), and a priced muster. Supersedes ADR 0081.
 
