@@ -1222,24 +1222,32 @@ let repairTests =
                     "a whole container needs nothing"
             }
 
-            test "container Repair is surplus-tier: feeding still wins the creep" {
+            test
+                "an ailing container's Repair is priced by its rebuild: feeding wins until decay is about to take it" {
                 // The same duel the road fights: a hungry spawn and an ailing
-                // container bid for one loaded creep, and feeding wins on rank.
-                let snapshot =
+                // container bid for one loaded creep. The Repair is worth the
+                // container's rebuild over the ticks decay leaves it (#622):
+                // at two fifths of its hits that is a band under the spawn;
+                // at a hundred hits, ten ticks from gone in an owned room, it
+                // is a rebuild's five thousand at stake.
+                let snapshot hits =
                     { bareRespawn with
                         Sources = []
                         Controller = None
                         Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
                         Creeps = [ worker "w1" 50 0 ]
                     }
-                    |> withHits "cont-1" BuiltKind.Container 100 250000
-
-                let { Verdicts = verdicts } = decideOn snapshot
+                    |> withHits "cont-1" BuiltKind.Container hits 250000
 
                 Expect.equal
-                    verdicts
+                    (decideOn (snapshot 100_000)).Verdicts
                     [ Verdict.Matched("w1", taskId (Refill("spawn-1", Energy)), MatchFactor.Rank) ]
-                    "the colony feeds itself before it mends containers: rank decided"
+                    "the colony feeds itself before it mends a container with life left: rank decided"
+
+                Expect.equal
+                    (decideOn (snapshot 100)).Verdicts
+                    [ Verdict.Matched("w1", taskId (Repair "cont-1"), MatchFactor.Rank) ]
+                    "and saves the one decay takes inside ten ticks first"
             }
 
             test "a surplus creep mends the container: assignment, intent and bubble" {
@@ -1506,5 +1514,95 @@ let nextPourTests =
                     "the second's: beside it"
 
                 Expect.isEmpty (decidedAt 2).Later "a cadence of 2 lays nothing later"
+            }
+        ]
+
+[<Tests>]
+let pricedSinkTests =
+    testList
+        "priced sinks"
+        [
+            test
+                "a tower short of energy is priced by the defence it costs under the home's raid hazard" {
+                // #622: a tower's Refill stood in the surplus in peace, and
+                // the home's raided flag flips only once the raid is there,
+                // so the towers started a raid short. Its price is the hazard
+                // times the fire its shortfall is (`towerShort`).
+                let rankAt (raided: int option) free =
+                    poolOn
+                        { bareRespawn with
+                            Time = 10_000
+                            HomeRaided = raided
+                            Refillables = [ refillable "tower-1" free BuiltKind.Tower ]
+                        }
+                    |> List.pick (fun entry ->
+                        if entry.Task = Refill("tower-1", Energy) then
+                            Some entry.Priority
+                        else
+                            None)
+
+                let quiet = rankAt None 500
+
+                Expect.isLessThan
+                    quiet
+                    (priorityOfTier Surplus)
+                    "a home no raid is on record in still fills its tower before the surplus is spent"
+
+                Expect.isLessThan
+                    (rankAt (Some 9_900) 500)
+                    quiet
+                    "a raid a hundred ticks gone fills it sooner"
+
+                Expect.isGreaterThan
+                    (rankAt None 20)
+                    quiet
+                    "twenty of room is worth less than five hundred"
+
+                Expect.isGreaterThan
+                    (rankAt (Some 9_999) Engine.towerCapacity)
+                    urgentRank
+                    "and out of a raid no price reaches the defence band"
+            }
+
+            test "a site's progress is at stake where hostiles walk (#661)" {
+                // A hostile stepping onto a site destroys it, so the progress
+                // built is priced at the room's raid hazard on top of the
+                // site's growth: a home raided a hundred ticks ago finishes
+                // its half-built extension before the controller's surplus.
+                let rankAt (raided: int option) =
+                    poolOn
+                        { bareRespawn with
+                            Time = 10_000
+                            HomeRaided = raided
+                            ConstructionSites =
+                                [
+                                    {
+                                        Id = "site-1"
+                                        Left = 1_500
+                                        Begun = true
+                                    }
+                                ]
+                            Spatial =
+                                bareRespawn.Spatial
+                                |> withTargets
+                                    [ "site-1", { X = 20; Y = 20 }, Site BuiltKind.Extension ]
+                        }
+                    |> List.pick (fun entry ->
+                        if entry.Task = Build "site-1" then
+                            Some entry.Priority
+                        else
+                            None)
+
+                Expect.equal
+                    (rankAt None)
+                    (priorityOfTier Surplus - priorityStep)
+                    "no hostile on record: the home site's growth, a rank over the surplus"
+
+                Expect.equal
+                    (rankAt (Some 9_900))
+                    (economyRank (
+                        valueOfRank (priorityOfTier Surplus - priorityStep) + 1_500.0 / 100.0
+                    ))
+                    "a raid a hundred ticks gone: the 1,500 built at one in a hundred a tick"
             }
         ]

@@ -467,6 +467,40 @@ let internal brokenLine (view: ColonyView) : Set<string> * Set<string> =
 
         weak, sites
 
+/// What the broken line (`brokenLine`) is short of its floor, by id, in hits:
+/// a weak rampart its floor less its hits, a site on the line its whole floor.
+/// The hits a raid meets fewer of there, which the pool prices under the
+/// home's raid hazard.
+let internal lineShortfall (view: ColonyView) : Map<string, int> =
+    let weak, sites = brokenLine view
+
+    if Set.isEmpty weak && Set.isEmpty sites then
+        Map.empty
+    else
+        let cap = buildFloor view
+
+        let floorAt tile =
+            Map.tryFind tile view.RampartFloors
+            |> Option.defaultValue view.Tuning.RampartFloor
+            |> capped cap
+
+        let ramparts =
+            perimeterRamparts view
+            |> List.choose (fun (id, tile, hits) ->
+                if Set.contains id weak then
+                    Some(id, max 0 (floorAt (RoomPos.pos tile) - hits))
+                else
+                    None)
+
+        let siteFloors =
+            sites
+            |> Set.toList
+            |> List.choose (fun id ->
+                SpatialInfo.placementOf view.Spatial id
+                |> Option.map (fun tile -> id, floorAt (RoomPos.pos tile)))
+
+        Map.ofList (ramparts @ siteFloors)
+
 /// The hostiles in a room, the bounce on its border included (#552): each on
 /// an exit tile of a room beside it at the tile it lands on in this one, and
 /// each healer remembered off an exit tile of this one

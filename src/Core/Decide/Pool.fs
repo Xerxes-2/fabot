@@ -1,5 +1,5 @@
-/// The Pool: every Task priced and tiered for the tick, the one place a Task
-/// kind is turned into a number. The restock, garrison and spare-rate rules
+/// The Pool: every Task priced for the tick (`Price`), the one place a Task
+/// is turned into a number. The restock, garrison and spare-rate rules
 /// behind a Post, the safety tiers, and `planPool`.
 [<AutoOpen>]
 module Fabot.Core.Decide.Pool
@@ -180,7 +180,8 @@ let internal outlivesTheStay
 /// and Assault. A predicate, because the rules that turn on it (`areaFor`
 /// skipping the Reach subtraction, `threatened` written beneath it, the
 /// Matcher's fight over Flee) are asked before `planPool` ranks anything,
-/// and `tierOf` ranks exactly these into `Safety`. Exhaustive on purpose.
+/// and `planFightPool` ranks exactly these on the fight's band. Exhaustive on
+/// purpose.
 let internal safetyTier task =
     match task with
     | Flee
@@ -604,17 +605,6 @@ let private isHomeSite (view: ColonyView) atlas siteId =
 let private insideDowngradeDeadline (view: ColonyView) =
     view.Controller |> Option.exists insideDeadline
 
-/// The rungs a rank stands above its own tier: a rung steps a Task up by less
-/// than half a tier, so the distance down to the next tier is the lift. The
-/// one rung down lifts nothing and reads 0.
-let private rungsAboveTier rank =
-    let aboveLower = ((rank % tierRungs) + tierRungs) % tierRungs
-
-    if aboveLower > tierRungs / 2 then
-        (tierRungs - aboveLower) / priorityStep
-    else
-        0
-
 /// Whether a Task is an intake: a Harvest, Withdraw or Pickup of either
 /// resource. What the body may take of them is `applicable`'s.
 let internal isIntake task =
@@ -626,14 +616,16 @@ let internal isIntake task =
 
 /// The rank the Matcher compares a candidate at (#501). For a body that digs,
 /// `nearest` is the travel cost of its cheapest intake candidate, and an
-/// intake gives back a rung of its lift per `Tuning.IntakeTravelPerRung` it
-/// lies beyond that, never more than the lift itself. `None` — a body with no
+/// intake gives back a rank of its lift over its band (`liftOverBand`: a
+/// full container's two over the flow, a bleeding pile's one) per
+/// `Tuning.IntakeTravelPerRung` it lies beyond that, never more than the lift
+/// itself, so travel never drops it under its band. `None` — a body with no
 /// Work — compares every Task at its pooled rank.
 let internal matchRank (tuning: Tuning) (nearest: int option) (pooled: PooledTask) cost =
     match nearest with
     | Some near when isIntake pooled.Task ->
         let spent = (cost - near) / max 1 tuning.IntakeTravelPerRung
-        pooled.Priority + priorityStep * min (rungsAboveTier pooled.Priority) spent
+        pooled.Priority + priorityStep * min (liftOverBand pooled.Priority) spent
     | _ -> pooled.Priority
 
 /// ADR-0006. Which of the four shapes a body is, as far as a capacity is
@@ -737,8 +729,8 @@ let planPoolHolding
 
     // ADR-0071. What the ring can still take, and whether the colony is
     // starved at it: room in the cluster, and a bank that cannot afford the
-    // hauler unit it would cast at its own capacity. Two readers below: the
-    // Storage draw's tier and its cap.
+    // hauler unit it would cast at its own capacity. Read below by the ring's
+    // rank, the Storage draw's price and its cap.
     let clusterRoom = cluster |> Option.map RefillCluster.free |> Option.defaultValue 0
 
     let clusterStarved =
@@ -763,14 +755,6 @@ let planPoolHolding
     // The ferry's sinks (`ferryBuffers`): what a mother lends a bootstrapping
     // child is written down and bounded.
     let ferrySinks = ferryBuffers view
-
-    // A busy colony's own buffer (#523): filled after every sink that spends,
-    // but not inside the deadline, where it feeds the upgrader (#525).
-    let yieldingBuffer =
-        if not (List.isEmpty busy) && not (insideDowngradeDeadline view) then
-            fun id -> Set.contains id buffers && not (Set.contains id ferrySinks)
-        else
-            fun _ -> false
 
     // A raid at home inside the deadline (#525): attackController sinks the
     // timer mid-siege, and the towers and struck ramparts still come first.
@@ -861,16 +845,6 @@ let planPoolHolding
                     lent |> Option.fold min room
                 | _ -> lent |> Option.defaultValue 0
 
-    // Every pooled energy sink but the stock's own, which would open the stock
-    // against itself. Lazy, like the terminals' below: only a colony with a
-    // stock reads either.
-    let stockSinkRoom =
-        lazy
-            (tasks
-             |> List.sumBy (function
-                 | Refill(id, Energy) when not (isStorage id) -> max 0 (sinkRoom id)
-                 | _ -> 0))
-
     // The lab cluster's fills (`Facts.labPlan`): by reagent, the room its
     // labs have left for it, and which labs ask. Lazy: only a terminal draw
     // reads them.
@@ -900,16 +874,15 @@ let planPoolHolding
                  max 0 (Engine.terminalCapacity - SpatialInfo.heldAllIn view.Spatial id)))
 
     // The rescue budget (#284): the decaying structures this colony has let
-    // fall so far below their own trigger that a repair is no longer surplus
-    // work, lifted two rungs over the rest of the tier and given one body
-    // apiece. The surplus tier is ordered by travel cost from where a body
-    // stands, so the cluster a loaded worker stands in regenerates its own
-    // supply of two-tile-away Repairs faster than anybody would walk out of
-    // it (live at t239,65x the base roads sat at 50-58% while the trunk north
-    // stood at 2% and the outpost's roads at 8%). The decaying kinds alone,
-    // ordered by the fraction of max and never the hits, ties by id. One body
-    // apiece, because the walk is the expensive half and one load carries a
-    // plain road from a quarter to over its whole line.
+    // fall so far below their own trigger that a repair is a trip of its own,
+    // given one body apiece. Their rank is their price, the rebuild decay is
+    // about to take (`rebuildAtRisk`), which lifts a structure near nothing
+    // over the surplus at any distance (live at t239,65x the base roads sat
+    // at 50-58% while the trunk north stood at 2% and the outpost's roads at
+    // 8%); this set only caps the crowd. The decaying kinds alone, ordered by
+    // the fraction of max and never the hits, ties by id. One body apiece,
+    // because the walk is the expensive half and one load carries a plain
+    // road from a quarter to over its whole line.
     //
     // The rescue set deliberately does not read the held fact: it asks which
     // far structure is worth a walk, on hits alone, so a rescue frees its slot
@@ -944,10 +917,6 @@ let planPoolHolding
         |> Set.ofList
 
     let underAttack = Facts.rampartsUnderAttack view
-
-    // The declared perimeter's ramparts under their floor, and the sites on
-    // its tiles: the line a raid breaks, rebuilt before roads and extensions.
-    let weakLine, lineSites = Facts.brokenLine view
 
     let extensionSited = lazy (Facts.homeSiteStands view BuiltKind.Extension)
 
@@ -1056,34 +1025,23 @@ let planPoolHolding
         | sites -> view.Tuning.OutpostBuilders / List.length sites |> max 1
 
 
-    // ADR-0010. The tier a Task sits in. Refill, Withdraw and Build are the three Tasks
-    // whose tier layers by target. On Refill the Storage and the container
-    // are each one projected kind and exclude each other by construction,
-    // while a tower is read off the Refillables census, which can overlap
-    // either — so the kind is asked first, deepest answer first.
-    let tierOf task =
+    // The work no energy price measures, at the band it is anchored in: the
+    // season's score and the ore and reagents beside it, a new colony and the
+    // Reactor's claim. None for everything the price below reads off the
+    // ground. Thorium is never energy (score is not economy), so its draws
+    // stand at the flow's band where the score is about to be lost or
+    // delivered, and a band under it where it is stock moved.
+    let scoreTierOf task : Tier option =
         match task with
-        | Flee -> Safety
-        // The tier holds four Tasks and no rank between them: a fight Task a
-        // fighter passes outranks Flee in the Matcher (#533), a Guard, a
-        // Defend and an Assault admit a Fighter alone, and a Defend admits its
-        // row's bodies alone.
-        | Guard _
-        | Defend _
-        | Assault _ -> Safety
-        | Harvest _ -> Feeding
-        // A decision made here, because nothing else made it: the ADRs fix the
-        // reserver row's casting order and say nothing about its matching
-        // order. Reserve joins the feeding tier on the casting order's own
-        // argument: it decides whether a room's income is five a tick or ten.
-        | Reserve _ -> Feeding
         // A claim decides whether there is going to be a second colony at all.
-        | Claim _ -> Feeding
+        | Claim _ -> Some Feeding
         // The reclaim decides whether the season's whole score accrues to this
-        // colony or to a rival. Not Safety tier: nothing out there is killing
-        // the body, and a Task ranked there would be offered to it ahead of
-        // running from a keeper.
-        | Reclaim _ -> Feeding
+        // colony or to a rival. Not the fight's band: nothing out there is
+        // killing the body, and a Task ranked there would be offered to it
+        // ahead of running from a keeper.
+        | Reclaim _ -> Some Feeding
+        // A deposit's dig: the score's own intake.
+        | Harvest rockId when Atlas.isMineral atlas rockId -> Some Feeding
         // The delivery's own draw is Feeding (#367): that load is the season's
         // score, not stock being topped up. Live at t506,631-507,096 the
         // courier scored the delivery draw at rank 8 while energy hauling
@@ -1091,253 +1049,427 @@ let planPoolHolding
         // 500 -> 47. Told apart by the store, the same test the Emitter's
         // `deliveryDraw` uses, and only while the programme is open.
         | Withdraw(storeId, Thorium) when isStorage storeId && Facts.courierProgrammeOpen view atlas ->
-            Feeding
+            Some Feeding
         // Ore lying in the Reactor's own room is the delivery's, not stock:
         // its sink is the Reactor five tiles away (`Planner.reactorRefills`).
         // Ore in a merely crossed room keeps `StockDraw` and its walk home.
-        | Withdraw(storeId, Thorium) when besideTheReactor storeId -> Feeding
-        | Pickup(pileId, Thorium) when besideTheReactor pileId -> Feeding
+        | Withdraw(storeId, Thorium) when besideTheReactor storeId -> Some Feeding
+        | Pickup(pileId, Thorium) when besideTheReactor pileId -> Some Feeding
         // Ore about to land on the floor, or already there, is Feeding (#497):
         // live W17S29 stood at 2,000 T with 885 on the floor while every
         // hauler topped up extensions that were not empty. Every pooled pile
         // is past `Tuning.PickupThreshold`. Not while a spawn is empty: the
         // colony staying alive comes first.
-        | Withdraw(storeId, Thorium) when overflowing storeId && not spawnEmpty -> Feeding
-        | Pickup(_, Thorium) when not spawnEmpty -> Feeding
-        // The mine haul ranks at the Storage's tier: an empty hauler beside
+        | Withdraw(storeId, Thorium) when overflowing storeId && not spawnEmpty -> Some Feeding
+        | Pickup(_, Thorium) when not spawnEmpty -> Some Feeding
+        // The mine haul ranks at the Storage's band: an empty hauler beside
         // the mine must not take the season's ore ahead of the energy the
-        // spawn is waiting on. Asked before the kind, because the store it
-        // names is a container and would otherwise answer Feeding.
-        | Withdraw(_, Thorium) -> StockDraw
+        // spawn is waiting on.
+        | Withdraw(_, Thorium) -> Some StockDraw
         // The ore haul one resource over, and never the season's score: an
         // overflowing ore mine is Feeding for the floor's reason, any other at
-        // the Storage's tier.
-        | Withdraw(storeId, Ore _) when overflowing storeId && not spawnEmpty -> Feeding
+        // the Storage's band.
+        | Withdraw(storeId, Ore _) when overflowing storeId && not spawnEmpty -> Some Feeding
         | Withdraw(_, Ore _)
-        | Pickup(_, Ore _) -> StockDraw
+        | Pickup(_, Ore _) -> Some StockDraw
         // The lab cluster's haul, terminal to lab and lab to terminal: stock
-        // moved between two stores, at the Storage's tier.
+        // moved between two stores, at the Storage's band.
         | Withdraw(_, Compound _)
-        | Pickup(_, Compound _) -> StockDraw
-        // ADR-0023. The Storage is stock, drawn a tier below the containers.
-        // The stock feeds a starved cluster at the flow's own rank: a tie with
-        // the containers and not a rank over them, so travel cost sends the
-        // body beside the Storage to the Storage, and capped in `capacityOf`
-        // at the loads the ring can take.
-        | Withdraw(storeId, Energy) ->
-            if isStorage storeId then
-                if clusterStarved then Feeding else StockDraw
-            else
-                Feeding
+        | Pickup(_, Compound _) -> Some StockDraw
         // Under an empty spawn a Thorium pile ranks where the Thorium container
         // does: it is that container's next dig, landed on the floor because
-        // the store was full. Both arms spelled: a third resource is a build
-        // error here.
-        | Pickup(_, Thorium) -> StockDraw
-        // A pile is flow and not stock: the haul cycle's energy lying where it
-        // fell.
-        | Pickup(_, Energy) -> Feeding
-        // Under the reserve income banks before it feeds the buffer or a
-        // child (#505): the ferry's sinks drop to the buffer's tier, and the
-        // Storage's own Refill rises to it, a rung over both.
-        | Refill(structureId, Energy) when
-            reserveShort && (isStorage structureId || Set.contains structureId ferrySinks)
-            ->
-            UpgradeBuffer
-        // A rung over the stock, so the Storage still takes only what is left.
-        | Refill(structureId, Energy) when yieldingBuffer structureId -> Stock
-        | Refill(structureId, _) ->
-            let kind = Map.tryFind structureId view.Spatial.TargetKinds
-
-            if kind = Some(Structure BuiltKind.Storage) then
-                Stock
-            elif kind = Some(Structure BuiltKind.Container) then
-                UpgradeBuffer
-            elif isTower structureId then
-                Surplus
-            else
-                // The flow; the refill cluster is keyed on a spawn and arrives
-                // through the same door.
-                Feeding
-        | Repair id when Set.contains id dying -> Feeding
-        | Build siteId when isFeedingSite view atlas fedSiteIds siteId -> Feeding
-        // The claim party's: RCL2 before the tap is what the claim is worth.
-        | Upgrade controllerId when Set.contains controllerId partyControllers -> Feeding
-        // A bootstrapped child's Upgrade, in the mother's pool (#213): the tier
-        // the pioneers were hired for. Left in the surplus, travel cost — a
-        // Seam and fifty tiles against five — kept every one of them at home.
-        // A level-1 nursery's comes ahead of its sites (#449).
-        | Upgrade controllerId when
-            isBorrowedUpgrade view controllerId
-            && (Atlas.targetRoom atlas controllerId |> Option.exists (isNurseryFirstLevel view)
-                || not (sitesPendingBeside view atlas controllerId))
-            ->
-            Feeding
-        | Build _
+        // the store was full.
+        | Pickup(_, Thorium) -> Some StockDraw
+        // A store of a resource no energy price covers: the labs' reagents,
+        // the terminal's ore, the Reactor's Thorium. The Storage's is the
+        // floor, priced below.
+        | Refill(structureId, resource) when resource <> Energy && not (isStorage structureId) ->
+            Some Feeding
+        | Flee
+        | Guard _
+        | Defend _
+        | Assault _
+        | Harvest _
+        | Reserve _
+        | Withdraw(_, Energy)
+        | Pickup(_, Energy)
+        | Refill _
         | Repair _
+        | Build _
         | Upgrade _
-        // Nothing waits on it: the room is only costing CPU while it stands.
-        | Dismantle _ -> Surplus
+        | Dismantle _ -> None
 
-    // Where the pool's Feeding-tier stores stand, so a pickup can be asked
-    // whether one of them is under its own pile. Read off the pool and not
-    // off the projection's whole container census: a store the pool holds no
-    // Withdraw for is not an alternative to anything.
-    let drawableTiles =
-        tasks
-        |> List.choose (fun task ->
+    // The rungs a score Task stands over its band (the only rungs left, for
+    // the score has no loss to price): a full mine container, whose next
+    // digs land on the floor and age the miner past the contact cliff (#306),
+    // two; the ore in a tombstone, which ends (#359), and the ore on the
+    // floor, which bleeds, one.
+    let scoreLift task =
+        match task with
+        | Withdraw(storeId, Thorium) when
+            SpatialInfo.heldIn view.Spatial Thorium storeId >= view.Tuning.MineContactCliff
+            ->
+            2
+        | Withdraw(storeId, Thorium) when
+            Map.tryFind storeId view.Spatial.TargetKinds = Some Tombstone
+            ->
+            1
+        | Pickup(_, Thorium) -> 1
+        | _ -> 0
+
+    let home = SpatialInfo.homeName view.Spatial
+
+    // The rate a room's sources are held at, the flow where the room's
+    // control is not on the view.
+    let rateIn room =
+        Map.tryFind room view.RoomControl
+        |> Option.map Facts.heldRateOf
+        |> Option.defaultValue Engine.heldOutputPerTick
+        |> float
+
+    let rateOf id =
+        SpatialInfo.roomOf view.Spatial id
+        |> Option.map rateIn
+        |> Option.defaultValue heldRate
+
+    // A tick the refill ring waits is a tick every spawn waits: the colony's
+    // spawn time at what a tick of it is worth (`Facts.spawnTickWorth`), every
+    // row casting at the bank's capacity. Never under one source's flow: a
+    // colony too poor to price its income is the one whose spawn it is.
+    let ringWorth =
+        max heldRate (Facts.spawnTickWorth view * float (max 1 (List.length view.Spawns)))
+
+    let isRing id =
+        cluster |> Option.exists (fun c -> c.Spawn = id)
+        || view.Refillables
+           |> List.exists (fun r ->
+               r.Id = id && (r.Kind = BuiltKind.Spawn || r.Kind = BuiltKind.Extension))
+
+    // The home's raid hazard, a creep's life where none is on record: what
+    // a tower short of energy and a line short of its floor are priced under.
+    let homeHazard = raidHazard view.Time view.HomeRaided homeRaidPrior
+
+    // The last tick a hostile walked a room: one standing there now, the
+    // home's last raider, a resident room's fight record. No prior: a room no
+    // hostile is known to walk puts no site at risk.
+    let lastWalked room =
+        [
+            if view.Hostiles |> List.exists (fun h -> h.Pos.Room = room) then
+                yield view.Time
+            if room = home then
+                yield! Option.toList view.HomeRaided
+            yield! Map.tryFind room view.Fought |> Option.map _.Seen |> Option.toList
+        ]
+        |> function
+            | [] -> None
+            | seen -> Some(List.max seen)
+
+    let siteProgress siteId =
+        match
+            siteKind siteId, view.ConstructionSites |> List.tryFind (fun site -> site.Id = siteId)
+        with
+        | Some(Site kind), Some site -> max 0 (constructionCost kind - site.Left)
+        | _ -> 0
+
+    // The bodies the buffer feeds, by their cost: the standing row's
+    // (`bodyClassOf`), which drinks nowhere else and whose cost the upgrader
+    // row sold it at, and every other light body holding the home
+    // controller's Upgrade, whose drink stands beside it.
+    let standingCosts =
+        lazy
+            (let upgrading =
+                view.Controller
+                |> Option.map (fun c ->
+                    HeldTaskFacts.holdersOf held (taskId (Upgrade c.Id)) |> Set.ofList)
+                |> Option.defaultValue Set.empty
+
+             view.Creeps
+             |> List.filter (fun creep ->
+                 match bodyClassOf view.Tuning atlas creep with
+                 | Standing -> true
+                 | Light -> Set.contains creep.Name upgrading
+                 | Heavy
+                 | Fighter -> false)
+             |> List.map (fun creep ->
+                 creep.Body
+                 |> Map.toList
+                 |> List.collect (fun (part, n) -> List.replicate n part)
+                 |> bodyCost))
+
+    let lineShort = lazy (Facts.lineShortfall view)
+
+    // A decaying structure's rebuild and the hits it loses a tick: a road's
+    // by its line's multiple of a plain road's hits, a container's by
+    // whether the room is ours.
+    let decayOf id (kind: BuiltKind) (hits: HitsInfo) =
+        match kind with
+        | BuiltKind.Road ->
+            let ratio = max 1 (hits.HitsMax / Engine.roadHits)
+
+            Some(
+                Engine.roadBuildCost * ratio,
+                float (Engine.roadDecayAmount * ratio) / float Engine.roadDecayTime
+            )
+        | BuiltKind.Container ->
+            let owned = SpatialInfo.roomOf view.Spatial id |> Option.exists (Facts.ourRoom view)
+
+            Some(
+                constructionCost BuiltKind.Container,
+                float Engine.containerDecayAmount
+                / float (
+                    if owned then
+                        Engine.containerDecayTimeOwned
+                    else
+                        Engine.containerDecayTime
+                )
+            )
+        | _ -> None
+
+    // A site's growth: the band its kind and room put it in, and the steps
+    // over it the colony grows by. Every site in a nursery or a bootstrapping
+    // room, and the outpost sites the builders' budget lifts, are income
+    // waiting (the flow's band); every other is the surplus's.
+    let siteGrowth siteId =
+        let band =
+            if isFeedingSite view atlas fedSiteIds siteId then
+                priorityOfTier Feeding
+            else
+                priorityOfTier Surplus
+
+        let surplus = band = priorityOfTier Surplus
+
+        let lift =
+            match siteKind siteId with
+            // A room's first tower over every other site (user, 2026-10-04:
+            // W17S25 at RCL3 raises its tower before its extensions): the
+            // room's defence once its safe mode ends.
+            | Some(Site BuiltKind.Tower) when
+                Atlas.targetRoom atlas siteId
+                |> Option.exists (fun room -> Atlas.builtIn atlas room BuiltKind.Tower = 0)
+                ->
+                2
+            // The Storage beside the home's sites and no higher while an
+            // extension site stands (#526): the extensions are the bank.
+            | Some(Site BuiltKind.Storage) when surplus && extensionSited.Force() -> 0
+            // A site outranks the controller (#234): a worker that fills at
+            // the buffer already stands in the controller's Work Area.
+            | _ when surplus && isHomeSite view atlas siteId -> 1
+            // An outpost's road site (#548): under the home's sites while the
+            // home builds, the colony's one lead site over the controller
+            // after, and every other on the band, where travel decides.
+            | _ when isOutpostRoadSite siteId ->
+                if homeBuilding.Force() then -1
+                elif leadRoadSite.Force() = Some siteId then 1
+                else 0
+            | _ -> 0
+
+        valueOfRank (band - lift)
+
+    // What a sink loses a tick while it waits, in energy: every Refill, Build,
+    // Repair, Upgrade and Dismantle. Apart from the intakes' prices below
+    // because the stock's draw is priced off the hungriest of these.
+    let sinkValueOf task : float =
+        match scoreTierOf task with
+        | Some tier -> valueOfRank (priorityOfTier tier)
+        | None ->
             match task with
-            | Withdraw(storeId, Energy) when tierOf task = Feeding ->
-                SpatialInfo.placementOf view.Spatial storeId
-            | _ -> None)
-        |> Set.ofList
-
-    // The Task's place on the ladder: its tier, with the rungs inside it and
-    // the downgrade deadline over it. The deadline lifts the colony's own
-    // controller and no other: the pool can hold a bootstrapped child's
-    // Upgrade too, and lifting that one on the mother's timer would send her
-    // loaded fleet across the Seam on the tick her own controller was closest
-    // to downgrading.
-    let priorityOf task =
-        let tier = tierOf task
-
-        // Which rung inside that tier, never a rank: a rung is a `Rung` case
-        // so the Resolver's half-tier rounding is checked against every one
-        // (#237).
-        let step =
-            match task with
-            // The energy pile's two rungs. A pile lying on a drawable store
-            // outranks every other Feeding container (a hauler beside a full
-            // container ignored the pile on it; stepping the Withdraw down
-            // instead demoted a full container behind every store at any
-            // distance). And a pile worth a trip of its own (#242): half a
-            // hauler load, read off the row's cast and never the candidate's
-            // carry — the creep-blind mirror of `applicable`'s `worthTheTrip`.
-            // The line is floored at twice `Tuning.PickupThreshold` (#249):
-            // under a bank of 450 half a load is the threshold itself, and
-            // every pooled pile took the rung. Smaller piles stay on the tier:
-            // one hundred energy forty tiles off is no reason to leave the
-            // 1,500 under a body's feet. `drawableTiles` holds only
-            // Feeding-tier Withdraws, so the ore's arm below inherits neither
-            // clause.
-            | Pickup(pileId, Energy) ->
-                let overADrawableStore =
-                    SpatialInfo.placementOf view.Spatial pileId
-                    |> Option.exists (fun tile -> Set.contains tile drawableTiles)
-
-                let worthATripOfItsOwn =
-                    stored pileId * 2 >= max haulerLoad (4 * view.Tuning.PickupThreshold)
-
-                if overADrawableStore || worthATripOfItsOwn then
-                    OneRungUp
+            // The stock's own Refill: nothing waits on it. Under the emergency
+            // reserve (#505, a named margin) income banks ahead of the ferry,
+            // a rank over its band.
+            | Refill(structureId, _) when isStorage structureId ->
+                if reserveShort then
+                    valueOfRank (priorityOfTier UpgradeBuffer - priorityStep)
                 else
-                    OnTheTier
-            // A tombstone or a ruin decays as a pile does (#250), so its
-            // energy is drawn on the pile's rung: a pile a rung over it sent a
-            // hauler past a store about to go.
+                    0.0
+            // What a mother lends a bootstrapping child: the child's need is
+            // not on her view, so it stands at the buffer's band.
+            | Refill(structureId, Energy) when Set.contains structureId ferrySinks ->
+                anchorOf UpgradeBuffer
+            // A busy colony's own buffer (#523): the upgrader row keeps one
+            // body there as downgrade insurance and no mouth, so the buffer
+            // is filled after every sink that spends, a rank over the stock —
+            // but not inside the deadline, where it feeds that body (#525).
+            // The row and the pool read the one fact, `busy`.
+            | Refill(structureId, Energy) when
+                Set.contains structureId buffers
+                && not (List.isEmpty busy)
+                && not (insideDowngradeDeadline view)
+                ->
+                valueOfRank (bottomRank - priorityStep)
+            // The buffer: what the bodies it feeds lose while it runs dry
+            // (under the line a hauled store reads drained at,
+            // `Tuning.HaulDrainedPercent`),
+            // the bodies the upgrader row bought among them, so the row never
+            // keeps a body the pool will not feed; and never under its band,
+            // where whoever upgrades drinks.
+            | Refill(structureId, Energy) when Set.contains structureId buffers ->
+                max
+                    (anchorOf UpgradeBuffer)
+                    (idleMouths
+                        (float view.Tuning.HaulDrainedPercent / 100.0)
+                        standingCosts.Value
+                        (SpatialInfo.heldIn view.Spatial Energy structureId)
+                        Engine.containerCapacity)
+            // A tower short of energy: the expected defence loss.
+            | Refill(structureId, Energy) when isTower structureId ->
+                let free =
+                    view.Refillables
+                    |> List.tryFind (fun r -> r.Id = structureId)
+                    |> Option.map _.FreeCapacity
+                    |> Option.defaultValue 0
+
+                towerShort homeHazard free
+            // The ring: every spawn's tick.
+            | Refill(structureId, Energy) when isRing structureId ->
+                // Starved, it stands in the defence band (`priorityOf`), and
+                // what a draw on the stock serves is worth that much.
+                if clusterStarved && cluster |> Option.exists (fun c -> c.Spawn = structureId) then
+                    valueOfRank urgentRank
+                else
+                    ringWorth
+            // The terminal's fee and aid: a send waits on it whole.
+            | Refill _ -> anchorOf Feeding
+            // A rampart about to decay away (`Tuning.RampartDying`): its site
+            // comes back to be built again (live 2026-10-04, W17S25's thirteen
+            // fresh ramparts at 1 hit, every worker on a site), two steps over
+            // the flow.
+            | Repair id when Set.contains id dying -> valueOfRank (priorityOfTier Feeding - 2)
+            // The declared line short of its floor: the hits a raid meets
+            // fewer of, at the energy they take, under the home's hazard.
+            | Repair id when lineShort.Value.ContainsKey id ->
+                max
+                    (anchorOf Surplus)
+                    (homeHazard * float lineShort.Value.[id] / float Engine.repairHitsPerEnergy)
+            | Repair id ->
+                match Map.tryFind id view.Spatial.TargetKinds, Map.tryFind id view.Spatial.Hits with
+                | Some(Structure kind), Some hits ->
+                    match decayOf id kind hits with
+                    | Some(rebuild, decay) -> rebuildAtRisk rebuild hits.Hits decay
+                    | None -> anchorOf Surplus
+                | _ -> anchorOf Surplus
+            // A site: its growth, and the progress hostiles walking its room
+            // can stomp (#661).
+            | Build siteId ->
+                let line =
+                    lineShort.Value
+                    |> Map.tryFind siteId
+                    |> Option.map (fun floor ->
+                        homeHazard * float floor / float Engine.repairHitsPerEnergy)
+                    |> Option.defaultValue 0.0
+
+                let walked =
+                    Atlas.targetRoom atlas siteId
+                    |> Option.map (fun room -> raidHazard view.Time (lastWalked room) 0.0)
+                    |> Option.defaultValue 0.0
+
+                max (siteGrowth siteId) line + stompRisk (siteProgress siteId) walked
+            // The claim party's: RCL2 before the tap is what the claim is
+            // worth, two steps over the flow (#471): on the band alone travel
+            // keeps every loaded pioneer at home.
+            | Upgrade controllerId when Set.contains controllerId partyControllers ->
+                valueOfRank (priorityOfTier Feeding - 2)
+            // A bootstrapped child's Upgrade, in the mother's pool (#213): the
+            // band the pioneers were hired for. A level-1 nursery's comes
+            // ahead of its sites (#449).
+            | Upgrade controllerId when
+                isBorrowedUpgrade view controllerId
+                && (Atlas.targetRoom atlas controllerId |> Option.exists (isNurseryFirstLevel view)
+                    || not (sitesPendingBeside view atlas controllerId))
+                ->
+                anchorOf Feeding
+            // The surplus's mouth: the energy is spent, not lost, and nothing
+            // waits on it.
+            | Upgrade _
+            // The room is only costing CPU while it stands.
+            | Dismantle _ -> anchorOf Surplus
+            // The intakes, priced below (`valueOf`); the score's, by
+            // `scoreTierOf`; and the fight's (`planFightPool`).
+            | Harvest _
+            | Reserve _
+            | Withdraw _
+            | Pickup _
+            | Claim _
+            | Reclaim _
+            | Flee
+            | Guard _
+            | Defend _
+            | Assault _ -> 0.0
+
+    // The hungriest sink an energy load serves: what a draw on the stock is
+    // worth (`stockDraw`).
+    let hungriest =
+        lazy
+            (tasks
+             |> List.fold
+                 (fun most task ->
+                     match task with
+                     | Refill(id, Energy) when not (isStorage id) -> max most (sinkValueOf task)
+                     | Build _
+                     | Repair _
+                     | Upgrade _ -> max most (sinkValueOf task)
+                     | _ -> most)
+                 0.0)
+
+    // ADR-0094. What a Task loses a tick while it waits, in energy: the price
+    // its rank is read off (`economyRank`).
+    let valueOf task : float =
+        match scoreTierOf task with
+        | Some tier -> valueOfRank (priorityOfTier tier - scoreLift task)
+        | None ->
+            match task with
+            // A dig and a reservation are the flow itself, whichever rock or
+            // controller: the caster casts one body a Post and one a room,
+            // legged for its walk, so which one a body takes is travel's — a
+            // rate apart, an outpost's Anchor walked home to a richer rock
+            // (#622's S4 capture).
+            | Harvest _
+            | Reserve _ -> heldRate
+            // The stock: worth what the hungriest sink it serves is worth, and
+            // never more than the flow.
+            | Withdraw(storeId, Energy) when isStorage storeId ->
+                stockDraw clusterStarved hungriest.Value
+            // A tombstone or a ruin ends whole (`transientLoss`).
             | Withdraw(storeId, Energy) when
                 Map.tryFind storeId view.Spatial.TargetKinds |> Option.exists isTransient
                 ->
-                OneRungUp
-            // A full source container, whose income is going away: two rungs,
-            // above the pile, because with the pile above the full container
-            // the haulers chased fifty-energy piles all day and never drew the
-            // 2,000 beside them. Source containers alone: the buffer and the
-            // Storage are sinks. The resource is spelt out so this arm and the
-            // ore's below are visibly disjoint.
-            | Withdraw(storeId, Energy) when
-                tier = Feeding && stored storeId >= Engine.containerCapacity
-                ->
-                TwoRungsUp
-            // The same rule one column over (#306): a full mineral container
-            // sends the next dig onto the floor too, and charges a second time
-            // for it in the miner's life past the contact cliff. The cliff and
-            // not the cap, on the arithmetic: lifted at the cap the miner
-            // averages `1 + p ≈ 3.67` a tick of ageing, at the cliff ≈3.0,
-            // which is the band `Tuning.MineContactAgeing`'s three is written
-            // for. What the lift steps over is the Storage's own energy
-            // Withdraw, and the bound on how many bodies leave the energy
-            // rotation is the pool's own pair of capacities, widest exactly
-            // when the mine has backed up (#315). The delivery draw from
-            // Storage inherits this lift deliberately: a warehouse holding at
-            // least the cliff has more than one delivery available.
-            | Withdraw(storeId, Thorium) when
-                SpatialInfo.heldIn view.Spatial Thorium storeId >= view.Tuning.MineContactCliff
-                ->
-                TwoRungsUp
-            // The ore in a store that ends, one rung up (#359): going away
-            // faster than a pile, if anything, since a decayed tombstone drops
-            // its whole store as piles that then bleed. Rungless it shares
-            // `StockDraw` with the Storage's energy Withdraw and loses every
-            // travel-cost tie to the bank at home. One rung and not two: two
-            // would put it over the mine's own full container, and draining
-            // the container is what stops the floor filling.
-            | Withdraw(storeId, Thorium) when
-                Map.tryFind storeId view.Spatial.TargetKinds = Some Tombstone
-                ->
-                OneRungUp
-            // And the floor under it, one rung lower, for the same reason.
-            // Unconditional, on a sentence about the resource and not the
-            // tile: ore on the floor is going away and nothing else on this
-            // tier is, and the colony has no second copy of season score.
-            // Neither of the energy pile's clauses is inherited: a mineral
-            // container's tile is not in `drawableTiles`, and a hundred-unit
-            // pile fails the worth-a-trip line at every bank the extractor
-            // stands at. Nor need the pile lie on the container: a hauler that
-            // dies mid-route leaves one on a road tile, and it takes this rung
-            // too.
-            | Pickup(_, Thorium) -> OneRungUp
-            // A room's first tower over every other site on its tier (user,
-            // 2026-10-04: W17S25 at RCL3 raises its tower before its
-            // extensions): the room's defence once its safe mode ends.
-            | Build siteId when
-                Map.tryFind siteId view.Spatial.TargetKinds = Some(Site BuiltKind.Tower)
-                && Atlas.targetRoom atlas siteId
-                   |> Option.exists (fun room -> Atlas.builtIn atlas room BuiltKind.Tower = 0)
-                ->
-                TwoRungsUp
-            // The declared line under its floor, and a site on it (user,
-            // 2026-10-05): W17S25's west line lay broken and thin while a
-            // rescued road and an extension took both workers, a rampart's
-            // floor rule never reading as a rescue. Above the home site's
-            // rung, which would otherwise answer first.
-            | Repair id when Set.contains id weakLine -> TwoRungsUp
-            | Build siteId when Set.contains siteId lineSites -> TwoRungsUp
-            // The Storage under the home site's rung while an extension site
-            // stands (#526): the extensions are the bank — bigger bodies, the
-            // two-CLAIM reserver — and the Storage only stock.
-            | Build siteId when
-                tier = Surplus
-                && Map.tryFind siteId view.Spatial.TargetKinds = Some(Site BuiltKind.Storage)
-                && extensionSited.Force()
-                ->
-                OnTheTier
-            // A site outranks the controller inside the surplus tier (#234):
-            // a worker that fills at the buffer is already standing in the
-            // controller's Work Area, so Upgrade costs it nothing and never
-            // goes task-gone.
-            | Build siteId when tier = Surplus && isHomeSite view atlas siteId -> OneRungUp
-            // An outpost's road site (#548). While the home builds, a rung
-            // under the tier, below the home Storage held down above. After
-            // it, the colony's lead road site a rung over the controller: on
-            // the tier no loaded worker standing in its Work Area ever crosses
-            // for one. Every other stays on the tier, where travel decides: a
-            // body already out there builds the next.
-            | Build siteId when isOutpostRoadSite siteId ->
-                if homeBuilding.Force() then OneRungDown
-                elif leadRoadSite.Force() = Some siteId then OneRungUp
-                else OnTheTier
-            // Over the home site as well (#284): a structure a quarter from
-            // destruction is work the colony has already paid for.
-            | Repair id when Set.contains id rescued || Set.contains id dying -> TwoRungsUp
-            // The claim party over the home's Feeding work (#471): on the
-            // tier alone travel cost keeps every loaded pioneer at home, the
-            // claim lands with no party, and the tap comes first.
-            | Upgrade id when Set.contains id partyControllers -> TwoRungsUp
-            | Refill(id, Energy) when reserveShort && isStorage id -> OneRungUp
-            | Refill(id, Energy) when yieldingBuffer id -> OneRungUp
-            | _ -> OnTheTier
+                flowDraw (transientLoss (stored storeId))
+            // The buffer fills from the haul, never from a source: it does not
+            // overflow.
+            | Withdraw(storeId, Energy) when Set.contains storeId buffers -> flowDraw 0.0
+            // A source's container: the flow, and the overflow pressure of
+            // its source's rate over the line a hauled container sawtooths
+            // under (`Tuning.HaulFullPercent`, the haul overflow's own line).
+            | Withdraw(storeId, Energy) ->
+                flowDraw (
+                    overflowLoss
+                        (float view.Tuning.HaulFullPercent / 100.0)
+                        (rateOf storeId)
+                        (stored storeId)
+                        Engine.containerCapacity
+                )
+            // A pile: the flow, and its decay.
+            | Pickup(pileId, Energy) -> flowDraw (pileDecay (stored pileId))
+            | _ -> sinkValueOf task
 
+    // Every pooled energy sink but the stock's own, which would open the stock
+    // against itself, and but a sink nothing waits on, which would carry the
+    // stock out to be banked again. Lazy: only a colony with a stock reads it.
+    let stockSinkRoom =
+        lazy
+            (tasks
+             |> List.sumBy (function
+                 | Refill(id, Energy) as task when not (isStorage id) && sinkValueOf task > 0.0 ->
+                     max 0 (sinkRoom id)
+                 | _ -> 0))
+
+    // The Task's rank: its price (`economyRank`), and over every price the
+    // bands no price reaches — the downgrade deadline (an engine fact) and
+    // the home's defence in a raid (home defence first). The deadline lifts
+    // the colony's own controller and no other: the pool can hold a
+    // bootstrapped child's Upgrade too, and lifting that one on the mother's
+    // timer would send her loaded fleet across the Seam on the tick her own
+    // controller was closest to downgrading.
+    let priorityOf task =
         match task with
         | Upgrade id when
             insideDowngradeDeadline view
@@ -1350,7 +1482,8 @@ let planPoolHolding
         | Repair id when raidedInDeadline && Set.contains id underAttack ->
             deadlineRank - priorityStep
         // The raided home's towers and the starved cluster share the band, and
-        // the walk decides between them.
+        // the walk decides between them: a colony that cannot buy the body
+        // that refills its ring casts nothing at all.
         | Refill(id, Energy) when raided && isTower id -> urgentRank
         | Refill(id, Energy) when clusterStarved && cluster |> Option.exists (fun c -> c.Spawn = id) ->
             urgentRank
@@ -1358,7 +1491,7 @@ let planPoolHolding
         // while it stands, and the tower's energy is no use once the raid is
         // through the line.
         | Repair id when Set.contains id underAttack -> urgentRank - priorityStep
-        | _ -> priorityOfTier tier + rankOfRung step
+        | _ -> economyRank (valueOf task)
 
     let isBorrowedSite siteId =
         siteRoomIs atlas (isBootstrapRoom view) siteId

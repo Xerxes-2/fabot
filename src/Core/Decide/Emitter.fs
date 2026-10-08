@@ -185,6 +185,11 @@ let internal applicable
             // `Feeding`, where the comparison is false, and 376 T stood in the
             // Storage with the Reactor dry for 424 ticks.
             || pooled.Priority >= priorityOfTier StockDraw - tierRungs / 2
+            // The stock's energy in its own words (#622): its draw is priced
+            // off the sink it serves, so its rank no longer names it, and
+            // there is still no store below it to fall to.
+            || (resource = Energy
+                && Map.tryFind storeId view.Spatial.TargetKinds = Some(Structure BuiltKind.Storage))
             // So the ore half says it in its own words: the delivery's draw is
             // always worth the trip, because a body refused it stands idle while
             // the Reactor burns down.

@@ -80,6 +80,41 @@ let stockTests =
                     "at it the buffer outbids the stock again"
             }
 
+            test
+                "under the emergency reserve a buffer the upgrader row's body stands idle at outbids the stock" {
+                // Live W17S29 (t1,026,455-509): two upgraders idled ~340 ticks
+                // beside an empty buffer while the row still asked for both
+                // (#622). The buffer is priced by the bodies it feeds, the
+                // row's own at the cost it sold them at, so the pool feeds
+                // every body the row keeps: under the reserve too, where the
+                // row hires on the income's share and the rest banks.
+                let upgrader = creepWith "u1" 0 50 (bodyFor upgraderPattern 1800)
+
+                let haulerTakes stored =
+                    let colony =
+                        stockColony [] (Map.ofList [ "can-ctrl", stored; "sto-1", 5_000 ])
+                        |> withLevel 4
+
+                    (decideOn
+                        { colony with
+                            Creeps = colony.Creeps @ [ upgrader ]
+                        })
+                        .Verdicts
+                    |> List.tryPick (function
+                        | Verdict.Matched("h1", task, factor) -> Some(task, factor)
+                        | _ -> None)
+
+                Expect.equal
+                    (haulerTakes 0)
+                    (Some(taskId (Refill("can-ctrl", Energy)), MatchFactor.Rank))
+                    "the empty buffer an upgrader waits at is fed before the stock banks"
+
+                Expect.equal
+                    (haulerTakes 1_900)
+                    (Some(taskId (Refill("sto-1", Energy)), MatchFactor.Rank))
+                    "a buffer that still feeds it leaves the load to bank"
+            }
+
             test "while the colony is busy the upgrade buffer is filled after builds and repairs" {
                 // W17S25, 2026-10-05 (#523): the haulers kept the buffer full
                 // while the west line lay broken. The stock's own Refill
@@ -613,12 +648,12 @@ let stockDrawTests =
                     "and it is emptied first from the stock's own doorstep too"
             }
 
-            // The one exception to the tier gap: a colony whose bank
+            // The one exception to the re-haul's half: a colony whose bank
             // cannot afford the hauler unit it would cast, with room in
-            // its ring, is starved, and there the stock's draw ranks with
-            // the flow's. The 300 bank's `4C/2M` costs 300, so a bank at
-            // 100 with fifty of room in the spawn is starved and a full
-            // bank is not.
+            // its ring, is starved, and there the stock's draw is worth the
+            // flow, for the spawn waits on the walk and not on the hauler's
+            // time. The 300 bank's `4C/2M` costs 300, so a bank at 100 with
+            // fifty of room in the spawn is starved and a full bank is not.
             test
                 "a starved cluster lets the stock tie the flow, and travel cost sends the near body to the stock" {
                 let starved pos =
@@ -666,7 +701,7 @@ let stockDrawTests =
                             MatchFactor.Rank
                         )
                     ]
-                    "a bank that can afford its hauler is not starved: ADR 0023's gap stands and rank decides"
+                    "a bank that can afford its hauler is not starved: the re-haul halves the stock and rank decides"
             }
 
             test
@@ -704,9 +739,13 @@ let stockDrawTests =
                     "and the other body hauls the flow"
             }
 
-            test "topping up from the stock outbids surplus work" {
+            test "a half load is spent on the surplus before the stock tops it up" {
                 // The worker stands inside the controller's Work Area and one
-                // step from the stock's, so Upgrade is the cheapest rival.
+                // step from the stock's, so Upgrade is the cheapest rival. The
+                // stock's draw is priced off the sink it serves, here that same
+                // surplus work, at half its worth for the re-haul (#622): where
+                // the stock's tier once stood over the surplus's, the load in
+                // hand now goes into the controller first.
                 let colony =
                     { drawColony
                           (Map.ofList [ "can-src", 0; "can-ctrl", 0; "sto-1", 500 ])
@@ -719,8 +758,8 @@ let stockDrawTests =
 
                 Expect.equal
                     verdicts
-                    [ Verdict.Matched("w1", taskId (Withdraw("sto-1", Energy)), MatchFactor.Rank) ]
-                    "a load worth carrying is worth completing first: rank decided"
+                    [ Verdict.Matched("w1", taskId (Upgrade "ctrl-1"), MatchFactor.Rank) ]
+                    "nothing waits on the top-up that does not wait on the load in hand: rank decided"
             }
 
             test "the flow's own Refill outbids the stock's draw" {

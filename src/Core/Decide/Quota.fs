@@ -116,8 +116,8 @@ let private sourceContainersOf (view: ColonyView) atlas : (string * RoomPos * st
 /// contributes a leg while it stands. A container that can price no sink hires
 /// nobody. Every projected room, not the home room alone: an outpost's
 /// container hires haul capacity exactly as a home one does. The cap is a
-/// capacity and not an order — `tierOf` files every source container's
-/// Withdraw on the feeding tier alike and travel cost ranks inside it.
+/// capacity and not an order — the pool prices every source container's
+/// Withdraw at the flow alike and travel cost ranks inside it.
 let internal haulerDemandOf (view: ColonyView) atlas : int * HaulDemandRow list * int =
     // Each beside the output of the rock it serves; one that resolves to no
     // priceable source leaves the list rather than entering at a default.

@@ -583,7 +583,7 @@ let outpostTests =
                 // own Harvest, never happened either, because the Storage's Withdraw
                 // is feeding tier and a few tiles from home.
                 //
-                // So this Build is feeding tier now (`tierOf`). The factor is `Rank`
+                // So this Build is priced at the flow now. The factor is `Rank`
                 // and not `TravelCost`: the site is still much the farther target and
                 // wins anyway. Pairwise, one rival at a time.
                 let sited =
@@ -864,7 +864,7 @@ let outpostTests =
                 // The switch closing under its own power, end to end (#157): a
                 // controller at home, a rock and a container site in the outpost, one
                 // loaded worker at home. It crosses because the site outranks the
-                // controller (`tierOf`); emptied, the Build goes inapplicable and the
+                // controller (its price); emptied, the Build goes inapplicable and the
                 // outpost's own rock a step away is the cheapest Task it has; full
                 // again, the site outranks everything once more. No "go home" act.
                 //

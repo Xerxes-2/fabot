@@ -1292,25 +1292,19 @@ let rankTierTests =
                     "reproduction fed, the guns outrank the buffer: rank decided"
             }
 
-            test "tower Refill, Repair and Upgrade are one surplus rung; Build stands above" {
+            test "a tower short of energy outranks the surplus's Build, Repair and Upgrade" {
                 // Pairwise, because the deciding factor is read off the winner
-                // and its cheapest rival alone: pool all four at once and the
-                // three-way tie hides whichever one left the tier. Build is
-                // the tier's own top rung, so it outranks the tower's Refill
-                // on a fixture where rank is the only thing that can separate
-                // anything. The rung reads the site's room (`isHomeSite`) and
-                // this fixture places nothing, which resolves toward home; the
-                // rung's room is pinned in `OutpostTests`.
+                // and its cheapest rival alone. The tower's Refill is priced by
+                // the defence its shortfall costs under the home's raid hazard
+                // (#622): a raid finds its towers full, so its 500 short is
+                // filled before the surplus is spent — where it used to tie
+                // Repair and Upgrade on the surplus tier and lose to a home
+                // Build's rung. On a fixture where rank is the only thing that
+                // can separate anything.
                 let verdictsFor colony = (decideOn colony).Verdicts
 
-                let tied =
-                    [
-                        Verdict.Matched(
-                            "w1",
-                            taskId (Refill("tower-1", Energy)),
-                            MatchFactor.PoolOrder
-                        )
-                    ]
+                let tower =
+                    [ Verdict.Matched("w1", taskId (Refill("tower-1", Energy)), MatchFactor.Rank) ]
 
                 Expect.equal
                     (verdictsFor
@@ -1324,23 +1318,21 @@ let rankTierTests =
                                     }
                                 ]
                         })
-                    [ Verdict.Matched("w1", taskId (Build "site-1"), MatchFactor.Rank) ]
-                    "Build outranks the tower Refill: rank broke it, not pool order"
+                    tower
+                    "the tower outranks a home Build"
 
-                // An ordinary Repair, deliberately: a road below the rescue
-                // line has a rung of its own and would break this tie by rank.
                 Expect.equal
                     (verdictsFor (surplusColony |> withHits "road-1" BuiltKind.Road 2400 5000))
-                    tied
-                    "Repair ties the tower Refill: pool order broke it, not rank"
+                    tower
+                    "and a road's Repair"
 
                 Expect.equal
                     (verdictsFor
                         { surplusColony with
                             Controller = Some(controllerAt 1)
                         })
-                    tied
-                    "Upgrade ties the tower Refill: pool order broke it, not rank"
+                    tower
+                    "and the Upgrade"
             }
 
             // The lane a loaded generalist really stands in: it fills at the
@@ -1381,17 +1373,22 @@ let rankTierTests =
                 // travel cost decided, and the bank is always the nearer.
                 // Pairwise on the mine's stock alone, with the body on the
                 // Storage's own Seat so the ore can never win on distance.
-                let banked stock =
+                //
+                // The bank's draw is priced off the sink it serves (#622): a
+                // waiting spawn's energy goes before the ore (the cap keeps
+                // that to the spawn's room), so the mouth here is a tower's
+                // top-up, which the ore outranks under the cliff and over it.
+                let banked mouth stock =
                     let stocked = mineHaulColony |> withMineStock stock
 
                     let colony =
                         { stocked with
                             Creeps = [ hauler "h1" 0 200 ]
                             // A mouth for the bank, so its Withdraw is pooled.
-                            // The spawn is unplaced and its Refill unreachable,
+                            // It is unplaced and its Refill unreachable,
                             // deliberately: an empty body is applicable to
                             // neither, so the pair here is the only pair.
-                            Refillables = [ refillable "spawn-1" 50 BuiltKind.Spawn ]
+                            Refillables = [ mouth ]
                         }
 
                     { colony with
@@ -1408,15 +1405,23 @@ let rankTierTests =
                         | Verdict.Matched("h1", task, factor) -> Some(task, factor)
                         | _ -> None)
 
-                Expect.equal
-                    (haulerTakes (banked 999))
-                    (Some(taskId (Withdraw("sto-1", Energy)), MatchFactor.TravelCost))
-                    "the premise: tied on rank, the bank underfoot takes the body every time"
+                let spawn = refillable "spawn-1" 50 BuiltKind.Spawn
+                let tower = refillable "tower-1" 50 BuiltKind.Tower
 
                 Expect.equal
-                    (haulerTakes (banked Tuning.defaults.MineContactCliff))
+                    (haulerTakes (banked spawn Tuning.defaults.MineContactCliff))
+                    (Some(taskId (Withdraw("sto-1", Energy)), MatchFactor.Rank))
+                    "the premise: a waiting spawn's energy goes before the ore, cliff or not"
+
+                Expect.equal
+                    (haulerTakes (banked tower 999))
                     (Some(taskId (Withdraw("can-min", Thorium)), MatchFactor.Rank))
-                    "past the contact cliff the ore outranks the bank and the mine is drawn"
+                    "for a tower's top-up the bank is worth less than the season's ore"
+
+                Expect.equal
+                    (haulerTakes (banked tower Tuning.defaults.MineContactCliff))
+                    (Some(taskId (Withdraw("can-min", Thorium)), MatchFactor.Rank))
+                    "and past the contact cliff the ore outranks the bank by its two rungs more"
             }
 
             test "the downgrade deadline still outranks a site" {

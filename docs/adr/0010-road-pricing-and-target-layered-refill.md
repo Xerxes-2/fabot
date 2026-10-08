@@ -1,6 +1,8 @@
 # Roads enter the pricing; Refill layers its rank by target
 
-> **Status:** amended by 0023, 0088, #234, #242, #285, #530
+> **Status:** amended by 0023, 0088, #234, #242, #285, #530, 0094
+
+> **Amended by ADR 0094** on the second decision and every rung banner below it: a Task's rank is its price, the energy a tick its delay costs, and no longer a tier its target is layered into. A tower's Refill is priced by the defence its shortfall costs under the home's raid hazard, not the surplus; the pile's, the tombstone's, the full container's and the rescue's rungs are their losses priced. The first decision (roads in the pricing) and #530's urgent band stand.
 
 > **Amended by ADR 0088 S2**: an armed body's ranking walk (a weapon or HEAL, `FatigueFactor.Whole`) is priced in whole ticks, two units each, so a road is no cheaper than plain where it is no quicker: a ranger took the road into a melee walking it (W17S26). Every other body keeps the half-tick units.
 

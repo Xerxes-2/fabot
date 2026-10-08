@@ -19,9 +19,10 @@ let withdrawCapacityTests =
                 // The matching key puts cost ahead of load, so without a
                 // capacity every empty hauler picks the nearest stocked
                 // container. The stock is the cap: `ceil(400 / 400)` is one
-                // seat. The far store is 1,800 and not a full 2,000, because
-                // a full source container is lifted a rung of its own.
-                let { Assignments = split } = decideOn (crowdColony 400 1800 crowdOfThree)
+                // seat. The far store is 1,500, under the haul's overflow line
+                // (`Tuning.HaulFullPercent`), because a container over it is
+                // priced its overflow pressure on top of the flow.
+                let { Assignments = split } = decideOn (crowdColony 400 1500 crowdOfThree)
 
                 Expect.equal
                     (drawersOf split "can-near")
@@ -48,7 +49,7 @@ let withdrawCapacityTests =
                 // a second trip nobody would be sent for.
                 let seatsAt stock =
                     let { Assignments = assignments } =
-                        decideOn (crowdColony stock 1800 (List.truncate 2 crowdOfThree))
+                        decideOn (crowdColony stock 1500 (List.truncate 2 crowdOfThree))
 
                     drawersOf assignments "can-near"
 
@@ -307,11 +308,12 @@ let pickupTaskTests =
                     "the tower first while a raider stands at home"
             }
 
-            test "a pile worth a whole trip outbids the container underfoot; a smaller one does not" {
-                // Nothing but travel cost separates a pile from a half-full
-                // container once apart, so the ground kept its energy until
-                // it decayed. A pile holding half a hauler unit's load or
-                // more is a trip of its own.
+            test
+                "a pile is the flow and its decay: a container it keeps pace with is the walk's to decide" {
+                // A pile loses `ceil(amount / 1000)` a tick and a container
+                // under the haul's overflow line nothing, so the two are
+                // within a rank until the pile bleeds two a tick (#622: the
+                // half-a-load rung of #242 and #249 is its decay, priced).
                 let matched colony =
                     let { Verdicts = verdicts } = decideOn colony
 
@@ -322,35 +324,24 @@ let pickupTaskTests =
 
                 Expect.equal
                     (matched (pileDownTheLane 800 600))
+                    (Some(taskId (Withdraw("can-a", Energy)), MatchFactor.TravelCost))
+                    "six hundred five tiles off bleeds one a tick: within a rank, the near store wins on price"
+
+                Expect.equal
+                    (matched (pileDownTheLane 800 1200))
                     (Some(taskId (Pickup("pile-a", Energy)), MatchFactor.Rank))
-                    "half the row's load five tiles off beats eight hundred at its feet"
+                    "twelve hundred bleeds two a tick: a rank over the store that keeps what it holds"
 
-                // The pairwise control: one energy under the line. A
-                // priority is a colony-wide scalar, so lifting every pile
-                // would send this body five tiles for a mouthful.
+                // Pairwise on the stock: a full source container loses its
+                // source's rate, two ranks up against the bleeding pile's one.
                 Expect.equal
-                    (matched (pileDownTheLane 800 599))
-                    (Some(taskId (Withdraw("can-a", Energy)), MatchFactor.TravelCost))
-                    "one under half a load: rank ties and the near store wins on price"
-
-                Expect.equal
-                    (matched (pileDownTheLane 800 100))
-                    (Some(taskId (Withdraw("can-a", Energy)), MatchFactor.TravelCost))
-                    "and a pile at the threshold is still the distance's to decide"
-
-                // Pairwise on the stock: a full source container is two
-                // rungs up against the pile's one, because the engine drops
-                // a garrison's overflow onto its tile only once it is full.
-                Expect.equal
-                    (matched (pileDownTheLane Engine.containerCapacity 600))
+                    (matched (pileDownTheLane Engine.containerCapacity 1200))
                     (Some(taskId (Withdraw("can-a", Energy)), MatchFactor.Rank))
-                    "two thousand full outranks the whole trip on the ground"
+                    "two thousand full outranks the pile on the ground"
             }
 
-            test "the whole trip's rung is a rung over the whole feeding tier" {
-                // A rank is a colony-wide scalar: the Pickup steps up
-                // against every Feeding Task. Each colony holds exactly two
-                // Tasks, the rival under the body's feet.
+            test
+                "a half load beside a hungry spawn is delivered; a tombstone ends whole and outranks a pile" {
                 let matched colony =
                     let { Verdicts = verdicts } = decideOn colony
 
@@ -360,59 +351,20 @@ let pickupTaskTests =
                         | _ -> None)
 
                 // The delivery half: a half-loaded hauler one step from a
-                // spawn with 300 free walks nineteen tiles for the pile.
-                Expect.equal
-                    (matched (pileAgainstAHungrySpawn 1800 600))
-                    (Some(taskId (Pickup("pile-a", Energy)), MatchFactor.Rank))
-                    "half a load on the ground outranks the hungry spawn at the body's feet"
+                // spawn with 300 free and a pile nineteen tiles off, at any
+                // bank: the pile's price is its decay, never a share of a load.
+                for bankEnergy in [ 300; 550; 1800 ] do
+                    Expect.equal
+                        (matched (pileAgainstAHungrySpawn bankEnergy 600))
+                        (Some(taskId (Refill("spawn-1", Energy)), MatchFactor.TravelCost))
+                        $"at a bank of {bankEnergy} the spawn at the body's feet takes the load"
 
-                Expect.equal
-                    (matched (pileAgainstAHungrySpawn 1800 599))
-                    (Some(taskId (Refill("spawn-1", Energy)), MatchFactor.TravelCost))
-                    "one energy under the line the spawn is the near Task again"
-
-                // A tombstone decays as a pile does, so it carries the
-                // pile's rung (#250): a pile a tier-wide rung over it sent a
-                // hauler nineteen tiles past a store about to go.
+                // A tombstone ends whole (#250): its 1,500 over the 250 ticks
+                // one stands at the most, six a tick, a rank over the pile.
                 Expect.equal
                     (matched (pileAgainstATombstone 600))
-                    (Some(taskId (Withdraw("tomb-a", Energy)), MatchFactor.TravelCost))
-                    "a whole trip's pile and a tombstone one tile away share a rung: travel cost decides"
-
-                Expect.equal
-                    (matched (pileAgainstATombstone 599))
                     (Some(taskId (Withdraw("tomb-a", Energy)), MatchFactor.Rank))
-                    "and under the line the tombstone's rung is the pile's to lose"
-            }
-
-            test "under a bank of 450 the whole trip's line stays at twice the threshold" {
-                // `haulerLoad` is `100 * (bank / 150)`, so half a load is a
-                // hundred at RCL1's bank of 300 — `Tuning.PickupThreshold`
-                // itself — and read off the load alone every pooled pile took
-                // the rung in the poorest colonies (#249). The line is
-                // floored at twice the threshold.
-                let matched colony =
-                    let { Verdicts = verdicts } = decideOn colony
-
-                    verdicts
-                    |> List.tryPick (function
-                        | Verdict.Matched("h1", task, factor) -> Some(task, factor)
-                        | _ -> None)
-
-                Expect.equal
-                    (matched (pileAgainstAHungrySpawn 300 100))
-                    (Some(taskId (Refill("spawn-1", Energy)), MatchFactor.TravelCost))
-                    "at RCL1 a threshold-sized pile nineteen tiles off takes no rung"
-
-                Expect.equal
-                    (matched (pileAgainstAHungrySpawn 300 200))
-                    (Some(taskId (Pickup("pile-a", Energy)), MatchFactor.Rank))
-                    "twice the threshold does"
-
-                Expect.equal
-                    (matched (pileAgainstAHungrySpawn 550 100))
-                    (Some(taskId (Refill("spawn-1", Energy)), MatchFactor.TravelCost))
-                    "and at RCL2 nothing moved"
+                    "the tombstone one tile away outranks the pile nineteen off"
             }
 
             test "a pile on a container's own tile is taken before the container" {
@@ -1103,12 +1055,18 @@ let thoriumLegTests =
                     (Some(priorityOfTier StockDraw + rankOfRung TwoRungsUp))
                     "at the cliff it takes the full energy container's own two rungs"
 
-                Expect.equal
+                // The bank's energy draw is priced off the spawn it serves
+                // (#622), half its worth for the re-haul: the energy the
+                // spawn waits on goes before the season's ore, and no more of
+                // it than the spawn has room for (the draw's cap), so the
+                // rest of the haul takes the lifted mine.
+                Expect.isLessThan
                     (rankIn
                         (banked |> withMineStock Tuning.defaults.MineContactCliff)
-                        (Withdraw("sto-1", Energy)))
-                    (Some(priorityOfTier StockDraw))
-                    "and what the lift steps over is the bank's own draw, rungless on that tier"
+                        (Withdraw("sto-1", Energy))
+                     |> Option.get)
+                    (priorityOfTier StockDraw + rankOfRung TwoRungsUp)
+                    "the bank's draw for a waiting spawn ranks over the lifted mine"
 
                 // The line the lift does not cross: every energy Task the
                 // spawn waits on is Feeding-tier, and a rung never leaves
@@ -1282,13 +1240,11 @@ let thoriumPileTests =
             test "a Thorium pile is drawn one rung up on its tier; the energy pile is flow" {
                 // Pairwise on the resource alone. A pile is the container's
                 // next dig lying on the floor, Feeding-tier unless a spawn is
-                // empty (#497). The rung inside it is neither of
-                // the energy pile's clauses (`drawableTiles` holds
-                // Feeding-tier Withdraws alone, and a hundred units fails
-                // the worth-a-trip line): ore on the floor bleeds
-                // `ceil(amount / 1000)` a tick and nothing else on this tier
-                // bleeds. Rungless it lost every travel-cost tie to the
-                // Storage's own energy draw.
+                // empty (#497). The rung inside it is the score's own, the
+                // energy pile priced by its decay (#622): ore on the floor
+                // bleeds `ceil(amount / 1000)` a tick and the season's score
+                // has no energy price to read it off. Rungless it lost every
+                // travel-cost tie to the Storage's own energy draw.
                 let rankIn colony task =
                     poolOn colony
                     |> List.tryPick (fun pooled ->
@@ -1296,8 +1252,8 @@ let thoriumPileTests =
 
                 Expect.equal
                     (rankIn (mineHaulColony |> withMineEnergyPile 630) (Pickup("pile-min", Energy)))
-                    (Some(priorityOfTier Feeding + rankOfRung OneRungUp))
-                    "the premise: an energy pile feeds the economy, and 630 is a trip of its own"
+                    (Some(rankOf (flowDraw (pileDecay 630))))
+                    "the premise: an energy pile is the flow and its decay, 630 bleeding one a tick"
 
                 Expect.equal
                     (rankIn (mineHaulColony |> withMinePile 630) (Pickup("pile-min", Thorium)))

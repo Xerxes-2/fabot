@@ -2648,9 +2648,13 @@ let arenaBorderTests =
                     |> List.tryFind (fun (_, s) -> s.At.Room = "W17S25")
                     |> Option.map fst
 
+                // A tick later than t23 since #622: the tower's Refill is
+                // priced by its twenty of room (rank 13, the surplus's 20
+                // before), so the hauler pushes a weight heavier in the
+                // arbitration by the exit and steps back once at t20.
                 Expect.equal
                     (home hauler)
-                    (Some 23)
+                    (Some 24)
                     $"the first crosses home round the melee\n{failure}"
 
                 Expect.equal (home walker) (Some 20) $"and so does the other\n{failure}"
