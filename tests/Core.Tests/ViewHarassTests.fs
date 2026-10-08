@@ -877,17 +877,28 @@ let private candidateAt tick (hostiles: HostileInfo list option) : World =
         }
     | None -> { World.empty with Time = tick }
 
-/// The memory carried through a run of ticks, from none, the harassment
-/// room the one candidate.
-let private preyThrough (worlds: World list) =
+/// The bodies a colony working the harassment room lays there after a run
+/// of ticks (`Quarry.ghosts` over the quarries `Quarry.recall` carried, the
+/// room watched), each with the life left it, none rooted.
+let private ghostsThrough (worlds: World list) =
     worlds
     |> List.fold
         (fun (previous: World) world ->
-            World.recallPrey (Set.singleton harassRoom) previous.PreySeen world)
+            Quarry.recall
+                Tuning.defaults.RaidBounceTicks
+                (Set.singleton harassRoom)
+                previous.Quarries
+                world)
         World.empty
     |> fun world ->
-        Map.tryFind harassRoom world.PreySeen
-        |> Option.map (fun seen -> seen.Bodies |> List.map _.Id, seen.Tick)
+        Quarry.ghosts
+            (Set.singleton harassRoom)
+            (fun _ -> false)
+            (fun _ -> false)
+            []
+            world.Time
+            world.Quarries
+        |> List.map (fun h -> h.Id, h.TicksToLive)
 
 [<Tests>]
 let preyMemoryTests =
@@ -899,12 +910,12 @@ let preyMemoryTests =
                 let miner = harassHostile "miner" enemy [ Work; Work; Move ]
 
                 Expect.equal
-                    (preyThrough [ candidateAt 100 (Some [ miner ]); candidateAt 101 None ])
-                    (Some([ "miner" ], 100))
-                    "dark, the room holds the miner as last seen"
+                    (ghostsThrough [ candidateAt 100 (Some [ miner ]); candidateAt 101 None ])
+                    [ "miner", 999 ]
+                    "dark, the room holds the miner as last seen, its life counted down"
 
-                Expect.isNone
-                    (preyThrough [ candidateAt 100 (Some [ miner ]); candidateAt 101 (Some []) ])
+                Expect.isEmpty
+                    (ghostsThrough [ candidateAt 100 (Some [ miner ]); candidateAt 101 (Some []) ])
                     "seen empty, empty"
             }
 
@@ -914,24 +925,49 @@ let preyMemoryTests =
                         TicksToLive = 5
                     }
 
-                Expect.isNone
-                    (preyThrough [ candidateAt 100 (Some [ short ]); candidateAt 106 None ])
+                Expect.isEmpty
+                    (ghostsThrough [ candidateAt 100 (Some [ short ]); candidateAt 106 None ])
                     "dead of age by now"
 
-                Expect.isNone
-                    (preyThrough
+                Expect.isEmpty
+                    (ghostsThrough
                         [
                             candidateAt
                                 100
                                 (Some [ harassHostile "keeper" "Source Keeper" [ Move ] ])
+                            candidateAt 101 None
                         ])
                     "a keeper is no prey"
             }
 
-            test "no candidate, no memory" {
-                Expect.isEmpty
-                    (World.recallPrey Set.empty Map.empty (candidateAt 100 (Some []))).PreySeen
-                    "the live switch off costs nothing"
+            // Moved by #663 S2: the memory ran the body's life; now it runs
+            // its odds (`Quarry.odds`), a walker's round trip.
+            test "a walker unseen past its round trip is no longer laid; a rooted one is" {
+                let miner = harassHostile "miner" enemy [ Work; Work; Move ]
+                let gone = [ candidateAt 100 (Some [ miner ]); candidateAt 301 None ]
+
+                Expect.isEmpty (ghostsThrough gone) "two hundred ticks out of sight: past its trip"
+
+                let rooted =
+                    gone
+                    |> List.fold
+                        (fun (previous: World) world ->
+                            Quarry.recall
+                                Tuning.defaults.RaidBounceTicks
+                                (Set.singleton harassRoom)
+                                previous.Quarries
+                                world)
+                        World.empty
+                    |> fun world ->
+                        Quarry.ghosts
+                            (Set.singleton harassRoom)
+                            (fun _ -> false)
+                            (fun _ -> true)
+                            []
+                            world.Time
+                            world.Quarries
+
+                Expect.equal (rooted |> List.map _.Id) [ "miner" ] "a digger on its seat stays"
             }
         ]
 

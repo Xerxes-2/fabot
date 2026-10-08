@@ -78,10 +78,6 @@ let mutable private quarries: Map<string, Track> = Map.empty
 // falling back on the danger log's threat memory.
 let mutable private raiders: Map<string, RaidSeen> = Map.empty
 
-// Each sweep candidate's bodies as last seen (`World.PreySeen`, #658): heap
-// only, a reset pricing a dark candidate at nothing until it is seen again.
-let mutable private preySeen: Map<string, BodiesSeen> = Map.empty
-
 // The last tick an armed rival stood in each room (`World.ArmedSeen`, #485):
 // heap state seeded off the `rooms` leaf on a cold heap, so the deploy before
 // a walk does not forget the room the walk goes round.
@@ -786,7 +782,6 @@ let private fullTick
                 (Quarry.watched Colony.declared candidates world)
                 quarries
                 world
-        |> World.recallPrey (World.preyRooms Colony.declared candidates) preySeen
         |> World.recallArmed Tuning.defaults armedSeen
         |> World.recallRivalControllers rivalControllers
         |> fun world -> { world with Refusals = refusals }
@@ -797,7 +792,6 @@ let private fullTick
     healers <- world.Healers
     quarries <- world.Quarries
     raiders <- world.Raiders
-    preySeen <- world.PreySeen
     armedSeen <- world.ArmedSeen
     rivalControllers <- world.RivalControllers
 

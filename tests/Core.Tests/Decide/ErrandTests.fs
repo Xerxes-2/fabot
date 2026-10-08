@@ -744,7 +744,6 @@ let errandStandDownTests =
                         Quarries = Map.empty
                         HostileSteps = Map.empty
                         Raiders = Map.empty
-                        PreySeen = Map.empty
                         ArmedSeen = Map.empty
                         RivalControllers = Map.empty
                         StrayGround = fun _ -> None

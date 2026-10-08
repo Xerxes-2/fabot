@@ -1191,8 +1191,6 @@ let ofGame
         HostileSteps = Map.empty
         // And the raid memory `World.recallRaiders`' (#569).
         Raiders = Map.empty
-        // And the sweep's memory `World.recallPrey`' (#658).
-        PreySeen = Map.empty
         // And the armed-room memory `World.recallArmed`' (#485).
         ArmedSeen = Map.empty
         // And the rival controllers `World.recallRivalControllers`' (#489).

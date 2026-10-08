@@ -1279,9 +1279,10 @@ let private pricedRequests (view: ColonyView) : LookRequest list =
     // The rooms a body last seen in `room` and out of sight now may linger in
     // across a border, or the room beside it it was last seen lingering in.
     let lingering room =
-        view.World.LastSteps
+        view.World.Quarries
         |> Map.toList
-        |> List.collect (fun (_, (at, seen)) ->
+        |> List.choose (fun (_, track) -> Quarry.step track)
+        |> List.collect (fun { At = at; Seen = seen } ->
             if seen >= view.Time then []
             elif at.Room = room then Dance.beyond at
             elif Dance.besideOf room at then [ at.Room ]

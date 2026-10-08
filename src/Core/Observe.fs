@@ -1086,12 +1086,16 @@ let private strikeGone
         // a look that answers for the room is the evidence it went (#585) —
         // unless the world sees it this tick lingering across the border, or
         // it was last seen within a dance of a border or lingering across one
-        // (`WorldView.LastSteps`, kept the bounce window) and a room it may
-        // have stepped into is not seen too.
+        // (`Quarry.step`, kept the bounce window) and a room it may have
+        // stepped into is not seen too.
         | None ->
             Set.contains id fallen
             || sees room
-               && (match Map.tryFind id view.World.LastSteps with
+               && (match
+                       Map.tryFind id view.World.Quarries
+                       |> Option.bind Quarry.step
+                       |> Option.map (fun step -> step.At, step.Seen)
+                   with
                    | Some(at, seen) when seen >= view.Time ->
                        at.Room <> room && not (Dance.besideOf room at)
                    | Some(at, _) when at.Room = room -> Dance.beyond at |> List.forall sees

@@ -1322,6 +1322,27 @@ let trespassTests =
                 Expect.isEmpty (decideOn (declaredRaid [])).Aims "a quiet colony aims at nothing"
             }
 
+            // The #663 S2 review: an act is aimed only at a body this tick's
+            // glance holds; a remembered one shapes the Task, never an act.
+            test
+                "a guard keeps the kill of a trespasser remembered out of sight, and aims at nothing" {
+                let colony =
+                    declaredRaid []
+                    |> withGuards [ guard "g-1", { X = 25; Y = 47 } ]
+                    |> fun colony ->
+                        colony
+                        |> remembering (colony.Time - 1) [ diggerAt "W1N2" { X = 25; Y = 44 } ]
+
+                let result = decideOn colony
+
+                Expect.equal
+                    (Map.tryFind "g-1" result.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "it holds the kill of the body it remembers"
+
+                Expect.isEmpty result.Aims "and aims at nothing"
+            }
+
             // #535 made the disarmed clause owner-agnostic (any non-ally's): a
             // cripple left in a room we mine is a fight's to finish, whoever's.
             test
@@ -1482,6 +1503,56 @@ let contestTests =
                     (contest.Values |> Map.keys |> List.ofSeq)
                     [ "d-1"; "h-2" ]
                     "each priced at its kill value too"
+            }
+
+            // The #663 S2 review: what a cast is priced by never holds a body
+            // out of sight certain. A digger on its seat out of sight is cast
+            // for only where no look can confirm it; a hauler that stepped
+            // out over the border, its trip kept, at its round trip's odds.
+            test
+                "a body out of sight is never certain to the cast: a seated digger waits on the look, a dancer decays" {
+                let remembered (observed: bool) (trip: bool) (body: HostileInfo) =
+                    let colony = declaredRaid [] |> fun c -> c |> remembering (c.Time - 20) [ body ]
+
+                    { colony with
+                        World =
+                            { colony.World with
+                                Observers = if observed then [ "W1N1" ] else []
+                                Quarries =
+                                    colony.World.Quarries
+                                    |> Map.map (fun _ track ->
+                                        if trip then
+                                            { track with
+                                                Trail = [ track.Seen, track.Body.Pos ]
+                                            }
+                                        else
+                                            track)
+                            }
+                    }
+
+                let valueOf colony id =
+                    (Facts.contestOf colony "W1N2").Values
+                    |> Map.tryFind id
+                    |> Option.defaultValue 0.0
+
+                let seen = valueOf (declaredRaid [ seatedDigger ]) "d-1"
+
+                Expect.equal
+                    (valueOf (remembered false false seatedDigger) "d-1")
+                    seen
+                    "no look can tell: rooted, certain"
+
+                Expect.equal
+                    (valueOf (remembered true false seatedDigger) "d-1")
+                    0.0
+                    "an observer reaches the room: nothing until its look"
+
+                let hauler = haulerOf "h-2" { X = 27; Y = 43 }
+                let inSight = valueOf (declaredRaid [ hauler ]) "h-2"
+                let dancing = valueOf (remembered false true hauler) "h-2"
+
+                Expect.isGreaterThan dancing 0.0 "out over the border, its trip kept: still priced"
+                Expect.isLessThan dancing inSight "but at its round trip's odds, not certain"
             }
 
             test "a raid alone, or a neutral's hauler, denies nothing" {

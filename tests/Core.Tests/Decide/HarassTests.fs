@@ -1229,7 +1229,12 @@ let sweepRoomTests =
                         ]
 
                 Expect.equal
-                    (Facts.sweepRate colony [ Fighter.ofCreep (ranger "ranger-r") ] 0 westRoom)
+                    (Facts.sweepRate
+                        Quarry.Reading.Value
+                        colony
+                        [ Fighter.ofCreep (ranger "ranger-r") ]
+                        0
+                        westRoom)
                     0.0
                     "the west room is worth nothing to one ranger under an escort that beats it"
 
@@ -1242,30 +1247,12 @@ let sweepRoomTests =
             test
                 "a room out of sight is priced by the bodies last seen there, each at the life left it" {
                 let seen life =
-                    {
-                        Bodies =
-                            [
-                                { theirsIn
-                                      westRoom
-                                      "miner-w"
-                                      { X = 20; Y = 20 }
-                                      [ Work; Work; Move ] with
-                                    TicksToLive = life
-                                }
-                            ]
-                        Tick = 0
+                    { theirsIn westRoom "miner-w" { X = 20; Y = 20 } [ Work; Work; Move ] with
+                        TicksToLive = life
                     }
 
                 let dark life =
-                    let colony = sweeping [] []
-
-                    { colony with
-                        Time = 100
-                        World =
-                            { colony.World with
-                                PreySeen = Map.ofList [ westRoom, seen life ]
-                            }
-                    }
+                    { sweeping [] [] with Time = 100 } |> remembering 0 [ seen life ]
 
                 Expect.equal
                     (Facts.sweepRoom (dark 1500) Map.empty)
@@ -1288,6 +1275,7 @@ let sweepRoomTests =
 
                 let rate owner =
                     Facts.sweepRate
+                        Quarry.Reading.Value
                         (sweeping
                             []
                             [
@@ -1323,10 +1311,6 @@ let sweepRoomTests =
 
                     { colony with
                         Time = 400
-                        World =
-                            { colony.World with
-                                PreySeen = Map.ofList [ westRoom, { Bodies = [ body ]; Tick = 0 } ]
-                            }
                         Spatial =
                             { colony.Spatial with
                                 TargetKinds = colony.Spatial.TargetKinds |> Map.add source Source
@@ -1338,6 +1322,7 @@ let sweepRoomTests =
                                         Map.add source { X = 20; Y = 19 } layer.TargetPositions
                                 }
                     }
+                    |> remembering 0 [ body ]
 
                 let seated =
                     { theirsIn westRoom "miner-w" { X = 20; Y = 20 } [ Work; Work; Move ] with
@@ -1357,6 +1342,54 @@ let sweepRoomTests =
                 Expect.isNone
                     (Facts.sweepRoom (dark hauling) Map.empty)
                     "a hauler unseen four hundred ticks, past its round trip, is gone"
+            }
+
+            // #663 S2's named change: one odds a body is still there, read
+            // for a cast (nothing while a look that confirms it is coming) or
+            // for a group already standing (at its odds).
+            test
+                "a body a look is about to confirm draws no cast, and a group standing values it at its odds" {
+                let hauling =
+                    { hauler westRoom "hauler-w" { X = 30; Y = 30 } with
+                        TicksToLive = 1500
+                    }
+
+                let rate reading (observed: bool) =
+                    let colony = { sweeping [] [] with Time = 30 } |> remembering 0 [ hauling ]
+
+                    let colony =
+                        { colony with
+                            World =
+                                { colony.World with
+                                    Observers =
+                                        if observed then
+                                            [ SpatialInfo.homeName colony.Spatial ]
+                                        else
+                                            []
+                                }
+                        }
+
+                    Facts.sweepRate
+                        reading
+                        colony
+                        [ Fighter.ofCreep (ranger "ranger-r") ]
+                        0
+                        westRoom
+
+                Expect.isGreaterThan
+                    (rate Quarry.Reading.Value true)
+                    0.0
+                    "thirty ticks unseen, a group standing values it at its odds"
+
+                Expect.equal
+                    (rate Quarry.Reading.Cast true)
+                    0.0
+                    "an observer of ours reaches the room: no cast until its look"
+
+                Expect.isGreaterThan
+                    (rate Quarry.Reading.Cast false)
+                    0.0
+                    "none reaches it: a cast at its odds"
             }
         ]
 
@@ -1622,12 +1655,6 @@ let sweepGroupTests =
                             { Tuning.defaults with
                                 MinWorkforce = 0
                             }
-                        World =
-                            { colony.World with
-                                PreySeen =
-                                    Map.ofList
-                                        [ harassRoom, { Bodies = [ body ]; Tick = 1000 - age } ]
-                            }
                         Spatial =
                             { colony.Spatial with
                                 TargetKinds =
@@ -1640,6 +1667,7 @@ let sweepGroupTests =
                                         Map.add "src-enemy" standTile layer.TargetPositions
                                 }
                     }
+                    |> remembering (1000 - age) [ body ]
 
                 let fighters (colony: ColonyView) =
                     spawnIntents (decideOn colony).Intents
@@ -1681,6 +1709,7 @@ let sweepGroupTests =
 
                 let rateOf owner =
                     Facts.sweepRate
+                        Quarry.Reading.Value
                         (sweeping [] [ { cripple with Owner = owner } ])
                         [ Fighter.ofCreep (ranger "r") ]
                         0
@@ -1832,7 +1861,12 @@ let catchableFirstTests =
                     "the tripper is camped at its odds; the miner on its seat is certain"
 
                 Expect.isGreaterThan
-                    (Facts.sweepRate (colony [ tripper ]) [ Fighter.ofCreep bigRanger ] 0 harassRoom)
+                    (Facts.sweepRate
+                        Quarry.Reading.Value
+                        (colony [ tripper ])
+                        [ Fighter.ofCreep bigRanger ]
+                        0
+                        harassRoom)
                     0.0
                     "alone, its camp pays: it came back within three ticks"
             }
@@ -1902,12 +1936,12 @@ let catchableFirstTests =
                 let team = [ Fighter.ofCreep holder ]
 
                 Expect.isGreaterThan
-                    (Facts.sweepRate inRoom team 0 harassRoom)
+                    (Facts.sweepRate Quarry.Reading.Value inRoom team 0 harassRoom)
                     0.0
                     "in the room: its camp pays"
 
                 Expect.isGreaterThan
-                    (Facts.sweepRate across team 0 harassRoom)
+                    (Facts.sweepRate Quarry.Reading.Value across team 0 harassRoom)
                     0.0
                     "across the border: the room's price holds, the group is not pulled out"
 

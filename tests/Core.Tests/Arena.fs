@@ -358,7 +358,6 @@ type Carried =
         Healers: Map<string, HealerSeen list>
         Quarries: Map<string, Track>
         Raiders: Map<string, RaidSeen>
-        PreySeen: Map<string, BodiesSeen>
         ArmedSeen: Map<string, int>
         LastPositions: Map<string, RoomPos>
         /// The store each body's load was drawn from (#530).
@@ -370,6 +369,11 @@ type Carried =
         Danger: Observe.Danger option
         /// Every rival controller as last seen (`World.recallRivalControllers`).
         RivalControllers: Map<string, RivalController>
+        /// Each body not ours that died, while its tombstone stands: its room
+        /// and the tick the tombstone decays (`Engine.tombstoneDecayPerPart`
+        /// a part), as `World.seenFacts` reads `FIND_TOMBSTONES` (#663: a
+        /// body seen dead is known gone).
+        Fallen: Map<string, string * int>
     }
 
 /// The arena's whole state between ticks.
@@ -915,13 +919,13 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 Healers = Map.empty
                 Quarries = Map.empty
                 Raiders = Map.empty
-                PreySeen = Map.empty
                 ArmedSeen = Map.empty
                 LastPositions = Map.empty
                 Drawn = Map.empty
                 Raids = Map.empty
                 Danger = None
                 RivalControllers = Map.empty
+                Fallen = Map.empty
             }
         Scores = Map.empty
         Ovens = []
@@ -1382,6 +1386,13 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                     kind = BuiltKind.Rampart && s.Owner <> Some Side.Ours && s.Owner <> None)
                 |> List.map (fun (s, _) -> s.At, s.Hits)
                 |> Map.ofList
+            // Every tombstone of a body not ours standing here, as
+            // `World.seenFacts` reads `FIND_TOMBSTONES`.
+            Fallen =
+                a.Carried.Fallen
+                |> Map.toList
+                |> List.filter (fun (_, (room, decays)) -> room = name && decays > a.Time)
+                |> List.map fst
             // `FIND_HOSTILE_STRUCTURES`' cores, as `World.seenFacts` reads
             // them: a stronghold's with its collapse clock.
             InvaderCores =
@@ -1466,7 +1477,6 @@ let worldOf (a: Arena) : World =
         Quarries = Map.empty
         HostileSteps = Map.empty
         Raiders = Map.empty
-        PreySeen = Map.empty
         ArmedSeen = Map.empty
         RivalControllers = Map.empty
         StrayGround = strayGround
@@ -1483,7 +1493,6 @@ let worldOf (a: Arena) : World =
             (Quarry.watched a.Colonies candidates world)
             a.Carried.Quarries
             world
-    |> World.recallPrey (World.preyRooms a.Colonies candidates) a.Carried.PreySeen
     |> World.recallArmed tuning a.Carried.ArmedSeen
     |> World.recallRivalControllers a.Carried.RivalControllers
 
@@ -1767,7 +1776,6 @@ let private decideOurs (a: Arena) : Intent list * Carried =
         Healers = world.Healers
         Quarries = world.Quarries
         Raiders = world.Raiders
-        PreySeen = world.PreySeen
         ArmedSeen = world.ArmedSeen
         Raids = raids
         Danger =
@@ -4914,6 +4922,23 @@ let step (a: Arena) : Arena * TickTrace =
             Carried =
                 { carried with
                     LastPositions = a.Bodies |> List.map (fun b -> b.Id, b.At) |> Map.ofList
+                    Fallen =
+                        let died =
+                            events
+                            |> Seq.choose (function
+                                | Died id -> Some id
+                                | _ -> None)
+                            |> Set.ofSeq
+
+                        (carried.Fallen |> Map.filter (fun _ (_, decays) -> decays > a.Time + 1),
+                         a.Bodies
+                         |> List.filter (fun b -> b.Side <> Side.Ours && died.Contains b.Id))
+                        ||> List.fold (fun fallen b ->
+                            Map.add
+                                b.Id
+                                (b.At.Room,
+                                 a.Time + 1 + Engine.tombstoneDecayPerPart * List.length b.Parts)
+                                fallen)
                 }
             // `StructureObserver.observeRoom` (`game/structures.js`) refuses
             // an observer not ours and a room past OBSERVER_RANGE.

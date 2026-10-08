@@ -2206,3 +2206,198 @@ let quarryTests =
                     "after it, afresh"
             }
         ]
+
+// ---- the queries read off the quarry memory (#663 S2) --------------------
+
+/// The bodies a colony working `quarryRoom` lays there on `tick` off these
+/// quarries (`Quarry.ghosts`), none rooted: each one's tile and life.
+let private ghostsIn (tick: int) (world: World) =
+    Quarry.ghosts
+        (Set.singleton quarryRoom)
+        (fun _ -> false)
+        (fun _ -> false)
+        []
+        tick
+        world.Quarries
+    |> List.map (fun h -> h.Pos, h.TicksToLive)
+
+[<Tests>]
+let quarryQueryTests =
+    testList
+        "what a remembered body is read as: its room, its odds, its ghost"
+        [
+            test
+                "a dancer across the border is its room's quarry on the tile it crossed out from; one past the dance is not" {
+                let came = RoomPos.at quarryRoom { X = 1; Y = 20 }
+
+                let crossed =
+                    Some
+                        {
+                            Came = came
+                            Ticks = [ 101 ]
+                            Tiles = [ RoomPos.at "W13S29" { X = 48; Y = 20 }; came ]
+                        }
+
+                Expect.equal
+                    (Quarry.placed quarryRoom (RoomPos.at "W13S29" { X = 47; Y = 20 }) crossed)
+                    (Some came)
+                    "two tiles over: still the room's, where it stepped out"
+
+                Expect.isNone
+                    (Quarry.placed quarryRoom (RoomPos.at "W13S29" { X = 40; Y = 20 }) crossed)
+                    "past the dance: the other room's"
+
+                Expect.equal
+                    (Quarry.placed quarryRoom (RoomPos.at quarryRoom { X = 5; Y = 5 }) None)
+                    (Some(RoomPos.at quarryRoom { X = 5; Y = 5 }))
+                    "standing in it: where it stands"
+            }
+
+            test "the odds a body is still there are one rule" {
+                let track seen ttl (x, y) trail gone =
+                    {
+                        Body = quarryBody ttl (quarryRoom, x, y)
+                        Seen = seen
+                        Cargo = 0
+                        Trail = trail
+                        Crossings = None
+                        Gone = gone
+                    }
+
+                // An empty [Carry; Move]: a tile a tick on plain, a room's
+                // side each way a round trip of 100.
+                let walker = track 100 1000 (25, 25) [] None
+
+                Expect.equal (Quarry.odds [] false 100 walker) 1.0 "in sight: certain"
+                Expect.equal (Quarry.odds [] false 150 walker) 0.5 "half its round trip on: half"
+                Expect.equal (Quarry.odds [] false 200 walker) 0.0 "its round trip out: nothing"
+                Expect.equal (Quarry.odds [] true 400 walker) 1.0 "rooted at its work: certain"
+
+                Expect.equal
+                    (Quarry.odds [] false 120 (track 100 1000 (1, 20) [ 100, walker.Body.Pos ] None))
+                    1.0
+                    "on a trip kept across the border: certain, its share its catch's"
+
+                Expect.floatClose
+                    Accuracy.high
+                    (Quarry.odds [] false 110 (track 100 30 (25, 25) [] None))
+                    (1.0 - 10.0 / 30.0)
+                    "a round trip longer than its life: over its life"
+
+                Expect.equal
+                    (Quarry.odds [] true 101 (track 100 1000 (25, 25) [] (Some Gone.SeenGone)))
+                    0.0
+                    "known gone: nothing"
+
+                // A [Carry; Carry; Move] last seen holding 100: two ticks a
+                // tile out loaded, one back empty, a trip of 150.
+                let loaded =
+                    { track 100 1000 (25, 25) [] None with
+                        Body =
+                            { (quarryBody 1000 (quarryRoom, 25, 25)) with
+                                Body = [ Carry; Carry; Move ]
+                                Hits = 3 * Engine.partHits
+                            }
+                        Cargo = 100
+                    }
+
+                Expect.equal (Quarry.odds [] false 175 loaded) 0.5 "its load walked home and back"
+            }
+
+            // The #663 S2 review: a body standing in sight across the border
+            // of the room it crossed out of, in a room no colony of ours
+            // prices a trespass in, is that room's still.
+            test
+                "a body in sight across the border it crossed out over is laid back in the room it left" {
+                let worlds =
+                    [
+                        sightAt 100 [ quarryRoom, [ quarryBody 1000 (quarryRoom, 1, 20) ] ] []
+                        sightAt
+                            101
+                            [ quarryRoom, []; "W13S29", [ quarryBody 999 ("W13S29", 47, 20) ] ]
+                            []
+                    ]
+
+                Expect.equal
+                    (ghostsIn 101 (quarriesThrough worlds))
+                    [ RoomPos.at quarryRoom { X = 1; Y = 20 }, 999 ]
+                    "on the tile it crossed out from, its life as read"
+            }
+
+            test "a lone healer is laid like any body, but where the raid's memory holds the room" {
+                let healer =
+                    { quarryBody 1000 (quarryRoom, 25, 25) with
+                        Body = [ Heal; Move ]
+                    }
+
+                let world =
+                    quarriesThrough [ sightAt 100 [ quarryRoom, [ healer ] ] []; sightAt 101 [] [] ]
+
+                let laid held =
+                    Quarry.ghosts
+                        (Set.singleton quarryRoom)
+                        (fun _ -> held)
+                        (fun _ -> false)
+                        []
+                        101
+                        world.Quarries
+                    |> List.map _.Id
+
+                Expect.equal
+                    (laid false)
+                    [ "quarry" ]
+                    "no raid remembered there: the healer is the room's"
+
+                Expect.isEmpty (laid true) "a raid remembered there keeps its healer itself"
+            }
+
+            // #618: a hunter flitted between its Guard and none as its quarry
+            // stepped in and out of sight across a border.
+            test
+                "a body that steps out of sight over a border of a room in sight stays the room's until its trip is out" {
+                let seen = sightAt 100 [ quarryRoom, [ quarryBody 1000 (quarryRoom, 1, 20) ] ] []
+                let lit tick = sightAt tick [ quarryRoom, [] ] []
+                let ended = 100 + Tuning.defaults.RaidBounceTicks + 1
+
+                Expect.equal
+                    (ghostsIn 101 (quarriesThrough [ seen; lit 101 ]))
+                    [ RoomPos.at quarryRoom { X = 1; Y = 20 }, 999 ]
+                    "laid where it was last seen, its life counted down"
+
+                Expect.isEmpty
+                    (ghostsIn ended (quarriesThrough [ seen; lit ended ]))
+                    "its trip out, the look at its room finds it gone"
+            }
+
+            test
+                "one last seen lingering across the border it crossed out over is laid back in the room it left" {
+                let worlds =
+                    [
+                        sightAt 100 [ quarryRoom, [ quarryBody 1000 (quarryRoom, 1, 20) ] ] []
+                        sightAt
+                            101
+                            [ quarryRoom, []; "W13S29", [ quarryBody 999 ("W13S29", 48, 20) ] ]
+                            []
+                        sightAt 102 [] []
+                    ]
+
+                Expect.equal
+                    (ghostsIn 102 (quarriesThrough worlds))
+                    [ RoomPos.at quarryRoom { X = 1; Y = 20 }, 998 ]
+                    "on the tile it crossed out from"
+            }
+
+            test "a raid's body is the raid memories', never laid" {
+                let raider =
+                    { quarryBody 1000 (quarryRoom, 25, 25) with
+                        Body = [ RangedAttack; Move ]
+                    }
+
+                Expect.isEmpty
+                    (ghostsIn
+                        101
+                        (quarriesThrough
+                            [ sightAt 100 [ quarryRoom, [ raider ] ] []; sightAt 101 [] [] ]))
+                    "armed: the raid memory's and the exit hold's"
+            }
+        ]

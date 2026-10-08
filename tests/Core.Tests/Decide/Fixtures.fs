@@ -700,6 +700,42 @@ let facing hostiles (snapshot: ColonyView) =
                 })
     }
 
+/// The same colony remembering these bodies out of sight, each last seen
+/// at its tile on `seen` (#663): a track for each in the world's quarry
+/// memory (`WorldView.Quarries`), what its odds are read off, and the body
+/// laid where `ColonyView.ofWorld` lays a ghost — among the hostiles and the
+/// recalled raiders, at the life left it now. No trip is kept: a body that
+/// danced out gives its crossings to `Quarry` itself.
+let remembering (seen: int) (bodies: HostileInfo list) (view: ColonyView) : ColonyView =
+    let laid =
+        bodies
+        |> List.map (fun h ->
+            { h with
+                TicksToLive = h.TicksToLive - (view.Time - seen)
+            })
+
+    { view with
+        Hostiles = view.Hostiles @ laid
+        RecalledRaiders = view.RecalledRaiders @ laid
+        World =
+            { view.World with
+                Quarries =
+                    (view.World.Quarries, bodies)
+                    ||> List.fold (fun quarries h ->
+                        Map.add
+                            h.Id
+                            {
+                                Body = h
+                                Seen = seen
+                                Cargo = 0
+                                Trail = []
+                                Crossings = None
+                                Gone = None
+                            }
+                            quarries)
+            }
+    }
+
 /// One source at (10,10) and the controller at (13,10). The Seat (11,10)
 /// sits at range 2 of the controller — inside its Upgrade Work Area — while
 /// (9,10) sits at range 4. No container, so no Post (#405).

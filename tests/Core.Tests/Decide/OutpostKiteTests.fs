@@ -1219,7 +1219,7 @@ let kiteTests =
 /// W1N3 beyond it, its ranger standing quiet there on the enemy's source.
 /// Moved by #658: the sweep works a candidate only where it has something to
 /// kill, so W1N3 holds the enemy's miner in the sweep's memory
-/// (`WorldView.PreySeen`), none in sight: its Guard is the ranger's quiet one.
+/// (`WorldView.Quarries`), none in sight: its Guard is the ranger's quiet one.
 let private harassingBeyond hostiles =
     let colony = declaredRaid hostiles
     let outpost = SpatialInfo.layerOf colony.Spatial "W1N2"
@@ -1230,21 +1230,7 @@ let private harassingBeyond hostiles =
             Owner = "Trepidimous"
         }
 
-    let colony =
-        { colony with
-            World =
-                { colony.World with
-                    PreySeen =
-                        Map.ofList
-                            [
-                                "W1N3",
-                                {
-                                    Bodies = [ remembered ]
-                                    Tick = colony.Time
-                                }
-                            ]
-                }
-        }
+    let colony = colony |> remembering colony.Time [ remembered ]
 
     let floor =
         TerrainGrid.ofList

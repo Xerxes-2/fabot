@@ -240,7 +240,7 @@ type WorldView =
         /// reads it.
         Questioned: Set<string>
         /// The rooms of ours an observer stands in: what a dark room's
-        /// remembered body waits on a look from (`Facts.contestOf`).
+        /// remembered body waits on a look from (`Facts.odds`).
         Observers: string list
         /// Each observer's room and the one room it looks at this tick, aimed
         /// once over every colony (`Layout.aimObservers`). None until the
@@ -277,17 +277,11 @@ type WorldView =
         /// how old the economy gate's memory of it is (`Facts.openToEconomy`,
         /// #605).
         RaidSeen: Map<string, int>
-        /// Each [[sweep]] candidate and outpost with the bodies it was last
-        /// seen holding (`World.PreySeen`, #658), a dancer across its border
-        /// among them in a room in sight: what a body out of sight is priced
-        /// by (`Facts.stillThere`).
-        PreySeen: Map<string, BodiesSeen>
-        /// Each hostile's last tile and the full tick it was seen there
-        /// (`World.HostileSteps`), one out of sight kept while it was last seen
-        /// within a dance of a border (`Dance.byBorder`) or crossed one lately:
-        /// whether a raid a look finds gone may only have stepped across
-        /// (`Observe.strikeGone`, #585). Empty in a fixture.
-        LastSteps: Map<string, RoomPos * int>
+        /// Every foreign body the world remembers, by id (`World.Quarries`,
+        /// #663): what a body out of sight is priced by (`Quarry.odds`), and
+        /// whether one a look finds gone may only have stepped across
+        /// (`Quarry.step`, `Observe.strikeGone`, #585). Empty in a fixture.
+        Quarries: Map<string, Track>
         /// Each rival room's defence response as its dossier saw it (#653):
         /// the fewest ticks from our first armed body in the room to its
         /// owner's first armed body there; `Int32.MaxValue` where it was
@@ -316,8 +310,7 @@ module WorldView =
             Watched = Set.empty
             Danger = Set.empty
             RaidSeen = Map.empty
-            PreySeen = Map.empty
-            LastSteps = Map.empty
+            Quarries = Map.empty
             Responses = Map.empty
             SweepGroup = []
             FighterLost = Map.empty
@@ -364,22 +357,17 @@ module WorldView =
 
     /// The ticks a raid that walked off unseen may still stand in, or come
     /// back to, the room it was last seen in (#585): its slowest body's round
-    /// trip, a room's side each way at its pace, over which the odds it is
-    /// still there fall to nothing (`Facts.stillThere`'s walk) — a body that
-    /// cannot walk, or would not be back before it ages out, for the life it
-    /// has left, so the slower a body the longer, to its life. A room's round
-    /// trip where nothing is known of the raid.
+    /// trip empty (`Quarry.roundTrip`: a raid carries nothing), over which the odds it is still there fall
+    /// to nothing (`Quarry.odds`) — a body that cannot walk for the life it
+    /// has left. A room's round trip where nothing is known of the raid.
     let raidTrip (raid: HostileInfo list) : int =
         match raid with
         | [] -> 2 * Engine.roomSide
         | _ ->
             raid
             |> List.map (fun hostile ->
-                let life = max 1 hostile.TicksToLive
-
-                match Gait.ticks Gait.plain (HostileInfo.gait raid hostile) with
-                | Some pace -> min life (2 * Engine.roomSide * pace)
-                | None -> life)
+                Quarry.roundTrip raid 0 hostile
+                |> Option.defaultValue (max 1 hostile.TicksToLive))
             |> List.max
 
     /// Whether a raid body recalled through blind ticks, last seen on `seen`,
@@ -455,11 +443,7 @@ module WorldView =
                 )
                 |> Set.intersect watched
             RaidSeen = raidSeen
-            // A room in sight too: a dancer across its border stays its own
-            // (`World.recallPrey`); a body standing in sight is never laid
-            // twice (`Facts.rememberedIn`).
-            PreySeen = world.PreySeen
-            LastSteps = world.HostileSteps |> Map.map (fun _ step -> step.At, step.Seen)
+            Quarries = world.Quarries
             Responses = Map.empty
             SweepGroup = []
             FighterLost =
@@ -741,8 +725,9 @@ type ColonyView =
         RecalledHealers: HostileInfo list
         /// The raid last seen in each room this colony works, or chases a
         /// raid in, that nothing sees this tick (`World.Raiders`, #569), at
-        /// its last tiles, its life counted down since, and each body last
-        /// seen in a dark outpost of its own (`World.PreySeen`): laid into
+        /// its last tiles, its life counted down since, and each body out of
+        /// sight the world remembers in an outpost of its own or a [[sweep]]
+        /// candidate, dark or seen (`Quarry.ghosts`, #618): laid into
         /// `Hostiles` too, so a raider stays the room's raid and a trespasser
         /// its kill — its Guard, verdict and targets — through the ticks
         /// between two looks. What the [[raid
@@ -909,17 +894,28 @@ module ColonyView =
                     ||> List.fold (fun control (room, r) -> Map.add room r.Control control)
             }
 
+    /// The hostiles this tick's glance holds (#663): `Hostiles` less each
+    /// body laid out of memory (`RecalledRaiders`), matched by id and tile,
+    /// so one in sight across a border and laid back in the room it crossed
+    /// out of stays where it stands. The only bodies an act — a strike, a
+    /// heal, an aim — is aimed at: a remembered body shapes Tasks and prices,
+    /// never an act.
+    let inGlance (view: ColonyView) : HostileInfo list =
+        match view.RecalledRaiders with
+        | [] -> view.Hostiles
+        | recalled ->
+            let laid = recalled |> List.map (fun h -> h.Id, h.Pos) |> Set.ofList
+            view.Hostiles |> List.filter (fun h -> not (laid.Contains(h.Id, h.Pos)))
+
     /// The view with only what was seen this tick in `Hostiles`, the raids
     /// recalled from earlier sightings (`RecalledRaiders`, #569) taken out:
     /// what the [[raid log]] folds, since a memory is no sighting.
     let sightedOnly (view: ColonyView) : ColonyView =
         match view.RecalledRaiders with
         | [] -> view
-        | recalled ->
-            let ids = recalled |> List.map (fun h -> h.Id) |> Set.ofList
-
+        | _ ->
             { view with
-                Hostiles = view.Hostiles |> List.filter (fun h -> not (Set.contains h.Id ids))
+                Hostiles = inGlance view
                 RecalledRaiders = []
             }
 
@@ -1873,31 +1869,54 @@ module ColonyView =
                                 })
                         | None -> [])
 
-            // And the bodies last seen in each outpost it works that nothing
-            // sees this tick (`World.PreySeen`): a rival's economy body
-            // taking from us stays the room's kill until a look finds it
-            // gone, as a raider stays its raid.
-            match world.PreySeen with
-            | prey when Map.isEmpty prey -> raid
-            | prey ->
+            // And every body the world remembers in an outpost it works or
+            // a [[sweep]] candidate that this tick's glance of the room does
+            // not hold (`Quarry.ghosts`, #663, #618), the room dark or seen:
+            // out of sight, or in sight across the border it crossed out
+            // over. A rival's economy body taking from us stays the room's
+            // kill, and a Task on it holds, until it is known gone or its
+            // odds run out, as a raider stays its raid. Laid apart from the
+            // glance (`RecalledRaiders`): no act is aimed at one
+            // (`ColonyView.inGlance`).
+            match world.Quarries with
+            | quarries when Map.isEmpty quarries -> raid
+            | quarries ->
                 let laid = raid |> List.map _.Id |> Set.ofList
 
-                let mined = outposts |> List.map (fun outpost -> outpost.RoomName) |> Set.ofList
+                let rooms =
+                    (outposts |> List.map _.RoomName) @ (scan.Harass |> List.map _.RoomName)
+                    |> Set.ofList
+                    |> Set.intersect (worked |> List.map fst |> Set.ofList)
+
+                let side = collected (fun facts -> facts.Hostiles)
+
+                // Rooted at its work by the one rule (`Quarry.rooted`), off
+                // the targets this cut projects of its room: its `Spatial`'s,
+                // as `Facts.rootedAtWork` reads them.
+                let rooted (body: HostileInfo) =
+                    match worked |> List.tryFind (fun (room, _) -> room = body.Pos.Room) with
+                    | None -> false
+                    | Some(_, facts) ->
+                        Quarry.rooted
+                            (fun kind ->
+                                Quarry.besideTarget
+                                    facts.Layer.TargetPositions
+                                    facts.TargetKinds
+                                    kind
+                                    (RoomPos.pos body.Pos))
+                            side
+                            body
+
+                // A room whose raid the world remembers (`World.Raiders`, the
+                // exit hold, `World.Healers`) keeps its healers itself.
+                let raidHeld room =
+                    Map.containsKey room world.Raiders
+                    || Map.containsKey room world.ExitWatches
+                    || Map.containsKey room world.Healers
 
                 raid
-                @ (worked
-                   |> List.filter (fun (room, _) ->
-                       mined.Contains room && not (World.seenNow world room))
-                   |> List.collect (fun (room, _) ->
-                       match Map.tryFind room prey with
-                       | Some last ->
-                           last.Bodies
-                           |> List.filter (fun h -> not (laid.Contains h.Id))
-                           |> List.map (fun h ->
-                               { h with
-                                   TicksToLive = h.TicksToLive - (world.Time - last.Tick)
-                               })
-                       | None -> []))
+                @ (Quarry.ghosts rooms raidHeld rooted side world.Time quarries
+                   |> List.filter (fun h -> not (laid.Contains h.Id)))
 
         // A child past its nursery: its rock is borrowed, never the mother's.
         let raised room =

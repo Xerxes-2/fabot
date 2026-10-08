@@ -767,8 +767,9 @@ let private strikeOrder
     let residentRooms = Facts.residentRooms view
 
     // In a harassment room the declared enemy's unarmed creeps are targets
-    // too (#432), after its armed ones.
-    view.Hostiles
+    // too (#432), after its armed ones. Only a body this tick's glance holds
+    // (`ColonyView.inGlance`, #663): a remembered one is aimed at by nothing.
+    ColonyView.inGlance view
     |> List.filter (fun h -> h.Pos.Room = room && targets.Shoots residentRooms fighting h)
     |> targets.Order room (Some creep) distance
 
@@ -799,7 +800,7 @@ let private bystanders (view: ColonyView) (fighting: Set<string>) (from: RoomPos
     let near (h: HostileInfo) =
         RoomPos.range from h.Pos |> Option.exists (fun r -> r <= Engine.rangedRange)
 
-    (view.Hostiles
+    (ColonyView.inGlance view
      |> List.filter near
      |> List.map (fun h -> h.Pos, Facts.mayStrike view fighting h))
     @ (view.Allies |> List.filter near |> List.map (fun h -> h.Pos, false))
@@ -1099,8 +1100,10 @@ let private defendIntent
                 |> line.Order here.Room (Some creep) (fun _ -> 0)
                 |> List.tryHead
 
-            pick (view.Hostiles |> List.filter (line.Shoots Set.empty Set.empty))
-            |> Option.orElse (pick view.Hostiles))
+            let glance = ColonyView.inGlance view
+
+            pick (glance |> List.filter (line.Shoots Set.empty Set.empty))
+            |> Option.orElse (pick glance))
         |> Option.map (fun target -> AttackCreep(creep.Name, target.Id))
     | _ -> None
 
@@ -1369,7 +1372,7 @@ let volleys (view: ColonyView) atlas (threats: Threats) (assigned: Map<string, T
                         Guns = gunsOf creep
                         Shields = shields
                         Bands =
-                            view.Hostiles
+                            ColonyView.inGlance view
                             |> List.filter (fun h -> h.Pos.Room = struck)
                             |> List.map (fun h -> h.Id, band h)
                             |> Fresh.mapOfList

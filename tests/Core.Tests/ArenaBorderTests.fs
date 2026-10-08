@@ -1692,6 +1692,79 @@ let private taskEachTick (creep: string) (ticks: int) (start: Arena) =
 
     go ticks start [] []
 
+/// #618 on the t1,037,961 capture: Synapse7330 alone walks off our W17S26
+/// container out over the west border into W18S26 (seen where `lookout`
+/// names it) and back, twice. The ranger holds W17S26's Guard from taking
+/// it until the hauler dies or the run ends, and shoots it on its returns.
+let private hunterKeepsTheDancer (lookout: Set<string>) =
+    let ranger = "ranger-1037139-Spawn11"
+    let at roomName x y = RoomPos.at roomName { X = x; Y = y }
+
+    let start =
+        let a = haulersAtTheContainer ()
+
+        { a with
+            Rooms = a.Rooms |> Map.add "W18S26" (room "W18S26")
+            Lookout = Set.union a.Lookout lookout
+            Bodies =
+                a.Bodies
+                |> List.filter (fun b -> b.Id <> "Nova7626")
+                |> List.map (fun b ->
+                    if b.Id = "Synapse7330" then
+                        { b with
+                            Script =
+                                Some(
+                                    Phases
+                                        [
+                                            35, GoTo(at "W18S26" 46 10)
+                                            60, GoTo(at "W17S26" 3 13)
+                                            90, GoTo(at "W18S26" 46 10)
+                                            0, GoTo(at "W17S26" 3 13)
+                                        ]
+                                )
+                        }
+                    else
+                        b)
+        }
+
+    let trace, tasks = start |> taskEachTick ranger 140
+    let failure = describe trace
+
+    let out =
+        trace
+        |> List.filter (fun t ->
+            t.Events
+            |> List.exists (function
+                | Crossed("Synapse7330", from, _) -> from.Room = "W17S26"
+                | _ -> false))
+
+    Expect.isGreaterThanOrEqual
+        (List.length out)
+        2
+        $"the premise: the hauler steps out of W17S26 twice\n{failure}"
+
+    let taken = tasks |> List.findIndex ((=) "guard:W17S26")
+    let held = tasks |> List.skip taken
+
+    let ends =
+        match diedOn "Synapse7330" trace with
+        | Some died -> died - taken
+        | None -> List.length held
+
+    Expect.isTrue
+        (held |> List.take ends |> List.forall ((=) "guard:W17S26"))
+        $"""the ranger holds W17S26's Guard from t{taken}: {String.concat "," tasks}{"\n"}{failure}"""
+
+    // Camped where it stepped out, the ranger shoots it each time it comes
+    // back.
+    let hitsAt (t: TickTrace) =
+        t.Bodies |> List.tryFind (fun b -> b.Id = "Synapse7330") |> Option.map _.Hits
+
+    Expect.isLessThan
+        (trace |> List.last |> hitsAt |> Option.defaultValue 0)
+        (trace |> List.item (List.head out).Tick |> hitsAt |> Option.defaultValue 0)
+        $"and it is shot on its returns\n{failure}"
+
 [<Tests>]
 let arenaBorderTests =
     testList
@@ -2751,7 +2824,7 @@ let arenaBorderTests =
             // the pool (task-gone) until a reserver walked in 73 ticks later.
             // Reproduced on 783fa815: the Guard at t0, gone at t1, the ranger
             // idle at (16,47) as live. A body taking from a room we mine stays
-            // the room's kill until a look finds it gone (`World.preyRooms`).
+            // the room's kill until a look finds it gone (`Quarry.ghosts`).
             test
                 "capture t1,037,961: the haulers the last look saw at our container stay the dark outpost's kill, and the ranger shoots one dead" {
                 let ranger = "ranger-1037139-Spawn11"
@@ -2763,6 +2836,30 @@ let arenaBorderTests =
                 Expect.isTrue
                     (tasks |> List.take died.Value |> List.forall ((=) "guard:W17S26"))
                     $"""the ranger holds W17S26's Guard until it does: {String.concat "," tasks}"""
+            }
+
+            // #618 (live, #617 part b): Trepidimous's Launch5733 stepping
+            // between W18S25 and W19S25 made the trespass Task appear and
+            // vanish at each crossing, and ranger-1015096 flitted guard →
+            // task-gone → guard, walking without arriving. The same shape on
+            // the t1,037,961 capture: Synapse7330 alone walks off our W17S26
+            // container out over the west border into W18S26, which nothing
+            // of ours sees, and back, twice. On main the Guard left the pool
+            // each time the hauler stepped out of sight (task-gone); a body
+            // the world remembers out of sight stays the room's kill
+            // (`Quarry.ghosts`), so the ranger holds the Guard throughout.
+            test
+                "#618: a hauler dancing out over a dark border stays the outpost's kill, and the ranger keeps its Guard" {
+                hunterKeepsTheDancer Set.empty
+            }
+
+            // The #663 S2 review: the same dance with W18S26 in sight (a
+            // look), a room no colony of ours prices a trespass in. The
+            // hauler two tiles over the border it crossed out of is still
+            // W17S26's quarry (`Quarry.placed`).
+            test
+                "#618: a hauler dancing out over a border into a room in sight stays the outpost's kill, and the ranger keeps its Guard" {
+                hunterKeepsTheDancer (Set.singleton "W18S26")
             }
 
             // The same haulers with W13S28 a living colony. The ranger walks in
@@ -2798,7 +2895,7 @@ let arenaBorderTests =
                         { dark with
                             Carried =
                                 { dark.Carried with
-                                    PreySeen = Map.empty
+                                    Quarries = Map.empty
                                 }
                         })
                     (Some "W17S26")
