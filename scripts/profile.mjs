@@ -5066,16 +5066,23 @@ function loadBundle(file, dir = "probe") {
 // hands it the warm one.
 function writeProbed(file, dir) {
   const read = readFileSync(file, "utf8");
-  const SWITCH_OFF = "\nvar ColonyModule_harass = empty();";
-  if (sweep && read.indexOf(SWITCH_OFF) < 0) {
+  // The live switch's whole binding, whatever its value (the live list, a
+  // filter of the declared one, `empty()`), up to the next top-level
+  // declaration: esbuild starts each at column 0 and indents what it spans.
+  const SWITCH = "\nvar ColonyModule_harass = ";
+  const at = read.indexOf(SWITCH);
+  const end = at < 0 ? -1 : read.slice(at + SWITCH.length).search(/\n(var|let|const|function|class) /);
+  if (sweep && (at < 0 || end < 0 || read.indexOf(SWITCH, at + 1) >= 0)) {
     throw new Error(
-      `${path.relative(process.cwd(), file)} holds no \`${SWITCH_OFF.trim()}\`: --sweep switches ` +
-        "src/Core/Types/Colonies.fs's `Colony.harass` on by that line, and whatever renamed it " +
-        "or switched it on live is what this probe has to be re-pointed at",
+      `${path.relative(process.cwd(), file)} holds no one \`${SWITCH.trim()}…\` binding: --sweep ` +
+        "sets src/Core/Types/Colonies.fs's `Colony.harass` to `Colony.harassDeclared` by that " +
+        "binding, and whatever renamed it is what this probe has to be re-pointed at",
     );
   }
   const source = sweep
-    ? read.replace(SWITCH_OFF, "\nvar ColonyModule_harass = ColonyModule_harassDeclared;")
+    ? read.slice(0, at) +
+      `${SWITCH}ColonyModule_harassDeclared;` +
+      read.slice(at + SWITCH.length + end)
     : read;
   for (const phase of ["openWhole", "joinWhole", "finishWhole"]) {
     const declarations = source.match(new RegExp(`^function ${phase}\\(`, "gm")) ?? [];
