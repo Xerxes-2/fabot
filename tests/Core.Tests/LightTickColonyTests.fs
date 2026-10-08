@@ -683,8 +683,6 @@ let fightOnlyTests =
 
                 let home = LightForce.Home("W3N1", "Trepidimous")
 
-                Expect.isEmpty (alone [ LightForce.HitsLost "miner" ]) "an economy body hurt"
-
                 Expect.isEmpty
                     (alone [ home; LightForce.OnBorder "miner" ])
                     "a raid beside a body on the ring"
@@ -697,11 +695,6 @@ let fightOnlyTests =
                     (alone [ home; LightForce.ControllerChanged "W3N1" ])
                     "beside its controller"
 
-                Expect.equal
-                    (alone [ home; LightForce.HitsLost "digger" ])
-                    (Set.ofList [ "W3N1" ])
-                    "another colony's economy fact is that colony's"
-
                 Expect.isEmpty
                     (LightTick.fightOnly
                         ranger
@@ -711,6 +704,50 @@ let fightOnlyTests =
                         split
                         [ LightForce.Fought "W7N1" ])
                     "a colony with no plan to replay decides whole"
+            }
+
+            test
+                "a hurt economy body decides its colony's fight alone: its answer is the fight's, its flight the decide's hand-back (#669)" {
+                // The Invader stood beside the miner as the plans were made;
+                // it struck since, and no plan strikes it.
+                let raided =
+                    { split with
+                        Hostiles = [ hostileIn "W4N1" 11 11 "Invader" true ]
+                    }
+
+                let seen = LightTick.ofPlans raided Set.empty (planned.Plans |> Map.toList)
+
+                let hurt =
+                    { raided with
+                        Creeps =
+                            raided.Creeps
+                            |> Map.change
+                                "miner"
+                                (Option.map (fun miner -> { miner with Hits = 900 }))
+                    }
+
+                let reasons = LightTick.forcing seen hurt
+
+                Expect.equal
+                    reasons
+                    [ LightForce.HitsLost "miner" ]
+                    "premise: the miner's lost hits alone"
+
+                Expect.equal
+                    (LightTick.fightOnly ranger pair holders seen hurt reasons)
+                    (Set.ofList [ "W3N1" ])
+                    "the miner's colony decides its fight alone"
+
+                Expect.equal
+                    (LightTick.fightOnly
+                        ranger
+                        pair
+                        holders
+                        seen
+                        hurt
+                        [ LightForce.Home("W3N1", "Trepidimous"); LightForce.HitsLost "digger" ])
+                    (Set.ofList [ "W1N1"; "W3N1" ])
+                    "another colony's hurt body is that colony's fight"
             }
 
             test

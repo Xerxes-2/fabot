@@ -1697,6 +1697,60 @@ let fightOnlyDecideTests =
                     "a body the full decide left parked owes no other"
             }
 
+            test
+                "an economy body Flee applies to that the carry held on other work decides the colony whole; one it held on Flee replays its flight (#669)" {
+                // A loaded worker two off a longbow, in its Reach: a whole
+                // decide runs it.
+                let struck =
+                    let room =
+                        openRoom 10
+                        |> withTargets [ "ram-1", { X = 20; Y = 25 }, Structure BuiltKind.Rampart ]
+                        |> withCreepsAt [ "w1", { X = 19; Y = 25 } ]
+
+                    { atLevel 3 room with
+                        Sources = []
+                        Creeps = [ worker "w1" 50 0 ]
+                    }
+                    |> withHits "ram-1" BuiltKind.Rampart 300_000 3_000_000
+                    |> facing [ hostileAt "h-1" { X = 17; Y = 25 } [ RangedAttack; Move ] ]
+
+                let first = decideUnarbitrated struck Map.empty Set.empty None ReplanTurn.Now
+
+                Expect.equal
+                    (Map.tryFind "w1" first.Economy.Held)
+                    (Some Flee)
+                    "premise: a whole decide runs the worker"
+
+                Expect.isSome
+                    (decideFight struck first.Assignments Set.empty first.Memo first.Economy)
+                    "held on Flee: the fight decides alone and the worker replays its flight"
+
+                Expect.isNone
+                    (decideFight
+                        struck
+                        first.Assignments
+                        Set.empty
+                        first.Memo
+                        { first.Economy with
+                            Held = Map.add "w1" (Repair "ram-1") first.Economy.Held
+                        })
+                    "held on its Repair: a whole decide runs it the same tick"
+
+                Expect.isEmpty first.Economy.Unfled "premise: the whole decide left nobody off Flee"
+
+                Expect.isSome
+                    (decideFight
+                        struck
+                        first.Assignments
+                        Set.empty
+                        first.Memo
+                        { first.Economy with
+                            Held = Map.add "w1" (Repair "ram-1") first.Economy.Held
+                            Unfled = Set.singleton "w1"
+                        })
+                    "left off an applicable Flee by the whole decide: it would be again, so the fight decides alone"
+            }
+
             test "a fight-only tick replays the economy's plan beside the fighters' fresh one" {
                 let first = decideUnarbitrated raidedHome Map.empty Set.empty None ReplanTurn.Now
                 let bodies = raidedHome.Creeps |> List.map _.Name |> Set.ofList

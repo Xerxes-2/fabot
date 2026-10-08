@@ -1196,9 +1196,12 @@ let deciders
 
 /// The deciders that decide their fight alone and replay their economy
 /// (`Entry.decideFight`): each whose every fact is a fight's — a raider at home, a
-/// hostile newly able to strike, a structure's fight, a chase, a fighter's
-/// lost hits (`fighter`) — with a plan to replay. Never one an economy fact concerns (a
-/// creep born, gone, on the ring or hurt, a controller changed, a deferred
+/// hostile newly able to strike, a structure's fight, a chase, a body's lost
+/// hits — with a plan to replay. A hurt body's answer is the fight's (a
+/// defender's cast, its striker struck); its flight the economy's, which
+/// `Entry.decideFight` hands back whole where Flee newly applies to it
+/// (#669). Never one an economy fact concerns (a
+/// creep born, gone or on the ring, a controller changed, a deferred
 /// decide), nor one with an economy body a hostile can newly strike, from
 /// where it stands or from where its replayed step lands it: Flee is the
 /// economy's to decide. A fight the plans already saw reach one is
@@ -1216,8 +1219,8 @@ let fightOnly
         | LightForce.Home _
         | LightForce.Hostile _
         | LightForce.Fought _
-        | LightForce.Chase _ -> true
-        | LightForce.HitsLost name -> fighter name
+        | LightForce.Chase _
+        | LightForce.HitsLost _ -> true
         | LightForce.CreepsChanged _
         | LightForce.OnBorder _
         | LightForce.ControllerChanged _

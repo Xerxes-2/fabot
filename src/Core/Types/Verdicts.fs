@@ -600,6 +600,10 @@ type EconomyCarry =
         /// The economy bodies the full decide left on work walled off from
         /// them, having no other: kept parked, so no full decide is owed.
         Parked: Set<string>
+        /// The economy bodies the full decide left off a Flee that applied
+        /// to them (its route unpriced, say): kept off it, so no full
+        /// decide is owed for their flight.
+        Unfled: Set<string>
     }
 
 /// What one tick of deciding returns: the Intents to execute, the

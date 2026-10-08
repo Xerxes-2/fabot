@@ -87,6 +87,70 @@ let raidedOutpostTests =
                     ]
                     "the raid takes the rock's Seats and the container's ground, and says so"
             }
+
+            test
+                "a fight-only decide of a raided outpost: an idle spawn the guard ask owes hands it back whole; the spawn at work, the digging anchor and the fleeing haulers keep their Tasks; the anchor shot to Work <= Move runs, and hands it back (#669)" {
+                // The forced tick of a hurt anchor decides its colony's fight
+                // alone (`LightTick.fightOnly`): its flight is no answer, the
+                // haulers' Flee replays, and the guard's cast stays asked.
+                let raided = declaredRaid raiders
+                let first = decideUnarbitrated raided Map.empty Set.empty None ReplanTurn.Now
+
+                Expect.isFalse
+                    (List.isEmpty first.Economy.Asks)
+                    "premise: the raid asks the guard row a body"
+
+                Expect.isNone
+                    (decideFight raided first.Assignments Set.empty first.Memo first.Economy)
+                    "the guard owed an idle spawn: spawning is the economy's"
+
+                let casting =
+                    { raided with
+                        Spawns =
+                            raided.Spawns
+                            |> List.map (fun spawn ->
+                                { spawn with
+                                    IsSpawning = true
+                                    Remaining = 10
+                                })
+                    }
+
+                let carried = decideUnarbitrated casting Map.empty Set.empty None ReplanTurn.Now
+
+                match
+                    decideFight casting carried.Assignments Set.empty carried.Memo carried.Economy
+                with
+                | None -> failtest "the spawn at work: nothing owed, the fight decides alone"
+                | Some fight ->
+                    Expect.equal
+                        fight.Assignments
+                        carried.Assignments
+                        "the anchor holds nothing to run to and the haulers keep their Flee"
+
+                // The live case: damage strips the anchor's Work to its Move,
+                // so it runs (`runsFromThreats`, #664), which the carry, laid
+                // while it dug, never priced.
+                let crippled =
+                    { casting with
+                        Creeps =
+                            casting.Creeps
+                            |> List.map (fun creep ->
+                                if creep.Name = "a-out" then
+                                    { creep with
+                                        Body = Map.add Work 1 creep.Body
+                                    }
+                                else
+                                    creep)
+                    }
+
+                Expect.isFalse
+                    (Set.contains "a-out" carried.Economy.Unfled)
+                    "premise: the digging anchor was no runner the whole decide left off Flee"
+
+                Expect.isNone
+                    (decideFight crippled carried.Assignments Set.empty carried.Memo carried.Economy)
+                    "the crippled anchor's flight is a whole decide's"
+            }
         ]
 
 /// The far corner of `raidedOutpost`'s field, six tiles and more off every

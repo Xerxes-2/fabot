@@ -1422,6 +1422,16 @@ and private finishWhole (tail: WholeTail) (outcomes: MatchOutcome list) : Decisi
                          Map.tryFind creep.Name assigned |> Option.exists (walledOff creep))
                      |> Seq.map _.Name
                      |> Fresh.setOfSeq)
+                Unfled =
+                    (match pool |> List.tryFind (fun pooled -> pooled.Task = Flee) with
+                     | None -> Fresh.setOfSeq Seq.empty
+                     | Some flee ->
+                         economyBodies
+                         |> Seq.filter (fun creep ->
+                             Map.tryFind creep.Name assigned <> Some Flee
+                             && applicable view own atlas creep flee)
+                         |> Seq.map _.Name
+                         |> Fresh.setOfSeq)
             }
     }
     |> Some
@@ -1461,7 +1471,8 @@ let decideUnarbitrated
 /// None where the economy would decide otherwise, so the caller decides the
 /// colony whole this tick: an economy body new since the carry (a fighter
 /// disarmed across the line), its own cast asks moved, an economy body a
-/// Reach has walled off from its Task since (`walledOffBy`), a body its
+/// Reach has walled off from its Task since (`walledOffBy`) or one Flee
+/// applies to that the carry held on other work, a body its
 /// share of the world's asks (`Caster.assign`; its own, alone) owes a spawn
 /// standing idle — spawning is the economy's —, or a fighter's step an
 /// economy body stands in. The last two are read once the world's fight is
@@ -1510,9 +1521,29 @@ let rec private openFight
                         | Some task, Some tid when taskId task = tid -> walledOff creep task
                         | _ -> false))
 
+        // An economy body Flee applies to now that the carry left on other
+        // work (#669): only a whole decide's Matcher moves it to Flee, and its
+        // replay would walk it on under fire until the next one. A body the
+        // carry holds on Flee replays that flight; one it left off a Flee that
+        // applied (`carry.Unfled`) would be left off it again.
+        let fleesAnew =
+            lazy
+                (fight.Pool.Value
+                 |> List.tryFind (fun pooled -> pooled.Task = Flee)
+                 |> Option.exists (fun flee ->
+                     economyBodies
+                     |> List.exists (fun creep ->
+                         Map.tryFind creep.Name carry.Held <> Some Flee
+                         && not (Set.contains creep.Name carry.Unfled)
+                         && applicable view threats atlas creep flee)))
+
         let calls = calledTo view atlas fight assignments
 
-        if castAsks view threats guarded calls <> carry.Asks || walledOffAnew.Force() then
+        if
+            castAsks view threats guarded calls <> carry.Asks
+            || walledOffAnew.Force()
+            || fleesAnew.Force()
+        then
             None
         else
             Some
