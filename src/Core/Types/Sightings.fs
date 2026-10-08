@@ -2147,7 +2147,6 @@ module World =
                         ""
                         (floors.[h.RoomName] * harass.BlockCost)
                         h.RoomName)
-            Floors = floors
             GarrisonFloor = tuning.RangerResidentBlocks * harass.BlockCost
             Holding = held
         }

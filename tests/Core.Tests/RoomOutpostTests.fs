@@ -383,8 +383,12 @@ let outpostDeclarationTests =
                     ]
                     "W15S28 casts W18S27 and W17S25, whose full floor W17S29 at RCL5 (2026-10-02) cannot buy; W17S29 casts W19S26 and W19S25 unseen, which W15S28 is past the budget of"
 
+                // The floors the casting buys (`Harass.blocks`; #656 dropped
+                // them off `HarassCasting`, read by no view since).
                 Expect.equal
-                    (casting 5_600 1_800).Floors
+                    (Colony.harassDeclared
+                     |> List.map (fun h -> h.RoomName, Harass.blocks Tuning.defaults h)
+                     |> Map.ofList)
                     (Map.ofList
                         [
                             "W18S27", Tuning.defaults.HarassBlocks

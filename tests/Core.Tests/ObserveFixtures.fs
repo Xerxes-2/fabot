@@ -78,7 +78,6 @@ let quiet: ColonyView =
         Dismantles = []
         Harass = []
         HarassCast = Set.empty
-        HarassFloors = Map.empty
         Assaults = []
         Consignee = None
         Perimeter = []

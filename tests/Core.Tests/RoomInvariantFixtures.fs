@@ -277,7 +277,6 @@ let internal colonyOf (room: LoadedRoom) level =
         Dismantles = []
         Harass = []
         HarassCast = Set.empty
-        HarassFloors = Map.empty
         Assaults = []
         Consignee = None
         Perimeter = []

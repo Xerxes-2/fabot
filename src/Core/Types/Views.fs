@@ -652,10 +652,6 @@ type ColonyView =
         /// the rooms the [[raid log]] reads as ours to attack, never as a
         /// raid on us.
         HarassCast: Set<string>
-        /// The ranger blocks each room of `Harass` was floored at
-        /// (`HarassCasting.Floors`), its ranger's least body (#457). A room
-        /// missing here reads the full floor, `Tuning.HarassBlocks`.
-        HarassFloors: Map<string, int>
         /// The [[assault]]s this colony runs this tick (`Assault.worked`):
         /// what the Assault Tasks, their ground and the squad rows read.
         Assaults: AssaultFacts list
@@ -1478,7 +1474,6 @@ module ColonyView =
                 Joins: JoinTable
                 Tuning: Tuning
                 Colonies: Colony list
-                Casting: HarassCasting
                 Gate: StandDown
                 Holders: Map<string, string>
                 Fighter: CreepInfo -> bool
@@ -1621,7 +1616,6 @@ module ColonyView =
             Joins = joins
             Tuning = tuning
             Colonies = colonies
-            Casting = casting
             Gate = gate
             Holders = holders
             Fighter = fighter
@@ -1666,8 +1660,7 @@ module ColonyView =
     /// out, each as the whole view cuts it; the colony's sets (its crossings,
     /// borrowed rooms, declarations) stay the whole cut's.
     let project (within: Set<string> option) (cut: Cut) : ColonyView =
-        let joins, tuning, colonies, casting =
-            cut.Joins, cut.Tuning, cut.Colonies, cut.Casting
+        let joins, tuning, colonies = cut.Joins, cut.Tuning, cut.Colonies
 
         let gate, holders, fighter, watch = cut.Gate, cut.Holders, cut.Fighter, cut.Watch
         let world, colony, stages, mine = cut.World, cut.Colony, cut.Stages, cut.Mine
@@ -2051,12 +2044,6 @@ module ColonyView =
             Harass = scan.Harass
             Assaults = scan.Assaults |> List.map (assaultFacts tuning gate.Taken world)
             HarassCast = scan.Cast |> List.map (fun h -> h.RoomName) |> Set.ofList
-            HarassFloors =
-                scan.Harass
-                |> List.choose (fun h ->
-                    Map.tryFind h.RoomName casting.Floors
-                    |> Option.map (fun blocks -> h.RoomName, blocks))
-                |> Map.ofList
             // The declaration, straight through: the room it names is not one
             // this colony projects (#349).
             Consignee = colony.Consignee

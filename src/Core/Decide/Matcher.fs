@@ -375,36 +375,13 @@ let matchAcross
     let isExpiring name =
         Map.tryFind name expiringNow |> Option.exists (fun e -> e.Value)
 
-    // A holder inside its lead is out of a relieved Task's caps (#439): the
-    // relief its row casts at that lead takes the seat beside it.
-    let relieved (capacity: Capacity) name = capacity.Relieved && isExpiring name
-
-    // A relief and its incumbent stay together once both hold a relieved Task,
-    // whatever the lead reads: it moves with the colony's worst room, and a
-    // lead that shrank mid-walk would release the relief. One holding under
-    // half the other's life is a relief pair; two of one generation are not.
-    let reliefPair (acc: Assignments) (creep: CreepInfo) (pooled: PooledTask) =
-        pooled.Capacity.Relieved
-        && (let tid = taskId pooled.Task
-
-            acc
-            |> Map.exists (fun name assigned ->
-                assigned = tid
-                && Map.tryFind name lives
-                   |> Option.exists (fun life ->
-                       2 * min life creep.TicksToLive < max life creep.TicksToLive)))
-
     let holdersAt (acc: Assignments) (candidate: CreepInfo) task (capacity: Capacity) arrival =
         let tid = taskId task
 
         acc
         |> Map.toList
         |> List.choose (fun (name, assigned) ->
-            if
-                assigned = tid
-                && overlaps candidate task capacity.Handover arrival name
-                && not (relieved capacity name)
-            then
+            if assigned = tid && overlaps candidate task capacity.Handover arrival name then
                 Some name
             else
                 None)
@@ -1104,14 +1081,14 @@ let matchAcross
             // A holder the engine refused since the last decide is matched
             // afresh at its refusal's price (#629): the keep stands on the
             // work landing, and the engine said it did not. Afresh means as a
-            // candidate: an expiring holder or a relief pair loses the
-            // keep's escape over a full cap, by design — the escape protects
-            // work under way, and this work is not.
+            // candidate: an expiring holder loses the keep's escape over a
+            // full cap, by design — the escape protects work under way, and
+            // this work is not.
             | Some _ when refusedSince k name tid ->
                 reopened.[name] <- tid
                 acc, loads, released
             | Some pooled ->
-                let escape = lazy (isExpiring creep.Name || reliefPair acc creep pooled)
+                let escape = lazy (isExpiring creep.Name)
 
                 match gate k true escape acc creep pooled with
                 | Error reason -> release (ReleaseReason.Rejected reason)

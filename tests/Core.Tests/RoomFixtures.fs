@@ -903,7 +903,6 @@ let colonyAt (capture: RoomCapture) (level: int) (bank: int) : ColonyView =
         Dismantles = []
         Harass = []
         HarassCast = Set.empty
-        HarassFloors = Map.empty
         Assaults = []
         Consignee = None
         Perimeter = []

@@ -711,7 +711,7 @@ type Harass =
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Harass =
     /// The ranger blocks the room is floored at: what its caster's bank must
-    /// buy, and what its ranger is cast at no fewer than.
+    /// buy (its cast is its fight's, #656).
     let blocks (tuning: Tuning) (harass: Harass) : int =
         harass.Blocks |> Option.defaultValue tuning.HarassBlocks
 
@@ -783,10 +783,6 @@ module CastBid =
 type HarassCasting =
     {
         Casters: (Harass * string option) list
-        /// The ranger blocks each room was floored at this tick, by room
-        /// name: what its caster's bank had to buy, and what its ranger is
-        /// cast at no fewer than (#457).
-        Floors: Map<string, int>
         /// The bank a contested home's resident garrison body costs
         /// (`Tuning.RangerResidentBlocks` ranger blocks): what its caster's
         /// bank buys (`World.garrisonCasters`).
@@ -804,7 +800,6 @@ module HarassCasting =
     let none: HarassCasting =
         {
             Casters = []
-            Floors = Map.empty
             GarrisonFloor = 0
             Holding = Map.empty
         }

@@ -853,16 +853,16 @@ let private declaredCasting blocks motherBank =
             Map.empty
             (harassWorldAt (reservedFor enemy) motherBank 300)
 
-    casting.Casters |> List.map (fun (h, caster) -> h.RoomName, caster), casting.Floors
+    casting.Casters |> List.map (fun (h, caster) -> h.RoomName, caster)
 
+// The floor decides which colony casts, never what is cast (#656: the room's
+// cast is its fight's; the view carried the floor to the ranger row).
 [<Tests>]
 let harassDeclaredFloorTests =
     testList
         "a harassment room is floored at the ranger blocks it is declared at"
         [
             test "a room declared at two blocks is cast by a 1,800 bank with no sighting of it" {
-                let casters, floors = declaredCasting (Some 2) 1800
-
                 Expect.isFalse
                     (Map.containsKey
                         harassRoom
@@ -870,42 +870,22 @@ let harassDeclaredFloorTests =
                     "the premise: the room was never seen"
 
                 Expect.equal
-                    casters
+                    (declaredCasting (Some 2) 1800)
                     [ harassRoom, Some mother ]
                     "the mother's 1,800 buys two blocks"
 
-                Expect.equal floors (Map.ofList [ harassRoom, 2 ]) "and the room is floored at two"
-
                 Expect.equal
-                    (fst (declaredCasting (Some 2) 1700))
+                    (declaredCasting (Some 2) 1700)
                     [ harassRoom, None ]
                     "a 1,700 bank buys them too, short of the Caster's floor: nobody casts it"
-
-                Expect.equal
-                    (harassView
-                        (declaredAt (Some 2))
-                        (harassWorldAt (reservedFor enemy) 1800 300)
-                        mother)
-                        .HarassFloors
-                    (Map.ofList [ harassRoom, 2 ])
-                    "which the caster's view carries to its ranger row"
             }
 
             test "a room declared with no blocks keeps the default floor" {
-                let casters, floors = declaredCasting None 1800
-
-                Expect.equal casters [ harassRoom, None ] "refused at 1,800"
+                Expect.equal (declaredCasting None 1800) [ harassRoom, None ] "refused at 1,800"
 
                 Expect.equal
-                    floors
-                    (Map.ofList [ harassRoom, Tuning.defaults.HarassBlocks ])
-                    "floored at the default blocks"
-
-                Expect.equal
-                    (fst (
-                        declaredCasting None (Tuning.defaults.HarassBlocks * Bodies.rangerBlockCost)
-                    ))
+                    (declaredCasting None (Tuning.defaults.HarassBlocks * Bodies.rangerBlockCost))
                     [ harassRoom, Some mother ]
-                    "and cast the tick the bank buys them"
+                    "and cast the tick the bank buys the default blocks"
             }
         ]
