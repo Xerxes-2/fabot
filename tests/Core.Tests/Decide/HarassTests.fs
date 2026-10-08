@@ -2254,6 +2254,166 @@ let catchableFirstTests =
             }
         ]
 
+/// The harassment room with no body of ours, a bank of `capacity`, and the
+/// 23C23M `dancer` standing on `at`, its crossings in from the room beside
+/// on these tiles of the harassment room (`ColonyView.Bounces`).
+let private dancingIn (capacity: int) (at: Pos) (tiles: Pos list) =
+    let laid = remoteWith { X = 25; Y = 25 } [ bigHauler "dancer" at ] []
+
+    { laid with
+        Creeps = []
+        Bank = bank capacity capacity
+        Bounces =
+            Map.ofList
+                [
+                    "dancer",
+                    {
+                        Came = RoomPos.at "W2N2" { X = 48; Y = 20 }
+                        Ticks = [ laid.Time - 2; laid.Time - 4; laid.Time - 6 ]
+                        Tiles =
+                            RoomPos.at "W2N2" { X = 49; Y = 20 }
+                            :: (tiles |> List.map (RoomPos.at harassRoom))
+                    }
+                ]
+    }
+
+[<Tests>]
+let campChooserTests =
+    testList
+        "the camp's body is the chooser's, priced (#663 M4)"
+        [
+            // #663 M4: the camp on a dancer probed only the biggest ranger
+            // the bank buys; a swing never camped (it struck the dancer at
+            // their standoff, three tiles, where it deals nothing).
+            test
+                "a dancer stepping in off the exit is a swing's camp where its quick kill spends less than a shot's" {
+                let colony = dancingIn 1800 { X = 2; Y = 20 } [ { X = 1; Y = 20 } ]
+                let cast = Facts.fighterCast colony harassRoom bodyTemplates Engine.guardCap
+
+                Expect.equal
+                    (cast.Template, cast.Blocks, cast.Ends)
+                    (BodyTemplate.Melee, 1, true)
+                    "a swing covers its every step in; one guard block's 90 a tick kills its 4,600 hits in 52 ticks, a ranger block's 20 in 230"
+
+                Expect.equal
+                    (fighterCastsOf colony)
+                    [ BodyTemplate.Melee, 1, 1 ]
+                    "the room's ask is the chooser's: one body of one guard block"
+
+                // The camp itself, with no holder: the chooser's swing, on
+                // the ground off the border a step from the tile it steps in
+                // on that a swing reaches.
+                let brief = Threats.briefOf (threatsOf colony (Atlas.ofView colony)) harassRoom
+
+                let camp = List.head brief.Jobs
+
+                Expect.equal
+                    (camp.Kind, camp.Quarry)
+                    (JobKind.Camp, [ "dancer" ])
+                    "its first job: the camp"
+
+                Expect.isTrue
+                    (camp.Tiles
+                     |> Set.forall (fun tile ->
+                         Dance.toEdge (RoomPos.pos tile) >= Dance.campDepth
+                         && range { X = 1; Y = 20 } (RoomPos.pos tile) <= Engine.meleeRange))
+                    "every tile a swing's reach of its step in, off the border"
+            }
+
+            test
+                "a dancer stepping in on the exit tile alone is no swing's camp: the chooser casts a shot" {
+                let colony = dancingIn 1800 { X = 0; Y = 20 } [ { X = 0; Y = 20 } ]
+                let cast = Facts.fighterCast colony harassRoom bodyTemplates Engine.guardCap
+
+                Expect.equal
+                    cast.Template
+                    BodyTemplate.Ranged
+                    "a swing on the camp's ground never reaches the exit tile"
+            }
+
+            // Review of S6: the price counted every step in a tile off the
+            // exit as a swing's while the camp laid read the ground; one
+            // ground now prices and lays it.
+            test
+                "a swing's step in walled off on the camp's ground is no camp: priced none, cast a shot, laid none" {
+                let open' = dancingIn 1800 { X = 1; Y = 20 } [ { X = 1; Y = 20 } ]
+                let layer = SpatialInfo.layerOf open'.Spatial harassRoom
+
+                // It steps in on (1,20) and stands there: the three tiles a
+                // swing covers it from off the border are built on.
+                let colony =
+                    { open' with
+                        Spatial =
+                            open'.Spatial
+                            |> withNeighbour
+                                harassRoom
+                                { layer with
+                                    Obstacles = Set.ofList [ for y in 19..21 -> { X = 2; Y = y } ]
+                                }
+                    }
+
+                Expect.equal
+                    (Facts.fighterCast open' harassRoom bodyTemplates Engine.guardCap).Template
+                    BodyTemplate.Melee
+                    "the premise: with the ground open, a swing's camp"
+
+                Expect.isEmpty
+                    (Facts.campGround colony Engine.meleeRange colony.Hostiles.Head)
+                    "no ground a swing may stand on covers a step in"
+
+                Expect.equal
+                    (Facts.fighterCast colony harassRoom bodyTemplates Engine.guardCap).Template
+                    BodyTemplate.Ranged
+                    "so the chooser casts a shot"
+
+                let camp =
+                    (Threats.briefOf (threatsOf colony (Atlas.ofView colony)) harassRoom).Jobs
+                    |> List.tryHead
+
+                Expect.isTrue
+                    (camp
+                     |> Option.forall (fun job ->
+                         job.Kind <> JobKind.Camp
+                         || job.Tiles
+                            |> Set.forall (fun tile ->
+                                range { X = 1; Y = 20 } (RoomPos.pos tile) <= 3)))
+                    "and any camp laid is a shot's, off the built ground"
+            }
+
+            // Review of S6: the kill branch priced no body already cast, so a
+            // ranger in the oven was priced as a fresh one beside every other
+            // set, and the ask could move off it as the price shifted.
+            test "a ranger already in the oven is priced sunk: the set it is one of is the cast" {
+                let colony =
+                    dancingIn 2400 { X = 2; Y = 20 } [ { X = 0; Y = 20 }; { X = 1; Y = 20 } ]
+
+                let oven =
+                    { colony with
+                        Casting =
+                            [
+                                {
+                                    Name = "ranger-1-spawn-1"
+                                    Body = bodyFor rangerPattern 1400
+                                }
+                            ]
+                    }
+
+                let castOf view =
+                    let cast = Facts.fighterCast view harassRoom bodyTemplates Engine.guardCap
+                    cast.Template, cast.Blocks, cast.Bodies
+
+                Expect.equal
+                    (castOf colony)
+                    (BodyTemplate.Ranged, 3, 1)
+                    "the premise: half its steps in on the exit tile, a shot's camp, three blocks fresh"
+
+                Expect.equal
+                    (castOf oven)
+                    (BodyTemplate.Ranged, 2, 2)
+                    "the two-block ranger in the oven spends no energy nor spawn: its pair is cheaper"
+            }
+        ]
+
 /// The look requests the colony's readers ask (`Layout.lookRequests`), by
 /// band, as (room, value, tolerance).
 let private asked (band: LookBand) (colony: ColonyView) =

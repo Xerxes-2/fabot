@@ -1342,7 +1342,7 @@ let guardRowTests =
                                             (CastRow.Fighter BodyTemplate.Ranged)
                                             "W1N2"
 
-                                    let blocks = max 1 (Facts.rangerBlocksReach colony)
+                                    let blocks = max 1 (biggestRanger colony)
                                     let energy = blocks * bodyCost rangerPattern.Block
                                     let a = creepWith "ranger-a" 0 0 (bodyFor rangerPattern energy)
                                     let b = creepWith "ranger-b" 0 0 (bodyFor rangerPattern energy)

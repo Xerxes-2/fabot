@@ -176,7 +176,7 @@ let errandStandDownTests =
                         Stance.Standoff
                         colony
                         errandRoom
-                        (Facts.rangerBlocksReach colony))
+                        (biggestRanger colony))
                     "the premise: the row's reach wins the exchange"
 
                 let log =
@@ -222,7 +222,7 @@ let errandStandDownTests =
                         Stance.Standoff
                         colony
                         errandRoom
-                        (Facts.rangerBlocksReach colony))
+                        (biggestRanger colony))
                     "the premise: one block loses to the squad"
 
                 let log =

@@ -1041,6 +1041,11 @@ module Dance =
     /// room.
     let byBorder (tile: RoomPos) : bool = toEdge (RoomPos.pos tile) <= depth
 
+    /// The steps in from the edge a camp's tile stands at least: off the
+    /// exit and the tile beside it a crossing lands on, the ground a walk
+    /// stops short of.
+    let campDepth = 2
+
     /// The rooms across the borders a tile stands within the dance depth of:
     /// where a body last seen on it may have stepped out to.
     let beyond (tile: RoomPos) : string list =

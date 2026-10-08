@@ -4009,27 +4009,20 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 |> List.choose (fun name ->
                     ColonyView.bodies view |> List.tryFind (fun creep -> creep.Name = name))
 
+            // With no holder, the bodies the chooser casts for the room
+            // (`Facts.fighterCast`, #663 M4): a swing where its camp pays
+            // more than a shot's.
             let team =
                 match holders with
-                | [] -> [ blocksFighter rangerPattern (max 1 (Facts.rangerBlocksReach view)) ]
+                | [] ->
+                    Facts.fighterCast view room bodyTemplates Engine.guardCap |> Facts.castFighters
                 | holders -> holders |> List.map Fighter.ofCreep
 
+            let reach = team |> List.map _.Reach |> List.fold max 0
+
             match Facts.sweepDancer view room team with
-            | None
-            | Some(_, []) -> None
+            | None -> None
             | Some(dancer, entries) ->
-                let reach = team |> List.map _.Reach |> List.max
-                let used = List.head entries
-
-                let struck (tile: Pos) =
-                    view.Hostiles
-                    |> List.exists (fun h ->
-                        h.Pos.Room = room
-                        && HostileInfo.armed view.Hostiles h
-                        && (HostileInfo.weaponRange view.Hostiles h
-                            |> Option.exists (fun weapon ->
-                                range tile (RoomPos.pos h.Pos) <= weapon + 1)))
-
                 let standing =
                     holders
                     |> List.choose (fun creep ->
@@ -4038,22 +4031,16 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     |> List.map RoomPos.pos
                     |> Set.ofList
 
-                let covered (tile: Pos) =
-                    entries
-                    |> List.filter (fun entry -> range tile (RoomPos.pos entry) <= reach)
-                    |> List.length
+                let used = entries |> List.tryHead |> Option.defaultValue dancer.Pos |> RoomPos.pos
 
+                // The camp's ground, the one its price reads
+                // (`Facts.campGround`): none where a step in has no tile
+                // the team's reach covers it from.
                 match
-                    Atlas.walkableWithinIn atlas room reach (RoomPos.pos used)
-                    // Off the exit and the tile beside it a crossing lands
-                    // on: the ground a walk stops short of.
-                    |> List.filter (fun tile -> Dance.toEdge tile >= 2 && not (struck tile))
-                    |> List.sortBy (fun tile ->
-                        not (standing.Contains tile),
-                        -(covered tile),
-                        range tile (RoomPos.pos used),
-                        tile.Y,
-                        tile.X)
+                    Facts.campGround view reach dancer
+                    |> List.sortBy (fun (tile, share) ->
+                        not (standing.Contains tile), -share, range tile used, tile.Y, tile.X)
+                    |> List.map fst
                     |> List.truncate (max 1 (List.length holders))
                 with
                 | [] -> None

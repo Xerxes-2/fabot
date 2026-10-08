@@ -420,7 +420,7 @@ let kiteTests =
                 let kites = blocksBeat rangerPattern Stance.Standoff colony "W1N2"
 
                 Expect.equal
-                    (kites (Facts.rangerBlocksReach colony), kites 3, kites 4)
+                    (kites (biggestRanger colony), kites 3, kites 4)
                     (true, false, true)
                     "four blocks' 80 outruns the healer's 72, three blocks' 60 does not"
             }

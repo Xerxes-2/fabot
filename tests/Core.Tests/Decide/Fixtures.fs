@@ -1240,6 +1240,11 @@ let fighterCastsOf colony =
         | CastRow.Fighter template -> Some(template, cast.Ask.Wanted, cast.Ask.Blocks)
         | _ -> None)
 
+/// The biggest ranger body a colony's bank buys, in blocks: a test's own
+/// premise arithmetic, no reader of the bot's.
+let biggestRanger (colony: ColonyView) =
+    min rangerBlocksMost (colony.Bank.Capacity / bodyCost rangerPattern.Block)
+
 let guardQuotaOf colony =
     rowOf "guard" colony |> Option.map (fun row -> row.Quota)
 
