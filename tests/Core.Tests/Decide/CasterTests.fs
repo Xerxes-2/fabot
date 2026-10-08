@@ -41,6 +41,7 @@ let private ask (task: Task) (row: CastRow) (wanted: int) : Cast =
                 Wanted = wanted
                 Blocks = 1
             }
+        Prey = None
     }
 
 /// The bodies each colony is handed for a Task, the crossings off the
@@ -53,6 +54,20 @@ let private bodiesFor (task: Task) (bidders: Caster.Bidder list) : Map<string, i
 
 /// A guard-row body: one ATTACK part.
 let private guardBody name = creepWith name 0 0 [ Attack; Move ]
+
+/// A declared enemy's empty 23C23M hauler in `room` (#652).
+let private haulerIn (room: string) =
+    { hostileIn room { X = 25; Y = 25 } (List.replicate 23 Carry @ List.replicate 23 Move) with
+        Id = "hauler-1"
+        Owner = "Trepidimous"
+    }
+
+/// The hauler of the Caster's trespass cases, in W4N1.
+let private trespasser = haulerIn "W4N1"
+
+/// A colony that sees these hostiles.
+let private seeing (hostiles: HostileInfo list) (view: ColonyView) =
+    { view with Hostiles = hostiles }
 
 [<Tests>]
 let casterTests =
@@ -213,6 +228,105 @@ let casterTests =
                     "and a guard W5N1 cast answers it as W5N1's, which casts no other"
             }
 
+            // #652: a trespass's kill outside the guarded rooms, its prey a
+            // declared enemy's hauler in W4N1 every colony sees.
+            test
+                "a trespass's kill is cast by the colony that lands it soonest where its cast pays, and by nobody where none does" {
+                // Its value as the asker priced it (`Cast.Prey`): what every
+                // colony weighing the cast reads, seeing the room or not.
+                let worth value =
+                    { ask (Guard "W4N1") CastRow.Ranger 1 with
+                        Prey = Some [ trespasser.Id, value ]
+                    }
+
+                let bodiesFor value =
+                    bodiesFor
+                        (Guard "W4N1")
+                        [
+                            bidder (seeing [ trespasser ] (rich "W1N1")) [ worth value ]
+                            bidder (seeing [ trespasser ] (rich "W5N1")) []
+                        ]
+
+                // A ranger block: 700 and its 18 spawn ticks at the colony's
+                // 20 a tick, 1,060.
+                Expect.equal
+                    (bodiesFor 2_300.0)
+                    (Map.ofList [ "W5N1", 1 ])
+                    "a 23C23M hauler's 2,300: the colony a crossing away casts, where the asker walks three"
+
+                Expect.isEmpty
+                    (bodiesFor 100.0)
+                    "a 1C1M hauler's 100, worth less than the cast: nobody casts, the asker neither"
+            }
+
+            // #652 review A1: the kth body of an ask pays for k.
+            test "two bodies of a trespass's kill are cast only where the prey pays for both" {
+                let second =
+                    { trespasser with
+                        Id = "hauler-2"
+                        Pos = RoomPos.at "W4N1" { X = 30; Y = 30 }
+                    }
+
+                // Each worth less than one 1,060 body, together more.
+                let kill =
+                    { ask (Guard "W4N1") CastRow.Ranger 2 with
+                        Prey = Some [ trespasser.Id, 650.0; second.Id, 650.0 ]
+                    }
+
+                Expect.equal
+                    (bodiesFor
+                        (Guard "W4N1")
+                        [ bidder (seeing [ trespasser; second ] (rich "W5N1")) [ kill ] ])
+                    (Map.ofList [ "W5N1", 1 ])
+                    "one body for 1,300 of prey, never two"
+            }
+
+            // #652 review S1, R3: a colony's own kill is cast past its bank's
+            // floor, whatever its stock; another's past both floors.
+            test "a colony under its bank's floor casts nothing for its own trespass" {
+                let hauler = haulerIn "W2N1"
+
+                let kill =
+                    { ask (Guard "W2N1") CastRow.Ranger 1 with
+                        Prey = Some [ hauler.Id, 2_300.0 ]
+                    }
+
+                let casts bank =
+                    bodiesFor
+                        (Guard "W2N1")
+                        [ bidder (seeing [ hauler ] (colonyAt "W1N1" bank 0)) [ kill ] ]
+
+                Expect.isEmpty
+                    (casts 1_200)
+                    "a child at a 1,200 bank leaves its trespasser to nobody"
+
+                Expect.equal
+                    (casts Tuning.defaults.CasterFloor)
+                    (Map.ofList [ "W1N1", 1 ])
+                    "at the floor it casts its own, no Storage at all"
+
+                // Another colony's kill, a crossing off: the bank alone
+                // lends no body, both floors do.
+                let lending stock =
+                    bodiesFor
+                        (Guard "W2N1")
+                        [
+                            bidder (seeing [ hauler ] (colonyAt "W1N1" 1_200 0)) [ kill ]
+                            bidder
+                                (seeing
+                                    [ hauler ]
+                                    (colonyAt "W3N1" Tuning.defaults.CasterFloor stock))
+                                []
+                        ]
+
+                Expect.isEmpty (lending 0) "a neighbour at the bank's floor and no stock lends none"
+
+                Expect.equal
+                    (lending Tuning.defaults.CasterReserve)
+                    (Map.ofList [ "W3N1", 1 ])
+                    "past the stock's reserve too, it casts the other's kill"
+            }
+
             test "an Assault's squad stays its declarer's" {
                 let squad: Cast =
                     {
@@ -223,6 +337,7 @@ let casterTests =
                                 Wanted = 1
                                 Blocks = 1
                             }
+                        Prey = None
                     }
 
                 Expect.equal

@@ -486,6 +486,30 @@ let private fightPass
         Pool = lazy (planFightPool threats tasks.Value)
     }
 
+/// Whether a holder of the colony is called to the kill in a room this tick
+/// (`killCalls`, the Matcher's own selection, read before the match by the
+/// gate's refusals a call can meet, `callAdmits`): a trespass's kill no
+/// holder is called to is cast for (#652). Selected on first read.
+let private calledTo
+    (view: ColonyView)
+    atlas
+    (fight: FightPass)
+    (assignments: Assignments)
+    : string -> bool =
+    let called =
+        lazy
+            (killCalls
+                view
+                atlas
+                fight.Threats
+                fight.Pool.Value
+                assignments
+                (callAdmits view atlas fight.Threats assignments)
+             |> Map.values
+             |> Set.ofSeq)
+
+    fun room -> called.Value.Contains room
+
 /// The fight pass's tail, over the bodies `movers` names (every body where
 /// None): the Emitter's acts, laid among the rest by `around`, the strike and
 /// heal reflexes over every body, the melee glue and the steps. The Intents
@@ -679,6 +703,8 @@ type private WholeHead =
         Held: HeldTaskFacts
         Outposts: OutpostFacts
         Fight: FightPass
+        /// Whether a holder is called to a room's kill (`calledTo`).
+        Calls: string -> bool
         Verbose: Set<string>
     }
 
@@ -851,6 +877,7 @@ let rec private openWhole
             Held = held
             Outposts = outposts
             Fight = fight
+            Calls = calledTo view atlas fight assignments
             Verbose = verbose
         }
 
@@ -859,7 +886,7 @@ let rec private openWhole
         View = view
         Threats = fight.Threats
         FightTasks = fight.Tasks
-        Casts = lazy (castsOf view fight.Threats outposts.Guarded)
+        Casts = lazy (castsOf view fight.Threats outposts.Guarded head.Calls)
         Fighters = economy.Fighters
         Join = joinWhole head
     }
@@ -872,15 +899,16 @@ and private joinWhole (head: WholeHead) (world: WorldFight) : Joining =
     let fought = foughtThreats threats world
 
     // The fighting rows cast for the Caster's share of the world's asks
-    // where it handed one, else for the colony's own.
-    let outposts =
-        { head.Outposts with
-            Casts = world.Casts
-        }
-
+    // where it handed one, else for the colony's own, a trespass's kill
+    // priced as its own cast (`ownCasts`).
     let casts =
         world.Casts
-        |> Option.defaultWith (fun () -> castsOf view threats outposts.Guarded)
+        |> Option.defaultWith (fun () -> ownCasts view threats head.Outposts.Guarded head.Calls)
+
+    let outposts =
+        { head.Outposts with
+            Casts = Some casts
+        }
 
     // The outpost's source containers, beside the memoised Layout and never
     // inside it: derived fresh every tick for the reason on the rule itself.
@@ -1287,7 +1315,7 @@ and private finishWhole (tail: WholeTail) (outcomes: MatchOutcome list) : Decisi
         Economy =
             {
                 Sizing = carriedSizing sizing
-                Asks = castAsks view own outposts.Guarded
+                Asks = castAsks view own outposts.Guarded head.Calls
                 Economy = economyBodies |> Seq.map _.Name |> Fresh.setOfSeq
                 EconomyPooled = not (List.isEmpty economyPool)
                 OutpostRooms = outposts.Declared
@@ -1393,7 +1421,9 @@ let rec private openFight
                         | Some task, Some tid when taskId task = tid -> walledOff creep task
                         | _ -> false))
 
-        if castAsks view threats guarded <> carry.Asks || walledOffAnew.Force() then
+        let calls = calledTo view atlas fight assignments
+
+        if castAsks view threats guarded calls <> carry.Asks || walledOffAnew.Force() then
             None
         else
             Some
@@ -1402,7 +1432,7 @@ let rec private openFight
                     View = view
                     Threats = threats
                     FightTasks = fight.Tasks
-                    Casts = lazy (castsOf view threats guarded)
+                    Casts = lazy (castsOf view threats guarded calls)
                     Fighters = fighters
                     Join =
                         joinFight

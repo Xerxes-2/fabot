@@ -58,8 +58,12 @@ let private roomOf (task: Task) =
 /// walk, a room's side a crossing (`hops`, the route's over every room's
 /// ground, `World.reachHops`, else off the names; past the hop budget where
 /// neither prices it); then a colony
-/// asking it, then by home. A colony casts for any ask but its own — one it
-/// asks for itself, for a room that is no other colony's home it defends —
+/// asking it, then by home. A trespass's kill (`Cast.Prey`, #652) goes only
+/// to a colony past its bank's floor for its own room (`CastBid.paysOwn`),
+/// past both floors for another's, whose cast landed at
+/// that cost pays for the body and every one before it in the ask
+/// (`Facts.castBodiesPaid`), and to nobody where none does. A colony casts
+/// for any ask but its own — one it asks for itself, for a room that is no other colony's home it defends —
 /// only with a spawn, a bank at `Tuning.CasterFloor` and a stock at
 /// `Tuning.CasterReserve`, within `Tuning.MaxHops` of the room and
 /// projecting it or within `Tuning.LaneHops`, so its body is handed the
@@ -233,11 +237,17 @@ let assign
             let own (bidder: Bidder) =
                 isAsker bidder && not (Facts.defendsOthers bidder.View room)
 
+            // A trespass's kill is cast into a colony's own room only past
+            // its bank's floor, the body paid for (#652): it is spent out of
+            // the economy it buys back.
             let casters =
                 eligible
                 |> List.filter (fun b ->
                     not (List.isEmpty b.View.Spawns)
-                    && (Option.isSome fixedTo || own b || Facts.castsForOthers b.View))
+                    && (Facts.castsForOthers b.View
+                        || (match ask.Prey with
+                            | Some _ -> own b && CastBid.paysOwn tuning b.View.Bank.Capacity
+                            | None -> Option.isSome fixedTo || own b)))
 
             let priced =
                 casters
@@ -263,8 +273,9 @@ let assign
             let holding (ledger: Ledger) (bidder: Bidder) =
                 Map.tryFind (bidder.Home, tid, row) ledger.HeldFor |> Option.defaultValue 0
 
-            // A body free of every fight, else one cast.
-            let fromFleet (ledger: Ledger) =
+            // A body free of every fight, else one cast; `unit` the body's
+            // place in the ask, so the kth of a priced kill pays for k.
+            let fromFleet (ledger: Ledger) (unit: int) =
                 let covering =
                     match
                         eligible
@@ -291,12 +302,32 @@ let assign
                     let queue (bidder: Bidder) =
                         Map.tryFind bidder.Home ledger.Queued |> Option.defaultValue 0
 
+                    let landing (bidder: Bidder) =
+                        snd priced.[bidder.Home].Value + queue bidder + walk bidder room
+
+                    // A trespass's kill is cast only by a colony whose cast,
+                    // landed where it bids, pays for this body and every one
+                    // before it in the ask (#652).
+                    let pays (bidder: Bidder) =
+                        match ask.Prey with
+                        | Some prey ->
+                            Facts.castBodiesPaid
+                                bidder.View
+                                row
+                                (blocksOf bidder)
+                                room
+                                (landing bidder)
+                                prey
+                            >= unit
+                        | None -> true
+
                     match
                         pool
+                        |> List.filter pays
                         |> List.map (fun b ->
                             ({
                                 Home = b.Home
-                                Cost = snd priced.[b.Home].Value + queue b + walk b room
+                                Cost = landing b
                                 Asks = isAsker b
                             }
                             : CastBid))
@@ -315,13 +346,14 @@ let assign
                             }
 
                         hand ledger bidder task row (blocksOf bidder)
+                    | None when Option.isSome ask.Prey -> ledger
                     | None ->
                         match askers |> List.tryFind (fun b -> own b && not (losesHome b)) with
                         | Some asker -> hand ledger asker task row (blocksOf asker)
                         | None -> ledger
 
             (ledger, [ 1 .. ask.Ask.Wanted ])
-            ||> List.fold (fun ledger _ ->
+            ||> List.fold (fun ledger unit ->
                 // A body already sent to this fight first, whoever cast it.
                 match bidders |> List.tryFind (fun b -> holding ledger b > 0) with
                 | Some bidder ->
@@ -335,7 +367,7 @@ let assign
                         }
 
                     hand ledger bidder task row (blocksOf bidder)
-                | None -> fromFleet ledger))
+                | None -> fromFleet ledger unit))
 
     let handed = (List.fold weigh ledger asks).Handed
 
@@ -356,6 +388,7 @@ let assign
                                     Wanted = units
                                     Blocks = blocks
                                 }
+                            Prey = ask.Prey
                         })))
 
         bidder.Home, shares @ (bidder.Asks |> List.filter (weighed >> not)))

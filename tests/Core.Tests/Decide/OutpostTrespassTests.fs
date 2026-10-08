@@ -56,6 +56,175 @@ let private secondOutpost hostiles (ours: (CreepInfo * Pos) list) =
                 }
     }
 
+/// The colony at its bank's floor (`Tuning.CasterFloor`), no stock: what a
+/// trespass's priced cast into its own room is paid out of (#652).
+let private paying (colony: ColonyView) =
+    { colony with
+        Bank = bank Tuning.defaults.CasterFloor Tuning.defaults.CasterFloor
+    }
+
+/// `raisingBeyond` with W2N3 beside the child's home W1N3 mined too, its
+/// source at (25,25): two outposts the child's resident borders (#652).
+let private raisingBesideTwo hostiles =
+    let colony = raisingBeyond hostiles
+
+    let floor =
+        TerrainGrid.ofList
+            [
+                for x in 1..48 do
+                    for y in 1..48 -> { X = x; Y = y }, Plain
+            ]
+
+    { colony with
+        Sources = source "src-c" :: colony.Sources
+        Spatial =
+            { colony.Spatial with
+                Borders = colony.Spatial.Borders |> Map.add "W2N3" plainRing
+                TargetKinds = colony.Spatial.TargetKinds |> Map.add "src-c" Source
+            }
+            |> withNeighbour
+                "W2N3"
+                { RoomLayer.empty with
+                    Terrain = floor
+                    TargetPositions = Map.ofList [ "src-c", { X = 25; Y = 25 } ]
+                    Obstacles = Set.singleton { X = 25; Y = 25 }
+                }
+    }
+
+/// The pair world decided whole (#652, the #647 shape): Raptor865's 5W3M
+/// seated beside the mother's outpost rock, the mother's bank at 1,300,
+/// under the floor her own cast is paid past, and the child at RCL6 past
+/// both floors, the bar for casting into another's room; `bodies` stand at
+/// the child's home.
+let private trespassedPairDecided (bodies: (string * BodyPart list) list) =
+    let outpost, child = ViewFixtures.outpost, ViewFixtures.child
+    let tuning = Tuning.defaults
+    let colonies = ViewFixtures.declared
+
+    let raptor: HostileInfo =
+        {
+            Id = "raptor-out"
+            Owner = "Trepidimous"
+            Pos = { Room = outpost; X = 5; Y = 6 }
+            Body = List.replicate 5 Work @ List.replicate 3 Move
+            Boosts = []
+            Hits = 8 * Engine.partHits
+            TicksToLive = 1000
+        }
+
+    let rooms =
+        ViewFixtures.pairRooms
+        |> Map.change outpost (Option.map (fun facts -> { facts with Hostiles = [ raptor ] }))
+        |> Map.change
+            ViewFixtures.mother
+            (Option.map (fun facts ->
+                { facts with
+                    Energy = { Available = 1_300; Capacity = 1_300 }
+                }))
+        |> Map.change
+            child
+            (Option.map (fun facts ->
+                { ViewFixtures.withStock tuning.CasterReserve facts with
+                    Controller =
+                        facts.Controller |> Option.map (fun ctrl -> { ctrl with Level = 6 })
+                    Energy =
+                        {
+                            Available = tuning.CasterFloor
+                            Capacity = tuning.CasterFloor
+                        }
+                    Layer =
+                        { facts.Layer with
+                            CreepPositions =
+                                (facts.Layer.CreepPositions, bodies)
+                                ||> List.fold (fun tiles (name, _) ->
+                                    Map.add name ViewFixtures.pioneerTile tiles)
+                        }
+                }))
+
+    let world =
+        { ViewFixtures.pairWorld with
+            Rooms = rooms
+            Sightings =
+                rooms
+                |> Map.map (fun _ facts ->
+                    {
+                        Tick = ViewFixtures.pairWorld.Time
+                        Targets = lazy (facts.TargetKinds |> Map.keys |> Set.ofSeq)
+                        Rival = None
+                    })
+            Creeps =
+                ViewFixtures.pairWorld.Creeps
+                @ (bodies
+                   |> List.map (fun (name, parts) ->
+                       let body = ViewFixtures.creepWithBody name child (List.countBy id parts)
+                       let hits = Engine.partHits * List.length parts
+
+                       { body with
+                           Info =
+                               { body.Info with
+                                   Hits = { Hits = hits; HitsMax = hits }
+                               }
+                       }))
+        }
+
+    let gates =
+        colonies |> List.map (fun colony -> colony.Home, StandDown.none) |> Map.ofList
+
+    let joins = JoinTable()
+
+    let holders =
+        World.creepColonies
+            tuning
+            colonies
+            (World.living colonies world)
+            ViewFixtures.noneShut
+            world
+
+    let watch = WorldView.ofWorld colonies (gates |> Map.toList |> List.map snd) world
+
+    let views =
+        colonies
+        |> List.map (fun colony ->
+            colony,
+            ColonyView.ofWorldRecalling
+                joins
+                tuning
+                colonies
+                HarassCasting.none
+                gates.[colony.Home]
+                holders
+                isFighterBody
+                watch
+                world
+                colony)
+
+    let decided =
+        decideColonies
+            {
+                Hops = World.reachHops StandDown.none joins tuning world tuning.MaxHops
+                Holding = Map.empty
+                Verbose = Set.empty
+                PlanMemos = Map.empty
+                Carries = Map.empty
+                Idle = Set.empty
+                FightAlone = Set.empty
+                TurnIndex = None
+            }
+            ignore
+            views
+
+    decided,
+    fun home ->
+        decided.Decided
+        |> List.pick (fun (colony, _, decision, ()) ->
+            if colony.Home = home then Some decision else None)
+
+/// This tick's casts for a room's kill: row, bodies and prey by id.
+let private killCasts (room: string) (decided: Decision) =
+    decided.Quotas.Casts
+    |> List.filter (fun cast -> cast.For = Guard room)
+    |> List.map (fun cast -> cast.Ask.Row, cast.Ask.Wanted, cast.Prey |> Option.map (List.map fst))
+
 [<Tests>]
 let trespassTests =
     testList
@@ -713,6 +882,206 @@ let trespassTests =
                     ((decideOn colony).Assignments
                      |> Map.exists (fun _ tid -> tid = taskId (Guard "W1N2")))
                     "the anchor and the haulers are no fighters"
+            }
+
+            // #652, live W17S26 t~1,030,262: Trepidimous' 5W3M miner on its
+            // seat and 23C23M hauler worked W17S25's outpost unanswered, no
+            // row casting for a trespass and no holder within the kill's
+            // walk.
+            test
+                "a miner and a hauler worth their casts in an outpost no body reaches: a guard is cast for the miner, a ranger for the hauler, and each takes the kill" {
+                let trespassers = [ seatedDigger; haulerOf "hauler-1" { X = 27; Y = 44 } ]
+                let colony = paying (declaredRaid trespassers)
+
+                // The kill is shown by `Facts.castBodiesPaid`'s own
+                // `killTicksOf` (the body alone at its standoff); this pins
+                // the casts and the seat, the arena the kill's ticks.
+                Expect.equal
+                    (killCasts "W1N2" (decideOn colony))
+                    [ CastRow.Guard, 1, Some [ "d-1" ]; CastRow.Ranger, 1, Some [ "hauler-1" ] ]
+                    "one guard for the miner its swing catches, one ranger for the hauler at its pace"
+
+                // The bodies those casts are, standing at the spawn: each
+                // is matched to the kill's seat (#647: the cast and the seat
+                // come from the same Brief).
+                for body in
+                    [
+                        creepWith "guard-1-Spawn1" 0 0 guardPattern.Block
+                        creepWith "ranger-1-Spawn1" 0 0 rangerPattern.Block
+                    ] do
+                    let cast = colony |> withBodyAtHome body atSpawn
+
+                    Expect.equal
+                        (Map.tryFind body.Name (decideOn cast).Assignments)
+                        (Some(taskId (Guard "W1N2")))
+                        $"the cast {body.Name} takes the outpost's kill"
+            }
+
+            test
+                "a body worth less than its cast, a bare scout or a body shot disarmed is cast for by no row" {
+                let cheap =
+                    { hostileIn "W1N2" { X = 24; Y = 41 } [ Work; Move ] with
+                        Id = "d-2"
+                        Owner = "Trepidimous"
+                    }
+
+                let scout =
+                    { hostileIn "W1N2" { X = 27; Y = 44 } [ Move ] with
+                        Owner = "Trepidimous"
+                    }
+
+                // 1,300 of body, its ten ATTACK shot off: a trespasser, but
+                // no economy of the enemy's (spar's squads: their cripples
+                // bought casts until the prey was the enemy's economy alone).
+                let disarmed =
+                    { hostileIn
+                          "W1N2"
+                          { X = 27; Y = 44 }
+                          (List.replicate 10 Attack @ List.replicate 10 Move) with
+                        Owner = "Trepidimous"
+                        Hits = 10 * Engine.partHits
+                    }
+
+                for hostiles, case in
+                    [
+                        [ cheap ], "a 1W1M digger on its seat: 262 energy against a 750 guard"
+                        [ scout ], "a lone scout: no trespasser at all"
+                        [ disarmed ], "a body shot disarmed: the fight's to finish, not a cast's"
+                    ] do
+                    Expect.isEmpty
+                        (killCasts "W1N2" (decideOn (paying (declaredRaid hostiles))))
+                        case
+            }
+
+            // #652 review S1, R3: the cast is spent out of the economy it
+            // buys back, so a colony's own kill is cast only past its bank's
+            // floor; the stock's reserve is the bar for lending to another.
+            test
+                "a colony under its bank's floor casts nothing for its own trespasser, at it with no stock it does" {
+                let raided = declaredRaid [ seatedDigger; haulerOf "hauler-1" { X = 27; Y = 44 } ]
+                let floor = Tuning.defaults.CasterFloor
+
+                Expect.isEmpty
+                    (killCasts
+                        "W1N2"
+                        (decideOn
+                            { raided with
+                                Bank = bank (floor - 1) (floor - 1)
+                            }))
+                    "a bank under CasterFloor"
+
+                Expect.isNonEmpty
+                    (killCasts "W1N2" (decideOn (paying raided)))
+                    "a bank at CasterFloor, no Storage at all"
+            }
+
+            test "a holder called to the kill within its walk is the answer: no row casts for it" {
+                let colony = paying (raisingBeyond [ seatedDigger ])
+
+                let called = decide colony residentHeld Set.empty None
+
+                Expect.equal
+                    (Map.tryFind "r-1" called.Assignments)
+                    (Some(taskId (Guard "W1N2")))
+                    "the premise: the quiet resident is called to the miner"
+
+                Expect.isEmpty (killCasts "W1N2" called) "and nothing is cast for it"
+
+                Expect.equal
+                    (killCasts "W1N2" (decideOn colony) |> List.map (fun (row, _, _) -> row))
+                    [ CastRow.Guard ]
+                    "the same miner with no holder to call is cast for"
+            }
+
+            // #652 review A2: the cast reads the Matcher's own call, one
+            // holder to one kill, so a resident in walk of two kills answers
+            // one and the other casts.
+            test "one resident in walk of two trespassed outposts is called to one: the other casts" {
+                let second =
+                    { seatedDigger with
+                        Id = "d-3"
+                        Pos = RoomPos.at "W2N3" { X = 24; Y = 25 }
+                    }
+
+                let called =
+                    decide
+                        (paying (raisingBesideTwo [ seatedDigger; second ]))
+                        residentHeld
+                        Set.empty
+                        None
+
+                // Both border its home; W2N3's miner is the nearer walk,
+                // about 50 tiles to W1N2's 64.
+                Expect.equal
+                    (Map.tryFind "r-1" called.Assignments)
+                    (Some(taskId (Guard "W2N3")))
+                    "the premise: the resident is called to the nearer kill"
+
+                Expect.isEmpty (killCasts "W2N3" called) "the kill it answers casts nothing"
+
+                Expect.equal
+                    (killCasts "W1N2" called)
+                    [ CastRow.Guard, 1, Some [ "d-1" ] ]
+                    "and the other outpost's miner is cast for"
+            }
+
+            // #652 re-review R1: a chase is always raided, which only the
+            // match prices; its call takes the resident from the trespass
+            // all the same, so the trespass casts.
+            test "a resident called to a nearer chase leaves the trespass beside it to a cast" {
+                let chased =
+                    { crippledAt { X = 25; Y = 10 } with
+                        Id = "h-chase"
+                        Pos = RoomPos.at "W2N3" { X = 45; Y = 25 }
+                    }
+
+                let called =
+                    decide
+                        (paying (raisingBesideTwo [ seatedDigger; chased ]))
+                        residentHeld
+                        Set.empty
+                        None
+
+                Expect.equal
+                    (Map.tryFind "r-1" called.Assignments)
+                    (Some(taskId (Guard "W2N3")))
+                    "the premise: the resident takes the chase"
+
+                Expect.equal
+                    (killCasts "W1N2" called)
+                    [ CastRow.Guard, 1, Some [ "d-1" ] ]
+                    "and the outpost's miner is cast for"
+            }
+
+            // #652 review A5, the #647 invariant across colonies: the cast
+            // the Caster hands another colony is matched to the kill's seat.
+            test
+                "a trespass in the mother's outpost the child lands is cast by the child, and its guard takes the kill" {
+                let outpost, mother, child =
+                    ViewFixtures.outpost, ViewFixtures.mother, ViewFixtures.child
+
+                let decided, decisionOf = trespassedPairDecided []
+
+                Expect.isEmpty decided.Faulted "the premise: both colonies decide"
+
+                Expect.equal
+                    (killCasts outpost (decisionOf child))
+                    [ CastRow.Guard, 1, Some [ "raptor-out" ] ]
+                    "the child, past both floors, is handed the guard for the miner"
+
+                Expect.isEmpty
+                    (killCasts outpost (decisionOf mother))
+                    "and the mother, under her bank's floor, casts none"
+
+                let decided, decisionOf =
+                    trespassedPairDecided [ "guard-960-Spawn2", guardPattern.Block ]
+
+                Expect.isEmpty decided.Faulted "the premise: both colonies decide, the guard cast"
+
+                Expect.equal
+                    (Map.tryFind "guard-960-Spawn2" (decisionOf child).Assignments)
+                    (Some(taskId (Guard outpost)))
+                    "the child's cast guard takes the mother's kill"
             }
 
             test "a ranger shoots it from three" {

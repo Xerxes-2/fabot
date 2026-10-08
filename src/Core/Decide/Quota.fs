@@ -12,20 +12,6 @@ open Fabot.Core.Types
 /// toward zero); each row's own floor answers for it.
 let internal ceilDiv numerator divisor = (numerator + divisor - 1) / divisor
 
-/// ADR-0042
-/// What one source of a room held this way is worth per tick. Owned **or**
-/// reserved, never reserved alone: the colony's own room is owned while
-/// nothing reserves it, so "reserved, or half" would price the two home
-/// sources at five each.
-let internal heldRateOf (control: RoomControlInfo) =
-    if
-        control.Owner = Ownership.Ours
-        || RoomControlInfo.heldBy ReservationHolder.Ours control |> Option.isSome
-    then
-        Engine.heldOutputPerTick
-    else
-        Engine.neutralOutputPerTick
-
 /// One source's rate per tick, read off the room it stands in: the ceiling on
 /// what anything standing over it can take out. Read per source, not a module
 /// constant, because a reservation can lapse. None for a source in a room the
@@ -557,26 +543,65 @@ let private chaseAsks
             |> List.map (fun ask -> task, ask)
         | _ -> [])
 
+/// The trespass kills outside the guarded rooms that a row is asked for
+/// (#652), each with the trespassers its row answers (`RowAsk.Prey`): a
+/// kill no holder of another Guard is called to (`calls`, the Matcher's
+/// own selection, `Pool.killCalls`), whose cast the Caster prices against
+/// what it lands (`Facts.castBodiesPaid`). One a holder is called to asks
+/// nothing: the holder is the cheaper body, already standing.
+let private killAsks
+    (threats: Threats)
+    (outposts: OutpostFacts)
+    (calls: string -> bool)
+    (row: CastRow)
+    : (Task * RowAsk) list =
+    threats.Briefs
+    |> Map.toList
+    |> List.collect (fun (task, brief) ->
+        match task with
+        | Guard room when
+            brief.Duty = Duty.Guard BriefKind.Trespass
+            && not (List.contains room outposts.Guarded)
+            && not (calls room)
+            ->
+            brief.Asks
+            |> List.filter (fun ask -> ask.Row = row)
+            |> List.map (fun ask -> task, ask)
+        | _ -> [])
+
 /// A fighting row's asks, each with its Task: its guarded rooms' but a
-/// cooling one's (`recastCooling`), its cast chases' and every other
-/// Brief's.
+/// cooling one's (`recastCooling`), its cast chases', its priced trespass
+/// kills' (`killAsks`) and every other Brief's.
 let private asksFor
     (view: ColonyView)
     (threats: Threats)
     (outposts: OutpostFacts)
+    (calls: string -> bool)
     (row: CastRow)
-    : (Task * RowAsk) list =
+    : (Task * RowAsk * bool) list =
+    let unpriced asks =
+        asks |> List.map (fun (task, ask) -> task, ask, false)
+
     (guardedAsks threats outposts row
      |> List.filter (fun (room, ask) -> not (recastCooling view threats room ask))
-     |> List.map (fun (room, ask) -> Guard room, ask))
-    @ chaseAsks view threats outposts row
-    @ briefAsks threats row
+     |> List.map (fun (room, ask) -> Guard room, ask)
+     |> unpriced)
+    @ unpriced (chaseAsks view threats outposts row)
+    @ (killAsks threats outposts calls row
+       |> List.map (fun (task, ask) -> task, ask, true))
+    @ unpriced (briefAsks threats row)
 
 /// Every fighting row's asks this tick, each with its Task, row, bodies and
 /// blocks, in `asksFor`'s order, off the guarded rooms, the one outpost fact
-/// `asksFor` reads: what this colony asks the world's Caster for
-/// (`Caster.assign`), and, decided alone, what it casts for.
-let castsOf (view: ColonyView) (threats: Threats) (guarded: string list) : Cast list =
+/// `asksFor` reads, and whether a holder is called to a room's kill
+/// (`calls`, `Pool.killCalls`): what this colony asks the world's Caster
+/// for (`Caster.assign`), a trespass's kill with its prey to price.
+let castsOf
+    (view: ColonyView)
+    (threats: Threats)
+    (guarded: string list)
+    (calls: string -> bool)
+    : Cast list =
     let outposts =
         {
             Claims = []
@@ -594,28 +619,93 @@ let castsOf (view: ColonyView) (threats: Threats) (guarded: string list) : Cast 
     |> List.append [ CastRow.Guard; CastRow.Ranger ]
     |> List.distinct
     |> List.collect (fun row ->
-        asksFor view threats outposts row
-        |> List.map (fun (task, ask) ->
+        asksFor view threats outposts calls row
+        |> List.map (fun (task, ask, priced) ->
+            let prey = if priced then ask.Prey else None
+
             {
                 For = task
                 Ask =
                     {
                         Row = row
-                        Wanted = ask.Wanted threats
+                        // A priced kill, one body a trespasser of its prey.
+                        Wanted =
+                            match prey with
+                            | Some ids -> min (ask.Wanted threats) (List.length ids)
+                            | None -> ask.Wanted threats
                         Blocks = ask.Blocks()
                     }
+                Prey = prey
             }))
 
-/// `castsOf` without their Tasks: what a fight-only decide holds against the
-/// last whole decide's (`EconomyCarry.Asks`).
-let internal castAsks (view: ColonyView) (threats: Threats) (guarded: string list) : CastAsk list =
-    castsOf view threats guarded |> List.map _.Ask
+/// What a colony casts for alone in the world (a fixture): its own asks
+/// (`castsOf`), a trespass's kill only past its bank's floor
+/// (`CastBid.paysOwn`) and only as many bodies as its own cast pays
+/// for (`Facts.castBodiesPaid`), landed as the Caster bids it: its spawn
+/// time (`Facts.castPrice`), its spawns' queue and its walk, a room's side a
+/// crossing off the room names.
+let ownCasts
+    (view: ColonyView)
+    (threats: Threats)
+    (guarded: string list)
+    (calls: string -> bool)
+    : Cast list =
+    let home = SpatialInfo.homeName view.Spatial
+
+    let queued =
+        (view.Spawns |> List.sumBy _.Remaining) / max 1 (List.length view.Spawns)
+
+    castsOf view threats guarded calls
+    |> List.choose (fun cast ->
+        match cast.Prey, cast.For with
+        | Some prey, Guard room ->
+            let landing =
+                snd (Facts.castPrice view cast.Ask.Row room)
+                + queued
+                + CastBid.walk view.Tuning (RoomName.hopsBetween home room)
+
+            let paid =
+                if CastBid.paysOwn view.Tuning view.Bank.Capacity then
+                    Facts.castBodiesPaid view cast.Ask.Row cast.Ask.Blocks room landing prey
+                else
+                    0
+
+            match min cast.Ask.Wanted paid with
+            | 0 -> None
+            | wanted ->
+                Some
+                    { cast with
+                        Ask = { cast.Ask with Wanted = wanted }
+                    }
+        | _ -> Some cast)
+
+/// `ownCasts` without their Tasks: what a fight-only decide holds against
+/// the last whole decide's (`EconomyCarry.Asks`).
+let internal castAsks
+    (view: ColonyView)
+    (threats: Threats)
+    (guarded: string list)
+    (calls: string -> bool)
+    : CastAsk list =
+    ownCasts view threats guarded calls |> List.map _.Ask
 
 /// A fighting row's casts this tick: the Caster's share where it handed one
-/// (`OutpostFacts.Casts`), else the row's own asks.
+/// (`OutpostFacts.Casts`), else the row's own unpriced asks — no trespass's
+/// kill, which only a priced cast answers (`ownCasts`, `Caster.assign`).
 let private rowCasts (outposts: OutpostFacts) (row: CastRow) : CastAsk list option =
     outposts.Casts
     |> Option.map (List.choose (fun cast -> if cast.Ask.Row = row then Some cast.Ask else None))
+
+/// A row's asks with no Caster's word (`rowCasts`): every one but a priced
+/// trespass kill.
+let private unpricedAsks
+    (view: ColonyView)
+    (threats: Threats)
+    (outposts: OutpostFacts)
+    (row: CastRow)
+    : (Task * RowAsk) list =
+    asksFor view threats outposts (fun _ -> false) row
+    |> List.choose (fun (task, ask, priced) -> if priced then None else Some(task, ask))
 
 /// A fighting row's quota: its casts' counts, summed.
 let internal rowQuota
@@ -627,7 +717,7 @@ let internal rowQuota
     match rowCasts outposts row with
     | Some casts -> casts |> List.sumBy _.Wanted
     | None ->
-        asksFor view threats outposts row
+        unpricedAsks view threats outposts row
         |> List.sumBy (fun (_, ask) -> ask.Wanted threats)
 
 /// The blocks a fighting row casts this tick: the worst of its casts'
@@ -644,7 +734,9 @@ let internal rowBlocksWanted
     match
         match rowCasts outposts row with
         | Some casts -> casts |> List.map _.Blocks
-        | None -> asksFor view threats outposts row |> List.map (fun (_, ask) -> ask.Blocks())
+        | None ->
+            unpricedAsks view threats outposts row
+            |> List.map (fun (_, ask) -> ask.Blocks())
     with
     | [] ->
         match row with

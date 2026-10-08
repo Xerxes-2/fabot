@@ -107,8 +107,9 @@ module BriefKind =
     let opens (ahead: BriefKind) (kind: BriefKind) =
         ahead = BriefKind.Chase && laysRing kind
 
-    /// A kill (#510, #516): one body, a rung up, cast for by no row, and a
-    /// quiet holder called to it.
+    /// A kill (#510, #516): one body, a rung up, and a quiet holder called to
+    /// it; a chase cast for by no row, a trespass only where its cast pays
+    /// (#652).
     let isKill (kind: BriefKind) =
         match kind with
         | BriefKind.Chase
@@ -319,14 +320,20 @@ type Brief =
 /// What one Brief asks a row for: the row, how many bodies, and the blocks
 /// each must carry to win the room alone. The guard and ranger rows sum the
 /// Guards' over the guarded rooms (`OutpostFacts.Guarded`), so a held exit's
-/// or a trespass's ask is read only where its room is guarded too; the
-/// defender and squad rows every other Brief's.
+/// ask is read only where its room is guarded too, and a trespass's
+/// elsewhere only priced (`Prey`, #652); the defender and squad rows every
+/// other Brief's.
 and [<NoEquality; NoComparison>] RowAsk =
     {
         Row: CastRow
         /// How many bodies, the tick's Threats given.
         Wanted: Threats -> int
         Blocks: unit -> int
+        /// A trespass's kill's: each trespasser the row answers
+        /// (`trespassSplit`) by id, with its kill value (`Facts.killValue`),
+        /// which prices its cast outside the guarded rooms (#652). None for
+        /// every other ask.
+        Prey: (string * float) list option
     }
 
 /// The Brief of each combat Task no source claims, read off one colony's
@@ -927,6 +934,7 @@ module Brief =
                         |> Option.defaultValue view.Tuning.HarassBlocks
 
                     rangerBlocksFor floor view room
+            Prey = None
         }
 
     /// What each kind asks its row for. A ranger kind the ranger row's, never
@@ -966,6 +974,7 @@ module Brief =
                                 (harassAsk view room).Blocks()
                             else
                                 rangerBlocksFor view.Tuning.RangerResidentBlocks view room
+                    Prey = None
                 }
             ]
         | BriefKind.Harass -> [ harassAsk view room ]
@@ -977,10 +986,19 @@ module Brief =
                     Row = CastRow.Ranger
                     Wanted = fun _ -> rangersWanted view room
                     Blocks = fun () -> rangerBlocksFor 1 view room
+                    Prey = None
                 }
             ]
         | BriefKind.Trespass ->
             let bouncing = answered.Value |> List.forall (snd >> List.isEmpty)
+
+            // A priced cast's prey is the enemy's economy alone, and what
+            // the ranger row answers is no guard's: one body a trespasser,
+            // never two (#652).
+            let shot =
+                answered.Value
+                |> List.collect (fun (row, trespassers) ->
+                    if row = CastRow.Ranger then trespassers else [])
 
             answered.Value
             |> List.map (fun (row, trespassers) ->
@@ -1002,6 +1020,13 @@ module Brief =
                                 rangerBlocksFor 1 view room
                             else
                                 guardBlocksFor view room
+                    Prey =
+                        trespassers
+                        |> List.filter (fun hostile ->
+                            Facts.enemyEconomy view.Hostiles hostile
+                            && (row = CastRow.Ranger || not (List.contains hostile shot)))
+                        |> List.map (fun hostile -> hostile.Id, Facts.killValue view hostile)
+                        |> Some
                 })
         | BriefKind.Outpost
         | BriefKind.Core
@@ -1011,6 +1036,7 @@ module Brief =
                     Row = CastRow.Guard
                     Wanted = fun _ -> guardsWanted view room
                     Blocks = fun () -> guardBlocksFor view room
+                    Prey = None
                 }
             ]
         // A chase is cast for by nobody, but in a room shut on a raid the
@@ -1025,6 +1051,7 @@ module Brief =
                         Row = CastRow.Ranger
                         Wanted = fun _ -> rangersWanted view room
                         Blocks = fun () -> rangerBlocksFor 1 view room
+                        Prey = None
                     }
                 ]
             | Some _ ->
@@ -1033,6 +1060,7 @@ module Brief =
                         Row = CastRow.Guard
                         Wanted = fun _ -> guardsWanted view room
                         Blocks = fun () -> guardBlocksFor view room
+                        Prey = None
                     }
                 ]
             | None -> []
@@ -1389,6 +1417,7 @@ module Brief =
                                 rangerBlocksFor 1 view (SpatialInfo.homeName view.Spatial)
                             else
                                 view.Tuning.DefenderBlocks
+                    Prey = None
                 })
 
         let capacity threats =
@@ -1450,6 +1479,7 @@ module Brief =
                             else
                                 0
                     Blocks = fun () -> 1
+                    Prey = None
                 })
 
         {

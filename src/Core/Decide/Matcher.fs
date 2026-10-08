@@ -136,6 +136,53 @@ let private fightRoomOf (task: Task) : string option =
     | Assault room -> Some room
     | _ -> None
 
+/// What the gate (`matchAcross`) says of a holder called off its Guard to a
+/// kill, read before the match (#652). Refused where the gate surely
+/// refuses it (threatened, inapplicable, outliving no child's stay: the
+/// gate's own reads); unsure where only the match settles it (a raided
+/// room's fit, walled off from its other work, a cap of the kill its
+/// remembered holders fill); admitted otherwise. What `Pool.killCalls`
+/// admits by when the trespass's cast asks whether a holder answers the
+/// kill: an unsure call takes the holder from every later kill and answers
+/// none, so a call this misjudges errs toward the cast.
+let internal callAdmits
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (assignments: Assignments)
+    (creep: CreepInfo)
+    (kill: PooledTask)
+    : CallVerdict =
+    let task = kill.Task
+    let tid = taskId task
+
+    let raided =
+        match task with
+        | Guard room -> Facts.raided view room
+        | _ -> false
+
+    let held =
+        assignments
+        |> Map.filter (fun name assigned -> assigned = tid && name <> creep.Name)
+        |> Map.count
+
+    if
+        threatened threats atlas creep task
+        || not (applicable view threats atlas creep kill)
+        || not (
+            outlivesTheStay view atlas creep task (lazy (Atlas.walkTicks atlas creep.Name task))
+        )
+    then
+        CallVerdict.Refused
+    elif
+        raided
+        || walledOffBy view atlas threats creep task
+        || kill.Capacity.Caps |> Map.exists (fun _ limit -> held >= limit)
+    then
+        CallVerdict.Unsure
+    else
+        CallVerdict.Admitted
+
 /// Keep still-valid assignments (anti-thrash) and greedily assign the rest,
 /// one pass after another, each starting from the holdings the passes before
 /// it left, `seed` before them all. A pass is one greedy match over the
@@ -933,74 +980,20 @@ let matchAcross
                     && Result.isOk (gate k false (lazy false) acc creep repair))
             | None -> false)
 
-    // The holders let go for a kill this tick (#510, #516), decided once
-    // against the remembered assignments, so the order the fold walks them in
-    // moves nothing. Per kill nobody holds (a `RecallPolicy.Kill`): the
-    // nearest holder within its walk of a Task it may be called off, for a
-    // kill that outranks that Task and that the cascade would give it (the
-    // gate says which bodies a kill admits). It is back once the kill is made.
+    // The holders let go for a kill this tick (#510, #516): the one
+    // selection (`killCalls`), a kill admitting whom the cascade would give
+    // it (the gate; a kill already held calls whoever its caps still seat,
+    // its holders counted whichever colony's: one pool). It is back once
+    // the kill is made.
     let calledOn k =
         let ctx = contexts.[k]
-        let view = ctx.View
 
-        let recalls =
-            ctx.Pool
-            |> List.choose (fun kill ->
-                match kill.Recall with
-                | Some(RecallPolicy.Kill(room, recall)) -> Some(kill, room, recall)
-                | _ -> None)
-
-        let kills = recalls |> List.map (fun (_, room, _) -> room) |> Set.ofList
-
-        if Set.isEmpty kills then
-            Set.empty
-        else
-
-            // Each holder of a Task it may be called off, beside the room it
-            // holds.
-            let holders =
-                assignments
-                |> Map.toList
-                |> List.choose (fun (name, tid) ->
-                    match
-                        Map.tryFind tid byIds.[k],
-                        view.Creeps |> List.tryFind (fun c -> c.Name = name)
-                    with
-                    | Some({
-                               Recall = Some(RecallPolicy.Callable room | RecallPolicy.Kill(room, _))
-                           } as pooled),
-                      Some creep -> Some(creep, pooled, room)
-                    | _ -> None)
-
-            // A kill already held calls whoever its caps still seat, its
-            // holders counted whichever colony's (the gate below): one pool.
-            recalls
-            |> List.fold
-                (fun (taken: Set<string>) (chase, killRoom, recall) ->
-                    holders
-                    |> List.filter (fun (creep, pooled, held) ->
-                        not (Set.contains creep.Name taken)
-                        && chase.Priority < pooled.Priority
-                        && Facts.mayBeCalled view kills held killRoom creep)
-                    |> List.choose (fun (creep, _, _) ->
-                        travelCostOf ctx.Threats ctx.Atlas creep.Name chase.Task
-                        |> Option.filter (fun cost ->
-                            cost <= recall.Walk
-                            && Result.isOk (
-                                gate
-                                    k
-                                    false
-                                    (lazy false)
-                                    (Map.remove creep.Name assignments)
-                                    creep
-                                    chase
-                            ))
-                        |> Option.map (fun cost -> (cost, creep.Name), creep.Name))
-                    |> List.sortBy fst
-                    |> List.tryHead
-                    |> Option.map (fun (_, name) -> Set.add name taken)
-                    |> Option.defaultValue taken)
-                Set.empty
+        killCalls ctx.View ctx.Atlas ctx.Threats ctx.Pool assignments (fun creep kill ->
+            match gate k false (lazy false) (Map.remove creep.Name assignments) creep kill with
+            | Ok _ -> CallVerdict.Admitted
+            | Error _ -> CallVerdict.Refused)
+        |> Map.keys
+        |> Set.ofSeq
 
     let called = contexts |> Array.mapi (fun k _ -> calledOn k)
 

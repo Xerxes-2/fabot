@@ -174,6 +174,7 @@ let private castsFor (task: Task) (views: ColonyView list) : (string * int) list
                     view
                     (threatsOf view atlas)
                     (Planner.outpostFactsOf view atlas).Guarded
+                    (fun _ -> false)
         }
         : Caster.Bidder))
     |> Caster.assign crossings Map.empty Map.empty

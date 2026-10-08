@@ -350,6 +350,114 @@ let internal travelCostOf (threats: Threats) atlas (creep: string) task =
         | area when Set.isEmpty area -> Atlas.travelCost atlas creep task
         | area -> Atlas.travelCostWithin atlas creep area
 
+/// What calling a holder off the Guard of `held` to the kill in `kill` costs
+/// (#510, #516): its travel cost to the kill, where it may be called off
+/// (`Facts.mayBeCalled`, `kills` the rooms of the colony's kills) and walks
+/// it within the kill's recall (`walk`).
+let private callCost
+    (threats: Threats)
+    atlas
+    (view: ColonyView)
+    (kills: Set<string>)
+    (held: string)
+    (kill: string)
+    (walk: int)
+    (creep: CreepInfo)
+    : int option =
+    if Facts.mayBeCalled view kills held kill creep then
+        travelCostOf threats atlas creep.Name (Guard kill)
+        |> Option.filter (fun cost -> cost <= walk)
+    else
+        None
+
+/// What a gate says of a holder called to a kill (`killCalls`): it takes
+/// the kill, it may (read before the match, on a refusal only the match can
+/// settle), or it surely does not.
+[<RequireQualifiedAccess>]
+type CallVerdict =
+    | Admitted
+    | Unsure
+    | Refused
+
+/// The holders a colony's kills call off the Guards they hold this tick
+/// (#510, #516), each to its kill's room, decided once against the
+/// remembered assignments, so no order of reading moves it. Over every kill
+/// in the pool (a `RecallPolicy.Kill`) and every holder of a pooled Task it
+/// may be called off that the kill outranks, the highest kill first, then
+/// the cheapest call (`callCost`, then by name and room): one holder a kill
+/// and one kill a holder, each pair `admits` lets take the kill — so a
+/// holder within walk of two kills of a rank is called to the one it
+/// reaches soonest, where the cascade seats it (#652). A pair `admits` is
+/// unsure of takes the holder from every later kill and calls none. The one
+/// selection the Matcher calls by (`calledOn`, its gate as `admits`, never
+/// unsure) and the trespass's cast reads before the match
+/// (`Matcher.callAdmits`): a kill no holder is called to casts.
+let internal killCalls
+    (view: ColonyView)
+    atlas
+    (threats: Threats)
+    (pool: PooledTask list)
+    (assignments: Assignments)
+    (admits: CreepInfo -> PooledTask -> CallVerdict)
+    : Map<string, string> =
+    let recalls =
+        pool
+        |> List.choose (fun kill ->
+            match kill.Recall with
+            | Some(RecallPolicy.Kill(room, recall)) -> Some(kill, room, recall)
+            | _ -> None)
+
+    if List.isEmpty recalls then
+        Map.empty
+    else
+        let kills = recalls |> List.map (fun (_, room, _) -> room) |> Set.ofList
+        let byId = pool |> List.map (fun p -> taskId p.Task, p) |> Map.ofList
+
+        // Each holder of a Task it may be called off, beside the room it
+        // holds.
+        let holders =
+            assignments
+            |> Map.toList
+            |> List.choose (fun (name, tid) ->
+                match
+                    Map.tryFind tid byId, view.Creeps |> List.tryFind (fun c -> c.Name = name)
+                with
+                | Some({
+                           Recall = Some(RecallPolicy.Callable room | RecallPolicy.Kill(room, _))
+                       } as pooled),
+                  Some creep -> Some(creep, pooled, room)
+                | _ -> None)
+
+        // Every pair a call could make, the highest kill first, then the
+        // cheapest: a holder goes to the kill it walks to soonest among
+        // its best, as the cascade then seats it, and each kill calls one
+        // holder. A pair the gate might admit claims the holder all the
+        // same, but answers its kill only where the gate surely does.
+        recalls
+        |> List.collect (fun (kill, killRoom, recall) ->
+            holders
+            |> List.filter (fun (_, pooled, _) -> kill.Priority < pooled.Priority)
+            |> List.choose (fun (creep, _, held) ->
+                callCost threats atlas view kills held killRoom recall.Walk creep
+                |> Option.map (fun cost ->
+                    (kill.Priority, cost, creep.Name, killRoom), (creep, kill))))
+        |> List.sortBy fst
+        |> List.fold
+            (fun
+                (claimed: Set<string>, called: Map<string, string>)
+                ((_, _, name, killRoom), (creep, kill)) ->
+                if
+                    claimed.Contains name || called |> Map.exists (fun _ room -> room = killRoom)
+                then
+                    claimed, called
+                else
+                    match admits creep kill with
+                    | CallVerdict.Admitted -> claimed.Add name, Map.add name killRoom called
+                    | CallVerdict.Unsure -> claimed.Add name, called
+                    | CallVerdict.Refused -> claimed, called)
+            (Set.empty, Map.empty)
+        |> snd
+
 /// The mover's step toward the tiles a creep may work its Task from, and the
 /// mate of `travelCostOf` above: whatever the price crossed for, the walk has to
 /// cross for too, or a body is ranked onto a Task it is never carried to. A

@@ -681,6 +681,18 @@ let internal healerAtHome (view: ColonyView) (hostile: HostileInfo) : bool =
     && HostileInfo.heals view.Hostiles hostile
     && ourRoom view hostile.Pos.Room
 
+/// Whether a hostile is a declared enemy's economy body (`Colony.enemies`):
+/// working or carrying with a WORK, CARRY or CLAIM, on paper and in effect.
+/// The trespasser a priced cast is bought against (#652); a body shot
+/// disarmed or a healer left bare is the fight's to finish, never a cast's.
+let internal enemyEconomy (side: HostileInfo list) (hostile: HostileInfo) =
+    let takes part =
+        part = Work || part = Carry || part = BodyPart.Claim
+
+    Colony.isEnemy hostile.Owner
+    && List.exists takes hostile.Body
+    && List.exists takes (HostileInfo.effectiveParts side hostile)
+
 /// Whether a hostile's body trespasses wherever it stands (#516), among
 /// `side`, unarmed in effect and one of three bodies:
 /// - shot disarmed: a weapon on paper and none in effect (#528, any owner's
@@ -697,9 +709,6 @@ let internal healerAtHome (view: ColonyView) (hostile: HostileInfo) : bool =
 ///   nothing.
 /// Whose it may be is `mayStrike`'s.
 let internal trespassingBody (side: HostileInfo list) (hostile: HostileInfo) =
-    let takes part =
-        part = Work || part = Carry || part = BodyPart.Claim
-
     let raidGone () =
         let room = hostile.Pos.Room
         let beside = RoomName.adjacent room
@@ -715,9 +724,7 @@ let internal trespassingBody (side: HostileInfo list) (hostile: HostileInfo) =
     && (Option.isSome (HostileInfo.weaponRangeOf hostile.Body)
         || List.contains Heal hostile.Body
            && (not (HostileInfo.heals side hostile) || raidGone ())
-        || Colony.isEnemy hostile.Owner
-           && List.exists takes hostile.Body
-           && List.exists takes (HostileInfo.effectiveParts side hostile))
+        || enemyEconomy side hostile)
 
 /// Whether this colony mines a room: its home, or a room of its sources.
 let internal minesRoom (view: ColonyView) (room: string) =
@@ -1884,6 +1891,91 @@ let internal killScoresIn
         | Some kill ->
             catchOdds view fighter from arrival kill hostile * killValue view hostile
             / float (max 0 arrival + kill)
+
+/// ADR-0042
+/// What one source of a room held this way is worth per tick. Owned **or**
+/// reserved, never reserved alone: the colony's own room is owned while
+/// nothing reserves it, so "reserved, or half" would price the two home
+/// sources at five each.
+let internal heldRateOf (control: RoomControlInfo) =
+    if
+        control.Owner = Ownership.Ours
+        || RoomControlInfo.heldBy ReservationHolder.Ours control |> Option.isSome
+    then
+        Engine.heldOutputPerTick
+    else
+        Engine.neutralOutputPerTick
+
+/// What one tick of a colony's spawn is worth (#652): the energy its sources
+/// yield a tick, each at the rate its room is held at (`heldRateOf`), shared
+/// over its spawns. What a cast's spawn time costs the economy the spawn
+/// would otherwise be casting for.
+let internal spawnTickWorth (view: ColonyView) : float =
+    let income =
+        view.Sources
+        |> List.sumBy (fun source ->
+            SpatialInfo.roomOf view.Spatial source.Id
+            |> Option.bind (fun room -> Map.tryFind room view.RoomControl)
+            |> Option.map heldRateOf
+            |> Option.defaultValue 0)
+
+    float income / float (max 1 (List.length view.Spawns))
+
+/// How many bodies of a row cast for a trespass's kill pay for themselves
+/// (#652): the most `k` whose cost the kills they land cover. The kills:
+/// each prey's kill value (`prey`, priced once by the colony asking, so
+/// every colony weighing the cast values it alike) times the odds one body,
+/// landing in `landing` ticks (its spawn time, its spawns' queue and its
+/// walk, as the Caster bids it), catches it (`catchOdds`, read as though no
+/// prey were walking off: a cast lands long after one step, and an ask that
+/// flipped on each step would cast and cancel), killed by the body alone
+/// at its standoff (`killTicksOf`), nothing of one that dies of age first.
+/// A body's cost: its `blocks` blocks of the row and its spawn time at what
+/// a tick of this colony's spawn is worth (`spawnTickWorth`). Priced with
+/// the world's vision of the room laid in, as `castPrice` is. Any other row
+/// pays for every body.
+let internal castBodiesPaid
+    (view: ColonyView)
+    (row: CastRow)
+    (blocks: int)
+    (room: string)
+    (landing: int)
+    (prey: (string * float) list)
+    : int =
+    match row with
+    | CastRow.Guard
+    | CastRow.Ranger ->
+        let priced =
+            { ColonyView.lookingInto (room :: RoomName.adjacent room) view with
+                Stepped = Map.empty
+                SteppedBack = Map.empty
+            }
+
+        let pattern = if row = CastRow.Ranger then rangerPattern else guardPattern
+
+        let body = blocksFighter pattern blocks
+        let healOn = healReachingWithin priced room priced.Tuning.ReachHorizon
+        let values = Map.ofList prey
+
+        let landed =
+            priced.Hostiles
+            |> List.filter (fun hostile -> hostile.Pos.Room = room)
+            |> List.sumBy (fun hostile ->
+                match
+                    Map.tryFind hostile.Id values, killTicksOf priced healOn [ body ] hostile
+                with
+                | Some value, Some kill when hostile.TicksToLive > landing + kill ->
+                    catchOdds priced body None landing kill hostile * value
+                | _ -> 0.0)
+
+        let spawnTicks = blocks * List.length pattern.Block * Engine.spawnTicksPerPart
+
+        let cost =
+            float (blocks * bodyCost pattern.Block) + float spawnTicks * spawnTickWorth view
+
+        int (landed / cost)
+    | CastRow.Defender
+    | CastRow.Squad _ -> System.Int32.MaxValue
 
 /// The kill order's leading key for one room's targets (#451), smallest
 /// first; the caller breaks ties. Outside a ranger's room (an outpost's

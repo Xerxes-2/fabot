@@ -1018,6 +1018,7 @@ let selfBreachTests =
                                                         Wanted = 1
                                                         Blocks = 1
                                                     }
+                                                Prey = None
                                             }
                                         ]
                                 }

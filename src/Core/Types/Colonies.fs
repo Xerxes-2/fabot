@@ -766,6 +766,11 @@ module CastBid =
     let paysOthers (tuning: Tuning) (capacity: int) (stock: int) : bool =
         capacity >= tuning.CasterFloor && stock >= tuning.CasterReserve
 
+    /// Whether a colony's bank pays a priced cast into its own rooms (#652):
+    /// `Tuning.CasterFloor` alone; the stock's reserve is the bar for
+    /// lending a body to another colony's room (`paysOthers`).
+    let paysOwn (tuning: Tuning) (capacity: int) : bool = capacity >= tuning.CasterFloor
+
     /// A walk's ticks in a cast's cost, a room's side a crossing; one no route
     /// nor name prices is a crossing past the hop budget.
     let walk (tuning: Tuning) (crossings: int option) : int =

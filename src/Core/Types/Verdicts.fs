@@ -464,7 +464,16 @@ type CastAsk =
 /// One ask a colony casts for, with the combat Task it is for: what the
 /// world's Caster hands each colony (`Caster.assign`), and what the `quotas`
 /// view prints as its asks.
-type Cast = { For: Task; Ask: CastAsk }
+type Cast =
+    {
+        For: Task
+        Ask: CastAsk
+        /// A trespass's kill outside the guarded rooms (#652): the id of each
+        /// trespasser its row answers and its kill value, priced by the
+        /// colony asking, which a colony's cast must pay for
+        /// (`Facts.castBodiesPaid`). None for every other ask, cast unpriced.
+        Prey: (string * float) list option
+    }
 
 /// The tick's workforce arithmetic as the cascade saw it: the whole
 /// target, the living and casting counts it was measured against, and one

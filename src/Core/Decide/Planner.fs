@@ -384,7 +384,7 @@ let planFightTasks
     // kites down pools its chase and nothing else.
     //
     // And one per room a trespasser stands in (#516): its kill, for a body
-    // no row casts.
+    // a holder called to it or a cast it pays for brings (#652).
     let guards =
         let briefed (claimed: Brief -> bool) =
             threats.Briefs
