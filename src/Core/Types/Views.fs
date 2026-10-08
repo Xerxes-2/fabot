@@ -277,6 +277,10 @@ type WorldView =
         /// how old the economy gate's memory of it is (`Facts.openToEconomy`,
         /// #605).
         RaidSeen: Map<string, int>
+        /// Each [[sweep]] candidate nothing sees this tick, with the bodies it
+        /// was last seen holding (`World.PreySeen`, #658): what the sweep
+        /// prices a dark room by.
+        PreySeen: Map<string, BodiesSeen>
         /// Each room a guard or ranger of ours was last lost in, the latest of
         /// every colony's raid log (`StandDown.FighterLost`), the larger cast
         /// on one tick: a room's recast cooldown is the room's, whichever
@@ -293,6 +297,7 @@ module WorldView =
             Watched = Set.empty
             Danger = Set.empty
             RaidSeen = Map.empty
+            PreySeen = Map.empty
             FighterLost = Map.empty
             Questioned = Set.empty
             Observers = []
@@ -421,6 +426,7 @@ module WorldView =
                 )
                 |> Set.intersect watched
             RaidSeen = raidSeen
+            PreySeen = world.PreySeen |> Map.filter (fun room _ -> not (World.seenNow world room))
             FighterLost =
                 (Map.empty, gates)
                 ||> List.fold (fun lost gate ->

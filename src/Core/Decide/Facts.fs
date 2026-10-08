@@ -1665,6 +1665,27 @@ let internal killValue (view: ColonyView) (hostile: HostileInfo) : float =
     )
     + harmRate view hostile walk * float replaced
 
+/// The odds a body the [[sweep]] remembers in a room nothing sees this tick
+/// (`WorldView.PreySeen`, #658) still stands there, off what it was doing and
+/// how long it has gone unseen: one rooted at its work (`rootedAtWork`: a
+/// digger on its seat, a CLAIM body at its controller) stays out its life;
+/// any other walks on, a carrier's load taken home and back in a round trip
+/// (`replacementWalk` each way at its loaded pace), so the odds fall from
+/// certain when seen to nothing once that trip has passed. A body in sight
+/// is certain.
+let internal stillThere (view: ColonyView) (hostile: HostileInfo) : float =
+    match Map.tryFind hostile.Pos.Room view.World.PreySeen with
+    | None -> 1.0
+    | Some seen ->
+        let age = view.Time - seen.Tick
+
+        if age <= 0 || rootedAtWork view hostile then
+            1.0
+        else
+            let pace = Gait.ticks Gait.plain (loadedGait view hostile) |> Option.defaultValue 1
+            let trip = 2 * replacementWalk * pace
+            max 0.0 (1.0 - float age / float trip)
+
 /// What one body of ours' blows on the hostiles of a room are priced by this
 /// tick (#651, #621), by id: each one's kill value a hit (`killValue` over
 /// its effective hits) beside the damage our other bodies deal it
@@ -3465,6 +3486,152 @@ let contestOf (view: ColonyView) (room: string) : Contest =
             |> List.map (fun hostile -> hostile.Id, killValue view hostile)
             |> Map.ofList
     }
+
+/// A [[sweep]] candidate as the sweep prices it (#658): the kill's pricing
+/// view (`killPricing`), and, in a room nothing sees this tick, the bodies
+/// it was last seen holding (`WorldView.PreySeen`), each at the life left it
+/// now, one that has died of age since gone.
+let private sweepPricing (view: ColonyView) (room: string) : ColonyView =
+    let priced = killPricing view room
+
+    match Map.tryFind room view.World.PreySeen with
+    | None -> priced
+    | Some seen ->
+        let age = view.Time - seen.Tick
+        let present = priced.Hostiles |> List.map _.Id |> Set.ofList
+
+        { priced with
+            Hostiles =
+                priced.Hostiles
+                @ (seen.Bodies
+                   |> List.filter (fun h -> h.TicksToLive > age && not (present.Contains h.Id))
+                   |> List.map (fun h ->
+                       { h with
+                           TicksToLive = h.TicksToLive - age
+                       }))
+        }
+
+/// What working one [[sweep]] candidate is worth a tick of the group's
+/// effort (#658): the kills it lands there (`killsLanded`: each body's kill
+/// value, #621, times the odds the group catches it, nothing of one that
+/// dies of age first), the declared enemy's economy bodies
+/// (`trespasser`) and, where the group wins the exchange against an escort
+/// there, the enemy's escort too, which unguards the rest (anybody else's
+/// armed body only gates the exchange); each body out of sight at the odds
+/// it is still there (`stillThere`); over the ticks they cost:
+/// its `arrival`, the escort's kill (`killTicks`) and each economy body's
+/// together (`killTicksOf`), concentrated, one at a time. Nothing where an
+/// escort beats the group (exposure: the group moves on rather than stands
+/// off), and nothing in a room nobody works.
+let sweepRate (view: ColonyView) (team: Fighter list) (arrival: int) (room: string) : float =
+    let priced = sweepPricing view room
+
+    let prey =
+        priced.Hostiles
+        |> List.filter (fun h -> h.Pos.Room = room && trespasser priced (Set.singleton room) h)
+
+    match team, prey with
+    | [], _
+    | _, [] -> 0.0
+    | _ ->
+        let raid = raidersIn priced room
+
+        let escort =
+            match raid with
+            | [] -> Some 0
+            | _ when won (exchangeIn priced room team) -> killTicks priced room team
+            | _ -> None
+
+        match escort with
+        | None -> 0.0
+        | Some escortTicks ->
+            let healOn = healReachingWithin priced room priced.Tuning.ReachHorizon
+            let landing = max 0 arrival + escortTicks
+
+            let kills =
+                prey
+                |> List.sumBy (fun h -> killTicksOf priced healOn team h |> Option.defaultValue 0)
+
+            // Only the declared enemy's bodies are worth a kill here: an
+            // Invader or a third player's escort gates the exchange and adds
+            // nothing (we do not defend his remote for him). A body
+            // remembered out of sight at the odds it is still there.
+            let values =
+                prey @ (raid |> List.filter (harassTarget priced))
+                |> List.map (fun h -> h.Id, killValue priced h * stillThere priced h)
+                |> Map.ofList
+
+            killsLanded priced room team landing values / float (max 1 (landing + kills))
+
+/// A [[sweep]]'s group (#658): the bodies of this colony holding the Guard of
+/// one of its candidates, by last tick's Tasks (`held`), wherever they stand.
+let sweepGroup (view: ColonyView) (held: Assignments) : CreepInfo list =
+    let guards =
+        view.Harass |> List.map (fun h -> taskId (Guard h.RoomName)) |> Set.ofList
+
+    ColonyView.bodies view
+    |> List.filter (fun creep -> Map.tryFind creep.Name held |> Option.exists guards.Contains)
+
+/// The [[sweep]]'s room (#658): of its candidates (`ColonyView.Harass`, the
+/// ones its caster works this tick), the one its group's effort lands the
+/// most kills a tick in (`sweepRate`), then by name; None where none pays.
+/// The group as it stands, its arrival its slowest body's walk there (none
+/// for a body already in the room); with no group, the biggest ranger the
+/// bank buys (`rangerBlocksReach`), its arrival its spawn time and its walk
+/// from home. The room the group stands in costs no walk, so it keeps the
+/// group until its kills there run out or another room's net of the walk
+/// pays more: no stored room, no hysteresis band.
+let sweepRoom (view: ColonyView) (held: Assignments) : string option =
+    match view.Harass with
+    | [] -> None
+    | candidates ->
+        let centre room = RoomPos.at room { X = 25; Y = 25 }
+
+        let walk (from: RoomPos) (pace: int) room =
+            if from.Room = room then
+                0
+            else
+                RoomName.tileRange from (centre room)
+                |> Option.map (fun tiles -> tiles * pace)
+                |> Option.defaultValue System.Int32.MaxValue
+
+        let paceOf (fighter: Fighter) =
+            Gait.ticks Gait.plain fighter.Gait |> Option.defaultValue 1
+
+        let team, arrival =
+            match sweepGroup view held with
+            | [] ->
+                let blocks = max 1 (rangerBlocksReach view)
+                let body = blocksFighter rangerPattern blocks
+                let home = centre (SpatialInfo.homeName view.Spatial)
+
+                [ body ],
+                fun room -> castSpawnTicks BodyTemplate.Ranged blocks + walk home (paceOf body) room
+            | group ->
+                let placed =
+                    group
+                    |> List.choose (fun creep ->
+                        placementOf view creep.Name
+                        |> Option.map (fun at -> at, Fighter.ofCreep creep))
+
+                (placed |> List.map snd),
+                fun room ->
+                    placed
+                    |> List.map (fun (at, fighter) -> walk at (paceOf fighter) room)
+                    |> List.fold max 0
+
+        candidates
+        |> List.map (fun h -> h.RoomName)
+        |> List.choose (fun room ->
+            match arrival room with
+            | System.Int32.MaxValue -> None
+            | ticks ->
+                match sweepRate view team ticks room with
+                | rate when rate > 0.0 -> Some(room, rate)
+                | _ -> None)
+        |> List.sortBy (fun (room, rate) -> -rate, room)
+        |> List.tryHead
+        |> Option.map fst
 
 /// The share of one body's energy a fight that holds it `ticks` spends of
 /// its life (`Engine.creepLifetime`, #654): a body that ends a fight

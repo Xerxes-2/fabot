@@ -892,6 +892,11 @@ type HealerSeen = { Healer: HostileInfo; Tick: int }
 /// raider, at its tile, its hits and its life as read then.
 type RaidSeen = { Raid: HostileInfo list; Tick: int }
 
+/// A [[sweep]] candidate's bodies as last seen there, and the tick they were
+/// seen (`World.recallPrey`, #658): every hostile standing in it, at its
+/// tile, its hits and its life as read then.
+type BodiesSeen = { Bodies: HostileInfo list; Tick: int }
+
 /// Where a hostile stands, and the tile of its room it stood on the full tick
 /// before when it has stepped off it since (`World.recallHostiles`, #551),
 /// and the first full tick it was seen on `At` (#552): one seen there on two
@@ -1085,6 +1090,11 @@ type World =
         /// it gone (`World.recallRaiders`, #569): what a blind tick reads the
         /// raid off. Heap state in the shell, never Memory.
         Raiders: Map<string, RaidSeen>
+        /// Each [[sweep]] candidate's bodies as last seen, while no sighting
+        /// since has found them gone (`World.recallPrey`, #658): what the
+        /// sweep prices a room out of sight by. Heap state in the shell, never
+        /// Memory.
+        PreySeen: Map<string, BodiesSeen>
         /// The last tick an armed rival — not an ally, not a Source Keeper —
         /// stood in each room, kept for `Tuning.HostileRoomMemory` ticks
         /// (`World.recallArmed`, #485): the rooms a non-fighter's walk goes
@@ -1123,6 +1133,7 @@ module World =
             Healers = Map.empty
             HostileSteps = Map.empty
             Raiders = Map.empty
+            PreySeen = Map.empty
             ArmedSeen = Map.empty
             RivalControllers = Map.empty
             StrayGround = fun _ -> None
@@ -1542,6 +1553,65 @@ module World =
         { world with
             Raiders = world.Rooms |> Map.toSeq |> Seq.choose remember |> Fresh.mapOfSeq
         }
+
+    /// This tick's world with each [[sweep]] candidate's bodies laid under it
+    /// (#658): a candidate seen now keeps every hostile standing in it but an
+    /// ally's and a Source Keeper, an empty room nothing; one out of sight
+    /// keeps what it was last seen holding, less each body fallen or standing
+    /// in another room this tick and each whose life has run out. Bounded by
+    /// the candidates, and built by `Fresh`, the map being carried to the
+    /// next tick.
+    let recallPrey
+        (candidates: Set<string>)
+        (previous: Map<string, BodiesSeen>)
+        (world: World)
+        : World =
+        if Set.isEmpty candidates then
+            { world with PreySeen = Map.empty }
+        else
+            let seen = seenNow world
+
+            let fallen =
+                world.Rooms
+                |> Map.toSeq
+                |> Seq.collect (fun (_, facts) -> facts.Fallen)
+                |> Set.ofSeq
+
+            let standing =
+                world.Rooms
+                |> Map.toSeq
+                |> Seq.collect (fun (room, facts) ->
+                    facts.Hostiles |> Seq.map (fun h -> h.Id, room))
+                |> Map.ofSeq
+
+            let remember room =
+                if seen room then
+                    match
+                        (roomOf world room).Hostiles
+                        |> List.filter (fun h ->
+                            not (Colony.isAlly h.Owner || HostileInfo.isKeeper h))
+                    with
+                    | [] -> None
+                    | now -> Some { Bodies = now; Tick = world.Time }
+                else
+                    Map.tryFind room previous
+                    |> Option.map (fun last ->
+                        { last with
+                            Bodies =
+                                last.Bodies
+                                |> List.filter (fun h ->
+                                    last.Tick + h.TicksToLive > world.Time
+                                    && not (Set.contains h.Id fallen)
+                                    && Map.tryFind h.Id standing |> Option.forall ((=) room))
+                        })
+                    |> Option.filter (fun last -> not (List.isEmpty last.Bodies))
+
+            { world with
+                PreySeen =
+                    candidates
+                    |> Seq.choose (fun room -> remember room |> Option.map (fun seen -> room, seen))
+                    |> Fresh.mapOfSeq
+            }
 
     /// This tick's world with each hostile's last step laid under it (#551):
     /// every hostile standing in a room this tick, and the tile of that room

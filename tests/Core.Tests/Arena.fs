@@ -1462,6 +1462,7 @@ let worldOf (a: Arena) : World =
         Healers = Map.empty
         HostileSteps = Map.empty
         Raiders = Map.empty
+        PreySeen = Map.empty
         ArmedSeen = Map.empty
         RivalControllers = Map.empty
         StrayGround = strayGround

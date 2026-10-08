@@ -1137,3 +1137,235 @@ let diggerFirstTests =
                     "the shot is the miner's, three tiles off where the hauler is two"
             }
         ]
+
+/// A creep of the enemy's standing in one of the sweep's candidates.
+let private theirsIn room id pos body =
+    { hostileIn room pos body with
+        Id = id
+        Owner = enemy
+    }
+
+/// The two candidates, the north room and the west one, cast off a home
+/// whose bank buys a three-block ranger, with these bodies of ours placed.
+let private sweeping (ours: (CreepInfo * RoomPos) list) (hostiles: HostileInfo list) =
+    { castingFrom [ declaration; declarationOf westRoom ] ours with
+        Bank = bank 2100 2100
+        Hostiles = hostiles
+    }
+
+/// A loaded 10C5M hauler: worth its cargo too.
+let private hauler room id pos =
+    theirsIn room id pos (List.replicate 10 Carry @ List.replicate 5 Move)
+
+[<Tests>]
+let sweepRoomTests =
+    testList
+        "the sweep's room: where its group's effort lands the most kills a tick"
+        [
+            test "with no group, the room whose kills pay most for the body the bank buys" {
+                let colony =
+                    sweeping
+                        []
+                        [
+                            theirsIn harassRoom "miner-n" { X = 20; Y = 20 } [ Work; Work; Move ]
+                            theirsIn westRoom "miner-w" { X = 20; Y = 20 } [ Work; Work; Move ]
+                            hauler westRoom "hauler-w" { X = 22; Y = 20 }
+                        ]
+
+                Expect.equal
+                    (Facts.sweepRoom colony Map.empty)
+                    (Some westRoom)
+                    "the west room: a miner and a hauler, a room's walk like the north's one miner"
+            }
+
+            test "nobody works a candidate: no room" {
+                Expect.isNone
+                    (Facts.sweepRoom (sweeping [] []) Map.empty)
+                    "nothing to kill anywhere"
+            }
+
+            // User 2026-10-08: one group concentrates and moves on when the
+            // kills run out; no stored room, the walk is the hysteresis.
+            test
+                "the room the group stands in keeps it while it holds kills, then the group moves on" {
+                let holder = ranger "ranger-r"
+                let at = RoomPos.at harassRoom { X = 25; Y = 25 }
+                let held = Map.ofList [ holder.Name, taskId (Guard harassRoom) ]
+
+                let west =
+                    [
+                        theirsIn westRoom "miner-w" { X = 20; Y = 20 } [ Work; Work; Move ]
+                        hauler westRoom "hauler-w" { X = 22; Y = 20 }
+                    ]
+
+                let working =
+                    sweeping
+                        [ holder, at ]
+                        (theirsIn harassRoom "miner-n" { X = 27; Y = 25 } [ Work; Work; Move ]
+                         :: west)
+
+                Expect.equal
+                    (Facts.sweepRoom working held)
+                    (Some harassRoom)
+                    "its miner, three tiles off, beats the west room's two a room's walk away"
+
+                Expect.equal
+                    (Facts.sweepRoom (sweeping [ holder, at ] west) held)
+                    (Some westRoom)
+                    "its miner dead, the west room's"
+            }
+
+            test "an escort that beats the group is no room for it: it goes where the kills are" {
+                // It out-shoots and out-heals the three-block ranger the bank
+                // buys (100 a tick against its 36 heal, 120 heal against its
+                // 60); a melee one would only be kited.
+                let escort =
+                    theirsIn
+                        westRoom
+                        "escort"
+                        { X = 24; Y = 20 }
+                        (List.replicate 20 Move
+                         @ List.replicate 10 RangedAttack
+                         @ List.replicate 10 Heal)
+
+                let colony =
+                    sweeping
+                        []
+                        [
+                            theirsIn harassRoom "miner-n" { X = 20; Y = 20 } [ Work; Work; Move ]
+                            theirsIn westRoom "miner-w" { X = 20; Y = 20 } [ Work; Work; Move ]
+                            hauler westRoom "hauler-w" { X = 22; Y = 20 }
+                            escort
+                        ]
+
+                Expect.equal
+                    (Facts.sweepRate colony [ Fighter.ofCreep (ranger "ranger-r") ] 0 westRoom)
+                    0.0
+                    "the west room is worth nothing to one ranger under an escort that beats it"
+
+                Expect.equal
+                    (Facts.sweepRoom colony Map.empty)
+                    (Some harassRoom)
+                    "the north room's miner"
+            }
+
+            test
+                "a room out of sight is priced by the bodies last seen there, each at the life left it" {
+                let seen life =
+                    {
+                        Bodies =
+                            [
+                                { theirsIn
+                                      westRoom
+                                      "miner-w"
+                                      { X = 20; Y = 20 }
+                                      [ Work; Work; Move ] with
+                                    TicksToLive = life
+                                }
+                            ]
+                        Tick = 0
+                    }
+
+                let dark life =
+                    let colony = sweeping [] []
+
+                    { colony with
+                        Time = 100
+                        World =
+                            { colony.World with
+                                PreySeen = Map.ofList [ westRoom, seen life ]
+                            }
+                    }
+
+                Expect.equal
+                    (Facts.sweepRoom (dark 1500) Map.empty)
+                    (Some westRoom)
+                    "a miner seen there a hundred ticks ago, with 1,400 ticks left"
+
+                Expect.isNone
+                    (Facts.sweepRoom (dark 150) Map.empty)
+                    "one with 50 left dies of age before the cast lands"
+            }
+
+            // The review of #658 (M2): we do not defend a rival's remote for
+            // him against a third party.
+            test
+                "only the declared enemy's bodies are worth a kill; anybody else's escort only costs time" {
+                let escortOf owner =
+                    { theirsIn westRoom "escort" { X = 24; Y = 20 } [ Move; Move; RangedAttack ] with
+                        Owner = owner
+                    }
+
+                let rate owner =
+                    Facts.sweepRate
+                        (sweeping
+                            []
+                            [
+                                theirsIn westRoom "miner-w" { X = 20; Y = 20 } [ Work; Work; Move ]
+                                escortOf owner
+                            ])
+                        [
+                            Fighter.ofCreep (
+                                creepWith
+                                    "r"
+                                    0
+                                    0
+                                    (Bodies.rangerPattern.Block @ Bodies.rangerPattern.Block)
+                            )
+                        ]
+                        0
+                        westRoom
+
+                Expect.isLessThan
+                    (rate "Invader")
+                    (rate enemy)
+                    "an Invader escort the group beats is time spent, not a kill landed"
+            }
+
+            // User 2026-10-08: the sweep is on demand, no spawn for ghosts.
+            test
+                "a body out of sight counts at the odds it is still there: a seated miner stays, a hauler walks on" {
+                let source = "src-w"
+
+                let dark (body: HostileInfo) =
+                    let colony = sweeping [] []
+                    let layer = SpatialInfo.layerOf colony.Spatial westRoom
+
+                    { colony with
+                        Time = 400
+                        World =
+                            { colony.World with
+                                PreySeen = Map.ofList [ westRoom, { Bodies = [ body ]; Tick = 0 } ]
+                            }
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds = colony.Spatial.TargetKinds |> Map.add source Source
+                            }
+                            |> withNeighbour
+                                westRoom
+                                { layer with
+                                    TargetPositions =
+                                        Map.add source { X = 20; Y = 19 } layer.TargetPositions
+                                }
+                    }
+
+                let seated =
+                    { theirsIn westRoom "miner-w" { X = 20; Y = 20 } [ Work; Work; Move ] with
+                        TicksToLive = 1500
+                    }
+
+                let hauling =
+                    { hauler westRoom "hauler-w" { X = 30; Y = 30 } with
+                        TicksToLive = 1500
+                    }
+
+                Expect.equal
+                    (Facts.sweepRoom (dark seated) Map.empty)
+                    (Some westRoom)
+                    "a miner on its seat four hundred ticks ago is still there"
+
+                Expect.isNone
+                    (Facts.sweepRoom (dark hauling) Map.empty)
+                    "a hauler unseen four hundred ticks, past its round trip, is gone"
+            }
+        ]

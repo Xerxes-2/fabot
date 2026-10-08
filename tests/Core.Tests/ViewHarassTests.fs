@@ -889,3 +889,91 @@ let harassDeclaredFloorTests =
                     "and cast the tick the bank buys the default blocks"
             }
         ]
+
+// ---- the sweep's memory of a candidate (#658) ----------------------------
+
+/// The world on `tick` with the harassment room seen holding these hostiles,
+/// or dark.
+let private candidateAt tick (hostiles: HostileInfo list option) : World =
+    match hostiles with
+    | Some hostiles ->
+        { World.empty with
+            Time = tick
+            Rooms =
+                Map.ofList
+                    [
+                        harassRoom,
+                        { RoomFacts.empty with
+                            Hostiles = hostiles
+                        }
+                    ]
+            Sightings =
+                Map.ofList
+                    [
+                        harassRoom,
+                        {
+                            Tick = tick
+                            Targets = lazy Set.empty
+                            Rival = None
+                        }
+                    ]
+        }
+    | None -> { World.empty with Time = tick }
+
+/// The memory carried through a run of ticks, from none, the harassment
+/// room the one candidate.
+let private preyThrough (worlds: World list) =
+    worlds
+    |> List.fold
+        (fun (previous: World) world ->
+            World.recallPrey (Set.singleton harassRoom) previous.PreySeen world)
+        World.empty
+    |> fun world ->
+        Map.tryFind harassRoom world.PreySeen
+        |> Option.map (fun seen -> seen.Bodies |> List.map _.Id, seen.Tick)
+
+[<Tests>]
+let preyMemoryTests =
+    testList
+        "a sweep candidate's bodies are remembered while it is dark"
+        [
+            test
+                "the bodies seen are kept through the dark ticks, and a look that finds it empty forgets them" {
+                let miner = harassHostile "miner" enemy [ Work; Work; Move ]
+
+                Expect.equal
+                    (preyThrough [ candidateAt 100 (Some [ miner ]); candidateAt 101 None ])
+                    (Some([ "miner" ], 100))
+                    "dark, the room holds the miner as last seen"
+
+                Expect.isNone
+                    (preyThrough [ candidateAt 100 (Some [ miner ]); candidateAt 101 (Some []) ])
+                    "seen empty, empty"
+            }
+
+            test "a body whose life has run out is gone, and an ally's or a keeper's is never kept" {
+                let short =
+                    { harassHostile "miner" enemy [ Work; Move ] with
+                        TicksToLive = 5
+                    }
+
+                Expect.isNone
+                    (preyThrough [ candidateAt 100 (Some [ short ]); candidateAt 106 None ])
+                    "dead of age by now"
+
+                Expect.isNone
+                    (preyThrough
+                        [
+                            candidateAt
+                                100
+                                (Some [ harassHostile "keeper" "Source Keeper" [ Move ] ])
+                        ])
+                    "a keeper is no prey"
+            }
+
+            test "no candidate, no memory" {
+                Expect.isEmpty
+                    (World.recallPrey Set.empty Map.empty (candidateAt 100 (Some []))).PreySeen
+                    "the live switch off costs nothing"
+            }
+        ]
