@@ -514,6 +514,18 @@ let body
 let parts (counts: (BodyPart * int) list) : BodyPart list =
     counts |> List.collect (fun (part, n) -> List.replicate n part)
 
+/// The body a row of ours casts at `blocks` whole blocks, laid as the cast
+/// path lays it (`Bodies.sizedBodyFor`, its MOVE last since #672): what a
+/// fixture standing in for one of our casts stands up. A fixed squad body
+/// ignores `blocks`.
+let castOf (pattern: BodyPattern) (blocks: int) : BodyPart list =
+    sizedBodyFor largestSizing pattern (blocks * bodyCost pattern.Block)
+
+/// Our guard, ranger and defender rows' casts at `blocks` blocks.
+let ourGuard blocks = castOf guardPattern blocks
+let ourRanger blocks = castOf rangerPattern blocks
+let ourDefender blocks = castOf defenderPattern blocks
+
 /// A captured body's `Boosts`: one compound a part, head first, "" for none,
 /// read by the Core's own table (`Boost.ofCompound`).
 let boostsOn (parts: BodyPart list) (compounds: string list) : Boost list =

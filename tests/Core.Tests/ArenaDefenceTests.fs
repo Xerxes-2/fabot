@@ -200,10 +200,10 @@ let private assaultProbe (ticks: int) =
 
     let squad =
         [
-            cast "sapper" Fabot.Core.Decide.Bodies.sapperPattern.Block 1 (w17s26 4 8)
-            cast "sapper" Fabot.Core.Decide.Bodies.sapperPattern.Block 2 (w17s26 4 10)
-            cast "medic" Fabot.Core.Decide.Bodies.medicPattern.Block 3 (w17s26 3 8)
-            cast "medic" Fabot.Core.Decide.Bodies.medicPattern.Block 4 (w17s26 3 10)
+            cast "sapper" (castOf Fabot.Core.Decide.Bodies.sapperPattern 1) 1 (w17s26 4 8)
+            cast "sapper" (castOf Fabot.Core.Decide.Bodies.sapperPattern 1) 2 (w17s26 4 10)
+            cast "medic" (castOf Fabot.Core.Decide.Bodies.medicPattern 1) 3 (w17s26 3 8)
+            cast "medic" (castOf Fabot.Core.Decide.Bodies.medicPattern 1) 4 (w17s26 3 10)
         ]
 
     let start = arena 889_849 [ mother; trepBase () ] colonies squad
@@ -268,10 +268,10 @@ let private baitProbe (ticks: int) =
         List.zip3
             [ "sapper"; "sapper"; "medic"; "medic" ]
             [
-                Fabot.Core.Decide.Bodies.sapperPattern.Block
-                Fabot.Core.Decide.Bodies.sapperPattern.Block
-                Fabot.Core.Decide.Bodies.medicPattern.Block
-                Fabot.Core.Decide.Bodies.medicPattern.Block
+                (castOf Fabot.Core.Decide.Bodies.sapperPattern 1)
+                (castOf Fabot.Core.Decide.Bodies.sapperPattern 1)
+                (castOf Fabot.Core.Decide.Bodies.medicPattern 1)
+                (castOf Fabot.Core.Decide.Bodies.medicPattern 1)
             ]
             tiles
         |> List.mapi (fun i (row, block, (x, y)) -> cast spawn row block (i + 1) (at x y))
@@ -363,10 +363,10 @@ let private westProbe (panics: bool) (ticks: int) =
 
     let squad =
         [
-            "sapper", Fabot.Core.Decide.Bodies.sapperPattern.Block, (43, 11)
-            "sapper", Fabot.Core.Decide.Bodies.sapperPattern.Block, (44, 11)
-            "medic", Fabot.Core.Decide.Bodies.medicPattern.Block, (43, 12)
-            "medic", Fabot.Core.Decide.Bodies.medicPattern.Block, (44, 12)
+            "sapper", (castOf Fabot.Core.Decide.Bodies.sapperPattern 1), (43, 11)
+            "sapper", (castOf Fabot.Core.Decide.Bodies.sapperPattern 1), (44, 11)
+            "medic", (castOf Fabot.Core.Decide.Bodies.medicPattern 1), (43, 12)
+            "medic", (castOf Fabot.Core.Decide.Bodies.medicPattern 1), (44, 12)
         ]
         |> List.mapi (fun i (row, block, (x, y)) ->
             body $"{row}-889000{i + 1}-Spawn8" Side.Ours block (w19s26 x y) None)
@@ -545,10 +545,10 @@ let private linkProbeFrom (tiles: RoomPos list) (holding: bool) (panics: bool) (
 
     let squad =
         [
-            "sapper", Fabot.Core.Decide.Bodies.sapperPattern.Block
-            "sapper", Fabot.Core.Decide.Bodies.sapperPattern.Block
-            "medic", Fabot.Core.Decide.Bodies.medicPattern.Block
-            "medic", Fabot.Core.Decide.Bodies.medicPattern.Block
+            "sapper", (castOf Fabot.Core.Decide.Bodies.sapperPattern 1)
+            "sapper", (castOf Fabot.Core.Decide.Bodies.sapperPattern 1)
+            "medic", (castOf Fabot.Core.Decide.Bodies.medicPattern 1)
+            "medic", (castOf Fabot.Core.Decide.Bodies.medicPattern 1)
         ]
         |> List.zip tiles
         |> List.mapi (fun i (at, (row, block)) ->

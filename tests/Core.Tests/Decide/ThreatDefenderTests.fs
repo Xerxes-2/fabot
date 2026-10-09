@@ -49,8 +49,8 @@ let rampartDefenderTests =
 
                 Expect.equal
                     (defenderCasts colony |> List.map (fun (_, body, _) -> body))
-                    [ List.replicate 6 Move @ List.replicate 6 Attack ]
-                    "six blocks on 800: 780"
+                    [ List.replicate 5 Move @ List.replicate 6 Attack @ [ Move ] ]
+                    "six blocks on 800: 780, one MOVE last (#672)"
 
                 Expect.equal
                     ((decideOn colony).Quotas.Rows |> List.map (fun row -> row.Row) |> List.head)
@@ -213,8 +213,8 @@ let rampartDefenderTests =
                     (spawnIntents (decideOn colony).Intents
                      |> List.filter (fun (_, _, name) -> name.StartsWith "ranger-")
                      |> List.map (fun (_, body, _) -> body))
-                    [ rangerPattern.Block ]
-                    "one ranger, one block on 800"
+                    [ withMoveLast rangerPattern.Block ]
+                    "one ranger, one block on 800, one MOVE last (#672)"
 
                 Expect.equal
                     (defendGround colony)
@@ -533,8 +533,8 @@ let rampartDefenderTests =
 
                 Expect.equal
                     (defenderCasts colony |> List.map (fun (_, body, _) -> body))
-                    [ List.replicate 4 Move @ List.replicate 4 Attack ]
-                    "four blocks on 550: the defender is cast"
+                    [ List.replicate 3 Move @ List.replicate 4 Attack @ [ Move ] ]
+                    "four blocks on 550: the defender is cast, one MOVE last (#672)"
             }
 
             test

@@ -1,6 +1,8 @@
 # An errand room is held by a ranged guard
 
-> **Status:** accepted, amended by 0083, #510, #533
+> **Status:** accepted, amended by 0083, #510, #533, #672
+
+> **Amended by #672** on 2026-10-09: point 1's order. Move still comes first, but one Move of the body goes last (`Bodies.withMoveLast`): a body cast as `[M×(3n−1); R×2n; H×n; M]`. The engine charges fatigue on a destroyed part and only a live Move pays it off, so a body whose Move all stand in front is pinned for good once they are shot off; with a Move last, a ranger with any part alive can walk out. Part counts are unchanged.
 
 > **Amended by #533** on 2026-10-05: "A ranger does not flee" holds only while it holds a fight Task. A ranger with none flees where the Reach out-damages its own heal, and walks home round the Reach (ADR 0056's #533 note).
 
@@ -22,7 +24,7 @@ ADR 0077 put a resident guard in the errand room, and the guard is melee: `[Toug
 
 We decided three things.
 
-1. **An errand room is held by the ranger row, not the guard row.** The ranger's block is `[Move; Move; Move; RangedAttack; RangedAttack; Heal]`: 700 energy, 20 damage and 12 heal a block, full speed. Move comes first, so damage lames the body before it disarms it. An errand room's Guard Task is applicable to a ranger alone, and an outpost's to a melee guard alone. The ranger stands on the Reactor's ring and shoots any armed hostile or rival claimer within three tiles, the claimer first. Outposts keep the melee guard, which is about 4.6 times cheaper per damage point against Invaders.
+1. **An errand room is held by the ranger row, not the guard row.** The ranger's block is `[Move; Move; Move; RangedAttack; RangedAttack; Heal]`: 700 energy, 20 damage and 12 heal a block, full speed. Move comes first, so damage lames the body before it disarms it (**amended by #672**: one Move goes last). An errand room's Guard Task is applicable to a ranger alone, and an outpost's to a melee guard alone. The ranger stands on the Reactor's ring and shoots any armed hostile or rival claimer within three tiles, the claimer first. Outposts keep the melee guard, which is about 4.6 times cheaper per damage point against Invaders.
 2. **A ranger's heal counts in the exchange.** The engine lets `heal` act beside `rangedAttack`, where it suppresses a melee `attack`. So the exchange that sizes a ranger and decides the errand room's withdrawal takes the ranger's own heal off the raid's damage. Against the two-longbow squad that is seven blocks, which a 5,300 bank buys in one body.
 3. **The errand room keeps a standing garrison in peace** (#419): `Tuning.RangerResidents` (2) bodies of `Tuning.RangerResidentBlocks` (7), the bodies a raid meets first. Seven blocks win the two-longbow squad alone, and the second body is already on the ring when the squad arrives, because a relief cast on sight lands some 280 ticks later, after the fight. About 6.5 energy a tick. (First shipped as one 3-block resident.)
 

@@ -73,7 +73,8 @@ let upgraderPattern =
 /// outpost, and kept in a worked errand room (#414). One Move per non-Move part, so fatigue parity holds. The order is
 /// a rule and not a layout (#282): the engine destroys parts from the head of
 /// the array, so Tough eats first, Move next (a guard that cannot walk is
-/// already standing on its target), then Attack, and Heal last.
+/// already standing on its target), then Attack, then Heal, and one Move
+/// last (#672, `withMoveLast`), so a stripped guard can still walk away.
 let guardPattern =
     {
         Name = RowName.guard
@@ -89,7 +90,8 @@ let guardBlocksMost = Engine.maxBodyParts / List.length guardPattern.Block
 /// The ranger row: the ranged body an errand room is held with (#411). Move
 /// first, so damage lames it before it disarms it — a ranger holds a ring and
 /// does not chase; then its two ranged parts and its heal, which the engine
-/// lets act beside a ranged attack.
+/// lets act beside a ranged attack; and one Move last (#672, `withMoveLast`),
+/// so a ranger shot to its heal can still walk out.
 let rangerPattern =
     {
         Name = RowName.ranger
@@ -111,7 +113,7 @@ let bodyTemplates = [ BodyTemplate.Melee; BodyTemplate.Ranged ]
 
 /// The home's [[defender]] (#504): MOVE and ATTACK one to one, a tile a tick
 /// on plain to its rampart, MOVE first so damage lames it before it disarms
-/// it.
+/// it, and one MOVE last as every cast's (`withMoveLast`).
 let defenderPattern =
     {
         Name = RowName.defender
@@ -119,7 +121,7 @@ let defenderPattern =
     }
 
 /// An [[assault]]'s healer: one fixed body, MOVE then HEAL, walking behind
-/// the sapper it pre-heals.
+/// the sapper it pre-heals; cast with one MOVE last (`withMoveLast`).
 let medicPattern =
     {
         Name = RowName.medic
@@ -128,8 +130,9 @@ let medicPattern =
 
 /// An [[assault]]'s breacher (#490): `docs/research/boosts.md` §4.1's D,
 /// MOVE then WORK, so damage lames it on the rampart it
-/// stands beside before it slows the dismantle. 3,750. Its own name and row,
-/// apart from the salvage dismantler's.
+/// stands beside before it slows the dismantle, and cast with one MOVE last
+/// (`withMoveLast`). 3,750. Its own name and row, apart from the salvage
+/// dismantler's.
 let sapperPattern =
     {
         Name = RowName.sapper
@@ -497,7 +500,7 @@ let internal anchorBodyFor workCap legs capacity =
 /// The whole-block rows' shared arithmetic: as many whole blocks as the
 /// capacity buys, never below one and never past the engine's 50-part cap, with
 /// the parts grouped by kind in the block's own order — so damage strips a
-/// row's output before its legs.
+/// row's output before its legs. `sizedBodyFor` then moves one MOVE last.
 let private wholeBlockBodyFor (block: BodyPart list) capacity =
     let repeats =
         capacity / bodyCost block
@@ -535,7 +538,8 @@ let internal reserverBodyFor capacity =
 /// The guard row's sizing rule: whole blocks, never below one and capped at
 /// five by the engine's 50 parts. A remainder spent at parity would buy Carry
 /// a guard has no use for. `List.distinct` keeps the block's order, so two
-/// blocks are `[T;T; M×10; A×6; H;H]` and not a shuffle of them. 300 cannot
+/// blocks are `[T;T; M×10; A×6; H;H]` and not a shuffle of them, cast as
+/// `[T;T; M×9; A×6; H;H; M]` (`withMoveLast`). 300 cannot
 /// afford one block and the row yields; 800 and 1,300 buy one, 1,800 two,
 /// 2,300 three.
 let private guardBodyFor capacity =
@@ -625,10 +629,19 @@ let largestSizing =
         DefenderBlocks = Tuning.defaults.DefenderBlocks
     }
 
-/// Body for a pattern at an energy capacity, under the row's own sizing rule.
-/// **The** dispatch over the pattern, asked by the rows, by the lead's
-/// successor and by `bodyFor`: written per caller it was three tables.
-let sizedBodyFor (sizing: BodySizing) pattern capacity =
+/// The one order rule every cast leaves by (#672): its last part is a MOVE,
+/// the one nearest the tail moved there and every other part kept in place.
+/// The engine destroys parts from the head and charges fatigue on a dead part
+/// too, so a body whose MOVE all stand in front is pinned for good once they
+/// are shot off; with a MOVE last, a body with any part alive can walk. A body
+/// with no MOVE is left as it is.
+let withMoveLast (body: BodyPart list) =
+    match List.tryFindIndexBack ((=) Move) body with
+    | Some at when at < List.length body - 1 -> List.removeAt at body @ [ Move ]
+    | _ -> body
+
+/// The row's own sizing rule, in the order its rule lays the parts.
+let private rowBodyFor (sizing: BodySizing) pattern capacity =
     if pattern.Name = anchorPattern.Name then
         anchorBodyFor sizing.AnchorCap sizing.AnchorLegs capacity
     elif pattern.Name = haulerPattern.Name then
@@ -659,6 +672,13 @@ let sizedBodyFor (sizing: BodySizing) pattern capacity =
         pattern.Block
     else
         parityBodyFor pattern capacity
+
+/// Body for a pattern at an energy capacity, under the row's own sizing rule
+/// and the cast's order rule (`withMoveLast`). **The** dispatch over the
+/// pattern, asked by the rows, by the lead's successor and by `bodyFor`:
+/// written per caller it was three tables.
+let sizedBodyFor (sizing: BodySizing) pattern capacity =
+    rowBodyFor sizing pattern capacity |> withMoveLast
 
 /// The same at the largest body either of those rows can take: the anchor's
 /// Post and the reserver's deficit are answered at their ceiling.

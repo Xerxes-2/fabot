@@ -489,7 +489,7 @@ let arenaScenarioTests =
                         body
                             "guard-1-Spawn1"
                             Side.Ours
-                            (parts [ Tough, 1; Move, 5; Attack, 3; Heal, 1 ])
+                            (ourGuard 1)
                             (RoomPos.at "W12S27" { X = 19; Y = 25 })
                             None
 
@@ -577,7 +577,7 @@ let arenaScenarioTests =
                     body
                         "ranger-1-Spawn1"
                         Side.Ours
-                        Fabot.Core.Decide.Bodies.rangerPattern.Block
+                        (ourRanger 1)
                         (RoomPos.at "W12S28" { X = 20; Y = 5 })
                         None
 
@@ -665,7 +665,7 @@ let arenaScenarioTests =
                     body
                         "ranger-1-Spawn1"
                         Side.Ours
-                        (List.concat (List.replicate 5 Fabot.Core.Decide.Bodies.rangerPattern.Block))
+                        (ourRanger 5)
                         (RoomPos.at "W12S27" { X = 8; Y = 31 })
                         None
 

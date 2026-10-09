@@ -100,7 +100,7 @@ let private outpostRaid (raid: BodyPart list list) () : Arena =
     let ours =
         homeCrew
         @ [
-            body "guard-1-Spawn1" Side.Ours guardPattern.Block (at "W12S28" 20 5) None
+            body "guard-1-Spawn1" Side.Ours (castOf guardPattern 1) (at "W12S28" 20 5) None
             body
                 "anchor-1-Spawn1"
                 Side.Ours
@@ -181,12 +181,7 @@ let private exitBounce () : Arena =
 
     let bodies =
         [
-            body
-                "defender-1-Spawn11"
-                Side.Ours
-                (parts [ Move, 10; Attack, 10 ])
-                (at "W17S25" 14 23)
-                None
+            body "defender-1-Spawn11" Side.Ours (castOf defenderPattern 10) (at "W17S25" 14 23) None
             body
                 "hauler-1-Spawn11"
                 Side.Ours
@@ -256,7 +251,7 @@ let private strongholdRangers () : Arena =
             ]
 
     let ranger (id: string) (x: int) =
-        body id Side.Ours (parts [ Move, 21; RangedAttack, 14; Heal, 7 ]) (at "W16S26" x 47) None
+        body id Side.Ours (castOf rangerPattern 7) (at "W16S26" x 47) None
 
     let defender =
         body "defender0" invader (parts [ Attack, 15; Move, 15 ]) (at "W16S26" 8 35) (Some Defend)
@@ -449,7 +444,7 @@ let private fleeingHauler () : Arena =
         |> List.map (fun (x, y) -> at "W17S26" x y)
 
     let ranger id tile =
-        body id Side.Ours (parts [ Move, 6; RangedAttack, 4; Heal, 2 ]) tile None
+        body id Side.Ours (castOf rangerPattern 2) tile None
 
     let hauler =
         { body
@@ -514,7 +509,7 @@ let private equalPaceMelee () : Arena =
         }
 
     let ranger id tile =
-        body id Side.Ours (parts [ Move, 6; RangedAttack, 4; Heal, 2 ]) tile None
+        body id Side.Ours (castOf rangerPattern 2) tile None
 
     arena
         900_000

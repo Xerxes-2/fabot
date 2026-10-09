@@ -1968,7 +1968,7 @@ let private standingHauler () : Arena =
         }
 
     let ranger id tile =
-        body id Side.Ours (parts [ Move, 6; RangedAttack, 4; Heal, 2 ]) tile None
+        body id Side.Ours (ourRanger 2) tile None
 
     arena
         900_000

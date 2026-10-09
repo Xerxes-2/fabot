@@ -1682,13 +1682,7 @@ let private dancerAcrossNorth () : Arena =
                 }
             ]
 
-    let ranger =
-        body
-            "ranger-1-Spawn1"
-            Side.Ours
-            (parts [ Move, 24; RangedAttack, 16; Heal, 8 ])
-            (at "W12S27" 14 10)
-            None
+    let ranger = body "ranger-1-Spawn1" Side.Ours (ourRanger 8) (at "W12S27" 14 10) None
 
     let dancer =
         body

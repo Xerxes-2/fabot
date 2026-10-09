@@ -34,12 +34,7 @@ let internal outpostRaid (invader: Body) =
         }
 
     let guard =
-        body
-            "guard-1-Spawn1"
-            Side.Ours
-            (parts [ Tough, 1; Move, 5; Attack, 3; Heal, 1 ])
-            (RoomPos.at "W12S28" { X = 20; Y = 5 })
-            None
+        body "guard-1-Spawn1" Side.Ours (ourGuard 1) (RoomPos.at "W12S28" { X = 20; Y = 5 }) None
 
     let hauler =
         body
@@ -58,7 +53,8 @@ let internal trepHealer = parts [ Move, 11; Heal, 7 ]
 let internal trepTapper = parts [ Move, 3; BodyPart.Claim, 3 ]
 let internal trep = Side.Player "Trepidimous"
 
-/// One resident R7 as the ranger row casts it: `21M 14R 7H`, MOVE first.
+/// One resident R7 as the ranger row cast it before #672 (the captures'
+/// live body): `21M 14R 7H`, MOVE first.
 let internal r7 = parts [ Move, 21; RangedAttack, 14; Heal, 7 ]
 
 let internal w17s25 (x: int) (y: int) = RoomPos.at "W17S25" { X = x; Y = y }

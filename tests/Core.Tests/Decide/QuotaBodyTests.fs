@@ -433,15 +433,17 @@ let patternTableTests =
             // Live, with ATTACK second, a guard's whole damage sat inside the
             // first four hundred hits and it reached its target disarmed. Move
             // goes ahead of Attack because a guard that cannot walk is still a
-            // guard, and Heal stays last.
+            // guard, and Heal comes after Attack. One Move then goes last
+            // (#672): a guard stripped to its Heal can still walk away.
             let guardBlock =
-                [ Tough; Move; Move; Move; Move; Move; Attack; Attack; Attack; Heal ]
+                [ Tough; Move; Move; Move; Move; Attack; Attack; Attack; Heal; Move ]
 
             let guardBlocks n =
                 List.replicate n Tough
-                @ List.replicate (5 * n) Move
+                @ List.replicate (5 * n - 1) Move
                 @ List.replicate (3 * n) Attack
                 @ List.replicate n Heal
+                @ [ Move ]
 
             test "the guard row's one block is 90 damage, 12 self-heal and 750 energy" {
                 // The 800 bank — the first that can pay for the row at all.
@@ -487,7 +489,7 @@ let patternTableTests =
                 Expect.equal
                     (bodyFor guardPattern 1800)
                     (guardBlocks 2)
-                    "two blocks: [T;T; A×6; M×10; H;H], TOUGH first and HEAL last"
+                    "two blocks: [T;T; M×9; A×6; H;H; M], TOUGH first and one MOVE last"
             }
 
             test "an RCL6 bank buys three" {
@@ -602,6 +604,104 @@ let patternTableTests =
                     Expect.isFalse
                         (bodyFor dismantlerPattern capacity |> List.contains Carry)
                         $"no Carry at capacity {capacity}"
+            }
+
+            test "every row's cast ends in a MOVE wherever it holds one" {
+                // #672: the engine destroys parts from the head of the array and
+                // charges fatigue on a dead part too, so a body whose MOVE all sit
+                // in front is pinned for good once they are shot off. A body keeps
+                // its last part a MOVE and can walk while any part lives.
+                let oneBlock =
+                    { largestSizing with
+                        AnchorLegs = OutpostLegs
+                        ReserverClaims = [ 1 ]
+                        GuardBlocks = 1
+                        RangerBlocks = 1
+                        UpgraderWork = 3
+                        DefenderBlocks = 1
+                    }
+
+                for sizing in [ largestSizing; oneBlock ] do
+                    for row in patternTable do
+                        for capacity in [ 300; 550; 800; 1300; 1800; 2300; 5600; 12900 ] do
+                            let body = sizedBodyFor sizing row capacity
+
+                            if List.contains Move body then
+                                Expect.equal
+                                    (List.last body)
+                                    Move
+                                    $"the {row.Name} row's cast at {capacity} ends in a MOVE: {body}"
+            }
+
+            test
+                "the MOVE that goes last is the one nearest the tail, and a body without one is left alone" {
+                Expect.equal
+                    (withMoveLast [ Tough; Move; Move; Attack; Heal ])
+                    [ Tough; Move; Attack; Heal; Move ]
+                    "one MOVE leaves its place for the tail; the rest keep their order"
+
+                Expect.equal
+                    (withMoveLast [ Work; Carry; Move ])
+                    [ Work; Carry; Move ]
+                    "a body already ending in a MOVE is unchanged"
+
+                Expect.equal
+                    (withMoveLast [ Work; Carry ])
+                    [ Work; Carry ]
+                    "no MOVE, nothing to move"
+            }
+
+            test
+                "the MOVE at the tail costs no row a part: every row's counts are its sizing rule's" {
+                // Each row's part counts at three banks, as `main` cast them
+                // before #672 moved one MOVE to the tail.
+                let counts =
+                    [
+                        "worker", 800, [ Work, 4; Carry, 4; Move, 4 ]
+                        "worker", 2300, [ Work, 11; Carry, 12; Move, 12 ]
+                        "worker", 12900, [ Work, 16; Carry, 17; Move, 17 ]
+                        "anchor", 800, [ Work, 6; Carry, 1; Move, 1 ]
+                        "anchor", 2300, [ Work, 6; Carry, 1; Move, 1 ]
+                        "anchor", 12900, [ Work, 6; Carry, 1; Move, 1 ]
+                        "hauler", 800, [ Carry, 10; Move, 5 ]
+                        "hauler", 2300, [ Carry, 30; Move, 15 ]
+                        "hauler", 12900, [ Carry, 32; Move, 16 ]
+                        "courier", 800, [ Carry, 20; Move, 10 ]
+                        "courier", 2300, [ Carry, 20; Move, 10 ]
+                        "courier", 12900, [ Carry, 20; Move, 10 ]
+                        "reserver", 800, [ BodyPart.Claim, 1; Move, 1 ]
+                        "reserver", 2300, [ BodyPart.Claim, 3; Move, 3 ]
+                        "reserver", 12900, [ BodyPart.Claim, 19; Move, 19 ]
+                        "upgrader", 800, [ Work, 5; Carry, 1; Move, 5 ]
+                        "upgrader", 2300, [ Work, 15; Carry, 1; Move, 15 ]
+                        "upgrader", 12900, [ Work, 24; Carry, 1; Move, 24 ]
+                        "guard", 800, [ Tough, 1; Move, 5; Attack, 3; Heal, 1 ]
+                        "guard", 2300, [ Tough, 3; Move, 15; Attack, 9; Heal, 3 ]
+                        "guard", 12900, [ Tough, 5; Move, 25; Attack, 15; Heal, 5 ]
+                        "ranger", 800, [ Move, 3; RangedAttack, 2; Heal, 1 ]
+                        "ranger", 2300, [ Move, 9; RangedAttack, 6; Heal, 3 ]
+                        "ranger", 12900, [ Move, 24; RangedAttack, 16; Heal, 8 ]
+                        "defender", 800, [ Move, 6; Attack, 6 ]
+                        "defender", 2300, [ Move, 10; Attack, 10 ]
+                        "defender", 12900, [ Move, 10; Attack, 10 ]
+                        "sapper", 800, [ Move, 25; Work, 25 ]
+                        "probe", 800, [ Tough, 4; Work, 5; Move, 9 ]
+                        "medic", 800, [ Move, 18; Heal, 18 ]
+                        "miner", 800, [ Work, 7; Move, 2 ]
+                        "miner", 2300, [ Work, 20; Move, 4 ]
+                        "miner", 12900, [ Work, 20; Move, 4 ]
+                        "dismantler", 800, [ Work, 5; Move, 5 ]
+                        "dismantler", 2300, [ Work, 15; Move, 15 ]
+                        "dismantler", 12900, [ Work, 25; Move, 25 ]
+                    ]
+
+                for name, capacity, expected in counts do
+                    let row = patternTable |> List.find (fun row -> row.Name = name)
+
+                    Expect.equal
+                        (bodyFor row capacity |> List.countBy id |> Map.ofList)
+                        (Map.ofList expected)
+                        $"the {name} row's part counts at {capacity}"
             }
 
             test "spawn planning casts from the pattern table's row" {
