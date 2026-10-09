@@ -1914,8 +1914,13 @@ let private fullTick
         | Some folded -> Decide.Ledger.account (Operations.campRooms admitted) folded records
         | None -> records
 
+    // What Memory holds of a record: its bids are the heap's alone, so a bid
+    // moving rewrites nothing.
+    let stored (records: OpRecord list) =
+        records |> List.map (fun record -> { record with Bids = [] })
+
     if
-        Some records <> codeRecords
+        Some(stored records) <> Option.map stored codeRecords
         || Some refusedCode <> codeRefused
         || not (List.isEmpty events)
     then

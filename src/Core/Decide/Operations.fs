@@ -43,22 +43,120 @@ let target (facts: OpFacts) (spec: OperationSpec) : string option =
             |> List.tryHead
             |> Option.map fst)
 
-/// The room that outpays `held`, the room committed to (`OpGuard.Outpaid`):
-/// of the target's other rooms whose rate on evidence (`OpFacts.Challenge`)
-/// is above the committed room's rate, the one paying most, then by name;
-/// None where none is, or the committed room is not priced. The room an
-/// `Outpaid` exit moves to: the one that won the comparison.
-let private challenger (facts: OpFacts) (spec: OperationSpec) (held: string) : string option =
+/// One of the target's other rooms read this tick as a bid for the latch
+/// off the room committed to: what it pays on evidence (`OpFacts.Challenge`),
+/// the ticks a move there takes to realise (`OpFacts.Arrival`), and whether
+/// a move there pays for itself on what this tick saw (`Bids`).
+type private Bid =
+    {
+        Room: string
+        Paid: float
+        Horizon: int
+        /// Yes where, in sight this tick, the move pays for itself on
+        /// evidence; No where, in sight, it does not even on the room's plain
+        /// rate: seen not out-paying. Unknown otherwise — out of sight, its
+        /// price is memory, and in sight on a plain rate evidence has yet to
+        /// confirm — which neither confirms a bid nor resets it, nor moves
+        /// the latch.
+        Bids: Truth
+    }
+
+/// The target's other rooms read as bids off `held`, the room committed to;
+/// none where the committed room is not priced, and a room not priced is no
+/// bid. A move pays for itself where the room's pay over the ticks the group
+/// takes to stand at its quarry (`Bid.Horizon`, a tick at least: the move is
+/// a tick's act) beats what `held` pays (`OpFacts.Rate`) over those ticks and
+/// over the walk the move adds beyond the one to `held`'s own quarry. So a
+/// move whose quarry lies no farther than the held room's pays on any
+/// surplus, and one from the held room's quarry, the whole horizon a walk,
+/// must earn the held room's yield over that walk as well as its surplus.
+let private bidsOn (facts: OpFacts) (spec: OperationSpec) (held: string) : Bid list =
     match roomsOf spec.Target, facts.Rate held with
     | Some rooms, Some rate ->
+        let stay = facts.Arrival held |> Option.defaultValue 0
+
         rooms
         |> List.filter ((<>) held)
-        |> List.choose (fun room -> facts.Challenge room |> Option.map (fun paid -> room, paid))
-        |> List.filter (fun (_, paid) -> paid > rate)
-        |> List.sortBy (fun (room, paid) -> -paid, room)
+        |> List.choose (fun room ->
+            match facts.Challenge room, facts.Rate room, facts.Arrival room with
+            | Some paid, Some plain, Some horizon ->
+                let span = float (max 1 horizon)
+                let rewalk = float (max 0 (horizon - stay))
+                let pays (yields: float) = yields * span > rate * (span + rewalk)
+
+                Some
+                    {
+                        Room = room
+                        Paid = paid
+                        Horizon = horizon
+                        Bids =
+                            if not (facts.Sighted room) then Truth.Unknown
+                            elif pays paid then Truth.Yes
+                            elif pays plain then Truth.Unknown
+                            else Truth.No
+                    }
+            | _ -> None)
+    | _ -> []
+
+/// The room that outpays `held`, the room committed to (`OpGuard.Outpaid`):
+/// of the rooms whose bid has stood for as long as a move there takes to
+/// realise (`OpRecord.Bids` against its horizon) and is seen out-paying
+/// this tick, the one paying most, then by name. A bid stands from the
+/// tick the room was seen out-paying until a tick it is seen not to: a
+/// comparison noise reverses sooner is no evidence for a move that cannot
+/// land before it, and a tick nothing sees the room says nothing either
+/// way, so a room seen only on looks counts its horizon between them and
+/// moves on a look. None before then. The room an `Outpaid` exit moves to.
+let private challenger (facts: OpFacts) (spec: OperationSpec) (record: OpRecord) : string option =
+    match record.Room with
+    | None -> None
+    | Some held ->
+        bidsOn facts spec held
+        |> List.filter (fun bid ->
+            bid.Bids = Truth.Yes
+            && record.Bids
+               |> List.exists (fun (room, since) ->
+                   room = bid.Room && facts.Now - since >= bid.Horizon))
+        |> List.sortBy (fun bid -> -bid.Paid, bid.Room)
         |> List.tryHead
-        |> Option.map fst
-    | _ -> None
+        |> Option.map _.Room
+
+/// The record with each room's bid for its latch moved on a tick
+/// (`bidsOn`), each on its own: one seen out-paying stands from the tick it
+/// first did, one seen not out-paying is dropped, and one nothing reads
+/// this tick keeps what it had.
+let private bidding (facts: OpFacts) (spec: OperationSpec) (record: OpRecord) : OpRecord =
+    let bids =
+        match record.Room with
+        | None -> []
+        | Some held ->
+            let standing (room: string) =
+                record.Bids |> List.tryFind (fst >> (=) room)
+
+            let read = bidsOn facts spec held
+
+            let moved =
+                read
+                |> List.choose (fun bid ->
+                    match bid.Bids, standing bid.Room with
+                    | Truth.Yes, Some kept -> Some kept
+                    | Truth.Yes, None -> Some(bid.Room, facts.Now)
+                    | Truth.Unknown, kept -> kept
+                    | Truth.No, _ -> None)
+
+            // A room not priced this tick keeps what it had: nothing saw it
+            // fail.
+            let unread =
+                record.Bids
+                |> List.filter (fun (room, _) ->
+                    room <> held && not (read |> List.exists (fun bid -> bid.Room = room)))
+
+            moved @ unread |> List.sortBy fst
+
+    if bids = record.Bids then
+        record
+    else
+        { record with Bids = bids }
 
 /// Whether a body worth its kill stands in sight in the room: Unknown where
 /// the room is not priced, or only bodies out of sight could answer.
@@ -169,21 +267,25 @@ let rec truth (facts: OpFacts) (spec: OperationSpec) (record: OpRecord) (guard: 
         match roomsOf spec.Target with
         | None -> Truth.Unknown
         | Some rooms ->
-            let beats (floor: float) (rates: float option list) =
-                if rates |> List.exists (Option.exists (fun rate -> rate > floor)) then
-                    Truth.Yes
-                elif rates |> List.exists Option.isNone then
-                    Truth.Unknown
-                else
-                    Truth.No
-
             match record.Room with
-            | None -> rooms |> List.map facts.Rate |> beats 0.0
+            | None -> truth facts spec record (OpGuard.RateAbove 0.0)
             | Some room ->
-                match facts.Rate room with
-                | None -> Truth.Unknown
-                | Some held ->
-                    rooms |> List.filter ((<>) room) |> List.map facts.Challenge |> beats held
+                match facts.Rate room, challenger facts spec record with
+                | None, _ -> Truth.Unknown
+                | Some _, Some _ -> Truth.Yes
+                // None that has paid long enough: Unknown where a room
+                // unpriced might have.
+                | Some _, None ->
+                    if
+                        rooms
+                        |> List.exists (fun other ->
+                            other <> room
+                            && (Option.isNone (facts.Challenge other)
+                                || Option.isNone (facts.Arrival other)))
+                    then
+                        Truth.Unknown
+                    else
+                        Truth.No
     | OpGuard.Exhausted ->
         match record.Room with
         | None -> Truth.Yes
@@ -230,8 +332,9 @@ let exitOf
 /// recurs (an `Armed` one ends done), else its phase's first exit taken.
 /// Each phase it enters, its room is chosen and latched there until
 /// the next: the room it was committed to, its commitment kept, while
-/// nothing outpays it and it is not exhausted; else the target's best
-/// (`target`).
+/// nothing outpays it (`challenger`) and it is not exhausted; else the
+/// target's best (`target`). The room bidding to outpay it is kept on the
+/// record every tick it runs its exits (`bidding`).
 let advance
     (facts: OpFacts)
     (spec: OperationSpec)
@@ -260,6 +363,7 @@ let advance
                 Lost = 0
                 NextDue = due
                 Ended = None
+                Bids = []
             },
         [ OpEvent.Began(spec.Id, phase, room.Value) ]
 
@@ -281,6 +385,7 @@ let advance
                 Lost = 0
                 NextDue = 0
                 Ended = None
+                Bids = []
             }
 
         if truth facts spec unbegun guard = Truth.Yes then
@@ -324,6 +429,7 @@ let advance
                         Room = None
                         RoomSince = next
                         NextDue = next + period
+                        Bids = []
                     },
                 [ OpEvent.Recurred(spec.Id, next) ]
             // An armed run's end: the next is due when it began (`NextDue`).
@@ -345,6 +451,9 @@ let advance
         elif windowed then
             recur ()
         else
+            // The room bidding for its latch, counted on from its first bid.
+            let record = bidding facts spec record
+
             let exits =
                 spec.Phases
                 |> List.tryFind (fun p -> p.Phase = record.Phase)
@@ -359,7 +468,7 @@ let advance
             let entered () =
                 match record.Room with
                 | Some kept when truth facts spec record OpGuard.Outpaid = Truth.Yes ->
-                    match challenger facts spec kept with
+                    match challenger facts spec record with
                     | Some other -> Some other, now
                     | None -> Some kept, record.RoomSince
                 | Some kept when truth facts spec record OpGuard.Exhausted = Truth.Yes ->
@@ -379,14 +488,35 @@ let advance
                 // commitment and the Task its room is fought under.
                 | into', _ when into = record.Phase && into' = record.Room -> Some record, []
                 | into', since ->
+                    // What decided a move of its room: the rate it left, what
+                    // the room it entered paid, and the move's horizon.
+                    let why =
+                        into'
+                        |> Option.filter (fun _ -> into' <> record.Room)
+                        |> Option.map (fun room ->
+                            {
+                                Held =
+                                    record.Room
+                                    |> Option.bind facts.Rate
+                                    |> Option.defaultValue 0.0
+                                Paid =
+                                    if challenger facts spec record = Some room then
+                                        facts.Challenge room
+                                    else
+                                        facts.Rate room
+                                    |> Option.defaultValue 0.0
+                                Horizon = facts.Arrival room |> Option.defaultValue 0
+                            })
+
                     Some
                         { record with
                             Phase = into
                             Since = now
                             Room = into'
                             RoomSince = since
+                            Bids = if into' = record.Room then record.Bids else []
                         },
-                    [ OpEvent.Moved(spec.Id, record.Phase, into, index, into') ]
+                    [ OpEvent.Moved(spec.Id, record.Phase, into, index, into', why) ]
             | _ -> Some record, []
 
 /// The interpreter's tick (#663 S7a, dry run): every admitted spec's record
@@ -485,6 +615,14 @@ let warmSince (since: int) (world: World) (room: string) : bool =
     Map.tryFind room world.Sightings
     |> Option.exists (fun sighting -> sighting.Tick >= since)
 
+/// Whether a room is in sight this tick for any of the views
+/// (`ColonyView.Seen`: a room seen this tick carries its time).
+let private sightedIn (now: int) (views: ColonyView list) (room: string) : bool =
+    views
+    |> List.exists (fun view ->
+        Map.tryFind room view.Seen
+        |> Option.exists (fun sighting -> sighting.Tick >= now))
+
 /// The facts an operation reads, over the colonies' views as decided this
 /// tick: a room's rate the best cast of a colony that prices it earns there
 /// (`Facts.castRateIn`); its worth off the first such colony by home.
@@ -533,6 +671,13 @@ let factsOf (now: int) (warm: string -> bool) (views: ColonyView list) : OpFacts
                 | [] -> None
                 | priced ->
                     priced |> List.map (fun view -> Facts.castRateIn view room) |> List.max |> Some
+        // No group: the cast lands wherever it is sent alike.
+        Arrival =
+            fun room ->
+                match pricing room with
+                | [] -> None
+                | _ -> Some 0
+        Sighted = sightedIn now views
         HomeThreatened =
             match views with
             | [] -> Truth.No
@@ -649,8 +794,10 @@ let private musteringOf (room: string) (body: Member) : Facts.Mustering =
 /// casts, nothing. The room its record works (`workedRoom`) is priced
 /// committed (`WorldView.Committed`, from the tick its record entered the
 /// phase): a body seen rooted at its work there since is priced on its
-/// work. The group's arrival, muster and exchange are read in the room the
-/// guards ask of (`OpFacts`); its home is threatened where every colony
+/// work. The ticks the group takes to stand at each room's quarry are its
+/// slowest body's (`Facts.groupArrival`). The group's arrival, muster and
+/// exchange are read in the room the guards ask of (`OpFacts`); its home is
+/// threatened where every colony
 /// that casts one of its rooms has a raider at home
 /// (`Facts.homeThreatened`). A room's worth is the world's table's.
 let ownFacts
@@ -729,6 +876,27 @@ let ownFacts
             |> Option.defaultWith (fun () -> rate room)
 
         if plain <= 0.0 then plain else min plain (onEvidence ())
+
+    // Each listed room's challenge and the group's arrival there, once a
+    // tick: the latch reads them on every tick it bids.
+    let challenges =
+        listed |> List.map (fun room -> room, lazy (challenge room)) |> Map.ofList
+
+    let arrival (room: string) =
+        match placed with
+        | [] -> 0
+        | placed ->
+            pricing room
+            |> Option.bind (fun view -> Facts.groupArrival view placed room)
+            |> Option.defaultValue 0
+
+    let arrivals =
+        listed |> List.map (fun room -> room, lazy (arrival room)) |> Map.ofList
+
+    let once (memo: Map<string, Lazy<'a>>) (read: string -> 'a) (room: string) : 'a =
+        match Map.tryFind room memo with
+        | Some answer -> answer.Value
+        | None -> read room
 
     let truthOf (answer: bool) = if answer then Truth.Yes else Truth.No
 
@@ -816,7 +984,11 @@ let ownFacts
                 || Option.isNone (Facts.muster view room (group |> List.map (musteringOf room))))
         Loses = loses
         Holds = holds
-        Challenge = fun room -> Some(paying room (fun () -> challenge room))
+        Challenge = fun room -> Some(paying room (fun () -> once challenges challenge room))
+        // No group, a cast lands wherever it is sent alike; a room no view
+        // prices pays nothing, so its arrival bids nothing.
+        Arrival = fun room -> Some(once arrivals arrival room)
+        Sighted = sightedIn now views
         HomeThreatened =
             match casting with
             | [] -> Truth.No
@@ -1223,6 +1395,8 @@ let private campFacts (now: int) (reads: ExitRead list) (priced: ColonyView list
         Loses = fun room -> readOf room |> Option.map exitLoses |> Option.defaultValue Truth.Unknown
         Holds = fun _ -> Truth.Unknown
         Challenge = fun _ -> None
+        Arrival = fun _ -> None
+        Sighted = sightedIn now priced
         HomeThreatened =
             match reads |> List.choose _.View with
             | [] -> Truth.No

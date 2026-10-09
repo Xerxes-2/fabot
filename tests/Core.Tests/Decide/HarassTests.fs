@@ -1720,9 +1720,20 @@ let sweepRoomTests =
                             }
                     }
 
+                // Both rooms in sight this tick.
                 let colony =
                     { sweeping [ holder, at ] (seated :: crossing) with
                         Time = 200
+                        Seen =
+                            [ harassRoom; westRoom ]
+                            |> List.map (fun room ->
+                                room,
+                                {
+                                    Tick = 200
+                                    Targets = lazy Set.empty
+                                    Rival = None
+                                })
+                            |> Map.ofList
                     }
 
                 let layer = SpatialInfo.layerOf colony.Spatial harassRoom
@@ -1765,6 +1776,7 @@ let sweepRoomTests =
                         Lost = 0
                         NextDue = 0
                         Ended = None
+                        Bids = []
                     }
 
                 let facts (view: ColonyView) =
@@ -1791,19 +1803,38 @@ let sweepRoomTests =
                     (once.Rate harassRoom |> Option.defaultValue 0.0)
                     "the premise: this tick the haulers pay more than the seated miner"
 
+                // Bidding since long before: the bid is what one tick's
+                // evidence withholds, not the count.
+                let long =
+                    { committed with
+                        Bids = [ westRoom, 0 ]
+                    }
+
                 Expect.equal
-                    (Operations.truth once spec committed OpGuard.Outpaid)
+                    (Operations.truth once spec long OpGuard.Outpaid)
                     Truth.No
                     "seen there once: no evidence, the room stands"
 
+                // Seen on two full ticks the move pays for itself, and moves
+                // the room once it has on every tick for the ticks the group
+                // takes to reach them.
+                let twice = facts (colony |> tracked [ 200; 199 ])
+                let horizon = twice.Arrival westRoom |> Option.defaultValue 0
+
+                let since (tick: int) =
+                    { committed with
+                        Bids = [ westRoom, tick ]
+                    }
+
                 Expect.equal
-                    (Operations.truth
-                        (facts (colony |> tracked [ 200; 199 ]))
-                        spec
-                        committed
-                        OpGuard.Outpaid)
+                    (Operations.truth twice spec (since (200 - horizon + 1)) OpGuard.Outpaid)
+                    Truth.No
+                    $"seen there on two full ticks, bidding a tick short of its horizon ({horizon}): not yet"
+
+                Expect.equal
+                    (Operations.truth twice spec (since (200 - horizon)) OpGuard.Outpaid)
                     Truth.Yes
-                    "seen there on two full ticks: they outpay it"
+                    "seen there on two full ticks, bidding for its horizon: they outpay it"
             }
 
             // Live W19S26, bundle f837bfb7, t1,065,819-832: the sweep took
@@ -1880,6 +1911,7 @@ let sweepRoomTests =
                         Lost = 0
                         NextDue = 0
                         Ended = None
+                        Bids = []
                     }
 
                 let group =
@@ -2000,6 +2032,7 @@ let sweepRoomTests =
                         Lost = 0
                         NextDue = 0
                         Ended = None
+                        Bids = []
                     }
 
                 let rooms =
@@ -2080,6 +2113,7 @@ let sweepRoomTests =
                         Lost = 0
                         NextDue = 0
                         Ended = None
+                        Bids = []
                     }
 
                 // The north room at `now`, the escort in sight or last seen
@@ -2207,6 +2241,7 @@ let sweepRoomTests =
                         Lost = 0
                         NextDue = 0
                         Ended = None
+                        Bids = []
                     }
 
                 // The colony at `now` remembering `body` last seen at `seen`,
@@ -2361,6 +2396,7 @@ let sweepRoomTests =
                         Lost = 0
                         NextDue = 0
                         Ended = None
+                        Bids = []
                     }
 
                 // The hauler back on 30,25 off 31,26, its trail newest first.
@@ -2370,6 +2406,17 @@ let sweepRoomTests =
                             Time = 200
                             Stepped = Map.ofList [ hauler.Id, tile 31 26 ]
                             SteppedBack = Map.ofList [ hauler.Id, tile 30 25 ]
+                            // Both rooms in sight this tick.
+                            Seen =
+                                [ harassRoom; westRoom ]
+                                |> List.map (fun room ->
+                                    room,
+                                    {
+                                        Tick = 200
+                                        Targets = lazy Set.empty
+                                        Rival = None
+                                    })
+                                |> Map.ofList
                         }
 
                     let track (h: HostileInfo) (steps: RoomPos list) =
@@ -2427,10 +2474,30 @@ let sweepRoomTests =
                     (Some committed, [])
                     "kiting: the north room kept, nothing logged"
 
+                // Milling, the west room bids from this tick, and takes the
+                // latch once it has bid for the ticks the group takes to
+                // reach the hauler.
+                let horizon = milling.Arrival westRoom |> Option.defaultValue 0
+
                 Expect.equal
-                    (Operations.advance milling spec (Some committed) |> fst |> Option.bind _.Room)
+                    (Operations.advance milling spec (Some committed)
+                     |> fst
+                     |> Option.map (fun r -> r.Room, r.Bids))
+                    (Some(Some harassRoom, [ westRoom, 200 ]))
+                    "milling: the west room bids from now"
+
+                Expect.equal
+                    (Operations.advance
+                        milling
+                        spec
+                        (Some
+                            { committed with
+                                Bids = [ westRoom, 200 - horizon ]
+                            })
+                     |> fst
+                     |> Option.bind _.Room)
                     (Some westRoom)
-                    "milling: the west room outpays it, and the latch moves there"
+                    $"milling for its horizon ({horizon}): the west room outpays it, and the latch moves there"
             }
         ]
 
@@ -2807,6 +2874,7 @@ let sweepGroupTests =
                         Lost = 0
                         NextDue = 0
                         Ended = None
+                        Bids = []
                     }
 
                 let _, ended, _ = laidWith [ wire None (Some colony.Time) ] [ running ]
@@ -4309,6 +4377,7 @@ let private campRunning (started: int) : OpRecord =
         Lost = 0
         NextDue = started + Operation.Templates.campSpan
         Ended = None
+        Bids = []
     }
 
 /// The exit camp moved on from its running record and laid over one colony.

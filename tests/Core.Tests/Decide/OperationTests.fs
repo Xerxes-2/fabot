@@ -29,6 +29,9 @@ let private factsAt (now: int) (rates: (string * float) list) : OpFacts =
         Loses = fun _ -> Truth.Unknown
         Holds = fun _ -> Truth.Unknown
         Challenge = fun room -> Map.tryFind room rates
+        // No group: a move lands at once.
+        Arrival = fun room -> Map.tryFind room rates |> Option.map (fun _ -> 0)
+        Sighted = fun _ -> true
         HomeThreatened = Truth.No
         ExitsUsed = lazy Truth.Unknown
         Pays = lazy Truth.Unknown
@@ -57,6 +60,7 @@ let private recordAt (phase: OpPhase) (since: int) : OpRecord =
         Lost = 0
         NextDue = 0
         Ended = None
+        Bids = []
     }
 
 /// Every spec admitted, nothing refused or kept.
@@ -158,6 +162,8 @@ let operationStepTests =
                         Loses = fun _ -> failwith "read with no op"
                         Holds = fun _ -> failwith "read with no op"
                         Challenge = fun _ -> failwith "priced with no op"
+                        Arrival = fun _ -> failwith "priced with no op"
+                        Sighted = fun _ -> failwith "read with no op"
                         HomeThreatened = Truth.Unknown
                         ExitsUsed = lazy (failwith "read with no op")
                         Pays = lazy (failwith "priced with no op")
@@ -440,6 +446,287 @@ let operationStepTests =
                     "into W2N1, committed from now"
             }
 
+            // Live W18S27 <-> W19S26, bundle 66de1701, t1,070,572-608: eleven
+            // `Outpaid` moves, one to seven ticks apart, while no body crossed
+            // between the rooms. The group: a ranger standing in W18S27 and
+            // one walking from W17S29, its slowest body some 115 ticks from
+            // W18S27's miner and 138 from W19S26's. Which reading turned the
+            // comparison on each tick the replay cannot say (our looks are
+            // not in it); here it turns on exactly the live ticks, priced as
+            // the arena prices the two rooms off the capture: W19S26 at 20
+            // in sight and 3.5 on evidence out of it, W18S27 at 7.5 to 12.
+            test
+                "t1,070,567-610: a comparison turning on each live move's tick never moves the latch before the move could land" {
+                let live =
+                    [ 572, "W19S26"; 579, "W18S27"; 581, "W19S26"; 582, "W18S27"; 584, "W19S26" ]
+                    @ [ 588, "W18S27"; 590, "W19S26"; 592, "W18S27"; 593, "W19S26" ]
+                    @ [ 606, "W18S27"; 608, "W19S26" ]
+                    |> List.map (fun (t, room) -> 1_070_000 + t, room)
+
+                // The room paying more on a tick: the one live had just moved to.
+                let ahead (now: int) =
+                    live
+                    |> List.filter (fun (t, _) -> t <= now)
+                    |> List.tryLast
+                    |> Option.map snd
+                    |> Option.defaultValue "W18S27"
+
+                let spec =
+                    Operation.Templates.sweep
+                        "sweep"
+                        "Trepidimous"
+                        [ "W18S27"; "W19S26" ]
+                        { limits with
+                            Deadline = System.Int32.MaxValue
+                        }
+
+                let factsOn (walked: int -> string -> int) (now: int) =
+                    let rate room =
+                        match room, ahead now with
+                        | "W19S26", "W19S26" -> 20.0
+                        | "W19S26", _ -> 3.5
+                        | _, "W19S26" -> 7.5
+                        | _ -> 12.0
+
+                    { factsAt now [ "W18S27", rate "W18S27"; "W19S26", rate "W19S26" ] with
+                        Holds = fun _ -> Truth.Yes
+                        Loses = fun _ -> Truth.No
+                        Arrival = fun room -> Some(walked now room)
+                    }
+
+                // The slowest body a tile a tick nearer both rooms' quarries.
+                let walking (now: int) (room: string) =
+                    let k = now - 1_070_567
+                    if room = "W18S27" then max 0 (115 - k) else max 0 (138 - k)
+
+                let start =
+                    { recordAt OpPhase.Execute 1_070_552 with
+                        Id = "sweep"
+                        Room = Some "W18S27"
+                    }
+
+                let moves (walked: int -> string -> int) =
+                    ((Some start, []), [ 1_070_567..1_070_610 ])
+                    ||> List.fold (fun (record, moved) now ->
+                        let next, _ = Operations.advance (factsOn walked now) spec record
+                        let room = next |> Option.bind _.Room
+
+                        next,
+                        (if room <> (record |> Option.bind _.Room) then
+                             (now, Option.defaultValue "" room) :: moved
+                         else
+                             moved))
+                    |> snd
+                    |> List.rev
+
+                Expect.equal
+                    (moves (fun _ _ -> 0))
+                    live
+                    "the premise: read with no horizon (main's rule), the latch moves on each live tick"
+
+                Expect.isEmpty
+                    (moves walking)
+                    "with the group's walk to each quarry: held, all 44 ticks"
+            }
+
+            test
+                "a room paying for the walk its move adds takes the latch once it has paid for the ticks the move takes, never before" {
+                let spec = sweep
+
+                let executing =
+                    { recordAt OpPhase.Execute 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                    }
+
+                // The group at W1N1's quarry, W2N1's ten ticks off: W2N1
+                // paying 3 against 1 earns 30 over its ten, against W1N1's
+                // 10 over them and 10 over the walk the move adds.
+                let factsOn (paid: float) (now: int) =
+                    { factsAt now [ "W1N1", 1.0; "W2N1", paid ] with
+                        Holds = fun _ -> Truth.Yes
+                        Loses = fun _ -> Truth.No
+                        Arrival = fun room -> if room = "W2N1" then Some 10 else Some 0
+                    }
+
+                let run (paid: float) =
+                    ((Some executing, []), [ 50..70 ])
+                    ||> List.fold (fun (record, events) now ->
+                        let next, moved = Operations.advance (factsOn paid now) spec record
+                        next, events @ (moved |> List.map (fun event -> now, event)))
+                    |> snd
+
+                Expect.equal
+                    (run 3.0)
+                    [
+                        60,
+                        OpEvent.Moved(
+                            "s1",
+                            OpPhase.Execute,
+                            OpPhase.Execute,
+                            1,
+                            Some "W2N1",
+                            Some { Held = 1.0; Paid = 3.0; Horizon = 10 }
+                        )
+                    ]
+                    "bidding from t50, it moves at t60, its ten ticks paid, with the numbers that decided it"
+
+                Expect.isEmpty
+                    (run 1.9)
+                    "paying under twice W1N1 from W1N1's quarry: the walk the move adds is not paid, it stays"
+
+                // Equidistant, the move adds no walk: any surplus that holds
+                // for its horizon pays.
+                let level (now: int) =
+                    { factsOn 1.1 now with
+                        Arrival = fun _ -> Some 10
+                    }
+
+                Expect.equal
+                    (Operations.advance
+                        (level 60)
+                        spec
+                        (Some { executing with Bids = [ "W2N1", 50 ] })
+                     |> fst
+                     |> Option.bind _.Room)
+                    (Some "W2N1")
+                    "equidistant, a surplus held for its horizon takes the latch"
+            }
+
+            // The ship-gate review: one count for the top bid alone was reset
+            // by every swap of two rooms that both outbid the held one, so
+            // neither ever moved it.
+            test
+                "two rooms both outbidding the held one, swapping places every tick: each bid stands on its own, and the better takes the latch after its horizon" {
+                let spec =
+                    Operation.Templates.sweep "s1" "Trepidimous" [ "W1N1"; "W2N1"; "W3N1" ] limits
+
+                let executing =
+                    { recordAt OpPhase.Execute 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                    }
+
+                let factsOn (now: int) =
+                    let high, low = if now % 2 = 0 then "W2N1", "W3N1" else "W3N1", "W2N1"
+
+                    { factsAt now [ "W1N1", 1.0; high, 3.0; low, 2.5 ] with
+                        Holds = fun _ -> Truth.Yes
+                        Loses = fun _ -> Truth.No
+                        Arrival = fun room -> if room = "W1N1" then Some 0 else Some 10
+                    }
+
+                let moves =
+                    ((Some executing, []), [ 50..70 ])
+                    ||> List.fold (fun (record, moved) now ->
+                        let next, events = Operations.advance (factsOn now) spec record
+
+                        next,
+                        moved
+                        @ (events
+                           |> List.choose (function
+                               | OpEvent.Moved(_, _, _, _, room, _) -> Some(now, room)
+                               | _ -> None)))
+                    |> snd
+
+                Expect.equal
+                    moves
+                    [ 60, Some "W2N1" ]
+                    "both bid from t50; at t60, both stood ten ticks, the one paying more that tick"
+            }
+
+            // The ship-gate review: a room seen only on an observer's looks
+            // bid only on them, and its count restarted in between. A tick
+            // nothing sees the room neither confirms its bid nor resets it.
+            test
+                "a better room seen every fifth tick takes the latch after its horizon; one seen paying once, then seen not paying, never does" {
+                let executing =
+                    { recordAt OpPhase.Execute 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                    }
+
+                // W2N1 in sight on every fifth tick, where it pays `seen now`;
+                // between looks its bodies are priced from memory at 3, and on
+                // evidence at 0.5 (none sampled twice).
+                let factsOn (seen: int -> float) (now: int) =
+                    let sighted = now % 5 = 0
+                    let plain = if sighted then seen now else 3.0
+                    let paid = if sighted then seen now else 0.5
+
+                    { factsAt now [ "W1N1", 1.0; "W2N1", plain ] with
+                        Holds = fun _ -> Truth.Yes
+                        Loses = fun _ -> Truth.No
+                        Challenge = fun room -> if room = "W2N1" then Some paid else Some 1.0
+                        Arrival = fun room -> if room = "W2N1" then Some 10 else Some 0
+                        Sighted = fun room -> room = "W1N1" || sighted
+                    }
+
+                let moves (seen: int -> float) =
+                    ((Some executing, []), [ 50..80 ])
+                    ||> List.fold (fun (record, moved) now ->
+                        let next, events = Operations.advance (factsOn seen now) sweep record
+
+                        next,
+                        moved
+                        @ (events
+                           |> List.choose (function
+                               | OpEvent.Moved(_, _, _, _, room, _) -> Some(now, room)
+                               | _ -> None)))
+                    |> snd
+
+                Expect.equal
+                    (moves (fun _ -> 3.0))
+                    [ 60, Some "W2N1" ]
+                    "seen out-paying at t50, never seen not to: it moves at t60, its ten ticks stood"
+
+                Expect.isEmpty
+                    (moves (fun now -> if now = 50 then 3.0 else 1.0))
+                    "seen paying at t50, seen not paying at t55: the bid falls, and memory alone starts none"
+            }
+
+            test "an exhausted room moves to one that pays at once, whatever a bid has yet to prove" {
+                let executing =
+                    { recordAt OpPhase.Execute 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                        Bids = [ "W2N1", 49 ]
+                    }
+
+                let spent =
+                    { factsAt 50 [ "W1N1", 0.0; "W2N1", 1.0 ] with
+                        Holds = fun room -> if room = "W1N1" then Truth.No else Truth.Yes
+                        Loses = fun _ -> Truth.No
+                        Arrival = fun room -> if room = "W2N1" then Some 30 else Some 0
+                    }
+
+                Expect.equal
+                    (Operations.truth spent sweep executing OpGuard.Outpaid)
+                    Truth.No
+                    "the premise: W2N1 has bid for one tick of its thirty"
+
+                let moved, events = Operations.advance spent sweep (Some executing)
+
+                Expect.equal
+                    (moved |> Option.map (fun r -> r.Phase, r.Room, r.RoomSince, r.Bids))
+                    (Some(OpPhase.Execute, Some "W2N1", 50, []))
+                    "into W2N1 on its exhaustion, committed from now, no bid carried over"
+
+                Expect.equal
+                    events
+                    [
+                        OpEvent.Moved(
+                            "s1",
+                            OpPhase.Execute,
+                            OpPhase.Execute,
+                            2,
+                            Some "W2N1",
+                            Some { Held = 0.0; Paid = 1.0; Horizon = 30 }
+                        )
+                    ]
+                    "its event: the room it left paid nothing"
+            }
+
             test "Unknown never transitions, and hides the exits after it" {
                 let spec =
                     withExits
@@ -581,7 +868,7 @@ let operationStepTests =
 
                 Expect.equal
                     events
-                    [ OpEvent.Moved("s1", OpPhase.Muster, OpPhase.Execute, 0, None) ]
+                    [ OpEvent.Moved("s1", OpPhase.Muster, OpPhase.Execute, 0, None, None) ]
                     "its event"
 
                 let second, _ = Operations.advance (factsAt 12 []) chain first
@@ -800,7 +1087,7 @@ let exitCampSpecTests =
                 Expect.equal
                     (moved Truth.Yes (fun room -> if room = "W2N3" then Truth.Yes else Truth.No))
                     (Some(OpPhase.Retreat, None),
-                     [ OpEvent.Moved("c1", OpPhase.Execute, OpPhase.Retreat, 0, None) ])
+                     [ OpEvent.Moved("c1", OpPhase.Execute, OpPhase.Retreat, 0, None, None) ])
                     "one exit lost: retreat"
 
                 Expect.equal

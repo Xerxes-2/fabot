@@ -3407,6 +3407,8 @@ let private recordOf (raw: obj) : OpRecord option =
                 Lost = numberOf raw "l"
                 NextDue = numberOf raw "n"
                 Ended = ended
+                // Heap only: a reset starts the count again.
+                Bids = []
             }))
 
 /// The ops leaf (`Memory.fabot.ops`), None where it is absent or no object:
@@ -3493,13 +3495,20 @@ let private eventWire (tick: int) (event: OpEvent) : obj =
         o?k <- "began"
         o?p <- nameIn phaseNames phase
         target room
-    | OpEvent.Moved(id, from, into, exit, room) ->
+    | OpEvent.Moved(id, from, into, exit, room, why) ->
         o?i <- id
         o?k <- "moved"
         o?f <- nameIn phaseNames from
         o?p <- nameIn phaseNames into
         o?x <- exit
         target room
+
+        // What decided a room's move.
+        why
+        |> Option.iter (fun why ->
+            o?h <- hundredths why.Held
+            o?v <- hundredths why.Paid
+            o?z <- why.Horizon)
     | OpEvent.Recurred(id, due) ->
         o?i <- id
         o?k <- "recurred"

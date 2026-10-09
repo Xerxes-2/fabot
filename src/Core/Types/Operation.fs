@@ -136,18 +136,21 @@ type OpGuard =
     /// Every colony that may cast for it has its own home threatened
     /// (`OpFacts.HomeThreatened`): none of them bids, home defence first.
     | HomeThreatened
-    /// Another of the target's rooms earns the group more a tick, over its
-    /// own spell, than the room its record is committed to: the other room
-    /// read on evidence (`OpFacts.Challenge`: only a body seen there on two
-    /// full ticks or more counts, so a body crossing it for a tick moves
-    /// nothing, and never above its own rate), its rate net of the group's
-    /// walk there; the committed room
-    /// read with the effort already spent in it (`OpFacts.Rate`) — its group
-    /// in or by it walks nothing, the volleys landed are the hits its quarry
-    /// lacks, its escort as it stands, and a body seen rooted at its work
-    /// there since it committed is priced on its work
-    /// (`WorldView.Committed`). Yes with no room committed and one room
-    /// earning anything.
+    /// A move off the room its record is committed to pays for itself, and
+    /// has paid for as long as it takes to realise (`Operations.challenger`):
+    /// another of the target's rooms, read on evidence (`OpFacts.Challenge`:
+    /// only a body seen there on two full ticks or more counts, and never
+    /// above its own rate), earns more over the ticks the group takes to
+    /// stand at its quarry (`OpFacts.Arrival`) than the committed room earns
+    /// over the same ticks and over the walk the move adds; and its bid has
+    /// stood for at least those ticks (`OpRecord.Bids`): from a tick it was
+    /// seen out-paying, with no tick since on which it was seen not to. The
+    /// committed room is read with the effort already
+    /// spent in it (`OpFacts.Rate`) — its group in or by it walks nothing,
+    /// the volleys landed are the hits its quarry lacks, its escort as it
+    /// stands, and a body seen rooted at its work there since it committed is
+    /// priced on its work (`WorldView.Committed`). Yes with no room
+    /// committed and one room earning anything.
     | Outpaid
     /// The room its record is committed to holds nothing more for the
     /// group: no body there worth its kill, in sight or remembered at its
@@ -338,6 +341,11 @@ type OpRecord =
         /// 0 for every other schedule.
         NextDue: int
         Ended: OpEnd option
+        /// Each room whose bid for a move off `Room` stands, with the tick it
+        /// was first seen out-paying (`OpGuard.Outpaid`), by room name. Heap
+        /// only, never written to Memory: a reset starts each count again,
+        /// which delays a move by at most its own persistence.
+        Bids: (string * int) list
     }
 
 /// What an operation's guards and target read this tick, over the world.
@@ -368,6 +376,14 @@ type OpFacts =
         /// bodies seen there on two full ticks or more counted, and never
         /// above its rate (`Rate`): evidence withholds credit, never adds it.
         Challenge: string -> float option
+        /// The ticks the operation's group takes to stand at a room's quarry
+        /// (`Facts.groupArrival`): what a move into it takes to realise; 0
+        /// with no group, whose cast lands wherever it is sent alike. None
+        /// where no colony prices the room.
+        Arrival: string -> int option
+        /// Whether a room is in sight this tick: what its price reads is
+        /// this tick's, not memory's.
+        Sighted: string -> bool
         /// Whether every colony that may cast for the operation has its home
         /// threatened.
         HomeThreatened: Truth
@@ -422,12 +438,31 @@ type OpAdmission =
         Kept: Set<string>
     }
 
+/// The numbers a move of an operation's room was decided on: the rate of
+/// the room it left (`OpFacts.Rate`), what the room it entered paid
+/// (`OpFacts.Challenge`, its rate where it moved on the room's exhaustion),
+/// and the ticks the group takes to stand at the entered room's quarry
+/// (`OpFacts.Arrival`).
+type OpMove =
+    {
+        Held: float
+        Paid: float
+        Horizon: int
+    }
+
 /// What the interpreter did this tick (`Memory.fabot.ops.events`). In the
 /// dry run (S7a, S7b) they are all it does.
 [<RequireQualifiedAccess>]
 type OpEvent =
     | Began of id: string * phase: OpPhase * target: string option
-    | Moved of id: string * from: OpPhase * into: OpPhase * exit: int * target: string option
+    /// `why` where the room changed.
+    | Moved of
+        id: string *
+        from: OpPhase *
+        into: OpPhase *
+        exit: int *
+        target: string option *
+        why: OpMove option
     | Recurred of id: string * due: int
     | Ended of id: string * OpEnd
     /// Its spec left Memory, or is refused now.

@@ -1211,7 +1211,13 @@ if (command === "console") {
         e.k === "began" ? `began in ${e.p}` :
         e.k === "ended" ? `ended ${e.e}` :
         e.k === "recurred" ? `recurs at t${e.n}` : e.k;
-      console.log(`  t${e.t} ${e.i} ${what}${e.r ? ` [${e.r}]` : ""}`);
+      // A room's move carries what decided it (#663): the left room's rate,
+      // what the entered one paid, and the ticks the move takes to land.
+      const why =
+        e.k === "moved" && typeof e.h === "number" && typeof e.v === "number"
+          ? `  held ${e.h} → paid ${e.v}${typeof e.z === "number" ? ` over ${e.z}t` : ""}`
+          : "";
+      console.log(`  t${e.t} ${e.i} ${what}${e.r ? ` [${e.r}]` : ""}${why}`);
     }
   }
 } else if (command === "fight-only") {

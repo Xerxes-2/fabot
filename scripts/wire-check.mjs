@@ -2805,7 +2805,7 @@ wire("ops: each event kind on the wire, stamped with its tick", async () => {
   const phase = (tag) => new OpPhase(tag, []);
   const { ops } = await opsThrough({}, [
     new OpEvent(0, ["op1", phase(2), undefined]),
-    new OpEvent(1, ["op1", phase(2), phase(3), 1, "W19S26"]),
+    new OpEvent(1, ["op1", phase(2), phase(3), 1, "W19S26", undefined]),
     new OpEvent(2, ["op1", 300]),
     new OpEvent(3, ["op1", new OpEnd(3, [])]),
     new OpEvent(4, ["op1"]),
@@ -2819,6 +2819,21 @@ wire("ops: each event kind on the wire, stamped with its tick", async () => {
       { t: 77, i: "op1", k: "ended", e: "budget" },
       { t: 77, i: "op1", k: "dropped" },
     ]),
+  );
+});
+
+// A move of an operation's room carries what decided it: the rate of the
+// room it left (`h`), what the room it entered paid (`v`), each to the
+// hundredth, and the move's horizon in ticks (`z`).
+wire("ops: a room's move carries the numbers that decided it", async () => {
+  const { OpEvent, OpPhase, OpMove } = await import("../build/fable/Core/Types/Operation.js");
+  const phase = (tag) => new OpPhase(tag, []);
+  const { ops } = await opsThrough({}, [
+    new OpEvent(1, ["sweep", phase(2), phase(2), 1, "W19S26", new OpMove(7.4012, 19.866, 130)]),
+  ]);
+  assert.equal(
+    stable(ops.events),
+    stable([{ t: 77, i: "sweep", k: "moved", f: "execute", p: "execute", x: 1, r: "W19S26", h: 7.4, v: 19.87, z: 130 }]),
   );
 });
 

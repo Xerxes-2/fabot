@@ -5858,6 +5858,43 @@ let groupRate (view: ColonyView) (group: (CreepInfo * RoomPos) list) (room: stri
         (dismantleOf (List.map fst group))
         room
 
+/// The ticks a group of ours takes to stand at a room's quarry (#663): its
+/// slowest body's walk at its plain pace to within its reach of the nearest
+/// body the room's
+/// worth values (`RoomWorth.values`, in sight or laid back as the sweep
+/// prices them, `sweepPricing`), as the crow flies across borders, as
+/// `doorTicks` reads a walk; to the room itself (`doorTicks`) where it values
+/// none. Where a move into the room is realised, which its door alone
+/// understates by the walk inside. None for no group, or one off the grid.
+let groupArrival
+    (view: ColonyView)
+    (group: (CreepInfo * RoomPos) list)
+    (room: string)
+    : int option =
+    let values = RoomWorth.values Quarry.Reading.Value (roomWorth view room)
+
+    let quarry =
+        (sweepPricing view room).Hostiles
+        |> List.filter (fun h ->
+            h.Pos.Room = room && Map.tryFind h.Id values |> Option.exists (fun v -> v > 0.0))
+        |> List.map _.Pos
+
+    let walk (creep: CreepInfo, at: RoomPos) =
+        let fighter = Fighter.ofCreep creep
+        let pace = paceOf fighter
+
+        match quarry |> List.choose (RoomName.tileRange at) with
+        | [] ->
+            match doorTicks at pace room with
+            | System.Int32.MaxValue -> None
+            | ticks -> Some ticks
+        | tiles -> Some(max 0 (List.min tiles - fighter.Reach) * pace)
+
+    match group |> List.map walk with
+    | [] -> None
+    | walks when List.forall Option.isSome walks -> walks |> List.choose id |> List.max |> Some
+    | _ -> None
+
 /// The view a room is priced off among the views laid together
 /// (`worthOwner`): the colony that mines it, else one that works it as a
 /// candidate, else one that projects it.

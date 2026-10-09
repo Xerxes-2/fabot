@@ -291,6 +291,35 @@ smoke("observe ledger prints each row's spend, loss, ratio and rate predicted ag
   assert.match(out, /ratio inf {2}rate 0\.00 predicted \/ 12\.00 realised/);
 });
 
+// #663: a room's move carries the numbers that decided it; an event without
+// them (an older bundle's, or a phase move) prints as before.
+smoke("observe op list prints a room move's held rate, what the room paid and its horizon (#663)", () => {
+  const file = join(dir, "ops-memory.json");
+  writeFileSync(
+    file,
+    JSON.stringify({
+      fabot: {
+        ops: {
+          code: { live: [{ i: "sweep", s: 100, p: "execute", a: 120, e: 0, l: 0, n: 0, r: "W19S26", c: 120 }] },
+          events: [
+            { t: 120, i: "sweep", k: "moved", f: "execute", p: "execute", x: 1, r: "W19S26", h: 7.5, v: 20.1, z: 30 },
+            { t: 90, i: "sweep", k: "moved", f: "execute", p: "hold", x: 3, r: "W18S27" },
+          ],
+        },
+      },
+    }),
+  );
+  const res = spawnSync(process.execPath, [script("observe.mjs"), "op", "list"], {
+    env: { ...process.env, SCREEPS_TOKEN: "", OBSERVE_MEMORY: file },
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  assert.equal(res.status, 0, res.stderr);
+  assert.ok(!crashed(res.stderr), res.stderr);
+  assert.match(res.stdout, /^ {2}t120 sweep execute -> execute \(exit 1\) \[W19S26\] {2}held 7\.5 → paid 20\.1 over 30t$/m);
+  assert.match(res.stdout, /^ {2}t90 sweep execute -> hold \(exit 3\) \[W18S27\]$/m);
+});
+
 smoke("observe cpu names each switch in effect and its source, a standing override flagged (#575)", () => {
   const { code, out, err } = runOffline(["cpu"]);
   assert.equal(code, 0, err);

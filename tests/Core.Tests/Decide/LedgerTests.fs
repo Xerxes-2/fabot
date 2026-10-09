@@ -156,6 +156,7 @@ let tests =
                         Lost = 7
                         NextDue = 0
                         Ended = ended
+                        Bids = []
                     }
 
                 let account records =

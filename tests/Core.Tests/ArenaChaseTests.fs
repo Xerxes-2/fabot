@@ -2364,6 +2364,7 @@ let private w19s25SweepLatch () : Arena =
                             Lost = 0
                             NextDue = 0
                             Ended = None
+                            Bids = []
                         }
                     ]
             }
@@ -2382,8 +2383,20 @@ let w19s25SweepLatchTests =
             // it had crossed last at t1,068,277 and walked inland since; a
             // step on, as walking (14). Its price is its trail's: once it
             // kites inland the room is W19S25, held to the end.
+            //
+            // A move waits until the room has been seen out-paying for the
+            // ticks the group takes to reach its quarry
+            // (`Operations.challenger`): while Bolt dances on the border
+            // W19S26, in the ranger's sight, pays 75-148 against W19S25's
+            // 52-62 from t1,068,247, and takes the latch at t1,068,262 (its
+            // horizon 15). Nothing of ours sees W19S25 after t1,068,277, so
+            // its remembered 55 against the kiter's 13 never starts a bid:
+            // memory alone moves no latch, and the room is W19S26 to the end,
+            // until a look at W19S25 or W19S26's exhaustion. Before, each
+            // move landed the tick its comparison turned: t1,068,247 into
+            // W19S26, and t1,068,284 back to W19S25 on memory.
             test
-                "t1,068,284-340: once Bolt7991 kites inland, the room is W19S25 on every tick, whichever way it steps" {
+                "t1,068,241-340: the latch moves once, into W19S26 after its horizon, and W19S25 out of sight never takes it back on memory" {
                 let rooms =
                     ((w19s25SweepLatch (), []), [ 1..100 ])
                     ||> List.fold (fun (state, rooms) _ ->
@@ -2395,11 +2408,15 @@ let w19s25SweepLatchTests =
                     |> snd
                     |> List.rev
 
-                let kited =
-                    rooms |> List.filter (fun (tick, _) -> tick >= 1_068_284 && tick <= 1_068_340)
+                let moves =
+                    rooms
+                    |> List.pairwise
+                    |> List.filter (fun ((_, a), (_, b)) -> a <> b)
+                    |> List.map snd
 
-                Expect.isTrue
-                    (kited |> List.forall (fun (_, room) -> room = Some "W19S25"))
-                    $"W19S25 from t1,068,284 to t1,068,340: {rooms}"
+                Expect.equal
+                    moves
+                    [ 1_068_262, Some "W19S26" ]
+                    $"one move, once W19S26 was seen out-paying for its horizon: {rooms}"
             }
         ]
