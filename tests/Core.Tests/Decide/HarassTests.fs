@@ -1394,6 +1394,279 @@ let sweepRoomTests =
                     0.0
                     "none reaches it: a cast at its odds"
             }
+
+            // Live W18S27 t1,058,000-299 (#663 S7c): the sweep's room flipped
+            // W18S27 <-> W19S26 every 2-8 ticks. HalfLife sat rooted at its
+            // source (certain to be caught); as our group closed it stepped
+            // off toward the exit, the one-step reading of a leaver collapsed
+            // its odds, the rate fell under W19S26's and the group turned;
+            // once we were gone it went back to work and the rate came back.
+            test
+                "a quarry stepping off its work as the group closes does not move the room the sweep committed to" {
+                let holder = ranger "ranger-r"
+                let home = SpatialInfo.homeName bareHome.Spatial
+                // Five tiles below the north room's edge, twenty-five off the
+                // west room's: the north room is the near one.
+                let at = RoomPos.at home { X = 25; Y = 5 }
+                let held = Map.ofList [ holder.Name, taskId (Guard harassRoom) ]
+                let source = "src-n"
+                let seat = { X = 20; Y = 10 }
+
+                // A rooted miner as fast as the ranger: 2W2M.
+                let halfLife (pos: Pos) =
+                    { theirsIn harassRoom "half-life" pos [ Work; Work; Move; Move ] with
+                        TicksToLive = 1400
+                    }
+
+                let west =
+                    [
+                        theirsIn westRoom "miner-w" { X = 20; Y = 20 } [ Work; Work; Move ]
+                        hauler westRoom "hauler-w" { X = 22; Y = 20 }
+                    ]
+
+                // The north room with its source beside the seat, its miner
+                // at `pos`, its trail in the quarry memory.
+                let tick (time: int) (pos: Pos) (trail: (int * Pos) list) (stepped: Pos option) =
+                    let colony = sweeping [ holder, at ] (halfLife pos :: west)
+                    let layer = SpatialInfo.layerOf colony.Spatial harassRoom
+                    let miner = halfLife pos
+
+                    { colony with
+                        Time = time
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds = colony.Spatial.TargetKinds |> Map.add source Source
+                            }
+                            |> withNeighbour
+                                harassRoom
+                                { layer with
+                                    TargetPositions =
+                                        Map.add source { X = 20; Y = 11 } layer.TargetPositions
+                                }
+                        Stepped =
+                            match stepped with
+                            | Some tile -> Map.ofList [ miner.Id, RoomPos.at harassRoom tile ]
+                            | None -> Map.empty
+                        World =
+                            { colony.World with
+                                Quarries =
+                                    Map.ofList
+                                        [
+                                            miner.Id,
+                                            {
+                                                Body = miner
+                                                Seen = time
+                                                Cargo = 0
+                                                Trail =
+                                                    trail
+                                                    |> List.map (fun (t, p) ->
+                                                        t, RoomPos.at harassRoom p)
+                                                Crossings = None
+                                                Gone = None
+                                            }
+                                        ]
+                            }
+                    }
+
+                let spec =
+                    Operation.Templates.sweep
+                        "sweep"
+                        enemy
+                        [ harassRoom; westRoom ]
+                        {
+                            MaxBodies = 6
+                            MaxEnergy = System.Int32.MaxValue
+                            Deadline = System.Int32.MaxValue
+                            MaxLossRatio = 1.0
+                        }
+
+                let step (record: OpRecord option) (view: ColonyView) =
+                    let group = Operations.groupIn (set [ harassRoom; westRoom ]) held [ view ]
+
+                    let facts =
+                        Operations.ownFacts
+                            view.Time
+                            (fun _ -> true)
+                            spec
+                            record
+                            (fun _ -> [ view ])
+                            group
+                            [ view ]
+
+                    facts, Operations.advance facts spec record |> fst
+
+                // Seated: the north room is the one the sweep commits to.
+                let seated = tick 100 seat [ 100, seat ] None
+                let _, committed = step None seated
+
+                Expect.equal (committed |> Option.bind _.Room) (Some harassRoom) "committed north"
+
+                // A tick on, it has stepped two tiles toward the north exit as
+                // the ranger closes: read uncommitted, its odds collapse and
+                // the west room pays more — the flip.
+                let fled = { X = 20; Y = 8 }
+                let closing = tick 101 fled [ 101, fled; 100, seat ] (Some seat)
+                let fresh, _ = step None closing
+
+                Expect.isGreaterThan
+                    (fresh.Rate westRoom |> Option.defaultValue 0.0)
+                    (fresh.Rate harassRoom |> Option.defaultValue 0.0)
+                    "uncommitted, the west room pays more once it stepped off"
+
+                let facts, kept = step committed closing
+
+                Expect.equal
+                    (kept |> Option.bind _.Room)
+                    (Some harassRoom)
+                    "committed, the room stands"
+
+                Expect.equal
+                    (kept |> Option.map (fun r -> r.Phase, r.Since))
+                    (Some(OpPhase.Execute, 100))
+                    "no exit taken"
+
+                Expect.equal
+                    (Operations.truth facts spec committed.Value OpGuard.Outpaid)
+                    Truth.No
+                    "the west room does not outpay the room committed to"
+
+                // Back on its seat once we are near: still the north room.
+                let back = tick 102 seat [ 102, seat; 101, fled; 100, seat ] (Some fled)
+                let _, still = step kept back
+
+                Expect.equal (still |> Option.bind _.Room) (Some harassRoom) "still north"
+
+                // Gone from the room: its value there is gone, and the room
+                // moves on.
+                let gone = sweeping [ holder, at ] west
+                let _, moved = step still { gone with Time = 103 }
+
+                Expect.equal
+                    (moved |> Option.bind _.Room)
+                    (Some westRoom)
+                    "its quarry gone, the west room"
+            }
+
+            // The S7c review: Outpaid read one tick's rates, so haulers
+            // crossing W19S26 for a tick would have moved the room. Another
+            // room outpays the committed one only on evidence: a body seen
+            // there on two full ticks.
+            test
+                "one tick of haulers crossing another candidate does not move the room committed to" {
+                let holder = ranger "ranger-r"
+                let home = SpatialInfo.homeName bareHome.Spatial
+                // By the west room's edge, twenty-five off the north room's.
+                let at = RoomPos.at home { X = 5; Y = 25 }
+                let held = Map.ofList [ holder.Name, taskId (Guard harassRoom) ]
+                let seat = { X = 20; Y = 10 }
+
+                let seated = theirsIn harassRoom "half-life" seat [ Work; Work; Move; Move ]
+
+                let crossing =
+                    [ 1..10 ]
+                    |> List.map (fun n -> hauler westRoom $"hauler-{n}" { X = 14 + 2 * n; Y = 20 })
+
+                // The haulers' tracks: on `samples` full ticks in the west room.
+                let tracked (samples: int list) (view: ColonyView) =
+                    { view with
+                        World =
+                            { view.World with
+                                Quarries =
+                                    crossing
+                                    |> List.map (fun h ->
+                                        h.Id,
+                                        {
+                                            Body = h
+                                            Seen = view.Time
+                                            Cargo = 0
+                                            Trail = samples |> List.map (fun t -> t, h.Pos)
+                                            Crossings = None
+                                            Gone = None
+                                        })
+                                    |> Map.ofList
+                            }
+                    }
+
+                let colony =
+                    { sweeping [ holder, at ] (seated :: crossing) with
+                        Time = 200
+                    }
+
+                let layer = SpatialInfo.layerOf colony.Spatial harassRoom
+
+                let colony =
+                    { colony with
+                        Spatial =
+                            { colony.Spatial with
+                                TargetKinds = colony.Spatial.TargetKinds |> Map.add "src-n" Source
+                            }
+                            |> withNeighbour
+                                harassRoom
+                                { layer with
+                                    TargetPositions =
+                                        Map.add "src-n" { X = 20; Y = 11 } layer.TargetPositions
+                                }
+                    }
+
+                let spec =
+                    Operation.Templates.sweep
+                        "sweep"
+                        enemy
+                        [ harassRoom; westRoom ]
+                        {
+                            MaxBodies = 6
+                            MaxEnergy = System.Int32.MaxValue
+                            Deadline = System.Int32.MaxValue
+                            MaxLossRatio = 1.0
+                        }
+
+                let committed =
+                    {
+                        Id = "sweep"
+                        Started = 100
+                        Phase = OpPhase.Execute
+                        Since = 100
+                        Room = Some harassRoom
+                        RoomSince = 100
+                        Spent = 0
+                        Lost = 0
+                        NextDue = 0
+                        Ended = None
+                    }
+
+                let facts (view: ColonyView) =
+                    let group = Operations.groupIn (set [ harassRoom; westRoom ]) held [ view ]
+
+                    Operations.ownFacts
+                        view.Time
+                        (fun _ -> true)
+                        spec
+                        (Some committed)
+                        (fun _ -> [ view ])
+                        group
+                        [ view ]
+
+                let once = facts (colony |> tracked [ 200 ])
+
+                Expect.isGreaterThan
+                    (once.Rate westRoom |> Option.defaultValue 0.0)
+                    (once.Rate harassRoom |> Option.defaultValue 0.0)
+                    "the premise: this tick the haulers pay more than the seated miner"
+
+                Expect.equal
+                    (Operations.truth once spec committed OpGuard.Outpaid)
+                    Truth.No
+                    "seen there once: no evidence, the room stands"
+
+                Expect.equal
+                    (Operations.truth
+                        (facts (colony |> tracked [ 200; 199 ]))
+                        spec
+                        committed
+                        OpGuard.Outpaid)
+                    Truth.Yes
+                    "seen there on two full ticks: they outpay it"
+            }
         ]
 
 [<Tests>]

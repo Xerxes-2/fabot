@@ -1771,7 +1771,9 @@ let borderCampTests =
             // The dancer bouncing on the exit before its camp pays is prey:
             // there the Brief seats its trespass split (#550), a swing's
             // floor beside the ranger, past what the group pays for — the
-            // one difference S7c decides.
+            // one difference S7c decides. Moved by S7c-1's latch: on a tick
+            // the per-tick choice works no room, the shadow keeps the room
+            // it committed to, its dancer still there.
             test
                 "the sweep as an operation, run in shadow, answers the camp the sweep lays every tick, and seats fewer only on the bouncing prey (#663 S7b)" {
                 let final, trace = dancerAcrossNorth () |> run 200
@@ -1780,13 +1782,17 @@ let borderCampTests =
                 Expect.isGreaterThan log.Working 0 $"the sweep worked its room\n%A{log}"
 
                 Expect.isTrue
-                    (log.Counts |> Map.forall (fun kind _ -> kind = Divergence.Seats))
-                    $"only the seats differ\n%A{log}\n{describe trace}"
+                    (log.Counts
+                     |> Map.forall (fun kind _ -> kind = Divergence.Seats || kind = Divergence.Room))
+                    $"only the seats and the committed room differ\n%A{log}\n{describe trace}"
 
                 Expect.all
                     log.Last
-                    (fun example -> int example.Sweep > int example.Shadow)
-                    $"the Brief seats more, never fewer\n%A{log}"
+                    (fun example ->
+                        match example.Kind with
+                        | Divergence.Room -> example.Sweep = "none" && example.Shadow = "W12S27"
+                        | _ -> int example.Sweep > int example.Shadow)
+                    $"the Brief seats more, never fewer; the shadow keeps its room where the sweep drops it\n%A{log}"
             }
 
             // #615, W17S26 replay t1,052,656-685 (our rangers held d4-7 off

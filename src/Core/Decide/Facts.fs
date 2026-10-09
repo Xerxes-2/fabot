@@ -3977,6 +3977,23 @@ let holdSpan (income: float) (crew: float) (trip: int) (evidence: int) : int =
 /// the rest. What a stand-down's evidence waits on where an observer reaches.
 let lookStride = 5
 
+/// The tile a body stood rooted at its work on in its room (`rootedAtWork`)
+/// at or after `since`, the newest its trail keeps (`Track.Trail`, the
+/// bounce window); None where it kept none.
+let private workTileSince (view: ColonyView) (since: int) (hostile: HostileInfo) : RoomPos option =
+    Map.tryFind hostile.Id view.World.Quarries
+    |> Option.bind (fun track ->
+        track.Trail
+        |> List.tryPick (fun (tick, at) ->
+            if
+                tick >= since
+                && at.Room = hostile.Pos.Room
+                && rootedAtWork view { hostile with Pos = at }
+            then
+                Some at
+            else
+                None))
+
 /// A room as its worth prices it (#658, #663): the kill's pricing
 /// view (`killPricing`), the bodies out of sight the world remembers among
 /// its hostiles (`Quarry.ghosts`), with each body's last steps kept: the
@@ -3987,10 +4004,17 @@ let lookStride = 5
 /// quarry on (`Quarry.placed`): a dancer standing across the border on the
 /// tile it crossed out from, so the room's price holds through the tick it
 /// is out (its camp, `catchOdds`), and the group is not pulled from the room
-/// and back. Built once a tick per view and room (`pricingMemo`): the
-/// worth, the rate, the muster and the camp read one.
+/// and back. In a room an operation is committed to (`WorldView.Committed`),
+/// a body seen rooted at its work there since it committed is priced on its
+/// work tile while it stays in the room (`workTileSince`): one stepping off
+/// its work as we close is part of the room we committed to, not its value
+/// gone (live W18S27, t1,058,000: the sweep flipped rooms every few ticks on
+/// a miner that stepped off its seat as the group came). Built once a tick
+/// per view and room (`pricingMemo`): the worth, the rate, the muster and
+/// the camp read one.
 let private pricingOf (view: ColonyView, room: string) : ColonyView =
     let priced = killPricing view room
+    let committed = Map.tryFind room view.World.Committed
 
     { priced with
         Hostiles =
@@ -3998,7 +4022,13 @@ let private pricingOf (view: ColonyView, room: string) : ColonyView =
             |> List.map (fun h ->
                 match Quarry.placed room h.Pos (Map.tryFind h.Id view.Bounces) with
                 | Some tile when tile <> h.Pos -> { h with Pos = tile }
-                | _ -> h)
+                | _ ->
+                    match committed with
+                    | Some since when h.Pos.Room = room && not (rootedAtWork priced h) ->
+                        workTileSince priced since h
+                        |> Option.map (fun tile -> { h with Pos = tile })
+                        |> Option.defaultValue h
+                    | _ -> h)
             // A dancer in sight across the border is laid back by the view
             // too (`Quarry.ghosts`) and by the look beside: one body.
             |> List.distinctBy (fun h -> h.Id, h.Pos)
@@ -4030,6 +4060,7 @@ let private pricesAlike (view: ColonyView, room: string) (view': ColonyView, roo
            && obj.ReferenceEquals(view.World.Observers, view'.World.Observers)
            && obj.ReferenceEquals(view.World.Answers, view'.World.Answers)
            && obj.ReferenceEquals(view.World.Dangers, view'.World.Dangers)
+           && obj.ReferenceEquals(view.World.Committed, view'.World.Committed)
            && view.Time = view'.Time)
 
 let private pricingMemo: TickMemo.Memo<ColonyView * string, ColonyView> =
@@ -5670,6 +5701,67 @@ let private groupRateIn
         match List.max arrivals with
         | System.Int32.MaxValue -> 0.0
         | arrival -> roomRate Quarry.Reading.Value view (List.map snd placed) dismantle arrival room
+
+/// What a group of ours earns in a room a tick where it stands
+/// (`groupRateIn`, each body at its odds), its dismantle its live WORK's
+/// (#663 S7c): an operation's price for its own group.
+let groupRate (view: ColonyView) (group: (CreepInfo * RoomPos) list) (room: string) : float =
+    groupRateIn
+        view
+        (group |> List.map (fun (creep, at) -> at, Fighter.ofCreep creep))
+        (dismantleOf (List.map fst group))
+        room
+
+/// The view a room is priced off among the views laid together
+/// (`worthOwner`): the colony that mines it, else one that works it as a
+/// candidate, else one that projects it.
+let pricedBy (views: ColonyView list) (room: string) : ColonyView option = worthOwner views room
+
+/// Whether a room still holds a quarry for a team (#663 S7c, an operation's
+/// `Exhausted`): a body its worth values (`RoomWorth.values`, in sight or
+/// remembered at its odds) that the team kills at all (`killTicksOf`) and
+/// that, dancing on the border, no heal across it keeps from the camp
+/// (`outHealsCamp`). Facts of the room's bodies, never this tick's catch
+/// odds: a quarry the team cannot catch this tick still holds the room. With
+/// no team, a body valued at all.
+let holdsQuarry (view: ColonyView) (room: string) (team: Fighter list) : bool =
+    let values = RoomWorth.values Quarry.Reading.Value (roomWorth view room)
+    let priced = sweepPricing view room
+
+    match team with
+    | [] -> values |> Map.exists (fun _ value -> value > 0.0)
+    | body :: _ ->
+        let killable = killableIn priced room team
+
+        priced.Hostiles
+        |> List.exists (fun h ->
+            h.Pos.Room = room
+            && (Map.tryFind h.Id values |> Option.exists (fun value -> value > 0.0))
+            && killable h
+            && not (dancingOn priced h && outHealsCamp priced body h))
+
+/// Whether a group of ours loses the exchange against a room's escort
+/// (`RoomWorth.Escort`, `exchangeIn`): the price `roomRate` reads as
+/// nothing earned. Never where no escort stands, nor for no group.
+let groupLoses (view: ColonyView) (group: (CreepInfo * RoomPos) list) (room: string) : bool =
+    match group with
+    | [] -> false
+    | group ->
+        not (List.isEmpty (roomWorth view room).Escort)
+        && not (
+            won (
+                exchangeIn
+                    (sweepPricing view room)
+                    room
+                    (group |> List.map (fst >> Fighter.ofCreep))
+            )
+        )
+
+/// Whether a colony's home is threatened (#663 S7c): a raider stands in it
+/// (`raided`). Its own defence comes first, so it bids no body out to an
+/// operation.
+let homeThreatened (view: ColonyView) : bool =
+    raided view (SpatialInfo.homeName view.Spatial)
 
 /// Each candidate the views work with the rate its group earns there
 /// (`sweepChoice`), in the order the views name them.

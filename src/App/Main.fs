@@ -816,14 +816,12 @@ let private sweepShadowTick (world: World) (seen: Decide.Entry.SweepSeen) =
         let state =
             sweepShadow |> Option.defaultWith (fun () -> None, ObserveMemory.loadShadow ())
 
-        let facts =
-            Operations.sweepFacts Game.time (Operations.warmSince loadedAt world) seen.Views
-
         let record, log =
             Operations.shadowStep
                 (standingNow world)
                 declared
-                facts
+                Game.time
+                (Operations.warmSince loadedAt world)
                 state
                 seen.Held
                 seen.Views

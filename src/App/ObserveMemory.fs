@@ -3387,6 +3387,15 @@ let private recordOf (raw: obj) : OpRecord option =
                 Started = numberOf raw "s"
                 Phase = phase
                 Since = numberOf raw "a"
+                // Absent (a record written before #663 S7c) or off its
+                // shape, no room: the next exit chooses one.
+                Room =
+                    if jsTypeof raw?r = "string" && (unbox<string> raw?r).Length > 0 then
+                        Some(unbox<string> raw?r)
+                    else
+                        None
+                // Absent or off its shape, the phase's entry.
+                RoomSince = numberValue raw?c |> Option.defaultValue (numberOf raw "a")
                 Spent = numberOf raw "e"
                 Lost = numberOf raw "l"
                 NextDue = numberOf raw "n"
@@ -3457,6 +3466,12 @@ let private recordWire (record: OpRecord) : obj =
             ]
 
     record.Ended |> Option.iter (fun how -> o?x <- nameIn endNames how)
+
+    record.Room
+    |> Option.iter (fun room ->
+        o?r <- room
+        o?c <- record.RoomSince)
+
     o
 
 let private eventWire (tick: int) (event: OpEvent) : obj =

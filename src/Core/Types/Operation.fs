@@ -82,7 +82,8 @@ type OpEnd =
     | Done
     /// An exit gave it up (its exchange lost, its losses past the limit).
     | Abandoned
-    /// Its deadline passed with no exit naming the end first.
+    /// Its deadline came: hard, whatever its phase and its exits; its bodies
+    /// go back to their ordinary duty.
     | Expired
     /// Its energy budget (`OpLimits.MaxEnergy`) ran out.
     | Budget
@@ -112,20 +113,45 @@ type OpGuard =
     | InPhaseFor of int
     /// Its deadline has come (`OpLimits.Deadline`).
     | PastDeadline
-    /// Unknown in S7a: the group loses the exchange against the escort.
+    /// The group loses the exchange against the escort of the room its record
+    /// is committed to (`OpFacts.Loses`); Unknown with no room committed.
     | ExchangeLoses
     /// Unknown in S7a: the target structure still stands.
     | StructureStands
-    /// Unknown in S7a: every job's seat is filled at its muster.
+    /// The group's muster lets it go into the room its record is committed
+    /// to: no body of it waits for the rest (`OpFacts.Assembled`); Unknown
+    /// with no room committed.
     | Assembled
-    /// Unknown in S7a: the group stands in the target room.
+    /// A body of the group stands in the room its record is committed to,
+    /// or on its doorstep (`OpFacts.Arrived`); Unknown with no room
+    /// committed.
     | Arrived
     /// Unknown in S7a: a body of the cast is under a fraction of its hits.
     | CastHurt of float
     /// Unknown in S7a: the ledger's loss ratio past `OpLimits.MaxLossRatio`.
     | LedgerLoss
-    /// Unknown in S7a: a home of a casting colony is threatened.
+    /// Every colony that may cast for it has its own home threatened
+    /// (`OpFacts.HomeThreatened`): none of them bids, home defence first.
     | HomeThreatened
+    /// Another of the target's rooms earns the group more a tick, over its
+    /// own spell, than the room its record is committed to: the other room
+    /// read on evidence (`OpFacts.Challenge`: only a body seen there on two
+    /// full ticks or more counts, so a body crossing it for a tick moves
+    /// nothing), its rate net of the group's walk there; the committed room
+    /// read with the effort already spent in it (`OpFacts.Rate`) — its group
+    /// in or by it walks nothing, the volleys landed are the hits its quarry
+    /// lacks, its escort as it stands, and a body seen rooted at its work
+    /// there since it committed is priced on its work
+    /// (`WorldView.Committed`). Yes with no room committed and one room
+    /// earning anything.
+    | Outpaid
+    /// The room its record is committed to holds nothing more for the
+    /// group: no body there worth its kill, in sight or remembered at its
+    /// odds (`OpFacts.Holds`), or the group loses its escort
+    /// (`OpFacts.Loses`). Evidence, never one tick's rate: a quarry the
+    /// group cannot catch this tick still holds the room. Yes with no room
+    /// committed.
+    | Exhausted
     /// Unknown in S7a: safe mode runs in the target room.
     | SafeModeIn
     /// Unknown in S7a: a code-registered predicate, by name.
@@ -200,7 +226,8 @@ type JobSpec =
     }
 
 /// One phase: its jobs, and its exits in order, the first whose guard
-/// answers `Yes` taken; an `Unknown` before it takes none.
+/// answers `Yes` taken; an `Unknown` before it takes none. An exit into the
+/// phase it leaves re-enters it: the record's room is chosen again.
 type PhaseSpec =
     {
         Phase: OpPhase
@@ -243,8 +270,8 @@ type OperationSpec =
 
 /// The one record of an operation Memory keeps (`Memory.fabot.ops.live`),
 /// about sixty bytes: its latch. What its group is, is the assignments
-/// leaf's (each Task names the operation); what its target is, is priced
-/// each tick.
+/// leaf's (each Task names the operation); its room is latched here and
+/// moves only as its phase does (#663 S7c).
 type OpRecord =
     {
         Id: string
@@ -254,6 +281,17 @@ type OpRecord =
         Phase: OpPhase
         /// The tick it entered `Phase`.
         Since: int
+        /// The room it is committed to: chosen as it enters a phase — the
+        /// room it was committed to while that room still pays and nothing
+        /// outpays it, else of its target's rooms the one earning most
+        /// (`Operations.target`), None where none earns anything — and kept
+        /// through every phase until the next entry, a hold among them. So
+        /// the room changes only on an exit (`OpGuard.Outpaid`, or the room
+        /// exhausted, `OpGuard.Exhausted`, re-entering the phase).
+        Room: string option
+        /// The tick `Room` was chosen: what its commitment is priced from
+        /// (`WorldView.Committed`).
+        RoomSince: int
         /// The energy its casts spent; nothing before S7c casts.
         Spent: int
         /// The energy of its bodies lost; nothing before S7c casts.
@@ -268,8 +306,9 @@ type OpRecord =
 type OpFacts =
     {
         Now: int
-        /// A room's rate a tick for a cast of ours there (`Facts.castRate`,
-        /// the best colony's); None where no colony prices it.
+        /// A room's rate a tick for the operation's group there, or with no
+        /// group for a cast of ours (`Operations.ownFacts`); None where no
+        /// colony prices it.
         Rate: string -> float option
         /// A room's worth this tick (`Facts.roomWorth`); None where no
         /// colony prices it.
@@ -278,6 +317,21 @@ type OpFacts =
         /// then a body not in the quarry memory may only be not yet
         /// remembered.
         Warm: string -> bool
+        /// Whether a body of the group stands in the room or on its doorstep.
+        Arrived: string -> Truth
+        /// Whether the group's muster on the room lets it go in.
+        Assembled: string -> Truth
+        /// Whether the group loses the exchange against the room's escort.
+        Loses: string -> Truth
+        /// Whether a body worth its kill stands in the room, in sight or
+        /// remembered at its odds (`RoomWorth.values`).
+        Holds: string -> Truth
+        /// A room's rate read on evidence (`OpGuard.Outpaid`): only its
+        /// bodies seen there on two full ticks or more counted.
+        Challenge: string -> float option
+        /// Whether every colony that may cast for the operation has its home
+        /// threatened.
+        HomeThreatened: Truth
     }
 
 /// Who holds a room that is not ours, as far as anything we keep knows.
@@ -352,11 +406,10 @@ type SweepAnswer =
         Seats: int
     }
 
-/// Which answer a shadow tick disagrees on. Only `Group`, `Jobs` and
-/// `Seats` compare computations made apart: the shadow reads the room off
-/// the very prices the sweep picked it by (`WorldView.SweepRates`), so
-/// `Room` is a consistency check that catches only what is filtered after
-/// the pick — the spec's phase latch, its listed rooms, a room refused it.
+/// Which answer a shadow tick disagrees on. Since S7c-1 every kind compares
+/// computations made apart: the shadow prices its rooms with its own group
+/// and keeps the room its record committed to (`OpRecord.Room`), where the
+/// sweep re-picks each tick off its own group's prices.
 [<RequireQualifiedAccess>]
 type Divergence =
     | Room
@@ -429,13 +482,18 @@ module Operation =
     /// Operations written in code, each a function of the parameters a
     /// Memory spec may give it.
     module Templates =
-        /// The [[sweep]] (ADR 0093) as a spec: one group over the listed
-        /// rooms, working the one its cast earns most in, holding while none
-        /// pays. Its muster is a job of its execute phase, priced as today;
+        /// The [[sweep]] as a spec: one group over the listed rooms, working
+        /// the one its group earns most in, committed to it until another
+        /// pays more on evidence net of the walk and the effort spent there
+        /// (`OpGuard.Outpaid`), or the room is exhausted (`OpGuard.Exhausted`:
+        /// nothing worth its kill there, or an escort the group loses) and
+        /// another pays; holding, the room kept, while an exhausted room has
+        /// no successor or no colony that may cast for it has its home
+        /// clear. Its muster is a job of its execute phase, priced as today;
         /// so is the ring a contested room lays under its escort's raid
-        /// (#656), which the sweep's room is fought as (S7b's shadow).
-        /// The most bodies its group seats: a named safety margin, the
-        /// guard cap's twice over (`Engine.guardCap`).
+        /// (#656), which the sweep's room is fought as. The most bodies its
+        /// group seats: a named safety margin, the guard cap's twice over
+        /// (`Engine.guardCap`).
         let sweepBodies = 2 * Engine.guardCap
 
         let sweep
@@ -470,8 +528,11 @@ module Operation =
                                 ]
                             Exits =
                                 [
-                                    OpGuard.PastDeadline, OpNext.Finish OpEnd.Done
-                                    OpGuard.Not(OpGuard.RateAbove 0.0), OpNext.To OpPhase.Hold
+                                    OpGuard.HomeThreatened, OpNext.To OpPhase.Hold
+                                    OpGuard.Outpaid, OpNext.To OpPhase.Execute
+                                    OpGuard.All [ OpGuard.Exhausted; OpGuard.RateAbove 0.0 ],
+                                    OpNext.To OpPhase.Execute
+                                    OpGuard.Exhausted, OpNext.To OpPhase.Hold
                                 ]
                             Urgent = []
                         }
@@ -480,8 +541,12 @@ module Operation =
                             Jobs = []
                             Exits =
                                 [
-                                    OpGuard.PastDeadline, OpNext.Finish OpEnd.Done
-                                    OpGuard.RateAbove 0.0, OpNext.To OpPhase.Execute
+                                    OpGuard.All
+                                        [
+                                            OpGuard.Not OpGuard.HomeThreatened
+                                            OpGuard.RateAbove 0.0
+                                        ],
+                                    OpNext.To OpPhase.Execute
                                 ]
                             Urgent = []
                         }

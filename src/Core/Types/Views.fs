@@ -316,6 +316,12 @@ type WorldView =
         /// views name them: what the operation interpreter's shadow reads
         /// (#663 S7b), so the price is one. Empty until the views are swept.
         SweepRates: (string * float) list
+        /// Each room an [[operation]] is committed to, against the tick it
+        /// committed (its record's room and phase entry, #663 S7c): where a
+        /// body seen rooted at its work there since is priced on that tile
+        /// while it stays in the room (`Facts.sweepPricing`). Empty with no
+        /// operation working a room.
+        Committed: Map<string, int>
         /// Each room a guard or ranger of ours was last lost in, the latest of
         /// every colony's raid log (`StandDown.FighterLost`), the larger cast
         /// on one tick: a room's recast cooldown is the room's, whichever
@@ -339,6 +345,7 @@ module WorldView =
             SweepGroup = []
             SweepRate = 0.0
             SweepRates = []
+            Committed = Map.empty
             FighterLost = Map.empty
             Questioned = Set.empty
             Observers = []
@@ -476,6 +483,7 @@ module WorldView =
             SweepGroup = []
             SweepRate = 0.0
             SweepRates = []
+            Committed = Map.empty
             FighterLost =
                 (Map.empty, gates)
                 ||> List.fold (fun lost gate ->

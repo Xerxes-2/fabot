@@ -1216,7 +1216,7 @@ if (command === "console") {
       const state =
         r === undefined ? "no record" :
         r.x !== undefined ? `ended ${r.x} (the id stays ended; a new op takes a new id)` :
-        `${r.p} since t${r.a}, run from t${r.s}, spent ${r.e}, lost ${r.l}`;
+        `${r.p}${r.r ? ` in ${r.r}` : ""} since t${r.a}, run from t${r.s}, spent ${r.e}, lost ${r.l}`;
       console.log(
         `${spec.id}  ${spec.template} vs ${spec.enemy} in ${(spec.rooms ?? []).join(",")}  ` +
           `deadline t${spec.deadline ?? "?"}  — ${state}`,

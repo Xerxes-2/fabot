@@ -1833,7 +1833,8 @@ let private decideOurs (a: Arena) : Intent list * Carried =
                 Operations.shadowStep
                     (Operations.standingOf a.Time ours (fun _ -> None) world)
                     declared
-                    (Operations.sweepFacts a.Time (fun _ -> true) seen.Views)
+                    a.Time
+                    (fun _ -> true)
                     a.Carried.Shadow
                     seen.Held
                     seen.Views

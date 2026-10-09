@@ -2742,6 +2742,44 @@ wire("ops: a record off its shape costs its own row", async () => {
   assert.equal(stable(ops.live), stable([opRecord]));
 });
 
+// The room a record is committed to (#663 S7c), `r`: a room name
+// round-trips; a record written before it (no `r`) or one whose `r` is off
+// its shape reads with no room, its row kept, and is written back without
+// one: the next exit chooses the room.
+// The tick that room was chosen, `c`: absent or off its shape, the phase's
+// entry (`a`), written back beside the room.
+wire("ops: a record's committed room round-trips; absent or off its shape it reads as none", async () => {
+  const { leaf, ops } = await opsThrough({
+    live: [
+      { ...opRecord, r: "W19S26", c: 90 },
+      { ...opRecord, i: "op2" },
+      { ...opRecord, i: "op3", r: 7 },
+      { ...opRecord, i: "op4", r: "" },
+      { ...opRecord, i: "op5", r: "W18S27", c: "soon" },
+    ],
+  });
+  assert.deepEqual(
+    [...leaf.Live].map((record) => [record.Room, record.RoomSince]),
+    [
+      ["W19S26", 90],
+      [undefined, 120],
+      [undefined, 120],
+      [undefined, 120],
+      ["W18S27", 120],
+    ],
+  );
+  assert.equal(
+    stable(ops.live),
+    stable([
+      { ...opRecord, r: "W19S26", c: 90 },
+      { ...opRecord, i: "op2" },
+      { ...opRecord, i: "op3" },
+      { ...opRecord, i: "op4" },
+      { ...opRecord, i: "op5", r: "W18S27", c: 120 },
+    ]),
+  );
+});
+
 wire("ops: events append after the kept ones, the newest twenty kept", async () => {
   const prior = Array.from({ length: 25 }, (_, t) => ({ t, i: "op1", k: "recurred", n: t }));
   const { ops } = await opsThrough({ events: [...prior, 7, null] });

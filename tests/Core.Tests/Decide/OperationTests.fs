@@ -22,6 +22,12 @@ let private factsAt (now: int) (rates: (string * float) list) : OpFacts =
                 else
                     None
         Warm = fun _ -> true
+        Arrived = fun _ -> Truth.Unknown
+        Assembled = fun _ -> Truth.Unknown
+        Loses = fun _ -> Truth.Unknown
+        Holds = fun _ -> Truth.Unknown
+        Challenge = fun room -> Map.tryFind room rates
+        HomeThreatened = Truth.No
     }
 
 let private limits =
@@ -41,6 +47,8 @@ let private recordAt (phase: OpPhase) (since: int) : OpRecord =
         Started = 0
         Phase = phase
         Since = since
+        Room = None
+        RoomSince = since
         Spent = 0
         Lost = 0
         NextDue = 0
@@ -141,6 +149,12 @@ let operationStepTests =
                         Rate = fun _ -> failwith "priced with no op"
                         Worth = fun _ -> failwith "priced with no op"
                         Warm = fun _ -> failwith "read with no op"
+                        Arrived = fun _ -> failwith "read with no op"
+                        Assembled = fun _ -> failwith "read with no op"
+                        Loses = fun _ -> failwith "read with no op"
+                        Holds = fun _ -> failwith "read with no op"
+                        Challenge = fun _ -> failwith "priced with no op"
+                        HomeThreatened = Truth.Unknown
                     }
 
                 Expect.equal (Operations.step untouched (admitting []) []) ([], []) "nothing moves"
@@ -163,9 +177,10 @@ let operationStepTests =
                     [
                         { recordAt OpPhase.Execute 100 with
                             Started = 100
+                            Room = Some "W2N1"
                         }
                     ]
-                    "begun at once"
+                    "begun at once, committed to its room"
 
                 Expect.equal
                     events
@@ -174,7 +189,7 @@ let operationStepTests =
             }
 
             test
-                "the sweep's transition table: no room pays, hold; one pays again, execute; its deadline, done" {
+                "the sweep's transition table: no room pays, hold; one pays again, execute; its deadline, expired" {
                 let at now rates phase =
                     Operations.advance (factsAt now rates) sweep (Some(recordAt phase 0))
                     |> fst
@@ -197,8 +212,71 @@ let operationStepTests =
 
                 Expect.equal
                     (at 5_000 [ "W1N1", 1.0 ] OpPhase.Execute)
-                    (Some(OpPhase.Execute, Some OpEnd.Done))
-                    "its deadline: done"
+                    (Some(OpPhase.Execute, Some OpEnd.Expired))
+                    "its deadline: expired, hard"
+            }
+
+            // The S7c review: Execute -> Hold on one tick's 0, then Hold ->
+            // Execute on the plain argmax, flipped the room in another shape.
+            test
+                "one tick at nothing for the room committed to, its quarry still there, moves neither the room nor the phase" {
+                let committed =
+                    { recordAt OpPhase.Execute 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                    }
+
+                let flat =
+                    { factsAt 50 [ "W1N1", 0.0; "W2N1", 0.0 ] with
+                        Holds = fun room -> if room = "W1N1" then Truth.Yes else Truth.No
+                        Loses = fun _ -> Truth.No
+                    }
+
+                let moved, events = Operations.advance flat sweep (Some committed)
+
+                Expect.equal
+                    moved
+                    (Some committed)
+                    "unmoved: the room, its commitment and the phase"
+
+                Expect.isEmpty events "silent"
+
+                Expect.equal
+                    (Operations.workedRoom 50 moved)
+                    (Some "W1N1")
+                    "still worked: its Brief laid, its group seated"
+            }
+
+            test
+                "across a hold the committed room is kept, and taken up again unless another outpays it on evidence" {
+                let held =
+                    { recordAt OpPhase.Hold 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                    }
+
+                // W2N1 pays more this tick on bodies seen there once: no
+                // evidence it outpays the room committed to.
+                let back =
+                    { factsAt 50 [ "W1N1", 1.0; "W2N1", 3.0 ] with
+                        Holds = fun room -> if room = "W1N1" then Truth.Yes else Truth.No
+                        Loses = fun _ -> Truth.No
+                        Challenge = fun room -> if room = "W2N1" then Some 0.5 else Some 1.0
+                    }
+
+                Expect.equal
+                    (Operations.advance back sweep (Some held)
+                     |> fst
+                     |> Option.map (fun r -> r.Phase, r.Room, r.RoomSince))
+                    (Some(OpPhase.Execute, Some "W1N1", 20))
+                    "the committed room, its commitment kept"
+
+                Expect.equal
+                    (Operations.advance { back with Challenge = back.Rate } sweep (Some held)
+                     |> fst
+                     |> Option.map (fun r -> r.Phase, r.Room, r.RoomSince))
+                    (Some(OpPhase.Execute, Some "W2N1", 50))
+                    "outpaid on evidence: the other room, committed from now"
             }
 
             test "Unknown never transitions, and hides the exits after it" {
@@ -348,14 +426,15 @@ let operationStepTests =
                 let second, _ = Operations.advance (factsAt 12 []) chain first
                 Expect.equal (second |> Option.bind _.Ended) (Some OpEnd.Done) "the next tick's"
 
-                // Past the deadline with an exit taken, the expiry waits a tick.
+                // Past the deadline, it expires whatever exit it could take:
+                // the deadline is hard.
                 let late, _ =
                     Operations.advance (factsAt 6_000 []) chain (Some(recordAt OpPhase.Muster 0))
 
                 Expect.equal
                     (late |> Option.map (fun r -> r.Phase, r.Ended))
-                    (Some(OpPhase.Execute, None))
-                    "moved, not ended"
+                    (Some(OpPhase.Muster, Some OpEnd.Expired))
+                    "expired, not moved"
             }
 
             test "past the deadline with no exit taken, it expires" {
@@ -386,10 +465,10 @@ let operationStepTests =
 
                 Expect.equal
                     (records |> List.map _.Ended)
-                    [ Some OpEnd.Done ]
+                    [ Some OpEnd.Expired ]
                     "ended, its record kept"
 
-                Expect.equal events [ OpEvent.Ended("op1", OpEnd.Done) ] "no Dropped"
+                Expect.equal events [ OpEvent.Ended("op1", OpEnd.Expired) ] "no Dropped"
 
                 // A tick on, the spec still listed: refused as ended, its record kept.
                 let after = Operation.admit (standingAt 6_001) records [ wire ]
@@ -914,7 +993,7 @@ let sweepShadowTests =
             }
 
             test
-                "another room is one disagreement, a consistency check: the jobs and the seats are compared only in one room" {
+                "another room is one disagreement: the jobs and the seats are compared only in one room" {
                 let examples =
                     Operations.disagreements 10 { shadowed with Room = None; Seats = 0 } answer
 
@@ -925,8 +1004,8 @@ let sweepShadowTests =
 
                 Expect.stringStarts
                     (List.head examples).Why
-                    "consistency"
-                    "labelled a consistency check"
+                    "the spec works no room"
+                    "why: the spec's own phase"
             }
 
             test
