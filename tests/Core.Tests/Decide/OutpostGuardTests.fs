@@ -1865,7 +1865,11 @@ let guardPrecedenceTests =
                         [ Trespasser ], BriefKind.Contested
                         [ Resident ], BriefKind.Resident
                         [ Harassed ], BriefKind.Contested
-                        [ ChaseSeen ], BriefKind.Chase
+                        // Moved by #663 (W17S26 t1,057,354): a raid in sight a
+                        // ranger chases is the contested room's, pursued, its
+                        // prey and convergence priced beside it; only the
+                        // blind outpost is the chase.
+                        [ ChaseSeen ], BriefKind.Contested
                         [ ChaseDark ], BriefKind.Chase
                         [ Raid; Hold ], BriefKind.Contested
                         [ Raid; Core ], BriefKind.Contested
@@ -1885,7 +1889,8 @@ let guardPrecedenceTests =
                         [ Resident; Core ], BriefKind.Resident
                         [ Harassed; Trespasser ], BriefKind.Contested
                         [ Resident; Harassed ], BriefKind.Resident
-                        [ ChaseSeen; Core ], BriefKind.Chase
+                        // Moved by #663: as `[ ChaseSeen ]`.
+                        [ ChaseSeen; Core ], BriefKind.Contested
                         [ ChaseSeen; Raid ], BriefKind.Contested
                         [ ChaseDark; Hold ], BriefKind.Chase
                         [ ChaseDark; Trespasser ], BriefKind.Chase

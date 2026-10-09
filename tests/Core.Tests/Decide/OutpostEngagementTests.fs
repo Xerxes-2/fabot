@@ -471,10 +471,12 @@ let engagementTests =
                 let threats = threatsOf shut (Atlas.ofView shut)
                 let brief = Threats.briefOf threats "W1N2"
 
+                // Moved by #663: a raid in sight a ranger chases is the
+                // contested room's, pursued.
                 Expect.equal
-                    brief.Duty
-                    (Duty.Guard BriefKind.Chase)
-                    "the premise: the room is the chase"
+                    (brief.Duty, Brief.pursued brief)
+                    (Duty.Guard BriefKind.Contested, true)
+                    "the premise: the room's raid is pursued"
 
                 Expect.equal
                     (brief.Asks |> List.map (fun ask -> ask.Row, ask.Wanted threats))
@@ -901,10 +903,12 @@ let engagementTests =
                 let lentIn = mother ("W1N3", { X = 25; Y = 10 })
                 let brief = heldBriefOf holding "W1N4" lentIn
 
+                // Moved by #663: the chase in sight is the contested room's
+                // raid, pursued.
                 Expect.equal
-                    (brief.Duty, brief.Verdict.Value)
-                    (Duty.Guard BriefKind.Chase, Answer.Win)
-                    "the premise: a chase the residents win"
+                    (brief.Duty, Brief.pursued brief, brief.Verdict.Value)
+                    (Duty.Guard BriefKind.Contested, true, Answer.Win)
+                    "the premise: a pursued raid the residents win"
 
                 Expect.equal
                     (brief.Capacity(threatsOf lentIn (Atlas.ofView lentIn))
@@ -1136,6 +1140,80 @@ let private contestedUnder control =
         RoomControl = Map.add "W1N2" control colony.RoomControl
     }
 
+/// Our ranger in W17S26 at t1,057,354: 40 a tick on 2 HEAL, 207 ticks to
+/// live.
+let private loneRanger =
+    creepWith
+        "r-1"
+        0
+        0
+        (List.replicate 6 Move @ List.replicate 4 RangedAttack @ List.replicate 2 Heal)
+    |> withLife 207
+
+/// W17S26 at t1,057,354 (#663, #673): Trepidimous's Phoenix (2R5M3H), his
+/// miner on our container, two 23C23M haulers drawing from it and a 3CL3M
+/// claimer on our reserved controller, our ranger `r-1` (`loneRanger`)
+/// standing in it, and whatever `more` adds.
+let private phoenixOnOurOutpost (more: ColonyView -> ColonyView) =
+    let trep (h: HostileInfo) = { h with Owner = "Trepidimous" }
+
+    let phoenix =
+        { trep (
+              hostileIn
+                  "W1N2"
+                  { X = 22; Y = 45 }
+                  (List.replicate 2 RangedAttack @ List.replicate 5 Move @ List.replicate 3 Heal)
+          ) with
+            Id = "Phoenix"
+        }
+
+    let carrier id pos =
+        { trep (hostileIn "W1N2" pos (List.replicate 23 Carry @ List.replicate 23 Move)) with
+            Id = id
+        }
+
+    let claimer =
+        { trep (
+              hostileIn
+                  "W1N2"
+                  { X = 29; Y = 47 }
+                  (List.replicate 3 BodyPart.Claim @ List.replicate 3 Move)
+          ) with
+            Id = "claimer"
+        }
+
+    let raided =
+        declaredRaid
+            [
+                phoenix
+                seatedDigger
+                carrier "hauler-a" { X = 26; Y = 43 }
+                carrier "hauler-b" { X = 27; Y = 44 }
+                claimer
+            ]
+
+    { raided with
+        Bank = bank 1800 1800
+        RoomControl = Map.add "W1N2" (enemyReservedRoom 1_900) raided.RoomControl
+    }
+    |> withGuards [ loneRanger, { X = 25; Y = 46 } ]
+    |> more
+
+/// The Threats with `r-1` holding the outpost's Guard.
+let private holdingPhoenix (colony: ColonyView) =
+    threatsOfHeld
+        colony
+        (Atlas.ofView colony)
+        (heldTaskFacts colony (Map.ofList [ "r-1", taskId (Guard "W1N2") ]))
+
+/// Whether a Brief lays a kill of Trepidimous's whole economy there.
+let private laysHisEconomy (brief: Brief) =
+    brief.Jobs
+    |> List.exists (fun job ->
+        job.Kind = JobKind.Strike
+        && [ "d-1"; "hauler-a"; "hauler-b"; "claimer" ]
+           |> List.forall (fun id -> List.contains id job.Quarry))
+
 [<Tests>]
 let contestedOutpostTests =
     testList
@@ -1158,5 +1236,92 @@ let contestedOutpostTests =
                         (Reserve "ctl-out")
                         (pooledOf (contestedUnder (reservedRoom false 1_900))))
                     "a neutral's hold is refused the reserver, as ever (#333)"
+            }
+
+            // Live W17S26 t1,057,354 (#663, #673): Trepidimous's Phoenix
+            // (2R5M3H) trades with our lone ranger, 40 a tick against its 36
+            // heal, ~250 ticks to kill on our ranger's 207 to live, while his
+            // miner digs our container, two 23C23M haulers draw from it and a
+            // 3CL3M claimer holds our controller. Live the room was a chase:
+            // no colony asked for a body and the ~7k of economy priced 0.
+            test
+                "a raid our lone ranger out-heals but cannot kill before it ages out, beside his economy, asks the cast that converges and prices his prey" {
+                let colony = phoenixOnOurOutpost id
+                let threats = holdingPhoenix colony
+                let brief = Threats.briefOf threats "W1N2"
+
+                Expect.isTrue
+                    (Facts.bodiesWin colony "W1N2" [ loneRanger ])
+                    "the premise: our ranger out-trades Phoenix"
+
+                Expect.isEmpty
+                    (Facts.converging colony "W1N2" [ loneRanger ])
+                    "but does not kill it before it ages out"
+
+                Expect.equal
+                    (brief.Duty, brief.Contention |> Option.map _.Phase)
+                    (Duty.Guard BriefKind.Contested, Some Phase.Raid)
+                    "the room is the contested room's raid, never a chase that prices nothing"
+
+                let wanted = brief.Asks |> List.sumBy (fun ask -> ask.Wanted threats)
+
+                // The cast that converges is the ranger standing and one
+                // fresh beside it; its prey's kills buy more on top.
+                Expect.isGreaterThan
+                    wanted
+                    2
+                    "a fight ask of the cast that converges, and the prey's bodies"
+
+                Expect.isTrue (laysHisEconomy brief) "his economy is a kill laid beside the raid"
+
+                Expect.isGreaterThanOrEqual
+                    (brief.Capacity threats
+                     |> Capacity.capOf CapScope.Fighters
+                     |> Option.defaultValue 0)
+                    wanted
+                    "and every body asked for is seated"
+            }
+
+            // The same with a ranger of ours idle at home beside it (live
+            // ranger-1056007, idle 600 ticks): the two win and live through
+            // the kill, so the raid is pursued, the idle one is seated beside
+            // the lone one and nothing is cast for the raid; his economy's
+            // kills still buy their bodies.
+            test
+                "with a ranger idle beside it, the pursued raid seats both, casts nothing for itself and still prices his prey" {
+                let colony =
+                    phoenixOnOurOutpost (
+                        withBodyAtHome
+                            (creepWith
+                                "r-2"
+                                0
+                                0
+                                (List.replicate 6 Move
+                                 @ List.replicate 4 RangedAttack
+                                 @ List.replicate 2 Heal))
+                            atSpawn
+                    )
+
+                let threats = holdingPhoenix colony
+                let brief = Threats.briefOf threats "W1N2"
+
+                Expect.equal
+                    (brief.Duty, Brief.pursued brief, brief.Verdict.Value)
+                    (Duty.Guard BriefKind.Contested, true, Answer.Win)
+                    "the premise: a raid the two rangers win, pursued"
+
+                Expect.isGreaterThanOrEqual
+                    (brief.Capacity threats
+                     |> Capacity.capOf CapScope.Fighters
+                     |> Option.defaultValue 0)
+                    2
+                    "both rangers are seated"
+
+                Expect.isTrue (laysHisEconomy brief) "his economy is a kill laid beside the raid"
+
+                Expect.isGreaterThan
+                    (brief.Asks |> List.sumBy (fun ask -> ask.Wanted threats))
+                    0
+                    "and its kills buy bodies of their own"
             }
         ]

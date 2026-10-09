@@ -6112,25 +6112,70 @@ let private lendableTo
     |> List.filter (fun (creep, here) ->
         here = room || quiet here && mayLeaveFor view room (Some here) creep)
 
+/// Whether every body of a set lives through the set's kill of the raid in
+/// `room` (`killTicks`), as a partner the gate counts does (`winsBeside`): a
+/// body that ages out first answers nothing.
+let private livesThrough (view: ColonyView) (room: string) (taken: CreepInfo list) =
+    killTicks view room (List.map Fighter.ofCreep taken)
+    |> Option.forall (fun kill -> taken |> List.forall (fun creep -> creep.TicksToLive > kill))
+
+/// The bodies of ours among `creeps` whose fight with the raid in `room`
+/// converges (#673): the longest-lived of them that win it together
+/// (`bodiesWin`) and live through their kill (`livesThrough`), its net
+/// damage past the raid's heal over the ticks they have left covering its
+/// hits; the shortest-lived let go one at a time until the rest do, none
+/// where no such set is left. The rest are no answer to the raid, whatever
+/// they stand on, and a fight's ask counts them as none.
+let converging (view: ColonyView) (room: string) (creeps: CreepInfo list) : CreepInfo list =
+    let rec trim (taken: CreepInfo list) =
+        match taken with
+        | [] -> []
+        | _ when bodiesWin view room taken && livesThrough view room taken -> taken
+        | _ :: longer -> trim longer
+
+    creeps |> List.sortBy (fun creep -> creep.TicksToLive, creep.Name) |> trim
+
+/// The bodies of a cast's row a room's raid wants counted against its ask
+/// (#673), its `holders` of the row standing by: the cast's own where the
+/// holders converge alone (`converging`) or nothing does; else every holder
+/// and the fewest fresh bodies of the cast that converge beside them, a
+/// holder that ages out first counted as none. A swing holding its post
+/// (`FighterCast.Held`, #531) converges on nothing, and wants the cast
+/// alone.
+let internal castConverging
+    (view: ColonyView)
+    (room: string)
+    (cast: FighterCast)
+    (holders: CreepInfo list)
+    : int =
+    if cast.Held || List.isEmpty holders then
+        cast.Bodies
+    else
+        let fresh = castBodies { cast with Bodies = Engine.guardCap }
+
+        match
+            [ 0 .. cast.Bodies ]
+            |> List.tryFind (fun k ->
+                not (List.isEmpty (converging view room (holders @ List.truncate k fresh))))
+        with
+        | Some 0 -> cast.Bodies
+        | Some joined -> max cast.Bodies (List.length holders + joined)
+        | None -> cast.Bodies
+
 /// The fewest rangers that win the raid in `room` together, among every
 /// lender's (`lendableTo`), each by name with its colony's home; None where
 /// all of them lose. Taken standing in the room first, then beside it, by
 /// name within each, and priced in `pricing`, a view that sees the raid. One
 /// count over the fleet's bodies HomeHold lets go, so a raid only two
-/// colonies' rangers win together is won (#518).
+/// colonies' rangers win together is won (#518). Each lives through the
+/// set's kill (`livesThrough`): a ranger that ages out first answers
+/// nothing, so a fight it holds is no chase.
 let private rangersAmong
     (pricing: Lazy<ColonyView>)
     (placed: string -> string option)
     (lenders: (string * ColonyView * (CreepInfo -> bool)) list)
     (room: string)
     : (string * string) list option =
-    // Each lives through the set's kill (`killTicks`), as a partner the gate
-    // counts does (`winsBeside`): a ranger that ages out first answers
-    // nothing, so a fight it holds is no chase and its relief is asked for.
-    let livesThrough (taken: CreepInfo list) =
-        killTicks pricing.Value room (List.map Fighter.ofCreep taken)
-        |> Option.forall (fun kill -> taken |> List.forall (fun creep -> creep.TicksToLive > kill))
-
     let rec wins taken named rest =
         match rest with
         | [] -> None
@@ -6138,7 +6183,7 @@ let private rangersAmong
             let taken = creep :: taken
             let named = (creep.Name, home) :: named
 
-            if bodiesWin pricing.Value room taken && livesThrough taken then
+            if bodiesWin pricing.Value room taken && livesThrough pricing.Value room taken then
                 Some(List.rev named)
             else
                 wins taken named rest
@@ -6392,10 +6437,12 @@ let internal rangersWin (view: ColonyView) (room: string) : int option =
 /// cast. A room shut on a raid (`ColonyView.RaidedOutposts`) pools no row's
 /// Guard, its economy being out, so any raid there the verdict does not lose
 /// is the chase, whichever row or rangers win it (#569, #571): the stand-down
-/// shuts the economy, never the kill. Read once a tick into the chase's
-/// `Brief`, off the room's `verdict` (`answered`). Never a [[sweep]]
-/// candidate (#658): the sweep fights in the one it works and leaves the
-/// rest.
+/// shuts the economy, never the kill. In sight the room is a contested room
+/// pursued (`Contention.Pursued`, #663): its raid and its prey priced
+/// together; the stand-down's row latches it (`OutpostEpisode.Chased`) for
+/// the blind ticks after, the chase proper. Read off the room's `verdict`
+/// (`answered`). Never a [[sweep]] candidate (#658): the sweep fights in the
+/// one it works and leaves the rest.
 let internal chased (view: ColonyView) (verdict: Answer * bool) (kept: bool) (room: string) : bool =
     room <> SpatialInfo.homeName view.Spatial
     && not (Set.contains room (rangerRooms view))

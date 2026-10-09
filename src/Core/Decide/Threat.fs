@@ -56,6 +56,10 @@ type BriefKind =
     | Core
     | ExitHold
     | Resident
+    /// An outpost gone dark on a raid a ranger kited down there
+    /// (`StandDown.ChasedOutposts`, #510): no raid in sight to price, so a
+    /// kite holder walks in after it. A raid in sight is the contested
+    /// room's, pursued (`Contention.Pursued`).
     | Chase
 
 /// What a contested room is fought over this tick (#656), off its facts.
@@ -80,6 +84,11 @@ type Contention =
     {
         Phase: Phase
         Ours: bool
+        /// A raid in sight rangers kite or are called to in a room no row's
+        /// Guard otherwise pools (`Facts.chased`, #510): pooled whatever
+        /// guards it, its holders kiting on the way in, its asks read where
+        /// no guarded room's are.
+        Pursued: bool
         Value: Lazy<RoomWorth>
     }
 
@@ -725,11 +734,23 @@ module Brief =
             Capacity.capping (CapScope.Row row) seats capacity)
 
     /// Whether a Brief is a kill (#510, #516): one body, a rung up, a quiet
-    /// holder called to it; a chase cast for by no row, a contested room's
-    /// prey only where its cast pays (#652, #656).
+    /// holder called to it; a blind chase cast for by no row, a contested
+    /// room's raid pursued, a contested room's prey only where its cast pays
+    /// (#652, #656).
     let isKill (brief: Brief) : bool =
         brief.Duty = Duty.Guard BriefKind.Chase
-        || brief.Contention |> Option.exists (fun c -> c.Phase = Phase.Prey)
+        || brief.Contention |> Option.exists (fun c -> c.Phase = Phase.Prey || c.Pursued)
+
+    /// Whether a Brief is a contested room's raid pursued
+    /// (`Contention.Pursued`): a kill, pooled and its asks read whatever
+    /// guards it.
+    let pursued (brief: Brief) : bool =
+        brief.Contention |> Option.exists _.Pursued
+
+    /// Whether a Brief is a contested room's prey (#656): the kill its
+    /// kills alone price where no economy of ours is guarded.
+    let isPrey (brief: Brief) : bool =
+        brief.Contention |> Option.exists (fun c -> c.Phase = Phase.Prey)
 
     /// One fight's ground divided into seats (#650): each holder's own
     /// ground, the tiles it reaches by its arrival (`arrival`, None for
@@ -929,14 +950,11 @@ module Brief =
 
         match kind with
         | BriefKind.Resident -> isRangerRowBody creep
-        // In sight, any fighting row's body that strikes every raider
-        // (#516), whichever row cast it; HomeHold the match's gate
-        // (`Matcher`). A stand-down shuts the economy, never the kill (#571).
-        // Out of sight, the kite it was shut on (#510): a body that outranges
-        // a swing, as no fight there is priced.
+        // Out of sight, the kite it was shut on (#510): a fighting row's body
+        // that outranges a swing, as no fight there is priced.
         | BriefKind.Chase ->
             (isRangerRowBody creep || isGuardRowBody creep)
-            && (Facts.raided view room || Fighter.outranges (Fighter.ofCreep creep))
+            && Fighter.outranges (Fighter.ofCreep creep)
             && strikes (HostileInfo.raider view.Hostiles)
         // A contested room's prey (#516, #656): the guard row's body that
         // strikes every trespasser its row answers (`trespassSplit`, #550),
@@ -1011,15 +1029,45 @@ module Brief =
     /// moves its economic delta (`RoomWorth.delta`) or holds prey: there is
     /// no post of ours to hold (#531), no raid there is ours to look for
     /// (#366), and the room's value is what a fight denies the rival.
+    ///
+    /// A contested room's raid is answered by the bodies whose fight with it
+    /// converges (#673, `Facts.castConverging`): a holder of the row that
+    /// ages out before its kill lands, or trades for ever against the raid's
+    /// heal, is no answer alone, so where its holders do not converge the ask
+    /// is every holder and the fewest fresh bodies that converge beside them,
+    /// as the Caster counts every living body of the row against it; a
+    /// pursued raid that is the rangers' by it (`standing`: they win it and
+    /// live through, `Facts.rangersWin`, and its own row casts nothing for
+    /// it, #571, #655) asks no body for itself (#510). Under its raid, in a
+    /// room of ours, its prey is priced beside it (#663): as many more bodies
+    /// as its kills, at their kill values, pay for (`Facts.castBodiesPaid`),
+    /// one a trespasser at most: an armed body standing there takes nothing
+    /// off an economy body's value.
     let private askOf
         (kind: BriefKind)
         (contention: Contention option)
         (ranged: bool)
-        (rowCast: Lazy<CastRow option>)
+        (standing: Lazy<bool>)
+        (holders: CreepInfo list)
+        (preyed: bool)
         (answered: Lazy<(CastRow * HostileInfo list) list>)
         (room: string)
         (view: ColonyView)
         : RowAsk list =
+        // Each trespasser its rows answer that is the enemy's economy, at its
+        // kill value (`RoomWorth.values`, read for a cast).
+        let preyOf (contention: Contention) =
+            let values = RoomWorth.values Quarry.Reading.Cast contention.Value.Value
+
+            answered.Value
+            |> List.collect snd
+            |> List.distinctBy _.Id
+            |> List.filter (Facts.enemyEconomy view.Hostiles)
+            |> List.map (fun hostile ->
+                hostile.Id,
+                Map.tryFind hostile.Id values
+                |> Option.defaultWith (fun () -> Facts.killValue view hostile))
+
         match kind, contention with
         | BriefKind.Resident, _ ->
             [
@@ -1036,19 +1084,7 @@ module Brief =
         // (`RoomWorth.values`, read for a cast). A trespasser only bouncing
         // on the exit is met by one melee block.
         | BriefKind.Contested, Some contention when contention.Phase = Phase.Prey ->
-            let values = RoomWorth.values Quarry.Reading.Cast contention.Value.Value
-
-            let prey =
-                answered.Value
-                |> List.collect snd
-                |> List.distinctBy _.Id
-                |> List.filter (Facts.enemyEconomy view.Hostiles)
-                |> List.map (fun hostile ->
-                    hostile.Id,
-                    Map.tryFind hostile.Id values
-                    |> Option.defaultWith (fun () -> Facts.killValue view hostile))
-
-            [ fighterAsk view room bodyTemplates (Some prey) (fun _ -> true) ]
+            [ fighterAsk view room bodyTemplates (Some(preyOf contention)) (fun _ -> true) ]
         // Under its raid, or nobody working it: the cheapest cast of its
         // row's template, a ranger's where a ranger answers it (#535), else a
         // swing holding the post (`admitsOf`).
@@ -1067,23 +1103,67 @@ module Brief =
                         || not (Map.isEmpty worth.Takes))
                 | _ -> true
 
-            [ fighterAsk view room [ template ] None pays ]
+            let raid = fighterAsk view room [ template ] None pays
+
+            // The cast that converges beside the holders of its row
+            // (`Facts.castConverging`).
+            let converging =
+                lazy
+                    (Facts.castConverging
+                        view
+                        room
+                        (Facts.fighterCast view room [ template ] Engine.guardCap)
+                        (holders
+                         |> List.filter (fun creep -> CastRow.cut raid.Row creep.Name creep.Body)))
+
+            // Under its raid, the bodies of the cast's row its prey's kills
+            // pay for (`Facts.castBodiesPaid`), landed after the body's spawn
+            // and its walk, one a trespasser at most. A room not ours prices
+            // its prey into whether its cast pays at all (`pays`, `Takes`).
+            let preyPaid =
+                lazy
+                    (match contention with
+                     | Some contention when
+                         preyed && contention.Ours && contention.Phase = Phase.Raid
+                         ->
+                         match preyOf contention with
+                         | [] -> 0
+                         | prey ->
+                             let blocks = raid.Blocks()
+
+                             let landing =
+                                 Facts.castSpawnTicks template blocks
+                                 + CastBid.walk
+                                     view.Tuning
+                                     (RoomName.hopsBetween (SpatialInfo.homeName view.Spatial) room)
+
+                             Facts.castBodiesPaid view raid.Row blocks room landing prey
+                             |> min (List.length prey)
+                             |> min Engine.guardCap
+                     | _ -> 0)
+
+            let standingWin () =
+                contention |> Option.exists _.Pursued && standing.Value
+
+            [
+                { raid with
+                    Wanted =
+                        fun threats ->
+                            match raid.Wanted threats with
+                            | 0 -> 0
+                            | _ when standingWin () -> preyPaid.Value
+                            | _ -> converging.Value + preyPaid.Value
+                }
+            ]
         // A held exit held by a ranger is the ranger's (`claimed`).
         | BriefKind.ExitHold, _ when ranged ->
             [ fighterAsk view room [ BodyTemplate.Ranged ] None (fun _ -> true) ]
         | BriefKind.Core, _
         | BriefKind.ExitHold, _ ->
             [ fighterAsk view room [ BodyTemplate.Melee ] None (fun _ -> true) ]
-        // A chase is cast for by nobody, but in a room shut on a raid the
-        // colony's own row wins (`rowCast`, #571): the stand-down shuts that
-        // room's Guard out of the pool, never the row's cast, so the chase
-        // carries the row's ask.
-        | BriefKind.Chase, _ ->
-            match rowCast.Value with
-            | Some(CastRow.Fighter template) ->
-                [ fighterAsk view room [ template ] None (fun _ -> true) ]
-            | Some _
-            | None -> []
+        // A blind chase prices no fight: nothing is cast for it, and the
+        // kite it was shut on walks in after the raid.
+        | BriefKind.Chase, _ -> []
 
     /// A contested room's group (#663 M3): the bodies of this colony holding
     /// its Guard, where each stands, and where the [[sweep]] works the room,
@@ -1112,6 +1192,7 @@ module Brief =
     /// nobody. Its capacity is their sum (`capacityOfJobs`).
     let private seated
         (kind: BriefKind)
+        (pursued: bool)
         (phase: Phase)
         (room: string)
         (verdict: Lazy<Answer>)
@@ -1155,21 +1236,8 @@ module Brief =
             | BriefKind.Resident ->
                 seat (fun threats -> any (wanted threats + view.Tuning.RangerResidents)) head
                 :: rest
-            // A kite seats as many rangers as kill what cannot close on them
-            // before it ages out, and every one at the fight
-            // (`Facts.kiteSeats`, #510, #596); a raid the rangers there and
-            // beside it win together takes as many as win it; one a row
-            // casts for, as many as it asks.
-            | BriefKind.Chase ->
-                let count threats =
-                    match verdict.Value with
-                    | Answer.Win when not (List.isEmpty asks) ->
-                        max (wanted threats) (rangers.Value |> Option.defaultValue 1)
-                    | Answer.Win -> rangers.Value |> Option.defaultValue 1
-                    | Answer.Kite -> Facts.kiteSeats view room holding
-                    | Answer.Lose -> 1
-
-                seat (count >> any) head :: rest
+            // A blind chase prices no fight: the one kite that walks in.
+            | BriefKind.Chase -> seat (fun _ -> any 1) head :: rest
             // One body kills a contested room's prey, which strikes nothing
             // back (#516): a seat a trespasser each template answers
             // (`trespassSplit`, #550), at most `Engine.guardCap` a template, a
@@ -1283,9 +1351,22 @@ module Brief =
                     else
                         0
 
+                // A pursued raid (#510): a kite seats as many rangers as kill
+                // what cannot close on them before it ages out, and every one
+                // at the fight (`Facts.kiteSeats`, #596); one the rangers
+                // there and beside it win together takes as many as win it.
+                let pursuing () =
+                    if not pursued then
+                        0
+                    else
+                        match verdict.Value with
+                        | Answer.Kite -> Facts.kiteSeats view room holding
+                        | Answer.Win -> rangers.Value |> Option.defaultValue 0
+                        | Answer.Lose -> 0
+
                 let count threats =
                     max
-                        grouped.Value
+                        (max grouped.Value (pursuing ()))
                         (max
                             (wanted threats)
                             (min Engine.guardCap (max (keeping ()) (losers.Value + 1))))
@@ -1307,11 +1388,13 @@ module Brief =
     /// and a room of ours nobody works, the remembered raid's (#366).
     /// Defence first, so a body the raid wants never goes to a kill, and only
     /// one the raid leaves free does (#528). The room's verdict, the rangers
-    /// that win it (`Facts.rangersWin`) and whether a ranger answers it
-    /// (`Facts.rangerAnswers`, or the room is a harassment room) and whether
-    /// the colony's own row casts for its chase (`casts`) come priced lazily,
-    /// once a tick; a contested room's `phase` and its price (`contest`)
-    /// beside them. Its answers read the view and Atlas given.
+    /// that win it (`Facts.rangersWin`), whether this colony's row casts for
+    /// it where they do (`casts`) and whether a ranger answers it
+    /// (`Facts.rangerAnswers`, or the room is a harassment room) come priced
+    /// lazily, once a tick; a contested room's `phase`, whether its raid is
+    /// pursued (`Contention.Pursued`) and whether prey works it under its
+    /// raid (`preyed`) beside them. Its answers read the view and Atlas
+    /// given.
     let internal claimed
         (view: ColonyView)
         (atlas: Atlas.Atlas)
@@ -1319,8 +1402,10 @@ module Brief =
         (raided: bool)
         (verdict: Lazy<Answer>)
         (rangers: Lazy<int option>)
-        (ranger: Lazy<bool>)
         (casts: Lazy<bool>)
+        (ranger: Lazy<bool>)
+        (pursued: bool)
+        (preyed: bool)
         (answered: Lazy<(CastRow * HostileInfo list) list>)
         (holding: Set<string>)
         (claims: BriefKind list)
@@ -1337,13 +1422,17 @@ module Brief =
                     {
                         Phase = phase
                         Ours = Facts.contestOurs view room
+                        Pursued = pursued
                         Value = value
                     }
             else
                 None
 
+        let pursued = Option.isSome contention && pursued
+
         let kill =
-            kind = BriefKind.Chase || kind = BriefKind.Contested && phase = Phase.Prey
+            kind = BriefKind.Chase
+            || kind = BriefKind.Contested && (phase = Phase.Prey || pursued)
 
         // A held exit is the row's that held the raid's Guard: a ranger
         // holding it keeps it while the raid bounces across the exit (live
@@ -1360,20 +1449,20 @@ module Brief =
             kind = BriefKind.Contested && ranger.Value
             || kind = BriefKind.ExitHold && heldByRanger.Value
 
-        let rowCast =
-            lazy
-                (if kind = BriefKind.Chase && casts.Value then
-                     Some(
-                         // A kite is the ranger's the verdict counted (#655).
-                         if ranger.Value || verdict.Value = Answer.Kite then
-                             CastRow.Fighter BodyTemplate.Ranged
-                         else
-                             CastRow.Fighter BodyTemplate.Melee
-                     )
-                 else
-                     None)
+        let holders =
+            ColonyView.bodies view |> List.filter (fun creep -> holding.Contains creep.Name)
 
-        let ask = askOf kind contention ranged rowCast answered room view
+        let ask =
+            askOf
+                kind
+                contention
+                ranged
+                (lazy (Option.isSome rangers.Value && not casts.Value))
+                holders
+                preyed
+                answered
+                room
+                view
 
         // With no job laid on any tile, one on the ring of the room's
         // declared sources, which `Outpost.Sources` places without vision
@@ -1392,7 +1481,7 @@ module Brief =
                         (lazy (RoomWorth.delta Quarry.Reading.Value (Facts.roomWorth view room)))
                 ]
             | jobs -> jobs
-            |> seated kind phase room verdict rangers holding answered ask view
+            |> seated kind pursued phase room verdict rangers holding answered ask view
 
         {
             Duty = Duty.Guard kind
@@ -1413,6 +1502,7 @@ module Brief =
             Avoid =
                 match kind with
                 | BriefKind.Chase -> Avoid.Kite
+                | _ when pursued -> Avoid.Kite
                 | _ when kill -> Avoid.Reach
                 | _ -> Avoid.Runner
             Rung =
@@ -1478,8 +1568,10 @@ module Brief =
             false
             (lazy Answer.Win)
             (lazy None)
-            (lazy (Set.contains room (harassRooms view)))
             (lazy false)
+            (lazy (Set.contains room (harassRooms view)))
+            false
+            false
             (lazy [])
             Set.empty
             []
@@ -3514,22 +3606,37 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     let answeredByRanger room =
         Map.tryFind room rows |> Option.exists (fun row -> row.Value.Ranger)
 
-    // The rooms a ranger chases a raid in (#510): in sight, `chased`'s; out
-    // of it, an outpost shut on a raid a ranger kites down, while no raid
-    // is seen there that its own row answers. The row is the gate: a look
-    // that finds the room empty ends the chase there (`Observe.strikeGone`).
-    let chasedRooms =
-        let kept room =
-            let holders = HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList
+    // Whether a ranger holds a room's Guard.
+    let kept room =
+        let holders = HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList
 
-            ColonyView.bodies view
-            |> List.exists (fun creep -> Set.contains creep.Name holders && isRangerRowBody creep)
+        ColonyView.bodies view
+        |> List.exists (fun creep -> Set.contains creep.Name holders && isRangerRowBody creep)
 
+    // The raids in sight a ranger pursues (#510, `chased`): each a contested
+    // room's, pooled whatever guards it (`Contention.Pursued`), priced with
+    // its prey beside it.
+    let pursuedRooms =
         verdicts
         |> Map.keys
         |> Seq.filter (fun room -> chased view (verdictOf room) (kept room) room)
         |> Set.ofSeq
-        |> Set.union (view.ChasedOutposts |> Set.filter (raided view >> not))
+
+    // Whether a ranger answers a pursued raid: rangers win it and not its
+    // own row, a ranger holds it, or it is kited (#655: a verdict casts the
+    // body it counts); else its own row's swing does (#571).
+    let pursuedByRanger room =
+        Set.contains room pursuedRooms
+        && (match verdictOf room with
+            | Answer.Kite, _
+            | _, false -> true
+            | _, true -> kept room)
+
+    // The rooms a ranger chases a raid in out of sight (#510): an outpost
+    // shut on a raid a ranger kites down, while no raid is seen there. The
+    // row is the gate: a look that finds the room empty ends the chase there
+    // (`Observe.strikeGone`).
+    let chasedRooms = view.ChasedOutposts |> Set.filter (raided view >> not)
 
     // A resident room's raid (#552): every body we shoot there that fights
     // or heals, or bounces on its exit (`Facts.bouncingInto`), which stands
@@ -3550,7 +3657,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         && sideScore room hostile > 0.0
 
     // The ranger rooms an armed raid, or a rival's claimer, stands in, the
-    // chased rooms a raid stands in, the raided rooms a ranger answers
+    // pursued rooms a raid stands in, the raided rooms a ranger answers
     // (#535), the resident rooms a raid stands at (#552), and those a body
     // worth its kill stands in (`worthIn`).
     let contested =
@@ -3560,7 +3667,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
              && (Map.containsKey hostile.Pos.Room ring
                  || claimsAFlag view.Hostiles resident hostile))
          |> List.map (fun hostile -> hostile.Pos.Room))
-        @ (chasedRooms |> Set.filter ring.ContainsKey |> Set.toList)
+        @ (pursuedRooms |> Set.filter ring.ContainsKey |> Set.toList)
         @ (ring.Keys
            |> Seq.filter (fun room -> not (Set.contains room rangers) && answeredByRanger room)
            |> List.ofSeq)
@@ -4003,9 +4110,10 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         | None -> false
 
     // A contested room's prey's ground (#516, #656): about every trespasser
-    // in a room of ours or a harassed one, never a chased room's, whose
-    // chase claims it first, nor a cored room's the core comes first in,
-    // nor a held exit's its holders would not be back at in time.
+    // in a room of ours or a harassed one, a raid's beside it or none (#663),
+    // never a blind chase's, whose chase claims it first, nor a cored room's
+    // the core comes first in, nor a held exit's its holders would not be
+    // back at in time.
     let prey =
         trespassIn (fun room ->
             not (Set.contains room chasedRooms)
@@ -4017,10 +4125,11 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // pools it (#542): a kill always (a chase, a contested room's prey);
     // any kind where the room's Guard is pooled whatever claims it
     // (`Facts.guardedRooms`), or where a body of ours holds that Guard
-    // beside a hostile (`engaged`, the held fight); a held exit where a body
-    // holds its Guard. `engaged` is a superset of the Planner's `fought`
-    // (which also asks `holdsFight` — circular here, as it reads the Brief):
-    // where they differ the kill pools a tick later, never stalls. The
+    // beside a hostile (`engaged`, the held fight), or a ranger pursues its
+    // raid (`pursuedRooms`); a held exit where a body holds its Guard.
+    // `engaged` is a superset of the Planner's `fought` (which also asks
+    // `holdsFight` — circular here, as it reads the Brief): where they
+    // differ the kill pools a tick later, never stalls. The
     // guarded rooms are derived only where a claim ahead would otherwise
     // shut a later one out.
     let guarded =
@@ -4029,7 +4138,9 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
              |> Set.ofList)
 
     let raidPools room =
-        Set.contains room engaged || Set.contains room guarded.Value
+        Set.contains room engaged
+        || Set.contains room pursuedRooms
+        || Set.contains room guarded.Value
 
     let pools kind room =
         kind = BriefKind.Chase
@@ -4037,10 +4148,13 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         || raidPools room
         || kind = BriefKind.ExitHold && Set.contains (taskId (Guard room)) held.All
 
-    // A contested room's phase (#656): its raid where that pools, or where
+    // A contested room's phase (#656): its raid where a ranger pursues it
+    // (a cripple shot disarmed among it, #510), where that pools, or where
     // no prey works it; else its prey; else quiet.
     let phaseOf room =
-        if Map.containsKey room ring && (raidPools room || not (Map.containsKey room prey)) then
+        if Set.contains room pursuedRooms then
+            Phase.Raid
+        elif Map.containsKey room ring && (raidPools room || not (Map.containsKey room prey)) then
             Phase.Raid
         elif Map.containsKey room prey then
             Phase.Prey
@@ -4049,11 +4163,11 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     // Each kind's claim, down `BriefKind.order`, on the rooms still open to
     // it: a resident and a chase claim their rooms outright; a contested
-    // room its raid's rooms outright, open under a chase as a ring is, and
-    // the rooms its prey works or that we harass, not under one; a held exit
-    // and a core only the rooms they lay ground in. A claim that pools
-    // nothing shuts nobody out. Per room, its claimants in that order; per
-    // kind, the ground it laid.
+    // room its raid's rooms and its pursued ones outright, open under a
+    // chase as a ring is, and the rooms its prey works or that we harass, not
+    // under one; a held exit and a core only the rooms they lay ground in. A
+    // claim that pools nothing shuts nobody out. Per room, its claimants in
+    // that order; per kind, the ground it laid.
     let claimants, laid =
         let outright rooms open' =
             rooms |> Seq.filter open' |> Seq.map (fun room -> room, Set.empty) |> List.ofSeq
@@ -4070,6 +4184,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     Seq.concat
                         [
                             ring.Keys |> Seq.filter open'
+                            pursuedRooms |> Seq.filter open'
                             prey.Keys |> Seq.filter unchased
                             harassRooms view |> Seq.filter unchased
                         ]
@@ -4209,14 +4324,15 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         |> Map.map (fun room tiles ->
             Job.laid JobKind.Resident tiles [] (lazy (Facts.roomWorth view room).Kept))
 
-    // A contested room's prey where its prey is what it is fought over, and
-    // its claim was open (#656): a kill of each trespasser there, at the kill
-    // score of the one its side's score leads.
+    // A contested room's prey where its claim was open (#656), what it is
+    // fought over or beside its raid (#663): a kill of each trespasser there,
+    // at the kill score of the one its side's score leads.
     let preyJobs =
         prey
         |> Map.filter (fun room _ ->
             match Map.tryFind room claimants with
-            | Some claims -> List.contains BriefKind.Contested claims && phaseOf room = Phase.Prey
+            | Some claims ->
+                List.contains BriefKind.Contested claims && phaseOf room <> Phase.Quiet
             | None -> false)
         |> Map.map (fun room (tiles, ids) ->
             Job.laid
@@ -4297,9 +4413,9 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // `BriefKind.order`, each kind's own in order, given whether a ranger
     // answers the room: a resident its kite, then its garrison ground; a
     // chase its kite; a contested room by its phase — under its raid its
-    // kite where a ranger answers it, then its rings; else its camp on a
-    // dancer, else its prey's kill —; a held exit and a core the rings: the
-    // raid's, each held exit's, each core's.
+    // kite where a ranger answers it, then its rings, then its prey's kill
+    // (#663); else its camp on a dancer, else its prey's kill —; a held exit
+    // and a core the rings: the raid's, each held exit's, each core's.
     let jobsIn room (kind: BriefKind) (phase: Phase) (ranged: bool) : Job list =
         let found (jobs: Map<string, Job>) = Map.tryFind room jobs |> Option.toList
 
@@ -4311,8 +4427,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             | BriefKind.Chase -> found kite
             | BriefKind.Contested ->
                 match phase with
-                | Phase.Raid when ranged -> found kite @ rings
-                | Phase.Raid -> rings
+                | Phase.Raid when ranged -> found kite @ rings @ found preyJobs
+                | Phase.Raid -> rings @ found preyJobs
                 | Phase.Prey
                 | Phase.Quiet ->
                     match campJob room with
@@ -4351,18 +4467,24 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 (Map.containsKey room ring)
                 verdict
                 winners
-                // A harassment room is the ranger's, a hostile in it or none
-                // (#432).
-                (lazy (answeredByRanger room || Set.contains room (harassRooms view)))
-                // Its chase cast for by this colony's row: a room shut on a
-                // raid that row wins (#571), or a kite its biggest ranger is
-                // counted for (#655: a verdict casts the body it counts).
+                // Its own row casts for it where rangers by it win it: a
+                // room shut on a raid this colony's row wins (#571), or a
+                // kite its biggest ranger is counted for (#655: a verdict
+                // casts the body it counts).
                 (lazy
                     (Map.tryFind room judged
                      |> Option.exists (fun verdict ->
                          verdict.Value.Casting.Contains home
                          && (Set.contains room view.RaidedOutposts
                              || verdict.Value.Answer = Answer.Kite))))
+                // A harassment room is the ranger's, a hostile in it or none
+                // (#432); so is a raid a ranger pursues.
+                (lazy
+                    (answeredByRanger room
+                     || Set.contains room (harassRooms view)
+                     || pursuedByRanger room))
+                (Set.contains room pursuedRooms)
+                (Map.containsKey room prey)
                 (lazy
                     (Brief.trespassSplit
                         view
@@ -4428,7 +4550,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             let seatGroundOf (creep: CreepInfo) =
                 match groundOf creep with
-                | Some(ground, false) when Brief.isKill brief && brief.Contention.IsSome ->
+                | Some(ground, false) when Brief.isPrey brief ->
                     let score = scoreOf atlas scores.Value creep
                     let reach = Fighter.reachOf creep
                     let arrival = arrivalOf creep

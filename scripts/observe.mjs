@@ -1768,6 +1768,11 @@ if (command === "console") {
   // this command has no way to read which.
   const RIVAL_RECHECK = 5000;
 
+  // How far ahead an armed sighting writes a room's threat latch, mirroring
+  // `Tuning.ThreatMemory` in Core (#366) under the same caveat: what tells a
+  // latch written this tick from one remembered.
+  const THREAT_MEMORY = 1500;
+
   // A row off the wire shape is fatal and quoted, never dropped. The
   // asymmetry is ADR 0043's: a row this reader hid would show its room as
   // open, and Core's decoder drops a row whose `expiry` or `basis` will not
@@ -2070,9 +2075,16 @@ if (command === "console") {
         .sort((a, b) => a.room.localeCompare(b.room));
 
       for (const latch of remembered) {
+        // The latch is written forward every tick an armed body stands in the
+        // room in sight, `ThreatMemory` ahead: one written this tick (or the
+        // bundle's last, a tick behind the clock) is a sighting, not memory.
+        const writtenAt = latch.until - THREAT_MEMORY;
         console.log(
-          `${latch.room}  guarded from memory — an armed threat was standing here at the last ` +
-            `look, and nothing of ours can see the room now`,
+          now - writtenAt <= 1
+            ? `${latch.room}  guarded — seen armed this tick (the memory written forward to ` +
+                `${tickOf(latch.until)})`
+            : `${latch.room}  guarded from memory — an armed threat was standing here at the ` +
+                `last look, ${ticks(now - writtenAt)} ago, and nothing of ours has seen one there since`,
         );
         console.log(
           `  the guard row hires one body for it until ${tickOf(latch.until)}, ` +

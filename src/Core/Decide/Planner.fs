@@ -381,7 +381,8 @@ let planFightTasks
     // the hold keeps that guard on the exit, and is no room the row hires for.
     //
     // And one per chased room (#510): an outpost shut on a raid a ranger
-    // kites down pools its chase and nothing else.
+    // kites down pools its chase and nothing else; in sight, its raid
+    // pursued (`Brief.pursued`).
     //
     // And one per contested room a trespasser works (#516, #656: ours or a
     // harassed one): its kill, for a body a holder called to it or a cast it

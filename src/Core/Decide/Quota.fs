@@ -475,7 +475,7 @@ let internal homeHolds (view: ColonyView) (room: string) : bool =
 /// outside the guarded rooms, or a rival's remote we harass — so the kill's
 /// value is all that buys a body.
 let private pricedKill (outposts: OutpostFacts) (room: string) (brief: Brief) : bool =
-    Brief.isKill brief
+    Brief.isPrey brief
     && (match brief.Contention with
         | Some contention -> not contention.Ours || not (List.contains room outposts.Guarded)
         | None -> false)
@@ -483,10 +483,10 @@ let private pricedKill (outposts: OutpostFacts) (room: string) (brief: Brief) : 
 /// The guarded rooms a fighting row asks for, each with its Brief's row ask
 /// (#411): read off `Threats.briefOf`, so a guarded room no source claims —
 /// an outpost the colony is blind in (#366) — asks as `Brief.unclaimed`'s
-/// melee guard. A chased room (#510) asks neither row but where its own row
-/// wins a room the stand-down shuts (`chaseAsks`), and a kill its kills pay
-/// for asks priced (`pricedKill`, `killAsks`). Every colony asks for its own
-/// rooms; which colony casts is the Caster's (`Caster.assign`).
+/// melee guard. A pursued raid outside them (#510) asks as its Brief does
+/// (`pursuedAsks`), and a kill its kills pay for asks priced (`pricedKill`,
+/// `killAsks`). Every colony asks for its own rooms; which colony casts is
+/// the Caster's (`Caster.assign`).
 let private guardedAsks
     (threats: Threats)
     (outposts: OutpostFacts)
@@ -537,10 +537,11 @@ let private recastCooling
         && ask.Wanted threats <= lost.Cast
     | _ -> false
 
-/// The chases outside the guarded rooms that a row casts for: a room shut on
-/// a raid this colony's own row wins (#571), whose Guard the stand-down keeps
-/// out of the guarded rooms but whose cast it never withholds.
-let private chaseAsks
+/// The pursued raids outside the guarded rooms that a row casts for
+/// (`Brief.pursued`): a room shut on a raid (#571), whose Guard the
+/// stand-down keeps out of the guarded rooms but whose cast it never
+/// withholds, or one rangers kite a raid in.
+let private pursuedAsks
     (view: ColonyView)
     (threats: Threats)
     (outposts: OutpostFacts)
@@ -550,10 +551,7 @@ let private chaseAsks
     |> Map.toList
     |> List.collect (fun (task, brief) ->
         match task with
-        | Guard room when
-            brief.Duty = Duty.Guard BriefKind.Chase
-            && not (List.contains room outposts.Guarded)
-            ->
+        | Guard room when Brief.pursued brief && not (List.contains room outposts.Guarded) ->
             brief.Asks
             |> List.filter (fun ask -> ask.Row = row && not (recastCooling view threats room ask))
             |> List.map (fun ask -> task, ask)
@@ -584,7 +582,7 @@ let private killAsks
         | _ -> [])
 
 /// A fighting row's asks, each with its Task: its guarded rooms' but a
-/// cooling one's (`recastCooling`), its cast chases', its priced trespass
+/// cooling one's (`recastCooling`), its pursued raids', its priced trespass
 /// kills' (`killAsks`) and every other Brief's.
 let private asksFor
     (view: ColonyView)
@@ -600,7 +598,7 @@ let private asksFor
      |> List.filter (fun (room, ask) -> not (recastCooling view threats room ask))
      |> List.map (fun (room, ask) -> Guard room, ask)
      |> unpriced)
-    @ unpriced (chaseAsks view threats outposts row)
+    @ unpriced (pursuedAsks view threats outposts row)
     @ (killAsks threats outposts calls row
        |> List.map (fun (task, ask) -> task, ask, true))
     @ unpriced (briefAsks threats row)
