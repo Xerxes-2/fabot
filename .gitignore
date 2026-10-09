@@ -5,3 +5,7 @@ dist/
 build/
 bin/
 obj/
+
+# Claude Code: subagent jj workspaces and machine-local settings
+.claude/worktrees/
+.claude/*.local.*

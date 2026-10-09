@@ -50,8 +50,8 @@ A live firefight (as above) the user flags may be fixed in the current session w
 
 - A background task or subagent notifies when it finishes: end the turn. Wait on the game with `npm run observe -- wait --ticks N`.
 - Stop a background job with TaskStop; `pkill -f` matches its own shell.
-- A subagent that edits runs with `isolation: "worktree"`: the WorktreeCreate hook gives it its own jj workspace under `~/.cache/claude-jj-workspaces/`, based on `main` (the hook's `trunk()`), and the repo-local `.claude/worktree-setup.local.sh` (untracked) links `node_modules`, copies `.env` and restores the dotnet tools. The subagent describes its change and never moves a bookmark or pushes.
-- Ship a subagent's change from the default workspace: `jj new <change>` (rebase it onto `main` first if `main` moved), then steps 4–5 with `-r <change>`. Subagent workspaces are swept at session end, or by hand with `jj workspace forget` and removing the directory.
+- A subagent that edits runs with `isolation: "worktree"`: the repo's WorktreeCreate hook (`.claude/hooks/worktree-create.sh`, registered in `.claude/settings.json`) gives it its own jj workspace at `.claude/worktrees/<name>` (ignored), based on `main` (`trunk()`, or `claude.worktree-base` when set), with `node_modules` linked, `.env` copied and the dotnet tools restored; anything machine-local goes in an untracked `.claude/worktree-setup.local.sh`. The subagent describes the workspace's own `@` (no `jj new` before its first edit, which leaves an empty change under its work) and never moves a bookmark or pushes.
+- Ship a subagent's change from the default workspace: `jj new <change>` (rebase it onto `main` first if `main` moved), then steps 4–5 with `-r <change>`. Subagent workspaces are swept at session end (`worktree-sweep.sh`); by hand, `.claude/hooks/worktree-sweep.sh --stale` forgets workspaces whose directory is gone and removes directories no workspace owns.
 - Another live session works in its own workspace too, or stays read-only.
 
 ## Live game
