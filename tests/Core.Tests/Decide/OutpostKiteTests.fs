@@ -2364,3 +2364,291 @@ let shutChaseTests =
                     "with the world looking in, the row still says chase, and the ranger keeps it"
             }
         ]
+
+[<Tests>]
+let kiteExchangeTests =
+    testList
+        "the kite exchange: where a fighter stands is priced off the bodies by range (#615)"
+        [
+            // A 6M 4R 2H ranger (ranger-1051197's body) on the band about a
+            // head at (25,25): what it lands there over the ticks the head
+            // stays in its reach, less the fire its standing there adds.
+            let head = { X = 25; Y = 25 }
+
+            let ranger =
+                Fighter.ofCreep (
+                    creepWith "r-1" 0 0 (List.concat (List.replicate 2 Bodies.rangerPattern.Block))
+                )
+
+            let band =
+                [
+                    for x in 22..28 do
+                        for y in 22..28 do
+                            let tile = { X = x; Y = y }
+
+                            if tile <> head then
+                                yield tile
+                ]
+
+            let exchange steps fires towers =
+                {
+                    Head = head
+                    HeadSteps = steps
+                    Fires = fires
+                    Towers = towers
+                    Targets = [ head ]
+                    Bystanders = []
+                }
+
+            // The band's tiles a lone ranger trades best on.
+            let best exchange =
+                let priced =
+                    band |> List.map (fun tile -> kiteExchangeOn exchange ranger [] tile, tile)
+
+                let top = priced |> List.map fst |> List.max
+                priced |> List.filter (fst >> (=) top) |> List.map snd
+
+            let ranges tiles =
+                tiles |> List.map (range head) |> List.distinct |> List.sort
+
+            // A shooter rooted where it stands: its shot and mass attack land
+            // from its tile.
+            let gun guns : KiteFire =
+                {
+                    At = head
+                    Guns = guns
+                    Swings = 0
+                    Stepping = false
+                }
+
+            // Bodies each reaching every tile of the band in a tick, standing
+            // on none of it, seated in one priced pass: each seat's range.
+            let seatAll fighter names exchange =
+                names
+                |> List.map (fun name ->
+                    name, fighter, None, band |> List.map (fun tile -> 1, tile))
+                |> kiteSeating exchange
+                |> Map.map (fun _ (seat, _) -> [ range head seat ])
+
+            let seatFour = seatAll ranger [ "r-1"; "r-2"; "r-3"; "r-4" ]
+
+            test
+                "an unarmed head that steps is closed on to one; one standing still anywhere in reach" {
+                Expect.equal (ranges (best (exchange true [] []))) [ 1 ] "stepping: beside it"
+
+                Expect.equal
+                    (ranges (best (exchange false [] [])))
+                    [ 1; 2; 3 ]
+                    "standing: nothing lost a step off, anywhere within three"
+            }
+
+            test "a lone shooter, whose shot lands alike at one to three, is closed on to one" {
+                Expect.equal
+                    (ranges (best (exchange true [ gun 3 ] [])))
+                    [ 1 ]
+                    "its 30 lands wherever we stand"
+            }
+
+            test "a melee is held off its swing, and a step past it where it can step first" {
+                let melee: KiteFire =
+                    {
+                        At = head
+                        Guns = 0
+                        Swings = 10
+                        Stepping = false
+                    }
+
+                Expect.equal
+                    (ranges (best (exchange false [ melee ] [])))
+                    [ 2; 3 ]
+                    "its 300 lands at one: off it, anywhere in reach"
+
+                // The review's equal-pace melee: one that steps this tick
+                // swings at two, so the ranger holds three.
+                Expect.equal
+                    (ranges (best (exchange true [ { melee with Stepping = true } ] [])))
+                    [ 3 ]
+                    "one that can step first: three"
+            }
+
+            test
+                "a body already on a tied-best tile keeps it, and the next is priced beside the tile it takes" {
+                let standing = { X = 23; Y = 25 }
+
+                let seats =
+                    [
+                        "r-1", ranger, Some standing, band |> List.map (fun tile -> 1, tile)
+                        "r-2", ranger, None, band |> List.map (fun tile -> 2, tile)
+                    ]
+                    |> kiteSeating (exchange false [] [])
+
+                Expect.equal
+                    (Map.tryFind "r-1" seats |> Option.map fst)
+                    (Some standing)
+                    "its own tile, of the tied ones"
+
+                Expect.isFalse
+                    (Map.tryFind "r-2" seats
+                     |> Option.exists (fun (chosen, tops) ->
+                         chosen = standing || tops.Contains standing))
+                    "the second is priced beside it and never seated on its tile"
+
+                // #615 review: two holders already on band tiles, the second
+                // standing where the first's price is best too. Never one
+                // tile for both, and neither's seats hold the other's tile.
+                let first, second = { X = 25; Y = 24 }, { X = 25; Y = 26 }
+
+                let both =
+                    [
+                        "r-1", ranger, Some first, band |> List.map (fun tile -> 1, tile)
+                        "r-2", ranger, Some second, band |> List.map (fun tile -> 1, tile)
+                    ]
+                    |> kiteSeating (exchange true [] [])
+
+                let tileOf name = Map.find name both |> fst
+                let seatsOf name = Map.find name both |> snd
+
+                Expect.equal
+                    (tileOf "r-1", tileOf "r-2")
+                    (first, second)
+                    "each keeps the tile it stands on"
+
+                Expect.isFalse
+                    (seatsOf "r-1" |> Set.contains second || seatsOf "r-2" |> Set.contains first)
+                    "neither's seats hold the other's tile"
+            }
+
+
+            test
+                "four rangers on one shooter are not stacked beside it: each more there turns its shot to a mass attack" {
+                // The first beside it costs its shot, 30, wherever it stands.
+                // A second beside it turns the shot into a mass attack of 60;
+                // at two it lands 42, at three 33: a ranger's 40 a tick held
+                // two ticks at two outweighs the 12 it adds.
+                Expect.equal
+                    (seatFour (exchange true [ gun 3 ] []))
+                    (Map.ofList [ "r-1", [ 1 ]; "r-2", [ 2 ]; "r-3", [ 2 ]; "r-4", [ 2 ] ])
+                    "one at one, the rest at two"
+
+                // Ten guns: a second beside it adds 100, at two 40, at three
+                // 10: the rest stand at three.
+                Expect.equal
+                    (seatFour (exchange true [ gun 10 ] []))
+                    (Map.ofList [ "r-1", [ 1 ]; "r-2", [ 3 ]; "r-3", [ 3 ]; "r-4", [ 3 ] ])
+                    "against a heavier gun, one at one, the rest at three"
+            }
+
+            test
+                "a cluster of shooters meets the group where its mass attack gains least, and our own mass attack counts" {
+                let clusterOf guns =
+                    { exchange
+                          true
+                          [
+                              gun guns
+                              { gun guns with
+                                  At = { X = 26; Y = 25 }
+                              }
+                              { gun guns with
+                                  At = { X = 24; Y = 25 }
+                              }
+                          ]
+                          [] with
+                        Targets = [ head; { X = 26; Y = 25 }; { X = 24; Y = 25 } ]
+                    }
+
+                let three = clusterOf 3
+
+                let nearest seats =
+                    seats |> Map.map (fun _ r -> List.min r)
+
+                // Three guns each: a ranger beside all three lands 120 by its
+                // mass attack, more than the 90 their mass attacks gain on it.
+                Expect.equal
+                    (nearest (seatFour three))
+                    (Map.ofList [ "r-1", 1; "r-2", 1; "r-3", 1; "r-4", 1 ])
+                    "a light cluster: our mass attack outdeals theirs, all four close"
+
+                // Ten guns each: a second body beside them adds 300, at three
+                // 30; the rest stand at three.
+                Expect.equal
+                    (nearest (seatFour (clusterOf 10)))
+                    (Map.ofList [ "r-1", 1; "r-2", 3; "r-3", 3; "r-4", 3 ])
+                    "a heavy cluster: one beside it, the rest at three"
+
+                // Our mass attack: beside all three a 4-gun ranger lands 120,
+                // more than its shot's 40.
+                Expect.isGreaterThan
+                    (kiteExchangeOn three ranger [] { X = 25; Y = 26 })
+                    (kiteExchangeOn { three with Targets = [ head ] } ranger [] { X = 25; Y = 26 })
+                    "a tile beside the three is worth our mass attack on them"
+            }
+
+            test
+                "a melee body is priced on its own swing: it closes to one on an unarmed head or a shooter, and on a melee where its swing outprices the other's" {
+                // A guard (3 ATTACK, 90 a tick beside it, nothing past it).
+                let swinger = Fighter.ofCreep (guard "g-1")
+
+                let bestFor fighter exchange =
+                    let priced =
+                        band |> List.map (fun tile -> kiteExchangeOn exchange fighter [] tile, tile)
+
+                    let top = priced |> List.map fst |> List.max
+                    priced |> List.filter (fst >> (=) top) |> List.map snd |> ranges
+
+                Expect.equal
+                    (bestFor swinger (exchange true [] []))
+                    [ 1 ]
+                    "an unarmed head that steps: beside it"
+
+                Expect.equal
+                    (bestFor swinger (exchange false [] []))
+                    [ 1 ]
+                    "one standing still: beside it, where alone a swing lands"
+
+                Expect.equal
+                    (bestFor swinger (exchange true [ gun 3 ] []))
+                    [ 1 ]
+                    "a lone shooter lands its 30 wherever we stand: beside it"
+
+                let swingOf swings : KiteFire =
+                    {
+                        At = head
+                        Guns = 0
+                        Swings = swings
+                        Stepping = false
+                    }
+
+                Expect.equal
+                    (bestFor swinger (exchange false [ swingOf 1 ] []))
+                    [ 1 ]
+                    "a melee of one ATTACK, standing: our 90 against its 30, beside it"
+
+                Expect.equal
+                    (bestFor swinger (exchange false [ swingOf 17 ] []))
+                    [ 2; 3 ]
+                    "a melee of seventeen: its 510 against our 90, off its swing"
+
+                // Four guards on one shooter of ten guns: the first beside it
+                // costs its shot wherever it stands; a second beside it turns
+                // the shot into a mass attack of 200, its swing worth 90.
+                let guards =
+                    seatAll swinger [ "g-1"; "g-2"; "g-3"; "g-4" ] (exchange true [ gun 10 ] [])
+
+                Expect.equal
+                    guards
+                    (Map.ofList [ "g-1", [ 1 ]; "g-2", [ 3 ]; "g-3", [ 3 ]; "g-4", [ 3 ] ])
+                    "one beside it, the rest out of its mass attack's best reach"
+            }
+
+            test "under a rival tower the band's tiles farthest from it are taken first" {
+                // Fifteen off the head, the tower lands 270 beside it on its
+                // far side and 210 three past it: 60 a tick less outweighs the
+                // ticks an unarmed head stays in reach from beside it.
+                let tower = { X = 25; Y = 10 }
+                let tiles = best (exchange true [] [ tower ])
+
+                Expect.isTrue
+                    (tiles |> List.forall (fun tile -> tile.Y = head.Y + 3))
+                    $"on the band's far row from the tower: {tiles}"
+            }
+        ]

@@ -2566,15 +2566,23 @@ let arenaBorderTests =
                 // fewest that kill before the raid ages out, and every body
                 // already at the fight), and the second, 140 a tick more, is
                 // not sent. Slower to the kill by four ticks, nobody struck.
+                // The kite exchange (#615) moved the first shot to t22: the
+                // ground is the band's tiles within three a ranger trades best
+                // on (`kiteExchangeOn`, the melee's swing priced off its body,
+                // a tile nearer where it can step first), where it was a fixed
+                // band of two, else three, its escape room read over that band
+                // alone; every holder seated on it in one priced pass. Two
+                // ticks sooner to the first shot, three to the kill (t33),
+                // nobody struck.
                 Expect.equal
                     firstShot
-                    (Some 24)
-                    $"it shoots the melee from t24 (main t68)\n{failure}"
+                    (Some 22)
+                    $"it shoots the melee from t22 (main t68)\n{failure}"
 
                 Expect.equal
                     (diedOn "HalfLife847" trace)
-                    (Some 36)
-                    $"the melee dies at t36 (S3 t74)\n{failure}"
+                    (Some 33)
+                    $"the melee dies at t33 (S3 t74)\n{failure}"
 
                 // Characterisation (for S4's Flee band, #583). S3 kept
                 // anchor-985849 and lost reserver-985957 at t10: the 1-block
