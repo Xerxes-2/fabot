@@ -1870,6 +1870,16 @@ if (command === "console") {
     console.log(`colony ${home}, now ${tickOf(now)}`);
     console.log("");
 
+    // The log under this colony also carries rooms it never declared: the
+    // world's record of other players' reservations and the sweep's
+    // stand-downs on rooms it sees. Printed under the colony's name they read
+    // as its outposts, so each one is tagged with what it is.
+    const ownRooms = declared === null ? null : new Set(declared);
+    const tag = (room) =>
+      ownRooms !== null && !ownRooms.has(room)
+        ? `  [not an outpost ${home} declares: a record of a room it sees]`
+        : "";
+
     // A hold whose tick has passed is a record the bot has not folded away
     // yet — the clock is the engine's and it ran out without anybody looking
     // (ADR 0043's re-entry rule), so the room is ours to reserve again and
@@ -1904,7 +1914,7 @@ if (command === "console") {
       for (const hold of [...standing].sort((a, b) => a.room.localeCompare(b.room))) {
         console.log(
           `${hold.room}  mined, not reserved — somebody else's reservation stands on its ` +
-            `controller until ${tickOf(hold.until)}, ${ticks(hold.until - now)} to go`,
+            `controller until ${tickOf(hold.until)}, ${ticks(hold.until - now)} to go${tag(hold.room)}`,
         );
         console.log(`  held by ${HOLDER[hold.holder]}`);
         console.log(
@@ -1965,7 +1975,9 @@ if (command === "console") {
       // while the log holds an expiry and a basis has lost exactly the trace
       // ADR 0043 asks this channel to keep (#117's US-20).
       for (const held of [...rivalHeld].sort((a, b) => a.room.localeCompare(b.room))) {
-        console.log(`${held.room}  shut since ${tickOf(held.since)}, and no clock is running`);
+        console.log(
+          `${held.room}  shut since ${tickOf(held.since)}, and no clock is running${tag(held.room)}`,
+        );
         console.log("  because another player owns it — not a threat that passes,");
         console.log("  a room that stopped being ours to work (ADR 0043)");
         // How this one ends, and since #165 the colony has a part in it: the
@@ -2026,10 +2038,11 @@ if (command === "console") {
         if (running.length > 0) {
           const row = running[0];
           console.log(
-            alsoHeld
+            (alsoHeld
               ? `${room}  and a stand-down is recorded too, until ${tickOf(row.expiry)} — ` +
-                  `${ticks(row.expiry - now)} to go`
-              : `${room}  shut until ${tickOf(row.expiry)} — ${ticks(row.expiry - now)} to go`,
+                `${ticks(row.expiry - now)} to go`
+              : `${room}  shut until ${tickOf(row.expiry)} — ${ticks(row.expiry - now)} to go`) +
+              tag(room),
           );
           console.log(`  because ${BASIS[row.basis]}`);
           // What `last` is a sighting *of* is the basis's, not the family's:
@@ -2044,9 +2057,9 @@ if (command === "console") {
         } else {
           const row = spent[0];
           console.log(
-            alsoHeld
+            (alsoHeld
               ? `${room}  and the stand-down recorded beside that has run out`
-              : `${room}  open — no stand-down is running`,
+              : `${room}  open — no stand-down is running`) + tag(room),
           );
           console.log(
             `  last one ran to ${tickOf(row.expiry)}, spent ${ticks(now - row.expiry)} ago ` +
@@ -2080,11 +2093,12 @@ if (command === "console") {
         // bundle's last, a tick behind the clock) is a sighting, not memory.
         const writtenAt = latch.until - THREAT_MEMORY;
         console.log(
-          now - writtenAt <= 1
+          (now - writtenAt <= 1
             ? `${latch.room}  guarded — seen armed this tick (the memory written forward to ` +
-                `${tickOf(latch.until)})`
+              `${tickOf(latch.until)})`
             : `${latch.room}  guarded from memory — an armed threat was standing here at the ` +
-                `last look, ${ticks(now - writtenAt)} ago, and nothing of ours has seen one there since`,
+              `last look, ${ticks(now - writtenAt)} ago, and nothing of ours has seen one there since`) +
+            tag(latch.room),
         );
         console.log(
           `  the guard row hires one body for it until ${tickOf(latch.until)}, ` +
