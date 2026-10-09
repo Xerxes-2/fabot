@@ -1835,9 +1835,10 @@ type ColonyDecisions<'Stamp> =
         /// every decision, on a tick every colony fought.
         Operations: Lazy<Ledger.Observed>
         /// The code's operations' records moved on this tick
-        /// (`Operations.lay`), and what moved: the shell stores them, the
-        /// latch the next tick moves on from.
-        Operated: OpRecord list * OpEvent list
+        /// (`Operations.layRead`), what moved, and each exit camp's trigger
+        /// as read: the shell stores them, the latch the next tick moves on
+        /// from.
+        Operated: OpRecord list * OpEvent list * OpReading list
     }
 
 /// One colony's step run alone: its throw is its own fault, handed back
@@ -1885,9 +1886,9 @@ let judgeColonies
     (declared: OpSpecWire list)
     (records: OpRecord list)
     (colonies: (Colony * ColonyView) list)
-    : ColonyView list * (OpRecord list * OpEvent list) =
-    let laid, records, events =
-        colonies |> List.map snd |> Operations.lay declared assignments records
+    : ColonyView list * (OpRecord list * OpEvent list * OpReading list) =
+    let laid, records, events, readings =
+        colonies |> List.map snd |> Operations.layRead declared assignments records
 
     List.zip colonies laid
     |> List.map (fun ((colony, _), view) ->
@@ -1899,7 +1900,7 @@ let judgeColonies
         : Facts.Judged))
     |> Facts.judge hops assignments
     |> WorldDanger.lay,
-    (records, events)
+    (records, events, readings)
 
 /// ADR-0091
 /// The world's fight, one Brief per combat Task world-wide: of the colonies
@@ -2088,7 +2089,7 @@ let private decideWorld
     (stamp: unit -> 'Stamp)
     (colonies: (Colony * ColonyView) list)
     (judged: ColonyView list)
-    (operated: OpRecord list * OpEvent list)
+    (operated: OpRecord list * OpEvent list * OpReading list)
     : ColonyDecisions<'Stamp> =
     // The world lane's stamps, observe-only: the judging before this is the
     // world's.

@@ -64,8 +64,29 @@
 //                                  the room it is committed to, since) and
 //                                  the refusals of its spec; each Memory
 //                                  spec with its record (run dry), the kill
-//                                  switch, the refusals and the last events.
-//                                  Read only
+//                                  switch, the refusals and the last events;
+//                                  each exit camp's trigger as read (#663
+//                                  S7e): every guard, and why it is not
+//                                  running
+//   observe.mjs op show <id>       one operation: its spec, record, refusals,
+//                                  trigger readings and recent events
+//   observe.mjs op add <template> <id> <enemy> <room…> [--budget N]
+//                  [--deadline T|+N] [--bodies N] [--live] [--write]
+//                                  publish a spec from a code template
+//                                  (exitCamp: <home> <landing room…>; sweep:
+//                                  <room…>), checked through the bot's own
+//                                  decoder (build/fable): prints the spec and
+//                                  what the bot decodes it to, and writes it
+//                                  only with --write. Dry (events only) until
+//                                  flagged live (--live, or `op live`); the
+//                                  deadline defaults to now + 5000
+//   observe.mjs op remove|live|dry <id> [--write]
+//                                  drop a spec, or let it cast (live, checked
+//                                  again first), or back to events only (dry)
+//   observe.mjs op off|on [--write]
+//                                  the kill switch over every operation, the
+//                                  code's among them
+//                                  Every op write is a dry run without --write
 //   observe.mjs console --seconds N     subscribe to the live console for N
 //                                       seconds, print what arrives, exit —
 //                                       the console keeps no history, so a
@@ -256,7 +277,9 @@ const usage =
   "reactor [--json] | cpu [--all] [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | " +
   "draw [add <room|creep> | remove <room|creep> | clear] [--json] | cadence [<2..4> | clear] | " +
-  "fight-only [on | off | clear] | op list [--json] | " +
+  "fight-only [on | off | clear] | " +
+  "op list|show <id> [--json] | op add <template> <id> <enemy> <room…> [--budget N] [--deadline T|+N] " +
+  "[--bodies N] [--live] [--write] | op remove|live|dry <id> [--write] | op off|on [--write] | " +
   "console --seconds N | eval '<expr>' [--seconds N] | room <name> [--json] | " +
   "wait --ticks N | health [--colony <home>] [--samples K] | " +
   "history <room> <tick> [--json] | probe [--json] | rivals [--json] | ledger [--json]";
@@ -268,11 +291,12 @@ const all = rawArgs.includes("--all");
 // Pull the valued flags out wherever they stand; what remains is positional.
 // A flag's value is whatever follows it, so a flag at the end, or one in
 // front of another flag, is caught below rather than read as a default.
-const VALUED = ["--seconds", "--colony", "--ticks", "--samples"];
+const VALUED = ["--seconds", "--colony", "--ticks", "--samples", "--budget", "--deadline", "--bodies"];
+const BOOLEAN = ["--json", "--all", "--live", "--write"];
 const flags = {};
 const args = [];
 for (let i = 0; i < rawArgs.length; i++) {
-  if (rawArgs[i] === "--json" || rawArgs[i] === "--all") continue;
+  if (BOOLEAN.includes(rawArgs[i])) continue;
   if (VALUED.includes(rawArgs[i])) {
     flags[rawArgs[i]] = rawArgs[++i];
   } else {
@@ -302,7 +326,7 @@ const ACCEPTS = {
   draw: ["--json"],
   cadence: [],
   "fight-only": [],
-  op: ["--json"],
+  op: ["--json", "--budget", "--deadline", "--bodies", "--live", "--write"],
   console: ["--seconds"],
   eval: ["--seconds"],
   room: ["--json"],
@@ -315,7 +339,7 @@ const ACCEPTS = {
 };
 
 if (!Object.hasOwn(ACCEPTS, command ?? "")) fail(usage);
-for (const flag of [...VALUED, "--json", "--all"]) {
+for (const flag of [...VALUED, ...BOOLEAN]) {
   if (rawArgs.includes(flag) && !ACCEPTS[command].includes(flag)) fail(usage);
 }
 for (const flag of VALUED) {
@@ -349,9 +373,28 @@ if (command === "fight-only" && action !== undefined) {
   if (!["on", "off", "clear"].includes(action)) fail("fight-only takes on, off or clear");
   if (actionName !== undefined) fail(usage);
 }
-// `op add|cancel|off|on` come with S7e; S7a only reads.
-if (command === "op" && (action !== "list" || actionName !== undefined)) {
-  fail("op takes list");
+// `op` (#663 S7e): every write is a dry run printing what it would write
+// unless `--write`; `add` builds a spec from a code template and checks it
+// through the bot's own decoder before anything is written.
+const OP_USAGE =
+  "op takes list | show <id> | add <template> <id> <enemy> <room…> [--budget N] [--deadline T|+N] " +
+  "[--bodies N] [--live] [--write] | remove <id> [--write] | live <id> [--write] | dry <id> [--write] | " +
+  "off [--write] | on [--write]";
+const OP_ARITY = { list: [0, 0], show: [1, 1], add: [4, Infinity], remove: [1, 1], live: [1, 1], dry: [1, 1], off: [0, 0], on: [0, 0] };
+const opArgs = rest.slice(1);
+if (command === "op") {
+  const arity = OP_ARITY[action ?? ""];
+  if (arity === undefined || opArgs.length < arity[0] || opArgs.length > arity[1]) fail(OP_USAGE);
+  const shaping = ["--budget", "--deadline", "--bodies", "--live"].filter((flag) => rawArgs.includes(flag));
+  if (action !== "add" && shaping.length > 0) fail(`${shaping[0]} is for op add\n${OP_USAGE}`);
+  if (["list", "show"].includes(action) && rawArgs.includes("--write")) fail(`op ${action} writes nothing\n${OP_USAGE}`);
+  if (!["list", "show"].includes(action) && json) fail(`--json is for op list and op show\n${OP_USAGE}`);
+  for (const flag of ["--budget", "--bodies"]) {
+    if (flags[flag] !== undefined && !/^-?\d+$/.test(flags[flag])) fail(`${flag} takes a whole number`);
+  }
+  if (flags["--deadline"] !== undefined && !/^\+?\d+$/.test(flags["--deadline"])) {
+    fail("--deadline takes a tick, or +N ticks from now");
+  }
 }
 if (command === "console" && !(Number.isFinite(seconds) && seconds > 0)) {
   fail("console needs --seconds N (a positive number): the subscription must be bounded");
@@ -580,6 +623,75 @@ const gameTime = async () => {
 
 // Resolve after `ms` without the shell's `sleep`.
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// ---- op's readers (#663 S7e) ----------------------------------------------
+
+// `Operation.defaultSpan`: the ticks a Memory spec runs when it names no
+// deadline; `op add` writes it out, so the deadline never moves.
+const OP_SPAN = 5000;
+
+// An operation's record (`recordWire`) as a line.
+const recordState = (r) =>
+  r === undefined
+    ? "no record"
+    : r.x !== undefined
+      ? `ended ${r.x}${typeof r.n === "number" && r.n > 0 ? ` (an armed one re-arms from t${r.n})` : ""}`
+      : `${r.p}${r.r ? ` in ${r.r}` : ""} since t${r.a}, run from t${r.s}, spent ${r.e}, lost ${r.l}`;
+
+// One event (`eventWire`) as a line.
+const eventLine = (e) => {
+  const what =
+    e.k === "moved" ? `${e.f} -> ${e.p} (exit ${e.x})` :
+    e.k === "began" ? `began in ${e.p}` :
+    e.k === "ended" ? `ended ${e.e}` :
+    e.k === "recurred" ? `recurs at t${e.n}` : e.k;
+  // A room's move carries what decided it (#663): the left room's rate,
+  // what the entered one paid, and the ticks the move takes to land.
+  const why =
+    e.k === "moved" && typeof e.h === "number" && typeof e.v === "number"
+      ? `  held ${e.h} → paid ${e.v}${typeof e.z === "number" ? ` over ${e.z}t` : ""}`
+      : "";
+  return `  t${e.t} ${e.i} ${what}${e.r ? ` [${e.r}]` : ""}${why}`;
+};
+
+// An exit camp's trigger as the bot read it (`Memory.fabot.ops.readings`,
+// `ObserveMemory.readingWire`): why it is not running, then each exit's
+// watch and guards — ExitsUsed, Pays (value against cost), ExchangeLoses
+// (against what may come out). Nothing for an operation with no reading.
+const triggerLines = (reading) => {
+  if (!reading || typeof reading !== "object" || !Array.isArray(reading.x)) return [];
+  const truth = (t) => (t === "y" ? "yes" : t === "n" ? "no" : "unknown");
+  return [
+    `  trigger: ${reading.why ? reading.why : "running"}`,
+    ...reading.x.map(
+      (e) =>
+        `    ${e.r}: watch ${e.age}t, ${e.w} ticks watched, ${e.a} landings by ${e.b} bodies` +
+        ` (λ ${(e.a / Math.max(1, e.w)).toFixed(3)}/t) | ExitsUsed ${truth(e.u)}` +
+        ` | Pays ${truth(e.p)}${typeof e.v === "number" ? ` (${e.v} against ${e.c})` : ""}` +
+        ` | ExchangeLoses ${truth(e.l)}${Array.isArray(e.by) ? ` (may come out: ${e.by.join("+")})` : ""}`,
+    ),
+  ];
+};
+
+// Who holds each room by our own look (`checkOpSpec`'s `holders`): its
+// controller's owner, else its reservation's player, else "" for nobody; a
+// room that will not read is left out, unknown, as the bot reads a room it
+// has not seen. Offline, `OBSERVE_HOLDERS` (JSON) and `OBSERVE_ME`.
+const holdersOf = async (rooms) => {
+  if (offline) {
+    return { me: process.env.OBSERVE_ME ?? "", holders: JSON.parse(process.env.OBSERVE_HOLDERS ?? "{}") };
+  }
+  const me = await api.me().catch((err) => fail(`who-am-I read failed: ${err.message ?? err}`));
+  const holders = {};
+  for (const room of new Set(rooms.filter((r) => typeof r === "string" && ROOM.test(r)))) {
+    const res = await api.req("GET", "/api/game/room-objects", { room, shard }).catch(() => undefined);
+    if (res?.ok !== 1) continue;
+    const controller = (res.objects ?? []).find((o) => o.type === "controller");
+    const user = controller?.user ?? controller?.reservation?.user;
+    holders[room] = user ? (res.users?.[user]?.username ?? user) : "";
+  }
+  return { me: me.username, holders };
+};
 
 // ---- console: a bounded subscription, the one non-Memory command --------
 
@@ -1161,63 +1273,171 @@ if (command === "console") {
     console.log(`cadence override is now ${show(wanted)}`);
   }
 } else if (command === "op") {
-  // ---- op list: the operations' leaf (#663), read only --------------------
+  // ---- op: the operations' leaf (#663) ------------------------------------
 
   // As the bot reads it (`ObserveMemory.loadOps`): no object is no operations.
   const stored = await memoryGet("fabot.ops");
   const ops = stored && typeof stored === "object" && !Array.isArray(stored) ? stored : undefined;
   const rows = (key) => (Array.isArray(ops?.[key]) ? ops[key].filter((r) => r && typeof r === "object") : []);
+  const code = ops?.code && typeof ops.code === "object" && !Array.isArray(ops.code) ? ops.code : {};
+  const codeRows = (key) => (Array.isArray(code[key]) ? code[key].filter((r) => r && typeof r === "object") : []);
+  const specs = rows("specs");
+  // A live spec's record rides in the code's latch (#663 S7e).
+  const recordOf = (id) =>
+    rows("live").find((r) => r.i === id) ?? codeRows("live").find((r) => r.i === id);
 
-  if (json) {
+  if (action === "list" && json) {
     console.log(JSON.stringify(ops ?? null, null, 2));
-  } else if (ops === undefined) {
+  } else if (action === "list" && ops === undefined) {
     console.log("no operations (Memory.fabot.ops is absent)");
-  } else {
+  } else if (action === "list") {
     const live = new Map(rows("live").map((r) => [r.i, r]));
+    const codeLive = new Map(codeRows("live").map((r) => [r.i, r]));
+    const published = new Set(specs.map((spec) => spec.id));
     // As the bot reads it: any truthy value is off.
     console.log(`kill switch: ${ops.off ? "OFF — nothing moves" : "on"}`);
-    // The code's operations' latch (#663 S7c, `saveOpsCode`).
-    const code = ops.code && typeof ops.code === "object" && !Array.isArray(ops.code) ? ops.code : {};
-    const codeRows = (key) =>
-      Array.isArray(code[key]) ? code[key].filter((r) => r && typeof r === "object") : [];
-    for (const r of codeRows("live")) {
+    // The code's operations' latch (#663 S7c, `saveOpsCode`); a live
+    // spec's record is listed with its spec.
+    for (const r of codeRows("live").filter((r) => !published.has(r.i))) {
       const state =
         r.x !== undefined
           ? `ENDED (${r.x}): it lays no Brief and casts nothing until its spec's deadline or budget ` +
             "moves past this end (an end by an exit stays)" :
         `${r.p}${r.r ? ` in ${r.r}` : ""} since t${r.a}, run from t${r.s}`;
       console.log(`${r.i}  code's — ${state}`);
+      for (const line of triggerLines(rows("readings").find((reading) => reading.i === r.i))) console.log(line);
+    }
+    // An armed code operation never begun has no record, only its trigger.
+    for (const reading of rows("readings").filter((r) => !codeLive.has(r.i) && !published.has(r.i))) {
+      console.log(`${reading.i}  code's — no record: never begun`);
+      for (const line of triggerLines(reading)) console.log(line);
     }
     for (const r of codeRows("refused")) console.log(`refused (code) ${r.id}: ${r.why}`);
-    const specs = rows("specs");
     if (specs.length === 0) console.log("no specs");
     for (const spec of specs) {
-      const r = live.get(spec.id);
-      const state =
-        r === undefined ? "no record" :
-        r.x !== undefined ? `ended ${r.x} (the id stays ended; a new op takes a new id)` :
-        `${r.p}${r.r ? ` in ${r.r}` : ""} since t${r.a}, run from t${r.s}, spent ${r.e}, lost ${r.l}`;
+      const r = spec.live === true ? codeLive.get(spec.id) : live.get(spec.id);
       console.log(
         `${spec.id}  ${spec.template} vs ${spec.enemy} in ${(spec.rooms ?? []).join(",")}  ` +
-          `deadline t${spec.deadline ?? "?"}  — ${state}`,
+          `deadline t${spec.deadline ?? "?"}  ${spec.live === true ? "LIVE" : "dry"}  — ${recordState(r)}`,
       );
+      for (const line of triggerLines(rows("readings").find((reading) => reading.i === spec.id))) console.log(line);
     }
     for (const r of rows("refused")) console.log(`refused ${r.id}: ${r.why}`);
     const events = rows("events");
     if (events.length > 0) console.log("\nlast events:");
-    for (const e of events) {
-      const what =
-        e.k === "moved" ? `${e.f} -> ${e.p} (exit ${e.x})` :
-        e.k === "began" ? `began in ${e.p}` :
-        e.k === "ended" ? `ended ${e.e}` :
-        e.k === "recurred" ? `recurs at t${e.n}` : e.k;
-      // A room's move carries what decided it (#663): the left room's rate,
-      // what the entered one paid, and the ticks the move takes to land.
-      const why =
-        e.k === "moved" && typeof e.h === "number" && typeof e.v === "number"
-          ? `  held ${e.h} → paid ${e.v}${typeof e.z === "number" ? ` over ${e.z}t` : ""}`
-          : "";
-      console.log(`  t${e.t} ${e.i} ${what}${e.r ? ` [${e.r}]` : ""}${why}`);
+    for (const e of events) console.log(eventLine(e));
+  } else if (action === "show") {
+    // ---- op show: one operation, wherever its parts are kept --------------
+    const id = opArgs[0];
+    const spec = specs.find((s) => s.id === id);
+    const record = recordOf(id);
+    const refusals = [...codeRows("refused"), ...rows("refused")].filter((r) => r.id === id);
+    const reading = rows("readings").find((r) => r.i === id);
+    const events = rows("events").filter((e) => e.i === id);
+    if (spec === undefined && record === undefined && reading === undefined && refusals.length === 0) {
+      fail(`no operation "${id}" in Memory.fabot.ops`);
+    }
+    if (json) {
+      console.log(JSON.stringify({ spec, record, refused: refusals, reading, events }, null, 2));
+    } else {
+      console.log(`${id}  ${spec ? `published, ${spec.live === true ? "LIVE" : "dry (events only)"}` : "code's"}`);
+      if (ops?.off) console.log("kill switch: OFF — nothing moves");
+      if (spec) console.log(`spec     ${JSON.stringify(spec)}`);
+      console.log(`record   ${recordState(record)}`);
+      for (const r of refusals) console.log(`refused  ${r.why}`);
+      for (const line of triggerLines(reading)) console.log(line);
+      if (events.length > 0) console.log("events:");
+      for (const e of events) console.log(eventLine(e));
+    }
+  } else {
+    // ---- op add | remove | live | dry | off | on: the operator's writes ----
+    if (offline && rawArgs.includes("--write")) fail("--write needs the server; offline is a dry run only");
+    const now = offline ? Number(process.env.OBSERVE_TIME ?? 0) : await gameTime();
+    const checkSpec = async (row, live, adding) => {
+      const module = new URL("../build/fable/ObserveMemory.js", import.meta.url);
+      const { checkOpSpec } = await import(module).catch(() =>
+        fail("op checks a spec through the bot's decoder in build/fable: run `npm run build:fable` first"),
+      );
+      const { me, holders } = await holdersOf(row.rooms ?? []);
+      return checkOpSpec(now, me, holders, ops ?? null, row, live, adding);
+    };
+    // The verdict as the bot would give it, and whether to go on.
+    const verdict = (check) => {
+      if (!check.ok) {
+        console.log(`refused by the bot's decoder: ${check.why}`);
+        return false;
+      }
+      const d = check.decoded;
+      console.log(`the bot admits it, to run ${check.runs === "live" ? "LIVE (it casts)" : "dry (events only)"}:`);
+      if (d) {
+        console.log(`  target    ${d.target} against ${d.enemy}`);
+        console.log(`  schedule  ${d.schedule}`);
+        console.log(`  phases    ${d.phases.join(" → ")}`);
+        console.log(`  limits    ${d.maxBodies} bodies, ${d.maxEnergy} energy, deadline t${d.deadline}`);
+      }
+      if (check.off) console.log("kill switch: OFF — nothing runs until `op on --write`");
+      return true;
+    };
+    let path;
+    let next;
+    if (action === "add") {
+      const [template, id, enemy, ...rooms] = opArgs;
+      const deadline = flags["--deadline"];
+      const row = {
+        id,
+        template,
+        enemy,
+        rooms,
+        deadline:
+          deadline === undefined ? now + OP_SPAN : deadline.startsWith("+") ? now + Number(deadline.slice(1)) : Number(deadline),
+        ...(flags["--budget"] === undefined ? {} : { maxEnergy: Number(flags["--budget"]) }),
+        ...(flags["--bodies"] === undefined ? {} : { maxBodies: Number(flags["--bodies"]) }),
+        ...(rawArgs.includes("--live") ? { live: true } : {}),
+      };
+      console.log(`spec: ${JSON.stringify(row)}`);
+      if (!verdict(await checkSpec(row, rawArgs.includes("--live"), true))) process.exit(1);
+      path = "fabot.ops.specs";
+      next = [...specs, row];
+    } else if (action === "remove" || action === "live" || action === "dry") {
+      const id = opArgs[0];
+      const row = specs.find((s) => s.id === id);
+      if (row === undefined) fail(`no published spec "${id}" (a code operation is code's: \`op off\` stops it)`);
+      if (action === "live") {
+        const flagged = { ...row, live: true };
+        console.log(`spec: ${JSON.stringify(flagged)}`);
+        if (!verdict(await checkSpec(flagged, true, false))) process.exit(1);
+      }
+      path = "fabot.ops.specs";
+      next =
+        action === "remove"
+          ? specs.filter((s) => s.id !== id)
+          : specs.map((s) => {
+              if (s.id !== id) return s;
+              const { live: _, ...dry } = s;
+              return action === "live" ? { ...dry, live: true } : dry;
+            });
+    } else {
+      path = "fabot.ops.off";
+      next = action === "off";
+    }
+    if (!rawArgs.includes("--write")) {
+      console.log(`would write Memory.${path} = ${JSON.stringify(next)}`);
+      console.log("dry run: nothing written; add --write to write it");
+    } else {
+      const res = await api.userMemorySet(path, next, shard).catch((err) => fail(`memory write failed: ${err.message ?? err}`));
+      if (res.ok !== 1) fail(`memory write failed: ${JSON.stringify(res)}`);
+      // Applied on a tick boundary, as `verbose` waits for.
+      const wanted = JSON.stringify(next);
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        const seen = await memoryGet(path);
+        // The bot may stamp a defaulted deadline; the ids and flags are what was asked.
+        const shape = (v) => (Array.isArray(v) ? JSON.stringify(v.map((s) => [s?.id, s?.live === true])) : JSON.stringify(v));
+        if (shape(seen) === shape(next)) break;
+        if (Date.now() >= deadline) fail(`write accepted but not visible after 20s; wanted ${wanted}`);
+        await pause(1000);
+      }
+      console.log(`Memory.${path} is now ${wanted}`);
     }
   }
 } else if (command === "fight-only") {

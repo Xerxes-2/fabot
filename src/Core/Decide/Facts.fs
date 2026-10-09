@@ -6314,6 +6314,10 @@ type ExitCampPrice =
         /// cast earns elsewhere over those ticks; with its group standing,
         /// a tick's kills less a tick's earnings elsewhere (the cast spent).
         Net: float
+        /// `Net`'s two sides: what its kills earn, and what it costs (the
+        /// cast and what the cast earns elsewhere), over the same span.
+        Value: float
+        Cost: float
         /// Whether no body it may cast — or, with a group, the group — wins
         /// the exchange against what may come out (`landedIn`).
         Loses: bool
@@ -6403,6 +6407,8 @@ let exitCampPrice
             Tile = best |> Option.map fst
             Rate = rate
             Net = rate - elsewhere span / float (max 1 span)
+            Value = rate
+            Cost = elsewhere span / float (max 1 span)
             Loses = fight && not (won (exchangeIn landed room fighters))
         }
     | [] ->
@@ -6437,13 +6443,17 @@ let exitCampPrice
                     |> List.map (tileRate view (System.Int32.MaxValue / 4) traffic ticks)
                     |> List.fold max 0.0
 
+                let spent = castSpent view template blocks 1 span
+                let forgone = elsewhere ticks
+
                 {
                     Template = template
                     Blocks = blocks
                     Tile = tile |> Option.map fst
                     Rate = rate
-                    Net =
-                        rate * float ticks - castSpent view template blocks 1 span - elsewhere ticks
+                    Net = rate * float ticks - spent - forgone
+                    Value = rate * float ticks
+                    Cost = spent + forgone
                     Loses = not wins
                 },
                 rate >= most
@@ -6479,6 +6489,8 @@ let exitCampPrice
                     Tile = None
                     Rate = 0.0
                     Net = 0.0
+                    Value = 0.0
+                    Cost = 0.0
                     Loses = fight
                 }
 

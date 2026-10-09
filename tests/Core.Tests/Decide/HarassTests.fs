@@ -4611,4 +4611,140 @@ let exitCampTests =
 
                 Expect.equal (records |> List.map _.Ended) [ Some OpEnd.Done ] "its record ended"
             }
+
+            // The user, 2026-10-10: the camp had never camped, and nothing
+            // said why. Its trigger's readings say it.
+            test
+                "its trigger's reading says why it is not running: warming, no arrivals, the exchange lost" {
+                let readingOf (colony: ColonyView) =
+                    match Operations.layRead [ campWire ] Map.empty [] [ colony ] with
+                    | _, _, _, [ reading ] -> reading
+                    | _ -> failtest "one reading"
+
+                let warming = readingOf (camped 3200 10 100 true true [])
+
+                Expect.equal
+                    warming.Idle
+                    $"{harassRoom}: watch warming 10/{ExitTraffic.window} ticks"
+                    "a heap ten ticks old: its watch is short of a window"
+
+                Expect.equal
+                    (warming.Exits |> List.map (fun e -> e.Used, e.Watched, e.Arrivals, e.Bodies))
+                    [ Truth.Unknown, 100, 10, 10 ]
+                    "what it watched"
+
+                Expect.equal
+                    (readingOf (camped 3200 0 100 false true [])).Idle
+                    $"{harassRoom}: no arrivals in 100 ticks watched"
+                    "nobody crossed"
+
+                // The body that beats the pair inside earns nothing there:
+                // what holds it is the price, read with its two sides.
+                let unpaid = readingOf (camped 3200 10 100 false true [ fuse; kinematic ])
+
+                Expect.equal unpaid.Idle $"{harassRoom}: pays 0 against 700" "it does not pay"
+
+                Expect.equal
+                    (unpaid.Exits
+                     |> List.map (fun e -> e.Used, e.Pays, e.Loses, e.Landers |> List.map _.Id))
+                    [ Truth.Yes, Truth.No, Truth.No, [ fuse.Id ] ]
+                    "prey uses it; the exchange won; Fuse what may come out"
+
+                let losing = readingOf (camped 550 10 100 false true [ fuse; kinematic ])
+
+                Expect.stringContains
+                    losing.Idle
+                    $"{harassRoom}: loses to 18M17A"
+                    "a bank that buys nothing beating Fuse: the exchange lost, and to what"
+
+                let running = readingOf (camped 3200 10 100 false true [])
+                Expect.equal running.Idle "" "begun: nothing holds it"
+
+                // The shell drops a landing room whose holder it cannot name.
+                match
+                    Operations.layRead
+                        [ { campWire with Rooms = [ rivalHome ] } ]
+                        Map.empty
+                        []
+                        [ camped 3200 10 100 false true [] ]
+                with
+                | _, _, _, [ reading ] ->
+                    Expect.stringStarts
+                        reading.Idle
+                        "no exit to camp"
+                        "every landing room dropped: nothing to read"
+                | _ -> failtest "one reading"
+
+                Expect.isTrue
+                    (running.Exits
+                     |> List.forall (fun e -> e.Pays = Truth.Yes && Option.isSome e.Priced))
+                    "it pays, priced"
+            }
+
+            // A spec published through Memory casts only once a human flags
+            // it live, and then as the code's spec would.
+            test
+                "a published camp flagged live is laid as code's; unflagged or switched off it casts nothing" {
+                let colony = camped 3200 10 100 false true []
+
+                let standing: OpStanding =
+                    {
+                        Now = colony.Time
+                        Ours = fun _ -> false
+                        Holder =
+                            fun room ->
+                                if room = rivalHome then
+                                    RoomHolder.Player enemy
+                                else
+                                    RoomHolder.Nobody
+                    }
+
+                let published (off: bool) (live: Set<string>) =
+                    Operation.publish standing off [] [] [] live [ campWire ]
+
+                // The camp's work, records and events alone: the fixture's
+                // view casts the room for the sweep besides.
+                let laidWith (wires: OpSpecWire list) =
+                    let camp (id: string) = id.StartsWith "camp"
+
+                    match Operations.lay wires Map.empty [] [ colony ] with
+                    | [ laid ], records, events ->
+                        laid.World.Operations |> Option.map (List.filter (fun op -> camp op.Id)),
+                        records |> List.filter (fun record -> camp record.Id),
+                        events
+                        |> List.filter (function
+                            | OpEvent.Began(id, _, _) -> camp id
+                            | _ -> true)
+                    | _ -> failtest "one colony laid"
+
+                let code = laidWith [ campWire ]
+
+                let codeWork, _, _ = code
+
+                Expect.isNonEmpty
+                    (codeWork |> Option.defaultValue [])
+                    "the premise: code's camp is laid"
+
+                Expect.equal
+                    (laidWith (published false (Set.singleton "camp")).Live)
+                    code
+                    "flagged live: its work, its record and its events the code's"
+
+                let dry = published false Set.empty
+
+                Expect.equal
+                    (dry.Dry.Admitted |> List.map _.Id)
+                    [ "camp" ]
+                    "unflagged: admitted to run dry"
+
+                Expect.equal
+                    (laidWith dry.Live)
+                    (Some [], [], [])
+                    "and nothing laid: no work, no record, no event"
+
+                Expect.equal
+                    (laidWith (published true (Set.singleton "camp")).Live)
+                    (Some [], [], [])
+                    "the kill switch: nothing laid though flagged live"
+            }
         ]

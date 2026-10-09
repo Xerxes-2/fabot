@@ -1857,7 +1857,9 @@ let private decideOurs (a: Arena) : Intent list * Carried =
         Ledger = ledger
         // Each running exit camp's spend read off the ledger as folded, as
         // `Main` reads it.
-        Operations = Ledger.account (Operations.campRooms a.Declared) ledger (fst decided.Operated)
+        Operations =
+            let records, _, _ = decided.Operated
+            Ledger.account (Operations.campRooms a.Declared) ledger records
         Traffic = world.Traffic
     }
 

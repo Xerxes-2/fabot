@@ -1632,6 +1632,283 @@ let operationDecodeTests =
             }
         ]
 
+/// An exit camp on W8N8 (Trepidimous's) landing in two rooms beside it, as
+/// the operator publishes one, its deadline pinned.
+let private beside = RoomName.adjacent "W8N8"
+
+let private campWire: OpSpecWire =
+    {
+        Id = "c1"
+        Template = "exitCamp"
+        Enemy = "Trepidimous"
+        Rooms = "W8N8" :: List.take 2 beside
+        Deadline = Some 6_000
+        MaxEnergy = None
+        MaxBodies = None
+    }
+
+/// The specs published over `standing` with no code spec and no record.
+let private publishing (live: Set<string>) (wires: OpSpecWire list) =
+    Operation.publish standing false [] [] [] live wires
+
+/// Each refusal of a lone spec published live.
+let private refusedLive (wire: OpSpecWire) : string list =
+    (publishing (Set.singleton wire.Id) [ wire ]).Refused |> List.map _.Why
+
+[<Tests>]
+let operationPublishTests =
+    testList
+        "a published operation: dry until flagged live, never sharing a room (#663 S7e)"
+        [
+            test
+                "unflagged it runs dry; flagged live it comes back a wire with the limits its decode priced" {
+                let dry = publishing Set.empty [ campWire ]
+
+                Expect.equal (dry.Dry.Admitted |> List.map _.Id) [ "c1" ] "admitted to run dry"
+                Expect.equal dry.Live [] "nothing to lay"
+
+                let live = publishing (Set.singleton "c1") [ campWire ]
+
+                Expect.equal live.Dry.Admitted [] "not run dry as well"
+
+                Expect.equal
+                    live.Live
+                    [
+                        { campWire with
+                            MaxBodies = Some 2
+                            MaxEnergy = Some(Operation.ceiling 2 Operation.Templates.campSpan)
+                        }
+                    ]
+                    "one body an exit, a run's budget the template's ceiling, the deadline as given"
+
+                Expect.equal live.Refused [] "nothing refused"
+            }
+
+            test "the decoder's refusals, by the decoder's reason" {
+                let cases =
+                    [
+                        { campWire with Template = "assault" }, "no template: assault"
+                        { campWire with Enemy = "Odiodin" }, "an ally: Odiodin"
+                        { campWire with Enemy = "Kalgen" }, "a neutral: Kalgen"
+                        { campWire with
+                            Rooms = [ "W8N8"; "W6N6" ]
+                        },
+                        "an ally's: W6N6"
+                        { campWire with
+                            Rooms = [ "W8N8"; "W7N7" ]
+                        },
+                        "a neutral's: W7N7"
+                        { campWire with
+                            Rooms = [ "W5N5"; "W5N6" ]
+                        },
+                        "ours: W5N5"
+                        { campWire with
+                            Rooms = [ "W8N8"; "W1N1" ]
+                        },
+                        "not beside W8N8: W1N1"
+                        { campWire with Rooms = [ "W8N8" ] }, "no room beside W8N8"
+                        { campWire with MaxEnergy = Some 0 }, "no budget"
+                        { campWire with MaxEnergy = Some -5 }, "no budget"
+                        { campWire with MaxBodies = Some 0 }, "no bodies"
+                        { campWire with Deadline = Some 900 }, "deadline past"
+                        { campWire with
+                            Template = "sweep"
+                            Rooms = [ "W9N9" ]
+                        },
+                        "no live sweep"
+                    ]
+
+                for wire, why in cases do
+                    Expect.equal (refusedLive wire) [ why ] why
+            }
+
+            test
+                "a spec sharing a code spec's id or room, or an earlier one's room, holds its record" {
+                let code =
+                    [
+                        { campWire with
+                            Id = "camp"
+                            Rooms = [ "W8N8"; List.head beside ]
+                        }
+                    ]
+
+                let record (id: string) =
+                    { recordAt OpPhase.Execute 900 with
+                        Id = id
+                    }
+
+                let published =
+                    Operation.publish
+                        standing
+                        false
+                        code
+                        []
+                        [ record "camp"; record "c2" ]
+                        (Set.ofList [ "camp"; "c2"; "c3"; "c4" ])
+                        [
+                            { campWire with Id = "camp" }
+                            { campWire with
+                                Id = "c2"
+                                Rooms = [ "W9N9"; "W9N8" ]
+                            }
+                            { campWire with
+                                Id = "c3"
+                                Template = "sweep"
+                                Rooms = [ "W8N8" ]
+                            }
+                            { campWire with
+                                Id = "c4"
+                                Rooms = [ "W9N9"; "W10N9" ]
+                            }
+                        ]
+
+                Expect.equal
+                    published.Refused
+                    [
+                        {
+                            Id = "camp"
+                            Why = "a code op's id: camp"
+                        }
+                        {
+                            Id = "c3"
+                            Why = "code op camp holds W8N8"
+                        }
+                        { Id = "c4"; Why = "op c2 holds W9N9" }
+                    ]
+                    "one fight a room: code's first, then Memory's in order"
+
+                Expect.equal
+                    (published.Live |> List.map _.Id)
+                    [ "c2" ]
+                    "the one that shares nothing"
+
+                Expect.isTrue
+                    (Set.isSubset (Set.ofList [ "camp"; "c3"; "c4" ]) published.LiveKept)
+                    "a clash holds: each record kept, unmoved"
+            }
+
+            test "the code's camp and a published one on the same rival home never both run" {
+                let wire =
+                    { campWire with
+                        Id = "mine"
+                        Rooms = [ "W18S26"; "W18S25" ]
+                    }
+
+                let published =
+                    Operation.publish
+                        standing
+                        false
+                        Colony.operations
+                        []
+                        []
+                        (Set.singleton "mine")
+                        [ wire ]
+
+                Expect.equal published.Live [] "not laid"
+
+                Expect.equal
+                    (published.Refused |> List.map _.Why)
+                    [ "code op camp holds W18S26" ]
+                    "its home the code camp's"
+            }
+
+            // Ship-gate review: the live flag is read by id, so a row with
+            // none ran live on a later row of its id flagged live.
+            test "an id on two rows refuses both: neither runs, dry or live, on the other's flag" {
+                let unflagged = campWire
+
+                let flagged =
+                    { campWire with
+                        Rooms = [ "W9N9"; "W9N8" ]
+                    }
+
+                let published = publishing (Set.singleton "c1") [ unflagged; flagged ]
+
+                Expect.equal
+                    (published.Live, published.Dry.Admitted)
+                    ([], [])
+                    "nothing laid, nothing run dry"
+
+                Expect.equal
+                    published.Refused
+                    [ { Id = "c1"; Why = "duplicate id" }; { Id = "c1"; Why = "duplicate id" } ]
+                    "every row refused"
+
+                Expect.equal published.Watched [] "nor watched"
+                Expect.isTrue (published.LiveKept.Contains "c1") "its record held"
+            }
+
+            test "the world watches the live specs laid or held, never one refused outright" {
+                let published =
+                    publishing
+                        (Set.ofList [ "c1"; "c2"; "c3"; "c4" ])
+                        [
+                            campWire
+                            { campWire with
+                                Id = "c2"
+                                Rooms = [ "W8N8"; List.item 2 beside ]
+                            }
+                            { campWire with
+                                Id = "c3"
+                                Template = "sweep"
+                                Rooms = [ "W9N9" ]
+                            }
+                            { campWire with
+                                Id = "c4"
+                                Rooms = [ "W9N9"; "W6N6" ]
+                            }
+                        ]
+
+                Expect.equal
+                    (published.Watched |> List.map _.Id)
+                    [ "c1"; "c2" ]
+                    "c1 laid, c2 held by its clash on W8N8; the live sweep and the ally's room unwatched"
+            }
+
+            test "the kill switch admits nothing and keeps every live record" {
+                let published =
+                    Operation.publish standing true [] [] [] (Set.singleton "c1") [ campWire ]
+
+                Expect.equal
+                    (published.Dry.Admitted, published.Live, published.Refused)
+                    ([], [], [])
+                    "nothing"
+
+                Expect.equal published.LiveKept (Set.singleton "c1") "its record kept"
+            }
+
+            test
+                "the code's latch keeps code's records and live ones standing; a live one gone is dropped" {
+                let record (id: string) =
+                    { recordAt OpPhase.Execute 900 with
+                        Id = id
+                    }
+
+                let published =
+                    Operation.publish
+                        standing
+                        false
+                        [
+                            { campWire with
+                                Id = "camp"
+                                Rooms = [ "W1N1"; "W1N2" ]
+                            }
+                        ]
+                        []
+                        []
+                        (Set.singleton "c1")
+                        [ campWire ]
+
+                Expect.equal
+                    (Operations.retire
+                        [ { campWire with Id = "camp" } ]
+                        published
+                        [ record "camp"; record "c1"; record "gone" ])
+                    ([ record "camp"; record "c1" ], [ OpEvent.Dropped "gone" ])
+                    "code's kept, the live one kept, the one whose spec left dropped"
+            }
+        ]
+
 [<Tests>]
 let sweepSpecTests =
     testList

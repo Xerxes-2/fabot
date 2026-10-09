@@ -3297,6 +3297,10 @@ type OpsLeaf =
         Specs: OpSpecWire list
         Garbled: OpRefusal list
         Live: OpRecord list
+        /// The ids of the spec rows flagged live (`live: true`, #663 S7e):
+        /// the operator's `op live`, which lets a spec cast. Fails closed:
+        /// only `true` is live, so a row off its shape runs dry.
+        LiveIds: Set<string>
         Off: bool
     }
 
@@ -3411,6 +3415,49 @@ let private recordOf (raw: obj) : OpRecord option =
                 Bids = []
             }))
 
+/// An ops leaf off the wire (`loadOps`), `raw` an object: the spec rows,
+/// the records and the switches.
+let private opsLeafOf (raw: obj) : OpsLeaf =
+    let rows =
+        if JS.Constructors.Array.isArray raw?specs then
+            unbox<obj[]> raw?specs |> List.ofArray
+        else
+            []
+
+    let decoded =
+        rows
+        |> List.map (fun row ->
+            try
+                // Live only for `true` itself.
+                Ok(specOf row, emitJsExpr row?live "$0 === true")
+            with _ ->
+                let id =
+                    if not (isNull row) && jsTypeof row?id = "string" then
+                        unbox<string> row?id
+                    else
+                        "?"
+
+                Error { Id = id; Why = "garbled" })
+
+    let specs =
+        decoded
+        |> List.choose (function
+            | Ok spec -> Some spec
+            | Error _ -> None)
+
+    {
+        Specs = specs |> List.map fst
+        Garbled =
+            decoded
+            |> List.choose (function
+                | Error refusal -> Some refusal
+                | Ok _ -> None)
+        Live = rowsOf recordOf raw?live
+        LiveIds = specs |> List.filter snd |> List.map (fun (spec, _) -> spec.Id) |> Set.ofList
+        // Fails closed: any value JavaScript reads as true.
+        Off = emitJsExpr raw?off "!!$0"
+    }
+
 /// The ops leaf (`Memory.fabot.ops`), None where it is absent or no object:
 /// no operations, never a fault. A spec row that will not decode is refused
 /// as garbled, by its id where it has one; a record that will not decode is
@@ -3418,46 +3465,7 @@ let private recordOf (raw: obj) : OpRecord option =
 let loadOps () : OpsLeaf option =
     try
         let raw = ops ()
-
-        if isNull raw then
-            None
-        else
-            let rows =
-                if JS.Constructors.Array.isArray raw?specs then
-                    unbox<obj[]> raw?specs |> List.ofArray
-                else
-                    []
-
-            let decoded =
-                rows
-                |> List.map (fun row ->
-                    try
-                        Ok(specOf row)
-                    with _ ->
-                        let id =
-                            if not (isNull row) && jsTypeof row?id = "string" then
-                                unbox<string> row?id
-                            else
-                                "?"
-
-                        Error { Id = id; Why = "garbled" })
-
-            Some
-                {
-                    Specs =
-                        decoded
-                        |> List.choose (function
-                            | Ok spec -> Some spec
-                            | Error _ -> None)
-                    Garbled =
-                        decoded
-                        |> List.choose (function
-                            | Error refusal -> Some refusal
-                            | Ok _ -> None)
-                    Live = rowsOf recordOf raw?live
-                    // Fails closed: any value JavaScript reads as true.
-                    Off = emitJsExpr raw?off "!!$0"
-                }
+        if isNull raw then None else Some(opsLeafOf raw)
     with _ ->
         None
 
@@ -3640,3 +3648,217 @@ let saveOpsCode
                 ]
 
         appendEvents raw tick events)
+
+// ---- the armed operations' triggers (#663 S7e) ------------------------------
+//
+// `Memory.fabot.ops.readings`, the bot's alone, rewritten each full tick:
+// each exit camp's trigger as read, so `observe op` says why it is not
+// running. `[{ i, why, x: [{ r, age, w, a, b, u, p, l, v?, c?, by? }] }]`:
+// per exit its landing room, the watch's age, full ticks watched, landings
+// and distinct bodies, each guard `y`/`n`/`?` (ExitsUsed, Pays,
+// ExchangeLoses), what it earns and costs where priced, and what may come
+// out by parts. About 150 bytes an exit.
+
+let private truthLetter (truth: Truth) : string =
+    match truth with
+    | Truth.Yes -> "y"
+    | Truth.No -> "n"
+    | Truth.Unknown -> "?"
+
+let private readingWire (reading: OpReading) : obj =
+    let exit (e: ExitReading) =
+        let o =
+            createObj
+                [
+                    "r" ==> e.Camp
+                    "age" ==> e.Age
+                    "w" ==> e.Watched
+                    "a" ==> e.Arrivals
+                    "b" ==> e.Bodies
+                    "u" ==> truthLetter e.Used
+                    "p" ==> truthLetter e.Pays
+                    "l" ==> truthLetter e.Loses
+                ]
+
+        e.Priced
+        |> Option.iter (fun (value, cost) ->
+            o?v <- int (System.Math.Round value)
+            o?c <- int (System.Math.Round cost))
+
+        if not (List.isEmpty e.Landers) then
+            o?by <-
+                e.Landers
+                |> List.map (fun h -> Fabot.Core.Decide.Operations.partsText h.Body)
+                |> Array.ofList
+
+        o
+
+    createObj
+        [
+            "i" ==> reading.Id
+            "why" ==> reading.Idle
+            "x" ==> (reading.Exits |> List.map exit |> Array.ofList)
+        ]
+
+/// The armed operations' triggers written onto the ops leaf
+/// (`Memory.fabot.ops.readings`), replacing the last: none, the key
+/// removed. Nothing where no ops leaf stands (`saveOpsCode` makes one for
+/// the code's operations), nor onto one off its shape.
+let saveOpsReadings (readings: OpReading list) =
+    let raw = ops ()
+
+    if not (isNull raw) then
+        if List.isEmpty readings then
+            emitJsStatement raw "delete $0.readings"
+        else
+            raw?readings <- readings |> List.map readingWire |> Array.ofList
+
+// ---- the operator's check (#663 S7e) ----------------------------------------
+
+/// A decoded spec as the operator reads it: its target, schedule, phases
+/// and the limits its decode priced.
+let private specSummary (spec: OperationSpec) : obj =
+    let target =
+        match spec.Target with
+        | OpTarget.Exits exits ->
+            "exits "
+            + (exits |> List.map (fun e -> e.Home + ">" + e.Camp) |> String.concat ", ")
+        | OpTarget.Among(RoomClass.Listed rooms) -> "the best of " + String.concat ", " rooms
+        | OpTarget.Among _ -> "a class of rooms"
+        | OpTarget.Room room -> room
+        | OpTarget.Structure(room, id) -> room + " " + id
+        | OpTarget.Quarry id -> id
+
+    let schedule =
+        match spec.Schedule with
+        | OpSchedule.Once -> "once"
+        | OpSchedule.Every(period, window) -> $"every {period} ticks, {window} at most"
+        | OpSchedule.When _ -> "on its guard"
+        | OpSchedule.Armed(_, period, window) ->
+            $"on its guard, {window} ticks a run at most, re-armed {period} after each began"
+
+    createObj
+        [
+            "id" ==> spec.Id
+            "enemy" ==> spec.Enemy
+            "target" ==> target
+            "schedule" ==> schedule
+            "phases"
+            ==> (spec.Phases |> List.map (fun p -> nameIn phaseNames p.Phase) |> Array.ofList)
+            "maxBodies" ==> spec.Limits.MaxBodies
+            "maxEnergy" ==> spec.Limits.MaxEnergy
+            "deadline" ==> spec.Limits.Deadline
+        ]
+
+/// What the bot would make of a spec row the operator is about to publish
+/// (`observe op add`, `op live`), off the shell's own decoder and admission
+/// (`specOf`, `Operation.publish`): `{ ok, why, runs, off, decoded }`.
+/// `stored` is the ops leaf as Memory holds it now (null for none); the row
+/// takes the place of its id's row there, or is appended — where `adding`,
+/// an id a row already holds is refused as a second row of it would be.
+/// `live` is whether the row is flagged live. `holders` maps a room to who
+/// holds it by the operator's own look — a username, "" for nobody — a room
+/// missing from it unknown, as the bot reads one it has not seen; a room of
+/// `me`, our username, is ours. The bot decides again on its own looks.
+let checkOpSpec
+    (now: int)
+    (me: string)
+    (holders: obj)
+    (stored: obj)
+    (row: obj)
+    (live: bool)
+    (adding: bool)
+    : obj =
+    let answer (ok: bool) (why: string) (runs: string) (decoded: obj) (off: bool) =
+        createObj
+            [
+                "ok" ==> ok
+                "why" ==> why
+                "runs" ==> runs
+                "decoded" ==> decoded
+                "off" ==> off
+            ]
+
+    let leaf =
+        if
+            isNull stored
+            || jsTypeof stored <> "object"
+            || JS.Constructors.Array.isArray stored
+        then
+            opsLeafOf (createEmpty<obj>)
+        else
+            opsLeafOf stored
+
+    let codeRecords =
+        if
+            isNull stored
+            || jsTypeof stored <> "object"
+            || isNull stored?code
+            || jsTypeof stored?code <> "object"
+        then
+            []
+        else
+            rowsOf recordOf stored?code?live
+
+    match
+        (try
+            Some(specOf row)
+         with _ ->
+             None)
+    with
+    | None -> answer false "garbled" null null leaf.Off
+    | Some wire when adding && leaf.Specs |> List.exists (fun spec -> spec.Id = wire.Id) ->
+        answer false "duplicate id" null null leaf.Off
+    | Some wire ->
+        let holderOf (room: string) =
+            let held = if isNull holders then null else holders?(room)
+
+            if jsTypeof held <> "string" then RoomHolder.Unknown
+            elif unbox<string> held = "" then RoomHolder.Nobody
+            else RoomHolder.Player(unbox<string> held)
+
+        let ours = Fabot.Core.Decide.Operations.declaredOurs Colony.declared
+
+        let standing: OpStanding =
+            {
+                Now = now
+                Ours = fun room -> ours.Contains room || holderOf room = RoomHolder.Player me
+                Holder = holderOf
+            }
+
+        let wires =
+            if leaf.Specs |> List.exists (fun spec -> spec.Id = wire.Id) then
+                leaf.Specs |> List.map (fun spec -> if spec.Id = wire.Id then wire else spec)
+            else
+                leaf.Specs @ [ wire ]
+
+        let liveIds =
+            if live then
+                leaf.LiveIds.Add wire.Id
+            else
+                leaf.LiveIds.Remove wire.Id
+
+        // As the bot admits it with the switch on: the switch is reported
+        // beside, not read as a refusal.
+        let publication =
+            Operation.publish standing false Colony.operations leaf.Live codeRecords liveIds wires
+
+        let records = if live then codeRecords else leaf.Live
+
+        let begun =
+            records
+            |> List.tryFind (fun record -> record.Id = wire.Id)
+            |> Option.map _.Started
+
+        let decoded () =
+            match Operation.decode standing begun wire with
+            | Ok spec -> specSummary spec
+            | Error _ -> null
+
+        match publication.Refused |> List.tryFind (fun refusal -> refusal.Id = wire.Id) with
+        | Some refusal -> answer false refusal.Why null null leaf.Off
+        | None when publication.Live |> List.exists (fun spec -> spec.Id = wire.Id) ->
+            answer true "" "live" (decoded ()) leaf.Off
+        | None when publication.Dry.Admitted |> List.exists (fun spec -> spec.Id = wire.Id) ->
+            answer true "" "dry" (decoded ()) leaf.Off
+        | None -> answer false "not admitted" null null leaf.Off

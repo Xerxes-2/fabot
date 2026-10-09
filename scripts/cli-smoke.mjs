@@ -66,6 +66,15 @@ refuses(["op"], "op takes list");
 refuses(["op", "add", "sweep"], "op takes list");
 refuses(["op", "list", "x"], "op takes list");
 refuses(["op", "shadow"], "op takes list");
+refuses(["op", "show"], "op takes list");
+refuses(["op", "remove"], "op takes list");
+refuses(["op", "off", "now"], "op takes list");
+refuses(["op", "remove", "c1", "--live"], "--live is for op add");
+refuses(["op", "list", "--write"], "op list writes nothing");
+refuses(["op", "off", "--json"], "--json is for op list and op show");
+refuses(["op", "add", "exitCamp", "c1", "Trepidimous", "W1N1", "--budget", "lots"], "--budget takes a whole number");
+refuses(["op", "add", "exitCamp", "c1", "Trepidimous", "W1N1", "--deadline", "soon"], "--deadline takes a tick");
+refuses(["cpu", "--write"], "usage:");
 refuses(["fight-lane"], "usage:");
 refuses(["console"], "console needs --seconds");
 refuses(["raids", "--colony"], "--colony needs a home room name");
@@ -109,6 +118,13 @@ for (const args of [
   ["fight-only", "clear"],
   ["op", "list"],
   ["op", "list", "--json"],
+  ["op", "show", "camp", "--json"],
+  ["op", "add", "exitCamp", "c1", "Trepidimous", "W1N1", "W1N2", "--budget", "3000", "--deadline", "+2000", "--live"],
+  ["op", "remove", "c1", "--write"],
+  ["op", "live", "c1"],
+  ["op", "dry", "c1", "--write"],
+  ["op", "off", "--write"],
+  ["op", "on"],
   ["console", "--seconds", "3"],
   ["eval", "Game.time"],
   ["eval", "Game.time", "--seconds", "4"],
@@ -318,6 +334,101 @@ smoke("observe op list prints a room move's held rate, what the room paid and it
   assert.ok(!crashed(res.stderr), res.stderr);
   assert.match(res.stdout, /^ {2}t120 sweep execute -> execute \(exit 1\) \[W19S26\] {2}held 7\.5 → paid 20\.1 over 30t$/m);
   assert.match(res.stdout, /^ {2}t90 sweep execute -> hold \(exit 3\) \[W18S27\]$/m);
+});
+
+// ---- observe op's writes, offline (#663 S7e) ------------------------------
+
+// The leaf as the bot writes it, with a published spec and the code camp's
+// trigger readings; holders off `OBSERVE_HOLDERS`, the clock off
+// `OBSERVE_TIME`. Every write is a dry run without `--write`, and offline
+// refuses `--write`. `op add` checks through `build/fable` (the wire gate
+// builds it before this runs).
+const opsFile = join(dir, "ops.json");
+writeFileSync(
+  opsFile,
+  JSON.stringify({
+    fabot: {
+      ops: {
+        specs: [{ id: "old", template: "exitCamp", enemy: "Trepidimous", rooms: ["W25S25", "W25S26"], deadline: 1004000 }],
+        live: [{ i: "old", s: 999000, p: "muster", a: 999000, e: 0, l: 0, n: 1000500 }],
+        readings: [
+          {
+            i: "camp",
+            why: "W19S26: watch warming 340/1500 ticks",
+            x: [{ r: "W19S26", age: 340, w: 200, a: 3, b: 2, u: "?", p: "?", l: "?", by: ["18M17A"] }],
+          },
+        ],
+        events: [{ t: 999000, i: "old", k: "began", p: "muster" }],
+      },
+    },
+  }),
+);
+const runOp = (args) => {
+  const res = spawnSync(process.execPath, [script("observe.mjs"), "op", ...args], {
+    env: {
+      ...process.env,
+      SCREEPS_TOKEN: "",
+      OBSERVE_MEMORY: opsFile,
+      OBSERVE_TIME: "1000000",
+      OBSERVE_ME: "Xerxes-2",
+      OBSERVE_HOLDERS: JSON.stringify({
+        W21S23: "Trepidimous",
+        W21S24: "",
+        W25S25: "Trepidimous",
+        W25S26: "",
+        W25S24: "",
+        W1N1: "Odiodin",
+      }),
+      NODE_NO_WARNINGS: "1",
+    },
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  assert.ok(!crashed(res.stderr), res.stderr);
+  return { code: res.status, out: res.stdout, err: res.stderr };
+};
+
+smoke("observe op add prints the spec and the bot's decode, and writes nothing", () => {
+  const { code, out, err } = runOp(["add", "exitCamp", "c2", "Trepidimous", "W21S23", "W21S24", "--budget", "3000"]);
+  assert.equal(code, 0, err);
+  assert.ok(out.includes('spec: {"id":"c2","template":"exitCamp","enemy":"Trepidimous","rooms":["W21S23","W21S24"],"deadline":1005000,"maxEnergy":3000}'), out);
+  assert.ok(out.includes("the bot admits it, to run dry (events only):"), out);
+  assert.ok(out.includes("  target    exits W21S23>W21S24 against Trepidimous"), out);
+  assert.ok(out.includes("  limits    1 bodies, 3000 energy, deadline t1005000"), out);
+  assert.ok(out.includes("dry run: nothing written; add --write to write it"), out);
+});
+
+smoke("observe op add refuses what the bot would, by the bot's reason", () => {
+  const ally = runOp(["add", "exitCamp", "c2", "Odiodin", "W21S23", "W21S24"]);
+  assert.equal(ally.code, 1);
+  assert.ok(ally.out.includes("refused by the bot's decoder: an ally: Odiodin"), ally.out);
+  const room = runOp(["add", "exitCamp", "c2", "Trepidimous", "W1N1", "W1N2", "--live"]);
+  assert.ok(room.out.includes("refused by the bot's decoder: an ally's: W1N1"), room.out);
+  const taken = runOp(["add", "exitCamp", "c2", "Trepidimous", "W25S25", "W25S24"]);
+  assert.ok(taken.out.includes("refused by the bot's decoder: op old holds W25S25"), taken.out);
+  assert.ok(!taken.out.includes("would write"), "nothing to write");
+});
+
+smoke("observe op remove prints the specs it would leave; offline refuses --write", () => {
+  const { code, out, err } = runOp(["remove", "old"]);
+  assert.equal(code, 0, err);
+  assert.ok(out.includes("would write Memory.fabot.ops.specs = []"), out);
+  const written = runOp(["remove", "old", "--write"]);
+  assert.equal(written.code, 1);
+  assert.ok(written.err.includes("--write needs the server"), written.err);
+  assert.ok(runOp(["remove", "nope"]).err.includes('no published spec "nope"'));
+});
+
+smoke("observe op show prints the spec, record, trigger and events; a code op its trigger alone", () => {
+  const { code, out, err } = runOp(["show", "old"]);
+  assert.equal(code, 0, err);
+  assert.ok(out.includes("old  published, dry (events only)"), out);
+  assert.ok(out.includes("record   muster since t999000, run from t999000, spent 0, lost 0"), out);
+  assert.ok(out.includes("  t999000 old began in muster"), out);
+  const camp = runOp(["show", "camp"]);
+  assert.ok(camp.out.includes("  trigger: W19S26: watch warming 340/1500 ticks"), camp.out);
+  assert.ok(camp.out.includes("ExchangeLoses unknown (may come out: 18M17A)"), camp.out);
+  assert.ok(runOp(["show", "nope"]).err.includes('no operation "nope"'));
 });
 
 smoke("observe cpu names each switch in effect and its source, a standing override flagged (#575)", () => {

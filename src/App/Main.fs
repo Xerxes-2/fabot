@@ -742,35 +742,22 @@ let private lightTick (atEntry: float) (last: LightTick.LastFull) (seen: LightTi
             Moved = []
         }
 
-/// Every [[sweep]] candidate the code's operations name (`Colony.operations`,
-/// #663 S7c), unchecked, and the ranger block a room's floor is counted in:
-/// the rooms the world reads facts for and keeps bodies out of sight in.
-/// Which a colony casts is the admitted specs' (`castable`).
-let private named: Harassment =
+/// Every [[sweep]] candidate these operations name (the code's,
+/// `Colony.operations`, #663 S7c, and the Memory specs flagged live, S7e),
+/// unchecked, and the ranger block a room's floor is counted in: the rooms
+/// the world reads facts for and keeps bodies out of sight in. Which a
+/// colony casts is the admitted specs' (`castable`).
+let private namedBy (wires: OpSpecWire list) : Harassment =
     {
-        Rooms = Colony.candidatesOf Colony.operations
+        Rooms = Colony.candidatesOf wires
         BlockCost = Bodies.rangerBlockCost
     }
 
-/// Every exit the code's exit camps name (#663 S7d), unchecked: what the
-/// world watches (`ExitTraffic.recall`), each home among the rooms whose
-/// bodies it keeps out of sight.
-let private campExits = Colony.campExitsOf Colony.operations
-
 /// Who stands in each room an operation names (`Operations.standingOf`):
 /// what `Operation.decode` and `Operation.ofCode` refuse a spec on.
-/// Every room a colony declares but those it declares to strike, read once
-/// a heap: the declarations are code's. An assault's room (W18S26 among
-/// them) is the enemy's, never ours: read as ours it refused the exit camp
-/// on its own target (#663 S7d).
-let private declaredRooms =
-    lazy
-        (Colony.declared
-         |> Seq.collect (fun colony ->
-             Set.difference
-                 (Colony.declaredRooms colony)
-                 (colony.Assaults |> List.map _.RoomName |> Set.ofList))
-         |> Fresh.setOfSeq)
+/// Every room a colony declares ours, read once a heap: the declarations
+/// are code's.
+let private declaredRooms = lazy (Operations.declaredOurs Colony.declared)
 
 let private standingNow (world: World) : OpStanding =
     let declared = declaredRooms.Value
@@ -796,12 +783,18 @@ let private stampHolders (world: World) =
         lastHolders <- Fresh.mapOfSeq (Seq.append (Map.toSeq lastHolders) moved)
 
 /// The operations' dry run (#663 S7a), once a full tick over the views as
-/// decided: the Memory specs admitted (`Operation.admit`), each record moved
-/// on (`Operations.step`), the records, refusals and events written back.
-/// Nothing reads them into a decision. With no ops leaf in Memory nothing
-/// runs and nothing is written.
-let private operationsDryRun (world: World) (views: ColonyView list) =
-    match ObserveMemory.loadOps () with
+/// decided: the Memory specs not flagged live, admitted this tick
+/// (`Operation.publish`, the tick's `publication`), each record moved on
+/// (`Operations.step`), the records, every Memory spec's refusals and
+/// events written back. Nothing reads them into a decision. With no ops
+/// leaf in Memory nothing runs and nothing is written.
+let private operationsDryRun
+    (world: World)
+    (views: ColonyView list)
+    (leaf: ObserveMemory.OpsLeaf option)
+    (publication: OpPublication)
+    =
+    match leaf with
     | None -> ()
     // The kill switch: nothing admitted, moved or written.
     | Some leaf when leaf.Off -> ()
@@ -810,32 +803,46 @@ let private operationsDryRun (world: World) (views: ColonyView list) =
     | Some leaf when List.isEmpty leaf.Specs && List.isEmpty leaf.Live && List.isEmpty leaf.Garbled ->
         ()
     | Some leaf ->
-        let standing = standingNow world
-        let admission = Operation.admit standing leaf.Live leaf.Specs
-
         let admission =
-            { admission with
-                Kept = Set.union admission.Kept (leaf.Garbled |> List.map _.Id |> Set.ofList)
+            { publication.Dry with
+                Kept = Set.union publication.Dry.Kept (leaf.Garbled |> List.map _.Id |> Set.ofList)
             }
 
         let facts = Operations.factsOf Game.time (Operations.warmSince loadedAt world) views
 
         let records, events = Operations.step facts admission leaf.Live
 
+        // A live spec's deadline as its decode priced it, written as a dry
+        // one's is.
         let deadlines =
             leaf.Specs
             |> List.filter (fun wire -> Option.isNone wire.Deadline)
             |> List.choose (fun wire ->
                 admission.Admitted
                 |> List.tryFind (fun spec -> spec.Id = wire.Id)
-                |> Option.map (fun spec -> spec.Id, spec.Limits.Deadline))
+                |> Option.map (fun spec -> spec.Id, spec.Limits.Deadline)
+                |> Option.orElse (
+                    publication.Live
+                    |> List.tryFind (fun live -> live.Id = wire.Id)
+                    |> Option.bind (fun live -> live.Deadline |> Option.map (fun d -> live.Id, d))
+                ))
 
-        ObserveMemory.saveOps Game.time records (leaf.Garbled @ admission.Refused) events deadlines
+        ObserveMemory.saveOps
+            Game.time
+            records
+            (leaf.Garbled @ publication.Refused)
+            events
+            deadlines
 
 /// The code's operations' records (#663 S7c), the latch each moves on from:
 /// the heap's, else read back off Memory (`Memory.fabot.ops.code`) on a cold
 /// heap, so a reset keeps the room each is committed to.
 let mutable private codeRecords: OpRecord list option = None
+
+/// The live Memory specs the last full tick's admission laid or held
+/// (`OpPublication.Watched`, #663 S7e): whose rooms the next tick's world
+/// watches. Heap only: a cold heap watches none until its first admission.
+let mutable private watchedLive: OpSpecWire list = []
 
 /// The refusals of the code's specs last written (`saveOpsCode`): a change
 /// of them alone is written too.
@@ -874,6 +881,29 @@ let private fullTick
         { dangerRooms with
             Rivals = written.Latched
         }
+
+    // The ops leaf, read once a full tick (#663 S7a): the Memory specs, and
+    // the kill switch over every operation.
+    let opsLeaf = ObserveMemory.loadOps ()
+    let opsOff = opsLeaf |> Option.exists _.Off
+
+    // The operations the world reads facts for (#663 S7e): the code's, and
+    // the live Memory specs last full tick's admission laid or held
+    // (`OpPublication.Watched`) — the world is read before this tick's
+    // admission can be, so a spec flagged live is watched from the full tick
+    // after its first admission; never one refused outright.
+    let watchedOps =
+        if opsOff then
+            Colony.operations
+        else
+            Colony.operations @ watchedLive
+
+    let named = namedBy watchedOps
+
+    // Every exit their exit camps name (#663 S7d): what the world watches
+    // (`ExitTraffic.recall`), each home among the rooms whose bodies it
+    // keeps out of sight.
+    let campExits = Colony.campExitsOf watchedOps
 
     // The sweep's candidates and the homes an exit camp camps (#663 S7d):
     // rooms whose bodies the world keeps out of sight.
@@ -958,15 +988,39 @@ let private fullTick
     // what a colony is handed for a creep it does not hold, the Matcher drops.
     let assignments = loadAssignments ()
 
+    // The code's operations' latch, as the decide moves it on.
+    let storedCode = codeRecords |> Option.defaultWith ObserveMemory.loadOpsCode
+
+    // The Memory specs this tick (#663 S7e): those flagged live laid beside
+    // the code's, the rest run dry after the decide.
+    let standing = standingNow world
+
+    let publication =
+        match opsLeaf with
+        | Some leaf ->
+            Operation.publish
+                standing
+                leaf.Off
+                Colony.operations
+                leaf.Live
+                storedCode
+                leaf.LiveIds
+                leaf.Specs
+        | None -> Operation.publish standing false Colony.operations [] storedCode Set.empty []
+
+    watchedLive <- publication.Watched
+
     // The code's operations admitted through the Memory spec's safety (#663
     // S7c): a room ours, an ally's or a neutral's dropped, a spec against
-    // an ally or a neutral refused whole. Only their rooms are cast, and
-    // none while the operations' kill switch is set (`op off`).
+    // an ally or a neutral refused whole; and the live Memory specs
+    // admitted. Only their rooms are cast, and none while the operations'
+    // kill switch is set (`op off`).
     let admitted, refusedCode =
-        if ObserveMemory.loadOps () |> Option.exists _.Off then
+        if opsOff then
             [], []
         else
-            Operations.declared (standingNow world) Colony.operations
+            let code, refused = Operations.declared standing Colony.operations
+            code @ publication.Live, refused
 
     let castable =
         { named with
@@ -1237,7 +1291,7 @@ let private fullTick
                     Idle = idle
                     FightAlone = fightCandidates
                     TurnIndex = Some turn
-                    Operations = codeRecords |> Option.defaultWith ObserveMemory.loadOpsCode
+                    Operations = storedCode
                     Declared = admitted
                 }
                 (fun () -> Game.cpu.getUsed (), floodedNow ())
@@ -1898,14 +1952,19 @@ let private fullTick
 
     // The operations' dry run: a throw costs its tick and nothing else.
     try
-        operationsDryRun world (colonyDecisions.Views |> List.map snd)
+        operationsDryRun world (colonyDecisions.Views |> List.map snd) opsLeaf publication
     with error ->
         recordFaults [ faultRow "" "ops" error ]
 
     // The code's operations' latch, written back whenever it moved: the
     // records the decide moved on (`Operations.lay`), what moved, and this
-    // tick's refusals of the code's specs.
-    let records, events = colonyDecisions.Operated
+    // tick's refusals of the code's specs. A live Memory spec's record
+    // rides in it while its spec stands (`Operations.retire`).
+    let records, events, readings = colonyDecisions.Operated
+
+    let records, events =
+        let records, dropped = Operations.retire Colony.operations publication records
+        records, events @ dropped
 
     // Each running exit camp's spend read off the ledger as folded (#663
     // S7d): what its budget is held to and its realised value read against.
@@ -1928,6 +1987,10 @@ let private fullTick
 
     codeRecords <- Some records
     codeRefused <- Some refusedCode
+
+    // Each exit camp's trigger as read this tick (#663 S7e): why it is not
+    // running, for `observe op`.
+    ObserveMemory.saveOpsReadings readings
 
     // A given-up colony's leaf and the flat legacy log, which nothing writes:
     // every home neither declared nor living (an undeclared spawn room, when

@@ -438,6 +438,64 @@ type OpAdmission =
         Kept: Set<string>
     }
 
+/// The Memory specs as the shell runs them this tick (#663 S7e,
+/// `Operation.publish`): those flagged live laid beside the code's, every
+/// other run dry, and every refusal of either.
+type OpPublication =
+    {
+        /// The specs not flagged live, admitted to run dry
+        /// (`Operations.step`): events only, no body cast.
+        Dry: OpAdmission
+        /// The specs flagged live admitted, each a wire with the limits its
+        /// decode priced pinned: what `Operations.lay` lays as it lays a
+        /// code spec, whose records it moves on beside the code's.
+        Live: OpSpecWire list
+        /// The ids flagged live whose records stand unmoved though their
+        /// spec is not laid this tick.
+        LiveKept: Set<string>
+        /// The live specs whose rooms the world reads (exits watched, bodies
+        /// kept out of sight): those laid, and those held by a clash or a
+        /// refusal that holds; never a duplicated id, a template that may
+        /// not run live, nor an unsafe one.
+        Watched: OpSpecWire list
+        Refused: OpRefusal list
+    }
+
+/// One exit of an exit camp as its trigger read it on a full tick (#663
+/// S7e): the facts each of its guards answered on.
+type ExitReading =
+    {
+        /// The room the exit lands in.
+        Camp: string
+        /// The ticks its watch has run since this heap began it: under
+        /// `ExitTraffic.window` it answers Unknown.
+        Age: int
+        /// The full ticks watched over the window, the enemy's landings over
+        /// them, and the distinct bodies landing.
+        Watched: int
+        Arrivals: int
+        Bodies: int
+        /// `OpGuard.ExitsUsed` at this exit.
+        Used: Truth
+        /// `OpGuard.Pays` at this exit, and what its kills earn against what
+        /// it costs over the run where a colony priced it.
+        Pays: Truth
+        Priced: (float * float) option
+        /// `OpGuard.ExchangeLoses` at this exit, and what may come out.
+        Loses: Truth
+        Landers: HostileInfo list
+    }
+
+/// An exit camp's trigger as read on a full tick (#663 S7e,
+/// `Memory.fabot.ops.readings`): each exit's reading, and why it is not
+/// running, "" where it is.
+type OpReading =
+    {
+        Id: string
+        Exits: ExitReading list
+        Idle: string
+    }
+
 /// The numbers a move of an operation's room was decided on: the rate of
 /// the room it left (`OpFacts.Rate`), what the room it entered paid
 /// (`OpFacts.Challenge`, its rate where it moved on the room's exhaustion),
@@ -681,6 +739,12 @@ module Operation =
         /// where any other room is dropped alone.
         let anchored (name: string) : bool = name = "exitCamp"
 
+        /// Whether a Memory spec of the template may run live (#663 S7e):
+        /// an exit camp's work is its own, one an exit; the sweep is the
+        /// one group over every candidate the colonies cast, which a
+        /// second sweep would only join.
+        let runsLive (name: string) : bool = name = "exitCamp"
+
     /// Whether a schedule can run: an `Every` run's period at least a tick,
     /// its window no longer than its period.
     let validSchedule (schedule: OpSchedule) : bool =
@@ -759,7 +823,7 @@ module Operation =
     /// A Memory spec admitted, or why not: the one gate between Memory and
     /// the interpreter. Its template must be code's; its enemy one we strike
     /// anywhere, never an ally nor a neutral; every room a target
-    /// (`roomRefusal`). Each parameter only narrows the template: the budget
+    /// (`roomRefusal`), an anchored template's beside its anchor. Each parameter only narrows the template: the budget
     /// and the bodies are the template's ceiling at most, which is also
     /// what they are when none is given. Every span is read from the
     /// operation's first tick, `begun` (its record's start), or now for one
@@ -802,7 +866,25 @@ module Operation =
                             | OpRefused.Unsafe _ -> true
                             | OpRefused.Holds _ -> false)
 
-                    match unsafe |> Option.orElse (List.tryHead refusals) with
+                    // An anchored template's rooms each beside its anchor
+                    // (an exit camp's landings beside the home), one at
+                    // least (#663 S7e): a room off its border is a typo.
+                    let astray =
+                        match wire.Rooms with
+                        | anchor :: rest when Templates.anchored wire.Template ->
+                            match rest |> List.filter ((<>) anchor) with
+                            | [] -> Some(OpRefused.Holds("no room beside " + anchor))
+                            | beside ->
+                                beside
+                                |> List.tryFind (fun room ->
+                                    not (List.contains room (RoomName.adjacent anchor)))
+                                |> Option.map (fun room ->
+                                    OpRefused.Holds($"not beside {anchor}: {room}"))
+                        | _ -> None
+
+                    match
+                        unsafe |> Option.orElse (List.tryHead refusals) |> Option.orElse astray
+                    with
                     | Some refused -> Error refused
                     | None ->
                         let deadline = wire.Deadline |> Option.defaultValue (from + defaultSpan)
@@ -925,3 +1007,168 @@ module Operation =
                     | Error refused -> Some(refusal id refused))
             Kept = listed |> List.filter (seated.Contains >> not) |> Set.ofList
         }
+
+    /// Why a Memory spec would share a fight with another operation (#663
+    /// S7e), None where it shares nothing: its id a code spec's (whose
+    /// record the code's latch keeps), or a room a code spec names or an
+    /// earlier Memory spec of another id does. One fight a room: every room
+    /// either names counts, an exit camp's home among them, so a spec never
+    /// casts into a room another operation may.
+    let clash
+        (code: OpSpecWire list)
+        (earlier: OpSpecWire list)
+        (wire: OpSpecWire)
+        : string option =
+        let holding (whose: string) (others: OpSpecWire list) =
+            others
+            |> List.tryPick (fun other ->
+                wire.Rooms
+                |> List.tryFind (fun room -> List.contains room other.Rooms)
+                |> Option.map (fun room -> $"{whose} {other.Id} holds {room}"))
+
+        if code |> List.exists (fun c -> c.Id = wire.Id) then
+            Some("a code op's id: " + wire.Id)
+        else
+            holding "code op" code
+            |> Option.orElse (holding "op" (earlier |> List.filter (fun e -> e.Id <> wire.Id)))
+
+    /// Every Memory spec as the shell runs it this tick (#663 S7e). Dry
+    /// unless flagged live (`live`, the operator's `op live`): a published
+    /// spec casts nothing until a human says it may, so a typo is events,
+    /// never bodies. An id on two rows refuses every row of it ("duplicate
+    /// id"), so no row runs on another's flag. Each one its decode admits passes `clash` against the
+    /// code's specs and the admitted specs ahead of it; then each is
+    /// admitted (`admit`) among its own kind —
+    /// the dry ones over their records (`Memory.fabot.ops.live`), the live
+    /// ones over the code's latch (`Memory.fabot.ops.code`), each kind at
+    /// most `liveCap` running. A live one admitted comes back a wire whose
+    /// limits its decode priced are pinned, laid as a code spec is
+    /// (`Operations.lay`). Only a template whose work is its own may run
+    /// live (`Templates.runsLive`). A clash, or a template that may not run
+    /// live, holds: its record is kept, unmoved. The kill switch (`off`)
+    /// admits nothing, and every live record stands unmoved.
+    let publish
+        (standing: OpStanding)
+        (off: bool)
+        (code: OpSpecWire list)
+        (dryRecords: OpRecord list)
+        (liveRecords: OpRecord list)
+        (live: Set<string>)
+        (wires: OpSpecWire list)
+        : OpPublication =
+        let none =
+            {
+                Admitted = []
+                Refused = []
+                Kept = Set.empty
+            }
+
+        if off then
+            {
+                Dry = none
+                Live = []
+                LiveKept = live
+                Watched = []
+                Refused = []
+            }
+        else
+            let begun (wire: OpSpecWire) =
+                (if live.Contains wire.Id then liveRecords else dryRecords)
+                |> List.tryFind (fun record -> record.Id = wire.Id)
+                |> Option.map _.Started
+
+            // Only a spec the decoder admits clashes, or holds a room
+            // against the specs behind it: any other is refused by the
+            // decoder's own reason (`admit`), an unsafe one first.
+            // An id on two rows is no one spec: which row a flag or a
+            // record belongs to is not known, so every row of it is
+            // refused and none runs, dry or live.
+            let doubled =
+                wires
+                |> List.countBy _.Id
+                |> List.filter (fun (_, rows) -> rows > 1)
+                |> List.map fst
+                |> Set.ofList
+
+            let duplicates =
+                wires
+                |> List.filter (fun wire -> doubled.Contains wire.Id)
+                |> List.map (fun wire -> { Id = wire.Id; Why = "duplicate id" })
+
+            let cleared, clashed, _ =
+                wires
+                |> List.filter (fun wire -> not (doubled.Contains wire.Id))
+                |> List.fold
+                    (fun (cleared, clashed, holding) (wire: OpSpecWire) ->
+                        match decode standing (begun wire) wire with
+                        | Error _ -> cleared @ [ wire ], clashed, holding
+                        | Ok _ ->
+                            match clash code holding wire with
+                            | Some why ->
+                                cleared, clashed @ [ { Id = wire.Id; Why = why } ], holding
+                            | None -> cleared @ [ wire ], clashed, holding @ [ wire ])
+                    ([], [], [])
+
+            // A template the decoder knows that may not run live; an
+            // unknown one is the decoder's to refuse, by its name.
+            let barred (wire: OpSpecWire) =
+                live.Contains wire.Id
+                && Option.isSome (Templates.byName wire.Template)
+                && not (Templates.runsLive wire.Template)
+
+            let barredOut =
+                cleared
+                |> List.filter barred
+                |> List.map (fun wire ->
+                    {
+                        Id = wire.Id
+                        Why = "no live " + wire.Template
+                    })
+
+            let liveWires =
+                cleared |> List.filter (fun wire -> live.Contains wire.Id && not (barred wire))
+
+            let dry =
+                admit
+                    standing
+                    dryRecords
+                    (cleared |> List.filter (fun wire -> not (live.Contains wire.Id)))
+
+            let lived = admit standing liveRecords liveWires
+            let held = duplicates @ clashed @ barredOut |> List.map _.Id |> Set.ofList
+
+            let laid =
+                lived.Admitted
+                |> List.choose (fun spec ->
+                    liveWires
+                    |> List.tryFind (fun wire -> wire.Id = spec.Id)
+                    |> Option.map (fun wire ->
+                        { wire with
+                            Rooms = List.distinct wire.Rooms
+                            Deadline = Some spec.Limits.Deadline
+                            MaxEnergy = Some spec.Limits.MaxEnergy
+                            MaxBodies = Some spec.Limits.MaxBodies
+                        }))
+
+            // Held, not laid: a live spec its admission keeps (a refusal
+            // that holds, or the live-op cap), and one that clashes.
+            let clashedIds = clashed |> List.map _.Id |> Set.ofList
+
+            let unlaid =
+                (liveWires |> List.filter (fun wire -> lived.Kept.Contains wire.Id))
+                @ (wires
+                   |> List.filter (fun wire ->
+                       live.Contains wire.Id
+                       && clashedIds.Contains wire.Id
+                       && not (doubled.Contains wire.Id)))
+
+            {
+                Dry =
+                    { dry with
+                        Kept = Set.union dry.Kept (held |> Set.filter (live.Contains >> not))
+                    }
+                Live = laid
+                LiveKept = Set.union lived.Kept (held |> Set.filter live.Contains)
+                Watched = laid @ unlaid
+                Refused = duplicates @ clashed @ barredOut @ dry.Refused @ lived.Refused
+            }

@@ -2970,6 +2970,101 @@ wire("ops code: an ops leaf off its shape is the operator's to mend: nothing is 
   assert.equal(globalThis.Memory.fabot.ops, "Incorrect memory path");
 });
 
+// ---- the published operations (#663 S7e) ----------------------------------
+
+// A spec row's `live` flag, the operator's `op live`: fails closed, only
+// `true` itself is live; the flag is the operator's, never rewritten.
+for (const [name, flag, reads] of [
+  ["true", true, true],
+  ['"true"', "true", false],
+  ["1", 1, false],
+  ["false", false, false],
+  ["absent", undefined, false],
+]) {
+  wire(`ops: a spec flagged live with ${name} reads ${reads ? "live" : "dry"}, the flag untouched`, async () => {
+    const row = flag === undefined ? { ...opSpec } : { ...opSpec, live: flag };
+    const { leaf, ops } = await opsThrough({ specs: [row] });
+    assert.deepEqual(Array.from(leaf.LiveIds), reads ? ["op1"] : []);
+    assert.equal(stable(ops.specs), stable([row]));
+  });
+}
+
+// `Memory.fabot.ops.readings`: each armed operation's trigger, rewritten
+// whole each full tick; none removes the key. Bounded: a reading of two
+// exits, landers and all, stays a few hundred bytes.
+wire("ops readings: each exit's watch and guards, compact; none removes the key", async () => {
+  const { saveOpsReadings } = await import(MODULE);
+  const { ofArray, empty } = await import(LIST);
+  const { OpReading, ExitReading, Truth } = await import("../build/fable/Core/Types/Operation.js");
+  const { HostileInfo } = await import("../build/fable/Core/Types/Sightings.js");
+  const { BodyPart } = await import("../build/fable/Core/Types/Vocabulary.js");
+  const parts = (n, tag) => Array.from({ length: n }, () => new BodyPart(tag, []));
+  const fuse = new HostileInfo("f1", "Trepidimous", { Room: "W18S26", X: 25, Y: 45 },
+    ofArray([...parts(18, 2), ...parts(17, 3)]), empty(), 3500, 1500);
+  const reading = new OpReading(
+    "camp",
+    ofArray([
+      new ExitReading("W19S26", 340, 200, 3, 2, Truth.Yes, Truth.No, [12.4, 700.6], Truth.Yes, ofArray([fuse])),
+      new ExitReading("W18S27", 340, 180, 0, 0, Truth.Unknown, Truth.Unknown, undefined, Truth.Unknown, empty()),
+    ]),
+    "W19S26: pays 12 against 701; W19S26: loses to 18M17A",
+  );
+  globalThis.Memory = { fabot: { ops: { specs: [opSpec] } } };
+  saveOpsReadings(ofArray([reading]));
+  const wireReadings = [
+    {
+      i: "camp",
+      why: "W19S26: pays 12 against 701; W19S26: loses to 18M17A",
+      x: [
+        { r: "W19S26", age: 340, w: 200, a: 3, b: 2, u: "y", p: "n", l: "y", v: 12, c: 701, by: ["18M17A"] },
+        { r: "W18S27", age: 340, w: 180, a: 0, b: 0, u: "?", p: "?", l: "?" },
+      ],
+    },
+  ];
+  assert.equal(stable(globalThis.Memory.fabot.ops.readings), stable(wireReadings));
+  assert.ok(JSON.stringify(wireReadings).length < 400, "a few hundred bytes");
+  assert.equal(stable(globalThis.Memory.fabot.ops.specs), stable([opSpec]), "the operator's keys untouched");
+  saveOpsReadings(empty());
+  assert.equal("readings" in globalThis.Memory.fabot.ops, false, "none: the key removed");
+  globalThis.Memory = { fabot: {} };
+  saveOpsReadings(ofArray([reading]));
+  assert.equal(globalThis.Memory.fabot.ops, undefined, "no ops leaf: none made");
+});
+
+// The operator's check (`checkOpSpec`): the shell's own decoder and
+// admission over the leaf as stored, so the CLI refuses what the bot would.
+wire("ops check: a spec is admitted dry or live, or refused by the bot's own reason", async () => {
+  const { checkOpSpec } = await import(MODULE);
+  const holders = { W21S23: "Trepidimous", W21S24: "", W20S23: "", W18S26: "Trepidimous", W18S27: "" };
+  const row = { id: "c2", template: "exitCamp", enemy: "Trepidimous", rooms: ["W21S23", "W21S24"], deadline: 1005000 };
+  const check = (r, live = false, adding = true, stored = null) =>
+    checkOpSpec(1000000, "Xerxes-2", holders, stored, r, live, adding);
+  const ok = check(row);
+  assert.deepEqual([ok.ok, ok.runs, ok.decoded.maxBodies, ok.decoded.deadline], [true, "dry", 1, 1005000]);
+  assert.equal(check(row, true).runs, "live");
+  for (const [changed, why] of [
+    [{ template: "assault" }, "no template: assault"],
+    [{ enemy: "Odiodin" }, "an ally: Odiodin"],
+    [{ enemy: "Kalgen" }, "a neutral: Kalgen"],
+    [{ rooms: ["W21S23", "W20S23", "W25S25"] }, "holder unknown: W25S25"],
+    [{ rooms: ["W21S23", "W25S23"] }, "holder unknown: W25S23"],
+    [{ maxEnergy: 0 }, "no budget"],
+    [{ deadline: 999000 }, "deadline past"],
+    [{ id: "camp" }, "a code op's id: camp"],
+    // The code camp's south exit: the sweep's room before the camp's home.
+    [{ rooms: ["W18S26", "W18S27"], id: "c3" }, "code op sweep holds W18S27"],
+    [{ template: "sweep", rooms: ["W21S24"] }, "no live sweep"],
+    [{ rooms: "W21S23" }, "garbled"],
+  ]) {
+    const answer = check({ ...row, ...changed }, true);
+    assert.deepEqual([answer.ok, answer.why], [false, why], why);
+  }
+  assert.equal(check(row, false, true, { specs: [row] }).why, "duplicate id");
+  assert.equal(check(row, true, false, { specs: [row] }).runs, "live", "`op live` re-checks its own row");
+  assert.equal(check({ ...row, id: "c4" }, false, true, { specs: [row] }).why, "op c2 holds W21S23");
+  assert.equal(check(row, false, true, { off: true }).off, true, "the switch reported beside");
+});
+
 // ---- run ----------------------------------------------------------------
 
 let failed = 0;
