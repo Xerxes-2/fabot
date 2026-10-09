@@ -1794,4 +1794,224 @@ let borderCampTests =
                     (fun example -> int example.Sweep > int example.Shadow)
                     $"the Brief seats more, never fewer\n%A{log}"
             }
+
+            // #615, W17S26 replay t1,052,656-685 (our rangers held d4-7 off
+            // Trepidimous' empty haulers Midnight and Onyx): rebuilt off the
+            // replay, each hauler walking its live tiles a tick at a time.
+            // Not a pinned capture: the arena runs no light ticks and the
+            // capture's Transition log was stale, so it does not keep the
+            // live tiles; it pins the mechanism live showed. Midnight walks
+            // in to the container at (27,9) and stands at (28,8); the kill's
+            // ground there is the store ring (#619), and ranger-1051197 stood
+            // on it three off Midnight. The exchange seats it beside.
+            test
+                "W17S26 replay t1,052,656: a ranger after an empty hauler standing at the store stands beside it" {
+                let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+                let trepidimous = Side.Player "Trepidimous"
+
+                let live (tiles: (int * int * int) list) =
+                    Phases [ for k, x, y in tiles -> k, GoTo(at "W17S26" x y) ]
+
+                let midnight =
+                    live
+                        [
+                            1, 40, 3
+                            2, 40, 4
+                            3, 41, 5
+                            4, 40, 6
+                            5, 40, 7
+                            6, 39, 8
+                            7, 40, 7
+                            8, 39, 6
+                            9, 38, 5
+                            10, 37, 4
+                            11, 36, 3
+                            12, 35, 2
+                            13, 34, 2
+                            14, 33, 2
+                            15, 32, 2
+                            16, 31, 2
+                            17, 30, 3
+                            18, 29, 4
+                            19, 28, 5
+                            20, 27, 6
+                            21, 26, 7
+                            22, 27, 8
+                            28, 28, 8
+                            29, 29, 7
+                            30, 30, 7
+                            31, 29, 7
+                            32, 30, 6
+                            33, 31, 7
+                            34, 32, 8
+                            35, 33, 9
+                            36, 33, 10
+                            37, 33, 11
+                            38, 33, 10
+                            39, 33, 9
+                            40, 32, 8
+                        ]
+
+                let onyx =
+                    live
+                        [
+                            1, 26, 7
+                            2, 27, 8
+                            3, 26, 7
+                            4, 25, 6
+                            5, 24, 5
+                            6, 23, 4
+                            7, 22, 3
+                            8, 21, 2
+                            9, 20, 1
+                            10, 19, 1
+                            12, 18, 1
+                            14, 17, 1
+                            16, 16, 1
+                            23, 19, 1
+                            24, 20, 1
+                            25, 21, 2
+                            26, 22, 3
+                            27, 23, 4
+                            28, 24, 5
+                            29, 25, 6
+                            30, 26, 7
+                            31, 27, 8
+                            32, 28, 7
+                            33, 29, 7
+                            34, 30, 7
+                            35, 31, 8
+                            36, 32, 9
+                            37, 32, 10
+                            38, 32, 9
+                            39, 31, 8
+                            40, 30, 7
+                        ]
+
+                let w17s26 =
+                    room "W17S26"
+                    |> withStructures
+                        [
+                            { structureOf "container" None 145_000 250_000 { X = 27; Y = 9 } with
+                                Energy = 1_041
+                            }
+                        ]
+                    |> withRoads
+                        [
+                            20, 1, 4_100
+                            21, 2, 4_100
+                            22, 3, 2_400
+                            23, 4, 4_200
+                            24, 5, 2_400
+                            25, 6, 2_500
+                            26, 7, 2_400
+                            27, 8, 4_000
+                        ]
+
+                let w17s25 =
+                    room "W17S25"
+                    |> withController Ownership.Ours None 5 3
+                    |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+                    |> withStructures
+                        [
+                            { structureOf
+                                  "storage"
+                                  (Some Side.Ours)
+                                  10_000
+                                  10_000
+                                  { X = 13; Y = 27 } with
+                                Energy = 10_597
+                            }
+                            towerOf Side.Ours { X = 11; Y = 29 } 1_000
+                            towerOf Side.Ours { X = 13; Y = 29 } 1_000
+                        ]
+
+                let colonies =
+                    Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W17S25" ])
+
+                let hauler parts =
+                    List.concat (List.replicate parts [ Move; Carry ])
+
+                let bodies: Body list =
+                    [
+                        { body
+                              "ranger-1051197-Spawn11"
+                              Side.Ours
+                              (parts [ Move, 6; RangedAttack, 4; Heal, 2 ])
+                              (at "W17S26" 35 1)
+                              None with
+                            TicksToLive = 76
+                        }
+                        { body
+                              "ranger-1052323-Spawn11"
+                              Side.Ours
+                              (parts [ Move, 3; RangedAttack, 2; Heal, 1 ])
+                              (at "W17S26" 33 1)
+                              None with
+                            TicksToLive = 1_184
+                        }
+                        { body
+                              "Midnight2077"
+                              trepidimous
+                              (hauler 23)
+                              (at "W17S26" 40 2)
+                              (Some midnight) with
+                            Hits = 3_628
+                        }
+                        { body "Onyx2239" trepidimous (hauler 13) (at "W17S26" 25 6) (Some onyx) with
+                            Hits = 2_420
+                        }
+                        { body
+                              "anchor-1052591-Spawn11"
+                              Side.Ours
+                              (parts [ Work, 6; Carry, 1; Move, 3 ])
+                              (at "W17S26" 27 9)
+                              None with
+                            Energy = 12
+                        }
+                    ]
+
+                let a = arena 1_052_656 [ w17s26; w17s25 ] colonies bodies
+
+                let a =
+                    { a with
+                        Carried =
+                            { a.Carried with
+                                Assignments =
+                                    Map.ofList
+                                        [
+                                            "ranger-1051197-Spawn11", "guard:W17S26"
+                                            "ranger-1052323-Spawn11", "guard:W17S26"
+                                            "anchor-1052591-Spawn11",
+                                            "harvest:6a8caa7ddd4872bccd318c78"
+                                        ]
+                            }
+                    }
+
+                let _, trace = run 30 a
+                let failure = describe trace
+                let ranger = pathOf "ranger-1051197-Spawn11" trace |> Map.ofList
+                let midnight = pathOf "Midnight2077" trace
+
+                // Midnight's ticks standing at the container's (28,8) after
+                // its first there.
+                let standing =
+                    midnight
+                    |> List.pairwise
+                    |> List.filter (fun ((_, before), (_, now)) ->
+                        before.At = now.At && now.At = at "W17S26" 28 8)
+                    |> List.map (fun (_, (tick, now)) -> tick, now.At)
+
+                Expect.isNonEmpty
+                    standing
+                    $"the premise: Midnight stands at the container\n{failure}"
+
+                // Its first tick there the ranger is still walking in (two
+                // off); from the next, beside it (main: three off).
+                for tick, quarry in List.tail standing do
+                    Expect.equal
+                        (Map.tryFind tick ranger |> Option.bind (fun s -> RoomPos.range s.At quarry))
+                        (Some 1)
+                        $"t{tick}: the ranger beside Midnight\n{failure}"
+            }
         ]

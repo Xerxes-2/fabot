@@ -2364,7 +2364,8 @@ let private catchOdds
 /// in the fight (`side`, every one at its standoff, `killTicksOf`), times the
 /// odds it lands the kill (`catchOdds`). Zero where the side never kills it.
 /// One score every kill order, ground and seat reads, so partners agree on
-/// the head and focus it.
+/// the head and focus it. Whether the side kills it at all is `killableIn`'s,
+/// the heal it takes `healUndoingIn`'s.
 let internal killScoresIn
     (view: ColonyView)
     (room: string)
@@ -2385,6 +2386,25 @@ let internal killScoresIn
         | Some kill ->
             catchOdds view fighter from arrival kill hostile * killValue view hostile
             / float (max 0 arrival + kill)
+
+/// Whether a side of ours kills a hostile of `room` at all (`killTicksOf`,
+/// the heal over the kill as `killScoresIn` reads it): a nought kill score
+/// of one it kills is its arrival's or its catch odds', of one it never
+/// kills its heal's.
+let internal killableIn
+    (view: ColonyView)
+    (room: string)
+    (side: Fighter list)
+    : HostileInfo -> bool =
+    let healOn = healReachingWithin view room view.Tuning.ReachHorizon
+    fun hostile -> Option.isSome (killTicksOf view healOn side hostile)
+
+/// The heal reaching a hostile of `room` a tick (`healReaching`), in the
+/// damage that undoes it through its TOUGH: what of our blows on it does not
+/// stick.
+let internal healUndoingIn (view: ColonyView) (room: string) : HostileInfo -> int =
+    let healOn = healReaching view room
+    fun hostile -> HostileInfo.damageFor hostile (healOn hostile)
 
 /// ADR-0042
 /// What one source of a room held this way is worth per tick. Owned **or**

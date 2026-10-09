@@ -1929,3 +1929,150 @@ let residentChaseTests =
                     "with a raider on the exit, the garrison holds its ring"
             }
         ]
+
+[<Tests>]
+let preySeatTests =
+    testList
+        "a prey's kill seats each holder where it trades best on its quarry (#615)"
+        [
+            // The seats of one holder of W1N2's Guard over `hostiles`.
+            let seatsOf
+                (hostiles: HostileInfo list)
+                (stepped: Map<string, RoomPos>)
+                (holder: CreepInfo)
+                (at: Pos)
+                =
+                let colony =
+                    { secondOutpost hostiles [ holder, at ] with
+                        Stepped = stepped
+                    }
+
+                let atlas = Atlas.ofView colony
+                let held = Map.ofList [ holder.Name, taskId (Guard "W1N2") ]
+                let threats = threatsOfHeld colony atlas (Facts.heldTaskFacts colony held)
+                let brief = Threats.briefOf threats "W1N2"
+
+                Map.tryFind holder.Name brief.Seats.Value
+                |> Option.orElse brief.Ground
+                |> Option.defaultValue Set.empty
+                |> Set.map RoomPos.pos
+
+            // W17S26 t1052679-685: Midnight (an empty hauler) walked in to
+            // the container at (27,9) and stood beside it; the kill's ground
+            // was the store ring, every tile within two of the container
+            // (#619), and a ranger seated anywhere on it within three of the
+            // hauler stood three off it. The exchange (`kiteExchangeOn`)
+            // prices a quarry that steps and cannot hurt it: beside it, where
+            // it stays in reach whichever way it steps off.
+            test
+                "a holder waiting at the store for a hauler walking in is seated on the ring tiles beside it" {
+                let container = { X = 25; Y = 41 }
+                let at = { X = 27; Y = 43 }
+
+                let hauler = haulerOf "h-1" at
+                let coming = Map.ofList [ "h-1", RoomPos.at "W1N2" { X = 28; Y = 44 } ]
+
+                let seats = seatsOf [ hauler ] coming (ranger "r-1") { X = 25; Y = 30 }
+
+                Expect.isNonEmpty seats "the premise, a seat"
+
+                Expect.isTrue
+                    (seats |> Set.forall (fun tile -> range tile container <= 2))
+                    $"on the store ring: {seats}"
+
+                Expect.isTrue
+                    (seats |> Set.forall (fun tile -> range tile at = 1))
+                    $"beside the hauler: {seats}"
+
+                // A guard alone never kills a hauler at its pace: it keeps
+                // off a swing (`Facts.killableIn`), so no kill is priced and
+                // the guard waits on the whole store ring, for the draw.
+                let guarded = seatsOf [ hauler ] coming (guard "g-1") { X = 25; Y = 30 }
+
+                Expect.isTrue
+                    (not (Set.isEmpty guarded)
+                     && guarded |> Set.forall (fun tile -> range tile container <= 2)
+                     && guarded |> Set.exists (fun tile -> range tile at > 1))
+                    $"the guard: the whole store ring: {guarded}"
+            }
+
+            // #615 review: with no kill priced for arrival or catch odds,
+            // a holder is seated on the quarry it reaches soonest within its
+            // reach; one the side never kills (its heal out-paces us) is no
+            // such quarry, however near.
+            test
+                "with no kill priced, a holder keeps to the quarry it reaches soonest that its side kills" {
+                // Haulers on the north side, each a step nearer the exit than
+                // the two before: leaving, out of reach, caught at nought.
+                let leaving id x y =
+                    haulerOf id { X = x; Y = y },
+                    (id, RoomPos.at "W1N2" { X = x; Y = y + 1 }),
+                    (id, RoomPos.at "W1N2" { X = x; Y = y + 2 })
+
+                let near, nearStep, nearBack = leaving "near" 20 10
+                let far, farStep, farBack = leaving "far" 36 10
+
+                let seatsWith (hostiles: HostileInfo list) steps backs =
+                    let colony =
+                        { secondOutpost hostiles [ ranger "r-1", { X = 22; Y = 20 } ] with
+                            Stepped = Map.ofList steps
+                            SteppedBack = Map.ofList backs
+                        }
+
+                    let atlas = Atlas.ofView colony
+                    let held = Map.ofList [ "r-1", taskId (Guard "W1N2") ]
+                    let threats = threatsOfHeld colony atlas (Facts.heldTaskFacts colony held)
+
+                    Map.tryFind "r-1" (Threats.briefOf threats "W1N2").Seats.Value
+                    |> Option.defaultValue Set.empty
+                    |> Set.map RoomPos.pos
+
+                let seats = seatsWith [ near; far ] [ nearStep; farStep ] [ nearBack; farBack ]
+
+                Expect.isTrue
+                    (not (Set.isEmpty seats)
+                     && seats |> Set.forall (fun tile -> range tile (RoomPos.pos near.Pos) <= 1))
+                    $"beside the nearer quarry only: {seats}"
+
+                // A hauler healing itself past what the ranger lands, nearer
+                // still and out of its heal's reach of the other: never
+                // killed, never the seat's quarry.
+                let medic, medicStep, medicBack =
+                    leaving "medic" 32 14
+                    |> fun (h, s, b) ->
+                        { h with
+                            Body = h.Body @ List.replicate 20 Heal
+                        },
+                        s,
+                        b
+
+                let seats =
+                    seatsWith [ near; medic ] [ nearStep; medicStep ] [ nearBack; medicBack ]
+
+                Expect.isTrue
+                    (not (Set.isEmpty seats)
+                     && seats |> Set.forall (fun tile -> range tile (RoomPos.pos near.Pos) <= 1))
+                    $"beside the hauler it kills, not the medic: {seats}"
+            }
+
+            // #615 review: the seat is priced among the tiles its walk
+            // reaches (`bestReached`); a top-priced tile walled off is no
+            // reason to drop to the whole ground, which a seat priced first
+            // and filtered after was: the walled tile alone the best, nothing
+            // left of it once filtered.
+            test "a walled-off top-priced tile never empties the seat" {
+                let p x y = { X = x; Y = y }
+                let walled = p 26 42
+                let tiles = set [ walled; p 28 42; p 28 43; p 27 44 ]
+                // The walled tile priced best; the rest the nearer (30,42).
+                let price tile =
+                    if tile = walled then 100 else -(range tile (p 30 42))
+
+                Expect.equal
+                    (bestReached (fun tile -> tile <> walled) price tiles)
+                    (set [ p 28 42; p 28 43 ])
+                    "the best of the tiles it reaches"
+
+                Expect.isEmpty (bestReached (fun _ -> false) price tiles) "none reached: no seat"
+            }
+        ]

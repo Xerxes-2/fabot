@@ -2994,6 +2994,10 @@ type KiteExchange =
     {
         Head: Pos
         HeadSteps: bool
+        /// The heal the head and its friends land on it a tick, in the
+        /// damage that undoes it (`Facts.healUndoingIn`): what of our blows
+        /// on it does not stick.
+        HealOn: int
         Fires: KiteFire list
         Towers: Pos list
         Targets: Pos list
@@ -3027,7 +3031,10 @@ let kiteExchangeOn (exchange: KiteExchange) (fighter: Fighter) (seated: Pos list
         kiteIncoming exchange.Fires exchange.Towers (tile :: seated)
         - kiteIncoming exchange.Fires exchange.Towers seated
 
-    max (fighter.DamageAt r) mass * stays - kiteReach * added
+    // Its blows at what sticks, net of the head's heal: a head that out-heals
+    // it is worth no standing in its gun.
+    max 0 (max (fighter.DamageAt r) mass - exchange.HealOn) * stays
+    - kiteReach * added
 
 /// Fighters seated on a kite band (#615), each with the tile it stands on
 /// and the tiles it reaches by its arrival in ticks: one priced pass, the
@@ -3080,6 +3087,55 @@ let kiteSeating
     claims
     |> List.map (fun (name, tile, tops) -> name, (tile, Set.add tile (Set.difference tops chosen)))
     |> Map.ofList
+
+/// Of `tiles`, the ones a body's walk reaches (`reached`) priced best
+/// (`price`): an unreached tile, however priced, is no seat and never
+/// outprices one it can stand on. Empty where it reaches none.
+let bestReached (reached: 'tile -> bool) (price: 'tile -> int) (tiles: Set<'tile>) : Set<'tile> =
+    match
+        tiles
+        |> Set.filter reached
+        |> Set.toList
+        |> List.map (fun tile -> price tile, tile)
+    with
+    | [] -> Set.empty
+    | priced ->
+        let best = priced |> List.map fst |> List.max
+        priced |> List.filter (fst >> (=) best) |> List.map snd |> Set.ofList
+
+/// One room's exchange about `head` (`KiteExchange`), off this tick's view:
+/// whether the head can step (a MOVE acting and its fatigue paid,
+/// `Arrival.waitOf`), the room's fire and rival towers, our `targets` there,
+/// and every body there a mass attack may not reach (one `mayStrike` refuses
+/// in `engaged`, an ally's).
+let private exchangeAbout
+    (view: ColonyView)
+    (engaged: Set<string>)
+    (targets: HostileInfo list)
+    (head: HostileInfo)
+    : KiteExchange =
+    let room = head.Pos.Room
+    let inRoom = view.Hostiles |> List.filter (fun hostile -> hostile.Pos.Room = room)
+    let seen = Map.tryFind room view.World.Rooms
+
+    {
+        Head = RoomPos.pos head.Pos
+        HeadSteps = stepsNowIn view inRoom head
+        HealOn = Facts.healUndoingIn view room head
+        Fires = firesIn view inRoom
+        Towers =
+            seen
+            |> Option.map (fun seen -> seen.Towers |> List.map snd)
+            |> Option.defaultValue []
+        Targets = targets |> List.map (fun h -> RoomPos.pos h.Pos)
+        Bystanders =
+            (inRoom
+             |> List.filter (fun h -> not (Facts.mayStrike view engaged h))
+             |> List.map (fun h -> RoomPos.pos h.Pos))
+            @ (view.Allies
+               |> List.filter (fun h -> h.Pos.Room = room)
+               |> List.map (fun h -> RoomPos.pos h.Pos))
+    }
 
 /// The kite ground (#510, movement S3): the tiles of one room within the
 /// head's reach that a body standing there steps off before any map shorter
@@ -3536,25 +3592,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
                  targets
                  |> killHead view room (sideScore room)
-                 |> Option.map (fun head ->
-                     head,
-                     {
-                         Head = RoomPos.pos head.Pos
-                         HeadSteps = stepsNowIn view inRoom head
-                         Fires = firesIn view inRoom
-                         Towers =
-                             Map.tryFind room view.World.Rooms
-                             |> Option.map (fun seen -> seen.Towers |> List.map snd)
-                             |> Option.defaultValue []
-                         Targets = targets |> List.map (fun h -> RoomPos.pos h.Pos)
-                         Bystanders =
-                             (inRoom
-                              |> List.filter (fun h -> not (Facts.mayStrike view engaged h))
-                              |> List.map (fun h -> RoomPos.pos h.Pos))
-                             @ (view.Allies
-                                |> List.filter (fun h -> h.Pos.Room = room)
-                                |> List.map (fun h -> RoomPos.pos h.Pos))
-                     })))
+                 |> Option.map (fun head -> head, exchangeAbout view engaged targets head)))
         |> Map.ofList
 
     // The body the kite ground is laid for: a ranger block (`kiteReach`).
@@ -4395,23 +4433,72 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     let reach = Fighter.reachOf creep
                     let arrival = arrivalOf creep
 
-                    let head =
+                    let targets =
                         view.Hostiles
                         |> List.filter (fun hostile ->
                             hostile.Pos.Room = room
                             && brief.Targets.Shoots resident engaged hostile)
-                        |> List.map (fun hostile -> score hostile, hostile)
-                        |> List.filter (fun (worth, _) -> worth > 0.0)
-                        |> List.sortBy (fun (worth, hostile) -> -worth, hostile.Id)
-                        |> List.tryHead
 
+                    // Its arrival within its reach of a hostile, as its kill
+                    // score reads it (`scoreOf`): the soonest tile of that
+                    // reach its own walk reaches.
+                    let inReachBy (hostile: HostileInfo) =
+                        Atlas.walkableWithinIn atlas room reach (RoomPos.pos hostile.Pos)
+                        |> List.choose (fun tile -> arrival (RoomPos.at room tile))
+                        |> function
+                            | [] -> None
+                            | ticks -> Some(List.min ticks)
+
+                    // Whether the holders together kill it at all: a nought
+                    // score of one they never kill is its heal's, and no
+                    // reason to stand by it.
+                    let killable =
+                        lazy (Facts.killableIn view room (holders |> List.map Fighter.ofCreep))
+
+                    // The kill worth most a tick of its effort; where none
+                    // is priced at any for its arrival or its catch odds
+                    // (each quarry walking off out of its reach), the one of
+                    // those it reaches soonest within its reach, the score's
+                    // own arrival term: it keeps pace on the one it is on,
+                    // never the nearest tile of every quarry's ground,
+                    // another's store ring among them (W17S26
+                    // t1052656-676: a ranger four off Midnight walked for
+                    // Onyx's tiles eleven off, every score nought).
+                    let head =
+                        match
+                            targets
+                            |> List.map (fun hostile -> score hostile, hostile)
+                            |> List.filter (fun (worth, _) -> worth > 0.0)
+                            |> List.sortBy (fun (worth, hostile) -> -worth, hostile.Id)
+                        with
+                        | (_, best) :: _ -> Some best
+                        | [] ->
+                            targets
+                            |> List.filter killable.Value
+                            |> List.choose (fun hostile ->
+                                inReachBy hostile
+                                |> Option.map (fun ticks -> (ticks, hostile.Id), hostile))
+                            |> List.sortBy fst
+                            |> List.tryHead
+                            |> Option.map snd
+
+                    // Of the ground within its reach of the head that its
+                    // walk reaches, the tiles it trades best on there
+                    // (`kiteExchangeOn`, the room's fire priced off the
+                    // bodies): beside a quarry that steps and cannot hurt it,
+                    // anywhere in its reach of one that stands, off a swing.
                     let near =
                         match head with
-                        | Some(_, target) ->
+                        | Some target ->
+                            let exchange = lazy (exchangeAbout view engaged targets target)
+                            let fighter = Fighter.ofCreep creep
+
                             ground
                             |> Set.filter (fun tile ->
                                 RoomPos.range tile target.Pos
                                 |> Option.exists (fun r -> r <= reach))
+                            |> bestReached (arrival >> Option.isSome) (fun tile ->
+                                kiteExchangeOn exchange.Value fighter [] (RoomPos.pos tile))
                         | None -> Set.empty
 
                     if

@@ -2394,6 +2394,7 @@ let kiteExchangeTests =
                 {
                     Head = head
                     HeadSteps = steps
+                    HealOn = 0
                     Fires = fires
                     Towers = towers
                     Targets = [ head ]
@@ -2638,6 +2639,23 @@ let kiteExchangeTests =
                     guards
                     (Map.ofList [ "g-1", [ 1 ]; "g-2", [ 3 ]; "g-3", [ 3 ]; "g-4", [ 3 ] ])
                     "one beside it, the rest out of its mass attack's best reach"
+            }
+
+            test
+                "a head that out-heals the body is worth none of its blows, only the fire it stands in" {
+                let shooter = exchange true [ gun 3 ] []
+
+                let healed = { shooter with HealOn = 100 }
+
+                Expect.isGreaterThan
+                    (kiteExchangeOn shooter ranger [] { X = 25; Y = 26 })
+                    0
+                    "the premise: beside a lone shooter it heals nothing of, its blows outprice its shot"
+
+                Expect.equal
+                    (kiteExchangeOn healed ranger [] { X = 25; Y = 26 })
+                    (-3 * 30)
+                    "healed past its 40: nothing sticks, its shot on us is all that is left"
             }
 
             test "under a rival tower the band's tiles farthest from it are taken first" {
