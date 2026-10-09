@@ -38,6 +38,23 @@ let target (facts: OpFacts) (spec: OperationSpec) : string option =
         |> List.tryHead
         |> Option.map fst)
 
+/// The room that outpays `held`, the room committed to (`OpGuard.Outpaid`):
+/// of the target's other rooms whose rate on evidence (`OpFacts.Challenge`)
+/// is above the committed room's rate, the one paying most, then by name;
+/// None where none is, or the committed room is not priced. The room an
+/// `Outpaid` exit moves to: the one that won the comparison.
+let private challenger (facts: OpFacts) (spec: OperationSpec) (held: string) : string option =
+    match roomsOf spec.Target, facts.Rate held with
+    | Some rooms, Some rate ->
+        rooms
+        |> List.filter ((<>) held)
+        |> List.choose (fun room -> facts.Challenge room |> Option.map (fun paid -> room, paid))
+        |> List.filter (fun (_, paid) -> paid > rate)
+        |> List.sortBy (fun (room, paid) -> -paid, room)
+        |> List.tryHead
+        |> Option.map fst
+    | _ -> None
+
 /// Whether a body worth its kill stands in sight in the room: Unknown where
 /// the room is not priced, or only bodies out of sight could answer.
 let private quarryIn (facts: OpFacts) (room: string) : Truth =
@@ -287,11 +304,15 @@ let advance
 
             // The room it enters the phase with: the one it is committed to,
             // its commitment kept through every phase, a hold among them,
-            // unless another room outpays it, or it is exhausted and another
-            // room pays; else the target's best, committed from now.
+            // unless another room outpays it (that room, `challenger`), or it
+            // is exhausted and another room pays (the target's best); else
+            // the target's best, committed from now.
             let entered () =
                 match record.Room with
-                | Some _ when truth facts spec record OpGuard.Outpaid = Truth.Yes -> room.Value, now
+                | Some kept when truth facts spec record OpGuard.Outpaid = Truth.Yes ->
+                    match challenger facts spec kept with
+                    | Some other -> Some other, now
+                    | None -> Some kept, record.RoomSince
                 | Some kept when truth facts spec record OpGuard.Exhausted = Truth.Yes ->
                     match room.Value with
                     | Some other when other <> kept -> Some other, now
@@ -303,16 +324,20 @@ let advance
             | Some(_, OpNext.Finish how) -> ended record how
             | Some(_, OpNext.Recur) -> recur ()
             | Some(index, OpNext.To into) when spec.Phases |> List.exists (fun p -> p.Phase = into) ->
-                let into', since = entered ()
-
-                Some
-                    { record with
-                        Phase = into
-                        Since = now
-                        Room = into'
-                        RoomSince = since
-                    },
-                [ OpEvent.Moved(spec.Id, record.Phase, into, index, into') ]
+                match entered () with
+                // Into the phase it is in, with the room it holds: no
+                // transition, so nothing moves — its phase's tick, its
+                // commitment and the Task its room is fought under.
+                | into', _ when into = record.Phase && into' = record.Room -> Some record, []
+                | into', since ->
+                    Some
+                        { record with
+                            Phase = into
+                            Since = now
+                            Room = into'
+                            RoomSince = since
+                        },
+                    [ OpEvent.Moved(spec.Id, record.Phase, into, index, into') ]
             | _ -> Some record, []
 
 /// The interpreter's tick (#663 S7a, dry run): every admitted spec's record
@@ -626,20 +651,32 @@ let ownFacts
     let rates = listed |> List.map (fun room -> room, lazy (rate room)) |> Map.ofList
 
     // A room's rate on evidence (`evidenced`): what another room must show
-    // to outpay the committed one.
+    // to outpay the committed one. Its rate, less what evidence withholds:
+    // a body seen there once earns the room nothing, and striking it never
+    // earns the room more (an escort it costs time against, a heal, a slow
+    // kill its rate is diluted by), so a room is never priced above its own
+    // rate, the basis the committed room is priced on.
     let challenge (room: string) =
-        match casters room with
-        | [] -> 0.0
-        | casting ->
-            match placed with
-            | [] ->
-                casting
-                |> List.map (fun view -> Facts.castRateIn (evidenced room (lay view)) room)
-                |> List.max
-            | placed ->
-                pricing room
-                |> Option.map (fun view -> Facts.groupRate (evidenced room view) placed room)
-                |> Option.defaultValue 0.0
+        let onEvidence () =
+            match casters room with
+            | [] -> 0.0
+            | casting ->
+                match placed with
+                | [] ->
+                    casting
+                    |> List.map (fun view -> Facts.castRateIn (evidenced room (lay view)) room)
+                    |> List.max
+                | placed ->
+                    pricing room
+                    |> Option.map (fun view -> Facts.groupRate (evidenced room view) placed room)
+                    |> Option.defaultValue 0.0
+
+        let plain =
+            Map.tryFind room rates
+            |> Option.map _.Value
+            |> Option.defaultWith (fun () -> rate room)
+
+        if plain <= 0.0 then plain else min plain (onEvidence ())
 
     let truthOf (answer: bool) = if answer then Truth.Yes else Truth.No
 

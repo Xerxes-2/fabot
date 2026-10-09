@@ -377,6 +377,65 @@ let operationStepTests =
                     "out of the hold into W2N1"
             }
 
+            // Live W19S26, bundle f837bfb7, t1,065,819-832: eleven
+            // `execute>execute` events through `Outpaid`, the room unchanged
+            // in each, every one re-committing it from that tick.
+            test
+                "an exit into the phase it is in with the room it holds is no transition: no event, its commitment kept" {
+                let executing =
+                    { recordAt OpPhase.Execute 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                    }
+
+                // Exhausted, and the target's best is the room it holds: the
+                // exhausted exit re-enters Execute with W1N1.
+                let spent =
+                    { factsAt 50 [ "W1N1", 1.0; "W2N1", 0.0 ] with
+                        Holds = fun room -> if room = "W1N1" then Truth.No else Truth.Yes
+                        Loses = fun _ -> Truth.No
+                    }
+
+                Expect.equal
+                    (Operations.exitOf
+                        spent
+                        sweep
+                        executing
+                        (sweep.Phases |> List.find (fun p -> p.Phase = OpPhase.Execute)).Exits
+                     |> Option.map fst)
+                    (Some 2)
+                    "the premise: the exhausted exit into Execute is taken"
+
+                Expect.equal
+                    (Operations.advance spent sweep (Some executing))
+                    (Some executing, [])
+                    "unmoved, silent"
+            }
+
+            test "outpaid, the room it moves to is the one that outpaid it, never the one it holds" {
+                let executing =
+                    { recordAt OpPhase.Execute 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                    }
+
+                // W2N1's challenge beats W1N1's rate, though W1N1's rate is
+                // the plain argmax: the shape the live events had.
+                let outpaid =
+                    { factsAt 50 [ "W1N1", 1.0; "W2N1", 0.5 ] with
+                        Holds = fun _ -> Truth.Yes
+                        Loses = fun _ -> Truth.No
+                        Challenge = fun room -> if room = "W2N1" then Some 1.5 else Some 1.0
+                    }
+
+                Expect.equal
+                    (Operations.advance outpaid sweep (Some executing)
+                     |> fst
+                     |> Option.map (fun r -> r.Phase, r.Room, r.RoomSince))
+                    (Some(OpPhase.Execute, Some "W2N1", 50))
+                    "into W2N1, committed from now"
+            }
+
             test "Unknown never transitions, and hides the exits after it" {
                 let spec =
                     withExits

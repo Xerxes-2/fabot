@@ -137,7 +137,8 @@ type OpGuard =
     /// own spell, than the room its record is committed to: the other room
     /// read on evidence (`OpFacts.Challenge`: only a body seen there on two
     /// full ticks or more counts, so a body crossing it for a tick moves
-    /// nothing), its rate net of the group's walk there; the committed room
+    /// nothing, and never above its own rate), its rate net of the group's
+    /// walk there; the committed room
     /// read with the effort already spent in it (`OpFacts.Rate`) — its group
     /// in or by it walks nothing, the volleys landed are the hits its quarry
     /// lacks, its escort as it stands, and a body seen rooted at its work
@@ -328,7 +329,8 @@ type OpFacts =
         /// remembered at its odds (`RoomWorth.values`).
         Holds: string -> Truth
         /// A room's rate read on evidence (`OpGuard.Outpaid`): only its
-        /// bodies seen there on two full ticks or more counted.
+        /// bodies seen there on two full ticks or more counted, and never
+        /// above its rate (`Rate`): evidence withholds credit, never adds it.
         Challenge: string -> float option
         /// Whether every colony that may cast for the operation has its home
         /// threatened.

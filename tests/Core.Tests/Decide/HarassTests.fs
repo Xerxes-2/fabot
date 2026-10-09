@@ -1806,6 +1806,359 @@ let sweepRoomTests =
                     "seen there on two full ticks: they outpay it"
             }
 
+            // Live W19S26, bundle f837bfb7, t1,065,819-832: the sweep took
+            // its `Outpaid` exit eleven times into the room it held, and the
+            // event re-committed it each tick. The exit fired on the other
+            // room's rate on evidence, the room it moved to was the plain
+            // argmax: the challenge stood above that room's own rate. Here a
+            // third party's escort just come into the west room, which the
+            // group beats but spends time on: dropped on evidence, the room
+            // read dearer than it is.
+            test
+                "a room is never priced on evidence above its own rate, so nothing outpays the committed room on a body seen once" {
+                let holder = ranger "ranger-r"
+                let home = SpatialInfo.homeName bareHome.Spatial
+                let held = Map.ofList [ holder.Name, taskId (operating harassRoom) ]
+                let minerN = theirsIn harassRoom "miner-n" { X = 20; Y = 20 } [ Work; Work; Move ]
+                let minerW = theirsIn westRoom "miner-w" { X = 20; Y = 20 } [ Work; Work; Move ]
+
+                // Anybody else's: it only gates the exchange, and costs time.
+                let escort =
+                    { theirsIn westRoom "escort" { X = 24; Y = 20 } [ Move; Move; RangedAttack ] with
+                        Owner = "Invader"
+                    }
+
+                let colony =
+                    { sweeping
+                          [ holder, RoomPos.at home { X = 15; Y = 20 } ]
+                          [ minerN; minerW; escort ] with
+                        Time = 200
+                    }
+
+                // The miners on two full ticks, the escort on none.
+                let colony =
+                    { colony with
+                        World =
+                            { colony.World with
+                                Quarries =
+                                    [ minerN; minerW ]
+                                    |> List.map (fun h ->
+                                        h.Id,
+                                        {
+                                            Body = h
+                                            Seen = 200
+                                            Cargo = 0
+                                            Trail = [ 200, h.Pos; 199, h.Pos ]
+                                            Crossings = None
+                                            Gone = None
+                                        })
+                                    |> Map.ofList
+                            }
+                    }
+
+                let spec =
+                    Operation.Templates.sweep
+                        "sweep"
+                        enemy
+                        [ harassRoom; westRoom ]
+                        {
+                            MaxBodies = 6
+                            MaxEnergy = System.Int32.MaxValue
+                            Deadline = System.Int32.MaxValue
+                            MaxLossRatio = 1.0
+                        }
+
+                let committed =
+                    {
+                        Id = "sweep"
+                        Started = 100
+                        Phase = OpPhase.Execute
+                        Since = 100
+                        Room = Some harassRoom
+                        RoomSince = 100
+                        Spent = 0
+                        Lost = 0
+                        NextDue = 0
+                        Ended = None
+                    }
+
+                let group =
+                    Operations.groupIn Colony.sweepId (set [ harassRoom; westRoom ]) held [ colony ]
+
+                let facts =
+                    Operations.ownFacts
+                        200
+                        (fun _ -> true)
+                        spec
+                        (Some committed)
+                        (fun _ -> [ colony ])
+                        group
+                        [ colony ]
+
+                let rate room =
+                    facts.Rate room |> Option.defaultValue 0.0
+
+                let challenge room =
+                    facts.Challenge room |> Option.defaultValue 0.0
+
+                Expect.isGreaterThan
+                    (rate harassRoom)
+                    (rate westRoom)
+                    "the premise: the west room's escort costs it more than the north room's walk"
+
+                Expect.isLessThanOrEqual
+                    (challenge westRoom)
+                    (rate westRoom)
+                    "the west room on evidence: never above its own rate"
+
+                Expect.equal
+                    (Operations.truth facts spec committed OpGuard.Outpaid)
+                    Truth.No
+                    "nothing outpays the north room"
+
+                Expect.equal
+                    (Operations.advance facts spec (Some committed))
+                    (Some committed, [])
+                    "no exit: its commitment and its phase's tick kept, nothing logged"
+            }
+
+            // Live W18S27 <-> W19S26, bundle f837bfb7, t1,065,834-937: the
+            // room moved every one to three ticks. An escort danced on the
+            // room's exit into a room nothing sees: priced while in sight,
+            // gone from the price while out, so each room outpaid the other
+            // in turn. A third party's light escort the group beats on the
+            // west room's exit, in sight on odd ticks and across the border
+            // on even ones; the north room pays between the two readings.
+            test
+                "an escort dancing over the border out of sight never moves the room back and forth" {
+                let holder = ranger "ranger-r"
+                let home = SpatialInfo.homeName bareHome.Spatial
+                let held = Map.ofList [ holder.Name, taskId (operating harassRoom) ]
+                let minerN = theirsIn harassRoom "miner-n" { X = 20; Y = 20 } [ Work; Work; Move ]
+                let minerW = theirsIn westRoom "miner-w" { X = 20; Y = 20 } [ Work; Work; Move ]
+
+                let escort =
+                    { theirsIn westRoom "escort" { X = 0; Y = 20 } [ Move; Move; RangedAttack ] with
+                        Owner = "Bane"
+                    }
+
+                let track (h: HostileInfo) (seen: int) =
+                    h.Id,
+                    {
+                        Body = h
+                        Seen = seen
+                        Cargo = 0
+                        Trail = [ seen, h.Pos; seen - 2, h.Pos ]
+                        Crossings = None
+                        Gone = None
+                    }
+
+                let viewAt (now: int) =
+                    let seen = now % 2 = 1
+
+                    let colony =
+                        { sweeping
+                              [ holder, RoomPos.at home { X = 15; Y = 20 } ]
+                              ([ minerN; minerW ] @ (if seen then [ escort ] else [])) with
+                            Time = now
+                        }
+
+                    { colony with
+                        World =
+                            { colony.World with
+                                Quarries =
+                                    Map.ofList
+                                        [
+                                            track minerN now
+                                            track minerW now
+                                            track escort (if seen then now else now - 1)
+                                        ]
+                            }
+                    }
+
+                let spec =
+                    Operation.Templates.sweep
+                        "sweep"
+                        enemy
+                        [ harassRoom; westRoom ]
+                        {
+                            MaxBodies = 6
+                            MaxEnergy = System.Int32.MaxValue
+                            Deadline = System.Int32.MaxValue
+                            MaxLossRatio = 1.0
+                        }
+
+                let committed =
+                    {
+                        Id = "sweep"
+                        Started = 100
+                        Phase = OpPhase.Execute
+                        Since = 100
+                        Room = Some harassRoom
+                        RoomSince = 100
+                        Spent = 0
+                        Lost = 0
+                        NextDue = 0
+                        Ended = None
+                    }
+
+                let rooms =
+                    ((Some committed, []), [ 201..208 ])
+                    ||> List.fold (fun (record, rooms) now ->
+                        let view = viewAt now
+
+                        let group =
+                            Operations.groupIn
+                                Colony.sweepId
+                                (set [ harassRoom; westRoom ])
+                                held
+                                [ view ]
+
+                        let facts =
+                            Operations.ownFacts
+                                now
+                                (fun _ -> true)
+                                spec
+                                record
+                                (fun _ -> [ view ])
+                                group
+                                [ view ]
+
+                        let moved = Operations.advance facts spec record |> fst
+                        moved, (now, moved |> Option.bind _.Room) :: rooms)
+                    |> snd
+                    |> List.rev
+
+                Expect.isTrue
+                    (rooms |> List.forall (fun (_, room) -> room = Some harassRoom))
+                    $"the north room on every tick, the escort the west room's in sight or out: {rooms}"
+            }
+
+            // #663 (comment 6080182862), live W19S26: Bane3972 (7M13R)
+            // danced on exit tile 39,0 and the phase cycled execute <-> hold:
+            // `Exhausted`'s escort half read the escort on sight alone, its
+            // quarry half the remembered set. One rule, seen or remembered:
+            // an escort the group loses to, bouncing over the north room's
+            // exit, keeps the room exhausted while it is out at its odds,
+            // and bars it no longer once they run out.
+            test
+                "an escort bouncing over the border keeps the room exhausted while it is out of sight within its odds" {
+                let holder = ranger "ranger-r"
+                let home = SpatialInfo.homeName bareHome.Spatial
+                let held = Map.ofList [ holder.Name, taskId (operating harassRoom) ]
+                let minerN = theirsIn harassRoom "miner-n" { X = 20; Y = 20 } [ Work; Work; Move ]
+
+                // It out-shoots the one-block ranger: 13 RANGED_ATTACK.
+                let bane =
+                    theirsIn
+                        harassRoom
+                        "bane"
+                        { X = 39; Y = 0 }
+                        (List.replicate 7 Move @ List.replicate 13 RangedAttack)
+
+                let spec =
+                    Operation.Templates.sweep
+                        "sweep"
+                        enemy
+                        [ harassRoom; westRoom ]
+                        {
+                            MaxBodies = 6
+                            MaxEnergy = System.Int32.MaxValue
+                            Deadline = System.Int32.MaxValue
+                            MaxLossRatio = 1.0
+                        }
+
+                let committed =
+                    {
+                        Id = "sweep"
+                        Started = 100
+                        Phase = OpPhase.Execute
+                        Since = 100
+                        Room = Some harassRoom
+                        RoomSince = 100
+                        Spent = 0
+                        Lost = 0
+                        NextDue = 0
+                        Ended = None
+                    }
+
+                // The north room at `now`, the escort in sight or last seen
+                // at `seen` with its trip (`trail`) kept or forgotten.
+                let viewAt (now: int) (seen: int) (trail: bool) =
+                    let colony =
+                        { sweeping
+                              [ holder, RoomPos.at home { X = 25; Y = 5 } ]
+                              (minerN :: (if seen = now then [ bane ] else [])) with
+                            Time = now
+                        }
+
+                    { colony with
+                        World =
+                            { colony.World with
+                                Quarries =
+                                    Map.ofList
+                                        [
+                                            minerN.Id,
+                                            {
+                                                Body = minerN
+                                                Seen = now
+                                                Cargo = 0
+                                                Trail = [ now, minerN.Pos; now - 1, minerN.Pos ]
+                                                Crossings = None
+                                                Gone = None
+                                            }
+                                            bane.Id,
+                                            {
+                                                Body = bane
+                                                Seen = seen
+                                                Cargo = 0
+                                                Trail =
+                                                    if trail then
+                                                        [ seen, bane.Pos; seen - 2, bane.Pos ]
+                                                    else
+                                                        []
+                                                Crossings = None
+                                                Gone = None
+                                            }
+                                        ]
+                            }
+                    }
+
+                let exhausted (view: ColonyView) =
+                    let group =
+                        Operations.groupIn
+                            Colony.sweepId
+                            (set [ harassRoom; westRoom ])
+                            held
+                            [ view ]
+
+                    let facts =
+                        Operations.ownFacts
+                            view.Time
+                            (fun _ -> true)
+                            spec
+                            (Some committed)
+                            (fun _ -> [ view ])
+                            group
+                            [ view ]
+
+                    Operations.truth facts spec committed OpGuard.Exhausted
+
+                let bouncing =
+                    [ 201..206 ]
+                    |> List.map (fun now ->
+                        now, exhausted (viewAt now (if now % 2 = 1 then now else now - 1) true))
+
+                Expect.isTrue
+                    (bouncing |> List.forall (fun (_, answer) -> answer = Truth.Yes))
+                    $"exhausted in sight and out of it alike: {bouncing}"
+
+                Expect.equal
+                    (exhausted (viewAt 1_200 200 false))
+                    Truth.No
+                    "a thousand ticks gone, its trip forgotten: past its odds it bars the room no longer"
+            }
+
             // The review of the S7c phase fix: the body out of sight past its
             // odds was counted by its owner alone, so one the group cannot
             // kill (out-healing it) held the room once its ghost was gone —

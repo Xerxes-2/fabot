@@ -4075,9 +4075,19 @@ let private pricingOf (view: ColonyView, room: string) : ColonyView =
     let priced = killPricing view room
     let committed = Map.tryFind room view.World.Committed
 
+    // Its escort out of sight by the rule a quarry is (`Quarry.escorts`):
+    // one dancing over the border into a room nothing sees is the room's
+    // escort through the ticks it is out, as a ghost is its quarry.
+    let escorts =
+        match Quarry.escorts (Set.singleton room) priced.Hostiles view.Time view.World.Quarries with
+        | [] -> []
+        | recalled ->
+            let laid = priced.Hostiles |> List.map _.Id |> Set.ofList
+            recalled |> List.filter (fun h -> not (laid.Contains h.Id))
+
     { priced with
         Hostiles =
-            priced.Hostiles
+            priced.Hostiles @ escorts
             |> List.map (fun h ->
                 match Quarry.placed room h.Pos (Map.tryFind h.Id view.Bounces) with
                 | Some tile when tile <> h.Pos -> { h with Pos = tile }

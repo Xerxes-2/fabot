@@ -480,19 +480,16 @@ let raidHeld (world: World) : Set<string> =
         ]
 
 /// The bodies the quarry memory keeps in `rooms` that this tick's glance of
-/// them does not hold (#663, #618), whatever their odds: each track not
-/// known gone that is the quarry of one of them (`lastIn`, the room it was
-/// last seen in first) — out of sight, or standing in sight across the
-/// border of the room it crossed out of — with life left: laid there at its
-/// tile, with the life left it now, beside its track. A body standing in
-/// one of `rooms` is that room's own sighting, never laid. Never an ally's
-/// nor a Source Keeper, nor an armed body, which the raid's own memories
-/// keep (`World.Raiders` in a dark room, the exit hold a seen one keeps
-/// where it left), nor a healer in a room one of them holds (`raidHeld`): a
-/// lone healer is a trespasser as any body is. In id order.
-let remembered
+/// them does not hold, each that `keeps` admits (asked of its track and its
+/// tile): each track not known gone that is the quarry of one of them (`lastIn`, the
+/// room it was last seen in first) — out of sight, or standing in sight
+/// across the border of the room it crossed out of — with life left: laid
+/// there at its tile, with the life left it now, beside its track. A body
+/// standing in one of `rooms` is that room's own sighting, never laid. Never
+/// an ally's nor a Source Keeper. In id order.
+let private keptIn
+    (keeps: Track -> RoomPos -> bool)
     (rooms: Set<string>)
-    (raidHeld: string -> bool)
     (now: int)
     (quarries: Map<string, Track>)
     : (Track * HostileInfo) list =
@@ -502,8 +499,7 @@ let remembered
         (track.Seen < now || not (rooms.Contains track.Body.Pos.Room))
         && not (Colony.isAlly track.Body.Owner)
         && not (HostileInfo.isKeeper track.Body)
-        && not (HostileInfo.armed [ track.Body ] track.Body)
-        && not (HostileInfo.heals [ track.Body ] track.Body && raidHeld tile.Room))
+        && keeps track tile)
     |> Seq.groupBy (fun (track, _) -> track.Body.Id)
     |> Seq.choose (fun (_, placings) ->
         let track, tile =
@@ -523,6 +519,44 @@ let remembered
             None)
     |> Seq.sortBy (fun (_, body) -> body.Id)
     |> List.ofSeq
+
+/// The bodies the quarry memory keeps in `rooms` that this tick's glance of
+/// them does not hold (#663, #618, `keptIn`), whatever their odds. Never an
+/// armed body, which the raid's own memories keep (`World.Raiders` in a
+/// dark room, the exit hold a seen one keeps where it left) and a room's
+/// pricing lays as its escort (`escorts`), nor a healer in a room one of
+/// them holds (`raidHeld`): a lone healer is a trespasser as any body is.
+let remembered
+    (rooms: Set<string>)
+    (raidHeld: string -> bool)
+    (now: int)
+    (quarries: Map<string, Track>)
+    : (Track * HostileInfo) list =
+    keptIn
+        (fun track tile ->
+            not (HostileInfo.armed [ track.Body ] track.Body)
+            && not (HostileInfo.heals [ track.Body ] track.Body && raidHeld tile.Room))
+        rooms
+        now
+        quarries
+
+/// The armed bodies the quarry memory keeps in `rooms` that this tick's
+/// glance does not hold (`keptIn`) while the odds each is still there
+/// (`odds`) are above nothing: a room's escort by the rule its quarry is
+/// (`ghosts`), so one that danced out over the border into a room nothing
+/// sees stays the room's escort while its trip lasts. Past its odds it is
+/// none: what bars a room is never held on memory alone, for the walk in is
+/// the look that finds it. `side` is the bodies its gait is read beside. In
+/// id order.
+let escorts
+    (rooms: Set<string>)
+    (side: HostileInfo list)
+    (now: int)
+    (quarries: Map<string, Track>)
+    : HostileInfo list =
+    keptIn (fun track _ -> HostileInfo.raider [ track.Body ] track.Body) rooms now quarries
+    |> List.filter (fun (track, _) -> odds side false now track > 0.0)
+    |> List.map snd
 
 /// The bodies a colony keeps in `rooms` that this tick's glance of them does
 /// not hold (`remembered`) while the odds each is still there (`odds`) are
