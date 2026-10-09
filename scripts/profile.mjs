@@ -103,16 +103,17 @@
 // to full, default 200,000). Without either, every run is the one it was.
 //
 // `--sweep` (#658) runs the bundle with the sweep switched on, harness only:
-// `Colony.harass` set to `Colony.harassDeclared` in the probed copy, never
-// in `dist/main.js`, so the live switch stays a human's commit. Its
+// `Colony.operations` set to the sweep over `Colony.harassDeclared` in the
+// probed copy (`Colony.harass` in a bundle built before #663 S7c), never in
+// `dist/main.js`, so the live switch stays a human's commit. Its
 // fingerprints differ from a run without it by design; compare it with
 // itself, and read its light and forced full tick counts.
 //
 // `--sweep-working` (#663 S7b, pair only) is the run the sweep works a room
-// in: the probed copy's `Colony.harass` is one rival remote beside the
-// mother (`furnishRemote`), Trepidimous' reservation on it and a miner and
-// a hauler of theirs in sight. No other scenario has the sweep choose a
-// room, so this is the gate a change to the sweep or its operation reads.
+// in: the probed copy's sweep is over one rival remote beside the mother
+// (`furnishRemote`), Trepidimous' reservation on it and a miner and a hauler
+// of theirs in sight. No other scenario has the sweep choose a room, so this
+// is the gate a change to the sweep or its operation reads.
 
 import { createRequire } from "node:module";
 import { Session } from "node:inspector/promises";
@@ -4988,6 +4989,14 @@ globalThis.__fabotDecideCalls = [];
 // *is* an F# list of the very type `worldRooms` wants, so its own terminator
 // and its own cons cell build the argument, and there is no third name to be
 // wrong about.
+// The candidates the world reads: since #663 S7c the code's operations'
+// (`Colony.candidatesOf Colony.operations`), before it `Colony.harass`.
+const worldRoomsProbe = (operated) =>
+  WORLD_ROOMS_PROBE.replace(
+    "ColonyModule_harass,",
+    operated ? "ColonyModule_candidatesOf(ColonyModule_operations)," : "ColonyModule_harass,",
+  );
+
 const WORLD_ROOMS_PROBE = `
 // ---- appended by scripts/profile.mjs: the shell's own declared-room set ----
 {
@@ -5111,11 +5120,6 @@ const PROBE_BINDINGS = [
     "the declared colonies, their outposts and their errands (#287, #321)",
   ],
   [
-    "var ColonyModule_harass ",
-    "src/Core/Types/Colonies.fs's `Colony.harass`",
-    "the harassment rooms whose chains the world holds terrain for (#432)",
-  ],
-  [
     "var TuningModule_defaults ",
     "src/Core/Types/Rules.fs's `Tuning.defaults`",
     "the hop budget, the keeper margin and the mine thresholds a scenario stands against " +
@@ -5159,23 +5163,52 @@ function loadBundle(file, dir = "probe") {
 // hands it the warm one.
 function writeProbed(file, dir) {
   const read = readFileSync(file, "utf8");
-  // The live switch's whole binding, whatever its value (the live list, a
-  // filter of the declared one, `empty()`), up to the next top-level
-  // declaration: esbuild starts each at column 0 and indents what it spans.
-  const SWITCH = "\nvar ColonyModule_harass = ";
+  // The live switch's whole binding, whatever its value, up to the next
+  // top-level declaration: esbuild starts each at column 0 and indents what
+  // it spans. Since #663 S7c the switch is `Colony.operations`, the code's
+  // operation specs; a bundle built before it switches `Colony.harass`
+  // (an A/B against an older base reads the same probe).
+  const OPERATIONS = "\nvar ColonyModule_operations = ";
+  // `Colony.sweepId` came with the switch's move (#663 S7c): an S7b bundle
+  // has `Colony.operations` too, derived off `Colony.harass`.
+  const operated = read.indexOf("\nvar ColonyModule_sweepId = ") >= 0;
+  const SWITCH = operated ? OPERATIONS : "\nvar ColonyModule_harass = ";
   const at = read.indexOf(SWITCH);
   const end = at < 0 ? -1 : read.slice(at + SWITCH.length).search(/\n(var|let|const|function|class) /);
   if ((sweep || SWEEP_WORKING) && (at < 0 || end < 0 || read.indexOf(SWITCH, at + 1) >= 0)) {
     throw new Error(
       `${path.relative(process.cwd(), file)} holds no one \`${SWITCH.trim()}…\` binding: --sweep ` +
-        "sets src/Core/Types/Colonies.fs's `Colony.harass` to `Colony.harassDeclared` by that " +
-        "binding, and whatever renamed it is what this probe has to be re-pointed at",
+        "sets src/Core/Types/Colonies.fs's `Colony.operations` to the sweep over " +
+        "`Colony.harassDeclared` by that binding, and whatever renamed it is what this probe " +
+        "has to be re-pointed at",
     );
   }
+  // The sweep's spec over these rooms against this enemy, built with the
+  // constructors the declared operations are built with, read off its
+  // binding (`new OpSpecWire(ColonyModule_sweepId, "sweep", ...)`).
+  const sweepOver = (rooms, enemy) => {
+    const wire = read.match(/\nvar ColonyModule_operations = [^\n]*?new (\w+)\(ColonyModule_sweepId,/);
+    const list = read.match(/\nvar ColonyModule_harassDeclared = (\w+)\(\[/);
+    if (!wire || !list) {
+      throw new Error(
+        `${path.relative(process.cwd(), file)}: \`Colony.operations\` no longer compiles to ` +
+          "`new OpSpecWire(ColonyModule_sweepId, \"sweep\", ...)` beside `ofArray([...])`, which " +
+          "--sweep builds its spec with; re-point it",
+      );
+    }
+    return `${list[1]}([new ${wire[1]}(ColonyModule_sweepId, "sweep", ${enemy}, ${list[1]}(${rooms}), void 0, void 0, void 0)])`;
+  };
   // `--sweep-working`: one candidate, the furnished remote, built with the
   // constructors the declared list is built with, read off its binding.
-  let harassed = "ColonyModule_harassDeclared";
-  if (SWEEP_WORKING) {
+  let harassed = operated
+    ? sweepOver(
+        "[...ColonyModule_harassDeclared].map((h) => h.RoomName)",
+        "[...ColonyModule_harassDeclared][0].Enemy",
+      )
+    : "ColonyModule_harassDeclared";
+  if (SWEEP_WORKING && operated) {
+    harassed = sweepOver(`["${SWEEP_REMOTE}"]`, `"${SWEEP_ENEMY}"`);
+  } else if (SWEEP_WORKING) {
     const declared = read.match(
       /\nvar ColonyModule_harassDeclared = (\w+)\(\[new (\w+)\("[^"]*", "[^"]*", (\w+)\(\[/,
     );
@@ -5206,7 +5239,29 @@ function writeProbed(file, dir) {
       );
     }
   }
-  for (const [binding, where, purpose] of PROBE_BINDINGS) {
+  // The harassment rooms whose chains the world holds terrain for (#432):
+  // the code's operations' candidates, or a bundle before #663 S7c's list.
+  const candidateBindings = operated
+    ? [
+        [
+          "var ColonyModule_operations ",
+          "src/Core/Types/Colonies.fs's `Colony.operations`",
+          "the operations whose candidates' chains the world holds terrain for (#432, #663)",
+        ],
+        [
+          "function ColonyModule_candidatesOf(",
+          "src/Core/Types/Colonies.fs's `Colony.candidatesOf`",
+          "the candidates the operations name (#663)",
+        ],
+      ]
+    : [
+        [
+          "var ColonyModule_harass ",
+          "src/Core/Types/Colonies.fs's `Colony.harass`",
+          "the harassment rooms whose chains the world holds terrain for (#432)",
+        ],
+      ];
+  for (const [binding, where, purpose] of [...PROBE_BINDINGS, ...candidateBindings]) {
     let found = 0;
     for (let at = 0; (at = source.indexOf(`\n${binding}`, at)) >= 0; at += 1)
       found++;
@@ -5223,7 +5278,7 @@ function writeProbed(file, dir) {
   const probedFile = path.join(probed, path.basename(file));
   writeFileSync(
     probedFile,
-    source + DECIDE_PROBE + WORLD_ROOMS_PROBE + DECLARATION_PROBE + REACTOR_CODEC_PROBE,
+    source + DECIDE_PROBE + worldRoomsProbe(operated) + DECLARATION_PROBE + REACTOR_CODEC_PROBE,
   );
   return probedFile;
 }
@@ -5921,28 +5976,26 @@ if (unprojected.length) {
           ]),
         ),
     ],
-    // The operations (#663): null in every scenario, none of which publishes one.
+    // The operations (#663): the code's latch (`code`, the sweep's record
+    // and its spec's refusals) and the events it moved by; no scenario
+    // publishes a Memory spec.
     ["ops", globalThis.Memory?.fabot?.ops],
-    // The sweep's shadow (#663 S7b): the operation interpreter's answers
-    // compared with the sweep's, every whole full tick.
-    ["shadow", globalThis.Memory?.fabot?.shadow],
     ["cpu ticks", (observe.cpu?.ticks ?? []).map((row) => row.t)],
   ];
   console.log(
     "\nMemory leaves (Memory.fabot.*), fingerprinted: " +
       leaves.map(([name, value]) => `${name} ${fingerprint(value)}`).join("  "),
   );
-  const shadow = globalThis.Memory?.fabot?.shadow;
-  if (shadow && typeof shadow === "object") {
-    const counts = Object.entries(shadow.c ?? {}).map(([kind, n]) => `${kind} ${n}`);
+  // The sweep's latch as the run left it, and every room it moved to.
+  const code = globalThis.Memory?.fabot?.ops?.code;
+  for (const r of Array.isArray(code?.live) ? code.live : []) {
+    const moves = (globalThis.Memory?.fabot?.ops?.events ?? [])
+      .filter((e) => e?.i === r.i && e.r)
+      .map((e) => `t${e.t} ${e.k} ${e.r}`);
     console.log(
-      `  sweep shadow: ${shadow.n} whole full ticks compared (${shadow.w ?? 0} working a room), ` +
-        (counts.length === 0 ? "no divergence" : `divergences: ${counts.join(", ")}`),
+      `  operation ${r.i}: ${r.x ? `ended ${r.x}` : `${r.p}${r.r ? ` in ${r.r}` : ""} since t${r.a}`}` +
+        (moves.length > 0 ? `; rooms: ${moves.join(", ")}` : ""),
     );
-    for (const e of shadow.e ?? []) {
-      console.log(`    t${e.t} ${e.k} ${e.r || "-"}: shadow ${e.o} | sweep ${e.s} (${e.w})`);
-    }
-    for (const r of shadow.x ?? []) console.log(`    refused ${r.id}: ${r.why}`);
   }
 
   // The cold-reset tick (#486): every deploy is one, and the engine

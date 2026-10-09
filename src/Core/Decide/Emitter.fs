@@ -374,7 +374,8 @@ let internal applicable
     // bodies and no other (#504, #546).
     | Guard _
     | Defend _
-    | Assault _ -> Threats.briefFor threats task |> Option.exists (fun brief -> brief.Admits creep)
+    | Assault _
+    | Operate _ -> Threats.briefFor threats task |> Option.exists (fun brief -> brief.Admits creep)
     // Any body standing where the Reach out-damages it runs, a fighter
     // included (#533): one holding no fight Task fights nothing there, and a
     // defender with no line to hold is only a target (#504). Which fighter
@@ -570,7 +571,8 @@ let private intentFor
     // placed Task target (`guardIntent`). Healing is the shared reflex's act.
     | Guard _
     | Defend _
-    | Assault _ -> None
+    | Assault _
+    | Operate _ -> None
 
 /// Chat-bubble glyph of a Task: the whole colony's current matching is
 /// legible in the viewer at one glyph per creep.
@@ -591,7 +593,8 @@ let private glyphFor =
     | Reclaim _ -> "☢️"
     | Dismantle _ -> "🪓"
     | Flee -> "🏃"
-    | Guard _ -> "⚔️"
+    | Guard _
+    | Operate _ -> "⚔️"
     | Defend _ -> "🧱"
     | Assault _ -> "🏰"
 
@@ -1154,8 +1157,10 @@ let private actionIntents
     match task with
     // A holder mustering (#535) waits out of reach and strikes nothing on its
     // way there, where a swing at a melee takes its strike-back.
-    | Guard room when Map.containsKey creep.Name (Threats.briefOf threats room).Stances -> []
-    | Guard room ->
+    | Guard room
+    | Operate(_, room) when Map.containsKey creep.Name (Threats.briefOf threats room).Stances -> []
+    | Guard room
+    | Operate(_, room) ->
         guardIntent view atlas (Threats.briefOf threats room).Targets fighting creep room
         |> Option.toList
     | Defend room when isRangerBody creep ->
@@ -1277,13 +1282,16 @@ let private strikesBy
     match Map.tryFind creep.Name assigned with
     // A holder mustering (#535): a ranger fires its reflex — a shot draws no
     // strike-back —, a melee body swings at nothing.
-    | Some(Guard room) when Map.containsKey creep.Name (Threats.briefOf threats room).Stances ->
+    | Some(Guard room)
+    | Some(Operate(_, room)) when Map.containsKey creep.Name (Threats.briefOf threats room).Stances ->
         if isRangerBody creep then reflex () else None
     // A holder on its way, standing in another room (#563): its kill order
     // stands in the Guard's room, so where it stands it strikes by the reflex.
-    | Some(Guard room) when Atlas.creepRoom atlas creep.Name |> Option.exists ((<>) room) ->
+    | Some(Guard room)
+    | Some(Operate(_, room)) when Atlas.creepRoom atlas creep.Name |> Option.exists ((<>) room) ->
         reflex ()
-    | Some(Guard room) -> own room |> Option.map (fun (room, targets) -> room, targets, true)
+    | Some(Guard room)
+    | Some(Operate(_, room)) -> own room |> Option.map (fun (room, targets) -> room, targets, true)
     // A ranger holding the home's Defend shoots its line as a Guard's
     // holder its room's (#546).
     | Some(Defend room as task) when isRangerBody creep ->
@@ -1297,7 +1305,8 @@ let private strikesBy
 /// Whether a body holds its Guard waiting on the muster ground (#535).
 let private mustering (threats: Threats) (assigned: Map<string, Task>) (creep: CreepInfo) =
     match Map.tryFind creep.Name assigned with
-    | Some(Guard room) -> Map.containsKey creep.Name (Threats.briefOf threats room).Stances
+    | Some(Guard room)
+    | Some(Operate(_, room)) -> Map.containsKey creep.Name (Threats.briefOf threats room).Stances
     | _ -> false
 
 /// Each fighter's aims (#528, #535): a holder of a Guard, not mustering, aims
@@ -1332,7 +1341,8 @@ let forces
     view.Creeps
     |> List.choose (fun creep ->
         match Map.tryFind creep.Name assigned with
-        | Some(Guard room) ->
+        | Some(Guard room)
+        | Some(Operate(_, room)) ->
             match (Threats.briefOf threats room).Jobs with
             | job :: _ when
                 job.Kind = JobKind.Muster
@@ -1460,7 +1470,8 @@ let private gluing
     (creep: CreepInfo)
     =
     match Map.tryFind creep.Name assigned, strikesBy view atlas threats assigned creep with
-    | Some(Guard _), Some(room, targets, true) when
+    | Some(Guard _), Some(room, targets, true)
+    | Some(Operate _), Some(room, targets, true) when
         Fighter.glues (Fighter.ofCreep creep) && not (mustering threats assigned creep)
         ->
         Some(room, targets)

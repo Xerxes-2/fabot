@@ -2387,7 +2387,8 @@ let worldObserverTests =
                     atLevel 8 (openRoom 6)
                     |> withTarget "observer-1" { X = 30; Y = 30 } (Structure BuiltKind.Observer)
 
-                let live = Colony.harass |> List.map _.RoomName |> Set.ofList
+                let live =
+                    Colony.candidatesOf Colony.operations |> List.map _.RoomName |> Set.ofList
 
                 let off =
                     Colony.harassDeclared

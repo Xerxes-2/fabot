@@ -2277,8 +2277,9 @@ module World =
     /// tick's Tasks, kept nowhere: the **incumbent**, a colony that cast a
     /// ranger standing in any room of the operation the room is one of
     /// (`operation`: every candidate of the one [[sweep]], #667) or a fighter
-    /// holding a Guard of one (`held`: on the walk out too), keeps every one
-    /// down to `Tuning.CasterReserveHold` and bids its walk
+    /// holding a Guard of one or the operation's own Task (`operating`,
+    /// `op:<id>`; `held`: on the walk out too), keeps every one down to
+    /// `Tuning.CasterReserveHold` and bids its walk
     /// `Tuning.CasterSwitchMargin` short; a colony with a ranger in its oven
     /// is read at the hold too, the body not yet holding the Guard it was
     /// cast for. Any other comes in at `Tuning.CasterReserve`. The spawns'
@@ -2292,10 +2293,15 @@ module World =
         (except: string)
         (floor: int)
         (operation: Set<string>)
+        (operating: string option)
         (room: string)
         : CastBid list =
-        // The Guards' ids as `Tasks.taskId` spells them.
-        let guards = operation |> Set.map (fun worked -> "guard:" + worked)
+        // The Guards' ids as `Tasks.taskId` spells them, and the operation's
+        // own Task (`Operate`, #663 S7c) where it has one.
+        let guards =
+            operation
+            |> Set.map (fun worked -> "guard:" + worked)
+            |> Set.union (Option.toList operating |> Set.ofList)
 
         let incumbents =
             match
@@ -2362,14 +2368,14 @@ module World =
         (floor: int)
         (room: string)
         : string option =
-        castBids hopsOf tuning living world held except floor (Set.singleton room) room
+        castBids hopsOf tuning living world held except floor (Set.singleton room) None room
         |> CastBid.choose
 
     /// The colonies that project each [[sweep]] candidate this tick (#658):
     /// every one past the Caster's floors that reaches it (`castBids`, over
     /// every room's ground, `reachHops`, #617), the room being no colony's
     /// own. The sweep is one operation, but no colony runs it: where it goes
-    /// and how big its group is are its price's (`Facts.sweep`), and each
+    /// and how big its group is are its price's (`Operations.lay`), and each
     /// body is the Caster's to hand the colony landing it soonest
     /// (`Caster.assign`), so a candidate one colony cannot reach is worked
     /// by one that can. Empty while no colony may. Stateless, and decided
@@ -2402,7 +2408,17 @@ module World =
                 rooms
                 |> List.map (fun h ->
                     h,
-                    castBids hopsOf tuning living world held "" 0 sweep h.RoomName
+                    castBids
+                        hopsOf
+                        tuning
+                        living
+                        world
+                        held
+                        ""
+                        0
+                        sweep
+                        (Some("op:" + Colony.sweepId))
+                        h.RoomName
                     |> List.map _.Home
                     |> List.sort)
             GarrisonFloor = tuning.RangerResidentBlocks * harass.BlockCost

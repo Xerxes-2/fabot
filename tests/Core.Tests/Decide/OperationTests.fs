@@ -7,6 +7,8 @@ open Expecto
 open Fabot.Core.Types
 open Fabot.Core.Decide
 
+module Observe = Fabot.Core.Observe
+
 /// Facts with every listed room priced at its rate, every room seen since
 /// the reset, and nothing else.
 let private factsAt (now: int) (rates: (string * float) list) : OpFacts =
@@ -707,7 +709,7 @@ let operationDecodeTests =
 
                 let remembered =
                     function
-                    | "W7N1" -> Some "Kalgen"
+                    | "W7N1" -> Some(RoomHolder.Player "Kalgen")
                     | _ -> None
 
                 let standing = Operations.standingOf 1_000 (Set.ofList [ "W5N1" ]) remembered world
@@ -747,6 +749,76 @@ let operationDecodeTests =
                         "admitted"
                     ]
                     "Odiodin's reservation, Kalgen's reservation and room, an ally's room out of sight"
+            }
+
+            test
+                "out of sight a room keeps the holder its last look found: a rival's lapsed remote castable, an ally's refused" {
+                // The look: Trepidimous's remote unreserved, Odiodin's reserved.
+                let seen =
+                    { World.empty with
+                        Rooms =
+                            Map.ofList
+                                [
+                                    "W1N1", looked Ownership.Unowned None
+                                    "W2N1", looked Ownership.Unowned (Some "Odiodin")
+                                ]
+                    }
+
+                let looks =
+                    [ "W1N1"; "W2N1" ]
+                    |> List.choose (fun room ->
+                        Operations.holderSeen seen room |> Option.map (fun h -> room, h))
+                    |> Map.ofList
+
+                // The dossier: Trepidimous's reservations, one seen gone and
+                // one standing at the last look.
+                let rivals: Observe.Rivals =
+                    Observe.Rivals.ofDossiers (
+                        Map.ofList
+                            [
+                                "Trepidimous",
+                                { Observe.Dossier.opened 900 with
+                                    Rooms =
+                                        Map.ofList
+                                            [
+                                                "W1N1",
+                                                { Observe.RivalRoom.empty with
+                                                    LapsedAt = 950
+                                                }
+                                                "W3N1",
+                                                { Observe.RivalRoom.empty with
+                                                    LapsedAt = 950
+                                                }
+                                                "W4N1",
+                                                { Observe.RivalRoom.empty with
+                                                    Seen = 960
+                                                    Reserving = true
+                                                }
+                                            ]
+                                }
+                            ]
+                    )
+
+                let sweep =
+                    { wire with
+                        Template = "sweep"
+                        Rooms = [ "W1N1"; "W2N1"; "W3N1"; "W4N1"; "W5N1" ]
+                    }
+
+                let castable (remembered: string -> RoomHolder option) =
+                    let standing = Operations.standingOf 1_000 Set.empty remembered World.empty
+                    let admitted, refused = Operations.declared standing [ sweep ]
+                    admitted |> List.collect _.Rooms, refused |> List.map _.Why
+
+                Expect.equal
+                    (castable (Observe.Rivals.lastHolder looks (Some rivals)))
+                    ([ "W1N1"; "W3N1"; "W4N1" ], [ "an ally's: W2N1"; "holder unknown: W5N1" ])
+                    "the looks this heap, else the dossier's lapse and reservation; never seen is unknown"
+
+                Expect.equal
+                    (castable (Observe.Rivals.lastHolder Map.empty (Some rivals)))
+                    ([ "W1N1"; "W3N1"; "W4N1" ], [ "holder unknown: W2N1"; "holder unknown: W5N1" ])
+                    "a cold heap: the ally's room is in no dossier, so unknown and still refused"
             }
 
             test "admitted in order: a duplicate id refused, and no more live than the cap" {
@@ -857,34 +929,30 @@ let operationDecodeTests =
             }
         ]
 
-/// One answer of the sweep's: in W1N1, a group of two, a strike seating two.
-let private answer: SweepAnswer =
-    {
-        Room = Some "W1N1"
-        Group = set [ "a"; "b" ]
-        Scoped = Set.empty
-        Jobs = [ JobKind.Strike ]
-        Seats = 2
-    }
-
-/// The shadow's answer for the same tick: the phase's declared jobs.
-let private shadowed =
-    { answer with
-        Jobs = [ JobKind.Strike; JobKind.Camp; JobKind.Ring; JobKind.Muster ]
-    }
-
 [<Tests>]
-let sweepShadowTests =
+let sweepSpecTests =
     testList
-        "the sweep's shadow (#663 S7b)"
+        "the sweep's code spec (#663 S7b, S7c)"
         [
-            test "the code declares the sweep over every live candidate, against their one enemy" {
-                Expect.equal
-                    (Colony.operations |> Result.map (List.collect _.Rooms))
-                    (Ok(Colony.harass |> List.map _.RoomName))
-                    "the live candidates"
+            test
+                "the code declares the sweep as one operation, its candidates its rooms against its one enemy" {
+                let candidates = Colony.candidatesOf Colony.operations
 
-                for candidates in [ Colony.harass; Colony.harassDeclared ] do
+                Expect.equal
+                    (candidates |> List.map _.RoomName)
+                    (Colony.operations |> List.collect _.Rooms)
+                    "a candidate a room"
+
+                Expect.equal
+                    (candidates
+                     |> List.choose (fun h ->
+                         Colony.harassDeclared
+                         |> List.tryFind (fun d -> d.RoomName = h.RoomName)
+                         |> Option.map (fun d -> d.Via = h.Via)))
+                    (candidates |> List.map (fun _ -> true))
+                    "each with its declared detour"
+
+                for candidates in [ candidates; Colony.harassDeclared ] do
                     match Colony.sweepOf candidates with
                     | Ok [ wire ] ->
                         Expect.all candidates (fun h -> h.Enemy = wire.Enemy) "one enemy"
@@ -911,17 +979,6 @@ let sweepShadowTests =
                     (Colony.sweepOf mixed)
                     (Error "sweep candidates of two enemies: Trepidimous, Shibdib")
                     "refused"
-
-                Expect.equal
-                    (Operations.declaredSweep standing (Colony.sweepOf mixed))
-                    (None,
-                     [
-                         {
-                             Id = "sweep"
-                             Why = "sweep candidates of two enemies: Trepidimous, Shibdib"
-                         }
-                     ])
-                    "no spec, one refusal"
             }
 
             test
@@ -980,112 +1037,24 @@ let sweepShadowTests =
                 | Error refused -> failtest $"refused whole: {refused}"
             }
 
-            test "a fault is recorded once a heap: a repeat of its message is not recorded again" {
-                let first = Operation.firstSeen Set.empty "boom"
-                Expect.equal first (Some(set [ "boom" ])) "the first recorded"
-                Expect.isNone (Operation.firstSeen first.Value "boom") "the repeat not"
-                Expect.isSome (Operation.firstSeen first.Value "bang") "another message is"
-            }
-
             test
-                "the shadow agrees where every answer is the sweep's, its phase's declared jobs a superset of those laid" {
-                Expect.isEmpty (Operations.disagreements 10 shadowed answer) "agreed"
-            }
+                "the shell casts only what the code spec's safety admits: a room that is ours is dropped, refused by name" {
+                let admitted, refused =
+                    Operations.declared
+                        standing
+                        [
+                            { wire with
+                                Id = "sweep"
+                                Rooms = [ "W5N5"; "W8N8" ]
+                            }
+                        ]
 
-            test
-                "another room is one disagreement: the jobs and the seats are compared only in one room" {
-                let examples =
-                    Operations.disagreements 10 { shadowed with Room = None; Seats = 0 } answer
+                Expect.equal (admitted |> List.collect _.Rooms) [ "W8N8" ] "ours dropped"
+                Expect.equal refused [ { Id = "sweep"; Why = "ours: W5N5" } ] "and refused"
 
                 Expect.equal
-                    (examples |> List.map (fun e -> e.Kind, e.Room, e.Shadow, e.Sweep))
-                    [ Divergence.Room, "W1N1", "none", "W1N1" ]
-                    "the room alone"
-
-                Expect.stringStarts
-                    (List.head examples).Why
-                    "the spec works no room"
-                    "why: the spec's own phase"
-            }
-
-            test
-                "in one room each answer that differs is one example, the group as the bodies only one side counts" {
-                let examples =
-                    Operations.disagreements
-                        10
-                        { shadowed with
-                            Group = set [ "a"; "c" ]
-                            Seats = 1
-                        }
-                        { answer with
-                            Jobs = [ JobKind.HoldExit; JobKind.Strike ]
-                        }
-
-                Expect.equal
-                    (examples |> List.map (fun e -> e.Kind, e.Shadow, e.Sweep))
-                    [
-                        Divergence.Group, "c", "b"
-                        Divergence.Jobs, "Strike,Camp,Ring,Muster", "HoldExit,Strike"
-                        Divergence.Seats, "1", "2"
-                    ]
-                    "each kind once"
-
-                Expect.equal (examples |> List.map _.Tick |> List.distinct) [ 10 ] "stamped"
-            }
-
-            test
-                "a group difference made only of bodies the shadow counts from a colony not casting their room is the roster's scope" {
-                let wider =
-                    { shadowed with
-                        Group = set [ "a"; "b"; "c" ]
-                        Scoped = set [ "c" ]
-                    }
-
-                Expect.equal
-                    (Operations.disagreements 10 wider answer |> List.map _.Kind)
-                    [ Divergence.Scope ]
-                    "scope"
-
-                Expect.equal
-                    (Operations.disagreements 10 { wider with Group = set [ "a"; "c" ] } answer
-                     |> List.map _.Kind)
-                    [ Divergence.Group ]
-                    "a body the sweep counts and the shadow does not is a group difference"
-            }
-
-            test
-                "the log counts each kind, keeps the latest newest first, one example a standing disagreement, at most its cap" {
-                let room tick =
-                    Operations.disagreements tick { shadowed with Room = None } answer
-
-                let log =
-                    [ 1..3 ]
-                    |> List.fold
-                        (fun log tick -> Operations.logged log answer (room tick))
-                        Operation.shadowEmpty
-
-                Expect.equal (log.Compared, log.Working) (3, 3) "three compared, each worked"
-                Expect.equal log.Counts (Map.ofList [ Divergence.Room, 3 ]) "counted"
-                Expect.equal (log.Last |> List.map _.Tick) [ 3 ] "one example, the latest"
-
-                let many =
-                    [ 1..12 ]
-                    |> List.fold
-                        (fun log tick ->
-                            Operations.logged
-                                log
-                                { answer with Room = None }
-                                (Operations.disagreements
-                                    tick
-                                    { shadowed with Seats = tick }
-                                    answer))
-                        Operation.shadowEmpty
-
-                Expect.equal many.Working 0 "no room worked"
-
-                Expect.equal
-                    (many.Last |> List.map _.Tick)
-                    [ 12..-1..5 ]
-                    "the cap's newest, newest first"
+                    (Operations.declared standing [ { wire with Enemy = "Odiodin" } ])
+                    ([], [ { Id = "op1"; Why = "an ally: Odiodin" } ])
+                    "against an ally: nothing cast"
             }
         ]

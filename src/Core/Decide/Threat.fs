@@ -93,12 +93,14 @@ type Contention =
     }
 
 /// Which combat Task a `Brief` describes: a room's Guard, of its flavour, or
-/// a Task of its own — the home's Defend, an Assault.
+/// a Task of its own — the home's Defend, an Assault, an operation's room
+/// (`Operate`, #663 S7c), fought as a contested room that is not ours.
 [<RequireQualifiedAccess>]
 type Duty =
     | Guard of BriefKind
     | Defend
     | Assault
+    | Operation of opId: string
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module BriefKind =
@@ -643,6 +645,27 @@ let internal rangedBlocks (floor: int) (view: ColonyView) (room: string) : int =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Job =
+    /// These jobs with their seats summing to `most` at most, every row
+    /// together, the first job's first (an operation's `OpLimits.MaxBodies`,
+    /// #663 S7c).
+    let capped (most: int) (jobs: Job list) : Job list =
+        jobs
+        |> List.mapi (fun index job ->
+            { job with
+                Seats =
+                    fun threats ->
+                        let before =
+                            jobs
+                            |> List.take index
+                            |> List.sumBy (fun earlier -> (earlier.Seats threats).Count)
+
+                        let seating = job.Seats threats
+
+                        { seating with
+                            Count = min seating.Count (max 0 (most - before))
+                        }
+            })
+
     /// A job laid in a room on these tiles, about these hostiles, at this
     /// price, seating nobody until its Brief seats it.
     let laid
@@ -751,6 +774,16 @@ module Brief =
     /// kills alone price where no economy of ours is guarded.
     let isPrey (brief: Brief) : bool =
         brief.Contention |> Option.exists (fun c -> c.Phase = Phase.Prey)
+
+    /// The flavour a room's fight is read as: a Guard's own; an operation's
+    /// room (#663 S7c) a contested room's, which it is fought as; None for a
+    /// Task of its own.
+    let flavourOf (brief: Brief) : BriefKind option =
+        match brief.Duty with
+        | Duty.Guard kind -> Some kind
+        | Duty.Operation _ -> Some BriefKind.Contested
+        | Duty.Defend
+        | Duty.Assault -> None
 
     /// One fight's ground divided into seats (#650): each holder's own
     /// ground, the tiles it reaches by its arrival (`arrival`, None for
@@ -1000,7 +1033,7 @@ module Brief =
     /// standing keeps its Guard (the pool's cap counts it) on safe ground.
     let private residentsWanted (room: string) (view: ColonyView) (threats: Threats) : int =
         let lost =
-            match Map.tryFind (Guard room) threats.Briefs with
+            match Map.tryFind (Facts.fightTask view room) threats.Briefs with
             | Some brief -> brief.Verdict.Value = Answer.Lose
             | None -> outmatched view room
 
@@ -1118,13 +1151,17 @@ module Brief =
 
             // Under its raid, the bodies of the cast's row its prey's kills
             // pay for (`Facts.castBodiesPaid`), landed after the body's spawn
-            // and its walk, one a trespasser at most. A room not ours prices
-            // its prey into whether its cast pays at all (`pays`, `Takes`).
+            // and its walk, one a trespasser at most: in a room of ours, and
+            // in an operation's room, where the raid and its prey are one
+            // price (#663 S7c). Any other room not ours prices its prey into
+            // whether its cast pays at all (`pays`, `Takes`).
             let preyPaid =
                 lazy
                     (match contention with
                      | Some contention when
-                         preyed && contention.Ours && contention.Phase = Phase.Raid
+                         preyed
+                         && (contention.Ours || Option.isSome (Facts.operationIn view room))
+                         && contention.Phase = Phase.Raid
                          ->
                          match preyOf contention with
                          | [] -> 0
@@ -1166,9 +1203,9 @@ module Brief =
         | BriefKind.Chase, _ -> []
 
     /// A contested room's group (#663 M3): the bodies of this colony holding
-    /// its Guard, where each stands, and where the [[sweep]] works the room,
-    /// every colony's body of the sweep's group (`WorldView.SweepGroup`):
-    /// the bodies on its jobs.
+    /// its fight, where each stands, and where an operation works the room,
+    /// every colony's body of its group (`OperationWork.Group`): the bodies
+    /// on its jobs.
     let private groupIn (view: ColonyView) (room: string) (holding: Set<string>) =
         let own =
             ColonyView.bodies view
@@ -1177,13 +1214,10 @@ module Brief =
                 SpatialInfo.creepPlacementOf view.Spatial creep.Name
                 |> Option.map (fun at -> creep, at))
 
-        let swept =
-            if Set.contains room (harassRooms view) then
-                view.World.SweepGroup
-            else
-                []
+        let operating =
+            Facts.operationIn view room |> Option.map _.Group |> Option.defaultValue []
 
-        own @ swept |> List.distinctBy (fun (creep, _) -> creep.Name)
+        own @ operating |> List.distinctBy (fun (creep, _) -> creep.Name)
 
     /// A Guard's jobs seated (#663 M3): its first job seats the bodies its
     /// kind's count admits, a row's ask's count read here a second time so
@@ -1247,6 +1281,19 @@ module Brief =
             // job, capped at their own count, and a ranged one sits either,
             // as its shot reaches what a swing catches too: seats are who may
             // stand, the cast what is bought.
+            //
+            // An operation's prey (#663 S7c) seats what its price pays for
+            // (`JobCount.Priced`): its group's paid seats (`Facts.seatsPaid`),
+            // never fewer than its cast buys, any row its Brief admits — not
+            // the trespass split, which seats a body a trespasser whatever
+            // the price.
+            | BriefKind.Contested when
+                phase = Phase.Prey && Option.isSome (Facts.operationIn view room)
+                ->
+                let cast (threats: Threats) =
+                    asks |> List.sumBy (fun a -> a.Wanted threats)
+
+                seat (fun threats -> any (max grouped.Value (cast threats))) head :: rest
             | BriefKind.Contested when phase = Phase.Prey ->
                 let bouncing = answered.Value |> List.forall (snd >> List.isEmpty)
 
@@ -1470,6 +1517,32 @@ module Brief =
         // world hands the Brief walks to it too (a transit room carries no
         // source). A post to hold or a room to look into, priced at what a
         // fight there keeps.
+        // An operation's room (#663 S7c): its Task the operation's, its asks
+        // and its seats at most the bodies the operation seats
+        // (`OpLimits.MaxBodies`), all its rows together, and its rank at most
+        // a kill's, under a home's raid.
+        let operation =
+            match kind with
+            | BriefKind.Contested -> Facts.operationIn view room
+            | _ -> None
+
+        let ask =
+            match operation with
+            | Some op ->
+                ask
+                |> List.mapi (fun index a ->
+                    { a with
+                        Wanted =
+                            fun threats ->
+                                let before =
+                                    ask
+                                    |> List.take index
+                                    |> List.sumBy (fun b -> b.Wanted threats)
+
+                                a.Wanted threats |> min (max 0 (op.MaxBodies - before))
+                    })
+            | None -> ask
+
         let jobs =
             match laid ranged |> List.filter (fun job -> not job.Tiles.IsEmpty) with
             | [] ->
@@ -1482,9 +1555,16 @@ module Brief =
                 ]
             | jobs -> jobs
             |> seated kind pursued phase room verdict rangers holding answered ask view
+            |> fun jobs ->
+                match operation with
+                | Some op -> Job.capped op.MaxBodies jobs
+                | None -> jobs
 
         {
-            Duty = Duty.Guard kind
+            Duty =
+                match operation with
+                | Some op -> Duty.Operation op.Id
+                | None -> Duty.Guard kind
             BuiltBy = SpatialInfo.homeName view.Spatial
             Claims = claims
             Contention = contention
@@ -1498,7 +1578,7 @@ module Brief =
                 kind = BriefKind.Chase
                 || kind = BriefKind.Contested
                    && phase = Phase.Quiet
-                   && Set.contains room (harassRooms view)
+                   && Set.contains room (operationRooms view)
             Avoid =
                 match kind with
                 | BriefKind.Chase -> Avoid.Kite
@@ -1506,21 +1586,24 @@ module Brief =
                 | _ when kill -> Avoid.Reach
                 | _ -> Avoid.Runner
             Rung =
-                match kind with
-                // A contested room's raid, harassed or ours (#609, #656): a
-                // ranger idling on a quiet Guard is sent to it; and a room
-                // nobody works pooled for the raid remembered there (#366).
-                // A harassment room nobody works is worked target or none,
-                // on the tier.
-                | BriefKind.Contested when
-                    phase = Phase.Raid
-                    || phase = Phase.Quiet && not (Set.contains room (harassRooms view))
-                    ->
-                    TwoRungsUp
-                | BriefKind.Resident
-                | BriefKind.Chase when raided -> TwoRungsUp
-                | _ when kill -> OneRungUp
-                | _ -> OnTheTier
+                let rung =
+                    match kind with
+                    // A contested room's raid, harassed or ours (#609, #656):
+                    // a ranger idling on a quiet Guard is sent to it; and a
+                    // room nobody works pooled for the raid remembered there
+                    // (#366). A harassment room nobody works is worked target
+                    // or none, on the tier.
+                    | BriefKind.Contested when
+                        phase = Phase.Raid
+                        || phase = Phase.Quiet && not (Set.contains room (operationRooms view))
+                        ->
+                        TwoRungsUp
+                    | BriefKind.Resident
+                    | BriefKind.Chase when raided -> TwoRungsUp
+                    | _ when kill -> OneRungUp
+                    | _ -> OnTheTier
+
+                if Option.isSome operation then min rung OneRungUp else rung
             Asks = ask
             Capacity = capacityOfJobs jobs
             Verdict = verdict
@@ -1537,8 +1620,8 @@ module Brief =
     /// body fights where it goes, at the standoff, a contested room's prey's
     /// holder among them.
     let stanceOf (view: ColonyView) (room: string) (brief: Brief) (creep: CreepInfo) : Stance =
-        match brief.Duty with
-        | Duty.Guard kind when
+        match flavourOf brief with
+        | Some kind when
             BriefKind.laysRing kind
             && not (isKill brief)
             && Fighter.glues (Fighter.ofCreep creep)
@@ -1569,7 +1652,7 @@ module Brief =
             (lazy Answer.Win)
             (lazy None)
             (lazy false)
-            (lazy (Set.contains room (harassRooms view)))
+            (lazy (Set.contains room (operationRooms view)))
             false
             false
             (lazy [])
@@ -1839,7 +1922,8 @@ module Brief =
                 }
 
         match task with
-        | Guard room -> Some(unclaimed view atlas room)
+        | Guard room
+        | Operate(_, room) -> Some(unclaimed view atlas room)
         | Defend _ -> Some(defending view [] 0 None Map.empty Set.empty (lazy Answer.Win))
         | Assault _ -> unformed Duty.Assault
         | _ -> None
@@ -2139,14 +2223,20 @@ module Threats =
                 }
         }
 
-    /// One room's Guard `Brief` this tick.
+    /// One room's fight's `Brief` this tick: its Guard's, or the operation's
+    /// working it (`Operate`, #663 S7c).
     let briefOf (threats: Threats) (room: string) : Brief =
         match Map.tryFind (Guard room) threats.Briefs with
         | Some brief -> brief
         | None ->
-            match threats.Unclaimed.BriefOf(Guard room) with
-            | Some brief -> brief
-            | None -> invalidOp $"No view derived these Threats to brief {room}'s Guard"
+            threats.Briefs
+            |> Map.tryPick (fun task brief ->
+                match task with
+                | Operate(_, worked) when worked = room -> Some brief
+                | _ -> None)
+            |> Option.orElseWith (fun () -> threats.Unclaimed.BriefOf(Guard room))
+            |> Option.defaultWith (fun () ->
+                invalidOp $"No view derived these Threats to brief {room}'s Guard")
 
     /// One combat Task's `Brief` this tick (`Brief.unclaimedFor` where no
     /// source claims it); None for a Task no Brief describes.
@@ -2918,7 +3008,8 @@ module Threats =
         (task: Task)
         : bool =
         match task with
-        | Guard room ->
+        | Guard room
+        | Operate(_, room) ->
             match briefFor threats task with
             | Some brief when brief.Verdict.Value <> Answer.Lose ->
                 let resident = residentRooms view
@@ -3535,7 +3626,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         |> List.map (fun room ->
             room,
             lazy
-                (let holders = HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList
+                (let holders =
+                    HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room)) |> Set.ofList
 
                  let side =
                      ColonyView.bodies view
@@ -3552,20 +3644,21 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     let rangers = rangerRooms view
 
-    // The rooms a hostile stands in whose Guard a living body of ours holds
-    // (`Threats.Engaged`, #535). Never a sweep candidate the sweep is not
-    // working (#658): the sweep's one room is its fight, and a body held to
-    // another is let go to it, not latched where it stood (live t1,038,786:
-    // a ranger engaged in W18S27 kept that room pooled and cast for beside
-    // the sweep's W19S26).
+    // The rooms a hostile stands in whose fight a living body of ours holds
+    // (`Threats.Engaged`, #535). Never a candidate an operation names and
+    // does not work (#658): its fight is the room the operation works, under
+    // the operation's Task, and a body still holding a candidate's Guard (one
+    // held from before the operation's Task, #663 S7c) is let go to it, not
+    // latched where it stood (live t1,038,786: a ranger engaged in W18S27
+    // kept that room pooled and cast for beside the sweep's W19S26).
     let engaged =
-        let sweeping = harassRooms view
+        let worked = operationRooms view
 
         view.Hostiles
         |> List.map (fun hostile -> hostile.Pos.Room)
         |> List.filter (fun room ->
-            not (List.isEmpty (HeldTaskFacts.holdersOf held (taskId (Guard room))))
-            && (sweeping.Contains room || not (view.HarassCast.Contains room)))
+            not (List.isEmpty (HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room))))
+            && (worked.Contains room || not (view.HarassCast.Contains room)))
         |> Set.ofList
 
     // Each room a hostile stands in: this colony's own row there
@@ -3608,7 +3701,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     // Whether a ranger holds a room's Guard.
     let kept room =
-        let holders = HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList
+        let holders =
+            HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room)) |> Set.ofList
 
         ColonyView.bodies view
         |> List.exists (fun creep -> Set.contains creep.Name holders && isRangerRowBody creep)
@@ -3778,7 +3872,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             let rangerHere =
                 lazy
                     (let guarding =
-                        HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList
+                        HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room))
+                        |> Set.ofList
 
                      ColonyView.bodies view
                      |> List.exists (fun creep ->
@@ -3962,7 +4057,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // Each room's ground, with the trespassers it is about.
     let trespassIn (open': string -> bool) =
         let huntedIn room =
-            not (List.isEmpty (HeldTaskFacts.holdersOf held (taskId (Guard room))))
+            not (List.isEmpty (HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room))))
 
         let haulGround = 2
         let waitReach = haulGround + 1
@@ -4087,7 +4182,10 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // ranger answers, is still struck first.
     let coreFirst room =
         Facts.expansionCores view |> List.exists (fun core -> core.RoomName = room)
-        && Brief.trespassSplit view (HeldTaskFacts.holdersOf held (taskId (Guard room))) room
+        && Brief.trespassSplit
+            view
+            (HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room)))
+            room
            |> List.forall (fun (row, trespassers) ->
                match row with
                | CastRow.Fighter BodyTemplate.Melee ->
@@ -4102,7 +4200,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         match Map.tryFind room view.ExitHolds with
         | Some hold ->
             let holders =
-                HeldTaskFacts.holdersOf held (taskId (Guard room))
+                HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room))
                 |> List.choose (fun name ->
                     ColonyView.bodies view |> List.tryFind (fun creep -> creep.Name = name))
 
@@ -4146,7 +4244,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         kind = BriefKind.Chase
         || kind = BriefKind.Contested && Map.containsKey room prey
         || raidPools room
-        || kind = BriefKind.ExitHold && Set.contains (taskId (Guard room)) held.All
+        || kind = BriefKind.ExitHold
+           && Set.contains (taskId (Facts.fightTask view room)) held.All
 
     // A contested room's phase (#656): its raid where a ranger pursues it
     // (a cripple shot disarmed among it, #510), where that pools, or where
@@ -4186,7 +4285,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                             ring.Keys |> Seq.filter open'
                             pursuedRooms |> Seq.filter open'
                             prey.Keys |> Seq.filter unchased
-                            harassRooms view |> Seq.filter unchased
+                            operationRooms view |> Seq.filter unchased
                         ]
                     |> Seq.distinct
                     |> Seq.map (fun room -> room, Set.empty)
@@ -4285,7 +4384,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
                 let back = hold.Run |> List.minBy (fun tile -> along tile, tile.Y, tile.X)
 
-                let holders = HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList
+                let holders =
+                    HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room)) |> Set.ofList
 
                 let side =
                     ColonyView.bodies view
@@ -4353,11 +4453,11 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     // choice: the tiles follow the trajectory it dances on. Priced at its
     // kill at the camp's odds (`Facts.campValue`).
     let campJob room =
-        if not (Set.contains room (harassRooms view)) || phaseOf room = Phase.Raid then
+        if not (Set.contains room (operationRooms view)) || phaseOf room = Phase.Raid then
             None
         else
             let holders =
-                HeldTaskFacts.holdersOf held (taskId (Guard room))
+                HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room))
                 |> List.choose (fun name ->
                     ColonyView.bodies view |> List.tryFind (fun creep -> creep.Name = name))
 
@@ -4459,7 +4559,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 | Some(verdict, winners) -> lazy (fst verdict.Value), winners
                 | None -> lazy Answer.Win, lazy None
 
-            Guard room,
+            Facts.fightTask view room,
             Brief.claimed
                 view
                 atlas
@@ -4481,16 +4581,16 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 // (#432); so is a raid a ranger pursues.
                 (lazy
                     (answeredByRanger room
-                     || Set.contains room (harassRooms view)
+                     || Set.contains room (operationRooms view)
                      || pursuedByRanger room))
                 (Set.contains room pursuedRooms)
                 (Map.containsKey room prey)
                 (lazy
                     (Brief.trespassSplit
                         view
-                        (HeldTaskFacts.holdersOf held (taskId (Guard room)))
+                        (HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room)))
                         room))
-                (HeldTaskFacts.holdersOf held (taskId (Guard room)) |> Set.ofList)
+                (HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room)) |> Set.ofList)
                 (claimsIn room)
                 (phaseOf room)
                 (jobsIn room (Brief.kindOf (claimsIn room)) (phaseOf room)))
@@ -4542,7 +4642,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
             // of that body, where it reaches a tile of it; else, or where it
             // kills none, the whole ground.
             let holders =
-                HeldTaskFacts.holdersOf held (taskId (Guard room))
+                HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room))
                 |> List.choose (fun name ->
                     ColonyView.bodies view |> List.tryFind (fun creep -> creep.Name = name))
 
@@ -4675,7 +4775,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         briefs
         |> Map.map (fun task brief ->
             match task, brief.Duty with
-            | Guard room, Duty.Guard _ ->
+            | Guard room, Duty.Guard _
+            | Operate(_, room), Duty.Operation _ ->
                 { brief with
                     Seats = lazy (seatsIn room brief)
                 }
@@ -5152,7 +5253,7 @@ let private withMusters
         // gather for.
         let musterOf (room: string) (brief: Brief) =
             let holders =
-                HeldTaskFacts.holdersOf held (taskId (Guard room))
+                HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room))
                 |> List.choose (fun name -> Map.tryFind name bodies)
 
             // A fight lost is no fight to gather for; a won one and a kited
@@ -5160,7 +5261,8 @@ let private withMusters
             let won =
                 match brief.Duty with
                 | Duty.Guard BriefKind.Resident -> false
-                | Duty.Guard _ -> brief.Verdict.Value <> Answer.Lose
+                | Duty.Guard _
+                | Duty.Operation _ -> brief.Verdict.Value <> Answer.Lose
                 | _ -> false
 
             if List.isEmpty holders || not won then
@@ -5171,10 +5273,7 @@ let private withMusters
                      |> List.choose (fun creep ->
                          SpatialInfo.creepPlacementOf view.Spatial creep.Name
                          |> Option.map (fun at -> creep, at)))
-                    @ (if Set.contains room (harassRooms view) then
-                           view.World.SweepGroup
-                       else
-                           [])
+                    @ (Facts.operationIn view room |> Option.map _.Group |> Option.defaultValue [])
                     |> List.distinctBy (fun (creep, _) -> creep.Name)
 
                 let engaged =
@@ -5247,7 +5346,7 @@ let private withMusters
                                 (lazy value)
 
                         Some(
-                            Guard room,
+                            Facts.fightTask view room,
                             { brief with
                                 Jobs = job :: brief.Jobs
                                 Stances =
@@ -5257,16 +5356,17 @@ let private withMusters
                             }
                         )
 
-        // Only the rooms a raider stands in or the [[sweep]] works, and only
-        // a Guard held there: the Briefs map is rebuilt for none of the rest.
+        // Only the rooms a raider stands in or an operation works, and only
+        // a fight held there: the Briefs map is rebuilt for none of the rest.
         let waiting =
             (view.Hostiles
              |> List.filter (HostileInfo.raider view.Hostiles)
              |> List.map (fun hostile -> hostile.Pos.Room))
-            @ Set.toList (harassRooms view)
+            @ Set.toList (operationRooms view)
             |> List.distinct
             |> List.choose (fun room ->
-                Map.tryFind (Guard room) threats.Briefs |> Option.bind (musterOf room))
+                Map.tryFind (Facts.fightTask view room) threats.Briefs
+                |> Option.bind (musterOf room))
 
         match waiting with
         | [] -> threats

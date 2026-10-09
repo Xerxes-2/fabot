@@ -89,6 +89,46 @@ let casterTests =
                     "the walk one crossing long, where the asker's is three"
             }
 
+            // #663 S7c: home defence first; and an operation's room is no
+            // colony's own, whoever asks for it.
+            test
+                "an operation's ask is cast by no colony whose home is threatened, nor by its asker under the floors" {
+                let operating = Operate(Colony.sweepId, "W4N1")
+                let row = CastRow.Fighter BodyTemplate.Ranged
+
+                let raided =
+                    { hostileIn "W5N1" { X = 25; Y = 25 } [ Attack; Attack; Move; Move ] with
+                        Id = "raider"
+                        Owner = "Trepidimous"
+                    }
+
+                let asking = bidder (rich "W1N1") [ ask operating row 1 ]
+
+                Expect.equal
+                    (bodiesFor operating [ asking; bidder (rich "W5N1") [] ])
+                    (Map.ofList [ "W5N1", 1 ])
+                    "the premise: the nearer colony casts it"
+
+                Expect.equal
+                    (bodiesFor operating [ asking; bidder (rich "W5N1" |> seeing [ raided ]) [] ])
+                    (Map.ofList [ "W1N1", 1 ])
+                    "a raider at the nearer one's home: it bids nothing, the asker casts"
+
+                Expect.equal
+                    (bodiesFor
+                        operating
+                        [
+                            bidder
+                                (colonyAt
+                                    "W1N1"
+                                    Tuning.defaults.CasterFloor
+                                    (Tuning.defaults.CasterReserve - 1))
+                                [ ask operating row 1 ]
+                        ])
+                    Map.empty
+                    "under the stock's floor its asker casts none of it: no colony's own room"
+            }
+
             test "a colony casts another's ask only past both floors, its bank's and its stock's" {
                 let asking =
                     bidder

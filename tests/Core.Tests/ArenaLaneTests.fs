@@ -1594,22 +1594,17 @@ let foughtWhereStruckTests =
             }
 
             // W19S26 under Wave7157's raid is the sweep's room, fought as a
-            // contested room's raid, its ring laid; guard-1007097 stands in
-            // W17S25, a declared candidate that is a home of ours: the code
-            // spec drops it (`Operation.ofCode`), and the guard is no body
-            // of the group.
+            // contested room's raid, its ring laid; W17S25, a declared
+            // candidate that is a home of ours, is cast by nobody
+            // (`World.harassCasters`), so no operation names it.
             test
-                "#663 S7b: the sweep as an operation, run in shadow, answers the raided room's ring, group and seats every tick" {
+                "#663 S7c: the sweep runs as an operation committed to the raided room, never to our home" {
                 let final, trace = w19s26LosingTrade Tuning.defaults.CasterReserve |> run 120
-                let _, log = final.Carried.Shadow
-
-                Expect.isGreaterThan log.Working 0 $"the sweep worked its room\n%A{log}"
-                Expect.isEmpty log.Counts $"no divergence\n%A{log}\n{describe trace}"
 
                 Expect.equal
-                    log.Refused
-                    [ { Id = "sweep"; Why = "ours: W17S25" } ]
-                    "our home dropped from the spec"
+                    (final.Carried.Operations |> List.choose _.Room)
+                    [ "W19S26" ]
+                    $"committed to the raided room\n{describe trace}"
             }
 
             // At the live 6,991, under `Tuning.CasterReserveHold`, no colony

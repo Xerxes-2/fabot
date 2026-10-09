@@ -1321,7 +1321,8 @@ let private actionOn =
     | Flee
     | Guard _
     | Defend _
-    | Assault _ -> None
+    | Assault _
+    | Operate _ -> None
 
 /// The room a Task's target stands in; None for a Task with no target or one
 /// the projection does not place.
@@ -2159,7 +2160,8 @@ let routes (atlas: Atlas) (fromRoom: string) (toRoom: string) : string list list
 let walkerOf (task: Task) : Walker =
     match task with
     | Guard _
-    | Defend _ -> Walker.Bold
+    | Defend _
+    | Operate _ -> Walker.Bold
     | Assault _ -> Walker.Siege
     | _ -> Walker.Wary
 

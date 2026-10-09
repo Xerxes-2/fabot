@@ -209,6 +209,8 @@ let private trespassedPairDecided (bodies: (string * BodyPart list) list) =
                 Idle = Set.empty
                 FightAlone = Set.empty
                 TurnIndex = None
+                Operations = []
+                Declared = []
             }
             ignore
             views
@@ -1769,7 +1771,9 @@ let contestTests =
                     0.0
                     "alone, a colony that mines nothing there keeps nothing there"
 
-                let swept = Facts.sweepAll Map.empty [ other; miner ] |> List.head
+                let swept =
+                    let laid, _, _ = Operations.lay [] Map.empty [] [ other; miner ]
+                    List.head laid
 
                 Expect.equal
                     (Facts.roomWorth swept "W1N2").Kept
@@ -1809,7 +1813,10 @@ let contestTests =
                     (Facts.roomWorth watcher "W1N2").Values
                     "alone, the watcher's room is no economy of ours"
 
-                let swept = Facts.sweepAll Map.empty [ watcher; miner ] |> List.head
+                let swept =
+                    let laid, _, _ = Operations.lay [] Map.empty [] [ watcher; miner ]
+                    List.head laid
+
                 let worth = Facts.roomWorth swept "W1N2"
 
                 Expect.equal

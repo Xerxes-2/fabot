@@ -560,6 +560,8 @@ let fireReflexTests =
                             Idle = Set.empty
                             FightAlone = Set.empty
                             TurnIndex = None
+                            Operations = []
+                            Declared = []
                         }
                         ignore
                         [ colony, snapshot ]

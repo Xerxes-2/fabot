@@ -1261,8 +1261,8 @@ let private tierRequests (view: ColonyView) (watched: string list) : LookRequest
        |> List.map (lookRequest LookBand.Box 1))
 
 /// The [[sweep]] candidates one colony casts (`ColonyView.HarassCast`, the
-/// shut ones included, beside the one the sweep narrowed `Harass` to): every
-/// room whose worth the world's table prices as a candidate.
+/// shut ones included, beside those it works, `Harass`): every room whose
+/// worth the world's table prices as a candidate.
 let private candidatesOf (view: ColonyView) : string list =
     view.Harass
     |> List.map _.RoomName
@@ -1359,13 +1359,13 @@ let private pricedRequests (view: ColonyView) : LookRequest list =
     standDowns @ pursued
 
 /// The rival dossier's watch on the rival remotes we know (#663 M5): every
-/// declared [[sweep]] candidate the live switch has on (`Colony.harass`),
+/// [[sweep]] candidate the code's operations name (`Colony.operations`),
 /// whether or not a colony can cast it this tick, worth no decision priced
 /// yet, so its band (`Watched`) serves it only on a tick no priced request
 /// nor claim takes the observer, once its sighting is `dangerStride` old:
 /// the sweep's evidence of a room with nothing remembered in it.
 let private dossierRequests: LookRequest list =
-    Colony.harass
+    Colony.candidatesOf Colony.operations
     |> List.map (fun h -> lookRequest LookBand.Watched dangerStride h.RoomName)
 
 /// Every look the colonies' readers ask this tick, off the first view's

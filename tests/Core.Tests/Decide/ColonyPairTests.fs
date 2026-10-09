@@ -570,6 +570,8 @@ let private decidePair (turn: int) (childMemo: PlanMemo option) =
             Idle = Set.empty
             FightAlone = Set.empty
             TurnIndex = Some turn
+            Operations = []
+            Declared = []
         }
         ignore
         (List.zip

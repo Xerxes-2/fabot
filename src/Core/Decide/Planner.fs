@@ -393,7 +393,8 @@ let planFightTasks
             |> Map.toSeq
             |> Seq.choose (fun (task, brief) ->
                 match task with
-                | Guard room when claimed brief -> Some room
+                | Guard room
+                | Operate(_, room) when claimed brief -> Some room
                 | _ -> None)
             |> Set.ofSeq
 
@@ -407,7 +408,7 @@ let planFightTasks
         let holding =
             briefed (fun brief -> List.contains BriefKind.ExitHold brief.Claims)
             |> Set.filter (fun room ->
-                Set.contains (taskId (Guard room)) held.All
+                Set.contains (taskId (Facts.fightTask view room)) held.All
                 && not (List.contains room guardedRooms))
             |> Set.toList
 
@@ -415,7 +416,7 @@ let planFightTasks
             [ BriefKind.Chase; BriefKind.Contested ]
             |> List.collect (fun kind ->
                 Set.difference
-                    (briefed (fun brief -> brief.Duty = Duty.Guard kind && Brief.isKill brief))
+                    (briefed (fun brief -> Brief.flavourOf brief = Some kind && Brief.isKill brief))
                     (Set.ofList (guardedRooms @ holding))
                 |> Set.toList)
 
@@ -430,10 +431,11 @@ let planFightTasks
 
             threats.Engaged
             |> Set.filter (fun room ->
-                HeldTaskFacts.holdersOf held (taskId (Guard room))
+                let task = Facts.fightTask view room
+
+                HeldTaskFacts.holdersOf held (taskId task)
                 |> List.choose (fun name -> Map.tryFind name bodies)
-                |> List.exists (fun creep ->
-                    Threats.holdsFight view atlas threats creep (Guard room)))
+                |> List.exists (fun creep -> Threats.holdsFight view atlas threats creep task))
             |> fun rooms -> Set.difference rooms (Set.ofList (guardedRooms @ holding @ killing))
             |> Set.toList
 
@@ -443,7 +445,8 @@ let planFightTasks
         let unheld room =
             not (Set.contains room view.Spatial.StrayRooms)
 
-        (guardedRooms @ List.filter unheld (holding @ killing @ fought) |> List.map Guard)
+        (guardedRooms @ List.filter unheld (holding @ killing @ fought)
+         |> List.map (Facts.fightTask view))
         // And one Assault per assault this colony pools (#490, #491).
         @ briefedAs Duty.Assault
         // And the home's Defend while it wants a defender (#504): the row

@@ -2821,79 +2821,109 @@ wire("ops: a defaulted deadline is written into its spec once, never over one gi
   assert.equal(globalThis.Memory.fabot.ops.specs[1].deadline, 6000, "a given deadline stands");
 });
 
-// ---- the sweep's shadow (#663 S7b) ----------------------------------------
+// ---- the code's operations' latch (#663 S7c) ------------------------------
 
-// `Memory.fabot.shadow`, the bot's alone: load, save, compare. An absent,
-// null or off-shape leaf reads as an empty log; a count off its shape costs
-// its kind, an example off its shape its own row; the examples past the cap
-// are dropped on read.
-const shadowThrough = async (shadow) => {
-  const { loadShadow, saveShadow } = await import(MODULE);
-  globalThis.Memory = shadow === undefined ? { fabot: {} } : { fabot: { shadow } };
-  const log = loadShadow();
-  saveShadow(log);
-  return { log, shadow: globalThis.Memory.fabot.shadow };
+// `Memory.fabot.ops.code`, the bot's alone: the records of the operations
+// code declares (`live`, each a Memory spec's record shape) and this tick's
+// refusals of their specs (`refused`); their events join the leaf's
+// `events`. Load, save the records read, compare.
+const codeThrough = async (ops, refused = []) => {
+  const { loadOpsCode, saveOpsCode } = await import(MODULE);
+  const { ofArray, empty } = await import(LIST);
+  globalThis.Memory = ops === undefined ? { fabot: {} } : { fabot: { ops } };
+  const records = loadOpsCode();
+  saveOpsCode(77, records, empty(), ofArray(refused));
+  return { records: [...records], ops: globalThis.Memory.fabot.ops };
 };
 
-const shadowExample = { t: 1007220, k: "seats", r: "W19S26", o: "1", s: "3", w: "the seats" };
-const emptyShadow = { n: 0, w: 0, c: {}, e: [], x: [] };
+const codeRecord = { ...opRecord, i: "sweep", r: "W18S27", c: 110 };
 
-for (const [name, leaf] of [
-  ["absent", undefined],
-  ["null", null],
-  ["a string", "Incorrect memory path"],
-  ["an array", [shadowExample]],
-  ["missing its tick count", { c: { seats: 2 }, e: [shadowExample] }],
+wire("ops code: a well-formed latch round-trips, the operator's keys untouched", async () => {
+  const full = {
+    specs: [opSpec],
+    live: [opRecord],
+    code: { live: [codeRecord], refused: [] },
+  };
+  const { records, ops } = await codeThrough(structuredClone(full));
+  assert.deepEqual(
+    records.map((record) => [record.Id, record.Room]),
+    [["sweep", "W18S27"]],
+  );
+  assert.equal(stable(ops), stable({ ...full, events: [] }));
+});
+
+wire("ops code: this tick's refusals are written beside the latch", async () => {
+  const { OpRefusal } = await import("../build/fable/Core/Types/Operation.js");
+  const { ops } = await codeThrough({ code: { live: [codeRecord] } }, [
+    new OpRefusal("sweep", "ours: W17S25"),
+  ]);
+  assert.equal(stable(ops.code.refused), stable([{ id: "sweep", why: "ours: W17S25" }]));
+});
+
+for (const [name, ops] of [
+  ["no code object", {}],
+  ["a code that is an array", { code: [codeRecord] }],
+  ["a code that is a string", { code: "Incorrect memory path" }],
+  ["a code with no live list", { code: { refused: [] } }],
 ]) {
-  wire(`shadow: a leaf that is ${name} reads as an empty log`, async () => {
-    const { log, shadow } = await shadowThrough(leaf);
-    assert.equal(log.Compared, 0);
-    assert.equal(stable(shadow), stable(emptyShadow));
+  wire(`ops code: a leaf with ${name} holds no records, never a fault`, async () => {
+    const { records } = await codeThrough(ops);
+    assert.deepEqual(records, []);
   });
 }
 
-wire("shadow: a well-formed leaf round-trips", async () => {
-  const full = {
-    n: 400,
-    w: 175,
-    c: { room: 1, group: 2, scope: 3, jobs: 4, seats: 133 },
-    e: [shadowExample, { ...shadowExample, t: 1007100, k: "group", o: "guard-1", s: "-" }],
-    x: [{ id: "sweep", why: "ours: W17S25" }],
-  };
-  const { log, shadow } = await shadowThrough(structuredClone(full));
-  assert.equal(log.Compared, 400);
-  assert.equal(stable(shadow), stable(full));
-});
-
-wire("shadow: a legacy leaf with no working count reads it as zero", async () => {
-  const { shadow } = await shadowThrough({ n: 5, c: {}, e: [] });
-  assert.equal(stable(shadow), stable({ ...emptyShadow, n: 5 }));
-});
-
-wire("shadow: a count, an example or a refusal off its shape costs its own entry", async () => {
-  const { shadow } = await shadowThrough({
-    n: 9,
-    w: 1,
-    c: { seats: 2, room: "x", dance: 3 },
-    e: [shadowExample, { ...shadowExample, k: "dance" }, { ...shadowExample, t: "now" }, { ...shadowExample, o: 7 }, null],
-    x: [{ id: "sweep", why: "ours: W1N1" }, { id: 7, why: "x" }, null],
+wire("ops code: a record off its shape costs its own row", async () => {
+  const { records } = await codeThrough({
+    code: { live: [codeRecord, { ...codeRecord, p: "dance" }, null, { ...codeRecord, i: "" }] },
   });
-  assert.equal(
-    stable(shadow),
-    stable({ n: 9, w: 1, c: { seats: 2 }, e: [shadowExample], x: [{ id: "sweep", why: "ours: W1N1" }] }),
+  assert.deepEqual(
+    records.map((record) => record.Id),
+    ["sweep"],
   );
 });
 
-wire("shadow: a working count off its shape costs itself alone, read as zero", async () => {
-  const { shadow } = await shadowThrough({ n: 4, w: "lots", c: { seats: 1 }, e: [shadowExample] });
-  assert.equal(stable(shadow), stable({ ...emptyShadow, n: 4, c: { seats: 1 }, e: [shadowExample] }));
+wire("ops code: a Memory with no ops leaf and nothing to write gains none", async () => {
+  const before = { fabot: { assignments: { c1: "op:sweep" } } };
+  globalThis.Memory = structuredClone(before);
+  const { saveOpsCode } = await import(MODULE);
+  const { empty } = await import(LIST);
+  saveOpsCode(77, empty(), empty(), empty());
+  assert.equal(stable(globalThis.Memory), stable(before));
 });
 
-wire("shadow: the examples past the cap are dropped on read", async () => {
-  const many = Array.from({ length: 12 }, (_, t) => ({ ...shadowExample, t }));
-  const { shadow } = await shadowThrough({ n: 12, w: 0, c: { seats: 12 }, e: many });
-  assert.equal(shadow.e.length, 8);
-  assert.equal(shadow.e[0].t, 0, "the newest first, as written");
+wire("ops code: a latch to write makes the ops leaf where none stands", async () => {
+  const { OpRecord, OpPhase } = await import("../build/fable/Core/Types/Operation.js");
+  const { saveOpsCode, loadOpsCode } = await import(MODULE);
+  const { ofArray, empty } = await import(LIST);
+  globalThis.Memory = { fabot: {} };
+  saveOpsCode(
+    77,
+    ofArray([new OpRecord("sweep", 100, new OpPhase(2, []), 120, "W18S27", 110, 0, 0, 0, undefined)]),
+    empty(),
+    empty(),
+  );
+  assert.equal(
+    stable(globalThis.Memory.fabot.ops),
+    stable({ code: { live: [codeRecord], refused: [] }, events: [] }),
+  );
+  assert.deepEqual(
+    [...loadOpsCode()].map((record) => record.Room),
+    ["W18S27"],
+  );
+});
+
+wire("ops code: an ops leaf off its shape is the operator's to mend: nothing is written onto it", async () => {
+  const { saveOpsCode } = await import(MODULE);
+  const { ofArray, empty } = await import(LIST);
+  const { OpRecord, OpPhase } = await import("../build/fable/Core/Types/Operation.js");
+  globalThis.Memory = { fabot: { ops: "Incorrect memory path" } };
+  saveOpsCode(
+    77,
+    ofArray([new OpRecord("sweep", 100, new OpPhase(2, []), 120, "W18S27", 110, 0, 0, 0, undefined)]),
+    empty(),
+    empty(),
+  );
+  assert.equal(globalThis.Memory.fabot.ops, "Incorrect memory path");
 });
 
 // ---- run ----------------------------------------------------------------

@@ -62,10 +62,10 @@ refuses(["cadence", "--json"], "usage:");
 refuses(["fight-only", "yes"], "fight-only takes on, off or clear");
 refuses(["fight-only", "on", "off"], "usage:");
 refuses(["fight-only", "--json"], "usage:");
-refuses(["op"], "op takes list or shadow");
-refuses(["op", "add", "sweep"], "op takes list or shadow");
-refuses(["op", "list", "x"], "op takes list or shadow");
-refuses(["op", "shadow", "x"], "op takes list or shadow");
+refuses(["op"], "op takes list");
+refuses(["op", "add", "sweep"], "op takes list");
+refuses(["op", "list", "x"], "op takes list");
+refuses(["op", "shadow"], "op takes list");
 refuses(["fight-lane"], "usage:");
 refuses(["console"], "console needs --seconds");
 refuses(["raids", "--colony"], "--colony needs a home room name");
@@ -109,8 +109,6 @@ for (const args of [
   ["fight-only", "clear"],
   ["op", "list"],
   ["op", "list", "--json"],
-  ["op", "shadow"],
-  ["op", "shadow", "--json"],
   ["console", "--seconds", "3"],
   ["eval", "Game.time"],
   ["eval", "Game.time", "--seconds", "4"],

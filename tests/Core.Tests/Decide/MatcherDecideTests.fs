@@ -1627,6 +1627,8 @@ let fightOnlyDecideTests =
                             Idle = Set.empty
                             FightAlone = alone
                             TurnIndex = None
+                            Operations = []
+                            Declared = []
                         }
                         ignore
                         [ colony, chokedHome ]

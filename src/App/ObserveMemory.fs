@@ -3507,6 +3507,21 @@ let private eventWire (tick: int) (event: OpEvent) : obj =
 
     o
 
+/// This tick's events appended to a leaf's `events` after the kept ones, the
+/// newest `Operation.eventCap` kept.
+let private appendEvents (raw: obj) (tick: int) (events: OpEvent list) =
+    let prior =
+        if JS.Constructors.Array.isArray raw?events then
+            unbox<obj[]> raw?events
+            |> Array.filter (fun row -> not (isNull row) && jsTypeof row = "object")
+        else
+            [||]
+
+    let all = Array.append prior (events |> List.map (eventWire tick) |> Array.ofList)
+
+    raw?events <-
+        Array.sub all (max 0 (all.Length - Operation.eventCap)) (min all.Length Operation.eventCap)
+
 /// The bot's half of the ops leaf written back, onto a leaf `loadOps` read:
 /// the records, this tick's refusals, this tick's events after the last
 /// `Operation.eventCap` kept, and each defaulted deadline written into its
@@ -3528,20 +3543,7 @@ let saveOps
             |> List.map (fun refusal -> createObj [ "id" ==> refusal.Id; "why" ==> refusal.Why ])
             |> Array.ofList
 
-        let prior =
-            if JS.Constructors.Array.isArray raw?events then
-                unbox<obj[]> raw?events
-                |> Array.filter (fun row -> not (isNull row) && jsTypeof row = "object")
-            else
-                [||]
-
-        let all = Array.append prior (events |> List.map (eventWire tick) |> Array.ofList)
-
-        raw?events <-
-            Array.sub
-                all
-                (max 0 (all.Length - Operation.eventCap))
-                (min all.Length Operation.eventCap)
+        appendEvents raw tick events
 
         if not (List.isEmpty deadlines) && JS.Constructors.Array.isArray raw?specs then
             for row in unbox<obj[]> raw?specs do
@@ -3550,114 +3552,75 @@ let saveOps
                     |> List.tryFind (fun (id, _) -> id = unbox<string> row?id)
                     |> Option.iter (fun (_, deadline) -> row?deadline <- deadline)
 
-// ---- the sweep's shadow (#663 S7b) -------------------------------------------
+// ---- the code's operations' latch (#663 S7c) -------------------------------
 //
-// `Memory.fabot.shadow`, the bot's alone: the full ticks the operation
-// interpreter's shadow of the sweep compared (`n`), those the sweep worked a
-// room on (`w`), a count per kind of disagreement (`c`), the latest few
-// (`e`), newest first, and this tick's refusals of the code spec (`x`). Read
-// back on a cold heap so the counts run on across a reset.
+// `Memory.fabot.ops.code`, the bot's alone: the records of the operations
+// code declares (`Colony.operations`), each shaped as a Memory spec's record
+// (`live`), and this tick's refusals of their specs (`refused`). Their events
+// join the leaf's `events`. A leaf with no `code` object, or one off its
+// shape, holds no records: the next full tick begins each afresh.
 
-let private divergenceNames =
-    [
-        Divergence.Room, "room"
-        Divergence.Group, "group"
-        Divergence.Scope, "scope"
-        Divergence.Jobs, "jobs"
-        Divergence.Seats, "seats"
-    ]
+/// The code's operations' records (`Memory.fabot.ops.code.live`): absent or
+/// off its shape, none, never a fault; a record that will not decode costs
+/// its own row.
+let loadOpsCode () : OpRecord list =
+    try
+        let raw = ops ()
 
-let private exampleOf (raw: obj) : ShadowExample option =
-    caseIn divergenceNames raw?k
-    |> Option.map (fun kind ->
-        let text (key: string) =
-            if jsTypeof raw?(key) = "string" then
-                unbox<string> raw?(key)
-            else
-                failwith ("not text: " + key)
+        if
+            isNull raw
+            || jsTypeof raw?code <> "object"
+            || isNull raw?code
+            || JS.Constructors.Array.isArray raw?code
+            || not (JS.Constructors.Array.isArray raw?code?live)
+        then
+            []
+        else
+            rowsOf recordOf raw?code?live
+    with _ ->
+        []
 
-        {
-            Tick = numberOf raw "t"
-            Kind = kind
-            Room = text "r"
-            Shadow = text "o"
-            Sweep = text "s"
-            Why = text "w"
-        })
+/// The code's operations' records written back, with this tick's events
+/// and refusals: onto the ops leaf, made where none stands. Nothing where
+/// there is nothing to write and no leaf stands — a Memory whose code
+/// declares no operation gains none — nor onto an ops leaf off its shape,
+/// which is the operator's to mend.
+let saveOpsCode
+    (tick: int)
+    (records: OpRecord list)
+    (events: OpEvent list)
+    (refused: OpRefusal list)
+    =
+    let fabot = Memory?fabot
+    let absent = isNull fabot || isNull fabot?ops
+    let raw = ops ()
 
-/// The shadow's log (`Memory.fabot.shadow`): absent, not an object or with
-/// no whole count of ticks, an empty log; a count that is not a whole number
-/// costs its kind, an example that will not decode its own row.
-let loadShadow () : ShadowLog =
-    leafOr
-        Operation.shadowEmpty
-        (fun () -> if isNull Memory?fabot then null else Memory?fabot?shadow)
-        (fun raw ->
-            if jsTypeof raw <> "object" || JS.Constructors.Array.isArray raw then
-                Operation.shadowEmpty
-            else
-                {
-                    Compared = numberOf raw "n"
-                    // Absent or off its shape, it costs itself alone.
-                    Working = numberValue raw?w |> Option.defaultValue 0
-                    Counts =
-                        intMapOf raw?c
-                        |> Map.toSeq
-                        |> Seq.choose (fun (name, count) ->
-                            caseIn divergenceNames (box name)
-                            |> Option.map (fun kind -> kind, count))
-                        |> Fresh.mapOfSeq
-                    Last =
-                        if JS.Constructors.Array.isArray raw?e then
-                            rowsOf exampleOf raw?e |> List.truncate Operation.shadowCap
-                        else
-                            []
-                    Refused =
-                        if JS.Constructors.Array.isArray raw?x then
-                            rowsOf
-                                (fun row ->
-                                    Some
-                                        {
-                                            Id = textOf row "id"
-                                            Why = textOf row "why"
-                                        })
-                                raw?x
-                        else
-                            []
-                })
+    let leaf =
+        if not (isNull raw) then
+            Some raw
+        elif
+            absent
+            && not (List.isEmpty records && List.isEmpty events && List.isEmpty refused)
+        then
+            if isNull Memory?fabot then
+                Memory?fabot <- createEmpty<obj>
 
-/// The shadow's log written whole.
-let saveShadow (log: ShadowLog) =
-    if isNull Memory?fabot then
-        Memory?fabot <- createEmpty<obj>
+            Memory?fabot?ops <- createEmpty<obj>
+            Some Memory?fabot?ops
+        else
+            None
 
-    Memory?fabot?shadow <-
-        createObj
-            [
-                "n" ==> log.Compared
-                "w" ==> log.Working
-                "c"
-                ==> hashOf
-                        box
-                        (log.Counts
-                         |> Map.toSeq
-                         |> Seq.map (fun (kind, n) -> nameIn divergenceNames kind, n))
-                "e"
-                ==> (log.Last
-                     |> List.map (fun example ->
-                         createObj
-                             [
-                                 "t" ==> example.Tick
-                                 "k" ==> nameIn divergenceNames example.Kind
-                                 "r" ==> example.Room
-                                 "o" ==> example.Shadow
-                                 "s" ==> example.Sweep
-                                 "w" ==> example.Why
-                             ])
-                     |> Array.ofList)
-                "x"
-                ==> (log.Refused
-                     |> List.map (fun refusal ->
-                         createObj [ "id" ==> refusal.Id; "why" ==> refusal.Why ])
-                     |> Array.ofList)
-            ]
+    leaf
+    |> Option.iter (fun raw ->
+        raw?code <-
+            createObj
+                [
+                    "live" ==> (records |> List.map recordWire |> Array.ofList)
+                    "refused"
+                    ==> (refused
+                         |> List.map (fun refusal ->
+                             createObj [ "id" ==> refusal.Id; "why" ==> refusal.Why ])
+                         |> Array.ofList)
+                ]
+
+        appendEvents raw tick events)

@@ -88,6 +88,11 @@ let mutable private armedSeen: Map<string, int> = Map.empty
 // before a deploy still refuses its owner's other rooms after it.
 let mutable private rivalControllers: Map<string, RivalController> = Map.empty
 
+// Who held each room at its last look this heap (`Operations.holderSeen`):
+// what an operation's room out of sight is known by (#663). A cold heap
+// starts empty and falls back on the rival dossier's.
+let mutable private lastHolders: Map<string, RoomHolder> = Fresh.mapOfSeq Seq.empty
+
 // The two of those a reset must not forget, as last written to the `rooms`
 // leaf: who owns each rival room (#444) and the tower latch. None on a cold
 // heap, which seeds `sightings` and `towered` off the leaf; written back
@@ -733,11 +738,13 @@ let private lightTick (atEntry: float) (last: LightTick.LastFull) (seen: LightTi
             Moved = []
         }
 
-/// The global harassment list, priced once: the declarations and the ranger
-/// block a room's floor is counted in.
-let private harassment: Harassment =
+/// Every [[sweep]] candidate the code's operations name (`Colony.operations`,
+/// #663 S7c), unchecked, and the ranger block a room's floor is counted in:
+/// the rooms the world reads facts for and keeps bodies out of sight in.
+/// Which a colony casts is the admitted specs' (`castable`).
+let private named: Harassment =
     {
-        Rooms = Colony.harass
+        Rooms = Colony.candidatesOf Colony.operations
         BlockCost = Bodies.rangerBlockCost
     }
 
@@ -751,15 +758,25 @@ let private declaredRooms =
 let private standingNow (world: World) : OpStanding =
     let declared = declaredRooms.Value
 
-    // A rival's reservation the dossier saw standing at its last look.
-    let remembered (room: string) =
-        rivalDossier
-        |> Option.bind (fun rivals ->
-            rivals.Dossiers
-            |> Map.tryFindKey (fun _ dossier ->
-                dossier.Rooms |> Map.tryFind room |> Option.exists _.Reserving))
+    Operations.standingOf
+        Game.time
+        declared
+        (Observe.Rivals.lastHolder lastHolders rivalDossier)
+        world
 
-    Operations.standingOf Game.time declared remembered world
+/// Stamps `lastHolders` with every room this tick's look named a holder
+/// for, the map rebuilt only when one moved.
+let private stampHolders (world: World) =
+    let moved =
+        world.Rooms
+        |> Map.toList
+        |> List.choose (fun (room, _) ->
+            Operations.holderSeen world room
+            |> Option.filter (fun holder -> Map.tryFind room lastHolders <> Some holder)
+            |> Option.map (fun holder -> room, holder))
+
+    if not (List.isEmpty moved) then
+        lastHolders <- Fresh.mapOfSeq (Seq.append (Map.toSeq lastHolders) moved)
 
 /// The operations' dry run (#663 S7a), once a full tick over the views as
 /// decided: the Memory specs admitted (`Operation.admit`), each record moved
@@ -771,6 +788,10 @@ let private operationsDryRun (world: World) (views: ColonyView list) =
     | None -> ()
     // The kill switch: nothing admitted, moved or written.
     | Some leaf when leaf.Off -> ()
+    // A leaf holding only the code's latch (`saveOpsCode`): no Memory spec
+    // to run, and nothing of the dry run's written onto it.
+    | Some leaf when List.isEmpty leaf.Specs && List.isEmpty leaf.Live && List.isEmpty leaf.Garbled ->
+        ()
     | Some leaf ->
         let standing = standingNow world
         let admission = Operation.admit standing leaf.Live leaf.Specs
@@ -794,42 +815,14 @@ let private operationsDryRun (world: World) (views: ColonyView list) =
 
         ObserveMemory.saveOps Game.time records (leaf.Garbled @ admission.Refused) events deadlines
 
-/// The sweep's code spec's record (#663 S7b), heap only — a reset begins it
-/// again —, and its shadow's log, read back off Memory on a cold heap.
-let mutable private sweepShadow: (OpRecord option * ShadowLog) option = None
+/// The code's operations' records (#663 S7c), the latch each moves on from:
+/// the heap's, else read back off Memory (`Memory.fabot.ops.code`) on a cold
+/// heap, so a reset keeps the room each is committed to.
+let mutable private codeRecords: OpRecord list option = None
 
-/// The shadow's faults recorded this heap, by message: each once
-/// (`Operation.firstSeen`), so one that throws every tick does not rewrite
-/// the fault log every tick.
-let mutable private shadowFaults: Set<string> = Fresh.setOfSeq Seq.empty
-
-/// The sweep's shadow (#663 S7b), once a whole full tick: the code spec
-/// (`Colony.operations`) resolved by the interpreter over this tick's prices
-/// (`Operations.shadowStep`) and compared with what `Facts.sweepAll` and
-/// the room's Brief decided, each disagreement logged
-/// (`Memory.fabot.shadow`). Nothing reads it into a decision; with no sweep
-/// declared nothing runs and nothing is written.
-let private sweepShadowTick (world: World) (seen: Decide.Entry.SweepSeen) =
-    match Colony.operations with
-    | Ok [] -> ()
-    | declared ->
-        let state =
-            sweepShadow |> Option.defaultWith (fun () -> None, ObserveMemory.loadShadow ())
-
-        let record, log =
-            Operations.shadowStep
-                (standingNow world)
-                declared
-                Game.time
-                (Operations.warmSince loadedAt world)
-                state
-                seen.Held
-                seen.Views
-                seen.Priced
-                seen.Decided
-
-        sweepShadow <- Some(record, log)
-        ObserveMemory.saveShadow log
+/// The refusals of the code's specs last written (`saveOpsCode`): a change
+/// of them alone is written too.
+let mutable private codeRefused: OpRefusal list option = None
 
 /// The full tick: the World, every colony's view and decision, the observe
 /// folds and every Memory leaf, and the record the light tick after it
@@ -866,7 +859,7 @@ let private fullTick
         }
 
     // The sweep's candidates: rooms whose bodies the world keeps out of sight.
-    let candidates = harassment.Rooms |> List.map _.RoomName
+    let candidates = named.Rooms |> List.map _.RoomName
 
     // The tick's World, read out of the engine once, with the previous tick's
     // sightings, tower latch, exit watch and healer memory laid under it.
@@ -874,7 +867,7 @@ let private fullTick
         World.ofGame
             Tuning.defaults
             Colony.declared
-            harassment
+            named
             (ObserveMemory.loadPositions ())
             (match lastFull with
              | Some(_, last) -> LightTick.walkers last
@@ -896,6 +889,7 @@ let private fullTick
         |> fun world -> { world with Refusals = refusals }
 
     sightings <- world.Sightings
+    stampHolders world
     towered <- world.Towered
     exitWatches <- world.ExitWatches
     healers <- world.Healers
@@ -942,11 +936,26 @@ let private fullTick
     // what a colony is handed for a creep it does not hold, the Matcher drops.
     let assignments = loadAssignments ()
 
+    // The code's operations admitted through the Memory spec's safety (#663
+    // S7c): a room ours, an ally's or a neutral's dropped, a spec against
+    // an ally or a neutral refused whole. Only their rooms are cast, and
+    // none while the operations' kill switch is set (`op off`).
+    let admitted, refusedCode =
+        if ObserveMemory.loadOps () |> Option.exists _.Off then
+            [], []
+        else
+            Operations.declared (standingNow world) Colony.operations
+
+    let castable =
+        { named with
+            Rooms = Colony.candidatesOf admitted
+        }
+
     // Which colony casts each harassment room, decided once for every
-    // colony's reading below (#434); a fighter held to a room's Guard keeps
+    // colony's reading below (#434); a fighter held to a room's fight keeps
     // its caster.
     let casting =
-        World.harassCasters joins Tuning.defaults Colony.declared harassment assignments world
+        World.harassCasters joins Tuning.defaults Colony.declared castable assignments world
 
     // Every creep filed under the colony that holds it this tick, cut once
     // and handed to each view: two colonies holding one creep would write two
@@ -1000,7 +1009,7 @@ let private fullTick
         { WorldView.ofWorld Colony.declared (gates |> Map.toList |> List.map snd) world with
             Responses =
                 match rivalDossier with
-                | Some rivals when not (List.isEmpty harassment.Rooms) ->
+                | Some rivals when not (List.isEmpty castable.Rooms) ->
                     Observe.Rivals.responses rivals
                 | _ -> Map.empty
             Flees =
@@ -1206,6 +1215,8 @@ let private fullTick
                     Idle = idle
                     FightAlone = fightCandidates
                     TurnIndex = Some turn
+                    Operations = codeRecords |> Option.defaultWith ObserveMemory.loadOpsCode
+                    Declared = admitted
                 }
                 (fun () -> Game.cpu.getUsed (), floodedNow ())
         with error ->
@@ -1869,17 +1880,20 @@ let private fullTick
     with error ->
         recordFaults [ faultRow "" "ops" error ]
 
-    // The sweep's shadow, on a whole tick alone (its Briefs the world's): a
-    // throw costs its tick and nothing else, and is recorded once a heap.
-    if colonyDecisions.Whole then
-        try
-            sweepShadowTick world (colonyDecisions.Sweep.Force())
-        with error ->
-            match Operation.firstSeen shadowFaults error.Message with
-            | Some seen ->
-                shadowFaults <- seen
-                recordFaults [ faultRow "" "shadow" error ]
-            | None -> ()
+    // The code's operations' latch, written back whenever it moved: the
+    // records the decide moved on (`Operations.lay`), what moved, and this
+    // tick's refusals of the code's specs.
+    let records, events = colonyDecisions.Operated
+
+    if
+        Some records <> codeRecords
+        || Some refusedCode <> codeRefused
+        || not (List.isEmpty events)
+    then
+        ObserveMemory.saveOpsCode Game.time records events refusedCode
+
+    codeRecords <- Some records
+    codeRefused <- Some refusedCode
 
     // A given-up colony's leaf and the flat legacy log, which nothing writes:
     // every home neither declared nor living (an undeclared spawn room, when

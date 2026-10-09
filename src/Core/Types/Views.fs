@@ -220,6 +220,27 @@ type WorldRoom =
         Control: RoomControlInfo
     }
 
+/// An [[operation]] working a room this tick (#663 S7c), as the interpreter
+/// laid it for every colony (`Operations.lay`): what the room's fight reads
+/// of it.
+type OperationWork =
+    {
+        /// Its id, which its Task carries (`Operate`, `op:<id>`).
+        Id: string
+        /// Whose bodies it is about: its quarry in its room.
+        Enemy: string
+        /// The room its record is committed to (`OpRecord.Room`).
+        Room: string
+        /// Its group, every colony's body of it, with where it stands
+        /// (`Operations.groupIn`): what its seats and its muster count.
+        Group: (CreepInfo * RoomPos) list
+        /// The rate its group earns in its room a tick (`Operations.ownFacts`):
+        /// what the operation ledger reads as its price.
+        Rate: float
+        /// The most bodies it seats (`OpLimits.MaxBodies`): its asks' cap.
+        MaxBodies: int
+    }
+
 /// The world layer's read of this tick, built once off the `World` and handed
 /// to every colony.
 type WorldView =
@@ -298,24 +319,17 @@ type WorldView =
         Flees: Map<string, float>
         /// Each room's worth this tick (`RoomWorth`, #663), built on first
         /// read off the colony whose economy it is, once for every colony
-        /// (`Facts.sweepAll`). None until the views are swept, and in a
-        /// fixture that prices a room off its own view (`Facts.roomWorth`).
+        /// (`Facts.layWorths`). None until the operations are laid
+        /// (`Operations.lay`), and in a fixture that prices a room off its
+        /// own view (`Facts.roomWorth`).
         Worths: Map<string, Lazy<RoomWorth>> option
-        /// The [[sweep]]'s group, every colony's body of it, with where it
-        /// stands (`Facts.sweepAll`, #658): what its muster waits for, the
-        /// bodies landing from other colonies among them. Empty until the
-        /// views are swept.
-        SweepGroup: (CreepInfo * RoomPos) list
-        /// The rate the [[sweep]]'s choice priced its room at
-        /// (`Facts.sweepChoice`, #662): what the operation ledger reads as a
-        /// sweep's price. Nothing until the views are swept, or where no
-        /// room pays.
-        SweepRate: float
-        /// Every candidate the [[sweep]]'s choice priced, with the rate its
-        /// group earns there a tick (`Facts.sweepAll`), in the order the
-        /// views name them: what the operation interpreter's shadow reads
-        /// (#663 S7b), so the price is one. Empty until the views are swept.
-        SweepRates: (string * float) list
+        /// Each [[operation]] working a room this tick (`Operations.lay`):
+        /// its room, its group and its price, the one answer every colony's
+        /// fight reads. None until the operations are laid: a candidate is
+        /// then read as worked (`Facts.operationRooms`), as pricing it for
+        /// the operation asks, and in every fixture of one view that lays
+        /// none.
+        Operations: OperationWork list option
         /// Each room an [[operation]] is committed to, against the tick it
         /// committed (its record's room and phase entry, #663 S7c): where a
         /// body seen rooted at its work there since is priced on that tile
@@ -342,9 +356,7 @@ module WorldView =
             Responses = Map.empty
             Flees = Map.empty
             Worths = None
-            SweepGroup = []
-            SweepRate = 0.0
-            SweepRates = []
+            Operations = None
             Committed = Map.empty
             FighterLost = Map.empty
             Questioned = Set.empty
@@ -480,9 +492,7 @@ module WorldView =
             Responses = Map.empty
             Flees = Map.empty
             Worths = None
-            SweepGroup = []
-            SweepRate = 0.0
-            SweepRates = []
+            Operations = None
             Committed = Map.empty
             FighterLost =
                 (Map.empty, gates)
@@ -712,8 +722,9 @@ type ColonyView =
         /// them from here. Empty once the last one falls.
         Dismantles: string list
         /// The [[harassment room]]s this colony casts this tick
-        /// (`World.harassCasters`), less those its [[stand-down]] shuts: what
-        /// the ranger's Guard and its unarmed targets are read off.
+        /// (`World.harassCasters`), less those its [[stand-down]] shuts: the
+        /// [[sweep]]'s candidates it works, of which the operation commits
+        /// to one (`WorldView.Operations`, `Facts.operationRooms`).
         Harass: Harass list
         /// Every harassment room this colony casts, the shut ones included:
         /// the rooms the [[raid log]] reads as ours to attack, never as a

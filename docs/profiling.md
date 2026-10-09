@@ -60,7 +60,7 @@ never a budget the bot acts on (ADR 0041: CPU is measured, not budgeted).
 
 ## The sweep switched on (`--sweep`)
 
-`--sweep` (#658) runs the probed copy with `Colony.harass` set to `Colony.harassDeclared`; `dist/main.js` and the live switch are untouched. The run's `colonies` fingerprint differs from one without it by design (the candidates projected or refused), so compare a `--sweep` run with another `--sweep` run, and read its `light ticks` and `forced full ticks` lines against a run without the flag: the sweep must add no forced full tick. The harness stands no hostile in a candidate, so the run prices the candidates' projection and the sweep's choice, never a fight.
+`--sweep` (#658) runs the probed copy with `Colony.operations` set to the sweep over `Colony.harassDeclared` (`Colony.harass` in a bundle built before #663 S7c); `dist/main.js` and the live switch are untouched. The run's `colonies` fingerprint differs from one without it by design (the candidates projected or refused), so compare a `--sweep` run with another `--sweep` run, and read its `light ticks` and `forced full ticks` lines against a run without the flag: the sweep must add no forced full tick. The harness stands no hostile in a candidate, so the run prices the candidates' projection and the sweep's choice, never a fight.
 
 ## The reset tick
 

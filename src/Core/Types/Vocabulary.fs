@@ -287,3 +287,9 @@ type Task =
     /// its capacity counts. Its Work Area is the rally ground until the squad
     /// launches, then beside the structure its sappers take down.
     | Assault of roomName: string
+    /// Working an [[operation]]'s room (#663 S7c): one Task per operation,
+    /// keyed on the operation and never on the room — its id is `op:<id>`,
+    /// so a body holds it across a move of the room the operation is
+    /// committed to. The room rides beside the key: the room this tick's
+    /// fight is in, its Work Area its Brief's, as a Guard's is.
+    | Operate of opId: string * roomName: string

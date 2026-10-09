@@ -511,7 +511,8 @@ let private briefAsks (threats: Threats) (row: CastRow) : (Task * RowAsk) list =
     |> Map.toList
     |> List.collect (fun (task, brief) ->
         match task with
-        | Guard _ -> []
+        | Guard _
+        | Operate _ -> []
         | _ ->
             brief.Asks
             |> List.filter (fun ask -> ask.Row = row)
@@ -551,7 +552,8 @@ let private pursuedAsks
     |> Map.toList
     |> List.collect (fun (task, brief) ->
         match task with
-        | Guard room when Brief.pursued brief && not (List.contains room outposts.Guarded) ->
+        | Guard room
+        | Operate(_, room) when Brief.pursued brief && not (List.contains room outposts.Guarded) ->
             brief.Asks
             |> List.filter (fun ask -> ask.Row = row && not (recastCooling view threats room ask))
             |> List.map (fun ask -> task, ask)
@@ -575,7 +577,8 @@ let private killAsks
     |> Map.toList
     |> List.collect (fun (task, brief) ->
         match task with
-        | Guard room when pricedKill outposts room brief && not (calls room) ->
+        | Guard room
+        | Operate(_, room) when pricedKill outposts room brief && not (calls room) ->
             brief.Asks
             |> List.filter (fun ask -> ask.Row = row)
             |> List.map (fun ask -> task, ask)
@@ -596,7 +599,7 @@ let private asksFor
 
     (guardedAsks threats outposts row
      |> List.filter (fun (room, ask) -> not (recastCooling view threats room ask))
-     |> List.map (fun (room, ask) -> Guard room, ask)
+     |> List.map (fun (room, ask) -> Facts.fightTask view room, ask)
      |> unpriced)
     @ unpriced (pursuedAsks view threats outposts row)
     @ (killAsks threats outposts calls row
@@ -677,7 +680,8 @@ let ownCasts
     castsOf view threats guarded calls
     |> List.choose (fun cast ->
         match cast.Prey, cast.For with
-        | Some prey, Guard room ->
+        | Some prey, Guard room
+        | Some prey, Operate(_, room) ->
             let landing = castLanding view cast.Ask.Row room
 
             let paid =
@@ -756,7 +760,8 @@ let internal rowAskReturns
 
     let priced task blocks prey =
         match prey |> Option.orElse (briefPrey task), task with
-        | Some prey, Guard room ->
+        | Some prey, Guard room
+        | Some prey, Operate(_, room) ->
             Facts.castReturn view row blocks room (castLanding view row room) prey
         | _ -> None
 

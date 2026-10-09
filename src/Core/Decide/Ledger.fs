@@ -13,8 +13,9 @@ open Fabot.Core.Types
 /// Which job or spell an operation is.
 [<RequireQualifiedAccess>]
 type OperationKind =
-    /// The [[sweep]]'s room spell: the ticks `Facts.sweepChoice` works one
-    /// room. A camp in its room is a job of it, recorded on its row.
+    /// The [[sweep]]'s room spell: the ticks its operation works one room
+    /// (`WorldView.Operations`). A camp in its room is a job of it,
+    /// recorded on its row.
     | Sweep
     /// A camp on a border dancer (`JobKind.Camp`) outside the sweep's room.
     | Camp
@@ -36,7 +37,7 @@ type OperationKey =
 
 /// The price the decision read as an operation opened, each only where the
 /// decide priced it that tick — the ledger prices nothing itself: the
-/// sweep's rate for its room (`WorldView.SweepRate`), its first job's value
+/// sweep's rate for its room (`OperationWork.Rate`), its first job's value
 /// a tick (`Job.Value`), and a camp's odds (`Job.Odds`).
 type Prediction =
     {
@@ -763,8 +764,12 @@ let private readingOf (view: ColonyView) (room: string) (worth: RoomWorth) : Rea
                     Map.add h.Id 0.0 values)
             worth.Values
 
+    // The enemy of an operation working the room.
     let candidate =
-        view.Harass |> List.tryFind (fun h -> h.RoomName = room) |> Option.map _.Enemy
+        if Set.contains room (Facts.operationRooms view) then
+            view.Harass |> List.tryFind (fun h -> h.RoomName = room) |> Option.map _.Enemy
+        else
+            None
 
     let reserver =
         Map.tryFind room view.World.Rooms
@@ -847,7 +852,7 @@ let private readingIn (view: ColonyView) (room: string) : Reading option =
 /// judged views (`views`), the world's Brief of each combat Task with its
 /// owner's view (`briefs`) and the Tasks this tick's match handed the
 /// fighters (`assigned`): the [[sweep]]'s room while it works one, at the
-/// rate its choice priced it at (`WorldView.SweepRate`), a camp in it a job
+/// rate its operation priced it at (`OperationWork.Rate`), a camp in it a job
 /// of it (its odds and the bodies it is laid on); and outside the sweep's
 /// room, of each [[contested room]]'s Guard, a camp where its jobs lay one,
 /// else its prey phase as a trespass and its raid phase outside a home as a
@@ -859,12 +864,29 @@ let observe
     (briefs: (Task * Brief * ColonyView) list)
     (assigned: Assignments)
     : Observed =
-    // Each Guard's holder by name, and where the world's census of our
-    // bodies stands it: read only where a Guard is held.
+    // The room each operation works this tick, by its Task's id.
+    let operating =
+        views
+        |> List.tryPick (fun view -> view.World.Operations)
+        |> Option.defaultValue []
+
+    let worked =
+        operating
+        |> List.map (fun op -> taskId (Operate(op.Id, op.Room)), op.Room)
+        |> Map.ofList
+
+    // Each fight's holder by name — a Guard's, or an operation's in the room
+    // it works — and where the world's census of our bodies stands it: read
+    // only where a fight is held.
     let guards =
         assigned
-        |> Map.filter (fun _ tid -> tid.StartsWith guardPrefix)
-        |> Map.map (fun _ tid -> tid.Substring guardPrefix.Length)
+        |> Map.toSeq
+        |> Seq.choose (fun (name, tid) ->
+            if tid.StartsWith guardPrefix then
+                Some(name, tid.Substring guardPrefix.Length)
+            else
+                Map.tryFind tid worked |> Option.map (fun room -> name, room))
+        |> Map.ofSeq
 
     let placed =
         match views with
@@ -888,10 +910,14 @@ let observe
         |> Seq.map (fun (room, held) -> room, held |> Seq.map snd |> List.ofSeq)
         |> Map.ofSeq
 
+    // The sweep's room, off the view of the first colony that casts it.
     let sweep =
-        views
-        |> List.tryPick (fun view ->
-            view.Harass |> List.tryHead |> Option.map (fun h -> h.RoomName, view))
+        operating
+        |> List.tryHead
+        |> Option.bind (fun op ->
+            views
+            |> List.tryFind (fun view -> Option.isSome (Facts.operationIn view op.Room))
+            |> Option.map (fun view -> op, view))
 
     let homes = lazy (views |> List.map Facts.homesOfOurs |> Set.unionMany)
 
@@ -918,7 +944,7 @@ let observe
         |> List.collect (fun (task, brief, view) ->
             match task, brief.Duty, brief.Contention with
             | Guard room, Duty.Guard BriefKind.Contested, Some contention ->
-                let swept = sweep |> Option.exists (fun (chosen, _) -> chosen = room)
+                let swept = sweep |> Option.exists (fun (op, _) -> op.Room = room)
 
                 // In the sweep's room a camp is a job of the sweep, on its row.
                 let kind =
@@ -952,11 +978,16 @@ let observe
 
     let swept =
         sweep
-        |> Option.map (fun (room, view) ->
+        |> Option.map (fun (op, view) ->
+            let room = op.Room
+
             let brief =
                 briefs
                 |> List.tryPick (fun (task, brief, _) ->
-                    if task = Guard room then Some brief else None)
+                    match task with
+                    | Operate(_, worked)
+                    | Guard worked when worked = room -> Some brief
+                    | _ -> None)
 
             let camp = brief |> Option.bind campOf
 
@@ -967,7 +998,7 @@ let observe
                 Predicted =
                     lazy
                         {
-                            Rate = Some view.World.SweepRate
+                            Rate = Some op.Rate
                             Value = brief |> Option.bind firstValue
                             Odds = camp |> Option.bind campOdds
                         }

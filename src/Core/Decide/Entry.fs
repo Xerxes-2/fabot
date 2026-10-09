@@ -311,7 +311,7 @@ let private signaturesOf (view: ColonyView) (memo: PlanMemo option) : Signed =
         |> Set.ofList
 
     let unplanned =
-        Set.union view.Crossed (Facts.harassRooms view)
+        Set.union view.Crossed (Facts.operationRooms view)
         |> Set.filter (fun room -> not (Set.contains room priced))
 
     // The economy's rooms alone (#667): the plan's chains enter no room the
@@ -727,10 +727,10 @@ let private kindRank (brief: Brief) =
     let placeOf kind =
         BriefKind.order |> List.tryFindIndex ((=) kind) |> Option.defaultValue 0
 
-    match brief.Duty with
-    | Duty.Guard _ when Brief.pursued brief -> 2 * placeOf BriefKind.Chase
-    | Duty.Guard kind -> 2 * placeOf kind + (if Brief.isPrey brief then 1 else 0)
-    | _ -> 0
+    match Brief.flavourOf brief with
+    | Some _ when Brief.pursued brief -> 2 * placeOf BriefKind.Chase
+    | Some kind -> 2 * placeOf kind + (if Brief.isPrey brief then 1 else 0)
+    | None -> 0
 
 /// The Threats a colony's fighters are priced, emitted and moved in: its
 /// own, the world's Briefs laid in beside them, each in the place of an own
@@ -1709,7 +1709,7 @@ let decideFight
     (memo: PlanMemo)
     (carry: EconomyCarry)
     : Decision option =
-    openFight (Facts.sweep assignments view) assignments verbose memo carry
+    openFight (Operations.layOne assignments view) assignments verbose memo carry
     |> Option.bind (fun opening ->
         let joining = opening.Join ownFight
         joining.Finish [ matchAlone joining assignments verbose ])
@@ -1725,9 +1725,9 @@ let decide
     : Decision =
     // One colony alone is always its own turn to re-plan: the budget #357
     // added staggers colonies against each other. Its sweep laid in as the
-    // world's tick lays it (`judgeColonies`).
+    // world's tick lays it (`judgeColonies`), with no stored latch.
     let view =
-        { Facts.sweep assignments view with
+        { Operations.layOne assignments view with
             Leaving =
                 leavingTiles
                     assignments
@@ -1770,6 +1770,12 @@ type ColonyInputs =
         /// The colony index whose turn it is to re-plan (#357), -1 for none;
         /// None where every colony re-plans on its own turn.
         TurnIndex: int option
+        /// The code's operations' records as last stored (#663 S7c,
+        /// `Memory.fabot.ops.code`): the latch each moves on from.
+        Operations: OpRecord list
+        /// The code's operation specs the shell admitted
+        /// (`Operations.declared`): the limits each runs under.
+        Declared: OpSpecWire list
     }
 
 /// A colony's own step that threw (#628): the colony decides nothing this
@@ -1789,20 +1795,6 @@ type ColonyFault =
 /// (`ColonyDecisions.Lane`): no room is named it.
 [<Literal>]
 let worldLane = "world"
-
-/// What the [[sweep]] decided this tick, as its shadow reads it (#663 S7b):
-/// its answers (`SweepAnswer`) off the judged views and its room's
-/// world Brief, the judged views, last tick's Tasks, and the view each
-/// room's fight is priced off (its Guard's owner's, else the first that
-/// casts it).
-[<NoEquality; NoComparison>]
-type SweepSeen =
-    {
-        Decided: SweepAnswer
-        Views: ColonyView list
-        Held: Assignments
-        Priced: string -> ColonyView option
-    }
 
 /// One tick's decisions over every colony.
 type ColonyDecisions<'Stamp> =
@@ -1842,9 +1834,10 @@ type ColonyDecisions<'Stamp> =
         /// (`Ledger.observe`), on first read: the shell's alone, after
         /// every decision, on a tick every colony fought.
         Operations: Lazy<Ledger.Observed>
-        /// What the sweep decided (`sweepSeen`), on first read: the shell's
-        /// alone, for the operation interpreter's shadow, on a whole tick.
-        Sweep: Lazy<SweepSeen>
+        /// The code's operations' records moved on this tick
+        /// (`Operations.lay`), and what moved: the shell stores them, the
+        /// latch the next tick moves on from.
+        Operated: OpRecord list * OpEvent list
     }
 
 /// One colony's step run alone: its throw is its own fault, handed back
@@ -1874,17 +1867,21 @@ let private sorted (results: Result<'a, ColonyFault> list) : 'a list * ColonyFau
 /// Each raided room's one verdict, priced once over the fleet and the
 /// world's vision and laid in each view (`Facts.judge`): a colony that does
 /// not decide (`idle`) sends only the bodies its plan already holds there.
-/// The [[sweep]]'s one room laid in first (`Facts.sweepAll`), so the
-/// verdicts price the room it works and no other candidate. And each
-/// contested room's one danger (`WorldDanger.lay`).
+/// The operations laid in first (`Operations.lay`, moved on from their
+/// stored records), so the verdicts price the room each works and no other
+/// candidate. And each contested room's one danger (`WorldDanger.lay`). The
+/// records come back moved on, with what moved.
 let judgeColonies
     (assignments: Assignments)
     (idle: Set<string>)
+    (declared: OpSpecWire list)
+    (records: OpRecord list)
     (colonies: (Colony * ColonyView) list)
-    : ColonyView list =
-    let swept = colonies |> List.map snd |> Facts.sweepAll assignments
+    : ColonyView list * (OpRecord list * OpEvent list) =
+    let laid, records, events =
+        colonies |> List.map snd |> Operations.lay declared assignments records
 
-    List.zip colonies swept
+    List.zip colonies laid
     |> List.map (fun ((colony, _), view) ->
         ({
             Cut = view
@@ -1893,7 +1890,8 @@ let judgeColonies
         }
         : Facts.Judged))
     |> Facts.judge assignments
-    |> WorldDanger.lay
+    |> WorldDanger.lay,
+    (records, events)
 
 /// ADR-0091
 /// The world's fight, one Brief per combat Task world-wide: of the colonies
@@ -1917,7 +1915,8 @@ let private worldFights
             |> List.choose (fun task ->
                 match task with
                 | Guard room
-                | Defend room ->
+                | Defend room
+                | Operate(_, room) ->
                     Threats.briefFor opening.Threats task
                     |> Option.map (fun brief -> task, (room, colony, opening, brief))
                 | _ -> None))
@@ -2008,7 +2007,8 @@ let private worldFights
             |> List.choose (fun task ->
                 match task with
                 | Guard at
-                | Defend at when at = room -> Threats.briefFor opening.Threats task
+                | Defend at
+                | Operate(_, at) when at = room -> Threats.briefFor opening.Threats task
                 | _ -> None)
 
         let laid =
@@ -2065,67 +2065,6 @@ let private towersAlone (view: ColonyView) (assignments: Assignments) : Intent l
     @ planTowerHeal view atlas
     @ planRampartDoors view
 
-/// What the [[sweep]] decided this tick (#663 S7b): its room, the one the
-/// judged views keep in `Harass` (`Facts.sweepAll`); its group, every view's
-/// `WorldView.SweepGroup`; and off its room's world Brief, read against its
-/// owner's Threats, its jobs' kinds and their seats
-/// summed. Read after every decision: nothing decides on it.
-let private sweepSeen
-    (holding: Assignments)
-    (judged: ColonyView list)
-    (briefs: (Task * Brief * ColonyView) list)
-    (owners: Map<Task, string>)
-    (threatsOf: string -> Threats option)
-    : SweepSeen =
-    let room =
-        judged
-        |> List.tryPick (fun view -> view.Harass |> List.tryHead |> Option.map _.RoomName)
-
-    let briefOf (room: string) =
-        briefs
-        |> List.tryPick (fun (task, brief, view) ->
-            if task = Guard room then Some(brief, view) else None)
-
-    let read =
-        room
-        |> Option.bind (fun room ->
-            briefOf room
-            |> Option.bind (fun (brief, _) ->
-                Map.tryFind (Guard room) owners
-                |> Option.bind threatsOf
-                |> Option.map (fun threats -> brief, threats)))
-
-    {
-        Decided =
-            {
-                Room = room
-                Group =
-                    judged
-                    |> List.collect (fun view ->
-                        view.World.SweepGroup |> List.map (fun (creep, _) -> creep.Name))
-                    |> Set.ofList
-                Scoped = Set.empty
-                Jobs =
-                    read
-                    |> Option.map (fun (brief, _) -> brief.Jobs |> List.map _.Kind)
-                    |> Option.defaultValue []
-                Seats =
-                    read
-                    |> Option.map (fun (brief, threats) ->
-                        brief.Jobs |> List.sumBy (fun job -> (job.Seats threats).Count))
-                    |> Option.defaultValue 0
-            }
-        Views = judged
-        Held = holding
-        Priced =
-            fun room ->
-                briefOf room
-                |> Option.map snd
-                |> Option.orElse (
-                    judged |> List.tryFind (fun view -> view.HarassCast.Contains room)
-                )
-    }
-
 /// The world lane's tick: every deciding colony opened —
 /// the fight-only ones (`openFight`) off the judged views, every other whole
 /// (`openWhole`) off the aimed ones —, the world's fight laid in
@@ -2141,6 +2080,7 @@ let private decideWorld
     (stamp: unit -> 'Stamp)
     (colonies: (Colony * ColonyView) list)
     (judged: ColonyView list)
+    (operated: OpRecord list * OpEvent list)
     : ColonyDecisions<'Stamp> =
     // The world lane's stamps, observe-only: the judging before this is the
     // world's.
@@ -2426,12 +2366,7 @@ let private decideWorld
         Towers = towers
         Whole = List.length whole = List.length colonies
         Operations = lazy (Ledger.observe judged briefs fleet.Assigned)
-        Sweep =
-            lazy
-                (sweepSeen inputs.Holding judged briefs owners (fun home ->
-                    opened
-                    |> List.tryFind (fun (colony, _, _) -> colony.Home = home)
-                    |> Option.map (fun (_, _, opening) -> opening.Threats)))
+        Operated = operated
     }
 
 /// Every colony's tick decided: the views judged (`judgeColonies`), then the
@@ -2459,6 +2394,7 @@ let decideColonies
         colonies
         |> List.map (fun (colony, view) -> colony, { view with Leaving = leaving })
 
-    let judged = judgeColonies inputs.Holding inputs.Idle colonies
+    let judged, operated =
+        judgeColonies inputs.Holding inputs.Idle inputs.Declared inputs.Operations colonies
 
-    decideWorld inputs stamp colonies judged
+    decideWorld inputs stamp colonies judged operated

@@ -1266,8 +1266,9 @@ module Colony =
             "W9S26", "Kalgen" // RCL6
         ]
 
-    /// The enemy remotes a human has declared for the [[sweep]], kept for the
-    /// day the user switches it on (`harass`) and for the tests that read the
+    /// The enemy remotes a human has declared for the [[sweep]]: each with the
+    /// detour its walk needs (`Via`), read by the candidates an operation
+    /// names (`candidatesOf`), and kept for the tests that read the
     /// declarations.
     let harassDeclared: Harass list =
         [
@@ -1308,19 +1309,54 @@ module Colony =
             }
         ]
 
-    /// The [[sweep]]'s live candidates: one list for the whole bot, run by
-    /// the colony `World.harassCasters` names, or refused while none can.
-    /// Switched on for W18S27 and W19S26, then W19S25 (user, 2026-10-08),
-    /// after the sweep replaced stationary harassment (it was off since one
-    /// stationary ranger chasing equal-pace haulers in W19S25 forced 42 of 100
-    /// ticks full and drained the bucket). Off is `[]`; all of it is
-    /// `harassDeclared`.
-    let harass: Harass list =
-        let on = set [ "W18S27"; "W19S26"; "W19S25" ]
-        harassDeclared |> List.filter (fun h -> on.Contains h.RoomName)
+    /// The [[sweep]]'s operation id: its holders' Task is `op:sweep`
+    /// (`Operate`), which a candidate's caster reads as its incumbent
+    /// (`World.harassCasters`).
+    let sweepId = "sweep"
 
-    /// The [[sweep]] over these candidates as an operation (#663 S7b): one
-    /// group over every candidate, against their one enemy; none with no
+    /// The operations code declares (#663 S7c), the source of every
+    /// [[sweep]] candidate: the sweep over W18S27 and W19S26, then W19S25
+    /// (user, 2026-10-08), after it replaced stationary harassment (it was
+    /// off since one stationary ranger chasing equal-pace haulers in W19S25
+    /// forced 42 of 100 ticks full and drained the bucket). Off is `[]`. The
+    /// shell admits each through the Memory spec's safety
+    /// (`Operations.declared`) and casts its rooms (`candidatesOf`).
+    let operations: OpSpecWire list =
+        [
+            {
+                Id = sweepId
+                Template = "sweep"
+                Enemy = "Trepidimous"
+                Rooms = [ "W18S27"; "W19S26"; "W19S25" ]
+                Deadline = None
+                MaxEnergy = None
+                MaxBodies = None
+            }
+        ]
+
+    /// The [[sweep]] candidates these operations name (#663 S7c): each room a
+    /// sweep spec lists, against its enemy, with the detour a human named
+    /// for its walk (`harassDeclared`'s `Via`), else none.
+    let candidatesOf (wires: OpSpecWire list) : Harass list =
+        wires
+        |> List.filter (fun wire -> wire.Template = "sweep")
+        |> List.collect (fun wire ->
+            wire.Rooms
+            |> List.map (fun room ->
+                {
+                    RoomName = room
+                    Enemy = wire.Enemy
+                    Via =
+                        harassDeclared
+                        |> List.tryFind (fun h -> h.RoomName = room)
+                        |> Option.map _.Via
+                        |> Option.defaultValue []
+                }))
+        |> List.distinctBy _.RoomName
+
+    /// The [[sweep]] over the candidates the colonies cast, as an operation
+    /// (#663 S7b; `Operations.sweepSpec` reads it off the views): one group
+    /// over every candidate, against their one enemy; none with no
     /// candidate. A sweep's group serves one enemy, so candidates of two
     /// are refused, naming them, rather than one read for both.
     let sweepOf (candidates: Harass list) : Result<OpSpecWire list, string> =
@@ -1330,7 +1366,7 @@ module Colony =
             Ok
                 [
                     {
-                        Id = "sweep"
+                        Id = sweepId
                         Template = "sweep"
                         Enemy = enemy
                         Rooms = candidates |> List.map _.RoomName
@@ -1340,11 +1376,6 @@ module Colony =
                     }
                 ]
         | enemies -> Error("sweep candidates of two enemies: " + String.concat ", " enemies)
-
-    /// The operations code declares (#663 S7b): the sweep over `harass`,
-    /// which stays the live input until the interpreter casts (S7c); until
-    /// then the interpreter runs it in shadow beside `Facts.sweepAll`.
-    let operations: Result<OpSpecWire list, string> = sweepOf harass
 
     /// The colonies a human has declared, moved by a human in a commit: an
     /// entry in this list is the whole of "I mean to take that room", and an

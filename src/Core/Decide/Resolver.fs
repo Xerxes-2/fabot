@@ -1425,7 +1425,8 @@ let closes
     (creep: CreepInfo)
     : bool =
     match Map.tryFind creep.Name assigned with
-    | Some(Guard room as task) ->
+    | Some(Guard room as task)
+    | Some(Operate(_, room) as task) ->
         let brief = Threats.briefOf threats room
 
         Facts.fits
@@ -1507,6 +1508,7 @@ let movementAmong
             |> List.filter (fun (name, at) ->
                 match Map.tryFind name assigned with
                 | Some(Guard room)
+                | Some(Operate(_, room))
                 | Some(Assault room) -> room <> at.Room
                 | _ -> false)
             |> List.map fst
@@ -1545,7 +1547,7 @@ let movementAmong
         | Some creep when
             isFighterBody creep
             && (Threats.winsIn view threats room creep
-                || Map.tryFind name assigned = Some(Guard room)
+                || Map.tryFind name assigned = Some(Facts.fightTask view room)
                    && Facts.raided view room
                    && Brief.stanceOf view room (Threats.briefOf threats room) creep = Stance.Standoff
                    && closesNow creep)
@@ -1615,7 +1617,8 @@ let movementAmong
     // What a Guard's holder walks round is its Brief's (`Brief.Avoid`).
     let avoidFor name =
         match Map.tryFind name assigned with
-        | Some(Guard room) -> (Threats.briefOf threats room).Avoid
+        | Some(Guard room)
+        | Some(Operate(_, room)) -> (Threats.briefOf threats room).Avoid
         | _ -> Avoid.Runner
 
     // A Chase's holder that outranges a swing kites (#510, #615 U1); a
@@ -1632,7 +1635,8 @@ let movementAmong
     // by, whatever the Guard's kind: walked into it, the raider strikes it.
     let kitesHere (creep: CreepInfo) (at: RoomPos) =
         match Map.tryFind creep.Name assigned with
-        | Some(Guard room) when room = at.Room ->
+        | Some(Guard room)
+        | Some(Operate(_, room)) when room = at.Room ->
             Brief.stanceOf view room (Threats.briefOf threats room) creep = Stance.Standoff
             && Threats.standsOffSome view threats atlas creep
         | _ -> false
@@ -1647,7 +1651,8 @@ let movementAmong
 
             let approach =
                 match Map.tryFind name assigned with
-                | Some(Guard room) -> Brief.approachOf (Threats.briefOf threats room)
+                | Some(Guard room)
+                | Some(Operate(_, room)) -> Brief.approachOf (Threats.briefOf threats room)
                 | _ -> lazy Set.empty
 
             match Threats.kiteUnsafeFor view threats atlas creep camp with
@@ -1675,7 +1680,9 @@ let movementAmong
     // horizon, net of its own heal, takes its hits (#650).
     let fightOf name (at: RoomPos) =
         match Map.tryFind name assigned, Map.tryFind name named.Value with
-        | Some(Guard room | Defend room | Assault room), Some creep when isFighterBody creep ->
+        | Some(Guard room | Defend room | Assault room | Operate(_, room)), Some creep when
+            isFighterBody creep
+            ->
             let horizon = view.Tuning.ReachHorizon
             let heal = Engine.healPower * partCount creep.Body Heal
             let struck = Threats.damageAt threats at.Room horizon (RoomPos.pos at)

@@ -1768,31 +1768,21 @@ let borderCampTests =
                     $"off the exit\n{failure}"
             }
 
-            // The dancer bouncing on the exit before its camp pays is prey:
-            // there the Brief seats its trespass split (#550), a swing's
-            // floor beside the ranger, past what the group pays for — the
-            // one difference S7c decides. Moved by S7c-1's latch: on a tick
-            // the per-tick choice works no room, the shadow keeps the room
-            // it committed to, its dancer still there.
+            // The camp is the sweep's operation's job (#663 S7c): its ranger
+            // holds the operation's Task, committed to the dancer's room.
             test
-                "the sweep as an operation, run in shadow, answers the camp the sweep lays every tick, and seats fewer only on the bouncing prey (#663 S7b)" {
-                let final, trace = dancerAcrossNorth () |> run 200
-                let _, log = final.Carried.Shadow
+                "the sweep's camp is its operation's: its ranger holds the operation's Task, committed to the dancer's room" {
+                let operating (a: Arena) =
+                    a.Carried.Assignments |> Map.exists (fun _ tid -> tid = "op:sweep")
 
-                Expect.isGreaterThan log.Working 0 $"the sweep worked its room\n%A{log}"
+                let working, trace = dancerAcrossNorth () |> runUntil operating 200
 
-                Expect.isTrue
-                    (log.Counts
-                     |> Map.forall (fun kind _ -> kind = Divergence.Seats || kind = Divergence.Room))
-                    $"only the seats and the committed room differ\n%A{log}\n{describe trace}"
+                Expect.isTrue (operating working) $"a body holds the sweep's Task\n{describe trace}"
 
-                Expect.all
-                    log.Last
-                    (fun example ->
-                        match example.Kind with
-                        | Divergence.Room -> example.Sweep = "none" && example.Shadow = "W12S27"
-                        | _ -> int example.Sweep > int example.Shadow)
-                    $"the Brief seats more, never fewer; the shadow keeps its room where the sweep drops it\n%A{log}"
+                Expect.equal
+                    (working.Carried.Operations |> List.choose _.Room)
+                    [ "W12S27" ]
+                    "committed to the dancer's room"
             }
 
             // #615, W17S26 replay t1,052,656-685 (our rangers held d4-7 off

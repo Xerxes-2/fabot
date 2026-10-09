@@ -292,9 +292,10 @@ type OpRecord =
         /// The tick `Room` was chosen: what its commitment is priced from
         /// (`WorldView.Committed`).
         RoomSince: int
-        /// The energy its casts spent; nothing before S7c casts.
+        /// The energy its casts spent; not yet counted (S7e reads it off the
+        /// operation ledger).
         Spent: int
-        /// The energy of its bodies lost; nothing before S7c casts.
+        /// The energy of its bodies lost; not yet counted (S7e).
         Lost: int
         /// An `Every` schedule's next run, a period after this one started;
         /// 0 for every other schedule.
@@ -387,65 +388,6 @@ type OpEvent =
     | Ended of id: string * OpEnd
     /// Its spec left Memory, or is refused now.
     | Dropped of id: string
-
-/// The [[sweep]]'s answers for one full tick (#663 S7b), as the decide gave
-/// them (`Facts.sweepAll` and the room's Guard Brief) or as the operation
-/// interpreter resolves the code spec (`Operations.sweepShadow`): the room
-/// worked, every body of the group, its jobs' kinds, first first, and the
-/// seats they sum to.
-type SweepAnswer =
-    {
-        Room: string option
-        Group: Set<string>
-        /// The shadow's alone: the bodies of its group whose own colony does
-        /// not cast the room they are counted in. The operation's roster is
-        /// the world's (S7c); the sweep's group is each colony's over the
-        /// candidates it casts (`Facts.sweepGroup`). Empty for the sweep.
-        Scoped: Set<string>
-        Jobs: JobKind list
-        Seats: int
-    }
-
-/// Which answer a shadow tick disagrees on. Since S7c-1 every kind compares
-/// computations made apart: the shadow prices its rooms with its own group
-/// and keeps the room its record committed to (`OpRecord.Room`), where the
-/// sweep re-picks each tick off its own group's prices.
-[<RequireQualifiedAccess>]
-type Divergence =
-    | Room
-    | Group
-    /// A group difference made wholly of bodies `SweepAnswer.Scoped` names:
-    /// the roster's scope, not a defect.
-    | Scope
-    | Jobs
-    | Seats
-
-/// One disagreement: the tick, the room (the sweep's, else the shadow's,
-/// else none), both answers as text and why they differ.
-type ShadowExample =
-    {
-        Tick: int
-        Kind: Divergence
-        Room: string
-        Shadow: string
-        Sweep: string
-        Why: string
-    }
-
-/// The shadow's bounded log (`Memory.fabot.shadow`): the full ticks it
-/// compared, a count of each kind of disagreement, and the latest few.
-/// It outlives the tick (#401): `Counts` is built by `Fresh`.
-type ShadowLog =
-    {
-        Compared: int
-        /// Of those, the ticks the sweep worked a room.
-        Working: int
-        Counts: Map<Divergence, int>
-        Last: ShadowExample list
-        /// This tick's refusals of the code spec (`Operation.ofCode`): a
-        /// room dropped from it, or the whole spec.
-        Refused: OpRefusal list
-    }
 
 [<RequireQualifiedAccess>]
 module Operation =
@@ -561,28 +503,6 @@ module Operation =
             match name with
             | "sweep" -> Some(sweep, sweepBodies)
             | _ -> None
-
-    /// The disagreements `ShadowLog.Last` keeps, newest first.
-    let shadowCap = 8
-
-    /// A log that has compared nothing.
-    let shadowEmpty: ShadowLog =
-        {
-            Compared = 0
-            Working = 0
-            Counts = Fresh.mapOfList []
-            Last = []
-            Refused = []
-        }
-
-    /// A fault's quarantine: the keys already recorded with this one added,
-    /// where it is new; None for one recorded before, which is not recorded
-    /// again (a repeat would rewrite the fault log every tick).
-    let firstSeen (seen: Set<string>) (key: string) : Set<string> option =
-        if seen.Contains key then
-            None
-        else
-            Some(Fresh.setOfSeq (Seq.append seen [ key ]))
 
     /// Whether a schedule can run: an `Every` run's period at least a tick,
     /// its window no longer than its period.

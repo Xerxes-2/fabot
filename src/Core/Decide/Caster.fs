@@ -37,7 +37,8 @@ type private Ledger =
 let private roomOf (task: Task) =
     match task with
     | Guard room
-    | Defend room -> Some room
+    | Defend room
+    | Operate(_, room) -> Some room
     | _ -> None
 
 /// The fight asks each colony casts for this tick, by home: every
@@ -135,7 +136,10 @@ let assign
     let fightOf (creep: CreepInfo) =
         Map.tryFind creep.Name held
         |> Option.filter (fun tid ->
-            tid.StartsWith "guard:" || tid.StartsWith "defend:" || tid.StartsWith "assault:")
+            tid.StartsWith "guard:"
+            || tid.StartsWith "defend:"
+            || tid.StartsWith "assault:"
+            || tid.StartsWith "op:")
 
     // The fleet each colony brings to a row: its living bodies of it, cast
     // wherever held (`Quota.fightersCast`), and its oven's. A body holding a
@@ -233,21 +237,31 @@ let assign
                 |> Option.map _.Ask.Blocks
                 |> Option.defaultValue ask.Ask.Blocks
 
+            // An operation's ask (#663 S7c) is bid for by no colony whose own
+            // home is threatened (`Facts.homeThreatened`): home defence
+            // first.
             let eligible =
-                match fixedTo with
-                | Some home -> bidders |> List.filter (fun b -> b.Home = home)
-                | None -> bidders |> List.filter (fun b -> isAsker b || reaches b room)
+                match fixedTo, task with
+                | Some home, _ -> bidders |> List.filter (fun b -> b.Home = home)
+                | None, Operate _ ->
+                    bidders
+                    |> List.filter (fun b ->
+                        (isAsker b || reaches b room) && not (Facts.homeThreatened b.View))
+                | None, _ -> bidders |> List.filter (fun b -> isAsker b || reaches b room)
 
             // Its own ask a colony casts for past no floor: one it asks for,
             // its home or a room that is no other colony's home it defends
             // (`Facts.defendsOthers`); any other past the floor, as the
-            // verdict weighs its row (`Facts.castsForOthers`).
-            // A [[sweep]]'s room is no colony's own, whoever asks for it
-            // (#658): each body past both floors, as for another's room.
+            // verdict weighs its row (`Facts.castsForOthers`). An
+            // operation's room is no colony's own, whoever asks for it: each
+            // body past both floors, as for another's room.
             let own (bidder: Bidder) =
-                isAsker bidder
-                && not (Facts.defendsOthers bidder.View room)
-                && Facts.contestOurs bidder.View room
+                match task with
+                | Operate _ -> false
+                | _ ->
+                    isAsker bidder
+                    && not (Facts.defendsOthers bidder.View room)
+                    && Facts.contestOurs bidder.View room
 
             // A trespass's kill is cast into a colony's own room only past
             // its bank's floor, the body paid for (#652): it is spent out of

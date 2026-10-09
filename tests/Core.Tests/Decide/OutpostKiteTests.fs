@@ -1271,14 +1271,17 @@ let chaseCallTests =
             // miner is laid in the view (one model for its price, its fight
             // and its cast), so r-1 holds a kill there, which a chase does not
             // call it off (it was a quiet harassment room's Guard, called).
+            // Moved by #663 S7c: the sweep's kill is its operation's Task
+            // (`op:sweep`), not the room's Guard.
             test "a ranger holding the sweep's kill keeps it against a chase within two rooms" {
-                let held = Map.ofList [ "r-1", taskId (Guard "W1N3") ]
+                let sweeping = taskId (Operate(Colony.sweepId, "W1N3"))
+                let held = Map.ofList [ "r-1", sweeping ]
 
                 let quiet = decide (harassingBeyond []) held Set.empty None
 
                 Expect.equal
                     (Map.tryFind "r-1" quiet.Assignments)
-                    (Some(taskId (Guard "W1N3")))
+                    (Some sweeping)
                     "the premise: with nothing to chase it keeps its own Guard"
 
                 let called =
@@ -1286,7 +1289,7 @@ let chaseCallTests =
 
                 Expect.equal
                     (Map.tryFind "r-1" called.Assignments)
-                    (Some(taskId (Guard "W1N3")))
+                    (Some sweeping)
                     "a crippled melee a walk away calls it off no kill"
             }
 
@@ -1303,7 +1306,10 @@ let chaseCallTests =
                         Creeps = colony.Creeps @ [ ranger "r-9" ]
                     }
 
-                let held = Map.ofList [ "r-1", taskId (Guard "W1N3"); "r-9", taskId (Guard "W1N2") ]
+                // Moved by #663 S7c: r-1 holds the sweep's operation's Task
+                // (`op:sweep`), not the room's Guard.
+                let sweeping = taskId (Operate(Colony.sweepId, "W1N3"))
+                let held = Map.ofList [ "r-1", sweeping; "r-9", taskId (Guard "W1N2") ]
 
                 let result = decide colony held Set.empty None
 
@@ -1316,7 +1322,7 @@ let chaseCallTests =
 
                 Expect.equal
                     (Map.tryFind "r-1" result.Assignments, Map.tryFind "r-9" result.Assignments)
-                    (Some(taskId (Guard "W1N3")), Some(taskId (Guard "W1N2")))
+                    (Some sweeping, Some(taskId (Guard "W1N2")))
                     "and each keeps what it held"
             }
         ]

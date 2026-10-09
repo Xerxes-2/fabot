@@ -29,6 +29,30 @@ let private declarationOf room =
 
 let private declaration = declarationOf harassRoom
 
+/// The sweep's Task in a room (#663 S7c): its operation's, `op:sweep`.
+let private operating room = Operate(Colony.sweepId, room)
+
+/// The room the sweep's operation commits to for one colony, with no stored
+/// latch (`Operations.layOne`): its first tick's choice.
+let private sweepRoom (view: ColonyView) (held: Assignments) : string option =
+    (Operations.layOne held view).World.Operations
+    |> Option.bind List.tryHead
+    |> Option.map _.Room
+
+/// The sweep's group as one colony's laid view reads it, by name.
+let private groupOf (view: ColonyView) : (CreepInfo * RoomPos) list =
+    view.World.Operations
+    |> Option.bind List.tryHead
+    |> Option.map _.Group
+    |> Option.defaultValue []
+
+/// The rooms a laid view works as an operation's (`Facts.operationIn`).
+let private workedIn (view: ColonyView) : string list =
+    view.World.Operations
+    |> Option.defaultValue []
+    |> List.filter (fun op -> Option.isSome (Facts.operationIn view op.Room))
+    |> List.map _.Room
+
 /// A second harassment room, west of home where the first is north.
 let private westRoom = "W2N1"
 
@@ -215,7 +239,7 @@ let harassGuardTests =
             // none, as an errand room is, and the ranger held it).
             // Moved again by #658's concentrate fix: every armed body of the
             // group standing in the sweep's room is seated there
-            // (`Facts.sweepSeats`), the melee one beside the ranger (it was
+            // (`Facts.seatsPaid`), the melee one beside the ranger (it was
             // left an outpost's, one seat a trespasser).
             test
                 "a quiet harassment room pools nothing; a worked one is held by the whole group standing there" {
@@ -241,7 +265,9 @@ let harassGuardTests =
                         { colony with
                             Hostiles = [ miner "miner" { X = 30; Y = 30 } ]
                         })
-                    (Some(taskId (Guard harassRoom)), Some(taskId (Guard harassRoom)))
+                    // Moved by #663 S7c: the sweep's room is its operation's
+                    // Task (`op:sweep`), not the room's Guard.
+                    (Some(taskId (operating harassRoom)), Some(taskId (operating harassRoom)))
                     "the enemy's miner there: the ranged body and the melee one both hold it"
             }
 
@@ -412,7 +438,9 @@ let harassGuardTests =
                     let colony = castingFrom [ declaration ] ours
 
                     { colony with Hostiles = [ escort ] }
-                    |> decideFrom (Map.ofList [ holder.Name, taskId (Guard harassRoom) ])
+                    // Moved by #663 S7c: the sweep's holder holds its
+                    // operation's Task (`op:sweep`), not the room's Guard.
+                    |> decideFrom (Map.ofList [ holder.Name, taskId (operating harassRoom) ])
 
                 let alone = decided [ holder, RoomPos.at harassRoom here ]
 
@@ -423,7 +451,7 @@ let harassGuardTests =
                     (alone.Verdicts
                      |> List.exists (function
                          | Verdict.Released(name, task, _) ->
-                             name = holder.Name && task = taskId (Guard harassRoom)
+                             name = holder.Name && task = taskId (operating harassRoom)
                          | _ -> false))
                     "alone it loses the exchange where it is struck, and lets the Guard go"
 
@@ -441,7 +469,7 @@ let harassGuardTests =
 
                 Expect.equal
                     (Map.tryFind holder.Name paired.Assignments)
-                    (Some(taskId (Guard harassRoom)))
+                    (Some(taskId (operating harassRoom)))
                     "beside a second ranger at the fight the pair wins it, and it holds"
             }
 
@@ -481,22 +509,21 @@ let harassGuardTests =
                 // Moved on purpose (#615 U3): the other, holding nothing, is
                 // named among the two the verdict wins with, so it is coming
                 // (it takes the Guard by the same answer): it holds. It ran
-                // while #602 counted only the fight's holders.
+                // while #602 counted only the fight's holders. Moved by #663
+                // S7c: the sweep's room is its operation's Task (`op:sweep`),
+                // held and taken, not the room's Guard.
+                let sweeping = operating harassRoom
+
                 Expect.equal
-                    (Map.tryFind
-                        holder.Name
-                        (decided [ holder.Name, Guard harassRoom ] ours).Assignments)
-                    (Some(taskId (Guard harassRoom)))
+                    (Map.tryFind holder.Name (decided [ holder.Name, sweeping ] ours).Assignments)
+                    (Some(taskId sweeping))
                     "the other walking in free, one of the pair that wins it: it holds"
 
                 Expect.equal
                     (Map.tryFind
                         holder.Name
-                        (decided
-                            [ holder.Name, Guard harassRoom; second.Name, Guard harassRoom ]
-                            ours)
-                            .Assignments)
-                    (Some(taskId (Guard harassRoom)))
+                        (decided [ holder.Name, sweeping; second.Name, sweeping ] ours).Assignments)
+                    (Some(taskId sweeping))
                     "the other holding the fight and landing within the horizon: it holds"
 
                 // Out of the escort's reach, half its hits gone, holding
@@ -513,7 +540,7 @@ let harassGuardTests =
 
                 Expect.notEqual
                     (Map.tryFind holder.Name (decided [] [ hurt, away ]).Assignments)
-                    (Some(taskId (Guard harassRoom)))
+                    (Some(taskId sweeping))
                     "hurt, it does not walk back into the fight it lost"
 
                 // Moved on purpose (#615 U3, #613): healed and alone it took
@@ -523,14 +550,14 @@ let harassGuardTests =
                 // the pair that wins it, it takes it.
                 Expect.notEqual
                     (Map.tryFind holder.Name (decided [] [ holder, away ]).Assignments)
-                    (Some(taskId (Guard harassRoom)))
+                    (Some(taskId sweeping))
                     "healed but alone, it takes no fight it loses alone"
 
                 Expect.equal
                     (Map.tryFind
                         holder.Name
                         (decided [] [ holder, away; second, coming ]).Assignments)
-                    (Some(taskId (Guard harassRoom)))
+                    (Some(taskId sweeping))
                     "healed, beside a second free to come, it takes the Guard again"
             }
 
@@ -572,9 +599,11 @@ let harassGuardTests =
                     (Some(within 1 raiderTile (Set.singleton raiderTile)))
                     "the ground is beside the raider, not the source's seats"
 
+                // Moved by #663 S7c: the sweep's room is its operation's
+                // Task (`op:sweep`), not the room's Guard.
                 Expect.equal
                     (Map.tryFind holder.Name (decideFrom held weak).Assignments)
-                    (Some(taskId (Guard harassRoom)))
+                    (Some(taskId (operating harassRoom)))
                     "a raider it beats alone: the seat holder takes the fight"
 
                 // #602's escort: 3 RANGED_ATTACK, 4 HEAL out-heal it alone.
@@ -595,7 +624,7 @@ let harassGuardTests =
 
                 Expect.notEqual
                     (Map.tryFind holder.Name (decideFrom held escort).Assignments)
-                    (Some(taskId (Guard harassRoom)))
+                    (Some(taskId (operating harassRoom)))
                     "one it loses alone: it lets the Guard go, unstruck on its seat"
             }
 
@@ -733,10 +762,14 @@ let harassSeatTests =
                     |> Map.values
                     |> Set.ofSeq
 
+                // Moved by #663 S7c: the sweep's room is its operation's
+                // Task (`op:sweep`), the room it works its own to name.
+                Expect.equal held (Set.singleton (taskId (operating westRoom))) "the sweep's Task"
+
                 Expect.equal
-                    held
-                    (Set.singleton (taskId (Guard westRoom)))
-                    "the west room's Guard, the north room's left"
+                    (sweepRoom colony Map.empty)
+                    (Some westRoom)
+                    "the west room, the north room's left"
             }
 
             // Moved by #658: a body holding a room whose kills ran out is let
@@ -759,12 +792,19 @@ let harassSeatTests =
                             ]
                     }
 
+                // Moved by #663 S7c: the sweep's holder holds its operation's
+                // Task (`op:sweep`), and keeps it as the room it works moves.
                 let decision =
-                    colony |> decideFrom (Map.ofList [ holder.Name, taskId (Guard harassRoom) ])
+                    colony |> decideFrom (Map.ofList [ holder.Name, taskId (operating harassRoom) ])
 
                 Expect.equal
                     (Map.tryFind holder.Name decision.Assignments)
-                    (Some(taskId (Guard westRoom)))
+                    (Some(taskId (operating westRoom)))
+                    "it keeps the sweep's Task"
+
+                Expect.equal
+                    (sweepRoom colony Map.empty)
+                    (Some westRoom)
                     "the north room empty, the west room's miner"
             }
         ]
@@ -830,6 +870,98 @@ let harassRowTests =
                     (fighters worked |> List.length)
                     1
                     "one body, the cheapest that kills the digger"
+            }
+
+            // 6adeb4b8 left it to the operation (#663 S7c): under its escort's
+            // raid, the room's ask is the raid's cast and the bodies its
+            // prey's kills pay for, one price, as a room of ours asks.
+            test
+                "under its escort's raid, the operation's room asks the bodies its prey's kills pay for beside the raid's" {
+                let layer = SpatialInfo.layerOf (bareHome |> harassing).Spatial harassRoom
+
+                let room (hostiles: HostileInfo list) =
+                    let colony =
+                        { (bareHome |> harassing) with
+                            Bank = bank 5600 5600
+                            Hostiles = hostiles
+                            Spatial =
+                                { (bareHome |> harassing).Spatial with
+                                    TargetKinds =
+                                        (bareHome |> harassing).Spatial.TargetKinds
+                                        |> Map.add "src-enemy" Source
+                                }
+                                |> withNeighbour
+                                    harassRoom
+                                    { layer with
+                                        TargetPositions =
+                                            Map.add "src-enemy" standTile layer.TargetPositions
+                                    }
+                        }
+                        |> Operations.layOne Map.empty
+
+                    let threats =
+                        threatsOfHeld colony (Atlas.ofView colony) (heldTaskFacts colony Map.empty)
+
+                    // The raid's own cast: the ranger row's, no holder to
+                    // converge beside.
+                    let cast =
+                        Facts.fighterCast colony harassRoom [ BodyTemplate.Ranged ] Engine.guardCap
+
+                    Threats.wants threats (operating harassRoom), cast
+
+                // One RANGED_ATTACK beside a HEAL: a raid one ranger beats.
+                let raider =
+                    theirs "raider" enemy { X = 30; Y = 30 } [ Move; Move; RangedAttack; Heal ]
+
+                let digger =
+                    theirs
+                        "digger"
+                        enemy
+                        { X = 19; Y = 11 }
+                        (List.replicate 5 Work @ List.replicate 3 Move)
+
+                let asked, cast = room [ raider; digger ]
+
+                Expect.isTrue
+                    (cast.Ends && cast.Bodies > 0)
+                    $"the premise: a cast ends the raid\n%A{cast}"
+
+                Expect.isGreaterThan
+                    asked
+                    cast.Bodies
+                    "the raid's cast, and a body more the digger's kill pays for"
+            }
+
+            // #663 S7c: home defence always ranks above an operation; a
+            // contested room's raid is two rungs up, an operation's at most
+            // a kill's one.
+            test "an operation's raid ranks a kill's rung, under a home's raid" {
+                let raider =
+                    theirs "raider" enemy { X = 30; Y = 30 } [ Move; Move; RangedAttack; Heal ]
+
+                let digger =
+                    theirs
+                        "digger"
+                        enemy
+                        { X = 19; Y = 11 }
+                        (List.replicate 5 Work @ List.replicate 3 Move)
+
+                let laid =
+                    { (bareHome |> harassing) with
+                        Bank = bank 5600 5600
+                        Hostiles = [ raider; digger ]
+                    }
+                    |> Operations.layOne Map.empty
+
+                Expect.equal
+                    (workedIn laid)
+                    [ harassRoom ]
+                    "the premise: the operation works the room"
+
+                Expect.equal
+                    (pooledHolding [] (operating harassRoom) laid |> Option.map fst)
+                    (Some(safetyRank OneRungUp))
+                    "one rung up, where a raid's Guard is two"
             }
         ]
 
@@ -1147,6 +1279,7 @@ let private sweeping (ours: (CreepInfo * RoomPos) list) (hostiles: HostileInfo l
 let private hauler room id pos =
     theirsIn room id pos (List.replicate 10 Carry @ List.replicate 5 Move)
 
+
 [<Tests>]
 let sweepRoomTests =
     testList
@@ -1163,15 +1296,13 @@ let sweepRoomTests =
                         ]
 
                 Expect.equal
-                    (Facts.sweepRoom colony Map.empty)
+                    (sweepRoom colony Map.empty)
                     (Some westRoom)
                     "the west room: a miner and a hauler, a room's walk like the north's one miner"
             }
 
             test "nobody works a candidate: no room" {
-                Expect.isNone
-                    (Facts.sweepRoom (sweeping [] []) Map.empty)
-                    "nothing to kill anywhere"
+                Expect.isNone (sweepRoom (sweeping [] []) Map.empty) "nothing to kill anywhere"
             }
 
             // User 2026-10-08: one group concentrates and moves on when the
@@ -1195,12 +1326,12 @@ let sweepRoomTests =
                          :: west)
 
                 Expect.equal
-                    (Facts.sweepRoom working held)
+                    (sweepRoom working held)
                     (Some harassRoom)
                     "its miner, three tiles off, beats the west room's two a room's walk away"
 
                 Expect.equal
-                    (Facts.sweepRoom (sweeping [ holder, at ] west) held)
+                    (sweepRoom (sweeping [ holder, at ] west) held)
                     (Some westRoom)
                     "its miner dead, the west room's"
             }
@@ -1239,10 +1370,7 @@ let sweepRoomTests =
                     0.0
                     "the west room is worth nothing to one ranger under an escort that beats it"
 
-                Expect.equal
-                    (Facts.sweepRoom colony Map.empty)
-                    (Some harassRoom)
-                    "the north room's miner"
+                Expect.equal (sweepRoom colony Map.empty) (Some harassRoom) "the north room's miner"
             }
 
             test
@@ -1256,12 +1384,12 @@ let sweepRoomTests =
                     { sweeping [] [] with Time = 100 } |> remembering 0 [ seen life ]
 
                 Expect.equal
-                    (Facts.sweepRoom (dark 1500) Map.empty)
+                    (sweepRoom (dark 1500) Map.empty)
                     (Some westRoom)
                     "a miner seen there a hundred ticks ago, with 1,400 ticks left"
 
                 Expect.isNone
-                    (Facts.sweepRoom (dark 150) Map.empty)
+                    (sweepRoom (dark 150) Map.empty)
                     "one with 50 left dies of age before the cast lands"
             }
 
@@ -1337,12 +1465,12 @@ let sweepRoomTests =
                     }
 
                 Expect.equal
-                    (Facts.sweepRoom (dark seated) Map.empty)
+                    (sweepRoom (dark seated) Map.empty)
                     (Some westRoom)
                     "a miner on its seat four hundred ticks ago is still there"
 
                 Expect.isNone
-                    (Facts.sweepRoom (dark hauling) Map.empty)
+                    (sweepRoom (dark hauling) Map.empty)
                     "a hauler unseen four hundred ticks, past its round trip, is gone"
             }
 
@@ -1481,7 +1609,12 @@ let sweepRoomTests =
                         }
 
                 let step (record: OpRecord option) (view: ColonyView) =
-                    let group = Operations.groupIn (set [ harassRoom; westRoom ]) held [ view ]
+                    let group =
+                        Operations.groupIn
+                            Colony.sweepId
+                            (set [ harassRoom; westRoom ])
+                            held
+                            [ view ]
 
                     let facts =
                         Operations.ownFacts
@@ -1635,7 +1768,12 @@ let sweepRoomTests =
                     }
 
                 let facts (view: ColonyView) =
-                    let group = Operations.groupIn (set [ harassRoom; westRoom ]) held [ view ]
+                    let group =
+                        Operations.groupIn
+                            Colony.sweepId
+                            (set [ harassRoom; westRoom ])
+                            held
+                            [ view ]
 
                     Operations.ownFacts
                         view.Time
@@ -1940,10 +2078,10 @@ let sweepGroupTests =
                             north.Name, taskId (Guard harassRoom)
                         ]
 
-                let swept = Facts.sweepAll held [ first; second ]
+                let swept, _, _ = Operations.lay [] held [] [ first; second ]
 
                 Expect.equal
-                    (swept |> List.map (fun view -> view.Harass |> List.map _.RoomName))
+                    (swept |> List.map workedIn)
                     [ [ harassRoom ]; [ harassRoom ] ]
                     "the premise: both colonies sweep the north room, its four bodies"
 
@@ -1954,19 +2092,139 @@ let sweepGroupTests =
                     "the west room's Guard is pooled for nobody, its holder beside its miner or not"
 
                 Expect.isSome
-                    (pooledHolding [ west.Name, Guard westRoom ] (Guard harassRoom) firstSwept)
+                    (pooledHolding [ west.Name, Guard westRoom ] (operating harassRoom) firstSwept)
                     "the sweep's room is"
 
                 let decision = decideFrom held (List.head swept)
 
+                // Moved by #663 S7c: the sweep's room is its operation's
+                // Task (`op:sweep`), not the room's Guard.
                 Expect.equal
                     (Map.tryFind west.Name decision.Assignments)
-                    (Some(taskId (Guard harassRoom)))
+                    (Some(taskId (operating harassRoom)))
                     "the west room's holder takes the sweep's room"
 
                 Expect.isFalse
                     (decision.Quotas.Casts |> List.exists (fun cast -> cast.For = Guard westRoom))
                     "and nobody casts for the west room"
+            }
+
+            // #663 S7c, the seat rule S7b's shadow left to S7c: an
+            // operation's prey seats what its price pays for (its group's
+            // paid seats, never fewer than its cast), not a seat a
+            // trespasser (#550), which seated three here.
+            // The S7c review: the spec's limits were thrown away (a code
+            // spec's deadline never expired it) and MaxBodies bounded each
+            // row's ask but no seat.
+            test
+                "a code spec's limits bind: its bodies cap every seat and ask together, its deadline ends it, a stale end re-begins" {
+                let wire (bodies: int option) (deadline: int option) : OpSpecWire =
+                    {
+                        Id = Colony.sweepId
+                        Template = "sweep"
+                        Enemy = enemy
+                        Rooms = [ harassRoom; westRoom ]
+                        Deadline = deadline
+                        MaxEnergy = None
+                        MaxBodies = bodies
+                    }
+
+                let a, b, c = ranger "ranger-a", ranger "ranger-b", ranger "ranger-c"
+
+                let held =
+                    [ a; b; c ]
+                    |> List.map (fun r -> r.Name, taskId (operating harassRoom))
+                    |> Map.ofList
+
+                let colony =
+                    sweeping
+                        [
+                            a, RoomPos.at harassRoom { X = 20; Y = 24 }
+                            b, RoomPos.at harassRoom { X = 24; Y = 24 }
+                            c, RoomPos.at harassRoom { X = 22; Y = 26 }
+                        ]
+                        [
+                            hauler harassRoom "hauler-n1" { X = 22; Y = 22 }
+                            hauler harassRoom "hauler-n2" { X = 28; Y = 22 }
+                            hauler harassRoom "hauler-n3" { X = 25; Y = 30 }
+                        ]
+
+                let laidWith (wires: OpSpecWire list) (records: OpRecord list) =
+                    Operations.lay wires held records [ colony ]
+
+                let capped, _, _ = laidWith [ wire (Some 1) None ] []
+                let laid = List.head capped
+                let threats = threatsOfHeld laid (Atlas.ofView laid) (heldTaskFacts laid held)
+                let brief = Threats.briefOf threats harassRoom
+
+                Expect.equal
+                    (brief.Capacity threats |> Capacity.capOf CapScope.Fighters)
+                    (Some 1)
+                    "one body seated, three standing"
+
+                Expect.isLessThanOrEqual
+                    (Threats.wants threats (operating harassRoom))
+                    1
+                    "and asked, every row together"
+
+                // Begun ten ticks ago in the north room.
+                let running =
+                    {
+                        Id = Colony.sweepId
+                        Started = colony.Time - 10
+                        Phase = OpPhase.Execute
+                        Since = colony.Time - 10
+                        Room = Some harassRoom
+                        RoomSince = colony.Time - 10
+                        Spent = 0
+                        Lost = 0
+                        NextDue = 0
+                        Ended = None
+                    }
+
+                let _, ended, _ = laidWith [ wire None (Some colony.Time) ] [ running ]
+
+                Expect.equal
+                    (ended |> List.map _.Ended)
+                    [ Some OpEnd.Expired ]
+                    "on its deadline it ends"
+
+                let reopened, _, _ = laidWith [ wire None None ] ended
+
+                Expect.equal
+                    (workedIn (List.head reopened))
+                    [ harassRoom ]
+                    "its deadline gone, it works again"
+            }
+
+            test "the operation's prey seats what its price pays for, not a seat a trespasser" {
+                let holder = ranger "ranger-a"
+                let held = Map.ofList [ holder.Name, taskId (operating harassRoom) ]
+
+                let laid =
+                    sweeping
+                        [ holder, RoomPos.at harassRoom { X = 20; Y = 24 } ]
+                        [
+                            hauler harassRoom "hauler-n1" { X = 22; Y = 22 }
+                            hauler harassRoom "hauler-n2" { X = 28; Y = 22 }
+                            hauler harassRoom "hauler-n3" { X = 25; Y = 30 }
+                        ]
+                    |> Operations.layOne held
+
+                let threats = threatsOfHeld laid (Atlas.ofView laid) (heldTaskFacts laid held)
+                let brief = Threats.briefOf threats harassRoom
+
+                let priced =
+                    max
+                        (Facts.seatsPaid laid harassRoom (groupOf laid))
+                        (brief.Asks |> List.sumBy (fun ask -> ask.Wanted threats))
+
+                Expect.equal
+                    (brief.Capacity threats |> Capacity.capOf CapScope.Fighters)
+                    (Some priced)
+                    "the group's paid seats, or the cast, the more"
+
+                Expect.isLessThan priced 3 "the premise: fewer than a seat a hauler"
             }
 
             test
@@ -1994,10 +2252,10 @@ let sweepGroupTests =
                             c, RoomPos.at "W1N1" { X = 25; Y = 20 }
                         ]
                         northBodies
-                    |> Facts.sweep held
+                    |> Operations.layOne held
 
                 Expect.isGreaterThanOrEqual
-                    (Facts.seatsPaid colony harassRoom colony.World.SweepGroup)
+                    (Facts.seatsPaid colony harassRoom (groupOf colony))
                     3
                     "both holders, and a seat for a third: three bodies kill the room's three sooner"
 
@@ -2012,12 +2270,12 @@ let sweepGroupTests =
                             c, RoomPos.at harassRoom { X = 22; Y = 26 }
                         ]
                         [ hauler harassRoom "hauler-n1" { X = 22; Y = 22 } ]
-                    |> Facts.sweep held
+                    |> Operations.layOne held
 
                 match
                     pooledHolding
-                        [ a.Name, Guard harassRoom; b.Name, Guard harassRoom ]
-                        (Guard harassRoom)
+                        [ a.Name, operating harassRoom; b.Name, operating harassRoom ]
+                        (operating harassRoom)
                         one
                 with
                 | Some(_, capacity) ->
@@ -2032,7 +2290,7 @@ let sweepGroupTests =
                 // one hauler: a fourth only shaves its kill, and no seat
                 // grows past the group.
                 Expect.equal
-                    (Facts.seatsPaid one harassRoom one.World.SweepGroup)
+                    (Facts.seatsPaid one harassRoom (groupOf one))
                     3
                     "the group seated, no body more"
             }
@@ -2051,19 +2309,17 @@ let sweepGroupTests =
                     Map.ofList
                         [ a.Name, taskId (Guard harassRoom); b.Name, taskId (Guard westRoom) ]
 
-                let swept = Facts.sweepAll held [ first; second ]
+                let swept, _, _ = Operations.lay [] held [] [ first; second ]
 
                 Expect.equal
-                    (swept |> List.map (fun view -> view.Harass |> List.map _.RoomName))
+                    (swept |> List.map workedIn)
                     [ [ harassRoom ]; [ harassRoom ] ]
                     "both colonies work the north room, the one with the kill"
 
                 Expect.equal
                     (swept
                      |> List.map (fun view ->
-                         view.World.SweepGroup
-                         |> List.map (fun (creep, _) -> creep.Name)
-                         |> List.sort))
+                         groupOf view |> List.map (fun (creep, _) -> creep.Name) |> List.sort))
                     [ [ a.Name; b.Name ]; [ a.Name; b.Name ] ]
                     "and each reads the whole group, the other colony's body among it"
             }
@@ -2123,12 +2379,17 @@ let sweepGroupTests =
                 let a = ranger "ranger-a"
                 let b = ranger "ranger-b"
 
+                // Moved by #663 S7c: the sweep's holders hold its
+                // operation's Task, not the room's Guard.
                 let held =
                     Map.ofList
-                        [ a.Name, taskId (Guard harassRoom); b.Name, taskId (Guard harassRoom) ]
+                        [
+                            a.Name, taskId (operating harassRoom)
+                            b.Name, taskId (operating harassRoom)
+                        ]
 
                 let briefWith (placed: (CreepInfo * RoomPos) list) =
-                    let colony = Facts.sweep held (sweeping placed [ northMiner ])
+                    let colony = Operations.layOne held (sweeping placed [ northMiner ])
 
                     Threats.briefOf
                         (threatsOfHeld colony (Atlas.ofView colony) (heldTaskFacts colony held))
@@ -2281,7 +2542,7 @@ let sweepGroupTests =
                     }
 
                 Expect.equal
-                    (Facts.sweep Map.empty laid).Dismantles
+                    (Operations.layOne Map.empty laid).Dismantles
                     [ "can-n"; "salvaged" ]
                     "the north room is the sweep's; the west room's container waits; the salvage room's stays"
             }
@@ -2750,7 +3011,7 @@ let sweepVisionTests =
                 // has on, cast or not; the case's own are cast but undeclared.
                 Expect.equal
                     (asked LookBand.Watched colony)
-                    (Colony.harass
+                    (Colony.candidatesOf Colony.operations
                      |> List.map (fun h -> h.RoomName, 0.0, Facts.lookStride)
                      |> List.sort)
                     "the dossier's watches, worth nothing priced"

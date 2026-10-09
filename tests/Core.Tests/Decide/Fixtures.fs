@@ -2600,10 +2600,10 @@ let pooledHolding (holding: (string * Task) list) (task: Task) (colony: ColonyVi
 
 /// The bodies a decision holds across the fight/economy line, each with its
 /// Task id: a fighter (`isFighterBody`) on an economy Task, or an economy body
-/// on a Guard, Defend or Assault. Flee is both sides'. Every arena step
-/// asserts there are none (`Arena.decideOurs`).
+/// on a Guard, Defend, Assault or an operation's Task. Flee is both sides'.
+/// Every arena step asserts there are none (`Arena.decideOurs`).
 let partitionBreaks (creeps: CreepInfo list) (assignments: Assignments) : (string * string) list =
-    let combat = [ Guard ""; Defend ""; Assault "" ] |> List.map taskId
+    let combat = [ Guard ""; Defend ""; Assault ""; Operate("", "") ] |> List.map taskId
 
     creeps
     |> List.choose (fun creep ->

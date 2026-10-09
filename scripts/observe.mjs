@@ -59,18 +59,13 @@
 //                                  tuned switch decides)
 //   observe.mjs fight-only on|off  set it: the bot reads it on its next tick
 //   observe.mjs fight-only clear   unset it
-//   observe.mjs op list            the operations (#663): each spec with its
-//                                  record (phase, since, ended), the kill
+//   observe.mjs op list            the operations (#663): the code's (the
+//                                  sweep, #663 S7c) with its latch (phase,
+//                                  the room it is committed to, since) and
+//                                  the refusals of its spec; each Memory
+//                                  spec with its record (run dry), the kill
 //                                  switch, the refusals and the last events.
-//                                  Read only; S7a runs them dry
-//   observe.mjs op shadow          the sweep's shadow (#663 S7b): the whole
-//                                  full ticks the operation interpreter's
-//                                  sweep was compared with the live sweep,
-//                                  a count per kind of disagreement and the
-//                                  latest few, each with both answers, and
-//                                  the rooms refused the code spec. Only
-//                                  group, jobs and seats are computed apart;
-//                                  room is a consistency check
+//                                  Read only
 //   observe.mjs console --seconds N     subscribe to the live console for N
 //                                       seconds, print what arrives, exit —
 //                                       the console keeps no history, so a
@@ -261,7 +256,7 @@ const usage =
   "reactor [--json] | cpu [--all] [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | " +
   "draw [add <room|creep> | remove <room|creep> | clear] [--json] | cadence [<2..4> | clear] | " +
-  "fight-only [on | off | clear] | op list|shadow [--json] | " +
+  "fight-only [on | off | clear] | op list [--json] | " +
   "console --seconds N | eval '<expr>' [--seconds N] | room <name> [--json] | " +
   "wait --ticks N | health [--colony <home>] [--samples K] | " +
   "history <room> <tick> [--json] | probe [--json] | rivals [--json] | ledger [--json]";
@@ -355,8 +350,8 @@ if (command === "fight-only" && action !== undefined) {
   if (actionName !== undefined) fail(usage);
 }
 // `op add|cancel|off|on` come with S7e; S7a only reads.
-if (command === "op" && (!["list", "shadow"].includes(action) || actionName !== undefined)) {
-  fail("op takes list or shadow");
+if (command === "op" && (action !== "list" || actionName !== undefined)) {
+  fail("op takes list");
 }
 if (command === "console" && !(Number.isFinite(seconds) && seconds > 0)) {
   fail("console needs --seconds N (a positive number): the subscription must be bounded");
@@ -1165,34 +1160,6 @@ if (command === "console") {
     }
     console.log(`cadence override is now ${show(wanted)}`);
   }
-} else if (command === "op" && action === "shadow") {
-  // ---- op shadow: the sweep's shadow log (#663 S7b), read only ------------
-
-  const stored = await memoryGet("fabot.shadow");
-  const shadow = stored && typeof stored === "object" && !Array.isArray(stored) ? stored : undefined;
-
-  if (json) {
-    console.log(JSON.stringify(shadow ?? null, null, 2));
-  } else if (shadow === undefined) {
-    console.log("no shadow log (Memory.fabot.shadow is absent: no sweep declared, or no whole full tick yet)");
-  } else {
-    const counts = Object.entries(shadow.c ?? {}).map(([kind, n]) => `${kind} ${n}`);
-    console.log(
-      `${shadow.n} whole full ticks compared, ${shadow.w ?? 0} with the sweep working a room; ` +
-        (counts.length === 0 ? "no divergence" : `divergences: ${counts.join(", ")}`),
-    );
-    console.log(
-      "only group, jobs and seats compare computations made apart; room is a consistency " +
-        "check (both read one price), scope a group difference of the world's roster",
-    );
-    const examples = Array.isArray(shadow.e) ? shadow.e.filter((e) => e && typeof e === "object") : [];
-    if (examples.length > 0) console.log("\nlatest, newest first:");
-    for (const e of examples) {
-      console.log(`  t${e.t} ${e.k} in ${e.r || "-"}: shadow ${e.o} | sweep ${e.s} — ${e.w}`);
-    }
-    const refused = Array.isArray(shadow.x) ? shadow.x.filter((r) => r && typeof r === "object") : [];
-    for (const r of refused) console.log(`refused ${r.id}: ${r.why}`);
-  }
 } else if (command === "op") {
   // ---- op list: the operations' leaf (#663), read only --------------------
 
@@ -1209,6 +1176,19 @@ if (command === "console") {
     const live = new Map(rows("live").map((r) => [r.i, r]));
     // As the bot reads it: any truthy value is off.
     console.log(`kill switch: ${ops.off ? "OFF — nothing moves" : "on"}`);
+    // The code's operations' latch (#663 S7c, `saveOpsCode`).
+    const code = ops.code && typeof ops.code === "object" && !Array.isArray(ops.code) ? ops.code : {};
+    const codeRows = (key) =>
+      Array.isArray(code[key]) ? code[key].filter((r) => r && typeof r === "object") : [];
+    for (const r of codeRows("live")) {
+      const state =
+        r.x !== undefined
+          ? `ENDED (${r.x}): it lays no Brief and casts nothing until its spec's deadline or budget ` +
+            "moves past this end (an end by an exit stays)" :
+        `${r.p}${r.r ? ` in ${r.r}` : ""} since t${r.a}, run from t${r.s}`;
+      console.log(`${r.i}  code's — ${state}`);
+    }
+    for (const r of codeRows("refused")) console.log(`refused (code) ${r.id}: ${r.why}`);
     const specs = rows("specs");
     if (specs.length === 0) console.log("no specs");
     for (const spec of specs) {
@@ -2305,7 +2285,7 @@ if (command === "console") {
   // round-tripped in `WireTests`), so a row whose kind is a string this
   // channel does not know is a wire shape that has moved under it — and the
   // operator's whole next act is to open the declaration list this word
-  // names: a colony's own, or `Colony.harass` for the whole bot. Guarding
+  // names: a colony's own, or `Colony.operations` (its candidates) for the whole bot. Guarding
   // `room` alone and then printing `kind ?? "(no kind)"` would be the
   // confident half-answer the paragraph above refuses, written three lines
   // under it.

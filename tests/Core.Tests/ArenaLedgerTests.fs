@@ -142,26 +142,30 @@ let tests =
                 Expect.equal row.Downtime 0 "never held unworked"
             }
 
-            // The one difference S7c decides: on the remote's prey the Brief
-            // seats one body per trespasser each template answers (#550),
-            // where the operation's priced count seats what its group pays
-            // for and its cast buys (`Facts.seatsPaid`, `Facts.fighterCast`).
+            // The sweep runs as an operation (#663 S7c): its body holds the
+            // operation's Task, its record commits to the remote, and once
+            // the remote's quarry is gone nothing pays and it holds.
             test
-                "the sweep as an operation, run in shadow, answers its room, its group and its jobs every tick, and seats fewer on the prey than its trespass split (#663 S7b)" {
-                let final, trace = sweepOneRemote () |> run 400
-                let _, log = final.Carried.Shadow
+                "the sweep runs as an operation: its ranger holds its Task while its record is committed to the remote, and it holds once its quarry is gone" {
+                let operating (a: Arena) =
+                    a.Carried.Assignments |> Map.exists (fun _ tid -> tid = "op:sweep")
 
-                Expect.equal log.Compared 400 "every tick compared"
-                Expect.isGreaterThan log.Working 0 $"the sweep worked its room\n%A{log}"
+                let working, _ = sweepOneRemote () |> runUntil operating 400
+
+                Expect.isTrue (operating working) "a body holds the sweep's Task"
 
                 Expect.equal
-                    (log.Counts |> Map.keys |> List.ofSeq)
-                    [ Divergence.Seats ]
-                    $"only the seats differ\n%A{log}\n{describe trace}"
+                    (working.Carried.Operations |> List.map (fun r -> r.Phase, r.Room))
+                    [ OpPhase.Execute, Some "W12S27" ]
+                    "committed to the remote"
 
-                Expect.all
-                    log.Last
-                    (fun example -> int example.Sweep > int example.Shadow)
-                    $"the Brief seats more, never fewer\n%A{log}"
+                let final, trace = sweepOneRemote () |> run 400
+
+                Expect.equal
+                    (final.Carried.Operations |> List.map _.Phase)
+                    [ OpPhase.Hold ]
+                    $"its quarry gone, it holds\n{describe trace}"
+
+                Expect.isFalse (operating final) "and its body is let go"
             }
         ]

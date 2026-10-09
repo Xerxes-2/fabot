@@ -4107,6 +4107,34 @@ module Rivals =
     /// (`WorldView.Flees`, #663): how often its work stops for our holding the
     /// room. One that fell is its kill's, in neither count. No row for a
     /// rival none of whose workers was ever watched so.
+    /// Who held a room at the last look anything kept (the remembered
+    /// holder `Operations.standingOf` reads out of sight, #663): `looks`, the
+    /// heap's last look at each room (`Operations.holderSeen`), else the
+    /// dossier's — the rival whose reservation stood there, or nobody where
+    /// a rival's reservation was seen gone and none seen since. A room only
+    /// an ally or a neutral held is in no dossier, so it is known only off
+    /// a look this heap.
+    let lastHolder
+        (looks: Map<string, RoomHolder>)
+        (rivals: Rivals option)
+        (room: string)
+        : RoomHolder option =
+        match Map.tryFind room looks, rivals with
+        | Some holder, _ -> Some holder
+        | None, None -> None
+        | None, Some rivals ->
+            let kept =
+                rivals.Dossiers
+                |> Map.toList
+                |> List.choose (fun (rival, dossier) ->
+                    Map.tryFind room dossier.Rooms |> Option.map (fun held -> rival, held))
+
+            match kept |> List.tryFind (fun (_, held) -> held.Reserving) with
+            | Some(rival, _) -> Some(RoomHolder.Player rival)
+            | None when kept |> List.exists (fun (_, held) -> held.LapsedAt > 0) ->
+                Some RoomHolder.Nobody
+            | None -> None
+
     let flees (rivals: Rivals) : Map<string, float> =
         rivals.Dossiers
         |> Map.toSeq

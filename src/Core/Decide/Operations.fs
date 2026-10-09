@@ -1,8 +1,9 @@
 /// The [[operation]] interpreter (#663 M7): once a full tick, over the
-/// world, each admitted spec's record moved on by its schedule, its target
-/// and its exits. S7a runs it dry: what it answers is its records and its
-/// events, and nothing reads them back into a decision — no Brief, no cast,
-/// no Task.
+/// world, each spec's record moved on by its schedule, its target and its
+/// exits. The code's sweep is laid for every colony (`lay`, #663 S7c): the
+/// room its record is committed to is fought under its Task (`Operate`),
+/// a Brief per operation. A Memory spec still runs dry (`step`): its records
+/// and its events, and nothing read back into a decision.
 module Fabot.Core.Decide.Operations
 
 open Fabot.Core.Types
@@ -341,33 +342,47 @@ let step
 
     (advanced |> List.choose fst) @ kept, (advanced |> List.collect snd) @ dropped
 
-/// Who holds each room as far as anything we keep knows: this tick's look
-/// (`RoomFacts.Control`: its owner, else its reservation's player, else
-/// nobody), else a holder remembered past the tick — the world's sighting
-/// of its owner, the declared rivals' rooms, and `remembered` (the rival
-/// dossier's standing reservations) — else unknown. An ally's reservation
-/// is remembered nowhere, so an ally's room out of sight is unknown, never
-/// nobody's. Ours is a declared room, or one we own or reserve this tick.
-let standingOf
-    (now: int)
-    (declared: Set<string>)
-    (remembered: string -> string option)
-    (world: World)
-    : OpStanding =
-    let facts (room: string) = Map.tryFind room world.Rooms
-    let control (room: string) = facts room |> Option.bind _.Control
+/// Who holds a room this tick's look found (`RoomFacts.Control`): its
+/// owner, else its reservation's player, else nobody; None out of sight,
+/// and for a rival's room whose owner nothing names.
+let holderSeen (world: World) (room: string) : RoomHolder option =
+    let facts = Map.tryFind room world.Rooms
 
-    let owner (room: string) =
-        facts room
+    match facts |> Option.bind _.Control with
+    | Some c when c.Owner = Ownership.Rival ->
+        facts
         |> Option.bind _.RivalController
         |> Option.map _.Owner
         |> Option.orElse (Map.tryFind room world.Sightings |> Option.bind _.Rival)
+        |> Option.map RoomHolder.Player
+    | Some c ->
+        match RoomControlInfo.heldByOther c with
+        | Some held -> Some(RoomHolder.Player held.Username)
+        | None -> Some RoomHolder.Nobody
+    | None -> None
 
-    let rememberedHolder (room: string) =
+/// Who holds each room as far as anything we keep knows: this tick's look
+/// (`holderSeen`), else the world's sighting of its owner and the declared
+/// rivals' rooms, else `remembered` — the last look at it a shell keeps
+/// (its last sighting this heap, else the rival dossier's: the rival whose
+/// reservation stood there, or nobody where that reservation was seen gone)
+/// — else unknown: a room never looked at since the reset, and one an ally
+/// or a neutral held at its last look out of the dossier's sight. Ours is
+/// a declared room, or one we own or reserve this tick.
+let standingOf
+    (now: int)
+    (declared: Set<string>)
+    (remembered: string -> RoomHolder option)
+    (world: World)
+    : OpStanding =
+    let control (room: string) =
+        Map.tryFind room world.Rooms |> Option.bind _.Control
+
+    let owned (room: string) =
         Map.tryFind room world.Sightings
         |> Option.bind _.Rival
         |> Option.orElse (Colony.rivals |> List.tryFind (fst >> (=) room) |> Option.map snd)
-        |> Option.orElse (remembered room)
+        |> Option.map RoomHolder.Player
 
     {
         Now = now
@@ -381,18 +396,11 @@ let standingOf
         Holder =
             fun room ->
                 match control room with
-                | Some c when c.Owner = Ownership.Rival ->
-                    match owner room with
-                    | Some player -> RoomHolder.Player player
-                    | None -> RoomHolder.Unknown
-                | Some c ->
-                    match RoomControlInfo.heldByOther c with
-                    | Some held -> RoomHolder.Player held.Username
-                    | None -> RoomHolder.Nobody
+                | Some _ -> holderSeen world room |> Option.defaultValue RoomHolder.Unknown
                 | None ->
-                    match rememberedHolder room with
-                    | Some player -> RoomHolder.Player player
-                    | None -> RoomHolder.Unknown
+                    owned room
+                    |> Option.orElse (remembered room)
+                    |> Option.defaultValue RoomHolder.Unknown
     }
 
 /// Whether a room has been seen since the heap's reset at `since`: a
@@ -456,88 +464,43 @@ let factsOf (now: int) (warm: string -> bool) (views: ColonyView list) : OpFacts
             | _ -> Truth.No
     }
 
-// ---- the sweep's shadow (#663 S7b) ----------------------------------------
+// ---- the operations laid (#663 S7c) ---------------------------------------
 
-/// One body of an operation's group: where it stands, and whether its own
-/// colony casts the room it is counted in (`SweepAnswer.Scoped`).
-type Member =
-    {
-        Creep: CreepInfo
-        At: RoomPos
-        OwnCast: bool
-    }
+/// One body of an operation's group, with where it stands.
+type Member = { Creep: CreepInfo; At: RoomPos }
 
-/// An operation's group over its rooms (#663 M7), the world's roster
-/// whichever colony a body is of — the rule the operation owns at S7c:
-/// every body of ours that held the Guard of one of them last tick
-/// (`held`), wherever it stands, and every armed one standing in one, each
-/// once.
-let groupIn (rooms: Set<string>) (held: Assignments) (views: ColonyView list) : Member list =
+/// An operation's group (#663 M7), the world's roster whichever colony a
+/// body is of: every body of ours holding its Task last tick (`held`,
+/// `op:<id>`) or the Guard of one of its rooms, wherever it stands, and
+/// every armed one standing in one of its rooms, each once.
+let groupIn
+    (id: string)
+    (rooms: Set<string>)
+    (held: Assignments)
+    (views: ColonyView list)
+    : Member list =
     if Set.isEmpty rooms then
         []
     else
-        let guards =
-            rooms |> Seq.map (fun room -> Facts.taskId (Guard room), room) |> Map.ofSeq
+        let tasks =
+            rooms
+            |> Seq.map (fun room -> Facts.taskId (Guard room))
+            |> Seq.append [ Facts.taskId (Operate(id, "")) ]
+            |> Set.ofSeq
 
         views
         |> List.collect (fun view ->
             ColonyView.bodies view
+            |> List.filter (fun creep ->
+                Map.tryFind creep.Name held |> Option.exists tasks.Contains
+                // Where it stands first: the body's reach is the dearer read.
+                || SpatialInfo.creepPlacementOf view.Spatial creep.Name
+                   |> Option.exists (fun at -> rooms.Contains at.Room)
+                   && (Fighter.ofCreep creep).Reach > 0)
             |> List.choose (fun creep ->
-                let counted =
-                    Map.tryFind creep.Name held
-                    |> Option.bind (fun tid -> Map.tryFind tid guards)
-                    |> Option.orElseWith (fun () ->
-                        // Where it stands first: the body's reach is the
-                        // dearer read.
-                        SpatialInfo.creepPlacementOf view.Spatial creep.Name
-                        |> Option.map _.Room
-                        |> Option.filter (fun room ->
-                            rooms.Contains room && (Fighter.ofCreep creep).Reach > 0))
-
-                counted
-                |> Option.bind (fun room ->
-                    Facts.placementOf view creep.Name
-                    |> Option.map (fun at ->
-                        {
-                            Creep = creep
-                            At = at
-                            OwnCast = view.HarassCast.Contains room
-                        }))))
+                Facts.placementOf view creep.Name
+                |> Option.map (fun at -> { Creep = creep; At = at })))
         |> List.distinctBy _.Creep.Name
-
-/// The listed rooms the sweep works this tick, the only ones its group is
-/// read over: of the rooms the decide priced (`WorldView.SweepRates`: a
-/// colony casts it and no stand-down shuts it), the room its phase works,
-/// each whose Guard a body held last tick, and each a body of the sweep's
-/// group stands in. None while it works none: nothing is scanned.
-let private workedRooms
-    (listed: Set<string>)
-    (room: string option)
-    (held: Assignments)
-    (views: ColonyView list)
-    : Set<string> =
-    let priced =
-        views
-        |> List.collect (fun view -> view.World.SweepRates |> List.map fst)
-        |> Set.ofList
-        |> Set.intersect listed
-
-    if Set.isEmpty priced then
-        Set.empty
-    else
-        let guards =
-            priced |> Seq.map (fun room -> Facts.taskId (Guard room), room) |> Map.ofSeq
-
-        let holding =
-            held |> Map.toSeq |> Seq.choose (fun (_, tid) -> Map.tryFind tid guards)
-
-        let standing =
-            views
-            |> Seq.collect (fun view -> view.World.SweepGroup |> Seq.map (fun (_, at) -> at.Room))
-
-        Seq.concat [ Option.toList room |> Seq.ofList; holding; standing ]
-        |> Set.ofSeq
-        |> Set.intersect priced
 
 /// The room a record works this tick: its committed room while it runs in
 /// `Execute`, none in any other phase, before its run, or once it ended.
@@ -732,259 +695,205 @@ let ownFacts
             | casting -> truthOf (casting |> List.forall Facts.homeThreatened)
     }
 
-/// The sweep's code spec resolved for one full tick, in shadow: its record
-/// moved on by its exits over its own prices (`ownFacts`, `advance`), and
-/// what it would lay — the room its record works (`workedRoom`), its group
-/// over the rooms it works (`groupIn`, `workedRooms`), its phase's declared
-/// jobs, and the seats its priced count gives: the group's paid seats
-/// (`Facts.seatsPaid`), never fewer than the chooser's cast for the room
-/// buys (`Facts.fighterCast`, its bodies where it ends the fight). `priced`
-/// is the view a room's fight is priced off, the Guard's owner's; `casters`
-/// the views that cast a room.
-let sweepShadow
-    (now: int)
-    (warm: string -> bool)
-    (spec: OperationSpec)
-    (record: OpRecord option)
+/// The [[sweep]] the colonies' views cast this tick (#663 S7c): the code's
+/// spec (`Colony.operations`, admitted by the shell through the Memory
+/// spec's safety, `Operation.ofCode`) reaches a colony as the candidates it
+/// casts (`ColonyView.Harass`), so the sweep over every candidate any of
+/// them casts, against their one enemy (`Colony.sweepOf`), under the limits
+/// the admitted code spec names (`declared`, its deadline, budget and
+/// bodies; none named, open-ended, the template's most bodies). None with no
+/// candidate cast, or candidates of two enemies.
+let sweepSpec (declared: OpSpecWire list) (views: ColonyView list) : OperationSpec option =
+    let candidates =
+        views |> List.collect _.Harass |> List.distinctBy (fun h -> h.RoomName)
+
+    match Colony.sweepOf candidates with
+    | Ok [ wire ] ->
+        let named = declared |> List.tryFind (fun code -> code.Id = wire.Id)
+
+        let limit (read: OpSpecWire -> int option) (open': int) =
+            named |> Option.bind read |> Option.defaultValue open'
+
+        Some(
+            Operation.Templates.sweep
+                wire.Id
+                wire.Enemy
+                wire.Rooms
+                {
+                    MaxBodies = limit _.MaxBodies Operation.Templates.sweepBodies
+                    MaxEnergy = limit _.MaxEnergy System.Int32.MaxValue
+                    Deadline = limit _.Deadline System.Int32.MaxValue
+                    MaxLossRatio = 1.0
+                }
+        )
+    | _ -> None
+
+/// A code operation's record as its spec reads it now: ended on its
+/// deadline or its budget while the spec no longer ends it there (a
+/// deadline moved on, a budget raised, the always-on sweep under a stale
+/// end) it begins again; ended by an exit, or on a deadline or budget the
+/// spec still names, it stays ended.
+let private reopened (now: int) (spec: OperationSpec) (record: OpRecord) : OpRecord option =
+    match record.Ended with
+    | Some OpEnd.Expired when now < spec.Limits.Deadline -> None
+    | Some OpEnd.Budget when record.Spent < spec.Limits.MaxEnergy -> None
+    | _ -> Some record
+
+/// The operations laid in every colony's view (#663 S7c), once a full tick
+/// before the world's verdicts are priced (`Entry.judgeColonies`): the
+/// sweep (`sweepSpec`) moved on from its record (`records`, the stored
+/// latch: `advance` over its own prices, `ownFacts`, with its group,
+/// `groupIn`, read off last tick's Tasks, `held`), and the room it works
+/// laid for every colony (`WorldView.Operations`: its room, its group, its
+/// rate, its most bodies) beside the room it is committed to
+/// (`WorldView.Committed`). Every room's worth is laid first, one table for
+/// every view (`Facts.layWorths`), priced while every candidate reads as
+/// worked: the choice and every reader after it price a room once. A view
+/// that casts candidates has its dismantler's targets narrowed to the room
+/// worked (an enemy container in a candidate the operation does not work
+/// is nobody's target this tick; a salvage room's stays). The records come
+/// back moved on, with what moved; with no sweep cast this tick its record
+/// stands unmoved (a caster's bank dipping keeps the latch) and nothing is
+/// laid but the worths.
+let lay
+    (declared: OpSpecWire list)
     (held: Assignments)
+    (records: OpRecord list)
     (views: ColonyView list)
-    (casters: string -> ColonyView list)
-    (priced: string -> ColonyView option)
-    : OpRecord option * SweepAnswer =
-    let listed = roomsOf spec.Target |> Option.defaultValue [] |> Set.ofList
+    : ColonyView list * OpRecord list * OpEvent list =
+    let now =
+        match views with
+        | view :: _ -> view.Time
+        | [] -> 0
 
-    let before =
-        groupIn (workedRooms listed (workedRoom now record) held views) held views
-
-    let facts = ownFacts now warm spec record casters before views
-    let record, _ = advance facts spec record
-
-    let phase =
-        record
-        |> Option.filter (fun record -> Option.isNone record.Ended && record.Started <= now)
-        |> Option.map _.Phase
-
-    let room = workedRoom now record
-    let group = groupIn (workedRooms listed room held views) held views
-
-    let declared =
-        phase
-        |> Option.bind (fun phase -> spec.Phases |> List.tryFind (fun p -> p.Phase = phase))
-        |> Option.map (fun p -> p.Jobs |> List.map _.Kind)
-        |> Option.defaultValue []
-
-    let seats =
-        room
-        |> Option.bind (fun room -> priced room |> Option.map (fun view -> room, view))
-        |> Option.map (fun (room, view) ->
-            let cast = Facts.fighterCast view room Bodies.bodyTemplates Engine.guardCap
-            let wanted = if cast.Ends then cast.Bodies else 0
-            let placed = group |> List.map (fun m -> m.Creep, m.At)
-            max (Facts.seatsPaid view room placed) wanted)
-
-    let names (members: Member list) =
-        members |> List.map _.Creep.Name |> Set.ofList
-
-    record,
-    {
-        Room = room
-        Group = names group
-        Scoped = group |> List.filter (fun m -> not m.OwnCast) |> names
-        Jobs = if Option.isSome room then declared else []
-        Seats = seats |> Option.defaultValue 0
-    }
-
-let private namesText (names: Set<string>) =
-    if Set.isEmpty names then "-" else String.concat "," names
-
-let private jobText (kind: JobKind) =
-    match kind with
-    | JobKind.Strike -> "Strike"
-    | JobKind.Ring -> "Ring"
-    | JobKind.Resident -> "Resident"
-    | JobKind.Camp -> "Camp"
-    | JobKind.Intercept -> "Intercept"
-    | JobKind.HoldExit -> "HoldExit"
-    | JobKind.Muster -> "Muster"
-
-let private jobsText (jobs: JobKind list) =
-    if List.isEmpty jobs then
-        "-"
-    else
-        jobs |> List.map jobText |> String.concat ","
-
-/// Where the shadow and the sweep disagree this tick, each kind once: the
-/// room, then the group whatever the
-/// room — `Scope` where only bodies the shadow counts from a colony not
-/// casting their room make the difference —; the jobs and the seats only
-/// where both work the same room. The jobs disagree where the sweep lays a
-/// kind the shadow's phase does not declare: a declared kind nothing lays
-/// (no quarry for it) is no disagreement.
-let disagreements (now: int) (shadow: SweepAnswer) (sweep: SweepAnswer) : ShadowExample list =
-    let room = sweep.Room |> Option.orElse shadow.Room |> Option.defaultValue ""
-
-    let example kind (ours: string) (theirs: string) (why: string) =
-        {
-            Tick = now
-            Kind = kind
-            Room = room
-            Shadow = ours
-            Sweep = theirs
-            Why = why
+    let laidAs (operations: OperationWork list) (committed: Map<string, int>) (view: ColonyView) =
+        { view with
+            World =
+                { view.World with
+                    Operations = Some operations
+                    Committed = committed
+                }
         }
 
-    let roomText = Option.defaultValue "none"
+    match sweepSpec declared views with
+    | None -> Facts.layWorths views |> List.map (laidAs [] Map.empty), records, []
+    | Some spec ->
+        let record =
+            records
+            |> List.tryFind (fun record -> record.Id = spec.Id)
+            |> Option.bind (reopened now spec)
 
-    let rooms =
-        if shadow.Room = sweep.Room then
-            []
-        else
-            let why =
-                match shadow.Room, sweep.Room with
-                | None, Some _ -> "the spec works no room (its phase, its rooms)"
-                | Some _, None -> "the sweep works no room"
-                | _ -> "the spec keeps the room it committed to, or prices its own group"
+        // The room it is committed to, whatever its phase, from the tick
+        // that room was chosen: one map for every view.
+        let commitment (record: OpRecord option) =
+            match committedRoom now record, record with
+            | Some room, Some record -> Map.ofList [ room, record.RoomSince ]
+            | _ -> Map.empty
 
-            [ example Divergence.Room (roomText shadow.Room) (roomText sweep.Room) why ]
+        let before = commitment record
 
-    let group =
-        if shadow.Group = sweep.Group then
-            []
-        else
-            // Each side's bodies the other lacks: the difference, not the
-            // whole group, keeps the example short.
-            let ours = Set.difference shadow.Group sweep.Group
-            let theirs = Set.difference sweep.Group shadow.Group
-
-            let kind, why =
-                if Set.isEmpty theirs && Set.isSubset ours shadow.Scoped then
-                    Divergence.Scope,
-                    "the world's roster counts bodies their own colony does not cast for"
-                else
-                    Divergence.Group, "bodies only one side counts"
-
-            [ example kind (namesText ours) (namesText theirs) why ]
-
-    let worked =
-        match shadow.Room, sweep.Room with
-        | Some ours, Some theirs when ours = theirs ->
-            let undeclared =
-                sweep.Jobs |> List.filter (fun kind -> not (List.contains kind shadow.Jobs))
-
-            let jobs =
-                if List.isEmpty undeclared then
-                    []
-                else
-                    [
-                        example
-                            Divergence.Jobs
-                            (jobsText shadow.Jobs)
-                            (jobsText sweep.Jobs)
-                            $"laid but not declared: {jobsText undeclared}"
-                    ]
-
-            let seats =
-                if shadow.Seats = sweep.Seats then
-                    []
-                else
-                    let more = if sweep.Seats > shadow.Seats then "more" else "fewer"
-
-                    [
-                        example
-                            Divergence.Seats
-                            (string shadow.Seats)
-                            (string sweep.Seats)
-                            $"the sweep seats {more} than its group pays for and its cast buys"
-                    ]
-
-            jobs @ seats
-        | _ -> []
-
-    rooms @ group @ worked
-
-/// The log a compared tick on: one more tick compared (and worked, where
-/// the sweep worked a room), each disagreement counted, the latest kept
-/// newest first, at most `Operation.shadowCap`, an older one saying what a
-/// newer one says (its kind, room and answers) dropped, so a disagreement
-/// that stands tick after tick is one example.
-let logged (log: ShadowLog) (sweep: SweepAnswer) (examples: ShadowExample list) : ShadowLog =
-    let same (a: ShadowExample) (b: ShadowExample) =
-        a.Kind = b.Kind && a.Room = b.Room && a.Shadow = b.Shadow && a.Sweep = b.Sweep
-
-    {
-        Compared = log.Compared + 1
-        Working = log.Working + (if Option.isSome sweep.Room then 1 else 0)
-        Counts =
-            examples
-            |> List.fold
-                (fun (counts: Map<Divergence, int>) example ->
-                    counts
-                    |> Map.add
-                        example.Kind
-                        (1 + (Map.tryFind example.Kind counts |> Option.defaultValue 0)))
-                log.Counts
-            |> Map.toSeq
-            |> Fresh.mapOfSeq
-        Last =
-            examples
-            @ (log.Last |> List.filter (fun old -> not (List.exists (same old) examples)))
-            |> List.truncate Operation.shadowCap
-        Refused = log.Refused
-    }
-
-/// The sweep the code declares (`Colony.operations`), through the code
-/// spec's safety (`Operation.ofCode`): the spec, or None, and this tick's
-/// refusals — the declaration's own (candidates of two enemies), the whole
-/// spec's, or each room dropped from it.
-let declaredSweep
-    (standing: OpStanding)
-    (declared: Result<OpSpecWire list, string>)
-    : OperationSpec option * OpRefusal list =
-    match declared with
-    | Error why -> None, [ { Id = "sweep"; Why = why } ]
-    | Ok wires ->
-        match wires |> List.tryFind (fun wire -> wire.Template = "sweep") with
-        | None -> None, []
-        | Some wire ->
-            match Operation.ofCode standing wire with
-            | Ok(spec, dropped) -> Some spec, dropped
-            | Error refused -> None, [ refused ]
-
-/// One whole full tick of the sweep's shadow: the declared spec
-/// (`declaredSweep`) resolved (`sweepShadow`) and compared with what the
-/// sweep decided (`sweep`), the record moved on and the log grown
-/// (`disagreements`, `logged`), this tick's refusals laid in. With no spec
-/// the record stands and nothing is compared.
-let shadowStep
-    (standing: OpStanding)
-    (declared: Result<OpSpecWire list, string>)
-    (now: int)
-    (warm: string -> bool)
-    (record: OpRecord option, log: ShadowLog)
-    (held: Assignments)
-    (views: ColonyView list)
-    (priced: string -> ColonyView option)
-    (sweep: SweepAnswer)
-    : OpRecord option * ShadowLog =
-    match declaredSweep standing declared with
-    | None, refused -> record, { log with Refused = refused }
-    | Some spec, refused ->
-        // The candidates the decide worked (`WorldView.SweepRates`), cast
-        // by each colony that casts them.
-        let worked =
+        let priced =
             views
-            |> List.collect (fun view -> view.World.SweepRates |> List.map fst)
-            |> Set.ofList
+            |> List.map (fun view ->
+                { view with
+                    World =
+                        { view.World with
+                            Operations = None
+                            Committed = before
+                        }
+                })
+            |> Facts.layWorths
+
+        let listed = roomsOf spec.Target |> Option.defaultValue []
 
         let casters (room: string) =
-            if worked.Contains room then
-                views |> List.filter (fun view -> view.HarassCast.Contains room)
-            else
-                []
+            priced
+            |> List.filter (fun view -> view.Harass |> List.exists (fun h -> h.RoomName = room))
 
-        let record, shadow = sweepShadow now warm spec record held views casters priced
+        let group = groupIn spec.Id (Set.ofList listed) held priced
+        // The sweep reads no quarry guard: every room counts as warm.
+        let facts = ownFacts now (fun _ -> true) spec record casters group priced
+        let moved, events = advance facts spec record
 
-        record,
-        { logged log sweep (disagreements now shadow sweep) with
-            Refused = refused
-        }
+        let work =
+            workedRoom now moved
+            |> Option.map (fun room ->
+                {
+                    Id = spec.Id
+                    Enemy = spec.Enemy
+                    Room = room
+                    Group = group |> List.map (fun m -> m.Creep, m.At)
+                    Rate = facts.Rate room |> Option.defaultValue 0.0
+                    MaxBodies = spec.Limits.MaxBodies
+                })
+
+        let committed =
+            match commitment moved with
+            | same when same = before -> before
+            | other -> other
+
+        let laid =
+            priced
+            |> List.map (fun view ->
+                let elsewhere =
+                    view.Harass
+                    |> List.map _.RoomName
+                    |> List.filter (fun candidate -> Some candidate <> (work |> Option.map _.Room))
+                    |> Set.ofList
+
+                { laidAs (Option.toList work) committed view with
+                    Dismantles =
+                        if Set.isEmpty elsewhere then
+                            view.Dismantles
+                        else
+                            view.Dismantles
+                            |> List.filter (fun id ->
+                                SpatialInfo.placementOf view.Spatial id
+                                |> Option.forall (fun at -> not (elsewhere.Contains at.Room)))
+                })
+
+        let records =
+            (records |> List.filter (fun record -> record.Id <> spec.Id))
+            @ Option.toList moved
+
+        laid, records, events
+
+/// `lay` over one colony's view alone, with no stored latch: the shape a
+/// decide of one colony asks in.
+let layOne (held: Assignments) (view: ColonyView) : ColonyView =
+    let laid, _, _ = lay [] held [] [ view ]
+    List.head laid
+
+
+/// The code's operations admitted (#663 S7c): each spec code declares
+/// (`Colony.operations`) through the Memory spec's safety
+/// (`Operation.ofCode`) — its rooms less each one dropped, with a refusal
+/// for each, or the whole spec refused. What the shell casts
+/// (`Colony.candidatesOf`).
+let declared (standing: OpStanding) (wires: OpSpecWire list) : OpSpecWire list * OpRefusal list =
+    wires
+    |> List.map (fun wire ->
+        match Operation.ofCode standing wire with
+        | Ok(spec, dropped) ->
+            let rooms = roomsOf spec.Target |> Option.defaultValue []
+
+            // A room whose holder nothing we keep knows is cast into by
+            // nobody until a look or a memory names one: one never seen
+            // since the reset, and an ally's reservation out of sight on a
+            // cold heap (no dossier keeps it).
+            let unknown =
+                rooms |> List.filter (fun room -> standing.Holder room = RoomHolder.Unknown)
+
+            Some
+                { wire with
+                    Rooms = rooms |> List.filter (fun room -> not (List.contains room unknown))
+                },
+            dropped
+            @ (unknown
+               |> List.map (fun room ->
+                   {
+                       Id = wire.Id
+                       Why = "holder unknown: " + room
+                   }))
+        | Error refused -> None, [ refused ])
+    |> fun answers -> List.choose fst answers, List.collect snd answers

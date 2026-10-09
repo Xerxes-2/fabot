@@ -140,6 +140,7 @@ let internal restockWait (view: ColonyView) task =
     | Guard _
     | Defend _
     | Assault _
+    | Operate _
     | Flee -> 0
 
 /// ADR-0025. The walk and the wait that hold a Task up for this creep, or None
@@ -187,7 +188,8 @@ let internal safetyTier task =
     | Flee
     | Guard _
     | Defend _
-    | Assault _ -> true
+    | Assault _
+    | Operate _ -> true
     | Harvest _
     | Withdraw _
     | Pickup _
@@ -220,7 +222,8 @@ let internal roomOfWork atlas task =
     | Refill(id, _) -> Atlas.targetRoom atlas id
     | Guard room
     | Defend room
-    | Assault room -> Some room
+    | Assault room
+    | Operate(_, room) -> Some room
     | Flee -> None
 
 /// Whether a tile stands in the Reach on a Task's own room, or None when the
@@ -260,8 +263,9 @@ let internal areaFor (threats: Threats) atlas creep task : Set<RoomPos> =
         // the room, whichever colony's body holds it — a blind room's (#366)
         // the declared source ring. One that walks in with no ground
         // (`Brief.WalksIn`) has the room's walkable ground off the border for
-        // a destination.
-        | Guard room ->
+        // a destination. An operation's, its room's.
+        | Guard room
+        | Operate(_, room) ->
             let brief = Threats.briefOf threats room
 
             // A melee body on a chase swings from the ring beside the raid,
@@ -338,10 +342,12 @@ let internal travelCostOf (threats: Threats) atlas (creep: string) task =
             | Some room when groundRoom room area <> room ->
                 Atlas.travelCostToward atlas creep task (groundRoom room area) area
             | _ -> Atlas.travelCostWithin atlas creep area)
-    | Guard room when Map.containsKey creep (Threats.briefOf threats room).Stances ->
+    | Guard room
+    | Operate(_, room) when Map.containsKey creep (Threats.briefOf threats room).Stances ->
         let area = areaFor threats atlas creep task
         Atlas.travelCostToward atlas creep task (groundRoom room area) area
     | Guard room
+    | Operate(_, room)
     | Defend room -> Atlas.travelCostToward atlas creep task room (areaFor threats atlas creep task)
     | Assault room ->
         let area = areaFor threats atlas creep task
@@ -469,7 +475,8 @@ let internal stepToward atlas (creep: string) task (area: Set<RoomPos>) =
     match task with
     | Guard room
     | Defend room
-    | Assault room -> Atlas.firstStepToward atlas creep task (groundRoom room area) area
+    | Assault room
+    | Operate(_, room) -> Atlas.firstStepToward atlas creep task (groundRoom room area) area
     | Flee ->
         match Atlas.creepRoom atlas creep with
         | Some room when groundRoom room area <> room ->
@@ -653,8 +660,10 @@ let private safetyEntry (threats: Threats) (task: Task) : PooledTask =
             + rankOfRung (
                 match task with
                 // A kill over a quiet holder's own Guard (#510, #516), and a
-                // raid's Guard over a kill (#528): its Brief's.
-                | Guard _ ->
+                // raid's Guard over a kill (#528): its Brief's. An
+                // operation's alike (#663 S7c).
+                | Guard _
+                | Operate _ ->
                     brief.Value
                     |> Option.map (fun brief -> brief.Rung)
                     |> Option.defaultValue OnTheTier
@@ -666,7 +675,8 @@ let private safetyEntry (threats: Threats) (task: Task) : PooledTask =
             // their row's own count, a squad's its slots, one cap per role.
             | Guard _
             | Defend _
-            | Assault _ ->
+            | Assault _
+            | Operate _ ->
                 brief.Value
                 |> Option.map (fun brief -> brief.Capacity threats)
                 |> Option.defaultValue (Capacity.roles [])
@@ -676,7 +686,8 @@ let private safetyEntry (threats: Threats) (task: Task) : PooledTask =
         // whose Brief recalls is a kill.
         Recall =
             match task with
-            | Guard room ->
+            | Guard room
+            | Operate(_, room) ->
                 match (Threats.briefOf threats room).Recall with
                 | Some recall -> Some(RecallPolicy.Kill(room, recall))
                 | None -> Some(RecallPolicy.Callable room)
@@ -1089,6 +1100,7 @@ let planPoolHolding
         | Guard _
         | Defend _
         | Assault _
+        | Operate _
         | Harvest _
         | Reserve _
         | Withdraw(_, Energy)
@@ -1393,7 +1405,8 @@ let planPoolHolding
             | Flee
             | Guard _
             | Defend _
-            | Assault _ -> 0.0
+            | Assault _
+            | Operate _ -> 0.0
 
     // The hungriest sink an energy load serves: what a draw on the stock is
     // worth (`stockDraw`).

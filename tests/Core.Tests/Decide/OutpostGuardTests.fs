@@ -709,6 +709,8 @@ let private blindPairDecided (raid: HostileInfo list) =
             Idle = Set.empty
             FightAlone = Set.empty
             TurnIndex = None
+            Operations = []
+            Declared = []
         }
         ignore
         views
@@ -1621,7 +1623,11 @@ let guardPrecedenceTests =
                             (held |> List.map (fun (name, task) -> name, taskId task) |> Map.ofList)
                             colony)
                             .Assignments
-                        |> Map.filter (fun _ tid -> tid = taskId (Guard "W1N2"))
+                        // The room's fight: its Guard, or the sweep's
+                        // operation's Task where it works the room (#663 S7c).
+                        |> Map.filter (fun _ tid ->
+                            tid = taskId (Guard "W1N2")
+                            || tid = taskId (Operate(Colony.sweepId, "W1N2")))
                         |> Map.keys
                         |> List.ofSeq
 

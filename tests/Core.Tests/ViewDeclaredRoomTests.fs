@@ -1200,6 +1200,7 @@ let private namedBy task =
     | Guard _
     | Defend _
     | Assault _
+    | Operate _
     | Flee -> None
 
 [<Tests>]

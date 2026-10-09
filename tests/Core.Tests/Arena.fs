@@ -377,10 +377,10 @@ type Carried =
         /// The operation ledger (`Ledger.fold`, #662), folded every tick as
         /// `Main` folds it on a full one.
         Ledger: Ledger.Ledger
-        /// The sweep's shadow (`Operations.shadowStep`, #663 S7b): the code
-        /// spec over the arena's harassment rooms, its record and its log,
-        /// stepped every tick as `Main` steps it on a whole full one.
-        Shadow: OpRecord option * ShadowLog
+        /// The operations' records (#663 S7c, `Operations.lay`): the sweep's
+        /// latch over the arena's harassment rooms, moved on every tick and
+        /// carried as `Main` stores it.
+        Operations: OpRecord list
     }
 
 /// The arena's whole state between ticks.
@@ -409,7 +409,7 @@ type Arena =
         Lookout: Set<string>
         /// The harassment rooms the arena declares (`withHarass`), each
         /// cast by the colony `World.harassCasters` names, as `Main` casts
-        /// `Colony.harass`; none by default.
+        /// the candidates of `Colony.operations`; none by default.
         Harass: Harass list
     }
 
@@ -946,7 +946,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 RivalControllers = Map.empty
                 Fallen = Map.empty
                 Ledger = Ledger.empty
-                Shadow = None, Operation.shadowEmpty
+                Operations = []
             }
         Scores = Map.empty
         Ovens = []
@@ -956,8 +956,9 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
         Harass = []
     }
 
-/// These harassment rooms declared, cast as `Main` casts `Colony.harass`
-/// (`World.harassCasters`): a capture of a fight in one names it.
+/// These harassment rooms declared, cast as `Main` casts the candidates of
+/// `Colony.operations` (`World.harassCasters`): a capture of a fight in one
+/// names it.
 let withHarass (rooms: Harass list) (a: Arena) : Arena = { a with Harass = rooms }
 
 /// Our spawns cast these rows, by pattern name, and only these.
@@ -1641,6 +1642,8 @@ let laneBreaks (a: Arena) : string list =
                         |> Set.ofList
                     FightAlone = Set.empty
                     TurnIndex = None
+                    Operations = a.Carried.Operations
+                    Declared = []
                 }
                 ignore
                 views
@@ -1695,7 +1698,8 @@ let laneBreaks (a: Arena) : string list =
 let viewOf (a: Arena) (home: string) : ColonyView =
     let _, _, views = cut a
 
-    judgeColonies a.Carried.Assignments Set.empty views
+    judgeColonies a.Carried.Assignments Set.empty [] a.Carried.Operations views
+    |> fst
     |> Layout.aimObservers Set.empty
     |> List.zip (views |> List.map fst)
     |> List.tryPick (fun (c, view) -> if c.Home = home then Some view else None)
@@ -1726,6 +1730,8 @@ let private decideOurs (a: Arena) : Intent list * Carried =
                 Idle = Set.empty
                 FightAlone = Set.empty
                 TurnIndex = None
+                Operations = a.Carried.Operations
+                Declared = []
             }
             ignore
             views
@@ -1822,24 +1828,7 @@ let private decideOurs (a: Arena) : Intent list * Carried =
             with
             | ledger, [] -> ledger
             | _, faults -> invalidOp $"t{a.Time}: the ledger's fold threw: %A{faults}"
-        Shadow =
-            match Colony.sweepOf a.Harass with
-            | Ok [] -> a.Carried.Shadow
-            | declared ->
-                let seen = decided.Sweep.Force()
-
-                let ours = a.Colonies |> List.map Colony.declaredRooms |> Set.unionMany
-
-                Operations.shadowStep
-                    (Operations.standingOf a.Time ours (fun _ -> None) world)
-                    declared
-                    a.Time
-                    (fun _ -> true)
-                    a.Carried.Shadow
-                    seen.Held
-                    seen.Views
-                    seen.Priced
-                    seen.Decided
+        Operations = fst decided.Operated
     }
 
 // ---------------------------------------------------------------------------

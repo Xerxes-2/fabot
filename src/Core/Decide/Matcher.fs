@@ -133,7 +133,8 @@ let private fightRoomOf (task: Task) : string option =
     match task with
     | Guard room
     | Defend room
-    | Assault room -> Some room
+    | Assault room
+    | Operate(_, room) -> Some room
     | _ -> None
 
 /// What the gate (`matchAcross`) says of a holder called off its Guard to a
@@ -158,7 +159,8 @@ let internal callAdmits
 
     let raided =
         match task with
-        | Guard room -> Facts.raided view room
+        | Guard room
+        | Operate(_, room) -> Facts.raided view room
         | _ -> false
 
     let held =
@@ -583,7 +585,8 @@ let matchAcross
             let held =
                 Map.tryFind body.Name acc |> Option.orElse (Map.tryFind body.Name assignments)
 
-            held = Some(taskId (Guard room)) || held = Some(taskId (Defend room))
+            held = Some(taskId (Facts.fightTask ctx.View room))
+            || held = Some(taskId (Defend room))
 
         Atlas.creepRoom ctx.Atlas creep.Name <> Some room
         && not (
@@ -751,7 +754,8 @@ let matchAcross
 
     let unfitNow k (creep: CreepInfo) task =
         match task with
-        | Guard room when
+        | Guard room
+        | Operate(_, room) when
             not (Set.contains room contexts.[k].Threats.Homes)
             && Facts.raided contexts.[k].View room
             ->
@@ -882,6 +886,18 @@ let matchAcross
                         && (match held.Split ':' with
                             | [| "guard"; from |] ->
                                 Facts.mayBeCalled ctx.View (Set.singleton room) from room other
+                            // An operation's holder, off the room it works.
+                            | [| "op"; id |] ->
+                                ctx.View.World.Operations
+                                |> Option.defaultValue []
+                                |> List.exists (fun op ->
+                                    op.Id = id
+                                    && Facts.mayBeCalled
+                                        ctx.View
+                                        (Set.singleton room)
+                                        op.Room
+                                        room
+                                        other)
                             | _ -> false)
 
                 // The seats an arriving body finds open when it lands
@@ -947,7 +963,8 @@ let matchAcross
     // it of a pair as a candidate, a holder and a body called off.
     let unfit k (creep: CreepInfo) task =
         match task with
-        | Guard _ ->
+        | Guard _
+        | Operate _ ->
             let key = struct (creep.Name, taskId task)
 
             match unfits.TryGetValue key with
