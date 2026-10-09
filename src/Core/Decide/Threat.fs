@@ -1558,6 +1558,25 @@ module Brief =
             | BriefKind.Contested -> Facts.operationIn view room
             | _ -> None
 
+        // An exit camp's ask is its body (#663 S7d): one of the template and
+        // blocks its operation priced (`Facts.exitCampPrice`), whatever
+        // walks the room, while the operation lays the camp.
+        let ask =
+            match operation |> Option.bind _.Camp with
+            | Some camp ->
+                let cast: Facts.FighterCast =
+                    {
+                        Template = camp.Template
+                        Blocks = max 1 camp.Blocks
+                        Bodies = 1
+                        Ends = true
+                        Trades = true
+                        Held = camp.Template = BodyTemplate.Melee
+                    }
+
+                [ castAsk view room camp.Template (lazy cast) None (fun _ -> true) ]
+            | None -> ask
+
         let ask =
             match operation with
             | Some op ->
@@ -4479,15 +4498,47 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                      |> List.filter (fun h -> List.contains h.Id ids)
                      |> List.fold (fun best h -> max best (sideScore room h)) 0.0)))
 
+    // The camp on a rival home's exit (#663 S7d, `Facts.exitCampIn`): the
+    // tile its operation priced for its body (`Facts.exitCampPrice`, per
+    // body: a swing a step in beside the tiles a crossing lands on, a shot
+    // out of the landers' swing), about every body of the room in that
+    // body's reach of it, at the rate its operation priced it at.
+    let exitCampJob room (op: OperationWork) (camp: ExitCamp) =
+        match camp.Tile with
+        | None -> None
+        | Some tile ->
+            let reach =
+                match
+                    HeldTaskFacts.holdersOf held (taskId (Facts.fightTask view room))
+                    |> List.choose (fun name ->
+                        ColonyView.bodies view |> List.tryFind (fun creep -> creep.Name = name))
+                with
+                | [] ->
+                    (Facts.blocksFighter (patternOfTemplate camp.Template) (max 1 camp.Blocks))
+                        .Reach
+                | holders -> holders |> List.map Fighter.reachOf |> List.max
+
+            let quarry =
+                view.Hostiles
+                |> List.filter (fun h ->
+                    h.Pos.Room = room
+                    && Facts.mayStrikeAnywhere h.Owner
+                    && range tile (RoomPos.pos h.Pos) <= reach)
+                |> List.map _.Id
+
+            Some(Job.laid JobKind.Camp (Set.singleton (RoomPos.at room tile)) quarry (lazy op.Rate))
+
     // The camp on a border dancer in the [[sweep]]'s room (#658,
-    // `Facts.sweepDancer`): tiles off the border ring and every armed body's
-    // reach, within the group's reach of the tiles the dancer steps in on,
-    // covering the most of them, the one it uses most first, then nearest
-    // it; one a holder, those a holder already stands on first (the walk
-    // spent is the camp's hysteresis). The dancer's tile now never enters the
-    // choice: the tiles follow the trajectory it dances on. Priced at its
-    // kill at the camp's odds (`Facts.campValue`).
-    let campJob room =
+    // `Facts.sweepDancer`): tiles off the border ring (#663 S7d: at any
+    // depth, priced per body) and every armed body's reach, within the
+    // group's reach of the tiles the dancer steps in on, covering the most
+    // of them, the one it uses most first, then the one its owner's armed
+    // bodies across the border strike least on landing (`Facts.campRisk`),
+    // then nearest it; one a holder, those a holder already stands on first
+    // (the walk spent is the camp's hysteresis). The dancer's tile now never
+    // enters the choice: the tiles follow the trajectory it dances on.
+    // Priced at its kill at the camp's odds (`Facts.campValue`).
+    let dancerCampJob room =
         if not (Set.contains room (operationRooms view)) || phaseOf room = Phase.Raid then
             None
         else
@@ -4559,6 +4610,15 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                         }
                     )
 
+    // A room's camp: its exit camp where an operation lays one, else a camp
+    // on a border dancer in the sweep's room; none under a raid there, which
+    // is fought where it stands.
+    let campJob room =
+        match Facts.exitCampIn view room with
+        | Some _ when phaseOf room = Phase.Raid -> None
+        | Some(op, camp) -> exitCampJob room op camp
+        | None -> dancerCampJob room
+
     // The jobs one room's Guard reads (#663 M3), from its kind down
     // `BriefKind.order`, each kind's own in order, given whether a ranger
     // answers the room: a resident its kite, then its garrison ground; a
@@ -4628,11 +4688,15 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                          && (Set.contains room view.RaidedOutposts
                              || verdict.Value.Answer = Answer.Kite))))
                 // A harassment room is the ranger's, a hostile in it or none
-                // (#432); so is a raid a ranger pursues.
+                // (#432); so is a raid a ranger pursues. An exit camp's is
+                // its body's template's (#663 S7d).
                 (lazy
-                    (answeredByRanger room
-                     || Set.contains room (operationRooms view)
-                     || pursuedByRanger room))
+                    (match Facts.exitCampIn view room with
+                     | Some(_, camp) -> camp.Template = BodyTemplate.Ranged
+                     | None ->
+                         answeredByRanger room
+                         || Set.contains room (operationRooms view)
+                         || pursuedByRanger room))
                 (Set.contains room pursuedRooms)
                 (Map.containsKey room prey)
                 (lazy

@@ -1382,7 +1382,23 @@ let lookRequests (views: ColonyView list) (watched: string list) : LookRequest l
             |> Set.toList
             |> List.map (lookRequest LookBand.Danger dangerStride)
 
+        // An operation's eyes (#663 S7d, `WorldView.OperationLooks`): an
+        // exit camp's rooms, at what its camp earns over the stride, in the
+        // band of the kills a look unlocks.
+        let operations =
+            first.World.OperationLooks
+            |> Map.toList
+            |> List.map (fun (room, value) ->
+                {
+                    Room = room
+                    Band = LookBand.Pursuit
+                    Value = value
+                    Tolerates = dangerStride
+                    Until = None
+                })
+
         danger
+        @ operations
         @ (views |> List.collect pricedRequests)
         @ dossierRequests
         @ (views

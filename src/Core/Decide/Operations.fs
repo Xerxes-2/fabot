@@ -2,8 +2,9 @@
 /// world, each spec's record moved on by its schedule, its target and its
 /// exits. The code's sweep is laid for every colony (`lay`, #663 S7c): the
 /// room its record is committed to is fought under its Task (`Operate`),
-/// a Brief per operation. A Memory spec still runs dry (`step`): its records
-/// and its events, and nothing read back into a decision.
+/// a Brief per operation; so is each room an exit camp code declares works
+/// (#663 S7d), one Task an exit. A Memory spec still runs dry (`step`): its
+/// records and its events, and nothing read back into a decision.
 module Fabot.Core.Decide.Operations
 
 open Fabot.Core.Types
@@ -21,22 +22,26 @@ let private roomsOf (target: OpTarget) : string list option =
     | OpTarget.Room room -> Some [ room ]
     | OpTarget.Structure(room, _) -> Some [ room ]
     | OpTarget.Among(RoomClass.Listed rooms) -> Some rooms
+    | OpTarget.Exits exits -> Some(exits |> List.map _.Camp)
     | OpTarget.Among RoomClass.RivalRemotes
     | OpTarget.Among RoomClass.RivalRemoteExits
     | OpTarget.Quarry _ -> None
 
 /// The target's room this tick: of its rooms, the one a cast of ours earns
 /// most in (`OpFacts.Rate`), then by name; None where none earns anything,
-/// or none is priced.
+/// or none is priced. None for exits, which are worked all at once.
 let target (facts: OpFacts) (spec: OperationSpec) : string option =
-    roomsOf spec.Target
-    |> Option.bind (fun rooms ->
-        rooms
-        |> List.choose (fun room -> facts.Rate room |> Option.map (fun rate -> room, rate))
-        |> List.filter (fun (_, rate) -> rate > 0.0)
-        |> List.sortBy (fun (room, rate) -> -rate, room)
-        |> List.tryHead
-        |> Option.map fst)
+    match spec.Target with
+    | OpTarget.Exits _ -> None
+    | _ ->
+        roomsOf spec.Target
+        |> Option.bind (fun rooms ->
+            rooms
+            |> List.choose (fun room -> facts.Rate room |> Option.map (fun rate -> room, rate))
+            |> List.filter (fun (_, rate) -> rate > 0.0)
+            |> List.sortBy (fun (room, rate) -> -rate, room)
+            |> List.tryHead
+            |> Option.map fst)
 
 /// The room that outpays `held`, the room committed to (`OpGuard.Outpaid`):
 /// of the target's other rooms whose rate on evidence (`OpFacts.Challenge`)
@@ -73,9 +78,36 @@ let private quarryIn (facts: OpFacts) (room: string) : Truth =
         else
             Truth.Unknown
 
+/// Kleene's conjunction of answers read in turn: the first `No` ends it
+/// (none after it is read), else any `Unknown`, else `Yes`.
+let private allOf (answers: (unit -> Truth) list) : Truth =
+    let rec go unknown =
+        function
+        | [] -> if unknown then Truth.Unknown else Truth.Yes
+        | answer :: rest ->
+            match answer () with
+            | Truth.No -> Truth.No
+            | Truth.Unknown -> go true rest
+            | Truth.Yes -> go unknown rest
+
+    go false answers
+
+/// Kleene's disjunction of answers read in turn: `allOf` negated.
+let private anyOf (answers: (unit -> Truth) list) : Truth =
+    answers |> List.map (fun answer () -> negate (answer ())) |> allOf |> negate
+
 /// A reading of the room a record is committed to; Unknown with none.
-let private committed (record: OpRecord) (read: string -> Truth) : Truth =
-    record.Room |> Option.map read |> Option.defaultValue Truth.Unknown
+/// Against exits, of every room they land in, combined by `over`: the
+/// exits have no one room.
+let private committed
+    (spec: OperationSpec)
+    (record: OpRecord)
+    (over: (unit -> Truth) list -> Truth)
+    (read: string -> Truth)
+    : Truth =
+    match spec.Target with
+    | OpTarget.Exits exits -> exits |> List.map (fun exit () -> read exit.Camp) |> over
+    | _ -> record.Room |> Option.map read |> Option.defaultValue Truth.Unknown
 
 /// A guard's answer for an operation as its record stands this tick.
 let rec truth (facts: OpFacts) (spec: OperationSpec) (record: OpRecord) (guard: OpGuard) : Truth =
@@ -83,17 +115,11 @@ let rec truth (facts: OpFacts) (spec: OperationSpec) (record: OpRecord) (guard: 
     | OpGuard.Always -> Truth.Yes
     | OpGuard.Not inner -> negate (truth facts spec record inner)
     | OpGuard.All guards ->
-        let answers = guards |> List.map (truth facts spec record)
-
-        if List.contains Truth.No answers then Truth.No
-        elif List.contains Truth.Unknown answers then Truth.Unknown
-        else Truth.Yes
+        guards |> List.map (fun guard () -> truth facts spec record guard) |> allOf
     | OpGuard.Any guards ->
-        let answers = guards |> List.map (truth facts spec record)
-
-        if List.contains Truth.Yes answers then Truth.Yes
-        elif List.contains Truth.Unknown answers then Truth.Unknown
-        else Truth.No
+        guards |> List.map (fun guard () -> truth facts spec record guard) |> anyOf
+    | OpGuard.ExitsUsed -> facts.ExitsUsed.Value
+    | OpGuard.Pays -> facts.Pays.Value
     | OpGuard.QuarryIn
     | OpGuard.QuarryGone ->
         let seen =
@@ -135,9 +161,9 @@ let rec truth (facts: OpFacts) (spec: OperationSpec) (record: OpRecord) (guard: 
             Truth.Yes
         else
             Truth.No
-    | OpGuard.ExchangeLoses -> committed record facts.Loses
-    | OpGuard.Assembled -> committed record facts.Assembled
-    | OpGuard.Arrived -> committed record facts.Arrived
+    | OpGuard.ExchangeLoses -> committed spec record anyOf facts.Loses
+    | OpGuard.Assembled -> committed spec record allOf facts.Assembled
+    | OpGuard.Arrived -> committed spec record allOf facts.Arrived
     | OpGuard.HomeThreatened -> facts.HomeThreatened
     | OpGuard.Outpaid ->
         match roomsOf spec.Target with
@@ -194,12 +220,15 @@ let exitOf
     first 0 exits
 
 /// One operation's record a tick on, and what moved: at most one change a
-/// tick. Ended is absorbing. A record is begun by its schedule (`Once` and
-/// `Every` at once, `When` on its guard's first `Yes`) and moves no further
-/// that tick. Then its deadline, hard: on it the operation expires, whatever
-/// its phase. Then its budget (spent past `MaxEnergy` ends it), then one
-/// exit: an `Every` run past its window recurs, else its phase's first exit
-/// taken. Each phase it enters, its room is chosen and latched there until
+/// tick. Ended is absorbing, but for an `Armed` run ended short of its
+/// deadline, which begins again on its guard's first `Yes` once its next
+/// run is due (`NextDue`). A record is begun by its schedule (`Once` and
+/// `Every` at once, `When` and `Armed` on its guard's first `Yes`) and
+/// moves no further that tick. Then its deadline, hard: on it the operation
+/// expires, whatever its phase. Then its budget (spent past `MaxEnergy`
+/// ends it), then one exit: an `Every` or `Armed` run past its window
+/// recurs (an `Armed` one ends done), else its phase's first exit taken.
+/// Each phase it enters, its room is chosen and latched there until
 /// the next: the room it was committed to, its commitment kept, while
 /// nothing outpays it and it is not exhausted; else the target's best
 /// (`target`).
@@ -215,7 +244,8 @@ let advance
     let begin' (phase: OpPhase) =
         let due =
             match spec.Schedule with
-            | OpSchedule.Every(period, _) -> now + period
+            | OpSchedule.Every(period, _)
+            | OpSchedule.Armed(_, period, _) -> now + period
             | _ -> 0
 
         Some
@@ -236,30 +266,47 @@ let advance
     let ended (record: OpRecord) (how: OpEnd) =
         Some { record with Ended = Some how }, [ OpEvent.Ended(spec.Id, how) ]
 
+    // A run begun on its guard's first `Yes`, read as a record not begun
+    // would; else the record as it stands.
+    let armed (guard: OpGuard) (phase: OpPhase) (standing: OpRecord option) =
+        let unbegun =
+            {
+                Id = spec.Id
+                Started = now
+                Phase = phase
+                Since = now
+                Room = None
+                RoomSince = now
+                Spent = 0
+                Lost = 0
+                NextDue = 0
+                Ended = None
+            }
+
+        if truth facts spec unbegun guard = Truth.Yes then
+            begin' phase
+        else
+            standing, []
+
     match record, first with
     | _, None -> record, []
+    // An armed schedule's run ended by an exit, its window or its budget (a
+    // run's) waits out its period, then on its guard again; its deadline
+    // ends it for good.
+    | Some record, Some phase when
+        Option.isSome record.Ended
+        && record.Ended <> Some OpEnd.Expired
+        && now >= record.NextDue
+        && now < spec.Limits.Deadline
+        ->
+        match spec.Schedule with
+        | OpSchedule.Armed(guard, _, _) -> armed guard phase (Some record)
+        | _ -> Some record, []
     | Some record, _ when Option.isSome record.Ended -> Some record, []
     | None, Some phase ->
         match spec.Schedule with
-        | OpSchedule.When guard ->
-            let unbegun =
-                {
-                    Id = spec.Id
-                    Started = now
-                    Phase = phase
-                    Since = now
-                    Room = None
-                    RoomSince = now
-                    Spent = 0
-                    Lost = 0
-                    NextDue = 0
-                    Ended = None
-                }
-
-            if truth facts spec unbegun guard = Truth.Yes then
-                begin' phase
-            else
-                None, []
+        | OpSchedule.When guard
+        | OpSchedule.Armed(guard, _, _) -> armed guard phase None
         | _ -> begin' phase
     // Waiting for its next run, or begun this tick.
     | Some record, _ when record.Started >= now -> Some record, []
@@ -279,11 +326,13 @@ let advance
                         NextDue = next + period
                     },
                 [ OpEvent.Recurred(spec.Id, next) ]
+            // An armed run's end: the next is due when it began (`NextDue`).
             | _ -> ended record OpEnd.Done
 
         let windowed =
             match spec.Schedule with
-            | OpSchedule.Every(_, window) -> now >= record.Started + window
+            | OpSchedule.Every(_, window)
+            | OpSchedule.Armed(_, _, window) -> now >= record.Started + window
             | _ -> false
 
         // The deadline ends it hard, whatever its phase and its exits: an
@@ -489,6 +538,9 @@ let factsOf (now: int) (warm: string -> bool) (views: ColonyView list) : OpFacts
             | [] -> Truth.No
             | views when List.forall Facts.homeThreatened views -> Truth.Yes
             | _ -> Truth.No
+        // A Memory spec's dry run watches no exit and prices no camp.
+        ExitsUsed = lazy Truth.Unknown
+        Pays = lazy Truth.Unknown
     }
 
 // ---- the operations laid (#663 S7c) ---------------------------------------
@@ -769,6 +821,9 @@ let ownFacts
             match casting with
             | [] -> Truth.No
             | casting -> truthOf (casting |> List.forall Facts.homeThreatened)
+        // The sweep camps no exit: its spec reads neither.
+        ExitsUsed = lazy Truth.Unknown
+        Pays = lazy Truth.Unknown
     }
 
 /// The [[sweep]] the colonies' views cast this tick (#663 S7c): the code's
@@ -780,8 +835,25 @@ let ownFacts
 /// bodies; none named, open-ended, the template's most bodies). None with no
 /// candidate cast, or candidates of two enemies.
 let sweepSpec (declared: OpSpecWire list) (views: ColonyView list) : OperationSpec option =
+    // A room only an exit camp names is its camp's to cast (#663 S7d), no
+    // candidate of the sweep's.
+    let campOnly =
+        declared
+        |> List.filter (fun wire -> Operation.Templates.anchored wire.Template)
+        |> List.collect _.Rooms
+        |> List.filter (fun room ->
+            not (
+                declared
+                |> List.exists (fun wire ->
+                    wire.Template = "sweep" && List.contains room wire.Rooms)
+            ))
+        |> Set.ofList
+
     let candidates =
-        views |> List.collect _.Harass |> List.distinctBy (fun h -> h.RoomName)
+        views
+        |> List.collect _.Harass
+        |> List.distinctBy (fun h -> h.RoomName)
+        |> List.filter (fun h -> not (campOnly.Contains h.RoomName))
 
     match Colony.sweepOf candidates with
     | Ok [ wire ] ->
@@ -815,6 +887,427 @@ let private reopened (now: int) (spec: OperationSpec) (record: OpRecord) : OpRec
     | Some OpEnd.Budget when record.Spent < spec.Limits.MaxEnergy -> None
     | _ -> Some record
 
+// ---- the exit camp laid (#663 S7d) ----------------------------------------
+
+/// The id an exit camp's work in one room carries, its Task's
+/// (`op:<id>@<room>`): one Task an exit, so a body holding one exit's is
+/// never read as another's.
+let campWorkId (id: string) (camp: string) : string = id + "@" + camp
+
+/// The exit camps code declares, as their template writes them, under the
+/// limits each names (none named, open-ended).
+let private campSpecs (declared: OpSpecWire list) : OperationSpec list =
+    declared
+    |> List.filter (fun wire -> wire.Template = "exitCamp")
+    |> List.map (fun wire ->
+        Operation.Templates.exitCamp
+            wire.Id
+            wire.Enemy
+            wire.Rooms
+            {
+                MaxBodies = wire.MaxBodies |> Option.defaultValue Engine.guardCap
+                MaxEnergy = wire.MaxEnergy |> Option.defaultValue System.Int32.MaxValue
+                Deadline = wire.Deadline |> Option.defaultValue System.Int32.MaxValue
+                MaxLossRatio = 1.0
+            })
+
+/// Each exit camp code declares, by its id, with the rooms its exits land
+/// in: what its spend is read over (`Ledger.account`).
+let campRooms (declared: OpSpecWire list) : (string * Set<string>) list =
+    campSpecs declared
+    |> List.map (fun spec -> spec.Id, roomsOf spec.Target |> Option.defaultValue [] |> Set.ofList)
+
+/// One exit as its camp reads it this tick (#663 S7d).
+type private ExitRead =
+    {
+        Exit: OpExit
+        /// The view that prices it: the first colony by home that casts its
+        /// room; None where none does.
+        View: ColonyView option
+        /// Its group: every body holding its Task (`campHolders`), and none
+        /// else — a body of ours standing in its room is another fight's.
+        Group: Member list
+        /// Whether prey uses it: two arrivals of the enemy over a watched
+        /// window, a return among them; Unknown while its watch has not run
+        /// a window since the heap's reset, or watched nothing.
+        Used: Truth
+        /// Its landing tiles by use (`ExitCamp.Entries`); none known, the
+        /// landing tiles at one each.
+        Entries: (Pos * int) list
+        /// The armed bodies that may come out (`Facts.exitLanders`); and
+        /// whether the home has been seen since the heap's reset, which they
+        /// are known by.
+        Landers: HostileInfo list
+        Warm: bool
+        /// Its camp priced (`Facts.exitCampPrice`); None with no view.
+        Price: Lazy<Facts.ExitCampPrice option>
+    }
+
+/// The bodies holding one exit's Task (`op:<id>@<room>`, held last tick),
+/// with where each stands: an exit camp's group, whichever colony cast it.
+let private campHolders (id: string) (held: Assignments) (views: ColonyView list) : Member list =
+    let task = Facts.taskId (Operate(id, ""))
+
+    views
+    |> List.collect (fun view ->
+        ColonyView.bodies view
+        |> List.filter (fun creep -> Map.tryFind creep.Name held = Some task)
+        |> List.choose (fun creep ->
+            Facts.placementOf view creep.Name
+            |> Option.map (fun at -> { Creep = creep; At = at })))
+    |> List.distinctBy _.Creep.Name
+
+/// Whether a phase of a spec lays work: one with a job.
+let private laysWork (spec: OperationSpec) (phase: OpPhase) : bool =
+    spec.Phases
+    |> List.exists (fun p -> p.Phase = phase && not (List.isEmpty p.Jobs))
+
+/// Each exit of a camp read this tick (#663 S7d) over the priced views:
+/// its group off last tick's Tasks (`held`), its watch off the world's
+/// (`WorldView.Traffic`), and its camp priced over what the run has left of
+/// its window (all of it before the run), against what a cast of the
+/// colony pricing it earns in its best candidate (`Facts.castRateIn`): the
+/// camp's own room among them, whose sweep the camp displaces while it
+/// works it.
+let private exitReads
+    (now: int)
+    (held: Assignments)
+    (spec: OperationSpec)
+    (record: OpRecord option)
+    (priced: ColonyView list)
+    : ExitRead list =
+    let exits =
+        match spec.Target with
+        | OpTarget.Exits exits -> exits
+        | _ -> []
+
+    let window =
+        match spec.Schedule with
+        | OpSchedule.Armed(_, _, window)
+        | OpSchedule.Every(_, window) -> window
+        | _ -> Operation.Templates.campSpan
+
+    let running =
+        record
+        |> Option.exists (fun record -> Option.isNone record.Ended && record.Started <= now)
+
+    let left =
+        match record with
+        | Some record when running -> max 0 (record.Started + window - now)
+        | _ -> window
+
+    exits
+    |> List.map (fun exit ->
+        let view =
+            priced
+            |> List.filter (fun view ->
+                view.Harass |> List.exists (fun h -> h.RoomName = exit.Camp))
+            |> List.sortBy (fun view -> SpatialInfo.homeName view.Spatial)
+            |> List.tryHead
+
+        // Only the bodies holding its Task: one of ours standing in the room
+        // is another fight's, and with none the camp prices its own cast.
+        let group =
+            if running then
+                campHolders (campWorkId spec.Id exit.Camp) held priced
+            else
+                []
+
+        let log =
+            priced
+            |> List.tryPick (fun view ->
+                Map.tryFind (ExitTraffic.key exit.Home exit.Camp) view.World.Traffic)
+
+        let enemy (h: HostileInfo) =
+            h.Owner = spec.Enemy && Facts.mayStrikeAnywhere h.Owner
+
+        let arrivals =
+            log
+            |> Option.map (fun log -> log.Arrivals |> List.filter (snd >> enemy))
+            |> Option.defaultValue []
+
+        let watched = log |> Option.map _.Watched |> Option.defaultValue []
+
+        // The watch is heap only: where resets come oftener than its window,
+        // it never runs one, and the camp never starts.
+        let used =
+            match log with
+            | Some log when now - log.Since >= ExitTraffic.window && not (List.isEmpty log.Watched) ->
+                if List.length arrivals >= 2 then Truth.Yes else Truth.No
+            | _ -> Truth.Unknown
+
+        // The traffic it is priced off: the window's bodies still in the
+        // stream — none known gone (a kill takes one out), and in its run
+        // none silent for longer than its own mean gap between landings
+        // (the full ticks watched over its landings), so traffic deterred
+        // stops paying within each body's own gap.
+        let gone (id: string) =
+            priced
+            |> List.exists (fun view ->
+                Map.tryFind id view.World.Quarries
+                |> Option.exists (fun track -> track.Gone.IsSome))
+
+        let arrivals =
+            match used with
+            | Truth.Unknown -> []
+            | _ ->
+                arrivals
+                |> List.groupBy (fun (_, h) -> h.Id)
+                |> List.filter (fun (id, landings) ->
+                    not (gone id)
+                    && (not running
+                        || (let last = landings |> List.map fst |> List.max
+
+                            let silent =
+                                watched |> List.filter (fun tick -> tick > last) |> List.length
+
+                            float silent < float (List.length watched)
+                                           / float (List.length landings))))
+                |> List.collect snd
+                |> List.sortByDescending fst
+
+        let border (room: string) =
+            view
+            |> Option.bind (fun view ->
+                Map.tryFind room view.Spatial.Borders
+                |> Option.orElse (Map.tryFind room view.World.Facts |> Option.map _.Border))
+
+        let landing = ExitTraffic.landingsOver border exit.Home exit.Camp
+
+        let entries =
+            landing
+            |> List.map (fun tile ->
+                tile,
+                1
+                + (arrivals |> List.filter (fun (_, h) -> RoomPos.pos h.Pos = tile) |> List.length))
+
+        let landers =
+            view
+            |> Option.map (fun view -> Facts.exitLanders view spec.Enemy exit.Home)
+            |> Option.defaultValue []
+
+        let warm =
+            view
+            |> Option.bind (fun view -> Map.tryFind exit.Home view.Seen)
+            |> Option.exists (fun sighting -> sighting.Tick > 0)
+
+        let price =
+            lazy
+                (view
+                 |> Option.map (fun view ->
+                     // What a cast earns over so many ticks in its best
+                     // candidate room: its rate there, never past what the
+                     // room holds over those ticks — its bodies' kills once
+                     // and the income its holding moves a tick.
+                     let candidates =
+                         view.Harass
+                         |> List.map (fun h ->
+                             let worth = Facts.roomWorth view h.RoomName
+
+                             Facts.castRateIn view h.RoomName,
+                             RoomWorth.values Quarry.Reading.Cast worth
+                             |> Map.fold (fun sum _ v -> sum + v) 0.0,
+                             RoomWorth.delta Quarry.Reading.Cast worth)
+
+                     let elsewhere (ticks: int) =
+                         candidates
+                         |> List.map (fun (rate, kills, delta) ->
+                             min (rate * float ticks) (kills + max 0.0 delta * float ticks))
+                         |> List.fold max 0.0
+
+                     Facts.exitCampPrice
+                         view
+                         exit.Camp
+                         entries
+                         arrivals
+                         watched
+                         landers
+                         left
+                         elsewhere
+                         (group |> List.map (fun m -> m.Creep, m.At))))
+
+        {
+            Exit = exit
+            View = view
+            Group = group
+            Used = used
+            Entries = entries
+            Landers = landers
+            Warm = warm
+            Price = price
+        })
+
+/// Whether an exit's camp pays (`OpGuard.Pays`): its price nets more than
+/// nothing and it wins its exchange; Unknown while its crossings are, or no
+/// colony prices it.
+let private exitPays (read: ExitRead) : Truth =
+    match read.Used with
+    | Truth.Unknown -> Truth.Unknown
+    | _ ->
+        match read.Price.Value with
+        | None -> Truth.Unknown
+        | Some price ->
+            if price.Net > 0.0 && not price.Loses then
+                Truth.Yes
+            else
+                Truth.No
+
+/// Whether an exit's camp loses its exchange (`OpGuard.ExchangeLoses`): its
+/// body, or its group, against the armed bodies that may come out, at an
+/// exit prey uses or one its group stands at; at any other, no. Unknown
+/// while the home has not been seen since the heap's reset (what may come
+/// out is not known), while whether prey uses an exit no group stands at
+/// is, or where no colony prices it.
+let private exitLoses (read: ExitRead) : Truth =
+    let standing = not (List.isEmpty read.Group)
+
+    if not read.Warm then
+        Truth.Unknown
+    else
+        match read.Used with
+        | Truth.No when not standing -> Truth.No
+        | Truth.Unknown when not standing -> Truth.Unknown
+        | _ ->
+            match read.Price.Value with
+            | None -> Truth.Unknown
+            | Some price -> if price.Loses then Truth.Yes else Truth.No
+
+/// Whether a running camp works an exit this tick: while it pays, or while
+/// its group stands for it and what it pays is not known (Unknown never
+/// ends it).
+let private exitWorked (read: ExitRead) : bool =
+    match exitPays read with
+    | Truth.Yes -> true
+    | Truth.Unknown -> not (List.isEmpty read.Group)
+    | Truth.No -> false
+
+/// An exit camp's facts this tick (#663 S7d), off its exits' reads: prey
+/// uses it where it uses any exit; it pays where any exit pays; its exchange
+/// read at each exit's room; at an exit it does not work its muster and its
+/// arrival ask nothing, at one it works a body of its group cast, and one
+/// landed in the room.
+let private campFacts (now: int) (reads: ExitRead list) (priced: ColonyView list) : OpFacts =
+    let truthOf (answer: bool) = if answer then Truth.Yes else Truth.No
+
+    let kleeneAny (answers: Truth list) =
+        if List.contains Truth.Yes answers then Truth.Yes
+        elif List.contains Truth.Unknown answers then Truth.Unknown
+        else Truth.No
+
+    let readOf (room: string) =
+        reads |> List.tryFind (fun read -> read.Exit.Camp = room)
+
+    let atWorked (answer: ExitRead -> Truth) (room: string) =
+        match readOf room with
+        | Some read when exitWorked read -> answer read
+        | Some _ -> Truth.Yes
+        | None -> Truth.Unknown
+
+    let landed (room: string) (m: Member) =
+        Facts.landsIn m.At (Fighter.ofCreep m.Creep) room = 0
+
+    {
+        Now = now
+        Rate =
+            fun room ->
+                readOf room |> Option.bind (fun read -> read.Price.Value) |> Option.map _.Rate
+        Worth =
+            fun room ->
+                priced
+                |> List.tryPick (fun view -> view.World.Worths |> Option.bind (Map.tryFind room))
+                |> Option.map _.Value
+        Warm = fun room -> readOf room |> Option.exists (fun read -> read.Used <> Truth.Unknown)
+        Arrived =
+            atWorked (fun read -> read.Group |> List.exists (landed read.Exit.Camp) |> truthOf)
+        Assembled = atWorked (fun read -> truthOf (not (List.isEmpty read.Group)))
+        Loses = fun room -> readOf room |> Option.map exitLoses |> Option.defaultValue Truth.Unknown
+        Holds = fun _ -> Truth.Unknown
+        Challenge = fun _ -> None
+        HomeThreatened =
+            match reads |> List.choose _.View with
+            | [] -> Truth.No
+            | views -> truthOf (views |> List.forall Facts.homeThreatened)
+        ExitsUsed = lazy (reads |> List.map _.Used |> kleeneAny)
+        Pays = lazy (reads |> List.map exitPays |> kleeneAny)
+    }
+
+/// One exit camp moved on and laid (#663 S7d): its record advanced over its
+/// facts (`campFacts`), and, while its phase lays work, a work in the room
+/// of each exit it works (`exitWorked`) — its body the price's, its tile
+/// the one priced for that body, its most bodies its share of the spec's —
+/// with the looks it asks: each room of an exit prey uses, and the home,
+/// at what its camp earns over a look's stride.
+let private layCamp
+    (now: int)
+    (held: Assignments)
+    (priced: ColonyView list)
+    (record: OpRecord option)
+    (spec: OperationSpec)
+    : OpRecord option * OpEvent list * OperationWork list * (string * float) list =
+    let reads = exitReads now held spec record priced
+    let facts = campFacts now reads priced
+    let moved, events = advance facts spec record
+
+    let running =
+        moved
+        |> Option.exists (fun record ->
+            Option.isNone record.Ended
+            && record.Started <= now
+            && laysWork spec record.Phase)
+
+    // The reads again with the run as it stands: a run begun this tick
+    // prices what its window has left.
+    let reads =
+        if running && moved <> record then
+            exitReads now held spec moved priced
+        else
+            reads
+
+    let share = max 1 (spec.Limits.MaxBodies / max 1 (List.length reads))
+
+    let works =
+        if not running then
+            []
+        else
+            reads
+            |> List.filter exitWorked
+            |> List.choose (fun read ->
+                read.Price.Value
+                |> Option.map (fun price ->
+                    {
+                        Id = campWorkId spec.Id read.Exit.Camp
+                        Enemy = spec.Enemy
+                        Room = read.Exit.Camp
+                        Group = read.Group |> List.map (fun m -> m.Creep, m.At)
+                        Rate = price.Rate
+                        MaxBodies = share
+                        Camp =
+                            Some
+                                {
+                                    Home = read.Exit.Home
+                                    Entries = read.Entries
+                                    Landers = read.Landers
+                                    Template = price.Template
+                                    Blocks = price.Blocks
+                                    Tile = price.Tile
+                                }
+                    }))
+
+    // Ended for good, it asks for nothing more.
+    let looks =
+        match moved with
+        | Some record when record.Ended = Some OpEnd.Expired -> []
+        | _ ->
+            reads
+            |> List.filter (fun read -> read.Used = Truth.Yes)
+            |> List.choose (fun read ->
+                read.Price.Value
+                |> Option.map (fun price -> read, price.Rate * float Facts.lookStride))
+            |> List.filter (fun (_, value) -> value > 0.0)
+            |> List.collect (fun (read, value) -> [ read.Exit.Camp, value; read.Exit.Home, value ])
+
+    moved, events, works, looks
+
 /// ADR-0096
 /// The operations laid in every colony's view (#663 S7c), once a full tick
 /// before the world's verdicts are priced (`Entry.judgeColonies`): the
@@ -832,6 +1325,13 @@ let private reopened (now: int) (spec: OperationSpec) (record: OpRecord) : OpRec
 /// back moved on, with what moved; with no sweep cast this tick its record
 /// stands unmoved (a caster's bank dipping keeps the latch) and nothing is
 /// laid but the worths.
+///
+/// The exit camps code declares (#663 S7d) are moved on and laid first
+/// (`layCamp`), over the same priced views: one fight a room, so a room an
+/// exit camp works is no room of the sweep's this tick — no colony casts it
+/// for the sweep, no body standing there is of its group, and its work
+/// there is not laid while its record keeps the room. The looks they ask
+/// are laid beside (`WorldView.OperationLooks`).
 let lay
     (declared: OpSpecWire list)
     (held: Assignments)
@@ -852,13 +1352,17 @@ let lay
                 }
         }
 
-    match sweepSpec declared views with
-    | None -> Facts.layWorths views |> List.map (laidAs [] Map.empty), records, []
-    | Some spec ->
-        let record =
+    let camps = campSpecs declared
+
+    match sweepSpec declared views, camps with
+    | None, [] -> Facts.layWorths views |> List.map (laidAs [] Map.empty), records, []
+    | sweep, camps ->
+        let recordOf (spec: OperationSpec) =
             records
             |> List.tryFind (fun record -> record.Id = spec.Id)
             |> Option.bind (reopened now spec)
+
+        let record = sweep |> Option.bind recordOf
 
         // The room it is committed to, whatever its phase, from the tick
         // that room was chosen: one map for every view.
@@ -881,33 +1385,72 @@ let lay
                 })
             |> Facts.layWorths
 
-        let listed = roomsOf spec.Target |> Option.defaultValue []
+        // The exit camps first: a room one works is no room of the sweep's.
+        let camped =
+            camps
+            |> List.map (fun spec -> spec, layCamp now held priced (recordOf spec) spec)
 
-        let casters (room: string) =
-            priced
-            |> List.filter (fun view -> view.Harass |> List.exists (fun h -> h.RoomName = room))
+        let campWorks = camped |> List.collect (fun (_, (_, _, works, _)) -> works)
+        let worked = campWorks |> List.map _.Room |> Set.ofList
 
-        let group = groupIn spec.Id (Set.ofList listed) held priced
-        // The sweep reads no quarry guard: every room counts as warm.
-        let facts = ownFacts now (fun _ -> true) spec record casters group priced
-        let moved, events = advance facts spec record
+        let looks =
+            camped
+            |> List.collect (fun (_, (_, _, _, looks)) -> looks)
+            |> List.groupBy fst
+            |> List.map (fun (room, values) -> room, List.sumBy snd values)
+            |> Fresh.mapOfList
 
-        let work =
-            workedRoom now moved
-            |> Option.map (fun room ->
-                {
-                    Id = spec.Id
-                    Enemy = spec.Enemy
-                    Room = room
-                    Group = group |> List.map (fun m -> m.Creep, m.At)
-                    Rate = facts.Rate room |> Option.defaultValue 0.0
-                    MaxBodies = spec.Limits.MaxBodies
-                })
+        let sweepRun =
+            sweep
+            |> Option.map (fun spec ->
+                let listed = roomsOf spec.Target |> Option.defaultValue []
+
+                let casters (room: string) =
+                    if worked.Contains room then
+                        []
+                    else
+                        priced
+                        |> List.filter (fun view ->
+                            view.Harass |> List.exists (fun h -> h.RoomName = room))
+
+                let group =
+                    groupIn
+                        spec.Id
+                        (listed |> List.filter (worked.Contains >> not) |> Set.ofList)
+                        held
+                        priced
+
+                // The sweep reads no quarry guard: every room counts as warm.
+                let facts = ownFacts now (fun _ -> true) spec record casters group priced
+                let moved, events = advance facts spec record
+
+                let work =
+                    workedRoom now moved
+                    |> Option.filter (worked.Contains >> not)
+                    |> Option.map (fun room ->
+                        {
+                            Id = spec.Id
+                            Enemy = spec.Enemy
+                            Room = room
+                            Group = group |> List.map (fun m -> m.Creep, m.At)
+                            Rate = facts.Rate room |> Option.defaultValue 0.0
+                            MaxBodies = spec.Limits.MaxBodies
+                            Camp = None
+                        })
+
+                spec, moved, events, work)
 
         let committed =
-            match commitment moved with
-            | same when same = before -> before
-            | other -> other
+            match sweepRun with
+            | Some(_, moved, _, _) ->
+                match commitment moved with
+                | same when same = before -> before
+                | other -> other
+            | None -> Map.empty
+
+        let work = sweepRun |> Option.bind (fun (_, _, _, work) -> work)
+        let operations = campWorks @ Option.toList work
+        let workRooms = operations |> List.map _.Room |> Set.ofList
 
         let laid =
             priced
@@ -915,10 +1458,19 @@ let lay
                 let elsewhere =
                     view.Harass
                     |> List.map _.RoomName
-                    |> List.filter (fun candidate -> Some candidate <> (work |> Option.map _.Room))
+                    |> List.filter (fun candidate -> not (workRooms.Contains candidate))
                     |> Set.ofList
 
-                { laidAs (Option.toList work) committed view with
+                let view = laidAs operations committed view
+
+                { view with
+                    World =
+                        if Map.isEmpty looks then
+                            view.World
+                        else
+                            { view.World with
+                                OperationLooks = looks
+                            }
                     Dismantles =
                         if Set.isEmpty elsewhere then
                             view.Dismantles
@@ -929,11 +1481,19 @@ let lay
                                 |> Option.forall (fun at -> not (elsewhere.Contains at.Room)))
                 })
 
-        let records =
-            (records |> List.filter (fun record -> record.Id <> spec.Id))
-            @ Option.toList moved
+        let moved =
+            (sweepRun
+             |> Option.map (fun (spec, moved, events, _) -> spec, moved, events)
+             |> Option.toList)
+            @ (camped |> List.map (fun (spec, (moved, events, _, _)) -> spec, moved, events))
 
-        laid, records, events
+        let ids = moved |> List.map (fun (spec, _, _) -> spec.Id) |> Set.ofList
+
+        let records =
+            (records |> List.filter (fun record -> not (ids.Contains record.Id)))
+            @ (moved |> List.collect (fun (_, record, _) -> Option.toList record))
+
+        laid, records, moved |> List.collect (fun (_, _, events) -> events)
 
 /// `lay` over one colony's view alone, with no stored latch: the shape a
 /// decide of one colony asks in.
@@ -961,16 +1521,32 @@ let declared (standing: OpStanding) (wires: OpSpecWire list) : OpSpecWire list *
             let unknown =
                 rooms |> List.filter (fun room -> standing.Holder room = RoomHolder.Unknown)
 
-            Some
-                { wire with
-                    Rooms = rooms |> List.filter (fun room -> not (List.contains room unknown))
-                },
-            dropped
-            @ (unknown
-               |> List.map (fun room ->
-                   {
-                       Id = wire.Id
-                       Why = "holder unknown: " + room
-                   }))
+            let refusals =
+                unknown
+                |> List.map (fun room ->
+                    {
+                        Id = wire.Id
+                        Why = "holder unknown: " + room
+                    })
+
+            let kept = rooms |> List.filter (fun room -> not (List.contains room unknown))
+
+            // An anchored template (an exit camp, #663 S7d) keeps its anchor
+            // first, its rooms about it; an anchor whose holder nothing
+            // names casts nothing.
+            match spec.Target with
+            | OpTarget.Exits(exit :: _) when Operation.Templates.anchored wire.Template ->
+                if standing.Holder exit.Home = RoomHolder.Unknown then
+                    None,
+                    dropped
+                    @ [
+                        {
+                            Id = wire.Id
+                            Why = "holder unknown: " + exit.Home
+                        }
+                    ]
+                else
+                    Some { wire with Rooms = exit.Home :: kept }, dropped @ refusals
+            | _ -> Some { wire with Rooms = kept }, dropped @ refusals
         | Error refused -> None, [ refused ])
     |> fun answers -> List.choose fst answers, List.collect snd answers

@@ -591,6 +591,103 @@ let private sweepTwoRemotes () : Arena =
         Lookout = set [ "W12S27"; "W13S28" ]
     }
 
+/// The exit camp on Trepidimous's W18S26 west exit (#663 S7d): x 0, y 6–8,
+/// landing on W19S26 (49,6)–(49,8). A colony of ours at W19S27 (RCL7, two
+/// spawns, a stocked storage) runs the camp as code declares it, its exit
+/// watched a window back (ten 6W3M miners landing on (49,8), where the
+/// miners below land walking in from (3,7), over a hundred
+/// full ticks), W18S26 in an observer's sight; the guard and ranger rows
+/// cast. Three miners cross out at t260, t300 and t340, each walking on to
+/// the remote's source. Cleared means every one of them is dead.
+let private exitCampWest () : Arena =
+    let trep = Side.Player "Trepidimous"
+    let start = 950_000
+
+    let home =
+        room "W19S27"
+        |> withController Ownership.Ours None 7 6
+        |> withSpawn "Spawn1" { X = 40; Y = 20 } 5_600
+        |> withSpawn "Spawn2" { X = 44; Y = 18 } 5_600
+        |> withStructures
+            [
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 42; Y = 22 } with
+                    Energy = 30_000
+                }
+            ]
+
+    let miner (id: string) (out: int) =
+        body
+            id
+            trep
+            (parts [ Work, 6; Move, 3 ])
+            (at "W18S26" 3 7)
+            (Some(Phases [ out, Hold; 1_000, GoTo(at "W19S26" 23 35) ]))
+
+    let landed (tick: int) : int * HostileInfo =
+        tick,
+        { Fabot.Core.Tests.Decide.Fixtures.hostileIn
+              "W19S26"
+              { X = 49; Y = 8 }
+              (List.replicate 6 Work @ List.replicate 3 Move) with
+            Id = $"miner-{tick}"
+            Owner = "Trepidimous"
+        }
+
+    // The home's economy, standing in for a staffed one, as `homeCrew`.
+    let crew =
+        [
+            body
+                "hauler-1-Spawn1"
+                Side.Ours
+                (parts [ Carry, 32; Move, 16 ])
+                (at "W19S27" 41 21)
+                None
+            body
+                "worker-1-Spawn2"
+                Side.Ours
+                (parts [ Work, 6; Carry, 7; Move, 7 ])
+                (at "W19S27" 38 24)
+                None
+        ]
+
+    let a =
+        arena
+            start
+            [ home; room "W19S26"; room "W18S26" ]
+            [ colony "W19S27" ]
+            (crew @ [ miner "Miner1" 260; miner "Miner2" 300; miner "Miner3" 340 ])
+        |> withCasts [ "guard"; "ranger" ]
+        |> withOperations
+            [
+                {
+                    Id = "camp"
+                    Template = "exitCamp"
+                    Enemy = "Trepidimous"
+                    Rooms = [ "W18S26"; "W19S26" ]
+                    Deadline = None
+                    MaxEnergy = None
+                    MaxBodies = None
+                }
+            ]
+
+    { a with
+        Lookout = set [ "W18S26" ]
+        Carried =
+            { a.Carried with
+                Traffic =
+                    Map.ofList
+                        [
+                            ExitTraffic.key "W18S26" "W19S26",
+                            {
+                                Watched = [ for back in 1..100 -> start - back ]
+                                Arrivals = [ for back in 1..10 -> landed (start - 10 * back) ]
+                                Standing = []
+                                Since = start - 2 * ExitTraffic.window
+                            }
+                        ]
+            }
+    }
+
 /// No economy body of Trepidimous' stands in the arena: every miner and
 /// hauler of the sweep's remotes is dead.
 let private noRivalEconomy (a: Arena) =
@@ -683,6 +780,12 @@ let private scenarios () : Scenario list =
             Slug = "sweep-two-remotes"
             Ticks = 800
             Start = sweepTwoRemotes
+            Cleared = noRivalEconomy
+        }
+        {
+            Slug = "exit-camp-west"
+            Ticks = 450
+            Start = exitCampWest
             Cleared = noRivalEconomy
         }
     ]

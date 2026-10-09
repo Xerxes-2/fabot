@@ -115,16 +115,19 @@ type OpGuard =
     | PastDeadline
     /// The group loses the exchange against the escort of the room its record
     /// is committed to (`OpFacts.Loses`); Unknown with no room committed.
+    /// Against exits, the exchange at any of them: the camp's bodies against
+    /// the armed bodies that may come out.
     | ExchangeLoses
     /// Unknown in S7a: the target structure still stands.
     | StructureStands
     /// The group's muster lets it go into the room its record is committed
     /// to: no body of it waits for the rest (`OpFacts.Assembled`); Unknown
-    /// with no room committed.
+    /// with no room committed. Against exits, at every one of them.
     | Assembled
     /// A body of the group stands in the room its record is committed to,
     /// or on its doorstep (`OpFacts.Arrived`); Unknown with no room
-    /// committed.
+    /// committed. Against exits, in every room one of them lands in that
+    /// the operation works (a room not worked asks none).
     | Arrived
     /// Unknown in S7a: a body of the cast is under a fraction of its hits.
     | CastHurt of float
@@ -153,6 +156,18 @@ type OpGuard =
     /// group cannot catch this tick still holds the room. Yes with no room
     /// committed.
     | Exhausted
+    /// Prey uses the target's exits (#663 S7d, `OpFacts.ExitsUsed`): bodies
+    /// were seen crossing out on them over the watch's window, a return
+    /// among them — two arrivals, never one sighting. Unknown while no exit's
+    /// watch has run a window since the heap's reset, or watched nothing.
+    | ExitsUsed
+    /// Its work pays (#663 S7d, `OpFacts.Pays`): before its run, the kills
+    /// its cast lands over the run, at their value by remaining life and the
+    /// odds it kills each, exceed the cast (its life spent and its spawn
+    /// time) and what those bodies earn elsewhere; in its run, its group's
+    /// kills a tick exceed what they earn elsewhere a tick. Unknown where the
+    /// crossings it is priced off are.
+    | Pays
     /// Unknown in S7a: safe mode runs in the target room.
     | SafeModeIn
     /// Unknown in S7a: a code-registered predicate, by name.
@@ -176,12 +191,26 @@ type RoomClass =
     /// Unresolved in S7a: their remotes' exits, for an interdiction camp.
     | RivalRemoteExits
 
+/// One exit of a rival home (#663 S7d): the border it shares with the room
+/// beside it, where a body crossing out lands.
+type OpExit =
+    {
+        /// The rival home the exit leads out of.
+        Home: string
+        /// The room beside it a body crossing out lands in: where the camp
+        /// stands, never the home.
+        Camp: string
+    }
+
 /// What an operation is against.
 [<RequireQualifiedAccess>]
 type OpTarget =
     | Room of string
     /// The room of the class that earns the most (`OpFacts.Rate`).
     | Among of RoomClass
+    /// Every one of these exits at once (#663 S7d, an interdiction camp):
+    /// its rooms the rooms they land in, each worked while it pays.
+    | Exits of OpExit list
     /// Unresolved in S7a: a structure, by room and id.
     | Structure of room: string * id: string
     /// Unresolved in S7a: one body, by id.
@@ -196,6 +225,12 @@ type OpSchedule =
     | Every of period: int * window: int
     /// From the first tick the guard answers `Yes`.
     | When of OpGuard
+    /// `When`, re-armed (#663 S7d): a run begun on the guard's first `Yes`
+    /// lasts at most `window` ticks; once a run ends by an exit, its window
+    /// or its budget (`OpLimits.MaxEnergy`, a run's), the next is due
+    /// `period` ticks after it began, and waits on the guard again. Its
+    /// deadline ends it for good.
+    | Armed of guard: OpGuard * period: int * window: int
 
 /// Which colonies may cast for it: only ever those past the Caster's floors.
 [<RequireQualifiedAccess>]
@@ -293,10 +328,11 @@ type OpRecord =
         /// The tick `Room` was chosen: what its commitment is priced from
         /// (`WorldView.Committed`).
         RoomSince: int
-        /// The energy its casts spent; not yet counted (S7e reads it off the
-        /// operation ledger).
+        /// The energy its casts spent this run: an exit camp's read off the
+        /// operation ledger's rows of its rooms since the run began
+        /// (`Ledger.account`, #663 S7d); not yet counted for the sweep.
         Spent: int
-        /// The energy of its bodies lost; not yet counted (S7e).
+        /// The energy of its bodies lost this run, read as `Spent` is.
         Lost: int
         /// An `Every` schedule's next run, a period after this one started;
         /// 0 for every other schedule.
@@ -335,6 +371,11 @@ type OpFacts =
         /// Whether every colony that may cast for the operation has its home
         /// threatened.
         HomeThreatened: Truth
+        /// Whether prey uses the operation's exits (`OpGuard.ExitsUsed`),
+        /// read on first use.
+        ExitsUsed: Lazy<Truth>
+        /// Whether its work pays (`OpGuard.Pays`), read on first use.
+        Pays: Lazy<Truth>
     }
 
 /// Who holds a room that is not ours, as far as anything we keep knows.
@@ -352,8 +393,9 @@ type RoomHolder =
 type OpStanding =
     {
         Now: int
-        /// A room of ours: a declared home or outpost, or one we own or
-        /// reserve.
+        /// A room of ours: one a colony declares (a home, an outpost, an
+        /// errand's or a salvage room; never an assault's, the enemy's), or
+        /// one we own or reserve.
         Ours: string -> bool
         Holder: string -> RoomHolder
     }
@@ -499,18 +541,117 @@ module Operation =
                 Limits = limits
             }
 
+        /// The longest run of an exit camp and the period it re-arms on: a
+        /// creep's life, the life of the bodies a run casts, so a run never
+        /// outlives its cast and two runs' casts never overlap.
+        let campSpan = Engine.creepLifetime
+
+        /// The interdiction camp (#663 S7d, user 2026-10-09: "简单有效"): a
+        /// rival home's exits camped from the rooms beside it, never the home,
+        /// whose towers reach no tile across its border. `rooms` names the
+        /// home, then each room one of its exits lands in. Each exit seats one
+        /// body (`MaxBodies` at most the exits), of the chooser's template and
+        /// size, on the camp's ground: where it strikes what steps onto the
+        /// exit (`JobKind.Camp`). Run on a priced trigger (`OpSchedule.Armed`):
+        /// prey uses the exits (`ExitsUsed`), the camp pays (`Pays`), and its
+        /// bodies win the exchange against what may come out (not
+        /// `ExchangeLoses`); each run at most `campSpan`, re-armed `campSpan`
+        /// after it began. Muster (its casts asked) → Approach (cast,
+        /// `Assembled`) → Execute (every worked exit's body there,
+        /// `Arrived`); in any of them, an exit whose exchange is lost →
+        /// Retreat, which lays no work, its bodies back to their ordinary
+        /// duty, and ends the run; the camp no longer paying → Done. Its
+        /// deadline ends it hard, before any exit.
+        let exitCamp
+            (id: string)
+            (enemy: string)
+            (rooms: string list)
+            (limits: OpLimits)
+            : OperationSpec =
+            let exits =
+                match rooms with
+                | home :: camps ->
+                    camps
+                    |> List.filter ((<>) home)
+                    |> List.distinct
+                    |> List.map (fun camp -> { Home = home; Camp = camp })
+                | [] -> []
+
+            let camp =
+                {
+                    Kind = JobKind.Camp
+                    Role = JobRole.Fighter
+                    Count = JobCount.Fixed 1
+                }
+
+            let working phase exits =
+                {
+                    Phase = phase
+                    Jobs = [ camp ]
+                    Exits = exits
+                    Urgent = []
+                }
+
+            let losing = OpGuard.ExchangeLoses, OpNext.To OpPhase.Retreat
+            let spent = OpGuard.Not OpGuard.Pays, OpNext.Finish OpEnd.Done
+
+            {
+                Id = id
+                Enemy = enemy
+                Target = OpTarget.Exits exits
+                Schedule =
+                    OpSchedule.Armed(
+                        OpGuard.All
+                            [ OpGuard.ExitsUsed; OpGuard.Pays; OpGuard.Not OpGuard.ExchangeLoses ],
+                        campSpan,
+                        campSpan
+                    )
+                Casting = CastFrom.AnyPastFloors
+                Phases =
+                    [
+                        working
+                            OpPhase.Muster
+                            [ losing; spent; OpGuard.Assembled, OpNext.To OpPhase.Approach ]
+                        working
+                            OpPhase.Approach
+                            [ losing; spent; OpGuard.Arrived, OpNext.To OpPhase.Execute ]
+                        working OpPhase.Execute [ losing; spent ]
+                        {
+                            Phase = OpPhase.Retreat
+                            Jobs = []
+                            Exits = [ OpGuard.Always, OpNext.Finish OpEnd.Abandoned ]
+                            Urgent = []
+                        }
+                    ]
+                Value = OpValue.Worth
+                // One body an exit, and a run's budget at most its bodies
+                // kept alive over the run (`ceiling`).
+                Limits =
+                    { limits with
+                        MaxBodies = min limits.MaxBodies (List.length exits)
+                        MaxEnergy = min limits.MaxEnergy (ceiling (List.length exits) campSpan)
+                    }
+            }
+
         /// A template by the name a Memory spec gives, with the most bodies
         /// it seats.
         let byName (name: string) =
             match name with
             | "sweep" -> Some(sweep, sweepBodies)
+            | "exitCamp" -> Some(exitCamp, Engine.guardCap)
             | _ -> None
+
+        /// Whether a template reads its first room as the one the rest are
+        /// about (an exit camp's home): dropping that room refuses the spec,
+        /// where any other room is dropped alone.
+        let anchored (name: string) : bool = name = "exitCamp"
 
     /// Whether a schedule can run: an `Every` run's period at least a tick,
     /// its window no longer than its period.
     let validSchedule (schedule: OpSchedule) : bool =
         match schedule with
-        | OpSchedule.Every(period, window) -> period > 0 && window >= 0 && window <= period
+        | OpSchedule.Every(period, window)
+        | OpSchedule.Armed(_, period, window) -> period > 0 && window >= 0 && window <= period
         | OpSchedule.Once
         | OpSchedule.When _ -> true
 
@@ -561,19 +702,24 @@ module Operation =
 
             let dropped = wire.Rooms |> List.choose unsafe
 
-            Ok(
-                template
-                    wire.Id
-                    wire.Enemy
-                    (wire.Rooms |> List.filter (unsafe >> Option.isNone))
-                    {
-                        MaxBodies = wire.MaxBodies |> Option.defaultValue bodies
-                        MaxEnergy = wire.MaxEnergy |> Option.defaultValue System.Int32.MaxValue
-                        Deadline = wire.Deadline |> Option.defaultValue System.Int32.MaxValue
-                        MaxLossRatio = 1.0
-                    },
-                dropped |> List.map refused
-            )
+            // A template's anchor (an exit camp's home) unsafe refuses it
+            // whole: the rest are about that room alone.
+            match wire.Rooms |> List.tryHead |> Option.bind unsafe with
+            | Some why when Templates.anchored wire.Template -> Error(refused why)
+            | _ ->
+                Ok(
+                    template
+                        wire.Id
+                        wire.Enemy
+                        (wire.Rooms |> List.filter (unsafe >> Option.isNone))
+                        {
+                            MaxBodies = wire.MaxBodies |> Option.defaultValue bodies
+                            MaxEnergy = wire.MaxEnergy |> Option.defaultValue System.Int32.MaxValue
+                            Deadline = wire.Deadline |> Option.defaultValue System.Int32.MaxValue
+                            MaxLossRatio = 1.0
+                        },
+                    dropped |> List.map refused
+                )
 
     /// A Memory spec admitted, or why not: the one gate between Memory and
     /// the interpreter. Its template must be code's; its enemy one we strike

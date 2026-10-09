@@ -3016,6 +3016,7 @@ let private encodeRow (row: Ledger.Row) : obj =
 
     row.AnswerFloor |> Option.iter (fun floor -> o?afloor <- floor)
     row.RosterFloor |> Option.iter (fun floor -> o?rfloor <- floor)
+    row.Operation |> Option.iter (fun task -> o?op <- task)
 
     o
 
@@ -3163,6 +3164,12 @@ let private decodeRow (raw: obj) : Ledger.Row option =
                             None)
                     |> Fresh.mapOfArray
                 AnswerFloor = floorOf "afloor"
+                // An exit camp's Task (#663 S7d); absent or off its shape, none.
+                Operation =
+                    if jsTypeof raw?op = "string" then
+                        Some(unbox<string> raw?op)
+                    else
+                        None
             }
 
 /// The ledger off its wire, or empty when the wire is absent or unreadable;

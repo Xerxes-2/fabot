@@ -1317,6 +1317,33 @@ type World =
         /// the shell, never Memory: a reset forgets a refusal the next
         /// refused act teaches again.
         Refusals: Refusal list
+        /// Each exit of a rival home an exit camp names, watched
+        /// (`ExitTraffic.recall`, #663 S7d), by `ExitTraffic.key`. Heap state
+        /// in the shell, never Memory: a reset starts each log afresh.
+        Traffic: Map<string, ExitLog>
+    }
+
+/// One exit of a rival home as the world watches it (#663 S7d): the bodies
+/// seen landing in the room beside it, and the full ticks that room was in
+/// sight, over the window (`ExitTraffic.window`). An arrival is seen only on
+/// a full tick that sees the room, a body standing on a landing tile it was
+/// not standing on at the last such tick: the rate of crossings is the
+/// arrivals over the ticks watched.
+and ExitLog =
+    {
+        /// The full ticks vision answered for the room the exit lands in,
+        /// newest first.
+        Watched: int list
+        /// Each body seen on a landing tile it had not stood on at the full
+        /// tick watched before, with the tick, newest first: the body as read
+        /// then, its tile the landing tile.
+        Arrivals: (int * HostileInfo) list
+        /// The bodies on a landing tile at the last full tick watched, each
+        /// with its tile: one still standing there is no new arrival.
+        Standing: (string * Pos) list
+        /// The tick this heap began the log: until a window has passed since,
+        /// a crossing out of sight before it may be missing.
+        Since: int
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -1339,6 +1366,7 @@ module World =
             RivalControllers = Map.empty
             StrayGround = fun _ -> None
             Refusals = []
+            Traffic = Map.empty
         }
 
     /// This tick's world with what it saw **before** laid under it (#151):
@@ -2920,3 +2948,103 @@ module World =
         (world: World)
         : Map<string, string> =
         creepColoniesRecalling (JoinTable()) tuning colonies HarassCasting.none running shut world
+
+/// The watch on the exits of a rival home an exit camp names (#663 S7d):
+/// each exit's log (`ExitLog`) folded once a full tick, heap state in the
+/// shell beside the quarry memory.
+[<RequireQualifiedAccess>]
+module ExitTraffic =
+    /// The ticks a log keeps: a creep's life, within which the bodies a home
+    /// sends out through an exit turn over. Heap only: global resets oftener
+    /// than this leave every log short of a window, and no camp starts.
+    let window = Engine.creepLifetime
+
+    /// An exit's key in `World.Traffic`: the home it leads out of and the
+    /// room it lands in.
+    let key (home: string) (camp: string) : string = home + ">" + camp
+
+    /// The tiles of `camp` a body crossing out of `home` lands on
+    /// (`Seam.pairsAcross`): its exit tiles on the border they share, each
+    /// whose tile and the home's beside it are no wall where `border` holds
+    /// the room's ring (where it holds none, every one).
+    let landingsOver
+        (border: string -> Map<Pos, Terrain> option)
+        (home: string)
+        (camp: string)
+        : Pos list =
+        match RoomName.offsetOf camp home with
+        | None -> []
+        | Some offset ->
+            let opens (room: string) (tile: Pos) =
+                match border room with
+                | Some ring when not ring.IsEmpty ->
+                    Map.tryFind tile ring |> Option.exists (fun terrain -> terrain <> Wall)
+                | _ -> true
+
+            Seam.pairsAcross offset
+            |> List.filter (fun (here, there) -> opens camp here && opens home there)
+            |> List.map fst
+
+    /// `landingsOver` the world's rooms' borders.
+    let landings (world: World) (home: string) (camp: string) : Pos list =
+        landingsOver (fun room -> World.groundOf world room |> Option.map _.Border) home camp
+
+    /// This tick's world with each exit's log a full tick on: on a tick
+    /// vision answers for the room it lands in, the tick watched, and every
+    /// body on a landing tile that was not standing on it at the last tick
+    /// watched an arrival; everything older than the window dropped. A log
+    /// begun on a cold heap starts at this tick (`ExitLog.Since`). Only the
+    /// exits named are kept.
+    let recall
+        (exits: (string * string) list)
+        (previous: Map<string, ExitLog>)
+        (world: World)
+        : World =
+        let now = world.Time
+
+        let logOf (home: string, camp: string) =
+            let log =
+                Map.tryFind (key home camp) previous
+                |> Option.defaultValue
+                    {
+                        Watched = []
+                        Arrivals = []
+                        Standing = []
+                        Since = now
+                    }
+
+            let watched = log.Watched |> List.filter (fun tick -> now - tick < window)
+            let arrivals = log.Arrivals |> List.filter (fun (tick, _) -> now - tick < window)
+
+            let log =
+                if World.seenNow world camp then
+                    let landing = landings world home camp |> Set.ofList
+
+                    let standing =
+                        (World.roomOf world camp).Hostiles
+                        |> List.filter (fun h ->
+                            h.Pos.Room = camp && landing.Contains(RoomPos.pos h.Pos))
+
+                    let arrived =
+                        standing
+                        |> List.filter (fun h ->
+                            not (List.contains (h.Id, RoomPos.pos h.Pos) log.Standing))
+                        |> List.map (fun h -> now, h)
+
+                    {
+                        Watched = now :: watched
+                        Arrivals = arrived @ arrivals
+                        Standing = standing |> List.map (fun h -> h.Id, RoomPos.pos h.Pos)
+                        Since = log.Since
+                    }
+                else
+                    { log with
+                        Watched = watched
+                        Arrivals = arrivals
+                    }
+
+            key home camp, log
+
+        { world with
+            Traffic = exits |> List.distinct |> List.map logOf |> Fresh.mapOfList
+        }

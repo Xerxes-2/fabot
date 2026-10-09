@@ -1,4 +1,16 @@
 {
+  "exit-camp-west": {
+    "castEnergy": 3000,
+    "cleared": 348,
+    "hurt": 0,
+    "kills": 3,
+    "ourDeaths": 0,
+    "safeMode": false,
+    "stoodDown": false,
+    "struck": 0,
+    "ticks": 450,
+    "towerSpent": 0
+  },
   "home-boosted-pass": {
     "castEnergy": 0,
     "cleared": 35,

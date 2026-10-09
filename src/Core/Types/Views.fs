@@ -235,6 +235,38 @@ type WorldRoom =
         Control: RoomControlInfo
     }
 
+/// The body patterns a fight's cast is chosen among (#654): the melee guard's
+/// block and the ranger's (#411), each a `Bodies` pattern.
+[<RequireQualifiedAccess>]
+type BodyTemplate =
+    | Melee
+    | Ranged
+
+/// The camp an [[operation]] lays on a rival home's exit (#663 S7d), in the
+/// room beside the home its bodies land in crossing out: what the room's
+/// fight reads of it.
+type ExitCamp =
+    {
+        /// The rival home whose exit it camps; the camp never enters it.
+        Home: string
+        /// The tiles of the room a body crossing out of the home lands on,
+        /// each with its weight: the arrivals seen on it, one more each so a
+        /// tile no arrival was seen on yet still counts. What the camp's
+        /// ground covers (`Facts.campGround`).
+        Entries: (Pos * int) list
+        /// The armed bodies that may come out (`Facts.exitLanders`): what a
+        /// tile's depth risks (`Facts.campRisk`).
+        Landers: HostileInfo list
+        /// The body the camp casts, its template and its blocks: the
+        /// chooser's (`Facts.exitCampPrice`); with its group there, the
+        /// group's template.
+        Template: BodyTemplate
+        Blocks: int
+        /// The tile its body stands on, priced for that body
+        /// (`Facts.exitCampPrice`); None where no ground covers an entry.
+        Tile: Pos option
+    }
+
 /// An [[operation]] working a room this tick (#663 S7c), as the interpreter
 /// laid it for every colony (`Operations.lay`): what the room's fight reads
 /// of it.
@@ -254,6 +286,9 @@ type OperationWork =
         Rate: float
         /// The most bodies it seats (`OpLimits.MaxBodies`): its asks' cap.
         MaxBodies: int
+        /// The exit it camps (#663 S7d); None for the [[sweep]], which
+        /// works its room whole.
+        Camp: ExitCamp option
     }
 
 /// The world layer's read of this tick, built once off the `World` and handed
@@ -355,6 +390,14 @@ type WorldView =
         /// while it stays in the room (`Facts.sweepPricing`). Empty with no
         /// operation working a room.
         Committed: Map<string, int>
+        /// Each watched exit of a rival home (`World.Traffic`, #663 S7d), by
+        /// `ExitTraffic.key`: the arrivals seen on its landing tiles and the
+        /// full ticks it was watched, what an exit camp's rate is read off.
+        Traffic: Map<string, ExitLog>
+        /// Each room an [[operation]] asks eyes on (#663 S7d), at the energy
+        /// the decision a look there unlocks is worth (`Operations.lay`):
+        /// an exit camp's rooms, its value over a look's stride.
+        OperationLooks: Map<string, float>
         /// Each room a guard or ranger of ours was last lost in, the latest of
         /// every colony's raid log (`StandDown.FighterLost`), the larger cast
         /// on one tick: a room's recast cooldown is the room's, whichever
@@ -378,6 +421,8 @@ module WorldView =
             Worths = None
             Operations = None
             Committed = Map.empty
+            Traffic = Map.empty
+            OperationLooks = Map.empty
             FighterLost = Map.empty
             Questioned = Set.empty
             Observers = []
@@ -515,6 +560,8 @@ module WorldView =
             Worths = None
             Operations = None
             Committed = Map.empty
+            Traffic = world.Traffic
+            OperationLooks = Map.empty
             FighterLost =
                 (Map.empty, gates)
                 ||> List.fold (fun lost gate ->

@@ -2,7 +2,8 @@
 /// contested operation — a [[sweep]] room spell, a camp, a trespass kill, a
 /// defended outpost raid — with what it cost us against what it cost the
 /// rival, beside the price the decision read at its open. Observation only:
-/// nothing decides on it. Read off what the tick's decide already priced
+/// nothing decides on it but an exit camp's run budget, its spend read back
+/// onto its record (`account`, #663 S7d). Read off what the tick's decide already priced
 /// (`observe`), folded on full ticks (`fold`), stored in its memory segment.
 [<RequireQualifiedAccess>]
 module Fabot.Core.Decide.Ledger
@@ -67,6 +68,10 @@ type Seen =
         Room: string
         Predicted: Lazy<Prediction>
         Camp: string list
+        /// The Task id of the operation it is fought under where one lays
+        /// it apart (an exit camp's `op:<id>@<room>`, #663 S7d); None for
+        /// every other.
+        Operation: string option
     }
 
 /// An armed body of the room's rival standing there: the tick its spawn
@@ -215,6 +220,9 @@ type Row =
         Camped: Set<string>
         Answers: Map<string, Armed>
         AnswerFloor: int option
+        /// The Task id of the operation it was opened under
+        /// (`Seen.Operation`): what an exit camp's spend is read by.
+        Operation: string option
     }
 
 /// The rows open, oldest first, the latest closed, newest first, and the
@@ -236,6 +244,41 @@ let capMarks = 12
 
 /// A ledger with no row.
 let empty: Ledger = { Open = []; Closed = []; Evicted = 0 }
+
+/// The exit camps' records with their runs' spend read off the ledger
+/// (#663 S7d, `OpRecord.Spent`, `Lost`): each running camp's, by its id with
+/// the rooms its exits land in (`camps`), the energy of the bodies cast for
+/// the rows opened under its own Tasks (`Row.Operation`, one an exit) since
+/// its run began, and of the bodies
+/// lost holding them, cast and lent. Every other record as it stands, an
+/// ended one among them.
+let account
+    (camps: (string * Set<string>) list)
+    (ledger: Ledger)
+    (records: OpRecord list)
+    : OpRecord list =
+    records
+    |> List.map (fun record ->
+        match camps |> List.tryFind (fun (id, _) -> id = record.Id) with
+        | Some(id, rooms) when Option.isNone record.Ended ->
+            // Its rows by its own Tasks, one an exit: never another camp's
+            // in the same room.
+            let tasks =
+                rooms
+                |> Set.map (fun room ->
+                    Facts.taskId (Operate(Operations.campWorkId id room, room)))
+
+            let rows =
+                ledger.Open @ ledger.Closed
+                |> List.filter (fun row ->
+                    row.Operation |> Option.exists tasks.Contains
+                    && row.Key.Start >= record.Started)
+
+            { record with
+                Spent = rows |> List.sumBy _.CastEnergy
+                Lost = rows |> List.sumBy (fun row -> row.CastLostCost + row.LentLostCost)
+            }
+        | _ -> record)
 
 // ---- the fold ---------------------------------------------------------------
 
@@ -545,6 +588,7 @@ let private opened (now: int) (seen: Seen) : Row =
         Camped = Fresh.setOfSeq Seq.empty
         Answers = Fresh.mapOfSeq Seq.empty
         AnswerFloor = None
+        Operation = seen.Operation
     }
 
 /// The ledger after one whole full tick (#662), every colony's fight
@@ -910,10 +954,11 @@ let observe
         |> Seq.map (fun (room, held) -> room, held |> Seq.map snd |> List.ofSeq)
         |> Map.ofSeq
 
-    // The sweep's room, off the view of the first colony that casts it.
+    // The sweep's room, off the view of the first colony that casts it: the
+    // operation working a room whole, no exit camp's.
     let sweep =
         operating
-        |> List.tryHead
+        |> List.tryFind (fun op -> Option.isNone op.Camp)
         |> Option.bind (fun op ->
             views
             |> List.tryFind (fun view -> Option.isSome (Facts.operationIn view op.Room))
@@ -972,6 +1017,7 @@ let observe
                                     Odds = camp |> Option.bind campOdds
                                 }
                         Camp = []
+                        Operation = None
                     })
                 |> Option.toList
             | _ -> [])
@@ -1003,10 +1049,41 @@ let observe
                             Odds = camp |> Option.bind campOdds
                         }
                 Camp = camp |> Option.map _.Quarry |> Option.defaultValue []
+                Operation = None
             })
         |> Option.toList
 
-    let seen = swept @ contested
+    // Each exit camp's room it works (#663 S7d): a camp, at the rate its
+    // operation priced it at and its camp job's value, its bodies those the
+    // camp is laid on.
+    let camps =
+        operating
+        |> List.filter (fun op -> Option.isSome op.Camp)
+        |> List.choose (fun op ->
+            briefs
+            |> List.tryPick (fun (task, brief, view) ->
+                match task with
+                | Operate(id, room) when id = op.Id && room = op.Room -> Some(brief, view)
+                | _ -> None)
+            |> Option.map (fun (brief, view) ->
+                let camp = campOf brief
+
+                view,
+                {
+                    Kind = OperationKind.Camp
+                    Room = op.Room
+                    Predicted =
+                        lazy
+                            {
+                                Rate = Some op.Rate
+                                Value = brief |> firstValue
+                                Odds = camp |> Option.bind campOdds
+                            }
+                    Camp = camp |> Option.map _.Quarry |> Option.defaultValue []
+                    Operation = Some(taskId (Operate(op.Id, op.Room)))
+                }))
+
+    let seen = swept @ camps @ contested
 
     // Each room read once, off the view that priced its operation, else
     // the first that projects it.

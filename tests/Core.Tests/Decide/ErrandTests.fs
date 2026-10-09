@@ -748,6 +748,7 @@ let errandStandDownTests =
                         RivalControllers = Map.empty
                         StrayGround = fun _ -> None
                         Refusals = []
+                        Traffic = Map.empty
                     }
 
                 let view shut =

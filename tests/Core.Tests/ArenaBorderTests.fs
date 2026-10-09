@@ -1767,11 +1767,140 @@ let private hunterDancesWith (lookout: Set<string>) (adjust: Arena -> Arena) =
 
 let private hunterKeepsTheDancer (lookout: Set<string>) = hunterDancesWith lookout id
 
+/// The exit camp on Trepidimous's W18S26 west exit (#663 S7d): x 0, y 6–8,
+/// landing on W19S26 (49,6)–(49,8). A colony of ours at W19S27 (RCL7,
+/// a stocked storage: past the Caster's floors) casts W19S26 as the camp's
+/// room; the camp is declared as code declares it, W18S26 in an observer's
+/// sight, and its exit watched a window back: `arrivals` bodies like a 6W3M
+/// miner landing on (49,7) over 100 full ticks watched.
+let private exitCamp (arrivals: int) (bodies: Body list) : Arena =
+    let start = 1_100_000
+
+    let home =
+        room "W19S27"
+        |> withController Ownership.Ours None 7 6
+        |> withSpawn "Spawn1" { X = 40; Y = 20 } 5_600
+        |> withStructures
+            [
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 42; Y = 22 } with
+                    Energy = 30_000
+                }
+            ]
+
+    let landed (tick: int) : int * HostileInfo =
+        tick,
+        { Fabot.Core.Tests.Decide.Fixtures.hostileIn
+              "W19S26"
+              { X = 49; Y = 7 }
+              (List.replicate 6 Work @ List.replicate 3 Move) with
+            Id = $"miner-{tick}"
+            Owner = "Trepidimous"
+        }
+
+    let a =
+        arena start [ home; room "W19S26"; room "W18S26" ] [ colony "W19S27" ] bodies
+        |> withOperations
+            [
+                {
+                    Id = "camp"
+                    Template = "exitCamp"
+                    Enemy = "Trepidimous"
+                    Rooms = [ "W18S26"; "W19S26" ]
+                    Deadline = None
+                    MaxEnergy = None
+                    MaxBodies = None
+                }
+            ]
+
+    { a with
+        Lookout = set [ "W18S26" ]
+        Carried =
+            { a.Carried with
+                Traffic =
+                    Map.ofList
+                        [
+                            ExitTraffic.key "W18S26" "W19S26",
+                            {
+                                Watched = [ for back in 1..100 -> start - back ]
+                                Arrivals = [ for back in 1..arrivals -> landed (start - 10 * back) ]
+                                Standing = []
+                                Since = start - 2 * ExitTraffic.window
+                            }
+                        ]
+            }
+    }
+
 [<Tests>]
 let arenaBorderTests =
     testList
         "arena border play"
         [
+            // #663 S7d (the user's addition): "西口这种两格的出口站一个谁出来
+            // 谁死". The camp's melee stands a step in, beside all three
+            // landing tiles, and takes its swing as the body lands: attacks
+            // resolve where the bodies stood as the tick began.
+            test
+                "an exit camp's swing a step in strikes a body on its landing tick and never steps onto an exit tile" {
+                let guard = "guard-1-Spawn1"
+
+                let ours =
+                    body guard Side.Ours (ourGuard 5) (RoomPos.at "W19S26" { X = 48; Y = 7 }) None
+
+                let miner =
+                    body
+                        "Miner1"
+                        trep
+                        (parts [ Work, 6; Move, 3 ])
+                        (RoomPos.at "W18S26" { X = 3; Y = 7 })
+                        (Some(Phases [ 6, Hold; 200, GoTo(RoomPos.at "W19S26" { X = 30; Y = 20 }) ]))
+
+                let start =
+                    let a = exitCamp 10 [ ours; miner ]
+
+                    { a with
+                        Carried =
+                            { a.Carried with
+                                Assignments = Map.ofList [ guard, "op:camp@W19S26" ]
+                            }
+                    }
+
+                let final, trace = start |> run 30
+
+                let failure = describe trace
+
+                Expect.isTrue
+                    (final.Carried.Operations |> List.exists (fun record -> record.Id = "camp"))
+                    $"the premise: the trigger prices the camp on\n{failure}"
+
+                let landed =
+                    crossingsInto "Miner1" "W19S26" trace
+                    |> List.tryHead
+                    |> Option.defaultWith (fun () ->
+                        failtest $"the miner never came out\n{failure}")
+
+                // Landed at the end of tick `landed`: it stands on the landing
+                // tile as the next tick begins, the tick our swing lands.
+                Expect.isTrue
+                    (trace
+                     |> List.exists (fun t ->
+                         t.Tick = landed + 1
+                         && t.Ours |> List.contains (AttackCreep(guard, "Miner1"))))
+                    $"the guard swings at it on its landing tick t{landed + 1}\n{failure}"
+
+                for tick, snapshot in pathOf guard trace do
+                    Expect.isFalse
+                        (Seam.onRing (RoomPos.pos snapshot.At))
+                        $"t{tick}: the guard never stands on the border ring\n{failure}"
+
+                    // The camp's tile, priced for a swing: a step in, beside
+                    // (49,6), (49,7) and (49,8) alike; it holds it, the
+                    // struck body walking off out of its reach.
+                    Expect.equal
+                        (RoomPos.pos snapshot.At)
+                        { X = 48; Y = 7 }
+                        $"t{tick}: on the camp's tile a step in\n{failure}"
+            }
+
             // #613 (live t1,014,093-291): the idle ranger walked in toward
             // Zero3956 and off again for 200 ticks, and the one fit ranger
             // went elsewhere: `Gait.fallsBehind` asked the melee to fall

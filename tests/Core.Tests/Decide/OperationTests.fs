@@ -30,6 +30,8 @@ let private factsAt (now: int) (rates: (string * float) list) : OpFacts =
         Holds = fun _ -> Truth.Unknown
         Challenge = fun room -> Map.tryFind room rates
         HomeThreatened = Truth.No
+        ExitsUsed = lazy Truth.Unknown
+        Pays = lazy Truth.Unknown
     }
 
 let private limits =
@@ -157,6 +159,8 @@ let operationStepTests =
                         Holds = fun _ -> failwith "read with no op"
                         Challenge = fun _ -> failwith "priced with no op"
                         HomeThreatened = Truth.Unknown
+                        ExitsUsed = lazy (failwith "read with no op")
+                        Pays = lazy (failwith "priced with no op")
                     }
 
                 Expect.equal (Operations.step untouched (admitting []) []) ([], []) "nothing moves"
@@ -701,6 +705,263 @@ let operationStepTests =
             }
         ]
 
+/// An exit camp on W1N3's exits into W1N2 and W2N3 (#663 S7d).
+let private camp =
+    Operation.Templates.exitCamp "c1" "Trepidimous" [ "W1N3"; "W1N2"; "W2N3" ] limits
+
+/// An exit camp's facts: prey uses its exits, it pays, and each of its rooms
+/// reads its exchange, its muster and its arrival as given.
+let private campAt
+    (now: int)
+    (used: Truth)
+    (pays: Truth)
+    (loses: string -> Truth)
+    (assembled: Truth)
+    (arrived: Truth)
+    : OpFacts =
+    { factsAt now [] with
+        Loses = loses
+        Assembled = fun _ -> assembled
+        Arrived = fun _ -> arrived
+        ExitsUsed = lazy used
+        Pays = lazy pays
+    }
+
+let private campRecord (phase: OpPhase) (started: int) : OpRecord =
+    { recordAt phase started with
+        Id = "c1"
+        Started = started
+        NextDue = started + Operation.Templates.campSpan
+    }
+
+[<Tests>]
+let exitCampSpecTests =
+    testList
+        "the exit camp's spec: its trigger, its phases and its exits (#663 S7d)"
+        [
+            test
+                "its shape: one body an exit, its rooms the exits' landings, armed on a priced trigger" {
+                Expect.equal
+                    camp.Target
+                    (OpTarget.Exits
+                        [ { Home = "W1N3"; Camp = "W1N2" }; { Home = "W1N3"; Camp = "W2N3" } ])
+                    "the home's exits into the rooms beside it"
+
+                Expect.equal camp.Limits.MaxBodies 2 "one body an exit"
+
+                Expect.equal
+                    (camp.Phases |> List.map _.Phase)
+                    [ OpPhase.Muster; OpPhase.Approach; OpPhase.Execute; OpPhase.Retreat ]
+                    "muster, approach, execute, retreat"
+
+                Expect.equal
+                    camp.Schedule
+                    (OpSchedule.Armed(
+                        OpGuard.All
+                            [ OpGuard.ExitsUsed; OpGuard.Pays; OpGuard.Not OpGuard.ExchangeLoses ],
+                        Operation.Templates.campSpan,
+                        Operation.Templates.campSpan
+                    ))
+                    "prey uses its exits, it pays, it wins: re-armed a lifetime after each run began"
+            }
+
+            test "its trigger: all three must hold, and Unknown never starts it" {
+                let begins used pays (loses: Truth) =
+                    Operations.advance
+                        (campAt 100 used pays (fun _ -> loses) Truth.No Truth.No)
+                        camp
+                        None
+                    |> fst
+                    |> Option.map (fun record -> record.Phase)
+
+                Expect.equal
+                    (begins Truth.Yes Truth.Yes Truth.No)
+                    (Some OpPhase.Muster)
+                    "all three: begun"
+
+                Expect.isNone (begins Truth.No Truth.Yes Truth.No) "no prey crossing: not"
+                Expect.isNone (begins Truth.Yes Truth.No Truth.No) "not paying: not"
+                Expect.isNone (begins Truth.Yes Truth.Yes Truth.Yes) "losing its exchange: not"
+                Expect.isNone (begins Truth.Unknown Truth.Yes Truth.No) "crossings unknown: not"
+                Expect.isNone (begins Truth.Yes Truth.Unknown Truth.No) "its price unknown: not"
+                Expect.isNone (begins Truth.Yes Truth.Yes Truth.Unknown) "its exchange unknown: not"
+            }
+
+            test
+                "losing the exchange at any exit retreats it; no longer paying ends it done; Unknown moves nothing" {
+                let moved pays (loses: string -> Truth) =
+                    Operations.advance
+                        (campAt 200 Truth.Yes pays loses Truth.Yes Truth.Yes)
+                        camp
+                        (Some(campRecord OpPhase.Execute 100))
+                    |> fun (record, events) ->
+                        record |> Option.map (fun r -> r.Phase, r.Ended), events
+
+                Expect.equal
+                    (moved Truth.Yes (fun room -> if room = "W2N3" then Truth.Yes else Truth.No))
+                    (Some(OpPhase.Retreat, None),
+                     [ OpEvent.Moved("c1", OpPhase.Execute, OpPhase.Retreat, 0, None) ])
+                    "one exit lost: retreat"
+
+                Expect.equal
+                    (moved Truth.No (fun _ -> Truth.No))
+                    (Some(OpPhase.Execute, Some OpEnd.Done), [ OpEvent.Ended("c1", OpEnd.Done) ])
+                    "the crossings decayed past its cost: done"
+
+                Expect.equal
+                    (moved Truth.Unknown (fun _ -> Truth.No))
+                    (Some(OpPhase.Execute, None), [])
+                    "its price unknown: held"
+
+                Expect.equal
+                    (moved Truth.No (fun room -> if room = "W1N2" then Truth.Unknown else Truth.No))
+                    (Some(OpPhase.Execute, None), [])
+                    "an exchange unknown ahead of the price: held"
+
+                Expect.equal
+                    (Operations.advance
+                        (campAt 201 Truth.Yes Truth.Yes (fun _ -> Truth.No) Truth.Yes Truth.Yes)
+                        camp
+                        (Some(campRecord OpPhase.Retreat 100))
+                     |> fst
+                     |> Option.bind _.Ended)
+                    (Some OpEnd.Abandoned)
+                    "its retreat lays no work and ends the run"
+            }
+
+            test "muster, approach, execute: cast, then there" {
+                let phaseAfter (phase: OpPhase) (assembled: Truth) (arrived: Truth) =
+                    Operations.advance
+                        (campAt 200 Truth.Yes Truth.Yes (fun _ -> Truth.No) assembled arrived)
+                        camp
+                        (Some(campRecord phase 100))
+                    |> fst
+                    |> Option.map _.Phase
+
+                Expect.equal
+                    (phaseAfter OpPhase.Muster Truth.No Truth.No)
+                    (Some OpPhase.Muster)
+                    "uncast: mustering"
+
+                Expect.equal
+                    (phaseAfter OpPhase.Muster Truth.Yes Truth.No)
+                    (Some OpPhase.Approach)
+                    "cast: on its way"
+
+                Expect.equal
+                    (phaseAfter OpPhase.Approach Truth.Yes Truth.No)
+                    (Some OpPhase.Approach)
+                    "walking"
+
+                Expect.equal
+                    (phaseAfter OpPhase.Approach Truth.Yes Truth.Yes)
+                    (Some OpPhase.Execute)
+                    "there"
+            }
+
+            test
+                "re-armed: a run ended waits out its period, then its trigger again; its window ends a run; its deadline for good" {
+                let ended (how: OpEnd) =
+                    { campRecord OpPhase.Execute 100 with
+                        Ended = Some how
+                    }
+
+                let at now pays record =
+                    Operations.advance
+                        (campAt now Truth.Yes pays (fun _ -> Truth.No) Truth.No Truth.No)
+                        camp
+                        (Some record)
+
+                let due = 100 + Operation.Templates.campSpan
+
+                Expect.equal
+                    (at (due - 1) Truth.Yes (ended OpEnd.Done))
+                    (Some(ended OpEnd.Done), [])
+                    "before it is due: ended"
+
+                Expect.equal
+                    (at due Truth.No (ended OpEnd.Abandoned))
+                    (Some(ended OpEnd.Abandoned), [])
+                    "due, its trigger no: waits on"
+
+                match at due Truth.Yes (ended OpEnd.Abandoned) with
+                | Some record, [ OpEvent.Began("c1", OpPhase.Muster, None) ] ->
+                    Expect.equal
+                        (record.Started, record.Spent, record.Lost, record.Ended, record.NextDue)
+                        (due, 0, 0, None, due + Operation.Templates.campSpan)
+                        "due, its trigger yes: a new run, its spend afresh"
+                | other -> failtest $"a new run: %A{other}"
+
+                Expect.equal
+                    (at due Truth.Yes (ended OpEnd.Budget) |> fst |> Option.bind _.Ended)
+                    None
+                    "a run's budget spent re-arms as well"
+
+                Expect.equal
+                    (Operations.advance
+                        (campAt due Truth.Yes Truth.Yes (fun _ -> Truth.No) Truth.No Truth.No)
+                        { camp with
+                            Limits = { camp.Limits with Deadline = due }
+                        }
+                        (Some(ended OpEnd.Expired))
+                     |> fst
+                     |> Option.bind _.Ended)
+                    (Some OpEnd.Expired)
+                    "expired: for good"
+
+                Expect.equal
+                    (Operations.advance
+                        (campAt due Truth.Yes Truth.Yes (fun _ -> Truth.No) Truth.Yes Truth.Yes)
+                        camp
+                        (Some(campRecord OpPhase.Execute 100))
+                     |> snd)
+                    [ OpEvent.Ended("c1", OpEnd.Done) ]
+                    "a run past its window ends done"
+            }
+
+            test
+                "code's camp is anchored on its home: an ally's home refuses it whole, an unknown one casts nothing" {
+                let wire: OpSpecWire =
+                    {
+                        Id = "c1"
+                        Template = "exitCamp"
+                        Enemy = "Trepidimous"
+                        Rooms = [ "W6N6"; "W9N9" ]
+                        Deadline = None
+                        MaxEnergy = None
+                        MaxBodies = None
+                    }
+
+                Expect.equal
+                    (Operation.ofCode standing wire |> Result.map ignore)
+                    (Error { Id = "c1"; Why = "an ally's: W6N6" })
+                    "an ally's home: refused, never read as a camp on W9N9"
+
+                Expect.equal
+                    (Operations.declared
+                        standing
+                        [
+                            { wire with
+                                Rooms = [ "W8N8"; "W5N5"; "W9N9" ]
+                            }
+                        ])
+                    ([ { wire with Rooms = [ "W8N8"; "W9N9" ] } ],
+                     [ { Id = "c1"; Why = "ours: W5N5" } ])
+                    "a room of ours dropped, its home kept first"
+
+                Expect.equal
+                    (Operations.declared standing [ { wire with Rooms = [ "W4N4"; "W9N9" ] } ])
+                    ([],
+                     [
+                         {
+                             Id = "c1"
+                             Why = "holder unknown: W4N4"
+                         }
+                     ])
+                    "its home's holder unknown: nothing cast"
+            }
+        ]
+
 [<Tests>]
 let operationDecodeTests =
     testList
@@ -1093,10 +1354,17 @@ let sweepSpecTests =
                 "the code declares the sweep as one operation, its candidates its rooms against its one enemy" {
                 let candidates = Colony.candidatesOf Colony.operations
 
+                // #663 S7d: an exit camp names its home first, which is no
+                // candidate; the rooms its exits land in are, once each.
                 Expect.equal
                     (candidates |> List.map _.RoomName)
-                    (Colony.operations |> List.collect _.Rooms)
-                    "a candidate a room"
+                    (Colony.operations
+                     |> List.collect (fun wire ->
+                         match wire.Template, wire.Rooms with
+                         | "exitCamp", _ :: camps -> camps
+                         | _, rooms -> rooms)
+                     |> List.distinct)
+                    "a candidate a room, an exit camp's home none"
 
                 Expect.equal
                     (candidates

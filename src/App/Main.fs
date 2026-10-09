@@ -74,6 +74,10 @@ let mutable private healers: Map<string, HealerSeen list> = Map.empty
 // #663): heap only, a reset forgetting every trip.
 let mutable private quarries: Map<string, Track> = Map.empty
 
+// Each exit camp's exits watched (`World.Traffic`, #663 S7d): heap only, a
+// reset starting each log afresh.
+let mutable private traffic: Map<string, ExitLog> = Map.empty
+
 // Each room's raid as last seen (`World.Raiders`, #569): heap only, a reset
 // falling back on the danger log's threat memory.
 let mutable private raiders: Map<string, RaidSeen> = Map.empty
@@ -748,12 +752,25 @@ let private named: Harassment =
         BlockCost = Bodies.rangerBlockCost
     }
 
+/// Every exit the code's exit camps name (#663 S7d), unchecked: what the
+/// world watches (`ExitTraffic.recall`), each home among the rooms whose
+/// bodies it keeps out of sight.
+let private campExits = Colony.campExitsOf Colony.operations
+
 /// Who stands in each room an operation names (`Operations.standingOf`):
 /// what `Operation.decode` and `Operation.ofCode` refuse a spec on.
-/// Every room a colony declares, read once a heap: the declarations are
-/// code's.
+/// Every room a colony declares but those it declares to strike, read once
+/// a heap: the declarations are code's. An assault's room (W18S26 among
+/// them) is the enemy's, never ours: read as ours it refused the exit camp
+/// on its own target (#663 S7d).
 let private declaredRooms =
-    lazy (Colony.declared |> Seq.collect Colony.declaredRooms |> Fresh.setOfSeq)
+    lazy
+        (Colony.declared
+         |> Seq.collect (fun colony ->
+             Set.difference
+                 (Colony.declaredRooms colony)
+                 (colony.Assaults |> List.map _.RoomName |> Set.ofList))
+         |> Fresh.setOfSeq)
 
 let private standingNow (world: World) : OpStanding =
     let declared = declaredRooms.Value
@@ -858,8 +875,11 @@ let private fullTick
             Rivals = written.Latched
         }
 
-    // The sweep's candidates: rooms whose bodies the world keeps out of sight.
-    let candidates = named.Rooms |> List.map _.RoomName
+    // The sweep's candidates and the homes an exit camp camps (#663 S7d):
+    // rooms whose bodies the world keeps out of sight.
+    let candidates =
+        (named.Rooms |> List.map _.RoomName) @ (campExits |> List.map fst)
+        |> List.distinct
 
     // The tick's World, read out of the engine once, with the previous tick's
     // sightings, tower latch, exit watch and healer memory laid under it.
@@ -886,6 +906,7 @@ let private fullTick
                 world
         |> World.recallArmed Tuning.defaults armedSeen
         |> World.recallRivalControllers rivalControllers
+        |> ExitTraffic.recall campExits traffic
         |> fun world -> { world with Refusals = refusals }
 
     sightings <- world.Sightings
@@ -894,6 +915,7 @@ let private fullTick
     exitWatches <- world.ExitWatches
     healers <- world.Healers
     quarries <- world.Quarries
+    traffic <- world.Traffic
     raiders <- world.Raiders
     armedSeen <- world.ArmedSeen
     rivalControllers <- world.RivalControllers
@@ -1884,6 +1906,13 @@ let private fullTick
     // records the decide moved on (`Operations.lay`), what moved, and this
     // tick's refusals of the code's specs.
     let records, events = colonyDecisions.Operated
+
+    // Each running exit camp's spend read off the ledger as folded (#663
+    // S7d): what its budget is held to and its realised value read against.
+    let records =
+        match ledger with
+        | Some folded -> Decide.Ledger.account (Operations.campRooms admitted) folded records
+        | None -> records
 
     if
         Some records <> codeRecords

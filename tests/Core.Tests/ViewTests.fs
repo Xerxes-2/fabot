@@ -2506,3 +2506,93 @@ let quarryQueryTests =
                     "armed: the raid memory's and the exit hold's"
             }
         ]
+
+/// A world at `time` seeing W19S26 where `seen`, these bodies standing in
+/// it (#663 S7d: W18S26's west exit lands on its x 49).
+let private landingAt (time: int) (seen: bool) (bodies: (string * Pos) list) : World =
+    { World.empty with
+        Time = time
+        Rooms =
+            Map.ofList
+                [
+                    "W19S26",
+                    { RoomFacts.empty with
+                        Hostiles =
+                            bodies
+                            |> List.map (fun (id, tile) ->
+                                {
+                                    Id = id
+                                    Owner = "Trepidimous"
+                                    Pos = RoomPos.at "W19S26" tile
+                                    Body = [ Work; Move ]
+                                    Boosts = []
+                                    Hits = 2 * Engine.partHits
+                                    TicksToLive = Engine.creepLifetime
+                                })
+                    }
+                ]
+        Sightings =
+            if seen then
+                Map.ofList
+                    [
+                        "W19S26",
+                        {
+                            Tick = time
+                            Targets = lazy Set.empty
+                            Rival = None
+                        }
+                    ]
+            else
+                Map.empty
+    }
+
+[<Tests>]
+let exitTrafficTests =
+    testList
+        "the watch on a rival home's exit (#663 S7d)"
+        [
+            test
+                "a body on a landing tile is one arrival however long it stands; a tick unseen watches nothing" {
+                let exits = [ "W18S26", "W19S26" ]
+                let key = ExitTraffic.key "W18S26" "W19S26"
+
+                let logAfter (worlds: World list) =
+                    (Map.empty, worlds)
+                    ||> List.fold (fun traffic world ->
+                        (ExitTraffic.recall exits traffic world).Traffic)
+                    |> Map.find key
+
+                let log =
+                    logAfter
+                        [
+                            landingAt
+                                100
+                                true
+                                [ "Miner1", { X = 49; Y = 7 }; "Hauler1", { X = 30; Y = 30 } ]
+                            landingAt 101 true [ "Miner1", { X = 49; Y = 7 } ]
+                            landingAt 102 false [ "Miner2", { X = 49; Y = 6 } ]
+                            landingAt 103 true [ "Miner2", { X = 49; Y = 6 } ]
+                        ]
+
+                Expect.equal log.Watched [ 103; 101; 100 ] "the full ticks it was in sight"
+
+                Expect.equal
+                    (log.Arrivals |> List.map (fun (tick, h) -> tick, h.Id))
+                    [ 103, "Miner2"; 100, "Miner1" ]
+                    "each landing once, the body inland none"
+
+                Expect.equal log.Since 100 "begun on this heap's first tick"
+
+                let later =
+                    logAfter
+                        [
+                            landingAt 100 true [ "Miner1", { X = 49; Y = 7 } ]
+                            landingAt (100 + ExitTraffic.window) true []
+                        ]
+
+                Expect.equal
+                    (later.Watched, later.Arrivals)
+                    ([ 100 + ExitTraffic.window ], [])
+                    "a window on, the old landings and ticks gone"
+            }
+        ]

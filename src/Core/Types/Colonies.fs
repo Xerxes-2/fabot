@@ -1332,16 +1332,36 @@ module Colony =
                 MaxEnergy = None
                 MaxBodies = None
             }
+            // The interdiction camp on Trepidimous's home W18S26 (user,
+            // 2026-10-09, #663 S7d): its west exit, landing on W19S26's east
+            // edge, and its south, on W18S27's north. Its trigger prices it
+            // on and off (`Operation.Templates.exitCamp`).
+            {
+                Id = "camp"
+                Template = "exitCamp"
+                Enemy = "Trepidimous"
+                Rooms = [ "W18S26"; "W19S26"; "W18S27" ]
+                Deadline = None
+                MaxEnergy = None
+                MaxBodies = None
+            }
         ]
 
     /// The [[sweep]] candidates these operations name (#663 S7c): each room a
-    /// sweep spec lists, against its enemy, with the detour a human named
-    /// for its walk (`harassDeclared`'s `Via`), else none.
+    /// sweep spec lists, and each room an exit camp's exits land in, never
+    /// the home it camps (#663 S7d), against its enemy, with the detour a
+    /// human named for its walk (`harassDeclared`'s `Via`), else none. What
+    /// the shell casts, each room by the colony `World.harassCasters` names.
     let candidatesOf (wires: OpSpecWire list) : Harass list =
         wires
-        |> List.filter (fun wire -> wire.Template = "sweep")
         |> List.collect (fun wire ->
-            wire.Rooms
+            let rooms =
+                match wire.Template, wire.Rooms with
+                | "sweep", rooms -> rooms
+                | "exitCamp", _ :: camps -> camps
+                | _ -> []
+
+            rooms
             |> List.map (fun room ->
                 {
                     RoomName = room
@@ -1353,6 +1373,19 @@ module Colony =
                         |> Option.defaultValue []
                 }))
         |> List.distinctBy _.RoomName
+
+    /// The exits these operations' exit camps name (#663 S7d), each the
+    /// rival home it leads out of and the room it lands in: what the world
+    /// watches (`ExitTraffic.recall`), the home among the rooms whose bodies
+    /// it keeps out of sight.
+    let campExitsOf (wires: OpSpecWire list) : (string * string) list =
+        wires
+        |> List.collect (fun wire ->
+            match wire.Template, wire.Rooms with
+            | "exitCamp", home :: camps ->
+                camps |> List.filter ((<>) home) |> List.map (fun camp -> home, camp)
+            | _ -> [])
+        |> List.distinct
 
     /// The [[sweep]] over the candidates the colonies cast, as an operation
     /// (#663 S7b; `Operations.sweepSpec` reads it off the views): one group

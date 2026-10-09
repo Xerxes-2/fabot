@@ -381,6 +381,9 @@ type Carried =
         /// latch over the arena's harassment rooms, moved on every tick and
         /// carried as `Main` stores it.
         Operations: OpRecord list
+        /// The exits the arena's exit camps watch (`World.Traffic`, #663
+        /// S7d), carried as `Main` carries them.
+        Traffic: Map<string, ExitLog>
     }
 
 /// The arena's whole state between ticks.
@@ -411,6 +414,11 @@ type Arena =
         /// cast by the colony `World.harassCasters` names, as `Main` casts
         /// the candidates of `Colony.operations`; none by default.
         Harass: Harass list
+        /// The code operations the arena declares beside its harassment
+        /// rooms (`withOperations`, #663 S7d): an exit camp's, its rooms
+        /// cast as `Main` casts `Colony.candidatesOf` and its exits watched;
+        /// none by default.
+        Declared: OpSpecWire list
     }
 
 /// What happened in a tick beyond positions and hits.
@@ -947,6 +955,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 Fallen = Map.empty
                 Ledger = Ledger.empty
                 Operations = []
+                Traffic = Map.empty
             }
         Scores = Map.empty
         Ovens = []
@@ -954,12 +963,23 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
         Observed = Set.empty
         Lookout = Set.empty
         Harass = []
+        Declared = []
     }
 
 /// These harassment rooms declared, cast as `Main` casts the candidates of
 /// `Colony.operations` (`World.harassCasters`): a capture of a fight in one
 /// names it.
 let withHarass (rooms: Harass list) (a: Arena) : Arena = { a with Harass = rooms }
+
+/// These code operations declared (#663 S7d), as `Colony.operations`
+/// declares them and `Main` admits them: an exit camp's rooms cast beside
+/// the harassment rooms, its exits watched.
+let withOperations (wires: OpSpecWire list) (a: Arena) : Arena = { a with Declared = wires }
+
+/// Every room the arena casts as a candidate: its harassment rooms, and
+/// each room its code operations name (`Colony.candidatesOf`).
+let private castRooms (a: Arena) : Harass list =
+    a.Harass @ Colony.candidatesOf a.Declared |> List.distinctBy _.RoomName
 
 /// Our spawns cast these rows, by pattern name, and only these.
 let withCasts (rows: string list) (a: Arena) : Arena = { a with Casts = Set.ofList rows }
@@ -1463,7 +1483,10 @@ let private strayGround (name: string) : RoomFacts option =
 let worldOf (a: Arena) : World =
     let tuning = Tuning.defaults
     let rooms = a.Rooms |> Map.map (fun name r -> factsOf a name r)
-    let candidates = a.Harass |> List.map _.RoomName
+    let exits = Colony.campExitsOf a.Declared
+
+    let candidates =
+        (castRooms a |> List.map _.RoomName) @ (exits |> List.map fst) |> List.distinct
 
     let sightings =
         a.Rooms
@@ -1503,6 +1526,7 @@ let worldOf (a: Arena) : World =
         RivalControllers = Map.empty
         StrayGround = strayGround
         Refusals = []
+        Traffic = Map.empty
     }
     |> World.recalling a.Carried.Sightings
     |> World.latchTowers tuning a.Carried.Towered
@@ -1517,6 +1541,7 @@ let worldOf (a: Arena) : World =
             world
     |> World.recallArmed tuning a.Carried.ArmedSeen
     |> World.recallRivalControllers a.Carried.RivalControllers
+    |> ExitTraffic.recall exits a.Carried.Traffic
 
 /// One colony's Raid log as the arena carries it.
 let private raidsOf (a: Arena) (home: string) =
@@ -1551,7 +1576,7 @@ let private cutsOf
             tuning
             a.Colonies
             {
-                Rooms = a.Harass
+                Rooms = castRooms a
                 BlockCost = Bodies.rangerBlockCost
             }
             a.Carried.Assignments
@@ -1643,7 +1668,7 @@ let laneBreaks (a: Arena) : string list =
                     FightAlone = Set.empty
                     TurnIndex = None
                     Operations = a.Carried.Operations
-                    Declared = []
+                    Declared = a.Declared
                 }
                 ignore
                 views
@@ -1698,7 +1723,7 @@ let laneBreaks (a: Arena) : string list =
 let viewOf (a: Arena) (home: string) : ColonyView =
     let _, hops, views = cut a
 
-    judgeColonies hops a.Carried.Assignments Set.empty [] a.Carried.Operations views
+    judgeColonies hops a.Carried.Assignments Set.empty a.Declared a.Carried.Operations views
     |> fst
     |> Layout.aimObservers Set.empty
     |> List.zip (views |> List.map fst)
@@ -1731,7 +1756,7 @@ let private decideOurs (a: Arena) : Intent list * Carried =
                 FightAlone = Set.empty
                 TurnIndex = None
                 Operations = a.Carried.Operations
-                Declared = []
+                Declared = a.Declared
             }
             ignore
             views
@@ -1788,6 +1813,24 @@ let private decideOurs (a: Arena) : Intent list * Carried =
         (Map.empty, decisions)
         ||> List.fold (fun acc (_, d) -> Map.fold (fun m k v -> Map.add k v m) acc d.Assignments)
 
+    let ledger =
+        // A row's throw is quarantined live; in an arena it is a failure.
+        match
+            Ledger.fold
+                {
+                    Time = a.Time
+                    Window = Tuning.defaults.RaidBounceTicks
+                    Living = alive
+                    Quarries = world.Quarries
+                    Fallen = Set.empty
+                    Forcing = []
+                    Observed = decided.Operations.Force()
+                }
+                a.Carried.Ledger
+        with
+        | ledger, [] -> ledger
+        | _, faults -> invalidOp $"t{a.Time}: the ledger's fold threw: %A{faults}"
+
     intents,
     { a.Carried with
         Assignments = assignments
@@ -1811,24 +1854,11 @@ let private decideOurs (a: Arena) : Intent list * Carried =
             |> Observe.Danger.watching world.ExitWatches
             |> Some
         RivalControllers = world.RivalControllers
-        Ledger =
-            // A row's throw is quarantined live; in an arena it is a failure.
-            match
-                Ledger.fold
-                    {
-                        Time = a.Time
-                        Window = Tuning.defaults.RaidBounceTicks
-                        Living = alive
-                        Quarries = world.Quarries
-                        Fallen = Set.empty
-                        Forcing = []
-                        Observed = decided.Operations.Force()
-                    }
-                    a.Carried.Ledger
-            with
-            | ledger, [] -> ledger
-            | _, faults -> invalidOp $"t{a.Time}: the ledger's fold threw: %A{faults}"
-        Operations = fst decided.Operated
+        Ledger = ledger
+        // Each running exit camp's spend read off the ledger as folded, as
+        // `Main` reads it.
+        Operations = Ledger.account (Operations.campRooms a.Declared) ledger (fst decided.Operated)
+        Traffic = world.Traffic
     }
 
 // ---------------------------------------------------------------------------

@@ -1199,6 +1199,8 @@ let ofGame
         StrayGround = strayGround
         // The shell lays its refusals in after the read (`Main`).
         Refusals = []
+        // And its exits' watch (`ExitTraffic.recall`).
+        Traffic = Map.empty
         // Every creep we own that is not still gestating, in the engine's own
         // order.
         Creeps =

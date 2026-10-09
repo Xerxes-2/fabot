@@ -1971,7 +1971,9 @@ wire("quotas: the haul overflow (#508) writes its fill and whether the extra bod
 wire("quotas: the asks (#580) write each cast's task, row, bodies and blocks", async () => {
   const { saveQuotas } = await import(MODULE);
   const { QuotasModule_silent, Quotas, Cast, CastAsk } = await import("../build/fable/Core/Types/Verdicts.js");
-  const { BodyTemplate, CastRow, SquadRole } = await import("../build/fable/Core/Types/Tasks.js");
+  const { CastRow, SquadRole } = await import("../build/fable/Core/Types/Tasks.js");
+  // Beside the exit camp's work since #663 S7d.
+  const { BodyTemplate } = await import("../build/fable/Core/Types/Views.js");
   const { Task } = await import("../build/fable/Core/Types/Vocabulary.js");
   const { ofArray } = await import(LIST);
   const s = QuotasModule_silent;
@@ -2460,6 +2462,16 @@ wire("ledger: a well-formed ledger round-trips unchanged", async () => {
   assert.equal(Object.hasOwn(back.closed[0], "afloor"), false, "and no floor where none rose");
 });
 
+// #663 S7d: an exit camp's row carries the Task it was opened under (`op`),
+// what its record's spend is read by; absent or off its shape, none.
+wire("ledger: an exit camp's row keeps its Task; absent or off its shape it has none", async () => {
+  const camp = { ...closedRow, k: "camp", op: "op:camp@W19S26" };
+  const back = await ledgerThrough({ open: [], closed: [camp, { ...closedRow, op: 7 }] });
+  assert.equal(back.closed[0].op, "op:camp@W19S26");
+  assert.equal(Object.hasOwn(back.closed[1], "op"), false, "a number is no Task");
+  assert.equal(Object.hasOwn((await ledgerThrough({ open: [], closed: [closedRow] })).closed[0], "op"), false);
+});
+
 wire("ledger: a row's later keys absent read as its last fold's tick, and as none", async () => {
   const { act, lk, lostLent, camp, camped, answers, afloor, rfloor, ...bare } = ledgerRow;
   const back = await ledgerThrough({ open: [bare], closed: [] });
@@ -2880,6 +2892,23 @@ wire("ops code: a record off its shape costs its own row", async () => {
     records.map((record) => record.Id),
     ["sweep"],
   );
+});
+
+// #663 S7d: an exit camp's record beside the sweep's, in the same shape:
+// no room (its exits are worked all at once), its run's spend off the
+// ledger, and a run ended abandoned waiting out its period (`n`) to re-arm.
+wire("ops code: an exit camp's record round-trips: no room, its run's spend, ended awaiting its next run", async () => {
+  const campRecord = { i: "camp", s: 100, p: "retreat", a: 300, e: 3750, l: 3750, n: 1600, x: "abandoned" };
+  const full = { code: { live: [codeRecord, campRecord], refused: [] } };
+  const { records, ops } = await codeThrough(structuredClone(full));
+  assert.deepEqual(
+    records.map((record) => [record.Id, record.Room, record.Spent, record.Lost, record.NextDue]),
+    [
+      ["sweep", "W18S27", 0, 0, 0],
+      ["camp", undefined, 3750, 3750, 1600],
+    ],
+  );
+  assert.equal(stable(ops), stable({ ...full, events: [] }));
 });
 
 wire("ops code: a Memory with no ops leaf and nothing to write gains none", async () => {

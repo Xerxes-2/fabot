@@ -28,6 +28,7 @@ let private seen kind values armed yieldOf worked : Ledger.Seen * Ledger.Reading
         Room = room
         Predicted = lazy prediction
         Camp = []
+        Operation = None
     },
     {
         Values = Map.ofList values
@@ -115,6 +116,82 @@ let tests =
     testList
         "operation ledger (#662)"
         [
+            // #663 S7d: an exit camp's record reads its run's spend off the
+            // ledger, so what it realised is read against what it priced.
+            test
+                "an exit camp's run reads its spend off the rows opened under its Task since it began" {
+                let camp =
+                    let seen, reading = seen Ledger.OperationKind.Camp [] [] 0.0 false
+
+                    { seen with
+                        Operation =
+                            Some(Facts.taskId (Operate(Operations.campWorkId "c1" room, room)))
+                    },
+                    reading
+
+                // A camp on a border dancer in the same room, no exit camp's.
+                let dancerCamp = seen Ledger.OperationKind.Camp [] [] 0.0 false
+
+                let charged (camp: Ledger.Seen * Ledger.Reading) =
+                    folds
+                        [
+                            tick 100 [ camp ] [] [] []
+                            tick 200 [ camp ] [ holder "guard-1" 1495 room ] [ "guard-1" ] []
+                            tick 202 [ camp ] [] [] []
+                        ]
+
+                // Cast for it at t200 (its spawn began at t165, after the
+                // open), gone at t202 with most of its life left: lost.
+                let ledger = charged camp
+
+                let record (started: int) (ended: OpEnd option) : OpRecord =
+                    {
+                        Id = "c1"
+                        Started = started
+                        Phase = OpPhase.Execute
+                        Since = started
+                        Room = None
+                        RoomSince = started
+                        Spent = 7
+                        Lost = 7
+                        NextDue = 0
+                        Ended = ended
+                    }
+
+                let account records =
+                    Ledger.account [ "c1", Set.singleton room ] ledger records
+                    |> List.map (fun r -> r.Spent, r.Lost)
+
+                Expect.equal
+                    (account [ record 90 None ])
+                    [ 1000, 1000 ]
+                    "its body's energy, cast and lost"
+
+                Expect.equal
+                    (account [ record 150 None ])
+                    [ 0, 0 ]
+                    "a row opened before the run began is an earlier run's"
+
+                Expect.equal
+                    (account [ record 90 (Some OpEnd.Done) ])
+                    [ 7, 7 ]
+                    "an ended run keeps its last reading"
+
+                Expect.equal
+                    (account [ { record 90 None with Id = "sweep" } ])
+                    [ 7, 7 ]
+                    "no exit camp's record: as it stands"
+
+                Expect.equal
+                    (Ledger.account
+                        [ "c1", Set.singleton room ]
+                        (charged dancerCamp)
+                        [ record 90 None ]
+                     |> List.map (fun r -> r.Spent, r.Lost))
+                    [ 0, 0 ]
+                    "a camp row in its room not opened under its Task is never its spend"
+            }
+
             test
                 "an operation seen opens one row, keyed by its kind, room and first tick, priced then" {
                 let ledger =
@@ -237,6 +314,7 @@ let tests =
                         Room = at n
                         Predicted = lazy prediction
                         Camp = []
+                        Operation = None
                     }
 
                 // Every row stands, held by a body each; the first opened ten

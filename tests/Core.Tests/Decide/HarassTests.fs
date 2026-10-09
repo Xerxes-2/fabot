@@ -3802,3 +3802,379 @@ let sweepVisionTests =
                 Expect.isEmpty (asked LookBand.Pursuit colony) "nothing out of sight to confirm"
             }
         ]
+
+// ---- the exit camp (#663 S7d) -----------------------------------------------
+
+/// The rival home north of the harassment room: its south exit lands on the
+/// harassment room's north edge.
+let private rivalHome = "W1N3"
+
+/// The exit camp on the rival home's south exit, as code declares one.
+let private campWire: OpSpecWire =
+    {
+        Id = "camp"
+        Template = "exitCamp"
+        Enemy = enemy
+        Rooms = [ rivalHome; harassRoom ]
+        Deadline = None
+        MaxEnergy = None
+        MaxBodies = None
+    }
+
+/// The enemy's 6W3M miner as seen landing on (x, 0).
+let private lander (id: string) (x: int) : HostileInfo =
+    theirs id enemy { X = x; Y = 0 } (List.replicate 6 Work @ List.replicate 3 Move)
+
+/// Trepidimous's armed pair standing in W18S26 live (2026-10-09): Fuse5564
+/// (18M 17A) and Kinematic5669 (11M 7H).
+let private fuse =
+    theirs "Fuse5564" enemy { X = 25; Y = 45 } (List.replicate 18 Move @ List.replicate 17 Attack)
+
+let private kinematic =
+    theirs "Kinematic5669" enemy { X = 26; Y = 45 } (List.replicate 11 Move @ List.replicate 7 Heal)
+
+/// The harassment room as an exit camp's (#663 S7d): its north border open
+/// on three tiles (24–26), wall elsewhere; the colony's bank `capacity`; the
+/// rival home seen last tick where `seen`, the quarry memory keeping `armed`
+/// in it; its exit watched over `watched` full ticks, `arrivals` miners
+/// landing on (25,0) among them, the watch begun a window back, or ten
+/// ticks back where `cold` (a heap just reset).
+let private camped
+    (capacity: int)
+    (arrivals: int)
+    (watched: int)
+    (cold: bool)
+    (seen: bool)
+    (armed: HostileInfo list)
+    : ColonyView =
+    let colony = bareHome |> harassing
+    let now = colony.Time
+
+    let ring =
+        plainRing
+        |> Map.map (fun tile terrain ->
+            if tile.Y = 0 && (tile.X < 24 || tile.X > 26) then
+                Wall
+            else
+                terrain)
+
+    { colony with
+        Bank = bank capacity capacity
+        Spatial =
+            { colony.Spatial with
+                Borders = colony.Spatial.Borders |> Map.add harassRoom ring
+            }
+        Seen =
+            if seen then
+                colony.Seen
+                |> Map.add
+                    rivalHome
+                    {
+                        Tick = now - 1
+                        Targets = lazy Set.empty
+                        Rival = Some enemy
+                    }
+            else
+                colony.Seen
+        World =
+            { colony.World with
+                Traffic =
+                    Map.ofList
+                        [
+                            ExitTraffic.key rivalHome harassRoom,
+                            {
+                                Watched = [ for back in 1..watched -> now - back ]
+                                Arrivals =
+                                    [
+                                        for back in 1..arrivals ->
+                                            now - back, lander $"miner-{back}" 25
+                                    ]
+                                Standing = []
+                                Since = if cold then now - 10 else now - 2 * ExitTraffic.window
+                            }
+                        ]
+                Quarries =
+                    armed
+                    |> List.map (fun h ->
+                        h.Id,
+                        {
+                            Body =
+                                { h with
+                                    Pos = RoomPos.at rivalHome (RoomPos.pos h.Pos)
+                                }
+                            Seen = now - 1
+                            Cargo = 0
+                            Trail = []
+                            Crossings = None
+                            Gone = None
+                        })
+                    |> Map.ofList
+            }
+    }
+
+/// The exit camp moved on and laid over one colony with no stored record:
+/// the laid view, the records and what moved.
+let private campLaid (colony: ColonyView) =
+    match Operations.lay [ campWire ] Map.empty [] [ colony ] with
+    | [ laid ], records, events -> laid, records, events
+    | _ -> failtest "one colony laid"
+
+/// The camp's exit with these landings in its watch, each by its tick.
+let private landing (landings: (int * HostileInfo) list) (colony: ColonyView) =
+    let key = ExitTraffic.key rivalHome harassRoom
+    let log = colony.World.Traffic.[key]
+
+    { colony with
+        World =
+            { colony.World with
+                Traffic = colony.World.Traffic |> Map.add key { log with Arrivals = landings }
+            }
+    }
+
+/// The camp's record running in Execute since `started`.
+let private campRunning (started: int) : OpRecord =
+    {
+        Id = "camp"
+        Started = started
+        Phase = OpPhase.Execute
+        Since = started
+        Room = None
+        RoomSince = started
+        Spent = 0
+        Lost = 0
+        NextDue = started + Operation.Templates.campSpan
+        Ended = None
+    }
+
+/// The exit camp moved on from its running record and laid over one colony.
+let private campRun (record: OpRecord) (colony: ColonyView) =
+    match Operations.lay [ campWire ] Map.empty [ record ] [ colony ] with
+    | [ laid ], records, events -> laid, records, events
+    | _ -> failtest "one colony laid"
+
+[<Tests>]
+let exitCampTests =
+    testList
+        "the exit camp on a rival home's exits (#663 S7d)"
+        [
+            // The user, 2026-10-09: "这个任务也应该有个触发条件吧" — priced,
+            // not a unit seen: prey uses the exit, the camp pays, and it
+            // wins its exchange.
+            test "crossings at a rate that pays the cast start it: a swing a step in, cast and laid" {
+                let laid, records, events = campLaid (camped 3200 10 100 false true [])
+
+                Expect.equal
+                    events
+                    [ OpEvent.Began("camp", OpPhase.Muster, None) ]
+                    "ten landings over a hundred ticks watched, each a miner a swing kills before it walks off: begun"
+
+                Expect.equal (records |> List.map _.Id) [ "camp" ] "its record kept"
+
+                let work =
+                    laid.World.Operations
+                    |> Option.defaultValue []
+                    |> List.tryFind (fun op -> op.Id = Operations.campWorkId "camp" harassRoom)
+                    |> Option.defaultWith (fun () -> failtest "the exit's work laid")
+
+                let camp = work.Camp |> Option.get
+
+                Expect.equal
+                    (camp.Template, camp.Tile)
+                    (BodyTemplate.Melee, Some { X = 25; Y = 1 })
+                    "the chooser's swing, a step in beside all three landing tiles"
+
+                Expect.isGreaterThan work.Rate 0.0 "priced at what its kills earn a tick"
+
+                let brief = Threats.briefOf (threatsOf laid (Atlas.ofView laid)) harassRoom
+
+                Expect.equal brief.Duty (Duty.Operation work.Id) "the room's fight is the camp's"
+
+                Expect.equal
+                    (brief.Jobs |> List.map (fun job -> job.Kind, job.Tiles))
+                    [ JobKind.Camp, Set.singleton (RoomPos.at harassRoom { X = 25; Y = 1 }) ]
+                    "its one job the camp on that tile"
+
+                Expect.equal
+                    (brief.Asks |> List.map (fun ask -> ask.Row, ask.Blocks()))
+                    [ CastRow.Fighter BodyTemplate.Melee, camp.Blocks ]
+                    "its ask the chooser's body"
+            }
+
+            test
+                "λ from the crossings: the same miners twice over a window pay no cast, one sighting is no evidence" {
+                let _, records, events = campLaid (camped 3200 2 ExitTraffic.window false true [])
+
+                Expect.equal
+                    (records, events)
+                    ([], [])
+                    "two landings in 1,500 ticks watched earn less than the cast spends: not begun"
+
+                let _, records, events = campLaid (camped 3200 1 100 false true [])
+
+                Expect.equal
+                    (records, events)
+                    ([], [])
+                    "one landing is a sighting, no return: not begun"
+            }
+
+            test "ExchangeLoses vetoes it: what may come out beats every body the bank buys" {
+                let _, _, events = campLaid (camped 3200 10 100 false true [])
+
+                Expect.isNonEmpty
+                    events
+                    "the premise: the same crossings with nothing armed inside start it"
+
+                let _, records, events =
+                    campLaid (camped 3200 10 100 false true [ fuse; kinematic ])
+
+                Expect.equal
+                    (records, events)
+                    ([], [])
+                    "Fuse's 510 a tick beside Kinematic's heal outlast a 4-block swing and out-heal a ranger: not begun"
+
+                // The exchange is what vetoes it: priced alike, it loses only
+                // against the pair landed on the exit.
+                let priced (landers: HostileInfo list) =
+                    Facts.exitCampPrice
+                        (camped 3200 10 100 false true [])
+                        harassRoom
+                        [ { X = 24; Y = 0 }, 1; { X = 25; Y = 0 }, 11; { X = 26; Y = 0 }, 1 ]
+                        [ 41, lander "miner" 25 ]
+                        [ for back in 1..10 -> 42 - back ]
+                        landers
+                        ExitTraffic.window
+                        (fun _ -> 0.0)
+                        []
+
+                Expect.equal
+                    ((priced [ fuse; kinematic ]).Loses, (priced []).Loses)
+                    (true, false)
+                    "lost against the pair, won with nothing armed to come out"
+            }
+
+            test
+                "Unknown never starts it: a watch not yet a window old, or a home unseen since the reset" {
+                let _, records, events = campLaid (camped 3200 10 100 true true [])
+
+                Expect.equal
+                    (records, events)
+                    ([], [])
+                    "a watch begun ten ticks back: what crossed before is not known"
+
+                let _, records, events = campLaid (camped 3200 10 100 false false [])
+
+                Expect.equal
+                    (records, events)
+                    ([], [])
+                    "the home never seen: what may come out is not known"
+            }
+
+            // Ship-gate review: a body of ours standing in the room was read
+            // as the camp's group, which priced it 0 blocks and cast 1.
+            test
+                "a ranger of ours standing in the camp's room is no body of its: the ask is the priced cast" {
+                let colony =
+                    camped 3200 10 100 false true []
+                    |> standingThere [ bigRanger, { X = 30; Y = 30 } ]
+
+                let laid, _, events = campRun (campRunning (colony.Time - 10)) colony
+
+                Expect.isEmpty events "the run goes on"
+
+                let work =
+                    laid.World.Operations
+                    |> Option.defaultValue []
+                    |> List.find (fun op -> op.Id = Operations.campWorkId "camp" harassRoom)
+
+                let camp = work.Camp |> Option.get
+
+                Expect.isEmpty work.Group "the ranger holds no Task of the camp's: not its group"
+
+                Expect.equal
+                    (camp.Template, camp.Blocks)
+                    (BodyTemplate.Melee, 4)
+                    "the chooser's swing, sized as before the run: four blocks the bank buys"
+
+                let brief = Threats.briefOf (threatsOf laid (Atlas.ofView laid)) harassRoom
+
+                Expect.equal
+                    (brief.Asks |> List.map (fun ask -> ask.Row, ask.Blocks()))
+                    [ CastRow.Fighter BodyTemplate.Melee, 4 ]
+                    "its ask the priced cast"
+            }
+
+            // Ship-gate review: λ counted crossings, so a body crossing ten
+            // times priced as ten kills.
+            test "one body crossing ten times is one body: its kill once, never ten" {
+                let colony = camped 3200 0 100 false true []
+                let now = colony.Time
+
+                let rateOf (landings: (int * HostileInfo) list) =
+                    (Facts.exitCampPrice
+                        colony
+                        harassRoom
+                        [ { X = 24; Y = 0 }, 1; { X = 25; Y = 0 }, 11; { X = 26; Y = 0 }, 1 ]
+                        landings
+                        [ for back in 1..100 -> now - back ]
+                        []
+                        ExitTraffic.window
+                        (fun _ -> 0.0)
+                        [])
+                        .Rate
+
+                let ten = rateOf [ for back in 1..10 -> now - 10 * back, lander $"miner-{back}" 25 ]
+                let one = rateOf [ for back in 1..10 -> now - 10 * back, lander "miner-1" 25 ]
+
+                Expect.isGreaterThan ten (5.0 * one) "ten bodies are ten kills"
+
+                Expect.isLessThanOrEqual
+                    (one * float ExitTraffic.window)
+                    750.0
+                    "one body, killed once: at most its 750 over the run"
+
+                let _, records, events =
+                    campLaid (
+                        camped 3200 0 100 false true []
+                        |> landing [ for back in 1..10 -> now - 10 * back, lander "miner-1" 25 ]
+                    )
+
+                Expect.equal
+                    (records, events)
+                    ([], [])
+                    "one body's kill pays no 4-block cast: not begun"
+            }
+
+            // Ship-gate review: in its run, the window's landings held Pays
+            // for 1,500 ticks after the traffic stopped.
+            test
+                "traffic deterred in its run stops it paying once each body is silent past its own gap" {
+                let colony = camped 3200 0 100 false true []
+                let now = colony.Time
+
+                // Ten miners each landing four times, every 25 ticks
+                // watched — the newest landing `last` ticks back. Their
+                // kills pay the cast still to come (no body holds its Task).
+                let shuttling (last: int) =
+                    colony
+                    |> landing
+                        [
+                            for trip in 0..3 do
+                                for id in 1..10 -> now - last - 25 * trip, lander $"miner-{id}" 25
+                        ]
+
+                let _, _, events = campRun (campRunning (now - 50)) (shuttling 10)
+
+                Expect.isEmpty
+                    events
+                    "each last seen ten ticks back, inside its 25-tick gap: still paying"
+
+                let _, records, events = campRun (campRunning (now - 50)) (shuttling 30)
+
+                Expect.equal
+                    events
+                    [ OpEvent.Ended("camp", OpEnd.Done) ]
+                    "each silent 30 ticks, past its gap: out of the stream, done"
+
+                Expect.equal (records |> List.map _.Ended) [ Some OpEnd.Done ] "its record ended"
+            }
+        ]

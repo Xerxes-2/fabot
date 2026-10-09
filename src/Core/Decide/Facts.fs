@@ -640,6 +640,12 @@ let operationIn (view: ColonyView) (room: string) : OperationWork option =
             op.Room = room && view.Harass |> List.exists (fun h -> h.RoomName = room))
     )
 
+/// The exit camp an [[operation]] lays in a room this colony casts
+/// (`operationIn`, `OperationWork.Camp`, #663 S7d), with its operation.
+let exitCampIn (view: ColonyView) (room: string) : (OperationWork * ExitCamp) option =
+    operationIn view room
+    |> Option.bind (fun op -> op.Camp |> Option.map (fun camp -> op, camp))
+
 /// The rooms this colony reads as an [[operation]]'s, as a set: once the
 /// operations are laid, the room each works among those it casts
 /// (`operationIn`); before (`WorldView.Operations` None: a candidate priced
@@ -1736,6 +1742,16 @@ let private harmRate (view: ColonyView) (hostile: HostileInfo) (walk: int) : flo
 let private loadedGait (view: ColonyView) (hostile: HostileInfo) : Gait =
     HostileInfo.loadedGait view.Hostiles (cargoOf view hostile) hostile
 
+/// The ticks a hostile's owner takes to replace it (#621): its walk back
+/// (`replacementWalk` at its loaded pace) and, beside it, its spawn time and
+/// that walk together — what its work is lost for (`killValue`), and the
+/// span within which two bodies of one shape are two at once rather than
+/// one replacing another (#663 S7d, `campSamples`).
+let internal replacementOf (view: ColonyView) (hostile: HostileInfo) : int * int =
+    let pace = Gait.ticks Gait.plain (loadedGait view hostile) |> Option.defaultValue 1
+    let walk = replacementWalk * pace
+    walk, Engine.spawnTicksPerPart * List.length hostile.Body + walk
+
 /// What killing a hostile is worth, in energy (#621, by its remaining life,
 /// #663): the share of its body (every part, destroyed ones too, and each
 /// boost a lab spent on it) its life has left to spend — its ticks to live
@@ -1747,10 +1763,7 @@ let internal killValue (view: ColonyView) (hostile: HostileInfo) : float =
     let boosted =
         hostile.Boosts |> List.filter (fun boost -> boost <> Unboosted) |> List.length
 
-    let pace = Gait.ticks Gait.plain (loadedGait view hostile) |> Option.defaultValue 1
-
-    let walk = replacementWalk * pace
-    let replaced = Engine.spawnTicksPerPart * List.length hostile.Body + walk
+    let walk, replaced = replacementOf view hostile
 
     let lifetime =
         if List.contains BodyPart.Claim hostile.Body then
@@ -5932,6 +5945,487 @@ let groupLoses (view: ColonyView) (group: (CreepInfo * RoomPos) list) (room: str
             )
         )
 
+// ---- the exit camp (#663 S7d) -----------------------------------------------
+
+/// The armed bodies that may come out of a rival home through its exits
+/// (#663 S7d): every body of `enemy` the quarry memory keeps in the home,
+/// in sight or out of it, not known gone and its life not run out, that
+/// fights. What an exit camp's exchange is priced against, and what a
+/// tile's depth risks (`campRisk`).
+let exitLanders (view: ColonyView) (enemy: string) (home: string) : HostileInfo list =
+    view.World.Quarries
+    |> Map.toList
+    |> List.map snd
+    |> List.filter (fun track ->
+        track.Body.Pos.Room = home
+        && track.Body.Owner = enemy
+        && track.Gone.IsNone
+        && (track.Body.TicksToLive < 1 || track.Seen + track.Body.TicksToLive > view.Time)
+        && HostileInfo.armed [ track.Body ] track.Body)
+    |> List.map _.Body
+
+/// A view of a camp's room with every lander standing on one of its entries
+/// (#663 S7d), the most used first, in turn: what may come out, come out.
+/// The room's own unarmed bodies left out, which are no camp's fight.
+let private landedIn
+    (view: ColonyView)
+    (room: string)
+    (entries: (Pos * int) list)
+    (landers: HostileInfo list)
+    : ColonyView =
+    match
+        entries
+        |> List.sortBy (fun (tile, uses) -> -uses, tile.Y, tile.X)
+        |> List.map fst
+    with
+    | [] -> view
+    | tiles ->
+        let tiles = Array.ofList tiles
+        let ids = landers |> List.map _.Id |> Set.ofList
+
+        let placed =
+            landers
+            |> List.mapi (fun index h ->
+                { h with
+                    Pos = RoomPos.at room tiles.[index % tiles.Length]
+                })
+
+        { view with
+            Hostiles =
+                (view.Hostiles
+                 |> List.filter (fun h ->
+                     not (ids.Contains h.Id)
+                     && (h.Pos.Room <> room || HostileInfo.armed view.Hostiles h)))
+                @ placed
+        }
+
+/// The ticks a body landing on an entry stands in the reach of a body of
+/// ours on a camp's tile (#663 S7d): attacks resolve where the bodies stood
+/// as the tick began, so it is struck on its landing tick and on every tick
+/// after it still stands in reach; it walks out by the nearest tile past
+/// the reach it may stand on (`past`, the ring none), its first step off
+/// the landing at once (the step onto the exit cost it no fatigue,
+/// `movement.js`) and every one after at its pace. No ground past the reach
+/// keeps it in reach its whole life. None out of reach on landing.
+let private campStrikes
+    (view: ColonyView)
+    (reach: int)
+    (past: Pos list)
+    (tile: Pos)
+    (arrival: HostileInfo)
+    : int option =
+    let at = RoomPos.pos arrival.Pos
+
+    if reach = 0 || range tile at > reach then
+        None
+    else
+        let steps =
+            match past with
+            | [] -> max 1 arrival.TicksToLive
+            | past -> past |> List.map (range at) |> List.min
+
+        let pace =
+            Gait.ticks Gait.plain (HostileInfo.gait view.Hostiles arrival)
+            |> Option.defaultValue 1
+
+        Some(1 + (max 1 steps - 1) * pace)
+
+/// The tiles a step past a camp tile's reach a body may stand on: where a
+/// body landing in its reach walks out of it (`campStrikes`).
+let private pastReach (stands: Pos -> bool) (reach: int) (tile: Pos) : Pos list =
+    [
+        for x in tile.X - reach - 1 .. tile.X + reach + 1 do
+            for y in tile.Y - reach - 1 .. tile.Y + reach + 1 do
+                let past = { X = x; Y = y }
+
+                if range past tile = reach + 1 && stands past then
+                    yield past
+    ]
+
+/// One body seen landing on an exit (#663 S7d): as last read, the rate it
+/// crosses at (its landings over the full ticks watched) and its kill value
+/// by remaining life (`killValue`).
+type private CampSample =
+    {
+        Body: HostileInfo
+        Rate: float
+        Value: float
+    }
+
+/// The traffic an exit's camp is priced off (#663 S7d): each distinct body
+/// seen landing once (`Samples`); and each shape's turnover (`Turnover`):
+/// its bodies, and the rate fresh ones of it come — the bodies of the shape
+/// seen past the most of it seen within one replacement's span
+/// (`replacementOf`: two within it are two at once, not one replacing the
+/// other), over the ticks the watch spans. A body is one body however often
+/// it crosses: a kill takes it out of the stream, and only turnover the
+/// watch saw puts another in.
+type private CampTraffic =
+    {
+        Samples: CampSample[]
+        /// Each shape's bodies, by their index in `Samples`, and its rate.
+        Turnover: (int[] * float) list
+    }
+
+let private campTraffic
+    (view: ColonyView)
+    (arrivals: (int * HostileInfo) list)
+    (watched: int list)
+    : CampTraffic =
+    match watched with
+    | [] -> { Samples = [||]; Turnover = [] }
+    | newest :: _ ->
+        let ticks = float (List.length watched)
+        let spanned = float (max 1 (newest - List.last watched + 1))
+
+        let samples =
+            arrivals
+            |> List.groupBy (fun (_, h) -> h.Id)
+            |> List.map (fun (_, landings) ->
+                // Newest first: the body as last read.
+                let body = landings |> List.head |> snd
+
+                {
+                    Body = body
+                    Rate = float (List.length landings) / ticks
+                    Value = killValue view body
+                })
+            |> Array.ofList
+
+        let turnover =
+            samples
+            |> Array.indexed
+            |> Array.toList
+            |> List.groupBy (fun (_, sample) -> sample.Body.Body, sample.Body.Boosts)
+            |> List.map (fun (_, shape) ->
+                let ids = shape |> List.map (fun (_, sample) -> sample.Body.Id) |> Set.ofList
+                let span = snd (replacementOf view (snd (List.head shape)).Body)
+
+                let landings =
+                    arrivals |> List.filter (fun (_, h) -> ids.Contains h.Id) |> List.sortBy fst
+
+                let atOnce =
+                    landings
+                    |> List.map (fun (tick, _) ->
+                        landings
+                        |> List.filter (fun (other, _) -> other >= tick && other - tick <= span)
+                        |> List.map (fun (_, h) -> h.Id)
+                        |> List.distinct
+                        |> List.length)
+                    |> List.fold max 0
+
+                (shape |> List.map fst |> Array.ofList),
+                float (max 0 (ids.Count - atOnce)) / spanned)
+
+        {
+            Samples = samples
+            Turnover = turnover
+        }
+
+/// One tile of a camp's ground for a reach (#663 S7d), read once for every
+/// body of that reach: its cover of the entries, the landers' blow there on
+/// landing (`campRisk`), its distance to the most used entry, and each body
+/// seen with the ticks it stands in reach landing (`campStrikes`).
+type private CampTile =
+    {
+        Tile: Pos
+        Share: float
+        Risk: int
+        Used: int
+        /// By each body's index in `CampTraffic.Samples`.
+        Strikes: int option[]
+    }
+
+/// The camp's ground for a reach (`campGroundOver`), each tile covering an
+/// entry read (`CampTile`).
+let private campTiles
+    (view: ColonyView)
+    (room: string)
+    (reach: int)
+    (entries: (Pos * int) list)
+    (landers: HostileInfo list)
+    (traffic: CampTraffic)
+    : CampTile list =
+    let used =
+        entries
+        |> List.sortBy (fun (tile, uses) -> -uses, tile.Y, tile.X)
+        |> List.tryHead
+        |> Option.map fst
+
+    let risk = campRisk view landers (List.map fst entries)
+    let stands = standable view room
+
+    campGroundOver view room reach entries
+    |> List.filter (fun (_, share) -> share > 0.0)
+    |> List.map (fun (tile, share) ->
+        let past = pastReach stands reach tile
+
+        {
+            Tile = tile
+            Share = share
+            Risk = risk tile
+            Used = used |> Option.map (range tile) |> Option.defaultValue 0
+            Strikes =
+                traffic.Samples
+                |> Array.map (fun sample -> campStrikes view reach past tile sample.Body)
+        })
+
+/// What a body dealing `damage` a strike, camped on a tile, earns a tick
+/// over `ticks` it stands there (#663 S7d): each body seen it kills in the
+/// ticks it stands in reach (`HostileInfo.killedWithin`, through its own
+/// heal) at its value, at the odds it crosses within those ticks
+/// (1 − e^(−rate·ticks)), once — killed, it is out of the stream; and each
+/// shape's fresh bodies over those ticks at the mean value the camp kills
+/// of the shape; never more than every crossing over those ticks a kill.
+/// Over the ticks, a tick.
+let private tileRate
+    (view: ColonyView)
+    (damage: int)
+    (traffic: CampTraffic)
+    (ticks: int)
+    (tile: CampTile)
+    : float =
+    if Array.isEmpty tile.Strikes || ticks <= 0 then
+        0.0
+    else
+        let span = float ticks
+        let samples = traffic.Samples
+
+        let killed =
+            tile.Strikes
+            |> Array.mapi (fun index struck ->
+                let sample = samples.[index]
+
+                match struck with
+                | Some n when
+                    HostileInfo.killedWithin
+                        sample.Body
+                        (fun _ -> damage)
+                        (HostileInfo.healing view.Hostiles sample.Body)
+                        n
+                    ->
+                    sample.Value
+                | _ -> 0.0)
+
+        let present =
+            samples
+            |> Array.mapi (fun index sample -> killed.[index] * (1.0 - exp (-sample.Rate * span)))
+            |> Array.sum
+
+        let fresh =
+            traffic.Turnover
+            |> List.sumBy (fun (shape, rate) ->
+                rate * span * (shape |> Array.sumBy (fun index -> killed.[index]))
+                / float (Array.length shape))
+
+        let crossings =
+            samples
+            |> Array.mapi (fun index sample -> killed.[index] * sample.Rate * span)
+            |> Array.sum
+
+        min (present + fresh) crossings / span
+
+/// A body's camp tile (#663 S7d): of the ground for its reach, the tile it
+/// earns most on (`tileRate`), then the one the landers strike least on
+/// landing, then the one covering most of the entries, then the nearest
+/// the most used, by tile; with the rate there. None where no ground covers
+/// an entry.
+let private bestTile
+    (view: ColonyView)
+    (damage: int)
+    (traffic: CampTraffic)
+    (ticks: int)
+    (tiles: CampTile list)
+    : (Pos * float) option =
+    tiles
+    |> List.map (fun tile -> tile, tileRate view damage traffic ticks tile)
+    |> List.sortBy (fun (tile, rate) ->
+        -rate, tile.Risk, -tile.Share, tile.Used, tile.Tile.Y, tile.Tile.X)
+    |> List.tryHead
+    |> Option.map (fun (tile, rate) -> tile.Tile, rate)
+
+/// One exit's camp as priced (#663 S7d, `exitCampPrice`).
+type ExitCampPrice =
+    {
+        /// The body it casts, or the group's: its template and blocks.
+        Template: BodyTemplate
+        Blocks: int
+        /// The tile it stands on; None where no ground covers an entry.
+        Tile: Pos option
+        /// What its kills earn a tick there (`campRateAt`).
+        Rate: float
+        /// What it nets over the run: before its cast, its kills over the
+        /// ticks it stands there less its cast (`castSpent`) and what the
+        /// cast earns elsewhere over those ticks; with its group standing,
+        /// a tick's kills less a tick's earnings elsewhere (the cast spent).
+        Net: float
+        /// Whether no body it may cast — or, with a group, the group — wins
+        /// the exchange against what may come out (`landedIn`).
+        Loses: bool
+    }
+
+/// One exit's camp priced (#663 S7d): its body chosen and sized, where it
+/// stands, what it earns, nets and whether it loses. `entries` the exit's
+/// landing tiles by use, `arrivals` the landings of the enemy's bodies the
+/// camp is priced off, each with its tick, over the full ticks `watched`
+/// (`campTraffic`), `landers` the armed
+/// bodies that may come out (`exitLanders`), `span` the ticks the run has
+/// left, `elsewhere` what a cast of the colony earns over so many ticks in
+/// its best candidate room, `group` the bodies holding the exit's Task.
+///
+/// Before the cast, each template is sized by the chooser: the smallest
+/// body that ends the fight against the landers standing on the entries
+/// (`fighterCast`, one body), and from there the size netting most over
+/// the run (`castSpent`: its life spent and its spawn time, beside the cast
+/// earning elsewhere over the ticks it stands there once spawned and
+/// walked); the template netting most among those that win. With a group —
+/// the bodies holding the camp's Task —, its bodies as they are: what they
+/// earn a tick there over the run's ticks left, and whether they win; its
+/// template and blocks the first body's.
+let exitCampPrice
+    (view: ColonyView)
+    (room: string)
+    (entries: (Pos * int) list)
+    (arrivals: (int * HostileInfo) list)
+    (watched: int list)
+    (landers: HostileInfo list)
+    (span: int)
+    (elsewhere: int -> float)
+    (group: (CreepInfo * RoomPos) list)
+    : ExitCampPrice =
+    let landed = landedIn view room entries landers
+    let fight = not (List.isEmpty (raidersIn landed room))
+    let traffic = campTraffic view arrivals watched
+
+    // The ground read once a reach: every size of a template shares it.
+    let grounds = System.Collections.Generic.Dictionary<int, CampTile list>()
+
+    let groundOf (reach: int) =
+        match grounds.TryGetValue reach with
+        | true, tiles -> tiles
+        | _ ->
+            let tiles = campTiles view room reach entries landers traffic
+            grounds.[reach] <- tiles
+            tiles
+
+    let tileOf (fighter: Fighter) (ticks: int) =
+        bestTile view (fighter.DamageAt fighter.Reach) traffic ticks (groundOf fighter.Reach)
+
+    match group with
+    | (first, _) :: _ ->
+        let fighters = group |> List.map (fst >> Fighter.ofCreep)
+
+        let best =
+            fighters
+            |> List.choose (fun fighter -> tileOf fighter span)
+            |> List.sortBy (fun (tile, rate) -> -rate, tile.Y, tile.X)
+            |> List.tryHead
+
+        let rate = best |> Option.map snd |> Option.defaultValue 0.0
+
+        let template =
+            if partCount first.Body RangedAttack > 0 then
+                BodyTemplate.Ranged
+            else
+                BodyTemplate.Melee
+
+        // Its blocks: its weapons over a block's.
+        let weapon =
+            if template = BodyTemplate.Ranged then
+                RangedAttack
+            else
+                Attack
+
+        let perBlock =
+            (patternOfTemplate template).Block
+            |> List.filter ((=) weapon)
+            |> List.length
+            |> max 1
+
+        {
+            Template = template
+            Blocks = partCount first.Body weapon / perBlock
+            Tile = best |> Option.map fst
+            Rate = rate
+            Net = rate - elsewhere span / float (max 1 span)
+            Loses = fight && not (won (exchangeIn landed room fighters))
+        }
+    | [] ->
+        let home = RoomPos.at (SpatialInfo.homeName view.Spatial) { X = 25; Y = 25 }
+
+        let priced (template: BodyTemplate) =
+            let pattern = patternOfTemplate template
+
+            let floor, wins =
+                if fight then
+                    let cast = fighterCast landed room [ template ] 1
+                    cast.Blocks, cast.Ends
+                else
+                    1, true
+
+            let sized (blocks: int) =
+                let fighter = blocksFighter pattern blocks
+
+                let lands =
+                    match doorTicks home (paceOf fighter) room with
+                    | System.Int32.MaxValue -> span
+                    | walk -> castSpawnTicks template blocks + walk
+
+                let ticks = max 0 (span - lands)
+                let tile = tileOf fighter ticks
+                let rate = tile |> Option.map snd |> Option.defaultValue 0.0
+
+                // Every kill its ground covers landed: no bigger body earns
+                // more there, it only costs more.
+                let most =
+                    groundOf fighter.Reach
+                    |> List.map (tileRate view (System.Int32.MaxValue / 4) traffic ticks)
+                    |> List.fold max 0.0
+
+                {
+                    Template = template
+                    Blocks = blocks
+                    Tile = tile |> Option.map fst
+                    Rate = rate
+                    Net =
+                        rate * float ticks - castSpent view template blocks 1 span - elsewhere ticks
+                    Loses = not wins
+                },
+                rate >= most
+
+            // Smallest first, up to the first size landing every kill.
+            let rec scan (sizes: int list) (found: ExitCampPrice list) =
+                match sizes with
+                | [] -> found
+                | blocks :: bigger ->
+                    match sized blocks with
+                    | price, true -> price :: found
+                    | price, false -> scan bigger (price :: found)
+
+            scan (blocksBought view template |> List.filter (fun blocks -> blocks >= floor)) []
+            |> List.sortBy (fun price -> -price.Net, price.Blocks)
+            |> List.tryHead
+
+        let priced = bodyTemplates |> List.choose priced
+
+        match
+            priced
+            |> List.filter (fun price -> not price.Loses)
+            |> List.sortBy (fun price -> -price.Net, price.Blocks)
+        with
+        | best :: _ -> best
+        | [] ->
+            match priced with
+            | first :: _ -> { first with Loses = true }
+            | [] ->
+                {
+                    Template = BodyTemplate.Melee
+                    Blocks = 0
+                    Tile = None
+                    Rate = 0.0
+                    Net = 0.0
+                    Loses = fight
+                }
 
 /// Every room's worth laid in every view (#663 M2), one table for all
 /// (`WorldView.Worths`, `worthTable`): each room priced on first read off
