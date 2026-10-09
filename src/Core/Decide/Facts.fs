@@ -2177,11 +2177,21 @@ let private campShare (view: ColonyView) (fighter: Fighter) (hostile: HostileInf
 
 /// Whether the heal a dancer takes while out (`healAcross`) undoes what a
 /// body of ours lands while it is in its reach (#658, `campShare`): it stays
-/// on the border and our camp never wears it down.
+/// on the border and our camp never wears it down. A dancer no heal reaches
+/// is never out-healed, whatever share of its time it was watched in reach:
+/// on the tick it is first seen on its exit it has none yet, and nothing
+/// against nothing is no heal.
 let private outHealsCamp (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : bool =
     let share, damage = campShare view fighter hostile
+    let heal = healAcross view hostile
 
-    float (healAcross view hostile) * (1.0 - share) >= float damage * share
+    heal > 0 && float heal * (1.0 - share) >= float damage * share
+
+/// Whether a dancer's heal across the border undoes the camp of every body
+/// of a team (`outHealsCamp`): the camp lands while any body's does
+/// (`campChance`), so only a team each of whose bodies it out-heals is.
+let private outHealsTeam (view: ColonyView) (team: Fighter list) (hostile: HostileInfo) : bool =
+    team |> List.forall (fun fighter -> outHealsCamp view fighter hostile)
 
 /// The odds a dancer's kill lands from a camp on a tile covering its way in
 /// (#658): the share of its watched time it stood in the body's reach
@@ -2393,6 +2403,20 @@ let private catchOdds
         else
             min 1.0 (float (max 0 window) / float kill)
 
+/// The odds a team of ours catches a hostile (`catchOdds`): its best body's,
+/// as a camp lands while any body's does (`campChance`); none for no team.
+let private teamCatch
+    (view: ColonyView)
+    (team: Fighter list)
+    (arrival: int)
+    (kill: int)
+    (hostile: HostileInfo)
+    : float =
+    team
+    |> List.fold
+        (fun best fighter -> max best (catchOdds view fighter None arrival kill hostile))
+        0.0
+
 /// One room's kill scores (#621), the heal reaching each hostile found once:
 /// what killing a hostile is worth (`killValue`) per tick of a body's effort,
 /// its own `arrival` within reach and the kill it lands beside its partners
@@ -2495,9 +2519,9 @@ let private killPricing (view: ColonyView) (room: string) : ColonyView =
     }
 
 /// The kills a team of ours lands in a room (#652, #654), landing in
-/// `landing` ticks: each hostile's value in `values` times the odds its
-/// first body catches it (`catchOdds`), killed by the team together at its
-/// standoff (`killTicksOf`), nothing of one that dies of age first.
+/// `landing` ticks: each hostile's value in `values` times the odds the team
+/// catches it (`teamCatch`), killed by the team together at its standoff
+/// (`killTicksOf`), nothing of one that dies of age first.
 let private killsLanded
     (priced: ColonyView)
     (room: string)
@@ -2507,7 +2531,7 @@ let private killsLanded
     : float =
     match team with
     | [] -> 0.0
-    | body :: _ ->
+    | team ->
         let healOn = healReachingWithin priced room priced.Tuning.ReachHorizon
 
         priced.Hostiles
@@ -2517,7 +2541,7 @@ let private killsLanded
             | Some value ->
                 match killTicksOf priced healOn team hostile with
                 | Some kill when hostile.TicksToLive > landing + kill ->
-                    catchOdds priced body None landing kill hostile * value
+                    teamCatch priced team landing kill hostile * value
                 | _ -> 0.0
             | None -> 0.0)
 
@@ -4461,20 +4485,21 @@ let private structuresTaken
 
 /// The odds a body's work stops for our holding its room (#663 M2): none for
 /// one that stays and out-heals the crew (never killed, or a dancer whose
-/// heal across the border undoes the camp, `outHealsCamp`); else the odds it
-/// slips the crew (one caught is priced by its kill instead), times its
-/// owner's flee share as its dossier saw it (`WorldView.Flees`), if any.
+/// heal across the border undoes the camp of each body of the crew,
+/// `outHealsTeam`); else the odds it slips the crew (one caught is priced by
+/// its kill instead), times its owner's flee share as its dossier saw it
+/// (`WorldView.Flees`), if any.
 let private stopsWorking
     (view: ColonyView)
     (priced: ColonyView)
-    (body: Fighter)
+    (team: Fighter list)
     (hostile: HostileInfo)
     (kill: int option)
     (catch: float)
     =
     match kill with
     | None -> 0.0
-    | Some _ when dancingOn priced hostile && outHealsCamp priced body hostile -> 0.0
+    | Some _ when dancingOn priced hostile && outHealsTeam priced team hostile -> 0.0
     | Some _ ->
         Map.tryFind hostile.Owner view.World.Flees
         |> Option.defaultValue 1.0
@@ -4484,7 +4509,7 @@ let private stopsWorking
 /// M2), off the room's worth (`roomWorth`). What it earns: the kills it
 /// lands there (each body's kill value at its odds read as `reading`, a
 /// cast's or a standing group's, times the odds the crew catches it,
-/// `catchOdds`, nothing of one that dies of age first); and over the ticks
+/// `teamCatch`, nothing of one that dies of age first); and over the ticks
 /// it holds the room clear, its kills past the escort's, our income kept
 /// there (`RoomWorth.Kept`) and the rival income that stops for our holding
 /// it — each economy body's take at its odds (`RoomWorth.takes`) times the
@@ -4506,7 +4531,7 @@ let roomRate
     : float =
     match team with
     | [] -> 0.0
-    | body :: _ ->
+    | team ->
         let worth = roomWorth view room
         let priced = sweepPricing view room
 
@@ -4535,7 +4560,7 @@ let roomRate
                     let catch =
                         match kill with
                         | Some kill when h.TicksToLive > landing + kill ->
-                            catchOdds priced body None landing kill h
+                            teamCatch priced team landing kill h
                         | _ -> 0.0
 
                     h, kill, catch)
@@ -4554,7 +4579,7 @@ let roomRate
                 bodies
                 |> List.sumBy (fun (h, kill, catch) ->
                     match Map.tryFind h.Id takes with
-                    | Some take -> take * stopsWorking view priced body h kill catch
+                    | Some take -> take * stopsWorking view priced team h kill catch
                     | None -> 0.0)
 
             let gained = landed + (worth.Kept + denied) * float kills
@@ -5747,27 +5772,87 @@ let groupRate (view: ColonyView) (group: (CreepInfo * RoomPos) list) (room: stri
 let pricedBy (views: ColonyView list) (room: string) : ColonyView option = worthOwner views room
 
 /// Whether a room still holds a quarry for a team (#663 S7c, an operation's
-/// `Exhausted`): a body its worth values (`RoomWorth.values`, in sight or
-/// remembered at its odds) that the team kills at all (`killTicksOf`) and
-/// that, dancing on the border, no heal across it keeps from the camp
-/// (`outHealsCamp`). Facts of the room's bodies, never this tick's catch
-/// odds: a quarry the team cannot catch this tick still holds the room. With
-/// no team, a body valued at all.
-let holdsQuarry (view: ColonyView) (room: string) (team: Fighter list) : bool =
+/// `Exhausted`): a body of it that the team kills at all (`killTicksOf`) and
+/// that, dancing on the border, no heal across it keeps from the camp of
+/// every body (`outHealsTeam`). Its bodies: each its worth values
+/// (`RoomWorth.values`, in sight or remembered at its odds), and, while a
+/// look at the room is on its way (`awaited`: the group walking in, whose
+/// arrival is the look), each the quarry memory keeps there out of sight
+/// once its odds ran out (`Quarry.remembered`), a prey of the room
+/// (`preyOf`) worth its kill, judged as one in sight is: laid back among the
+/// room's bodies as a ghost is. The clock is no look, so such a body is the
+/// room's until the look or its death finds it gone (`Track.Gone`, its
+/// life); with no look coming nothing will find it so, and its odds are all
+/// the room has (a body past them is priced at nothing, and no cast walks in
+/// for it). Facts of the room's bodies, never this tick's catch odds: a
+/// quarry the team cannot catch this tick still holds the room. With no
+/// team, a body valued at all.
+let holdsQuarry (view: ColonyView) (room: string) (team: Fighter list) (awaited: bool) : bool =
     let values = RoomWorth.values Quarry.Reading.Value (roomWorth view room)
     let priced = sweepPricing view room
 
-    match team with
-    | [] -> values |> Map.exists (fun _ value -> value > 0.0)
-    | body :: _ ->
-        let killable = killableIn priced room team
+    // Whether any of these bodies is a quarry for the team, judged in a view.
+    let holdsIn (judging: ColonyView) (ids: Set<string>) =
+        let judged = sweepPricing judging room
 
+        let bodies =
+            judged.Hostiles |> List.filter (fun h -> h.Pos.Room = room && ids.Contains h.Id)
+
+        match team with
+        | [] -> not (List.isEmpty bodies)
+        | team ->
+            let killable = killableIn judged room team
+
+            bodies
+            |> List.exists (fun h ->
+                killable h && not (dancingOn judged h && outHealsTeam judged team h))
+
+    let laid =
         priced.Hostiles
-        |> List.exists (fun h ->
+        |> List.filter (fun h ->
             h.Pos.Room = room
-            && (Map.tryFind h.Id values |> Option.exists (fun value -> value > 0.0))
-            && killable h
-            && not (dancingOn priced h && outHealsCamp priced body h))
+            && (Map.tryFind h.Id values |> Option.exists (fun value -> value > 0.0)))
+        |> List.map _.Id
+        |> Set.ofList
+
+    let unseen () =
+        let seen =
+            priced.Hostiles
+            |> List.filter (fun h -> h.Pos.Room = room)
+            |> List.map _.Id
+            |> Set.ofList
+
+        let scope = scopeOf [ view ]
+
+        Quarry.remembered
+            (Set.singleton room)
+            view.World.RaidHeld.Contains
+            view.Time
+            view.World.Quarries
+        |> List.map snd
+        |> List.filter (fun h ->
+            not (seen.Contains h.Id)
+            && preyOf scope priced room h
+            && killValue priced h > 0.0)
+
+    // Laid as in sight: no track prices it at its odds.
+    let inSight (bodies: HostileInfo list) (ids: Set<string>) =
+        { view with
+            Hostiles = view.Hostiles @ bodies
+            World =
+                { view.World with
+                    Worths = None
+                    Quarries = view.World.Quarries |> Map.filter (fun id _ -> not (ids.Contains id))
+                }
+        }
+
+    holdsIn view laid
+    || awaited
+       && (match unseen () with
+           | [] -> false
+           | bodies ->
+               let ids = bodies |> List.map _.Id |> Set.ofList
+               holdsIn (inSight bodies ids) ids)
 
 /// Whether a group of ours loses the exchange against a room's escort
 /// (`RoomWorth.Escort`, `exchangeIn`): the price `roomRate` reads as

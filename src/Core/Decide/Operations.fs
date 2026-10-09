@@ -286,16 +286,18 @@ let advance
                 |> Option.defaultValue []
 
             // The room it enters the phase with: the one it is committed to,
-            // its commitment kept, while nothing outpays it and it is not
-            // exhausted; else the target's best, committed from now.
+            // its commitment kept through every phase, a hold among them,
+            // unless another room outpays it, or it is exhausted and another
+            // room pays; else the target's best, committed from now.
             let entered () =
                 match record.Room with
-                | Some kept when
-                    truth facts spec record OpGuard.Outpaid = Truth.No
-                    && truth facts spec record OpGuard.Exhausted = Truth.No
-                    ->
-                    Some kept, record.RoomSince
-                | _ -> room.Value, now
+                | Some _ when truth facts spec record OpGuard.Outpaid = Truth.Yes -> room.Value, now
+                | Some kept when truth facts spec record OpGuard.Exhausted = Truth.Yes ->
+                    match room.Value with
+                    | Some other when other <> kept -> Some other, now
+                    | _ -> Some kept, record.RoomSince
+                | Some kept -> Some kept, record.RoomSince
+                | None -> room.Value, now
 
             match exitOf facts spec record exits with
             | Some(_, OpNext.Finish how) -> ended record how
@@ -655,13 +657,60 @@ let ownFacts
         |> List.collect casters
         |> List.distinctBy (fun view -> SpatialInfo.homeName view.Spatial)
 
+    // A look at its committed room is on its way while it executes there with
+    // a group: the room's Brief walks the group in, and its arrival is the
+    // look (`Facts.holdsQuarry`).
+    let awaited (room: string) =
+        not (List.isEmpty placed)
+        && record
+           |> Option.exists (fun record ->
+               record.Phase = OpPhase.Execute && record.Room = Some room)
+
+    // The group's bodies, or with none the cast a colony would send.
+    let holdsOf =
+        reading (fun view room ->
+            let team =
+                match placed with
+                | [] ->
+                    Facts.fighterCast view room Bodies.bodyTemplates Engine.guardCap
+                    |> Facts.castFighters
+                | placed -> placed |> List.map (fst >> Fighter.ofCreep)
+
+            Facts.holdsQuarry view room team (awaited room))
+
+    let loses = reading (fun view room -> Facts.groupLoses view placed room)
+
+    // Each listed room's readings, once a tick: the guards and the rate read
+    // them alike.
+    let held = listed |> List.map (fun room -> room, lazy (holdsOf room)) |> Map.ofList
+
+    let holds (room: string) =
+        match Map.tryFind room held with
+        | Some reading -> reading.Value
+        | None -> holdsOf room
+
+    // `Exhausted`'s own reading of a room: the rate reads it too, so a room
+    // the guard calls exhausted pays nothing and no exit re-enters on a price
+    // the guard has just refused.
+    let exhausted =
+        listed
+        |> List.map (fun room -> room, lazy (holds room = Truth.No || loses room = Truth.Yes))
+        |> Map.ofList
+
+    let paying (room: string) (price: unit -> float) =
+        match Map.tryFind room exhausted with
+        | Some spent when spent.Value -> 0.0
+        | _ -> price ()
+
     {
         Now = now
         Rate =
             fun room ->
-                Map.tryFind room rates
-                |> Option.map _.Value
-                |> Option.orElseWith (fun () -> Some(rate room))
+                paying room (fun () ->
+                    Map.tryFind room rates
+                    |> Option.map _.Value
+                    |> Option.defaultWith (fun () -> rate room))
+                |> Some
         Worth =
             fun room ->
                 views
@@ -676,19 +725,9 @@ let ownFacts
             reading (fun view room ->
                 List.exists (landed room) group
                 || Option.isNone (Facts.muster view room (group |> List.map (musteringOf room))))
-        Loses = reading (fun view room -> Facts.groupLoses view placed room)
-        // The group's bodies, or with none the cast a colony would send.
-        Holds =
-            reading (fun view room ->
-                let team =
-                    match placed with
-                    | [] ->
-                        Facts.fighterCast view room Bodies.bodyTemplates Engine.guardCap
-                        |> Facts.castFighters
-                    | placed -> placed |> List.map (fst >> Fighter.ofCreep)
-
-                Facts.holdsQuarry view room team)
-        Challenge = fun room -> Some(challenge room)
+        Loses = loses
+        Holds = holds
+        Challenge = fun room -> Some(paying room (fun () -> challenge room))
         HomeThreatened =
             match casting with
             | [] -> Truth.No

@@ -303,6 +303,10 @@ type WorldView =
         /// whether one a look finds gone may only have stepped across
         /// (`Quarry.step`, `Observe.strikeGone`, #585). Empty in a fixture.
         Quarries: Map<string, Track>
+        /// The rooms whose raid the world remembers, which keep their
+        /// healers themselves (`Quarry.raidHeld`): a healer remembered there
+        /// is the raid's, never a body of the room.
+        RaidHeld: Set<string>
         /// Each rival room's defence response as its dossier saw it (#653):
         /// the fewest ticks from our first armed body in the room to its
         /// owner's first armed body there; `Int32.MaxValue` where it was
@@ -353,6 +357,7 @@ module WorldView =
             Danger = Set.empty
             RaidSeen = Map.empty
             Quarries = Map.empty
+            RaidHeld = Set.empty
             Responses = Map.empty
             Flees = Map.empty
             Worths = None
@@ -489,6 +494,7 @@ module WorldView =
                 |> Set.intersect watched
             RaidSeen = raidSeen
             Quarries = world.Quarries
+            RaidHeld = Quarry.raidHeld world
             Responses = Map.empty
             Flees = Map.empty
             Worths = None
@@ -1964,15 +1970,14 @@ module ColonyView =
                             side
                             body
 
-                // A room whose raid the world remembers (`World.Raiders`, the
-                // exit hold, `World.Healers`) keeps its healers itself.
-                let raidHeld room =
-                    Map.containsKey room world.Raiders
-                    || Map.containsKey room world.ExitWatches
-                    || Map.containsKey room world.Healers
-
                 raid
-                @ (Quarry.ghosts rooms raidHeld rooted side world.Time quarries
+                @ (Quarry.ghosts
+                    rooms
+                    (Quarry.raidHeld world).Contains
+                    rooted
+                    side
+                    world.Time
+                    quarries
                    |> List.filter (fun h -> not (laid.Contains h.Id)))
 
         // A child past its nursery: its rock is borrowed, never the mother's.

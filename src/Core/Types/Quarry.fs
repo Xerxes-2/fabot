@@ -468,29 +468,34 @@ let odds (side: HostileInfo list) (rooted: bool) (now: int) (track: Track) : flo
             | None -> 1.0
             | Some trip -> max 0.0 (1.0 - float age / float trip)
 
-/// The bodies a colony keeps in `rooms` that this tick's glance of them does
-/// not hold (#663, #618): each track not known gone that is the quarry of one
-/// of them (`lastIn`, the room it was last seen in first) — out of sight, or
-/// standing in sight across the border of the room it crossed out of — while
-/// the odds it is still there (`odds`) are above nothing: laid there at its
-/// tile, with the life left it now. A room dark or seen, the room across
-/// dark or seen, alike: a body that crossed out of a room of ours stays the
-/// room's while its trip lasts, so a Task on it holds until it is known gone
-/// or its odds run out. A body standing in one of `rooms` is that room's own
-/// sighting, never laid. Never an ally's nor a Source Keeper, nor an armed
-/// body, which the raid's own memories keep (`World.Raiders` in a dark room,
-/// the exit hold a seen one keeps where it left), nor a healer in a room one
-/// of them holds (`raidHeld`): a lone healer is a trespasser as any body is.
-/// `rooted` is asked of a body at its tile there; `side` is the bodies its
-/// gait is read beside. In id order.
-let ghosts
+/// The rooms whose raid the world remembers (`World.Raiders`, the exit hold,
+/// `World.Healers`): each keeps its healers itself, so a healer there is
+/// none of `remembered`'s.
+let raidHeld (world: World) : Set<string> =
+    Set.unionMany
+        [
+            Map.keys world.Raiders |> Set.ofSeq
+            Map.keys world.ExitWatches |> Set.ofSeq
+            Map.keys world.Healers |> Set.ofSeq
+        ]
+
+/// The bodies the quarry memory keeps in `rooms` that this tick's glance of
+/// them does not hold (#663, #618), whatever their odds: each track not
+/// known gone that is the quarry of one of them (`lastIn`, the room it was
+/// last seen in first) — out of sight, or standing in sight across the
+/// border of the room it crossed out of — with life left: laid there at its
+/// tile, with the life left it now, beside its track. A body standing in
+/// one of `rooms` is that room's own sighting, never laid. Never an ally's
+/// nor a Source Keeper, nor an armed body, which the raid's own memories
+/// keep (`World.Raiders` in a dark room, the exit hold a seen one keeps
+/// where it left), nor a healer in a room one of them holds (`raidHeld`): a
+/// lone healer is a trespasser as any body is. In id order.
+let remembered
     (rooms: Set<string>)
     (raidHeld: string -> bool)
-    (rooted: HostileInfo -> bool)
-    (side: HostileInfo list)
     (now: int)
     (quarries: Map<string, Track>)
-    : HostileInfo list =
+    : (Track * HostileInfo) list =
     rooms
     |> Seq.collect (fun room -> lastIn room quarries)
     |> Seq.filter (fun (track, tile) ->
@@ -506,13 +511,34 @@ let ghosts
 
         let life = track.Body.TicksToLive - (now - track.Seen)
 
-        if life > 0 && odds side (rooted { track.Body with Pos = tile }) now track > 0.0 then
-            Some
+        if life > 0 then
+            Some(
+                track,
                 { track.Body with
                     Pos = tile
                     TicksToLive = life
                 }
+            )
         else
             None)
-    |> Seq.sortBy _.Id
+    |> Seq.sortBy (fun (_, body) -> body.Id)
     |> List.ofSeq
+
+/// The bodies a colony keeps in `rooms` that this tick's glance of them does
+/// not hold (`remembered`) while the odds each is still there (`odds`) are
+/// above nothing. A room dark or seen, the room across dark or seen, alike:
+/// a body that crossed out of a room of ours stays the room's while its trip
+/// lasts, so a Task on it holds until it is known gone or its odds run out.
+/// `rooted` is asked of a body at its tile there; `side` is the bodies its
+/// gait is read beside. In id order.
+let ghosts
+    (rooms: Set<string>)
+    (raidHeld: string -> bool)
+    (rooted: HostileInfo -> bool)
+    (side: HostileInfo list)
+    (now: int)
+    (quarries: Map<string, Track>)
+    : HostileInfo list =
+    remembered rooms raidHeld now quarries
+    |> List.filter (fun (track, body) -> odds side (rooted body) now track > 0.0)
+    |> List.map snd

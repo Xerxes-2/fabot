@@ -1702,6 +1702,22 @@ let private dancerAcrossNorth () : Arena =
             }
         ]
 
+/// The sweep's phase after each of `ticks` arena ticks (1-based), an
+/// observer of ours looking at W12S27 on the ticks `looks` names and on no
+/// other.
+let private phasesUnder (looks: int -> bool) (ticks: int) (a: Arena) : (int * OpPhase option) list =
+    ((a, []), [ 1..ticks ])
+    ||> List.fold (fun (state, phases) k ->
+        let next, _ =
+            { state with
+                Lookout = if looks k then set [ "W12S27" ] else Set.empty
+            }
+            |> run 1
+
+        next, (k, next.Carried.Operations |> List.tryHead |> Option.map _.Phase) :: phases)
+    |> snd
+    |> List.rev
+
 [<Tests>]
 let borderCampTests =
     testList
@@ -1783,6 +1799,126 @@ let borderCampTests =
                     (working.Carried.Operations |> List.choose _.Room)
                     [ "W12S27" ]
                     "committed to the dancer's room"
+            }
+
+            // Live W19S26, t1,061,361-541 (S7c): the sweep flapped execute ->
+            // hold -> execute, `Exhausted` and the re-entering rate reading
+            // its quarry apart. Two ways, both red here before the fix: the
+            // tick the dancer is seen on its exit it read out-healed by no
+            // heal at all (nothing against a share of nothing, t3), and once
+            // out of sight its odds ran out on the clock and the room read
+            // empty with no look finding it so (t103), re-entered on the next
+            // look. Here nothing of ours stands in W12S27 and no group holds
+            // the sweep: an observer looks on the first ticks and at 251
+            // alone, and the dancer is carried across the north exit and back
+            // all along. With no look coming its odds are all the room has
+            // (the fixup's review): the sweep holds once they run out, and
+            // only the look at 251 moves it back.
+            test "a dancer bouncing across the border out of sight never flaps the sweep's phase" {
+                let a = dancerAcrossNorth ()
+
+                let phases =
+                    { a with
+                        Bodies = a.Bodies |> List.filter (fun b -> b.Side <> Side.Ours)
+                    }
+                    |> phasesUnder (fun k -> k <= 3 || k = 251) 300
+
+                let changes =
+                    phases
+                    |> List.pairwise
+                    |> List.filter (fun ((_, before), (_, after)) -> before <> after)
+                    |> List.map (fun (_, (k, phase)) -> k, phase)
+
+                Expect.isTrue
+                    (phases
+                     |> List.forall (fun (k, phase) -> k >= 100 || phase = Some OpPhase.Execute))
+                    $"executing while its odds last, no hold on the tick it is seen on its exit: {phases}"
+
+                Expect.isLessThanOrEqual
+                    (changes |> List.filter (fun (k, _) -> k < 251) |> List.length)
+                    1
+                    $"one hold at most before the look, never back on the next tick: {changes}"
+            }
+
+            // The other side of the rule, with no group: no look is coming,
+            // so the sweep holds as the miner's odds run out, never before,
+            // and a look that finds the room empty keeps it held.
+            test
+                "with no group and no look coming, the sweep holds as its quarry's odds run out, never before, and stays held" {
+                let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+
+                let miner =
+                    body
+                        "miner"
+                        (Side.Player "Trepidimous")
+                        (parts [ Move, 5; Work, 5 ])
+                        (at "W12S27" 14 10)
+                        (Some(GoTo(at "W12S26" 10 47)))
+
+                let a = dancerAcrossNorth ()
+
+                let phases =
+                    { a with Bodies = [ miner ] } |> phasesUnder (fun k -> k <= 3 || k = 250) 260
+
+                let holding =
+                    phases
+                    |> List.filter (fun (_, phase) -> phase = Some OpPhase.Hold)
+                    |> List.map fst
+
+                Expect.isNonEmpty holding $"it holds: {phases}"
+
+                Expect.isGreaterThanOrEqual
+                    (List.min holding)
+                    100
+                    $"not before its odds run out, the miner gone on the quiet: {phases}"
+
+                Expect.isTrue
+                    (phases
+                     |> List.forall (fun (k, phase) ->
+                         k < List.min holding || phase = Some OpPhase.Hold))
+                    $"and held from then on, the look at 250 finding the room empty: {phases}"
+            }
+
+            // The same review: the dancer with a healer across the border
+            // that out-heals the camp, played under the operation. The camp
+            // never pays, so the sweep holds, and never flaps back on a price
+            // its guard refused.
+            test "a dancer its healer keeps from the camp: the sweep holds, and stays held" {
+                let a = dancerAcrossNorth ()
+
+                let healer =
+                    body
+                        "healer"
+                        (Side.Player "Trepidimous")
+                        (parts [ Move, 20; Heal, 20 ])
+                        (RoomPos.at "W12S26" { X = 10; Y = 48 })
+                        (Some Hold)
+
+                // The healer in sight all along, as the camp test above.
+                let healed =
+                    { a with
+                        Bodies = a.Bodies @ [ healer ]
+                        Lookout = set [ "W12S26" ]
+                    }
+
+                let phases =
+                    ((healed, []), [ 1..60 ])
+                    ||> List.fold (fun (state, phases) k ->
+                        let next, _ = run 1 state
+
+                        next,
+                        (k, next.Carried.Operations |> List.tryHead |> Option.map _.Phase)
+                        :: phases)
+                    |> snd
+                    |> List.rev
+
+                let held = phases |> List.skipWhile (fun (_, phase) -> phase <> Some OpPhase.Hold)
+
+                Expect.isNonEmpty held $"it holds: {phases}"
+
+                Expect.isTrue
+                    (held |> List.forall (fun (_, phase) -> phase = Some OpPhase.Hold))
+                    $"and never executes again: {phases}"
             }
 
             // #615, W17S26 replay t1,052,656-685 (our rangers held d4-7 off

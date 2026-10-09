@@ -281,6 +281,102 @@ let operationStepTests =
                     "outpaid on evidence: the other room, committed from now"
             }
 
+            // Live W19S26 after S7c: the hold entered on nothing paying dropped
+            // the room, and the execute after it took the plain argmax.
+            test
+                "execute in a room, hold when nothing pays, execute again: the same room, though another pays a little more one tick" {
+                let executing =
+                    { recordAt OpPhase.Execute 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                    }
+
+                let spent =
+                    { factsAt 50 [ "W1N1", 0.0; "W2N1", 0.0 ] with
+                        Holds = fun _ -> Truth.No
+                        Loses = fun _ -> Truth.No
+                    }
+
+                let held = Operations.advance spent sweep (Some executing) |> fst
+
+                Expect.equal
+                    (held |> Option.map (fun r -> r.Phase, r.Room, r.RoomSince))
+                    (Some(OpPhase.Hold, Some "W1N1", 20))
+                    "the hold keeps the room and its commitment"
+
+                // W1N1 pays again; W2N1 a little more on bodies seen there
+                // once: no evidence it outpays.
+                let back =
+                    { factsAt 60 [ "W1N1", 1.0; "W2N1", 1.1 ] with
+                        Holds = fun _ -> Truth.Yes
+                        Loses = fun _ -> Truth.No
+                        Challenge = fun room -> if room = "W2N1" then Some 0.0 else Some 1.0
+                    }
+
+                Expect.equal
+                    (Operations.advance back sweep held
+                     |> fst
+                     |> Option.map (fun r -> r.Phase, r.Room, r.RoomSince))
+                    (Some(OpPhase.Execute, Some "W1N1", 20))
+                    "back to the room it was committed to"
+
+                // Exhausted with another paying: the hold's room moves on.
+                let elsewhere =
+                    { factsAt 50 [ "W1N1", 0.0; "W2N1", 1.0 ] with
+                        Holds = fun room -> if room = "W1N1" then Truth.No else Truth.Yes
+                        Loses = fun _ -> Truth.No
+                    }
+
+                Expect.equal
+                    (Operations.advance elsewhere sweep (Some executing)
+                     |> fst
+                     |> Option.map (fun r -> r.Phase, r.Room, r.RoomSince))
+                    (Some(OpPhase.Execute, Some "W2N1", 50))
+                    "exhausted, another paying: that room, committed from now"
+            }
+
+            // The S7c fix's review: above, W2N1's challenge is its rate, so
+            // `Outpaid` takes the room. Live, an exhausted room's successor
+            // often has no body seen on two full ticks (challenge nothing)
+            // while its plain rate pays: the exhausted branch of the entry.
+            test
+                "exhausted, another paying on its rate though on no evidence: that room, committed from now" {
+                let executing =
+                    { recordAt OpPhase.Execute 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                    }
+
+                let spent =
+                    { factsAt 50 [ "W1N1", 0.0; "W2N1", 1.0 ] with
+                        Holds = fun room -> if room = "W1N1" then Truth.No else Truth.Yes
+                        Loses = fun _ -> Truth.No
+                        Challenge = fun _ -> Some 0.0
+                    }
+
+                Expect.equal
+                    (Operations.truth spent sweep executing OpGuard.Outpaid)
+                    Truth.No
+                    "the premise: nothing outpays it on evidence"
+
+                Expect.equal
+                    (Operations.advance spent sweep (Some executing)
+                     |> fst
+                     |> Option.map (fun r -> r.Phase, r.Room, r.RoomSince))
+                    (Some(OpPhase.Execute, Some "W2N1", 50))
+                    "the room moves on its exhaustion"
+
+                // From a hold, the same: the room it kept is spent, W2N1 pays.
+                let holding = { executing with Phase = OpPhase.Hold }
+
+                Expect.equal
+                    (Operations.advance spent sweep (Some holding)
+                     |> fst
+                     |> Option.map (fun r -> r.Phase, r.Room, r.RoomSince))
+                    (Some(OpPhase.Execute, Some "W2N1", 50))
+                    "out of the hold into W2N1"
+            }
+
             test "Unknown never transitions, and hides the exits after it" {
                 let spec =
                     withExits

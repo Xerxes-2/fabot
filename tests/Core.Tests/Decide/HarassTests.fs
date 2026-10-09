@@ -1805,6 +1805,159 @@ let sweepRoomTests =
                     Truth.Yes
                     "seen there on two full ticks: they outpay it"
             }
+
+            // The review of the S7c phase fix: the body out of sight past its
+            // odds was counted by its owner alone, so one the group cannot
+            // kill (out-healing it) held the room once its ghost was gone —
+            // `Exhausted` flipped on the clock. A body out of sight is judged
+            // as one in sight, whatever its odds; one the group kills holds
+            // the room until a look or its death finds it gone.
+            test
+                "a body out of sight is the room's quarry by the rule a seen one is, before and after its odds run out" {
+                let holder = ranger "ranger-r"
+                let home = SpatialInfo.homeName bareHome.Spatial
+                let held = Map.ofList [ holder.Name, taskId (operating harassRoom) ]
+                let seen = 100
+
+                // A self-healer the one-block ranger never kills, and a miner
+                // it does: neither armed.
+                let mender =
+                    theirsIn
+                        harassRoom
+                        "mender"
+                        { X = 20; Y = 20 }
+                        (List.replicate 5 Move @ List.replicate 5 Heal)
+
+                let miner = theirsIn harassRoom "miner-n" { X = 20; Y = 20 } [ Work; Work; Move ]
+
+                let spec =
+                    Operation.Templates.sweep
+                        "sweep"
+                        enemy
+                        [ harassRoom; westRoom ]
+                        {
+                            MaxBodies = 6
+                            MaxEnergy = System.Int32.MaxValue
+                            Deadline = System.Int32.MaxValue
+                            MaxLossRatio = 1.0
+                        }
+
+                let committed =
+                    {
+                        Id = "sweep"
+                        Started = seen
+                        Phase = OpPhase.Execute
+                        Since = seen
+                        Room = Some harassRoom
+                        RoomSince = seen
+                        Spent = 0
+                        Lost = 0
+                        NextDue = 0
+                        Ended = None
+                    }
+
+                // The colony at `now` remembering `body` last seen at `seen`,
+                // laid as a ghost while the shell would lay one
+                // (`Quarry.ghosts`: its odds above nothing).
+                let viewWith (others: HostileInfo list) (now: int) (body: HostileInfo) =
+                    let remembered =
+                        { sweeping [ holder, RoomPos.at home { X = 25; Y = 5 } ] others with
+                            Time = now
+                        }
+                        |> remembering seen [ body ]
+
+                    let ghost =
+                        Quarry.ghosts
+                            (set [ harassRoom ])
+                            (fun _ -> false)
+                            (fun _ -> false)
+                            remembered.Hostiles
+                            now
+                            remembered.World.Quarries
+
+                    if List.isEmpty ghost then
+                        { remembered with
+                            Hostiles = others
+                            RecalledRaiders = []
+                        }
+                    else
+                        remembered
+
+                let viewAt = viewWith []
+
+                let factsOf (held: Assignments) (record: OpRecord) (view: ColonyView) =
+                    let group =
+                        Operations.groupIn
+                            Colony.sweepId
+                            (set [ harassRoom; westRoom ])
+                            held
+                            [ view ]
+
+                    Operations.ownFacts
+                        view.Time
+                        (fun _ -> true)
+                        spec
+                        (Some record)
+                        (fun _ -> [ view ])
+                        group
+                        [ view ]
+
+                let exhausted (view: ColonyView) =
+                    Operations.truth (factsOf held committed view) spec committed OpGuard.Exhausted
+
+                let soon = viewAt (seen + 1) mender
+                let late = viewAt (seen + 1000) mender
+
+                Expect.equal
+                    (soon.Hostiles |> List.map _.Id, late.Hostiles |> List.map _.Id)
+                    ([ "mender" ], [])
+                    "the premise: a ghost a tick on, none once its odds ran out"
+
+                Expect.equal (exhausted soon) Truth.Yes "a ghost the group never kills: exhausted"
+
+                Expect.equal
+                    (exhausted late)
+                    Truth.Yes
+                    "and still, its ghost gone: no flip on the clock"
+
+                Expect.equal
+                    (exhausted (viewAt (seen + 1) miner))
+                    Truth.No
+                    "a miner it kills holds the room"
+
+                Expect.equal
+                    (exhausted (viewAt (seen + 1000) miner))
+                    Truth.No
+                    "and holds it out of sight past its odds while its group walks in: no look found it gone"
+
+                // The fixup's review: with no group no look is coming (a body
+                // past its odds is priced at nothing, and no cast walks in for
+                // it), so its odds are all the room has. The operation never
+                // sits in a room paying nothing, nor re-enters it on another
+                // room's price. The west room pays on a miner seen once.
+                let advanced (record: OpRecord) (view: ColonyView) =
+                    Operations.advance (factsOf Map.empty record view) spec (Some record)
+                    |> fst
+                    |> Option.map (fun r -> r.Phase, r.Room)
+
+                let westMiner = theirsIn westRoom "miner-w" { X = 20; Y = 20 } [ Work; Work; Move ]
+                let elsewhere = viewWith [ westMiner ] (seen + 1000) miner
+
+                Expect.equal
+                    (advanced committed (viewAt (seen + 1000) miner))
+                    (Some(OpPhase.Hold, Some harassRoom))
+                    "no group, nothing else paying: it holds, the room kept"
+
+                Expect.equal
+                    (advanced committed elsewhere)
+                    (Some(OpPhase.Execute, Some westRoom))
+                    "no group, the west room paying: it moves there"
+
+                Expect.equal
+                    (advanced { committed with Phase = OpPhase.Hold } elsewhere)
+                    (Some(OpPhase.Execute, Some westRoom))
+                    "out of a hold on the west room's price: into the west room"
+            }
         ]
 
 [<Tests>]
@@ -2785,6 +2938,154 @@ let catchableFirstTests =
                     (Emitter.forces inRoom threats (Map.ofList [ holder.Name, Guard harassRoom ]))
                     (Map.ofList [ holder.Name, JobForce.Covers(camp.Tiles, Fighter.reachOf holder) ])
                     "the camp's holder covers its reach of the camp"
+            }
+
+            // The review of the S7c phase fix: `outHealsCamp` read nothing
+            // against a share of nothing as out-healed (`0 >= 0`), so a
+            // dancer never watched in our reach was denied nothing in every
+            // price of its room (`stopsWorking`) and held no quarry. A heal
+            // undoes a camp only where one reaches it. Each case below reads
+            // the denial off its owner's flee share: with none, the room
+            // denies the dancer's take nothing.
+            test
+                "a dancer no heal reaches is never out-healed: its take is denied, its room holds it; a heal reaching its crossing undoes the camp" {
+                let start = stepping { X = 5; Y = 20 } [] [] []
+
+                // Out over the west border on its one crossing since it was
+                // watched: in our reach none of its watched time.
+                let across (healers: HostileInfo list) (flees: float) =
+                    { start with
+                        Hostiles =
+                            { bigHauler "dancer" { X = 0; Y = 20 } with
+                                Pos = RoomPos.at "W2N2" { X = 49; Y = 20 }
+                            }
+                            :: healers
+                        Bounces =
+                            Map.ofList
+                                [
+                                    "dancer",
+                                    {
+                                        Came = RoomPos.at harassRoom { X = 0; Y = 20 }
+                                        Ticks = [ start.Time - 2 ]
+                                        Tiles =
+                                            [
+                                                RoomPos.at "W2N2" { X = 49; Y = 20 }
+                                                RoomPos.at harassRoom { X = 0; Y = 20 }
+                                            ]
+                                    }
+                                ]
+                        World =
+                            { start.World with
+                                Flees = Map.ofList [ enemy, flees ]
+                            }
+                    }
+
+                let medic = creepWith "medic" 0 0 [ Heal; Heal; Move; Move ]
+                let ranged = Fighter.ofCreep bigRanger
+
+                let healerAt (x: int) =
+                    { theirsIn
+                          "W2N2"
+                          "healer"
+                          { X = x; Y = 20 }
+                          (List.replicate 5 Heal @ List.replicate 5 Move) with
+                        Pos = RoomPos.at "W2N2" { X = x; Y = 20 }
+                    }
+
+                let rate team healers flees =
+                    Facts.roomRate Quarry.Reading.Value (across healers flees) team 0 0 harassRoom
+
+                // No heal at all; a healer four tiles off the tile it crosses
+                // to, past a ranged heal's reach; and a team whose first body
+                // deals nothing: none out-healed.
+                for name, team, healers in
+                    [
+                        "no heal", [ ranged ], []
+                        "a healer past ranged reach of its crossing", [ ranged ], [ healerAt 45 ]
+                        "a medic first in the team", [ Fighter.ofCreep medic; ranged ], []
+                    ] do
+                    Expect.isGreaterThan
+                        (rate team healers 1.0)
+                        (rate team healers 0.0)
+                        $"{name}: its take denied at its owner's flee share"
+
+                    Expect.isTrue
+                        (Facts.holdsQuarry (across healers 1.0) harassRoom team false)
+                        $"{name}: the room holds it"
+
+                // A healer beside its crossing: the heal it takes out undoes
+                // what lands while it is in, none of its time.
+                Expect.equal
+                    (rate [ ranged ] [ healerAt 48 ] 1.0)
+                    (rate [ ranged ] [ healerAt 48 ] 0.0)
+                    "a heal reaching its crossing: denied nothing"
+
+                Expect.isFalse
+                    (Facts.holdsQuarry (across [ healerAt 48 ] 1.0) harassRoom [ ranged ] false)
+                    "and the room holds no quarry in it"
+            }
+
+            // The same review: out-healed read the team's first body alone,
+            // where the camp lands while any body's does (`campChance`).
+            test "a dancer is out-healed only where every body of the team is, whatever their order" {
+                let start = stepping { X = 3; Y = 20 } [] [] []
+
+                // In off the west border on its latest crossing, out on the
+                // one before: half its watched time in; a 2-HEAL healer of
+                // its owner beside the tile it crosses to, 24 a tick.
+                let dancing =
+                    { start with
+                        Hostiles =
+                            [
+                                bigHauler "dancer" { X = 0; Y = 20 }
+                                { theirsIn
+                                      "W2N2"
+                                      "healer"
+                                      { X = 48; Y = 20 }
+                                      [ Heal; Heal; Move; Move ] with
+                                    Pos = RoomPos.at "W2N2" { X = 48; Y = 20 }
+                                }
+                            ]
+                        Bounces =
+                            Map.ofList
+                                [
+                                    "dancer",
+                                    {
+                                        Came = RoomPos.at "W2N2" { X = 48; Y = 20 }
+                                        Ticks = [ start.Time - 2; start.Time - 4 ]
+                                        Tiles =
+                                            [
+                                                RoomPos.at "W2N2" { X = 49; Y = 20 }
+                                                RoomPos.at harassRoom { X = 0; Y = 20 }
+                                            ]
+                                    }
+                                ]
+                    }
+
+                let medic = Fighter.ofCreep (creepWith "medic" 0 0 [ Heal; Heal; Move; Move ])
+                let ranged = Fighter.ofCreep bigRanger
+
+                Expect.isTrue
+                    (Facts.holdsQuarry dancing harassRoom [ ranged ] false)
+                    "the premise: the ranger's camp out-lands the heal"
+
+                Expect.isTrue
+                    (Facts.holdsQuarry dancing harassRoom [ medic; ranged ] false)
+                    "a medic first changes nothing: the ranger's camp still lands"
+
+                // The room's rate alike: the catch is the best body's and the
+                // denial the team's, so the medic first (its camp out-healed,
+                // its catch none) no longer prices the dancer at nothing.
+                let rate team =
+                    Facts.roomRate Quarry.Reading.Value dancing team 0 0 harassRoom
+
+                Expect.isGreaterThan (rate [ ranged ]) 0.0 "the premise: the room pays the ranger"
+
+                Expect.floatClose
+                    Accuracy.high
+                    (rate [ medic; ranged ])
+                    (rate [ ranged; medic ])
+                    "the team's rate, whatever its order"
             }
         ]
 
