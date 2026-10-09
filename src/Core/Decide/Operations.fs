@@ -1124,10 +1124,10 @@ type private ExitRead =
         /// Its landing tiles by use (`ExitCamp.Entries`); none known, the
         /// landing tiles at one each.
         Entries: (Pos * int) list
-        /// The armed bodies that may come out (`Facts.exitLanders`); and
+        /// The bodies that may land, each with its odds (`Facts.exitLanders`); and
         /// whether the home has been seen since the heap's reset, which they
         /// are known by.
-        Landers: HostileInfo list
+        Landers: (HostileInfo * float) list
         Warm: bool
         /// Its camp priced (`Facts.exitCampPrice`); None with no view.
         Price: Lazy<Facts.ExitCampPrice option>
@@ -1277,7 +1277,17 @@ let private exitReads
 
         let landers =
             view
-            |> Option.map (fun view -> Facts.exitLanders view spec.Enemy exit.Home)
+            |> Option.map (fun view ->
+                Facts.exitLanders
+                    view
+                    spec.Enemy
+                    exit.Home
+                    exit.Camp
+                    landing
+                    arrivals
+                    watched
+                    (record |> Option.filter (fun _ -> running) |> Option.map _.Started)
+                    left)
             |> Option.defaultValue []
 
         let warm =
@@ -1351,7 +1361,9 @@ let private exitPays (read: ExitRead) : Truth =
                 Truth.No
 
 /// Whether an exit's camp loses its exchange (`OpGuard.ExchangeLoses`): its
-/// body, or its group, against the armed bodies that may come out, at an
+/// body, or its group, against the bodies landing at odds 1
+/// (`Facts.exitLanders`: one seen at the exits, or whose shape landed in
+/// the run; the rest are priced as its expected loss), at an
 /// exit prey uses or one its group stands at; at any other, no. Unknown
 /// while the home has not been seen since the heap's reset (what may come
 /// out is not known), while whether prey uses an exit no group stands at
@@ -1452,7 +1464,7 @@ let private readingOf (read: ExitRead) : ExitReading =
             else
                 None
         Loses = exitLoses read
-        Landers = read.Landers
+        Landers = read.Landers |> List.map fst
     }
 
 /// A body by its parts, most first, each count and the part's letter
@@ -1583,7 +1595,7 @@ let private layCamp
                                 {
                                     Home = read.Exit.Home
                                     Entries = read.Entries
-                                    Landers = read.Landers
+                                    Landers = read.Landers |> List.map fst
                                     Template = price.Template
                                     Blocks = price.Blocks
                                     Tile = price.Tile

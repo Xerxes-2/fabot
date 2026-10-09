@@ -4451,24 +4451,39 @@ let exitCampTests =
                     "one landing is a sighting, no return: not begun"
             }
 
-            test "ExchangeLoses vetoes it: what may come out beats every body the bank buys" {
+            test
+                "ExchangeLoses vetoes it: the pair standing at the exit beats every body the bank buys" {
                 let _, _, events = campLaid (camped 3200 10 100 false true [])
 
                 Expect.isNonEmpty
                     events
                     "the premise: the same crossings with nothing armed inside start it"
 
+                let colony = camped 3200 10 100 false true [ fuse; kinematic ]
+
                 let _, records, events =
-                    campLaid (camped 3200 10 100 false true [ fuse; kinematic ])
+                    campLaid
+                        { colony with
+                            Hostiles =
+                                colony.Hostiles
+                                @ [
+                                    { fuse with
+                                        Pos = RoomPos.at rivalHome { X = 25; Y = 49 }
+                                    }
+                                    { kinematic with
+                                        Pos = RoomPos.at rivalHome { X = 26; Y = 49 }
+                                    }
+                                ]
+                        }
 
                 Expect.equal
                     (records, events)
                     ([], [])
-                    "Fuse's 510 a tick beside Kinematic's heal outlast a 4-block swing and out-heal a ranger: not begun"
+                    "on the home's exit tiles across the border, the pair lands at odds 1, outlasts a 4-block swing and out-heals a ranger: not begun"
 
                 // The exchange is what vetoes it: priced alike, it loses only
                 // against the pair landed on the exit.
-                let priced (landers: HostileInfo list) =
+                let priced (landers: (HostileInfo * float) list) =
                     Facts.exitCampPrice
                         (camped 3200 10 100 false true [])
                         harassRoom
@@ -4481,9 +4496,254 @@ let exitCampTests =
                         []
 
                 Expect.equal
-                    ((priced [ fuse; kinematic ]).Loses, (priced []).Loses)
+                    ((priced [ fuse, 1.0; kinematic, 1.0 ]).Loses, (priced []).Loses)
                     (true, false)
                     "lost against the pair, won with nothing armed to come out"
+            }
+
+            // The user, 2026-10-10: "这个近战现在从不出门，治疗兵也从不治疗别的creep" —
+            // the threat is each body at the odds it lands, read from what
+            // it has done, never from its presence in the home.
+            test
+                "a home guard never seen to land over a window's watch is an expected loss at its odds, not a veto" {
+                let colony = camped 3200 40 ExitTraffic.window false true [ fuse; kinematic ]
+                let now = colony.Time
+                let landing = [ for x in 24..26 -> { X = x; Y = 0 } ]
+
+                let landersOver (span: int) =
+                    Facts.exitLanders
+                        colony
+                        enemy
+                        rivalHome
+                        harassRoom
+                        landing
+                        colony.World.Traffic.[ExitTraffic.key rivalHome harassRoom].Arrivals
+                        [ for back in 1 .. ExitTraffic.window -> now - back ]
+                        None
+                        span
+
+                let oddsOf (landers: (HostileInfo * float) list) =
+                    landers |> List.map (fun (h, odds) -> h.Id, round (odds * 100.0)) |> List.sort
+
+                // No landing over 1,500 ticks watched: 1 − 2^(−½) ≈ 29% within
+                // a window's span.
+                Expect.equal
+                    (oddsOf (landersOver ExitTraffic.window))
+                    [ "Fuse5564", 29.0; "Kinematic5669", 29.0 ]
+                    "a window watched with no landing: each at its odds, never landed for being home"
+
+                Expect.equal
+                    (oddsOf (landersOver 100))
+                    [ "Fuse5564", 3.0; "Kinematic5669", 3.0 ]
+                    "within a run's last hundred ticks, about 3%"
+
+                let log = colony.World.Traffic.[ExitTraffic.key rivalHome harassRoom]
+
+                let priced (landers: (HostileInfo * float) list) =
+                    Facts.exitCampPrice
+                        colony
+                        harassRoom
+                        [ { X = 24; Y = 0 }, 1; { X = 25; Y = 0 }, 41; { X = 26; Y = 0 }, 1 ]
+                        log.Arrivals
+                        log.Watched
+                        landers
+                        ExitTraffic.window
+                        (fun _ -> 0.0)
+                        []
+
+                let alone = priced []
+                let price = priced (landersOver ExitTraffic.window)
+
+                Expect.equal
+                    (price.Template, price.Blocks, price.Tile, price.Loses)
+                    (BodyTemplate.Melee, 4, Some { X = 25; Y = 1 }, false)
+                    "the chooser's 4-block swing a step in still: a ranger out of Fuse's swing gets away from it, but kills no miner walking off its reach"
+
+                // The swing neither beats Fuse landed whole nor outwalks it
+                // (both a tile a tick, the swing in Fuse's swing on its
+                // landing): its 3,000 energy at Fuse's 29%.
+                Expect.floatClose
+                    Accuracy.medium
+                    price.Loss
+                    (3000.0 * (1.0 - 2.0 ** -0.5))
+                    "its expected loss: its cost at the odds Fuse lands"
+
+                Expect.floatClose
+                    Accuracy.medium
+                    price.Net
+                    (alone.Net - price.Loss)
+                    "netted after it"
+
+                let _, _, events = campLaid colony
+
+                Expect.equal
+                    events
+                    [ OpEvent.Began("camp", OpPhase.Muster, None) ]
+                    "forty miners a window pay the expected loss many times over: begun"
+            }
+
+            test
+                "a sally answering a camp raises the next run's priced risk, its guard a new body or not" {
+                let colony = camped 3200 10 ExitTraffic.window false true [ fuse; kinematic ]
+                let now = colony.Time
+                let key = ExitTraffic.key rivalHome harassRoom
+                let landing' = [ for x in 24..26 -> { X = x; Y = 0 } ]
+
+                // The pair that answered the last run, since dead: Fuse's and
+                // Kinematic's shapes under other ids.
+                let sally =
+                    [
+                        now - 400,
+                        { fuse with
+                            Id = "Fuse4021"
+                            Pos = RoomPos.at harassRoom { X = 25; Y = 0 }
+                        }
+                        now - 400,
+                        { kinematic with
+                            Id = "Kinematic4022"
+                            Pos = RoomPos.at harassRoom { X = 26; Y = 0 }
+                        }
+                    ]
+
+                let answered = colony |> landing (sally @ colony.World.Traffic.[key].Arrivals)
+
+                let landersIn (view: ColonyView) =
+                    Facts.exitLanders
+                        view
+                        enemy
+                        rivalHome
+                        harassRoom
+                        landing'
+                        view.World.Traffic.[key].Arrivals
+                        view.World.Traffic.[key].Watched
+                        None
+                        ExitTraffic.window
+
+                Expect.equal
+                    (landersIn answered
+                     |> List.map (fun (h, odds) -> h.Id, round (odds * 100.0))
+                     |> List.sort)
+                    [ "Fuse5564", 65.0; "Kinematic5669", 65.0 ]
+                    "one landing of their shapes over the window: 1 − 2^(−1.5) ≈ 65%, the new Fuse carrying the old one's answer"
+
+                // A 4-block swing standing a step in prices what it expects to
+                // lose: its energy at the odds the pair lands, for it neither
+                // beats Fuse nor outwalks it.
+                let swing =
+                    creepWith
+                        "guard-camp"
+                        0
+                        0
+                        (List.replicate 4 Bodies.guardPattern.Block |> List.concat)
+
+                let lossIn (view: ColonyView) =
+                    let log = view.World.Traffic.[key]
+
+                    (Facts.exitCampPrice
+                        view
+                        harassRoom
+                        [ { X = 24; Y = 0 }, 1; { X = 25; Y = 0 }, 41; { X = 26; Y = 0 }, 1 ]
+                        log.Arrivals
+                        log.Watched
+                        (landersIn view)
+                        ExitTraffic.window
+                        (fun _ -> 0.0)
+                        [ swing, RoomPos.at harassRoom { X = 25; Y = 1 } ])
+                        .Loss
+
+                Expect.floatClose
+                    Accuracy.medium
+                    (lossIn answered / lossIn colony)
+                    ((1.0 - 2.0 ** -1.5) / (1.0 - 2.0 ** -0.5))
+                    "the answer raises the swing's expected loss from 29% of its cost to 65%"
+
+                // A shot three in, out of Fuse's swing at its pace, gets away.
+                let shot =
+                    creepWith
+                        "ranger-camp"
+                        0
+                        0
+                        (List.replicate 3 Bodies.rangerPattern.Block |> List.concat)
+
+                let log = answered.World.Traffic.[key]
+
+                let shotPrice =
+                    Facts.exitCampPrice
+                        answered
+                        harassRoom
+                        [ { X = 24; Y = 0 }, 1; { X = 25; Y = 0 }, 11; { X = 26; Y = 0 }, 1 ]
+                        log.Arrivals
+                        log.Watched
+                        (landersIn answered)
+                        ExitTraffic.window
+                        (fun _ -> 0.0)
+                        [ shot, RoomPos.at harassRoom { X = 25; Y = 3 } ]
+
+                Expect.equal
+                    (shotPrice.Tile, shotPrice.Loss)
+                    (Some { X = 23; Y = 2 }, 0.0)
+                    "a ranger's tile out of Fuse's swing of every entry, at its pace: it gets away, losing nothing"
+
+                let _, _, events = campLaid colony
+
+                Expect.equal
+                    events
+                    [ OpEvent.Began("camp", OpPhase.Muster, None) ]
+                    "ten miners a window pay a swing at 29%: begun"
+
+                let _, records, events = campLaid answered
+
+                Expect.equal
+                    (records, events)
+                    ([], [])
+                    "at 65% they do not: the home that answered the last camp keeps the next one off"
+
+                let shuttling =
+                    Facts.exitLanders
+                        colony
+                        enemy
+                        rivalHome
+                        harassRoom
+                        [ for x in 24..26 -> { X = x; Y = 0 } ]
+                        [ for trip in 1..10 -> now - 100 * trip, fuse ]
+                        colony.World.Traffic.[key].Watched
+                        None
+                        ExitTraffic.window
+
+                Expect.isGreaterThan
+                    (shuttling |> List.find (fun (h, _) -> h.Id = "Fuse5564") |> snd)
+                    0.999
+                    "a body shuttling out ten times a window counts in full"
+            }
+
+            test "in its run, the pair seen stepping onto the exit is landed: Retreat" {
+                let colony = camped 3200 40 ExitTraffic.window false true [ fuse; kinematic ]
+                let now = colony.Time
+
+                let _, _, events = campRun (campRunning (now - 50)) colony
+
+                Expect.isEmpty events "the premise: the pair at home, the run goes on"
+
+                let sallied =
+                    { colony with
+                        Hostiles =
+                            colony.Hostiles
+                            @ [
+                                { fuse with
+                                    Pos = RoomPos.at harassRoom { X = 25; Y = 0 }
+                                }
+                                { kinematic with
+                                    Pos = RoomPos.at harassRoom { X = 26; Y = 0 }
+                                }
+                            ]
+                    }
+
+                let _, _, events = campRun (campRunning (now - 50)) sallied
+
+                Expect.equal
+                    events
+                    [ OpEvent.Moved("camp", OpPhase.Execute, OpPhase.Retreat, 0, None, None) ]
+                    "seen on the exit, the pair lands at odds 1 and beats the swing: Retreat"
             }
 
             test
@@ -4638,24 +4898,48 @@ let exitCampTests =
                     $"{harassRoom}: no arrivals in 100 ticks watched"
                     "nobody crossed"
 
-                // The body that beats the pair inside earns nothing there:
-                // what holds it is the price, read with its two sides.
-                let unpaid = readingOf (camped 3200 10 100 false true [ fuse; kinematic ])
+                // The pair inside, never seen to land, is a chance priced as
+                // the camp's expected loss: what may come out, not a veto.
+                let athome = readingOf (camped 3200 10 100 false true [ fuse; kinematic ])
 
-                Expect.equal unpaid.Idle $"{harassRoom}: pays 0 against 700" "it does not pay"
+                Expect.equal athome.Idle "" "the pair at home priced, the camp begins"
 
                 Expect.equal
-                    (unpaid.Exits
+                    (athome.Exits
                      |> List.map (fun e -> e.Used, e.Pays, e.Loses, e.Landers |> List.map _.Id))
-                    [ Truth.Yes, Truth.No, Truth.No, [ fuse.Id ] ]
-                    "prey uses it; the exchange won; Fuse what may come out"
+                    [ Truth.Yes, Truth.Yes, Truth.No, [ fuse.Id; kinematic.Id ] ]
+                    "prey uses it; it pays past its loss; the pair what may come out"
 
-                let losing = readingOf (camped 550 10 100 false true [ fuse; kinematic ])
+                // A bank that buys nothing to camp with: what holds it is the
+                // price, read with its two sides.
+                let unpaid = readingOf (camped 550 10 100 false true [ fuse; kinematic ])
+
+                Expect.equal unpaid.Idle $"{harassRoom}: pays 0 against 0" "it does not pay"
+
+                // The pair standing at the exit is landed: the exchange lost,
+                // and to what.
+                let atExit =
+                    [
+                        { fuse with
+                            Pos = RoomPos.at harassRoom { X = 25; Y = 0 }
+                        }
+                        { kinematic with
+                            Pos = RoomPos.at harassRoom { X = 26; Y = 0 }
+                        }
+                    ]
+
+                let losing =
+                    let colony = camped 3200 10 100 false true [ fuse; kinematic ]
+
+                    readingOf
+                        { colony with
+                            Hostiles = colony.Hostiles @ atExit
+                        }
 
                 Expect.stringContains
                     losing.Idle
                     $"{harassRoom}: loses to 18M17A"
-                    "a bank that buys nothing beating Fuse: the exchange lost, and to what"
+                    "no body the bank buys beats the pair at the exit: the exchange lost, and to what"
 
                 let running = readingOf (camped 3200 10 100 false true [])
                 Expect.equal running.Idle "" "begun: nothing holds it"

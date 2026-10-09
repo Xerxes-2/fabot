@@ -6002,22 +6002,118 @@ let groupLoses (view: ColonyView) (group: (CreepInfo * RoomPos) list) (room: str
 
 // ---- the exit camp (#663 S7d) -----------------------------------------------
 
-/// The armed bodies that may come out of a rival home through its exits
-/// (#663 S7d): every body of `enemy` the quarry memory keeps in the home,
-/// in sight or out of it, not known gone and its life not run out, that
-/// fights. What an exit camp's exchange is priced against, and what a
-/// tile's depth risks (`campRisk`).
-let exitLanders (view: ColonyView) (enemy: string) (home: string) : HostileInfo list =
-    view.World.Quarries
-    |> Map.toList
-    |> List.map snd
-    |> List.filter (fun track ->
-        track.Body.Pos.Room = home
-        && track.Body.Owner = enemy
-        && track.Gone.IsNone
-        && (track.Body.TicksToLive < 1 || track.Seen + track.Body.TicksToLive > view.Time)
-        && HostileInfo.armed [ track.Body ] track.Body)
-    |> List.map _.Body
+/// The bodies that may land on an exit camp's tiles within its span
+/// (#663 S7d), each whole with its odds of landing there, read from what it
+/// has done and never from its presence in the home: what the camp's
+/// exchange, its expected loss and its tiles' risk (`campRisk`) are priced
+/// against, one list. Of `enemy`, armed or healing: each the quarry memory
+/// keeps in the home, in sight or out of it, not known gone and its life
+/// not run out; and each standing on a `landing` tile of `camp` or beside
+/// one, either side of the border.
+///
+/// A body seen at the exits, or whose shape landed since the run began
+/// (`run`, its start), lands: odds 1. Else its odds within `span` are the
+/// prey's 1 − e^(−rate·span) (`tileRate`) over the rates the landings of
+/// its shape on these exits over the ticks `watched` leave possible: a
+/// shape landing often counts in full, one never seen to land at what its
+/// time watched with none bounds — a home guard's odds falling as the watch
+/// grows, never 1 for being home. By shape (its parts and boosts), not by
+/// id: a home answers a camp with its guard, and the guard it spawns next
+/// carries the answer the last one gave. Nothing watched, nothing is known:
+/// odds 1. A healer heals beside the bodies it lands with (those landing on
+/// a tick it lands on; never seen to land, any): its odds at most theirs,
+/// and none with no armed body to land with.
+let exitLanders
+    (view: ColonyView)
+    (enemy: string)
+    (home: string)
+    (camp: string)
+    (landing: Pos list)
+    (arrivals: (int * HostileInfo) list)
+    (watched: int list)
+    (run: int option)
+    (span: int)
+    : (HostileInfo * float) list =
+    let fights (h: HostileInfo) =
+        HostileInfo.armed [ h ] h || HostileInfo.heals [ h ] h
+
+    let exits = landing |> List.map (RoomPos.at camp)
+
+    let atExits =
+        view.Hostiles
+        |> List.filter (fun h ->
+            h.Owner = enemy
+            && fights h
+            && exits
+               |> List.exists (fun tile ->
+                   RoomName.tileRange tile h.Pos
+                   |> Option.exists (fun r -> r <= Engine.meleeRange)))
+
+    let seen = atExits |> List.map _.Id |> Set.ofList
+
+    let inHome =
+        view.World.Quarries
+        |> Map.toList
+        |> List.map snd
+        |> List.filter (fun track ->
+            track.Body.Pos.Room = home
+            && track.Body.Owner = enemy
+            && not (seen.Contains track.Body.Id)
+            && track.Gone.IsNone
+            && (track.Body.TicksToLive < 1 || track.Seen + track.Body.TicksToLive > view.Time)
+            && fights track.Body)
+        |> List.map _.Body
+
+    let ticks = List.length watched
+
+    // The ticks its shape landed on: one tick once, however many landed.
+    let landingsOf (h: HostileInfo) =
+        arrivals
+        |> List.filter (fun (_, a) -> a.Body = h.Body && a.Boosts = h.Boosts)
+        |> List.map fst
+        |> List.distinct
+
+    let ownOdds (h: HostileInfo) =
+        let landings = landingsOf h
+
+        if
+            ticks = 0
+            || seen.Contains h.Id
+            || run
+               |> Option.exists (fun started ->
+                   landings |> List.exists (fun tick -> tick >= started))
+        then
+            1.0
+        else
+            // The prey's 1 − e^(−rate·span) over every rate its landings
+            // over the ticks watched leave possible (Gamma posterior under
+            // Jeffreys' prior, half a landing: the watch alone speaks).
+            let landed = float (List.length landings) + 0.5
+            1.0 - (1.0 + float (max 0 span) / float ticks) ** -landed
+
+    let bodies = atExits @ inHome
+    let armed = bodies |> List.filter (fun h -> HostileInfo.armed [ h ] h)
+
+    let oddsOf (h: HostileInfo) =
+        if HostileInfo.armed [ h ] h then
+            ownOdds h
+        else
+            let landings = landingsOf h |> Set.ofList
+
+            let partners =
+                match
+                    armed |> List.filter (fun a -> landingsOf a |> List.exists landings.Contains)
+                with
+                | [] -> armed
+                | beside -> beside
+
+            match partners with
+            | [] -> 0.0
+            | partners -> min (ownOdds h) (partners |> List.map ownOdds |> List.max)
+
+    bodies
+    |> List.map (fun h -> h, oddsOf h)
+    |> List.filter (fun (_, odds) -> odds > 0.0)
 
 /// A view of a camp's room with every lander standing on one of its entries
 /// (#663 S7d), the most used first, in turn: what may come out, come out.
@@ -6179,13 +6275,14 @@ let private campTraffic
 
 /// One tile of a camp's ground for a reach (#663 S7d), read once for every
 /// body of that reach: its cover of the entries, the landers' blow there on
-/// landing (`campRisk`), its distance to the most used entry, and each body
-/// seen with the ticks it stands in reach landing (`campStrikes`).
+/// landing (`campRisk`, each lander's at its odds), its distance to the most
+/// used entry, and each body seen with the ticks it stands in reach landing
+/// (`campStrikes`).
 type private CampTile =
     {
         Tile: Pos
         Share: float
-        Risk: int
+        Risk: float
         Used: int
         /// By each body's index in `CampTraffic.Samples`.
         Strikes: int option[]
@@ -6198,7 +6295,7 @@ let private campTiles
     (room: string)
     (reach: int)
     (entries: (Pos * int) list)
-    (landers: HostileInfo list)
+    (landers: (HostileInfo * float) list)
     (traffic: CampTraffic)
     : CampTile list =
     let used =
@@ -6207,7 +6304,11 @@ let private campTiles
         |> List.tryHead
         |> Option.map fst
 
-    let risk = campRisk view landers (List.map fst entries)
+    let risk tile =
+        landers
+        |> List.sumBy (fun (h, odds) ->
+            odds * float (campRisk view [ h ] (List.map fst entries) tile))
+
     let stands = standable view room
 
     campGroundOver view room reach entries
@@ -6281,23 +6382,52 @@ let private tileRate
         min (present + fresh) crossings / span
 
 /// A body's camp tile (#663 S7d): of the ground for its reach, the tile it
-/// earns most on (`tileRate`), then the one the landers strike least on
-/// landing, then the one covering most of the entries, then the nearest
-/// the most used, by tile; with the rate there. None where no ground covers
-/// an entry.
+/// nets most on over `ticks` — its kills there (`tileRate`) less what it
+/// expects to lose there (`loss`) —, then the one the landers strike least
+/// on landing, then the one covering most of the entries, then the nearest
+/// the most used, by tile; with the rate and the loss there. None where no
+/// ground covers an entry.
 let private bestTile
     (view: ColonyView)
     (damage: int)
     (traffic: CampTraffic)
     (ticks: int)
+    (loss: Pos -> float)
     (tiles: CampTile list)
-    : (Pos * float) option =
+    : (Pos * float * float) option =
     tiles
-    |> List.map (fun tile -> tile, tileRate view damage traffic ticks tile)
-    |> List.sortBy (fun (tile, rate) ->
-        -rate, tile.Risk, -tile.Share, tile.Used, tile.Tile.Y, tile.Tile.X)
+    |> List.map (fun tile -> tile, tileRate view damage traffic ticks tile, loss tile.Tile)
+    |> List.sortBy (fun (tile, rate, lost) ->
+        -(rate * float ticks - lost), tile.Risk, -tile.Share, tile.Used, tile.Tile.Y, tile.Tile.X)
     |> List.tryHead
-    |> Option.map (fun (tile, rate) -> tile.Tile, rate)
+    |> Option.map (fun (tile, rate, lost) -> tile.Tile, rate, lost)
+
+/// Whether a body of ours on a camp tile gets away from a body landing on
+/// the nearest of its entries (#663 S7d): it outwalks one slower on plain,
+/// and keeps the gap from one at its pace only from beyond that body's
+/// reach on its landing — attacks resolve where bodies stood as the tick
+/// began, so one landing in reach strikes at once, and at its pace it stays
+/// in reach every tick after. One quicker catches it wherever it stands.
+let private getsAway
+    (fighter: Fighter)
+    (entries: Pos list)
+    (tile: Pos)
+    (lander: HostileInfo)
+    : bool =
+    let near =
+        match entries with
+        | [] -> 0
+        | entries -> entries |> List.map (range tile) |> List.min
+
+    let reach = HostileInfo.weaponRange [ lander ] lander |> Option.defaultValue 0
+
+    match
+        Gait.ticks Gait.plain (HostileInfo.gait [ lander ] lander),
+        Gait.ticks Gait.plain fighter.Gait
+    with
+    | None, _ -> true
+    | Some _, None -> false
+    | Some theirs, Some ours -> theirs > ours || theirs = ours && near > reach
 
 /// One exit's camp as priced (#663 S7d, `exitCampPrice`).
 type ExitCampPrice =
@@ -6309,17 +6439,21 @@ type ExitCampPrice =
         Tile: Pos option
         /// What its kills earn a tick there (`campRateAt`).
         Rate: float
+        /// What it expects to lose over the run's ticks left: each body's
+        /// cost at the odds a body that lands beats and catches it.
+        Loss: float
         /// What it nets over the run: before its cast, its kills over the
-        /// ticks it stands there less its cast (`castSpent`) and what the
-        /// cast earns elsewhere over those ticks; with its group standing,
-        /// a tick's kills less a tick's earnings elsewhere (the cast spent).
+        /// ticks it stands there less its cast (`castSpent`), what the cast
+        /// earns elsewhere over those ticks and its `Loss`; with its group
+        /// standing, a tick's kills less a tick's earnings elsewhere and a
+        /// tick's share of its `Loss` (the cast spent).
         Net: float
         /// `Net`'s two sides: what its kills earn, and what it costs (the
         /// cast and what the cast earns elsewhere), over the same span.
         Value: float
         Cost: float
         /// Whether no body it may cast — or, with a group, the group — wins
-        /// the exchange against what may come out (`landedIn`).
+        /// the exchange against the bodies landing at odds 1 (`landedIn`).
         Loses: bool
     }
 
@@ -6327,34 +6461,78 @@ type ExitCampPrice =
 /// stands, what it earns, nets and whether it loses. `entries` the exit's
 /// landing tiles by use, `arrivals` the landings of the enemy's bodies the
 /// camp is priced off, each with its tick, over the full ticks `watched`
-/// (`campTraffic`), `landers` the armed
-/// bodies that may come out (`exitLanders`), `span` the ticks the run has
+/// (`campTraffic`), `landers` the bodies that may land, each whole with its
+/// odds (`exitLanders`), `span` the ticks the run has
 /// left, `elsewhere` what a cast of the colony earns over so many ticks in
 /// its best candidate room, `group` the bodies holding the exit's Task.
 ///
+/// The landers at odds 1 stand on the entries: what the exchange is judged
+/// against (`Loses`). Each armed lander below odds 1 is a chance: it lands
+/// whole, beside them and every healer that may land, at its odds; where it
+/// beats a body of ours and the body does not get away from it on its tile
+/// (`getsAway`), the body is lost. A body's expected loss is its cost
+/// (`castCost`; a group's bodies their energy) at the odds any chance takes
+/// it, 1 − Π(1 − odds) over the chances that do.
+///
 /// Before the cast, each template is sized by the chooser: the smallest
-/// body that ends the fight against the landers standing on the entries
-/// (`fighterCast`, one body), and from there the size netting most over
-/// the run (`castSpent`: its life spent and its spawn time, beside the cast
-/// earning elsewhere over the ticks it stands there once spawned and
-/// walked); the template netting most among those that win. With a group —
-/// the bodies holding the camp's Task —, its bodies as they are: what they
-/// earn a tick there over the run's ticks left, and whether they win; its
-/// template and blocks the first body's.
+/// body that ends the fight against the landers at odds 1 (`fighterCast`,
+/// one body), and from there the size netting most over the run
+/// (`castSpent`: its life spent and its spawn time, beside the cast earning
+/// elsewhere over the ticks it stands there once spawned and walked, and
+/// its expected loss); its tile the one netting most; the template netting
+/// most among those that win. With a group — the bodies holding the camp's
+/// Task —, its bodies as they are: what they earn a tick there over the
+/// run's ticks left less a tick of their expected loss, and whether they
+/// win; its template and blocks the first body's.
 let exitCampPrice
     (view: ColonyView)
     (room: string)
     (entries: (Pos * int) list)
     (arrivals: (int * HostileInfo) list)
     (watched: int list)
-    (landers: HostileInfo list)
+    (landers: (HostileInfo * float) list)
     (span: int)
     (elsewhere: int -> float)
     (group: (CreepInfo * RoomPos) list)
     : ExitCampPrice =
-    let landed = landedIn view room entries landers
+    let certain = landers |> List.filter (fun (_, odds) -> odds >= 1.0) |> List.map fst
+    let landed = landedIn view room entries certain
     let fight = not (List.isEmpty (raidersIn landed room))
     let traffic = campTraffic view arrivals watched
+    let tiles = List.map fst entries
+
+    // Each armed lander below odds 1, landed whole beside the certain ones
+    // and every healer that may land with it.
+    let healers =
+        landers
+        |> List.filter (fun (h, odds) -> odds < 1.0 && not (HostileInfo.armed [ h ] h))
+        |> List.map fst
+
+    let chances =
+        landers
+        |> List.filter (fun (h, odds) -> odds < 1.0 && HostileInfo.armed [ h ] h)
+        |> List.map (fun (h, odds) -> h, odds, landedIn view room entries (certain @ h :: healers))
+
+    // The chances that beat these bodies together, each with its odds.
+    let beating (fighters: Fighter list) =
+        chances
+        |> List.filter (fun (_, _, landed) -> not (won (exchangeIn landed room fighters)))
+        |> List.map (fun (h, odds, _) -> h, odds)
+
+    // What a body of `cost` expects to lose on a tile to the chances that
+    // beat it: its cost at the odds one catches it.
+    let lossOf (beaten: (HostileInfo * float) list) (fighter: Fighter) (cost: float) (tile: Pos) =
+        let kept =
+            beaten
+            |> List.fold
+                (fun kept (h, odds) ->
+                    if getsAway fighter tiles tile h then
+                        kept
+                    else
+                        kept * (1.0 - odds))
+                1.0
+
+        cost * (1.0 - kept)
 
     // The ground read once a reach: every size of a template shares it.
     let grounds = System.Collections.Generic.Dictionary<int, CampTile list>()
@@ -6367,20 +6545,33 @@ let exitCampPrice
             grounds.[reach] <- tiles
             tiles
 
-    let tileOf (fighter: Fighter) (ticks: int) =
-        bestTile view (fighter.DamageAt fighter.Reach) traffic ticks (groundOf fighter.Reach)
+    let tileOf (fighter: Fighter) (ticks: int) (loss: Pos -> float) =
+        bestTile view (fighter.DamageAt fighter.Reach) traffic ticks loss (groundOf fighter.Reach)
 
     match group with
     | (first, _) :: _ ->
         let fighters = group |> List.map (fst >> Fighter.ofCreep)
+        let beaten = beating fighters
+
+        // The group's loss with its bodies on a tile: each body's energy at
+        // the odds a chance beating the group catches it.
+        let groupLoss (tile: Pos) =
+            group
+            |> List.sumBy (fun (creep, _) ->
+                let energy =
+                    creep.Body |> Map.toList |> List.sumBy (fun (part, n) -> n * bodyCost [ part ])
+
+                lossOf beaten (Fighter.ofCreep creep) (float energy) tile)
 
         let best =
             fighters
-            |> List.choose (fun fighter -> tileOf fighter span)
-            |> List.sortBy (fun (tile, rate) -> -rate, tile.Y, tile.X)
+            |> List.choose (fun fighter -> tileOf fighter span groupLoss)
+            |> List.sortBy (fun (tile, rate, lost) -> -(rate * float span - lost), tile.Y, tile.X)
             |> List.tryHead
 
-        let rate = best |> Option.map snd |> Option.defaultValue 0.0
+        let rate = best |> Option.map (fun (_, rate, _) -> rate) |> Option.defaultValue 0.0
+
+        let loss = best |> Option.map (fun (_, _, lost) -> lost) |> Option.defaultValue 0.0
 
         let template =
             if partCount first.Body RangedAttack > 0 then
@@ -6404,11 +6595,12 @@ let exitCampPrice
         {
             Template = template
             Blocks = partCount first.Body weapon / perBlock
-            Tile = best |> Option.map fst
+            Tile = best |> Option.map (fun (tile, _, _) -> tile)
             Rate = rate
-            Net = rate - elsewhere span / float (max 1 span)
+            Loss = loss
+            Net = rate - (elsewhere span + loss) / float (max 1 span)
             Value = rate
-            Cost = elsewhere span / float (max 1 span)
+            Cost = (elsewhere span + loss) / float (max 1 span)
             Loses = fight && not (won (exchangeIn landed room fighters))
         }
     | [] ->
@@ -6433,8 +6625,13 @@ let exitCampPrice
                     | walk -> castSpawnTicks template blocks + walk
 
                 let ticks = max 0 (span - lands)
-                let tile = tileOf fighter ticks
-                let rate = tile |> Option.map snd |> Option.defaultValue 0.0
+                let cost = castCost view template blocks
+                let beaten = beating [ fighter ]
+                let tile = tileOf fighter ticks (lossOf beaten fighter cost)
+
+                let rate = tile |> Option.map (fun (_, rate, _) -> rate) |> Option.defaultValue 0.0
+
+                let loss = tile |> Option.map (fun (_, _, lost) -> lost) |> Option.defaultValue 0.0
 
                 // Every kill its ground covers landed: no bigger body earns
                 // more there, it only costs more.
@@ -6449,16 +6646,19 @@ let exitCampPrice
                 {
                     Template = template
                     Blocks = blocks
-                    Tile = tile |> Option.map fst
+                    Tile = tile |> Option.map (fun (tile, _, _) -> tile)
                     Rate = rate
-                    Net = rate * float ticks - spent - forgone
+                    Loss = loss
+                    Net = rate * float ticks - spent - forgone - loss
                     Value = rate * float ticks
-                    Cost = spent + forgone
+                    Cost = spent + forgone + loss
                     Loses = not wins
                 },
-                rate >= most
+                // and beaten by no chance: a bigger body may lose less.
+                rate >= most && List.isEmpty beaten
 
-            // Smallest first, up to the first size landing every kill.
+            // Smallest first, up to the first size landing every kill that no
+            // chance beats.
             let rec scan (sizes: int list) (found: ExitCampPrice list) =
                 match sizes with
                 | [] -> found
@@ -6488,6 +6688,7 @@ let exitCampPrice
                     Blocks = 0
                     Tile = None
                     Rate = 0.0
+                    Loss = 0.0
                     Net = 0.0
                     Value = 0.0
                     Cost = 0.0
