@@ -456,10 +456,9 @@ smoke("observe outposts refuses a declared list off its shape", () => {
 // The anchors the wrapper needs, as esbuild writes top-level functions,
 // under the banner `scripts/bundle.mjs` writes.
 const bundle = `var __FABOT_VERSION__ = "abc 123+dirty";
-function SpatialInfoModule_homeName(s) { return s; }
 function planTasks() { return 1; }
-function decideUnarbitrated(view) { return planTasks() + planTasks(); }
-function loop() { decideUnarbitrated({ Spatial: "W1N1" }); }
+function colonyAlone(home, phase, step) { return step(); }
+function loop() { planTasks(); colonyAlone("W1N1", "open", () => planTasks() + planTasks()); }
 `;
 const bundlePath = join(dir, "main.js");
 const wrappedPath = join(dir, "wrapped.js");
@@ -474,7 +473,9 @@ smoke("probe wraps a bundle that then writes Memory.__probe", () => {
   assert.equal(probe.ticks, 2);
   assert.equal(probe.window, 2);
   assert.deepEqual(probe.fns["W1N1:planTasks"], [0, 4]);
+  assert.deepEqual(probe.fns["-:planTasks"], [0, 2]);
   assert.deepEqual(probe.fns["W1N1:decide"], [0, 2]);
+  assert.deepEqual(probe.fns["W1N1:decide.open"], [0, 2]);
   assert.deepEqual(probe.fns["-:tick"], [0, 2]);
   assert.equal(vm.runInNewContext(`${readFileSync(wrappedPath, "utf8")}\n__FABOT_VERSION__`, context), "abc 123+dirty+probe");
 });

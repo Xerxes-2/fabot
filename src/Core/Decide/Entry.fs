@@ -1841,8 +1841,15 @@ type ColonyDecisions<'Stamp> =
     }
 
 /// One colony's step run alone: its throw is its own fault, handed back
-/// beside the other colonies' decisions rather than through them.
-let private alone (home: string) (phase: string) (step: unit -> 'a) : Result<'a, ColonyFault> =
+/// beside the other colonies' decisions rather than through them. Every
+/// colony's own decide time runs inside it, so `scripts/probe.mjs` charges
+/// that time to `home` here: a name no other module declares, so the bundle
+/// keeps it as written.
+let private colonyAlone
+    (home: string)
+    (phase: string)
+    (step: unit -> 'a)
+    : Result<'a, ColonyFault> =
     try
         Ok(step ())
     with error ->
@@ -2094,7 +2101,7 @@ let private decideWorld
         |> List.filter (fun ((colony, _), _) -> Set.contains colony.Home inputs.FightAlone)
         |> List.map (fun ((colony, _), view) ->
             let opened =
-                alone colony.Home "fight" (fun () ->
+                colonyAlone colony.Home "fight" (fun () ->
                     Option.map2
                         (fun memo carry ->
                             openFight view inputs.Holding inputs.Verbose memo carry)
@@ -2155,7 +2162,7 @@ let private decideWorld
                 | _ -> ReplanTurn.Now
 
             let opened =
-                alone colony.Home "open" (fun () ->
+                colonyAlone colony.Home "open" (fun () ->
                     colony,
                     view,
                     openWhole
@@ -2216,7 +2223,7 @@ let private decideWorld
         opened
         |> List.map (fun (colony, view, opening) ->
             let joining =
-                alone colony.Home "join" (fun () ->
+                colonyAlone colony.Home "join" (fun () ->
                     colony, view, opening, opening.Join fights.[colony.Home])
 
             stampAs colony.Home
@@ -2257,7 +2264,7 @@ let private decideWorld
     let finished, finishFaults =
         joined
         |> List.map (fun (colony, view, opening, joining) ->
-            alone colony.Home "finish" (fun () ->
+            colonyAlone colony.Home "finish" (fun () ->
                 let economy =
                     joining.Economy
                     |> Option.map (fun share ->
@@ -2293,7 +2300,7 @@ let private decideWorld
             |> List.exists (fun (decided, _, decision, _) ->
                 decided.Home = colony.Home && Option.isNone decision))
         |> List.map (fun (index, (colony, view)) ->
-            alone colony.Home "handed" (fun () ->
+            colonyAlone colony.Home "handed" (fun () ->
                 let whose =
                     match inputs.TurnIndex with
                     | Some _ when index <> turn -> ReplanTurn.Waiting
@@ -2343,7 +2350,8 @@ let private decideWorld
         views
         |> List.filter (fun (colony, _) -> Set.contains colony.Home faulted)
         |> List.map (fun (colony, view) ->
-            alone colony.Home "towers" (fun () -> colony.Home, towersAlone view inputs.Holding))
+            colonyAlone colony.Home "towers" (fun () ->
+                colony.Home, towersAlone view inputs.Holding))
         |> sorted
 
     {

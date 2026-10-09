@@ -7,8 +7,11 @@
 //
 // Each named function is renamed `<fn>__orig` and a wrapper of the original
 // name is appended, so every call site in the bundle goes through it. Time
-// spent inside `decideUnarbitrated` is charged to the colony it decides for;
-// time outside any colony to `-`. `loop` is always wrapped, as `-:tick`.
+// spent inside `colonyAlone` (`Decide.Entry`: every colony's own step of the
+// tick's decide, each under its phase) is charged to the colony it runs for,
+// as `<home>:decide` and `<home>:decide.<phase>`; time outside any colony —
+// the world's fight, the casting, the one fleet match, the projections — to
+// `-`. Both it and `loop` are always wrapped, `loop` as `-:tick`.
 //
 // A name the bundle does not declare exactly once at the top level is a
 // failure, never a skip: a probe that silently measured fewer functions
@@ -32,12 +35,13 @@ const fail = (msg) => {
   process.exit(1);
 };
 
-// The decide sub-phases as of the 2026-09-30 CPU round.
-const DEFAULT_FNS = `signaturesOf ofViewRecalling planLayout haulerDemandOf threatsOf planOutpostContainers
-planSafeMode planFire planTowerHeal planConsignment outpostFactsOf rowSizingOf heldTaskFacts planTasks
-planPool evictFarFieldsExcept planSpawns matchCreeps assignedTasks emit planSignatures movementOf
-resolveRooms travelCostOf walkTicks areaFor evictRooms joinedAcross ColonyViewModule_ofWorldRecalling
-WorldModule_scanRecalling WorldModule_harassCasters`.split(/\s+/);
+// The decide sub-phases as of the 2026-10-10 bundle: planning, threats,
+// tasks, pool, matching, spawns, movement, the world scan and projection.
+const DEFAULT_FNS = `signaturesOf ofViewRecalling planLayout haulerDemandOf threatsOfHeld planOutpostContainers
+planSafeMode planFire planTowerHeal planConsignment outpostFactsOf rowSizingOf heldTaskFacts planFightTasks
+planEconomyTasks planFightPool planPoolHolding evictFarFieldsExcept planSpawns matchAcross assignedTasks emit
+planSignatures movementOf resolveRooms travelCostOf walkTicks areaFor evictRooms joinedAcross
+ColonyViewModule_cutOf ColonyViewModule_project WorldModule_scanRecalling WorldModule_harassCasters`.split(/\s+/);
 
 const VALUED = ["--out", "--fns", "--from", "--ticks"];
 const flags = {};
@@ -68,7 +72,7 @@ if (window === 0) fail(`--ticks must be at least 1\n${usage}`);
 const fns = flags["--fns"] ? flags["--fns"].split(",").filter(Boolean) : DEFAULT_FNS;
 for (const fn of fns) {
   if (!/^[A-Za-z_$][\w$]*$/.test(fn)) fail(`${fn} is not a function name`);
-  if (fn === "loop" || fn === "decideUnarbitrated") fail(`${fn} is always wrapped; leave it out of --fns`);
+  if (fn === "loop" || fn === "colonyAlone") fail(`${fn} is always wrapped; leave it out of --fns`);
 }
 
 let source;
@@ -82,7 +86,7 @@ if (source.includes("__orig(")) fail(`${input} is already wrapped; probe a clean
 // Every anchor is checked before any is renamed, so one run names every
 // missing function rather than the first.
 const declarations = (fn) => source.split(`\nfunction ${fn}(`).length - 1;
-const anchors = [...fns, "decideUnarbitrated", "loop", "SpatialInfoModule_homeName"];
+const anchors = [...fns, "colonyAlone", "loop"];
 const missing = anchors.filter((fn) => declarations(fn) !== 1);
 if (missing.length > 0) {
   fail(
@@ -98,7 +102,7 @@ const banner = source.match(BANNER);
 if (!banner) fail(`${input} carries no version banner on its first line — run npm run build first`);
 
 let patched = source.replace(BANNER, () => `var __FABOT_VERSION__ = ${JSON.stringify(`${JSON.parse(banner[1])}+probe`)};`);
-for (const fn of [...fns, "decideUnarbitrated", "loop"]) {
+for (const fn of [...fns, "colonyAlone", "loop"]) {
   patched = patched.replace(`\nfunction ${fn}(`, `\nfunction ${fn}__orig(`);
 }
 
@@ -108,10 +112,12 @@ const wrappers = fns.map(
     `const t0 = Game.cpu.getUsed(); try { return ${fn}__orig(...a); } ` +
     `finally { P.add(P.cur + ':${fn}', Game.cpu.getUsed() - t0); } }`,
 );
+// `colonyAlone(home, phase, step)`: the colony's home is its first argument.
 wrappers.push(
-  `function decideUnarbitrated(...a) { const P = globalThis.__P; if (!P || !P.on) return decideUnarbitrated__orig(...a); ` +
-    `const prev = P.cur; P.cur = SpatialInfoModule_homeName(a[0].Spatial); const t0 = Game.cpu.getUsed(); ` +
-    `try { return decideUnarbitrated__orig(...a); } finally { P.add(P.cur + ':decide', Game.cpu.getUsed() - t0); P.cur = prev; } }`,
+  `function colonyAlone(...a) { const P = globalThis.__P; if (!P || !P.on) return colonyAlone__orig(...a); ` +
+    `const prev = P.cur; P.cur = a[0]; const t0 = Game.cpu.getUsed(); ` +
+    `try { return colonyAlone__orig(...a); } finally { const ms = Game.cpu.getUsed() - t0; ` +
+    `P.add(P.cur + ':decide', ms); P.add(P.cur + ':decide.' + a[1], ms); P.cur = prev; } }`,
 );
 wrappers.push(`function loop() {
   const P = globalThis.__P ??= { n: 0, acc: {}, cur: '-', on: false, add(k, v) { const e = this.acc[k] ??= [0, 0]; e[0] += v; e[1]++; } };
