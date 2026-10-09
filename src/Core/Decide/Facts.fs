@@ -1986,25 +1986,24 @@ let private standable (view: ColonyView) (room: string) : Pos -> bool =
                 | Some Wall
                 | None -> false)
 
-/// The ground a body of `reach` camps a dancer from (#658, #663 M4), each
-/// tile with the share of the dancer's steps in it covers: its entries
-/// (`dancerEntries`, by use; its tile now where none is known) within the
-/// reach of the tile. A tile off the border ring (`Dance.campDepth`), one a
-/// body may stand on (`standable`), and out of every armed body's reach and
-/// the step it closes. One ground for the camp's price and the camp laid
-/// (`Threat`'s camp job): a swing covers only the entries a step in from
-/// the exit, and a dancer whose way in has no such ground is no camp.
-let private campGroundOf (view: ColonyView, reach: int, hostile: HostileInfo) : (Pos * float) list =
-    let room = hostile.Pos.Room
-
-    let entries =
-        match dancerEntries view hostile with
-        | [] -> [ hostile.Pos ]
-        | entries -> entries
-        |> List.map RoomPos.pos
-        |> List.countBy id
-
-    let total = entries |> List.sumBy snd
+/// The ground a body of `reach` camps the tiles bodies step into a room on
+/// (`entries`, each by its use) from (#658, #663 M4, S7d), each tile with
+/// the share of the steps in it covers: the entries within the reach of the
+/// tile. Priced per body (#663 S7d): any tile a body may stand on
+/// (`standable`) — never the border ring, which is the exits', so no walk
+/// to it or held on it ever carries the body across — whatever its depth,
+/// so a swing camps a step in from the exit, beside the tile a crossing
+/// lands on, and a shot as deep as its reach; and out of every armed body's
+/// reach in the room and the step it closes. What depth costs a body beyond
+/// that is the strike back of the bodies that may land on the entries
+/// (`campRisk`), read where the ground is chosen.
+let private campGroundOver
+    (view: ColonyView)
+    (room: string)
+    (reach: int)
+    (entries: (Pos * int) list)
+    : (Pos * float) list =
+    let total = entries |> List.sumBy snd |> max 1
     let stands = standable view room
 
     let struck (tile: Pos) =
@@ -2023,8 +2022,7 @@ let private campGroundOf (view: ColonyView, reach: int, hostile: HostileInfo) : 
                     yield { X = x; Y = y }
         ])
     |> List.distinct
-    |> List.filter (fun tile ->
-        Dance.toEdge tile >= Dance.campDepth && stands tile && not (struck tile))
+    |> List.filter (fun tile -> stands tile && not (struck tile))
     |> List.map (fun tile ->
         tile,
         float (
@@ -2032,6 +2030,59 @@ let private campGroundOf (view: ColonyView, reach: int, hostile: HostileInfo) : 
             |> List.sumBy (fun (entry, uses) -> if range tile entry <= reach then uses else 0)
         )
         / float total)
+
+/// The ground a body of `reach` camps a dancer from (#658, #663 M4): the
+/// camp's ground (`campGroundOver`) over the tiles it steps in and out on
+/// (`dancerEntries`, by use; its tile now where none is known). One ground
+/// for the camp's price and the camp laid (`Threat`'s camp job): a dancer
+/// whose way in has no such ground is no camp.
+let private campGroundOf (view: ColonyView, reach: int, hostile: HostileInfo) : (Pos * float) list =
+    let entries =
+        match dancerEntries view hostile with
+        | [] -> [ hostile.Pos ]
+        | entries -> entries
+        |> List.map RoomPos.pos
+        |> List.countBy id
+
+    campGroundOver view hostile.Pos.Room reach entries
+
+/// What the armed bodies that may land on a camp's entries deal a tile of
+/// its ground on their landing tick (#663 S7d): attacks resolve where the
+/// bodies stood as the tick began, so a body landing on an entry strikes,
+/// that tick, every tile its weapon reaches from there. Each lander at the
+/// nearest entry to the tile, its swing within a step and its shot within
+/// three. The risk a camp's depth is priced at beside its cover: a shot
+/// out of a swing's reach of every entry covers the entries as well and
+/// takes no blow on the landing.
+let campRisk (view: ColonyView) (landers: HostileInfo list) (entries: Pos list) (tile: Pos) : int =
+    match entries with
+    | [] -> 0
+    | entries ->
+        let near = entries |> List.map (range tile) |> List.min
+
+        landers
+        |> List.sumBy (fun h ->
+            let power = HostileInfo.effectivePower view.Hostiles h
+
+            (if near <= Engine.meleeRange then
+                 power Attack * Engine.attackPower
+             else
+                 0)
+            + (if near <= Engine.rangedRange then
+                   power RangedAttack * Engine.rangedAttackPower
+               else
+                   0))
+
+/// The armed bodies that may land on a dancer's entries (#663 S7d): its
+/// owner's, standing beside the room across the border it dances on
+/// (`Dance.besideOf`).
+let internal dancerLanders (view: ColonyView) (dancer: HostileInfo) : HostileInfo list =
+    view.Hostiles
+    |> List.filter (fun h ->
+        h.Id <> dancer.Id
+        && h.Owner = dancer.Owner
+        && HostileInfo.armed view.Hostiles h
+        && Dance.besideOf dancer.Pos.Room h.Pos)
 
 let private campGroundMemo: TickMemo.Memo<ColonyView * int * HostileInfo, (Pos * float) list> =
     TickMemo.create 32 (fun (view, reach, hostile) (view', reach', hostile') ->

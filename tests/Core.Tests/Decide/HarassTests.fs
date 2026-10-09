@@ -3503,20 +3503,75 @@ let campChooserTests =
                 Expect.isTrue
                     (camp.Tiles
                      |> Set.forall (fun tile ->
-                         Dance.toEdge (RoomPos.pos tile) >= Dance.campDepth
+                         not (Seam.onRing (RoomPos.pos tile))
                          && range { X = 1; Y = 20 } (RoomPos.pos tile) <= Engine.meleeRange))
                     "every tile a swing's reach of its step in, off the border"
             }
 
+            // #663 S7d (user's addition): a camp's depth is priced per body.
+            // A swing stood two tiles in under `Dance.campDepth = 2` and so
+            // never covered the exit tile; it now stands a step in, beside
+            // the tile a crossing lands on, the border ring still the
+            // exits'.
             test
-                "a dancer stepping in on the exit tile alone is no swing's camp: the chooser casts a shot" {
+                "a dancer stepping in on the exit tile is a swing's camp a step in: the chooser casts a swing" {
                 let colony = dancingIn 1800 { X = 0; Y = 20 } [ { X = 0; Y = 20 } ]
                 let cast = Facts.fighterCast colony harassRoom bodyTemplates Engine.guardCap
 
                 Expect.equal
                     cast.Template
-                    BodyTemplate.Ranged
-                    "a swing on the camp's ground never reaches the exit tile"
+                    BodyTemplate.Melee
+                    "a swing a step in reaches the exit tile it steps in on"
+
+                let camp =
+                    List.head
+                        (Threats.briefOf (threatsOf colony (Atlas.ofView colony)) harassRoom).Jobs
+
+                Expect.equal camp.Kind JobKind.Camp "its first job: the camp"
+
+                Expect.isTrue
+                    (camp.Tiles
+                     |> Set.forall (fun tile ->
+                         Dance.toEdge (RoomPos.pos tile) = 1
+                         && range { X = 0; Y = 20 } (RoomPos.pos tile) <= Engine.meleeRange))
+                    "every tile a step in off the border ring, a swing's reach of the exit tile"
+            }
+
+            test
+                "a camp's depth is priced per body: a swing's a step in, a shot's out of a lander's swing" {
+                let colony = dancingIn 1800 { X = 0; Y = 20 } [ { X = 0; Y = 20 } ]
+                let dancer = colony.Hostiles.Head
+
+                // Its owner's 10A10M across the border, which may land on the
+                // exit tile beside the dancer.
+                let escort =
+                    { hostileIn
+                          "W2N2"
+                          { X = 48; Y = 20 }
+                          (List.replicate 10 Attack @ List.replicate 10 Move) with
+                        Id = "escort"
+                        Owner = enemy
+                    }
+
+                let depths (ground: (Pos * float) list) =
+                    ground |> List.map (fst >> Dance.toEdge) |> List.distinct |> List.sort
+
+                Expect.equal
+                    (depths (Facts.campGround colony Engine.meleeRange dancer))
+                    [ 1 ]
+                    "a swing covers the exit tile only a step in"
+
+                Expect.equal
+                    (depths (Facts.campGround colony Engine.rangedRange dancer))
+                    [ 1; 2; 3 ]
+                    "a shot covers it from as deep as its reach"
+
+                let risk = Facts.campRisk colony [ escort ] [ { X = 0; Y = 20 } ]
+
+                Expect.equal
+                    (risk { X = 1; Y = 20 }, risk { X = 2; Y = 20 }, risk { X = 3; Y = 21 })
+                    (300, 0, 0)
+                    "a step in takes the lander's 300 on its landing tick; two in and deeper, none"
             }
 
             // Review of S6: the price counted every step in a tile off the
@@ -3524,10 +3579,10 @@ let campChooserTests =
             // ground now prices and lays it.
             test
                 "a swing's step in walled off on the camp's ground is no camp: priced none, cast a shot, laid none" {
-                let open' = dancingIn 1800 { X = 1; Y = 20 } [ { X = 1; Y = 20 } ]
+                let open' = dancingIn 1800 { X = 0; Y = 20 } [ { X = 0; Y = 20 } ]
                 let layer = SpatialInfo.layerOf open'.Spatial harassRoom
 
-                // It steps in on (1,20) and stands there: the three tiles a
+                // It steps in on the exit tile (0,20): the three tiles a
                 // swing covers it from off the border are built on.
                 let colony =
                     { open' with
@@ -3536,7 +3591,7 @@ let campChooserTests =
                             |> withNeighbour
                                 harassRoom
                                 { layer with
-                                    Obstacles = Set.ofList [ for y in 19..21 -> { X = 2; Y = y } ]
+                                    Obstacles = Set.ofList [ for y in 19..21 -> { X = 1; Y = y } ]
                                 }
                     }
 
@@ -3564,7 +3619,7 @@ let campChooserTests =
                          job.Kind <> JobKind.Camp
                          || job.Tiles
                             |> Set.forall (fun tile ->
-                                range { X = 1; Y = 20 } (RoomPos.pos tile) <= 3)))
+                                range { X = 0; Y = 20 } (RoomPos.pos tile) <= 3)))
                     "and any camp laid is a shot's, off the built ground"
             }
 
@@ -3572,8 +3627,12 @@ let campChooserTests =
             // ranger in the oven was priced as a fresh one beside every other
             // set, and the ask could move off it as the price shifted.
             test "a ranger already in the oven is priced sunk: the set it is one of is the cast" {
+                // Its steps in six tiles apart along the exit: one swing's
+                // tile covers half of them, a shot's all (#663 S7d moved
+                // them off the exit and the tile beside it, which a swing a
+                // step in now covers together).
                 let colony =
-                    dancingIn 2400 { X = 2; Y = 20 } [ { X = 0; Y = 20 }; { X = 1; Y = 20 } ]
+                    dancingIn 2400 { X = 2; Y = 20 } [ { X = 0; Y = 17 }; { X = 0; Y = 23 } ]
 
                 let oven =
                     { colony with

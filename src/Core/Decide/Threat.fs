@@ -4520,13 +4520,28 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
                 let used = entries |> List.tryHead |> Option.defaultValue dancer.Pos |> RoomPos.pos
 
+                // What a tile's depth costs (`Facts.campRisk`): the blow of
+                // its owner's armed bodies that may land on its way in.
+                let risk =
+                    Facts.campRisk
+                        view
+                        (Facts.dancerLanders view dancer)
+                        (match entries |> List.filter (fun at -> at.Room = room) with
+                         | [] -> [ used ]
+                         | inside -> inside |> List.map RoomPos.pos)
+
                 // The camp's ground, the one its price reads
                 // (`Facts.campGround`): none where a step in has no tile
                 // the team's reach covers it from.
                 match
                     Facts.campGround view reach dancer
                     |> List.sortBy (fun (tile, share) ->
-                        not (standing.Contains tile), -share, range tile used, tile.Y, tile.X)
+                        not (standing.Contains tile),
+                        -share,
+                        risk tile,
+                        range tile used,
+                        tile.Y,
+                        tile.X)
                     |> List.map fst
                     |> List.truncate (max 1 (List.length holders))
                 with
