@@ -299,25 +299,118 @@ let recall
 
 // ---- the queries every reader of a remembered body asks (#663 S2) ---------
 
+/// What a body's trail (`Track.Trail`) says of how it moves, read once a
+/// tick (`shapeOf`): the tiles it turned on — stepped off back onto the
+/// tile it came from — since it last came to rest (stood on one tile two
+/// full ticks or more; none for one at rest now), and the last tick it
+/// stood off the dance depth of every edge (`Dance.byBorder`), if it did.
+type TrailShape =
+    {
+        Turns: RoomPos list
+        Inland: int option
+    }
+
+/// A trail's shape (`TrailShape`). Its runs, newest first: each tile with
+/// the newest and the oldest tick it stood there on.
+let shape (trail: (int * RoomPos) list) : TrailShape =
+    let runs =
+        trail
+        |> List.fold
+            (fun runs (tick, tile) ->
+                match runs with
+                | (at, newest, _) :: rest when at = tile -> (at, newest, tick) :: rest
+                | _ -> (tile, tick, tick) :: runs)
+            []
+        |> List.rev
+
+    // The runs since it last came to rest, that rest the oldest of them.
+    let rec moving runs =
+        match runs with
+        | [] -> []
+        | (tile, newest, oldest) :: rest ->
+            if newest > oldest then [ tile ] else tile :: moving rest
+
+    let rec turns tiles =
+        match tiles with
+        | later :: turn :: earlier :: rest ->
+            let beyond = turns (turn :: earlier :: rest)
+            if later = earlier then turn :: beyond else beyond
+        | _ -> []
+
+    {
+        Turns = turns (moving runs)
+        Inland =
+            trail
+            |> List.tryPick (fun (tick, tile) -> if Dance.byBorder tile then None else Some tick)
+    }
+
+/// A trail with nothing in it: no turn, never inland.
+let still: TrailShape = { Turns = []; Inland = None }
+
+/// Each track's trail shape, built once a tick per quarry map.
+let private shapes: TickMemo.Memo<Map<string, Track>, Map<string, TrailShape>> =
+    TickMemo.create 4 TickMemo.byReference
+
+/// The shape of the trail the quarry memory keeps of a body (`shape`);
+/// `still` for one it holds no track of.
+let shapeOf (quarries: Map<string, Track>) (id: string) : TrailShape =
+    TickMemo.recall shapes quarries (Map.map (fun _ (track: Track) -> shape track.Trail))
+    |> Map.tryFind id
+    |> Option.defaultValue still
+
+/// Whether every turn a body made since it last came to rest lies within a
+/// step of `at`, across a border alike (`RoomName.tileRange`): one that
+/// mills turns where it stands, one that turns farther off ranges over the
+/// room keeping its distance, and its step back is its next leg, not its
+/// work. True for one at rest, or with no turn kept.
+let turnsBeside (at: RoomPos) (trail: TrailShape) : bool =
+    trail.Turns
+    |> List.forall (fun turn ->
+        RoomName.tileRange turn at |> Option.exists (fun steps -> steps <= 1))
+
+/// Whether a body that crossed its room's border dances on it: it crossed
+/// (`Crossing.Ticks`) after the last tick it stood off the dance depth of
+/// every edge, or never stood off it. One that walked off inland and has
+/// not crossed since is a body of the room it stands in, whatever crossings
+/// the window still holds; one that stepped inland once and crossed again
+/// dances from that crossing.
+let keptToBorder (crossed: Crossing) (trail: TrailShape) : bool =
+    match trail.Inland with
+    | None -> true
+    | Some inland -> crossed.Ticks |> List.exists (fun tick -> tick > inland)
+
 /// The tile a body is a room's quarry on (#658, #663): standing in the room,
 /// where it stands; standing across its border, out by its latest crossing
 /// (`Crossing.Came`) from a tile within the depth a dance turns back at
-/// (`Dance.byBorder`) and lingering beside it (`Dance.besideOf`), the tile it
+/// (`Dance.byBorder`), lingering beside it (`Dance.besideOf`) and kept to
+/// the border since (`keptToBorder`, off its `trail`'s shape), the tile it
 /// crossed out from, so the room keeps it through the ticks it is out; else
 /// none. A dancer is the quarry of both rooms it dances between.
-let placed (room: string) (at: RoomPos) (crossed: Crossing option) : RoomPos option =
+let placed
+    (room: string)
+    (at: RoomPos)
+    (crossed: Crossing option)
+    (trail: TrailShape)
+    : RoomPos option =
     if at.Room = room then
         Some at
     elif Dance.besideOf room at then
         crossed
+        |> Option.filter (fun crossed -> keptToBorder crossed trail)
         |> Option.map _.Came
         |> Option.filter (fun came -> came.Room = room && Dance.byBorder came)
     else
         None
 
-/// `placed` off a track: its body as last seen and its crossings.
+/// `placed` off a track: its body as last seen, its crossings and its trail.
 let placedIn (room: string) (track: Track) : RoomPos option =
-    placed room track.Body.Pos track.Crossings
+    let at = track.Body.Pos
+
+    // Its trail read only where its crossing can place it.
+    if at.Room <> room && Dance.besideOf room at && track.Crossings.IsSome then
+        placed room at track.Crossings (shape track.Trail)
+    else
+        placed room at track.Crossings still
 
 /// The index `lastIn` reads, built once a tick per quarry map.
 let private byRoom: TickMemo.Memo<Map<string, Track>, Map<string, (Track * RoomPos) list>> =

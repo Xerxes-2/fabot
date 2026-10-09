@@ -2141,3 +2141,265 @@ let borderCampTests =
                         $"t{tick}: the ranger beside Midnight\n{failure}"
             }
         ]
+
+// ---- arena capture: the sweep's room over W19S25/W19S26, t1,068,240 (#663) --
+// `npm run capture -- W19S26 1068292 --rooms W19S25,W17S29,W18S27,W17S25`,
+// read at live t1,069,178, started 52 ticks earlier off `observe history`
+// (t1,068,240-342) so the quarry memory holds Bolt7991's dance first.
+//   W19S26  https://screeps.com/room-history/shardSeason/W19S26/1068200.json
+//   W19S25  https://screeps.com/room-history/shardSeason/W19S25/1068200.json
+// Laid by hand from the skeleton: the homes W17S29 (Spawn9, which cast the
+// group) and W17S25 bare of all but controller, spawn, storage and towers,
+// their economy bodies left out; the rooms between them and the candidates
+// laid empty, so the Caster finds its hops; W18S26 left out, as live it is
+// rival-held. Talon8086 (2CLAIM, leaving west) and Nova8122 (1W1C1M) left
+// out. Every body walks its live tiles a tick at a time, ours too: the
+// pipeline decides the sweep's room off the live walk. On main the latch
+// moved sixteen times between t1,068,284 and t1,068,330, at t1,068,316,
+// 317, 322 and 328 on the live ticks (Memory.fabot.ops.events), the rest a
+// tick to three off.
+
+/// A body's live tiles, one an arena tick from tick 0 on: a room's name
+/// stands before the tiles in it.
+let private livePath (path: string) : Behaviour =
+    path.Split(' ', System.StringSplitOptions.RemoveEmptyEntries)
+    |> Array.fold
+        (fun (room, tiles) token ->
+            match token.Split ',' with
+            | [| x; y |] -> room, RoomPos.at room { X = int x; Y = int y } :: tiles
+            | _ -> token, tiles)
+        ("", [])
+    |> snd
+    |> List.rev
+    |> List.mapi (fun k tile -> k + 1, GoTo tile)
+    |> Phases
+
+let private w19s25SweepLatch () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+    let hauler = List.concat (List.replicate 23 [ Move; Carry ])
+
+    let w17s29 =
+        room "W17S29"
+        |> withController Ownership.Ours None 6 4
+        |> withControllerClocks 0 0 120_000 3_617_636
+        |> withSpawn "Spawn9" { X = 24; Y = 40 } 2_300
+        |> withStructures
+            [
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 23; Y = 39 } with
+                    Energy = 25_294
+                }
+                towerOf Side.Ours { X = 21; Y = 39 } 1_000
+                towerOf Side.Ours { X = 23; Y = 41 } 1_000
+            ]
+
+    let w17s25 =
+        room "W17S25"
+        |> withController Ownership.Ours None 5 3
+        |> withControllerClocks 0 0 80_000 676_665
+        |> withSpawn "Spawn11" { X = 14; Y = 28 } 1_800
+        |> withStructures
+            [
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 13; Y = 27 } with
+                    Energy = 8_106
+                }
+                towerOf Side.Ours { X = 11; Y = 29 } 1_000
+                towerOf Side.Ours { X = 13; Y = 29 } 1_000
+            ]
+
+    let empty =
+        [
+            "W19S26"
+            "W19S25"
+            "W18S27"
+            "W18S25"
+            "W17S26"
+            "W17S27"
+            "W17S28"
+            "W18S28"
+            "W18S29"
+            "W19S27"
+            "W19S28"
+            "W19S29"
+        ]
+        |> List.map room
+
+    let colonies =
+        Colony.declared
+        |> List.filter (fun c -> List.contains c.Home [ "W17S29"; "W17S25" ])
+
+    // Oblivion7691 on its three tiles beside the source, two ticks each.
+    let oblivion =
+        Phases
+            [
+                for k in 1..102 ->
+                    k,
+                    GoTo(
+                        List.item
+                            (((k - 1) / 2) % 3)
+                            [ at "W19S25" 26 21; at "W19S25" 26 22; at "W19S25" 27 22 ]
+                    )
+            ]
+
+    let bodies =
+        [
+            { body
+                  "guard-1067926-Spawn9"
+                  Side.Ours
+                  (parts [ Tough, 1; Move, 4; Attack, 3; Heal, 1; Move, 1 ])
+                  (at "W19S26" 28 36)
+                  (Some(
+                      livePath (
+                          "W19S26 29,35 30,34 31,33 32,32 33,31 34,30 33,29 32,28 31,27 30,26 29,25 29,24 "
+                          + "30,23 30,22 31,21 32,20 33,19 34,18 33,18 32,18 31,17 31,17 31,17 31,17 31,17 "
+                          + "30,16 30,16 29,15 28,14 27,13 26,12 25,11 24,10 23,11 24,12 24,13 24,12 23,11 "
+                          + "23,10 23,9 23,8 23,7 22,6 23,5 24,4 25,3 26,2 27,1 26,1 25,1 24,1 23,1 22,1 21,1 "
+                          + "22,1 23,1 24,1 25,1 26,1 27,1 26,1 25,1 24,1 23,1 22,1 21,1 22,1 23,1 24,1 25,1 "
+                          + "26,1 27,1 26,1 25,1 24,1 23,1 22,1 23,1 24,1 25,1 26,1 25,1 24,1 23,1 24,1 25,1 "
+                          + "26,1 25,1 24,1 23,1 22,1 21,1 20,1 19,1 18,1 17,1 16,1 15,1 14,1 15,0 W19S25 "
+                          + "15,48 15,48"
+                      )
+                  )) with
+                TicksToLive = 1_214
+            }
+            { body
+                  "ranger-1067770-Spawn9"
+                  Side.Ours
+                  (parts [ Move, 8; RangedAttack, 6; Heal, 3; Move, 1 ])
+                  (at "W19S25" 29 48)
+                  (Some(
+                      livePath (
+                          "W19S25 30,47 31,47 32,48 33,47 34,47 35,48 34,47 33,47 32,46 31,46 30,47 29,48 "
+                          + "30,47 31,47 32,48 33,47 34,47 35,48 34,47 33,47 32,46 31,46 30,47 29,48 30,47 "
+                          + "31,46 32,46 33,47 34,47 35,48 34,47 33,47 32,46 32,47 33,48 33,48 34,49 W19S26 "
+                          + "34,1 34,1 35,1 36,2 37,3 37,3 37,3 37,3 38,2 39,1 40,2 39,1 38,1 37,1 36,1 35,1 "
+                          + "34,1 35,1 36,1 37,2 36,3 37,4 38,5 37,4 36,3 35,2 34,1 33,1 32,1 33,1 34,1 35,1 "
+                          + "36,2 37,3 38,4 37,3 36,2 35,1 34,1 33,1 34,1 35,1 36,1 37,1 36,1 35,1 34,1 35,1 "
+                          + "36,1 37,1 36,1 35,1 34,1 33,1 32,1 31,1 30,1 29,1 28,1 27,1 26,1 25,1 26,0 "
+                          + "W19S25 26,48 26,48"
+                      )
+                  )) with
+                TicksToLive = 1_082
+            }
+            // An empty 23C23M hauler shot down to 16M 17C, at the group's
+            // pace: dancing on W19S25's south exit while the ranger camped
+            // it there, then into W19S26 after the ranger crossed, kiting
+            // the group (t1,068,278-338), and back across.
+            { body
+                  "Bolt7991"
+                  trepidimous
+                  hauler
+                  (at "W19S25" 32 48)
+                  (Some(
+                      livePath (
+                          "W19S25 33,48 34,48 35,48 36,48 37,49 W19S26 37,1 36,1 35,0 W19S25 35,49 W19S26 "
+                          + "35,1 34,1 33,0 W19S25 34,48 35,48 36,48 37,48 38,49 W19S26 38,1 37,1 36,1 35,1 "
+                          + "34,1 33,0 W19S25 34,48 35,48 36,48 37,48 38,48 39,49 W19S26 39,1 38,1 37,1 36,0 "
+                          + "W19S25 37,48 38,48 39,49 W19S26 39,1 40,2 41,3 40,2 41,3 42,4 43,5 44,6 43,5 "
+                          + "44,6 45,7 44,8 43,9 42,8 41,7 41,8 40,7 41,8 40,7 41,8 40,7 41,8 42,7 43,6 44,7 "
+                          + "43,6 42,5 41,4 40,3 39,2 38,1 39,2 40,3 41,4 42,5 43,6 44,7 43,6 42,5 41,4 40,3 "
+                          + "39,2 40,3 41,4 42,5 43,6 42,5 41,4 40,3 41,4 42,5 43,6 42,5 41,4 40,3 39,2 38,1 "
+                          + "37,1 36,1 35,1 34,1 33,0 W19S25 32,48 31,48 32,47 33,48"
+                      )
+                  )) with
+                Hits = 3_700
+                TicksToLive = 1_387
+            }
+            // W19S25's seated miners and the haulers at their source.
+            body
+                "Morgana7524"
+                trepidimous
+                (parts [ Move, 3; Work, 5 ])
+                (at "W19S25" 27 20)
+                (Some Hold)
+            body "Quirk7553" trepidimous hauler (at "W19S25" 27 21) (Some Hold)
+            body "Oblivion7691" trepidimous hauler (at "W19S25" 27 22) (Some oblivion)
+            body "Bite7829" trepidimous (parts [ Move, 3; Work, 5 ]) (at "W19S25" 5 19) (Some Hold)
+            body "Phantom7853" trepidimous hauler (at "W19S25" 4 20) (Some Hold)
+            // W18S27, the sweep's third room.
+            { body
+                  "Hammer7389"
+                  trepidimous
+                  (parts [ Move, 7; Carry, 7 ])
+                  (at "W18S27" 25 7)
+                  (Some Hold) with
+                Hits = 1_400
+            }
+            body
+                "Eternity8186"
+                trepidimous
+                (parts [ Move, 3; Work, 5 ])
+                (at "W18S27" 26 8)
+                (Some Hold)
+            body
+                "Torpedo8171"
+                trepidimous
+                (parts [ Move, 1; RangedAttack, 1; Move, 1; Heal, 1; Move, 1 ])
+                (at "W18S27" 3 11)
+                (Some Hold)
+        ]
+
+    let a =
+        arena 1_068_241 (w17s29 :: w17s25 :: empty) colonies bodies
+        |> withOperations (Colony.operations |> List.filter (fun wire -> wire.Id = Colony.sweepId))
+
+    { a with
+        Carried =
+            { a.Carried with
+                Assignments =
+                    Map.ofList
+                        [ "guard-1067926-Spawn9", "op:sweep"; "ranger-1067770-Spawn9", "op:sweep" ]
+                // The record's room before the ring's first event (t1,068,293
+                // moved off W19S25); its tick is not in the ring.
+                Operations =
+                    [
+                        {
+                            Id = Colony.sweepId
+                            Started = 1_061_277
+                            Phase = OpPhase.Execute
+                            Since = 1_068_200
+                            Room = Some "W19S25"
+                            RoomSince = 1_068_200
+                            Spent = 0
+                            Lost = 0
+                            NextDue = 0
+                            Ended = None
+                        }
+                    ]
+            }
+    }
+
+[<Tests>]
+let w19s25SweepLatchTests =
+    testList
+        "arena capture: the sweep's room over W19S25/W19S26"
+        [
+            // Live W19S25/W19S26, bundle a3801bee, t1,068,293-340: eighteen
+            // `Outpaid` moves between the two rooms. Bolt7991 kited the group
+            // in W19S26, read caught on each tick it turned back (W19S26 69
+            // a tick against W19S25's 49) and camped at a dancer's odds each
+            // time it came within four of the north edge (133-160), though
+            // it had crossed last at t1,068,277 and walked inland since; a
+            // step on, as walking (14). Its price is its trail's: once it
+            // kites inland the room is W19S25, held to the end.
+            test
+                "t1,068,284-340: once Bolt7991 kites inland, the room is W19S25 on every tick, whichever way it steps" {
+                let rooms =
+                    ((w19s25SweepLatch (), []), [ 1..100 ])
+                    ||> List.fold (fun (state, rooms) _ ->
+                        let next, _ = run 1 state
+
+                        next,
+                        (state.Time, next.Carried.Operations |> List.tryHead |> Option.bind _.Room)
+                        :: rooms)
+                    |> snd
+                    |> List.rev
+
+                let kited =
+                    rooms |> List.filter (fun (tick, _) -> tick >= 1_068_284 && tick <= 1_068_340)
+
+                Expect.isTrue
+                    (kited |> List.forall (fun (_, room) -> room = Some "W19S25"))
+                    $"W19S25 from t1,068,284 to t1,068,340: {rooms}"
+            }
+        ]

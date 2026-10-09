@@ -4149,7 +4149,11 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     RoomName.adjacent room
                     |> List.filter (fun other -> trespassRooms view other && huntedIn other)
                     |> List.tryPick (fun other ->
-                        Quarry.placed other hostile.Pos (Map.tryFind hostile.Id view.Bounces)
+                        Quarry.placed
+                            other
+                            hostile.Pos
+                            (Map.tryFind hostile.Id view.Bounces)
+                            (Quarry.shapeOf view.World.Quarries hostile.Id)
                         |> Option.map (fun tile -> other, RoomPos.pos tile))
 
             if trespasser view engaged hostile then

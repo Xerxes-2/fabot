@@ -1936,10 +1936,17 @@ let blowsWorth
 
     standing true - standing false
 
+/// The shape of the trail the quarry memory keeps of a hostile
+/// (`Quarry.shapeOf`), read once a tick.
+let private trailOf (view: ColonyView) (hostile: HostileInfo) : Quarry.TrailShape =
+    Quarry.shapeOf view.World.Quarries hostile.Id
+
 /// Whether a hostile dances on its room's border, by its trajectory (#658):
 /// within the depth our reach and its step out cover, it crossed the border
 /// lately (`ColonyView.Bounces`: out and back, either way, a few steps over
-/// or on the exit tile alike), or it mills in place (`Quarry.inPlace`), or
+/// or on the exit tile alike) since it last stood inland
+/// (`Quarry.keptToBorder`), or it mills in place (`Quarry.inPlace`, every
+/// turn since it last came to rest beside it, `Quarry.turnsBeside`), or
 /// it is placed back on the tile it crossed out from (`Quarry.placed`). A
 /// body that cannot walk off dances on nothing.
 let internal dancingOn (view: ColonyView) (hostile: HostileInfo) : bool =
@@ -1947,11 +1954,13 @@ let internal dancingOn (view: ColonyView) (hostile: HostileInfo) : bool =
     && not (HostileInfo.stationary view.Hostiles hostile)
     && not (rootedAtWork view hostile)
     && Dance.byBorder hostile.Pos
-    && (Map.containsKey hostile.Id view.Bounces
+    && (Map.tryFind hostile.Id view.Bounces
+        |> Option.exists (fun crossed -> Quarry.keptToBorder crossed (trailOf view hostile))
         || Quarry.inPlace
             hostile.Pos
             (Map.tryFind hostile.Id view.Stepped)
-            (Map.tryFind hostile.Id view.SteppedBack))
+            (Map.tryFind hostile.Id view.SteppedBack)
+           && Quarry.turnsBeside hostile.Pos (trailOf view hostile))
 
 /// The tiles of its room a dancer steps in and out on (#658,
 /// `Crossing.Tiles`), each as often as it used it, and its tile now where it
@@ -2424,9 +2433,16 @@ let private catchOdds
         // A body stepping back and forth in place is caught at its work
         // (live t1,030,4xx, W19S25: two haulers on one four-step dance,
         // each read leaving off one step every other tick, turned the
-        // ranger between them for 100+ ticks).
+        // ranger between them for 100+ ticks); one whose trail turned
+        // farther off kites over the room, and its step back is walking
+        // (live t1,068,293-340, W19S26: an empty hauler kiting the sweep's
+        // group read caught on each turn and flipped its room).
         let leaving = Quarry.leaving (exitSteps view) hostile.Pos left back
-        let walking = Quarry.walking hostile.Pos left back
+
+        let walking =
+            lazy
+                (Quarry.walking hostile.Pos left back
+                 || not (Quarry.turnsBeside hostile.Pos (trailOf view hostile)))
 
         let dancing = dancingOn view hostile
 
@@ -2455,7 +2471,7 @@ let private catchOdds
             // leaves in a step: caught only for what lands before it, from
             // in reach.
             | _ when out <= 1 -> off + 1 - max 0 arrival
-            | _ when not leaving && walking -> off - max 0 arrival
+            | _ when not leaving && walking.Value -> off - max 0 arrival
             | _ when not leaving -> kill
             | _ when arrival > 0 -> 0
             | _ -> off
@@ -4153,7 +4169,9 @@ let private pricingOf (view: ColonyView, room: string) : ColonyView =
         Hostiles =
             priced.Hostiles @ escorts
             |> List.map (fun h ->
-                match Quarry.placed room h.Pos (Map.tryFind h.Id view.Bounces) with
+                match
+                    Quarry.placed room h.Pos (Map.tryFind h.Id view.Bounces) (trailOf view h)
+                with
                 | Some tile when tile <> h.Pos -> { h with Pos = tile }
                 | _ ->
                     match committed with

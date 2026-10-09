@@ -2344,16 +2344,28 @@ let quarryQueryTests =
                         }
 
                 Expect.equal
-                    (Quarry.placed quarryRoom (RoomPos.at "W13S29" { X = 47; Y = 20 }) crossed)
+                    (Quarry.placed
+                        quarryRoom
+                        (RoomPos.at "W13S29" { X = 47; Y = 20 })
+                        crossed
+                        Quarry.still)
                     (Some came)
                     "two tiles over: still the room's, where it stepped out"
 
                 Expect.isNone
-                    (Quarry.placed quarryRoom (RoomPos.at "W13S29" { X = 40; Y = 20 }) crossed)
+                    (Quarry.placed
+                        quarryRoom
+                        (RoomPos.at "W13S29" { X = 40; Y = 20 })
+                        crossed
+                        Quarry.still)
                     "past the dance: the other room's"
 
                 Expect.equal
-                    (Quarry.placed quarryRoom (RoomPos.at quarryRoom { X = 5; Y = 5 }) None)
+                    (Quarry.placed
+                        quarryRoom
+                        (RoomPos.at quarryRoom { X = 5; Y = 5 })
+                        None
+                        Quarry.still)
                     (Some(RoomPos.at quarryRoom { X = 5; Y = 5 }))
                     "standing in it: where it stands"
             }

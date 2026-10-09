@@ -2311,6 +2311,127 @@ let sweepRoomTests =
                     (Some(OpPhase.Execute, Some westRoom))
                     "out of a hold on the west room's price: into the west room"
             }
+
+            // Live W19S25 <-> W19S26, bundle a3801bee, t1,068,293-340: sixteen
+            // `Outpaid` moves, each undone within one to eight ticks. The
+            // group held W19S25 (seated miners and haulers at their source);
+            // W19S26's one hauler, kiting the group at its pace, read caught
+            // on each tick it turned back and outpaid it. Here the north room
+            // is held on a seated miner and the west room's hauler has just
+            // turned back after ranging over the room: no move. Milling on
+            // one tile, it is caught, its room outpays and the latch moves.
+            test
+                "a hauler turning back as it kites over the room never outpays the room held; one milling on its tile does" {
+                let holder = ranger "ranger-r"
+                let home = SpatialInfo.homeName bareHome.Spatial
+                let held = Map.ofList [ holder.Name, taskId (operating harassRoom) ]
+                let minerN = theirsIn harassRoom "miner-n" { X = 20; Y = 20 } [ Work; Work; Move ]
+
+                // Empty, at the ranger's pace on plain.
+                let hauler =
+                    theirsIn
+                        westRoom
+                        "hauler-w"
+                        { X = 30; Y = 25 }
+                        (List.replicate 5 Carry @ List.replicate 5 Move)
+
+                let tile x y = RoomPos.at westRoom { X = x; Y = y }
+
+                let spec =
+                    Operation.Templates.sweep
+                        "sweep"
+                        enemy
+                        [ harassRoom; westRoom ]
+                        {
+                            MaxBodies = 6
+                            MaxEnergy = System.Int32.MaxValue
+                            Deadline = System.Int32.MaxValue
+                            MaxLossRatio = 1.0
+                        }
+
+                let committed =
+                    {
+                        Id = "sweep"
+                        Started = 100
+                        Phase = OpPhase.Execute
+                        Since = 100
+                        Room = Some harassRoom
+                        RoomSince = 100
+                        Spent = 0
+                        Lost = 0
+                        NextDue = 0
+                        Ended = None
+                    }
+
+                // The hauler back on 30,25 off 31,26, its trail newest first.
+                let facts (trail: (int * int) list) =
+                    let colony =
+                        { sweeping [ holder, RoomPos.at home { X = 15; Y = 20 } ] [ minerN; hauler ] with
+                            Time = 200
+                            Stepped = Map.ofList [ hauler.Id, tile 31 26 ]
+                            SteppedBack = Map.ofList [ hauler.Id, tile 30 25 ]
+                        }
+
+                    let track (h: HostileInfo) (steps: RoomPos list) =
+                        h.Id,
+                        {
+                            Body = h
+                            Seen = 200
+                            Cargo = 0
+                            Trail = steps |> List.mapi (fun ago at -> 200 - ago, at)
+                            Crossings = None
+                            Gone = None
+                        }
+
+                    let colony =
+                        { colony with
+                            World =
+                                { colony.World with
+                                    Quarries =
+                                        Map.ofList
+                                            [
+                                                track minerN [ minerN.Pos; minerN.Pos ]
+                                                track
+                                                    hauler
+                                                    (trail |> List.map (fun (x, y) -> tile x y))
+                                            ]
+                                }
+                        }
+
+                    let group =
+                        Operations.groupIn
+                            Colony.sweepId
+                            (set [ harassRoom; westRoom ])
+                            held
+                            [ colony ]
+
+                    Operations.ownFacts
+                        200
+                        (fun _ -> true)
+                        spec
+                        (Some committed)
+                        (fun _ -> [ colony ])
+                        group
+                        [ colony ]
+
+                let kiting = facts [ 30, 25; 31, 26; 30, 25; 29, 24; 28, 23; 27, 22; 28, 23 ]
+                let milling = facts [ 30, 25; 31, 26; 30, 25; 31, 26; 30, 25; 31, 26 ]
+
+                Expect.isGreaterThan
+                    (milling.Challenge westRoom |> Option.defaultValue 0.0)
+                    (milling.Rate harassRoom |> Option.defaultValue 0.0)
+                    "the premise: caught, the hauler outpays the seated miner"
+
+                Expect.equal
+                    (Operations.advance kiting spec (Some committed))
+                    (Some committed, [])
+                    "kiting: the north room kept, nothing logged"
+
+                Expect.equal
+                    (Operations.advance milling spec (Some committed) |> fst |> Option.bind _.Room)
+                    (Some westRoom)
+                    "milling: the west room outpays it, and the latch moves there"
+            }
         ]
 
 [<Tests>]
@@ -3080,6 +3201,60 @@ let private stepping
             |> Map.ofList
     }
 
+/// What our biggest ranger earns a tick in the harassment room on an empty
+/// 23C23M hauler at 30,2, two off its north edge and stepping for it, its
+/// trail these tiles a tick apart (newest first, `x, y`) and its crossings
+/// in from W1N3 these ticks ago (none: it never crossed).
+let private crosserPriced (trail: (int * int) list) (crossings: int list) : float =
+    let crosser = bigHauler "crosser" { X = 30; Y = 2 }
+    let tile x y = RoomPos.at harassRoom { X = x; Y = y }
+
+    let laid =
+        stepping
+            { X = 10; Y = 25 }
+            [ crosser ]
+            []
+            [ "crosser", { X = 30; Y = 3 }, { X = 30; Y = 4 } ]
+
+    let crossing =
+        match crossings with
+        | [] -> None
+        | agos ->
+            Some
+                {
+                    Came = RoomPos.at "W1N3" { X = 30; Y = 48 }
+                    Ticks = agos |> List.map (fun ago -> laid.Time - ago)
+                    Tiles = [ tile 30 0; RoomPos.at "W1N3" { X = 30; Y = 48 } ]
+                }
+
+    let colony =
+        { laid with
+            Bounces =
+                crossing
+                |> Option.map (fun crossed -> Map.ofList [ crosser.Id, crossed ])
+                |> Option.defaultValue Map.empty
+            World =
+                { laid.World with
+                    Quarries =
+                        Map.ofList
+                            [
+                                crosser.Id,
+                                {
+                                    Body = crosser
+                                    Seen = laid.Time
+                                    Cargo = 0
+                                    Trail =
+                                        trail
+                                        |> List.mapi (fun ago (x, y) -> laid.Time - ago, tile x y)
+                                    Crossings = crossing
+                                    Gone = None
+                                }
+                            ]
+                }
+        }
+
+    Facts.roomRate Quarry.Reading.Value colony [ Fighter.ofCreep bigRanger ] 0 0 harassRoom
+
 [<Tests>]
 let catchableFirstTests =
     testList
@@ -3439,6 +3614,196 @@ let catchableFirstTests =
                     (rate [ medic; ranged ])
                     (rate [ ranged; medic ])
                     "the team's rate, whatever its order"
+            }
+
+            // Live W19S26, t1,068,293-340 (bundle a3801bee): Bolt7991, an
+            // empty hauler at the group's pace, kited it across the room,
+            // turning back each time the group closed or walked off. Each
+            // turn read as milling, caught at its work (catch 1.0, the room
+            // 69 a tick), each step on as walking (0.1, the room 14): the
+            // sweep's room flipped with its steps. A turn is milling only
+            // where every turn its trail keeps lies within a step of it.
+            test
+                "a hauler turning back after ranging over the room is priced as it walks, whichever way its last step went; one milling on a tile is caught" {
+                let kiter = bigHauler "kiter" { X = 30; Y = 25 }
+                let tile x y = RoomPos.at harassRoom { X = x; Y = y }
+
+                // The kiter's trail, newest first, and its last two steps.
+                let priced (trail: (int * int) list) (back: Pos) =
+                    let laid =
+                        stepping
+                            { X = 10; Y = 25 }
+                            [ kiter ]
+                            []
+                            [ "kiter", { X = 31; Y = 26 }, back ]
+
+                    let colony =
+                        { laid with
+                            World =
+                                { laid.World with
+                                    Quarries =
+                                        Map.ofList
+                                            [
+                                                kiter.Id,
+                                                {
+                                                    Body = kiter
+                                                    Seen = laid.Time
+                                                    Cargo = 0
+                                                    Trail =
+                                                        trail
+                                                        |> List.mapi (fun ago (x, y) ->
+                                                            laid.Time - ago, tile x y)
+                                                    Crossings = None
+                                                    Gone = None
+                                                }
+                                            ]
+                                }
+                        }
+
+                    Facts.roomRate
+                        Quarry.Reading.Value
+                        colony
+                        [ Fighter.ofCreep bigRanger ]
+                        0
+                        0
+                        harassRoom
+
+                // Up from a turn at 27,22, three tiles off; then back a step.
+                let ranged = [ 30, 25; 31, 26; 30, 25; 29, 24; 28, 23; 27, 22; 28, 23 ]
+                let milled = [ 30, 25; 31, 26; 30, 25; 31, 26; 30, 25; 31, 26 ]
+
+                Expect.floatClose
+                    Accuracy.high
+                    (priced ranged { X = 30; Y = 25 })
+                    (priced ranged { X = 32; Y = 27 })
+                    "turned back onto 30,25 or walked on through 31,26: one price, as it walks"
+
+                Expect.isGreaterThan
+                    (priced milled { X = 30; Y = 25 })
+                    (priced ranged { X = 30; Y = 25 })
+                    "every turn within a step: it mills, caught at its work"
+            }
+
+            // Live W19S26, t1,068,305-327: Bolt7991 crossed in from W19S25
+            // at t1,068,277 and kited inland since; each time it came within
+            // the dance depth of the north edge it read as a dancer, camped
+            // at 0.76 (the room 133-160 a tick) against 0.1 a step farther
+            // in (14). A crossing makes a dancer only while the body kept to
+            // the border since.
+            test
+                "a hauler that crossed in and walked inland since is no dancer back by the border; one that kept to it is camped" {
+                let priced trail crossed =
+                    crosserPriced trail (if crossed then [ 20 ] else [])
+
+                // Since its crossing twenty ticks ago: down to y=12 and back,
+                // or up and down the edge.
+                let inland =
+                    [ 0..20 ] |> List.map (fun ago -> 30, (if ago <= 10 then 2 + ago else 22 - ago))
+
+                let edge = [ 0..20 ] |> List.map (fun ago -> 30, [ 2; 3; 4; 3 ].[ago % 4])
+
+                Expect.floatClose
+                    Accuracy.high
+                    (priced inland true)
+                    (priced inland false)
+                    "walked inland since its crossing: priced as the same body that never crossed"
+
+                Expect.isGreaterThan
+                    (priced edge true)
+                    (priced edge false)
+                    "kept to the border since: a dancer, its camp paying"
+            }
+
+            // The ship gate's review: a dancer that steps inland once (off
+            // our ranger's line, say) and dances on lost its camp for the
+            // whole bounce window, the window's oldest crossing anchoring
+            // the rule. It dances again from its first crossing after.
+            test "a hauler that stepped inland once and crossed again dances from that crossing" {
+                // Ten ticks ago five tiles in; the edge before and since.
+                let trail =
+                    [ 0..20 ]
+                    |> List.map (fun ago -> 30, (if ago = 10 then 7 else [ 2; 3; 4; 3 ].[ago % 4]))
+
+                Expect.floatClose
+                    Accuracy.high
+                    (crosserPriced trail [ 14; 18 ])
+                    (crosserPriced trail [])
+                    "no crossing since its step inland: priced as one that never crossed"
+
+                Expect.isGreaterThan
+                    (crosserPriced trail [ 6; 14; 18 ])
+                    (crosserPriced trail [])
+                    "crossed again six ticks ago: a dancer, its camp paying"
+
+                Expect.floatClose
+                    Accuracy.high
+                    (crosserPriced trail [ 2; 6; 14; 18 ])
+                    (crosserPriced (trail |> List.map (fun (x, y) -> x, min y 4)) [ 2; 6; 14; 18 ])
+                    "and priced as the dancer that never stepped in"
+            }
+
+            // The ship gate's review: a hauler that shied three tiles off its
+            // container as we came and walked back to stand on it read as
+            // walking for the whole window, its one far turn kept. Its turns
+            // count since it last came to rest: standing now, it is at work.
+            test
+                "a hauler that shied off and came back to stand at its container is caught at its work" {
+                let hauler = bigHauler "hauler" { X = 30; Y = 25 }
+                let tile x y = RoomPos.at harassRoom { X = x; Y = y }
+
+                let priced (trail: (int * (int * int)) list) =
+                    let laid = stepping { X = 10; Y = 25 } [ hauler ] [] []
+
+                    let colony =
+                        { laid with
+                            World =
+                                { laid.World with
+                                    Quarries =
+                                        Map.ofList
+                                            [
+                                                hauler.Id,
+                                                {
+                                                    Body = hauler
+                                                    Seen = laid.Time
+                                                    Cargo = 0
+                                                    Trail =
+                                                        trail
+                                                        |> List.map (fun (ago, (x, y)) ->
+                                                            laid.Time - ago, tile x y)
+                                                    Crossings = None
+                                                    Gone = None
+                                                }
+                                            ]
+                                }
+                        }
+
+                    Facts.roomRate
+                        Quarry.Reading.Value
+                        colony
+                        [ Fighter.ofCreep bigRanger ]
+                        0
+                        0
+                        harassRoom
+
+                // Stood on 30,25 four ticks (a run: its newest and oldest
+                // tick), after out to 33,28 and back.
+                let shied =
+                    [
+                        0, (30, 25)
+                        3, (30, 25)
+                        4, (31, 26)
+                        5, (32, 27)
+                        6, (33, 28)
+                        7, (32, 27)
+                        8, (31, 26)
+                        9, (30, 25)
+                    ]
+
+                Expect.floatClose
+                    Accuracy.high
+                    (priced shied)
+                    (priced [])
+                    "standing at its work since: priced as one with no trail kept, caught"
             }
         ]
 
