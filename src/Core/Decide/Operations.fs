@@ -739,6 +739,7 @@ let private reopened (now: int) (spec: OperationSpec) (record: OpRecord) : OpRec
     | Some OpEnd.Budget when record.Spent < spec.Limits.MaxEnergy -> None
     | _ -> Some record
 
+/// ADR-0096
 /// The operations laid in every colony's view (#663 S7c), once a full tick
 /// before the world's verdicts are priced (`Entry.judgeColonies`): the
 /// sweep (`sweepSpec`) moved on from its record (`records`, the stored

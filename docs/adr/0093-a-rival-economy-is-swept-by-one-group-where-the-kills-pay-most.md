@@ -1,6 +1,8 @@
 # A rival's economy is swept by one group, working the room where its kills pay most
 
-> **Status:** accepted; amended by #667
+> **Status:** superseded by 0096
+
+> **Superseded by ADR 0096** (#663 S7c, 2026-10-09): the sweep is an operation whose stored record keeps the room it is committed to, changed only on an exit; its bodies hold the operation's Task. Decisions 3, 5 and 6 and the rejection of a stored record are replaced; 1, 2, 4 and 7 are carried there unchanged.
 
 > **Amended by #667** on decision 2's incumbent band: one sweep, one caster. A colony whose ranger stands in any candidate, or holds any candidate's Guard, keeps its bid on every candidate down to `CasterReserveHold`, not on the room it stands in alone; per room, a stock hovering at the reserve flipped the other candidates in and out of its projection and replanned it.
 
