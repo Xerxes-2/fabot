@@ -777,3 +777,236 @@ let operationDecodeTests =
                         | _ -> ()
             }
         ]
+
+/// One answer of the sweep's: in W1N1, a group of two, a strike seating two.
+let private answer: SweepAnswer =
+    {
+        Room = Some "W1N1"
+        Group = set [ "a"; "b" ]
+        Scoped = Set.empty
+        Jobs = [ JobKind.Strike ]
+        Seats = 2
+    }
+
+/// The shadow's answer for the same tick: the phase's declared jobs.
+let private shadowed =
+    { answer with
+        Jobs = [ JobKind.Strike; JobKind.Camp; JobKind.Ring; JobKind.Muster ]
+    }
+
+[<Tests>]
+let sweepShadowTests =
+    testList
+        "the sweep's shadow (#663 S7b)"
+        [
+            test "the code declares the sweep over every live candidate, against their one enemy" {
+                Expect.equal
+                    (Colony.operations |> Result.map (List.collect _.Rooms))
+                    (Ok(Colony.harass |> List.map _.RoomName))
+                    "the live candidates"
+
+                for candidates in [ Colony.harass; Colony.harassDeclared ] do
+                    match Colony.sweepOf candidates with
+                    | Ok [ wire ] ->
+                        Expect.all candidates (fun h -> h.Enemy = wire.Enemy) "one enemy"
+                    | Ok [] -> Expect.isEmpty candidates "none with no candidate"
+                    | other -> failtest $"one sweep: {other}"
+            }
+
+            test "candidates of two enemies are refused by name, never read as the first's" {
+                let mixed: Harass list =
+                    [
+                        {
+                            RoomName = "W8N8"
+                            Enemy = "Trepidimous"
+                            Via = []
+                        }
+                        {
+                            RoomName = "W9N9"
+                            Enemy = "Shibdib"
+                            Via = []
+                        }
+                    ]
+
+                Expect.equal
+                    (Colony.sweepOf mixed)
+                    (Error "sweep candidates of two enemies: Trepidimous, Shibdib")
+                    "refused"
+
+                Expect.equal
+                    (Operations.declaredSweep standing (Colony.sweepOf mixed))
+                    (None,
+                     [
+                         {
+                             Id = "sweep"
+                             Why = "sweep candidates of two enemies: Trepidimous, Shibdib"
+                         }
+                     ])
+                    "no spec, one refusal"
+            }
+
+            test
+                "a code spec runs with no deadline nor budget but what it names; an unknown template is refused" {
+                match Operation.ofCode standing wire with
+                | Ok(spec, []) ->
+                    Expect.equal
+                        (spec.Limits.Deadline, spec.Limits.MaxEnergy)
+                        (System.Int32.MaxValue, System.Int32.MaxValue)
+                        "open-ended"
+                | other -> failtest $"admitted whole: {other}"
+
+                Expect.equal
+                    (Operation.ofCode standing { wire with Template = "siege" })
+                    (Error
+                        {
+                            Id = "op1"
+                            Why = "no template: siege"
+                        })
+                    "unknown"
+            }
+
+            test
+                "a code spec passes the Memory spec's safety: an ally or a neutral as enemy refuses it, a room that is ours, an ally's or a neutral's is dropped, an unknown holder stays" {
+                Expect.equal
+                    (Operation.ofCode standing { wire with Enemy = "Odiodin" })
+                    (Error { Id = "op1"; Why = "an ally: Odiodin" })
+                    "an ally"
+
+                Expect.equal
+                    (Operation.ofCode standing { wire with Enemy = "somebody" })
+                    (Error
+                        {
+                            Id = "op1"
+                            Why = "a neutral: somebody"
+                        })
+                    "a neutral"
+
+                match
+                    Operation.ofCode
+                        standing
+                        { wire with
+                            Rooms = [ "W5N5"; "W6N6"; "W7N7"; "W4N4"; "W8N8" ]
+                        }
+                with
+                | Ok(spec, dropped) ->
+                    Expect.equal
+                        spec.Target
+                        (OpTarget.Among(RoomClass.Listed [ "W4N4"; "W8N8" ]))
+                        "kept"
+
+                    Expect.equal
+                        (dropped |> List.map _.Why)
+                        [ "ours: W5N5"; "an ally's: W6N6"; "a neutral's: W7N7" ]
+                        "each dropped room refused"
+                | Error refused -> failtest $"refused whole: {refused}"
+            }
+
+            test "a fault is recorded once a heap: a repeat of its message is not recorded again" {
+                let first = Operation.firstSeen Set.empty "boom"
+                Expect.equal first (Some(set [ "boom" ])) "the first recorded"
+                Expect.isNone (Operation.firstSeen first.Value "boom") "the repeat not"
+                Expect.isSome (Operation.firstSeen first.Value "bang") "another message is"
+            }
+
+            test
+                "the shadow agrees where every answer is the sweep's, its phase's declared jobs a superset of those laid" {
+                Expect.isEmpty (Operations.disagreements 10 shadowed answer) "agreed"
+            }
+
+            test
+                "another room is one disagreement, a consistency check: the jobs and the seats are compared only in one room" {
+                let examples =
+                    Operations.disagreements 10 { shadowed with Room = None; Seats = 0 } answer
+
+                Expect.equal
+                    (examples |> List.map (fun e -> e.Kind, e.Room, e.Shadow, e.Sweep))
+                    [ Divergence.Room, "W1N1", "none", "W1N1" ]
+                    "the room alone"
+
+                Expect.stringStarts
+                    (List.head examples).Why
+                    "consistency"
+                    "labelled a consistency check"
+            }
+
+            test
+                "in one room each answer that differs is one example, the group as the bodies only one side counts" {
+                let examples =
+                    Operations.disagreements
+                        10
+                        { shadowed with
+                            Group = set [ "a"; "c" ]
+                            Seats = 1
+                        }
+                        { answer with
+                            Jobs = [ JobKind.HoldExit; JobKind.Strike ]
+                        }
+
+                Expect.equal
+                    (examples |> List.map (fun e -> e.Kind, e.Shadow, e.Sweep))
+                    [
+                        Divergence.Group, "c", "b"
+                        Divergence.Jobs, "Strike,Camp,Ring,Muster", "HoldExit,Strike"
+                        Divergence.Seats, "1", "2"
+                    ]
+                    "each kind once"
+
+                Expect.equal (examples |> List.map _.Tick |> List.distinct) [ 10 ] "stamped"
+            }
+
+            test
+                "a group difference made only of bodies the shadow counts from a colony not casting their room is the roster's scope" {
+                let wider =
+                    { shadowed with
+                        Group = set [ "a"; "b"; "c" ]
+                        Scoped = set [ "c" ]
+                    }
+
+                Expect.equal
+                    (Operations.disagreements 10 wider answer |> List.map _.Kind)
+                    [ Divergence.Scope ]
+                    "scope"
+
+                Expect.equal
+                    (Operations.disagreements 10 { wider with Group = set [ "a"; "c" ] } answer
+                     |> List.map _.Kind)
+                    [ Divergence.Group ]
+                    "a body the sweep counts and the shadow does not is a group difference"
+            }
+
+            test
+                "the log counts each kind, keeps the latest newest first, one example a standing disagreement, at most its cap" {
+                let room tick =
+                    Operations.disagreements tick { shadowed with Room = None } answer
+
+                let log =
+                    [ 1..3 ]
+                    |> List.fold
+                        (fun log tick -> Operations.logged log answer (room tick))
+                        Operation.shadowEmpty
+
+                Expect.equal (log.Compared, log.Working) (3, 3) "three compared, each worked"
+                Expect.equal log.Counts (Map.ofList [ Divergence.Room, 3 ]) "counted"
+                Expect.equal (log.Last |> List.map _.Tick) [ 3 ] "one example, the latest"
+
+                let many =
+                    [ 1..12 ]
+                    |> List.fold
+                        (fun log tick ->
+                            Operations.logged
+                                log
+                                { answer with Room = None }
+                                (Operations.disagreements
+                                    tick
+                                    { shadowed with Seats = tick }
+                                    answer))
+                        Operation.shadowEmpty
+
+                Expect.equal many.Working 0 "no room worked"
+
+                Expect.equal
+                    (many.Last |> List.map _.Tick)
+                    [ 12..-1..5 ]
+                    "the cap's newest, newest first"
+            }
+        ]

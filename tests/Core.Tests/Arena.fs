@@ -377,6 +377,10 @@ type Carried =
         /// The operation ledger (`Ledger.fold`, #662), folded every tick as
         /// `Main` folds it on a full one.
         Ledger: Ledger.Ledger
+        /// The sweep's shadow (`Operations.shadowStep`, #663 S7b): the code
+        /// spec over the arena's harassment rooms, its record and its log,
+        /// stepped every tick as `Main` steps it on a whole full one.
+        Shadow: OpRecord option * ShadowLog
     }
 
 /// The arena's whole state between ticks.
@@ -930,6 +934,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 RivalControllers = Map.empty
                 Fallen = Map.empty
                 Ledger = Ledger.empty
+                Shadow = None, Operation.shadowEmpty
             }
         Scores = Map.empty
         Ovens = []
@@ -1805,6 +1810,23 @@ let private decideOurs (a: Arena) : Intent list * Carried =
             with
             | ledger, [] -> ledger
             | _, faults -> invalidOp $"t{a.Time}: the ledger's fold threw: %A{faults}"
+        Shadow =
+            match Colony.sweepOf a.Harass with
+            | Ok [] -> a.Carried.Shadow
+            | declared ->
+                let seen = decided.Sweep.Force()
+
+                let ours = a.Colonies |> List.map Colony.declaredRooms |> Set.unionMany
+
+                Operations.shadowStep
+                    (Operations.standingOf a.Time ours (fun _ -> None) world)
+                    declared
+                    (Operations.sweepFacts a.Time (fun _ -> true) seen.Views)
+                    a.Carried.Shadow
+                    seen.Held
+                    seen.Views
+                    seen.Priced
+                    seen.Decided
     }
 
 // ---------------------------------------------------------------------------

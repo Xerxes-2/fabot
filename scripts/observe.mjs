@@ -63,6 +63,14 @@
 //                                  record (phase, since, ended), the kill
 //                                  switch, the refusals and the last events.
 //                                  Read only; S7a runs them dry
+//   observe.mjs op shadow          the sweep's shadow (#663 S7b): the whole
+//                                  full ticks the operation interpreter's
+//                                  sweep was compared with the live sweep,
+//                                  a count per kind of disagreement and the
+//                                  latest few, each with both answers, and
+//                                  the rooms refused the code spec. Only
+//                                  group, jobs and seats are computed apart;
+//                                  room is a consistency check
 //   observe.mjs console --seconds N     subscribe to the live console for N
 //                                       seconds, print what arrives, exit —
 //                                       the console keeps no history, so a
@@ -253,7 +261,7 @@ const usage =
   "reactor [--json] | cpu [--all] [--json] | " +
   "verbose [add <creep> | remove <creep> | clear] [--json] | " +
   "draw [add <room|creep> | remove <room|creep> | clear] [--json] | cadence [<2..4> | clear] | " +
-  "fight-only [on | off | clear] | op list [--json] | " +
+  "fight-only [on | off | clear] | op list|shadow [--json] | " +
   "console --seconds N | eval '<expr>' [--seconds N] | room <name> [--json] | " +
   "wait --ticks N | health [--colony <home>] [--samples K] | " +
   "history <room> <tick> [--json] | probe [--json] | rivals [--json] | ledger [--json]";
@@ -347,7 +355,9 @@ if (command === "fight-only" && action !== undefined) {
   if (actionName !== undefined) fail(usage);
 }
 // `op add|cancel|off|on` come with S7e; S7a only reads.
-if (command === "op" && (action !== "list" || actionName !== undefined)) fail("op takes list");
+if (command === "op" && (!["list", "shadow"].includes(action) || actionName !== undefined)) {
+  fail("op takes list or shadow");
+}
 if (command === "console" && !(Number.isFinite(seconds) && seconds > 0)) {
   fail("console needs --seconds N (a positive number): the subscription must be bounded");
 }
@@ -1154,6 +1164,34 @@ if (command === "console") {
       await new Promise((r) => setTimeout(r, 1000));
     }
     console.log(`cadence override is now ${show(wanted)}`);
+  }
+} else if (command === "op" && action === "shadow") {
+  // ---- op shadow: the sweep's shadow log (#663 S7b), read only ------------
+
+  const stored = await memoryGet("fabot.shadow");
+  const shadow = stored && typeof stored === "object" && !Array.isArray(stored) ? stored : undefined;
+
+  if (json) {
+    console.log(JSON.stringify(shadow ?? null, null, 2));
+  } else if (shadow === undefined) {
+    console.log("no shadow log (Memory.fabot.shadow is absent: no sweep declared, or no whole full tick yet)");
+  } else {
+    const counts = Object.entries(shadow.c ?? {}).map(([kind, n]) => `${kind} ${n}`);
+    console.log(
+      `${shadow.n} whole full ticks compared, ${shadow.w ?? 0} with the sweep working a room; ` +
+        (counts.length === 0 ? "no divergence" : `divergences: ${counts.join(", ")}`),
+    );
+    console.log(
+      "only group, jobs and seats compare computations made apart; room is a consistency " +
+        "check (both read one price), scope a group difference of the world's roster",
+    );
+    const examples = Array.isArray(shadow.e) ? shadow.e.filter((e) => e && typeof e === "object") : [];
+    if (examples.length > 0) console.log("\nlatest, newest first:");
+    for (const e of examples) {
+      console.log(`  t${e.t} ${e.k} in ${e.r || "-"}: shadow ${e.o} | sweep ${e.s} — ${e.w}`);
+    }
+    const refused = Array.isArray(shadow.x) ? shadow.x.filter((r) => r && typeof r === "object") : [];
+    for (const r of refused) console.log(`refused ${r.id}: ${r.why}`);
   }
 } else if (command === "op") {
   // ---- op list: the operations' leaf (#663), read only --------------------

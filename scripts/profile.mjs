@@ -107,6 +107,12 @@
 // in `dist/main.js`, so the live switch stays a human's commit. Its
 // fingerprints differ from a run without it by design; compare it with
 // itself, and read its light and forced full tick counts.
+//
+// `--sweep-working` (#663 S7b, pair only) is the run the sweep works a room
+// in: the probed copy's `Colony.harass` is one rival remote beside the
+// mother (`furnishRemote`), Trepidimous' reservation on it and a miner and
+// a hauler of theirs in sight. No other scenario has the sweep choose a
+// room, so this is the gate a change to the sweep or its operation reads.
 
 import { createRequire } from "node:module";
 import { Session } from "node:inspector/promises";
@@ -126,7 +132,7 @@ const RAIDABLE = ["outpost", "pair", "siege"];
 const USAGE =
   "usage: npm run profile -- [ticks] [top-N] [--census-every N]" +
   " [--scenario stub|outpost|young|pair|reactor|siege] [--level 1..8] [--raided] [--resets N]" +
-  " [--short N] [--stock N] [--sweep]" +
+  " [--short N] [--stock N] [--sweep | --sweep-working]" +
   "  (positive integers)";
 
 // The controller level a scenario's colony is built at, and the one number
@@ -174,6 +180,8 @@ let levelArg = null;
 let raided = false;
 // The sweep switched on in the probed copy alone (#658).
 let sweep = false;
+// The sweep switched on over one rival remote it has prey in (#663 S7b).
+let sweepWorking = false;
 // How many cold resets the run ends on (#486): each loads a fresh copy of
 // the bundle over the run's last Memory and times its first tick.
 let resets = 5;
@@ -188,6 +196,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (process.argv[i] === "--scenario") scenario = process.argv[++i];
   else if (process.argv[i] === "--raided") raided = true;
   else if (process.argv[i] === "--sweep") sweep = true;
+  else if (process.argv[i] === "--sweep-working") sweepWorking = true;
   else if (process.argv[i] === "--resets") resets = Number(process.argv[++i]);
   else if (process.argv[i] === "--short") shortArg = process.argv[++i];
   else if (process.argv[i] === "--stock") stockArg = process.argv[++i];
@@ -218,6 +227,18 @@ if (!SCENARIOS.includes(scenario)) {
   process.exit(1);
 }
 const RAIDED = raided;
+const SWEEP_WORKING = sweepWorking;
+// The pair mother's level this run: RCL6 under `--sweep-working`, because an
+// RCL5 mother with her extension sites pending banks under
+// `Tuning.CasterFloor` and no colony would cast the remote at all.
+const PAIR_MOTHER_LEVEL = SWEEP_WORKING ? 6 : MOTHER_LEVEL;
+if (SWEEP_WORKING && (scenario !== "pair" || sweep)) {
+  console.error(
+    `--sweep-working furnishes a rival remote beside the pair scenario's mother and switches ` +
+      `the sweep on over it alone: pair only, and not with --sweep\n${USAGE}`,
+  );
+  process.exit(1);
+}
 if (RAIDED && !RAIDABLE.includes(scenario)) {
   console.error(
     `--raided stands a hostile in an outpost and the ${scenario} scenario furnishes none; ` +
@@ -2443,6 +2464,70 @@ function furnishOutpost(capture, register, structure, raided = false, homeRoom =
   };
 }
 
+// `--sweep-working` (#663 S7b): a rival's remote the sweep has something to
+// work in — Trepidimous' reservation on its controller, a 5W3M miner on the
+// first source's nearest free tile and a loaded 10C5M hauler beside it, in
+// sight — so the sweep chooses a room and casts for it, which no other
+// scenario has it do. Nothing of ours stands there.
+const SWEEP_REMOTE = "W12S29";
+const SWEEP_ENEMY = "Trepidimous";
+
+function furnishRemote(capture, register) {
+  const sources = registerSources(capture, register);
+  const controller = register({
+    id: capture.controller.id,
+    my: false,
+    level: 0,
+    ticksToDowngrade: undefined,
+    safeModeAvailable: 0,
+    safeMode: undefined,
+    reservation: { username: SWEEP_ENEMY, ticksToEnd: OUTPOST_RESERVATION_TICKS },
+    pos: capture.controller.pos,
+    activateSafeMode: ok,
+  });
+  const occupied = new Set([
+    ...sources.map((source) => keyOf(source.pos)),
+    keyOf(capture.controller.pos),
+  ]);
+  const hostile = (name, parts, energy) => {
+    const pos = nearestFree(capture, sources[0].pos, occupied);
+    occupied.add(keyOf(pos));
+    return register({
+      id: `${capture.name.toLowerCase()}-${name}`,
+      name: `${name}-${SWEEP_ENEMY}`,
+      owner: { username: SWEEP_ENEMY },
+      pos,
+      body: parts.map((type) => ({ type })),
+      hits: parts.length * 100,
+      ticksToLive: CREEP_LIFE_TIME,
+      store: energy > 0 ? store({ used: energy, capacity: 500 }) : store(),
+    });
+  };
+  const hostiles = [
+    hostile("miner", [...Array(5).fill("work"), ...Array(3).fill("move")], 0),
+    hostile("hauler", [...Array(10).fill("carry"), ...Array(5).fill("move")], 500),
+  ];
+  return {
+    capture,
+    occupied,
+    hostiles,
+    room: stubRoom({
+      name: capture.name,
+      controller,
+      findTables: {
+        105: sources,
+        108: [],
+        107: [],
+        114: [],
+        115: [],
+        103: hostiles,
+        106: [],
+        116: [],
+      },
+    }),
+  };
+}
+
 // The raid a furnished world is standing, for the report to read back: the
 // room it is in and the hostiles in it, or null where there is none. Taken
 // off the furnished rooms and never off the flag, so a world that was asked
@@ -2990,7 +3075,7 @@ function buildPairWorld({ siege = false } = {}) {
     capture: motherCapture,
     spawnPos: HOME_SPAWN,
     spawnName: "Spawn1",
-    rcl: MOTHER_LEVEL,
+    rcl: PAIR_MOTHER_LEVEL,
     shape: REST_SHAPE,
     prefix: "",
     register,
@@ -3025,7 +3110,7 @@ function buildPairWorld({ siege = false } = {}) {
   const crewOutposts = outpostCrew({
     outpostRooms,
     spawnName: "Spawn1",
-    rcl: MOTHER_LEVEL,
+    rcl: PAIR_MOTHER_LEVEL,
     register,
     creeps,
   });
@@ -3122,12 +3207,19 @@ function buildPairWorld({ siege = false } = {}) {
     );
   }
 
-  const rooms = [mother.room, child.room, ...outpostRooms.map((o) => o.room)];
+  const remote = SWEEP_WORKING ? furnishRemote(loadCapture(SWEEP_REMOTE), register) : null;
+  const rooms = [
+    mother.room,
+    child.room,
+    ...outpostRooms.map((o) => o.room),
+    ...(remote ? [remote.room] : []),
+  ];
   return {
     terrains: new Map([
       [motherCapture.name, motherCapture.terrain],
       [childCapture.name, childCapture.terrain],
       ...outposts.map((capture) => [capture.name, capture.terrain]),
+      ...(remote ? [[remote.capture.name, remote.capture.terrain]] : []),
       ...declaredTerrains(rooms.map((room) => room.name)),
     ]),
     rooms,
@@ -3155,6 +3247,7 @@ function buildPairWorld({ siege = false } = {}) {
       [motherCapture.name, mother.occupied],
       [childCapture.name, child.occupied],
       ...outpostRooms.map((outpost) => [outpost.room.name, outpost.occupied]),
+      ...(remote ? [[remote.room.name, remote.occupied]] : []),
     ]),
     // Both, in `Colony.declared`'s order — and the run throws on the first
     // profiled tick if the bundle decides for anything else.
@@ -3164,7 +3257,7 @@ function buildPairWorld({ siege = false } = {}) {
     crew: crewOutposts,
     describe: () => [
       `mother and bootstrapping child on real terrain (ADR 0036, ADR 0052): ${motherCapture.name}` +
-        ` at RCL${MOTHER_LEVEL} and ${childCapture.name} at RCL${LEVEL}, ${creeps.length} creeps ` +
+        ` at RCL${PAIR_MOTHER_LEVEL} and ${childCapture.name} at RCL${LEVEL}, ${creeps.length} creeps ` +
         `over ${rooms.length} rooms`,
       `  ${motherCapture.name} mother   ${plural(mother.sources.length, "source")}, controller, ` +
         `${furnitureLine(mother.furniture)}, ${plural(mother.roads.length, "road")}, ` +
@@ -5072,18 +5165,35 @@ function writeProbed(file, dir) {
   const SWITCH = "\nvar ColonyModule_harass = ";
   const at = read.indexOf(SWITCH);
   const end = at < 0 ? -1 : read.slice(at + SWITCH.length).search(/\n(var|let|const|function|class) /);
-  if (sweep && (at < 0 || end < 0 || read.indexOf(SWITCH, at + 1) >= 0)) {
+  if ((sweep || SWEEP_WORKING) && (at < 0 || end < 0 || read.indexOf(SWITCH, at + 1) >= 0)) {
     throw new Error(
       `${path.relative(process.cwd(), file)} holds no one \`${SWITCH.trim()}…\` binding: --sweep ` +
         "sets src/Core/Types/Colonies.fs's `Colony.harass` to `Colony.harassDeclared` by that " +
         "binding, and whatever renamed it is what this probe has to be re-pointed at",
     );
   }
-  const source = sweep
-    ? read.slice(0, at) +
-      `${SWITCH}ColonyModule_harassDeclared;` +
-      read.slice(at + SWITCH.length + end)
-    : read;
+  // `--sweep-working`: one candidate, the furnished remote, built with the
+  // constructors the declared list is built with, read off its binding.
+  let harassed = "ColonyModule_harassDeclared";
+  if (SWEEP_WORKING) {
+    const declared = read.match(
+      /\nvar ColonyModule_harassDeclared = (\w+)\(\[new (\w+)\("[^"]*", "[^"]*", (\w+)\(\[/,
+    );
+    const nothing = read.match(/\nvar ColonyModule_harassDeclared = [^\n]*?, (\w+)\(\)\)/);
+    if (!declared || !nothing) {
+      throw new Error(
+        `${path.relative(process.cwd(), file)}: \`Colony.harassDeclared\` no longer compiles to ` +
+          "`ofArray([new Harass(room, enemy, ofArray([...]))..., empty()...])`, which " +
+          "--sweep-working builds its one candidate with; re-point it",
+      );
+    }
+    const [, ofArray, harass] = declared;
+    harassed = `${ofArray}([new ${harass}("${SWEEP_REMOTE}", "${SWEEP_ENEMY}", ${nothing[1]}())])`;
+  }
+  const source =
+    sweep || SWEEP_WORKING
+      ? read.slice(0, at) + `${SWITCH}${harassed};` + read.slice(at + SWITCH.length + end)
+      : read;
   for (const phase of ["openWhole", "joinWhole", "finishWhole"]) {
     const declarations = source.match(new RegExp(`^function ${phase}\\(`, "gm")) ?? [];
     if (declarations.length !== 1) {
@@ -5813,12 +5923,27 @@ if (unprojected.length) {
     ],
     // The operations (#663): null in every scenario, none of which publishes one.
     ["ops", globalThis.Memory?.fabot?.ops],
+    // The sweep's shadow (#663 S7b): the operation interpreter's answers
+    // compared with the sweep's, every whole full tick.
+    ["shadow", globalThis.Memory?.fabot?.shadow],
     ["cpu ticks", (observe.cpu?.ticks ?? []).map((row) => row.t)],
   ];
   console.log(
     "\nMemory leaves (Memory.fabot.*), fingerprinted: " +
       leaves.map(([name, value]) => `${name} ${fingerprint(value)}`).join("  "),
   );
+  const shadow = globalThis.Memory?.fabot?.shadow;
+  if (shadow && typeof shadow === "object") {
+    const counts = Object.entries(shadow.c ?? {}).map(([kind, n]) => `${kind} ${n}`);
+    console.log(
+      `  sweep shadow: ${shadow.n} whole full ticks compared (${shadow.w ?? 0} working a room), ` +
+        (counts.length === 0 ? "no divergence" : `divergences: ${counts.join(", ")}`),
+    );
+    for (const e of shadow.e ?? []) {
+      console.log(`    t${e.t} ${e.k} ${e.r || "-"}: shadow ${e.o} | sweep ${e.s} (${e.w})`);
+    }
+    for (const r of shadow.x ?? []) console.log(`    refused ${r.id}: ${r.why}`);
+  }
 
   // The cold-reset tick (#486): every deploy is one, and the engine
   // terminates a tick over 500 ms. A first tick of the run is not one — the

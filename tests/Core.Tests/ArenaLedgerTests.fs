@@ -141,4 +141,27 @@ let tests =
 
                 Expect.equal row.Downtime 0 "never held unworked"
             }
+
+            // The one difference S7c decides: on the remote's prey the Brief
+            // seats one body per trespasser each template answers (#550),
+            // where the operation's priced count seats what its group pays
+            // for and its cast buys (`Facts.seatsPaid`, `Facts.fighterCast`).
+            test
+                "the sweep as an operation, run in shadow, answers its room, its group and its jobs every tick, and seats fewer on the prey than its trespass split (#663 S7b)" {
+                let final, trace = sweepOneRemote () |> run 400
+                let _, log = final.Carried.Shadow
+
+                Expect.equal log.Compared 400 "every tick compared"
+                Expect.isGreaterThan log.Working 0 $"the sweep worked its room\n%A{log}"
+
+                Expect.equal
+                    (log.Counts |> Map.keys |> List.ofSeq)
+                    [ Divergence.Seats ]
+                    $"only the seats differ\n%A{log}\n{describe trace}"
+
+                Expect.all
+                    log.Last
+                    (fun example -> int example.Sweep > int example.Shadow)
+                    $"the Brief seats more, never fewer\n%A{log}"
+            }
         ]

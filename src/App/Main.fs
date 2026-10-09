@@ -737,6 +737,26 @@ let private harassment: Harassment =
         BlockCost = Bodies.rangerBlockCost
     }
 
+/// Who stands in each room an operation names (`Operations.standingOf`):
+/// what `Operation.decode` and `Operation.ofCode` refuse a spec on.
+/// Every room a colony declares, read once a heap: the declarations are
+/// code's.
+let private declaredRooms =
+    lazy (Colony.declared |> Seq.collect Colony.declaredRooms |> Fresh.setOfSeq)
+
+let private standingNow (world: World) : OpStanding =
+    let declared = declaredRooms.Value
+
+    // A rival's reservation the dossier saw standing at its last look.
+    let remembered (room: string) =
+        rivalDossier
+        |> Option.bind (fun rivals ->
+            rivals.Dossiers
+            |> Map.tryFindKey (fun _ dossier ->
+                dossier.Rooms |> Map.tryFind room |> Option.exists _.Reserving))
+
+    Operations.standingOf Game.time declared remembered world
+
 /// The operations' dry run (#663 S7a), once a full tick over the views as
 /// decided: the Memory specs admitted (`Operation.admit`), each record moved
 /// on (`Operations.step`), the records, refusals and events written back.
@@ -748,17 +768,7 @@ let private operationsDryRun (world: World) (views: ColonyView list) =
     // The kill switch: nothing admitted, moved or written.
     | Some leaf when leaf.Off -> ()
     | Some leaf ->
-        let declared = Colony.declared |> List.map Colony.declaredRooms |> Set.unionMany
-
-        // A rival's reservation the dossier saw standing at its last look.
-        let remembered (room: string) =
-            rivalDossier
-            |> Option.bind (fun rivals ->
-                rivals.Dossiers
-                |> Map.tryFindKey (fun _ dossier ->
-                    dossier.Rooms |> Map.tryFind room |> Option.exists _.Reserving))
-
-        let standing = Operations.standingOf Game.time declared remembered world
+        let standing = standingNow world
         let admission = Operation.admit standing leaf.Live leaf.Specs
 
         let admission =
@@ -779,6 +789,45 @@ let private operationsDryRun (world: World) (views: ColonyView list) =
                 |> Option.map (fun spec -> spec.Id, spec.Limits.Deadline))
 
         ObserveMemory.saveOps Game.time records (leaf.Garbled @ admission.Refused) events deadlines
+
+/// The sweep's code spec's record (#663 S7b), heap only — a reset begins it
+/// again —, and its shadow's log, read back off Memory on a cold heap.
+let mutable private sweepShadow: (OpRecord option * ShadowLog) option = None
+
+/// The shadow's faults recorded this heap, by message: each once
+/// (`Operation.firstSeen`), so one that throws every tick does not rewrite
+/// the fault log every tick.
+let mutable private shadowFaults: Set<string> = Fresh.setOfSeq Seq.empty
+
+/// The sweep's shadow (#663 S7b), once a whole full tick: the code spec
+/// (`Colony.operations`) resolved by the interpreter over this tick's prices
+/// (`Operations.shadowStep`) and compared with what `Facts.sweepAll` and
+/// the room's Brief decided, each disagreement logged
+/// (`Memory.fabot.shadow`). Nothing reads it into a decision; with no sweep
+/// declared nothing runs and nothing is written.
+let private sweepShadowTick (world: World) (seen: Decide.Entry.SweepSeen) =
+    match Colony.operations with
+    | Ok [] -> ()
+    | declared ->
+        let state =
+            sweepShadow |> Option.defaultWith (fun () -> None, ObserveMemory.loadShadow ())
+
+        let facts =
+            Operations.sweepFacts Game.time (Operations.warmSince loadedAt world) seen.Views
+
+        let record, log =
+            Operations.shadowStep
+                (standingNow world)
+                declared
+                facts
+                state
+                seen.Held
+                seen.Views
+                seen.Priced
+                seen.Decided
+
+        sweepShadow <- Some(record, log)
+        ObserveMemory.saveShadow log
 
 /// The full tick: the World, every colony's view and decision, the observe
 /// folds and every Memory leaf, and the record the light tick after it
@@ -1817,6 +1866,18 @@ let private fullTick
         operationsDryRun world (colonyDecisions.Views |> List.map snd)
     with error ->
         recordFaults [ faultRow "" "ops" error ]
+
+    // The sweep's shadow, on a whole tick alone (its Briefs the world's): a
+    // throw costs its tick and nothing else, and is recorded once a heap.
+    if colonyDecisions.Whole then
+        try
+            sweepShadowTick world (colonyDecisions.Sweep.Force())
+        with error ->
+            match Operation.firstSeen shadowFaults error.Message with
+            | Some seen ->
+                shadowFaults <- seen
+                recordFaults [ faultRow "" "shadow" error ]
+            | None -> ()
 
     // A given-up colony's leaf and the flat legacy log, which nothing writes:
     // every home neither declared nor living (an undeclared spawn room, when

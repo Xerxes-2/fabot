@@ -280,19 +280,6 @@ type OpFacts =
         Warm: string -> bool
     }
 
-/// A spec as Memory spells it (`Memory.fabot.ops.specs`): a template's name
-/// and the parameters it takes, each of which may only narrow it.
-type OpSpecWire =
-    {
-        Id: string
-        Template: string
-        Enemy: string
-        Rooms: string list
-        Deadline: int option
-        MaxEnergy: int option
-        MaxBodies: int option
-    }
-
 /// Who holds a room that is not ours, as far as anything we keep knows.
 [<RequireQualifiedAccess>]
 type RoomHolder =
@@ -347,6 +334,66 @@ type OpEvent =
     /// Its spec left Memory, or is refused now.
     | Dropped of id: string
 
+/// The [[sweep]]'s answers for one full tick (#663 S7b), as the decide gave
+/// them (`Facts.sweepAll` and the room's Guard Brief) or as the operation
+/// interpreter resolves the code spec (`Operations.sweepShadow`): the room
+/// worked, every body of the group, its jobs' kinds, first first, and the
+/// seats they sum to.
+type SweepAnswer =
+    {
+        Room: string option
+        Group: Set<string>
+        /// The shadow's alone: the bodies of its group whose own colony does
+        /// not cast the room they are counted in. The operation's roster is
+        /// the world's (S7c); the sweep's group is each colony's over the
+        /// candidates it casts (`Facts.sweepGroup`). Empty for the sweep.
+        Scoped: Set<string>
+        Jobs: JobKind list
+        Seats: int
+    }
+
+/// Which answer a shadow tick disagrees on. Only `Group`, `Jobs` and
+/// `Seats` compare computations made apart: the shadow reads the room off
+/// the very prices the sweep picked it by (`WorldView.SweepRates`), so
+/// `Room` is a consistency check that catches only what is filtered after
+/// the pick — the spec's phase latch, its listed rooms, a room refused it.
+[<RequireQualifiedAccess>]
+type Divergence =
+    | Room
+    | Group
+    /// A group difference made wholly of bodies `SweepAnswer.Scoped` names:
+    /// the roster's scope, not a defect.
+    | Scope
+    | Jobs
+    | Seats
+
+/// One disagreement: the tick, the room (the sweep's, else the shadow's,
+/// else none), both answers as text and why they differ.
+type ShadowExample =
+    {
+        Tick: int
+        Kind: Divergence
+        Room: string
+        Shadow: string
+        Sweep: string
+        Why: string
+    }
+
+/// The shadow's bounded log (`Memory.fabot.shadow`): the full ticks it
+/// compared, a count of each kind of disagreement, and the latest few.
+/// It outlives the tick (#401): `Counts` is built by `Fresh`.
+type ShadowLog =
+    {
+        Compared: int
+        /// Of those, the ticks the sweep worked a room.
+        Working: int
+        Counts: Map<Divergence, int>
+        Last: ShadowExample list
+        /// This tick's refusals of the code spec (`Operation.ofCode`): a
+        /// room dropped from it, or the whole spec.
+        Refused: OpRefusal list
+    }
+
 [<RequireQualifiedAccess>]
 module Operation =
     /// The ticks a Memory spec runs when it names no deadline (user, #663).
@@ -384,7 +431,9 @@ module Operation =
     module Templates =
         /// The [[sweep]] (ADR 0093) as a spec: one group over the listed
         /// rooms, working the one its cast earns most in, holding while none
-        /// pays. Its muster is a job of its execute phase, priced as today.
+        /// pays. Its muster is a job of its execute phase, priced as today;
+        /// so is the ring a contested room lays under its escort's raid
+        /// (#656), which the sweep's room is fought as (S7b's shadow).
         /// The most bodies its group seats: a named safety margin, the
         /// guard cap's twice over (`Engine.guardCap`).
         let sweepBodies = 2 * Engine.guardCap
@@ -416,6 +465,7 @@ module Operation =
                                 [
                                     fighter JobKind.Strike
                                     fighter JobKind.Camp
+                                    fighter JobKind.Ring
                                     fighter JobKind.Muster
                                 ]
                             Exits =
@@ -447,6 +497,28 @@ module Operation =
             | "sweep" -> Some(sweep, sweepBodies)
             | _ -> None
 
+    /// The disagreements `ShadowLog.Last` keeps, newest first.
+    let shadowCap = 8
+
+    /// A log that has compared nothing.
+    let shadowEmpty: ShadowLog =
+        {
+            Compared = 0
+            Working = 0
+            Counts = Fresh.mapOfList []
+            Last = []
+            Refused = []
+        }
+
+    /// A fault's quarantine: the keys already recorded with this one added,
+    /// where it is new; None for one recorded before, which is not recorded
+    /// again (a repeat would rewrite the fault log every tick).
+    let firstSeen (seen: Set<string>) (key: string) : Set<string> option =
+        if seen.Contains key then
+            None
+        else
+            Some(Fresh.setOfSeq (Seq.append seen [ key ]))
+
     /// Whether a schedule can run: an `Every` run's period at least a tick,
     /// its window no longer than its period.
     let validSchedule (schedule: OpSchedule) : bool =
@@ -474,6 +546,47 @@ module Operation =
             | RoomHolder.Unknown -> Some(OpRefused.Holds("holder unknown: " + room))
             | RoomHolder.Player _
             | RoomHolder.Nobody -> None
+
+    /// A spec code declares (`Colony.operations`) as its template writes
+    /// it, through the same safety a Memory spec passes (`decode`): never
+    /// against an ally nor a neutral (the whole spec refused), and a room
+    /// that is ours, an ally's or a neutral's dropped from it with a refusal
+    /// of its own. Nothing else of `decode` binds code: a room whose holder
+    /// is unknown out of sight stays, as the declaration does; no deadline
+    /// nor budget but what it names, for it runs until code drops it.
+    let ofCode
+        (standing: OpStanding)
+        (wire: OpSpecWire)
+        : Result<OperationSpec * OpRefusal list, OpRefusal> =
+        let refused (why: string) = { Id = wire.Id; Why = why }
+
+        match Templates.byName wire.Template with
+        | None -> Error(refused ("no template: " + wire.Template))
+        | Some _ when Colony.isAlly wire.Enemy -> Error(refused ("an ally: " + wire.Enemy))
+        | Some _ when not (Colony.strikesAnywhere wire.Enemy) ->
+            Error(refused ("a neutral: " + wire.Enemy))
+        | Some(template, bodies) ->
+            let unsafe (room: string) =
+                match roomRefusal standing room with
+                | Some(OpRefused.Unsafe why) -> Some why
+                | Some(OpRefused.Holds _)
+                | None -> None
+
+            let dropped = wire.Rooms |> List.choose unsafe
+
+            Ok(
+                template
+                    wire.Id
+                    wire.Enemy
+                    (wire.Rooms |> List.filter (unsafe >> Option.isNone))
+                    {
+                        MaxBodies = wire.MaxBodies |> Option.defaultValue bodies
+                        MaxEnergy = wire.MaxEnergy |> Option.defaultValue System.Int32.MaxValue
+                        Deadline = wire.Deadline |> Option.defaultValue System.Int32.MaxValue
+                        MaxLossRatio = 1.0
+                    },
+                dropped |> List.map refused
+            )
 
     /// A Memory spec admitted, or why not: the one gate between Memory and
     /// the interpreter. Its template must be code's; its enemy one we strike

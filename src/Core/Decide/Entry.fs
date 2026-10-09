@@ -1794,6 +1794,20 @@ type ColonyFault =
 [<Literal>]
 let worldLane = "world"
 
+/// What the [[sweep]] decided this tick, as its shadow reads it (#663 S7b):
+/// its answers (`SweepAnswer`) off the judged views and its room's
+/// world Brief, the judged views, last tick's Tasks, and the view each
+/// room's fight is priced off (its Guard's owner's, else the first that
+/// casts it).
+[<NoEquality; NoComparison>]
+type SweepSeen =
+    {
+        Decided: SweepAnswer
+        Views: ColonyView list
+        Held: Assignments
+        Priced: string -> ColonyView option
+    }
+
 /// One tick's decisions over every colony.
 type ColonyDecisions<'Stamp> =
     {
@@ -1832,6 +1846,9 @@ type ColonyDecisions<'Stamp> =
         /// (`Ledger.observe`), on first read: the shell's alone, after
         /// every decision, on a tick every colony fought.
         Operations: Lazy<Ledger.Observed>
+        /// What the sweep decided (`sweepSeen`), on first read: the shell's
+        /// alone, for the operation interpreter's shadow, on a whole tick.
+        Sweep: Lazy<SweepSeen>
     }
 
 /// One colony's step run alone: its throw is its own fault, handed back
@@ -2051,6 +2068,67 @@ let private towersAlone (view: ColonyView) (assignments: Assignments) : Intent l
     @ planFire view atlas
     @ planTowerHeal view atlas
     @ planRampartDoors view
+
+/// What the [[sweep]] decided this tick (#663 S7b): its room, the one the
+/// judged views keep in `Harass` (`Facts.sweepAll`); its group, every view's
+/// `WorldView.SweepGroup`; and off its room's world Brief, read against its
+/// owner's Threats, its jobs' kinds and their seats
+/// summed. Read after every decision: nothing decides on it.
+let private sweepSeen
+    (holding: Assignments)
+    (judged: ColonyView list)
+    (briefs: (Task * Brief * ColonyView) list)
+    (owners: Map<Task, string>)
+    (threatsOf: string -> Threats option)
+    : SweepSeen =
+    let room =
+        judged
+        |> List.tryPick (fun view -> view.Harass |> List.tryHead |> Option.map _.RoomName)
+
+    let briefOf (room: string) =
+        briefs
+        |> List.tryPick (fun (task, brief, view) ->
+            if task = Guard room then Some(brief, view) else None)
+
+    let read =
+        room
+        |> Option.bind (fun room ->
+            briefOf room
+            |> Option.bind (fun (brief, _) ->
+                Map.tryFind (Guard room) owners
+                |> Option.bind threatsOf
+                |> Option.map (fun threats -> brief, threats)))
+
+    {
+        Decided =
+            {
+                Room = room
+                Group =
+                    judged
+                    |> List.collect (fun view ->
+                        view.World.SweepGroup |> List.map (fun (creep, _) -> creep.Name))
+                    |> Set.ofList
+                Scoped = Set.empty
+                Jobs =
+                    read
+                    |> Option.map (fun (brief, _) -> brief.Jobs |> List.map _.Kind)
+                    |> Option.defaultValue []
+                Seats =
+                    read
+                    |> Option.map (fun (brief, threats) ->
+                        brief.Jobs |> List.sumBy (fun job -> (job.Seats threats).Count))
+                    |> Option.defaultValue 0
+            }
+        Views = judged
+        Held = holding
+        Priced =
+            fun room ->
+                briefOf room
+                |> Option.map snd
+                |> Option.orElse (
+                    judged |> List.tryFind (fun view -> view.HarassCast.Contains room)
+                )
+    }
 
 /// The world lane's tick: every deciding colony opened —
 /// the fight-only ones (`openFight`) off the judged views, every other whole
@@ -2352,6 +2430,12 @@ let private decideWorld
         Towers = towers
         Whole = List.length whole = List.length colonies
         Operations = lazy (Ledger.observe judged briefs fleet.Assigned)
+        Sweep =
+            lazy
+                (sweepSeen inputs.Holding judged briefs owners (fun home ->
+                    opened
+                    |> List.tryFind (fun (colony, _, _) -> colony.Home = home)
+                    |> Option.map (fun (_, _, opening) -> opening.Threats)))
     }
 
 /// Every colony's tick decided: the views judged (`judgeColonies`), then the

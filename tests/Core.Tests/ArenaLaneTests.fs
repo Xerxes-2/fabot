@@ -1593,6 +1593,25 @@ let foughtWhereStruckTests =
                     $"the pair kills Wave7157 by t115\n{failure}"
             }
 
+            // W19S26 under Wave7157's raid is the sweep's room, fought as a
+            // contested room's raid, its ring laid; guard-1007097 stands in
+            // W17S25, a declared candidate that is a home of ours: the code
+            // spec drops it (`Operation.ofCode`), and the guard is no body
+            // of the group.
+            test
+                "#663 S7b: the sweep as an operation, run in shadow, answers the raided room's ring, group and seats every tick" {
+                let final, trace = w19s26LosingTrade Tuning.defaults.CasterReserve |> run 120
+                let _, log = final.Carried.Shadow
+
+                Expect.isGreaterThan log.Working 0 $"the sweep worked its room\n%A{log}"
+                Expect.isEmpty log.Counts $"no divergence\n%A{log}\n{describe trace}"
+
+                Expect.equal
+                    log.Refused
+                    [ { Id = "sweep"; Why = "ours: W17S25" } ]
+                    "our home dropped from the spec"
+            }
+
             // At the live 6,991, under `Tuning.CasterReserveHold`, no colony
             // casts either harassment room; each is held for its rangers
             // alone, and a Guard there is no fight they keep

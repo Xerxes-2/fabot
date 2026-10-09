@@ -3534,3 +3534,115 @@ let saveOps
                     deadlines
                     |> List.tryFind (fun (id, _) -> id = unbox<string> row?id)
                     |> Option.iter (fun (_, deadline) -> row?deadline <- deadline)
+
+// ---- the sweep's shadow (#663 S7b) -------------------------------------------
+//
+// `Memory.fabot.shadow`, the bot's alone: the full ticks the operation
+// interpreter's shadow of the sweep compared (`n`), those the sweep worked a
+// room on (`w`), a count per kind of disagreement (`c`), the latest few
+// (`e`), newest first, and this tick's refusals of the code spec (`x`). Read
+// back on a cold heap so the counts run on across a reset.
+
+let private divergenceNames =
+    [
+        Divergence.Room, "room"
+        Divergence.Group, "group"
+        Divergence.Scope, "scope"
+        Divergence.Jobs, "jobs"
+        Divergence.Seats, "seats"
+    ]
+
+let private exampleOf (raw: obj) : ShadowExample option =
+    caseIn divergenceNames raw?k
+    |> Option.map (fun kind ->
+        let text (key: string) =
+            if jsTypeof raw?(key) = "string" then
+                unbox<string> raw?(key)
+            else
+                failwith ("not text: " + key)
+
+        {
+            Tick = numberOf raw "t"
+            Kind = kind
+            Room = text "r"
+            Shadow = text "o"
+            Sweep = text "s"
+            Why = text "w"
+        })
+
+/// The shadow's log (`Memory.fabot.shadow`): absent, not an object or with
+/// no whole count of ticks, an empty log; a count that is not a whole number
+/// costs its kind, an example that will not decode its own row.
+let loadShadow () : ShadowLog =
+    leafOr
+        Operation.shadowEmpty
+        (fun () -> if isNull Memory?fabot then null else Memory?fabot?shadow)
+        (fun raw ->
+            if jsTypeof raw <> "object" || JS.Constructors.Array.isArray raw then
+                Operation.shadowEmpty
+            else
+                {
+                    Compared = numberOf raw "n"
+                    // Absent or off its shape, it costs itself alone.
+                    Working = numberValue raw?w |> Option.defaultValue 0
+                    Counts =
+                        intMapOf raw?c
+                        |> Map.toSeq
+                        |> Seq.choose (fun (name, count) ->
+                            caseIn divergenceNames (box name)
+                            |> Option.map (fun kind -> kind, count))
+                        |> Fresh.mapOfSeq
+                    Last =
+                        if JS.Constructors.Array.isArray raw?e then
+                            rowsOf exampleOf raw?e |> List.truncate Operation.shadowCap
+                        else
+                            []
+                    Refused =
+                        if JS.Constructors.Array.isArray raw?x then
+                            rowsOf
+                                (fun row ->
+                                    Some
+                                        {
+                                            Id = textOf row "id"
+                                            Why = textOf row "why"
+                                        })
+                                raw?x
+                        else
+                            []
+                })
+
+/// The shadow's log written whole.
+let saveShadow (log: ShadowLog) =
+    if isNull Memory?fabot then
+        Memory?fabot <- createEmpty<obj>
+
+    Memory?fabot?shadow <-
+        createObj
+            [
+                "n" ==> log.Compared
+                "w" ==> log.Working
+                "c"
+                ==> hashOf
+                        box
+                        (log.Counts
+                         |> Map.toSeq
+                         |> Seq.map (fun (kind, n) -> nameIn divergenceNames kind, n))
+                "e"
+                ==> (log.Last
+                     |> List.map (fun example ->
+                         createObj
+                             [
+                                 "t" ==> example.Tick
+                                 "k" ==> nameIn divergenceNames example.Kind
+                                 "r" ==> example.Room
+                                 "o" ==> example.Shadow
+                                 "s" ==> example.Sweep
+                                 "w" ==> example.Why
+                             ])
+                     |> Array.ofList)
+                "x"
+                ==> (log.Refused
+                     |> List.map (fun refusal ->
+                         createObj [ "id" ==> refusal.Id; "why" ==> refusal.Why ])
+                     |> Array.ofList)
+            ]

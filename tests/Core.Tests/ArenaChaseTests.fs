@@ -1773,4 +1773,25 @@ let borderCampTests =
                     (camped |> List.forall (fun tile -> tile.Y > 0))
                     $"off the exit\n{failure}"
             }
+
+            // The dancer bouncing on the exit before its camp pays is prey:
+            // there the Brief seats its trespass split (#550), a swing's
+            // floor beside the ranger, past what the group pays for — the
+            // one difference S7c decides.
+            test
+                "the sweep as an operation, run in shadow, answers the camp the sweep lays every tick, and seats fewer only on the bouncing prey (#663 S7b)" {
+                let final, trace = dancerAcrossNorth () |> run 200
+                let _, log = final.Carried.Shadow
+
+                Expect.isGreaterThan log.Working 0 $"the sweep worked its room\n%A{log}"
+
+                Expect.isTrue
+                    (log.Counts |> Map.forall (fun kind _ -> kind = Divergence.Seats))
+                    $"only the seats differ\n%A{log}\n{describe trace}"
+
+                Expect.all
+                    log.Last
+                    (fun example -> int example.Sweep > int example.Shadow)
+                    $"the Brief seats more, never fewer\n%A{log}"
+            }
         ]

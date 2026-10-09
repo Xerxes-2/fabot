@@ -712,6 +712,21 @@ module Harass =
         harass
         |> List.collect (fun h -> h.RoomName :: h.Via @ RoomName.transitBetween home h.RoomName)
 
+/// An [[operation]] as a template's name and the parameters it takes, each of
+/// which may only narrow it: as Memory spells one (`Memory.fabot.ops.specs`,
+/// admitted by `Operation.decode`) and as code declares one
+/// (`Colony.operations`, `Operation.ofCode`).
+type OpSpecWire =
+    {
+        Id: string
+        Template: string
+        Enemy: string
+        Rooms: string list
+        Deadline: int option
+        MaxEnergy: int option
+        MaxBodies: int option
+    }
+
 /// The global harassment list as one tick reads it: the sweep's candidates,
 /// and the price of one ranger block (`Bodies.rangerBlockCost`), handed in
 /// because the ranger's block is `decide`'s to know: a contested home's
@@ -1303,6 +1318,33 @@ module Colony =
     let harass: Harass list =
         let on = set [ "W18S27"; "W19S26"; "W19S25" ]
         harassDeclared |> List.filter (fun h -> on.Contains h.RoomName)
+
+    /// The [[sweep]] over these candidates as an operation (#663 S7b): one
+    /// group over every candidate, against their one enemy; none with no
+    /// candidate. A sweep's group serves one enemy, so candidates of two
+    /// are refused, naming them, rather than one read for both.
+    let sweepOf (candidates: Harass list) : Result<OpSpecWire list, string> =
+        match candidates |> List.map _.Enemy |> List.distinct with
+        | [] -> Ok []
+        | [ enemy ] ->
+            Ok
+                [
+                    {
+                        Id = "sweep"
+                        Template = "sweep"
+                        Enemy = enemy
+                        Rooms = candidates |> List.map _.RoomName
+                        Deadline = None
+                        MaxEnergy = None
+                        MaxBodies = None
+                    }
+                ]
+        | enemies -> Error("sweep candidates of two enemies: " + String.concat ", " enemies)
+
+    /// The operations code declares (#663 S7b): the sweep over `harass`,
+    /// which stays the live input until the interpreter casts (S7c); until
+    /// then the interpreter runs it in shadow beside `Facts.sweepAll`.
+    let operations: Result<OpSpecWire list, string> = sweepOf harass
 
     /// The colonies a human has declared, moved by a human in a commit: an
     /// entry in this list is the whole of "I mean to take that room", and an

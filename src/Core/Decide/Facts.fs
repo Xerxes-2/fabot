@@ -1038,7 +1038,7 @@ let private closesIn (side: HostileInfo list) (fighter: Fighter) (hostile: Hosti
 
 /// Where a creep of ours stands: its colony's projection, else the world's
 /// census of every body (`WorldView.Bodies`).
-let private placementOf (view: ColonyView) (name: string) : RoomPos option =
+let internal placementOf (view: ColonyView) (name: string) : RoomPos option =
     SpatialInfo.creepPlacementOf view.Spatial name
     |> Option.orElseWith (fun () ->
         view.World.Bodies.Value
@@ -4493,7 +4493,11 @@ let private sweepBodies (held: Assignments) (views: ColonyView list) =
 /// joins the one group while concentrating pays, never a second room, and
 /// the group stops where the next body would earn less than its share. No
 /// group seats none: the job's own count does.
-let seatsPaid (view: ColonyView) (room: string) (group: (CreepInfo * RoomPos) list) : int =
+let private seatsPaidOf
+    (view: ColonyView)
+    (room: string)
+    (group: (CreepInfo * RoomPos) list)
+    : int =
     let placed = group |> List.map (fun (creep, at) -> at, Fighter.ofCreep creep)
 
     let dismantle = dismantleOf (List.map fst group)
@@ -4547,6 +4551,19 @@ let seatsPaid (view: ColonyView) (room: string) (group: (CreepInfo * RoomPos) li
                1
            else
                0)
+
+let private seatsPaidMemo: TickMemo.Memo<ColonyView * string * (string * RoomPos) list, int> =
+    TickMemo.create 8 (fun (view, room, group) (view', room', group') ->
+        obj.ReferenceEquals(view, view') && room = room' && group = group')
+
+/// `seatsPaidOf`, once a tick per view, room and group — its bodies and
+/// where they stand, whatever order they come in: the first reading of a
+/// group is every later one's, so the operation's shadow reads the seats the
+/// room's Brief priced rather than pricing them again (#663 S7b).
+let seatsPaid (view: ColonyView) (room: string) (group: (CreepInfo * RoomPos) list) : int =
+    let key = group |> List.map (fun (creep, at) -> creep.Name, at) |> List.sortBy fst
+
+    TickMemo.recall seatsPaidMemo (view, room, key) (fun _ -> seatsPaidOf view room group)
 
 /// One body a muster weighs (#663 M3): its fight, the ticks it lands in the
 /// room (none for one already waiting), and its energy.
@@ -5671,15 +5688,15 @@ let private sweepRates (held: Assignments) (views: ColonyView list) : (string * 
 /// cast is the fight's to price. The room the group stands in costs no walk, so
 /// it keeps the group until what it earns there runs out or another room's
 /// net of the walk pays more: no stored room, no hysteresis band.
-let private sweepPick (held: Assignments) (views: ColonyView list) : (string * float) option =
-    sweepRates held views
+let private sweepPick (rates: (string * float) list) : (string * float) option =
+    rates
     |> List.filter (fun (_, rate) -> rate > 0.0)
     |> List.sortBy (fun (room, rate) -> -rate, room)
     |> List.tryHead
 
 /// `sweepPick`'s room.
 let sweepChoice (held: Assignments) (views: ColonyView list) : string option =
-    sweepPick held views |> Option.map fst
+    sweepPick (sweepRates held views) |> Option.map fst
 
 /// `sweepChoice` over one colony's view alone.
 let sweepRoom (view: ColonyView) (held: Assignments) : string option = sweepChoice held [ view ]
@@ -5710,7 +5727,8 @@ let sweepAll (held: Assignments) (views: ColonyView list) : ColonyView list =
 
     laid.Value <- views
 
-    let pick = sweepPick held views
+    let rates = sweepRates held views
+    let pick = sweepPick rates
     let room = pick |> Option.map fst
     let rate = pick |> Option.map snd |> Option.defaultValue 0.0
     let group = lazy (sweepBodies held views)
@@ -5740,6 +5758,7 @@ let sweepAll (held: Assignments) (views: ColonyView list) : ColonyView list =
                     { view.World with
                         SweepGroup = group.Value
                         SweepRate = rate
+                        SweepRates = rates
                     }
             })
 

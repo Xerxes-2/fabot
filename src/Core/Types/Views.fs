@@ -311,6 +311,11 @@ type WorldView =
         /// sweep's price. Nothing until the views are swept, or where no
         /// room pays.
         SweepRate: float
+        /// Every candidate the [[sweep]]'s choice priced, with the rate its
+        /// group earns there a tick (`Facts.sweepAll`), in the order the
+        /// views name them: what the operation interpreter's shadow reads
+        /// (#663 S7b), so the price is one. Empty until the views are swept.
+        SweepRates: (string * float) list
         /// Each room a guard or ranger of ours was last lost in, the latest of
         /// every colony's raid log (`StandDown.FighterLost`), the larger cast
         /// on one tick: a room's recast cooldown is the room's, whichever
@@ -333,6 +338,7 @@ module WorldView =
             Worths = None
             SweepGroup = []
             SweepRate = 0.0
+            SweepRates = []
             FighterLost = Map.empty
             Questioned = Set.empty
             Observers = []
@@ -469,6 +475,7 @@ module WorldView =
             Worths = None
             SweepGroup = []
             SweepRate = 0.0
+            SweepRates = []
             FighterLost =
                 (Map.empty, gates)
                 ||> List.fold (fun lost gate ->
