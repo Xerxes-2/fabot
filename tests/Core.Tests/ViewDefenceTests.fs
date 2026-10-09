@@ -470,6 +470,7 @@ let defendedHomeTests =
 
                     let judged =
                         Facts.judge
+                            (fun _ _ -> None)
                             Map.empty
                             [ deciding (viewOf world mother); deciding (viewOf world child) ]
 
@@ -491,6 +492,146 @@ let defendedHomeTests =
                 Expect.isTrue (Map.containsKey mother (rowsOver reserved)) "at the reserve it is"
             }
 
+            // #663: a colony lends unless its own home's fight needs it. A
+            // body that hurts nothing gates nothing; a raid her towers and
+            // standing defence lose does.
+            test
+                "a scout in the mother's home leaves her defending the child; a raid she loses there does not" {
+                let rowsOver world =
+                    let deciding view : Facts.Judged =
+                        {
+                            Cut = view
+                            Owns = Set.empty
+                            Decides = true
+                        }
+
+                    let judged =
+                        Facts.judge
+                            (fun _ _ -> None)
+                            Map.empty
+                            [ deciding (viewOf world mother); deciding (viewOf world child) ]
+
+                    (Facts.verdictOf (List.head judged) child).Rows
+
+                let atMother (parts: BodyPart list) =
+                    inRoom mother (fun facts ->
+                        { facts with
+                            Hostiles =
+                                [
+                                    {
+                                        Id = "at-mother"
+                                        Owner = "Trepidimous"
+                                        Pos = { Room = mother; X = 5; Y = 5 }
+                                        Body = parts
+                                        Boosts = []
+                                        Hits = Engine.partHits * List.length parts
+                                        TicksToLive = 1000
+                                    }
+                                ]
+                        })
+
+                let reserved = raided 7 |> inRoom mother (withStock Tuning.defaults.CasterReserve)
+
+                Expect.isTrue
+                    (Map.containsKey mother (rowsOver reserved))
+                    "the premise: she defends the child's home"
+
+                Expect.isTrue
+                    (Map.containsKey mother (rowsOver (reserved |> atMother [ Move; Move ])))
+                    "a scout at her home leaves her row weighed"
+
+                let towered =
+                    inRoom mother (fun facts ->
+                        { facts with
+                            Refillables =
+                                [
+                                    {
+                                        Id = "tower-mother"
+                                        FreeCapacity = 0
+                                        Kind = BuiltKind.Tower
+                                    }
+                                ]
+                        })
+
+                Expect.isTrue
+                    (Map.containsKey
+                        mother
+                        (rowsOver (reserved |> towered |> atMother [ RangedAttack; Move ])))
+                    "and so does a harasser her tower kills"
+
+                Expect.isFalse
+                    (Map.containsKey
+                        mother
+                        (rowsOver (
+                            reserved
+                            |> atMother (List.replicate 7 Move @ List.replicate 13 RangedAttack)
+                        )))
+                    "a 7M13R her home has no tower to win is her own fight first"
+            }
+
+            // #663: her home's raid is priced with its healers beside it, as
+            // `homeUnheld` prices it: a dismantler her tower would kill alone
+            // is healed past its damage, and her own fight. An ally's armed
+            // body is no raid of hers.
+            test
+                "a healed dismantler her tower cannot out-damage is her own fight; an ally's body is not" {
+                let towered =
+                    inRoom mother (fun facts ->
+                        { facts with
+                            Refillables =
+                                [
+                                    {
+                                        Id = "tower-mother"
+                                        FreeCapacity = 0
+                                        Kind = BuiltKind.Tower
+                                    }
+                                ]
+                        })
+
+                let atMother (owner: string) (bodies: BodyPart list list) =
+                    inRoom mother (fun facts ->
+                        { facts with
+                            Hostiles =
+                                bodies
+                                |> List.mapi (fun i parts ->
+                                    {
+                                        Id = $"at-mother-{i}"
+                                        Owner = owner
+                                        Pos = { Room = mother; X = 5 + i; Y = 5 }
+                                        Body = parts
+                                        Boosts = []
+                                        Hits = Engine.partHits * List.length parts
+                                        TicksToLive = 1000
+                                    })
+                        })
+
+                let towerless = raided 7 |> inRoom mother (withStock Tuning.defaults.CasterReserve)
+                let reserved = towerless |> towered
+
+                let threatened world =
+                    Facts.homeThreatened (viewOf world mother)
+
+                let dismantler = [ Work; Work; Move; Move ]
+                let healer = List.replicate 20 Heal @ List.replicate 10 Move
+                let harasser = List.replicate 7 Move @ List.replicate 13 RangedAttack
+
+                Expect.isTrue
+                    (threatened (towerless |> atMother "Trepidimous" [ harasser ]))
+                    "the premise: a 7M13R her home has no tower for is her own fight"
+
+                Expect.isFalse
+                    (threatened (reserved |> atMother "Trepidimous" [ dismantler ]))
+                    "the premise: her tower kills the dismantler alone"
+
+                Expect.isTrue
+                    (threatened (reserved |> atMother "Trepidimous" [ dismantler; healer ]))
+                    "healed past her tower's damage, it is her own fight"
+
+                Expect.isFalse
+                    (threatened (towerless |> atMother "Odiodin" [ harasser ]))
+                    "an ally's is no raid"
+            }
+
             test "a raised home its mother defends too is still her residents', never its own row's" {
                 // The pair world's child is Bootstrapping at RCL2 with a
                 // spawn of its own; no tower, so any armed raid beats it.
@@ -508,7 +649,11 @@ let defendedHomeTests =
                         Decides = true
                     }
 
-                let judged = Facts.judge Map.empty [ deciding motherView; deciding childView ]
+                let judged =
+                    Facts.judge
+                        (fun _ _ -> None)
+                        Map.empty
+                        [ deciding motherView; deciding childView ]
 
                 let verdict = Facts.verdictOf (List.head judged) child
 
@@ -1185,7 +1330,11 @@ let worldSeamTests =
                         Decides = true
                     }
 
-                let judged = Facts.judge Map.empty [ deciding motherView; deciding childView ]
+                let judged =
+                    Facts.judge
+                        (fun _ _ -> None)
+                        Map.empty
+                        [ deciding motherView; deciding childView ]
 
                 Expect.equal
                     (judged |> List.map (fun view -> Facts.answer view childOutpost))

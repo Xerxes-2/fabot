@@ -815,7 +815,17 @@ let matchAcross
                 // heal back while the relief was cast).
                 let ovens =
                     lazy
-                        (let casting = (Facts.verdictOf ctx.View room).Casting
+                        (let verdict = Facts.verdictOf ctx.View room
+                         let casting = verdict.Casting
+
+                         // A lent room's one caster casts its lent row's
+                         // template (#663): a body of the other row in its
+                         // oven is cast for no fight of this room's.
+                         let ofRow (body: CreepInfo) =
+                             match verdict.Lent with
+                             | Some(_, row) when row.Ranger -> isRangerRowBody body
+                             | Some _ -> isGuardRowBody body
+                             | None -> true
 
                          contexts
                          |> Array.toList
@@ -833,7 +843,7 @@ let matchAcross
 
                              c.View.Casting
                              |> List.map (fun cast -> Facts.ovenBody cast, born + walk))
-                         |> List.filter (fun (body, _) -> isFighterBody body))
+                         |> List.filter (fun (body, _) -> isFighterBody body && ofRow body))
 
                 let ovenLands =
                     lazy

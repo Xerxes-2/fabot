@@ -604,7 +604,7 @@ let private flightsOf (threats: Threats) (atlas: Atlas.Atlas) : Flights =
 /// biggest the bank buys (#487): one block's 90 a tick spends most of a
 /// body's life on the core's 100,000 hits. Priced on first read where the
 /// template is given. None wanted where the cast does not pay (`pays`).
-let internal fighterAsk
+let rec internal fighterAsk
     (view: ColonyView)
     (room: string)
     (templates: BodyTemplate list)
@@ -618,6 +618,20 @@ let internal fighterAsk
         | [ one ] -> one
         | _ -> cast.Value.Template
 
+    castAsk view room template cast prey pays
+
+/// The fighter row's ask for one room's fight of a given cast of
+/// `template` (`fighterAsk`'s, or the row another colony wins the room by,
+/// `Facts.borrowedRow`, #663): its bodies and blocks, a melee body in a room
+/// holding a level-0 core the biggest the bank buys.
+and internal castAsk
+    (view: ColonyView)
+    (room: string)
+    (template: BodyTemplate)
+    (cast: Lazy<FighterCast>)
+    (prey: (string * float) list option)
+    (pays: FighterCast -> bool)
+    : RowAsk =
     let cored () =
         template = BodyTemplate.Melee
         && Facts.expansionCores view |> List.exists (fun core -> core.RoomName = room)
@@ -1136,7 +1150,25 @@ module Brief =
                         || not (Map.isEmpty worth.Takes))
                 | _ -> true
 
-            let raid = fighterAsk view room [ template ] None pays
+            // Its own cheapest cast, or where the room is lent to another
+            // colony (`Facts.borrowedRow`, #663), the lender's row's cast,
+            // whose template its row answers with (`rows`): the room's ask
+            // is the cast the Caster hands that colony, bodies and blocks.
+            let cast =
+                lazy
+                    (match Facts.borrowedRow view room with
+                     | Some row when row.Ranger = (template = BodyTemplate.Ranged) ->
+                         {
+                             Template = template
+                             Blocks = row.Blocks
+                             Bodies = row.Bodies
+                             Ends = true
+                             Trades = true
+                             Held = row.Held
+                         }
+                     | _ -> Facts.fighterCast view room [ template ] Engine.guardCap)
+
+            let raid = castAsk view room template cast None pays
 
             // The cast that converges beside the holders of its row
             // (`Facts.castConverging`).
@@ -1145,7 +1177,7 @@ module Brief =
                     (Facts.castConverging
                         view
                         room
-                        (Facts.fighterCast view room [ template ] Engine.guardCap)
+                        cast.Value
                         (holders
                          |> List.filter (fun creep -> CastRow.cut raid.Row creep.Name creep.Body)))
 
@@ -3663,7 +3695,9 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
     // Each room a hostile stands in: this colony's own row there
     // (`Facts.rowAnswer`, #535), as the room's verdict priced it where it
-    // weighed this colony's row, the room's one verdict (`Facts.answered`, the
+    // weighed this colony's row, or where nothing of the room's own answers
+    // it, the row of the colony it is lent to (`Facts.borrowedRow`, #663: the
+    // body cast is that row's), the room's one verdict (`Facts.answered`, the
     // world's) and the rangers that win it, each read on first use. Any other
     // room has no raider, and is `Win`.
     let home = SpatialInfo.homeName view.Spatial
@@ -3679,9 +3713,10 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
         judged
         |> Map.map (fun room verdict ->
             lazy
-                (match Map.tryFind home verdict.Value.Rows with
-                 | Some row -> row
-                 | None -> rowAnswer view room))
+                (match Facts.borrowedRow view room, Map.tryFind home verdict.Value.Rows with
+                 | Some lent, _ -> lent
+                 | None, Some row -> row
+                 | None, None -> rowAnswer view room))
 
     let verdicts =
         judged

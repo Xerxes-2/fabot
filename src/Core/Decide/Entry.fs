@@ -1872,6 +1872,7 @@ let private sorted (results: Result<'a, ColonyFault> list) : 'a list * ColonyFau
 /// candidate. And each contested room's one danger (`WorldDanger.lay`). The
 /// records come back moved on, with what moved.
 let judgeColonies
+    (hops: string -> string -> int option)
     (assignments: Assignments)
     (idle: Set<string>)
     (declared: OpSpecWire list)
@@ -1889,7 +1890,7 @@ let judgeColonies
             Decides = not (Set.contains colony.Home idle)
         }
         : Facts.Judged))
-    |> Facts.judge assignments
+    |> Facts.judge hops assignments
     |> WorldDanger.lay,
     (records, events)
 
@@ -2395,6 +2396,12 @@ let decideColonies
         |> List.map (fun (colony, view) -> colony, { view with Leaving = leaving })
 
     let judged, operated =
-        judgeColonies inputs.Holding inputs.Idle inputs.Declared inputs.Operations colonies
+        judgeColonies
+            inputs.Hops
+            inputs.Holding
+            inputs.Idle
+            inputs.Declared
+            inputs.Operations
+            colonies
 
     decideWorld inputs stamp colonies judged operated

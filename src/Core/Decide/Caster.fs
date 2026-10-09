@@ -48,7 +48,8 @@ let private roomOf (task: Task) =
 /// first colony asking it does. Each body an ask wants is read off the
 /// fleet first, so a caster flip never casts twice: a living body of the
 /// row or one in an oven, whichever colony cast it — one of a colony asking
-/// the Task first, else of the nearest that reaches the room —, a body
+/// the Task first, else of the nearest that reaches the room; never one of
+/// a caster whose cast loses where another's wins —, a body
 /// holding another home's Defend (`held`) left out, as that Defend's ask
 /// counts it; only the remainder is cast. A body still to cast goes to a
 /// colony whose cast wins the room (`Facts.castPrice`), whether it decides
@@ -65,13 +66,18 @@ let private roomOf (task: Task) =
 /// that cost pays for the body and every one before it in the ask
 /// (`Facts.castBodiesPaid`), and to nobody where none does. A colony casts
 /// for any ask but its own — one it asks for itself, for a room that is no other colony's home it defends —
-/// only with a spawn, a bank at `Tuning.CasterFloor` and a stock at
-/// `Tuning.CasterReserve`, within `Tuning.MaxHops` of the room and
-/// projecting it or within `Tuning.LaneHops`, so its body is handed the
-/// room's fight. A home's Defend (its rampart defender) is the home's
-/// alone. One colony may serve several asks, one ask be split among
-/// colonies. A body nobody may cast stays its first asker whose own room it
-/// is.
+/// only where it lends to it (`Facts.lendsAt`, the membership the verdict
+/// weighs its row by, #663: a spawn, a bank at `Tuning.CasterFloor`, a
+/// stock at `Tuning.CasterReserve` or the incumbent's at
+/// `Tuning.CasterReserveHold`, its home's fight not needing it), within
+/// `Tuning.MaxHops` of the room and projecting it or within
+/// `Tuning.LaneHops`, so its body is handed the room's fight; and casts it
+/// at its own cast's blocks where it did not ask it (`Facts.castOf`). A
+/// raided Guard room lent to one colony (`RoomVerdict.Lent`) is cast by that
+/// colony alone, at its lent row's blocks, the ask sized to that row. A
+/// home's Defend (its rampart defender) is the home's alone. One colony may
+/// serve several asks, one ask be split among colonies. A body nobody may
+/// cast stays its first asker whose own room it is.
 let assign
     (hops: string -> string -> int option)
     (held: Assignments)
@@ -90,11 +96,10 @@ let assign
         CastBid.walk tuning (crossings bidder room)
 
     let reaches (bidder: Bidder) (room: string) =
-        let projects = Map.containsKey room bidder.View.Spatial.Rooms
-
-        match crossings bidder room with
-        | Some hops -> hops <= tuning.MaxHops && (projects || hops <= tuning.LaneHops)
-        | None -> projects
+        Facts.castReaches
+            tuning
+            (crossings bidder room)
+            (Map.containsKey room bidder.View.Spatial.Rooms)
 
     let spawnsOf (bidder: Bidder) = max 1 (List.length bidder.View.Spawns)
 
@@ -229,30 +234,10 @@ let assign
         ||> List.fold (fun ledger ask ->
             let row = ask.Ask.Row
 
-            // The blocks a colony casts for it: its own ask's, else the
-            // source's.
-            let blocksOf (bidder: Bidder) =
-                bidder.Asks
-                |> List.tryFind (fun cast -> cast.For = task && cast.Ask.Row = row)
-                |> Option.map _.Ask.Blocks
-                |> Option.defaultValue ask.Ask.Blocks
-
-            // An operation's ask (#663 S7c) is bid for by no colony whose own
-            // home is threatened (`Facts.homeThreatened`): home defence
-            // first.
-            let eligible =
-                match fixedTo, task with
-                | Some home, _ -> bidders |> List.filter (fun b -> b.Home = home)
-                | None, Operate _ ->
-                    bidders
-                    |> List.filter (fun b ->
-                        (isAsker b || reaches b room) && not (Facts.homeThreatened b.View))
-                | None, _ -> bidders |> List.filter (fun b -> isAsker b || reaches b room)
-
             // Its own ask a colony casts for past no floor: one it asks for,
             // its home or a room that is no other colony's home it defends
-            // (`Facts.defendsOthers`); any other past the floor, as the
-            // verdict weighs its row (`Facts.castsForOthers`). An
+            // (`Facts.defendsOthers`); any other where it lends, as the
+            // verdict weighs its row (`Facts.lendsAt`). An
             // operation's room is no colony's own, whoever asks for it: each
             // body past both floors, as for another's room.
             let own (bidder: Bidder) =
@@ -263,6 +248,17 @@ let assign
                     && not (Facts.defendsOthers bidder.View room)
                     && Facts.contestOurs bidder.View room
 
+            // Any ask but its own is bid for by no colony whose own home is
+            // threatened (`Facts.homeThreatened`): home defence first.
+            let eligible =
+                match fixedTo with
+                | Some home -> bidders |> List.filter (fun b -> b.Home = home)
+                | None ->
+                    bidders
+                    |> List.filter (fun b ->
+                        own b
+                        || (isAsker b || reaches b room) && not (Facts.homeThreatened b.View))
+
             // A trespass's kill is cast into a colony's own room only past
             // its bank's floor, the body paid for (#652): it is spent out of
             // the economy it buys back.
@@ -270,26 +266,92 @@ let assign
                 eligible
                 |> List.filter (fun b ->
                     not (List.isEmpty b.View.Spawns)
-                    && (Facts.castsForOthers b.View
+                    && (Facts.lendsAt held b.View room
                         || (match ask.Prey with
                             | Some _ -> own b && CastBid.paysOwn tuning b.View.Bank.Capacity
                             | None -> Option.isSome fixedTo || own b)))
 
             let priced =
                 casters
-                |> List.map (fun b -> b.Home, lazy (Facts.castPrice b.View row room))
+                |> List.map (fun b -> b.Home, lazy (Facts.castOf b.View row room))
                 |> Map.ofList
+
+            let wins (bidder: Bidder) =
+                Map.tryFind bidder.Home priced
+                |> Option.exists (fun cast ->
+                    let won, _, _ = cast.Value
+                    won)
+
+            // The caster a raided Guard room nothing of its own answers is
+            // lent to, with the row the verdict won it by
+            // (`RoomVerdict.Lent`, #663), where that row is this ask's: the
+            // ask was sized to that row, so that colony alone casts it, at
+            // that row's blocks.
+            let lent =
+                match task, row with
+                | Guard _, CastRow.Fighter template ->
+                    (Facts.verdictOf (List.head askers).View room).Lent
+                    |> Option.filter (fun (_, answer) ->
+                        answer.Ranger = (template = BodyTemplate.Ranged))
+                    |> Option.bind (fun (home, answer) ->
+                        casters
+                        |> List.tryFind (fun b -> b.Home = home)
+                        |> Option.map (fun lender -> lender, template, answer))
+                | _ -> None
+
+            let lentTo (bidder: Bidder) =
+                lent |> Option.filter (fun (lender, _, _) -> lender.Home = bidder.Home)
+
+            let spawnOf (bidder: Bidder) =
+                match lentTo bidder with
+                | Some(_, template, answer) -> Facts.castSpawnTicks template answer.Blocks
+                | None ->
+                    let _, spawn, _ = priced.[bidder.Home].Value
+                    spawn
+
+            // The blocks a colony casts for it: its own ask's, else the lent
+            // row's, else its own cast's (`Facts.castOf`, #663: a colony
+            // casting an ask it did not make casts the body its bank buys,
+            // never the asker's smaller one), else the source's.
+            let blocksOf (bidder: Bidder) =
+                bidder.Asks
+                |> List.tryFind (fun cast -> cast.For = task && cast.Ask.Row = row)
+                |> Option.map _.Ask.Blocks
+                |> Option.orElse (
+                    lentTo bidder |> Option.map (fun (_, _, answer) -> answer.Blocks)
+                )
+                |> Option.orElse (
+                    Map.tryFind bidder.Home priced
+                    |> Option.bind (fun cast ->
+                        let _, _, blocks = cast.Value
+                        blocks)
+                )
+                |> Option.defaultValue ask.Ask.Blocks
 
             // Weighed over every colony that may cast, deciding this tick
             // or not: a winner that does not decide is handed the body all
-            // the same, and casts it when it next decides whole.
+            // the same, and casts it when it next decides whole. A lent
+            // room's one winner is its lender.
+            let winners =
+                match lent with
+                | Some(lender, _, _) -> [ lender ]
+                | None -> casters |> List.filter wins
+
             let pool =
                 match casters with
                 | [ one ] when not homeOfOurs -> [ one ]
                 | _ ->
-                    match casters |> List.filter (fun b -> fst priced.[b.Home].Value) with
+                    match winners with
                     | [] -> casters |> List.filter (losesHome >> not)
                     | winners -> winners
+
+            // A caster whose cast loses where another's wins covers nothing
+            // with a free body (#663): the fleet's count reads no body's
+            // size, and its body is one the winning cast would not cast.
+            let covers (bidder: Bidder) =
+                List.isEmpty winners
+                || not (Map.containsKey bidder.Home priced)
+                || winners |> List.exists (fun b -> b.Home = bidder.Home)
 
             let left (ledger: Ledger) (bidder: Bidder) =
                 Map.tryFind (bidder.Home, row) ledger.Supply |> Option.defaultValue 0
@@ -305,13 +367,13 @@ let assign
                 let covering =
                     match
                         eligible
-                        |> List.filter isAsker
+                        |> List.filter (fun b -> isAsker b && covers b)
                         |> List.tryFind (fun b -> left ledger b > 0)
                     with
                     | Some own -> Some own
                     | None ->
                         eligible
-                        |> List.filter (fun b -> left ledger b > 0)
+                        |> List.filter (fun b -> covers b && left ledger b > 0)
                         |> List.sortBy (fun b -> walk b room, b.Home)
                         |> List.tryHead
 
@@ -329,7 +391,7 @@ let assign
                         Map.tryFind bidder.Home ledger.Queued |> Option.defaultValue 0
 
                     let landing (bidder: Bidder) =
-                        snd priced.[bidder.Home].Value + queue bidder + walk bidder room
+                        spawnOf bidder + queue bidder + walk bidder room
 
                     // A trespass's kill is cast only by a colony whose cast,
                     // landed where it bids, pays for this body and every one
@@ -366,8 +428,7 @@ let assign
                                 Queued =
                                     Map.add
                                         bidder.Home
-                                        (queue bidder
-                                         + snd priced.[bidder.Home].Value / spawnsOf bidder)
+                                        (queue bidder + spawnOf bidder / spawnsOf bidder)
                                         ledger.Queued
                             }
 

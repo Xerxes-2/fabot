@@ -1198,3 +1198,837 @@ let exitHoldTests =
                     "and none of it is an exit tile the terrain lays, which would carry the guard across"
             }
         ]
+
+/// The pair world's two homes as two colonies of their own (#663): the
+/// mother's RCL5 home with its 1,800 bank and one spawn, its outpost beside
+/// it, and the child grown into an RCL8 colony with a 12,900 bank and a
+/// Storage past the Caster's reserve, a room off the outpost.
+let private lenders =
+    ViewFixtures.declared |> List.map (fun colony -> { colony with Mother = None })
+
+/// Two of Trepidimous's 7M13R standing in `room` (W17S26, t1060231): 130 a
+/// tick each, 2,000 hits, no heal, two ticks a plain tile.
+let private harassers (room: string) : HostileInfo list =
+    [ 0; 1 ]
+    |> List.map (fun i ->
+        {
+            Id = $"trep-{room}-{i}"
+            Owner = "Trepidimous"
+            Pos = { Room = room; X = 5 + i; Y = 6 }
+            Body = List.replicate 7 Move @ List.replicate 13 RangedAttack
+            Boosts = []
+            Hits = 20 * Engine.partHits
+            TicksToLive = 1400
+        })
+
+/// The pair world with the child an RCL8 colony, these hostiles in the
+/// mother's outpost and these in the child's home.
+let private lendingWorld (inOutpost: HostileInfo list) (atChild: HostileInfo list) : World =
+    let rooms = ViewFixtures.pairWorld.Rooms
+
+    { ViewFixtures.pairWorld with
+        Rooms =
+            rooms
+            |> Map.change
+                ViewFixtures.outpost
+                (Option.map (fun (facts: RoomFacts) -> { facts with Hostiles = inOutpost }))
+            |> Map.change
+                ViewFixtures.child
+                (Option.map (fun (facts: RoomFacts) ->
+                    { ViewFixtures.withStock 100_000 facts with
+                        Controller =
+                            facts.Controller |> Option.map (fun ctrl -> { ctrl with Level = 8 })
+                        Energy =
+                            {
+                                Available = 12_900
+                                Capacity = 12_900
+                            }
+                        Hostiles = atChild
+                    }))
+    }
+
+/// A third colony, W11S27, an RCL8 home as rich as the child, a room off
+/// the outpost on its other side.
+let private third = "W11S27"
+
+let private trio: Colony list =
+    lenders
+    @ [
+        { (List.last lenders) with
+            Home = third
+            Mother = None
+        }
+    ]
+
+/// `lendingWorld` with the third colony's home in it at this level and
+/// bank, seen this tick.
+let private trioWorldAt (level: int) (bank: int) (inOutpost: HostileInfo list) : World =
+    let world = lendingWorld inOutpost []
+
+    let name, facts =
+        ViewFixtures.roomOf third Ownership.Ours [ $"ctrl-{third}", { X = 2; Y = 2 }, Controller ]
+        |> ViewFixtures.ourColony "Spawn3" level bank
+
+    let facts = ViewFixtures.withStock 100_000 facts
+
+    { world with
+        Rooms = Map.add name facts world.Rooms
+        Sightings =
+            Map.add
+                name
+                {
+                    Tick = world.Time
+                    Targets = lazy (facts.TargetKinds |> Map.keys |> Set.ofSeq)
+                    Rival = None
+                }
+                world.Sightings
+    }
+
+/// `trioWorldAt` with the third colony an RCL8 home as rich as the child.
+let private trioWorld (inOutpost: HostileInfo list) : World = trioWorldAt 8 12_900 inOutpost
+
+/// Each colony's view with the world's verdicts priced over all of them
+/// (`Facts.judge`), these Tasks held, a crossing off the room names.
+let private judgedHolding (held: Assignments) (colonies: Colony list) (world: World) =
+    colonies
+    |> List.map (fun colony ->
+        ({
+            Cut = ViewFixtures.viewUnder colonies world colony.Home
+            Owns = Colony.declaredRooms colony
+            Decides = true
+        }
+        : Facts.Judged))
+    |> Facts.judge (fun _ _ -> None) held
+
+/// `judgedHolding` with nothing held.
+let private judgedAll (colonies: Colony list) (world: World) : ColonyView list =
+    judgedHolding Map.empty colonies world
+
+/// The same raid aged to `life` ticks.
+let private aged (life: int) (raid: HostileInfo list) =
+    raid |> List.map (fun hostile -> { hostile with TicksToLive = life })
+
+/// A guard of `blocks` guard blocks named `name` standing in `room`.
+let private guardAt (room: string) (name: string) (blocks: int) (world: World) : World =
+    let parts =
+        guardPattern.Block
+        |> List.countBy id
+        |> List.map (fun (part, count) -> part, count * blocks)
+
+    let guard = ViewFixtures.creepWithBody name room parts
+    let hits = Engine.partHits * blocks * List.length guardPattern.Block
+
+    { world with
+        Creeps =
+            { guard with
+                Info =
+                    { guard.Info with
+                        Hits = { Hits = hits; HitsMax = hits }
+                    }
+            }
+            :: world.Creeps
+        Rooms =
+            world.Rooms
+            |> Map.change
+                room
+                (Option.map (fun (facts: RoomFacts) ->
+                    { facts with
+                        Layer =
+                            { facts.Layer with
+                                CreepPositions =
+                                    Map.add name { X = 8; Y = 8 } facts.Layer.CreepPositions
+                            }
+                    }))
+    }
+
+/// A guard of `blocks` guard blocks named `name` standing in the outpost,
+/// which the outpost's projection adopts into the owner's cut.
+let private guardIn (name: string) (blocks: int) (world: World) : World =
+    guardAt ViewFixtures.outpost name blocks world
+
+/// The lender's five-block guard standing in the outpost.
+let private lentGuard (world: World) : World = guardIn "guard-990-Spawn2" 5 world
+
+/// The bodies each colony casts for a Task (`Caster.assign`), each judged
+/// view asking what it asks (`Quota.castsOf`); a colony casting none left
+/// out.
+let private castHeld (held: Assignments) (task: Task) (views: ColonyView list) =
+    let facts: HeldTaskFacts =
+        {
+            All = held |> Map.values |> Set.ofSeq
+            WithThorium = Set.empty
+            Holders =
+                held
+                |> Map.toList
+                |> List.groupBy snd
+                |> List.map (fun (tid, holders) -> tid, List.map fst holders)
+                |> Map.ofList
+        }
+
+    views
+    |> List.map (fun view ->
+        let atlas = Atlas.ofView view
+
+        ({
+            Home = SpatialInfo.homeName view.Spatial
+            View = view
+            Asks =
+                Quota.castsOf
+                    view
+                    (Threat.threatsOfHeld view atlas facts)
+                    (Planner.outpostFactsOf view atlas).Guarded
+                    (fun _ -> false)
+        }
+        : Caster.Bidder))
+    |> Caster.assign (fun _ _ -> None) held Map.empty
+    |> Map.toList
+    |> List.choose (fun (home, casts) ->
+        match
+            casts
+            |> List.filter (fun cast -> cast.For = task)
+            |> List.sumBy (fun cast -> cast.Ask.Wanted)
+        with
+        | 0 -> None
+        | bodies -> Some(home, bodies))
+
+/// The bodies and their blocks each colony casts for a Task, nothing held;
+/// a colony casting none left out.
+let private castsFor (task: Task) (views: ColonyView list) : (string * int * int) list =
+    views
+    |> List.map (fun view ->
+        let atlas = Atlas.ofView view
+
+        ({
+            Home = SpatialInfo.homeName view.Spatial
+            View = view
+            Asks =
+                Quota.castsOf
+                    view
+                    (threatsOf view atlas)
+                    (Planner.outpostFactsOf view atlas).Guarded
+                    (fun _ -> false)
+        }
+        : Caster.Bidder))
+    |> Caster.assign (fun _ _ -> None) Map.empty Map.empty
+    |> Map.toList
+    |> List.collect (fun (home, casts) ->
+        casts
+        |> List.filter (fun cast -> cast.For = task && cast.Ask.Wanted > 0)
+        |> List.map (fun cast -> home, cast.Ask.Wanted, cast.Ask.Blocks))
+
+/// What one judged view asks for a Task (`Quota.castsOf`), nothing held:
+/// row, bodies and blocks.
+let private askedFor (task: Task) (view: ColonyView) : (CastRow * int * int) list =
+    let atlas = Atlas.ofView view
+
+    Quota.castsOf view (threatsOf view atlas) (Planner.outpostFactsOf view atlas).Guarded (fun _ ->
+        false)
+    |> List.filter (fun cast -> cast.For = task && cast.Ask.Wanted > 0)
+    |> List.map (fun cast -> cast.Ask.Row, cast.Ask.Wanted, cast.Ask.Blocks)
+
+/// `castsFor` with each cast's row.
+let private castRowsFor
+    (task: Task)
+    (views: ColonyView list)
+    : (string * CastRow * int * int) list =
+    views
+    |> List.map (fun view ->
+        let atlas = Atlas.ofView view
+
+        ({
+            Home = SpatialInfo.homeName view.Spatial
+            View = view
+            Asks =
+                Quota.castsOf
+                    view
+                    (threatsOf view atlas)
+                    (Planner.outpostFactsOf view atlas).Guarded
+                    (fun _ -> false)
+        }
+        : Caster.Bidder))
+    |> Caster.assign (fun _ _ -> None) Map.empty Map.empty
+    |> Map.toList
+    |> List.collect (fun (home, casts) ->
+        casts
+        |> List.filter (fun cast -> cast.For = task && cast.Ask.Wanted > 0)
+        |> List.map (fun cast -> home, cast.Ask.Row, cast.Ask.Wanted, cast.Ask.Blocks))
+
+/// `castHeld` with nothing held.
+let private castFor (task: Task) (views: ColonyView list) : (string * int) list =
+    views
+    |> List.map (fun view ->
+        let atlas = Atlas.ofView view
+
+        ({
+            Home = SpatialInfo.homeName view.Spatial
+            View = view
+            Asks =
+                Quota.castsOf
+                    view
+                    (threatsOf view atlas)
+                    (Planner.outpostFactsOf view atlas).Guarded
+                    (fun _ -> false)
+        }
+        : Caster.Bidder))
+    |> Caster.assign (fun _ _ -> None) Map.empty Map.empty
+    |> Map.toList
+    |> List.choose (fun (home, casts) ->
+        match
+            casts
+            |> List.filter (fun cast -> cast.For = task)
+            |> List.sumBy (fun cast -> cast.Ask.Wanted)
+        with
+        | 0 -> None
+        | bodies -> Some(home, bodies))
+
+/// The rooms a colony's stand-down shuts off this tick's sightings.
+let private shutBy (colony: ColonyView) =
+    Observe.RaidState.empty
+    |> Observe.foldRaids
+        Observe.capEpisodes
+        Set.empty
+        colony
+        (Planner.outpostFactsOf colony (Atlas.ofView colony)).Declared
+    |> Observe.standDown Tuning.defaults (colony.Time + 1)
+    |> fun gate -> gate.Shut
+
+/// The whole tick over these colonies (`Entry.decideColonies`), these Tasks
+/// held: the Task each body is matched to, by name, whichever colony
+/// matches it.
+let private matchedAll (held: Assignments) (colonies: Colony list) (world: World) =
+    let tuning = Tuning.defaults
+
+    let gates =
+        colonies |> List.map (fun colony -> colony.Home, StandDown.none) |> Map.ofList
+
+    let joins = JoinTable()
+
+    let holders =
+        World.creepColonies
+            tuning
+            colonies
+            (World.living colonies world)
+            ViewFixtures.noneShut
+            world
+
+    let watch = WorldView.ofWorld colonies (gates |> Map.toList |> List.map snd) world
+
+    let views =
+        colonies
+        |> List.map (fun colony ->
+            colony,
+            ColonyView.ofWorldRecalling
+                joins
+                tuning
+                colonies
+                HarassCasting.none
+                gates.[colony.Home]
+                holders
+                isFighterBody
+                watch
+                world
+                colony)
+
+    (decideColonies
+        {
+            Hops = fun _ _ -> None
+            Holding = held
+            Verbose = Set.empty
+            PlanMemos = Map.empty
+            Carries = Map.empty
+            Idle = Set.empty
+            FightAlone = Set.empty
+            TurnIndex = None
+            Operations = []
+            Declared = []
+        }
+        ignore
+        views)
+        .Decided
+    |> List.collect (fun (_, _, decision, ()) ->
+        decision.Verdicts
+        |> List.choose (function
+            | Verdict.Matched(creep, task, _) -> Some(creep, task)
+            | _ -> None))
+    |> Map.ofList
+
+[<Tests>]
+let lentOutpostTests =
+    testList
+        "an outpost raid its own colony loses is priced by what any colony may lend it (#663)"
+        [
+            // The W17S26 shape: the RCL5 owner's 1,800 bank loses two 7M13R,
+            // and an RCL8 colony a room off wins them. That colony casts for
+            // the outpost as its owner does: its row is weighed, the verdict
+            // is its Win, the owner keeps the outpost open, and the owner's
+            // ask, sized to the winning row, is cast by it at its own blocks.
+            test "the W17S26 shape: an RCL8 colony's cast wins the RCL5 owner's outpost" {
+                let world = lendingWorld (harassers ViewFixtures.outpost) []
+
+                let alone =
+                    judgedAll
+                        (lenders |> List.filter (fun colony -> colony.Home = ViewFixtures.mother))
+                        world
+
+                Expect.equal
+                    (Facts.answer (List.head alone) ViewFixtures.outpost)
+                    Answer.Lose
+                    "the premise: the owner's own bank loses it"
+
+                let views = judgedAll lenders world
+                let owner = List.head views
+                let verdict = Facts.verdictOf owner ViewFixtures.outpost
+
+                Expect.equal verdict.Answer Answer.Win "the lender's cast wins it"
+
+                Expect.equal
+                    verdict.Casting
+                    (Set.singleton ViewFixtures.child)
+                    "and the Win casts the lender"
+
+                Expect.equal
+                    (verdict.Rows
+                     |> Map.map (fun _ row -> row.Wins, row.Bodies, row.Blocks)
+                     |> Map.tryFind ViewFixtures.child)
+                    (Some(true, 1, 5))
+                    "its row: one five-block guard"
+
+                Expect.isTrue
+                    (fst (
+                        Facts.castPrice
+                            (List.item 1 views)
+                            (CastRow.Fighter BodyTemplate.Melee)
+                            ViewFixtures.outpost
+                    ))
+                    "the Caster's price of the lender's cast wins it too"
+
+                Expect.isFalse
+                    (Set.contains ViewFixtures.outpost (shutBy owner))
+                    "the owner does not stand the outpost down"
+
+                Expect.equal
+                    (castsFor (Guard ViewFixtures.outpost) views)
+                    [ ViewFixtures.child, 1, 5 ]
+                    "and the outpost's Guard is cast by the lender alone: one body, at its own five blocks"
+            }
+
+            // The lender's stock dipping under the reserve as it pays for its
+            // body hands the room to no one: a colony whose body holds the
+            // room's fight, or whose oven holds a fighter, casts down to
+            // `Tuning.CasterReserveHold`, as `World.casterOf` holds a
+            // harassment room's caster. Under the hold it casts nothing.
+            test "a lender whose body holds the fight keeps casting down to the hold" {
+                let lent = "guard-990-Spawn2"
+                let held = Map.ofList [ lent, taskId (Guard ViewFixtures.outpost) ]
+
+                let between =
+                    (Tuning.defaults.CasterReserveHold + Tuning.defaults.CasterReserve) / 2
+
+                let stocked (stock: int) (holding: bool) =
+                    let world = lendingWorld (harassers ViewFixtures.outpost) []
+                    let world = if holding then guardIn lent 3 world else world
+
+                    let world =
+                        { world with
+                            Rooms =
+                                world.Rooms
+                                |> Map.change
+                                    ViewFixtures.child
+                                    (Option.map (ViewFixtures.withStock stock))
+                        }
+
+                    Facts.answer
+                        (List.head (
+                            judgedHolding (if holding then held else Map.empty) lenders world
+                        ))
+                        ViewFixtures.outpost
+
+                Expect.equal
+                    (stocked between false)
+                    Answer.Lose
+                    "under the reserve, with no body there, it casts nothing"
+
+                Expect.equal
+                    (stocked between true)
+                    Answer.Win
+                    "its body holding the Guard, it casts down to the hold"
+
+                Expect.equal
+                    (stocked (Tuning.defaults.CasterReserveHold - 1) true)
+                    Answer.Lose
+                    "under the hold its own economy comes first"
+            }
+
+            // A held body of any size is no lent cast: the owner's two-block
+            // guard holding the Guard loses the raid, so the lender's guard
+            // is still cast beside it.
+            test "the owner's weak guard holding the outpost: the lender still casts" {
+                let weak = "guard-990-Spawn1"
+                let held = Map.ofList [ weak, taskId (Guard ViewFixtures.outpost) ]
+
+                let views =
+                    judgedHolding
+                        held
+                        lenders
+                        (lendingWorld (harassers ViewFixtures.outpost) [] |> guardIn weak 2)
+
+                let verdict = Facts.verdictOf (List.head views) ViewFixtures.outpost
+
+                Expect.equal
+                    (verdict.Answer, verdict.Casting)
+                    (Answer.Win, Set.singleton ViewFixtures.child)
+                    "the premise: the lender's row is the Win"
+
+                Expect.contains
+                    (castHeld held (Guard ViewFixtures.outpost) views)
+                    (ViewFixtures.child, 1)
+                    "the lender casts its guard beside the weak one"
+            }
+
+            // A free body of a caster whose cast loses where another's wins
+            // covers nothing: the fleet's count reads no body's size, and the
+            // owner's two-block guard standing by is no body the winning cast
+            // would cast. The lender casts its own.
+            test "the owner's free weak guard covers nothing the lender's cast wins" {
+                let views =
+                    judgedAll
+                        lenders
+                        (lendingWorld (harassers ViewFixtures.outpost) []
+                         |> guardIn "guard-990-Spawn1" 2)
+
+                Expect.equal
+                    (castFor (Guard ViewFixtures.outpost) views)
+                    [ ViewFixtures.child, 1 ]
+                    "the lender casts the body, the weak guard counted for none"
+            }
+
+            // Two colonies could cast for it: both rows are weighed, as two
+            // owners' would be, and the room is lent to the one whose cast
+            // lands first — the third, a room nearer — once: the Win's one
+            // caster, handed the one body.
+            test "two colonies could lend: both are weighed, one is handed the body" {
+                let views = judgedAll trio (trioWorld (harassers ViewFixtures.outpost))
+                let verdict = Facts.verdictOf (List.head views) ViewFixtures.outpost
+
+                Expect.equal
+                    (verdict.Casting, verdict.Lent |> Option.map fst)
+                    (Set.singleton third, Some third)
+                    "the room is lent to the one landing first, the Win's one caster"
+
+                Expect.equal
+                    (castFor (Guard ViewFixtures.outpost) views)
+                    [ third, 1 ]
+                    "and it is handed the one body"
+            }
+
+            // Lenders of different sizes (#663): the RCL7 third wins with
+            // one four-block guard holding its post, the RCL8 child with a
+            // five-block one, and the third lands first. What is cast is the
+            // winning cast of the colony casting it: the verdict's row, the
+            // owner's ask and the Caster's cast read one row, bodies and
+            // blocks together, never one colony's count at another's size.
+            test "lenders of different sizes: the one handed the body casts its own winning cast" {
+                let alone = judgedAll lenders (lendingWorld (harassers ViewFixtures.outpost) [])
+
+                Expect.equal
+                    ((Facts.verdictOf (List.head alone) ViewFixtures.outpost).Lent
+                     |> Option.map (fun (home, row) -> home, row.Bodies, row.Blocks))
+                    (Some(ViewFixtures.child, 1, 5))
+                    "the premise: the child alone wins it with one five-block guard"
+
+                let views = judgedAll trio (trioWorldAt 7 3_300 (harassers ViewFixtures.outpost))
+                let owner = List.head views
+                let verdict = Facts.verdictOf owner ViewFixtures.outpost
+
+                Expect.equal
+                    (verdict.Lent |> Option.map (fun (home, row) -> home, row.Bodies, row.Blocks))
+                    (Some(third, 1, 4))
+                    "the third, landing first, is lent it by its own row: one four-block guard"
+
+                Expect.equal
+                    (askedFor (Guard ViewFixtures.outpost) owner)
+                    [ CastRow.Fighter BodyTemplate.Melee, 1, 4 ]
+                    "the owner asks that row's cast"
+
+                Expect.equal
+                    (castRowsFor (Guard ViewFixtures.outpost) views)
+                    [ third, CastRow.Fighter BodyTemplate.Melee, 1, 4 ]
+                    "and the third casts it at its own count and blocks"
+            }
+
+            // A Ranged lender row (#663): three 7M13R, which the owner's
+            // melee loses and the child's two eight-block rangers win. The
+            // owner's ask follows the row the room is lent by — its template,
+            // bodies and blocks — so the lender casts rangers, never a melee
+            // ask sized to the owner's losing cast, which no lender's melee
+            // wins and the owner would cast itself.
+            test
+                "a Ranged lender row winning where the owner's melee loses: a Ranged ask, cast by the lender" {
+                let raid =
+                    [ 0..2 ]
+                    |> List.map (fun i ->
+                        { List.head (harassers ViewFixtures.outpost) with
+                            Id = $"trep-three-{i}"
+                            Pos =
+                                {
+                                    Room = ViewFixtures.outpost
+                                    X = 5 + i
+                                    Y = 6
+                                }
+                        })
+
+                let views = judgedAll lenders (lendingWorld raid [])
+                let owner = List.head views
+                let verdict = Facts.verdictOf owner ViewFixtures.outpost
+
+                Expect.equal
+                    (verdict.Rows
+                     |> Map.tryFind ViewFixtures.mother
+                     |> Option.map (fun row -> row.Ranger, row.Wins))
+                    (Some(false, false))
+                    "the premise: the owner's own row is a melee one that loses"
+
+                Expect.equal
+                    (verdict.Answer,
+                     verdict.Lent
+                     |> Option.map (fun (home, row) -> home, row.Ranger, row.Bodies, row.Blocks))
+                    (Answer.Win, Some(ViewFixtures.child, true, 2, 8))
+                    "the room is lent to the child's row: two eight-block rangers"
+
+                Expect.equal
+                    (askedFor (Guard ViewFixtures.outpost) owner)
+                    [ CastRow.Fighter BodyTemplate.Ranged, 2, 8 ]
+                    "the owner asks the lender's row: rangers, its count and blocks"
+
+                Expect.equal
+                    (castRowsFor (Guard ViewFixtures.outpost) views)
+                    [ ViewFixtures.child, CastRow.Fighter BodyTemplate.Ranged, 2, 8 ]
+                    "and the child casts them, nothing of the owner's"
+
+                Expect.isFalse
+                    (Set.contains ViewFixtures.outpost (shutBy owner))
+                    "the owner keeps the outpost open"
+            }
+
+            test "a colony whose own home is raided lends nothing" {
+                let world =
+                    lendingWorld (harassers ViewFixtures.outpost) (harassers ViewFixtures.child)
+
+                let views = judgedAll lenders world
+
+                Expect.equal
+                    (Facts.answer (List.head views) ViewFixtures.outpost)
+                    Answer.Lose
+                    "the outpost is the stand-down's: the only lender defends its home"
+
+                Expect.isFalse
+                    (castFor (Guard ViewFixtures.outpost) views
+                     |> List.exists (fun (home, _) -> home = ViewFixtures.child))
+                    "and its home casts no body for the outpost"
+            }
+
+            test "the owner's own row answers a raid it wins, whoever could lend" {
+                let raider =
+                    {
+                        Id = "scout"
+                        Owner = "Trepidimous"
+                        Pos =
+                            {
+                                Room = ViewFixtures.outpost
+                                X = 5
+                                Y = 6
+                            }
+                        Body = [ Attack; Move ]
+                        Boosts = []
+                        Hits = 2 * Engine.partHits
+                        TicksToLive = 1400
+                    }
+
+                let views = judgedAll lenders (lendingWorld [ raider ] [])
+                let verdict = Facts.verdictOf (List.head views) ViewFixtures.outpost
+
+                Expect.equal verdict.Answer Answer.Win "the owner's row wins it"
+
+                Expect.contains verdict.Casting ViewFixtures.mother "and casts it"
+
+                Expect.equal
+                    (castFor (Guard ViewFixtures.outpost) views |> List.map fst)
+                    [ ViewFixtures.mother ]
+                    "and the owner casts its Guard"
+            }
+
+            // While the lender's body spawns, its stock dipped under the
+            // reserve as it paid: the body in its oven holds it at the hold
+            // band, the verdict keeps its Win, and the body in the oven is
+            // the ask's (the fleet read first): no second colony casts
+            // another.
+            test "a lender's body in its oven keeps the Win and is the only body cast" {
+                let between =
+                    (Tuning.defaults.CasterReserveHold + Tuning.defaults.CasterReserve) / 2
+
+                let spawning =
+                    let world = trioWorld (harassers ViewFixtures.outpost)
+
+                    { world with
+                        Rooms =
+                            world.Rooms
+                            |> Map.change
+                                ViewFixtures.child
+                                (Option.map (fun (facts: RoomFacts) ->
+                                    { ViewFixtures.withStock between facts with
+                                        Spawns =
+                                            facts.Spawns
+                                            |> List.map (fun spawner ->
+                                                { spawner with
+                                                    IsSpawning = true
+                                                    Remaining = 20
+                                                })
+                                        Casting =
+                                            [
+                                                {
+                                                    Name = "guard-991-Spawn2"
+                                                    Body =
+                                                        List.replicate 5 guardPattern.Block
+                                                        |> List.concat
+                                                }
+                                            ]
+                                    }))
+                    }
+
+                let views = judgedAll trio spawning
+                let verdict = Facts.verdictOf (List.head views) ViewFixtures.outpost
+
+                Expect.equal verdict.Answer Answer.Win "the Win holds while the body spawns"
+
+                Expect.contains
+                    verdict.Casting
+                    ViewFixtures.child
+                    "the child still casts for it, at the hold"
+
+                Expect.equal
+                    (castFor (Guard ViewFixtures.outpost) views)
+                    [ ViewFixtures.child, 1 ]
+                    "the body in its oven is the ask's one body: the third colony casts none"
+            }
+
+            // A dismantler with no weapon raids a home of ours as surely as a
+            // harasser: the world prices the home's raid over every colony, so
+            // a colony that would answer it is weighed, and its raid lasts
+            // while the dismantler does. (An outpost's unarmed digger keeps
+            // the old pricing.)
+            test "a healed dismantler with no weapon at a home is priced over every colony" {
+                let train =
+                    [
+                        [ Work; Work; Work; Move; Move; Move ]
+                        List.replicate 20 Heal @ List.replicate 10 Move
+                    ]
+                    |> List.mapi (fun i parts ->
+                        {
+                            Id = $"train-{i}"
+                            Owner = "Trepidimous"
+                            Pos =
+                                {
+                                    Room = ViewFixtures.mother
+                                    X = 5 + i
+                                    Y = 6
+                                }
+                            Body = parts
+                            Boosts = []
+                            Hits = Engine.partHits * List.length parts
+                            TicksToLive = 1400
+                        })
+
+                let world =
+                    let world = lendingWorld [] []
+
+                    { world with
+                        Rooms =
+                            world.Rooms
+                            |> Map.change
+                                ViewFixtures.mother
+                                (Option.map (fun (facts: RoomFacts) ->
+                                    { facts with
+                                        Hostiles = train
+                                        Refillables = []
+                                    }))
+                    }
+
+                let views = judgedAll lenders world
+
+                Expect.isTrue
+                    (Map.containsKey ViewFixtures.mother (List.head views).World.Answers)
+                    "the world prices the home's raid"
+
+                Expect.notEqual
+                    (Facts.verdictOf (List.head views) ViewFixtures.mother).Answer
+                    Answer.Lose
+                    "and some colony answers it"
+            }
+
+            // The lender's five-block guard holding the outpost: the Guard
+            // counts it, the Caster casts nothing fresh beside it.
+            test "the lender's body holding the outpost is the ask's body, nothing fresh beside it" {
+                let lent = "guard-990-Spawn2"
+                let held = Map.ofList [ lent, taskId (Guard ViewFixtures.outpost) ]
+
+                let views =
+                    judgedHolding
+                        held
+                        lenders
+                        (lendingWorld (harassers ViewFixtures.outpost) [] |> lentGuard)
+
+                Expect.equal
+                    (Facts.answer (List.head views) ViewFixtures.outpost)
+                    Answer.Win
+                    "its row wins the outpost"
+
+                Expect.equal
+                    (castHeld held (Guard ViewFixtures.outpost) views)
+                    [ ViewFixtures.child, 1 ]
+                    "the Guard counts the holding body alone"
+            }
+
+            // The tick the lender's body is born (#663): it has left the
+            // oven, and holds no Task yet (`held` is last tick's), while the
+            // stock it paid from sits between the hold and the reserve. A
+            // fighter holding no Task is the incumbent's, read at the hold:
+            // the Win stands, and the newborn is matched to the outpost.
+            test
+                "the birth tick, the stock in the hold band: the Win stands and the newborn is matched" {
+                let newborn = "guard-991-Spawn2"
+
+                let between =
+                    (Tuning.defaults.CasterReserveHold + Tuning.defaults.CasterReserve) / 2
+
+                let world =
+                    let world = lendingWorld (harassers ViewFixtures.outpost) []
+
+                    { world with
+                        Rooms =
+                            world.Rooms
+                            |> Map.change
+                                ViewFixtures.child
+                                (Option.map (ViewFixtures.withStock between))
+                    }
+
+                Expect.equal
+                    (Facts.answer (List.head (judgedAll lenders world)) ViewFixtures.outpost)
+                    Answer.Lose
+                    "the premise: in the band, with no body of its, the child lends nothing"
+
+                let born = guardAt ViewFixtures.child newborn 5 world
+
+                let verdict =
+                    Facts.verdictOf (List.head (judgedAll lenders born)) ViewFixtures.outpost
+
+                Expect.equal
+                    (verdict.Answer, verdict.Lent |> Option.map fst)
+                    (Answer.Win, Some ViewFixtures.child)
+                    "its newborn holding no Task, the room stays lent to it"
+
+                Expect.equal
+                    (Map.tryFind newborn (matchedAll Map.empty lenders born))
+                    (Some(taskId (Guard ViewFixtures.outpost)))
+                    "and the newborn is matched to the outpost's Guard"
+            }
+        ]

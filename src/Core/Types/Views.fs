@@ -86,9 +86,19 @@ type Answer =
     /// Nothing of ours wins it: the [[stand-down]]'s.
     | Lose
 
-/// A room's own row in one colony (#535): whether it is the ranger's, and
-/// whether its biggest cast wins the room alone (`Facts.rowAnswer`).
-type RowAnswer = { Ranger: bool; Wins: bool }
+/// A room's own row in one colony (#535): whether it is the ranger's,
+/// whether its biggest cast wins the room alone (`Facts.rowAnswer`), and
+/// that cast's bodies of `Blocks` blocks, `Held` where it is a guard holding
+/// its post (#663: the room's ask is sized to the row that wins it,
+/// whichever colony's); none where no raid is priced.
+type RowAnswer =
+    {
+        Ranger: bool
+        Wins: bool
+        Blocks: int
+        Bodies: int
+        Held: bool
+    }
 
 /// One raided room's verdict, priced once a tick over our fleet and the
 /// world's vision (`Facts.judge`) and read by every colony alike.
@@ -115,6 +125,11 @@ type RoomVerdict =
         /// Those rangers by name, each with its colony's home, where they
         /// are the answer (no row wins and none kites); empty otherwise.
         Bodies: (string * string) list
+        /// The colony a raided Guard room nothing of its own answers is lent
+        /// to, with the row it wins it by (#663): its owner's ask is that
+        /// row's template, bodies and blocks, and the Caster casts it there
+        /// alone. None where the room's own rows, kite or rangers answer it.
+        Lent: (string * RowAnswer) option
     }
 
 /// The whole ticks a tile of road, plain and swamp takes one body

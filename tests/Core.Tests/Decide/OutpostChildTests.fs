@@ -138,7 +138,7 @@ let private judgeOverFleet held (colonies: Facts.Judged list) =
                         }
                 }
         })
-    |> Facts.judge held
+    |> Facts.judge (fun _ _ -> None) held
 
 /// The mother's view and the child's with the world's verdicts priced over
 /// both (`Facts.judge`).
@@ -681,8 +681,9 @@ let childOutpostTests =
                     "the one verdict is the child's row's"
 
                 Expect.equal
-                    (Facts.verdictOf judged "W1N4").Rows
-                    (Map.ofList [ "W1N3", { Ranger = false; Wins = false } ])
+                    ((Facts.verdictOf judged "W1N4").Rows
+                     |> Map.map (fun _ row -> row.Ranger, row.Wins))
+                    (Map.ofList [ "W1N3", (false, false) ])
                     "the mother's row weighed nowhere"
 
                 Expect.equal (shutOf judged) (Set.singleton "W1N4") "so the child stands it down"

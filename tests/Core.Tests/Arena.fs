@@ -1696,9 +1696,9 @@ let laneBreaks (a: Arena) : string list =
 /// The view one living colony decides this tick off: judged and aimed as
 /// `Entry.decideColonies` lays them.
 let viewOf (a: Arena) (home: string) : ColonyView =
-    let _, _, views = cut a
+    let _, hops, views = cut a
 
-    judgeColonies a.Carried.Assignments Set.empty [] a.Carried.Operations views
+    judgeColonies hops a.Carried.Assignments Set.empty [] a.Carried.Operations views
     |> fst
     |> Layout.aimObservers Set.empty
     |> List.zip (views |> List.map fst)
