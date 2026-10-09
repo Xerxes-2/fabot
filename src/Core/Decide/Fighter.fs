@@ -185,3 +185,11 @@ module Fighter =
     /// a swing, so it closes to one and steps after the target onto the tile
     /// it leaves (`Emitter.glue`), its chase weighing that step as any other.
     let glues (fighter: Fighter) : bool = fighter.Reach = Engine.meleeRange
+
+    /// Whether a body's standoff on one target is that target's tile: a
+    /// swing's always (`glues`); a gun's on a target with no weapon, which
+    /// cannot hurt it from anywhere, so standing off it buys nothing and
+    /// costs the catch: its shot lands alike from one as from three, and only
+    /// one keeps a quarry that walks off in its reach after the step.
+    let gluesOn (fighter: Fighter) (armed: bool) : bool =
+        glues fighter || fighter.Reach > 0 && not armed

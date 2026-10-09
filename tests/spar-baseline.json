@@ -109,9 +109,9 @@
   },
   "outpost-fleeing-hauler": {
     "castEnergy": 0,
-    "cleared": null,
+    "cleared": 31,
     "hurt": 0,
-    "kills": 0,
+    "kills": 1,
     "ourDeaths": 0,
     "safeMode": false,
     "stoodDown": false,

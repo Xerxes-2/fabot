@@ -303,6 +303,22 @@ let fighterTests =
                 Expect.isFalse
                     (Fighter.glues (wholeFighter medicPattern.Block))
                     "nor one with no weapon"
+
+                Expect.isTrue
+                    (Fighter.gluesOn ranger false && Fighter.gluesOn hybrid false)
+                    "a gun's standoff on a body with no weapon is its tile"
+
+                Expect.isFalse
+                    (Fighter.gluesOn ranger true || Fighter.gluesOn hybrid true)
+                    "and on an armed one its reach"
+
+                Expect.isTrue
+                    (Fighter.gluesOn guard true)
+                    "a swing's is its target's tile, armed or not"
+
+                Expect.isFalse
+                    (Fighter.gluesOn (wholeFighter medicPattern.Block) false)
+                    "a body with no weapon glues onto nothing"
             }
         ]
 

@@ -130,7 +130,7 @@ type Plan =
         /// Each aiming fighter's guns, strike and shields (`Emitter.volleys`,
         /// #537).
         Volleys: Map<string, Volley>
-        /// The tiles about each melee glue body whose step holds it
+        /// The tiles about each glue body whose step holds it
         /// (`Emitter.mired`, #614), which its light tick glue keeps off.
         Mired: Map<string, Set<RoomPos>>
         /// Each chaser's track (`Decision.Tracks`): the tick of its first
@@ -726,6 +726,36 @@ let private merged (now: Glance) (last: LastFull) : Plan =
             Forces = mapOf _.Forces
         }
 
+/// Whether a gun beside its unarmed quarry glues onto its tile off the
+/// glance, as the full tick's glue would (`Emitter.glue`): a holder the full
+/// tick glues (its `Plan.Mired` entry: a Guard's or an operation's), onto a
+/// tile that holds it not, off the exit ring and off our rampart, that no
+/// other armed body reaches by the tick after (`Emitter.glueClear`, the full
+/// tick's rule). The glance reads no towers: a rival tower's fire is the
+/// full tick's alone. Read by the replay's glue and by the chase force,
+/// which leaves a glued gun to its glue.
+let private gunGlues
+    (plan: Plan)
+    (now: Glance)
+    (name: string)
+    (from: RoomPos)
+    (quarry: GlanceHostile)
+    =
+    not quarry.Armed
+    && RoomPos.range from quarry.Tile = Some Engine.meleeRange
+    && Map.tryFind name plan.Mired
+       |> Option.exists (fun mired -> not (Set.contains quarry.Tile mired))
+    && not (List.contains from now.Structures)
+    && not (Seam.onRing (RoomPos.pos quarry.Tile))
+    && Decide.Emitter.glueClear
+        (now.Hostiles
+         |> List.choose (fun h ->
+             if h.Id <> quarry.Id && h.Armed then
+                 h.Weapon |> Option.map (fun weapon -> h.Tile, weapon)
+             else
+                 None))
+        quarry.Tile
+
 /// The rooms the plans' volleys stand in (`Glance.PowerCreeps`).
 let volleyRooms (last: LastFull) : string list =
     last.Plans
@@ -1045,7 +1075,9 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
     // it. Only while a decide can change the outcome (#626): the chaser
     // closes on the quarry and no armed body menaces it, whose kite or
     // flight a decide keeps. A melee body beside its quarry keeps it on its
-    // light tick (`Emitter.glueStep`); an armed quarry is the kite's. And a
+    // light tick (`Emitter.glueStep`), and a gun beside it where its light
+    // tick glues (`gunGlues`; where that is vetoed, it forces); an armed
+    // quarry is the kite's. And a
     // chase on its track whose walk left (where it stands and its step plan
     // on) an armed body that stepped since the plan, or came into sight,
     // newly reaches before the next decide: the decide priced its walk off
@@ -1125,6 +1157,9 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
                         && not (harmless now quarry)
                         && RoomPos.range creep.Tile quarry.Tile
                            |> Option.forall (fun r -> r > glues)
+                        && not (
+                            reach > Engine.meleeRange && gunGlues plan now name creep.Tile quarry
+                        )
                         && lost ()
                         && closes creep quarry reach
                         && not (menaced now creep.Tile)
@@ -1597,7 +1632,16 @@ let intents (record: LastFull) (now: Glance) : Intent list =
             // target's tile as kept where no other melee body of theirs
             // swings at it, and the full tick's mired tile, which holds the
             // body while the target walks off, as not (#614).
+            //
+            // A gun steps after its order's head as the full tick's glue does
+            // (`Emitter.glue`): an unarmed head that walked off where the plan
+            // marked it, where `gunGlues` lets it.
             let glued =
+                let onRampart = List.contains creep.Tile now.Structures
+
+                let mired tile =
+                    Map.tryFind name last.Mired |> Option.exists (Set.contains tile)
+
                 match issued with
                 | Some(AttackCreep _ as aim, true) when List.contains aim held ->
                     let melee =
@@ -1605,15 +1649,10 @@ let intents (record: LastFull) (now: Glance) : Intent list =
                         |> List.filter (fun h -> h.Armed && h.Weapon = Some Engine.meleeRange)
                         |> List.map (fun h -> h.Tile)
 
-                    let onRampart = List.contains creep.Tile now.Structures
-
                     aimed aim
                     |> Option.bind (fun (tile, _) ->
-                        let mired =
-                            Map.tryFind name last.Mired |> Option.exists (Set.contains tile)
-
                         let keeps =
-                            not mired
+                            not (mired tile)
                             && melee
                                |> List.forall (fun other ->
                                    other = tile
@@ -1621,6 +1660,17 @@ let intents (record: LastFull) (now: Glance) : Intent list =
                                       |> Option.forall (fun r -> r > Engine.meleeRange))
 
                         Decide.Emitter.glueStep creep.Tile tile onRampart keeps)
+                | Some(RangedAttackCreep(_, target) as aim, true) when List.tryHead held = Some aim ->
+                    match now.Hostiles |> List.tryFind (fun h -> h.Id = target) with
+                    | Some quarry when
+                        Map.tryFind target record.Marks |> Option.exists ((<>) quarry.Tile)
+                        ->
+                        Decide.Emitter.glueStep
+                            creep.Tile
+                            quarry.Tile
+                            onRampart
+                            (gunGlues last now name creep.Tile quarry)
+                    | _ -> None
                 | _ -> None
 
             match inward, glued with

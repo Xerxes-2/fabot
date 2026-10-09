@@ -1922,6 +1922,121 @@ let kiteStepTests =
                 Expect.isNonEmpty strikes "the premise: it aims"
             }
 
+            // Live W17S26 t1,074,561-583: a ranger beside an empty hauler
+            // stood on its seat beside it while it walked off, and trailed it
+            // three behind at its pace. A gun's standoff on a body with no
+            // weapon is its tile (`Fighter.gluesOn`): the hauler cannot hurt
+            // it from anywhere, its shot lands alike from one as from three,
+            // and only one keeps a quarry that walks off in its reach.
+            test
+                "a ranger beside an unarmed hauler that walks steps after it onto its tile; beside one at rest, or a shooter, it holds and shoots" {
+                let target = { X = 25; Y = 44 }
+                let from = { X = 24; Y = 44 }
+
+                let glued body (left: Pos option) =
+                    let colony =
+                        declaredRaid
+                            [
+                                { hostileIn "W1N2" target body with
+                                    Owner = "Trepidimous"
+                                }
+                            ]
+                        |> withField
+                        |> withGuards [ rangerOf "g-1" 4, from ]
+
+                    let colony =
+                        match left with
+                        | Some tile ->
+                            { colony with
+                                Stepped = Map.ofList [ "h-1", RoomPos.at "W1N2" tile ]
+                            }
+                        | None -> colony
+
+                    let atlas = Atlas.ofView colony
+                    let threats = threatsOf colony atlas
+                    let assigned = Map.ofList [ "g-1", Guard "W1N2" ]
+
+                    Emitter.glue
+                        colony
+                        atlas
+                        threats
+                        assigned
+                        (Resolver.glueChases colony atlas threats assigned)
+
+                let hauler = List.replicate 23 Carry @ List.replicate 23 Move
+                let walked = Some { X = 24; Y = 45 }
+
+                Expect.equal
+                    (glued hauler walked)
+                    [ MoveCreep("g-1", Right) ]
+                    "a hauler walking: onto its tile, beside it whichever way it steps next"
+
+                Expect.isEmpty (glued hauler None) "a hauler at rest: it holds where it shoots"
+
+                Expect.isEmpty
+                    (glued smallRanged walked)
+                    "a shooter walking is the kite's: it holds its standoff"
+            }
+
+            // Ship review of the gun's glue: in a ranger's room a broken raid
+            // healer (our shot out-deals its heal) heads the order over its
+            // armed escort (`Facts.killTier`). The tile it leaves is three
+            // off the escort's gun and the ranger's four, which the maps read
+            // alike (`Arrival.damageAt` counts a step), so `glueKeeps` let
+            // the step into its reach; the glue never steps a gun into
+            // another armed body's reach (`Emitter.glueClear`, the rule the
+            // light tick reads too), nor off its kite walk. (An escort melee
+            // in reach of the tile stands within three of the gun, whose
+            // mass attack then outdeals the shot: no glue rides on it.)
+            test "a ranger never glues onto an unarmed head whose tile an armed escort reaches" {
+                // The child's home W1N3, its resident r-1 at (25,26).
+                let target = { X = 25; Y = 27 }
+
+                let glueAndAims escortAt =
+                    let healer =
+                        { hostileIn "W1N3" target [ Move; Move; Heal ] with
+                            Owner = "Trepidimous"
+                        }
+
+                    let escort =
+                        escortAt
+                        |> Option.map (fun (at: Pos) ->
+                            { hostileAt "m-1" at smallRanged with
+                                Pos = RoomPos.at "W1N3" at
+                                Owner = "Trepidimous"
+                            })
+                        |> Option.toList
+
+                    let colony =
+                        { raisingBeyond (healer :: escort) with
+                            Stepped = Map.ofList [ "h-1", RoomPos.at "W1N3" { X = 25; Y = 28 } ]
+                        }
+
+                    let atlas = Atlas.ofView colony
+                    let threats = threatsOf colony atlas
+                    let assigned = residentHeld |> Map.map (fun _ _ -> Guard "W1N3")
+
+                    Emitter.glue
+                        colony
+                        atlas
+                        threats
+                        assigned
+                        (Resolver.glueChases colony atlas threats assigned),
+                    Emitter.aims colony atlas threats assigned
+
+                let alone, _ = glueAndAims None
+                Expect.equal alone [ MoveCreep("r-1", Bottom) ] "the premise: alone, onto its tile"
+
+                let escorted, aims = glueAndAims (Some { X = 25; Y = 30 })
+
+                Expect.equal
+                    (List.tryHead aims)
+                    (Some(RangedAttackCreep("r-1", "h-1")))
+                    "the premise: the broken healer heads the order over its escort"
+
+                Expect.isEmpty escorted "its tile in the escort's reach: it holds and shoots"
+            }
+
             // #614 review: the light ticks' plan is cut only where the full
             // tick would trade the step for another. A guard far off a
             // target standing past a swamp band that spans the field has no

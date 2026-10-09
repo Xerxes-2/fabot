@@ -762,6 +762,121 @@ let replayTests =
                     "on a tile that holds it, it swings and stands"
             }
 
+            // Live W17S26 t1,074,561-583: a ranger beside an empty hauler
+            // stood on the light ticks while it walked off, and trailed it
+            // three behind. A gun's standoff on an unarmed body is its tile
+            // (`Fighter.gluesOn`): it steps after its order's head as the
+            // full tick's glue does, while that head walked off its mark.
+            test
+                "a gun beside its unarmed head that walked off its mark steps after it onto its tile; never onto an armed head, one at rest, or one another armed body reaches" {
+                let seen x y (hostiles: GlanceHostile list) =
+                    { quiet with
+                        Creeps =
+                            quiet.Creeps
+                            |> Map.add
+                                "ranger"
+                                { creepAt 12 10 1000 with
+                                    Reach = Engine.rangedRange
+                                }
+                        Hostiles = hostile x y "Trepidimous" false :: hostiles
+                    }
+
+                // The full tick's glue body: a Guard's holder has a `Mired`
+                // entry (`Emitter.mired`), empty where no tile holds it.
+                let fullWith (mired: Map<string, Set<RoomPos>>) (head: GlanceHostile) =
+                    LightTick.lastFull
+                        { quiet with
+                            Creeps =
+                                quiet.Creeps
+                                |> Map.add
+                                    "ranger"
+                                    { creepAt 12 10 1000 with
+                                        Reach = Engine.rangedRange
+                                    }
+                            Hostiles = [ head ]
+                        }
+                        Map.empty
+                        [ RangedAttackCreep("ranger", "h-1") ]
+                    |> aiming [ RangedAttackCreep("ranger", "h-1") ] Map.empty
+                    |> fun record ->
+                        { record with
+                            Plans =
+                                record.Plans |> Map.map (fun _ plan -> { plan with Mired = mired })
+                        }
+
+                let full = fullWith (Map.ofList [ "ranger", Set.empty ])
+
+                let ofRanger record now =
+                    LightTick.intents record now
+                    |> List.filter (fun intent ->
+                        match intent with
+                        | RangedAttackCreep("ranger", _)
+                        | MoveCreep("ranger", _) -> true
+                        | _ -> false)
+
+                let unarmed = full (hostile 13 11 "Trepidimous" false)
+
+                Expect.equal
+                    (ofRanger unarmed (seen 13 10 []))
+                    [ RangedAttackCreep("ranger", "h-1"); MoveCreep("ranger", Right) ]
+                    "walked off its mark: the shot, and a step onto its tile"
+
+                Expect.equal
+                    (ofRanger unarmed (seen 13 11 []))
+                    [ RangedAttackCreep("ranger", "h-1") ]
+                    "on its mark: the shot, and it stands"
+
+                let escort =
+                    { hostile 16 10 "Trepidimous" true with
+                        Id = "h-escort"
+                        Weapon = Some Engine.rangedRange
+                    }
+
+                Expect.equal
+                    (ofRanger unarmed (seen 13 10 [ escort ]))
+                    [ RangedAttackCreep("ranger", "h-1") ]
+                    "a shooter three off its tile: it stands"
+
+                let armed =
+                    { hostile 13 10 "Trepidimous" true with
+                        Weapon = Some Engine.rangedRange
+                    }
+
+                Expect.equal
+                    (ofRanger
+                        (full { armed with Tile = tile 13 11 })
+                        { seen 13 10 [] with
+                            Hostiles = [ armed ]
+                        })
+                    [ RangedAttackCreep("ranger", "h-1") ]
+                    "an armed head is the kite's: it shoots and never steps onto it"
+
+                let fromHead = hostile 13 11 "Trepidimous" false
+
+                Expect.equal
+                    (ofRanger (fullWith Map.empty fromHead) (seen 13 10 []))
+                    [ RangedAttackCreep("ranger", "h-1") ]
+                    "a gun the full tick never glues (no Guard's holder: no `Mired` entry) never glues on its light tick"
+
+                // The chase force leaves a glued gun to its glue, and forces
+                // where the glue is vetoed: replayed, the gun would stand.
+                let chased record now =
+                    LightTick.forcing record now |> List.contains (LightForce.Chase "ranger")
+
+                Expect.isFalse
+                    (chased (full fromHead) (seen 13 10 []))
+                    "its light tick glues: no full tick"
+
+                let mired = fullWith (Map.ofList [ "ranger", Set.ofList [ tile 13 10 ] ]) fromHead
+
+                Expect.equal
+                    (ofRanger mired (seen 13 10 []))
+                    [ RangedAttackCreep("ranger", "h-1") ]
+                    "the premise: onto a tile that holds it, no glue"
+
+                Expect.isTrue (chased mired (seen 13 10 [])) "a vetoed glue forces the full tick"
+            }
+
             // Melee glue steps onto the target's tile from range 1. Movement S3
             // moved what keeps it off a tile into the caller's reading: the
             // full tick's maps (`Emitter.glueKeeps`, a tile struck no harder

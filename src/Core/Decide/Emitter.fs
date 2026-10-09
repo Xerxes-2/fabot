@@ -726,7 +726,7 @@ let glueStep (from: RoomPos) (target: RoomPos) (onRampart: bool) (keeps: bool) :
         directionTo (RoomPos.pos from) (RoomPos.pos target)
     | _ -> None
 
-/// Whether a melee body beside its target keeps contact on the target's tile
+/// Whether a body beside its target keeps contact on the target's tile
 /// at no worse an exchange (movement S3): what the hostile maps land there by
 /// the tick it stands on it (`Threats.damageAt`) is no more than its heal
 /// while it swings (`Fighter.HealAt`: none, the engine dropping a swing
@@ -737,6 +737,16 @@ let glueKeeps (threats: Threats) (creep: CreepInfo) (from: RoomPos) (target: Roo
     let onto = Threats.damageAt threats target.Room 1 (RoomPos.pos target)
 
     onto <= heal || onto <= Threats.damageAt threats from.Room 1 (RoomPos.pos from)
+
+/// Whether a gun's glue onto `tile` stays out of every armed body but its
+/// target (`others`: each one's tile and weapon range): none reaches the tile
+/// by the tick after, its weapon's range and a step, as the hostile maps
+/// count a tick (`Arrival.damageAt`). Read alike by the full tick's glue and
+/// the light tick's, which reads no maps; neither weighs a tower here.
+let glueClear (others: (RoomPos * int) list) (tile: RoomPos) : bool =
+    others
+    |> List.forall (fun (at, weapon) ->
+        RoomPos.range at tile |> Option.forall (fun r -> r > weapon + 1))
 
 /// The Threats a fighter may strike in a room, in its Selector's kill order
 /// (`Facts.killRank`, #451), then the one nearest a Post of that room, ties by
@@ -1459,9 +1469,9 @@ let holds atlas (room: string) (gait: Gait) (tile: Pos) : bool =
 
     weight > 0 && Gait.ticks weight gait |> Option.exists (fun ticks -> ticks > 1)
 
-/// The melee glue's bodies (`glue`): a Guard's holder whose standoff is its
-/// target's tile (`Fighter.glues`: its reach a swing, #615 U1), not
-/// mustering, aiming where it stands; with its room and targets.
+/// The glue's bodies (`glue`): a Guard's holder with a weapon, not
+/// mustering, aiming where it stands; with its room and targets. Whether it
+/// glues onto the target it strikes is that target's (`Fighter.gluesOn`).
 let private gluing
     (view: ColonyView)
     atlas
@@ -1472,18 +1482,23 @@ let private gluing
     match Map.tryFind creep.Name assigned, strikesBy view atlas threats assigned creep with
     | Some(Guard _), Some(room, targets, true)
     | Some(Operate _), Some(room, targets, true) when
-        Fighter.glues (Fighter.ofCreep creep) && not (mustering threats assigned creep)
+        Fighter.reachOf creep > 0 && not (mustering threats assigned creep)
         ->
         Some(room, targets)
     | _ -> None
 
-/// Each melee fighter's step onto the target it reaches (`glueStep`, #535),
-/// its chase's step at a standoff of one (#615 U1): a Guard's holder whose
-/// reach is a swing (`gluing`), not mustering, beside the swing
-/// `guardIntent` issues at the same target, where its chase keeps the step
-/// (`chases`: from the body's tile onto its target's, `Resolver.chaseStep`'s
-/// weighing, #614). The mover leaves these bodies standing: the tile is the
-/// target's until it steps off, which no arbitration of ours settles.
+/// Each fighter's step onto the target it reaches beside it (`glueStep`,
+/// #535), its chase's step at a standoff of one (#615 U1): a Guard's holder
+/// (`gluing`), not mustering, beside the strike `guardIntent` issues at the
+/// same target, where its standoff on that target is its tile
+/// (`Fighter.gluesOn`) and its chase keeps the step (`chases`: from the
+/// body's tile onto its target's, `Resolver.chaseStep`'s weighing, #614). A
+/// gun glues only onto its order's head, and only while it walks
+/// (`ColonyView.Stepped`): a step onto a body at rest gains nothing and
+/// holds the gun off the seat its walk keeps; and never onto a tile another
+/// armed body reaches (`glueClear`) or its kite walk keeps off. The mover leaves these bodies
+/// standing: the tile is the target's until it steps off, which no
+/// arbitration of ours settles.
 let glue
     (view: ColonyView)
     atlas
@@ -1500,25 +1515,66 @@ let glue
         |> List.choose (fun creep ->
             match gluing view atlas threats assigned creep with
             | Some(room, targets) ->
+                let fighter = Fighter.ofCreep creep
+
+                // A gun's quarry: its order's head, walking, onto a tile no
+                // other armed body reaches (`glueClear`) and its kite walk
+                // keeps not off (`Threats.kiteUnsafeFor`): the glue never
+                // overrides a kite's step into an escort's reach.
+                let quarry (target: HostileInfo) =
+                    let tile = target.Pos
+
+                    let others () =
+                        view.Hostiles
+                        |> List.choose (fun h ->
+                            if h.Id = target.Id || h.Pos.Room <> tile.Room then
+                                None
+                            else
+                                HostileInfo.weaponRange view.Hostiles h
+                                |> Option.map (fun weapon -> h.Pos, weapon))
+
+                    let kept () =
+                        let camp =
+                            Map.tryFind tile.Room view.ExitHolds
+                            |> Option.map (fun hold -> hold.Exit)
+
+                        match Threats.kiteUnsafeFor view threats atlas creep camp with
+                        | Some(unsafe, _) -> not (unsafe (indexOf (RoomPos.pos tile)))
+                        | None -> true
+
+                    Fighter.glues fighter
+                    || Map.containsKey target.Id view.Stepped
+                       && strikeOrder view atlas targets fighting creep room
+                          |> List.tryHead
+                          |> Option.exists (fun head -> head.Id = target.Id)
+                       && glueClear (others ()) tile
+                       && kept ()
+
                 match
                     strikeOf view atlas targets fighting creep room,
                     Atlas.creepTile atlas creep.Name
                 with
-                | Some(At(target, true)), Some from ->
+                | Some(At(target, true)), Some from when
+                    Fighter.gluesOn fighter (HostileInfo.armed view.Hostiles target)
+                    ->
                     let onRampart =
                         Set.contains (RoomPos.pos from) (Atlas.ourRampartTilesIn atlas from.Room)
 
                     // The chase weighed only where the rest lets the step.
                     glueStep from target.Pos onRampart true
                     |> Option.filter (fun _ ->
-                        glueKeeps threats creep from target.Pos && chases creep from target.Pos)
+                        quarry target
+                        && glueKeeps threats creep from target.Pos
+                        && chases creep from target.Pos)
                     |> Option.map (fun direction -> MoveCreep(creep.Name, direction))
                 | _ -> None
             | _ -> None)
 
-/// The tiles about each melee glue body (`gluing`) whose step holds it
+/// The tiles about each glue body (`gluing`) whose step holds it
 /// (`holds`), as far as it can glue before the next full tick: a light tick's
-/// glue, which reads no terrain, never steps onto one (#614).
+/// glue, which reads no terrain, never steps onto one (#614). Every glue
+/// body has its entry, empty where none holds it: the light tick glues a gun
+/// only where it has one, the holders the full tick glues.
 let mired
     (view: ColonyView)
     atlas
@@ -1540,6 +1596,6 @@ let mired
                     |> List.map (RoomPos.at from.Room)
                     |> Set.ofList
 
-                if Set.isEmpty tiles then None else Some(creep.Name, tiles)
+                Some(creep.Name, tiles)
             | _ -> None)
         |> Map.ofList
