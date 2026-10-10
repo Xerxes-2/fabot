@@ -195,6 +195,13 @@ module Atlas =
         | true, grid -> grid.Occupied.[Tiles.ofPos pos]
         | _ -> false
 
+    /// Whether a body of one tile may stand on a tile of a room this tick, a
+    /// creep's tile included; false in a room not visible.
+    let passable (atlas: Atlas) (room: string) (tile: int) : bool =
+        match atlas.Rooms.TryGetValue room with
+        | true, grid -> tile >= 0 && tile < Tiles.count && grid.Weights.[tile] >= 0
+        | _ -> false
+
     // A tile a footprint may stand on and stay: passable, off the ring.
     let private seat (footprint: Footprint) (weights: int[]) (tile: int) =
         weightOf footprint weights tile >= 0 && not (onEdge footprint tile)
