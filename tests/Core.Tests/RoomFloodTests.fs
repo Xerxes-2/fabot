@@ -324,7 +324,7 @@ let onDemandFloodTests =
 
                 Expect.isNone
                     (travelCostWithin atlas creep.Name (Set.singleton (here { X = 60; Y = 3 })))
-                    "a tile off the fifty-by-fifty grid is unpriceable, not an exception (ADR 0004)"
+                    "a tile off the fifty-by-fifty grid is unpriceable, not an exception"
 
                 for wall in walls do
                     Expect.isNone
