@@ -3075,7 +3075,7 @@ module ExitTraffic =
 
     /// The room an exit's key lands in (`key`), None for a key off its shape.
     let campOf (exit: string) : string option =
-        match exit.Split '>' with
+        match exit.Split [| '>' |] with
         | [| home; camp |] when home <> "" && camp <> "" -> Some camp
         | _ -> None
 
