@@ -54,6 +54,15 @@ A live firefight (as above) the user flags may be fixed in the current session w
 - Ship a subagent's change from the default workspace: `jj new <change>` (rebase it onto `main` first if `main` moved), then steps 4–5 with `-r <change>`. A subagent's workspace is removed when it stops with no work in it and no background task running (`subagent-stop.sh`); one holding work stays, so the agent can be resumed to amend it, until session end (`worktree-sweep.sh`); by hand, `.claude/hooks/worktree-sweep.sh --stale` forgets workspaces whose directory is gone and removes directories no workspace owns.
 - Another live session works in its own workspace too, or stays read-only.
 
+### Cloud sessions
+
+A cloud session (claude.ai/code) may push only the branch it was cloned on, so that branch stands in for `main` everywhere above; `main` gets the work by PR, merged by the user.
+
+- `session-start.sh` records the branch as `claude.session-branch`, gives jj git's identity, makes what origin holds immutable, and defines `jj ship [-r REV]` (`scripts/ship.sh`: the gates, then the branch set to REV and pushed; jj starts a new `@` when REV was it). The local `main` bookmark is never moved.
+- Step 4 is `jj ship`; subagent workspaces are based on the session branch, and a subagent's change is rebased onto it, not onto `main`.
+- The container is reclaimed when the session idles: work not pushed is lost, so ship each issue as it lands.
+- `npm run deploy` from a cloud session runs the session branch live, ahead of `main`.
+
 ## Live game
 
 `npm run observe -- <cmd>`: `health` first after a deploy, then `cpu`, `tasks`, `timeline <creep>`, `raids`, `outposts`, `room <name>`, `eval '<expr>'`, `history <room> <tick>`, `wait --ticks N`. The full list is its usage line.
