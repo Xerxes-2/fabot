@@ -3621,7 +3621,7 @@ let catchableFirstTests =
                 // #663 M3: the camp is a job of its own, about the dancer, at
                 // its kill at the camp's odds over the kill's ticks.
                 let camp = List.head brief.Jobs
-                let dancer, _ = (Facts.sweepDancer inRoom harassRoom team).Value
+                let dancer, _ = (Facts.sweepDancer inRoom harassRoom team None).Value
 
                 Expect.equal
                     (camp.Kind, camp.Quarry)

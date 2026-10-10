@@ -74,6 +74,10 @@ let mutable private healers: Map<string, HealerSeen list> = Map.empty
 // #663): heap only, a reset forgetting every trip.
 let mutable private quarries: Map<string, Track> = Map.empty
 
+// Each body's kill head (`World.Heads`): heap only, a reset seating each
+// body afresh.
+let mutable private heads: Map<string, HeadLatch> = Map.empty
+
 // Each exit camp's exits watched (`World.Traffic`, #663 S7d): heap state
 // written to the ops leaf every full tick and read back off it on a cold heap
 // (#674), None until then, so a reset resumes each log's window.
@@ -941,7 +945,11 @@ let private fullTick
         |> ExitTraffic.recall
             campExits
             (traffic |> Option.defaultWith (fun () -> ObserveMemory.loadTraffic Game.time))
-        |> fun world -> { world with Refusals = refusals }
+        |> fun world ->
+            { world with
+                Refusals = refusals
+                Heads = heads
+            }
 
     sightings <- world.Sightings
     stampHolders world
@@ -1588,6 +1596,21 @@ let private fullTick
             else
                 ColonyView.bodies view |> List.map _.Name)
         |> Set.ofList
+
+    // Each body's kill head into the next tick (`HeadLatch.carry`): a
+    // deciding colony's bodies — a fight-only decide's fighters — the heads
+    // its seats moved, any other living body its own.
+    heads <-
+        heads
+        |> HeadLatch.carry
+            living
+            (decisions
+             |> List.map (fun (colony, view, decision, _, _) ->
+                 (if Set.contains colony.Home fightOnly then
+                      decision.Fight.Fighters
+                  else
+                      ColonyView.bodies view |> List.map _.Name |> Set.ofList),
+                 decision.Heads))
 
     let decidedHomes =
         decisions

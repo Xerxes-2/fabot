@@ -749,6 +749,7 @@ let errandStandDownTests =
                         StrayGround = fun _ -> None
                         Refusals = []
                         Traffic = Map.empty
+                        Heads = Map.empty
                     }
 
                 let view shut =

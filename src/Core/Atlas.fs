@@ -185,6 +185,9 @@ type Atlas =
             /// Each chaser's track this tick (`Resolver.chainOf`): where its
             /// chase assumed its quarry stands each tick after this one.
             Tracks: System.Collections.Generic.Dictionary<string, RoomPos list>
+            /// Each body's kill head this tick (`HeadLatch.step`), as its
+            /// prey seat moved it.
+            Heads: System.Collections.Generic.Dictionary<string, HeadLatch>
             /// The creeps whose bodies were cast with more Work parts than Move
             /// (`RowName.castHeavy`): the row they were cast for, never the parts
             /// damage left standing, so a shot Anchor still holds its Post (#664).
@@ -697,6 +700,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         SeatUnions = System.Collections.Generic.Dictionary()
         Steps = System.Collections.Generic.Dictionary()
         Tracks = System.Collections.Generic.Dictionary()
+        Heads = System.Collections.Generic.Dictionary()
         Heavy =
             creeps
             |> List.filter RowName.castHeavy
@@ -3709,6 +3713,14 @@ let recordChain (atlas: Atlas) (creep: string) (plan: RoomPos list option) (trac
 /// decision keeps it past the tick.
 let tracks (atlas: Atlas) : Map<string, RoomPos list> =
     [ for KeyValue(creep, track) in atlas.Tracks -> creep, track ] |> Fresh.mapOfSeq
+
+/// Sets a body's kill head (`HeadLatch.step`).
+let recordHead (atlas: Atlas) (creep: string) (latch: HeadLatch) = atlas.Heads.[creep] <- latch
+
+/// Every body's kill head this tick (`Atlas.Heads`), built by `Fresh`: the
+/// world keeps it past the tick.
+let heads (atlas: Atlas) : Map<string, HeadLatch> =
+    [ for KeyValue(creep, latch) in atlas.Heads -> creep, latch ] |> Fresh.mapOfSeq
 
 /// One creep's step plan as the mover left it this tick, if it has one.
 let stepPlanOf (atlas: Atlas) (creep: string) : RoomPos list option =

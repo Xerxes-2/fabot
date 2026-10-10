@@ -4451,15 +4451,17 @@ let internal raidHoldSpan (view: ColonyView) (room: string) (raid: HostileInfo l
 
 /// The dancer the [[sweep]]'s group camps in its room (#658), and the tiles
 /// of the room it steps in and out on (`dancerEntries`), the most used
-/// first: where the body its
-/// kill score leads, the group's (`team`) over the room's prey as the sweep
-/// prices them (`sweepPricing`: a dancer across the border laid back), is a
-/// dancer (`dancingOn`) whose camp pays (`campOdds`). None where the head is
-/// a body caught where it stands, or nothing pays.
+/// first: where the group's head — the body it holds (`held`, its seat's
+/// `HeadLatch`) while that one still pays, else the one its kill score
+/// leads, the group's (`team`) over the room's prey as the sweep prices them
+/// (`sweepPricing`: a dancer across the border laid back) — is a dancer
+/// (`dancingOn`) whose camp pays (`campOdds`). None where the head is a body
+/// caught where it stands, or nothing pays.
 let sweepDancer
     (view: ColonyView)
     (room: string)
     (team: Fighter list)
+    (held: string option)
     : (HostileInfo * RoomPos list) option =
     match team with
     | [] -> None
@@ -4467,12 +4469,15 @@ let sweepDancer
         let priced = sweepPricing view room
         let score = killScoresIn priced room team
 
-        priced.Hostiles
-        |> List.filter (fun h -> h.Pos.Room = room && trespasser priced (Set.singleton room) h)
-        |> List.map (fun h -> score fighter None 0 h, h)
-        |> List.filter (fun (worth, _) -> worth > 0.0)
-        |> List.sortBy (fun (worth, h) -> -worth, h.Id)
-        |> List.tryHead
+        let paying =
+            priced.Hostiles
+            |> List.filter (fun h -> h.Pos.Room = room && trespasser priced (Set.singleton room) h)
+            |> List.map (fun h -> score fighter None 0 h, h)
+            |> List.filter (fun (worth, _) -> worth > 0.0)
+
+        held
+        |> Option.bind (fun id -> paying |> List.tryFind (fun (_, h) -> h.Id = id))
+        |> Option.orElse (paying |> List.sortBy (fun (worth, h) -> -worth, h.Id) |> List.tryHead)
         |> Option.map snd
         |> Option.filter (dancingOn priced)
         |> Option.map (fun dancer ->

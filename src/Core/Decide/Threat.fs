@@ -4562,7 +4562,15 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
 
             let reach = team |> List.map _.Reach |> List.fold max 0
 
-            match Facts.sweepDancer view room team with
+            // The head a holder's seat holds (`World.Heads`): the camp and
+            // the seat follow one quarry, not two leads that turn the body
+            // between them.
+            let heldHead =
+                holders
+                |> List.tryPick (fun creep ->
+                    Map.tryFind creep.Name view.World.Heads |> Option.map _.Head)
+
+            match Facts.sweepDancer view room team heldHead with
             | None -> None
             | Some(dancer, entries) ->
                 let standing =
@@ -4803,16 +4811,41 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                     // never the nearest tile of every quarry's ground,
                     // another's store ring among them (W17S26
                     // t1052656-676: a ranger four off Midnight walked for
-                    // Onyx's tiles eleven off, every score nought).
-                    let head =
-                        match
+                    // Onyx's tiles eleven off, every score nought). Held
+                    // across ticks (`HeadLatch.step`): a quarry that steps
+                    // off as the body comes and back as it goes moves no
+                    // head before a walk to another could land (live
+                    // t1,079,44x-49x, W19S26: a ranger turned between two
+                    // shying haulers, each read caught at rest and fled
+                    // once it came within six, every 18 ticks past a
+                    // seated miner).
+                    let held = Map.tryFind creep.Name view.World.Heads
+
+                    let latched =
+                        targets
+                        |> List.choose (fun hostile ->
+                            let worth = score hostile
+
+                            if
+                                worth > 0.0
+                                || held |> Option.exists (fun latch -> latch.Head = hostile.Id)
+                                   && killable.Value hostile
+                            then
+                                Some(hostile.Id, worth, lazy (inReachBy hostile))
+                            else
+                                None)
+                        |> HeadLatch.step view.Time held
+                        |> Option.bind (fun latch ->
                             targets
-                            |> List.map (fun hostile -> score hostile, hostile)
-                            |> List.filter (fun (worth, _) -> worth > 0.0)
-                            |> List.sortBy (fun (worth, hostile) -> -worth, hostile.Id)
-                        with
-                        | (_, best) :: _ -> Some best
-                        | [] ->
+                            |> List.tryFind (fun hostile -> hostile.Id = latch.Head)
+                            |> Option.map (fun head -> latch, head))
+
+                    let head =
+                        match latched with
+                        | Some(latch, head) ->
+                            Atlas.recordHead atlas creep.Name latch
+                            Some head
+                        | None ->
                             targets
                             |> List.filter killable.Value
                             |> List.choose (fun hostile ->

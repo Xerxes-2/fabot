@@ -1201,6 +1201,8 @@ let ofGame
         Refusals = []
         // And its exits' watch (`ExitTraffic.recall`).
         Traffic = Map.empty
+        // And its bodies' kill heads (`Main`).
+        Heads = Map.empty
         // Every creep we own that is not still gestating, in the engine's own
         // order.
         Creeps =

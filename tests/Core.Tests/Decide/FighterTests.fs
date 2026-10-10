@@ -716,3 +716,140 @@ let strikeChoiceTests =
                     "a neutral's extension at range 3 in a crossed room"
             }
         ]
+
+/// One tick of a kill head's latch (`HeadLatch.step`) off its quarries, each
+/// its id, its kill score and its walk.
+let private headAfter
+    (now: int)
+    (held: HeadLatch option)
+    (quarries: (string * float * int option) list)
+    =
+    quarries
+    |> List.map (fun (id, score, walk) -> id, score, Lazy.CreateFromValue walk)
+    |> HeadLatch.step now held
+
+/// The latch moved over consecutive ticks from `start`, each tick's quarries
+/// in turn; the latch after each.
+let private headsOver
+    (start: int)
+    (held: HeadLatch option)
+    (ticks: (string * float * int option) list list)
+    =
+    ticks
+    |> List.indexed
+    |> List.scan (fun latch (k, quarries) -> headAfter (start + k) latch quarries) held
+    |> List.tail
+    |> List.map (Option.map _.Head)
+
+[<Tests>]
+let headLatchTests =
+    testList
+        "the kill head a body holds"
+        [
+            test "with none held, the quarry paying most; none where nothing pays" {
+                Expect.equal
+                    (headAfter 100 None [ "a", 10.0, Some 3; "b", 20.0, Some 9 ]
+                     |> Option.map _.Head)
+                    (Some "b")
+                    "the best paying, whatever its walk"
+
+                Expect.equal (headAfter 100 None [ "a", 0.0, Some 3 ]) None "nothing pays"
+            }
+
+            // A body walking to a quarry that steps off as it comes and back
+            // as it goes (live t1,079,44x, W19S26): a reading that turns
+            // sooner than the walk to the other could land is no evidence.
+            test
+                "a better quarry takes the head once it has out-paid the held one for its walk, and not a tick sooner" {
+                let held = Some { Head = "riddle"; Bids = [] }
+                let tick = [ "riddle", 0.0, Some 2; "catch", 39.0, Some 8 ]
+
+                Expect.equal
+                    (headsOver 100 held (List.replicate 9 tick))
+                    ([ for _ in 1..8 -> Some "riddle" ] @ [ Some "catch" ])
+                    "eight ticks out-paid is its walk; it moves on the ninth reading (t108)"
+            }
+
+            test "a bid falls the tick its quarry is seen not out-paying, and stands afresh after" {
+                let held = Some { Head = "riddle"; Bids = [] }
+                let fled = [ "riddle", 0.0, Some 2; "catch", 39.0, Some 4 ]
+                let back = [ "riddle", 50.0, Some 2; "catch", 39.0, Some 4 ]
+
+                Expect.equal
+                    (headsOver 100 held [ fled; fled; fled; back; fled; fled; fled; fled; fled ])
+                    ([ for _ in 1..8 -> Some "riddle" ] @ [ Some "catch" ])
+                    "riddle back at rest at t103 drops the bid; catch stands again from t104 and moves at t108"
+            }
+
+            // A hauler kiting at our pace reads nought, and the body after it
+            // walks off the seated miner behind it: the walk to the miner
+            // grows a tick each tick, as fast as the bid ages.
+            test
+                "a walk that grows as the body walks off the challenger defers its bid no longer than the walk at its start" {
+                let held = Some { Head = "kiter"; Bids = [] }
+
+                Expect.equal
+                    (headsOver
+                        100
+                        held
+                        [ for k in 0..4 -> [ "kiter", 0.0, Some 2; "miner", 20.0, Some(3 + k) ] ])
+                    [ Some "kiter"; Some "kiter"; Some "kiter"; Some "miner"; Some "miner" ]
+                    "the bid's walk is its three at t100: it moves at t103"
+            }
+
+            test "a head that pays nothing yields at once to a challenger in reach" {
+                Expect.equal
+                    (headAfter
+                        100
+                        (Some { Head = "kiter"; Bids = [] })
+                        [ "kiter", 0.0, Some 6; "miner", 20.0, Some 0 ]
+                     |> Option.map _.Head)
+                    (Some "miner")
+                    "nothing to wait out"
+            }
+
+            test "a quarry already in reach takes the head the tick it out-pays" {
+                Expect.equal
+                    (headAfter
+                        100
+                        (Some { Head = "catch"; Bids = [] })
+                        [ "catch", 39.0, Some 8; "miner", 47.0, Some 0 ]
+                     |> Option.map _.Head)
+                    (Some "miner")
+                    "no walk to wait out"
+            }
+
+            test "a held head gone from the quarries leaves the seat to the best paying" {
+                Expect.equal
+                    (headAfter
+                        100
+                        (Some { Head = "dead"; Bids = [ "a", 90, 3 ] })
+                        [ "a", 10.0, Some 3; "b", 20.0, Some 9 ]
+                     |> Option.map (fun latch -> latch.Head, latch.Bids))
+                    (Some("b", []))
+                    "no bid carried over"
+            }
+
+            test "of the bids that stood their walk, the one paying most moves the head" {
+                let held =
+                    Some
+                        {
+                            Head = "h"
+                            Bids = [ "a", 90, 3; "b", 95, 5 ]
+                        }
+
+                Expect.equal
+                    (headAfter
+                        100
+                        held
+                        [
+                            "h", 5.0, Some 0
+                            "a", 10.0, Some 3
+                            "b", 20.0, Some 5
+                            "c", 30.0, Some 4
+                        ]
+                     |> Option.map (fun latch -> latch.Head, latch.Bids))
+                    (Some("b", []))
+                    "a and b stood their walks, c bids from t100 and b pays most of the two"
+            }
+        ]

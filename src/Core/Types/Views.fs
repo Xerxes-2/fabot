@@ -405,6 +405,9 @@ type WorldView =
         /// on one tick: a room's recast cooldown is the room's, whichever
         /// colony would cast.
         FighterLost: Map<string, FighterLoss>
+        /// Each body of ours' kill head as its last decide seated it
+        /// (`World.Heads`).
+        Heads: Map<string, HeadLatch>
     }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -426,6 +429,7 @@ module WorldView =
             Traffic = Map.empty
             OperationLooks = Map.empty
             FighterLost = Map.empty
+            Heads = Map.empty
             Questioned = Set.empty
             Observers = []
             Looks = None
@@ -564,6 +568,7 @@ module WorldView =
             Committed = Map.empty
             Traffic = world.Traffic
             OperationLooks = Map.empty
+            Heads = world.Heads
             FighterLost =
                 (Map.empty, gates)
                 ||> List.fold (fun lost gate ->

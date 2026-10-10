@@ -347,6 +347,7 @@ let internal pairWorld: World =
         StrayGround = fun _ -> None
         Refusals = []
         Traffic = Map.empty
+        Heads = Map.empty
     }
 
 let internal noneShut = Map.empty<string, Set<string>>

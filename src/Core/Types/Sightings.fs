@@ -1245,6 +1245,98 @@ module Refusal =
             else
                 row)
 
+/// The quarry a body of ours seats about in a kill (`Threat`'s prey seat,
+/// #663), held across ticks: its head, and each other quarry seen out-paying
+/// it, with the tick it first was and the walk to it then.
+type HeadLatch =
+    {
+        Head: string
+        Bids: (string * int * int) list
+    }
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module HeadLatch =
+    /// The latch moved on a tick off its quarries as the seat reads them now
+    /// (`candidates`: each one's id, its kill score, and the ticks the body
+    /// takes to stand in its reach, None where it reaches none, read only of
+    /// a quarry out-paying the head). A held head still among them keeps the
+    /// seat until a challenger has out-paid it for as long as the walk to the
+    /// challenger took when its bid began: a reading that turns sooner (a
+    /// quarry that steps off as the body comes and back as it goes, nought
+    /// while it does) is no evidence for a walk that cannot land before it,
+    /// and the walk already made is the held head's. The walk is the bid's
+    /// at its start, so a body walking off the challenger, after a head that
+    /// pays nothing, defers it by no more than that. A bid stands from the
+    /// tick its quarry was first seen out-paying the head until a tick it is
+    /// not; of the bids that have stood their walk, the one paying most
+    /// moves the head, then by id; one in reach now stands at once. With no
+    /// head held, or the held one gone, the one paying most; none where
+    /// nothing pays.
+    let step
+        (now: int)
+        (held: HeadLatch option)
+        (candidates: (string * float * Lazy<int option>) list)
+        : HeadLatch option =
+        let scoreOf id =
+            candidates
+            |> List.tryPick (fun (other, score, _) -> if other = id then Some score else None)
+
+        let best () =
+            candidates
+            |> List.filter (fun (_, score, _) -> score > 0.0)
+            |> List.sortBy (fun (id, score, _) -> -score, id)
+            |> List.tryHead
+            |> Option.map (fun (id, _, _) -> { Head = id; Bids = [] })
+
+        match
+            held
+            |> Option.bind (fun latch -> scoreOf latch.Head |> Option.map (fun s -> latch, s))
+        with
+        | Some(latch, kept) ->
+            let bids =
+                candidates
+                |> List.filter (fun (id, score, _) -> id <> latch.Head && score > kept)
+                |> List.choose (fun (id, score, walk) ->
+                    match
+                        latch.Bids
+                        |> List.tryPick (fun (bid, since, walk) ->
+                            if bid = id then Some(since, walk) else None)
+                    with
+                    | Some(since, walk) -> Some(id, score, since, walk)
+                    | None -> walk.Value |> Option.map (fun walk -> id, score, now, walk))
+
+            match
+                bids
+                |> List.filter (fun (_, _, since, walk) -> now - since >= walk)
+                |> List.sortBy (fun (id, score, _, _) -> -score, id)
+            with
+            | (moved, _, _, _) :: _ -> Some { Head = moved; Bids = [] }
+            | [] ->
+                Some
+                    { latch with
+                        Bids = bids |> List.map (fun (id, _, since, walk) -> id, since, walk)
+                    }
+        | None -> best ()
+
+    /// The heads carried into the next tick (`World.Heads`): the bodies each
+    /// colony decided this tick (`decided`, with the heads its decide
+    /// seated) hold this tick's, none where no seat moved one; any other
+    /// body keeps its own while it lives (a light tick, a colony waiting its
+    /// turn). Built by `Fresh`: the shell keeps it past the tick.
+    let carry
+        (living: Set<string>)
+        (decided: (Set<string> * Map<string, HeadLatch>) list)
+        (previous: Map<string, HeadLatch>)
+        : Map<string, HeadLatch> =
+        let seated = decided |> List.map fst |> Set.unionMany
+
+        Seq.append
+            (previous
+             |> Map.toSeq
+             |> Seq.filter (fun (name, _) -> living.Contains name && not (seated.Contains name)))
+            (decided |> Seq.collect (snd >> Map.toSeq))
+        |> Fresh.mapOfSeq
+
 /// Everything this tick was seen to hold, once. The shell builds one
 /// (`World.ofGame`, the only code that touches `Game`) and
 /// `ColonyView.ofWorld` cuts one colony's share of it; `decide` is written
@@ -1322,6 +1414,10 @@ type World =
         /// the shell also keeps in Memory (#674), so a reset resumes each log
         /// where the last full tick left it.
         Traffic: Map<string, ExitLog>
+        /// Each body of ours' kill head as its last decide seated it
+        /// (`HeadLatch.step`), by name. Heap state in the shell, never
+        /// Memory: a reset seats each body afresh.
+        Heads: Map<string, HeadLatch>
     }
 
 /// One exit of a rival home as the world watches it (#663 S7d): the bodies
@@ -1368,6 +1464,7 @@ module World =
             StrayGround = fun _ -> None
             Refusals = []
             Traffic = Map.empty
+            Heads = Map.empty
         }
 
     /// This tick's world with what it saw **before** laid under it (#151):

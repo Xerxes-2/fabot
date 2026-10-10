@@ -238,6 +238,7 @@ let private world: World =
         StrayGround = fun _ -> None
         Refusals = []
         Traffic = Map.empty
+        Heads = Map.empty
     }
 
 let private sweptView () =

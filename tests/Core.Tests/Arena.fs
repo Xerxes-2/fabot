@@ -165,6 +165,11 @@ type Behaviour =
     /// good): a tile another body holds is passed for the next free one, and
     /// off the path the next is the path tile nearest it, the latest of ties.
     | WalkRound of RoomPos list
+    /// An unarmed body that shies from an armed enemy (#663, Trepidimous'
+    /// haulers and miners in W19S26): it walks to `away` while an armed
+    /// enemy stands within `keep` of it, across a border alike
+    /// (`RoomName.tileRange`), and back to `home` once none does.
+    | Shy of keep: int * away: RoomPos * home: RoomPos
 
 /// One creep in the arena: its body head first, the hits it has left (which
 /// say which parts still act, `Engine.liveParts`), where it stands, its
@@ -384,6 +389,9 @@ type Carried =
         /// The exits the arena's exit camps watch (`World.Traffic`, #663
         /// S7d), carried as `Main` carries them.
         Traffic: Map<string, ExitLog>
+        /// Each body of ours' kill head (`World.Heads`), carried as `Main`
+        /// carries them.
+        Heads: Map<string, HeadLatch>
     }
 
 /// The arena's whole state between ticks.
@@ -956,6 +964,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 Ledger = Ledger.empty
                 Operations = []
                 Traffic = Map.empty
+                Heads = Map.empty
             }
         Scores = Map.empty
         Ovens = []
@@ -1529,6 +1538,7 @@ let worldOf (a: Arena) : World =
         StrayGround = strayGround
         Refusals = []
         Traffic = Map.empty
+        Heads = a.Carried.Heads
     }
     |> World.recalling a.Carried.Sightings
     |> World.latchTowers tuning a.Carried.Towered
@@ -1800,6 +1810,14 @@ let private decideOurs (a: Arena) : Intent list * Carried =
             let state, danger = Observe.Danger.probing view decision.Intents (state, danger)
             Map.add c.Home state raids, danger)
 
+    let heads =
+        a.Carried.Heads
+        |> HeadLatch.carry
+            alive
+            (decisions
+             |> List.map (fun (_, view, decision) ->
+                 ColonyView.bodies view |> List.map _.Name |> Set.ofList, decision.Heads))
+
     let decisions = decisions |> List.map (fun (c, _, decision) -> c.Home, decision)
 
     let moves, _ =
@@ -1863,6 +1881,7 @@ let private decideOurs (a: Arena) : Intent list * Carried =
             let records, _, _ = decided.Operated
             Ledger.account (Operations.campRooms a.Declared) ledger records
         Traffic = world.Traffic
+        Heads = heads
     }
 
 // ---------------------------------------------------------------------------
@@ -3450,6 +3469,14 @@ let rec private scriptActs (a: Arena) (planned: Map<string, RoomPos>) (b: Body) 
 
         fightInReach a Nearest b
         @ move (next |> Option.bind (fun tile -> stepToward a b (Set.singleton tile)))
+    | Shy(keep, away, home) ->
+        let pressed =
+            enemies
+            |> List.exists (fun e ->
+                (activeCount e Attack > 0 || activeCount e RangedAttack > 0)
+                && RoomName.tileRange e.At b.At |> Option.exists (fun r -> r <= keep))
+
+        move (stepToward a b (Set.singleton (if pressed then away else home)))
     | Phases _
     | Retreat _ -> []
 

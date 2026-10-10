@@ -658,6 +658,10 @@ type Decision =
         /// its unarmed quarry stands each tick after this one, walking on in
         /// its heading (#626). A light tick re-decides it only off it.
         Tracks: Map<string, RoomPos list>
+        /// Each body's kill head as its prey seat moved it this tick
+        /// (`HeadLatch.step`): what the shell carries into the next tick's
+        /// `World.Heads`.
+        Heads: Map<string, HeadLatch>
         /// Each fighter whose job is no kill, its light-tick force rule
         /// (`JobForce`, `Emitter.forces`).
         Forces: Map<string, JobForce>

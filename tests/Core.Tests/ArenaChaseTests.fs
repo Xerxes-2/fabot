@@ -1747,7 +1747,7 @@ let borderCampTests =
                         Lookout = set [ "W12S26" ]
                     }
 
-                let _, trace = healed |> run 60
+                let _, trace = healed |> run 120
                 let failure = describe trace
 
                 Expect.isTrue (survived "dancer" trace) $"the dancer stands\n{failure}"
@@ -3276,5 +3276,178 @@ let w17s26HaulerTrailTests =
                     (apart |> List.filter (fun (_, r) -> r > 1))
                     [ 34, 2 ]
                     $"beside it every tick but the swamp step's\n{failure}"
+            }
+        ]
+
+// ---- arena capture w19s26-sweep-flip -----------------------------------------
+// `npm run capture -- W19S26 1079440 --rooms W17S29 --name w19s26-sweep-flip`,
+// read at live t1,079,600.
+//   W19S26  https://screeps.com/room-history/shardSeason/W19S26/1079400.json
+//   W17S29  https://screeps.com/room-history/shardSeason/W17S29/1079400.json
+// Laid by hand from the skeleton: the home W17S29 (Spawn9, which cast the
+// ranger) bare of all but controller, spawn, storage and towers, its economy
+// bodies left out; the rooms between it and the candidates laid empty. Only
+// the sweep is declared: the exit camp on W18S26 was not running. Each
+// hostile shies as `observe history` t1,079,441-500 shows it did: every
+// one stepped off on the tick after the ranger came within six of it and
+// walked back on the tick after it stood farther.
+
+/// W19S26 at t1,079,440: the sweep's lone ranger (9M 6R 3H) at 15,36 on
+/// its walk between two quarries, each 6-12 tiles off: Oblivion8806 (3M
+/// 5W, 740 of 800) seated at its source (4,46) on 5,47 beside the empty
+/// hauler Riddle9018, and the empty hauler Catch228632 (22M 22C) at the
+/// other source's container site. Live, each quarry stepped off as the
+/// ranger came within 5-6 — Riddle out across the south exit and back,
+/// Oblivion a step to 4,48 and back, Catch four steps east and back —
+/// and the ranger turned at each, 9,42 and 18,33, every 18 ticks
+/// (t1,079,446, 455, 464, 473, 482, 491).
+let private w19s26SweepFlip () : Arena =
+    let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
+    let trepidimous = Side.Player "Trepidimous"
+    let hauler = List.concat (List.replicate 23 [ Move; Carry ])
+    let w19s26 = at "W19S26"
+
+    let w17s29 =
+        room "W17S29"
+        |> withController Ownership.Ours None 7 5
+        |> withControllerClocks 0 0 150_000 256_424
+        |> withSpawn "Spawn9" { X = 24; Y = 40 } 5_600
+        |> withStructures
+            [
+                { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 23; Y = 39 } with
+                    Energy = 25_285
+                }
+                towerOf Side.Ours { X = 21; Y = 39 } 1_000
+                towerOf Side.Ours { X = 23; Y = 41 } 1_000
+                towerOf Side.Ours { X = 29; Y = 43 } 1_000
+            ]
+
+    let empty =
+        [
+            "W19S27"
+            "W19S25"
+            "W18S27"
+            "W17S27"
+            "W17S28"
+            "W18S28"
+            "W18S29"
+            "W19S28"
+        ]
+        |> List.map room
+
+    let colonies =
+        Colony.declared |> List.filter (fun c -> List.contains c.Home [ "W17S29" ])
+
+    // Each shies from the ranger as it did live: off while it stands within
+    // six, back to its post once it does not.
+    let oblivion = Shy(6, w19s26 4 48, w19s26 5 47)
+    let catch = Shy(6, w19s26 25 35, w19s26 21 34)
+    let riddle = Shy(6, at "W19S27" 4 1, w19s26 6 46)
+
+    let bodies: Body list =
+        [
+            { body
+                  "Catch228632"
+                  trepidimous
+                  (List.concat (List.replicate 22 [ Move; Carry ]))
+                  (w19s26 23 34)
+                  (Some catch) with
+                TicksToLive = 822
+            }
+            { body
+                  "Oblivion8806"
+                  trepidimous
+                  (parts [ Move, 3; Work, 5 ])
+                  (w19s26 5 47)
+                  (Some oblivion) with
+                Hits = 740
+                TicksToLive = 888
+            }
+            { body "Riddle9018" trepidimous hauler (w19s26 6 46) (Some riddle) with
+                TicksToLive = 1_214
+            }
+            { body
+                  "ranger-1078611-Spawn9"
+                  Side.Ours
+                  (parts [ Move, 8; RangedAttack, 6; Heal, 3; Move, 1 ])
+                  (w19s26 15 36)
+                  None with
+                TicksToLive = 723
+            }
+        ]
+
+    let a =
+        arena 1_079_441 (room "W19S26" :: w17s29 :: empty) colonies bodies
+        |> withOperations (Colony.operations |> List.filter (fun wire -> wire.Id = Colony.sweepId))
+
+    { a with
+        Carried =
+            { a.Carried with
+                Assignments = Map.ofList [ "ranger-1078611-Spawn9", "op:sweep" ]
+                ArmedSeen = Map.ofList [ "W19S26", 1_078_689 ]
+                Towered = Set.ofList [ "W17S29" ]
+                Operations =
+                    [
+                        {
+                            Id = Colony.sweepId
+                            Started = 1_061_277
+                            Phase = OpPhase.Execute
+                            Since = 1_078_600
+                            Room = Some "W19S26"
+                            RoomSince = 1_078_600
+                            Spent = 0
+                            Lost = 0
+                            NextDue = 0
+                            Ended = None
+                            Bids = []
+                        }
+                    ]
+            }
+    }
+
+[<Tests>]
+let w19s26SweepFlipTests =
+    testList
+        "arena capture: the sweep's ranger between two quarries in W19S26"
+        [
+            // Live t1,079,446-491 the ranger turned at 9,42 and 18,33 every
+            // 18 ticks, Oblivion untouched. On main the arena turns it the
+            // same way (at 10,41 and 14,37, every 8 ticks: it decides every
+            // tick where live decided every third) for all 120 ticks: Riddle
+            // leads at rest (4,017 over its 77-tick kill), reads fled the
+            // tick it steps off (odds 0) and Catch leads, and Riddle leads
+            // again the tick it is back at rest. Oblivion's 383 over its
+            // 13-tick kill never leads. Now the head holds while no
+            // challenger out-pays it for its walk (`HeadLatch.step`), and
+            // the camp follows the head held: the ranger walks on into
+            // Riddle's corner, Oblivion stands in its reach, and once worn
+            // down out-pays everything in reach and dies.
+            test
+                "t1,079,440 capture: the ranger holds its quarry through the haulers' shying and kills the seated miner" {
+                let _, trace = w19s26SweepFlip () |> run 40
+                let failure = describe trace
+                let miner = pathOf "Oblivion8806" trace |> Map.ofList
+                let died = diedOn "Oblivion8806" trace
+
+                Expect.isLessThanOrEqual
+                    (died |> Option.defaultValue System.Int32.MaxValue)
+                    25
+                    $"Oblivion dies by t25\n{failure}"
+
+                let apart =
+                    pathOf "ranger-1078611-Spawn9" trace
+                    |> List.choose (fun (tick, ranger) ->
+                        Map.tryFind tick miner
+                        |> Option.bind (fun quarry -> RoomPos.range ranger.At quarry.At))
+
+                // A step the miner shies off widens the gap once; a ranger
+                // walking off it widens it tick after tick.
+                Expect.isFalse
+                    (apart
+                     |> List.windowed 3
+                     |> List.exists (function
+                         | [ a; b; c ] -> a < b && b < c
+                         | _ -> false))
+                    $"the ranger never walks off it: {apart}\n{failure}"
             }
         ]
