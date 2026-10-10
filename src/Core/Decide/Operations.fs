@@ -52,6 +52,11 @@ type private Bid =
         Room: string
         Paid: float
         Horizon: int
+        /// The energy the move earns over its horizon beyond what staying
+        /// does, on the room's plain rate (memory's where it is out of
+        /// sight, each body at its odds): positive where the move would pay
+        /// for itself were that rate confirmed (`latchLooks`).
+        Gain: float
         /// Yes where, in sight this tick, the move pays for itself on
         /// evidence; No where, in sight, it does not even on the room's plain
         /// rate: seen not out-paying. Unknown otherwise — out of sight, its
@@ -82,13 +87,15 @@ let private bidsOn (facts: OpFacts) (spec: OperationSpec) (held: string) : Bid l
             | Some paid, Some plain, Some horizon ->
                 let span = float (max 1 horizon)
                 let rewalk = float (max 0 (horizon - stay))
-                let pays (yields: float) = yields * span > rate * (span + rewalk)
+                let gain (yields: float) = yields * span - rate * (span + rewalk)
+                let pays (yields: float) = gain yields > 0.0
 
                 Some
                     {
                         Room = room
                         Paid = paid
                         Horizon = horizon
+                        Gain = gain plain
                         Bids =
                             if not (facts.Sighted room) then Truth.Unknown
                             elif pays paid then Truth.Yes
@@ -157,6 +164,32 @@ let private bidding (facts: OpFacts) (spec: OperationSpec) (record: OpRecord) : 
         record
     else
         { record with Bids = bids }
+
+/// What a look at each of the target's other rooms is worth to its latch
+/// (#663 S4): memory alone moves no latch (`bidsOn`: a room out of sight
+/// bids Unknown), so a look is worth the move it can enable — the energy
+/// the move earns over its horizon beyond staying, on the room's plain rate
+/// (`Bid.Gain`: memory's out of sight, its bodies already at the odds they
+/// still stand there), nothing where that rate says the move would not
+/// pay. Off the room the record holds while it runs (its bids are read in
+/// every phase); none before its run, once it ended, or where the held room
+/// is unpriced. A room in sight asks too: the observer serves an ask only
+/// once its last sighting is a stride old (`Layout.assignLooks`).
+let latchLooks
+    (facts: OpFacts)
+    (spec: OperationSpec)
+    (record: OpRecord option)
+    : (string * float) list =
+    match record with
+    | Some {
+               Room = Some held
+               Ended = None
+               Started = started
+           } when started <= facts.Now ->
+        bidsOn facts spec held
+        |> List.filter (fun bid -> bid.Gain > 0.0)
+        |> List.map (fun bid -> bid.Room, bid.Gain)
+    | _ -> []
 
 /// Whether a body worth its kill stands in sight in the room: Unknown where
 /// the room is not priced, or only bodies out of sight could answer.
@@ -1637,8 +1670,9 @@ let private layCamp
 /// (`layCamp`), over the same priced views: one fight a room, so a room an
 /// exit camp works is no room of the sweep's this tick — no colony casts it
 /// for the sweep, no body standing there is of its group, and its work
-/// there is not laid while its record keeps the room. The looks they ask
-/// are laid beside (`WorldView.OperationLooks`), and each camp's trigger
+/// there is not laid while its record keeps the room. The looks they and
+/// the sweep's latch ask (`latchLooks`) are laid beside
+/// (`WorldView.OperationLooks`), and each camp's trigger
 /// as read (#663 S7e, `OpReading`).
 let layRead
     (declared: OpSpecWire list)
@@ -1701,13 +1735,6 @@ let layRead
         let campWorks = camped |> List.collect (fun (_, (_, _, works, _, _)) -> works)
         let worked = campWorks |> List.map _.Room |> Set.ofList
 
-        let looks =
-            camped
-            |> List.collect (fun (_, (_, _, _, looks, _)) -> looks)
-            |> List.groupBy fst
-            |> List.map (fun (room, values) -> room, List.sumBy snd values)
-            |> Fresh.mapOfList
-
         let sweepRun =
             sweep
             |> Option.map (fun spec ->
@@ -1746,17 +1773,28 @@ let layRead
                             Camp = None
                         })
 
-                spec, moved, events, work)
+                spec, moved, events, work, latchLooks facts spec moved)
+
+        // Every look an operation asks, a room's the sum of what each look
+        // there unlocks: an exit camp's earnings, the sweep's latch move.
+        let looks =
+            (camped |> List.collect (fun (_, (_, _, _, looks, _)) -> looks))
+            @ (sweepRun
+               |> Option.map (fun (_, _, _, _, looks) -> looks)
+               |> Option.defaultValue [])
+            |> List.groupBy fst
+            |> List.map (fun (room, values) -> room, List.sumBy snd values)
+            |> Fresh.mapOfList
 
         let committed =
             match sweepRun with
-            | Some(_, moved, _, _) ->
+            | Some(_, moved, _, _, _) ->
                 match commitment moved with
                 | same when same = before -> before
                 | other -> other
             | None -> Map.empty
 
-        let work = sweepRun |> Option.bind (fun (_, _, _, work) -> work)
+        let work = sweepRun |> Option.bind (fun (_, _, _, work, _) -> work)
         let operations = campWorks @ Option.toList work
         let workRooms = operations |> List.map _.Room |> Set.ofList
 
@@ -1791,7 +1829,7 @@ let layRead
 
         let moved =
             (sweepRun
-             |> Option.map (fun (spec, moved, events, _) -> spec, moved, events)
+             |> Option.map (fun (spec, moved, events, _, _) -> spec, moved, events)
              |> Option.toList)
             @ (camped |> List.map (fun (spec, (moved, events, _, _, _)) -> spec, moved, events))
 

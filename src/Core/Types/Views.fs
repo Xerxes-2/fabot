@@ -396,7 +396,9 @@ type WorldView =
         Traffic: Map<string, ExitLog>
         /// Each room an [[operation]] asks eyes on (#663 S7d), at the energy
         /// the decision a look there unlocks is worth (`Operations.lay`):
-        /// an exit camp's rooms, its value over a look's stride.
+        /// an exit camp's rooms, its value over a look's stride, and the
+        /// sweep's other rooms, the latch move a look may enable
+        /// (`Operations.latchLooks`), summed where both ask.
         OperationLooks: Map<string, float>
         /// Each room a guard or ranger of ours was last lost in, the latest of
         /// every colony's raid log (`StandDown.FighterLost`), the larger cast

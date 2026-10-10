@@ -2177,7 +2177,11 @@ let private livePath (path: string) : Behaviour =
     |> List.mapi (fun k tile -> k + 1, GoTo tile)
     |> Phases
 
-let private w19s25SweepLatch () : Arena =
+/// The capture, with an observer of ours at W17S29 where `observed`: live
+/// the observer is W13S28's (RCL8), six rooms from W19S25 and inside
+/// OBSERVER_RANGE; it stands at the home already laid, so the casting
+/// colonies are the capture's.
+let private w19s25SweepLatchSeen (observed: bool) : Arena =
     let at roomName (x: int) (y: int) = RoomPos.at roomName { X = x; Y = y }
     let trepidimous = Side.Player "Trepidimous"
     let hauler = List.concat (List.replicate 23 [ Move; Carry ])
@@ -2187,7 +2191,7 @@ let private w19s25SweepLatch () : Arena =
         |> withController Ownership.Ours None 6 4
         |> withControllerClocks 0 0 120_000 3_617_636
         |> withSpawn "Spawn9" { X = 24; Y = 40 } 2_300
-        |> withStructures
+        |> withStructures (
             [
                 { structureOf "storage" (Some Side.Ours) 10_000 10_000 { X = 23; Y = 39 } with
                     Energy = 25_294
@@ -2195,6 +2199,11 @@ let private w19s25SweepLatch () : Arena =
                 towerOf Side.Ours { X = 21; Y = 39 } 1_000
                 towerOf Side.Ours { X = 23; Y = 41 } 1_000
             ]
+            @ (if observed then
+                   [ structureOf "observer" (Some Side.Ours) 500 500 { X = 26; Y = 38 } ]
+               else
+                   [])
+        )
 
     let w17s25 =
         room "W17S25"
@@ -2373,6 +2382,22 @@ let private w19s25SweepLatch () : Arena =
             }
     }
 
+/// The capture as live: no observer reaches the candidates.
+let private w19s25SweepLatch () : Arena = w19s25SweepLatchSeen false
+
+/// The capture run 100 ticks: each tick's time, the sweep's room after it,
+/// and the rooms our observers looked at.
+let private latchRun (start: Arena) : (int * string option * Set<string>) list =
+    ((start, []), [ 1..100 ])
+    ||> List.fold (fun (state, rooms) _ ->
+        let next, _ = run 1 state
+
+        next,
+        (state.Time, next.Carried.Operations |> List.tryHead |> Option.bind _.Room, next.Observed)
+        :: rooms)
+    |> snd
+    |> List.rev
+
 [<Tests>]
 let w19s25SweepLatchTests =
     testList
@@ -2401,15 +2426,7 @@ let w19s25SweepLatchTests =
             test
                 "t1,068,241-340: the latch moves once, into W19S26 after its horizon, and W19S25 out of sight never takes it back on memory" {
                 let rooms =
-                    ((w19s25SweepLatch (), []), [ 1..100 ])
-                    ||> List.fold (fun (state, rooms) _ ->
-                        let next, _ = run 1 state
-
-                        next,
-                        (state.Time, next.Carried.Operations |> List.tryHead |> Option.bind _.Room)
-                        :: rooms)
-                    |> snd
-                    |> List.rev
+                    latchRun (w19s25SweepLatch ()) |> List.map (fun (time, room, _) -> time, room)
 
                 let moves =
                     rooms
@@ -2421,6 +2438,42 @@ let w19s25SweepLatchTests =
                     moves
                     [ 1_068_262, Some "W19S26" ]
                     $"one move, once W19S26 was seen out-paying for its horizon: {rooms}"
+            }
+
+            // The look that capture lacks (#663 S4 follow-up): an observer in
+            // reach of W19S25, as W13S28's is live. Once our ranger leaves
+            // W19S25 (t1,068,277) the observer looks there each time its
+            // sighting is a stride old, from t1,068,283; the look shows it
+            // out-paying the kiter, its bid starts on the tick it is seen,
+            // and the latch moves back on the first look after its horizon.
+            // The look is bought on main too: W19S25's remembered bodies
+            // price it first in the pursuit's band (~14,500 a look, against
+            // the latch move's ~1,300), so this pins the look-bid-move chain
+            // the capture without an observer cannot reach.
+            test
+                "t1,068,241-340, an observer in reach: a look at W19S25 starts its bid, and the latch moves back on the first look after its horizon" {
+                let ran = latchRun (w19s25SweepLatchSeen true)
+
+                let moves =
+                    ran
+                    |> List.pairwise
+                    |> List.filter (fun ((_, a, _), (_, b, _)) -> a <> b)
+                    |> List.map (fun (_, (time, room, _)) -> time, room)
+
+                let looks =
+                    ran
+                    |> List.filter (fun (_, _, looked) -> looked.Contains "W19S25")
+                    |> List.map (fun (time, _, _) -> time)
+
+                Expect.equal
+                    (looks |> List.filter (fun time -> time < 1_068_314))
+                    [ 1_068_283; 1_068_289; 1_068_295; 1_068_301; 1_068_307; 1_068_313 ]
+                    "the observer looks at W19S25 once its sighting is a stride old"
+
+                Expect.equal
+                    moves
+                    [ 1_068_262, Some "W19S26"; 1_068_314, Some "W19S25" ]
+                    $"into W19S26 after its horizon, and back to W19S25 on a look: {ran}"
             }
         ]
 

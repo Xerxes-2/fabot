@@ -1383,8 +1383,9 @@ let lookRequests (views: ColonyView list) (watched: string list) : LookRequest l
             |> List.map (lookRequest LookBand.Danger dangerStride)
 
         // An operation's eyes (#663 S7d, `WorldView.OperationLooks`): an
-        // exit camp's rooms, at what its camp earns over the stride, in the
-        // band of the kills a look unlocks.
+        // exit camp's rooms, at what its camp earns over the stride, and the
+        // sweep's rooms, at the latch move a look may enable, in the band of
+        // the kills a look unlocks.
         let operations =
             first.World.OperationLooks
             |> Map.toList

@@ -4229,6 +4229,96 @@ let sweepVisionTests =
                     "on a trip, certain: the candidate and the room across its west border"
             }
 
+            // #663 S4 follow-up: memory alone moves the sweep's latch nowhere,
+            // so the candidate remembered out-paying the room held asks a look
+            // for the move it can enable (`Operations.latchLooks`), laid with
+            // the operations' looks; the room held asks none for it.
+            test
+                "a candidate remembered out-paying the room the sweep holds asks a look worth the latch move, in the pursuit's band" {
+                let holder = ranger "ranger-a"
+                let held = Map.ofList [ holder.Name, taskId (operating harassRoom) ]
+
+                let colony =
+                    sweeping
+                        [ holder, RoomPos.at harassRoom { X = 20; Y = 24 } ]
+                        // A miner in armour: slow to kill for what it is worth.
+                        [
+                            theirsIn
+                                harassRoom
+                                "miner-n"
+                                { X = 20; Y = 20 }
+                                (Work :: List.replicate 20 Tough @ [ Move ])
+                        ]
+                    |> rememberingFor 2 false (hauler westRoom "hauler-w1" { X = 22; Y = 20 })
+                    |> rememberingFor 2 false (hauler westRoom "hauler-w2" { X = 24; Y = 20 })
+                    |> rememberingFor 2 false (hauler westRoom "hauler-w3" { X = 22; Y = 22 })
+                    |> rememberingFor 2 false (hauler westRoom "hauler-w4" { X = 24; Y = 22 })
+                    |> rememberingFor 2 false (hauler westRoom "hauler-w5" { X = 23; Y = 21 })
+
+                let holding room =
+                    {
+                        Id = Colony.sweepId
+                        Started = colony.Time - 10
+                        Phase = OpPhase.Execute
+                        Since = colony.Time - 10
+                        Room = Some room
+                        RoomSince = colony.Time - 10
+                        Spent = 0
+                        Lost = 0
+                        NextDue = 0
+                        Ended = None
+                        Bids = []
+                    }
+
+                let laidHolding room =
+                    let laid, _, _ = Operations.lay [] held [ holding room ] [ colony ]
+                    List.head laid
+
+                let north = laidHolding harassRoom
+                let looks = north.World.OperationLooks
+
+                // The facts the latch reads, as `lay` reads them: the group's
+                // rate in each room and its walk to each quarry.
+                let facts =
+                    let spec = (Operations.sweepSpec [] [ colony ]).Value
+                    let priced = Facts.layWorths [ colony ]
+
+                    Operations.ownFacts
+                        colony.Time
+                        (fun _ -> true)
+                        spec
+                        (Some(holding harassRoom))
+                        (fun _ -> priced)
+                        (Operations.groupIn spec.Id (set [ harassRoom; westRoom ]) held priced)
+                        priced
+
+                let rate room =
+                    facts.Rate room |> Option.defaultValue 0.0
+
+                let walk room =
+                    facts.Arrival room |> Option.defaultValue 0 |> float
+
+                Expect.isTrue
+                    (rate westRoom > rate harassRoom && walk westRoom > walk harassRoom)
+                    "the premise: the west room remembered paying more, its quarry farther"
+
+                Expect.floatClose
+                    Accuracy.high
+                    (Map.tryFind westRoom looks |> Option.defaultValue 0.0)
+                    (rate westRoom * walk westRoom
+                     - rate harassRoom * (walk westRoom + walk westRoom - walk harassRoom))
+                    "the west room asks a look worth the move's surplus over its horizon, net of the walk it adds"
+
+                Expect.contains
+                    (asked LookBand.Pursuit north)
+                    (westRoom, looks.[westRoom], Facts.lookStride)
+                    "laid with the operations' looks, in the pursuit's band"
+
+                Expect.isFalse
+                    ((laidHolding westRoom).World.OperationLooks |> Map.containsKey harassRoom)
+                    "holding the west room, the north room paying less asks none for the latch"
+            }
+
             test "a candidate in sight asks nothing priced" {
                 let colony = sweeping [] [ hauler westRoom "hauler-w" { X = 22; Y = 20 } ]
 

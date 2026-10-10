@@ -685,6 +685,191 @@ let operationStepTests =
                     "seen paying at t50, seen not paying at t55: the bid falls, and memory alone starts none"
             }
 
+            // #663 S4 follow-up: memory alone moves no latch, so a room priced
+            // high from memory waits for a look; the look is worth the move it
+            // can enable, priced as the bid that move would make.
+            test
+                "a look at a room out of sight is worth the move it can enable; one memory says would not pay asks none" {
+                let spec =
+                    Operation.Templates.sweep "s1" "Trepidimous" [ "W1N1"; "W2N1"; "W3N1" ] limits
+
+                let executing =
+                    { recordAt OpPhase.Execute 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                    }
+
+                // The arena's W19S25 against the kiter held in W19S26: 55 from
+                // memory against 13, both quarries thirty ticks off; W3N1
+                // remembered at 10. Out of sight, on evidence neither pays.
+                let facts =
+                    { factsAt 50 [ "W1N1", 13.0; "W2N1", 55.0; "W3N1", 10.0 ] with
+                        Holds = fun _ -> Truth.Yes
+                        Loses = fun _ -> Truth.No
+                        Challenge = fun room -> if room = "W1N1" then Some 13.0 else Some 0.0
+                        Arrival = fun _ -> Some 30
+                        Sighted = fun room -> room = "W1N1"
+                    }
+
+                Expect.equal
+                    (Operations.latchLooks facts spec (Some executing))
+                    [ "W2N1", (55.0 - 13.0) * 30.0 ]
+                    "W2N1: the surplus over the thirty ticks its move takes; W3N1 below the held rate, none"
+
+                // The held room's quarry at hand, W2N1's thirty ticks off: the
+                // move must also pay the held room's yield over the walk it adds.
+                let farther =
+                    { facts with
+                        Arrival = fun room -> if room = "W1N1" then Some 0 else Some 30
+                    }
+
+                Expect.equal
+                    (Operations.latchLooks farther spec (Some executing))
+                    [ "W2N1", 55.0 * 30.0 - 13.0 * 60.0 ]
+                    "the walk the move adds is the bid's: priced as the bid would"
+
+                Expect.isEmpty
+                    (Operations.latchLooks
+                        { farther with
+                            Rate = fun room -> if room = "W2N1" then Some 20.0 else Some 13.0
+                        }
+                        spec
+                        (Some executing))
+                    "remembered at 20 from the held room's quarry: 600 over the move against 780 staying, no look"
+
+                Expect.isEmpty
+                    (Operations.latchLooks facts spec None)
+                    "a record not begun holds no room: no latch to move"
+
+                Expect.isEmpty
+                    (Operations.latchLooks
+                        facts
+                        spec
+                        (Some
+                            { executing with
+                                Ended = Some OpEnd.Done
+                            }))
+                    "nor one ended"
+            }
+
+            // The look and the bid together, as the world aims the observer
+            // (`Layout.assignLooks`) over the operation's looks
+            // (`WorldView.OperationLooks`, the Pursuit band): one observer, one
+            // look a tick, the room it looks at in sight the next tick.
+            test
+                "the observer looks at a room remembered out-paying on its priced turn, and its bid starts on the look's tick; a stand-down's look goes first" {
+                let executing =
+                    { recordAt OpPhase.Execute 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                    }
+
+                let request (band: LookBand) (until: int option) (room: string, value: float) =
+                    {
+                        Room = room
+                        Band = band
+                        Value = value
+                        Tolerates = Facts.lookStride
+                        Until = until
+                    }
+
+                // W2N1 pays `remembered` from memory out of sight and 55 in
+                // sight, on evidence only in sight; W1N1, our group there,
+                // always in sight at 13; both quarries thirty ticks off.
+                let factsOn (remembered: float) (sighted: Set<string>) (now: int) =
+                    let seen = sighted.Contains "W2N1"
+
+                    { factsAt now [ "W1N1", 13.0; "W2N1", (if seen then 55.0 else remembered) ] with
+                        Holds = fun _ -> Truth.Yes
+                        Loses = fun _ -> Truth.No
+                        Challenge =
+                            fun room ->
+                                match room with
+                                | "W2N1" -> Some(if seen then 55.0 else 0.0)
+                                | _ -> Some 13.0
+                        Arrival = fun _ -> Some 30
+                        Sighted = fun room -> room = "W1N1" || sighted.Contains room
+                    }
+
+                // From t50: a stand-down's look at W4N1 open to t50, worth
+                // more than any kill; a remembered body in W5N1 worth 500 to
+                // the pursuit, under W2N1's latch move (1,260).
+                let run (remembered: float) =
+                    ((Some executing, Map.empty, Set.empty, []), [ 50..90 ])
+                    ||> List.fold (fun (record, lastSeen, sighted, trace) now ->
+                        let facts = factsOn remembered sighted now
+                        let next, events = Operations.advance facts sweep record
+
+                        let requests =
+                            request LookBand.Danger (Some 50) ("W4N1", 100.0)
+                            :: request LookBand.Pursuit None ("W5N1", 500.0)
+                            :: (Operations.latchLooks facts sweep next
+                                |> List.map (request LookBand.Pursuit None))
+
+                        let looked =
+                            Layout.assignLooks
+                                now
+                                (fun room -> Map.tryFind room lastSeen)
+                                [ "W3N3" ]
+                                requests
+                            |> Map.tryFind "W3N3"
+
+                        let seenNext = looked |> Option.toList |> Set.ofList
+
+                        let lastSeen =
+                            (lastSeen, seenNext)
+                            ||> Set.fold (fun seen room -> Map.add room (now + 1) seen)
+
+                        let moved =
+                            events
+                            |> List.choose (function
+                                | OpEvent.Moved(_, _, _, _, room, _) -> room
+                                | _ -> None)
+
+                        next,
+                        lastSeen,
+                        seenNext,
+                        trace
+                        @ [
+                            now, looked, next |> Option.map _.Bids |> Option.defaultValue [], moved
+                        ])
+                    |> fun (_, _, _, trace) -> trace
+
+                let trace = run 55.0
+
+                let looksAt room =
+                    trace |> List.filter (fun (_, looked, _, _) -> looked = Some room)
+
+                Expect.equal
+                    (trace |> List.map (fun (now, looked, _, _) -> now, looked) |> List.take 3)
+                    [ 50, Some "W4N1"; 51, Some "W2N1"; 52, Some "W5N1" ]
+                    "the stand-down's look first, then W2N1's over the lesser pursuit"
+
+                Expect.equal
+                    (trace
+                     |> List.tryPick (fun (now, _, bids, _) ->
+                         if List.isEmpty bids then None else Some(now, bids)))
+                    (Some(52, [ "W2N1", 52 ]))
+                    "the bid starts the tick the look shows it out-paying"
+
+                Expect.equal
+                    (looksAt "W2N1" |> List.map (fun (now, _, _, _) -> now))
+                    [ 51; 57; 63; 69; 75; 81 ]
+                    "looked at again each time its sighting is a stride old, until it holds the latch"
+
+                Expect.equal
+                    (trace
+                     |> List.collect (fun (now, _, _, moved) -> moved |> List.map (fun r -> now, r)))
+                    [ 82, "W2N1" ]
+                    "and the latch moves on the first look after its thirty ticks"
+
+                let below = run 10.0
+
+                Expect.isEmpty
+                    (below |> List.filter (fun (_, looked, _, _) -> looked = Some "W2N1"))
+                    "remembered below the held rate: the observer never looks at it for the latch"
+            }
+
             test "an exhausted room moves to one that pays at once, whatever a bid has yet to prove" {
                 let executing =
                     { recordAt OpPhase.Execute 40 with
