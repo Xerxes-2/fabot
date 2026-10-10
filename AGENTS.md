@@ -58,7 +58,7 @@ A live firefight (as above) the user flags may be fixed in the current session w
 
 A cloud session (claude.ai/code) may push only the branch it was cloned on, so that branch stands in for `main` everywhere above; `main` gets the work by PR, merged by the user.
 
-- `session-start.sh` records the branch as `claude.session-branch`, gives jj git's identity, makes what origin holds immutable, and defines `jj ship [-r REV]` (`scripts/ship.sh`: the gates, then the branch set to REV and pushed, and a new `@` when REV was it). The local `main` bookmark is never moved.
+- `session-start.sh` records the branch as `claude.session-branch`, gives jj git's identity, makes what origin holds immutable, and defines `jj ship [-r REV]` (`scripts/ship.sh`: the gates, then the branch set to REV and pushed; jj starts a new `@` when REV was it). The local `main` bookmark is never moved.
 - Step 4 is `jj ship`; subagent workspaces are based on the session branch, and a subagent's change is rebased onto it, not onto `main`.
 - The container is reclaimed when the session idles: work not pushed is lost, so ship each issue as it lands.
 - `npm run deploy` from a cloud session runs the session branch live, ahead of `main`.

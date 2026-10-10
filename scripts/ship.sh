@@ -27,13 +27,9 @@ npm run build
 
 jj bookmark set "$branch" -r "$rev"
 
-pushed() {
-  # Shipped from @, the next edit starts a change of its own.
-  [ "$(jj log --no-graph -r "$rev" -T 'change_id')" != "$(jj log --no-graph -r @ -T 'change_id')" ] || jj new
-}
-
+# Shipped from @, jj itself starts a new @: what origin holds is immutable.
 for wait in 2 4 8 16 0; do
-  jj git push -b "$branch" && { pushed; exit 0; }
+  jj git push -b "$branch" && exit 0
   [ "$wait" -gt 0 ] || break
   echo "ship: push failed, retrying in ${wait}s" >&2
   sleep "$wait"
