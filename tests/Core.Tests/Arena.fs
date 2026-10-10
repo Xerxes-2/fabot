@@ -392,6 +392,9 @@ type Carried =
         /// Each body of ours' kill head (`World.Heads`), carried as `Main`
         /// carries them.
         Heads: Map<string, HeadLatch>
+        /// The exit camps' prices held (`Operations.layReadHeld`), carried as
+        /// `Main` carries them.
+        CampPrices: Map<string, Operations.HeldCampPrice>
     }
 
 /// The arena's whole state between ticks.
@@ -965,6 +968,7 @@ let arena (time: int) (rooms: ArenaRoom list) (colonies: Colony list) (bodies: B
                 Operations = []
                 Traffic = Map.empty
                 Heads = Map.empty
+                CampPrices = Map.empty
             }
         Scores = Map.empty
         Ovens = []
@@ -1681,6 +1685,9 @@ let laneBreaks (a: Arena) : string list =
                     TurnIndex = None
                     Operations = a.Carried.Operations
                     Declared = a.Declared
+                    // Priced afresh: a held price would answer both lanes
+                    // alike, whatever the cut.
+                    CampPrices = Map.empty
                 }
                 ignore
                 views
@@ -1735,8 +1742,15 @@ let laneBreaks (a: Arena) : string list =
 let viewOf (a: Arena) (home: string) : ColonyView =
     let _, hops, views = cut a
 
-    judgeColonies hops a.Carried.Assignments Set.empty a.Declared a.Carried.Operations views
-    |> fst
+    judgeColoniesHeld
+        hops
+        a.Carried.Assignments
+        Set.empty
+        a.Declared
+        a.Carried.Operations
+        a.Carried.CampPrices
+        views
+    |> fun (judged, _, _) -> judged
     |> Layout.aimObservers Set.empty
     |> List.zip (views |> List.map fst)
     |> List.tryPick (fun (c, view) -> if c.Home = home then Some view else None)
@@ -1769,6 +1783,7 @@ let private decideOurs (a: Arena) : Intent list * Carried =
                 TurnIndex = None
                 Operations = a.Carried.Operations
                 Declared = a.Declared
+                CampPrices = a.Carried.CampPrices
             }
             ignore
             views
@@ -1882,6 +1897,7 @@ let private decideOurs (a: Arena) : Intent list * Carried =
             Ledger.account (Operations.campRooms a.Declared) ledger records
         Traffic = world.Traffic
         Heads = heads
+        CampPrices = decided.CampPrices
     }
 
 // ---------------------------------------------------------------------------

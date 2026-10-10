@@ -572,6 +572,7 @@ let private decidePair (turn: int) (childMemo: PlanMemo option) =
             TurnIndex = Some turn
             Operations = []
             Declared = []
+            CampPrices = Map.empty
         }
         ignore
         (List.zip

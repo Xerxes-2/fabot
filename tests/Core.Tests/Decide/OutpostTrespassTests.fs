@@ -211,6 +211,7 @@ let private trespassedPairDecided (bodies: (string * BodyPart list) list) =
                 TurnIndex = None
                 Operations = []
                 Declared = []
+                CampPrices = Map.empty
             }
             ignore
             views

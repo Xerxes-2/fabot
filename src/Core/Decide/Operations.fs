@@ -1200,6 +1200,38 @@ let campRooms (declared: OpSpecWire list) : (string * Set<string>) list =
     campSpecs declared
     |> List.map (fun spec -> spec.Id, roomsOf spec.Target |> Option.defaultValue [] |> Set.ofList)
 
+/// What an exit's camp price moves with between the ticks it is held over,
+/// a camp not running: the colony pricing it, its watch's landings, its
+/// entries, the armed bodies standing in its room, what may land — whether
+/// it lands for certain, else its odds to the hundredth, which creep up as
+/// the watch runs — and its group. A lander's tile and a body's life are not
+/// in it, nor the ticks watched (a landing moves the arrivals, which are; a
+/// tick watched more moves a rate over hundreds of them), the bank or what a
+/// cast earns elsewhere: those drift, and a held price reads them at most
+/// `campPriceHeld` ticks old.
+type CampPriceKey =
+    {
+        Pricer: string
+        Arrivals: (int * string) list
+        Entries: (Pos * int) list
+        Standing: (string * BodyPart list * Boost list * int * RoomPos) list
+        Landers: (string * BodyPart list * Boost list * int * bool * int) list
+        Group: (string * (BodyPart * int) list * int) list
+    }
+
+/// An exit's camp as last priced (`Facts.exitCampPrice`), held across ticks
+/// by its operation's id and its room: the tick it was priced, under its key.
+type HeldCampPrice =
+    {
+        Key: CampPriceKey
+        Priced: int
+        Price: Facts.ExitCampPrice
+    }
+
+// Pricing an exit was a fifth of a full tick (2026-10-10, ~11 ms an exit);
+// the drift a price this old misses moves its net little.
+let campPriceHeld = 10
+
 /// One exit as its camp reads it this tick (#663 S7d).
 type private ExitRead =
     {
@@ -1269,6 +1301,7 @@ let private exitReads
     (spec: OperationSpec)
     (record: OpRecord option)
     (priced: ColonyView list)
+    (prices: System.Collections.Generic.Dictionary<string, HeldCampPrice>)
     : ExitRead list =
     let exits =
         match spec.Target with
@@ -1417,36 +1450,85 @@ let private exitReads
             lazy
                 (view
                  |> Option.map (fun view ->
-                     // What a cast earns over so many ticks in its best
-                     // candidate room: its rate there, never past what the
-                     // room holds over those ticks — its bodies' kills once
-                     // and the income its holding moves a tick.
-                     let candidates =
-                         view.Harass
-                         |> List.map (fun h ->
-                             let worth = Facts.roomWorth view h.RoomName
+                     let id = $"{spec.Id}@{exit.Camp}"
 
-                             Facts.castRateIn view h.RoomName,
-                             RoomWorth.values Quarry.Reading.Cast worth
-                             |> Map.fold (fun sum _ v -> sum + v) 0.0,
-                             RoomWorth.delta Quarry.Reading.Cast worth)
+                     let key =
+                         {
+                             Pricer = SpatialInfo.homeName view.Spatial
+                             Arrivals = arrivals |> List.map (fun (tick, h) -> tick, h.Id)
+                             Entries = entries
+                             Standing =
+                                 view.Hostiles
+                                 |> List.filter (fun h ->
+                                     h.Pos.Room = exit.Camp && HostileInfo.armed view.Hostiles h)
+                                 |> List.map (fun h -> h.Id, h.Body, h.Boosts, h.Hits, h.Pos)
+                             Landers =
+                                 landers
+                                 |> List.map (fun (h, odds) ->
+                                     h.Id,
+                                     h.Body,
+                                     h.Boosts,
+                                     h.Hits,
+                                     odds >= 1.0,
+                                     int (round (odds * 100.0)))
+                             Group =
+                                 group
+                                 |> List.map (fun m ->
+                                     m.Creep.Name, Map.toList m.Creep.Body, m.Creep.Hits.Hits)
+                         }
 
-                     let elsewhere (ticks: int) =
-                         candidates
-                         |> List.map (fun (rate, kills, delta) ->
-                             min (rate * float ticks) (kills + max 0.0 delta * float ticks))
-                         |> List.fold max 0.0
+                     // A running camp is priced afresh every tick: its ticks
+                     // left, its pays and its exchange decide its run.
+                     match prices.TryGetValue id with
+                     | true, held when
+                         not running
+                         && held.Key = key
+                         && now >= held.Priced
+                         && now - held.Priced < campPriceHeld
+                         ->
+                         held.Price
+                     | _ ->
 
-                     Facts.exitCampPrice
-                         view
-                         exit.Camp
-                         entries
-                         arrivals
-                         watched
-                         landers
-                         left
-                         elsewhere
-                         (group |> List.map (fun m -> m.Creep, m.At))))
+                         // What a cast earns over so many ticks in its best
+                         // candidate room: its rate there, never past what the
+                         // room holds over those ticks — its bodies' kills once
+                         // and the income its holding moves a tick.
+                         let candidates =
+                             view.Harass
+                             |> List.map (fun h ->
+                                 let worth = Facts.roomWorth view h.RoomName
+
+                                 Facts.castRateIn view h.RoomName,
+                                 RoomWorth.values Quarry.Reading.Cast worth
+                                 |> Map.fold (fun sum _ v -> sum + v) 0.0,
+                                 RoomWorth.delta Quarry.Reading.Cast worth)
+
+                         let elsewhere (ticks: int) =
+                             candidates
+                             |> List.map (fun (rate, kills, delta) ->
+                                 min (rate * float ticks) (kills + max 0.0 delta * float ticks))
+                             |> List.fold max 0.0
+
+                         let fresh =
+                             Facts.exitCampPrice
+                                 view
+                                 exit.Camp
+                                 entries
+                                 arrivals
+                                 watched
+                                 landers
+                                 left
+                                 elsewhere
+                                 (group |> List.map (fun m -> m.Creep, m.At))
+
+                         prices.[id] <-
+                             {
+                                 Key = key
+                                 Priced = now
+                                 Price = fresh
+                             }
+
+                         fresh))
 
         {
             Exit = exit
@@ -1656,10 +1738,11 @@ let private layCamp
     (now: int)
     (held: Assignments)
     (priced: ColonyView list)
+    (prices: System.Collections.Generic.Dictionary<string, HeldCampPrice>)
     (record: OpRecord option)
     (spec: OperationSpec)
     : OpRecord option * OpEvent list * OperationWork list * (string * float) list * OpReading =
-    let reads = exitReads now held spec record priced
+    let reads = exitReads now held spec record priced prices
     let facts = campFacts now reads priced
     let moved, events = advance facts spec record
 
@@ -1674,7 +1757,7 @@ let private layCamp
     // prices what its window has left.
     let reads =
         if running && moved <> record then
-            exitReads now held spec moved priced
+            exitReads now held spec moved priced prices
         else
             reads
 
@@ -1759,16 +1842,34 @@ let private layCamp
 /// the sweep's latch ask (`latchLooks`) are laid beside
 /// (`WorldView.OperationLooks`), and each camp's trigger
 /// as read (#663 S7e, `OpReading`).
-let layRead
+///
+/// Each exit's price is held across ticks (`HeldCampPrice`, from `held`
+/// last tick's) and priced afresh only once its key moves or it is
+/// `campPriceHeld` ticks old; the prices this tick holds come back.
+let layReadHeld
     (declared: OpSpecWire list)
     (held: Assignments)
     (records: OpRecord list)
+    (heldPrices: Map<string, HeldCampPrice>)
     (views: ColonyView list)
-    : ColonyView list * OpRecord list * OpEvent list * OpReading list =
+    : ColonyView list * OpRecord list * OpEvent list * OpReading list * Map<string, HeldCampPrice> =
     let now =
         match views with
         | view :: _ -> view.Time
         | [] -> 0
+
+    let prices = System.Collections.Generic.Dictionary<string, HeldCampPrice>()
+
+    for KeyValue(id, price) in heldPrices do
+        prices.[id] <- price
+
+    // Only the prices still young enough to be read next tick are kept.
+    let kept () =
+        prices
+        |> Seq.filter (fun entry ->
+            entry.Value.Priced <= now && now - entry.Value.Priced < campPriceHeld)
+        |> Seq.map (fun entry -> entry.Key, entry.Value)
+        |> Fresh.mapOfSeq
 
     let laidAs (operations: OperationWork list) (committed: Map<string, int>) (view: ColonyView) =
         { view with
@@ -1782,7 +1883,8 @@ let layRead
     let camps = campSpecs declared
 
     match sweepSpec declared views, camps with
-    | None, [] -> Facts.layWorths views |> List.map (laidAs [] Map.empty), records, [], []
+    | None, [] ->
+        Facts.layWorths views |> List.map (laidAs [] Map.empty), records, [], [], Map.empty
     | sweep, camps ->
         let recordOf (spec: OperationSpec) =
             records
@@ -1815,7 +1917,7 @@ let layRead
         // The exit camps first: a room one works is no room of the sweep's.
         let camped =
             camps
-            |> List.map (fun spec -> spec, layCamp now held priced (recordOf spec) spec)
+            |> List.map (fun spec -> spec, layCamp now held priced prices (recordOf spec) spec)
 
         let campWorks = camped |> List.collect (fun (_, (_, _, works, _, _)) -> works)
         let worked = campWorks |> List.map _.Room |> Set.ofList
@@ -1927,7 +2029,20 @@ let layRead
         laid,
         records,
         moved |> List.collect (fun (_, _, events) -> events),
-        camped |> List.map (fun (_, (_, _, _, _, reading)) -> reading)
+        camped |> List.map (fun (_, (_, _, _, _, reading)) -> reading),
+        kept ()
+
+/// `layReadHeld` with no price held: each exit priced this tick.
+let layRead
+    (declared: OpSpecWire list)
+    (held: Assignments)
+    (records: OpRecord list)
+    (views: ColonyView list)
+    : ColonyView list * OpRecord list * OpEvent list * OpReading list =
+    let laid, records, events, readings, _ =
+        layReadHeld declared held records Map.empty views
+
+    laid, records, events, readings
 
 /// `layRead` without the camps' readings.
 let lay

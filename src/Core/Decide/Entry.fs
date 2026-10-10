@@ -1778,6 +1778,8 @@ type ColonyInputs =
         /// The code's operation specs the shell admitted
         /// (`Operations.declared`): the limits each runs under.
         Declared: OpSpecWire list
+        /// The exit camps' prices last tick held (`ColonyDecisions.CampPrices`).
+        CampPrices: Map<string, Operations.HeldCampPrice>
     }
 
 /// A colony's own step that threw (#628): the colony decides nothing this
@@ -1841,6 +1843,9 @@ type ColonyDecisions<'Stamp> =
         /// as read: the shell stores them, the latch the next tick moves on
         /// from.
         Operated: OpRecord list * OpEvent list * OpReading list
+        /// The exit camps' prices held for the next tick
+        /// (`Operations.layReadHeld`): the shell keeps them in the heap.
+        CampPrices: Map<string, Operations.HeldCampPrice>
     }
 
 /// One colony's step run alone: its throw is its own fault, handed back
@@ -1880,7 +1885,40 @@ let private sorted (results: Result<'a, ColonyFault> list) : 'a list * ColonyFau
 /// The operations laid in first (`Operations.lay`, moved on from their
 /// stored records), so the verdicts price the room each works and no other
 /// candidate. And each contested room's one danger (`WorldDanger.lay`). The
-/// records come back moved on, with what moved.
+/// records come back moved on, with what moved, and the exit camps' prices
+/// held for the next tick (`Operations.layReadHeld`).
+let judgeColoniesHeld
+    (hops: string -> string -> int option)
+    (assignments: Assignments)
+    (idle: Set<string>)
+    (declared: OpSpecWire list)
+    (records: OpRecord list)
+    (heldPrices: Map<string, Operations.HeldCampPrice>)
+    (colonies: (Colony * ColonyView) list)
+    : ColonyView list *
+      (OpRecord list * OpEvent list * OpReading list) *
+      Map<string, Operations.HeldCampPrice>
+    =
+    let laid, records, events, readings, prices =
+        colonies
+        |> List.map snd
+        |> Operations.layReadHeld declared assignments records heldPrices
+
+    let judged =
+        List.zip colonies laid
+        |> List.map (fun ((colony, _), view) ->
+            ({
+                Cut = view
+                Owns = Colony.declaredRooms colony
+                Decides = not (Set.contains colony.Home idle)
+            }
+            : Facts.Judged))
+        |> Facts.judge hops assignments
+        |> WorldDanger.lay
+
+    judged, (records, events, readings), prices
+
+/// `judgeColoniesHeld` with no exit camp's price held.
 let judgeColonies
     (hops: string -> string -> int option)
     (assignments: Assignments)
@@ -1889,20 +1927,10 @@ let judgeColonies
     (records: OpRecord list)
     (colonies: (Colony * ColonyView) list)
     : ColonyView list * (OpRecord list * OpEvent list * OpReading list) =
-    let laid, records, events, readings =
-        colonies |> List.map snd |> Operations.layRead declared assignments records
+    let judged, operated, _ =
+        judgeColoniesHeld hops assignments idle declared records Map.empty colonies
 
-    List.zip colonies laid
-    |> List.map (fun ((colony, _), view) ->
-        ({
-            Cut = view
-            Owns = Colony.declaredRooms colony
-            Decides = not (Set.contains colony.Home idle)
-        }
-        : Facts.Judged))
-    |> Facts.judge hops assignments
-    |> WorldDanger.lay,
-    (records, events, readings)
+    judged, operated
 
 /// ADR-0091
 /// The world's fight, one Brief per combat Task world-wide: of the colonies
@@ -2092,6 +2120,7 @@ let private decideWorld
     (colonies: (Colony * ColonyView) list)
     (judged: ColonyView list)
     (operated: OpRecord list * OpEvent list * OpReading list)
+    (prices: Map<string, Operations.HeldCampPrice>)
     : ColonyDecisions<'Stamp> =
     // The world lane's stamps, observe-only: the judging before this is the
     // world's.
@@ -2379,6 +2408,7 @@ let private decideWorld
         Whole = List.length whole = List.length colonies
         Operations = lazy (Ledger.observe judged briefs fleet.Assigned)
         Operated = operated
+        CampPrices = prices
     }
 
 /// Every colony's tick decided: the views judged (`judgeColonies`), then the
@@ -2406,13 +2436,14 @@ let decideColonies
         colonies
         |> List.map (fun (colony, view) -> colony, { view with Leaving = leaving })
 
-    let judged, operated =
-        judgeColonies
+    let judged, operated, prices =
+        judgeColoniesHeld
             inputs.Hops
             inputs.Holding
             inputs.Idle
             inputs.Declared
             inputs.Operations
+            inputs.CampPrices
             colonies
 
-    decideWorld inputs stamp colonies judged operated
+    decideWorld inputs stamp colonies judged operated prices

@@ -562,6 +562,7 @@ let fireReflexTests =
                             TurnIndex = None
                             Operations = []
                             Declared = []
+                            CampPrices = Map.empty
                         }
                         ignore
                         [ colony, snapshot ]
