@@ -33,7 +33,7 @@ type RoomEnergy =
 /// built. Projection vocabulary, distinct from the Intent vocabulary of
 /// placeable kinds: every placeable kind widens into one of these
 /// (`builtKindOfPlaceable`), never the other way.
-[<RequireQualifiedAccess>]
+[<RequireQualifiedAccess; CustomEquality; CustomComparison>]
 type BuiltKind =
     | Spawn
     | Extension
@@ -74,6 +74,44 @@ type BuiltKind =
     | Lab
     /// Any structure kind the decision layer has no rules for yet.
     | Other
+
+    /// The case's place in the declaration: what equality and order read,
+    /// by hand for `Pos`'s reason — Fable's generic union walk
+    /// (`sameConstructor`, then the fields) on every census scan. The same
+    /// contract holds on every vocabulary union that carries one (`Ordinal`,
+    /// pinned by `OrdinalTests`): one int per value, ascending as the default
+    /// order ran, and a case wrapping another union packs that union's
+    /// ordinal into a gap no wider than its stride (`Resource`: 14 ores, 16
+    /// compounds and up; `TargetKind`: 64 a case). A new case takes the next
+    /// int in declaration order and moves the ones after it.
+    member this.Ordinal =
+        match this with
+        | Spawn -> 0
+        | Extension -> 1
+        | Tower -> 2
+        | Road -> 3
+        | Container -> 4
+        | Storage -> 5
+        | Link -> 6
+        | Rampart -> 7
+        | Extractor -> 8
+        | Terminal -> 9
+        | Observer -> 10
+        | Lab -> 11
+        | Other -> 12
+
+    override this.Equals other =
+        match other with
+        | :? BuiltKind as that -> this.Ordinal = that.Ordinal
+        | _ -> false
+
+    override this.GetHashCode() = this.Ordinal
+
+    interface System.IComparable with
+        member this.CompareTo other =
+            match other with
+            | :? BuiltKind as that -> compare this.Ordinal that.Ordinal
+            | _ -> 1
 
 /// What the decision layer knows about one energy-hungry structure
 /// (spawn, extension, or tower) this tick.
