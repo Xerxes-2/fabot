@@ -6557,12 +6557,28 @@ let private bestTile
     (loss: Pos -> float)
     (tiles: CampTile list)
     : (Pos * float * float) option =
+    // The least key in one pass, the first of equal keys kept as a stable
+    // sort's head keeps it: every size of every template asks it over the
+    // whole ground.
     tiles
-    |> List.map (fun tile -> tile, tileRate view damage traffic ticks tile, loss tile.Tile)
-    |> List.sortBy (fun (tile, rate, lost) ->
-        -(rate * float ticks - lost), tile.Risk, -tile.Share, tile.Used, tile.Tile.Y, tile.Tile.X)
-    |> List.tryHead
-    |> Option.map (fun (tile, rate, lost) -> tile.Tile, rate, lost)
+    |> List.fold
+        (fun best tile ->
+            let rate = tileRate view damage traffic ticks tile
+            let lost = loss tile.Tile
+
+            let key =
+                -(rate * float ticks - lost),
+                tile.Risk,
+                -tile.Share,
+                tile.Used,
+                tile.Tile.Y,
+                tile.Tile.X
+
+            match best with
+            | Some(least, _, _, _) when least <= key -> best
+            | _ -> Some(key, tile, rate, lost))
+        None
+    |> Option.map (fun (_, tile, rate, lost) -> tile.Tile, rate, lost)
 
 /// Whether a body of ours on a camp tile gets away from a body landing on
 /// the nearest of its entries (#663 S7d): it outwalks one slower on plain,
