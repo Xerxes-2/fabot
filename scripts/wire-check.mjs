@@ -3372,6 +3372,7 @@ wire("TileSet under Fable answers what a sorted index list answers", async () =>
     const r = sorted(a);
     assert.deepEqual(indices(s), r, "the tiles, in Pos order");
     assert.equal(T.TileSetModule_count(s), r.length, "count");
+    assert.deepEqual(indices(T.TileSetModule_init((i) => r.includes(i))), r, "init");
     if (r.length) {
       const least = T.TileSetModule_minElement(s);
       assert.equal(least.X * 50 + least.Y, r[0], "minElement");

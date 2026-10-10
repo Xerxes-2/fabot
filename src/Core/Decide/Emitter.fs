@@ -760,7 +760,7 @@ let private strikeOrder
     (creep: CreepInfo)
     (room: string)
     =
-    let posts = Atlas.postsIn atlas room
+    let posts = Atlas.postGridIn atlas room
 
     // The guard's own tile, which is only read where the room has no Post; an
     // unplaced body prices every Threat alike and the id order answers.
@@ -770,12 +770,12 @@ let private strikeOrder
     let distance (hostile: HostileInfo) =
         let from = RoomPos.pos hostile.Pos
 
-        if Set.isEmpty posts then
+        if TileSet.isEmpty posts then
             here
             |> Option.map (fun tile -> range from (RoomPos.pos tile))
             |> Option.defaultValue 0
         else
-            posts |> Set.toList |> List.map (range from) |> List.min
+            posts |> TileSet.toList |> List.map (range from) |> List.min
 
     // In a resident room a rival's CLAIM body is a target too (#414): unarmed,
     // it is what takes the flag, or in a raised home the controller (#447).

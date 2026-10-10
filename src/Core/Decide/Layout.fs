@@ -2042,14 +2042,14 @@ let planLayout
 
         // The working ground — every source's Seats and the controller's
         // Upgrade Work Area — is off-limits to the cluster.
-        let working = Atlas.workingGroundIn atlas room
+        let working = Atlas.workingGridIn atlas room
 
         let buildable = Atlas.buildableTilesIn atlas room
 
         let ordering =
             buildable
             |> List.filter (fun tile ->
-                (tile.X + tile.Y) % 2 = parity && not (Set.contains tile working))
+                (tile.X + tile.Y) % 2 = parity && not (TileSet.contains tile working))
             |> List.sortBy (fun tile -> range tile spawnPos, tile.X, tile.Y)
 
         // A kind's still-open gap at a level: its allowance there minus the

@@ -3621,7 +3621,7 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
                 let guard part =
                     max 1 (guardBlocksReach view) * partCountIn guardPattern.Block part
 
-                let posts = Atlas.postsIn atlas room |> Set.toList
+                let posts = Atlas.postGridIn atlas room |> TileSet.toList
 
                 let tiles =
                     if

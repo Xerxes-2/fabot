@@ -721,7 +721,7 @@ let private fleeStep
 /// ends the darkness.
 let private moveIntentFor
     (rankOf: Task -> int)
-    (idleGround: string -> Set<Pos> * Set<RoomPos>)
+    (idleGround: string -> TileSet * TileSet)
     (threats: Threats)
     atlas
     (creep: string)
@@ -964,7 +964,7 @@ let private moveIntentFor
         let off, on =
             beside
             |> List.filter sheltered
-            |> List.partition (fun tile -> not (Set.contains tile ground))
+            |> List.partition (fun tile -> not (TileSet.contains tile ground))
 
         let tail = staying @ off @ on
 
@@ -974,12 +974,12 @@ let private moveIntentFor
         // nothing walks it back from. Nowhere safe off the ground is nowhere
         // to go: it parks.
         let stepOff =
-            if Set.contains pos ground then
+            if TileSet.contains pos ground then
                 let reach = Threats.reachIn threats room
 
                 offGround
-                |> Set.filter (fun tile ->
-                    not (Set.contains (RoomPos.pos tile) reach) && sheltered (RoomPos.pos tile))
+                |> TileSet.filter (fun tile -> not (Set.contains tile reach) && sheltered tile)
+                |> TileSet.toRoomSet room
                 |> Atlas.firstStepWithin atlas creep
                 |> Option.map RoomPos.pos
             else
@@ -1722,7 +1722,8 @@ let movementAmong
         |> Map.ofList
 
     let idleGround room =
-        Map.tryFind room idleGrounds |> Option.defaultValue (Set.empty, Set.empty)
+        Map.tryFind room idleGrounds
+        |> Option.defaultValue (TileSet.empty, TileSet.empty)
 
     // A fatigued walker issues no step this tick, so the light tick after it
     // had none to replay and it stood still the tick its fatigue cleared

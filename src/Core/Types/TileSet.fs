@@ -25,20 +25,10 @@ let inline private wordOf (index: int) = index >>> 5
 let inline private bitOf (index: int) = 1 <<< (index &&& 31)
 
 // The index of a word's lowest set bit, the word not zero: the count of
-// trailing zeros, which JS reaches through `clz32` of the bit alone. The .NET
-// body is the tests' (netstandard2.0 has no `BitOperations`).
+// trailing zeros, which JS reaches through `clz32` of the bit alone.
 [<Emit("(31 - Math.clz32($0 & -$0))")>]
 let private lowestBit (w: int) : int =
-    let mutable low = w &&& -w
-    let mutable b = 0
-
-    while low <> 1 do
-        // A logical shift: bit 31 alone reads negative, and `>>>` on an int
-        // keeps its sign.
-        low <- (low >>> 1) &&& 0x7FFFFFFF
-        b <- b + 1
-
-    b
+    System.Numerics.BitOperations.TrailingZeroCount w
 
 let private popCount (w: int) =
     let mutable rest = w
@@ -192,6 +182,21 @@ module TileSet =
     let ofList (tiles: Pos list) = ofSeq tiles
     let ofArray (tiles: Pos[]) = ofSeq tiles
 
+    /// The tiles whose grid index `holds` answers for: a grid read as a set.
+    let init (holds: int -> bool) : TileSet =
+        let words = Array.zeroCreate wordCount
+
+        for i in 0 .. wordCount - 1 do
+            let mutable w = 0
+
+            for index in i <<< 5 .. min tileCount ((i + 1) <<< 5) - 1 do
+                if holds index then
+                    w <- w ||| bitOf index
+
+            setWord i words w
+
+        { Words = words }
+
     /// Every tile, in `Pos` order, to `f`.
     let iter (f: Pos -> unit) (set: TileSet) =
         for i in 0 .. wordCount - 1 do
@@ -338,6 +343,10 @@ module TileSet =
 
     /// The `Set<Pos>` a seam not yet moved reads, built to outlive the tick.
     let toSet (set: TileSet) : Set<Pos> = Fresh.setOfSeq (toArray set)
+
+    /// The tiles joined to their room, for a seam that reads `Set<RoomPos>`.
+    let toRoomSet (room: string) (set: TileSet) : Set<RoomPos> =
+        fold (fun joined tile -> Set.add (RoomPos.at room tile) joined) Set.empty set
 
     /// A `Set<Pos>` of in-grid tiles, as a `TileSet`.
     let ofSet (tiles: Set<Pos>) : TileSet = ofSeq tiles

@@ -54,6 +54,16 @@ let tileSetTests =
                     Expect.equal (TileSet.toSet tiles) set "toSet"
                     Expect.equal (TileSet.ofSet set) tiles "ofSet"
 
+                    Expect.equal
+                        (TileSet.init (fun index -> Set.contains (posAt index) set))
+                        tiles
+                        "init, off a grid"
+
+                    Expect.equal
+                        (TileSet.toRoomSet "W1N1" tiles)
+                        (RoomPos.setAt "W1N1" set)
+                        "toRoomSet"
+
                     if not set.IsEmpty then
                         Expect.equal (TileSet.minElement tiles) (Set.minElement set) "minElement"
 
