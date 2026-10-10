@@ -140,11 +140,14 @@ type OpGuard =
     /// has paid for as long as it takes to realise (`Operations.challenger`):
     /// another of the target's rooms, read on evidence (`OpFacts.Challenge`:
     /// only a body seen there on two full ticks or more counts, and never
-    /// above its own rate), earns more over the ticks the group takes to
-    /// stand at its quarry (`OpFacts.Arrival`) than the committed room earns
-    /// over the same ticks and over the walk the move adds; and its bid has
-    /// stood for at least those ticks (`OpRecord.Bids`): from a tick it was
-    /// seen out-paying, with no tick since on which it was seen not to. The
+    /// above its own rate), earns more over the span the move can be
+    /// realised (from the group standing at its quarry, `OpFacts.Arrival`,
+    /// until the group, the deadline or its quarry ends, `OpFacts.GroupLife`,
+    /// `OpFacts.QuarryLife`) than the committed room earns over the same
+    /// span; and its bid has stood for those arrival ticks, or less where
+    /// waiting costs more than a wrong move forfeits (`OpRecord.Bids`): from
+    /// a tick it was seen out-paying, with no tick since on which it was
+    /// seen not to. The
     /// committed room is read with the effort already
     /// spent in it (`OpFacts.Rate`) — its group in or by it walks nothing,
     /// the volleys landed are the hits its quarry lacks, its escort as it
@@ -376,11 +379,19 @@ type OpFacts =
         /// bodies seen there on two full ticks or more counted, and never
         /// above its rate (`Rate`): evidence withholds credit, never adds it.
         Challenge: string -> float option
-        /// The ticks the operation's group takes to stand at a room's quarry
-        /// (`Facts.groupArrival`): what a move into it takes to realise; 0
+        /// The ticks the operation's group takes to stand at a room's quarry,
+        /// its bodies that realise the room's rate (`Facts.groupLanding`,
+        /// `Facts.groupArrival`): what a move into it takes to realise; 0
         /// with no group, whose cast lands wherever it is sent alike. None
         /// where no colony prices the room.
         Arrival: string -> int option
+        /// The ticks a room's quarry lasts (`Facts.quarryLife`): no rate is
+        /// earned there past it. None where it values no body, or no colony
+        /// prices it.
+        QuarryLife: string -> int option
+        /// The ticks the operation's group can still fight: its
+        /// longest-lived body's life, a cast's whole lifetime with no group.
+        GroupLife: int
         /// Whether a room is in sight this tick: what its price reads is
         /// this tick's, not memory's.
         Sighted: string -> bool

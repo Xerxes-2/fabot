@@ -51,12 +51,19 @@ type private Bid =
     {
         Room: string
         Paid: float
-        Horizon: int
-        /// The energy the move earns over its horizon beyond what staying
-        /// does, on the room's plain rate (memory's where it is out of
-        /// sight, each body at its odds): positive where the move would pay
-        /// for itself were that rate confirmed (`latchLooks`).
+        /// The ticks the bid must stand before the move (`challenger`): its
+        /// horizon, or less where waiting would cost more than a wrong move
+        /// forfeits (`bidsOn`).
+        Persists: float
+        /// The energy the move earns over the span it can be realised
+        /// beyond what staying does, on the room's plain rate (memory's
+        /// where it is out of sight, each body at its odds): positive where
+        /// the move would pay for itself were that rate confirmed
+        /// (`latchLooks`).
         Gain: float
+        /// The ticks the room earns over once moved to: the span from the
+        /// group standing at its quarry to its end (`bidsOn`).
+        Window: float
         /// Yes where, in sight this tick, the move pays for itself on
         /// evidence; No where, in sight, it does not even on the room's plain
         /// rate: seen not out-paying. Unknown otherwise — out of sight, its
@@ -68,34 +75,64 @@ type private Bid =
 
 /// The target's other rooms read as bids off `held`, the room committed to;
 /// none where the committed room is not priced, and a room not priced is no
-/// bid. A move pays for itself where the room's pay over the ticks the group
-/// takes to stand at its quarry (`Bid.Horizon`, a tick at least: the move is
-/// a tick's act) beats what `held` pays (`OpFacts.Rate`) over those ticks and
-/// over the walk the move adds beyond the one to `held`'s own quarry. So a
-/// move whose quarry lies no farther than the held room's pays on any
-/// surplus, and one from the held room's quarry, the whole horizon a walk,
-/// must earn the held room's yield over that walk as well as its surplus.
+/// bid. A move pays for itself where what the room pays over the span it
+/// can be realised beats what `held` pays (`OpFacts.Rate`) over the same
+/// span. The span ends where the group can fight no more
+/// (`OpFacts.GroupLife`) or the operation's deadline falls, and a room earns
+/// over it from the tick the group stands at its quarry (`OpFacts.Arrival`)
+/// until then or its quarry's death (`OpFacts.QuarryLife`), whichever is
+/// first. So the walk a move adds is a cost inside that span, and a room
+/// whose quarry dies before the group stands at it earns nothing.
+///
+/// A bid must stand for its horizon, the ticks the move takes to realise,
+/// or less where waiting costs more than a wrong move forfeits: a wrong
+/// move forfeits what staying earns over the span, and each tick of waiting
+/// costs the surplus the move earns a tick. The forfeit is read off the
+/// held room's rate only where its quarry is not known to hold
+/// (`OpFacts.Holds` not Yes: unpriced, or a ghost past its odds): a room
+/// that holds its quarry is worth that quarry, and its rate dips with each
+/// tick's catch odds (a body walking out, a kiter turning away), which
+/// says nothing of what staying forfeits, so it waits its horizon. Where
+/// the held quarry dies before the group stands at it, staying forfeits
+/// nothing whatever it holds. A wrong move forfeiting nothing, the bid
+/// lands on the first tick it is seen out-paying on evidence.
 let private bidsOn (facts: OpFacts) (spec: OperationSpec) (held: string) : Bid list =
     match roomsOf spec.Target, facts.Rate held with
     | Some rooms, Some rate ->
-        let stay = facts.Arrival held |> Option.defaultValue 0
+        let realisable = min facts.GroupLife (spec.Limits.Deadline - facts.Now)
+
+        // The ticks a room earns over from the group's arrival at its quarry.
+        let earning (room: string) (arrival: int) =
+            let ends =
+                facts.QuarryLife room
+                |> Option.map (min realisable)
+                |> Option.defaultValue realisable
+
+            float (max 0 (ends - arrival))
+
+        let window = earning held (facts.Arrival held |> Option.defaultValue 0)
+        let staying = rate * window
+        let holds = facts.Holds held = Truth.Yes
 
         rooms
         |> List.filter ((<>) held)
         |> List.choose (fun room ->
             match facts.Challenge room, facts.Rate room, facts.Arrival room with
             | Some paid, Some plain, Some horizon ->
-                let span = float (max 1 horizon)
-                let rewalk = float (max 0 (horizon - stay))
-                let gain (yields: float) = yields * span - rate * (span + rewalk)
+                let span = earning room horizon
+                let gain (yields: float) = yields * span - staying
                 let pays (yields: float) = gain yields > 0.0
 
                 Some
                     {
                         Room = room
                         Paid = paid
-                        Horizon = horizon
+                        Persists =
+                            if window <= 0.0 then 0.0
+                            elif holds || paid <= rate then float horizon
+                            else min (float horizon) (staying / (paid - rate))
                         Gain = gain plain
+                        Window = span
                         Bids =
                             if not (facts.Sighted room) then Truth.Unknown
                             elif pays paid then Truth.Yes
@@ -106,8 +143,8 @@ let private bidsOn (facts: OpFacts) (spec: OperationSpec) (held: string) : Bid l
     | _ -> []
 
 /// The room that outpays `held`, the room committed to (`OpGuard.Outpaid`):
-/// of the rooms whose bid has stood for as long as a move there takes to
-/// realise (`OpRecord.Bids` against its horizon) and is seen out-paying
+/// of the rooms whose bid has stood for as long as it must
+/// (`OpRecord.Bids` against `Bid.Persists`) and is seen out-paying
 /// this tick, the one paying most, then by name. A bid stands from the
 /// tick the room was seen out-paying until a tick it is seen not to: a
 /// comparison noise reverses sooner is no evidence for a move that cannot
@@ -123,7 +160,7 @@ let private challenger (facts: OpFacts) (spec: OperationSpec) (record: OpRecord)
             bid.Bids = Truth.Yes
             && record.Bids
                |> List.exists (fun (room, since) ->
-                   room = bid.Room && facts.Now - since >= bid.Horizon))
+                   room = bid.Room && float (facts.Now - since) >= bid.Persists))
         |> List.sortBy (fun bid -> -bid.Paid, bid.Room)
         |> List.tryHead
         |> Option.map _.Room
@@ -168,10 +205,12 @@ let private bidding (facts: OpFacts) (spec: OperationSpec) (record: OpRecord) : 
 /// What a look at each of the target's other rooms is worth to its latch
 /// (#663 S4): memory alone moves no latch (`bidsOn`: a room out of sight
 /// bids Unknown), so a look is worth the move it can enable — the energy
-/// the move earns over its horizon beyond staying, on the room's plain rate
-/// (`Bid.Gain`: memory's out of sight, its bodies already at the odds they
-/// still stand there), nothing where that rate says the move would not
-/// pay. Off the room the record holds while it runs (its bids are read in
+/// the move earns beyond staying, on the room's plain rate (`Bid.Gain`:
+/// memory's out of sight, its bodies already at the odds they still stand
+/// there), a tick of its window (`Bid.Window`) over the stride a look
+/// serves (`Facts.lookStride`), the unit the pursuit band's other looks are
+/// priced in (a body's kill and take over the stride); nothing where that
+/// rate says the move would not pay. Off the room the record holds while it runs (its bids are read in
 /// every phase); none before its run, once it ended, or where the held room
 /// is unpriced. A room in sight asks too: the observer serves an ask only
 /// once its last sighting is a stride old (`Layout.assignLooks`).
@@ -188,7 +227,7 @@ let latchLooks
            } when started <= facts.Now ->
         bidsOn facts spec held
         |> List.filter (fun bid -> bid.Gain > 0.0)
-        |> List.map (fun bid -> bid.Room, bid.Gain)
+        |> List.map (fun bid -> bid.Room, bid.Gain / bid.Window * float Facts.lookStride)
     | _ -> []
 
 /// Whether a body worth its kill stands in sight in the room: Unknown where
@@ -722,6 +761,12 @@ let factsOf (now: int) (warm: string -> bool) (views: ColonyView list) : OpFacts
                 match pricing room with
                 | [] -> None
                 | _ -> Some 0
+        QuarryLife =
+            fun room ->
+                pricing room
+                |> List.tryHead
+                |> Option.bind (fun view -> Facts.quarryLife view room)
+        GroupLife = Engine.creepLifetime
         Sighted = sightedIn now views
         HomeThreatened =
             match views with
@@ -832,15 +877,17 @@ let private musteringOf (room: string) (body: Member) : Facts.Mustering =
 /// An operation's own facts this tick (#663 S7c), priced with its own group
 /// (`group`, the world's roster, `groupIn`) over the colonies' views, and
 /// never off another's price: each listed room's rate is the group's where
-/// it stands (`Facts.groupRate`, off the room's pricing view,
-/// `Facts.pricedBy`), its arrival its slowest body's walk, so a room away
-/// pays net of the walk there; with no group, the best cast of a colony
+/// it stands (`Facts.groupLanding`, off the room's pricing view,
+/// `Facts.pricedBy`), landing with the bodies that realise it, so a room
+/// away pays net of the walk there; with no group, the best cast of a colony
 /// that casts the room (`casters`, `Facts.castRateIn`); in a room no colony
 /// casts, nothing. The room its record works (`workedRoom`) is priced
 /// committed (`WorldView.Committed`, from the tick its record entered the
 /// phase): a body seen rooted at its work there since is priced on its
-/// work. The ticks the group takes to stand at each room's quarry are its
-/// slowest body's (`Facts.groupArrival`). The group's arrival, muster and
+/// work. The ticks the group takes to stand at each room's quarry are the
+/// slowest of those bodies' (`Facts.groupArrival`); how long each room's
+/// quarry lasts is its longest-lived body's (`Facts.quarryLife`), and the
+/// group's its own. The group's arrival, muster and
 /// exchange are read in the room the guards ask of (`OpFacts`); its home is
 /// threatened where every colony
 /// that casts one of its rooms has a raider at home
@@ -881,18 +928,30 @@ let ownFacts
         Facts.pricedBy laid room
         |> Option.orElse (casters room |> List.tryHead |> Option.map lay)
 
-    let rate (room: string) =
+    // A room's rate and the bodies of the group that realise it
+    // (`Facts.groupLanding`), the whole group where it is not priced.
+    let landing (room: string) =
         match casters room with
-        | [] -> 0.0
+        | [] -> 0.0, placed
         | casting ->
             match placed with
-            | [] -> casting |> List.map (fun view -> Facts.castRateIn (lay view) room) |> List.max
+            | [] ->
+                casting |> List.map (fun view -> Facts.castRateIn (lay view) room) |> List.max,
+                placed
             | placed ->
                 pricing room
-                |> Option.map (fun view -> Facts.groupRate view placed room)
-                |> Option.defaultValue 0.0
+                |> Option.map (fun view -> Facts.groupLanding view placed room)
+                |> Option.defaultValue (0.0, placed)
 
-    let rates = listed |> List.map (fun room -> room, lazy (rate room)) |> Map.ofList
+    let landings =
+        listed |> List.map (fun room -> room, lazy (landing room)) |> Map.ofList
+
+    let landingIn (room: string) =
+        match Map.tryFind room landings with
+        | Some answer -> answer.Value
+        | None -> landing room
+
+    let rate (room: string) = landingIn room |> fst
 
     // A room's rate on evidence (`evidenced`): what another room must show
     // to outpay the committed one. Its rate, less what evidence withholds:
@@ -910,15 +969,15 @@ let ownFacts
                     casting
                     |> List.map (fun view -> Facts.castRateIn (evidenced room (lay view)) room)
                     |> List.max
-                | placed ->
+                // The bodies that realise its plain rate, landing as its
+                // arrival reads them.
+                | _ ->
                     pricing room
-                    |> Option.map (fun view -> Facts.groupRate (evidenced room view) placed room)
+                    |> Option.map (fun view ->
+                        Facts.groupRate (evidenced room view) (landingIn room |> snd) room)
                     |> Option.defaultValue 0.0
 
-        let plain =
-            Map.tryFind room rates
-            |> Option.map _.Value
-            |> Option.defaultWith (fun () -> rate room)
+        let plain = rate room
 
         if plain <= 0.0 then plain else min plain (onEvidence ())
 
@@ -927,16 +986,24 @@ let ownFacts
     let challenges =
         listed |> List.map (fun room -> room, lazy (challenge room)) |> Map.ofList
 
+    // The arrival of the bodies that realise the room's rate, so the
+    // horizon a move is priced over is the one its rate lands at.
     let arrival (room: string) =
         match placed with
         | [] -> 0
-        | placed ->
+        | _ ->
             pricing room
-            |> Option.bind (fun view -> Facts.groupArrival view placed room)
+            |> Option.bind (fun view -> Facts.groupArrival view (landingIn room |> snd) room)
             |> Option.defaultValue 0
 
     let arrivals =
         listed |> List.map (fun room -> room, lazy (arrival room)) |> Map.ofList
+
+    let quarryLife (room: string) =
+        pricing room |> Option.bind (fun view -> Facts.quarryLife view room)
+
+    let quarryLives =
+        listed |> List.map (fun room -> room, lazy (quarryLife room)) |> Map.ofList
 
     let once (memo: Map<string, Lazy<'a>>) (read: string -> 'a) (room: string) : 'a =
         match Map.tryFind room memo with
@@ -1006,13 +1073,7 @@ let ownFacts
 
     {
         Now = now
-        Rate =
-            fun room ->
-                paying room (fun () ->
-                    Map.tryFind room rates
-                    |> Option.map _.Value
-                    |> Option.defaultWith (fun () -> rate room))
-                |> Some
+        Rate = fun room -> paying room (fun () -> rate room) |> Some
         Worth =
             fun room ->
                 views
@@ -1033,6 +1094,11 @@ let ownFacts
         // No group, a cast lands wherever it is sent alike; a room no view
         // prices pays nothing, so its arrival bids nothing.
         Arrival = fun room -> Some(once arrivals arrival room)
+        QuarryLife = once quarryLives quarryLife
+        GroupLife =
+            match group with
+            | [] -> Engine.creepLifetime
+            | group -> group |> List.map _.Creep.TicksToLive |> List.max
         Sighted = sightedIn now views
         HomeThreatened =
             match casting with
@@ -1483,6 +1549,8 @@ let private campFacts (now: int) (reads: ExitRead list) (priced: ColonyView list
         Holds = fun _ -> Truth.Unknown
         Challenge = fun _ -> None
         Arrival = fun _ -> None
+        QuarryLife = fun _ -> None
+        GroupLife = Engine.creepLifetime
         Sighted = sightedIn now priced
         HomeThreatened =
             match reads |> List.choose _.View with

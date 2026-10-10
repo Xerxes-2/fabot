@@ -31,6 +31,9 @@ let private factsAt (now: int) (rates: (string * float) list) : OpFacts =
         Challenge = fun room -> Map.tryFind room rates
         // No group: a move lands at once.
         Arrival = fun room -> Map.tryFind room rates |> Option.map (fun _ -> 0)
+        // No quarry life read, and a cast's whole lifetime to fight.
+        QuarryLife = fun _ -> None
+        GroupLife = Engine.creepLifetime
         Sighted = fun _ -> true
         HomeThreatened = Truth.No
         ExitsUsed = lazy Truth.Unknown
@@ -163,6 +166,8 @@ let operationStepTests =
                         Holds = fun _ -> failwith "read with no op"
                         Challenge = fun _ -> failwith "priced with no op"
                         Arrival = fun _ -> failwith "priced with no op"
+                        QuarryLife = fun _ -> failwith "priced with no op"
+                        GroupLife = 0
                         Sighted = fun _ -> failwith "read with no op"
                         HomeThreatened = Truth.Unknown
                         ExitsUsed = lazy (failwith "read with no op")
@@ -529,8 +534,12 @@ let operationStepTests =
                     "with the group's walk to each quarry: held, all 44 ticks"
             }
 
+            // #663 (a), the latch's review: a move from the held room's
+            // quarry had to earn twice the held rate, a window of twice its
+            // horizon whatever the quarry's life, so a room paying 1.9 for a
+            // thousand ticks was never taken.
             test
-                "a room paying for the walk its move adds takes the latch once it has paid for the ticks the move takes, never before" {
+                "a room paying more over the span its move is realised takes the latch once its bid has stood for its horizon, never before; one whose quarry dies first never" {
                 let spec = sweep
 
                 let executing =
@@ -539,22 +548,32 @@ let operationStepTests =
                         RoomSince = 20
                     }
 
-                // The group at W1N1's quarry, W2N1's ten ticks off: W2N1
-                // paying 3 against 1 earns 30 over its ten, against W1N1's
-                // 10 over them and 10 over the walk the move adds.
-                let factsOn (paid: float) (now: int) =
+                // The group at W1N1's quarry, W2N1's ten ticks off, a cast's
+                // lifetime to fight: W2N1 earns `paid` from its tenth tick
+                // until its quarry (`life`, ticks from now) or the group
+                // ends; W1N1 1 a tick from now until the group ends.
+                let factsOn (paid: float) (life: int option) (now: int) =
                     { factsAt now [ "W1N1", 1.0; "W2N1", paid ] with
                         Holds = fun _ -> Truth.Yes
                         Loses = fun _ -> Truth.No
                         Arrival = fun room -> if room = "W2N1" then Some 10 else Some 0
+                        QuarryLife = fun room -> if room = "W2N1" then life else None
                     }
 
-                let run (paid: float) =
+                let runFor (life: int option) (paid: float) =
                     ((Some executing, []), [ 50..70 ])
                     ||> List.fold (fun (record, events) now ->
-                        let next, moved = Operations.advance (factsOn paid now) spec record
+                        let next, moved = Operations.advance (factsOn paid life now) spec record
                         next, events @ (moved |> List.map (fun event -> now, event)))
                     |> snd
+
+                let run = runFor None
+
+                let movedAt (events: (int * OpEvent) list) =
+                    events
+                    |> List.choose (function
+                        | now, OpEvent.Moved(_, _, _, _, room, _) -> Some(now, room)
+                        | _ -> None)
 
                 Expect.equal
                     (run 3.0)
@@ -571,14 +590,22 @@ let operationStepTests =
                     ]
                     "bidding from t50, it moves at t60, its ten ticks paid, with the numbers that decided it"
 
+                // Moved: on main 1.9 from W1N1's quarry never moved (under
+                // twice the held rate). Over a thousand ticks it earns
+                // 1.9 x 990 against W1N1's 1 x 1500.
+                Expect.equal
+                    (runFor (Some 1_000) 1.9 |> movedAt)
+                    [ 60, Some "W2N1" ]
+                    "paying 1.9 for a quarry living a thousand ticks: it moves once its bid has stood its ten"
+
                 Expect.isEmpty
-                    (run 1.9)
-                    "paying under twice W1N1 from W1N1's quarry: the walk the move adds is not paid, it stays"
+                    (runFor (Some 20) 1.9)
+                    "paying 1.9 for a quarry dying in twenty ticks: ten ticks of it never pay for W1N1's span, it stays"
 
                 // Equidistant, the move adds no walk: any surplus that holds
                 // for its horizon pays.
                 let level (now: int) =
-                    { factsOn 1.1 now with
+                    { factsOn 1.1 None now with
                         Arrival = fun _ -> Some 10
                     }
 
@@ -711,13 +738,20 @@ let operationStepTests =
                         Sighted = fun room -> room = "W1N1"
                     }
 
+                // Moved: each value below was the gain over twice the move's
+                // horizon (main); now the gain over the span the move is
+                // realised (the group's lifetime here), a tick of its window
+                // over the stride a look serves: the pursuit band's unit.
+                let lifetime = float Engine.creepLifetime
+                let stride = float Facts.lookStride
+
                 Expect.equal
                     (Operations.latchLooks facts spec (Some executing))
-                    [ "W2N1", (55.0 - 13.0) * 30.0 ]
-                    "W2N1: the surplus over the thirty ticks its move takes; W3N1 below the held rate, none"
+                    [ "W2N1", (55.0 - 13.0) * stride ]
+                    "W2N1: the surplus a tick over the stride; W3N1 below the held rate, none"
 
                 // The held room's quarry at hand, W2N1's thirty ticks off: the
-                // move must also pay the held room's yield over the walk it adds.
+                // move forgoes the held room's yield over the walk it adds.
                 let farther =
                     { facts with
                         Arrival = fun room -> if room = "W1N1" then Some 0 else Some 30
@@ -725,17 +759,20 @@ let operationStepTests =
 
                 Expect.equal
                     (Operations.latchLooks farther spec (Some executing))
-                    [ "W2N1", 55.0 * 30.0 - 13.0 * 60.0 ]
+                    [
+                        "W2N1",
+                        (55.0 * (lifetime - 30.0) - 13.0 * lifetime) / (lifetime - 30.0) * stride
+                    ]
                     "the walk the move adds is the bid's: priced as the bid would"
 
                 Expect.isEmpty
                     (Operations.latchLooks
                         { farther with
-                            Rate = fun room -> if room = "W2N1" then Some 20.0 else Some 13.0
+                            QuarryLife = fun room -> if room = "W2N1" then Some 60 else None
                         }
                         spec
                         (Some executing))
-                    "remembered at 20 from the held room's quarry: 600 over the move against 780 staying, no look"
+                    "its quarry dying in sixty ticks: 55 over thirty against 13 over the group's span staying, no look"
 
                 Expect.isEmpty
                     (Operations.latchLooks facts spec None)
@@ -792,9 +829,13 @@ let operationStepTests =
                     }
 
                 // From t50: a stand-down's look at W4N1 open to t50, worth
-                // more than any kill; a remembered body in W5N1 worth 500 to
-                // the pursuit, under W2N1's latch move (1,260).
-                let run (remembered: float) =
+                // more than any kill; a remembered body in W5N1 worth
+                // `pursuit` over the stride to the pursuit, against W2N1's
+                // latch move, (55 - 13) x 5 = 210 over the stride. Moved by
+                // the ship-gate review (F3): W5N1 was 500 under a latch look
+                // priced over twice the horizon (1,260); the look is now in
+                // the band's unit, so the lesser pursuit is 100.
+                let runWith (pursuit: float) (remembered: float) =
                     ((Some executing, Map.empty, Set.empty, []), [ 50..90 ])
                     ||> List.fold (fun (record, lastSeen, sighted, trace) now ->
                         let facts = factsOn remembered sighted now
@@ -802,7 +843,7 @@ let operationStepTests =
 
                         let requests =
                             request LookBand.Danger (Some 50) ("W4N1", 100.0)
-                            :: request LookBand.Pursuit None ("W5N1", 500.0)
+                            :: request LookBand.Pursuit None ("W5N1", pursuit)
                             :: (Operations.latchLooks facts sweep next
                                 |> List.map (request LookBand.Pursuit None))
 
@@ -835,7 +876,17 @@ let operationStepTests =
                         ])
                     |> fun (_, _, _, trace) -> trace
 
+                let run = runWith 100.0
                 let trace = run 55.0
+
+                // The ship-gate review (F3): a dark outpost's trespasser look
+                // worth more over the stride than the latch move's goes first.
+                Expect.equal
+                    (runWith 300.0 55.0
+                     |> List.map (fun (now, looked, _, _) -> now, looked)
+                     |> List.take 3)
+                    [ 50, Some "W4N1"; 51, Some "W5N1"; 52, Some "W2N1" ]
+                    "a pursuit look worth 300 over the stride outranks the latch's 210"
 
                 let looksAt room =
                     trace |> List.filter (fun (_, looked, _, _) -> looked = Some room)
@@ -878,17 +929,21 @@ let operationStepTests =
                         Bids = [ "W2N1", 49 ]
                     }
 
+                // Moved: W2N1 out of sight this tick. In sight, a held room
+                // paying nothing forfeits nothing to a wrong move, so its bid
+                // no longer waits and `Outpaid` would move it first.
                 let spent =
                     { factsAt 50 [ "W1N1", 0.0; "W2N1", 1.0 ] with
                         Holds = fun room -> if room = "W1N1" then Truth.No else Truth.Yes
                         Loses = fun _ -> Truth.No
                         Arrival = fun room -> if room = "W2N1" then Some 30 else Some 0
+                        Sighted = fun room -> room = "W1N1"
                     }
 
                 Expect.equal
                     (Operations.truth spent sweep executing OpGuard.Outpaid)
                     Truth.No
-                    "the premise: W2N1 has bid for one tick of its thirty"
+                    "the premise: W2N1, its bid one tick old, is not seen out-paying this tick"
 
                 let moved, events = Operations.advance spent sweep (Some executing)
 
@@ -910,6 +965,115 @@ let operationStepTests =
                         )
                     ]
                     "its event: the room it left paid nothing"
+            }
+
+            // #663 (b), the latch's review: a held room paying nothing but not
+            // exhausted (its quarry Unknown: no pricing view, or a ghost past
+            // its odds awaiting a look) waited out the bid's whole horizon.
+            test
+                "a held room paying nothing, not exhausted, moves the tick a room is seen out-paying: a wrong move forfeits nothing, so the bid waits as long as staying is worth" {
+                let executing =
+                    { recordAt OpPhase.Execute 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                    }
+
+                // W1N1's quarry unknown, the group at it; W2N1 paying 3, its
+                // quarry thirty ticks off, in sight on every tick or none.
+                let factsOn (held: float) (sighted: bool) (now: int) =
+                    { factsAt now [ "W1N1", held; "W2N1", 3.0 ] with
+                        Holds = fun _ -> Truth.Unknown
+                        Loses = fun _ -> Truth.Unknown
+                        Arrival = fun room -> if room = "W2N1" then Some 30 else Some 0
+                        Sighted = fun room -> room = "W1N1" || sighted
+                    }
+
+                let movedAt (held: float) (sighted: bool) =
+                    ((Some executing, None), [ 50..90 ])
+                    ||> List.fold (fun (record, moved) now ->
+                        let next, events =
+                            Operations.advance (factsOn held sighted now) sweep record
+
+                        next,
+                        match moved, events with
+                        | None, OpEvent.Moved(_, _, _, 1, Some "W2N1", _) :: _ -> Some now
+                        | _ -> moved)
+                    |> snd
+
+                Expect.equal
+                    (Operations.truth (factsOn 0.0 true 50) sweep executing OpGuard.Exhausted)
+                    Truth.Unknown
+                    "the premise: W1N1 is not exhausted"
+
+                // On main it moved at t80, its thirty ticks waited.
+                Expect.equal
+                    (movedAt 0.0 true)
+                    (Some 50)
+                    "staying earns nothing: it moves the tick its bid starts"
+
+                // A wrong move forfeits 0.01 x 1500 = 15; a tick of waiting
+                // costs the surplus, 2.99: the bid waits five ticks.
+                Expect.equal
+                    (movedAt 0.01 true)
+                    (Some 56)
+                    "staying earns a little: the bid waits what it is worth"
+
+                Expect.equal
+                    (movedAt 1.0 true)
+                    (Some 80)
+                    "staying earns 1 a tick: the bid waits its whole horizon"
+
+                Expect.isNone
+                    (movedAt 0.0 false)
+                    "never seen, W2N1 priced from memory starts no bid: memory alone moves no latch"
+            }
+
+            // The ship-gate review (F1): the held room's rate reads this tick's
+            // catch odds, 0 for a kiter turning away while `Holds` keeps it
+            // Yes. A forfeit read off that dip let one tick move the latch,
+            // and the kiter's room, as challenger, never stood its horizon
+            // to take it back: the ping-pong's shape, stuck.
+            test
+                "a held room whose kiter's catch dips to nothing every other tick keeps the latch against a steady room; one whose quarry dies before the group stands at it gives it up at once" {
+                let executing =
+                    { recordAt OpPhase.Execute 40 with
+                        Room = Some "W1N1"
+                        RoomSince = 20
+                    }
+
+                let factsOn (held: int -> float) (life: int option) (now: int) =
+                    { factsAt now [ "W1N1", held now; "W2N1", 7.0 ] with
+                        Holds = fun _ -> Truth.Yes
+                        Loses = fun _ -> Truth.No
+                        Arrival = fun room -> if room = "W2N1" then Some 30 else Some 10
+                        QuarryLife = fun room -> if room = "W1N1" then life else None
+                    }
+
+                let moves (held: int -> float) (life: int option) =
+                    ((Some executing, []), [ 50..120 ])
+                    ||> List.fold (fun (record, moved) now ->
+                        let next, events = Operations.advance (factsOn held life now) sweep record
+
+                        next,
+                        moved
+                        @ (events
+                           |> List.choose (function
+                               | OpEvent.Moved(_, _, _, _, room, _) -> Some(now, room)
+                               | _ -> None)))
+                    |> snd
+
+                // The kiter caught at 13 on even ticks, at 0 on odd: W2N1's
+                // bid starts on each odd tick and falls on the next.
+                Expect.isEmpty
+                    (moves (fun now -> if now % 2 = 0 then 13.0 else 0.0) None)
+                    "holding its quarry, the held room's dips forfeit no less: every bid waits its thirty ticks, and none stands them"
+
+                // W1N1's quarry dies in five ticks, the group ten off: staying
+                // earns nothing whatever its rate reads.
+                Expect.equal
+                    (moves (fun _ -> 13.0) (Some 5))
+                    [ 50, Some "W2N1" ]
+                    "its quarry gone before the group stands at it, staying forfeits nothing: it moves the tick W2N1 is seen out-paying"
             }
 
             test "Unknown never transitions, and hides the exits after it" {

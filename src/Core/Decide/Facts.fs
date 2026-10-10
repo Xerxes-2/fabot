@@ -4786,6 +4786,19 @@ type Mustering =
 let landsIn (at: RoomPos) (fighter: Fighter) (room: string) : int =
     doorTicks at (paceOf fighter) room
 
+/// Whether, in a room not ours to keep (`contestOurs`), its owner's defence
+/// answers (`RoomWorth.Response`) bodies landing `spread` ticks ahead of the
+/// rest of their group before the rest land: the muster's catch of a
+/// vanguard beside the escort's, and what keeps a vanguard from standing
+/// for its group's landing (`groupLanding`).
+let private answeredAhead
+    (view: ColonyView)
+    (room: string)
+    (worth: RoomWorth)
+    (spread: int)
+    : bool =
+    not (contestOurs view room) && spread > worth.Response
+
 /// The one muster rule (#535, #658, #663 M3): whether a fight's group waits
 /// at its last crossing for the rest of it, priced off the room's worth
 /// (`roomWorth`) whatever the room's phase, and its price a tick where it
@@ -4832,7 +4845,7 @@ let muster (view: ColonyView) (room: string) (group: Mustering list) : float opt
             else
                 let beaten = beats lone
 
-                let caught = beaten || not (contestOurs view room) && spread > worth.Response
+                let caught = beaten || answeredAhead view room worth spread
 
                 let loss = if caught then vanguard |> List.sumBy _.Energy else 0.0
 
@@ -5832,52 +5845,125 @@ let castRateIn (view: ColonyView) (room: string) : float =
                 (spawnRounds view cast.Template cast.Blocks cast.Bodies + walk)
                 room
 
-/// What a group standing where it stands earns in a room a tick
-/// (`roomRate`, each body at its odds), its arrival its slowest body's walk
-/// (`doorTicks`); nothing off the grid.
-let private groupRateIn
-    (view: ColonyView)
-    (placed: (RoomPos * Fighter) list)
-    (dismantle: int)
-    (room: string)
-    : float =
-    match placed |> List.map (fun (at, fighter) -> doorTicks at (paceOf fighter) room) with
+/// What bodies of ours standing where they stand earn in a room a tick
+/// (#663 S7c, `roomRate`, each body at its odds), landing with the last of
+/// them (`doorTicks` at their plain pace), dismantling with their live WORK:
+/// an operation's price for the bodies of its group that realise a room
+/// (`groupLanding`). Nothing for none, or one off the grid.
+let groupRate (view: ColonyView) (bodies: (CreepInfo * RoomPos) list) (room: string) : float =
+    match
+        bodies
+        |> List.map (fun (creep, at) -> doorTicks at (paceOf (Fighter.ofCreep creep)) room)
+    with
     | [] -> 0.0
     | arrivals ->
         match List.max arrivals with
         | System.Int32.MaxValue -> 0.0
-        | arrival -> roomRate Quarry.Reading.Value view (List.map snd placed) dismantle arrival room
+        | lands ->
+            roomRate
+                Quarry.Reading.Value
+                view
+                (bodies |> List.map (fst >> Fighter.ofCreep))
+                (dismantleOf (List.map fst bodies))
+                lands
+                room
 
-/// What a group of ours earns in a room a tick where it stands
-/// (`groupRateIn`, each body at its odds), its dismantle its live WORK's
-/// (#663 S7c): an operation's price for its own group.
-let groupRate (view: ColonyView) (group: (CreepInfo * RoomPos) list) (room: string) : float =
-    groupRateIn
-        view
-        (group |> List.map (fun (creep, at) -> at, Fighter.ofCreep creep))
-        (dismantleOf (List.map fst group))
-        room
+/// What a group of ours standing where it stands earns in a room a tick,
+/// and the bodies that realise it (#663): of the group in the order its
+/// bodies land (`doorTicks` at their plain pace), the first so many whose
+/// rate (`groupRate`) is the best. A later body joins where waiting for it
+/// raises what the group earns a tick: a straggler that adds less than its
+/// wait costs never sets the landing, and one the vanguard cannot win
+/// without does (alone it loses the exchange, and earns nothing). Bodies
+/// ahead of the rest stand for the group only where the muster would let
+/// them land alone (`answeredAhead`): where the owner's defence answers them
+/// before the rest land, the muster holds them and the group lands
+/// together. Ties go to the more bodies. Nothing, the whole group, for no
+/// group or one off the grid.
+let groupLanding
+    (view: ColonyView)
+    (group: (CreepInfo * RoomPos) list)
+    (room: string)
+    : float * (CreepInfo * RoomPos) list =
+    let landing =
+        group
+        |> List.mapi (fun index (creep, at) ->
+            index, doorTicks at (paceOf (Fighter.ofCreep creep)) room)
 
-/// The ticks a group of ours takes to stand at a room's quarry (#663): its
-/// slowest body's walk at its plain pace to within its reach of the nearest
-/// body the room's
-/// worth values (`RoomWorth.values`, in sight or laid back as the sweep
-/// prices them, `sweepPricing`), as the crow flies across borders, as
-/// `doorTicks` reads a walk; to the room itself (`doorTicks`) where it values
-/// none. Where a move into the room is realised, which its door alone
-/// understates by the walk inside. None for no group, or one off the grid.
+    if
+        List.isEmpty landing
+        || landing |> List.exists (fun (_, lands) -> lands = System.Int32.MaxValue)
+    then
+        0.0, group
+    else
+        let worth = roomWorth view room
+        let last = landing |> List.map snd |> List.max
+
+        landing
+        |> List.sortBy snd
+        |> List.fold
+            (fun (first: Set<int>, best: (float * (CreepInfo * RoomPos) list) option) (index, lands) ->
+                let first = Set.add index first
+
+                if answeredAhead view room worth (last - lands) then
+                    first, best
+                else
+                    // In the group's own order, as the whole group is priced.
+                    let bodies =
+                        group
+                        |> List.indexed
+                        |> List.filter (fst >> first.Contains)
+                        |> List.map snd
+
+                    let rate = groupRate view bodies room
+
+                    match best with
+                    | Some(top, _) when top > rate -> first, best
+                    | _ -> first, Some(rate, bodies))
+            (Set.empty, None)
+        |> snd
+        |> Option.defaultValue (0.0, group)
+
+/// The bodies in a room its worth values (`RoomWorth.values`, in sight or
+/// laid back as the sweep prices them, `sweepPricing`): its quarry.
+let private quarryOf (view: ColonyView) (room: string) : HostileInfo list =
+    let values = RoomWorth.values Quarry.Reading.Value (roomWorth view room)
+
+    (sweepPricing view room).Hostiles
+    |> List.filter (fun h ->
+        h.Pos.Room = room && Map.tryFind h.Id values |> Option.exists (fun v -> v > 0.0))
+
+/// The ticks a room's quarry lasts (#663): the longest life of its bodies
+/// (`quarryOf`), a spawning one's a whole lifetime. What a room pays is
+/// earned off them, and none earns past its death. None where it values
+/// none.
+let quarryLife (view: ColonyView) (room: string) : int option =
+    match quarryOf view room with
+    | [] -> None
+    | bodies ->
+        bodies
+        |> List.map (fun h ->
+            if h.TicksToLive >= 1 then
+                h.TicksToLive
+            else
+                Engine.creepLifetime)
+        |> List.max
+        |> Some
+
+/// The ticks the bodies of a group of ours take to stand at a room's quarry
+/// (#663), the bodies that realise its rate (`groupLanding`) where an
+/// operation asks: the slowest one's walk at its plain pace to within its
+/// reach of the nearest body of the quarry (`quarryOf`), as the crow flies
+/// across borders, as `doorTicks` reads a walk; to the room itself
+/// (`doorTicks`) where it values none. Where a move into the room is
+/// realised, which its door alone understates by the walk inside. None for
+/// no bodies, or one off the grid.
 let groupArrival
     (view: ColonyView)
     (group: (CreepInfo * RoomPos) list)
     (room: string)
     : int option =
-    let values = RoomWorth.values Quarry.Reading.Value (roomWorth view room)
-
-    let quarry =
-        (sweepPricing view room).Hostiles
-        |> List.filter (fun h ->
-            h.Pos.Room = room && Map.tryFind h.Id values |> Option.exists (fun v -> v > 0.0))
-        |> List.map _.Pos
+    let quarry = quarryOf view room |> List.map _.Pos
 
     let walk (creep: CreepInfo, at: RoomPos) =
         let fighter = Fighter.ofCreep creep

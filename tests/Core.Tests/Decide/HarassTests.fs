@@ -2735,6 +2735,116 @@ let sweepGroupTests =
     testList
         "the sweep's group over every colony, and its muster"
         [
+            // #663 (c), the latch's review: the horizon was the slowest
+            // body's walk, so a reinforcement 115-138 ticks out set it for a
+            // group whose body on the doorstep already wins the room.
+            test
+                "a straggler 130 ticks out sets neither the rate's landing nor the latch's horizon where a body five ticks out realises the room, unless the owner answers that body first" {
+                let near = ranger "ranger-near"
+                let far = ranger "ranger-far"
+                // Five ticks from the west room's edge, and four rooms off.
+                let nearAt = RoomPos.at "W1N1" { X = 5; Y = 20 }
+                let farAt = RoomPos.at "W5N1" { X = 25; Y = 25 }
+
+                // The west room's owner answering a body landing alone in
+                // `response` ticks.
+                let answering (response: int) =
+                    let colony =
+                        sweeping
+                            [ near, nearAt; far, farAt ]
+                            [ theirsIn westRoom "miner-w" { X = 20; Y = 20 } [ Work; Work; Move ] ]
+
+                    let colony =
+                        { colony with
+                            World =
+                                { colony.World with
+                                    Responses = Map.ofList [ westRoom, response ]
+                                }
+                        }
+
+                    let held =
+                        Map.ofList [ for r in [ near; far ] -> r.Name, taskId (operating westRoom) ]
+
+                    let spec = (Operations.sweepSpec [] [ colony ]).Value
+                    let priced = Facts.layWorths [ colony ]
+
+                    let group =
+                        Operations.groupIn spec.Id (set [ harassRoom; westRoom ]) held priced
+
+                    List.head priced,
+                    Operations.ownFacts
+                        colony.Time
+                        (fun _ -> true)
+                        spec
+                        None
+                        (fun _ -> priced)
+                        group
+                        priced,
+                    group |> List.map (fun m -> m.Creep, m.At)
+
+                // Nothing of the owner's ever answered.
+                let view, facts, placed = answering System.Int32.MaxValue
+
+                Expect.equal
+                    (Facts.landsIn nearAt (Fighter.ofCreep near) westRoom)
+                    5
+                    "the premise: the vanguard lands in five ticks"
+
+                Expect.equal
+                    (placed |> List.map (fst >> _.Name) |> List.sort)
+                    [ far.Name; near.Name ]
+                    "the premise: both bodies are the group"
+
+                Expect.isGreaterThan
+                    (Facts.groupArrival view placed westRoom |> Option.defaultValue 0)
+                    100
+                    "the premise: the whole group stands at the quarry over a hundred ticks out"
+
+                Expect.equal
+                    (Facts.groupLanding view placed westRoom |> snd |> List.map (fst >> _.Name))
+                    [ near.Name ]
+                    "the near body realises the room alone: waiting for the straggler earns less a tick"
+
+                Expect.equal
+                    (facts.Arrival westRoom)
+                    (Facts.groupArrival view [ near, nearAt ] westRoom)
+                    "the latch's horizon is the near body's walk"
+
+                Expect.isLessThan
+                    (facts.Arrival westRoom |> Option.defaultValue System.Int32.MaxValue)
+                    50
+                    "tens of ticks, not the straggler's hundreds"
+
+                Expect.equal
+                    (facts.Rate westRoom)
+                    (Some(Facts.groupRate view [ near, nearAt ] westRoom))
+                    "and the rate lands with it"
+
+                // The ship-gate review (F2): where the owner answers the
+                // vanguard before the straggler lands, the muster holds it
+                // (`Facts.muster`, the same catch), so the group lands
+                // together and the rate and horizon are the group's.
+                let view, facts, placed = answering 20
+
+                Expect.equal
+                    (Facts.groupLanding view placed westRoom
+                     |> snd
+                     |> List.map (fst >> _.Name)
+                     |> List.sort)
+                    [ far.Name; near.Name ]
+                    "answered in twenty ticks, the vanguard does not stand for the group"
+
+                Expect.equal
+                    (facts.Arrival westRoom)
+                    (Facts.groupArrival view placed westRoom)
+                    "the latch's horizon is the whole group's"
+
+                Expect.equal
+                    (facts.Rate westRoom)
+                    (Some(Facts.groupRate view placed westRoom))
+                    "and so is the rate"
+            }
+
             // Live t1,038,786 (#658): W17S29's ranger engaged a miner in
             // W18S27 kept that Guard pooled (the held fight's latch) and
             // W15S28 cast for it, while the sweep worked W19S26: two rooms.
@@ -4278,9 +4388,11 @@ let sweepVisionTests =
                 let looks = north.World.OperationLooks
 
                 // The facts the latch reads, as `lay` reads them: the group's
-                // rate in each room and its walk to each quarry.
+                // rate in each room, its walk to each quarry, each quarry's
+                // life and the group's.
+                let spec = (Operations.sweepSpec [] [ colony ]).Value
+
                 let facts =
-                    let spec = (Operations.sweepSpec [] [ colony ]).Value
                     let priced = Facts.layWorths [ colony ]
 
                     Operations.ownFacts
@@ -4302,12 +4414,25 @@ let sweepVisionTests =
                     (rate westRoom > rate harassRoom && walk westRoom > walk harassRoom)
                     "the premise: the west room remembered paying more, its quarry farther"
 
+                // Each room earns from the group at its quarry until the
+                // group, the deadline or the quarry ends.
+                let earning room =
+                    let realisable = min facts.GroupLife (spec.Limits.Deadline - colony.Time)
+
+                    let ends =
+                        facts.QuarryLife room
+                        |> Option.map (min realisable)
+                        |> Option.defaultValue realisable
+
+                    max 0.0 (float ends - walk room)
+
                 Expect.floatClose
                     Accuracy.high
                     (Map.tryFind westRoom looks |> Option.defaultValue 0.0)
-                    (rate westRoom * walk westRoom
-                     - rate harassRoom * (walk westRoom + walk westRoom - walk harassRoom))
-                    "the west room asks a look worth the move's surplus over its horizon, net of the walk it adds"
+                    ((rate westRoom * earning westRoom - rate harassRoom * earning harassRoom)
+                     / earning westRoom
+                     * float Facts.lookStride)
+                    "the west room asks a look worth the move's surplus over the span it is realised, its walk a cost inside it, a tick of it over the stride"
 
                 Expect.contains
                     (asked LookBand.Pursuit north)
