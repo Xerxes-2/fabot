@@ -431,6 +431,20 @@ module Outpost =
             Controller = "6a8caa89dd4872bccd318e4c", { Room = "W16S29"; X = 23; Y = 32 }
         }
 
+    /// W17S29's west outpost, declared 2026-10-10 (user): giaco's remote,
+    /// left with its reservation running out at t1,083,748; its roads and
+    /// two containers stand. Ids and tiles are the committed capture's.
+    let w18s29: Outpost =
+        {
+            RoomName = "W18S29"
+            Sources =
+                [
+                    "6a8caa72dd4872bccd318b35", { Room = "W18S29"; X = 11; Y = 5 }
+                    "6a8caa72dd4872bccd318b36", { Room = "W18S29"; X = 38; Y = 38 }
+                ]
+            Controller = "6a8caa72dd4872bccd318b37", { Room = "W18S29"; X = 38; Y = 43 }
+        }
+
     /// W17S25's first outpost, declared 2026-10-04 (user): one exit south, a
     /// single source (28,10), unreserved since our harassment drove
     /// Trepidimous' miners out; still harassed (the harassment cut lets an
@@ -1562,7 +1576,7 @@ module Colony =
             // Claimed t808,328, and off W15S28's outposts since (#404).
             {
                 Home = "W17S29"
-                Outposts = [ Outpost.w16s29 ]
+                Outposts = [ Outpost.w16s29; Outpost.w18s29 ]
                 Errands = []
                 Salvage = []
                 Mother = Some "W15S28"
