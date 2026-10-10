@@ -79,12 +79,22 @@ export async function usernamesOf(api, ids) {
 }
 
 // A body as counts by part, `16w 16c 16m`, in the order the parts first
-// appear; `tough` and `claim` keep enough letters to stay apart.
+// appear; `tough` and `claim` keep enough letters to stay apart. A boosted
+// run prints its tier, `10h(T3)`: T3 compounds start with X, T2 carry a 2.
 const PART = { work: "w", carry: "c", move: "m", attack: "a", ranged_attack: "r", heal: "h", tough: "t", claim: "cl" };
+export const boostTier = (boost) => (!boost ? 0 : boost.startsWith("X") ? 3 : boost.includes("2") ? 2 : 1);
 export const bodySummary = (body) => {
   const counts = new Map();
-  for (const part of body ?? []) counts.set(part.type, (counts.get(part.type) ?? 0) + 1);
-  return [...counts].map(([type, n]) => `${n}${PART[type] ?? type}`).join(" ");
+  for (const part of body ?? []) {
+    const key = `${part.type}:${boostTier(part.boost)}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([key, n]) => {
+      const [type, tier] = key.split(":");
+      return `${n}${PART[type] ?? type}${tier === "0" ? "" : `(T${tier})`}`;
+    })
+    .join(" ");
 };
 
 // The actions a creep logged this tick, `attack→24,31 move`; the engine
