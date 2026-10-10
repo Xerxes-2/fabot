@@ -1205,8 +1205,8 @@ let private strikeGone
                             List.contains room declared
                             && Decide.Facts.chased
                                 view
-                                (Decide.Facts.answered view room)
-                                false
+                                (fun () -> Decide.Facts.answered view room)
+                                (fun () -> false)
                                 room
                     }
 

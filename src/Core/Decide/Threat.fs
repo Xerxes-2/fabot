@@ -3767,7 +3767,8 @@ let private threatsHeldBy (view: ColonyView) atlas (held: HeldTaskFacts) : Threa
     let pursuedRooms =
         verdicts
         |> Map.keys
-        |> Seq.filter (fun room -> chased view (verdictOf room) (kept room) room)
+        |> Seq.filter (fun room ->
+            chased view (fun () -> verdictOf room) (fun () -> kept room) room)
         |> Set.ofSeq
 
     // Whether a ranger answers a pursued raid: rangers win it and not its

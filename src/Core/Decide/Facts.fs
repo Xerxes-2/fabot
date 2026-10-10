@@ -7658,18 +7658,25 @@ let internal rangersWin (view: ColonyView) (room: string) : int option =
 /// together; the stand-down's row latches it (`OutpostEpisode.Chased`) for
 /// the blind ticks after, the chase proper. Read off the room's `verdict`
 /// (`answered`). Never a [[sweep]] candidate (#658): the sweep fights in the
-/// one it works and leaves the rest.
-let internal chased (view: ColonyView) (verdict: Answer * bool) (kept: bool) (room: string) : bool =
+/// one it works and leaves the rest. The verdict and `kept` are read last, and
+/// only for a raided room: a room's verdict is priced over the fleet, and a
+/// colony sees hostiles in many rooms no raid of ours stands in.
+let internal chased
+    (view: ColonyView)
+    (verdict: unit -> Answer * bool)
+    (kept: unit -> bool)
+    (room: string)
+    : bool =
     room <> SpatialInfo.homeName view.Spatial
     && not (Set.contains room (rangerRooms view))
     && not (Set.contains room view.HarassCast)
     && raided view room
-    && (match verdict with
+    && (match verdict () with
         | Answer.Lose, _ -> false
         | _, false -> true
         | _, true ->
             Set.contains room view.RaidedOutposts
-            || kept && (castKites view room || Option.isSome (rangersWin view room)))
+            || kept () && (castKites view room || Option.isSome (rangersWin view room)))
 
 /// Whether nothing of ours wins the raid standing in a room (`Answer.Lose`):
 /// in a ranger room, the raid its row casts nobody into, and the residents
