@@ -1180,6 +1180,11 @@ let private campHolders (id: string) (held: Assignments) (views: ColonyView list
             |> Option.map (fun at -> { Creep = creep; At = at })))
     |> List.distinctBy _.Creep.Name
 
+/// Whether a body of a camp's group has landed in its room: where the
+/// group stands at the exit (`OpGuard.Arrived`).
+let private landedIn (room: string) (m: Member) : bool =
+    Facts.landsIn m.At (Fighter.ofCreep m.Creep) room = 0
+
 /// Whether a phase of a spec lays work: one with a job.
 let private laysWork (spec: OperationSpec) (phase: OpPhase) : bool =
     spec.Phases
@@ -1263,15 +1268,28 @@ let private exitReads
             | _ -> Truth.Unknown
 
         // The traffic it is priced off: the window's bodies still in the
-        // stream — none known gone (a kill takes one out), and in its run
-        // none silent for longer than its own mean gap between landings
-        // (the full ticks watched over its landings), so traffic deterred
-        // stops paying within each body's own gap.
+        // stream — none known gone (a kill takes one out), and, once its
+        // group has held the exit in this run, none silent for longer than
+        // its own mean gap between landings (the full ticks watched over its
+        // landings), its silence counted from the run's start, never before
+        // it — so traffic deterred stops paying within each body's own gap.
+        // Until the group has held the exit the run is priced as it began.
         let gone (id: string) =
             priced
             |> List.exists (fun view ->
                 Map.tryFind id view.World.Quarries
                 |> Option.exists (fun track -> track.Gone.IsSome))
+
+        // Held from the first tick a body of the group landed for the rest of
+        // the run: a run enters Execute only on `Arrived`, so its phase keeps
+        // it once that body steps out or dies.
+        let holding =
+            group |> List.exists (landedIn exit.Camp)
+            || running
+               && record |> Option.exists (fun record -> record.Phase = OpPhase.Execute)
+
+        // Read only while holding, which only a running record does.
+        let started = record |> Option.map _.Started |> Option.defaultValue now
 
         let arrivals =
             match used with
@@ -1281,11 +1299,13 @@ let private exitReads
                 |> List.groupBy (fun (_, h) -> h.Id)
                 |> List.filter (fun (id, landings) ->
                     not (gone id)
-                    && (not running
+                    && (not holding
                         || (let last = landings |> List.map fst |> List.max
 
                             let silent =
-                                watched |> List.filter (fun tick -> tick > last) |> List.length
+                                watched
+                                |> List.filter (fun tick -> tick > last && tick >= started)
+                                |> List.length
 
                             float silent < float (List.length watched)
                                            / float (List.length landings))))
@@ -1445,9 +1465,6 @@ let private campFacts (now: int) (reads: ExitRead list) (priced: ColonyView list
         | Some _ -> Truth.Yes
         | None -> Truth.Unknown
 
-    let landed (room: string) (m: Member) =
-        Facts.landsIn m.At (Fighter.ofCreep m.Creep) room = 0
-
     {
         Now = now
         Rate =
@@ -1460,7 +1477,7 @@ let private campFacts (now: int) (reads: ExitRead list) (priced: ColonyView list
                 |> Option.map _.Value
         Warm = fun room -> readOf room |> Option.exists (fun read -> read.Used <> Truth.Unknown)
         Arrived =
-            atWorked (fun read -> read.Group |> List.exists (landed read.Exit.Camp) |> truthOf)
+            atWorked (fun read -> read.Group |> List.exists (landedIn read.Exit.Camp) |> truthOf)
         Assembled = atWorked (fun read -> truthOf (not (List.isEmpty read.Group)))
         Loses = fun room -> readOf room |> Option.map exitLoses |> Option.defaultValue Truth.Unknown
         Holds = fun _ -> Truth.Unknown

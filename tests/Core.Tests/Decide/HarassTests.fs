@@ -4470,11 +4470,25 @@ let private campRunning (started: int) : OpRecord =
         Bids = []
     }
 
-/// The exit camp moved on from its running record and laid over one colony.
-let private campRun (record: OpRecord) (colony: ColonyView) =
-    match Operations.lay [ campWire ] Map.empty [ record ] [ colony ] with
+/// The exit camp moved on from its running record and laid over one colony,
+/// with these Tasks held last tick.
+let private campRunHeld (held: Assignments) (record: OpRecord) (colony: ColonyView) =
+    match Operations.lay [ campWire ] held [ record ] [ colony ] with
     | [ laid ], records, events -> laid, records, events
     | _ -> failtest "one colony laid"
+
+/// The exit camp moved on from its running record and laid over one colony.
+let private campRun (record: OpRecord) (colony: ColonyView) = campRunHeld Map.empty record colony
+
+/// The camp's cast: a 4-block swing, and the exit's Task it holds.
+let private campSwing =
+    creepWith "guard-camp" 0 0 (List.replicate 4 Bodies.guardPattern.Block |> List.concat)
+
+let private campHeld: Assignments =
+    Map.ofList
+        [
+            campSwing.Name, taskId (Operate(Operations.campWorkId "camp" harassRoom, ""))
+        ]
 
 [<Tests>]
 let exitCampTests =
@@ -5003,12 +5017,15 @@ let exitCampTests =
             // for 1,500 ticks after the traffic stopped.
             test
                 "traffic deterred in its run stops it paying once each body is silent past its own gap" {
-                let colony = camped 3200 0 100 false true []
+                // Its swing holding the exit's Task, standing a step in.
+                let colony =
+                    camped 3200 0 100 false true []
+                    |> standingThere [ campSwing, { X = 25; Y = 1 } ]
+
                 let now = colony.Time
 
                 // Ten miners each landing four times, every 25 ticks
-                // watched — the newest landing `last` ticks back. Their
-                // kills pay the cast still to come (no body holds its Task).
+                // watched — the newest landing `last` ticks back.
                 let shuttling (last: int) =
                     colony
                     |> landing
@@ -5017,20 +5034,146 @@ let exitCampTests =
                                 for id in 1..10 -> now - last - 25 * trip, lander $"miner-{id}" 25
                         ]
 
-                let _, _, events = campRun (campRunning (now - 50)) (shuttling 10)
+                let _, _, events = campRunHeld campHeld (campRunning (now - 50)) (shuttling 10)
 
                 Expect.isEmpty
                     events
                     "each last seen ten ticks back, inside its 25-tick gap: still paying"
 
-                let _, records, events = campRun (campRunning (now - 50)) (shuttling 30)
+                let _, records, events =
+                    campRunHeld campHeld (campRunning (now - 50)) (shuttling 30)
 
                 Expect.equal
                     events
                     [ OpEvent.Ended("camp", OpEnd.Done) ]
-                    "each silent 30 ticks, past its gap: out of the stream, done"
+                    "each silent 30 ticks of its run, past its gap: out of the stream, done"
 
                 Expect.equal (records |> List.map _.Ended) [ Some OpEnd.Done ] "its record ended"
+
+                let _, _, events = campRunHeld campHeld (campRunning (now - 5)) (shuttling 30)
+
+                Expect.isEmpty
+                    events
+                    "silent 30 ticks, but the run watched only 5 of them: no stop told from a gap yet"
+            }
+
+            // Live 2026-10-10, W18S27: begun at t1079321 on 8 landings by 2
+            // bodies over 291 ticks watched, ended Done in Muster three ticks
+            // later, both bodies read silent past their 73-tick gap before
+            // any body of the camp stood at the exit.
+            test "begun on its price, it is priced as begun until its group stands at the exit" {
+                let colony = camped 3200 0 291 false true []
+                let now = colony.Time
+
+                // Two reservers landing together every 72 ticks watched, the
+                // newest pair 75 ticks back: past each one's 73-tick gap.
+                let live =
+                    colony
+                    |> landing
+                        [
+                            for trip in 0..3 do
+                                for id in 1..2 ->
+                                    now - 75 - 72 * trip,
+                                    theirs
+                                        $"reserver-{id}"
+                                        enemy
+                                        { X = 25; Y = 0 }
+                                        [ BodyPart.Claim; BodyPart.Claim; Move; Move ]
+                        ]
+
+                let _, _, events = campLaid live
+
+                Expect.equal
+                    events
+                    [ OpEvent.Began("camp", OpPhase.Muster, None) ]
+                    "the premise: priced on, begun"
+
+                let at (phase: OpPhase) (started: int) =
+                    { campRunning started with
+                        Phase = phase
+                        Since = started
+                    }
+
+                let _, records, events = campRunHeld campHeld (at OpPhase.Muster (now - 3)) live
+
+                Expect.equal
+                    (records |> List.map _.Ended, events)
+                    ([ None ], [])
+                    "three ticks into its muster, nothing cast: the price it began on, not done"
+
+                // Its swing cast and walking from home, the run 200 ticks old
+                // and silent all of it.
+                let walking =
+                    { live with
+                        Creeps = live.Creeps @ [ campSwing ]
+                        Spatial =
+                            live.Spatial |> withCreepsAt [ campSwing.Name, { X = 25; Y = 25 } ]
+                    }
+
+                let laid, records, events =
+                    campRunHeld campHeld (at OpPhase.Approach (now - 200)) walking
+
+                Expect.equal
+                    (laid.World.Operations
+                     |> Option.defaultValue []
+                     |> List.collect (fun op -> op.Group |> List.map (fst >> _.Name)))
+                    [ campSwing.Name ]
+                    "the premise: the walking swing is its group"
+
+                Expect.equal
+                    (records |> List.map _.Ended, events)
+                    ([ None ], [])
+                    "its swing walking: still priced as begun, the silence no stop yet"
+
+                // Landed, it reads the run's silence: 200 ticks past each gap.
+                let _, _, events =
+                    campRunHeld
+                        campHeld
+                        (at OpPhase.Execute (now - 200))
+                        (live |> standingThere [ campSwing, { X = 25; Y = 1 } ])
+
+                Expect.equal
+                    events
+                    [ OpEvent.Ended("camp", OpEnd.Done) ]
+                    "standing at the exit through a run silent past every gap: done"
+
+                // Landed, then dead: the run in Execute has held the exit, so
+                // it still reads the run's silence, and asks no second cast.
+                let laid, records, events =
+                    campRunHeld campHeld (at OpPhase.Execute (now - 200)) live
+
+                Expect.equal
+                    (records |> List.map _.Ended, events)
+                    ([ Some OpEnd.Done ], [ OpEvent.Ended("camp", OpEnd.Done) ])
+                    "its swing dead after it held the exit: the watched stop still ends it"
+
+                Expect.isEmpty
+                    (laid.World.Operations
+                     |> Option.defaultValue []
+                     |> List.filter (fun op -> op.Id = Operations.campWorkId "camp" harassRoom))
+                    "no work laid, so no second cast asked"
+
+                // The pair seen stepping onto the exit while it musters.
+                let sallied =
+                    { live with
+                        Hostiles =
+                            live.Hostiles
+                            @ [
+                                { fuse with
+                                    Pos = RoomPos.at harassRoom { X = 25; Y = 0 }
+                                }
+                                { kinematic with
+                                    Pos = RoomPos.at harassRoom { X = 26; Y = 0 }
+                                }
+                            ]
+                    }
+
+                let _, _, events = campRunHeld campHeld (at OpPhase.Muster (now - 3)) sallied
+
+                Expect.equal
+                    events
+                    [ OpEvent.Moved("camp", OpPhase.Muster, OpPhase.Retreat, 0, None, None) ]
+                    "ExchangeLoses still sends it to Retreat"
             }
 
             // The user, 2026-10-10: the camp had never camped, and nothing
