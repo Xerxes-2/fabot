@@ -87,8 +87,12 @@ World ──▶ Derived ──▶ decisions ──▶ Intents
 - Decision functions in `Fight`, `Economy`, `Strategy` take `Derived` (and
   `Atlas`), not `World`. What a function reads is its signature; a `World`
   parameter below the deriving stage is a review flag.
-- **One tick cache exists**: `Atlas`'s flood table, keyed by (room, start,
-  footprint), cleared at the tick's end, counting hits and misses. Floods are
+- **One tick cache exists**: `Atlas`'s flood table of goal-seeded reverse
+  floods, keyed by (room, goal tiles and range — or the exit toward the next
+  room —, footprint, pace class: the body's step ticks on road, plain and
+  swamp), living in the `Atlas` value of one tick, counting hits and misses.
+  Room routes are recomputed per cross-room query; if the counts show it,
+  they join `Derived` (an owner decision). Floods are
   the only demand-driven derivation. Any other `TickMemo`, `Dictionary` cache
   or `lazy` outside `Derived` is an architecture change (`AGENTS.md`).
 - **Counts are a gate** (§9.3): floods, Atlas misses, `Exchange.outcome` calls
@@ -586,7 +590,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 | `App/Bindings.fs` | `App/Bindings.fs` | ✅ verbatim, plus `cpu.limit` and segment writes |
 | `App/World.fs`, `Main.fs` shell | `App/World.fs`, `Wire.fs`, `Main.fs`, `Core/Tick.fs` | ✅ `World`: terrain, controllers, sources, minerals, structures, sites, piles, remains, hostiles, our creeps with bodies and stores; per-module CPU, fault isolation, switches, recorder, observe segment |
 | `Types/Rules.fs` `Engine`, `Types/Vocabulary.fs`, `Types/Lists.fs` | `Core/Engine.fs`, `Core/Vocabulary.fs`, `Core/Lists.fs` | ✅ `Engine` less policy (`guardCap`) and season (`reactorCapacity`), plus part costs, regen time and level progress; `Vocabulary` less `Task` (Economy's) and with season resources as `Resource.Other` |
-| `Core/Atlas.fs`, `Grid.fs`, `Geometry.fs` | `Atlas` tile layer | port; add footprint; add the room-graph layer |
+| `Core/Atlas.fs`, `Grid.fs`, `Geometry.fs` | `Core/Atlas/Tiles.fs`, `Grid.fs`, `Atlas.fs` | ✅ tile index `y*50+x` (the terrain buffer's), the flood, footprint on every query, a minimal room graph, the flood table. Known gaps: a route is chosen without the footprint (a Quad can be routed through a one-tile gap); travel ticks toward another room cover this room's leg only; boosted CARRY is priced unboosted. `TileSet` waits for its first reader |
 | `Decide/Resolver.fs` | `Move` | port arbitration + step functions; drop fight precedence; add formation stepping |
 | `Decide/Pool, Matcher, Planner, Quota, Spawns, Price, Bodies, Labs, Layout` | `Economy`, `Layout` | port into one world pool, cut fight cases |
 | `Types/Colonies.fs` declarations, `allies` | `declarations` data | not ported as code; the current rooms seed the first `declarations` |

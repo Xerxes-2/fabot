@@ -21,14 +21,14 @@ type Pos =
         | _ -> false
 
     override this.GetHashCode() =
-        (this.X * 50 + this.Y) ^^^ this.Room.GetHashCode()
+        (this.Y * 50 + this.X) ^^^ this.Room.GetHashCode()
 
     interface System.IComparable with
         member this.CompareTo other =
             match other with
             | :? Pos as that ->
                 match compare this.Room that.Room with
-                | 0 -> compare (this.X * 50 + this.Y) (that.X * 50 + that.Y)
+                | 0 -> compare (this.Y * 50 + this.X) (that.Y * 50 + that.X)
                 | c -> c
             | _ -> 1
 

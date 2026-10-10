@@ -6,6 +6,7 @@
   <ItemGroup>
     <Compile Include="EngineTests.fs" />
     <Compile Include="TickTests.fs" />
+    <Compile Include="AtlasTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Core/Core.fsproj" />

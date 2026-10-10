@@ -8,8 +8,14 @@
     <Compile Include="Vocabulary.fs" />
     <Compile Include="Engine.fs" />
     <Compile Include="World.fs" />
+    <Compile Include="Atlas/Tiles.fs" />
+    <Compile Include="Atlas/Grid.fs" />
+    <Compile Include="Atlas/Atlas.fs" />
     <Compile Include="Intents.fs" />
     <Compile Include="State.fs" />
     <Compile Include="Tick.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Fable.Core" Version="5.2.0" />
   </ItemGroup>
 </Project>

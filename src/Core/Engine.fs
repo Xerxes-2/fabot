@@ -315,7 +315,11 @@ let controllerLevelProgress (level: int) =
     | 7 -> 10_935_000
     | _ -> 0
 
-/// A swamp tile's walk weight against plain's two.
+/// The fatigue a weighted part makes stepping onto a road, plain and swamp.
+let roadWeight = 1
+
+let plainWeight = 2
+
 let swampWeight = 10
 
 let roadBuildCost = 300
@@ -356,5 +360,5 @@ let repairHitsPerEnergy = 100
 /// MAX_CONSTRUCTION_SITES, across every room.
 let maxConstructionSites = 100
 
-/// A room's side in tiles: the stride of every flat `x * 50 + y` grid.
+/// A room's side in tiles: the stride of every flat `y * 50 + x` grid.
 let roomSide = 50
