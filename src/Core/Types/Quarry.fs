@@ -131,6 +131,7 @@ let recall
             { c with
                 Ticks = ticks
                 Tiles = List.truncate (2 * List.length ticks) c.Tiles
+                Faced = c.Faced |> List.filter (fun tick -> world.Time - tick <= window)
             })
         |> Option.filter (fun c -> not (List.isEmpty c.Ticks))
 
@@ -145,6 +146,38 @@ let recall
             RoomName.offsetOf tile.Room room
             |> Option.bind (fun offset -> Seam.landingOf offset (RoomPos.pos tile))
             |> Option.map (RoomPos.at room))
+
+    // Our armed bodies this tick, each where it stands with its weapon's
+    // reach: a body coming in within it comes into our reach (`Faced`).
+    let armedOurs =
+        lazy
+            (world.Creeps
+             |> List.choose (fun creep ->
+                 let has part =
+                     Map.tryFind part creep.Info.Body |> Option.exists (fun n -> n > 0)
+
+                 let reach =
+                     if has RangedAttack then Some Engine.rangedRange
+                     elif has Attack then Some Engine.meleeRange
+                     else None
+
+                 reach
+                 |> Option.bind (fun reach ->
+                     Map.tryFind creep.Room world.Rooms
+                     |> Option.bind (fun facts ->
+                         Map.tryFind creep.Info.Name facts.Layer.CreepPositions)
+                     |> Option.map (fun tile -> RoomPos.at creep.Room tile, reach))))
+
+    // This tick's crossing in onto `tile`, where it came into our reach.
+    let facedOn (tile: RoomPos) =
+        if
+            armedOurs.Value
+            |> List.exists (fun (at, reach) ->
+                RoomPos.range at tile |> Option.exists (fun steps -> steps <= reach))
+        then
+            [ world.Time ]
+        else
+            []
 
     let present =
         world.Rooms
@@ -196,6 +229,9 @@ let recall
                                     :: far
                                     :: step.At
                                     :: (kept |> Option.map _.Tiles |> Option.defaultValue [])
+                                Faced =
+                                    facedOn h.Pos
+                                    @ (kept |> Option.map _.Faced |> Option.defaultValue [])
                             }
                     | Some step, _ when step.At.Room <> h.Pos.Room ->
                         let kept = recent step.Crossed
@@ -210,6 +246,9 @@ let recall
                                     h.Pos
                                     :: step.At
                                     :: (kept |> Option.map _.Tiles |> Option.defaultValue [])
+                                Faced =
+                                    facedOn h.Pos
+                                    @ (kept |> Option.map _.Faced |> Option.defaultValue [])
                             }
                     | Some step, _ -> recent step.Crossed
                     | None, _ -> None
@@ -505,6 +544,26 @@ let returnRate (now: int) (crossed: Crossing) : float =
     let returns = float ((List.length crossed.Ticks + 1) / 2)
     let watched = float (max 1 (now - List.last crossed.Ticks + 1))
     returns / watched
+
+/// How often a body comes back into our reach in `room` (#663): its returns
+/// into the room with an armed body of ours in reach of where it came in
+/// (`Crossing.Faced`) over the ticks it was watched in. A return is a
+/// crossing in after one out: its crossings alternate sides, the latest
+/// from `Crossing.Came`, so its first trip into the room is no return. One
+/// that comes back only once we have left comes back into the room, never
+/// into our reach: none.
+let facedReturnRate (room: string) (now: int) (crossed: Crossing) : float =
+    let inNow = crossed.Came.Room <> room
+    let count = List.length crossed.Ticks
+
+    let returns =
+        crossed.Ticks
+        |> List.indexed
+        |> List.filter (fun (i, tick) ->
+            (i % 2 = 0) = inNow && i < count - 1 && List.contains tick crossed.Faced)
+        |> List.length
+
+    float returns / float (max 1 (now - List.last crossed.Ticks + 1))
 
 /// Whether a tile stands within a step of a target of a kind, off a room's
 /// target tiles and the kinds by id: what `rooted` asks its `beside` of.

@@ -1093,6 +1093,7 @@ let borderTripTests =
                     (Some
                         {
                             Came = RoomPos.at "W13S29" { X = 49; Y = 20 }
+                            Faced = []
                             Ticks = [ 103; 101 ]
                             Tiles =
                                 [

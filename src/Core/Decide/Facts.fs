@@ -1978,13 +1978,18 @@ let private dancerEntries (view: ColonyView) (hostile: HostileInfo) : RoomPos li
     (crossed |> Option.map _.Tiles |> Option.defaultValue []) @ here
     |> List.filter (fun tile -> tile.Room = room)
 
-/// Whether a hostile is a dancer a camp is laid for (#663 M4): unarmed,
-/// dancing on its border (`dancingOn`), in a room a camp is laid in (the
-/// operation's, `operationRooms`). Any other dancer is met where it stands.
-let private campable (view: ColonyView) (hostile: HostileInfo) : bool =
+/// Whether a hostile's way in is camped once it comes back over its border
+/// (#663 M4): unarmed, in a room a camp is laid in (the operation's,
+/// `operationRooms`).
+let private campsFor (view: ColonyView) (hostile: HostileInfo) : bool =
     Set.contains hostile.Pos.Room (operationRooms view)
     && not (HostileInfo.armed view.Hostiles hostile)
-    && dancingOn view hostile
+
+/// Whether a hostile is a dancer a camp is laid for (#663 M4): one whose way
+/// in is camped (`campsFor`), dancing on its border (`dancingOn`). Any other
+/// dancer is met where it stands.
+let private campable (view: ColonyView) (hostile: HostileInfo) : bool =
+    campsFor view hostile && dancingOn view hostile
 
 /// Whether a body of ours may stand on a tile of a room: ground, no wall,
 /// no obstacle built on it, off the border and terrain this view projects
@@ -2235,30 +2240,44 @@ let private healAcross (view: ColonyView) (hostile: HostileInfo) : int =
             | _ -> 0)
 
 /// The share of a dancer's watched time it stood in reach of a body of ours
-/// (#658, #663 M4), and what the body deals it there. A dancer a camp is
-/// laid for (`campable`): the share it stood in (`dancerInShare`) on the
-/// steps in the body covers from the camp's ground (`campCover`), struck at
-/// the body's best range. Any other dancer is struck only from off its
-/// border's dance, by a shot: the share it stood in, at the ranged range —
-/// a swing there is struck back, which no camp prices.
-let private campShare (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : float * int =
-    if campable view hostile then
+/// (#658, #663 M4), and what the body deals it there. One whose way in is
+/// camped (`camps`): the share it stood in (`dancerInShare`) on the steps in
+/// the body covers from the camp's ground (`campCover`), struck at the
+/// body's best range. Any other is struck only from off its border's dance,
+/// by a shot: the share it stood in, at the ranged range — a swing there is
+/// struck back, which no camp prices.
+let private campShareOf
+    (view: ColonyView)
+    (camps: bool)
+    (fighter: Fighter)
+    (hostile: HostileInfo)
+    : float * int =
+    if camps then
         dancerInShare view hostile * campCover view fighter hostile,
         fighter.DamageAt(Fighter.bestRange fighter)
     else
         dancerInShare view hostile, fighter.DamageAt Engine.rangedRange
 
 /// Whether the heal a dancer takes while out (`healAcross`) undoes what a
-/// body of ours lands while it is in its reach (#658, `campShare`): it stays
-/// on the border and our camp never wears it down. A dancer no heal reaches
-/// is never out-healed, whatever share of its time it was watched in reach:
-/// on the tick it is first seen on its exit it has none yet, and nothing
-/// against nothing is no heal.
-let private outHealsCamp (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : bool =
-    let share, damage = campShare view fighter hostile
+/// body of ours lands while it is in its reach (#658, `campShareOf`): it
+/// stays on the border and our camp never wears it down. A dancer no heal
+/// reaches is never out-healed, whatever share of its time it was watched in
+/// reach: on the tick it is first seen on its exit it has none yet, and
+/// nothing against nothing is no heal.
+let private outHealsCampOf
+    (view: ColonyView)
+    (camps: bool)
+    (fighter: Fighter)
+    (hostile: HostileInfo)
+    : bool =
+    let share, damage = campShareOf view camps fighter hostile
     let heal = healAcross view hostile
 
     heal > 0 && float heal * (1.0 - share) >= float damage * share
+
+/// `outHealsCampOf` of a dancer as its room camps it (`campable`).
+let private outHealsCamp (view: ColonyView) (fighter: Fighter) (hostile: HostileInfo) : bool =
+    outHealsCampOf view (campable view hostile) fighter hostile
 
 /// Whether a dancer's heal across the border undoes the camp of every body
 /// of a team (`outHealsCamp`): the camp lands while any body's does
@@ -2266,31 +2285,59 @@ let private outHealsCamp (view: ColonyView) (fighter: Fighter) (hostile: Hostile
 let private outHealsTeam (view: ColonyView) (team: Fighter list) (hostile: HostileInfo) : bool =
     team |> List.forall (fun fighter -> outHealsCamp view fighter hostile)
 
+/// The odds a kill lands on a body coming back over its border (#658,
+/// #663): the share of its watched time it stood in the body's reach
+/// (`campShareOf`, its way in camped or not, `camps`), times the odds it
+/// comes back over the camp's ticks, 1 − e^(−λ·T), λ its returns a tick off
+/// its crossings (`rate`) and T twice the kill (it is in reach about half
+/// its time); nothing where the heal it takes while out (`healAcross`)
+/// undoes what lands while it is in. A body that never left the room comes
+/// back for certain.
+let private comingBackOdds
+    (view: ColonyView)
+    (camps: bool)
+    (rate: Crossing -> float)
+    (fighter: Fighter)
+    (kill: int)
+    (hostile: HostileInfo)
+    : float =
+    let share, _ = campShareOf view camps fighter hostile
+
+    let returning =
+        match Map.tryFind hostile.Id view.Bounces with
+        | None -> 1.0
+        | Some crossed -> 1.0 - exp (-(rate crossed) * 2.0 * float kill)
+
+    if outHealsCampOf view camps fighter hostile then
+        0.0
+    else
+        share * returning
+
 /// The odds a dancer's kill lands from a camp on a tile covering its way in
-/// (#658): the share of its watched time it stood in the body's reach
-/// (`campShare`),
-/// times the odds it keeps coming back over the camp's ticks, 1 − e^(−λ·T),
-/// λ its returns a tick (`Quarry.returnRate`) and T twice the kill (it is in
-/// reach about half its time); nothing where the heal it takes while out
-/// (`healAcross`) undoes what lands while it is in. A body that never left
-/// the room comes back for certain.
+/// (#658, `comingBackOdds`): its way in camped where its room lays a camp
+/// for it (`campable`), at every return it makes (`Quarry.returnRate`).
 let private campOdds
     (view: ColonyView)
     (fighter: Fighter)
     (kill: int)
     (hostile: HostileInfo)
     : float =
-    let share, _ = campShare view fighter hostile
+    comingBackOdds view (campable view hostile) (Quarry.returnRate view.Time) fighter kill hostile
 
-    let returning =
-        match Map.tryFind hostile.Id view.Bounces with
-        | None -> 1.0
-        | Some crossed -> 1.0 - exp (-(Quarry.returnRate view.Time crossed) * 2.0 * float kill)
+/// The odds a body walking off out of a body's reach comes back into it
+/// while the body waits (#663, `comingBackOdds`, camped where its room
+/// camps a body coming back, `campsFor`): at the returns it made into our
+/// reach (`Quarry.facedReturnRate`), never those it made only once we had
+/// left — a body that shies off as we come and walks back as we go comes
+/// back into the room, not into our reach. None for a body seen to make
+/// none.
+let private returnOdds (view: ColonyView) (fighter: Fighter) (kill: int) (hostile: HostileInfo) =
+    let rate = Quarry.facedReturnRate hostile.Pos.Room view.Time
 
-    if outHealsCamp view fighter hostile then
-        0.0
-    else
-        share * returning
+    match Map.tryFind hostile.Id view.Bounces with
+    | Some crossed when rate crossed > 0.0 ->
+        comingBackOdds view (campsFor view hostile) rate fighter kill hostile
+    | _ -> 0.0
 
 /// Each tile's steps through a room's ground to its nearest walkable exit
 /// tile (#659 S1), by tile index: the border's exit tiles that are no wall,
@@ -2402,7 +2449,8 @@ let internal exitSteps (view: ColonyView) (tile: RoomPos) : int =
 /// once it walks off (its last
 /// step took it nearer that way out, `ColonyView.Stepped`, and the one
 /// before not farther, `ColonyView.SteppedBack`, `Quarry.leaving`) only from
-/// in reach, and then until it is off.
+/// in reach, and then until it is off. Off is not lost (#663): of what gets
+/// away, the share that comes back into reach (`returnOdds`).
 let private catchOdds
     (view: ColonyView)
     (fighter: Fighter)
@@ -2478,10 +2526,18 @@ let private catchOdds
 
         // A dancer's odds are its camp's, as a share and never rounded to a
         // tick: a one-tick kill at a third's odds is a third, not none.
+        // Any other body walking off is not lost at the border (#663): what
+        // gets away of it comes back into reach at its returns into it
+        // (`returnOdds`).
         if dancing then
             min 1.0 (campOdds view fighter kill hostile)
         else
-            min 1.0 (float (max 0 window) / float kill)
+            let chase = min 1.0 (float (max 0 window) / float kill)
+
+            if chase >= 1.0 then
+                1.0
+            else
+                chase + (1.0 - chase) * returnOdds view fighter kill hostile
 
 /// The odds a team of ours catches a hostile (`catchOdds`): its best body's,
 /// as a camp lands while any body's does (`campChance`); none for no team.

@@ -1016,11 +1016,16 @@ type HostileStep =
 /// was seen in another room than the one it was last seen in, newest first;
 /// and the tiles it crossed between, each crossing's tile it came onto and
 /// the tile it came from, newest first: the tiles it steps in and out on.
+/// `Faced`: of those ticks, the ones it came into a room with an armed body
+/// of ours standing there within its weapon's reach of the tile it came
+/// onto (#663), newest first: the returns it made into our reach, not
+/// only into the room.
 and Crossing =
     {
         Came: RoomPos
         Ticks: int list
         Tiles: RoomPos list
+        Faced: int list
     }
 
 /// A body's dance on a border (#585, #658): how deep into a room a body

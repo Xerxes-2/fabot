@@ -2161,6 +2161,73 @@ let quarryTests =
                     "its room in sight, the room across dark: it may only have stepped out"
             }
 
+            // #663: a return counts as one into our reach only where a body
+            // of ours stood in its weapon's reach of where it came in.
+            test
+                "a body coming back over the border is marked faced only with our armed body in reach of it" {
+                let body x = quarryBody 1000 (quarryRoom, x, 20)
+
+                let out =
+                    { body 1 with
+                        Pos = RoomPos.at "W13S29" { X = 48; Y = 20 }
+                    }
+
+                let backWith (ranger: (int * int * BodyPart) option) =
+                    let world = sightAt 102 [ quarryRoom, [ body 1 ] ] []
+
+                    match ranger with
+                    | None -> world
+                    | Some(x, y, weapon) ->
+                        let creep = creep "ranger-950-Spawn2" quarryRoom
+
+                        { world with
+                            Creeps =
+                                [
+                                    { creep with
+                                        Info =
+                                            { creep.Info with
+                                                Body = Map.ofList [ weapon, 1; Move, 1 ]
+                                            }
+                                    }
+                                ]
+                            Rooms =
+                                world.Rooms
+                                |> Map.map (fun _ facts ->
+                                    { facts with
+                                        Layer =
+                                            { facts.Layer with
+                                                CreepPositions =
+                                                    Map.ofList
+                                                        [ creep.Info.Name, { X = x; Y = y } ]
+                                            }
+                                    })
+                        }
+
+                let facedOf ranger =
+                    quarriesThrough
+                        [
+                            sightAt 100 [ quarryRoom, [ body 1 ] ] []
+                            sightAt 101 [ "W13S29", [ out ] ] []
+                            backWith ranger
+                        ]
+                    |> fun world -> world.Quarries.["quarry"].Crossings |> Option.map _.Faced
+
+                Expect.equal
+                    (facedOf (Some(4, 20, RangedAttack)))
+                    (Some [ 102 ])
+                    "a shot three off: faced"
+
+                Expect.equal (facedOf (Some(5, 20, RangedAttack))) (Some []) "a shot four off: not"
+                Expect.equal (facedOf (Some(3, 20, Attack))) (Some []) "a swing two off: not"
+
+                Expect.equal
+                    (facedOf (Some(4, 20, Work)))
+                    (Some [])
+                    "an unarmed body three off: not"
+
+                Expect.equal (facedOf None) (Some []) "nobody of ours: not"
+            }
+
             // #663 S4: a look must be able to fade a pursuit. A trip was never
             // seen gone, so a crossing hauler asked full-price looks of two
             // rooms through its whole window.
@@ -2249,6 +2316,7 @@ let quarryTests =
                     Some
                         {
                             Came = RoomPos.at "W12S28" { X = 25; Y = 0 }
+                            Faced = []
                             Ticks = [ 99 ]
                             Tiles = []
                         }
@@ -2339,6 +2407,7 @@ let quarryQueryTests =
                     Some
                         {
                             Came = came
+                            Faced = []
                             Ticks = [ 101 ]
                             Tiles = [ RoomPos.at "W13S29" { X = 48; Y = 20 }; came ]
                         }

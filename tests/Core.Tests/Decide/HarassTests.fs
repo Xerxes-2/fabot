@@ -3382,8 +3382,15 @@ let private stepping
 /// What our biggest ranger earns a tick in the harassment room on an empty
 /// 23C23M hauler at 30,2, two off its north edge and stepping for it, its
 /// trail these tiles a tick apart (newest first, `x, y`) and its crossings
-/// in from W1N3 these ticks ago (none: it never crossed).
-let private crosserPriced (trail: (int * int) list) (crossings: int list) : float =
+/// in from W1N3 these ticks ago (none: it never crossed), those of them it
+/// came in with an armed body of ours in reach `faced`, arriving in its
+/// reach these ticks from now.
+let private crosserPricedFrom
+    (arrival: int)
+    (faced: int list)
+    (trail: (int * int) list)
+    (crossings: int list)
+    : float =
     let crosser = bigHauler "crosser" { X = 30; Y = 2 }
     let tile x y = RoomPos.at harassRoom { X = x; Y = y }
 
@@ -3403,6 +3410,7 @@ let private crosserPriced (trail: (int * int) list) (crossings: int list) : floa
                     Came = RoomPos.at "W1N3" { X = 30; Y = 48 }
                     Ticks = agos |> List.map (fun ago -> laid.Time - ago)
                     Tiles = [ tile 30 0; RoomPos.at "W1N3" { X = 30; Y = 48 } ]
+                    Faced = faced |> List.map (fun ago -> laid.Time - ago)
                 }
 
     let colony =
@@ -3431,7 +3439,11 @@ let private crosserPriced (trail: (int * int) list) (crossings: int list) : floa
                 }
         }
 
-    Facts.roomRate Quarry.Reading.Value colony [ Fighter.ofCreep bigRanger ] 0 0 harassRoom
+    Facts.roomRate Quarry.Reading.Value colony [ Fighter.ofCreep bigRanger ] 0 arrival harassRoom
+
+/// `crosserPricedFrom` for a ranger in its reach now, no return of it made
+/// into our reach.
+let private crosserPriced = crosserPricedFrom 0 []
 
 [<Tests>]
 let catchableFirstTests =
@@ -3494,6 +3506,7 @@ let catchableFirstTests =
                                     "tripper",
                                     {
                                         Came = RoomPos.at "W2N2" { X = 48; Y = 20 }
+                                        Faced = []
                                         Ticks = [ laid.Time - 3; laid.Time - 6 ]
                                         Tiles =
                                             [
@@ -3575,6 +3588,7 @@ let catchableFirstTests =
                                     "dancer",
                                     {
                                         Came = RoomPos.at harassRoom { X = 0; Y = 20 }
+                                        Faced = []
                                         Ticks = [ inRoom.Time; inRoom.Time - 2; inRoom.Time - 4 ]
                                         Tiles =
                                             [
@@ -3672,6 +3686,7 @@ let catchableFirstTests =
                                     "dancer",
                                     {
                                         Came = RoomPos.at harassRoom { X = 0; Y = 20 }
+                                        Faced = []
                                         Ticks = [ start.Time - 2 ]
                                         Tiles =
                                             [
@@ -3758,6 +3773,7 @@ let catchableFirstTests =
                                     "dancer",
                                     {
                                         Came = RoomPos.at "W2N2" { X = 48; Y = 20 }
+                                        Faced = []
                                         Ticks = [ start.Time - 2; start.Time - 4 ]
                                         Tiles =
                                             [
@@ -3920,6 +3936,47 @@ let catchableFirstTests =
                     "and priced as the dancer that never stepped in"
             }
 
+            // User 2026-10-10: "既然我们已经应对边缘舞者了，追逃向边界的敌人
+            // 优先级好像也没那么低了？" Live W19S26, t1,079,44x-49x: Riddle9018's
+            // haulers shied over the south exit each time our ranger came
+            // within six and walked back once it left; each read lost the
+            // tick it turned for the exit, priced at nought out of reach.
+            // Its return counts only into our reach (the ship gate's review):
+            // a hauler that shies off as we come and walks back as we go
+            // comes back into the room, never into the ranger's reach.
+            test
+                "a hauler seen to come back into our reach keeps its price walking off out of reach; one that comes back only once we have left, or never, is lost there" {
+                // Inland since its last round trip, walking for the north
+                // edge it went out over twice, the ranger 10 ticks off its
+                // reach: out 30 and 20 ticks ago, back in 26 and 16.
+                let trail = [ 0..30 ] |> List.map (fun ago -> 30, min 12 (2 + ago))
+                let tripped = [ 16; 20; 26; 30 ]
+
+                let lost = crosserPricedFrom 10 [] trail []
+
+                Expect.isGreaterThan
+                    (crosserPricedFrom 10 [ 16; 26 ] trail tripped)
+                    lost
+                    "back into our reach twice: its kill at the odds it comes back, above one never seen to leave, off the border before the ranger reaches it"
+
+                Expect.isGreaterThan
+                    (crosserPricedFrom 10 [ 16; 26 ] trail tripped)
+                    (crosserPricedFrom 10 [ 26 ] trail tripped)
+                    "once of the two: at the rate it comes back into reach, less"
+
+                Expect.floatClose
+                    Accuracy.high
+                    (crosserPricedFrom 10 [] trail tripped)
+                    lost
+                    "back only once we had left, each time: into the room, never into our reach, lost"
+
+                Expect.floatClose
+                    Accuracy.high
+                    (crosserPricedFrom 10 [ 20 ] trail [ 20 ])
+                    lost
+                    "seen only to come in, its first trip into the room: no return, lost"
+            }
+
             // The ship gate's review: a hauler that shied three tiles off its
             // container as we came and walked back to stand on it read as
             // walking for the whole window, its one far turn kept. Its turns
@@ -4001,6 +4058,7 @@ let private dancingIn (capacity: int) (at: Pos) (tiles: Pos list) =
                     {
                         Came = RoomPos.at "W2N2" { X = 48; Y = 20 }
                         Ticks = [ laid.Time - 2; laid.Time - 4; laid.Time - 6 ]
+                        Faced = []
                         Tiles =
                             RoomPos.at "W2N2" { X = 49; Y = 20 }
                             :: (tiles |> List.map (RoomPos.at harassRoom))
@@ -4286,6 +4344,7 @@ let sweepVisionTests =
                     let crossed =
                         {
                             Came = RoomPos.at westRoom { X = 1; Y = 20 }
+                            Faced = []
                             Ticks = [ remembered.Time - 3 ]
                             Tiles = []
                         }
