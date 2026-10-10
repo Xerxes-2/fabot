@@ -8,6 +8,7 @@ module Fabot.Core.Types.Vocabulary
 
 /// A creep body part, the engine's full vocabulary. Our own bodies use only
 /// Work/Carry/Move; the rest arrive on hostile creeps.
+[<CustomEquality; CustomComparison>]
 type BodyPart =
     | Work
     | Carry
@@ -18,20 +19,36 @@ type BodyPart =
     | Claim
     | Tough
 
-/// Whether two parts are one kind, matched case by case: `=` on a union is
-/// Fable's generic `equals`, and the body scans below ask it of every part of
-/// every hostile, many times a tick.
-let samePart (a: BodyPart) (b: BodyPart) : bool =
-    match a, b with
-    | Work, Work
-    | Carry, Carry
-    | Move, Move
-    | Attack, Attack
-    | RangedAttack, RangedAttack
-    | Heal, Heal
-    | Claim, Claim
-    | Tough, Tough -> true
-    | _ -> false
+    /// The case's place in the declaration, which equality and order read
+    /// by hand (`BuiltKind.Ordinal`'s reason).
+    member this.Ordinal =
+        match this with
+        | Work -> 0
+        | Carry -> 1
+        | Move -> 2
+        | Attack -> 3
+        | RangedAttack -> 4
+        | Heal -> 5
+        | Claim -> 6
+        | Tough -> 7
+
+    override this.Equals other =
+        match other with
+        | :? BodyPart as that -> this.Ordinal = that.Ordinal
+        | _ -> false
+
+    override this.GetHashCode() = this.Ordinal
+
+    interface System.IComparable with
+        member this.CompareTo other =
+            match other with
+            | :? BodyPart as that -> compare this.Ordinal that.Ordinal
+            | _ -> 1
+
+/// Whether two parts are one kind, as two ints and not through Fable's
+/// generic `equals`: the body scans below ask it of every part of every
+/// hostile, many times a tick.
+let samePart (a: BodyPart) (b: BodyPart) : bool = a.Ordinal = b.Ordinal
 
 /// A part's one letter, as a body's text spells it: the readings' "18M17A"
 /// and the traffic watch's Memory shape (`ExitTraffic.shapeText`).
@@ -177,6 +194,7 @@ let partCountIn (body: BodyPart list) part =
 /// A room's ordinary **[[ore]]**: the seven base minerals a `FIND_MINERALS`
 /// deposit can hold beside the season's Thorium. The compounds a lab makes
 /// out of them are not ore and are not here.
+[<CustomEquality; CustomComparison>]
 type Ore =
     | Hydrogen
     | Oxygen
@@ -186,12 +204,38 @@ type Ore =
     | Zynthium
     | Catalyst
 
+    /// The case's place in the declaration, which equality and order read
+    /// by hand (`BuiltKind.Ordinal`'s reason).
+    member this.Ordinal =
+        match this with
+        | Hydrogen -> 0
+        | Oxygen -> 1
+        | Utrium -> 2
+        | Keanium -> 3
+        | Lemergium -> 4
+        | Zynthium -> 5
+        | Catalyst -> 6
+
+    override this.Equals other =
+        match other with
+        | :? Ore as that -> this.Ordinal = that.Ordinal
+        | _ -> false
+
+    override this.GetHashCode() = this.Ordinal
+
+    interface System.IComparable with
+        member this.CompareTo other =
+            match other with
+            | :? Ore as that -> compare this.Ordinal that.Ordinal
+            | _ -> 1
+
 /// Every Ore — the closed set, closed by `Core.Tests` as `allBodyParts` is.
 let allOres = [ Hydrogen; Oxygen; Utrium; Keanium; Lemergium; Zynthium; Catalyst ]
 
 /// A **[[compound]]**: what the [[lab cluster]] makes out of [[ore]]. The UH
 /// line alone, the one boost line our own ore reaches; a compound joins the
 /// day a decision of ours names it.
+[<CustomEquality; CustomComparison>]
 type Compound =
     /// OH, hydroxide: H and O. It boosts nothing; UH2O's second reagent.
     | Hydroxide
@@ -199,6 +243,27 @@ type Compound =
     | UtriumHydride
     /// UH2O, utrium acid: UH and OH. ATTACK ×3.
     | UtriumAcid
+
+    /// The case's place in the declaration, which equality and order read
+    /// by hand (`BuiltKind.Ordinal`'s reason).
+    member this.Ordinal =
+        match this with
+        | Hydroxide -> 0
+        | UtriumHydride -> 1
+        | UtriumAcid -> 2
+
+    override this.Equals other =
+        match other with
+        | :? Compound as that -> this.Ordinal = that.Ordinal
+        | _ -> false
+
+    override this.GetHashCode() = this.Ordinal
+
+    interface System.IComparable with
+        member this.CompareTo other =
+            match other with
+            | :? Compound as that -> compare this.Ordinal that.Ordinal
+            | _ -> 1
 
 /// Every Compound — the closed set, closed by `Core.Tests` as `allOres` is.
 let allCompounds = [ Hydroxide; UtriumHydride; UtriumAcid ]
@@ -212,11 +277,35 @@ let allCompounds = [ Hydroxide; UtriumHydride; UtriumAcid ]
 /// decision of ours names it. Declared beside the body parts because it is the
 /// engine's vocabulary: `withdraw` and `transfer` have taken one of these
 /// strings all along.
+[<CustomEquality; CustomComparison>]
 type Resource =
     | Energy
     | Thorium
     | Ore of Ore
     | Compound of Compound
+
+    /// One int per resource, ascending as the default order runs — the
+    /// case, then the ore or compound inside it — which equality and order
+    /// read by hand (`BuiltKind.Ordinal`'s reason).
+    member this.Ordinal =
+        match this with
+        | Energy -> 0
+        | Thorium -> 1
+        | Ore ore -> 2 + ore.Ordinal
+        | Compound compound -> 16 + compound.Ordinal
+
+    override this.Equals other =
+        match other with
+        | :? Resource as that -> this.Ordinal = that.Ordinal
+        | _ -> false
+
+    override this.GetHashCode() = this.Ordinal
+
+    interface System.IComparable with
+        member this.CompareTo other =
+            match other with
+            | :? Resource as that -> compare this.Ordinal that.Ordinal
+            | _ -> 1
 
 /// Whether a resource is a **mineral** in a store's sense — an ore or a
 /// compound — the resources a lab holds and `SpatialInfo.Minerals` files.

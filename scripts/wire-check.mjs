@@ -3341,6 +3341,66 @@ wire("ops check: a spec is admitted dry or live, or refused by the bot's own rea
   assert.equal(check(row, false, true, { off: true }).off, true, "the switch reported beside");
 });
 
+// ---- TileSet under Fable ------------------------------------------------
+
+// A bitset is the one Core type whose meaning rests on JS bit arithmetic:
+// bit 31 reads negative, and `dotnet test` never runs the Fable build. Each
+// operation is held to a sorted list of grid indices, the order `Set<Pos>`
+// enumerates in, over sets that straddle the word boundaries.
+wire("TileSet under Fable answers what a sorted index list answers", async () => {
+  const T = await import("../build/fable/Core/Types/TileSet.js");
+  const G = await import("../build/fable/Core/Types/Geometry.js");
+  const { ofArray } = await import(LIST);
+  const pos = (i) => new G.Pos(Math.floor(i / 50), i % 50);
+  let seed = 97;
+  const rnd = (n) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  const shapes = [[], [0], [31], [2499], [0, 30, 31, 32, 33, 63, 64, 2495, 2496, 2499], [31, 63, 95]];
+  for (const n of [5, 60, 900, 2400]) shapes.push(Array.from({ length: n }, () => rnd(2500)));
+  const sorted = (a) => [...new Set(a)].sort((x, y) => x - y);
+  const tiles = (a) => T.TileSetModule_ofList(ofArray(a.map(pos)));
+  const indices = (s) => [...T.TileSetModule_toArray(s)].map((p) => p.X * 50 + p.Y);
+  // Lexicographic over the sorted indices, a prefix the lesser: `Set<Pos>`'s order.
+  const order = (r, q) => {
+    for (let k = 0; k < Math.min(r.length, q.length); k++) if (r[k] !== q[k]) return r[k] < q[k] ? -1 : 1;
+    return Math.sign(r.length - q.length);
+  };
+  for (const a of shapes) {
+    const s = tiles(a);
+    const r = sorted(a);
+    assert.deepEqual(indices(s), r, "the tiles, in Pos order");
+    assert.equal(T.TileSetModule_count(s), r.length, "count");
+    assert.deepEqual(indices(T.TileSetModule_init((i) => r.includes(i))), r, "init");
+    if (r.length) {
+      const least = T.TileSetModule_minElement(s);
+      assert.equal(least.X * 50 + least.Y, r[0], "minElement");
+    }
+    const odd = (p) => (p.X * 7 + p.Y) % 2 === 1;
+    assert.deepEqual(indices(T.TileSetModule_filter(odd, s)), r.filter((i) => odd(pos(i))), "filter");
+    for (let k = 0; k < 50; k++) {
+      const i = rnd(2500);
+      assert.equal(T.TileSetModule_contains(pos(i), s), r.includes(i), `contains ${i}`);
+    }
+    for (const i of [0, 31, 32, 63, 2495, 2499, rnd(2500)]) {
+      assert.deepEqual(indices(T.TileSetModule_add(pos(i), s)), sorted(r.concat([i])), `add ${i}`);
+      assert.deepEqual(indices(T.TileSetModule_remove(pos(i), s)), r.filter((x) => x !== i), `remove ${i}`);
+    }
+    for (const b of shapes) {
+      const t = tiles(b);
+      const q = sorted(b);
+      assert.deepEqual(indices(T.TileSetModule_union(s, t)), sorted(r.concat(q)), "union");
+      assert.deepEqual(indices(T.TileSetModule_intersect(s, t)), r.filter((x) => q.includes(x)), "intersect");
+      assert.deepEqual(indices(T.TileSetModule_difference(s, t)), r.filter((x) => !q.includes(x)), "difference");
+      assert.equal(T.TileSetModule_isSubset(s, t), r.every((x) => q.includes(x)), "isSubset");
+      assert.equal(s.Equals(t), stable(r) === stable(q), "equality");
+      assert.equal(Math.sign(s.CompareTo(t)), order(r, q), "comparison");
+    }
+  }
+  assert.throws(() => T.TileSetModule_add(new G.Pos(-1, 0), T.TileSetModule_empty), /off the grid/);
+});
+
 // ---- run ----------------------------------------------------------------
 
 let failed = 0;

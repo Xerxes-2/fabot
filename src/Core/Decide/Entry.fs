@@ -119,10 +119,10 @@ let private signedCensusOf
 
 /// A flat signature's parts by name: the head's three, then each room's.
 let private signatureParts (signature: string) : Map<string, string> =
-    match signature.Split('\n') |> List.ofArray with
+    match signature.Split [| '\n' |] |> List.ofArray with
     | head :: rooms ->
         let headParts =
-            match head.Split('|') with
+            match head.Split [| '|' |] with
             | [| home; level; stages |] -> [ "home", home; "level", level; "stages", stages ]
             | _ -> [ "head", head ]
 

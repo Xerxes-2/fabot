@@ -1301,7 +1301,7 @@ let internal quotaRowsOf
                |> List.choose (fun s -> Atlas.targetRoom atlas s.Id)
                |> Set.ofList
                |> Set.union (shutToEconomy view)
-               |> Seq.sumBy (fun room -> Set.count (Atlas.postsIn atlas room)))
+               |> Seq.sumBy (fun room -> TileSet.count (Atlas.postGridIn atlas room)))
         Hauler = haulerQuota
         Miner = sizing.MinerQuota
         Courier = sizing.CourierQuota

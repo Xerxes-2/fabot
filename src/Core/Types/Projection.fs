@@ -195,6 +195,7 @@ module TerrainGrid =
         iterIndexed (fun index terrain -> handle (posAt index) terrain) grid
 
 /// What kind of thing a projected target is.
+[<CustomEquality; CustomComparison>]
 type TargetKind =
     | Source
     | Controller
@@ -221,20 +222,37 @@ type TargetKind =
     /// an ore deposit stays, at zero while it regenerates.
     | Mineral of resource: Resource
 
-/// `a = b` over two kinds, the case matched first: Fable's generic union
-/// equality is a constructor check and a field walk per call, and the census
-/// scans below ask it once per target in every projected room, almost always
-/// of two different cases.
-let internal sameKind (a: TargetKind) (b: TargetKind) : bool =
-    match a, b with
-    | Source, Source
-    | Controller, Controller
-    | Tombstone, Tombstone -> true
-    | Structure x, Structure y
-    | Site x, Site y -> x = y
-    | Dropped x, Dropped y
-    | Mineral x, Mineral y -> x = y
-    | _ -> false
+    /// One int per kind, ascending as the default order runs — the case,
+    /// then the structure or resource inside it — which equality and order
+    /// read by hand (`BuiltKind.Ordinal`'s reason): a kind keys the Atlas's
+    /// kind census and every census scan compares two.
+    member this.Ordinal =
+        match this with
+        | Source -> 0
+        | Controller -> 64
+        | Structure kind -> 128 + kind.Ordinal
+        | Site kind -> 192 + kind.Ordinal
+        | Dropped resource -> 256 + resource.Ordinal
+        | Tombstone -> 320
+        | Mineral resource -> 384 + resource.Ordinal
+
+    override this.Equals other =
+        match other with
+        | :? TargetKind as that -> this.Ordinal = that.Ordinal
+        | _ -> false
+
+    override this.GetHashCode() = this.Ordinal
+
+    interface System.IComparable with
+        member this.CompareTo other =
+            match other with
+            | :? TargetKind as that -> compare this.Ordinal that.Ordinal
+            | _ -> 1
+
+/// `a = b` over two kinds as two ints, without the call through Fable's
+/// generic `equals`: the census scans below ask it once per target in every
+/// projected room.
+let internal sameKind (a: TargetKind) (b: TargetKind) : bool = a.Ordinal = b.Ordinal
 
 /// Whether a projected target is one of the two transient kinds — a pile or a
 /// tombstone/ruin — that stand on a tile without holding it. Both vanish

@@ -76,7 +76,7 @@ let private shortId (id: string) =
 /// A Task id with its object id cut short (`Facts.taskId`'s
 /// `kind:target[:resource]`); a room name stays whole.
 let private shortTask (task: string) =
-    match task.Split ':' |> List.ofArray with
+    match task.Split [| ':' |] |> List.ofArray with
     | kind :: target :: rest -> String.concat ":" (kind :: shortId target :: rest)
     | _ -> task
 

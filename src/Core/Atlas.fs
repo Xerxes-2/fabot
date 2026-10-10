@@ -147,10 +147,7 @@ type Atlas =
             /// tiles joined to it, because what leaves the Atlas carries its room and
             /// what stays inside indexes one room's grid.
             WorkAreas:
-                System.Collections.Generic.Dictionary<
-                    Task,
-                    (string * Set<Pos>) option * Set<RoomPos>
-                 >
+                System.Collections.Generic.Dictionary<Task, (string * TileSet) option * Set<RoomPos>>
             /// The Work-heavy variant of the same table: the narrowed area per Task,
             /// built at most once per tick. Only Harvest narrows, so `posts` is
             /// derived once per source.
@@ -166,13 +163,15 @@ type Atlas =
             /// per row: `postsOf` alone was 5.8% of a `pair --level 7` tick (#370,
             /// 2026-09-18), four set intersections over a hundred tiles, re-derived
             /// on every ask. Keyed by room name.
-            Posts: System.Collections.Generic.Dictionary<string, Set<Pos>>
+            Posts: System.Collections.Generic.Dictionary<string, TileSet>
             /// The standing half of the census above: same key, same lifetime,
             /// its own table because `standingPostsOf` asks for it alone.
-            StandingPosts: System.Collections.Generic.Dictionary<string, Set<Pos>>
+            StandingPosts: System.Collections.Generic.Dictionary<string, TileSet>
             /// The union of every source's Seats in a room, which both of the
             /// above are cut from and the [[working ground]] reads on its own.
-            SeatUnions: System.Collections.Generic.Dictionary<string, Set<Pos>>
+            SeatUnions: System.Collections.Generic.Dictionary<string, TileSet>
+            /// The built containers' tiles per room (`containerGridIn`).
+            ContainerGrids: System.Collections.Generic.Dictionary<string, TileSet>
             /// Each creep's step plan this tick: the first tile of the path the
             /// mover's own flood stepped it onto and up to
             /// `Tuning.maxCadence` - 1 tiles after it, at least one, written
@@ -698,6 +697,7 @@ let ofViewRecalling (walks: WalkTable) (farFields: FarFieldMemo) (view: ColonyVi
         Posts = System.Collections.Generic.Dictionary()
         StandingPosts = System.Collections.Generic.Dictionary()
         SeatUnions = System.Collections.Generic.Dictionary()
+        ContainerGrids = System.Collections.Generic.Dictionary()
         Steps = System.Collections.Generic.Dictionary()
         Tracks = System.Collections.Generic.Dictionary()
         Heads = System.Collections.Generic.Dictionary()
@@ -876,14 +876,35 @@ let private tileIn (atlas: Atlas) (room: string) (id: string) : Pos option =
     | Some(where, tile) when where = room -> Some tile
     | _ -> None
 
+/// Build-once-per-tick over one of the Atlas's mutable tables: the shape
+/// every key set the view does not carry is memoised through. No reader can
+/// observe whether the answer was built or recalled, and the Atlas is rebuilt
+/// every tick, so each table is per-tick by construction.
+let private memoised
+    (table: System.Collections.Generic.Dictionary<'key, 'value>)
+    (key: 'key)
+    (build: unit -> 'value)
+    : 'value =
+    // `ContainsKey` then the indexer, and never `TryGetValue` in a match:
+    // Fable compiles the out-parameter pattern into an `FSharpRef` wrapping a
+    // getter and a setter closure plus the tuple the match destructures — four
+    // allocations on the one read every memoised table in the Atlas makes,
+    // against two native `Map` probes and none.
+    if table.ContainsKey key then
+        table.[key]
+    else
+        let value = build ()
+        table.[key] <- value
+        value
+
 /// One room's tiles stamped with their room, and empty for geometry the
 /// projection places nowhere — the tail every `…In` census wears on its way
 /// out of the Atlas, because a caller outside holds no room to stamp a bare
 /// `Pos` with.
-let private stamped (tiles: (string * Set<Pos>) option) : Set<RoomPos> =
-    tiles
-    |> Option.map (fun (room, grid) -> RoomPos.setAt room grid)
-    |> Option.defaultValue Set.empty
+let private stamped (tiles: (string * TileSet) option) : Set<RoomPos> =
+    match tiles with
+    | Some(room, grid) -> TileSet.toRoomSet room grid
+    | None -> Set.empty
 
 /// Placed targets of one kind in one named room: id and tile, in id order.
 /// The room is named rather than searched: its readers are the reflexes,
@@ -945,12 +966,12 @@ let roadTilesIn (atlas: Atlas) (room: string) : Set<Pos> = (layerOf atlas room).
 /// every tile census below is that join with a different list of ids in front
 /// of it. Ids the room does not place drop out, which is what keeps another
 /// room's coordinates out of a `Set<Pos>` that has no room dimension.
-let private tilesOfIdsIn (atlas: Atlas) (room: string) (ids: string list) : Set<Pos> =
+let private placedTilesIn (atlas: Atlas) (room: string) (ids: string list) : Pos list =
     let layer = layerOf atlas room
+    ids |> List.choose (fun id -> Map.tryFind id layer.TargetPositions)
 
-    ids
-    |> List.choose (fun id -> Map.tryFind id layer.TargetPositions)
-    |> Set.ofList
+let private tilesOfIdsIn (atlas: Atlas) (room: string) (ids: string list) : Set<Pos> =
+    placedTilesIn atlas room ids |> Set.ofList
 
 /// Tiles of one room's placed targets whose kind answers a predicate, for the
 /// censuses read as tiles rather than as counts. The room is named rather
@@ -978,6 +999,16 @@ let pendingRoadTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// standing half: a built container keeps a plan from re-dropping its site.
 let private containerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
     tilesOfKindIn atlas room (Structure BuiltKind.Container)
+
+/// `tilesOfKindIn` as a tile set, for the Post algebra below.
+let private gridOfKindIn (atlas: Atlas) (room: string) (kind: TargetKind) : TileSet =
+    targetsOfKind atlas kind |> placedTilesIn atlas room |> TileSet.ofList
+
+/// The built containers' tiles as a tile set, once a tick per room: the Post
+/// census and the overflow gate ask it per source and per creep.
+let private containerGridIn (atlas: Atlas) (room: string) : TileSet =
+    memoised atlas.ContainerGrids room (fun () ->
+        gridOfKindIn atlas room (Structure BuiltKind.Container))
 
 /// Tiles of one room holding a container construction site — the census's
 /// pending half: a pending container is not yet a container but its tile
@@ -1366,8 +1397,8 @@ let private actionTilesOf (atlas: Atlas) (task: Task) : (string * Pos list) opti
 
 /// Seat tiles of a placed source: walkable (non-wall) neighbours of its tile,
 /// by terrain alone — structures and creeps do not consume Seats.
-let private seatTiles (ground: int[]) (pos: Pos) : Set<Pos> =
-    neighbours pos |> List.filter (walkableAt ground) |> Set.ofList
+let private seatTiles (ground: int[]) (pos: Pos) : TileSet =
+    neighbours pos |> List.filter (walkableAt ground) |> TileSet.ofList
 
 /// Seat tiles of a placed **rock** — the geometry behind `seats`, for the
 /// Layout's source-container pick and for the mineral container's: a
@@ -1375,7 +1406,7 @@ let private seatTiles (ground: int[]) (pos: Pos) : Set<Pos> =
 /// target the projection does not place. The rock's own room answers, not
 /// the colony's, so an outpost source's Seats are never a home tile of the
 /// same coordinate.
-let private seatTilesIn (atlas: Atlas) (rockId: string) : (string * Set<Pos>) option =
+let private seatTilesIn (atlas: Atlas) (rockId: string) : (string * TileSet) option =
     targetAt atlas rockId
     |> Option.map (fun (room, pos) -> room, seatTiles (groundOf atlas room) pos)
 
@@ -1385,13 +1416,13 @@ let seatTilesOf (atlas: Atlas) (rockId: string) : Set<RoomPos> = seatTilesIn atl
 /// projection does not place: no capacity is derivable, and unpriceable
 /// geometry never counts against a Task.
 let seats (atlas: Atlas) (sourceId: string) : int option =
-    seatTilesIn atlas sourceId |> Option.map (snd >> Set.count)
+    seatTilesIn atlas sourceId |> Option.map (snd >> TileSet.count)
 
 /// The Work Area geometry behind `workArea`: the passable tiles within the
 /// action's range of its target. Empty for a Task the projection cannot place a
 /// target for — and for Flee, whose safe ground is a colony fact the decision
 /// layer derives rather than geometry the projection carries.
-let private buildWorkArea (atlas: Atlas) (task: Task) : (string * Set<Pos>) option =
+let private buildWorkArea (atlas: Atlas) (task: Task) : (string * TileSet) option =
     match actionOn task with
     | None -> None
     | Some(_, r) ->
@@ -1408,29 +1439,8 @@ let private buildWorkArea (atlas: Atlas) (task: Task) : (string * Set<Pos>) opti
                 targets
                 |> List.collect (tilesWithin r)
                 |> List.filter (walkableAt weights)
-                |> Set.ofList
+                |> TileSet.ofList
             )
-
-/// Build-once-per-tick over one of the Atlas's mutable tables: the shape
-/// every key set the view does not carry is memoised through. No reader can
-/// observe whether the answer was built or recalled, and the Atlas is rebuilt
-/// every tick, so each table is per-tick by construction.
-let private memoised
-    (table: System.Collections.Generic.Dictionary<'key, 'value>)
-    (key: 'key)
-    (build: unit -> 'value)
-    : 'value =
-    // `ContainsKey` then the indexer, and never `TryGetValue` in a match:
-    // Fable compiles the out-parameter pattern into an `FSharpRef` wrapping a
-    // getter and a setter closure plus the tuple the match destructures — four
-    // allocations on the one read every memoised table in the Atlas makes,
-    // against two native `Map` probes and none.
-    if table.ContainsKey key then
-        table.[key]
-    else
-        let value = build ()
-        table.[key] <- value
-        value
 
 /// Note the rooms out of sight among those an entry of the census-keyed
 /// tables was just flooded over (`FarFieldMemo.DarkRead`, #666). Called from
@@ -1456,7 +1466,7 @@ let private areaOf (atlas: Atlas) (task: Task) =
 /// *inside* the Atlas takes, so the join is never paid inside a per-creep
 /// query. None for a Task the projection cannot place a target for, and
 /// for Flee.
-let private areaTilesOf (atlas: Atlas) (task: Task) : (string * Set<Pos>) option =
+let private areaTilesOf (atlas: Atlas) (task: Task) : (string * TileSet) option =
     fst (areaOf atlas task)
 
 let workArea (atlas: Atlas) (task: Task) : Set<RoomPos> = snd (areaOf atlas task)
@@ -1464,14 +1474,14 @@ let workArea (atlas: Atlas) (task: Task) : Set<RoomPos> = snd (areaOf atlas task
 /// Every source of one room's Seat tiles, unioned — the seat half of the
 /// working ground. Named room and not every layer: a `Pos` carries no room, so
 /// another room's Seat would read as one of this room's.
-let private seatUnionIn (atlas: Atlas) (room: string) : Set<Pos> =
+let private seatUnionIn (atlas: Atlas) (room: string) : TileSet =
     memoised atlas.SeatUnions room (fun () ->
         let ground = groundOf atlas room
 
         targetsOfKind atlas Source
         |> List.choose (tileIn atlas room)
         |> List.map (seatTiles ground)
-        |> List.fold Set.union Set.empty)
+        |> TileSet.unionMany)
 
 /// The **standable** ring of one room's projected sources, joined to that
 /// room: the [[guard]]'s Work Area on the ticks it has no [[threat]] to ring
@@ -1494,14 +1504,14 @@ let sourceRingIn (atlas: Atlas) (room: string) : Set<RoomPos> =
 /// Every controller of one room's Upgrade Work Area, unioned — the tiles a
 /// creep can upgrade from, behind the working ground and controllerContainers.
 /// One room for the same reason the Seat union is one room's.
-let private upgradeAreaIn (atlas: Atlas) (room: string) : Set<Pos> =
+let private upgradeAreaIn (atlas: Atlas) (room: string) : TileSet =
     targetsOfKind atlas Controller
     |> List.filter (tileIn atlas room >> Option.isSome)
     |> List.map (fun id ->
         match areaTilesOf atlas (Upgrade id) with
         | Some(_, tiles) -> tiles
-        | None -> Set.empty)
-    |> List.fold Set.union Set.empty
+        | None -> TileSet.empty)
+    |> TileSet.unionMany
 
 /// The ground a room's Thorium minerals hold: each deposit's own tile (the
 /// extractor's) and every Seat of it (the miner's, and its container's).
@@ -1512,12 +1522,12 @@ let private upgradeAreaIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// Deliberately **not** folded into `seatUnionIn`: a mineral's Seat under a
 /// container would otherwise count as a [[post]], hire an [[anchor]] and
 /// enter the Anchor row's quota. Off `mineralsIn`, never a second census.
-let private mineralGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
+let private mineralGroundIn (atlas: Atlas) (room: string) : TileSet =
     let ground = groundOf atlas room
 
     mineralsIn atlas room
-    |> List.map (fun (_, tile) -> Set.add tile (seatTiles ground tile))
-    |> List.fold Set.union Set.empty
+    |> List.map (fun (_, tile) -> TileSet.add tile (seatTiles ground tile))
+    |> TileSet.unionMany
 
 /// The working ground of the room: every projected source's Seats, every
 /// projected Thorium mineral's tile and Seats, plus, at home only, the
@@ -1526,13 +1536,17 @@ let private mineralGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// an outpost's controller and upgrades nobody's but its own (#241). This is
 /// the **Layout's** question: the mover asks `idleGroundIn`, a strictly wider
 /// set (#268), and widening this one instead would move every clustered pick.
-let workingGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
+let workingGridIn (atlas: Atlas) (room: string) : TileSet =
     let mined = mineralGroundIn atlas room
 
     if room = atlas.Home then
-        Set.unionMany [ seatUnionIn atlas room; upgradeAreaIn atlas room; mined ]
+        TileSet.unionMany [ seatUnionIn atlas room; upgradeAreaIn atlas room; mined ]
     else
-        Set.union (seatUnionIn atlas room) mined
+        TileSet.union (seatUnionIn atlas room) mined
+
+/// `workingGridIn` as a `Set<Pos>`.
+let workingGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
+    workingGridIn atlas room |> TileSet.toSet
 
 /// The tiles of one room's **stores**: a built [[container]], the
 /// [[storage]], and every structure the colony pours a [[refill]] into,
@@ -1571,7 +1585,7 @@ let private idleMaskIn (atlas: Atlas) (room: string) : bool[] =
 
     let markAround (pos: Pos) = aroundWalkable weights pos mark
 
-    workingGroundIn atlas room |> Set.iter mark
+    workingGridIn atlas room |> TileSet.iter mark
     storeTilesIn atlas room |> Set.iter markAround
 
     // The ground beside every exit too: an idle body on (1,15) of W17S25 stood
@@ -1594,7 +1608,7 @@ let idleGroundIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// The idle ground (`idleGroundIn`) beside the ring just outside it: the
 /// walkable tiles touching it that it does not hold, where any step off it
 /// lands.
-let idleGroundAndRingIn (atlas: Atlas) (room: string) : Set<Pos> * Set<RoomPos> =
+let idleGroundAndRingIn (atlas: Atlas) (room: string) : TileSet * TileSet =
     let weights = weightsOf atlas room
     let mask = idleMaskIn atlas room
     let ring = Array.create tileCount false
@@ -1605,17 +1619,16 @@ let idleGroundAndRingIn (atlas: Atlas) (room: string) : Set<Pos> * Set<RoomPos> 
                 if not mask.[indexOf tile] then
                     ring.[indexOf tile] <- true)
 
-    Set.ofList (tilesWhere (fun index -> mask.[index]) id),
-    Set.ofList (tilesWhere (fun index -> ring.[index]) (RoomPos.at room))
+    TileSet.init (fun index -> mask.[index]), TileSet.init (fun index -> ring.[index])
 
 /// The Post a rock picks among its footed Seats: the farthest from the
 /// room's controller, then a built container before a site, then the first
 /// tile. None for no candidate.
-let private bestPost (atlas: Atlas) (room: string) (candidates: Set<Pos>) : Pos option =
-    if Set.count candidates <= 1 then
-        Set.toList candidates |> List.tryHead
+let private bestPost (atlas: Atlas) (room: string) (candidates: TileSet) : Pos option =
+    if TileSet.count candidates <= 1 then
+        TileSet.toList candidates |> List.tryHead
     else
-        let built = containerTilesIn atlas room
+        let built = containerGridIn atlas room
         let controllers = targetsOfKind atlas Controller |> List.choose (tileIn atlas room)
 
         let reach tile =
@@ -1624,8 +1637,8 @@ let private bestPost (atlas: Atlas) (room: string) (candidates: Set<Pos>) : Pos 
             | _ -> controllers |> List.map (range tile) |> List.min
 
         candidates
-        |> Set.toList
-        |> List.sortBy (fun tile -> -(reach tile), not (Set.contains tile built), tile)
+        |> TileSet.toList
+        |> List.sortBy (fun tile -> -(reach tile), not (TileSet.contains tile built), tile)
         |> List.tryHead
 
 /// ADR-0012, ADR-0076
@@ -1634,26 +1647,31 @@ let private bestPost (atlas: Atlas) (room: string) (candidates: Set<Pos>) : Pos 
 /// from the room's controller, then built before site, then the first tile.
 /// The capacity unit of the Anchor quota and of Harvest's own concurrency, and
 /// the only footing a Work-heavy body harvests from.
-let postsIn (atlas: Atlas) (room: string) : Set<Pos> =
+let postGridIn (atlas: Atlas) (room: string) : TileSet =
     memoised atlas.Posts room (fun () ->
         let ground = groundOf atlas room
 
         let footed =
-            Set.union (containerTilesIn atlas room) (pendingContainerTilesIn atlas room)
+            TileSet.union
+                (containerGridIn atlas room)
+                (gridOfKindIn atlas room (Site BuiltKind.Container))
 
         targetsOfKind atlas Source
         |> List.choose (tileIn atlas room)
         |> List.choose (fun pos ->
-            bestPost atlas room (Set.intersect (seatTiles ground pos) footed))
-        |> Set.ofList)
+            bestPost atlas room (TileSet.intersect (seatTiles ground pos) footed))
+        |> TileSet.ofList)
+
+/// `postGridIn` as a `Set<Pos>`.
+let postsIn (atlas: Atlas) (room: string) : Set<Pos> = postGridIn atlas room |> TileSet.toSet
 
 /// The **standing** half of the Post census: the Posts under a built
 /// container. Separated from `postsIn` along the split between what a room is
 /// *worth* and what it is *worked* from: this is the switch that admits a
 /// source into the quotas, and a site throws none.
-let private standingPostsIn (atlas: Atlas) (room: string) : Set<Pos> =
+let private standingPostsIn (atlas: Atlas) (room: string) : TileSet =
     memoised atlas.StandingPosts room (fun () ->
-        Set.intersect (postsIn atlas room) (containerTilesIn atlas room))
+        TileSet.intersect (postGridIn atlas room) (containerGridIn atlas room))
 
 /// Every projected room's Posts, counted: the Anchor row's quota. An outpost's
 /// Post is the same garrison tile a home Post is and hires the same row.
@@ -1666,14 +1684,15 @@ let private standingPostsIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// it.
 let postCount (atlas: Atlas) : int =
     atlas.Spatial.Rooms
-    |> Map.fold (fun total room _ -> total + Set.count (postsIn atlas room)) 0
+    |> Map.fold (fun total room _ -> total + TileSet.count (postGridIn atlas room)) 0
 
 /// Tiles holding a standing container on a Post — the tiles a work-heavy
 /// body garrisons and cannot flee from, ramparted beside the Keep. A Post
 /// whose container is still a site is not one of these: what the rule covers
 /// is a structure standing. The room is the caller's.
 let postContainerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
-    Set.intersect (containerTilesIn atlas room) (postsIn atlas room)
+    TileSet.intersect (containerGridIn atlas room) (postGridIn atlas room)
+    |> TileSet.toSet
 
 /// The **mine Posts** of one room: every Thorium deposit's Seat carrying a
 /// built container — the tile the [[miner]] stands on, a store-less body
@@ -1685,26 +1704,26 @@ let postContainerTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
 /// in that census would hire a six-Work body with a Carry part to stand on a
 /// tile whose whole yield is Thorium. The **built** container alone, never
 /// its site: a miner cannot raise one, Build being shut to a Work-heavy body.
-let private minePostsIn (atlas: Atlas) (room: string) : Set<Pos> =
+let private minePostsIn (atlas: Atlas) (room: string) : TileSet =
     let ground = groundOf atlas room
 
     let seats =
         mineralsIn atlas room
         |> List.map (fun (_, tile) -> seatTiles ground tile)
-        |> List.fold Set.union Set.empty
+        |> TileSet.unionMany
 
-    Set.intersect seats (containerTilesIn atlas room)
+    TileSet.intersect seats (containerGridIn atlas room)
 
 /// One source's own Seats that the named census counts as Posts — the join
 /// both readings of "this rock's Posts" are made of, differing in nothing but
 /// which census they intersect with.
 let private postsOfBy
-    (census: Atlas -> string -> Set<Pos>)
+    (census: Atlas -> string -> TileSet)
     (atlas: Atlas)
     (sourceId: string)
-    : (string * Set<Pos>) option =
+    : (string * TileSet) option =
     seatTilesIn atlas sourceId
-    |> Option.map (fun (room, seats) -> room, Set.intersect seats (census atlas room))
+    |> Option.map (fun (room, seats) -> room, TileSet.intersect seats (census atlas room))
 
 /// The Posts of one source: its own Seats that are Posts. Empty for a source
 /// the projection does not place. The Seat join keeps a neighbouring
@@ -1726,13 +1745,13 @@ let private postsOfBy
 /// the other rock's Post can stand on one of this rock's Seats, and this
 /// rock's own pick is the best of what its Seats hold — its pick ranks first
 /// among every footed Seat it has, so among the room's Posts on them too.
-let private postsOfIn (atlas: Atlas) (rockId: string) : (string * Set<Pos>) option =
+let private postsOfIn (atlas: Atlas) (rockId: string) : (string * TileSet) option =
     if isMineral atlas rockId then
         postsOfBy minePostsIn atlas rockId
     else
-        postsOfBy postsIn atlas rockId
+        postsOfBy postGridIn atlas rockId
         |> Option.map (fun (room, tiles) ->
-            room, bestPost atlas room tiles |> Option.toList |> Set.ofList)
+            room, bestPost atlas room tiles |> Option.toList |> TileSet.ofList)
 
 let postsOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> = postsOfIn atlas sourceId |> stamped
 
@@ -1743,7 +1762,8 @@ let standingPostsOf (atlas: Atlas) (sourceId: string) : Set<RoomPos> =
         Set.empty
     else
         postsOfIn atlas sourceId
-        |> Option.map (fun (room, tiles) -> room, Set.intersect tiles (standingPostsIn atlas room))
+        |> Option.map (fun (room, tiles) ->
+            room, TileSet.intersect tiles (standingPostsIn atlas room))
         |> stamped
 
 /// The source whose Post a tile of the named room is, or None: the one
@@ -1753,7 +1773,10 @@ let sourceOfPost (atlas: Atlas) (room: string) (tile: Pos) : string option =
     targetsOfKind atlas Source
     |> List.tryFind (fun id ->
         tileIn atlas room id |> Option.isSome
-        && postsOf atlas id = Set.singleton (RoomPos.at room tile))
+        && (match postsOfIn atlas id with
+            | Some(where, posts) ->
+                where = room && TileSet.count posts = 1 && TileSet.contains tile posts
+            | None -> false))
 
 /// The tile of a container construction site standing on a [[post]] — the one
 /// site a body may build from under its own feet. `None` for a site of any
@@ -1766,7 +1789,8 @@ let postSiteTile (atlas: Atlas) (siteId: string) : RoomPos option =
         None
     else
         match targetAt atlas siteId with
-        | Some(room, tile) when Set.contains tile (postsIn atlas room) -> Some(RoomPos.at room tile)
+        | Some(room, tile) when TileSet.contains tile (postGridIn atlas room) ->
+            Some(RoomPos.at room tile)
         | _ -> None
 
 let standsOnPostSite (atlas: Atlas) (creep: string) (siteId: string) : bool =
@@ -1855,12 +1879,12 @@ let private narrowedArea (atlas: Atlas) (creep: string) (task: Task) : Set<RoomP
     | Harvest sourceId ->
         memoised atlas.LightAreas task (fun () ->
             match postsOfIn atlas sourceId with
-            | Some(room, postTiles) when not (Set.isEmpty postTiles) ->
+            | Some(room, postTiles) when not (TileSet.isEmpty postTiles) ->
                 // Over the room's own grid and joined once: a `Set<RoomPos>`
                 // difference would compare a room name at every node of it.
                 workArea atlas task
                 |> Set.filter (fun tile ->
-                    not (tile.Room = room && Set.contains (RoomPos.pos tile) postTiles))
+                    not (tile.Room = room && TileSet.contains (RoomPos.pos tile) postTiles))
             | _ -> workArea atlas task)
     | _ -> workArea atlas task
 
@@ -1894,7 +1918,7 @@ let standsWhereItDigs (atlas: Atlas) (sourceIds: string list) (creep: string) : 
     match creepAt atlas creep with
     | None -> false
     | Some(room, tile) ->
-        Set.contains tile (minePostsIn atlas room)
+        TileSet.contains tile (minePostsIn atlas room)
         || sourceIds
            |> List.exists (fun id ->
                Set.contains (RoomPos.at room tile) (narrowedArea atlas creep (Harvest id)))
@@ -1909,7 +1933,7 @@ let controllerContainers (atlas: Atlas) : Set<string> =
     | None ->
         let home = atlas.Home
         let area = upgradeAreaIn atlas home
-        let posts = postsIn atlas home
+        let posts = postGridIn atlas home
 
         // The colony's own room, and the container's tile is read out of that
         // room's layer rather than resolved off its id: a container standing on
@@ -1921,7 +1945,7 @@ let controllerContainers (atlas: Atlas) : Set<string> =
             targetsOfKind atlas (Structure BuiltKind.Container)
             |> List.filter (fun id ->
                 match Map.tryFind id placed with
-                | Some pos -> Set.contains pos area && not (Set.contains pos posts)
+                | Some pos -> TileSet.contains pos area && not (TileSet.contains pos posts)
                 | None -> false)
             |> Set.ofList
 
@@ -1938,9 +1962,9 @@ let controllerContainers (atlas: Atlas) : Set<string> =
 let catchesOverflow (atlas: Atlas) (creep: string) (sourceId: string) : bool =
     together atlas creep sourceId
     |> Option.exists (fun (room, tile, _) ->
-        Set.contains tile (containerTilesIn atlas room)
+        TileSet.contains tile (containerGridIn atlas room)
         && (match seatTilesIn atlas sourceId with
-            | Some(_, seats) -> Set.contains tile seats
+            | Some(_, seats) -> TileSet.contains tile seats
             | None -> false))
 
 /// Whether a creep stands where it could dig a source: in that source's own

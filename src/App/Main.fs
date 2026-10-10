@@ -673,7 +673,7 @@ let private faultRow (colony: string) (phase: string) (error: exn) : ObserveMemo
                 text
         Frames =
             if jsTypeof stack = "string" then
-                (unbox<string> stack).Split('\n')
+                (unbox<string> stack).Split [| '\n' |]
                 |> Array.map _.Trim()
                 |> Array.filter (fun frame -> frame.StartsWith "at " && not (inLibrary frame))
                 |> Array.truncate 3

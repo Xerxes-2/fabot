@@ -893,7 +893,7 @@ let matchAcross
                     | None -> true
                     | Some held ->
                         named.Value.Contains other.Name
-                        && (match held.Split ':' with
+                        && (match held.Split [| ':' |] with
                             | [| "guard"; from |] ->
                                 Facts.mayBeCalled ctx.View (Set.singleton room) from room other
                             // An operation's holder, off the room it works.
