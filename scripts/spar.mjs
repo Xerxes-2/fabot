@@ -57,7 +57,7 @@ function bench(args) {
   if (args.some((a) => a !== "--accept")) fail(usage);
 
   rmSync(OUT, { recursive: true, force: true });
-  const res = spawnSync("dotnet", ["test", join(REPO, "tests/Core.Tests"), "--filter", FILTER], {
+  const res = spawnSync("dotnet", ["test", join(REPO, "tests/Core.Tests"), "-c", "Release", "--filter", FILTER], {
     stdio: ["ignore", "pipe", "inherit"],
     encoding: "utf8",
     env: { ...process.env, FABOT_SPAR_DIR: OUT },

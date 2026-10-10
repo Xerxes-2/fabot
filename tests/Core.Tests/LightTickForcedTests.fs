@@ -949,9 +949,11 @@ let forcedTests =
                         Map.empty
                         [ AttackCreep("guard", "h-1"); HealCreep("medic", "guard") ]
 
+                // A light tick is a tick after the plans, never on theirs.
                 let lost hits =
                     { fighting with
                         Creeps = fighting.Creeps |> Map.add "guard" (creepAt 12 10 (1000 - hits))
+                        Time = fighting.Time + 1
                     }
 
                 Expect.equal
@@ -973,12 +975,40 @@ let forcedTests =
                     (Some(LightForce.HitsLost "guard"))
                     "its striker stepped out of reach of the target"
 
+                // Struck by a body the plan only saw (no striker of ours on it):
+                // the plans were made under that fire, so a tick later a loss
+                // it outlives to the replay's last tick waits for the full
+                // tick; one it does not outlive is decided now.
+                let watched = LightTick.lastFull fighting Map.empty [ HealCreep("medic", "guard") ]
+
+                let later = lost
+
                 Expect.equal
-                    (LightTick.forced
-                        (LightTick.lastFull fighting Map.empty [ HealCreep("medic", "guard") ])
-                        (lost 10))
+                    (LightTick.forced watched (later 10))
+                    None
+                    "struck by a body the plan saw reach it, a loss it outlives: the full tick answers it"
+
+                Expect.equal
+                    (LightTick.forced watched (later 300))
                     (Some(LightForce.HitsLost "guard"))
-                    "struck by a body the plan only saw"
+                    "300 a tick against 700 left: it would fall before the replay ends"
+
+                // A body the plans never saw reach it is news, whatever the loss.
+                let fresh =
+                    { later 10 with
+                        Hostiles =
+                            [
+                                hostile 13 10 "Trepidimous" true
+                                { hostile 11 10 "Trepidimous" true with
+                                    Id = "h-2"
+                                }
+                            ]
+                    }
+
+                Expect.contains
+                    (LightTick.forcing watched fresh)
+                    (LightForce.HitsLost "guard")
+                    "struck where a body the plans did not see now reaches it"
             }
 
             test

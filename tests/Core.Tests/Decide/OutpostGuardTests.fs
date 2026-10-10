@@ -711,6 +711,7 @@ let private blindPairDecided (raid: HostileInfo list) =
             TurnIndex = None
             Operations = []
             Declared = []
+            CampPrices = Map.empty
         }
         ignore
         views

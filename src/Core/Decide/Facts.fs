@@ -3787,7 +3787,7 @@ let private freshHits (view: ColonyView) (room: string) (soon: int) (hits: int) 
 
 /// `BlockPrice` of a row's pattern in a room; None under towers not ours
 /// (`underRivalTowers`).
-let private blockPrice (pattern: BodyPattern) (stance: Stance) (view: ColonyView) (room: string) =
+let private blockPriceOf (pattern: BodyPattern, stance: Stance, view: ColonyView, room: string) =
     if underRivalTowers view room then
         None
     else
@@ -3821,6 +3821,21 @@ let private blockPrice (pattern: BodyPattern) (stance: Stance) (view: ColonyView
                 Hits = one.Hits
                 Back = back
             }
+
+// Every row asks each room's price of a pattern several times a tick: each
+// cast it prices (`fighterCast`'s templates and body counts) and each
+// `blocksBeat` asked whole. Keyed by the view itself, which no tick mutates.
+let private blockPriceMemo
+    : TickMemo.Memo<BodyPattern * Stance * ColonyView * string, BlockPrice option> =
+    TickMemo.create 64 (fun (pattern, stance, view, room) (pattern', stance', view', room') ->
+        obj.ReferenceEquals(view, view')
+        && room = room'
+        && stance = stance'
+        && (obj.ReferenceEquals(pattern, pattern') || pattern = pattern'))
+
+/// `blockPriceOf`, once a tick per pattern, stance, view and room.
+let private blockPrice (pattern: BodyPattern) (stance: Stance) (view: ColonyView) (room: string) =
+    TickMemo.recall blockPriceMemo (pattern, stance, view, room) blockPriceOf
 
 /// A body of `blocks` blocks of a priced row: what it deals beside our
 /// towers, what its swings struck back add to that (`struckBack`), and the
@@ -6542,12 +6557,28 @@ let private bestTile
     (loss: Pos -> float)
     (tiles: CampTile list)
     : (Pos * float * float) option =
+    // The least key in one pass, the first of equal keys kept as a stable
+    // sort's head keeps it: every size of every template asks it over the
+    // whole ground.
     tiles
-    |> List.map (fun tile -> tile, tileRate view damage traffic ticks tile, loss tile.Tile)
-    |> List.sortBy (fun (tile, rate, lost) ->
-        -(rate * float ticks - lost), tile.Risk, -tile.Share, tile.Used, tile.Tile.Y, tile.Tile.X)
-    |> List.tryHead
-    |> Option.map (fun (tile, rate, lost) -> tile.Tile, rate, lost)
+    |> List.fold
+        (fun best tile ->
+            let rate = tileRate view damage traffic ticks tile
+            let lost = loss tile.Tile
+
+            let key =
+                -(rate * float ticks - lost),
+                tile.Risk,
+                -tile.Share,
+                tile.Used,
+                tile.Tile.Y,
+                tile.Tile.X
+
+            match best with
+            | Some(least, _, _, _) when least <= key -> best
+            | _ -> Some(key, tile, rate, lost))
+        None
+    |> Option.map (fun (_, tile, rate, lost) -> tile.Tile, rate, lost)
 
 /// Whether a body of ours on a camp tile gets away from a body landing on
 /// the nearest of its entries (#663 S7d): it outwalks one slower on plain,
@@ -7627,18 +7658,25 @@ let internal rangersWin (view: ColonyView) (room: string) : int option =
 /// together; the stand-down's row latches it (`OutpostEpisode.Chased`) for
 /// the blind ticks after, the chase proper. Read off the room's `verdict`
 /// (`answered`). Never a [[sweep]] candidate (#658): the sweep fights in the
-/// one it works and leaves the rest.
-let internal chased (view: ColonyView) (verdict: Answer * bool) (kept: bool) (room: string) : bool =
+/// one it works and leaves the rest. The verdict and `kept` are read last, and
+/// only for a raided room: a room's verdict is priced over the fleet, and a
+/// colony sees hostiles in many rooms no raid of ours stands in.
+let internal chased
+    (view: ColonyView)
+    (verdict: unit -> Answer * bool)
+    (kept: unit -> bool)
+    (room: string)
+    : bool =
     room <> SpatialInfo.homeName view.Spatial
     && not (Set.contains room (rangerRooms view))
     && not (Set.contains room view.HarassCast)
     && raided view room
-    && (match verdict with
+    && (match verdict () with
         | Answer.Lose, _ -> false
         | _, false -> true
         | _, true ->
             Set.contains room view.RaidedOutposts
-            || kept && (castKites view room || Option.isSome (rangersWin view room)))
+            || kept () && (castKites view room || Option.isSome (rangersWin view room)))
 
 /// Whether nothing of ours wins the raid standing in a room (`Answer.Lose`):
 /// in a ranger room, the raid its row casts nobody into, and the residents

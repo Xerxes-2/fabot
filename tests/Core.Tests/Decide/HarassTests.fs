@@ -5453,6 +5453,70 @@ let exitCampTests =
                     "it pays, priced"
             }
 
+            // Pricing an idle camp's exits was a fifth of a live full tick
+            // (2026-10-10): its price is held until what it moves with moves.
+            test "an idle camp's price is held until its key moves or it is campPriceHeld ticks old" {
+                let priced (held: Map<string, Operations.HeldCampPrice>) (colony: ColonyView) =
+                    match Operations.layReadHeld [ campWire ] Map.empty [] held [ colony ] with
+                    | _, _, _, [ reading ], prices -> reading, prices
+                    | _ -> failtest "one reading"
+
+                // A bank that buys nothing to camp with: it stays idle.
+                let colony = camped 550 10 100 false true [ fuse; kinematic ]
+                let first, held = priced Map.empty colony
+
+                Expect.equal
+                    (held |> Map.toList |> List.map (fun (_, price) -> price.Priced))
+                    [ colony.Time ]
+                    "its one exit priced this tick, held"
+
+                let later (ticks: int) (view: ColonyView) =
+                    { view with Time = colony.Time + ticks }
+
+                let next, kept = priced held (later 1 colony)
+                Expect.equal kept held "the next tick reads the held price"
+
+                let pricedParts (reading: OpReading) =
+                    reading.Exits |> List.map (fun e -> e.Pays, e.Loses, e.Priced)
+
+                Expect.equal (pricedParts next) (pricedParts first) "read as it was priced"
+
+                // An armed body standing in the room is in its key: priced at
+                // once, and it loses.
+                let landed =
+                    later
+                        1
+                        { colony with
+                            Hostiles =
+                                colony.Hostiles
+                                @ [
+                                    { fuse with
+                                        Pos = RoomPos.at harassRoom { X = 25; Y = 0 }
+                                    }
+                                    { kinematic with
+                                        Pos = RoomPos.at harassRoom { X = 26; Y = 0 }
+                                    }
+                                ]
+                        }
+
+                let losing, repriced = priced held landed
+
+                Expect.equal
+                    (repriced |> Map.toList |> List.map (fun (_, price) -> price.Priced))
+                    [ colony.Time + 1 ]
+                    "the pair in the room moves the key"
+
+                Expect.stringContains losing.Idle "loses to" "and the exchange is lost at once"
+
+                let aged = later Operations.campPriceHeld colony
+                let _, renewed = priced held aged
+
+                Expect.equal
+                    (renewed |> Map.toList |> List.map (fun (_, price) -> price.Priced))
+                    [ aged.Time ]
+                    "a price campPriceHeld ticks old is priced afresh"
+            }
+
             // A spec published through Memory casts only once a human flags
             // it live, and then as the code's spec would.
             test

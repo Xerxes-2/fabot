@@ -162,6 +162,9 @@ type LastFull =
         /// The colonies a cold reset left undecided (`resetSplit`): the tick
         /// after it is full and decides them.
         Deferred: Set<string>
+        /// The tick these facts were read on (`Glance.Time`): `Hits` is that
+        /// tick's, whichever plans were carried from older ones.
+        Time: int
     }
 
 /// Why a light tick hands over to a full one, and whose replay it breaks
@@ -668,6 +671,7 @@ let ofPlans (glance: Glance) (deferred: Set<string>) (plans: (string * Plan) lis
             |> Seq.map (fun hostile -> hostile.Id, hostile.Tile)
             |> Fresh.mapOfSeq
         Deferred = Fresh.setOfSeq deferred
+        Time = glance.Time
     }
 
 /// One colony's full tick, holding every creep the glance sees, as a
@@ -972,7 +976,9 @@ let private trackAt (plan: Plan) (name: string) (time: int) : RoomPos option =
 /// structure's fight); a creep born or gone; one on the border ring with no
 /// step in; a creep of ours that lost hits, unless every body that could
 /// have struck it is one a striker of ours aims at and reaches, and the loss
-/// is within the healing the plans give it; a chaser its plan stands while
+/// is within the healing the plans give it, or every one is fire no striker
+/// of ours answers that already reached it as the plans were made and the
+/// creep outlives its rate to the replay's last tick; a chaser its plan stands while
 /// its unarmed quarry walks off, if it can close; a controller changed.
 let forcing (last: LastFull) (now: Glance) : LightForce list =
     let strikers = strikers last
@@ -1050,10 +1056,28 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
 
     // Who could have struck the creep where it stands: a body whose weapon
     // reaches it now or after a step. None means a cause out of sight (a
-    // tower, a body gone). Excused only where the plans fight every one of
-    // them from in reach and heal what it lost (#533's out-damaged reading).
+    // tower, a body gone). Excused where the plans fight every one of them
+    // from in reach and heal what it lost (#533's out-damaged reading). And
+    // fire no plan answers — no striker of ours on any of them — that was
+    // already landing on it as the plans were made, where it outlives the
+    // loss's rate to the last tick any cadence replays: the plans were made
+    // under that fire, and the full tick answers it before it can fall; else
+    // a body under it forces a decide on every tick it is struck. A fight
+    // the plans answer is #533's to judge, whatever its rate.
     let hitsLost =
         let healed = healing last now
+        let since = now.Time - last.Time
+
+        let unanswered name (near: GlanceHostile list) =
+            near
+            |> List.forall (fun hostile ->
+                Set.contains (hostile.Id, Reached.Creep(name, true)) last.Hurting
+                && not (fighting hostile false (fun _ -> true)))
+
+        let outlives (creep: GlanceCreep) (before: int) =
+            since >= 1
+            && since < Tuning.maxCadence
+            && creep.Hits * since > (before - creep.Hits) * (Tuning.maxCadence - since)
 
         now.Creeps
         |> Map.toList
@@ -1062,6 +1086,7 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
             | Some before when creep.Hits < before ->
                 match hostiles |> List.filter (fun hostile -> reaches hostile creep.Tile) with
                 | [] -> true
+                | near when unanswered name near && outlives creep before -> false
                 | near ->
                     near
                     |> List.exists (fun hostile -> not (fighting hostile true (fun _ -> true)))

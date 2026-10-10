@@ -1629,6 +1629,7 @@ let fightOnlyDecideTests =
                             TurnIndex = None
                             Operations = []
                             Declared = []
+                            CampPrices = Map.empty
                         }
                         ignore
                         [ colony, chokedHome ]

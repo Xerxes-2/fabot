@@ -148,6 +148,12 @@ let mutable private ledgerFaults: Set<string> = Fresh.setOfSeq Seq.empty
 let mutable private ledgerForcings: Decide.Ledger.Forcing list = []
 let mutable private ledgerFallen: Set<string> = Fresh.setOfSeq Seq.empty
 
+// Each exit camp's price the last decide held (`Operations.layReadHeld`), any
+// decide that ran the operations, whole or not: a reset prices every exit
+// afresh.
+let mutable private campPrices: Map<string, Decide.Operations.HeldCampPrice> =
+    Fresh.mapOfSeq Seq.empty
+
 [<Emit("globalThis")>]
 let private globalThis: obj = jsNative
 
@@ -1308,6 +1314,7 @@ let private fullTick
                     TurnIndex = Some turn
                     Operations = storedCode
                     Declared = admitted
+                    CampPrices = campPrices
                 }
                 (fun () -> Game.cpu.getUsed (), floodedNow ())
         with error ->
@@ -1991,6 +1998,7 @@ let private fullTick
     // tick's refusals of the code's specs. A live Memory spec's record
     // rides in it while its spec stands (`Operations.retire`).
     let records, events, readings = colonyDecisions.Operated
+    campPrices <- colonyDecisions.CampPrices
 
     let records, events =
         let records, dropped = Operations.retire Colony.operations publication records

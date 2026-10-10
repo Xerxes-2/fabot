@@ -1541,6 +1541,7 @@ let private matchedAll (held: Assignments) (colonies: Colony list) (world: World
             TurnIndex = None
             Operations = []
             Declared = []
+            CampPrices = Map.empty
         }
         ignore
         views)
