@@ -14,7 +14,8 @@
     "deploy": "npm run build && npm run smoke --silent && npm run upload",
     "observe": "node --env-file-if-exists=.env scripts/observe.mjs",
     "cpuprofile": "node scripts/cpuprofile.mjs",
-    "xx": "node scripts/xxscreeps/xx.mjs"
+    "xx": "node scripts/xxscreeps/xx.mjs",
+    "soak": "node scripts/xxscreeps/soak.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
