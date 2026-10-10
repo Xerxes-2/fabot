@@ -19,8 +19,14 @@ cd "$CLAUDE_PROJECT_DIR"
 
   if [ -n "$branch" ]; then
     jj config set --repo claude.session-branch "$branch"
-    jj bookmark track "$branch" --remote origin 2>/dev/null || true
+    # The clone writes origin's ref for a branch origin may not have yet; a fetch
+    # corrects it, or the first push fails its lease ("stale info").
+    jj git fetch -b "$branch" || true
   fi
+
+  # A pushed change is immutable (AGENTS.md): an edit after a push lands in a new one.
+  jj config set --repo 'revset-aliases."immutable_heads()"' \
+    'builtin_immutable_heads() | remote_bookmarks(remote=exact:"origin")'
 
   # jj takes git's identity; the working-copy change made before it had none.
   name=$(git config user.name || true)
