@@ -13,23 +13,63 @@ const fail = (msg) => {
 
 const segments = {};
 let used = 0;
+const at = (x, y) => ({ x, y, roomName: "W1N1" });
+const store = (held, capacity) => ({ ...held, getCapacity: (r) => (r === undefined || r === "energy" ? capacity : null) });
+const spawn = {
+  id: "s1",
+  name: "Spawn1",
+  structureType: "spawn",
+  my: true,
+  owner: { username: "me" },
+  pos: at(25, 25),
+  hits: 5000,
+  hitsMax: 5000,
+  store: store({ energy: 300 }, 300),
+  spawning: null,
+};
+const road = { id: "r1", structureType: "road", pos: at(26, 25), hits: 5000, hitsMax: 5000 };
+const creep = {
+  id: "k1",
+  name: "a",
+  my: true,
+  owner: { username: "me" },
+  spawning: false,
+  pos: at(10, 10),
+  body: [
+    { type: "work", hits: 100 },
+    { type: "carry", hits: 100 },
+    { type: "move", hits: 100, boost: "ZO" },
+  ],
+  hits: 300,
+  hitsMax: 300,
+  ticksToLive: 1400,
+  fatigue: 0,
+  store: store({ energy: 20 }, 50),
+  say: () => 0,
+  move: () => 0,
+};
+const found = {
+  105: [{ id: "src1", pos: at(5, 5), energy: 3000, energyCapacity: 3000, ticksToRegeneration: undefined }],
+  116: [{ id: "m1", pos: at(40, 40), mineralType: "H", mineralAmount: 70000 }],
+  107: [spawn, road],
+  111: [{ id: "cs1", structureType: "extension", my: true, owner: { username: "me" }, pos: at(27, 27), progress: 0, progressTotal: 3000 }],
+  106: [{ id: "p1", resourceType: "energy", pos: at(11, 11), amount: 50 }],
+  118: [],
+  123: [],
+  103: [],
+};
 const room = {
   name: "W1N1",
   energyAvailable: 300,
   energyCapacityAvailable: 300,
-  controller: { id: "c1", my: true, level: 1, ticksToDowngrade: 20000 },
+  controller: { id: "c1", my: true, owner: { username: "me" }, pos: at(30, 30), level: 1, progress: 10, progressTotal: 200, ticksToDowngrade: 20000, safeModeAvailable: 1 },
+  find: (type) => found[type] ?? [],
 };
-const spawn = { id: "s1", name: "Spawn1", room, spawning: null };
-const creep = {
-  name: "a",
-  spawning: false,
-  pos: { x: 10, y: 10, roomName: "W1N1" },
-  hits: 100,
-  hitsMax: 100,
-  ticksToLive: 1400,
-  say: () => 0,
-  move: () => 0,
-};
+spawn.room = room;
+creep.room = room;
+const terrain = new Uint8Array(2500);
+terrain[0] = 1;
+terrain[51] = 2;
 
 globalThis.Memory = { fabot: { v1: "left alone" } };
 globalThis.RawMemory = { segments, get: () => JSON.stringify(globalThis.Memory) };
@@ -37,6 +77,7 @@ globalThis.Game = {
   time: 100,
   cpu: { limit: 20, bucket: 10000, getUsed: () => (used += 0.25) },
   rooms: { W1N1: room },
+  map: { getRoomTerrain: () => ({ getRawBuffer: () => terrain }) },
   spawns: { Spawn1: spawn },
   creeps: { a: creep },
   getObjectById: (id) => (id === "s1" ? spawn : null),
@@ -61,7 +102,15 @@ const phases = observe.phases.map(([name]) => name);
 for (const want of ["memory", "world", "execute", "record"])
   if (!phases.includes(want)) fail(`phase ${want} not reported: ${phases}`);
 const recorded = JSON.parse(segments[10 + (103 % 5)] ?? fail("recorder wrote nothing"));
-if (recorded.world.Creeps.length !== 1) fail("recorder's world lost the creep");
+const w = recorded.world;
+if (w.Creeps.length !== 1) fail("recorder's world lost the creep");
+const [r] = w.Rooms;
+if (typeof r.Terrain !== "string" || r.Terrain.length !== 2500 || r.Terrain.slice(0, 2) !== "10")
+  fail(`terrain not recorded as 2,500 digits: ${String(r.Terrain).slice(0, 40)}`);
+if (r.Sources.length !== 1 || r.Structures.length !== 2 || r.Sites.length !== 1 || r.Piles.length !== 1)
+  fail(`room facts lost: ${JSON.stringify({ s: r.Sources.length, st: r.Structures.length, si: r.Sites.length, p: r.Piles.length })}`);
+const [k] = w.Creeps;
+if (k.Body.length !== 3 || k.Store.Capacity !== 50) fail(`creep facts lost: ${JSON.stringify(k).slice(0, 200)}`);
 if (Memory.fabot.v1 !== "left alone") fail("v1's Memory was touched");
 
 const version = readFileSync(new URL("../dist/main.js", import.meta.url), "utf8").split("\n")[0];

@@ -111,11 +111,16 @@ let writeObserve (o: Observed) : unit =
 
     writeSegment observeSegment text
 
+/// `JSON.stringify` with a room's terrain buffer written as one digit a tile,
+/// 2,500 characters, instead of an object keyed by index.
+[<Emit("JSON.stringify($0, (_k, v) => v instanceof Uint8Array ? Array.from(v).join('') : v)")>]
+let private stringifyWorld (_value: obj) : string = jsNative
+
 /// Write this tick's world and the Memory string's size to the recorder's
 /// ring. A tick whose record would not fit a segment is skipped and says so.
 let record (time: int) (world: Fabot.Core.World.World) : string option =
     let text =
-        jsonStringify (
+        stringifyWorld (
             createObj
                 [ "tick" ==> time; "memoryBytes" ==> (rawMemory ()).Length; "world" ==> world ]
         )

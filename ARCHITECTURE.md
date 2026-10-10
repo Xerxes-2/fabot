@@ -584,7 +584,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 | v1 | v2 | Action |
 |---|---|---|
 | `App/Bindings.fs` | `App/Bindings.fs` | ✅ verbatim, plus `cpu.limit` and segment writes |
-| `App/World.fs`, `Main.fs` shell | `App/World.fs`, `Wire.fs`, `Main.fs`, `Core/Tick.fs` | ✅ minimal `World`; per-module CPU, fault isolation, switches, recorder, observe segment. ⏳ `World` grows with its readers |
+| `App/World.fs`, `Main.fs` shell | `App/World.fs`, `Wire.fs`, `Main.fs`, `Core/Tick.fs` | ✅ `World`: terrain, controllers, sources, minerals, structures, sites, piles, remains, hostiles, our creeps with bodies and stores; per-module CPU, fault isolation, switches, recorder, observe segment |
 | `Types/Rules.fs` `Engine`, `Types/Vocabulary.fs`, `Types/Lists.fs` | `Core/Engine.fs`, `Core/Vocabulary.fs`, `Core/Lists.fs` | ✅ `Engine` less policy (`guardCap`) and season (`reactorCapacity`), plus part costs, regen time and level progress; `Vocabulary` less `Task` (Economy's) and with season resources as `Resource.Other` |
 | `Core/Atlas.fs`, `Grid.fs`, `Geometry.fs` | `Atlas` tile layer | port; add footprint; add the room-graph layer |
 | `Decide/Resolver.fs` | `Move` | port arbitration + step functions; drop fight precedence; add formation stepping |
