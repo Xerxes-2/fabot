@@ -1,6 +1,7 @@
-// The line ceilings in scripts/ceilings.json, checked. A directory's count is
-// every line of every .fs beneath it, minus a `<dir>/Kinds/*` entry's files,
-// which are each held to their own ceiling. Exits non-zero on any breach.
+// The line ceilings in scripts/ceilings.json, checked, and no issue or ADR
+// citation in code. A directory's count is every line of every .fs beneath
+// it, minus a `<dir>/Kinds/*` entry's files, which are each held to their own
+// ceiling. Exits non-zero on any breach.
 //
 // Usage: node scripts/ceiling.mjs
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -31,6 +32,22 @@ for (const [key, ceiling] of Object.entries(ceilings)) {
     const files = fsFiles(key).filter((f) => !perFile.some((dir) => dir !== key && f.startsWith(dir + "/")));
     rows.push([key, files.reduce((n, f) => n + lineCount(f), 0), ceiling]);
   }
+}
+
+// AGENTS.md: no issue numbers or ADR citations in code; git log has them.
+const cited = ["src", "tests"]
+  .filter(existsSync)
+  .flatMap(fsFiles)
+  .flatMap((file) =>
+    readFileSync(file, "utf8")
+      .split("\n")
+      .map((line, i) => [file, i + 1, line])
+      .filter(([, , line]) => /#\d{2,}\b|\bADR[- ]?\d{3,4}\b/.test(line)),
+  );
+for (const [file, n, line] of cited) console.error(`CITE ${file}:${n}: ${line.trim()}`);
+if (cited.length > 0) {
+  console.error(`ceiling: ${cited.length} issue/ADR citation(s) in code; git log carries them (AGENTS.md)`);
+  process.exit(1);
 }
 
 const over = rows.filter(([, n, c]) => n > c);

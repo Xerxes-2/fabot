@@ -83,7 +83,7 @@ let withMoveLast (body: BodyPart list) : BodyPart list =
 
 let private replicate (n: int) (part: BodyPart) = List.replicate (max 0 n) part
 
-/// The worker's rule (ADR-0003): as many whole blocks as the bank buys up to
+/// The worker's rule: as many whole blocks as the bank buys up to
 /// `most`; where the bank and not `most` stopped them, the bank's remainder on
 /// Carry and Move at loaded road parity (`work + carry <= 2 × move`, a tile a
 /// tick loaded on a road). Grouped so damage strips Work first. A body held to

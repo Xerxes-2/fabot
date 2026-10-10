@@ -319,8 +319,7 @@ type IBodyPartDef =
     abstract ``type``: string
     /// Hits left in this one part. The engine destroys parts from the head of
     /// the body, and a destroyed part stays in the array reading zero — so a
-    /// count that does not read this counts weapons the creep no longer has
-    /// (#270).
+    /// count that does not read this counts weapons the creep no longer has.
     abstract hits: int
     /// The compound boosting this part, e.g. "XKHO2"; undefined unboosted.
     abstract boost: string
@@ -381,9 +380,9 @@ type ICreep =
     /// `heal` at range 1..3 for RANGED_HEAL_POWER per HEAL part.
     abstract rangedHeal: target: obj -> int
     /// Hit one creep within range 3 for RANGED_ATTACK_POWER per RANGED_ATTACK
-    /// part (#411).
+    /// part.
     abstract rangedAttack: target: obj -> int
-    /// Hit every creep and structure not ours within range 3 (#537).
+    /// Hit every creep and structure not ours within range 3 .
     abstract rangedMassAttack: unit -> int
     /// Single-step move by direction constant (TOP = 1, clockwise). The only
     /// movement API the bot uses; moveTo is not bound.
