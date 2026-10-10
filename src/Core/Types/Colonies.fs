@@ -1377,15 +1377,19 @@ module Colony =
     /// The exits these operations' exit camps name (#663 S7d), each the
     /// rival home it leads out of and the room it lands in: what the world
     /// watches (`ExitTraffic.recall`), the home among the rooms whose bodies
-    /// it keeps out of sight.
-    let campExitsOf (wires: OpSpecWire list) : (string * string) list =
+    /// it keeps out of sight; with the enemy the camp fights there, whose
+    /// bodies alone its watch logs (#674). One enemy an exit, the first
+    /// operation's: one fight a room.
+    let campExitsOf (wires: OpSpecWire list) : (string * string * string) list =
         wires
         |> List.collect (fun wire ->
             match wire.Template, wire.Rooms with
             | "exitCamp", home :: camps ->
-                camps |> List.filter ((<>) home) |> List.map (fun camp -> home, camp)
+                camps
+                |> List.filter ((<>) home)
+                |> List.map (fun camp -> home, camp, wire.Enemy)
             | _ -> [])
-        |> List.distinct
+        |> List.distinctBy (fun (home, camp, _) -> home, camp)
 
     /// The [[sweep]] over the candidates the colonies cast, as an operation
     /// (#663 S7b; `Operations.sweepSpec` reads it off the views): one group

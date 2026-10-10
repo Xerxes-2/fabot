@@ -1486,7 +1486,9 @@ let worldOf (a: Arena) : World =
     let exits = Colony.campExitsOf a.Declared
 
     let candidates =
-        (castRooms a |> List.map _.RoomName) @ (exits |> List.map fst) |> List.distinct
+        (castRooms a |> List.map _.RoomName)
+        @ (exits |> List.map (fun (home, _, _) -> home))
+        |> List.distinct
 
     let sightings =
         a.Rooms

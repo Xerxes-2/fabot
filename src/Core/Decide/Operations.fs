@@ -1222,8 +1222,7 @@ let private exitReads
         let bodies =
             arrivals |> List.map (fun (_, h) -> h.Id) |> List.distinct |> List.length
 
-        // The watch is heap only: where resets come oftener than its window,
-        // it never runs one, and the camp never starts.
+        // Known once the watch has run a window, resets and all (#674).
         let used =
             match log with
             | Some log when now - log.Since >= ExitTraffic.window && not (List.isEmpty log.Watched) ->
@@ -1470,19 +1469,8 @@ let private readingOf (read: ExitRead) : ExitReading =
 /// A body by its parts, most first, each count and the part's letter
 /// (`17A18M`): what an operator reads of a body that may come out.
 let partsText (body: BodyPart list) : string =
-    let letter =
-        function
-        | BodyPart.Work -> "W"
-        | BodyPart.Carry -> "C"
-        | BodyPart.Move -> "M"
-        | BodyPart.Attack -> "A"
-        | BodyPart.RangedAttack -> "R"
-        | BodyPart.Heal -> "H"
-        | BodyPart.Claim -> "K"
-        | BodyPart.Tough -> "T"
-
     body
-    |> List.countBy letter
+    |> List.countBy (partLetter >> string)
     |> List.sortBy (fun (part, n) -> -n, part)
     |> List.map (fun (part, n) -> $"{n}{part}")
     |> String.concat ""

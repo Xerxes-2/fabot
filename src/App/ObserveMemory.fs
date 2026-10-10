@@ -3713,6 +3713,282 @@ let saveOpsReadings (readings: OpReading list) =
         else
             raw?readings <- readings |> List.map readingWire |> Array.ofList
 
+// ---- the exit camps' traffic watch (#674) ----------------------------------
+//
+// `Memory.fabot.ops.traffic`, the bot's alone, rewritten each full tick so a
+// reset resumes the watch (`World.Traffic`): each exit's log under its key
+// (`ExitTraffic.key`), `{ s, o, w, b, a, n }`. `s` the tick the watch began;
+// `o` the enemy whose landings it logs (no other's are: `ExitTraffic.recall`),
+// written beside landings only; `w` the full ticks watched as runs oldest
+// first, `[start, count]` or `[start, count, step]` past a step of one
+// (`ExitTraffic.runsOf`); `b` each body landing, `[id, shape]`
+// (`ExitTraffic.shapeText`), only those a landing in `a` names; `a` each
+// landing newest first, `[tick, body, x, y, hits, ttl]`, `body` its index in
+// `b`, its tile in the room the exit lands in; `n` the bodies standing on a
+// landing tile at the last tick watched, `[id, x, y]`. A body's shape is its
+// newest landing's.
+//
+// Read on a cold heap, never more than a log can hold: the newest window of
+// runs and a window of ticks visited in all (`ExitTraffic.ticksOf`), the
+// newest `ExitTraffic.cap` landings and as many bodies, each truncated
+// before it is decoded. Only what lies within the window before the tick
+// reading it; a watch begun after that tick, or before tick 0, is off its
+// shape. An exit off its shape costs that exit, a row off its shape that
+// row, an absent `o`, `b`, `a` or `n` (an older shape) none of them.
+//
+// Size (wire-check): about 900 B an exit at live traffic. At the bound — the
+// cap's 750 landings by as many distinct bodies of 24-character ids, and a
+// window watched in its most broken runs (a run holds two ticks and the
+// next begins two on at the nearest, so 500) — about 64 KB an exit where the
+// bodies share a 50-part boosted shape, and 165 KB where each is spelt in
+// the longest text a shape has (fifty one-part boosted runs).
+
+let private isArray (raw: obj) : bool = JS.Constructors.Array.isArray raw
+
+// A wire tuple's whole number at `index` a 32-bit integer holds, and a throw
+// for anything else: a fraction, a string, a number past an int.
+let private intAt (row: obj[]) (index: int) : int =
+    let value = if index < row.Length then row.[index] else null
+
+    if
+        jsTypeof value = "number"
+        && emitJsExpr value "Number.isInteger($0) && Math.abs($0) <= 2147483647"
+    then
+        unbox<int> value
+    else
+        failwith "not a whole number"
+
+// The same, and a throw for a negative one: a tick, a count of hits or of
+// ticks to live.
+let private naturalAt (row: obj[]) (index: int) : int =
+    let number = intAt row index
+
+    if number < 0 then failwith "negative" else number
+
+// A wire tuple's non-empty string at `index`, and a throw for anything else.
+let private textAt (row: obj[]) (index: int) : string =
+    if
+        index < row.Length
+        && jsTypeof row.[index] = "string"
+        && (unbox<string> row.[index]).Length > 0
+    then
+        unbox<string> row.[index]
+    else
+        failwith "not a name"
+
+let private tupleOf (raw: obj) : obj[] =
+    if isArray raw then
+        unbox<obj[]> raw
+    else
+        failwith "not a row"
+
+// A tile of a room, and a throw for one off the room.
+let private roomTileAt (row: obj[]) (index: int) : Pos =
+    let tile =
+        {
+            X = intAt row index
+            Y = intAt row (index + 1)
+        }
+
+    if
+        tile.X < 0
+        || tile.Y < 0
+        || tile.X >= Engine.roomSide
+        || tile.Y >= Engine.roomSide
+    then
+        failwith "not a tile"
+    else
+        tile
+
+let private trafficWire (log: ExitLog) : obj =
+    let index = System.Collections.Generic.Dictionary<string, int>()
+    let bodies = ResizeArray<obj>()
+
+    let landings =
+        log.Arrivals
+        |> List.map (fun (tick, h) ->
+            let body =
+                match index.TryGetValue h.Id with
+                | true, body -> body
+                | _ ->
+                    let body = bodies.Count
+                    index.[h.Id] <- body
+
+                    bodies.Add(box [| box h.Id; box (ExitTraffic.shapeText h.Body h.Boosts) |])
+
+                    body
+
+            box
+                [|
+                    box tick
+                    box body
+                    box h.Pos.X
+                    box h.Pos.Y
+                    box h.Hits
+                    box h.TicksToLive
+                |])
+        |> Array.ofList
+
+    let runs =
+        ExitTraffic.runsOf log.Watched
+        |> List.map (fun (start, count, step) ->
+            if step = 1 then
+                box [| box start; box count |]
+            else
+                box [| box start; box count; box step |])
+        |> Array.ofList
+
+    let o =
+        createObj
+            [
+                "s" ==> log.Since
+                "w" ==> runs
+                "b" ==> bodies.ToArray()
+                "a" ==> landings
+                "n"
+                ==> (log.Standing
+                     |> List.map (fun (id, tile) -> box [| box id; box tile.X; box tile.Y |])
+                     |> Array.ofList)
+            ]
+
+    match log.Arrivals with
+    | (_, h) :: _ -> o?o <- h.Owner
+    | [] -> ()
+
+    o
+
+let private exitLogOf (now: int) (camp: string) (raw: obj) : ExitLog =
+    if isNull raw || jsTypeof raw <> "object" || isArray raw then
+        failwith "not a log"
+
+    let rows (key: string) : obj[] =
+        if isArray raw?(key) then unbox<obj[]> raw?(key) else [||]
+
+    let since = naturalAt [| raw?s |] 0
+
+    if since > now then
+        failwith "begun after now"
+
+    // The newest window of runs (written oldest first): no more ticks than
+    // that can be watched.
+    let runs =
+        let all = rows "w"
+
+        rowsOf
+            (fun raw ->
+                let row = tupleOf raw
+
+                match row.Length with
+                | 2 -> Some(intAt row 0, intAt row 1, 1)
+                | 3 -> Some(intAt row 0, intAt row 1, intAt row 2)
+                | _ -> None)
+            (box (Array.skip (max 0 (all.Length - ExitTraffic.window)) all))
+
+    let owner =
+        if jsTypeof raw?o = "string" && (unbox<string> raw?o).Length > 0 then
+            Some(unbox<string> raw?o)
+        else
+            None
+
+    // As many bodies as the landings kept can name, each decoded once.
+    let bodies =
+        rows "b"
+        |> Array.truncate ExitTraffic.cap
+        |> Array.map (fun raw ->
+            try
+                let row = tupleOf raw
+
+                ExitTraffic.shapeOf (textAt row 1)
+                |> Option.map (fun shape -> textAt row 0, shape)
+            with _ ->
+                None)
+
+    let arrival (raw: obj) : (int * HostileInfo) option =
+        let row = tupleOf raw
+        let tick = naturalAt row 0
+        let body = intAt row 1
+
+        match
+            owner,
+            (if body >= 0 && body < bodies.Length then
+                 bodies.[body]
+             else
+                 None)
+        with
+        | Some owner, Some(id, (parts, boosts)) when tick <= now && now - tick < ExitTraffic.window ->
+            Some(
+                tick,
+                {
+                    Id = id
+                    Owner = owner
+                    Pos = RoomPos.at camp (roomTileAt row 2)
+                    Body = parts
+                    Boosts = boosts
+                    Hits = naturalAt row 4
+                    TicksToLive = naturalAt row 5
+                }
+            )
+        | _ -> None
+
+    {
+        Watched = ExitTraffic.ticksOf now runs
+        // The newest landings (written newest first), before they decode.
+        Arrivals = rowsOf arrival (box (rows "a" |> Array.truncate ExitTraffic.cap))
+        Standing =
+            rowsOf
+                (fun raw ->
+                    let row = tupleOf raw
+                    Some(textAt row 0, roomTileAt row 1))
+                // A border's tiles at the most: what a landing ring holds.
+                (box (rows "n" |> Array.truncate Engine.roomSide))
+        Since = since
+    }
+
+/// The exit camps' traffic watch as the last full tick wrote it
+/// (`Memory.fabot.ops.traffic`), read at `now`: what a cold heap's world
+/// starts from. Absent or off its shape, none, never a fault.
+let loadTraffic (now: int) : Map<string, ExitLog> =
+    leafOr
+        Map.empty
+        (fun () ->
+            let raw = ops ()
+            if isNull raw then null else raw?traffic)
+        (fun leaf ->
+            if jsTypeof leaf <> "object" || isArray leaf then
+                Map.empty
+            else
+                objectEntries leaf
+                |> Array.choose (fun (key, raw) ->
+                    ExitTraffic.campOf key
+                    |> Option.bind (fun camp ->
+                        try
+                            Some(key, exitLogOf now camp raw)
+                        with _ ->
+                            None))
+                |> Fresh.mapOfArray)
+
+/// The exit camps' traffic watch written onto the ops leaf
+/// (`Memory.fabot.ops.traffic`), replacing the last: none, the key removed.
+/// The ops leaf made where none stands and there is a watch to keep; nothing
+/// onto one off its shape, which is the operator's to mend.
+let saveTraffic (traffic: Map<string, ExitLog>) =
+    let raw = ops ()
+
+    if not (isNull raw) then
+        if traffic.IsEmpty then
+            emitJsStatement raw "delete $0.traffic"
+        else
+            raw?traffic <- traffic |> Map.toSeq |> hashOf trafficWire
+    elif not traffic.IsEmpty then
+        let fabot = Memory?fabot
+
+        if isNull fabot || isNull fabot?ops then
+            if isNull fabot then
+                Memory?fabot <- createEmpty<obj>
+
+            Memory?fabot?ops <-
+                createObj [ "traffic" ==> (traffic |> Map.toSeq |> hashOf trafficWire) ]
+
 // ---- the operator's check (#663 S7e) ----------------------------------------
 
 /// A decoded spec as the operator reads it: its target, schedule, phases

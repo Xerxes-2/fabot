@@ -162,7 +162,7 @@ type OpGuard =
     /// Prey uses the target's exits (#663 S7d, `OpFacts.ExitsUsed`): bodies
     /// were seen crossing out on them over the watch's window, a return
     /// among them — two arrivals, never one sighting. Unknown while no exit's
-    /// watch has run a window since the heap's reset, or watched nothing.
+    /// watch has run a window, or watched nothing.
     | ExitsUsed
     /// Its work pays (#663 S7d, `OpFacts.Pays`): before its run, the kills
     /// its cast lands over the run, at their value by remaining life and the
@@ -467,7 +467,7 @@ type ExitReading =
     {
         /// The room the exit lands in.
         Camp: string
-        /// The ticks its watch has run since this heap began it: under
+        /// The ticks its watch has run, resets and all (#674): under
         /// `ExitTraffic.window` it answers Unknown.
         Age: int
         /// The full ticks watched over the window, the enemy's landings over

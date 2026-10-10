@@ -33,6 +33,24 @@ let samePart (a: BodyPart) (b: BodyPart) : bool =
     | Tough, Tough -> true
     | _ -> false
 
+/// A part's one letter, as a body's text spells it: the readings' "18M17A"
+/// and the traffic watch's Memory shape (`ExitTraffic.shapeText`).
+let partLetter (part: BodyPart) : char =
+    match part with
+    | Work -> 'W'
+    | Carry -> 'C'
+    | Move -> 'M'
+    | Attack -> 'A'
+    | RangedAttack -> 'R'
+    | Heal -> 'H'
+    | BodyPart.Claim -> 'K'
+    | Tough -> 'T'
+
+/// Every BodyPart — the closed set, for building tables over the vocabulary.
+/// A literal, closed by `Core.Tests`, which fails when this list is short.
+let allBodyParts =
+    [ Work; Carry; Move; Attack; RangedAttack; Heal; BodyPart.Claim; Tough ]
+
 /// The boost one part carries, as far as a fight reads it: the tier of a
 /// compound on the part's own combat act (`BOOSTS`) — ATTACK's swing,
 /// RANGED_ATTACK's shot and mass attack, HEAL's heals, TOUGH's damage taken,

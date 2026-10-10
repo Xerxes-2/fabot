@@ -1319,7 +1319,8 @@ type World =
         Refusals: Refusal list
         /// Each exit of a rival home an exit camp names, watched
         /// (`ExitTraffic.recall`, #663 S7d), by `ExitTraffic.key`. Heap state
-        /// in the shell, never Memory: a reset starts each log afresh.
+        /// the shell also keeps in Memory (#674), so a reset resumes each log
+        /// where the last full tick left it.
         Traffic: Map<string, ExitLog>
     }
 
@@ -1334,15 +1335,15 @@ and ExitLog =
         /// The full ticks vision answered for the room the exit lands in,
         /// newest first.
         Watched: int list
-        /// Each body seen on a landing tile it had not stood on at the full
-        /// tick watched before, with the tick, newest first: the body as read
-        /// then, its tile the landing tile.
+        /// Each body of the exit's enemy seen on a landing tile it had not
+        /// stood on at the full tick watched before, with the tick, newest
+        /// first: the body as read then, its tile the landing tile.
         Arrivals: (int * HostileInfo) list
-        /// The bodies on a landing tile at the last full tick watched, each
+        /// The enemy's bodies on a landing tile at the last full tick watched, each
         /// with its tile: one still standing there is no new arrival.
         Standing: (string * Pos) list
-        /// The tick this heap began the log: until a window has passed since,
-        /// a crossing out of sight before it may be missing.
+        /// The tick the log began, kept across resets (#674): until a window
+        /// has passed since, a crossing out of sight before it may be missing.
         Since: int
     }
 
@@ -2951,17 +2952,196 @@ module World =
 
 /// The watch on the exits of a rival home an exit camp names (#663 S7d):
 /// each exit's log (`ExitLog`) folded once a full tick, heap state in the
-/// shell beside the quarry memory.
+/// shell beside the quarry memory and kept in Memory across resets (#674).
 [<RequireQualifiedAccess>]
 module ExitTraffic =
     /// The ticks a log keeps: a creep's life, within which the bodies a home
-    /// sends out through an exit turn over. Heap only: global resets oftener
-    /// than this leave every log short of a window, and no camp starts.
+    /// sends out through an exit turn over.
     let window = Engine.creepLifetime
+
+    /// The most landings a log keeps (#674), the newest: a named safety
+    /// margin on the Memory a log takes, as many as one body can land in a
+    /// window (it crosses back before it lands again, so every other tick
+    /// at the most). Counted over the enemy's landings alone, the only ones
+    /// a log keeps (`recall`), so no other body's crossings push its out;
+    /// traffic seen live is a few dozen a window.
+    let cap = window / 2
 
     /// An exit's key in `World.Traffic`: the home it leads out of and the
     /// room it lands in.
     let key (home: string) (camp: string) : string = home + ">" + camp
+
+    /// The room an exit's key lands in (`key`), None for a key off its shape.
+    let campOf (exit: string) : string option =
+        match exit.Split '>' with
+        | [| home; camp |] when home <> "" && camp <> "" -> Some camp
+        | _ -> None
+
+    /// The full ticks watched as runs (#674), oldest first: each
+    /// `(start, count, step)` the ticks start, start + step, …, count of
+    /// them. A full tick comes each cadence's step, so a window watched at a
+    /// steady cadence is one run, and each forced tick or tick unseen breaks
+    /// one. `watched` newest first, as `ExitLog.Watched` holds it.
+    let runsOf (watched: int list) : (int * int * int) list =
+        let runs = ResizeArray<int * int * int>()
+        let mutable start = 0
+        let mutable last = 0
+        let mutable count = 0
+        let mutable step = 1
+
+        for tick in List.rev watched do
+            if count = 0 then
+                start <- tick
+                count <- 1
+                step <- 1
+            elif count = 1 && tick > last then
+                step <- tick - last
+                count <- 2
+            elif tick - last = step then
+                count <- count + 1
+            else
+                runs.Add((start, count, step))
+                start <- tick
+                count <- 1
+                step <- 1
+
+            last <- tick
+
+        if count > 0 then
+            runs.Add((start, count, step))
+
+        List.ofSeq runs
+
+    /// `runsOf` read back, newest first and each tick once: only the ticks
+    /// within the window up to `now`, the newest runs read first; a run off
+    /// its shape (no tick, a step under one) reads none. At most a window of
+    /// ticks is visited in all, which runs that never overlap — every run
+    /// `runsOf` writes — never reach, so runs edited to overlap cost a read
+    /// of a window and no more.
+    let ticksOf (now: int) (runs: (int * int * int) list) : int list =
+        let oldest = now - window + 1
+        // By age: index 0 is `now`.
+        let seen = Array.zeroCreate<bool> window
+        let mutable budget = window
+
+        for start, count, step in List.rev runs do
+            if budget > 0 && count >= 1 && step >= 1 && start <= now then
+                // In floats: an edited start or step far off overflows none.
+                let first =
+                    if start >= oldest then
+                        0.0
+                    else
+                        ceil ((float oldest - float start) / float step)
+
+                let mutable k =
+                    min (float (count - 1)) (floor ((float now - float start) / float step))
+
+                while budget > 0 && k >= first do
+                    let tick = float start + k * float step
+
+                    if tick >= float oldest && tick <= float now then
+                        seen.[now - int tick] <- true
+
+                    budget <- budget - 1
+                    k <- k - 1.0
+
+        [
+            for age in 0 .. window - 1 do
+                if seen.[age] then
+                    yield now - age
+        ]
+
+    /// A body's parts and boosts as Memory spells them (#674): head first,
+    /// each run of one part at one boost as its count and letter
+    /// (`partLetter`), a boosted run's tier after it as `a`, `b` or `c` —
+    /// Trepidimous' 3R4H7M harasser in six characters, a boosted 50-part
+    /// body in a few dozen.
+    let shapeText (body: BodyPart list) (boosts: Boost list) : string =
+        let boosts = Array.ofList boosts
+        let parts = Array.ofList body
+        let text = ResizeArray<string>()
+
+        let tier (index: int) =
+            if index < boosts.Length then
+                match boosts.[index] with
+                | Unboosted -> ""
+                | Tier1 -> "a"
+                | Tier2 -> "b"
+                | Tier3 -> "c"
+            else
+                ""
+
+        let mutable index = 0
+
+        while index < parts.Length do
+            let part = parts.[index]
+            let boost = tier index
+            let mutable run = 1
+
+            while index + run < parts.Length
+                  && samePart parts.[index + run] part
+                  && tier (index + run) = boost do
+                run <- run + 1
+
+            text.Add(string run + string (partLetter part) + boost)
+            index <- index + run
+
+        String.concat "" text
+
+    /// `shapeText` read back: the parts and their boosts, the boosts empty
+    /// for a body none of whose parts carries one (`HostileInfo.Boosts`).
+    /// None for text off its shape: a letter no part has, a run of none, or
+    /// a body empty or longer than the engine allows.
+    let shapeOf (text: string) : (BodyPart list * Boost list) option =
+        let parts = ResizeArray<BodyPart>()
+        let boosts = ResizeArray<Boost>()
+        let mutable boosted = false
+        let mutable ok = true
+        let mutable at = 0
+
+        while ok && at < text.Length do
+            // Its count: three digits at the most, more than a body holds.
+            let mutable count = 0
+            let mutable digits = 0
+
+            while at < text.Length && digits < 3 && text.[at] >= '0' && text.[at] <= '9' do
+                count <- count * 10 + (int text.[at] - int '0')
+                digits <- digits + 1
+                at <- at + 1
+
+            let part =
+                if at < text.Length then
+                    allBodyParts |> List.tryFind (fun part -> partLetter part = text.[at])
+                else
+                    None
+
+            match part with
+            | Some part when count > 0 && parts.Count + count <= Engine.maxBodyParts ->
+                at <- at + 1
+
+                let tier =
+                    if at >= text.Length then
+                        Unboosted
+                    else
+                        match text.[at] with
+                        | 'a' -> Tier1
+                        | 'b' -> Tier2
+                        | 'c' -> Tier3
+                        | _ -> Unboosted
+
+                if tier <> Unboosted then
+                    at <- at + 1
+                    boosted <- true
+
+                for _ in 1..count do
+                    parts.Add part
+                    boosts.Add tier
+            | _ -> ok <- false
+
+        if not ok || parts.Count = 0 then
+            None
+        else
+            Some(List.ofSeq parts, (if boosted then List.ofSeq boosts else []))
 
     /// The tiles of `camp` a body crossing out of `home` lands on
     /// (`Seam.pairsAcross`): its exit tiles on the border they share, each
@@ -2991,18 +3171,21 @@ module ExitTraffic =
 
     /// This tick's world with each exit's log a full tick on: on a tick
     /// vision answers for the room it lands in, the tick watched, and every
-    /// body on a landing tile that was not standing on it at the last tick
-    /// watched an arrival; everything older than the window dropped. A log
-    /// begun on a cold heap starts at this tick (`ExitLog.Since`). Only the
-    /// exits named are kept.
+    /// body of the exit's enemy (`Colony.campExitsOf`: the only bodies its
+    /// camp prices) on a landing tile that was not standing on it at the
+    /// last tick watched an arrival; everything older than the window, or
+    /// of another owner, dropped, and
+    /// the landings past `cap`. An exit `previous` holds no log for (neither
+    /// the heap nor Memory kept one) starts at this tick (`ExitLog.Since`).
+    /// Only the exits named are kept.
     let recall
-        (exits: (string * string) list)
+        (exits: (string * string * string) list)
         (previous: Map<string, ExitLog>)
         (world: World)
         : World =
         let now = world.Time
 
-        let logOf (home: string, camp: string) =
+        let logOf (home: string, camp: string, enemy: string) =
             let log =
                 Map.tryFind (key home camp) previous
                 |> Option.defaultValue
@@ -3014,7 +3197,11 @@ module ExitTraffic =
                     }
 
             let watched = log.Watched |> List.filter (fun tick -> now - tick < window)
-            let arrivals = log.Arrivals |> List.filter (fun (tick, _) -> now - tick < window)
+
+            let arrivals =
+                log.Arrivals
+                |> List.filter (fun (tick, h) -> now - tick < window && h.Owner = enemy)
+                |> List.truncate cap
 
             let log =
                 if World.seenNow world camp then
@@ -3023,7 +3210,9 @@ module ExitTraffic =
                     let standing =
                         (World.roomOf world camp).Hostiles
                         |> List.filter (fun h ->
-                            h.Pos.Room = camp && landing.Contains(RoomPos.pos h.Pos))
+                            h.Owner = enemy
+                            && h.Pos.Room = camp
+                            && landing.Contains(RoomPos.pos h.Pos))
 
                     let arrived =
                         standing
@@ -3033,7 +3222,7 @@ module ExitTraffic =
 
                     {
                         Watched = now :: watched
-                        Arrivals = arrived @ arrivals
+                        Arrivals = List.truncate cap (arrived @ arrivals)
                         Standing = standing |> List.map (fun h -> h.Id, RoomPos.pos h.Pos)
                         Since = log.Since
                     }
@@ -3046,5 +3235,9 @@ module ExitTraffic =
             key home camp, log
 
         { world with
-            Traffic = exits |> List.distinct |> List.map logOf |> Fresh.mapOfList
+            Traffic =
+                exits
+                |> List.distinctBy (fun (home, camp, _) -> home, camp)
+                |> List.map logOf
+                |> Fresh.mapOfList
         }

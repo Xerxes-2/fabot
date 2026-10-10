@@ -4763,6 +4763,77 @@ let exitCampTests =
                     "the home never seen: what may come out is not known"
             }
 
+            // #674: five resets in ~6,000 ticks live, and the watch, heap
+            // only, never ran a window. It is kept in Memory now.
+            test
+                "a reset resumes the watch off Memory: its age, ticks and landings kept, ExitsUsed known at once" {
+                let colony = camped 3200 10 100 false true []
+                let key = ExitTraffic.key rivalHome harassRoom
+                let log = colony.World.Traffic.[key]
+
+                // The log through Memory's shapes, as a cold heap reads it.
+                let stored =
+                    { log with
+                        Watched = ExitTraffic.ticksOf colony.Time (ExitTraffic.runsOf log.Watched)
+                        Arrivals =
+                            log.Arrivals
+                            |> List.map (fun (tick, h) ->
+                                match
+                                    ExitTraffic.shapeOf (ExitTraffic.shapeText h.Body h.Boosts)
+                                with
+                                | Some(body, boosts) ->
+                                    tick, { h with Body = body; Boosts = boosts }
+                                | None -> failtest "a shape that reads back")
+                    }
+
+                let resumed =
+                    (ExitTraffic.recall
+                        [ rivalHome, harassRoom, enemy ]
+                        (Map.ofList [ key, stored ])
+                        { World.empty with Time = colony.Time })
+                        .Traffic.[key]
+
+                Expect.equal resumed log "the fresh world's log is the one the last heap left"
+
+                let readingOf (log: ExitLog) =
+                    match
+                        Operations.layRead
+                            [ campWire ]
+                            Map.empty
+                            []
+                            [
+                                { colony with
+                                    World =
+                                        { colony.World with
+                                            Traffic = Map.ofList [ key, log ]
+                                        }
+                                }
+                            ]
+                    with
+                    | _, _, _, [ reading ] -> reading
+                    | _ -> failtest "one reading"
+
+                let reset = readingOf resumed
+
+                Expect.equal
+                    (reset.Exits |> List.map (fun e -> e.Used, e.Age, e.Watched, e.Arrivals))
+                    [ Truth.Yes, 2 * ExitTraffic.window, 100, 10 ]
+                    "its age two windows, as before the reset: prey uses the exit"
+
+                Expect.equal reset.Idle "" "nothing holds it: begun"
+
+                Expect.equal
+                    (readingOf
+                        { log with
+                            Watched = [ colony.Time ]
+                            Arrivals = []
+                            Since = colony.Time
+                        })
+                        .Idle
+                    $"{harassRoom}: watch warming 0/{ExitTraffic.window} ticks"
+                    "a heap that kept nothing would begin afresh: warming"
+            }
+
             // Ship-gate review: a body of ours standing in the room was read
             // as the camp's group, which priced it 0 blocks and cast 1.
             test

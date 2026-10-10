@@ -74,9 +74,10 @@ let mutable private healers: Map<string, HealerSeen list> = Map.empty
 // #663): heap only, a reset forgetting every trip.
 let mutable private quarries: Map<string, Track> = Map.empty
 
-// Each exit camp's exits watched (`World.Traffic`, #663 S7d): heap only, a
-// reset starting each log afresh.
-let mutable private traffic: Map<string, ExitLog> = Map.empty
+// Each exit camp's exits watched (`World.Traffic`, #663 S7d): heap state
+// written to the ops leaf every full tick and read back off it on a cold heap
+// (#674), None until then, so a reset resumes each log's window.
+let mutable private traffic: Map<string, ExitLog> option = None
 
 // Each room's raid as last seen (`World.Raiders`, #569): heap only, a reset
 // falling back on the danger log's threat memory.
@@ -908,7 +909,8 @@ let private fullTick
     // The sweep's candidates and the homes an exit camp camps (#663 S7d):
     // rooms whose bodies the world keeps out of sight.
     let candidates =
-        (named.Rooms |> List.map _.RoomName) @ (campExits |> List.map fst)
+        (named.Rooms |> List.map _.RoomName)
+        @ (campExits |> List.map (fun (home, _, _) -> home))
         |> List.distinct
 
     // The tick's World, read out of the engine once, with the previous tick's
@@ -936,7 +938,9 @@ let private fullTick
                 world
         |> World.recallArmed Tuning.defaults armedSeen
         |> World.recallRivalControllers rivalControllers
-        |> ExitTraffic.recall campExits traffic
+        |> ExitTraffic.recall
+            campExits
+            (traffic |> Option.defaultWith (fun () -> ObserveMemory.loadTraffic Game.time))
         |> fun world -> { world with Refusals = refusals }
 
     sightings <- world.Sightings
@@ -945,7 +949,10 @@ let private fullTick
     exitWatches <- world.ExitWatches
     healers <- world.Healers
     quarries <- world.Quarries
-    traffic <- world.Traffic
+    traffic <- Some world.Traffic
+    // Every full tick moves a watched exit's log (a tick watched, or one aged
+    // out of the window), so it is written each one: a reset loses no tick.
+    ObserveMemory.saveTraffic world.Traffic
     raiders <- world.Raiders
     armedSeen <- world.ArmedSeen
     rivalControllers <- world.RivalControllers

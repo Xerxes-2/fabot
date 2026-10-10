@@ -3031,6 +3031,282 @@ wire("ops readings: each exit's watch and guards, compact; none removes the key"
   assert.equal(globalThis.Memory.fabot.ops, undefined, "no ops leaf: none made");
 });
 
+// ---- the exit camps' traffic watch (#674) ---------------------------------
+
+// `Memory.fabot.ops.traffic`, the bot's alone: each watched exit's log,
+// `{ s, o, w, b, a, n }` (`ObserveMemory.trafficWire`), written each full
+// tick and read back on a cold heap at the tick reading it. Load, save,
+// compare. The leaf is the bot's, but a hand edit through the Memory API
+// may leave anything there: no edit may make the cold read throw, hang or
+// read more than a log holds.
+const trafficNow = 1_000_000;
+const trafficThrough = async (ops, now = trafficNow) => {
+  const { loadTraffic, saveTraffic } = await import(MODULE);
+  globalThis.Memory = ops === undefined ? { fabot: {} } : { fabot: { ops } };
+  const traffic = loadTraffic(now);
+  saveTraffic(traffic);
+  return { traffic, ops: globalThis.Memory.fabot.ops };
+};
+
+const fuseId = "68f0c1e2a3b4c5d6e7f8a9b0";
+const westLog = {
+  s: trafficNow - 3000,
+  o: "Trepidimous",
+  // A full tick every other tick for a hundred ticks, then one forced.
+  w: [
+    [trafficNow - 300, 100, 2],
+    [trafficNow - 99, 1],
+  ],
+  b: [
+    [fuseId, "3R4H7M"],
+    ["b2", "2Tc2Aa1A1M"],
+  ],
+  a: [
+    [trafficNow - 99, 0, 25, 0, 1400, 900],
+    [trafficNow - 110, 1, 24, 0, 600, 1200],
+    [trafficNow - 200, 0, 25, 0, 1400, 999],
+  ],
+  n: [[fuseId, 25, 0]],
+};
+
+wire("traffic: an exit's log round-trips, its bodies whole, the operator's keys untouched", async () => {
+  const full = { specs: [opSpec], traffic: { "W18S26>W19S26": westLog } };
+  const { traffic, ops } = await trafficThrough(structuredClone(full));
+  assert.equal(stable(ops), stable(full));
+  const [[key, log]] = [...traffic];
+  assert.equal(key, "W18S26>W19S26");
+  assert.deepEqual([log.Since, [...log.Watched].length, [...log.Watched][0]], [trafficNow - 3000, 101, trafficNow - 99]);
+  const [tick, fuse] = [...log.Arrivals][0];
+  assert.deepEqual(
+    [tick, fuse.Id, fuse.Owner, { ...fuse.Pos }, [...fuse.Body].length, [...fuse.Boosts].length, fuse.Hits, fuse.TicksToLive],
+    [trafficNow - 99, fuseId, "Trepidimous", { Room: "W19S26", X: 25, Y: 0 }, 14, 0, 1400, 900],
+  );
+  const boosted = [...log.Arrivals][1][1];
+  assert.deepEqual(
+    [...boosted.Boosts].map((boost) => boost.tag),
+    [3, 3, 1, 1, 0, 0],
+    "each part's tier, head first",
+  );
+});
+
+wire("traffic: an older shape, a log with no bodies, landings or standing, reads its watch", async () => {
+  const { traffic } = await trafficThrough({ traffic: { "W18S26>W19S26": { s: trafficNow - 3000, w: westLog.w } } });
+  const log = traffic.get("W18S26>W19S26");
+  assert.deepEqual([log.Since, [...log.Watched].length, [...log.Arrivals].length], [trafficNow - 3000, 101, 0]);
+});
+
+for (const [name, leaf] of [
+  ["a traffic that is a string", "Incorrect memory path"],
+  ["a traffic that is an array", [westLog]],
+  ["a traffic that is null", null],
+  ["an exit that is no object", { "W18S26>W19S26": [1, 2] }],
+  ["an exit with no tick begun", { "W18S26>W19S26": { ...westLog, s: "soon" } }],
+  // #674 review: `recall` writes `s` back, so one in the future stuck forever.
+  ["an exit begun after now", { "W18S26>W19S26": { ...westLog, s: trafficNow + 1 } }],
+  ["an exit begun before tick 0", { "W18S26>W19S26": { ...westLog, s: -5 } }],
+  ["an exit begun on no whole tick", { "W18S26>W19S26": { ...westLog, s: trafficNow - 0.5 } }],
+  ["an exit whose key names no exit", { W19S26: westLog }],
+]) {
+  wire(`traffic: ${name} reads as no watch, never a fault`, async () => {
+    const { loadTraffic } = await import(MODULE);
+    globalThis.Memory = { fabot: { ops: { traffic: leaf } } };
+    assert.equal([...loadTraffic(trafficNow)].length, 0);
+  });
+}
+
+wire("traffic: an ops leaf off its shape reads as no watch, and nothing is written onto it", async () => {
+  const { traffic } = await trafficThrough({ traffic: { "W18S26>W19S26": westLog } });
+  const { saveTraffic, loadTraffic } = await import(MODULE);
+  globalThis.Memory = { fabot: { ops: "Incorrect memory path" } };
+  assert.equal([...loadTraffic(trafficNow)].length, 0);
+  saveTraffic(traffic);
+  assert.equal(globalThis.Memory.fabot.ops, "Incorrect memory path");
+});
+
+wire("traffic: a row off its shape costs its own row", async () => {
+  const { traffic } = await trafficThrough({
+    traffic: {
+      "W18S26>W19S26": {
+        ...westLog,
+        w: [...westLog.w, [trafficNow - 50, 0], [trafficNow - 40, 2, 0], "run", [trafficNow - 30]],
+        b: [...westLog.b, ["b3", "3X"], ["", "1M"]],
+        a: [
+          ...westLog.a,
+          [trafficNow - 98, 7, 25, 0, 100, 100],
+          [trafficNow - 97, 2, 25, 0, 100, 100],
+          [trafficNow - 96, 3, 25, 0, 100, 100],
+          [trafficNow - 95, 0, 50, 0, 100, 100],
+          [trafficNow - 94, 0, 25, 0, "full", 100],
+          [trafficNow + 5, 0, 25, 0, 100, 100],
+          // Negative or fractional hits and ticks to live, a fractional tick.
+          [trafficNow - 93, 0, 25, 0, -1, 100],
+          [trafficNow - 92, 0, 25, 0, 100, -3],
+          [trafficNow - 91, 0, 25, 0, 100.5, 100],
+          [trafficNow - 90.5, 0, 25, 0, 100, 100],
+          null,
+        ],
+        n: [...westLog.n, ["", 1, 1], ["x", 25]],
+      },
+    },
+  });
+  const log = traffic.get("W18S26>W19S26");
+  assert.deepEqual(
+    [[...log.Watched].length, [...log.Arrivals].map(([tick]) => tick), [...log.Standing].length],
+    [101, westLog.a.map(([tick]) => tick), 1],
+  );
+});
+
+wire("traffic: read back, only the window and at most a body's bouncing worth of landings", async () => {
+  const many = 2000;
+  const { traffic, ops } = await trafficThrough({
+    traffic: {
+      "W18S26>W19S26": {
+        s: trafficNow - 5000,
+        o: "Trepidimous",
+        w: [[trafficNow - many, many]],
+        b: [[fuseId, "3R4H7M"]],
+        a: Array.from({ length: many }, (_, back) => [trafficNow - 1 - back, 0, 25, 0, 1400, 900]),
+      },
+      "W18S26>W18S27": { s: trafficNow - 5000, w: [[0, 2_000_000_000]] },
+    },
+  });
+  const log = traffic.get("W18S26>W19S26");
+  // The window is the 1,500 ticks up to now; the run ends a tick before it.
+  assert.deepEqual([[...log.Watched].length, [...log.Arrivals].length], [1499, 750]);
+  assert.equal([...traffic.get("W18S26>W18S27").Watched].length, 1500, "a run however long reads a window");
+  assert.deepEqual(ops.traffic["W18S26>W19S26"].w, [[trafficNow - 1499, 1499]], "written back as one run");
+});
+
+// #674 review: the bound claimed before was one body's and one run's. The
+// worst a log holds: the cap's 750 landings by as many distinct bodies of
+// 24-character ids, and a window watched in its most broken runs. `runsOf`
+// folds the tick after a run's first into it, and a run's next tick at its
+// step extends it, so a run holds two ticks and the next begins two on at
+// the nearest: 500 runs a window (gaps of 1 and 2 by turns).
+const trafficAtBound = async (shapeOf) => {
+  const ids = Array.from({ length: 800 }, (_, i) => `${i}`.padStart(24, "f"));
+  const w = [];
+  for (let tick = trafficNow - 1499; tick + 1 <= trafficNow; tick += 3) w.push([tick, 2]);
+  const exit = {
+    s: trafficNow - 40_000,
+    o: "Trepidimous",
+    w,
+    b: ids.map((id, i) => [id, shapeOf(i)]),
+    a: ids.map((_, i) => [trafficNow - 1 - i, i, 49, 1 + (i % 48), 5000, 1500]),
+    n: Array.from({ length: 48 }, (_, i) => [ids[i], 49, 1 + i]),
+  };
+  const { traffic, ops } = await trafficThrough({ traffic: { "W18S27>W19S27": exit } });
+  const log = traffic.get("W18S27>W19S27");
+  assert.deepEqual(
+    [[...log.Arrivals].length, new Set([...log.Arrivals].map(([, h]) => h.Id)).size, [...log.Watched].length],
+    [750, 750, 1000],
+    "the cap's landings, each a body of its own; a window's ticks in 500 runs",
+  );
+  const written = ops.traffic["W18S27>W19S27"];
+  assert.deepEqual(
+    [written.b.length, written.a.length, written.w.length],
+    [750, 750, 500],
+    "only the bodies a landing kept names; the runs written back as broken",
+  );
+  return JSON.stringify(written).length;
+};
+
+wire("traffic: at the bound, 750 distinct bodies of a 50-part boosted shape in broken runs: under 70 KB", async () => {
+  const bytes = await trafficAtBound(() => "5Tc10Rc10Hc25Mc");
+  console.log(`       (an exit at the bound, one shape: ${bytes} B)`);
+  assert.ok(bytes < 70_000, `${bytes} B`);
+});
+
+// The longest a shape is spelt: fifty parts, each its own run and boosted
+// ("1Ta1Mb…", three characters a part), each body's its own.
+wire("traffic: at the bound, each body a distinct 50-part shape of the longest text: under 175 KB", async () => {
+  const tiers = ["a", "b", "c"];
+  const bytes = await trafficAtBound((i) =>
+    Array.from({ length: 50 }, (_, p) => `1${p % 2 === 0 ? "T" : "M"}${tiers[Math.floor(i / 3 ** Math.min(p, 6)) % 3]}`).join(""),
+  );
+  console.log(`       (an exit at the bound, every shape distinct and longest: ${bytes} B)`);
+  assert.ok(bytes < 175_000, `${bytes} B`);
+});
+
+// #674 review: a window of runs edited to overlap, each a window long, made
+// ~2.25 million cells before `List.distinct` on a cold heap.
+wire("traffic: runs edited to overlap read a window, the newest runs first, at once", async () => {
+  const { loadTraffic } = await import(MODULE);
+  const overlapping = Array.from({ length: 5000 }, () => [trafficNow - 1499, 1500]);
+  globalThis.Memory = {
+    fabot: {
+      ops: {
+        traffic: {
+          "W18S26>W19S26": { s: trafficNow - 3000, w: [[trafficNow - 1499, 10], ...overlapping] },
+          // Oldest first as written: the newest run is the last, kept.
+          "W18S26>W18S27": {
+            s: trafficNow - 3000,
+            w: [...Array.from({ length: 2000 }, () => [trafficNow - 2000, 1]), [trafficNow - 5, 3, 2]],
+          },
+        },
+      },
+    },
+  };
+  const started = performance.now();
+  const traffic = loadTraffic(trafficNow);
+  const ms = performance.now() - started;
+  assert.equal([...traffic.get("W18S26>W19S26").Watched].length, 1500);
+  assert.deepEqual([...traffic.get("W18S26>W18S27").Watched], [trafficNow - 1, trafficNow - 3, trafficNow - 5]);
+  assert.ok(ms < 200, `read in ${ms.toFixed(1)} ms`);
+});
+
+// #674 review: `a` and `b` are cut to the cap before they decode.
+wire("traffic: landings and bodies edited past the cap: the newest landings read, the rest never decoded", async () => {
+  const many = 100_000;
+  const { traffic } = await trafficThrough({
+    traffic: {
+      "W18S26>W19S26": {
+        s: trafficNow - 3000,
+        o: "Trepidimous",
+        w: westLog.w,
+        b: Array.from({ length: many }, (_, i) => [`body-${i}`, "3R4H7M"]),
+        a: Array.from({ length: many }, (_, i) => [trafficNow - 1 - (i % 1400), i, 25, 0, 1400, 900]),
+      },
+    },
+  });
+  const arrivals = [...traffic.get("W18S26>W19S26").Arrivals];
+  assert.deepEqual([arrivals.length, arrivals[0][1].Id, arrivals[749][1].Id], [750, "body-0", "body-749"]);
+});
+
+wire("traffic: a live-like exit is about a kilobyte", async () => {
+  // A window at cadence 2 broken by ten forced ticks; twenty landings by
+  // four bodies of 24-character ids, Trepidimous' harassers.
+  const ids = Array.from({ length: 4 }, (_, i) => `68f0c1e2a3b4c5d6e7f8a9b${i}`);
+  const w = Array.from({ length: 11 }, (_, i) => [trafficNow - 1499 + i * 136, 67, 2]);
+  const exit = {
+    s: trafficNow - 40_000,
+    o: "Trepidimous",
+    w,
+    b: ids.map((id) => [id, "3R4H7M"]),
+    a: Array.from({ length: 20 }, (_, i) => [trafficNow - 1 - i * 70, i % 4, 24 + (i % 3), 0, 1400, 1500 - i * 70]),
+    n: [],
+  };
+  const { ops } = await trafficThrough({ traffic: { "W18S26>W19S26": exit, "W18S26>W18S27": exit } });
+  const bytes = JSON.stringify(ops.traffic).length;
+  console.log(`       (two live-like exits: ${bytes} B)`);
+  assert.ok(bytes < 2_500, `two exits under 2.5 KB, ${bytes} B`);
+});
+
+wire("traffic: no watch removes the key, and makes no ops leaf where none stands", async () => {
+  const { saveTraffic, loadTraffic } = await import(MODULE);
+  const { traffic } = await trafficThrough({ traffic: { "W18S26>W19S26": westLog } });
+  globalThis.Memory = { fabot: {} };
+  const none = loadTraffic(trafficNow);
+  saveTraffic(none);
+  assert.equal(globalThis.Memory.fabot.ops, undefined, "nothing to keep: no ops leaf made");
+  globalThis.Memory = { fabot: { ops: { specs: [opSpec], traffic: { "W18S26>W19S26": westLog } } } };
+  saveTraffic(none);
+  assert.equal(stable(globalThis.Memory.fabot.ops), stable({ specs: [opSpec] }), "no exit watched: the key removed");
+  globalThis.Memory = { fabot: {} };
+  saveTraffic(traffic);
+  assert.equal(stable(globalThis.Memory.fabot.ops), stable({ traffic: { "W18S26>W19S26": westLog } }), "a watch to keep: made");
+});
+
 // The operator's check (`checkOpSpec`): the shell's own decoder and
 // admission over the leaf as stored, so the CLI refuses what the bot would.
 wire("ops check: a spec is admitted dry or live, or refused by the bot's own reason", async () => {

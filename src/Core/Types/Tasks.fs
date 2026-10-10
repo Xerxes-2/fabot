@@ -292,11 +292,6 @@ let directionTo (from: Pos) (dest: Pos) : Direction option =
     | -1, -1 -> Some TopLeft
     | _ -> None
 
-/// Every BodyPart — the closed set, for building tables over the vocabulary.
-/// A literal, closed by `Core.Tests`, which fails when this list is short.
-let allBodyParts =
-    [ Work; Carry; Move; Attack; RangedAttack; Heal; BodyPart.Claim; Tough ]
-
 /// Screeps body-part strings as the engine spells them, in `spawnCreep`
 /// bodies and `creep.body` entries alike — the one place the spelling
 /// lives (its reverse is derived from this table, never written twice).

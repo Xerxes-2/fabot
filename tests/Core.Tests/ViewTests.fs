@@ -2565,7 +2565,7 @@ let exitTrafficTests =
         [
             test
                 "a body on a landing tile is one arrival however long it stands; a tick unseen watches nothing" {
-                let exits = [ "W18S26", "W19S26" ]
+                let exits = [ "W18S26", "W19S26", "Trepidimous" ]
                 let key = ExitTraffic.key "W18S26" "W19S26"
 
                 let logAfter (worlds: World list) =
@@ -2606,5 +2606,199 @@ let exitTrafficTests =
                     (later.Watched, later.Arrivals)
                     ([ 100 + ExitTraffic.window ], [])
                     "a window on, the old landings and ticks gone"
+            }
+
+            // #674: the watch is kept in Memory, so it must stay small.
+            test "pruning keeps only the window, and at most a body's bouncing worth of landings" {
+                let exits = [ "W18S26", "W19S26", "Trepidimous" ]
+                let key = ExitTraffic.key "W18S26" "W19S26"
+                let now = 10_000
+
+                let crowded =
+                    {
+                        Watched = [ for back in 0 .. ExitTraffic.window + 10 -> now - 1 - back ]
+                        Arrivals =
+                            [
+                                for back in 0 .. ExitTraffic.window + 10 ->
+                                    now - 1 - back,
+                                    {
+                                        Id = $"bouncer-{back % 3}"
+                                        Owner = "Trepidimous"
+                                        Pos = RoomPos.at "W19S26" { X = 49; Y = 7 }
+                                        Body = [ Work; Move ]
+                                        Boosts = []
+                                        Hits = 2 * Engine.partHits
+                                        TicksToLive = Engine.creepLifetime
+                                    }
+                            ]
+                        Standing = []
+                        Since = now - 3 * ExitTraffic.window
+                    }
+
+                let log =
+                    (ExitTraffic.recall exits (Map.ofList [ key, crowded ]) (landingAt now false []))
+                        .Traffic.[key]
+
+                Expect.equal
+                    log.Watched
+                    [ for back in 1 .. ExitTraffic.window - 1 -> now - back ]
+                    "only the ticks within the window"
+
+                Expect.equal
+                    (List.length log.Arrivals)
+                    ExitTraffic.cap
+                    "the newest landings, to the cap"
+
+                Expect.equal
+                    (List.head log.Arrivals |> fst, List.last log.Arrivals |> fst)
+                    (now - 1, now - ExitTraffic.cap)
+                    "the newest kept"
+
+                Expect.equal log.Since crowded.Since "the watch's age untouched"
+            }
+
+            // #674 review: the cap counted every owner's landings, so a scout
+            // or an Invader crossing pushed the enemy's oldest out.
+            test
+                "only the enemy's bodies are logged: another owner's crossing pushes none of its landings out" {
+                let exits = [ "W18S26", "W19S26", "Trepidimous" ]
+                let key = ExitTraffic.key "W18S26" "W19S26"
+                let now = 10_000
+
+                let miner (id: string) =
+                    {
+                        Id = id
+                        Owner = "Trepidimous"
+                        Pos = RoomPos.at "W19S26" { X = 49; Y = 7 }
+                        Body = [ Work; Move ]
+                        Boosts = []
+                        Hits = 2 * Engine.partHits
+                        TicksToLive = Engine.creepLifetime
+                    }
+
+                let full =
+                    {
+                        Watched = [ now - 1 ]
+                        Arrivals =
+                            [
+                                for back in 1 .. ExitTraffic.cap ->
+                                    now - back, miner $"miner-{back}"
+                            ]
+                        Standing = []
+                        Since = now - 2 * ExitTraffic.window
+                    }
+
+                let world =
+                    let seen =
+                        landingAt
+                            now
+                            true
+                            [
+                                "Scout1", { X = 49; Y = 7 }
+                                "Invader1", { X = 49; Y = 6 }
+                                "Miner1", { X = 49; Y = 8 }
+                            ]
+
+                    let ownedBy (h: HostileInfo) =
+                        match h.Id with
+                        | "Scout1" -> { h with Owner = "Kalgen" }
+                        | "Invader1" -> { h with Owner = "Invader" }
+                        | _ -> h
+
+                    { seen with
+                        Rooms =
+                            seen.Rooms
+                            |> Map.map (fun _ room ->
+                                { room with
+                                    Hostiles = room.Hostiles |> List.map ownedBy
+                                })
+                    }
+
+                let log = (ExitTraffic.recall exits (Map.ofList [ key, full ]) world).Traffic.[key]
+
+                Expect.equal
+                    (log.Arrivals |> List.take 2 |> List.map (fun (tick, h) -> tick, h.Id))
+                    [ now, "Miner1"; now - 1, "miner-1" ]
+                    "the enemy's landing logged, the scout's and the Invader's not"
+
+                Expect.equal
+                    (List.length log.Arrivals, List.last log.Arrivals |> fst)
+                    (ExitTraffic.cap, now - (ExitTraffic.cap - 1))
+                    "the cap over the enemy's landings alone: only its own oldest goes"
+
+                Expect.equal
+                    log.Standing
+                    [ "Miner1", { X = 49; Y = 8 } ]
+                    "only the enemy's standing body kept"
+            }
+
+            test
+                "the ticks watched run-length encoded: a steady cadence is one run, a forced tick breaks it" {
+                let watched = List.sortDescending ([ 100..2..200 ] @ [ 201; 203; 205 ] @ [ 300 ])
+
+                let runs = ExitTraffic.runsOf watched
+
+                Expect.equal
+                    runs
+                    [ 100, 51, 2; 201, 3, 2; 300, 1, 1 ]
+                    "a full tick every other tick, then a forced one shifting the cadence, then one seen alone"
+
+                Expect.equal (ExitTraffic.ticksOf 300 runs) watched "read back whole"
+                Expect.equal (ExitTraffic.runsOf []) [] "nothing watched, no run"
+
+                Expect.equal
+                    (ExitTraffic.ticksOf (100 + ExitTraffic.window) runs)
+                    (watched |> List.filter (fun tick -> tick > 100))
+                    "read later, only the window"
+
+                Expect.equal
+                    (ExitTraffic.ticksOf 1_000_000 [ 0, 100, 1 ])
+                    []
+                    "a run older than the window reads none"
+
+                Expect.equal
+                    (ExitTraffic.ticksOf 5000 [ 0, System.Int32.MaxValue, 1 ] |> List.length)
+                    ExitTraffic.window
+                    "and one spanning it at most a window"
+
+                Expect.equal
+                    (ExitTraffic.ticksOf
+                        5000
+                        (List.replicate ExitTraffic.window (3501, ExitTraffic.window, 1)))
+                    [ 5000..-1..3501 ]
+                    "a window of runs edited to overlap: the newest read, a window of ticks visited in all"
+
+                Expect.equal
+                    (ExitTraffic.ticksOf
+                        5000
+                        [ 4000, 2, System.Int32.MaxValue; System.Int32.MinValue, 3, 1 ])
+                    [ 4000 ]
+                    "a step or a start far off overflows nothing"
+
+                Expect.equal
+                    (ExitTraffic.ticksOf 300 [ 100, 0, 1; 100, 5, 0; 400, 2, 1 ])
+                    []
+                    "a run of no tick, of no step, or after now: none"
+            }
+
+            test "a body's shape spelt head first, a boosted run's tier after it, and read back" {
+                let harasser =
+                    List.replicate 3 RangedAttack @ List.replicate 4 Heal @ List.replicate 7 Move
+
+                Expect.equal (ExitTraffic.shapeText harasser []) "3R4H7M" "unboosted"
+                Expect.equal (ExitTraffic.shapeOf "3R4H7M") (Some(harasser, [])) "read back"
+
+                let body = [ Tough; Tough; Attack; Attack; Attack; Move ]
+                let boosts = [ Tier3; Tier3; Tier1; Tier1; Unboosted; Unboosted ]
+
+                Expect.equal
+                    (ExitTraffic.shapeText body boosts)
+                    "2Tc2Aa1A1M"
+                    "each run at one boost"
+
+                Expect.equal (ExitTraffic.shapeOf "2Tc2Aa1A1M") (Some(body, boosts)) "read back"
+
+                for text in [ ""; "3"; "M"; "0M"; "3X"; "51M"; "30M30A"; "1000M"; "2Ma3"; "a2M" ] do
+                    Expect.equal (ExitTraffic.shapeOf text) None $"off its shape: \"{text}\""
             }
         ]
