@@ -3787,7 +3787,7 @@ let private freshHits (view: ColonyView) (room: string) (soon: int) (hits: int) 
 
 /// `BlockPrice` of a row's pattern in a room; None under towers not ours
 /// (`underRivalTowers`).
-let private blockPrice (pattern: BodyPattern) (stance: Stance) (view: ColonyView) (room: string) =
+let private blockPriceOf (pattern: BodyPattern, stance: Stance, view: ColonyView, room: string) =
     if underRivalTowers view room then
         None
     else
@@ -3821,6 +3821,21 @@ let private blockPrice (pattern: BodyPattern) (stance: Stance) (view: ColonyView
                 Hits = one.Hits
                 Back = back
             }
+
+// Every row asks each room's price of a pattern several times a tick: each
+// cast it prices (`fighterCast`'s templates and body counts) and each
+// `blocksBeat` asked whole. Keyed by the view itself, which no tick mutates.
+let private blockPriceMemo
+    : TickMemo.Memo<BodyPattern * Stance * ColonyView * string, BlockPrice option> =
+    TickMemo.create 64 (fun (pattern, stance, view, room) (pattern', stance', view', room') ->
+        obj.ReferenceEquals(view, view')
+        && room = room'
+        && stance = stance'
+        && (obj.ReferenceEquals(pattern, pattern') || pattern = pattern'))
+
+/// `blockPriceOf`, once a tick per pattern, stance, view and room.
+let private blockPrice (pattern: BodyPattern) (stance: Stance) (view: ColonyView) (room: string) =
+    TickMemo.recall blockPriceMemo (pattern, stance, view, room) blockPriceOf
 
 /// A body of `blocks` blocks of a priced row: what it deals beside our
 /// towers, what its swings struck back add to that (`struckBack`), and the
