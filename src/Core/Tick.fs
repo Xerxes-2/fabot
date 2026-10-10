@@ -8,10 +8,15 @@ open Fabot.Core.World
 open Fabot.Core.Intents
 open Fabot.Core.State
 
+/// What every module reads: the tick's facts and the geometry built from them
+/// once (`ARCHITECTURE.md` §1).
+[<NoEquality; NoComparison>]
+type Context = { World: World; Atlas: Atlas }
+
 type Module =
     {
         Name: string
-        Run: World -> State -> Intent list * State
+        Run: Context -> State -> Intent list * State
     }
 
 type Outcome =
@@ -36,7 +41,7 @@ type Result =
 
 /// Run `modules` in order over one world. A module that throws keeps the
 /// state it was handed and adds no intents; the modules after it still run.
-let run (clock: unit -> float) (modules: Module list) (world: World) (state: State) : Result =
+let run (clock: unit -> float) (modules: Module list) (context: Context) (state: State) : Result =
     let step (intents, state, reports) (m: Module) =
         if Set.contains m.Name state.Off then
             intents,
@@ -52,7 +57,7 @@ let run (clock: unit -> float) (modules: Module list) (world: World) (state: Sta
 
             let produced, next, outcome =
                 try
-                    let produced, next = m.Run world state
+                    let produced, next = m.Run context state
                     produced, next, Ran
                 with error ->
                     [], state, Faulted error.Message

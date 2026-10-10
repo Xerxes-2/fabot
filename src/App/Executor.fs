@@ -2,6 +2,7 @@
 module Fabot.Executor
 
 open Fabot.Bindings
+open Fabot.Core.Vocabulary
 open Fabot.Core.Intents
 
 /// An intent the engine answered with a non-OK code, or whose actor is gone.
@@ -21,18 +22,44 @@ let private act (intent: Intent) : string * int =
         match objectItem<ICreep> Game.creeps name with
         | creep when isNull (box creep) -> "creep", notFound
         | creep ->
+            // An act on a target the engine no longer finds is refused here,
+            // as the engine would refuse it.
+            let on (verb: string) (id: string) (f: obj -> int) =
+                match Game.getObjectById id with
+                | target when isNull target -> verb, notFound
+                | target -> verb, f target
+
             match act with
             | Move direction -> "move", creep.move direction
             | Say message -> "say", creep.say message
+            | Harvest id -> on "harvest" id creep.harvest
+            | Transfer(id, r) -> on "transfer" id (fun t -> creep.transfer (t, resourceName r))
+            | Withdraw(id, r) -> on "withdraw" id (fun t -> creep.withdraw (t, resourceName r))
+            | Pickup id -> on "pickup" id creep.pickup
+            | Build id -> on "build" id creep.build
+            | Repair id -> on "repair" id creep.repair
+            | Upgrade id -> on "upgrade" id creep.upgradeController
+            | Reserve id -> on "reserve" id creep.reserveController
+            | ClaimController id -> on "claim" id creep.claimController
     | Spawn(id, SpawnCreep(body, name)) ->
         match Game.getObjectById id with
         | spawn when isNull spawn -> "spawn", notFound
-        | spawn -> "spawn", (unbox<ISpawn> spawn).spawnCreep (Array.ofList body, name)
+        | spawn ->
+            "spawn",
+            (unbox<ISpawn> spawn).spawnCreep (body |> List.map partName |> Array.ofList, name)
+
+/// The code a refusal reports for an intent whose call threw: one bad
+/// intent costs itself, never the rest of the tick's.
+let threw = -100
 
 let run (intents: Intent list) : Refusal list =
     intents
     |> List.choose (fun intent ->
-        let name, code = act intent
+        let name, code =
+            try
+                act intent
+            with _ ->
+                "threw", threw
 
         if code = 0 then
             None

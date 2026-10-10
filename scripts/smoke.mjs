@@ -26,6 +26,7 @@ const spawn = {
   hitsMax: 5000,
   store: store({ energy: 300 }, 300),
   spawning: null,
+  spawnCreep: () => 0,
 };
 const road = { id: "r1", structureType: "road", pos: at(26, 25), hits: 5000, hitsMax: 5000 };
 const creep = {
@@ -47,6 +48,13 @@ const creep = {
   store: store({ energy: 20 }, 50),
   say: () => 0,
   move: () => 0,
+  harvest: () => 0,
+  transfer: () => 0,
+  withdraw: () => 0,
+  pickup: () => 0,
+  build: () => 0,
+  repair: () => 0,
+  upgradeController: () => 0,
 };
 const found = {
   105: [{ id: "src1", pos: at(5, 5), energy: 3000, energyCapacity: 3000, ticksToRegeneration: undefined }],
@@ -80,7 +88,7 @@ globalThis.Game = {
   map: { getRoomTerrain: () => ({ getRawBuffer: () => terrain }) },
   spawns: { Spawn1: spawn },
   creeps: { a: creep },
-  getObjectById: (id) => (id === "s1" ? spawn : null),
+  getObjectById: (id) => ({ s1: spawn, src1: found[105][0], c1: room.controller, cs1: found[111][0], p1: found[106][0] })[id] ?? null,
 };
 
 const require = createRequire(import.meta.url);
@@ -99,7 +107,7 @@ const observe = JSON.parse(segments[1] ?? fail("no observe segment written"));
 if (observe.tick !== 103) fail(`observe tick ${observe.tick}, not 103`);
 if (observe.faults.length !== 0) fail(`faults: ${JSON.stringify(observe.faults)}`);
 const phases = observe.phases.map(([name]) => name);
-for (const want of ["memory", "world", "execute", "record"])
+for (const want of ["memory", "world", "atlas", "economy", "execute", "write", "record"])
   if (!phases.includes(want)) fail(`phase ${want} not reported: ${phases}`);
 const recorded = JSON.parse(segments[10 + (103 % 5)] ?? fail("recorder wrote nothing"));
 const w = recorded.world;
@@ -112,6 +120,9 @@ if (r.Sources.length !== 1 || r.Structures.length !== 2 || r.Sites.length !== 1 
 const [k] = w.Creeps;
 if (k.Body.length !== 3 || k.Store.Capacity !== 50) fail(`creep facts lost: ${JSON.stringify(k).slice(0, 200)}`);
 if (Memory.fabot.v1 !== "left alone") fail("v1's Memory was touched");
+const held = Memory.v2.assignments?.a;
+if (typeof held !== "string") fail(`the creep holds no task: ${JSON.stringify(Memory.v2.assignments)}`);
+if (observe.refusals.some((r) => r.code === -100)) fail(`an intent threw: ${JSON.stringify(observe.refusals)}`);
 
 const version = readFileSync(new URL("../dist/main.js", import.meta.url), "utf8").split("\n")[0];
 console.log(`smoke: 4 ticks clean (${version.match(/"(.*)"/)?.[1] ?? "unnamed"})`);

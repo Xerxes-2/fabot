@@ -9,15 +9,21 @@ open Fabot.Core.World
 open Fabot.Core.Intents
 open Fabot.Core.State
 
-let private world =
+let private world: Tick.Context =
+    let world =
+        {
+            Time = 1
+            Me = ""
+            CpuLimit = 20.0
+            Bucket = 10_000
+            Rooms = [||]
+            Spawns = [||]
+            Creeps = [||]
+        }
+
     {
-        Time = 1
-        Me = ""
-        CpuLimit = 20.0
-        Bucket = 10_000
-        Rooms = [||]
-        Spawns = [||]
-        Creeps = [||]
+        World = world
+        Atlas = Atlas.ofWorld world
     }
 
 /// A module named `i` that says its name once, or throws.
@@ -78,7 +84,12 @@ let tests =
             <| fun (throws: bool list) (offIndex: int) ->
                 let throws = false :: throws
                 let off = abs (offIndex % List.length throws)
-                let state = { Off = Set.singleton $"m{off}" }
+
+                let state =
+                    { State.empty with
+                        Off = Set.singleton $"m{off}"
+                    }
+
                 let result = Tick.run (ticking ()) (modulesOf throws) world state
                 let report = result.Reports.[off]
 

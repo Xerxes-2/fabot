@@ -8,7 +8,7 @@ open Fabot.Core
 
 /// The modules, in the order they decide. Each lands here as it is built:
 /// Economy, Layout, Strategy, Fight.
-let private modules: Tick.Module list = []
+let private modules: Tick.Module list = [ Economy.Run.economy ]
 
 /// The change this bundle was built from, off `scripts/bundle.mjs`'s banner.
 [<Emit("(typeof __FABOT_VERSION__ === 'string' ? __FABOT_VERSION__ : 'unbuilt')")>]
@@ -43,7 +43,9 @@ let private runTick () =
 
     let state = timed "memory" Wire.readState
     let world = timed "world" World.ofGame
-    let result = Tick.run clock modules world state
+    let atlas = timed "atlas" (fun () -> Atlas.ofWorld world)
+
+    let result = Tick.run clock modules { World = world; Atlas = atlas } state
 
     for report in result.Reports do
         phases.Add(report.Module, report.Cpu)
@@ -54,6 +56,7 @@ let private runTick () =
         | Tick.Off -> ()
 
     let refusals = timed "execute" (fun () -> Executor.run result.Intents)
+    timed "write" (fun () -> Wire.writeState result.State)
 
     if Wire.recording () then
         timed "record" (fun () -> Wire.record world.Time world)

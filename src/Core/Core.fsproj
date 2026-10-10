@@ -24,6 +24,7 @@
     <Compile Include="Economy/Pool.fs" />
     <Compile Include="Economy/Quota.fs" />
     <Compile Include="Economy/Matcher.fs" />
+    <Compile Include="Economy/Run.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Fable.Core" Version="5.2.0" />

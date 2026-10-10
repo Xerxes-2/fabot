@@ -41,17 +41,35 @@ let private switches () : obj =
         fresh
 
 /// `Memory.v2.switches.<module> = false` turns a module off; anything else
-/// leaves it on. The first touch of `Memory` is the engine's parse, so this
-/// is the read the tick's "memory" phase times.
+/// leaves it on. `Memory.v2.assignments` maps a creep's name to its Task's
+/// id; a value that is not a string is dropped. The first touch of `Memory`
+/// is the engine's parse, so this is the read the tick's "memory" phase times.
 let readState () : State =
     let s = switches ()
+    let held = (root ())?assignments
 
     {
         Off =
             objectEntries s
             |> Array.choose (fun (name, value) -> if value = box false then Some name else None)
             |> Set.ofArray
+        Assignments =
+            if isObject held then
+                objectEntries held
+                |> Array.choose (fun (name, value) ->
+                    match value with
+                    | :? string as id -> Some(name, id)
+                    | _ -> None)
+                |> Map.ofArray
+            else
+                Map.empty
     }
+
+/// Write what the tick decided back to `Memory.v2`; the switches are the
+/// operator's and are left as they are.
+let writeState (state: State) : unit =
+    (root ())?assignments <-
+        createObj (state.Assignments |> Map.toList |> List.map (fun (name, id) -> name ==> id))
 
 /// The recorder is off unless `Memory.v2.switches.recorder = true`.
 let recording () : bool = (switches ())?recorder = box true
