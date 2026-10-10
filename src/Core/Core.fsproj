@@ -4,6 +4,7 @@
     <RootNamespace>Fabot.Core</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Types/Lists.fs" />
     <Compile Include="Types/Vocabulary.fs" />
     <Compile Include="Types/Fresh.fs" />
     <Compile Include="Types/TickMemo.fs" />
