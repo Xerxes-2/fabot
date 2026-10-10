@@ -7,8 +7,10 @@
 #   1. the revset in repo config `claude.worktree-base`, when it resolves to exactly
 #      one commit (an orchestrator's integration bookmark:
 #      `jj config set --repo claude.worktree-base integ`, unset after);
-#   2. trunk() (the `main` bookmark);
-#   3. a frozen copy of the main workspace's @ (`jj duplicate`, "cc-base: <name>"),
+#   2. in a cloud session, its branch (`claude.session-branch`, set by session-start.sh),
+#      which stands in for `main` there;
+#   3. trunk() (the `main` bookmark);
+#   4. a frozen copy of the main workspace's @ (`jj duplicate`, "cc-base: <name>"),
 #      never @ itself, which the main workspace keeps rewriting.
 #
 # Subagent workspaces ("agent-*") are registered under .claude/worktrees/.sessions/
@@ -36,9 +38,13 @@ j() { jj -R "$main" --ignore-working-copy --color never "$@"; }
 one() { [ "$(j log --no-graph -r "$1" -T '"x"' 2>/dev/null)" = "x" ]; }
 
 cfg_base=$(j config get claude.worktree-base 2>/dev/null || true)
+session_branch=$(j config get claude.session-branch 2>/dev/null || true)
 if [ -n "$cfg_base" ] && one "$cfg_base"; then
   base="$cfg_base"
   echo "worktree-create: basing on claude.worktree-base = $cfg_base" >&2
+elif [ -n "$session_branch" ] && one "bookmarks(exact:\"$session_branch\")"; then
+  base="bookmarks(exact:\"$session_branch\")"
+  echo "worktree-create: basing on the session branch $session_branch" >&2
 elif one 'trunk() ~ root()'; then
   base='trunk()'
 else
