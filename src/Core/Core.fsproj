@@ -4,6 +4,9 @@
     <RootNamespace>Fabot.Core</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Lists.fs" />
+    <Compile Include="Vocabulary.fs" />
+    <Compile Include="Engine.fs" />
     <Compile Include="World.fs" />
     <Compile Include="Intents.fs" />
     <Compile Include="State.fs" />

@@ -585,7 +585,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 |---|---|---|
 | `App/Bindings.fs` | `App/Bindings.fs` | ✅ verbatim, plus `cpu.limit` and segment writes |
 | `App/World.fs`, `Main.fs` shell | `App/World.fs`, `Wire.fs`, `Main.fs`, `Core/Tick.fs` | ✅ minimal `World`; per-module CPU, fault isolation, switches, recorder, observe segment. ⏳ `World` grows with its readers |
-| `Types/Rules.fs` `Engine`, `Types/Vocabulary.fs` | `Core/Engine`, `Core/Vocabulary` | ⏳ with the economy port: `Engine` needs `BodyPart`/`Boost`, which come with the economy's vocabulary |
+| `Types/Rules.fs` `Engine`, `Types/Vocabulary.fs`, `Types/Lists.fs` | `Core/Engine.fs`, `Core/Vocabulary.fs`, `Core/Lists.fs` | ✅ `Engine` less policy (`guardCap`) and season (`reactorCapacity`), plus part costs, regen time and level progress; `Vocabulary` less `Task` (Economy's) and with season resources as `Resource.Other` |
 | `Core/Atlas.fs`, `Grid.fs`, `Geometry.fs` | `Atlas` tile layer | port; add footprint; add the room-graph layer |
 | `Decide/Resolver.fs` | `Move` | port arbitration + step functions; drop fight precedence; add formation stepping |
 | `Decide/Pool, Matcher, Planner, Quota, Spawns, Price, Bodies, Labs, Layout` | `Economy`, `Layout` | port into one world pool, cut fight cases |
