@@ -598,7 +598,10 @@ smoke("probe refuses a bundle with no version banner", () => {
   assert.ok(!crashed(err) && err.includes("no version banner"), err);
 });
 smoke("probe refuses a bundle it already wrapped", () => {
-  const { code, err } = run("probe.mjs", [wrappedPath, "--out", join(dir, "again.js"), "--fns", "planTasks"]);
+  // Its own wrap: the cases run sharded, so the one above may run elsewhere.
+  const wrapped = join(dir, "wrapped-again.js");
+  assert.equal(run("probe.mjs", [bundlePath, "--out", wrapped, "--fns", "planTasks"]).code, 0);
+  const { code, err } = run("probe.mjs", [wrapped, "--out", join(dir, "again.js"), "--fns", "planTasks"]);
   assert.equal(code, 1);
   assert.ok(!crashed(err) && err.includes("already wrapped"), err);
 });
@@ -950,8 +953,37 @@ sparRefuses(["xx", "outpost-melee", "--tolerance", "x"], "--tolerance needs a wh
 
 // ---- run ----------------------------------------------------------------
 
+// Each case spawns its script, a quarter second apiece: the cases run as one
+// shard per core, each this script again over every Nth case.
+const shard = process.env.CLI_SMOKE_SHARD;
+if (shard === undefined) {
+  const { spawn } = await import("node:child_process");
+  const { availableParallelism } = await import("node:os");
+  const count = availableParallelism();
+  const shards = Array.from({ length: count }, (_, index) =>
+    new Promise((resolve) => {
+      const child = spawn(process.execPath, [script("cli-smoke.mjs")], {
+        env: { ...process.env, CLI_SMOKE_SHARD: `${index}/${count}` },
+        stdio: ["ignore", "pipe", "inherit"],
+      });
+      let out = "";
+      child.stdout.on("data", (chunk) => (out += chunk));
+      child.on("close", (code) => resolve({ code, out }));
+    }),
+  );
+  const results = await Promise.all(shards);
+  const lines = results.flatMap((r) => r.out.split("\n").filter((l) => /^ {2}(ok|FAIL|\s)/.test(l)));
+  console.log(lines.join("\n"));
+  // A case a crashed shard never reached counts as failed, not passed.
+  const passed = lines.filter((l) => l.startsWith("  ok")).length;
+  rmSync(dir, { recursive: true, force: true });
+  console.log(`\n${passed} passed, ${cases.length - passed} failed`);
+  process.exit(passed === cases.length && results.every((r) => r.code === 0) ? 0 : 1);
+}
+const [index, count] = shard.split("/").map(Number);
+
 let failed = 0;
-for (const { name, body } of cases) {
+for (const { name, body } of cases.filter((_, i) => i % count === index)) {
   try {
     body();
     console.log(`  ok   ${name}`);

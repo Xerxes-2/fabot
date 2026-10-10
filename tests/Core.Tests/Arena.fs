@@ -1888,6 +1888,26 @@ let private decideOurs (a: Arena) : Intent list * Carried =
 // The scripts
 // ---------------------------------------------------------------------------
 
+/// Each captured room's terrain walls, row by column, read once: the
+/// searches ask every tile of every room. Held by the capture itself, not
+/// its room's name: a test may lay its own terrain over a room.
+let private wallsOf =
+    let held =
+        System.Runtime.CompilerServices.ConditionalWeakTable<RoomCapture, bool[]>()
+
+    fun (r: ArenaRoom) ->
+        held.GetValue(
+            r.Capture,
+            fun _ ->
+                Array.init (Engine.roomSide * Engine.roomSide) (fun n ->
+                    terrainAt
+                        r
+                        {
+                            X = n / Engine.roomSide
+                            Y = n % Engine.roomSide
+                        } = Wall)
+        )
+
 /// The walk graph across every arena room, one node per tile per room: a
 /// tile is passable when its terrain is not wall and no obstacle structure
 /// stands on it; an exit tile leads only to its landing (a player's body;
@@ -1901,15 +1921,6 @@ let private stepToward (a: Arena) (mover: Body) (goals: Set<RoomPos>) : Directio
         let side = Engine.roomSide
         let total = names.Length * side * side
 
-        let blocked =
-            names |> Array.map (fun n -> structureTiles mover.Side (Map.find n a.Rooms))
-
-        let occupied =
-            a.Bodies
-            |> List.filter (fun b -> b.Id <> mover.Id)
-            |> List.map (fun b -> b.At)
-            |> Set.ofList
-
         let npc =
             match mover.Side with
             | Side.Npc _ -> true
@@ -1917,6 +1928,40 @@ let private stepToward (a: Arena) (mover: Body) (goals: Set<RoomPos>) : Directio
 
         let node (at: RoomPos) =
             Map.find at.Room indexOf * side * side + at.X * side + at.Y
+
+        // The search visits every tile of every room when no goal is
+        // reachable: what it asks of a tile is read off flat arrays by node.
+        let flags (tiles: RoomPos seq) =
+            let marked = Array.create total false
+
+            for at in tiles do
+                if Map.containsKey at.Room indexOf then
+                    marked[node at] <- true
+
+            marked
+
+        let closed = Array.create total false
+
+        for r, name in Array.indexed names do
+            let room = Map.find name a.Rooms
+            Array.blit (wallsOf room) 0 closed (r * side * side) (side * side)
+
+            for tile in structureTiles mover.Side room do
+                closed[node (RoomPos.at name tile)] <- true
+
+            if npc then
+                for x in 0 .. Seam.exitEdge do
+                    for y in 0 .. Seam.exitEdge do
+                        if Seam.onRing { X = x; Y = y } then
+                            closed[node { Room = name; X = x; Y = y }] <- true
+
+        let occupied =
+            a.Bodies
+            |> Seq.filter (fun b -> b.Id <> mover.Id)
+            |> Seq.map (fun b -> b.At)
+            |> flags
+
+        let goal = flags goals
 
         let posOf (n: int) =
             let r = n / (side * side)
@@ -1928,35 +1973,16 @@ let private stepToward (a: Arena) (mover: Body) (goals: Set<RoomPos>) : Directio
                 Y = rest % side
             }
 
-        let passable (at: RoomPos) =
-            Map.containsKey at.Room indexOf
-            && at.X >= 0
-            && at.X <= Seam.exitEdge
-            && at.Y >= 0
-            && at.Y <= Seam.exitEdge
-            && terrainAt (Map.find at.Room a.Rooms) (RoomPos.pos at) <> Wall
-            && not (Set.contains (RoomPos.pos at) blocked[Map.find at.Room indexOf])
-            && not (npc && Seam.onRing (RoomPos.pos at))
-            && (Set.contains at goals || not (Set.contains at occupied))
-
         // A tile the walk was carried onto (a landing, or where the mover
         // stands) is left like any other; an exit tile stepped onto leads to
         // its landing and nowhere else.
         let carried = Array.create total false
 
-        let successors (n: int) (at: RoomPos) =
-            let tile = RoomPos.pos at
+        let steps =
+            [| Top; TopRight; Right; BottomRight; Bottom; BottomLeft; Left; TopLeft |]
+            |> Array.map stepOf
 
-            if Seam.isExit tile && not carried[n] then
-                match landingOf at with
-                | Some(roomName, landing) when Map.containsKey roomName indexOf ->
-                    [ RoomPos.at roomName landing ]
-                | _ -> []
-            else
-                [ Top; TopRight; Right; BottomRight; Bottom; BottomLeft; Left; TopLeft ]
-                |> List.map (stepTo at)
-                |> List.filter (fun next -> next <> at && passable next)
-
+        let clamp v = max 0 (min Seam.exitEdge v)
         let parent = Array.create total -1
         let start = node mover.At
         parent[start] <- start
@@ -1965,21 +1991,33 @@ let private stepToward (a: Arena) (mover: Body) (goals: Set<RoomPos>) : Directio
         queue.Enqueue start
         let mutable found = -1
 
+        let reach (n: int) (m: int) (crossed: bool) =
+            if found < 0 && parent[m] < 0 then
+                parent[m] <- n
+                carried[m] <- crossed
+
+                if goal[m] then found <- m else queue.Enqueue m
+
         while found < 0 && queue.Count > 0 do
             let n = queue.Dequeue()
             let here = posOf n
+            let r = n / (side * side)
 
-            for next in successors n here do
-                let m = node next
+            if Seam.isExit (RoomPos.pos here) && not carried[n] then
+                match landingOf here with
+                | Some(roomName, landing) ->
+                    match Map.tryFind roomName indexOf with
+                    | Some r' -> reach n (r' * side * side + landing.X * side + landing.Y) (r' <> r)
+                    | None -> ()
+                | None -> ()
+            else
+                for dx, dy in steps do
+                    let x = clamp (here.X + dx)
+                    let y = clamp (here.Y + dy)
+                    let m = r * side * side + x * side + y
 
-                if found < 0 && parent[m] < 0 then
-                    parent[m] <- n
-                    carried[m] <- next.Room <> here.Room
-
-                    if Set.contains next goals then
-                        found <- m
-                    else
-                        queue.Enqueue m
+                    if m <> n && not closed[m] && (goal[m] || not occupied[m]) then
+                        reach n m false
 
         if found < 0 then
             None
@@ -2026,24 +2064,6 @@ let private barriersFor (side: Side) (r: ArenaRoom) : Map<Pos, ArenaStructure li
     |> List.map (fun (at, stack) ->
         at, stack |> List.sortBy (fun s -> (if s.Kind = "rampart" then 0 else 1), s.Id))
     |> Map.ofList
-
-/// Each captured room's terrain walls, row by column, read once: a capture
-/// never changes, and the breach search asks every tile of every room.
-let private wallsOf =
-    let held = System.Collections.Concurrent.ConcurrentDictionary<string, bool[]>()
-
-    fun (r: ArenaRoom) ->
-        held.GetOrAdd(
-            r.Capture.RoomName,
-            fun _ ->
-                Array.init (Engine.roomSide * Engine.roomSide) (fun n ->
-                    terrainAt
-                        r
-                        {
-                            X = n / Engine.roomSide
-                            Y = n % Engine.roomSide
-                        } = Wall)
-        )
 
 /// The first barrier (`barriersFor`) on the cheapest walk for a body to a
 /// ground tile across the arena's rooms, beside the tile it stands on; None

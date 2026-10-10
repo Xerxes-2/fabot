@@ -220,7 +220,7 @@ if (fromFile) {
   arenaPath = join(out, `${slug}.arena.jsonl`);
   rmSync(scenarioPath, { force: true });
   console.error(`running the arena test that calls crossValidate "${slug}"`);
-  const res = spawnSync("dotnet", ["test", join(REPO, "tests/Core.Tests"), "--filter", `FullyQualifiedName~${flags["--filter"] ?? "arena"}`], {
+  const res = spawnSync("dotnet", ["test", join(REPO, "tests/Core.Tests"), "-c", "Release", "--filter", `FullyQualifiedName~${flags["--filter"] ?? "arena"}`], {
     stdio: ["ignore", "ignore", "inherit"],
     env: { ...process.env, FABOT_ARENA_DUMP: slug, FABOT_ARENA_DUMP_DIR: out },
   });

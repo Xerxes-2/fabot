@@ -23,7 +23,8 @@ branch=$(jj config get claude.session-branch 2>/dev/null || true)
   { echo "ship: $rev has no description" >&2; exit 1; }
 
 npm test
-npm run build
+# `npm run build` but the Fable compile: the wire gate just compiled this tree.
+npm run bundle
 
 jj bookmark set "$branch" -r "$rev"
 
