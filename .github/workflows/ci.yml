@@ -44,10 +44,13 @@ jobs:
       - name: Install npm dependencies
         run: nix develop -c npm ci --no-audit --no-fund
 
-      # The local gate whole: format check, ADR gate, dotnet test and the wire
-      # gate (scripts/wire-check.mjs), which dotnet test cannot see.
+      # The local gate whole: format check, line ceilings, dotnet test.
       - name: Test
         run: nix develop -c npm test
 
       - name: Build bundle
         run: nix develop -c npm run build
+
+      # The bundle loads and runs a few ticks against a stub game.
+      - name: Smoke
+        run: nix develop -c npm run smoke

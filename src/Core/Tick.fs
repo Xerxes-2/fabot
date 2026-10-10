@@ -1,0 +1,75 @@
+/// One tick over the modules, in order: each is timed, can be switched off,
+/// and a throw in one costs that module this tick and nothing else
+/// (`ARCHITECTURE.md` §2). The clock is passed in, so the decision stays
+/// deterministic and the accounting is testable.
+module Fabot.Core.Tick
+
+open Fabot.Core.World
+open Fabot.Core.Intents
+open Fabot.Core.State
+
+type Module =
+    {
+        Name: string
+        Run: World -> State -> Intent list * State
+    }
+
+type Outcome =
+    | Ran
+    | Off
+    | Faulted of message: string
+
+type Report =
+    {
+        Module: string
+        /// CPU the module spent, by the clock passed in.
+        Cpu: float
+        Outcome: Outcome
+    }
+
+type Result =
+    {
+        Intents: Intent list
+        State: State
+        Reports: Report list
+    }
+
+/// Run `modules` in order over one world. A module that throws keeps the
+/// state it was handed and adds no intents; the modules after it still run.
+let run (clock: unit -> float) (modules: Module list) (world: World) (state: State) : Result =
+    let step (intents, state, reports) (m: Module) =
+        if Set.contains m.Name state.Off then
+            intents,
+            state,
+            {
+                Module = m.Name
+                Cpu = 0.0
+                Outcome = Off
+            }
+            :: reports
+        else
+            let start = clock ()
+
+            let produced, next, outcome =
+                try
+                    let produced, next = m.Run world state
+                    produced, next, Ran
+                with error ->
+                    [], state, Faulted error.Message
+
+            let report =
+                {
+                    Module = m.Name
+                    Cpu = clock () - start
+                    Outcome = outcome
+                }
+
+            List.rev produced @ intents, next, report :: reports
+
+    let intents, state, reports = List.fold step ([], state, []) modules
+
+    {
+        Intents = List.rev intents
+        State = state
+        Reports = List.rev reports
+    }

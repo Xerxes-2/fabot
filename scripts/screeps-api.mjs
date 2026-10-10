@@ -1,8 +1,5 @@
-// The server connection the authoring scripts share: `observe.mjs`, which
-// reads what the live colony wrote to Memory, and `capture-room.mjs`, which
-// captures a room's fixed shape into a fixture (ADR 0036). Both reach the
-// same account the same way, and a second spelling of "which shard" would be
-// a second thing to keep in step with `.env.example`.
+// The server connection the operator scripts share (`observe.mjs` today), so
+// "which shard" is spelt once, in step with `.env.example`.
 //
 // Config via .env (loaded by `node --env-file-if-exists=.env`):
 //   SCREEPS_TOKEN   - auth token (required)

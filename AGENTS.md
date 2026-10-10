@@ -1,34 +1,66 @@
 # fabot
 
-## Code hygiene
+`ARCHITECTURE.md` is the only design document. The code decides anything it does
+not; no other file is a source of truth. v1 (commit `427ff628`) is source to
+port from, never a fact about v2.
 
-Each rule's reason is in `docs/agents/hygiene.md`.
+## Boundaries
 
-- Fantomas formats (`npm run format`); `npm test` checks it. Lint is the compiler: `TreatWarningsAsErrors` + `--warnon:1182`.
-- A new `Decide` test goes in the file its *domain* owns, never one named after the ticket: `docs/agents/orchestration.md` § Where a new Decide test goes.
-- An Atlas fixture is a function that captures no Atlas of its own (`ParallelSafetyTests` enforces it).
-- A new Memory leaf or a changed wire key gets a case in `scripts/wire-check.mjs`: `dotnet test` cannot see `src/App/ObserveMemory.fs`.
-- A collection that outlives the tick is built by `Fresh.*`.
-- Edit F# with the Edit tool; a python/sed rewrite of a source file breaks on its anchors.
-- A CPU claim is an interleaved A/B with identical Memory fingerprints; a few percent needs `scripts/bench-remote.sh` or a count.
-- `[<Emit>]` stubs take `_`-prefixed params; an `[<Emit>]` accessor with a real .NET body names them normally.
+- A module's state is the row it owns in `ARCHITECTURE.md` §4. Adding a store,
+  a `TickMemo`, a module-level `mutable`, a Memory or segment read outside
+  `Main`, a `Tuning` field, or any cooldown / latch / grace / hold-while /
+  hysteresis: **stop and ask the owner.** These are architecture changes and
+  never fixes. Owner away: label the issue `needs-owner`, park it, take other
+  work. Never work around it.
+- `Fight` and `Economy` do not import each other; only `Strategy` imports
+  `Season`. Declarations flow down §3's table, never up.
+- No room name, player name or object id in source. They are `declarations`.
+- Line ceilings (`scripts/ceilings.json`, `npm run ceiling`) are never raised. A change over the ceiling
+  pays for itself by deleting first.
+- `decide` is deterministic: no clock, no unseeded random.
+- Derived facts are computed once into `Derived` and passed down. A decision
+  function takes `Derived`, never `World`. The only tick cache is `Atlas`'s
+  flood table; a new `TickMemo`, `Dictionary` cache or `lazy` outside
+  `Derived` is an architecture change (stop and ask).
+- Count ceilings (`scripts/counts`, `scripts/ceilings.json`) are a gate like line
+  ceilings: never raised.
 
 ## Fixing behaviour
 
-- Name the broken invariant before the fix: one sentence about every body, room or colony it covers, not the case in front of you; then fix at that level, or fold the case into the epic that owns the invariant. A rule that ends an act too early is fixed there, not by a new act that mops up after it.
-- A combat rule reads the body, never the owner; the owner decides only diplomacy (`Facts.mayStrike`) and engine facts (an Invader stays in its room, a keeper holds its lair).
-- A capture (`npm run capture`, `docs/agents/arena-capture.md`) reproduces the live outcome before it is pinned; one that doesn't is a finding about the capture or the arena.
-- A decision is priced from the facts already computed (value: body cost, cargo, throughput; cost: arrival, ticks to kill, catch odds), not from a fixed order, threshold or count; a constant stays only for an engine fact or a named safety margin.
-- A refactor of the seam a bug lives in outranks a patch beside it: a live report that isn't a firefight (home in danger, bucket falling, income being lost) is recorded on the epic that owns the seam, not slotted in ahead of it.
-- A change names every test expectation it moves and why; a refactor may move them too, when each move is justified.
-- A fight change (Facts, Threat, Emitter, Resolver, Arrival, the arena) runs `npm run spar` and names every worse metric in the commit: `docs/agents/spar.md`.
+- Name the invariant the bug breaks, in one sentence that covers every body,
+  room or colony. A new rule that mops up after an old one is not a fix.
+- A fight fix changes a phase rule, a tactic or `Exchange`. It never adds a
+  per-tick check. If the bug is "we changed our mind mid-fight", the fix is in
+  the event that re-evaluated, not a latch.
+- Net lines added by a fix should be ≤ 0. A positive diff says why in the
+  commit.
+- Prices are set when a commitment is made (`Exchange.cheapestWin`,
+  `Strategy`, `Price`), not re-read per tick. A constant is an engine fact or
+  a named safety margin.
+- No issue numbers, dates or incident narratives in code. `git log` has them.
 
-## ADRs
+## Verification
 
-- Write one only if the decision is hard to reverse, surprising without context, and a real trade-off. Tuning gets a one-line why-comment or a test name.
-- Changing a decision: mark the old ADR `superseded by NNNN` and remove its code citations in the same commit.
-- Cite an ADR in code once, at the site that implements it, as `// ADR-NNNN`; never restate its reasoning. The citation count is capped (`scripts/adr-ceiling`, never raised): a new citation is paid for by removing a duplicate one.
-- `bash scripts/adr-check.sh --index` lists the live ADRs; skip superseded ones unless asked for history.
+- A behaviour fix is verified by an xxscreeps scenario that reproduces the
+  incident passing, and the scenario library not regressing
+  (`ARCHITECTURE.md` §10.2). Add the scenario to the library.
+- An `Exchange` change is verified by the prediction error on the generated
+  set not rising (§10.1).
+- An economy change is read off the soak's curves.
+- Unit tests only for invariants and pure arithmetic. A test that asserts one
+  creep's action in one scenario is rejected in review.
+- `npm test` (unit) stays under a minute. Scenarios and soak run on `jj ship`
+  for the modules a change touches, and nightly in full.
+
+## Performance
+
+- No performance change without the representative benchmark
+  (`ARCHITECTURE.md` §9.1: live capture, engine cost model, calibrated against
+  `observe cpu`). If the benchmark is not representative, fix the benchmark.
+- The dialect in §9.2 is a default, not a rule: a measurement overrides it
+  either way, and the commit quotes the measurement.
+- A speed claim is an interleaved A/B on that benchmark with identical Memory
+  fingerprints, or a count. A wall-clock number alone is not a claim.
 
 ## Version control
 
@@ -38,12 +70,12 @@ Each rule's reason is in `docs/agents/hygiene.md`.
 
 1. `/code-review` has run on the diff and its findings are resolved.
 2. `jj describe` with a conventional-commit subject and one `Fixes #<n>` trailer line per issue.
-3. `jj bookmark set main -r @`, then `jj ship`: the gates (`npm test`: format check, ADR gate, `dotnet test`, wire gate; then the build), then `jj git push`. Its gates are the pre-push run; don't run `npm test` again before it. A pushed change is immutable.
-4. `npm run deploy` uploads the built bundle to the live server; the first tick after it is a cold reset.
+3. `jj bookmark set main -r @`, then `jj ship`: the gates (`npm test`: format check, line ceilings, `dotnet test`; then the build and `npm run smoke`), then `jj git push`. Its gates are the pre-push run; don't run `npm test` again before it. A pushed change is immutable.
+4. `npm run deploy` builds, smokes and uploads the bundle to the live server; the first tick after it is a cold reset.
 
 Squash TDD slices into one change per issue; push per issue.
 
-A live firefight (as above) the user flags may be fixed in the current session without the subagent loop; steps 2 and 3 still apply.
+A live firefight the user flags may be fixed in the current session without the subagent loop; steps 2 and 3 still apply.
 
 ### Working alongside
 
@@ -64,13 +96,14 @@ A cloud session (claude.ai/code) may push only the branch it was cloned on, so t
 
 ## Live game
 
-`npm run observe -- <cmd>`: `health` first after a deploy, then `cpu`, `tasks`, `timeline <creep>`, `raids`, `outposts`, `room <name>`, `eval '<expr>'`, `history <room> <tick>`, `wait --ticks N`. The full list is its usage line.
+**The live server runs v1** until the owner deploys v2 on purpose: `npm run
+deploy` from this tree uploads a bot that does nothing yet. Never deploy
+unasked.
 
-CPU: `npm run profile -- --scenario <s>` (harness), `npm run cpuprofile -- build/fabot.cpuprofile flat <fn>` (where a function's time goes), and for live attribution `npm run probe` wraps named functions in `dist/main.js`, uploaded with `npm run upload`, read with `observe probe`, undone by `npm run deploy`.
+`npm run observe -- health` first after a deploy; then `cpu`, `faults`,
+`switches`, `capture`, `wait --ticks N`. Kill switches: `observe switch <name>
+on|off|clear`. The commands ARCHITECTURE.md names beyond these (`engagements`,
+`exchange`, `declare`, `replay`) land with their modules.
 
-## Agent skills
-
-- Issue tracker: GitHub Issues (Xerxes-2/fabot) via `gh`. See `docs/agents/issue-tracker.md`.
-- Triage labels: the default five roles. See `docs/agents/triage-labels.md`.
-- Domain docs: `CONTEXT.md` (grep it for the term you need) + `docs/adr/`. See `docs/agents/domain.md`.
-- Orchestration of a queue of `ready-for-agent` issues: `docs/agents/orchestration.md`.
+v1 is archived at commit `427ff628`: `git show 427ff628:<path>` reads a file
+being ported. It is source to port from, never a fact about v2.

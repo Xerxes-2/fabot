@@ -13,6 +13,8 @@ type IHeapStatistics =
 
 type ICpu =
     abstract getUsed: unit -> float
+    /// The account's CPU allotment a tick.
+    abstract limit: float
     abstract getHeapStatistics: unit -> IHeapStatistics
     /// The CPU the engine has banked for us. The tick ceiling is 500 ms for
     /// the whole life of a non-empty bucket, not `min(limit + bucket, 500)`:
@@ -419,9 +421,17 @@ let Game: IGame = jsNative
 let Memory: obj = jsNative
 
 /// `segments` (id → string, the active ones this tick) and
-/// `setActiveSegments`; read and written by `ObserveMemory` alone.
+/// `setActiveSegments`; read and written by `Wire` alone.
 [<Global("RawMemory")>]
 let RawMemory: obj = jsNative
+
+/// Write one memory segment (0..99, at most 100 KB, at most ten a tick). A
+/// write needs no `setActiveSegments`; a read does, a tick ahead.
+[<Emit("RawMemory.segments[$0] = $1")>]
+let writeSegment (_id: int) (_text: string) : unit = jsNative
+
+[<Emit("JSON.stringify($0)")>]
+let jsonStringify (_value: obj) : string = jsNative
 
 [<Emit("Object.values($0)")>]
 let objectValues<'T> (_o: obj) : 'T[] = jsNative
