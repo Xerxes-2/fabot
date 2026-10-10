@@ -1576,8 +1576,7 @@ module Colony =
             // Claimed t808,328, and off W15S28's outposts since (#404).
             {
                 Home = "W17S29"
-                // W18S29 withdrawn t1,085,480: declared, the bucket ran to 0.
-                Outposts = [ Outpost.w16s29 ]
+                Outposts = [ Outpost.w16s29; Outpost.w18s29 ]
                 Errands = []
                 Salvage = []
                 Mother = Some "W15S28"
