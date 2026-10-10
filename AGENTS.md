@@ -36,22 +36,21 @@ Each rule's reason is in `docs/agents/hygiene.md`.
 
 ### Shipping an issue
 
-1. `npm test` (format check, ADR gate, `dotnet test`, wire gate) and `npm run build` are clean.
-2. `/code-review` has run on the diff and its findings are resolved.
-3. `jj describe` with a conventional-commit subject and one `Fixes #<n>` trailer line per issue.
-4. `jj bookmark set main -r @`, then `jj ship` (the gates again, then `jj git push`). A pushed change is immutable.
-5. `npm run deploy` uploads the built bundle to the live server; the first tick after it is a cold reset.
+1. `/code-review` has run on the diff and its findings are resolved.
+2. `jj describe` with a conventional-commit subject and one `Fixes #<n>` trailer line per issue.
+3. `jj bookmark set main -r @`, then `jj ship`: the gates (`npm test`: format check, ADR gate, `dotnet test`, wire gate; then the build), then `jj git push`. Its gates are the pre-push run; don't run `npm test` again before it. A pushed change is immutable.
+4. `npm run deploy` uploads the built bundle to the live server; the first tick after it is a cold reset.
 
 Squash TDD slices into one change per issue; push per issue.
 
-A live firefight (as above) the user flags may be fixed in the current session without the subagent loop; steps 1, 3 and 4 still apply.
+A live firefight (as above) the user flags may be fixed in the current session without the subagent loop; steps 2 and 3 still apply.
 
 ### Working alongside
 
 - A background task or subagent notifies when it finishes: end the turn. Wait on the game with `npm run observe -- wait --ticks N`.
 - Stop a background job with TaskStop; `pkill -f` matches its own shell.
 - A subagent that edits runs with `isolation: "worktree"`: the repo's WorktreeCreate hook (`.claude/hooks/worktree-create.sh`, registered in `.claude/settings.json`) gives it its own jj workspace at `.claude/worktrees/<name>` (ignored), based on `main` (`trunk()`, or `claude.worktree-base` when set), with `node_modules` linked, `.env` copied and the dotnet tools restored; anything machine-local goes in an untracked `.claude/worktree-setup.local.sh`. The subagent describes the workspace's own `@` (no `jj new` before its first edit, which leaves an empty change under its work) and never moves a bookmark or pushes.
-- Ship a subagent's change from the default workspace: `jj new <change>` (rebase it onto `main` first if `main` moved), then steps 4–5 with `-r <change>`. A subagent's workspace is removed when it stops with no work in it and no background task running (`subagent-stop.sh`); one holding work stays, so the agent can be resumed to amend it, until session end (`worktree-sweep.sh`); by hand, `.claude/hooks/worktree-sweep.sh --stale` forgets workspaces whose directory is gone and removes directories no workspace owns.
+- Ship a subagent's change from the default workspace: `jj new <change>` (rebase it onto `main` first if `main` moved), then steps 3–4 with `-r <change>`. A subagent's workspace is removed when it stops with no work in it and no background task running (`subagent-stop.sh`); one holding work stays, so the agent can be resumed to amend it, until session end (`worktree-sweep.sh`); by hand, `.claude/hooks/worktree-sweep.sh --stale` forgets workspaces whose directory is gone and removes directories no workspace owns.
 - Another live session works in its own workspace too, or stays read-only.
 
 ### Cloud sessions
@@ -59,7 +58,7 @@ A live firefight (as above) the user flags may be fixed in the current session w
 A cloud session (claude.ai/code) may push only the branch it was cloned on, so that branch stands in for `main` everywhere above; `main` gets the work by PR, merged by the user.
 
 - `session-start.sh` records the branch as `claude.session-branch`, gives jj git's identity, makes what origin holds immutable, and defines `jj ship [-r REV]` (`scripts/ship.sh`: the gates, then the branch set to REV and pushed; jj starts a new `@` when REV was it). The local `main` bookmark is never moved.
-- Step 4 is `jj ship`; subagent workspaces are based on the session branch, and a subagent's change is rebased onto it, not onto `main`.
+- Step 3 is `jj ship`; subagent workspaces are based on the session branch, and a subagent's change is rebased onto it, not onto `main`.
 - The container is reclaimed when the session idles: work not pushed is lost, so ship each issue as it lands.
 - `npm run deploy` from a cloud session runs the session branch live, ahead of `main`.
 
