@@ -12,6 +12,7 @@ open Fabot.Core.State
 let private world =
     {
         Time = 1
+        Me = ""
         CpuLimit = 20.0
         Bucket = 10_000
         Rooms = [||]

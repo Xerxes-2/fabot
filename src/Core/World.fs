@@ -316,18 +316,29 @@ type Room =
         Hostiles: Creep[]
     }
 
+/// The body in a spawn's oven: its name, the ticks until it stands, its
+/// parts (read off `Game.creeps`, where it already stands spawning).
+type Oven =
+    {
+        Name: string
+        Remaining: int
+        Body: Part[]
+    }
+
 type Spawn =
     {
         Id: string
         Name: string
         Pos: Pos
-        /// Ticks until the body in the oven stands; 0 when idle.
-        Spawning: int
+        /// The body in the oven; `None` when idle.
+        Spawning: Oven option
     }
 
 type World =
     {
         Time: int
+        /// Our username, off any object we own; empty while we own nothing.
+        Me: string
         /// `Game.cpu.limit` and `Game.cpu.bucket`.
         CpuLimit: float
         Bucket: int

@@ -54,6 +54,10 @@ let boostMineralPerPart = 30
 /// CONTROLLER_RESERVE_MAX.
 let reservationCap = 5000
 
+/// CONTROLLER_RESERVE: ticks `reserveController` adds a CLAIM part a tick.
+/// The reservation also decays by one a tick, so N parts gain N - 1.
+let reservePerClaim = 1
+
 /// NUKE_DAMAGE at the centre tile and within `nukeRadius` of it; a rampart on
 /// a tile takes it first.
 let nukeDamageCentre = 10_000_000

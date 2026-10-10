@@ -297,6 +297,8 @@ type IRoom =
 /// The body a spawn is building (`StructureSpawn.spawning`).
 [<AllowNullLiteral>]
 type ISpawning =
+    /// The name of the creep in the oven.
+    abstract name: string
     /// Ticks until the body stands.
     abstract remainingTime: int
 
@@ -305,6 +307,7 @@ type ISpawn =
     abstract id: string
     /// Null when the spawn is idle.
     abstract spawning: ISpawning
+    abstract owner: IOwner
     abstract room: IRoom
     abstract store: IStore
     abstract pos: IRoomPosition

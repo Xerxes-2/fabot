@@ -177,20 +177,50 @@ let private spawnOf (spawn: ISpawn) : Spawn =
         Pos = posOf spawn.pos
         Spawning =
             if isNull spawn.spawning then
-                0
+                None
             else
-                spawn.spawning.remainingTime
+                let name = spawn.spawning.name
+                let creep: ICreep = Game.creeps?(name)
+
+                Some
+                    {
+                        Name = name
+                        Remaining = spawn.spawning.remainingTime
+                        Body =
+                            if absent (box creep) then
+                                [||]
+                            else
+                                creep.body |> Array.map partOf
+                    }
     }
 
+/// Our username: off a spawn, else a creep, else a controller of ours.
+let private me (spawns: ISpawn[]) (creeps: ICreep[]) (rooms: IRoom[]) : string =
+    match spawns |> Array.tryHead, creeps |> Array.tryHead with
+    | Some spawn, _ -> spawn.owner.username
+    | None, Some creep -> creep.owner.username
+    | None, None ->
+        rooms
+        |> Array.tryPick (fun room ->
+            let c = room.controller
+
+            if not (absent (box c)) && c.my then
+                Some c.owner.username
+            else
+                None)
+        |> Option.defaultValue ""
+
 let ofGame () : World =
+    let spawns = objectValues<ISpawn> Game.spawns
+    let creeps = objectValues<ICreep> Game.creeps
+    let rooms = objectValues<IRoom> Game.rooms
+
     {
         Time = Game.time
+        Me = me spawns creeps rooms
         CpuLimit = Game.cpu.limit
         Bucket = Game.cpu.bucket
-        Rooms = objectValues<IRoom> Game.rooms |> Array.map roomOf
-        Spawns = objectValues<ISpawn> Game.spawns |> Array.map spawnOf
-        Creeps =
-            objectValues<ICreep> Game.creeps
-            |> Array.filter (fun c -> not c.spawning)
-            |> Array.map creepOf
+        Rooms = rooms |> Array.map roomOf
+        Spawns = spawns |> Array.map spawnOf
+        Creeps = creeps |> Array.filter (fun c -> not c.spawning) |> Array.map creepOf
     }
