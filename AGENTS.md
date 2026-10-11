@@ -4,6 +4,11 @@
 not; no other file is a source of truth. v1 (commit `427ff628`) is source to
 port from, never a fact about v2.
 
+Reading costs more than writing: every line is written once and read by
+every agent and every review after. Prefer deleting to adding, a type or a
+name to a sentence, one place for a fact to two, and short reports to long
+ones.
+
 ## Boundaries
 
 - A module's state is the row it owns in `ARCHITECTURE.md` §4. Adding a store,
