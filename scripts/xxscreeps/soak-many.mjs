@@ -146,6 +146,9 @@ const rowOf = (run) => {
   const refusals = Object.values(JSON.parse(read(run, "refusals.json") ?? "{}")).reduce((a, b) => a + b, 0);
   const last = samples.at(-1) ?? {};
   const at = (rcl) => levels.find((l) => l.rcl >= rcl)?.t;
+  // Shares of what was dug: lost to decay, put into the controller, built.
+  const ledger = last.ledger;
+  const share = (n) => (ledger && ledger.dug > 0 ? `${((100 * n) / ledger.dug).toFixed(1)}%` : "-");
   return {
     ok: !failed(run),
     rcl: last.rcl,
@@ -156,18 +159,22 @@ const rowOf = (run) => {
     dropped: samples.find((s) => s.t >= 8000)?.dropped,
     faults,
     refusals,
+    lost: share(ledger?.decayed ?? 0),
+    upgrade: share(ledger?.upgrade ?? 0),
+    build: share(ledger?.build ?? 0),
+    residual: ledger?.residual,
   };
 };
 
 const cell = (v, w = 9) => String(v ?? "-").padStart(w);
-console.log(["room", "seed", "bundle", "ok", "rcl", "progress", "rcl2", "rcl3", "rcl4", "drop@8k", "faults", "refusals"].map((h, i) => cell(h, i === 2 ? 12 : 9)).join(""));
+console.log(["room", "seed", "bundle", "ok", "rcl", "progress", "rcl2", "rcl3", "rcl4", "drop@8k", "faults", "refusals", "lost", "upgrade", "build", "residual"].map((h, i) => cell(h, i === 2 ? 12 : 9)).join(""));
 for (const room of rooms)
   for (const seed of seeds)
     for (const bot of bots) {
       const run = runs.find((r) => r.room === room && r.seed === seed && r.bot === bot);
       const r = rowOf(run);
       console.log(
-        [room, seed, bot.name, r.ok ? "yes" : "NO", r.rcl, r.progress, r.rcl2, r.rcl3, r.rcl4, r.dropped, r.faults, r.refusals]
+        [room, seed, bot.name, r.ok ? "yes" : "NO", r.rcl, r.progress, r.rcl2, r.rcl3, r.rcl4, r.dropped, r.faults, r.refusals, r.lost, r.upgrade, r.build, r.residual]
           .map((v, i) => cell(v, i === 2 ? 12 : 9))
           .join(""),
       );

@@ -57,6 +57,9 @@ type SourceFact =
         Seats: int
         /// Energy left in it until it regenerates.
         Energy: int
+        /// Energy a tick its diggers take out of it (`dugAt`): what every
+        /// income and flow is read off, never the rate alone.
+        Dug: int
     }
 
 /// A mineral under our extractor, with ore left in it.
@@ -83,10 +86,12 @@ type RefillFact =
 type StoreKind =
     | Container
     | Storage
+    /// The controller's container: what the upgraders draw from.
+    | Buffer
     /// A tombstone or a ruin: a store that ends.
     | Remains
 
-/// A store holding energy, or our storage with room for it.
+/// A store holding energy, or our storage or buffer with room for it.
 [<NoEquality; NoComparison>]
 type StoreFact =
     {
@@ -144,7 +149,7 @@ type Ground =
         Sites: SiteFact[]
         Repairs: RepairFact[]
         Piles: PileFact[]
-        /// Energy a tick its sources yield.
+        /// Energy a tick its sources' diggers take (`SourceFact.Dug`).
         Income: int
         /// Its controller is unowned and reserved by nobody or by us: a
         /// reservation or a claim the engine accepts.
@@ -255,7 +260,34 @@ let private seatsAt (atlas: Atlas) (range: int) (target: Pos) =
     | 0 -> System.Int32.MaxValue
     | n -> n
 
-let private groundOf (atlas: Atlas) (me: string) (room: Room) : Ground =
+/// A harvester crew's WORK past the source's saturation: the dig finishes
+/// the source inside its regeneration window despite the ticks a body loses
+/// walking and dropping its load. A named margin.
+let harvestSpareWork = 1
+
+/// The WORK a source's harvester is sized to: its output's, and a spare.
+let digWork (rate: int) =
+    (rate + Engine.harvestPerWork - 1) / Engine.harvestPerWork + harvestSpareWork
+
+/// What a source's diggers take out of it a tick at a bank of `capacity`:
+/// the one harvester its post seats (a home one where `home`), else a worker
+/// on each of its seats; never over its rate.
+let dugAt (capacity: int) (home: bool) (rate: int) (posted: bool) (seats: int) : int =
+    let body =
+        if not posted then
+            Bodies.sized Pattern.Worker Engine.maxBodyParts capacity
+        elif home then
+            homeHarvester (digWork rate) capacity
+        else
+            Bodies.sized Pattern.Harvester (digWork rate) capacity
+
+    match body with
+    | Some body ->
+        let diggers = if posted then 1 else seats
+        min rate (diggers * partCountIn body Work * Engine.harvestPerWork)
+    | None -> 0
+
+let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : Ground =
     let rate =
         if held room then
             Engine.heldOutputPerTick
@@ -290,6 +322,13 @@ let private groundOf (atlas: Atlas) (me: string) (room: Room) : Ground =
         |> List.tryHead
         |> Option.map snd
 
+    // A container in the controller's upgrade range: its buffer, where no
+    // source is beside it.
+    let buffered (pos: Pos) =
+        room.Controller
+        |> Option.bind (fun c -> rangeIn c.Pos pos)
+        |> Option.exists (fun r -> r <= Task.rangeOf (Task.Upgrade ""))
+
     let servedRate (pos: Pos) =
         let mutable r = 0
 
@@ -303,6 +342,7 @@ let private groundOf (atlas: Atlas) (me: string) (room: Room) : Ground =
         room.Sources
         |> Array.map (fun s ->
             let post = postOf s.Pos
+            let seats = seatsAt atlas 1 s.Pos
 
             {
                 Id = s.Id
@@ -310,8 +350,9 @@ let private groundOf (atlas: Atlas) (me: string) (room: Room) : Ground =
                 Rate = rate
                 Post = post |> Option.map fst
                 Container = post |> Option.bind snd
-                Seats = seatsAt atlas 1 s.Pos
+                Seats = seats
                 Energy = s.Energy
+                Dug = dugAt capacity ownedRoom rate (Option.isSome post) seats
             })
 
     let minerals =
@@ -348,17 +389,22 @@ let private groundOf (atlas: Atlas) (me: string) (room: Room) : Ground =
         | Kind.Storage ->
             let energy = Store.amountOf Energy s.Store
             let owned = s.Kind = Kind.Storage && s.Owner = Ours
+            let rate = if s.Kind = Kind.Container then servedRate s.Pos else 0
 
-            if energy > 0 || owned then
+            let kind =
+                if s.Kind = Kind.Storage then
+                    StoreKind.Storage
+                elif rate = 0 && ownedRoom && buffered s.Pos then
+                    StoreKind.Buffer
+                else
+                    StoreKind.Container
+
+            if energy > 0 || owned || kind = StoreKind.Buffer then
                 stores.Add
                     {
                         Id = s.Id
                         Pos = s.Pos
-                        Kind =
-                            if s.Kind = Kind.Storage then
-                                StoreKind.Storage
-                            else
-                                StoreKind.Container
+                        Kind = kind
                         Energy = energy
                         Free = Store.free s.Store
                         Fill =
@@ -366,7 +412,7 @@ let private groundOf (atlas: Atlas) (me: string) (room: Room) : Ground =
                                 float (Store.used s.Store) / float s.Store.Capacity
                             else
                                 0.0
-                        SourceRate = if s.Kind = Kind.Container then servedRate s.Pos else 0
+                        SourceRate = rate
                         Owned = owned
                     }
         | _ -> ()
@@ -444,7 +490,7 @@ let private groundOf (atlas: Atlas) (me: string) (room: Room) : Ground =
                     Resource = p.Resource
                     Amount = p.Amount
                 })
-        Income = sources |> Array.sumBy (fun s -> s.Rate)
+        Income = sources |> Array.sumBy (fun s -> s.Dug)
         Reservable = room.Controller |> Option.exists (reservable me)
         OurReservation =
             match room.Controller |> Option.bind (fun c -> c.Reservation) with
@@ -490,10 +536,15 @@ let ofWorld (world: World) (atlas: Atlas) (worked: string list) (claims: string 
         world.Rooms
         |> Array.filter (fun room -> List.contains room.Name worked && not (isColony room.Name))
 
+    // A declared room is dug by bodies its richest colony casts.
+    let richest =
+        colonies |> Array.fold (fun most (room, _) -> max most room.EnergyCapacity) 0
+
     let grounds =
         Array.append
-            (colonies |> Array.map (fst >> groundOf atlas world.Me))
-            (declared |> Array.map (groundOf atlas world.Me))
+            (colonies
+             |> Array.map (fun (room, _) -> groundOf atlas world.Me room.EnergyCapacity room))
+            (declared |> Array.map (groundOf atlas world.Me richest))
 
     let bodies =
         world.Creeps

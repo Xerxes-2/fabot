@@ -127,7 +127,7 @@ let matchAll
         match Map.tryFind bodies.[bi].Name assignments with
         | Some tid ->
             match byId.TryGetValue tid with
-            | true, oi when fits bodies.[bi] pool.[oi].Task && walk bi oi >= 0 ->
+            | true, oi when fits bodies.[bi] pool.[oi] && walk bi oi >= 0 ->
                 let key =
                     if seated oi then
                         -(seatValue bodies.[bi] pool.[oi] (walk bi oi))
@@ -171,7 +171,7 @@ let matchAll
         for oi in 0 .. offers - 1 do
             let offer = pool.[oi]
 
-            if fits bodies.[bi] offer.Task && open' bi oi then
+            if fits bodies.[bi] offer && open' bi oi then
                 let w = walk bi oi
 
                 if

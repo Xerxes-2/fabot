@@ -27,6 +27,11 @@ let upgradeRank = 3 * bandRanks
 
 let bottomRank = 4 * bandRanks
 
+/// The controller's buffer, half a band under the upgrade it feeds and over
+/// the stock's own refill: a load no sink takes stands at the controller
+/// before it is banked.
+let bufferRank = upgradeRank + bandRanks / 2
+
 /// The controller inside its downgrade deadline, a band above the flow: an
 /// engine fact (it downgrades, and safe mode needs the timer), not a price.
 let deadlineRank = -bandRanks

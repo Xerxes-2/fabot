@@ -83,6 +83,7 @@ let private offerGen (i: int) : Gen<Offer> =
     gen {
         let! task = taskGen (Gen.constant $"o{i}")
         let! priority = Gen.choose (-10, 40)
+        let! draw = Gen.elements [ Draw.Open; Draw.Spenders; Draw.Buffer ]
 
         let! capacity =
             Gen.oneof
@@ -105,6 +106,7 @@ let private offerGen (i: int) : Gen<Offer> =
                 Target = at
                 Priority = priority
                 Capacity = capacity
+                Draw = draw
             }
     }
 
@@ -285,7 +287,31 @@ let tests =
                             Pattern = Bodies.Pattern.Harvester
                             Free = 0
                         }
-                        (Harvest "s"))
+                        {
+                            Task = Harvest "s"
+                            Id = "h:s"
+                            Target = at
+                            Priority = 0
+                            Capacity = Capacity.Unbounded
+                            Draw = Draw.Open
+                        })
+
+            testPropertyWithConfig config "an upgrader fits only an upgrade or its buffer"
+            <| fun (scene: Scene) ->
+                scene.Bodies
+                |> Array.forall (fun b ->
+                    let upgrader =
+                        { b with
+                            Pattern = Bodies.Pattern.Upgrader
+                        }
+
+                    scene.Pool
+                    |> Array.forall (fun o ->
+                        not (fits upgrader o)
+                        || match o.Task with
+                           | Upgrade _ -> true
+                           | Withdraw _ -> o.Draw = Draw.Buffer
+                           | _ -> false))
 
             testPropertyWithConfig config "no capacity is filled past its last holder"
             <| fun (scene: Scene) ->
@@ -333,7 +359,7 @@ let tests =
                     | None -> true
                     | Some id ->
                         match scene.Pool |> Array.tryFind (fun o -> o.Id = id) with
-                        | Some offer -> fits b offer.Task && reaches scene b offer
+                        | Some offer -> fits b offer && reaches scene b offer
                         | None -> false)
 
             testPropertyWithConfig config "a match does not depend on the order of the bodies"
@@ -361,7 +387,7 @@ let tests =
                         match scene.Pool |> Array.tryFind (fun o -> o.Id = id) with
                         | Some offer when
                             offer.Capacity = Capacity.Unbounded
-                            && fits b offer.Task
+                            && fits b offer
                             && reaches scene b offer
                             ->
                             Map.tryFind b.Name out = Some id
@@ -393,7 +419,7 @@ let tests =
                     || scene.Pool
                        |> Array.forall (fun o ->
                            not (
-                               fits b o.Task
+                               fits b o
                                && admits o (garrisons b o) (held o) (kin b o)
                                && reaches scene b o
                            )))

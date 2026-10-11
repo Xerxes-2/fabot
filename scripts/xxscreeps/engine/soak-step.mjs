@@ -8,7 +8,11 @@
 // `refusals.json` (counts by act and code), `levels.json` (the tick each
 // controller level was first seen), `observe.json` (the last segment
 // read), `cpu.jsonl` (tick, engine-reported
-// CPU, the bot's own phases) and `console.log`.
+// CPU, the bot's own phases) and `console.log`. Each sample carries the
+// room's energy ledger, cumulative from the first tick (`ledger`): dug,
+// spawn regeneration, spent on bodies, building, upgrading, repairing and
+// towers, lost to pile decay, and the stock standing (stores, carried, piles);
+// dug + regen = spent + decayed + Δstock, less the residual it reports.
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
@@ -66,6 +70,72 @@ async function observed() {
 }
 
 const energyIn = (o) => o.store?.getUsedCapacity?.("energy") ?? 0;
+
+// Event ids (EVENT_* constants).
+const HARVEST = 5;
+const BUILD = 4;
+const REPAIR = 7;
+const UPGRADE = 9;
+const ATTACK = 1;
+const HEAL = 6;
+const PART_COST = { move: 50, work: 100, carry: 50, attack: 80, ranged_attack: 150, heal: 250, claim: 600, tough: 10 };
+const ledger = { dug: 0, regen: 0, spawn: 0, build: 0, upgrade: 0, repair: 0, tower: 0, decayed: 0, stock0: null, stock: 0 };
+const born = new Set();
+let lastPiles = new Map();
+let regenNext = 0;
+
+// One tick of the ledger, off the room as the tick left it.
+function account(room) {
+  const objects = [...room["#objects"]];
+  const sources = new Set(objects.filter((o) => o["#lookType"] === "source").map((o) => o.id));
+  const towers = new Set(objects.filter((o) => o.structureType === "tower" && o["#user"] === ours).map((o) => o.id));
+  ledger.regen += regenNext;
+  for (const e of room["#eventLog"] ?? []) {
+    const kind = e.event ?? e._$Variant;
+    if (kind === HARVEST && sources.has(e.targetId)) ledger.dug += e.amount;
+    else if (kind === BUILD) ledger.build += e.energySpent ?? 0;
+    else if (kind === UPGRADE) ledger.upgrade += e.energySpent ?? 0;
+    else if (kind === REPAIR) {
+      if (towers.has(e.objectId)) ledger.tower += e.energySpent ?? 10;
+      else ledger.repair += e.energySpent ?? 0;
+    } else if ((kind === ATTACK || kind === HEAL) && towers.has(e.objectId)) ledger.tower += 10;
+  }
+  const piles = new Map();
+  let stock = 0;
+  let bank = 0;
+  const spawns = [];
+  for (const o of objects) {
+    if (o["#lookType"] === "resource") {
+      if (o.resourceType !== "energy") continue;
+      piles.set(o.id, o.amount);
+      stock += o.amount;
+      const before = lastPiles.get(o.id);
+      if (before !== undefined) ledger.decayed += Math.ceil(before / 1000);
+      continue;
+    }
+    if (o.body !== undefined && o["#user"] !== ours) continue;
+    if (o.body !== undefined && !born.has(o.name)) {
+      born.add(o.name);
+      ledger.spawn += o.body.reduce((sum, p) => sum + (PART_COST[p.type] ?? 0), 0);
+    }
+    stock += energyIn(o);
+    if ((o.structureType === "spawn" || o.structureType === "extension") && o["#user"] === ours) {
+      bank += energyIn(o);
+      if (o.structureType === "spawn") spawns.push(o);
+    }
+  }
+  lastPiles = piles;
+  // A spawn regains one a tick while it and the room's bank are under 300.
+  regenNext = bank < 300 ? spawns.filter((sp) => energyIn(sp) < 300).length : 0;
+  if (ledger.stock0 === null) ledger.stock0 = stock;
+  ledger.stock = stock;
+}
+
+function ledgerRow() {
+  const { stock0, stock, ...flows } = ledger;
+  const spent = flows.spawn + flows.build + flows.upgrade + flows.repair + flows.tower;
+  return { ...flows, stock, residual: flows.dug + flows.regen - spent - flows.decayed - (stock - stock0) };
+}
 
 function sample(t, time, room) {
   const row = {
@@ -170,10 +240,12 @@ for (let t = 0; t < ticks; t++) {
   }
   fs.writeSync(cpuOut, JSON.stringify({ t, time, cpu, observed: fresh ? obs.cpu : null, phases: fresh ? obs.phases : null }) + "\n");
   const room = await shard.loadRoom(roomName, time);
+  account(room);
   if (room["#level"] !== levels.at(-1)?.rcl) levels.push({ t, time, rcl: room["#level"] });
   if (t % every === 0 || t === ticks - 1) {
     const row = sample(t, time, room);
     row.cpu = cpu;
+    row.ledger = ledgerRow();
     row.botCpu = fresh ? obs.cpu : null;
     row.faults = seenFaults.size;
     row.ms = Date.now() - started;

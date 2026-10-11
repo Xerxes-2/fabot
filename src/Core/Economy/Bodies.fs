@@ -17,12 +17,21 @@ type Pattern =
     | Harvester
     /// Carries and does not dig.
     | Hauler
+    /// Heavy WORK that stands beside the controller's buffer and upgrades,
+    /// one CARRY its draw's worth.
+    | Upgrader
     /// Holds a reservation or takes a controller.
     | Claimer
 
 /// Every pattern, in the order a quota reports them.
 let allPatterns =
-    [ Pattern.Worker; Pattern.Harvester; Pattern.Hauler; Pattern.Claimer ]
+    [
+        Pattern.Worker
+        Pattern.Harvester
+        Pattern.Hauler
+        Pattern.Upgrader
+        Pattern.Claimer
+    ]
 
 /// The name a cast of the pattern starts with.
 let nameOf (pattern: Pattern) : string =
@@ -30,6 +39,7 @@ let nameOf (pattern: Pattern) : string =
     | Pattern.Worker -> "worker"
     | Pattern.Harvester -> "harvester"
     | Pattern.Hauler -> "hauler"
+    | Pattern.Upgrader -> "upgrader"
     | Pattern.Claimer -> "claimer"
 
 /// The repeating block, and the least body the pattern casts.
@@ -38,13 +48,15 @@ let blockOf (pattern: Pattern) : BodyPart list =
     | Pattern.Worker -> [ Work; Carry; Move ]
     | Pattern.Harvester -> [ Work; Work; Carry; Move ]
     | Pattern.Hauler -> [ Carry; Carry; Move ]
+    | Pattern.Upgrader -> [ Work; Carry; Move ]
     | Pattern.Claimer -> [ Claim; Move ]
 
 /// The part a pattern's quota is counted in.
 let keyPartOf (pattern: Pattern) : BodyPart =
     match pattern with
     | Pattern.Worker
-    | Pattern.Harvester -> Work
+    | Pattern.Harvester
+    | Pattern.Upgrader -> Work
     | Pattern.Hauler -> Carry
     | Pattern.Claimer -> Claim
 
@@ -64,6 +76,11 @@ let patternOfName (name: string) : Pattern option =
 
     allPatterns |> List.tryFind (fun p -> nameOf p = prefix)
 
+/// Whether a body stands where it works: fewer than one CARRY to four WORK,
+/// so a delivery is a commute for its WORK. The upgrader row casts only a
+/// standing body, or it is a worker by another name.
+let standing (work: int) (carry: int) : bool = carry * 4 < work
+
 /// The pattern live parts read as, for a body whose name says none.
 let patternOfParts (work: int) (carry: int) (move: int) (claim: int) : Pattern =
     if claim > 0 then
@@ -72,6 +89,8 @@ let patternOfParts (work: int) (carry: int) (move: int) (claim: int) : Pattern =
         Pattern.Harvester
     elif work = 0 && carry > 0 then
         Pattern.Hauler
+    elif standing work carry then
+        Pattern.Upgrader
     else
         Pattern.Worker
 
@@ -143,6 +162,18 @@ let private harvesterBody (moves: int -> int) (most: int) (capacity: int) =
 
     bodyOf (max 2 n)
 
+/// The upgrader's rule: one CARRY, the rest of the bank on WORK and MOVE
+/// pairs up to `most` WORK. The MOVEs walk it to the buffer once at road
+/// parity; the CARRY holds one draw from the buffer at its feet.
+let private upgraderBody (most: int) (capacity: int) =
+    let pairs =
+        (capacity - Engine.partCost Carry) / Engine.bodyCost [ Work; Move ]
+        |> min ((Engine.maxBodyParts - 1) / 2)
+        |> min most
+        |> max 1
+
+    replicate pairs Work @ [ Carry ] @ replicate pairs Move
+
 /// Whole blocks, grouped by part in the block's order, up to `most` blocks.
 let private wholeBlocks (block: BodyPart list) (most: int) (capacity: int) =
     let repeats =
@@ -168,6 +199,7 @@ let sized (pattern: Pattern) (most: int) (capacity: int) : BodyPart list option 
             | Pattern.Worker -> workerBody most capacity
             | Pattern.Harvester -> harvesterBody (fun n -> (n + 1) / 2) (max 2 most) capacity
             | Pattern.Hauler -> wholeBlocks (blockOf pattern) ((most + 1) / 2) capacity
+            | Pattern.Upgrader -> upgraderBody most capacity
             | Pattern.Claimer -> wholeBlocks (blockOf pattern) most capacity
 
         Some(withMoveLast body)

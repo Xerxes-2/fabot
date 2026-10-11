@@ -29,6 +29,19 @@ type Capacity =
     /// carry of the resource.
     | Load of int
 
+/// Which bodies a draw from a store is for.
+[<RequireQualifiedAccess>]
+type Draw =
+    /// Any body with room: a store the flow passes through, or the stock
+    /// while a sink other than itself is hungry.
+    | Open
+    /// A body that spends what it draws (a WORK part): the stock while no
+    /// other sink is hungry, which a carrier would only pour back.
+    | Spenders
+    /// The controller's buffer: a body that spends, and the one store a
+    /// standing upgrader draws from.
+    | Buffer
+
 /// One entry of the pool.
 [<NoEquality; NoComparison>]
 type Offer =
@@ -41,26 +54,37 @@ type Offer =
         /// Where the Task ranks against every other, lower first.
         Priority: int
         Capacity: Capacity
+        /// `Open` but for a draw.
+        Draw: Draw
     }
 
 /// What a body carries of a resource.
 let private carried (body: Body) (resource: Resource) = Store.amountOf resource body.Store
 
-/// Whether a body's parts and store let it act on the Task now. One rule for
-/// a fresh match and a kept one: an intake while the store has room, a
-/// delivery while it holds the resource. A harvester digs whatever its store
-/// holds, the engine dropping the overflow where it stands, and takes nothing
-/// else: its seat is the work it was cast for, its CARRY the dig's buffer.
-let fits (body: Body) (task: Task) : bool =
-    match task with
+/// Whether a body's parts and store let it act on the offer now. One rule
+/// for a fresh match and a kept one: an intake while the store is at least
+/// half empty (a fuller body delivers first), a delivery while it holds the
+/// resource. A harvester digs whatever its store holds, the engine dropping
+/// the overflow where it stands, and takes nothing else: its seat is the work
+/// it was cast for, its CARRY the dig's buffer. An upgrader upgrades and
+/// draws its buffer, and nothing else: a delivery is a commute for its WORK.
+let fits (body: Body) (offer: Offer) : bool =
+    match offer.Task with
+    | Upgrade _ ->
+        body.Pattern <> Pattern.Harvester
+        && body.Work > 0
+        && body.Carry > 0
+        && body.Energy > 0
+    | Withdraw _ when body.Pattern = Pattern.Upgrader -> offer.Draw = Draw.Buffer && body.Free > 0
+    | _ when body.Pattern = Pattern.Upgrader -> false
     | Harvest _ -> body.Work > 0 && (body.Pattern = Pattern.Harvester || body.Free > 0)
     | _ when body.Pattern = Pattern.Harvester -> false
+    | Withdraw _ when offer.Draw <> Draw.Open && body.Work = 0 -> false
     | Withdraw _
-    | Pickup _ -> body.Carry > 0 && body.Free > 0
+    | Pickup _ -> body.Carry > 0 && body.Free > 0 && body.Free * 2 >= body.Store.Capacity
     | Refill(_, resource) -> body.Carry > 0 && carried body resource > 0
     | Build _
-    | Repair _
-    | Upgrade _ -> body.Work > 0 && body.Carry > 0 && body.Energy > 0
+    | Repair _ -> body.Work > 0 && body.Carry > 0 && body.Energy > 0
     | Reserve _
     | Claim _ -> body.Claim > 0
 
@@ -128,6 +152,7 @@ let private offer task (target: Pos) (value: float) capacity =
         Target = target
         Priority = Price.economyRank value
         Capacity = capacity
+        Draw = Draw.Open
     }
 
 /// The controller stands inside the downgrade line safe mode needs.
@@ -250,6 +275,13 @@ let pool (derived: Derived) : Offer[] =
 
         let starved = colony |> Option.exists (fun c -> c.Bank < c.BankCapacity)
 
+        // The room the sinks other than the stock have: what a carrier's draw
+        // on the stock is for.
+        let room =
+            (ground.Refills |> Array.sumBy (fun r -> r.Free))
+            + (ground.Stores
+               |> Array.sumBy (fun s -> if s.Kind = StoreKind.Buffer then s.Free else 0))
+
         for s in ground.Stores do
             if s.Energy > 0 then
                 let value =
@@ -258,9 +290,29 @@ let pool (derived: Derived) : Offer[] =
                     | StoreKind.Container when s.SourceRate > 0 ->
                         Price.flowDraw (Price.overflowLoss s.SourceRate s.Fill)
                     | StoreKind.Container
+                    | StoreKind.Buffer
                     | StoreKind.Storage -> Price.stockDraw starved hungriest
 
-                offers.Add(offer (Withdraw(s.Id, Energy)) s.Pos value (Capacity.Load s.Energy))
+                let draw, load =
+                    match s.Kind with
+                    | StoreKind.Buffer -> Draw.Buffer, s.Energy
+                    | StoreKind.Storage when room > 0 -> Draw.Open, min s.Energy room
+                    | StoreKind.Storage -> Draw.Spenders, s.Energy
+                    | _ -> Draw.Open, s.Energy
+
+                offers.Add
+                    { offer (Withdraw(s.Id, Energy)) s.Pos value (Capacity.Load load) with
+                        Draw = draw
+                    }
+
+            if s.Kind = StoreKind.Buffer && s.Free > 0 then
+                offers.Add(
+                    offer
+                        (Refill(s.Id, Energy))
+                        s.Pos
+                        (Price.valueOfRank Price.bufferRank)
+                        (Capacity.Load s.Free)
+                )
 
             if s.Owned && s.Free > 0 then
                 for r in Array.append [| Energy |] ores do

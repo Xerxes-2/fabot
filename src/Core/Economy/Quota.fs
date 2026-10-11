@@ -59,11 +59,6 @@ type Plan =
         Casts: Cast list
     }
 
-/// A harvest crew's WORK past the source's saturation: the dig finishes the
-/// source inside its regeneration window despite the ticks a body loses
-/// walking and dropping its load. A named margin.
-let harvestSpareWork = 1
-
 /// The ticks a body's successor needs before it can take over: its spawn
 /// time and `walk`, the ticks from the casting spawn to the body's work.
 let lead (body: Body) (walk: int) : int =
@@ -176,130 +171,122 @@ type Leg = BodyPart list -> Pos -> Pos -> int -> int option
 let private roundTrip (leg: Leg) (body: BodyPart list) (fetch: Pos) (work: Pos) (range: int) =
     leg body fetch work range |> Option.map (fun there -> max 2 (2 * there))
 
-/// What a haul from a source delivers a tick, of the `allowed` it digs, by
-/// the colony that casts it: all of it where the colony banks in a storage;
-/// else its share of what the spawn draws, the standing bodies' upkeep, the
-/// rest of the dig left for the workers to fetch. A haul feeds only sinks.
-let private haulShare (distance: Pos -> Pos -> int option) (derived: Derived) =
-    let draw = Array.zeroCreate<float> derived.Colonies.Length
+/// The energy a colony keeps in its storage before it spends the surplus:
+/// every tower its level allows firing for two creep lifetimes, the owner's
+/// number (`ARCHITECTURE.md` §5). Nothing is kept without a storage.
+let reserveTarget (level: int) : int =
+    Engine.controllerStructures "tower" level
+    * Engine.towerEnergyCost
+    * Engine.creepLifetime
+    * 2
 
-    for b in derived.Bodies do
-        match nearest distance derived.Colonies (fun _ -> true) b.Pos with
-        | Some ci ->
-            let cost =
-                b.Work * Engine.partCost Work
-                + b.Carry * Engine.partCost Carry
-                + b.Move * Engine.partCost Move
-                + b.Claim * Engine.partCost Claim
+/// The colony a ground's work counts to: its own, else the nearest to its
+/// controller or first source.
+let private ownerOf (distance: Pos -> Pos -> int option) (derived: Derived) (gi: int) =
+    let colonies = derived.Colonies
 
-            draw.[ci] <- draw.[ci] + float cost / float (lifeOf b.Pattern)
-        | None -> ()
+    if gi < colonies.Length then
+        Some gi
+    else
+        let ground = derived.Grounds.[gi]
 
-    fun (caster: int option) (allowed: int) ->
-        match caster with
-        | Some ci when not (derived.Grounds.[ci].Stores |> Array.exists (fun s -> s.Owned)) ->
-            let income = max 1 derived.Grounds.[ci].Income
-            min allowed (int (ceil (draw.[ci] * float allowed / float income)))
-        | _ -> allowed
+        ground.Controller
+        |> Option.map (fun c -> c.Pos)
+        |> Option.orElse (ground.Sources |> Array.tryHead |> Option.map (fun s -> s.Pos))
+        |> Option.bind (nearest distance colonies (fun _ -> true))
 
-/// The WORK a source's harvesters are sized to: its output's, and a spare.
-let private digWork (s: SourceFact) =
-    ceilDiv s.Rate Engine.harvestPerWork + harvestSpareWork
+/// The energy a tick one source's haul must move: what its post digs, and
+/// what stands in its container and beside it over a creep's life, so a
+/// hauler cast now clears the backlog before it dies. Zero until its
+/// container is built: a dig that falls on the floor is the workers' to fetch.
+let private haulFlow (ground: Ground) (s: SourceFact) : float =
+    match s.Container with
+    | None -> 0.0
+    | Some id ->
+        let stored =
+            ground.Stores |> Array.sumBy (fun st -> if st.Id = id then st.Energy else 0)
 
-/// What a source yields a tick: its rate where its seats hold enough of the
-/// nearest colony's harvester to dig it out, else what those seats dig. The
-/// income every row past the harvesters is hired against, never the rate
-/// alone: a seat short of the rate leaves the rest in the rock.
-let private dugAt (distance: Pos -> Pos -> int option) (derived: Derived) (s: SourceFact) =
-    match
-        nearest distance derived.Colonies (fun _ -> true) s.Pos
-        |> Option.bind (fun ci ->
-            bodyFor
-                derived.Colonies.[ci]
-                (seated Pattern.Harvester s.Pos (digWork s) s.Seats (fun _ -> None)))
-    with
-    | Some body ->
-        let perSeat = partCountIn body Work * Engine.harvestPerWork
+        let piled =
+            ground.Piles
+            |> Array.sumBy (fun p ->
+                if
+                    p.Resource = Energy
+                    && p.Pos.Room = s.Pos.Room
+                    && max (abs (p.Pos.X - s.Pos.X)) (abs (p.Pos.Y - s.Pos.Y)) <= 1
+                then
+                    p.Amount
+                else
+                    0)
 
-        if s.Seats >= ceilDiv s.Rate perSeat then
-            s.Rate
-        else
-            s.Seats * perSeat
-    | None -> s.Rate
+        float s.Dug + float (stored + piled) / float Engine.creepLifetime
 
-/// What the ground wants beyond the workers: harvest and haul for each
-/// source, a reserver for each declared room's reservable controller, a
-/// claimer for each declared claim.
+/// What the ground wants beyond the spenders: a harvester on each source's
+/// post, the haul from each built container, a reserver for each declared
+/// room's reservable controller, a claimer for each declared claim. A source
+/// with no post is dug by the workers' seat crews (`spendDemands`).
 ///
-/// A source is dug by bodies standing at its seats: its WORK wanted is its
-/// output's, its bodies no more than its seats, so where the seats bind the
-/// body with the more WORK a seat yields the more and outprices the rest. The
-/// dig falls where it is dug (a pile, or the container a body stands on), and
-/// a haul moves it.
+/// The haul is one demand a colony: its containers' flows (`haulFlow`), each
+/// times its round trip to the dearest sink it feeds (the spawn, the buffer,
+/// the storage), over a CARRY's load, rounded once. The dearest, not the
+/// nearest: a ring fills in a trip, and the flow that goes on all day is to
+/// the far sink.
 let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (derived: Derived) =
     let demands = ResizeArray<Demand>()
     let life = float Engine.creepLifetime
-    let hauled = haulShare distance derived
+    let colonies = derived.Colonies
+    let carries = Array.zeroCreate<float> colonies.Length
+    let flows = Array.zeroCreate<float> colonies.Length
+    let digs = Array.init colonies.Length (fun _ -> ResizeArray<int * Demand>())
+
+    let sinksOf ci =
+        homeOf colonies.[ci]
+        :: (derived.Grounds.[ci].Stores
+            |> Array.filter (fun st -> st.Kind = StoreKind.Buffer || st.Owned)
+            |> Array.map (fun st -> st.Pos)
+            |> List.ofArray)
 
     derived.Grounds
     |> Array.iteri (fun gi ground ->
+        let owner = ownerOf distance derived gi
+
         for s in ground.Sources do
-            let rate = s.Rate
+            match s.Post with
+            | Some post ->
+                // A post with no container yet piles its dig, and a pile decays.
+                let spill = if Option.isSome s.Container then 0.0 else Price.pileDecay 1
 
-            // With no container a body's dig piles under it, and a pile decays
-            // while it stands.
-            let spill = if Option.isSome s.Container then 0.0 else Price.pileDecay 1
+                let dig =
+                    { seated Pattern.Harvester s.Pos (digWork s.Rate) 1 (fun body ->
+                          Some(
+                              (float (min s.Rate (partCountIn body Work * Engine.harvestPerWork))
+                               - spill)
+                              * life
+                          )) with
+                        Spill = spill
+                    }
 
-            // A posted source seats one harvester, on its post.
-            let seats = if Option.isSome s.Post then 1 else s.Seats
+                demands.Add dig
 
-            let dig =
-                { seated Pattern.Harvester s.Pos (digWork s) seats (fun body ->
-                      Some(
-                          (float (min rate (partCountIn body Work * Engine.harvestPerWork))
-                           - spill)
-                          * life
-                      )) with
-                    Spill = spill
-                }
+                match owner with
+                | Some ci when Option.isSome s.Container ->
+                    let trip =
+                        sized Pattern.Hauler Engine.maxBodyParts colonies.[ci].BankCapacity
+                        |> Option.map (fun body ->
+                            sinksOf ci
+                            |> List.choose (fun sink -> roundTrip leg body post sink 1)
+                            |> List.fold max 0)
+                        |> Option.defaultValue 0
 
-            demands.Add dig
-
-            // The round trip to the nearest colony's sink, at the pace of the
-            // hauler it casts; a haul nobody can price hires nobody.
-            let caster = nearest distance derived.Colonies (fun _ -> true) s.Pos
-
-            let trip =
-                caster
-                |> Option.bind (fun ci ->
-                    sized Pattern.Hauler Engine.maxBodyParts derived.Colonies.[ci].BankCapacity
-                    |> Option.bind (fun body -> roundTrip leg body s.Pos (sinkOf derived ci) 1))
-
-            let allowed = dugAt distance derived s
-
-            match trip with
-            | Some trip ->
-                demands.Add(
-                    demand
-                        Pattern.Hauler
-                        s.Pos
-                        (ceilDiv (hauled caster allowed * trip) Engine.carryPartCapacity)
-                        (fun body ->
-                            let moved =
-                                float (partCountIn body Carry * Engine.carryPartCapacity)
-                                / float trip
-
-                            // What the standing harvesters dig there: a
-                            // haul moves only what a dig leaves, so a
-                            // source's harvesters are bought first.
-                            let dug = min rate ((dig.Wanted - dig.Left) * Engine.harvestPerWork)
-
-                            Some(min (float dug) moved * life))
-                )
+                    if trip > 0 then
+                        let flow = haulFlow ground s
+                        carries.[ci] <- carries.[ci] + flow * float trip
+                        flows.[ci] <- flows.[ci] + flow
+                        digs.[ci].Add(s.Rate, dig)
+                | _ -> ()
             | None -> ()
 
         match ground.Controller with
-        | Some c when ground.Reservable && gi >= derived.Colonies.Length ->
+        | Some c when ground.Reservable && gi >= colonies.Length ->
             let gain =
                 float (
                     ground.Sources.Length
@@ -313,18 +300,47 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
             )
         | _ -> ())
 
+    for ci in 0 .. colonies.Length - 1 do
+        if carries.[ci] > 0.0 then
+            let wanted = int (ceil (carries.[ci] / float Engine.carryPartCapacity))
+            let flow = flows.[ci]
+            let digs = digs.[ci]
+
+            demands.Add(
+                demand Pattern.Hauler (homeOf colonies.[ci]) wanted (fun body ->
+                    let moved = float (partCountIn body Carry) * flow / float wanted
+
+                    // What the standing harvesters dig: a haul moves only
+                    // what a dig leaves, so the harvesters are bought first.
+                    let dug =
+                        digs
+                        |> Seq.sumBy (fun (rate, dig) ->
+                            min rate ((dig.Wanted - dig.Left) * Engine.harvestPerWork))
+
+                    Some(min (float dug) moved * life))
+            )
+
     for c in derived.Claims do
         demands.Add(demand Pattern.Claimer c.Pos 1 (fun _ -> None))
 
     demands
 
-/// Each colony's worker WORK: the surplus its income leaves once every body's
-/// upkeep and spill is paid, the workers' own upkeep included, spent upgrading
-/// at the pace a worker's loads allow; no more bodies than its controller
-/// seats. A colony's own room counts to it, a declared room and a demand to
-/// the nearest colony. Never under one: a colony with no worker builds and
-/// upgrades nothing.
-let private workerDemands
+/// What a colony spends its surplus on: the upgraders standing at its buffer
+/// and the workers that build, repair and upgrade.
+///
+/// - The surplus a tick: what the posts of built containers dig, less every
+///   other body's upkeep.
+/// - With a storage, the reserve (`reserveTarget`) comes first: the gap
+///   saved over a creep's life, never more than the surplus.
+/// - The energy the standing sites still owe, over a creep's life, is the
+///   workers'. The upgraders are hired out of what is left, and out of the
+///   stock above the reserve, in whole bodies of a lifetime's drain and body
+///   (rounded down), only while a buffer stands and the bank casts a
+///   standing body.
+/// - The workers spend the rest at the pace their loads allow (rounded up),
+///   never under two bodies while anything is to be built or repaired, else
+///   one; and a crew on each seat of a home source with no post.
+let private spendDemands
     (distance: Pos -> Pos -> int option)
     (leg: Leg)
     (derived: Derived)
@@ -332,24 +348,20 @@ let private workerDemands
     =
     let colonies = derived.Colonies
     let n = colonies.Length
-    let income = Array.zeroCreate n
+    let life = float Engine.creepLifetime
+    let income = Array.zeroCreate<float> n
+    let owed = Array.zeroCreate<float> n
     let upkeep = Array.zeroCreate<float> n
 
     derived.Grounds
     |> Array.iteri (fun gi ground ->
-        let owner =
-            if gi < n then
-                Some gi
-            else
-                ground.Controller
-                |> Option.map (fun c -> c.Pos)
-                |> Option.orElse (ground.Sources |> Array.tryHead |> Option.map (fun s -> s.Pos))
-                |> Option.bind (nearest distance colonies (fun _ -> true))
-
-        match owner with
+        match ownerOf distance derived gi with
         | Some ci ->
             for s in ground.Sources do
-                income.[ci] <- income.[ci] + dugAt distance derived s
+                if Option.isSome s.Container then
+                    income.[ci] <- income.[ci] + float s.Dug
+
+            owed.[ci] <- owed.[ci] + float (ground.Sites |> Array.sumBy (fun s -> s.Left)) / life
         | None -> ())
 
     for d in others do
@@ -368,25 +380,54 @@ let private workerDemands
 
     colonies
     |> Array.mapi (fun ci colony ->
-        let surplus = float income.[ci] - upkeep.[ci] |> max 0.0
+        let ground = derived.Grounds.[ci]
+        let at = colony.Controller.Pos
+        let surplus = income.[ci] - upkeep.[ci]
+        let storage = ground.Stores |> Array.tryFind (fun s -> s.Owned)
+
+        let reserve, stock =
+            match storage with
+            | Some s -> reserveTarget colony.Controller.Level, s.Energy
+            | None -> 0, 0
+
+        let save = float (reserve - stock) / life |> min surplus |> max 0.0
+
+        let mouth =
+            sized Pattern.Upgrader Engine.maxBodyParts colony.BankCapacity
+            |> Option.filter (fun body ->
+                ground.Stores |> Array.exists (fun s -> s.Kind = StoreKind.Buffer)
+                && standing (partCountIn body Work) (partCountIn body Carry))
+
+        let upgraders, mouthWork, eaten =
+            match mouth with
+            | Some body ->
+                let work = partCountIn body Work
+
+                let lifeCost =
+                    float (work * Engine.upgradeDrainPerWork) * life + float (Engine.bodyCost body)
+
+                let onIncome = (surplus - save - owed.[ci]) * life / lifeCost |> max 0.0 |> floor
+                let onStock = float (stock - reserve) / lifeCost |> max 0.0 |> floor
+                int (onIncome + onStock), work, onIncome * lifeCost / life
+            | None -> 0, 0, 0.0
+
+        let rest = surplus - save - eaten
 
         // A worker drains the controller while its load lasts, then walks to
         // its energy and back: the storage where one stands, else the
         // sources' digs, each as often as it yields.
-        let ground = derived.Grounds.[ci]
-        let at = colony.Controller.Pos
         let range = Task.rangeOf (Task.Upgrade colony.Controller.Id)
 
         let fetches =
-            match ground.Stores |> Array.tryFind (fun s -> s.Owned) with
+            match storage with
             | Some storage -> [| storage.Pos, 1 |]
-            | None -> ground.Sources |> Array.map (fun s -> s.Pos, s.Rate)
+            | None -> ground.Sources |> Array.map (fun s -> s.Pos, s.Dug)
 
-        // What a WORK of the unit worker (the body each WORK past the
-        // standing ones is cast as) puts into the controller a tick over its
-        // loads and their round trips; the WORK the surplus keeps, each
-        // draining and paying its share of its body.
-        let drain, spend =
+        // The WORK of the unit worker (the body each WORK past the standing
+        // ones is cast as) the rest keeps: each puts into the controller a
+        // tick what its loads and their round trips allow, and pays its share
+        // of its body.
+        let spend =
             match sized Pattern.Worker 1 colony.BankCapacity with
             | Some body when partsOf Pattern.Worker body > 0 ->
                 let work = partsOf Pattern.Worker body
@@ -407,7 +448,7 @@ let private workerDemands
 
                 // No energy a worker reaches: nothing to spend.
                 if weights = 0 then
-                    0.0, 0
+                    0
                 else
                     let drain =
                         float Engine.upgradeDrainPerWork * upgrading
@@ -416,11 +457,51 @@ let private workerDemands
                     let upkeep =
                         float (Engine.bodyCost body) / float (work * lifeOf Pattern.Worker)
 
-                    drain, int (surplus / (drain + upkeep))
-            | _ -> 0.0, 0
+                    int (ceil (max 0.0 rest / (drain + upkeep)))
+            | _ -> 0
 
-        seated Pattern.Worker at (max 1 spend) (max 1 ground.UpgradeSeats) (fun body ->
-            Some(float (partsOf Pattern.Worker body) * drain * float Engine.creepLifetime)))
+        let bodyWork =
+            sized Pattern.Worker Engine.maxBodyParts colony.BankCapacity
+            |> Option.map (partsOf Pattern.Worker)
+            |> Option.defaultValue 1
+
+        let floorBodies =
+            if ground.Sites.Length > 0 || ground.Repairs.Length > 0 then
+                2
+            else
+                1
+
+        // Not knowing a source's seats is no crew.
+        let crews =
+            ground.Sources
+            |> Array.sumBy (fun s ->
+                if Option.isNone s.Post && s.Seats < System.Int32.MaxValue then
+                    s.Seats
+                else
+                    0)
+
+        [|
+            seated
+                Pattern.Worker
+                at
+                (max spend (floorBodies * bodyWork) + crews * bodyWork)
+                (max floorBodies ground.UpgradeSeats + crews)
+                (fun body -> Some(float (partsOf Pattern.Worker body) * life))
+            seated Pattern.Upgrader at (upgraders * mouthWork) upgraders (fun body ->
+                Some(float (partsOf Pattern.Upgrader body) * life))
+        |])
+    |> Array.concat
+
+/// Where a seat is cast in the order, first lowest: the seats with no
+/// price, then the ground's by what the body returns on its cost, then the
+/// workers the same way, and the upgraders last: they spend what every other
+/// seat leaves. Stable, so a tie keeps the demands' order.
+let private castOrder (seat: Seat) : int * float =
+    match seat.Return, seat.Pattern with
+    | None, _ -> 0, 0.0
+    | Some _, Pattern.Upgrader -> 3, 0.0
+    | Some r, Pattern.Worker -> 2, -r
+    | Some r, _ -> 1, -r
 
 /// The tick's quota. `assignments` is last tick's match, `pool` this tick's
 /// offers: together they say which colony a body serves. `walk fresh body
@@ -436,9 +517,7 @@ let private workerDemands
 ///   refill casts a worker from what is banked first, or its bank never
 ///   fills again (the supply floor).
 /// - Each seat goes to its nearest colony with an idle spawn whose bank holds
-///   the pattern's block, sized to that bank. Seats with no price are cast
-///   first, then by what that colony's body returns on its cost, dearest
-///   first.
+///   the pattern's block, sized to that bank, cast in `castOrder`.
 /// - A colony waits for its bank to pay its dearest seat rather than spend
 ///   it on a cheaper one.
 let plan
@@ -452,8 +531,7 @@ let plan
     let colonies = derived.Colonies
     let others = groundDemands distance leg derived
 
-    let all =
-        Array.append (others.ToArray()) (workerDemands distance leg derived others)
+    let all = Array.append (others.ToArray()) (spendDemands distance leg derived others)
 
     let standing = System.Collections.Generic.Dictionary<Pattern, int>()
 
@@ -623,13 +701,7 @@ let plan
                 seatsLeft <- seatsLeft - 1
             | _ -> go <- false
 
-    let ordered =
-        let all = List.ofSeq seats
-
-        (all |> List.filter (fun s -> Option.isNone s.Return))
-        @ (all
-           |> List.filter (fun s -> Option.isSome s.Return)
-           |> List.sortBy (fun s -> -(Option.defaultValue 0.0 s.Return)))
+    let ordered = seats |> List.ofSeq |> List.sortBy castOrder
 
     let waiting = Array.create colonies.Length false
 
