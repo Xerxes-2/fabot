@@ -339,7 +339,8 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
 ///   standing body.
 /// - The workers spend the rest at the pace their loads allow (rounded up),
 ///   never under two bodies while anything is to be built or repaired, else
-///   one; and a crew on each seat of a home source with no post.
+///   one; and a crew on each seat but the post of a home source whose
+///   container does not stand: they dig, and build it.
 let private spendDemands
     (distance: Pos -> Pos -> int option)
     (leg: Leg)
@@ -484,8 +485,8 @@ let private spendDemands
         let crews =
             ground.Sources
             |> Array.sumBy (fun s ->
-                if Option.isNone s.Post && s.Seats < System.Int32.MaxValue then
-                    s.Seats
+                if Option.isNone s.Container && s.Seats < System.Int32.MaxValue then
+                    s.Seats - (if Option.isSome s.Post then 1 else 0)
                 else
                     0)
 
