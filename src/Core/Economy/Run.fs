@@ -136,7 +136,7 @@ let private actOf (task: Task) : CreepAct =
 let decide (context: Context) (state: State) : Intent list * State =
     let world = context.World
     let atlas = context.Atlas
-    let derived = Derived.ofWorld world atlas [] []
+    let derived = Derived.ofWorld world atlas context.Declarations [] []
     let offers = Pool.pool derived
 
     let creeps = Dictionary<string, Creep>()

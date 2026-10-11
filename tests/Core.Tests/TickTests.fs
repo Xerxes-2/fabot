@@ -25,6 +25,7 @@ let private world: Tick.Context =
     {
         World = world
         Atlas = Atlas.ofWorld world
+        Declarations = Tick.undeclared
     }
 
 /// A module named `i` that says its name once, or throws.

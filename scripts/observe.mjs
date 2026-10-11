@@ -10,6 +10,9 @@
 //   observe.mjs switch <name> on|off|clear
 //                                  off: `false` (the module is skipped); on: `true`
 //                                  (the recorder's opt-in); clear: remove the key
+//   observe.mjs declare [reserve <n>]
+//                                  Memory.v2.declarations as stored; with a name, set it
+//                                  (reserve: creep lifetimes of tower fire the reserve holds)
 //   observe.mjs capture [out.jsonl]
 //                                  the recorder's ring (segments 10..14), oldest first
 //   observe.mjs wait --ticks N     return after N game ticks
@@ -60,6 +63,20 @@ switch (cmd) {
   case "switches":
     console.log(JSON.stringify((await memory("v2.switches")) ?? {}, null, 2));
     break;
+  case "declare": {
+    const [name, value] = args;
+    const declarations = (await memory("v2.declarations")) ?? {};
+    if (name === undefined) {
+      console.log(JSON.stringify(declarations, null, 2));
+      break;
+    }
+    const n = Number(value);
+    if (name !== "reserve" || value === undefined || !(n >= 0)) fail("usage: observe declare [reserve <n ≥ 0>]");
+    declarations[name] = n;
+    await api.req("POST", "/api/user/memory", { path: "v2.declarations", value: declarations, shard });
+    console.log(`v2.declarations = ${JSON.stringify(declarations)} (read next tick)`);
+    break;
+  }
   case "switch": {
     const [name, state] = args;
     if (!name || !["on", "off", "clear"].includes(state)) fail("usage: observe switch <name> on|off|clear");
@@ -89,5 +106,5 @@ switch (cmd) {
     break;
   }
   default:
-    fail("usage: observe health|cpu|faults|switches|switch <name> on|off|clear|capture [out]|wait --ticks N");
+    fail("usage: observe health|cpu|faults|switches|switch <name> on|off|clear|declare [reserve <n>]|capture [out]|wait --ticks N");
 }

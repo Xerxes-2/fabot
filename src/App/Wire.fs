@@ -72,6 +72,15 @@ let writeState (state: State) : unit =
     (root ())?assignments <-
         createObj (state.Assignments |> Map.toList |> List.map (fun (name, id) -> name ==> id))
 
+/// `Memory.v2.declarations`: `reserve`, the creep lifetimes of tower fire a
+/// reserve holds; what is absent, negative or not a number is undeclared.
+let readDeclarations () : Fabot.Core.Tick.Declarations =
+    let declared = (root ())?declarations
+
+    match (if isObject declared then box declared?reserve else null) with
+    | :? float as n when n >= 0.0 -> { ReserveLifetimes = n }
+    | _ -> Fabot.Core.Tick.undeclared
+
 /// The recorder is off unless `Memory.v2.switches.recorder = true`.
 let recording () : bool = (switches ())?recorder = box true
 

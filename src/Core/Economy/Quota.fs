@@ -172,13 +172,16 @@ let private roundTrip (leg: Leg) (body: BodyPart list) (fetch: Pos) (work: Pos) 
     leg body fetch work range |> Option.map (fun there -> max 2 (2 * there))
 
 /// The energy a colony keeps in its storage before it spends the surplus:
-/// every tower its level allows firing for two creep lifetimes, the owner's
-/// number (`ARCHITECTURE.md` §5). Nothing is kept without a storage.
-let reserveTarget (level: int) : int =
-    Engine.controllerStructures "tower" level
-    * Engine.towerEnergyCost
-    * Engine.creepLifetime
-    * 2
+/// every tower its level allows firing for `lifetimes` creep lifetimes, the
+/// owner's number (`ARCHITECTURE.md` §5). Nothing is kept without a storage.
+let reserveTarget (lifetimes: float) (level: int) : int =
+    float (
+        Engine.controllerStructures "tower" level
+        * Engine.towerEnergyCost
+        * Engine.creepLifetime
+    )
+    * lifetimes
+    |> int
 
 /// The colony a ground's work counts to: its own, else the nearest to its
 /// controller or first source.
@@ -387,7 +390,7 @@ let private spendDemands
 
         let reserve, stock =
             match storage with
-            | Some s -> reserveTarget colony.Controller.Level, s.Energy
+            | Some s -> reserveTarget derived.ReserveLifetimes colony.Controller.Level, s.Energy
             | None -> 0, 0
 
         let save = float (reserve - stock) / life |> min surplus |> max 0.0

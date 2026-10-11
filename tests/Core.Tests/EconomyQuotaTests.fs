@@ -280,7 +280,7 @@ let private distance (a: Pos) (b: Pos) =
         Some Engine.roomSide
 
 let private derive (g: Generated) =
-    Derived.ofWorld g.World (Atlas.ofWorld g.World) g.Worked g.Claims
+    Derived.ofWorld g.World (Atlas.ofWorld g.World) Tick.undeclared g.Worked g.Claims
 
 /// Every third body assigned to an offer, picked by its index.
 let private assignedIn (derived: Derived.Derived) (pool: Offer[]) =

@@ -54,7 +54,16 @@ let private runTick () =
     let world = timed "world" World.ofGame
     let atlas = timed "atlas" (fun () -> Atlas.ofWorld world)
 
-    let result = Tick.run clock modules { World = world; Atlas = atlas } state
+    let result =
+        Tick.run
+            clock
+            modules
+            {
+                World = world
+                Atlas = atlas
+                Declarations = Wire.readDeclarations ()
+            }
+            state
 
     for report in result.Reports do
         phases.Add(report.Module, report.Cpu)

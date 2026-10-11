@@ -8,10 +8,26 @@ open Fabot.Core.World
 open Fabot.Core.Intents
 open Fabot.Core.State
 
-/// What every module reads: the tick's facts and the geometry built from them
-/// once (`ARCHITECTURE.md` §1).
+/// What the operator declares (`declarations`, `ARCHITECTURE.md` §4), read
+/// by `Main` and handed down.
+type Declarations =
+    {
+        /// The creep lifetimes of tower fire a colony's reserve holds.
+        ReserveLifetimes: float
+    }
+
+/// The declarations where the operator has declared nothing.
+let undeclared = { ReserveLifetimes = 2.0 }
+
+/// What every module reads: the tick's facts, the geometry built from them
+/// once (`ARCHITECTURE.md` §1), and the declarations.
 [<NoEquality; NoComparison>]
-type Context = { World: World; Atlas: Atlas }
+type Context =
+    {
+        World: World
+        Atlas: Atlas
+        Declarations: Declarations
+    }
 
 type Module =
     {

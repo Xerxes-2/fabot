@@ -196,6 +196,8 @@ type Derived =
         Carriers: Body[]
         /// Bodies with a CLAIM part.
         Claimers: Body[]
+        /// The creep lifetimes of tower fire a reserve holds (`Declarations`).
+        ReserveLifetimes: float
     }
 
 /// Chebyshev range between two tiles of one room; `None` across rooms.
@@ -506,7 +508,13 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
 /// are the rooms declared to the economy beyond the colonies' own (outposts, a
 /// claim's room once a spawn site stands); `claims` the rooms declared for a
 /// claim. A declared room out of sight contributes nothing.
-let ofWorld (world: World) (atlas: Atlas) (worked: string list) (claims: string list) : Derived =
+let ofWorld
+    (world: World)
+    (atlas: Atlas)
+    (declarations: Tick.Declarations)
+    (worked: string list)
+    (claims: string list)
+    : Derived =
     let colonies =
         world.Rooms
         |> Array.choose (fun room ->
@@ -575,4 +583,5 @@ let ofWorld (world: World) (atlas: Atlas) (worked: string list) (claims: string 
         Workers = bodies |> Array.filter (fun b -> b.Work > 0 && b.Carry > 0)
         Carriers = bodies |> Array.filter (fun b -> b.Carry > 0 && b.Work = 0)
         Claimers = bodies |> Array.filter (fun b -> b.Claim > 0)
+        ReserveLifetimes = declarations.ReserveLifetimes
     }
