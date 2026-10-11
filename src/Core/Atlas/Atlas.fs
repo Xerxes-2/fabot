@@ -117,6 +117,33 @@ module Field =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Atlas =
+    let private beside (range: int) (a: Pos) (b: Pos) =
+        a.Room = b.Room && max (abs (a.X - b.X)) (abs (a.Y - b.Y)) <= range
+
+    /// Whether a tile is a room's controller buffer: in its controller's
+    /// upgrade range, with no source beside it.
+    let isBuffer (room: Room) (pos: Pos) : bool =
+        room.Controller |> Option.exists (fun c -> beside Engine.upgradeRange c.Pos pos)
+        && not (room.Sources |> Array.exists (fun s -> beside 1 s.Pos pos))
+
+    /// The tiles a working body holds for its life, read off the structures
+    /// alone: a container or a container site of ours beside a source (its
+    /// harvester's post), and the controller's buffer.
+    let workSeats (room: Room) : int[] =
+        let posts =
+            Array.append
+                (room.Structures
+                 |> Array.filter (fun s -> s.Kind = Kind.Container)
+                 |> Array.map (fun s -> s.Pos))
+                (room.Sites
+                 |> Array.filter (fun s -> s.Kind = Kind.Container && s.Owner = Ours)
+                 |> Array.map (fun s -> s.Pos))
+
+        posts
+        |> Array.filter (fun p ->
+            isBuffer room p || room.Sources |> Array.exists (fun s -> beside 1 s.Pos p))
+        |> Array.map Tiles.ofPos
+
     /// The walk grid and occupancy of every visible room. A road makes its
     /// tile 1 (a tunnel too); a structure no creep of ours may stand on, of any
     /// owner, a site of ours that the engine treats as an obstacle, and a
@@ -142,6 +169,9 @@ module Atlas =
                 match s.Kind with
                 | Kind.Road -> weights.[Tiles.ofPos s.Pos] <- Engine.roadWeight
                 | _ -> ()
+
+            for tile in workSeats room do
+                weights.[tile] <- seatWeight
 
             for s in room.Structures do
                 if not s.Walkable then
@@ -377,6 +407,7 @@ module Atlas =
                         string steps.[Engine.roadWeight],
                         string steps.[Engine.plainWeight],
                         string steps.[Engine.swampWeight],
+                        string steps.[seatWeight],
                         goalKey
                     )
 

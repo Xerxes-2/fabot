@@ -418,13 +418,15 @@ let private spendDemands
 
         // A worker drains the controller while its load lasts, then walks to
         // its energy and back: the storage where one stands, else the
-        // sources' digs, each as often as it yields.
+        // sources' digs (a post's container, else the rock), each as often
+        // as it yields.
         let range = Task.rangeOf (Task.Upgrade colony.Controller.Id)
 
         let fetches =
             match storage with
             | Some storage -> [| storage.Pos, 1 |]
-            | None -> ground.Sources |> Array.map (fun s -> s.Pos, s.Dug)
+            | None ->
+                ground.Sources |> Array.map (fun s -> Option.defaultValue s.Pos s.Post, s.Dug)
 
         // The WORK of the unit worker (the body each WORK past the standing
         // ones is cast as) the rest keeps: each puts into the controller a

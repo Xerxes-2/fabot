@@ -88,10 +88,16 @@ let stepTicks (factor: FatigueFactor) (weight: int) =
     let units = stepUnits factor weight
     if units < 0 then -1 else (units + 1) / 2
 
+/// The weight of a tile a working body holds for its life (`Atlas.workSeats`):
+/// five swamp steps, a detour a walk takes before it waits on a body that
+/// never moves, finite so the body's own walk and the only way through still
+/// reach it.
+let seatWeight = 5 * Engine.swampWeight
+
 /// The price of a step onto every weight a grid can hold, indexed by weight:
-/// the flood reads a table, not a closure. Swamp is the dearest weight.
+/// the flood reads a table, not a closure. A work seat is the dearest weight.
 let stepTable (factor: FatigueFactor) : int[] =
-    Array.init (Engine.swampWeight + 1) (stepTicks factor)
+    Array.init (seatWeight + 1) (stepTicks factor)
 
 /// The flood's array accessors: checked on .NET, a bare JS index under Fable,
 /// whose own indexer re-tests indices the loop has already kept in range.

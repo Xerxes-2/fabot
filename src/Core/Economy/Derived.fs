@@ -324,13 +324,6 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
         |> List.tryHead
         |> Option.map snd
 
-    // A container in the controller's upgrade range: its buffer, where no
-    // source is beside it.
-    let buffered (pos: Pos) =
-        room.Controller
-        |> Option.bind (fun c -> rangeIn c.Pos pos)
-        |> Option.exists (fun r -> r <= Task.rangeOf (Task.Upgrade ""))
-
     let servedRate (pos: Pos) =
         let mutable r = 0
 
@@ -396,7 +389,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
             let kind =
                 if s.Kind = Kind.Storage then
                     StoreKind.Storage
-                elif rate = 0 && ownedRoom && buffered s.Pos then
+                elif ownedRoom && Atlas.isBuffer room s.Pos then
                     StoreKind.Buffer
                 else
                     StoreKind.Container

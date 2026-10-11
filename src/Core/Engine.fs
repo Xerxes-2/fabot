@@ -131,6 +131,9 @@ let meleeRange = 1
 
 let rangedRange = 3
 
+/// The reach of upgradeController, build and repair.
+let upgradeRange = 3
+
 /// A Source Keeper rests within this range of its source or mineral and never
 /// pursues; freshly cast, it walks there from its lair for a few ticks.
 let keeperPin = 1
