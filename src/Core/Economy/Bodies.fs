@@ -130,12 +130,11 @@ let private workerBody (most: int) (capacity: int) =
 
     replicate work Work @ replicate carry Carry @ replicate move Move
 
-/// The harvester's rule: one Carry, a Move per two Work so it walks to a
-/// container in another room at a tile every two ticks, and every Work the
-/// bank buys up to `most`.
-let private harvesterBody (most: int) (capacity: int) =
+/// The harvester's rule: one Carry, `moves n` Moves for `n` Work, and every
+/// Work the bank buys up to `most`.
+let private harvesterBody (moves: int -> int) (most: int) (capacity: int) =
     let bodyOf n =
-        replicate n Work @ [ Carry ] @ replicate ((n + 1) / 2) Move
+        replicate n Work @ [ Carry ] @ replicate (moves n) Move
 
     let mutable n = min most ((Engine.maxBodyParts - 1) * 2 / 3)
 
@@ -167,8 +166,21 @@ let sized (pattern: Pattern) (most: int) (capacity: int) : BodyPart list option 
         let body =
             match pattern with
             | Pattern.Worker -> workerBody most capacity
-            | Pattern.Harvester -> harvesterBody (max 2 most) capacity
+            | Pattern.Harvester -> harvesterBody (fun n -> (n + 1) / 2) (max 2 most) capacity
             | Pattern.Hauler -> wholeBlocks (blockOf pattern) ((most + 1) / 2) capacity
             | Pattern.Claimer -> wholeBlocks (blockOf pattern) most capacity
 
         Some(withMoveLast body)
+
+/// A harvester for a seat in its casting colony's own room, which it walks
+/// once: every Work the bank buys up to `most` with one Move, then the
+/// bank's rest on Moves up to `sized`'s one per two Work. Legs never cost it
+/// a Work.
+let homeHarvester (most: int) (capacity: int) : BodyPart list option =
+    if capacity < Engine.bodyCost (blockOf Pattern.Harvester) then
+        None
+    else
+        let body = harvesterBody (fun _ -> 1) (max 2 most) capacity
+        let legs = (partCountIn body Work + 1) / 2 - 1
+        let spare = (capacity - Engine.bodyCost body) / Engine.partCost Move
+        Some(withMoveLast (body @ replicate (min legs spare) Move))

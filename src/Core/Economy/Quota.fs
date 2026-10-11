@@ -129,7 +129,10 @@ let private demand pattern at wanted value =
 /// The body a colony casts for a demand: the most its bank buys, the key
 /// parts held to what the demand wants. The one place a body is chosen.
 let private bodyFor (colony: Colony) (d: Demand) : BodyPart list option =
-    sized d.Pattern d.Wanted colony.BankCapacity
+    if d.Pattern = Pattern.Harvester && d.At.Room = colony.Room then
+        homeHarvester d.Wanted colony.BankCapacity
+    else
+        sized d.Pattern d.Wanted colony.BankCapacity
 
 /// Where a colony's bodies leave from: its first spawn.
 let private homeOf (colony: Colony) = colony.Spawns.[0].Pos
@@ -211,7 +214,9 @@ let private dugAt (distance: Pos -> Pos -> int option) (derived: Derived) (s: So
     match
         nearest distance derived.Colonies (fun _ -> true) s.Pos
         |> Option.bind (fun ci ->
-            sized Pattern.Harvester (digWork s) derived.Colonies.[ci].BankCapacity)
+            bodyFor
+                derived.Colonies.[ci]
+                (seated Pattern.Harvester s.Pos (digWork s) s.Seats (fun _ -> None)))
     with
     | Some body ->
         let perSeat = partCountIn body Work * Engine.harvestPerWork

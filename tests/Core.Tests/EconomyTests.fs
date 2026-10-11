@@ -242,6 +242,12 @@ let tests =
                         List.length body <= Engine.maxBodyParts
                         && Engine.bodyCost body <= capacity
                         && List.last body = Move)
+                && (match Bodies.homeHarvester most capacity with
+                    | None -> capacity < Engine.bodyCost (Bodies.blockOf Bodies.Pattern.Harvester)
+                    | Some body ->
+                        List.length body <= Engine.maxBodyParts
+                        && Engine.bodyCost body <= capacity
+                        && List.last body = Move)
 
             testProperty "a worker held to k WORK costs no more than k unit blocks"
             <| fun (capacity: int) (k: int) ->
