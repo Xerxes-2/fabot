@@ -126,13 +126,23 @@ const refusals = {};
 let lastObserved = null;
 let lastObs = null;
 const started = Date.now();
+// Steps that needed a second pausedTick: reported, never silent.
+const slowTicks = [];
 for (let t = 0; t < ticks; t++) {
   consoleTick = time;
   if (t > 0) {
     cpu = null; // a tick the runner skips reports no usage
+    // The engine waits up to its intent-abandon timeout (120 s, set by
+    // soak.mjs) for our bot's intents, so a tick may legitimately take that
+    // long; wait past it, then ask once more before giving up.
     await svc.publish({ type: "pausedTick" });
-    time = await nextTick(60_000);
-    if (time === null) throw new Error(`no tick after a pausedTick at t${t}; see the server log`);
+    time = await nextTick(150_000);
+    if (time === null) {
+      slowTicks.push(t);
+      await svc.publish({ type: "pausedTick" });
+      time = await nextTick(150_000);
+    }
+    if (time === null) throw new Error(`no tick after two pausedTicks at t${t}; see the server log`);
   }
   const obs = await observed();
   // A segment the bot did not rewrite this tick is last tick's: count it once.
@@ -167,6 +177,7 @@ for (let t = 0; t < ticks; t++) {
 fs.writeFileSync(join(out, "refusals.json"), JSON.stringify(refusals, null, 2) + "\n");
 fs.writeFileSync(join(out, "observe.json"), JSON.stringify(lastObs, null, 1) + "\n");
 fs.writeFileSync(join(out, "levels.json"), JSON.stringify(levels) + "\n");
+fs.writeFileSync(join(out, "slow.json"), JSON.stringify(slowTicks) + "\n");
 console.log(JSON.stringify({ ticks, ms: Date.now() - started }));
 
 await svc.publish({ type: "shutdown" });

@@ -12,7 +12,7 @@
 // Needs `npm run build` (dist/main.js) and `npm run xx -- setup` (the engine
 // and its template world, under $FABOT_XXSCREEPS_HOME). Writes
 // soak-runs/<run>/ (outside build/, which `npm run build` wipes):
-// samples.jsonl, faults.jsonl, refusals.json, levels.json, observe.json,
+// samples.jsonl, faults.jsonl, refusals.json, levels.json, slow.json, observe.json,
 // cpu.jsonl, console.log and server.log; prints the samples as a table and a
 // summary.
 import { spawn, spawnSync } from "node:child_process";
@@ -146,6 +146,8 @@ const lines = (f) => readFileSync(join(out, f), "utf8").split("\n").filter(Boole
 const samples = lines("samples.jsonl");
 const faults = lines("faults.jsonl");
 const refusals = JSON.parse(readFileSync(join(out, "refusals.json"), "utf8"));
+// Steps the engine took past the step's wait (a slow or abandoned bot tick).
+const slow = JSON.parse(readFileSync(join(out, "slow.json"), "utf8"));
 const levels = JSON.parse(readFileSync(join(out, "levels.json"), "utf8"));
 
 const columns = [
@@ -187,6 +189,7 @@ console.log(
     `cpu mean ${cpus.length ? (cpus.reduce((a, b) => a + b, 0) / cpus.length).toFixed(2) : "-"} max ${cpus.length ? Math.max(...cpus).toFixed(2) : "-"}`,
     `faults ${faults.length}`,
     `refusals ${top.length ? top.join(", ") : "none"}`,
+    `slow steps ${slow.length ? slow.map((t) => `t${t}`).join(", ") : "none"}`,
   ].join("; "),
 );
 for (const f of faults.slice(0, 10)) console.log(`  fault t${f.tick} ${f.where}: ${f.message}`);
