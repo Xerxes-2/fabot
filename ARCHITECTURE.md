@@ -512,6 +512,33 @@ everything v1 used its self-written arena for, and more:
   Before it ships, the same over several rooms (`npm run soak:many`, five
   rooms spread over the sector by default, medians printed), so no change is
   tuned to one room's terrain.
+- **Nodes.** A long soak from a respawn reaches RCL3 in 10,000 ticks and
+  never sees links, labs or power. Each node below is a start state built
+  from Layout's own plan (the level's allowed structures on their planned
+  tiles, a stock in storage, no creeps, so the cold start is exercised too)
+  and run a few thousand ticks:
+
+  | Node | Start | What it proves | Read |
+  |---|---|---|---|
+  | N1 respawn | RCL1, one spawn | the opening, investment order | ticks to RCL2/3, first road and container |
+  | N2 RCL3 | 10 extensions, a tower, source containers | road and container returns, tower refill | income, walk share of creep-ticks, upgrade rate |
+  | N3 RCL4 | 20 extensions, storage 5k | storage logistics, hauler ratio vs roads | storage net flow, haulers, ticks to RCL5 |
+  | N4 RCL5 | 30 extensions, 2 towers, storage 50k, links unlocked | how much hauling links replace | link throughput, haulers (should fall), upgrade rate |
+  | N5 RCL6 | terminal, extractor, 3 labs, storage 100k | mining, reactions, upgrade boost, market | ore a tick, boosted upgrade rate, market net |
+  | N6 RCL7 | 2 spawns, factory, 6 labs, storage 300k | spawn queueing, compression, big bodies | spawn use, factory output, CPU |
+  | N7 RCL8 | the full set, storage 500k | where energy goes past the 15/tick upgrade cap | power processed, surplus use, CPU |
+  | E1 outposts | RCL5 + two neutral neighbours | reservation, remote haul, whether an outpost pays | outpost net (after its bodies), reservation held |
+  | E2 claim | RCL6 + a neighbour Strategy picks | choosing, claiming, pioneers, aid | ticks to the child's RCL3, mother's income cost |
+  | E3 colonies | three colonies at RCL7, 5, 2 | the world pool across colonies, terminal balancing | total income, cross-colony work share, CPU vs colonies |
+  | S1 invaders | N3 + timed Invader waves, home and outposts | `Defend`, towers, recovery | losses, ticks back to income |
+  | S2 keepers | RCL7 + a keeper room | `KeeperDuty`, whether keeper mining pays | keeper-room net, losses |
+  | S3 stronghold | RCL7 + a stronghold next door | whether to fight it, `Siege` | the decision, gain vs cost |
+  | S4 low CPU | N6 with the CPU limit at 20 | degradation, the bucket | bucket curve, income lost to degrading |
+
+  Each push runs the one or two nodes its change touches (about a minute);
+  nightly runs them all with the five-room long soak. Nodes N1–N4 come first
+  (the economy and links), N5–N7 with their structures, E with Strategy, S
+  with Fight. ❓ the node builder (`npm run soak -- --node N3`) is not built.
 - **Adversaries.** xxscreeps hosts several users: v1 as the opponent for
   `Defend` (self-play), open-source bots (TooAngel is plain JS; Overmind and
   The International need a build) for `Siege`/`Drain` when their turn comes.
