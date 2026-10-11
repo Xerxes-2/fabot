@@ -38,8 +38,9 @@ type Draw =
     /// A body that spends what it draws (a WORK part): the stock while no
     /// other sink is hungry, which a carrier would only pour back.
     | Spenders
-    /// The controller's buffer: an upgrader alone, which spends what it
-    /// draws on the controller and nowhere else.
+    /// On an Upgrade, the controller's buffer stocked: its holder draws as
+    /// it upgrades (`drawsBuffer`) and may hold it empty. The buffer is drawn
+    /// nowhere else, so what it holds goes to the controller alone.
     | Buffer
 
 /// One entry of the pool.
@@ -69,23 +70,29 @@ let garrisons (body: Body) (offer: Offer) : bool =
     | Capacity.Seated(_, posts, _) -> posts > 0 && body.Pattern = Pattern.Harvester
     | _ -> false
 
+/// Whether a body's parts let it upgrade.
+let upgrades (body: Body) : bool =
+    body.Pattern <> Pattern.Harvester && body.Work > 0 && body.Carry > 0
+
+/// Whether an Upgrade's holder draws the buffer this tick: what it holds
+/// falls short of a tick's upgrade. The engine withdraws before it upgrades,
+/// so the draw tops up what the upgrade spends.
+let drawsBuffer (body: Body) (offer: Offer) : bool =
+    offer.Draw = Draw.Buffer
+    && body.Free > 0
+    && body.Energy < body.Work * Engine.upgradeDrainPerWork
+
 /// Whether a body's parts and store let it act on the offer now. One rule
 /// for a fresh match and a kept one: an intake while the store is at least
 /// half empty (a fuller body delivers first), a delivery while it holds the
 /// resource. A harvester digs whatever its store holds, the engine dropping
 /// the overflow where it stands, and takes nothing but a post: the seat it
-/// was cast for and `Quota` counts it in. An upgrader upgrades and draws its
-/// buffer, and nothing else: a delivery is a commute for its WORK.
+/// was cast for and `Quota` counts it in. An upgrader upgrades and nothing
+/// else: a delivery is a commute for its WORK.
 let fits (body: Body) (offer: Offer) : bool =
     match offer.Task with
-    | Upgrade _ ->
-        body.Pattern <> Pattern.Harvester
-        && body.Work > 0
-        && body.Carry > 0
-        && body.Energy > 0
-    | Withdraw _ when body.Pattern = Pattern.Upgrader -> offer.Draw = Draw.Buffer && body.Free > 0
+    | Upgrade _ -> upgrades body && (body.Energy > 0 || offer.Draw = Draw.Buffer)
     | _ when body.Pattern = Pattern.Upgrader -> false
-    | Withdraw _ when offer.Draw = Draw.Buffer -> false
     | Harvest _ ->
         body.Work > 0
         && (garrisons body offer || body.Pattern <> Pattern.Harvester && body.Free > 0)
@@ -131,7 +138,7 @@ let admits (offer: Offer) (garrison: bool) (held: int) (seatedAlike: int) : bool
 /// energy it digs or upgrades before it dies, or before its load is full (a
 /// dig into its store, counting what it already dug, so a digger part-way
 /// through its load is worth no less than an empty one) or empty (an
-/// upgrade). 0 for any other offer.
+/// upgrade off no stocked buffer). 0 for any other offer.
 let seatValue (body: Body) (offer: Offer) (walk: int) : int =
     match offer.Capacity with
     | Capacity.Seated _ ->
@@ -145,7 +152,13 @@ let seatValue (body: Body) (offer: Offer) (walk: int) : int =
                 dig
             else
                 min (body.Free + body.Energy) dig
-        | Upgrade _ -> min body.Energy (body.Work * Engine.upgradeDrainPerWork * stay)
+        | Upgrade _ ->
+            let upgrade = body.Work * Engine.upgradeDrainPerWork * stay
+
+            if offer.Draw = Draw.Buffer then
+                upgrade
+            else
+                min body.Energy upgrade
         | _ -> body.Work * stay
     | _ -> 0
 
@@ -260,7 +273,13 @@ let pool (derived: Derived) : Offer[] =
                 )
 
             let upgrade =
-                offer (Upgrade c.Id) c.Pos (Price.valueOfRank Price.upgradeRank) capacity
+                { offer (Upgrade c.Id) c.Pos (Price.valueOfRank Price.upgradeRank) capacity with
+                    Draw =
+                        if ground.Buffer |> Option.exists (fun b -> b.Energy > 0) then
+                            Draw.Buffer
+                        else
+                            Draw.Open
+                }
 
             offers.Add(
                 if insideDeadline c then
@@ -280,11 +299,11 @@ let pool (derived: Derived) : Offer[] =
 
         let starved = colony |> Option.exists (fun c -> c.Bank < c.BankCapacity)
 
-        // The buffer is filled while an upgrader stands (or bakes) to drink
-        // it: nobody else draws it.
+        // The buffer is filled while a body that upgrades stands (or bakes)
+        // in the room to drink it.
         let drinks =
             Array.append derived.Bodies derived.Ovens
-            |> Array.exists (fun b -> b.Pattern = Pattern.Upgrader && b.Pos.Room = ground.Room)
+            |> Array.exists (fun b -> upgrades b && b.Pos.Room = ground.Room)
 
         // The room the sinks other than the stock have: what a carrier's draw
         // on the stock is for.
@@ -294,7 +313,7 @@ let pool (derived: Derived) : Offer[] =
                |> Array.sumBy (fun s -> if s.Kind = StoreKind.Buffer && drinks then s.Free else 0))
 
         for s in ground.Stores do
-            if s.Energy > 0 then
+            if s.Energy > 0 && s.Kind <> StoreKind.Buffer then
                 let value =
                     match s.Kind with
                     | StoreKind.Remains -> Price.flowDraw (Price.transientLoss s.Energy)
@@ -306,7 +325,6 @@ let pool (derived: Derived) : Offer[] =
 
                 let draw, load =
                     match s.Kind with
-                    | StoreKind.Buffer -> Draw.Buffer, s.Energy
                     | StoreKind.Storage when room > 0 -> Draw.Open, min s.Energy room
                     | StoreKind.Storage -> Draw.Spenders, s.Energy
                     | _ -> Draw.Open, s.Energy

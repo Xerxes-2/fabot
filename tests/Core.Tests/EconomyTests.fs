@@ -296,7 +296,7 @@ let tests =
                             Draw = Draw.Open
                         })
 
-            testPropertyWithConfig config "an upgrader fits only an upgrade or its buffer"
+            testPropertyWithConfig config "an upgrader fits only an upgrade"
             <| fun (scene: Scene) ->
                 scene.Bodies
                 |> Array.forall (fun b ->
@@ -310,7 +310,6 @@ let tests =
                         not (fits upgrader o)
                         || match o.Task with
                            | Upgrade _ -> true
-                           | Withdraw _ -> o.Draw = Draw.Buffer
                            | _ -> false))
 
             testPropertyWithConfig config "no capacity is filled past its last holder"

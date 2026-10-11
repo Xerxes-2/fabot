@@ -422,15 +422,16 @@ let private spendDemands
         let rest = surplus - save - upgradersDrain
 
         // A worker drains the controller while its load lasts, then walks to
-        // its energy and back: the storage where one stands, else the
-        // sources' digs (a post's container, else the rock), each as often
-        // as it yields.
+        // its energy and back: the buffer where one stands, else the storage,
+        // else the sources' digs (a post's container, else the rock), each
+        // as often as it yields.
         let range = Task.rangeOf (Task.Upgrade colony.Controller.Id)
 
         let fetches =
-            match storage with
-            | Some storage -> [| storage.Pos, 1 |]
-            | None ->
+            match ground.Buffer, storage with
+            | Some buffer, _ -> [| buffer.Pos, 1 |]
+            | None, Some storage -> [| storage.Pos, 1 |]
+            | None, None ->
                 ground.Sources |> Array.map (fun s -> Option.defaultValue s.Pos s.Post, s.Dug)
 
         let cast = sized Pattern.Worker Engine.maxBodyParts colony.BankCapacity
