@@ -272,14 +272,8 @@ let decide (context: Context) (state: State) : Intent list * State =
     let moves = ResizeArray<Intent>()
 
     for KeyValue(room, list) in wishes do
-        let held =
-            world.Rooms
-            |> Array.tryFind (fun r -> r.Name = room)
-            |> Option.map (fun r -> r.Hostiles |> Array.map (fun h -> Tiles.ofPos h.Pos))
-            |> Option.defaultValue [||]
-
         for name, direction in
-            Arbitrate.arbitrate (Atlas.passable atlas room) held (List.ofSeq list) do
+            Arbitrate.arbitrate (Atlas.passable atlas room) [||] (List.ofSeq list) do
             moves.Add(Creep(name, Move direction))
 
     casts @ List.ofSeq acts @ List.ofSeq moves, { state with Assignments = assignments }

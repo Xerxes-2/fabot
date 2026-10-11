@@ -32,10 +32,11 @@ type Target =
 /// miss a flood run.
 type Counts = { Hits: int; Misses: int }
 
-/// One visible room's ground this tick: a fatigue weight per tile (-1 where
-/// nothing may stand) and whether a creep stands there. A creep is no wall: who yields is `Move`'s call.
+/// One visible room's ground this tick: a fatigue weight per tile, -1 where
+/// nothing may stand. Our creeps are no wall (who yields is `Move`'s call); a
+/// creep not ours yields to nothing we decide, so its tile is one this tick.
 [<NoEquality; NoComparison>]
-type internal RoomGrid = { Weights: int[]; Occupied: bool[] }
+type internal RoomGrid = { Weights: int[] }
 
 /// A room priced for one mover toward one target: the ticks from each tile.
 [<NoEquality; NoComparison>]
@@ -167,7 +168,6 @@ module Atlas =
 
         for room in world.Rooms |> Array.filter (fun r -> r.Terrain.Length = Tiles.count) do
             let weights = Array.zeroCreate Tiles.count
-            let occupied = Array.zeroCreate Tiles.count
             let terrain = room.Terrain
 
             for i in 0 .. Tiles.count - 1 do
@@ -204,18 +204,9 @@ module Atlas =
             room.Controller |> Option.iter (fun c -> weights.[Tiles.ofPos c.Pos] <- -1)
 
             for creep in room.Hostiles do
-                occupied.[Tiles.ofPos creep.Pos] <- true
+                weights.[Tiles.ofPos creep.Pos] <- -1
 
-            rooms.[room.Name] <-
-                {
-                    Weights = weights
-                    Occupied = occupied
-                }
-
-        for creep in world.Creeps do
-            match rooms.TryGetValue creep.Pos.Room with
-            | true, grid -> grid.Occupied.[Tiles.ofPos creep.Pos] <- true
-            | _ -> ()
+            rooms.[room.Name] <- { Weights = weights }
 
         {
             Rooms = rooms
@@ -230,14 +221,8 @@ module Atlas =
             Misses = atlas.Misses
         }
 
-    /// Whether a creep stands on a tile this tick; false in a room not visible.
-    let occupied (atlas: Atlas) (pos: Pos) : bool =
-        match atlas.Rooms.TryGetValue pos.Room with
-        | true, grid -> grid.Occupied.[Tiles.ofPos pos]
-        | _ -> false
-
     /// Whether a body of one tile may stand on a tile of a room this tick, a
-    /// creep's tile included; false in a room not visible.
+    /// tile one of ours stands on included; false in a room not visible.
     let passable (atlas: Atlas) (room: string) (tile: int) : bool =
         match atlas.Rooms.TryGetValue room with
         | true, grid -> tile >= 0 && tile < Tiles.count && grid.Weights.[tile] >= 0
