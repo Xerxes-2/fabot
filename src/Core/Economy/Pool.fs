@@ -62,13 +62,20 @@ type Offer =
 /// What a body carries of a resource.
 let private carried (body: Body) (resource: Resource) = Store.amountOf resource body.Store
 
+/// Whether a body holds a seated offer's post rather than its other seats: a
+/// harvester, where the offer has a post.
+let garrisons (body: Body) (offer: Offer) : bool =
+    match offer.Capacity with
+    | Capacity.Seated(_, posts, _) -> posts > 0 && body.Pattern = Pattern.Harvester
+    | _ -> false
+
 /// Whether a body's parts and store let it act on the offer now. One rule
 /// for a fresh match and a kept one: an intake while the store is at least
 /// half empty (a fuller body delivers first), a delivery while it holds the
 /// resource. A harvester digs whatever its store holds, the engine dropping
-/// the overflow where it stands, and takes nothing else: its seat is the work
-/// it was cast for, its CARRY the dig's buffer. An upgrader upgrades and
-/// draws its buffer, and nothing else: a delivery is a commute for its WORK.
+/// the overflow where it stands, and takes nothing but a post: the seat it
+/// was cast for and `Quota` counts it in. An upgrader upgrades and draws its
+/// buffer, and nothing else: a delivery is a commute for its WORK.
 let fits (body: Body) (offer: Offer) : bool =
     match offer.Task with
     | Upgrade _ ->
@@ -79,7 +86,9 @@ let fits (body: Body) (offer: Offer) : bool =
     | Withdraw _ when body.Pattern = Pattern.Upgrader -> offer.Draw = Draw.Buffer && body.Free > 0
     | _ when body.Pattern = Pattern.Upgrader -> false
     | Withdraw _ when offer.Draw = Draw.Buffer -> false
-    | Harvest _ -> body.Work > 0 && (body.Pattern = Pattern.Harvester || body.Free > 0)
+    | Harvest _ ->
+        body.Work > 0
+        && (garrisons body offer || body.Pattern <> Pattern.Harvester && body.Free > 0)
     | _ when body.Pattern = Pattern.Harvester -> false
     | Withdraw _ when offer.Draw <> Draw.Open && body.Work = 0 -> false
     | Withdraw _
@@ -89,13 +98,6 @@ let fits (body: Body) (offer: Offer) : bool =
     | Repair _ -> body.Work > 0 && body.Carry > 0 && body.Energy > 0
     | Reserve _
     | Claim _ -> body.Claim > 0
-
-/// Whether a body holds a seated offer's post rather than its other seats: a
-/// harvester, where the offer has a post.
-let garrisons (body: Body) (offer: Offer) : bool =
-    match offer.Capacity with
-    | Capacity.Seated(_, posts, _) -> posts > 0 && body.Pattern = Pattern.Harvester
-    | _ -> false
 
 /// What one holder counts against an offer's capacity. Where a seated offer
 /// has a post, only its garrison counts WORK: the other seats stay open while

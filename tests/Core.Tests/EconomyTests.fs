@@ -277,7 +277,7 @@ let tests =
 
                 n >= 2 && gain n >= short && (n = 2 || gain (n - 1) < short)
 
-            testPropertyWithConfig config "a harvester fits its harvest whatever its store holds"
+            testPropertyWithConfig config "a harvester fits its post whatever its store holds"
             <| fun (scene: Scene) ->
                 scene.Bodies
                 |> Array.forall (fun b ->
@@ -292,7 +292,7 @@ let tests =
                             Id = "h:s"
                             Target = at
                             Priority = 0
-                            Capacity = Capacity.Unbounded
+                            Capacity = Capacity.Seated(1, 1, 1)
                             Draw = Draw.Open
                         })
 
