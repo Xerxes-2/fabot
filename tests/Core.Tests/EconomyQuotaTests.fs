@@ -456,6 +456,12 @@ let tests =
                 let standing (p: Quota.Plan) pattern =
                     p.Wants |> List.sumBy (fun w -> if w.Pattern = pattern then w.Standing else 0)
 
+                // A baking harvester spares its spawn the anchor floor, so the
+                // spawn casts seats at its own size: seats compare only where
+                // both plans cast the same floors.
+                let floors (p: Quota.Plan) =
+                    p.Casts |> List.filter (fun c -> c.Floor) |> List.map (fun c -> c.Spawn)
+
                 Bodies.allPatterns
                 |> List.forall (fun pattern ->
                     let oven =
@@ -466,7 +472,7 @@ let tests =
                             else
                                 0)
 
-                    count baked pattern <= count bare pattern
+                    (floors baked <> floors bare || count baked pattern <= count bare pattern)
                     && standing baked pattern = standing bare pattern + oven)
 
             testPropertyWithConfig
