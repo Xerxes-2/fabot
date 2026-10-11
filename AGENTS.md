@@ -46,7 +46,10 @@ port from, never a fact about v2.
   (`ARCHITECTURE.md` §10.2). Add the scenario to the library.
 - An `Exchange` change is verified by the prediction error on the generated
   set not rising (§10.1).
-- An economy change is read off the soak's curves.
+- An economy change is read off the soak's curves over the long horizon
+  (`npm run soak -- --ticks 10000`, `ARCHITECTURE.md` §5, §10.2): long-run
+  growth is the objective, and an early regression is accepted when the end
+  of the run improves.
 - Unit tests only for invariants and pure arithmetic. A test that asserts one
   creep's action in one scenario is rejected in review.
 - `npm test` (unit) stays under a minute. Scenarios and soak run on `jj ship`

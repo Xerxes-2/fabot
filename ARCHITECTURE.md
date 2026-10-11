@@ -201,6 +201,13 @@ interchangeable, and re-matching on a key change is cheap and does not
 oscillate (stickiness via `assignments` is enough). It becomes **one world
 pool**; a creep takes the nearest task it fits whatever colony spawned it.
 
+**The objective is long-run growth.** An investment (a structure, a bigger
+body, a container, a road) is priced by what it returns over the horizon it
+will stand, on the same scale as the work it competes with (upgrading, today's
+refill), so the economy invests first wherever the return pays. A slower start
+that ends higher is the better economy; an early regression is accepted when
+the long soak (§10.2) improves.
+
 Port with these cuts:
 - No fight tasks (`Guard`, `Defend`, `Assault`, `Flee`), no Safety band, no fight
   cases in the matcher's keep cascade.
@@ -498,7 +505,10 @@ everything v1 used its self-written arena for, and more:
   The library runs nightly.
 - **Soak.** The real sector's terrain and rooms, from one spawn for thousands
   of ticks: income curve, expansion cadence, losses to NPC waves, CPU curve.
-  A change to the economy is read off this curve, not off a unit test.
+  A change to the economy is read off this curve, not off a unit test. It is
+  judged on the long horizon (`npm run soak -- --ticks 10000`): the RCL and
+  progress at the end, the tick each level is reached, the income in the last
+  thousand ticks; the first few thousand ticks alone decide nothing (§5).
 - **Adversaries.** xxscreeps hosts several users: v1 as the opponent for
   `Defend` (self-play), open-source bots (TooAngel is plain JS; Overmind and
   The International need a build) for `Siege`/`Drain` when their turn comes.
