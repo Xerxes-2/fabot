@@ -638,6 +638,17 @@ Correctness is proven live, so the live loop has to be safe:
 v1 is the `v1` bookmark (from `427ff628`, main before v2 landed), maintenance only.
 Read a v1 file with `git show v1:<path>`; nothing of v1 stays in the tree.
 
+Milestones, in order; one is done when its exit holds, not when its list is
+empty:
+
+| Milestone | What | Exit |
+|---|---|---|
+| M1 economy | the rest of v1's economy mechanisms | the seat-extreme soak beats v1's bundle in both classes, on a second seed |
+| M2 structures | node builder (N1–N4), links (judged on nodes, not v1's arithmetic), labs, factory, the RCL8 set | each node beats the economy without that structure |
+| M3 defence | `Exchange`, `Defend`, the first tactics, casting, the self-play harness | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
+| M4 live | v2 replaces v1 | ❓ the owner decides from progress |
+| M5 reach | `Strategy` over many colonies, the offensive kinds | set when M4 is |
+
 Status: ✅ landed · ⏳ next · blank not started.
 
 | v1 | v2 | Action |
