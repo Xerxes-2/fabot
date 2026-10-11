@@ -84,22 +84,28 @@ let drawsBuffer (body: Body) (offer: Offer) : bool =
 
 /// Whether a body's parts and store let it act on the offer now. One rule
 /// for a fresh match and a kept one: an intake while the store is at least
-/// half empty (a fuller body delivers first), a delivery while it holds the
-/// resource. A harvester digs whatever its store holds, the engine dropping
-/// the overflow where it stands, and takes nothing but a post: the seat it
-/// was cast for and `Quota` counts it in. An upgrader upgrades and nothing
-/// else: a delivery is a commute for its WORK.
+/// half empty (a fuller body delivers first), or a dig already in reach until
+/// the store is full; a delivery while it holds the resource. A harvester
+/// digs whatever its store holds, the engine dropping the overflow where it
+/// stands, and takes nothing but a post: the seat it was cast for and `Quota`
+/// counts it in. An upgrader upgrades and nothing else: a delivery is a
+/// commute for its WORK.
 let fits (body: Body) (offer: Offer) : bool =
+    let halfEmpty = body.Free > 0 && body.Free * 2 >= body.Store.Capacity
+
     match offer.Task with
     | Upgrade _ -> upgrades body && (body.Energy > 0 || offer.Draw = Draw.Buffer)
     | _ when body.Pattern = Pattern.Upgrader -> false
     | Harvest _ ->
         body.Work > 0
-        && (garrisons body offer || body.Pattern <> Pattern.Harvester && body.Free > 0)
+        && (garrisons body offer
+            || body.Pattern <> Pattern.Harvester
+               && (halfEmpty
+                   || body.Free > 0 && Pos.within (rangeOf offer.Task) body.Pos offer.Target))
     | _ when body.Pattern = Pattern.Harvester -> false
     | Withdraw _ when offer.Draw <> Draw.Open && body.Work = 0 -> false
     | Withdraw _
-    | Pickup _ -> body.Carry > 0 && body.Free > 0 && body.Free * 2 >= body.Store.Capacity
+    | Pickup _ -> body.Carry > 0 && halfEmpty
     | Refill(_, resource) -> body.Carry > 0 && carried body resource > 0
     | Build _
     | Repair _ -> body.Work > 0 && body.Carry > 0 && body.Energy > 0
