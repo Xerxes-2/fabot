@@ -8,9 +8,7 @@ open Fabot.Core
 
 /// The modules, in the order they decide. Each lands here as it is built:
 /// Economy, Layout, Strategy, Fight.
-// `Layout.Run.layout` joins after `economy` once its long soak beats the
-// economy alone (ARCHITECTURE §10.2).
-let private modules: Tick.Module list = [ Economy.Run.economy ]
+let private modules: Tick.Module list = [ Economy.Run.economy; Layout.Run.layout ]
 
 /// The change this bundle was built from, off `scripts/bundle.mjs`'s banner.
 [<Emit("(typeof __FABOT_VERSION__ === 'string' ? __FABOT_VERSION__ : 'unbuilt')")>]
