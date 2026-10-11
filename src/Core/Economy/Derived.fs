@@ -45,7 +45,12 @@ type SourceFact =
         /// Energy a tick it yields: `Engine.heldOutputPerTick` in an owned or
         /// reserved room, `neutralOutputPerTick` elsewhere.
         Rate: int
-        /// A container within reach of the source, which takes what it digs.
+        /// The seat a harvester digs it from: the one under a container or a
+        /// container site, farthest from the controller, so a controller
+        /// container on a seat is no post. A built container before a site,
+        /// then the first tile.
+        Post: Pos option
+        /// The container standing on the post, which takes what it digs.
         Container: string option
         /// The tiles a body can stand on to dig it: what bounds its holders
         /// (`seatsAt`).
@@ -261,6 +266,30 @@ let private groundOf (atlas: Atlas) (me: string) (room: Room) : Ground =
 
     let containers = room.Structures |> Array.filter (fun s -> s.Kind = Kind.Container)
 
+    let footings =
+        Array.append
+            (containers |> Array.map (fun c -> c.Pos, Some c.Id))
+            (room.Sites
+             |> Array.filter (fun s -> s.Kind = Kind.Container && s.Owner = Ours)
+             |> Array.map (fun s -> s.Pos, None))
+
+    let fromController (p: Pos) =
+        room.Controller
+        |> Option.bind (fun c -> rangeIn c.Pos p)
+        |> Option.defaultValue 0
+
+    // A source's post, and the container standing on it.
+    let postOf (source: Pos) =
+        Atlas.seats atlas Grid.One 1 source
+        |> List.choose (fun seat ->
+            footings
+            |> Array.tryFind (fun (p, _) -> p = seat)
+            |> Option.map (fun (_, built) ->
+                (-(fromController seat), Option.isNone built), (seat, built)))
+        |> List.sortBy fst
+        |> List.tryHead
+        |> Option.map snd
+
     let servedRate (pos: Pos) =
         let mutable r = 0
 
@@ -273,14 +302,14 @@ let private groundOf (atlas: Atlas) (me: string) (room: Room) : Ground =
     let sources =
         room.Sources
         |> Array.map (fun s ->
+            let post = postOf s.Pos
+
             {
                 Id = s.Id
                 Pos = s.Pos
                 Rate = rate
-                Container =
-                    containers
-                    |> Array.tryFind (fun c -> rangeIn s.Pos c.Pos = Some 1)
-                    |> Option.map (fun c -> c.Id)
+                Post = post |> Option.map fst
+                Container = post |> Option.bind snd
                 Seats = seatsAt atlas 1 s.Pos
                 Energy = s.Energy
             })

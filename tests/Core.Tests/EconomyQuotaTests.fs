@@ -328,7 +328,8 @@ let tests =
                        | Capacity.Bodies n
                        | Capacity.Work n
                        | Capacity.Load n -> n >= 0
-                       | Capacity.Seated(seats, work) -> seats >= 0 && work >= 0)
+                       | Capacity.Seated(seats, posts, work) ->
+                           0 <= posts && posts <= 1 && posts <= seats && work >= 0)
 
             testPropertyWithConfig
                 config

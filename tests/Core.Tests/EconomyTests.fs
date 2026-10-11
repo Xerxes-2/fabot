@@ -91,9 +91,10 @@ let private offerGen (i: int) : Gen<Offer> =
                     Gen.choose (0, 3) |> Gen.map Capacity.Bodies
                     Gen.choose (0, 12) |> Gen.map Capacity.Work
                     Gen.choose (0, 400) |> Gen.map Capacity.Load
-                    Gen.map2
-                        (fun s w -> Capacity.Seated(s, w))
+                    Gen.map3
+                        (fun s p w -> Capacity.Seated(s, min s p, w))
                         (Gen.choose (0, 4))
+                        (Gen.choose (0, 1))
                         (Gen.choose (0, 12))
                 ]
 
@@ -189,7 +190,7 @@ let private limitOf =
     | Capacity.Bodies n
     | Capacity.Work n
     | Capacity.Load n
-    | Capacity.Seated(_, n) -> Some n
+    | Capacity.Seated(_, _, n) -> Some n
 
 [<Tests>]
 let tests =
@@ -302,18 +303,22 @@ let tests =
                         Array.sum shares - Array.max shares < limit
                     | _ -> true)
 
-            testPropertyWithConfig config "no seated task holds more bodies than its seats"
+            testPropertyWithConfig
+                config
+                "no seated task holds more garrisons than its posts, nor other bodies than its other seats"
             <| fun (scene: Scene) ->
                 let out = matched scene scene.Assignments
 
                 scene.Pool
                 |> Array.forall (fun offer ->
                     match offer.Capacity with
-                    | Capacity.Seated(seats, _) ->
-                        scene.Bodies
-                        |> Array.filter (fun b -> Map.tryFind b.Name out = Some offer.Id)
-                        |> Array.length
-                        <= seats
+                    | Capacity.Seated(seats, posts, _) ->
+                        let garrisons, others =
+                            scene.Bodies
+                            |> Array.filter (fun b -> Map.tryFind b.Name out = Some offer.Id)
+                            |> Array.partition (fun b -> garrisons b offer)
+
+                        garrisons.Length <= posts && others.Length <= seats - posts
                     | _ -> true)
 
             testPropertyWithConfig
@@ -375,9 +380,11 @@ let tests =
                         else
                             0)
 
-                let holders (offer: Offer) =
+                let kin (body: Body) (offer: Offer) =
                     scene.Bodies
-                    |> Array.filter (fun b -> Map.tryFind b.Name out = Some offer.Id)
+                    |> Array.filter (fun b ->
+                        Map.tryFind b.Name out = Some offer.Id
+                        && garrisons b offer = garrisons body offer)
                     |> Array.length
 
                 scene.Bodies
@@ -386,6 +393,8 @@ let tests =
                     || scene.Pool
                        |> Array.forall (fun o ->
                            not (
-                               fits b o.Task && admits o (held o) (holders o) && reaches scene b o
+                               fits b o.Task
+                               && admits o (garrisons b o) (held o) (kin b o)
+                               && reaches scene b o
                            )))
         ]

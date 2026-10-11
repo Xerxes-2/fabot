@@ -250,8 +250,11 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
             // while it stands.
             let spill = if Option.isSome s.Container then 0.0 else Price.pileDecay 1
 
+            // A posted source seats one harvester, on its post.
+            let seats = if Option.isSome s.Post then 1 else s.Seats
+
             let dig =
-                { seated Pattern.Harvester s.Pos (digWork s) s.Seats (fun body ->
+                { seated Pattern.Harvester s.Pos (digWork s) seats (fun body ->
                       Some(
                           (float (min rate (partCountIn body Work * Engine.harvestPerWork))
                            - spill)

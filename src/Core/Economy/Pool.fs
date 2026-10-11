@@ -21,7 +21,10 @@ type Capacity =
     /// Holders' live WORK parts.
     | Work of int
     /// Holders, one to a seat, and their live WORK parts: whichever binds.
-    | Seated of seats: int * work: int
+    /// Of the seats, `posts` are the garrisons' (`garrisons`) and the rest
+    /// everyone else's, so a light body never holds the seat a harvester
+    /// digs into a container from; with no post every seat is anyone's.
+    | Seated of seats: int * posts: int * work: int
     /// Energy: an intake counts its holders' free room, a delivery what they
     /// carry of the resource.
     | Load of int
@@ -61,11 +64,21 @@ let fits (body: Body) (task: Task) : bool =
     | Reserve _
     | Claim _ -> body.Claim > 0
 
-/// What one holder counts against an offer's capacity.
+/// Whether a body holds a seated offer's post rather than its other seats: a
+/// harvester, where the offer has a post.
+let garrisons (body: Body) (offer: Offer) : bool =
+    match offer.Capacity with
+    | Capacity.Seated(_, posts, _) -> posts > 0 && body.Pattern = Pattern.Harvester
+    | _ -> false
+
+/// What one holder counts against an offer's capacity. Where a seated offer
+/// has a post, only its garrison counts WORK: the other seats stay open while
+/// the garrison digs short of the work.
 let share (body: Body) (offer: Offer) : int =
     match offer.Capacity with
     | Capacity.Unbounded -> 0
     | Capacity.Bodies _ -> 1
+    | Capacity.Seated(_, posts, _) when posts > 0 && not (garrisons body offer) -> 0
     | Capacity.Work _
     | Capacity.Seated _ -> body.Work
     | Capacity.Load _ ->
@@ -74,19 +87,23 @@ let share (body: Body) (offer: Offer) : int =
         | task when isIntake task -> body.Free
         | _ -> body.Energy
 
-/// Whether an offer admits one more holder while it has `holders` who bring
-/// `held` (`share` summed).
-let admits (offer: Offer) (held: int) (holders: int) : bool =
+/// Whether an offer admits one more holder while its holders bring `held`
+/// (`share` summed) and `kin` of them hold seats of the candidate's kind
+/// (`garrisons`).
+let admits (offer: Offer) (garrison: bool) (held: int) (kin: int) : bool =
     match offer.Capacity with
     | Capacity.Unbounded -> true
     | Capacity.Bodies n
     | Capacity.Work n
     | Capacity.Load n -> held < n
-    | Capacity.Seated(seats, work) -> holders < seats && held < work
+    | Capacity.Seated(seats, posts, work) ->
+        held < work && kin < (if garrison then posts else seats - posts)
 
 /// What a body brings a seated offer over its stay, `walk` ticks away: the
-/// energy it digs or upgrades before it dies, or before its store fills (a
-/// dig into its store) or empties (an upgrade). 0 for any other offer.
+/// energy it digs or upgrades before it dies, or before its load is full (a
+/// dig into its store, counting what it already dug, so a digger part-way
+/// through its load is worth no less than an empty one) or empty (an
+/// upgrade). 0 for any other offer.
 let seatValue (body: Body) (offer: Offer) (walk: int) : int =
     match offer.Capacity with
     | Capacity.Seated _ ->
@@ -99,7 +116,7 @@ let seatValue (body: Body) (offer: Offer) (walk: int) : int =
             if body.Pattern = Pattern.Harvester then
                 dig
             else
-                min body.Free dig
+                min (body.Free + body.Energy) dig
         | Upgrade _ -> min body.Energy (body.Work * Engine.upgradeDrainPerWork * stay)
         | _ -> body.Work * stay
     | _ -> 0
@@ -153,6 +170,7 @@ let pool (derived: Derived) : Offer[] =
                     (float s.Rate)
                     (Capacity.Seated(
                         s.Seats,
+                        (if Option.isSome s.Post then 1 else 0),
                         (s.Rate + Engine.harvestPerWork - 1) / Engine.harvestPerWork
                     ))
             )
@@ -204,6 +222,7 @@ let pool (derived: Derived) : Offer[] =
             let capacity =
                 Capacity.Seated(
                     ground.UpgradeSeats,
+                    0,
                     if c.Level >= Engine.controllerMaxLevel then
                         Engine.maxUpgradePerTick
                     else

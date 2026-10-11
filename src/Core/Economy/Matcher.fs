@@ -56,6 +56,7 @@ let matchAll
 
     let held = Array.zeroCreate<int> offers
     let holders = Array.zeroCreate<int> offers
+    let garrisoned = Array.zeroCreate<int> offers
     let assigned = Array.create bodies.Length -1
 
     let seated (oi: int) =
@@ -64,36 +65,59 @@ let matchAll
         | _ -> false
 
     // Whether body `a` goes ahead of body `b` on a seated offer: what it
-    // brings the seat over its stay, then its name.
+    // brings the seat over its stay, then the nearer, then its name.
     let ahead (oi: int) (a: int) (b: int) =
         let va = seatValue bodies.[a] pool.[oi] (walk a oi)
         let vb = seatValue bodies.[b] pool.[oi] (walk b oi)
 
         va > vb
-        || (va = vb && System.String.CompareOrdinal(bodies.[a].Name, bodies.[b].Name) < 0)
+        || (va = vb
+            && (walk a oi < walk b oi
+                || (walk a oi = walk b oi
+                    && System.String.CompareOrdinal(bodies.[a].Name, bodies.[b].Name) < 0)))
+
+    let garrison (bi: int) (oi: int) = garrisons bodies.[bi] pool.[oi]
+
+    // Whether an offer admits a body among all its holders.
+    let admitsNow (bi: int) (oi: int) =
+        let kin =
+            if garrison bi oi then
+                garrisoned.[oi]
+            else
+                holders.[oi] - garrisoned.[oi]
+
+        admits pool.[oi] (garrison bi oi) held.[oi] kin
 
     // Whether a seated offer admits a body among the holders ahead of it.
     let admitsAhead (bi: int) (oi: int) =
-        let mutable n = 0
+        let mutable kin = 0
         let mutable sum = 0
 
         for b in 0 .. bodies.Length - 1 do
             if assigned.[b] = oi && b <> bi && ahead oi b bi then
-                n <- n + 1
                 sum <- sum + share bodies.[b] pool.[oi]
 
-        admits pool.[oi] sum n
+                if garrison b oi = garrison bi oi then
+                    kin <- kin + 1
+
+        admits pool.[oi] (garrison bi oi) sum kin
 
     let take (bi: int) (oi: int) =
         assigned.[bi] <- oi
         held.[oi] <- held.[oi] + share bodies.[bi] pool.[oi]
         holders.[oi] <- holders.[oi] + 1
 
+        if garrison bi oi then
+            garrisoned.[oi] <- garrisoned.[oi] + 1
+
     let release (bi: int) =
         let oi = assigned.[bi]
         assigned.[bi] <- -1
         held.[oi] <- held.[oi] - share bodies.[bi] pool.[oi]
         holders.[oi] <- holders.[oi] - 1
+
+        if garrison bi oi then
+            garrisoned.[oi] <- garrisoned.[oi] - 1
 
     // The keep: a seated offer keeps its dearest holders, any other its
     // lightest first.
@@ -123,7 +147,7 @@ let matchAll
             System.String.CompareOrdinal(bodies.[b1].Name, bodies.[b2].Name))
 
     for struct (_, _, bi, oi) in kept do
-        if admits pool.[oi] held.[oi] holders.[oi] then
+        if admitsNow bi oi then
             take bi oi
 
     // The fresh match. Each body's best offer, recomputed only when the
@@ -139,7 +163,7 @@ let matchAll
     // Open to the body: room among all the holders, or on a seated offer
     // among those ahead of it.
     let open' (bi: int) (oi: int) =
-        admits pool.[oi] held.[oi] holders.[oi] || (seated oi && admitsAhead bi oi)
+        admitsNow bi oi || (seated oi && admitsAhead bi oi)
 
     let score (bi: int) =
         bestOffer.[bi] <- -1
@@ -200,13 +224,19 @@ let matchAll
                 let ordered =
                     seatedHere |> Array.sortWith (fun a b -> if ahead oi a b then -1 else 1)
 
+                let mutable posted = 0
                 let mutable n = 0
                 let mutable sum = 0
 
                 for b in ordered do
-                    if admits pool.[oi] sum n then
+                    let kin = if garrison b oi then posted else n - posted
+
+                    if admits pool.[oi] (garrison b oi) sum kin then
                         n <- n + 1
                         sum <- sum + share bodies.[b] pool.[oi]
+
+                        if garrison b oi then
+                            posted <- posted + 1
                     else
                         released.Add b
 
