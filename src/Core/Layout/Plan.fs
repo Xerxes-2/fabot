@@ -460,11 +460,27 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
     // One container serves every rock it stands beside.
     let rockLevel = haulLevel
 
-    // A tile a link may take: free of the plan, off the two rings.
+    // Every walk's tiles, the ones paved after a dead end is chosen included.
+    let onWay = Array.create Tiles.count false
+
+    for _, path in sourceWalks do
+        for t in path do
+            setAt t onWay true
+
+    for t in controllerWalk do
+        setAt t onWay true
+
+    for _, path in mineralWalks do
+        for t in path do
+            setAt t onWay true
+
+    // A tile a link may take: free of the plan and of every way, off the two
+    // rings.
     let linkable (n: int) =
         n >= 0
         && at n weights >= 0
         && not (at n taken)
+        && not (at n onWay)
         && at n roadLevel = none
         && Tiles.xOf n >= 2
         && Tiles.yOf n >= 2
@@ -484,20 +500,6 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
 
     let sourceLink (container: int) =
         linkBeside container (fun t -> Tiles.range t anchor)
-
-    // Every walk's tiles, the ones paved after a dead end is chosen included.
-    let onWay = Array.create Tiles.count false
-
-    for _, path in sourceWalks do
-        for t in path do
-            setAt t onWay true
-
-    for t in controllerWalk do
-        setAt t onWay true
-
-    for _, path in mineralWalks do
-        for t in path do
-            setAt t onWay true
 
     // Off every way, with room beside it for its link.
     let deadEnd (rock: int) (head: int) (t: int) =
