@@ -1,15 +1,5 @@
-/// The colony's whole plan, drawn once for the eighth level on the room's
-/// ground (`Ground`) around its anchor: every structure the engine allows a
-/// room a place, so nothing moves or is rebuilt as the room levels up. A
-/// level places the prefix of each kind it allows (`Sites`).
-///
-/// The shape is a diagonal lattice: roads on the two diagonal families
-/// through the anchor, four tiles apart, and structures in the plus-shaped
-/// cells between them, so every structure stands beside a road and a hauler
-/// on one road tile reaches up to four. The anchor is a road crossing; its
-/// four orthogonal neighbours are the hub, which one standing body reaches
-/// all of. Slots go to kinds nearest first by the walk along the lattice,
-/// so the structures filled every tick are the ones closest to the storage.
+/// Drawn once for the eighth level, so nothing moves or is rebuilt as the
+/// room levels up. A diagonal lattice, so a hauler on one road tile reaches up to four.
 module Fabot.Core.Layout.Plan
 
 open Fable.Core
@@ -19,24 +9,20 @@ open Fabot.Core.Grid
 open Fabot.Core.Layout.Ground
 open Fabot.Core.Layout.Shape
 
-/// The lattice's period: roads every fourth diagonal, which leaves cells of
-/// five tiles, each beside a road. A design constant, not an engine fact.
+/// Leaves cells of five tiles, each beside a road. A design constant, not an
+/// engine fact.
 let private period = 4
 
 let private wrap (v: int) = ((v % period) + period) % period
 
-/// Whether a tile lies on the lattice's roads drawn through `anchor`.
 let onLattice (anchor: int) (tile: int) =
     let dx = Tiles.xOf tile - Tiles.xOf anchor
     let dy = Tiles.yOf tile - Tiles.yOf anchor
     wrap (dx + dy) = 0 || wrap (dx - dy) = 0
 
 
-/// The labs the eighth level allows: two inputs and the outputs.
 let private labs = Engine.controllerStructures "lab" Engine.controllerMaxLevel
 
-/// The level from which the engine allows the `rank`-th structure of a kind
-/// (0-based); past the eighth level's count, the eighth plus one.
 let levelOf (kind: Kind) (rank: int) =
     let name = Kind.name kind
     let mutable level = 0
@@ -47,8 +33,6 @@ let levelOf (kind: Kind) (rank: int) =
 
     level
 
-/// The order kinds are placed in while several are open: spawn capacity
-/// first, then defence, then what feeds them, then the rest.
 let priority (kind: Kind) =
     match kind with
     | Kind.Spawn -> 0
@@ -68,11 +52,6 @@ let priority (kind: Kind) =
     | Kind.Observer -> 14
     | _ -> 15
 
-// The reaction cluster among the open slots: two adjacent inputs (the pair
-// that leaves the widest window within reach of both) and the outputs within
-// reaction range of both, the cluster whose slots' ranks (`rank`, the walk
-// order) sum least; ties to the earlier input. The first input is one of
-// `inputs`. Inputs first; None when no pair has room for every output.
 let private labCluster (inputs: int[]) (rank: int[]) (isOpen: int -> bool) : int[] option =
     let reach = Engine.labReactionRange
     let mutable best: int[] option = None
@@ -115,20 +94,15 @@ let private labCluster (inputs: int[]) (rank: int[]) (isOpen: int -> bool) : int
 
     best
 
-/// The open slots nearest the core the lab search tries as a first input
-/// before it tries them all: a few labs' worth, enough on open ground.
+/// A few labs' worth of first inputs: enough on open ground.
 let private labSearch = 3 * labs
 
-/// The hub's kinds, in the order they take the anchor's orthogonal
-/// neighbours.
 let private hub = [| Kind.Storage; Kind.Link; Kind.Terminal; Kind.Factory |]
 
-/// The eighth level's allowance of a kind.
 let private count (kind: Kind) =
     Engine.controllerStructures (Kind.name kind) Engine.controllerMaxLevel
 
-/// The kinds a plan seats its whole allowance of; a plan short of one is
-/// unfit. Links, containers and roads are seated by what they serve.
+/// Not links, containers or roads: they are seated by what they serve.
 let sized =
     [
         Kind.Spawn
@@ -143,30 +117,22 @@ let sized =
         Kind.Lab
     ]
 
-/// The kinds a rampart covers: what a raid comes for.
+/// What a raid comes for.
 let private keep = [| Kind.Spawn; Kind.Tower; Kind.Storage; Kind.Terminal |]
 
-/// The level ramparts are kept from: the first tower's, the room's first
-/// defence.
+/// The first tower: the room's first defence.
 let rampartLevel = levelOf Kind.Tower 0
 
-/// What a step off the lattice pays over the ground's weight: a road leaves
-/// the lattice only to at round a wall the lattice cannot. A design
-/// constant.
+/// A road leaves the lattice only to go round a wall. A design constant.
 let private detour = 2 * Engine.plainWeight
 
-/// The walk's step prices: a step costs the walk weight of the tile it lands
-/// on, lattice or detour.
 let private steps = Array.init (Engine.swampWeight + detour + 1) id
 
 let private none = System.Int32.MaxValue
 
-/// The level roads and containers are laid from: the first extensions'.
 /// At the first level a room's energy goes to its controller alone.
 let haulLevel = levelOf Kind.Extension 0
 
-/// A source's container as planted: its rock, its tile, the link held beside
-/// a dead end, and the rock's way out.
 type private Posted =
     {
         Rock: int
@@ -175,21 +141,16 @@ type private Posted =
         Path: int list
     }
 
-/// Ints sorted ascending in place: the engine's numeric sort under Fable,
-/// which the library's comparer-driven sort is several times slower than.
+/// The engine's numeric sort under Fable: the library's comparer-driven sort
+/// is several times slower.
 #if FABLE_COMPILER_JAVASCRIPT
 [<Emit("$0.sort((a, b) => a - b)")>]
 #endif
 let private sortInts (_keys: int[]) : unit = Array.sortInPlace _keys
 
-/// The walks a road's sort key tells apart, so level, walk and tile share
-/// one int; longer walks sort together, by tile.
+/// So level, walk and tile share one sort key; longer walks sort together.
 let private roadSpan = 1 <<< 14
 
-/// The next tile down a flood from `t` toward its goal: the neighbour whose
-/// distance plus its own weight is least, ties to the lowest direction, a
-/// ring tile short of the goal never stepped on; -1 at a goal or where none
-/// is reached.
 let down (weights: int[]) (dist: int[]) (t: int) =
     let mutable next = -1
     let mutable best = unreached
@@ -207,8 +168,6 @@ let down (weights: int[]) (dist: int[]) (t: int) =
 
     next
 
-/// The cheapest walk down a flood from `start` (`down` each step): the tiles
-/// after `start` up to and with the goal; empty when no goal is reached.
 let descend (weights: int[]) (dist: int[]) (start: int) : int list =
     let path = ResizeArray()
     let mutable here = down weights dist start
@@ -222,15 +181,8 @@ let descend (weights: int[]) (dist: int[]) (start: int) : int list =
     else
         []
 
-/// The plan of a room around `anchor`. The spawns standing (`spawns`) only
-/// order the anchor's spawn slots, those they hold taken first, so a spawn
-/// on a slot never moves the plan.
-///
-/// One flood from the anchor prices the room: a lattice tile at the ground's
-/// weight, any other at `detour` more. Walked down, it gives every road: the
-/// way out to each source, the controller and each mineral, and the way in
-/// to each slot, which leaves the lattice only round a wall. Those ways are
-/// laid before any slot is handed out, so no structure ever stands on one.
+/// `spawns` only order the spawn slots, so a spawn on a slot never moves the
+/// plan. Ways are laid before slots are handed out, so no structure stands on one.
 let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
     let weights = ground.Weights
     let unfit = ResizeArray<string>()
@@ -253,8 +205,6 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
     setAt (anchor) lane (max Engine.plainWeight (at (anchor) weights))
     let walk = flood One lane steps [| anchor |]
 
-    // Kept clear: every tile a lattice tile's way down crosses off the
-    // lattice, and every tile of a way out.
     let clear = Array.create Tiles.count false
     let lattice t = at t onLat && at t lane >= 0
 
@@ -308,10 +258,7 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
                 None
             | path -> Some(m, path))
 
-    // Each slot: a free tile off the lattice and every way, beside a reached
-    // lattice tile (its access), keyed by the access's walk, then by tile.
     let access = Array.create Tiles.count -1
-    // A slot's key: its access's walk, then its tile, in one int.
     let slotList = ResizeArray<int>()
 
     for t in 0 .. Tiles.count - 1 do
@@ -353,7 +300,6 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
                 setAt (t) taken (true)
                 picked.Add(kind, t)
 
-    // The hub: the anchor's orthogonal neighbours, where they are slots.
     let mutable hubFilled = 0
 
     for direction in [| Tiles.top; Tiles.right; Tiles.bottom; Tiles.left |] do
@@ -367,8 +313,6 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
     for k in hubFilled .. hub.Length - 1 do
         fill (at (k) hub) 1
 
-    // The spawns on the anchor's spawn slots, those with a spawn standing
-    // first, then any slot left nearest.
     let slots = spawnSlots anchor
 
     let order =
@@ -407,9 +351,6 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
 
     fill Kind.Observer (count Kind.Observer)
 
-    // Each slot's way in, from its access down to the anchor, a road at the
-    // lowest level of the slots it serves, and never before the haul's; a
-    // standing spawn off the slots enters by its nearest reached neighbour.
     let roadLevel = Array.create Tiles.count none
     let ranks = System.Collections.Generic.Dictionary<Kind, int>()
     let items = ResizeArray<Item>()
@@ -462,13 +403,10 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
             if not (at (t) taken) then
                 setAt (t) roadLevel (min (at (t) roadLevel) level)
 
-    // A container is walkable and takes a dead end beside its rock, off the
-    // head of its way out: a tile no way crosses, so no body walking past
-    // shoves its harvester off it. Where no such tile is, the head itself.
-    // One container serves every rock it stands beside.
+    // A container takes a dead end off its way out, so no body walking past
+    // shoves its harvester off it.
     let rockLevel = haulLevel
 
-    // Every walk's tiles, the ones paved after a dead end is chosen included.
     let onWay = Array.create Tiles.count false
 
     for _, path in sourceWalks do
@@ -482,8 +420,6 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         for t in path do
             setAt t onWay true
 
-    // A tile a link may take: free of the plan and of every way, off the two
-    // rings.
     let linkable (n: int) =
         n >= 0
         && at n weights >= 0
@@ -509,7 +445,6 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
     let sourceLink (container: int) =
         linkBeside container (fun t -> Tiles.range t anchor)
 
-    // Off every way, with room beside it for its link.
     let deadEnd (rock: int) (head: int) (t: int) =
         t <> head
         && Tiles.range t rock = 1
@@ -523,9 +458,8 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         && Tiles.within 1 t
            |> Array.exists (fun n -> n <> t && linkable n && not (at n clear))
 
-    // Each source, its container's tile, its link's where held, and its way
-    // out. A dead end's link is held as it is planted, so no other container
-    // or link takes the room it was chosen for.
+    // A dead end's link is held as it is planted, so no other container or
+    // link takes the room it was chosen for.
     let posted =
         sourceWalks
         |> Array.map (fun (rock, path) ->
@@ -557,9 +491,8 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
                     Path = path
                 })
 
-    // The controller's container a tile further out than the first, where
-    // upgraders stand round it within range 3 of the controller; the first
-    // tile is left to stand on.
+    // The controller's container a tile further out, leaving the first for
+    // an upgrader to stand on.
     let seat (t: int) =
         if not (at t taken) then
             plant Kind.Container t rockLevel
@@ -586,10 +519,6 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
 
         pave (List.tail path) digLevel
 
-    // The links outside the hub: the controller's, where upgraders reach it,
-    // then each source's, the longest way out first; each beside its
-    // container on a tile no plan holds, a dead end's held since it was
-    // planted.
     let links = ResizeArray<int>()
 
     let open' (t: int) =
@@ -637,9 +566,8 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
                 Level = levelOf Kind.Link i
             })
 
-    // The hub's link comes after them: it only moves the storage's energy
-    // to the controller's link, paying the 3% loss on all of it to save a
-    // walk, where a source's link saves the whole haul from its source.
+    // The hub's link comes last: it pays the 3% loss on all the storage's
+    // energy to save a walk, where a source's link saves a whole haul.
     for k in 0 .. items.Count - 1 do
         if items.[k].Kind = Kind.Link then
             items.[k] <-
@@ -647,7 +575,6 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
                     Level = levelOf Kind.Link outer.Length
                 }
 
-    // Roads by level, then nearest the anchor, then tile, keyed in one int.
     let roadKeys = ResizeArray<int>()
 
     for t in 0 .. Tiles.count - 1 do
@@ -670,8 +597,7 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
                 Level = at t roadLevel
             })
 
-    // A rampart over each structure a raid comes for and each source's
-    // container its harvester cannot leave, from the room's first tower.
+    // A source's container too: its harvester cannot leave it.
     let ramparts =
         let covered =
             [|
@@ -724,16 +650,8 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         Unfit = List.ofSeq unfit
     }
 
-/// The plan of a room with the spawns that stand in it (tiles): of the plans
-/// around `Ground.anchors`, the first that keeps the most standing spawns,
-/// then stands its first spawn on a spawn slot. So the spawns a plan places,
-/// built where it says, give the plan again: an anchor before it in the
-/// order seats no spawn, standing or not. None when the room offers no
-/// anchor.
-///
-/// A room without a spawn draws no more anchors than one standing spawn
-/// has (`spawnOffsets`); when none of them seats its spawn, the plan is the
-/// first anchor's.
+/// Scored so the spawns a plan places, built where it says, give the plan
+/// again: an anchor before it in the order seats no spawn, standing or not.
 let ofGround (ground: Ground) (spawns: int[]) : Plan option =
     let candidates = anchors ground spawns
 

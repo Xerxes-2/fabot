@@ -1,18 +1,11 @@
-/// A room's wishes resolved at once into an injective assignment of creeps to
-/// tiles: no creep moves outside it. A weighted augmenting search over the
-/// room's whole matching: each wish in turn looks for chains of displacements
-/// ending on a free tile and takes the best, if it raises the room's score
-/// (`Wish.value` summed over every wish) or, at an equal score, puts more
-/// bodies back on the tiles they stand on. Swaps and rotations fall out of the
-/// search; a body standing in its work area is shuffled within it for free
-/// and pushed out of it at its weight and one.
+/// An augmenting search over the room's whole matching, so swaps and
+/// rotations fall out of it rather than being special cases.
 module Fabot.Core.Move.Arbitrate
 
 open Fabot.Core
 open Fabot.Core.Grid
 
-/// A room's steps, each moving creep's direction by name, and the searches
-/// it took: one per wish offered a turn, the count `scripts/counts` reads.
+/// `Searches` is the count `scripts/counts` reads.
 type Resolution =
     {
         Steps: (string * int) list
@@ -26,10 +19,8 @@ let private covered (footprint: Footprint) (anchor: int) : int[] =
 
 let private inRoom (tile: int) = tile >= 0 && tile < Tiles.count
 
-// The order wishes are offered in: a wish that moves before one that stays
-// (a stayer only ever asks back onto its work or its own tile), heavier
-// first, then by name, ordinal. The names are unique, so the order is total
-// and the input's own order never shows.
+// A stayer only ever asks back onto its work or its own tile, so movers go
+// first. Names are unique, so the order is total and the input's never shows.
 let private offered (a: Wish) (b: Wish) =
     match compare (Wish.stays a) (Wish.stays b) with
     | 0 ->
@@ -38,29 +29,9 @@ let private offered (a: Wish) (b: Wish) =
         | c -> c
     | c -> c
 
-// Whether a chain's (score, bodies home) beats another's: score first, then
-// bodies back on their own tiles.
 let inline private above (s: int) (h: int) (s0: int) (h0: int) = s > s0 || (s = s0 && h > h0)
 
-/// The room's resolution: `passable` says where a body may stand, `held` the
-/// tiles of bodies outside the wishes (theirs, and ours with none). A wish
-/// that cannot move, or covers more than a tile, is an obstacle where it
-/// stands, as is any wish standing on a tile already held. Guarantees, for
-/// every input:
-/// - injective: no two bodies, wished or held, end on one tile;
-/// - a creep moves only one step, onto a passable tile it listed (head or
-///   tail), or back onto the tile it stands on;
-/// - every chain taken raises (room score, bodies on their own tile)
-///   lexicographically, so the score of the result is above everyone staying
-///   unless nobody moves;
-/// - of a search's chains the best is taken: highest score, then most bodies
-///   home, then fewest bodies displaced, then the first in candidate order;
-/// - a displaced body lands on its displacer's `Onward` only when no chain
-///   through its other tiles is taken;
-/// - at the end no wish could raise (its value, home) by stepping alone onto
-///   a free tile it listed: a wish is offered again whenever a tile it lists
-///   changed holder since its last search, until a pass takes no chain;
-/// - deterministic, and the same for any order of `wishes` and `held`.
+/// `held`: the tiles of bodies outside the wishes (theirs, and ours with none).
 let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resolution =
     let blocked = Array.zeroCreate<bool> Tiles.count
 
@@ -86,8 +57,6 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
     let n = order.Length
     let tileOf = order |> Array.map (fun wish -> wish.At)
 
-    // Where each may be placed, in its order: head, tail, then the tile it
-    // stands on, which is always open to it.
     let candidates =
         order
         |> Array.map (fun wish ->
@@ -113,12 +82,9 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
             found.Add at
             found.ToArray())
 
-    // The most a tile it can reach is worth to each.
     let reachable =
         Array.init n (fun i -> candidates.[i] |> Array.map (Wish.value order.[i]) |> Array.max)
 
-    // One search's state: the creeps on the chain being walked, the best
-    // (score, home) each creep was reached at, and the best chain so far.
     let onPath = Array.zeroCreate<bool> n
     let labelStamp = Array.zeroCreate<int> n
     let labelScore = Array.zeroCreate<int> n
@@ -130,8 +96,6 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
     let mutable taken = 0
     let mutable stamp = 0
 
-    // A chain ended on a free tile at (s, h): counted when it would be taken,
-    // kept when it beats the best so far.
     let finish (s: int) (h: int) =
         if above s h 0 0 then
             taken <- taken + 1
@@ -145,12 +109,8 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
                 bestChain.Clear()
                 bestChain.AddRange path
 
-    // Wish `i` leaving `from` with the chain at (score, home). A creep on the
-    // chain is not displaced again; one reached before in this search is
-    // explored again only when reached at a better (score, home), since what
-    // a chain makes past a creep depends on nothing but the creeps already on
-    // it. `onward` is tried last, only when no chain through its other tiles
-    // would be taken.
+    // A creep reached before is explored again only at a better (score, home):
+    // what a chain makes past it depends only on the creeps already on it.
     let rec explore (i: int) (from: int) (score: int) (home: int) (onward: int) =
         onPath.[i] <- true
         let wish = order.[i]

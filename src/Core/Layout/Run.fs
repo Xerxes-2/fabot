@@ -1,5 +1,3 @@
-/// The layout as one module of the tick: derive the colonies (`Derive`),
-/// then for each the sites its plan still wants and its towers' reflex.
 module Fabot.Core.Layout.Run
 
 open Fabot.Core
@@ -9,9 +7,6 @@ open Fabot.Core.State
 open Fabot.Core.Tick
 open Fabot.Core.Layout.Derive
 
-/// The intents for the derived colonies, with `budget` sites left of the
-/// world's MAX_CONSTRUCTION_SITES. A room already holding its sites in
-/// flight, or whose census leaves nothing to place, places none.
 let decideOver (colonies: Colony[]) (budget: int) : Intent list =
     let mutable budget = budget
     let intents = ResizeArray<Intent>()
@@ -39,5 +34,4 @@ let decide (context: Context) (state: State) : Intent list * State =
     decideOver colonies (Engine.maxConstructionSites - world.OurSites),
     { state with Layout = standing }
 
-/// The layout as the tick runs it.
 let layout: Module = { Name = "layout"; Run = decide }

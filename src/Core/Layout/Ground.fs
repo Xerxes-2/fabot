@@ -1,46 +1,34 @@
-/// One room's fixed ground as the Layout plans it: terrain and the objects
-/// that never move (sources, minerals, the controller, a structure that is
-/// not ours), the tiles a structure may be planned on, and the anchor the
-/// plan is drawn around. Built from the room alone, so a plan drawn on it
-/// moves only when the ground does.
+/// Built from the room alone, so a plan drawn on it moves only when the
+/// ground does.
 module Fabot.Core.Layout.Ground
 
 open Fabot.Core
 open Fabot.Core.World
 open Fabot.Core.Grid
 
-/// A room's ground for planning.
 [<NoEquality; NoComparison>]
 type Ground =
     {
         Room: string
-        /// Per tile: -1 for a wall or a fixed obstacle (a source, a mineral,
-        /// the controller, a structure not ours that no creep crosses), else
-        /// the terrain's fatigue weight (plain or swamp). Our own structures
-        /// are not read: the plan is drawn on the ground, never on itself.
+        /// -1 where no creep crosses. Our own structures are not read: the
+        /// plan is drawn on the ground, never on itself.
         Weights: int[]
-        /// Per tile: whether a structure may be planned here. Passable, off
-        /// the border ring and the ring inside it (the engine refuses most
-        /// structures beside an exit), and off the working ground: a seat of
-        /// a source or a mineral, and the controller's near tiles.
         Free: bool[]
-        /// Tiles, ascending.
         Sources: int[]
         Minerals: int[]
         /// The controller's tile; -1 for none.
         Controller: int
     }
 
-/// The controller's near tiles kept off the plan's slots: upgraders stand
-/// within range 3 of it, and this leaves them the two rings inside that.
+/// Upgraders work within range 3 of the controller; this leaves them the two
+/// rings inside that.
 let private controllerKeep = 2
 
 /// The ring inside the border where the engine refuses a structure beside an
 /// exit; roads and containers are allowed there but nothing here plans one.
 let private exitKeep = 1
 
-/// The tiles of the structures not ours that no creep crosses, ascending:
-/// the only part of a room's ground that can change.
+/// The only part of a room's ground that can change.
 let obstacles (room: Room) : int[] =
     room.Structures
     |> Array.choose (fun s ->
@@ -50,7 +38,6 @@ let obstacles (room: Room) : int[] =
         | _ -> Some(Tiles.ofPos s.Pos))
     |> Array.sort
 
-/// The ground of one room. None for a room whose terrain is not a whole room.
 let ofRoom (room: Room) : Ground option =
     if room.Terrain.Length <> Tiles.count then
         None
@@ -121,16 +108,13 @@ let ofRoom (room: Room) : Ground option =
                 Controller = controller
             }
 
-/// The square an anchor is judged by: its free tiles within this range hold
-/// the plan's core of hub, spawns, towers and near extensions. A design
+/// Holds the plan's core of hub, spawns, towers and near extensions: a design
 /// constant of the lattice (`Plan`), not an engine fact.
 let coreRadius = 4
 
-/// The spawn slots relative to an anchor, in the order they are taken: the
-/// centres of the four lattice cells beside it (`Plan`).
+/// The centres of the four lattice cells beside an anchor (`Plan`).
 let spawnOffsets = [| 2, 0; -2, 0; 0, 2; 0, -2 |]
 
-/// The spawn slots of an anchor, as tiles; -1 for one off the room.
 let spawnSlots (anchor: int) : int[] =
     spawnOffsets
     |> Array.map (fun (dx, dy) ->
@@ -138,8 +122,8 @@ let spawnSlots (anchor: int) : int[] =
         let y = Tiles.yOf anchor + dy
         if Tiles.inRoom x y then Tiles.index x y else -1)
 
-// Summed range from a tile to every source and the controller: the walk the
-// colony pays from its core, by the cheapest measure there is.
+// Range, not path cost: the cheapest measure of the walk the colony pays
+// from its core.
 let private reachSum (ground: Ground) (tile: int) =
     let mutable sum = 0
 
@@ -151,7 +135,6 @@ let private reachSum (ground: Ground) (tile: int) =
 
     sum
 
-// Each tile's free tiles within `coreRadius`, by a summed-area table.
 let private openness (ground: Ground) : int[] =
     let n = Tiles.side + 1
     let sums = Array.zeroCreate (n * n)
@@ -174,8 +157,6 @@ let private openness (ground: Ground) : int[] =
         at (y1 * n + x1) sums - at (y0 * n + x1) sums - at (y1 * n + x0) sums
         + at (y0 * n + x0) sums)
 
-// An anchor may stand where it is passable, two tiles inside the border, with
-// a free spawn slot.
 let private valid (ground: Ground) (anchor: int) =
     let x = Tiles.xOf anchor
     let y = Tiles.yOf anchor
@@ -187,10 +168,6 @@ let private valid (ground: Ground) (anchor: int) =
     && at anchor ground.Weights >= 0
     && spawnSlots anchor |> Array.exists (fun s -> s >= 0 && at s ground.Free)
 
-/// The valid anchors, best first: the most free tiles within `coreRadius`,
-/// then the least summed range to the sources and the controller, then the
-/// lowest tile. With spawns standing only an anchor with one on its slots is
-/// a candidate; without, every tile is.
 let anchors (ground: Ground) (spawns: int[]) : int[] =
     let opens = openness ground
 
