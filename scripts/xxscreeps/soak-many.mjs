@@ -9,6 +9,7 @@
 //   --ticks  per room (default 10000), --seed (default 1)
 //   --jobs   soaks at once (default 2: each holds a server and our sandbox)
 //   --tag    output names: soak-runs/<tag>-<room>/ (default many)
+//   --bot    the bundle every room runs (default dist/main.js)
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -17,7 +18,7 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
 const SOAK = join(HERE, "soak.mjs");
-const usage = "usage: npm run soak:many -- [--rooms N | --room A,B,...] [--ticks T] [--seed S] [--jobs J] [--tag name]";
+const usage = "usage: npm run soak:many -- [--rooms N | --room A,B,...] [--ticks T] [--seed S] [--jobs J] [--tag name] [--bot main.js]";
 const fail = (m) => {
   console.error(m);
   process.exit(1);
@@ -26,7 +27,7 @@ const fail = (m) => {
 const flags = {};
 const rest = process.argv.slice(2);
 for (let i = 0; i < rest.length; i++) {
-  if (!["--rooms", "--room", "--ticks", "--seed", "--jobs", "--tag"].includes(rest[i])) fail(usage);
+  if (!["--rooms", "--room", "--ticks", "--seed", "--jobs", "--tag", "--bot"].includes(rest[i])) fail(usage);
   const value = rest[i + 1];
   if (value === undefined || value.startsWith("--")) fail(`${rest[i]} needs a value\n${usage}`);
   flags[rest[i++]] = value;
@@ -58,7 +59,7 @@ console.error(`rooms: ${rooms.join(", ")}; ${ticks} ticks each, seed ${seed}, ${
 const runOf = (room) => `${tag}-${room}`;
 function soak(room) {
   return new Promise((done) => {
-    const child = spawn("node", [SOAK, "--room", room, "--run", runOf(room), "--ticks", String(ticks), "--seed", String(seed), "--every", "100"], {
+    const child = spawn("node", [SOAK, "--room", room, "--run", runOf(room), "--ticks", String(ticks), "--seed", String(seed), "--every", "100", ...(flags["--bot"] ? ["--bot", resolve(flags["--bot"])] : [])], {
       stdio: ["ignore", "ignore", "ignore"],
     });
     child.on("exit", (code) => done(code));

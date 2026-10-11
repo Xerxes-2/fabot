@@ -27,6 +27,12 @@ port from, never a fact about v2.
 
 ## Fixing behaviour
 
+- v1 (`427ff628`) ran live and solved much of the economy already. Before
+  designing a fix, find how v1 solved the problem (its code and
+  `docs/adr/`, read with `git show 427ff628:<path>`) and port that mechanism
+  with its invariant; drop or replace it only when it was a one-incident
+  patch or no longer applies, and say which in the commit.
+
 - Name the invariant the bug breaks, in one sentence that covers every body,
   room or colony. A new rule that mops up after an old one is not a fix.
 - A fight fix changes a phase rule, a tactic or `Exchange`. It never adds a

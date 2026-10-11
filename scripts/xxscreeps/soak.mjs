@@ -3,6 +3,8 @@
 //
 // Usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>]
 //        npm run soak -- --list      the rooms a soak can stand in, as JSON
+//   --bot    the bundle to run (default dist/main.js): v1's or a baseline's,
+//            to compare on the same room and seed
 //   --ticks  ticks to step (default 3000)
 //   --every  a sample every K ticks (default 100), and the last tick
 //   --seed   the engine's move tie-break seed (default 1): one seed, one run
@@ -22,7 +24,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -43,7 +45,7 @@ const listOnly = rest[0] === "--list";
 if (listOnly) rest.shift();
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (!["--ticks", "--every", "--seed", "--room", "--run"].includes(a)) fail(usage);
+  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot"].includes(a)) fail(usage);
   const value = rest[++i];
   if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
   flags[a] = value;
@@ -58,7 +60,10 @@ const every = whole("--every", 100, 1);
 const seed = whole("--seed", 1, 0);
 if (flags["--room"] !== undefined && !/^[WE]\d+[NS]\d+$/.test(flags["--room"])) fail(`--room: "${flags["--room"]}" is not a room name`);
 if (flags["--run"] !== undefined && !/^[\w.-]+$/.test(flags["--run"])) fail("--run: letters, digits, dots, dashes");
-if (!existsSync(join(REPO, "dist/main.js"))) fail("no dist/main.js: npm run build first");
+// The bundle that plays: ours as built, or another (v1's, a baseline's) to
+// compare against on the same room and seed.
+const bot = resolve(flags["--bot"] ?? join(REPO, "dist/main.js"));
+if (!existsSync(bot)) fail(flags["--bot"] ? `--bot: no file at ${bot}` : "no dist/main.js: npm run build first");
 if (!existsSync(join(TEMPLATE, "screeps/shard0/data.json"))) fail(`no template world at ${TEMPLATE}: npm run xx -- setup first`);
 
 // ---- the engine, on Node 24 through nix (as xx.mjs) ------------------------
@@ -107,7 +112,7 @@ writeFileSync(join(world, ".screepsrc.yaml"), screepsrc);
 writeFileSync(join(world, "package.json"), '{ "private": true }\n');
 writeFileSync(join(world, "seed.txt"), `${seed}\n`);
 mkdirSync(join(world, "bot"), { recursive: true });
-cpSync(join(REPO, "dist/main.js"), join(world, "bot/main.js"));
+cpSync(bot, join(world, "bot/main.js"));
 
 if (listOnly) {
   // The rooms a soak can stand in, for `soak-many.mjs`; nothing is run.
