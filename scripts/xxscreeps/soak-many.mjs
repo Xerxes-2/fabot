@@ -3,11 +3,13 @@
 // one seed (ARCHITECTURE.md §10.2): `soak.mjs` once per (bundle, seed, room),
 // many at a time, then one table.
 //
-// Usage: npm run soak:many -- [--bot [name=]a.js,[name=]b.js] [--seed 1,2] [--room A,B,...]
+// Usage: npm run soak:many -- [--bot [name=]a.js,[name=]b.js] [--seed 1,2,1+7] [--room A,B,...]
 //                             [--ticks T] [--jobs J] [--tag name] [--fresh]
 //   --bot    the bundles to compare (default dist/main.js); the first is the
 //            base the others are read against. A name defaults to the file's.
-//   --seed   the seeds (default 1,2)
+//   --seed   the starts (default 1,2,1+7): an engine seed, or seed+K for a bot that
+//            sits out its first K ticks (soak.mjs --late), a nudge the seed
+//            alone does not give a room with few tie-breaks
 //   --room   these rooms instead of the two extremes of harvest seats: both
 //            sources with one seat (a small harvester cannot fill a source)
 //            and both with four or more (bodies can crowd in instead)
@@ -33,7 +35,7 @@ const SOAK = join(HERE, "soak.mjs");
 const RUNS = join(REPO, "soak-runs");
 const CACHE = join(RUNS, ".cache");
 const usage =
-  "usage: npm run soak:many -- [--bot [name=]a.js,...] [--seed 1,2] [--room A,B,...] [--ticks T] [--jobs J] [--tag name] [--fresh]";
+  "usage: npm run soak:many -- [--bot [name=]a.js,...] [--seed 1,2,1+7] [--room A,B,...] [--ticks T] [--jobs J] [--tag name] [--fresh]";
 const fail = (m) => {
   console.error(m);
   process.exit(1);
@@ -57,7 +59,10 @@ const whole = (text, flag, min) => {
   return n;
 };
 const ticks = whole(flags["--ticks"] ?? 30000, "--ticks", 1);
-const seeds = (flags["--seed"] ?? "1,2").split(",").map((s) => whole(s, "--seed", 0));
+const seeds = (flags["--seed"] ?? "1,2,1+7").split(",").map((spec) => {
+  const [seed, late = "0"] = spec.split("+");
+  return { seed: whole(seed, "--seed", 0), late: whole(late, "--seed", 0), label: spec };
+});
 const jobs = whole(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / 2)), "--jobs", 1);
 const tag = flags["--tag"] ?? "many";
 if (!/^[A-Za-z0-9-]+$/.test(tag)) fail("--tag: letters, digits, dashes");
@@ -94,8 +99,8 @@ const runs = bots.flatMap((bot) =>
       bot,
       seed,
       room,
-      name: `${tag}-${bot.name}-s${seed}-${room}`,
-      key: hash(bot.code, room, String(seed), String(ticks), scriptsHash),
+      name: `${tag}-${bot.name}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${room}`,
+      key: hash(bot.code, room, String(seed.seed), String(seed.late), String(ticks), scriptsHash),
     })),
   ),
 );
@@ -104,13 +109,13 @@ const cached = (run) => !flags["--fresh"] && existsSync(join(CACHE, run.key, "le
 // Two bundles of the same code share their runs.
 const todo = runs.filter((r, i) => !cached(r) && runs.findIndex((o) => o.key === r.key) === i);
 console.error(
-  `${bots.map((b) => b.name).join(" vs ")}; rooms ${rooms.join(", ")}; seeds ${seeds.join(", ")}; ${ticks} ticks; ` +
+  `${bots.map((b) => b.name).join(" vs ")}; rooms ${rooms.join(", ")}; starts ${seeds.map((x) => x.label).join(", ")}; ${ticks} ticks; ` +
     `${runs.length - todo.length} cached, ${todo.length} to run, ${jobs} at a time`,
 );
 
 function soak(run) {
   return new Promise((done) => {
-    const args = ["--room", run.room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed), "--every", "100", "--bot", run.bot.file];
+    const args = ["--room", run.room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file];
     const child = spawn("node", [SOAK, ...args], { stdio: ["ignore", "ignore", "ignore"] });
     child.on("exit", (code) => done(code));
   });
@@ -177,7 +182,7 @@ for (const room of rooms)
       const run = runs.find((r) => r.room === room && r.seed === seed && r.bot === bot);
       const r = rowOf(run);
       console.log(
-        [room, seed, bot.name, r.ok ? "yes" : "NO", r.rcl, r.rcl3, r.rcl4, r.controller, r.structures, r.fortified, r.stock, r.open ? `${r.worth}?` : r.worth, r.faults]
+        [room, seed.label, bot.name, r.ok ? "yes" : "NO", r.rcl, r.rcl3, r.rcl4, r.controller, r.structures, r.fortified, r.stock, r.open ? `${r.worth}?` : r.worth, r.faults]
           .map((v, i) => cell(v, i === 2 ? 12 : 9))
           .join(""),
       );

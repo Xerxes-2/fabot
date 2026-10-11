@@ -11,6 +11,9 @@
 //   --room   the colony's room (default: the first by name with an unowned
 //            controller and two sources)
 //   --run    the output's name under soak-runs/ (default <room>-seed<N>)
+//   --late   ticks the bot sits out at the start (default 0): a nudge to the
+//            early trajectory, so a soak:many spread measures how far a run
+//            drifts from a small change, which the seed alone does not
 //
 // Needs `npm run build` (dist/main.js) and `npm run xx -- setup` (the engine
 // and its template world, under $FABOT_XXSCREEPS_HOME). Writes
@@ -25,7 +28,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -46,7 +49,7 @@ const listOnly = rest[0] === "--list";
 if (listOnly) rest.shift();
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot"].includes(a)) fail(usage);
+  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late"].includes(a)) fail(usage);
   const value = rest[++i];
   if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
   flags[a] = value;
@@ -59,6 +62,7 @@ const whole = (flag, fallback, min) => {
 const ticks = whole("--ticks", 3000, 1);
 const every = whole("--every", 100, 1);
 const seed = whole("--seed", 1, 0);
+const late = whole("--late", 0, 0);
 if (flags["--room"] !== undefined && !/^[WE]\d+[NS]\d+$/.test(flags["--room"])) fail(`--room: "${flags["--room"]}" is not a room name`);
 if (flags["--run"] !== undefined && !/^[\w.-]+$/.test(flags["--run"])) fail("--run: letters, digits, dots, dashes");
 // The bundle that plays: ours as built, or another (v1's, a baseline's) to
@@ -116,7 +120,15 @@ writeFileSync(join(world, ".screepsrc.yaml"), screepsrc);
 writeFileSync(join(world, "package.json"), '{ "private": true }\n');
 writeFileSync(join(world, "seed.txt"), `${seed}\n`);
 mkdirSync(join(world, "bot"), { recursive: true });
-cpSync(bot, join(world, "bot/main.js"));
+if (late === 0) cpSync(bot, join(world, "bot/main.js"));
+else {
+  // The bundle's exports are getters, so the wait wraps it from outside.
+  cpSync(bot, join(world, "bot/fabot.js"));
+  writeFileSync(
+    join(world, "bot/main.js"),
+    `const bot = require("fabot");\nlet first;\nmodule.exports.loop = () => {\n  first ??= Game.time;\n  if (Game.time >= first + ${late}) bot.loop();\n};\n`,
+  );
+}
 
 if (listOnly) {
   // The rooms a soak can stand in, for `soak-many.mjs`; nothing is run.
