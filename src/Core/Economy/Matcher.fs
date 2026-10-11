@@ -150,8 +150,8 @@ let matchAll
         if admitsNow bi oi then
             take bi oi
 
-    // The fresh match. Each body's best offer, recomputed only when the
-    // offer it was best on gains a holder.
+    // The fresh match. Each body's best offer, recomputed when the offer it
+    // was best on gains a holder, and by every body when a seat is released.
     let bestOffer = Array.create bodies.Length -1
     let bestRank = Array.zeroCreate<int> bodies.Length
     let bestWalk = Array.zeroCreate<int> bodies.Length
@@ -244,7 +244,7 @@ let matchAll
                     release b
 
             for bi in 0 .. bodies.Length - 1 do
-                if assigned.[bi] < 0 && (bestOffer.[bi] = oi || released.Contains bi) then
+                if assigned.[bi] < 0 && (bestOffer.[bi] = oi || released.Count > 0) then
                     score bi
 
     let mutable out = Map.empty
