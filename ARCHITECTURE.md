@@ -215,10 +215,11 @@ investment by its return was built and measured, cost twice the CPU and 580
 lines for no gain, and was not merged.
 
 **A colony keeps a reserve before it spends the surplus.** With storage, the
-target is every tower the level allows firing for two creep lifetimes
-(towers × TOWER_ENERGY_COST × CREEP_LIFE_TIME × 2: 30k at RCL4, 180k at RCL8):
-the season fights daily, and v1, spending all its surplus, held under 100k at
-RCL8. Below the target the gap is saved over a lifetime; above it the excess
+target is every tower the level allows firing for a number of creep
+lifetimes (towers × TOWER_ENERGY_COST × CREEP_LIFE_TIME × n). n is a
+declaration the operator sets live (`observe declare reserve n`), 2 by
+default (30k at RCL4, 180k at RCL8): the season fights daily, and v1,
+spending all its surplus, held under 100k at RCL8. Below the target the gap is saved over a lifetime; above it the excess
 hires upgraders in proportion. Open-source bots keep 75k–150k at RCL7–8 and
 pay walls from a higher threshold.
 
