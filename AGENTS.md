@@ -101,7 +101,8 @@ Docs:
   (`npm run soak -- --ticks 30000`, `ARCHITECTURE.md` §5, §10.2): long-run
   growth is the objective, and an early regression is accepted when the end
   of the run improves. Before shipping, `npm run soak:many` (the
-  seat extremes): no room regresses.
+  seat extremes) on two seeds or more: no room regresses, where a loss
+  smaller than that room's spread across seeds on the base is noise.
 - Unit tests only for invariants and pure arithmetic. A test that asserts one
   creep's action in one scenario is rejected in review.
 - `npm test` (unit) stays under a minute. Scenarios and soak run on `jj ship`
