@@ -1,6 +1,4 @@
-/// What `decide` asks the game to do, typed by the actor that does it
-/// (`ARCHITECTURE.md` §1). `Executor` turns each into one API call and
-/// reports the engine's answer.
+/// `Executor` turns each intent into one API call (`ARCHITECTURE.md` §1).
 module Fabot.Core.Intents
 
 open Fabot.Core.Vocabulary
@@ -21,7 +19,6 @@ type CreepAct =
 
 type SpawnAct = SpawnCreep of body: BodyPart list * name: string
 
-/// A room's own act: a construction site of ours on one of its tiles.
 type RoomAct = CreateSite of x: int * y: int * kind: World.Kind
 
 type LinkAct = TransferEnergy of target: string * amount: int
@@ -37,7 +34,6 @@ type Intent =
     | Tower of id: string * TowerAct
     | Link of id: string * LinkAct
 
-/// The actor an intent names, for a refusal's report.
 let actorOf =
     function
     | Creep(name, _) -> name

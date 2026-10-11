@@ -1,12 +1,11 @@
-/// This tick's facts, read once by the shell (`Fabot.World.ofGame`). Nothing in
-/// Core reads the game any other way. Facts only: no conclusion is stored here,
-/// and a field nobody reads is not added ahead of its reader.
+/// Nothing in Core reads the game but through this. Facts only: no conclusion
+/// is stored here, and a field nobody reads is not added ahead of its reader.
 module Fabot.Core.World
 
 open Fabot.Core.Vocabulary
 
-/// A tile of one room. Compared by hand: Fable's structural compare on a
-/// record walks every field, and positions are compared per tile per tick.
+/// Compared by hand: Fable's structural compare on a record walks every
+/// field, and positions are compared per tile per tick.
 [<CustomEquality; CustomComparison>]
 type Pos =
     {
@@ -34,28 +33,24 @@ type Pos =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Pos =
-    /// Chebyshev range between two tiles of one room; `None` across rooms.
     let range (a: Pos) (b: Pos) : int option =
         if a.Room = b.Room then
             Some(max (abs (a.X - b.X)) (abs (a.Y - b.Y)))
         else
             None
 
-    /// Whether two tiles stand in one room within `range` of each other.
     let within (range: int) (a: Pos) (b: Pos) : bool =
         a.Room = b.Room && max (abs (a.X - b.X)) (abs (a.Y - b.Y)) <= range
 
-/// Who an object belongs to, as far as a decision asks.
 type Owner =
     | Ours
     | Theirs of username: string
     | Nobody
 
-/// A store's contents: each resource it holds, and what it can hold in all.
 type Store =
     {
         Held: (Resource * int)[]
-        /// Total capacity, over every resource; 0 for no store.
+        /// Over every resource; 0 for no store.
         Capacity: int
     }
 
@@ -199,8 +194,7 @@ module Kind =
         | Kind.Portal -> "portal"
         | Kind.Other name -> name
 
-    /// Whether a creep may stand on it: roads, containers and ramparts (a
-    /// rampart only if ours or public; `Structure.Walkable` carries that).
+    /// A rampart is walkable only if ours or public: `Structure.Walkable`.
     let walkable (kind: Kind) : bool =
         match kind with
         | Kind.Road
@@ -218,10 +212,7 @@ type Structure =
         Hits: int
         HitsMax: int
         Store: Store
-        /// Ticks before it may act again (extractor, lab, link, terminal…).
         Cooldown: int
-        /// Whether our creeps may stand on it: the kind's answer, and a
-        /// rampart's only when it is ours or public.
         Walkable: bool
     }
 
@@ -241,7 +232,7 @@ type Source =
         Pos: Pos
         Energy: int
         EnergyCapacity: int
-        /// Ticks until it regenerates; 0 while the engine has no timer running.
+        /// 0 while the engine has no timer running.
         TicksToRegeneration: int
     }
 
@@ -253,7 +244,6 @@ type Mineral =
         Amount: int
     }
 
-/// A dropped pile.
 type Pile =
     {
         Id: string
@@ -262,7 +252,7 @@ type Pile =
         Amount: int
     }
 
-/// A tombstone or a ruin: one store with a clock on it.
+/// A tombstone or a ruin.
 type Remains = { Id: string; Pos: Pos; Store: Store }
 
 type Controller =
@@ -275,14 +265,12 @@ type Controller =
         ProgressTotal: int
         /// 0 on a controller nobody owns.
         TicksToDowngrade: int
-        /// Who reserves it and for how long; `None` when nobody does.
+        /// Username and ticks left.
         Reservation: (string * int) option
-        /// Ticks of safe mode left; 0 when off.
         SafeMode: int
         SafeModeAvailable: int
     }
 
-/// One body part as it stands: its kind, the hits left in it, its boost.
 [<Struct>]
 type Part =
     {
@@ -310,11 +298,10 @@ type Creep =
 type Room =
     {
         Name: string
-        /// `Game.map.getRoomTerrain(name).getRawBuffer()`: per `y * 50 + x`,
-        /// bit 1 wall, bit 2 swamp.
+        /// `Game.map.getRoomTerrain(name).getRawBuffer()`.
         Terrain: byte[]
         Controller: Controller option
-        /// Spawn energy banked and its capacity; 0 in a room without spawns.
+        /// 0 in a room without spawns.
         EnergyAvailable: int
         EnergyCapacity: int
         Sources: Source[]
@@ -325,12 +312,9 @@ type Room =
         Sites: Site[]
         Piles: Pile[]
         Remains: Remains[]
-        /// Every creep not ours standing here.
         Hostiles: Creep[]
     }
 
-/// The body in a spawn's oven: its name, the ticks until it stands, its
-/// parts (read off `Game.creeps`, where it already stands spawning).
 type Oven =
     {
         Name: string
@@ -343,16 +327,14 @@ type Spawn =
         Id: string
         Name: string
         Pos: Pos
-        /// The body in the oven; `None` when idle.
         Spawning: Oven option
     }
 
 type World =
     {
         Time: int
-        /// Our username, off any object we own; empty while we own nothing.
+        /// Empty while we own nothing.
         Me: string
-        /// `Game.cpu.limit` and `Game.cpu.bucket`.
         CpuLimit: float
         Bucket: int
         /// Visible rooms.
@@ -361,12 +343,10 @@ type World =
         Spawns: Spawn[]
         /// Ours, standing (still in an oven excluded).
         Creeps: Creep[]
-        /// Our construction sites in every room, seen or not
-        /// (`Game.constructionSites`): what MAX_CONSTRUCTION_SITES counts.
+        /// In every room, seen or not: what MAX_CONSTRUCTION_SITES counts.
         OurSites: int
     }
 
-/// Terrain at a tile of a room's raw buffer.
 module Terrain =
     let wall = 1uy
     let swamp = 2uy

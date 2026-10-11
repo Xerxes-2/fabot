@@ -1,7 +1,5 @@
-/// A room's tiles as one integer each, the engine's directions between them,
-/// its exit edges, and room names as world coordinates. A tile is `y * 50 + x`,
-/// the index of the terrain's raw buffer, so every per-room array in the Atlas
-/// reads the terrain's own order.
+/// A tile is `y * 50 + x`, the terrain raw buffer's index, so every per-room
+/// array in the Atlas reads the terrain's own order.
 module Fabot.Core.Tiles
 
 open Fabot.Core.World
@@ -63,14 +61,11 @@ let dy (direction: int) =
     | 6 -> 1
     | _ -> 0
 
-/// The tile one step from `tile` in `direction`, or -1 off the room.
 let neighbour (tile: int) (direction: int) =
     let x = xOf tile + dx direction
     let y = yOf tile + dy direction
     if inRoom x y then index x y else -1
 
-/// The direction from one tile to an adjacent one; 0 when they are not
-/// adjacent or are one tile.
 let direction (from: int) (onto: int) =
     let ddx = xOf onto - xOf from
     let ddy = yOf onto - yOf from
@@ -86,8 +81,6 @@ let direction (from: int) (onto: int) =
     | -1, -1 -> topLeft
     | _ -> 0
 
-/// The tiles of a room within `radius` of `tile`, clamped to the room, in
-/// tile order.
 let within (radius: int) (tile: int) : int[] =
     let x = xOf tile
     let y = yOf tile
@@ -101,15 +94,13 @@ let within (radius: int) (tile: int) : int[] =
 
 let private last = side - 1
 
-/// Whether a tile is on the room's border ring, corners included.
 let onEdge (tile: int) =
     let x = xOf tile
     let y = yOf tile
     x = 0 || y = 0 || x = last || y = last
 
-/// The exit a tile stands on, as the direction it leaves by (`top`, `right`,
-/// `bottom` or `left`, the engine's FIND_EXIT_* values); 0 off the ring and on
-/// a corner, which lies on two borders and lands nowhere.
+/// The engine's FIND_EXIT_* values; a corner lies on two borders and lands
+/// nowhere.
 let exitOf (tile: int) =
     let x = xOf tile
     let y = yOf tile
@@ -122,8 +113,6 @@ let exitOf (tile: int) =
     elif y = last then bottom
     else left
 
-/// The tiles of one exit edge, corners excluded, in tile order; empty for a
-/// direction that names no edge.
 let exitTiles (exit: int) : int[] =
     match exit with
     | 1 -> Array.init (side - 2) (fun i -> index (i + 1) 0)
@@ -132,8 +121,6 @@ let exitTiles (exit: int) : int[] =
     | 7 -> Array.init (side - 2) (fun i -> index 0 (i + 1))
     | _ -> [||]
 
-/// The tile of the next room a body on this exit tile lands on; -1 off an
-/// exit.
 let landing (tile: int) =
     let x = xOf tile
     let y = yOf tile
@@ -145,9 +132,6 @@ let landing (tile: int) =
     | 7 -> index last y
     | _ -> -1
 
-/// A room's place on the world grid, read off its name: `W0` is x = -1 and
-/// `E0` x = 0, `N0` y = -1 and `S0` y = 0, so `W12S28` is (-13, 28). None for
-/// a name outside the engine's grammar.
 let roomCoords (name: string) : (int * int) option =
     let digit i =
         i < name.Length && name.[i] >= '0' && name.[i] <= '9'
@@ -184,7 +168,6 @@ let roomCoords (name: string) : (int * int) option =
         | Some x, Some y -> Some(x, y)
         | _ -> None
 
-/// The name of the room at world coordinates: `roomCoords` backwards.
 let roomName (x: int) (y: int) : string =
     let axis outward inward value =
         if value < 0 then
@@ -194,8 +177,6 @@ let roomName (x: int) (y: int) : string =
 
     axis "W" "E" x + axis "N" "S" y
 
-/// The room across an exit of this one; None for a name outside the grammar
-/// or a direction that names no exit.
 let roomToward (name: string) (exit: int) : string option =
     match exit with
     | 1
@@ -206,8 +187,6 @@ let roomToward (name: string) (exit: int) : string option =
         |> Option.map (fun (x, y) -> roomName (x + dx exit) (y + dy exit))
     | _ -> None
 
-/// The exit of `from` that leads into `onto`; None unless the two share a
-/// border.
 let exitToward (from: string) (onto: string) : int option =
     match roomCoords from, roomCoords onto with
     | Some(fx, fy), Some(tx, ty) ->

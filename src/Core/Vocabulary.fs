@@ -1,6 +1,5 @@
-/// The engine's nouns: body parts, boosts, minerals, resources. Each union
-/// compares by a hand-written ordinal: Fable's generic union equality walks
-/// the case structure, and v1 measured these compares on its hot paths.
+/// Each union compares by a hand-written ordinal: Fable's generic union
+/// equality walks the case structure, and v1 measured it on hot paths.
 [<AutoOpen>]
 module Fabot.Core.Vocabulary
 
@@ -65,7 +64,6 @@ let partOfName (name: string) : BodyPart option =
     | "tough" -> Some Tough
     | _ -> None
 
-/// A part's one letter, as a body's text spells it ("18M17A").
 let partLetter (part: BodyPart) : char =
     match part with
     | Work -> 'W'
@@ -79,10 +77,7 @@ let partLetter (part: BodyPart) : char =
 
 let allBodyParts = [ Work; Carry; Move; Attack; RangedAttack; Heal; Claim; Tough ]
 
-/// The boost one part carries as far as a fight reads it: the tier of a
-/// compound on the part's own combat act (`BOOSTS`) — ATTACK's swing,
-/// RANGED_ATTACK's shot and mass attack, HEAL's heals, TOUGH's damage taken,
-/// MOVE's fatigue, WORK's dismantle — or none. A WORK boost for harvest,
+/// A fight's view of a part's boost (`BOOSTS`): a WORK boost for harvest,
 /// build or upgrade and a CARRY boost read as `Unboosted`.
 type Boost =
     | Unboosted
@@ -114,10 +109,8 @@ module Boost =
         | Work, "XZH2O" -> Tier3
         | _ -> Unboosted
 
-    /// How many unboosted parts of its kind one part acts as
-    /// (`calcBodyEffectiveness`): ×2/×3/×4 a tier on ATTACK, RANGED_ATTACK,
-    /// HEAL, MOVE and dismantling WORK; 1 for the rest, TOUGH included,
-    /// whose boost is on the damage it takes (`damageRatio`).
+    /// `calcBodyEffectiveness`. TOUGH's boost is on the damage it takes
+    /// (`damageRatio`), not here.
     let multiple (part: BodyPart) (boost: Boost) : int =
         match part, boost with
         | (Attack | RangedAttack | Heal | Move | Work), Tier1 -> 2
@@ -125,7 +118,6 @@ module Boost =
         | (Attack | RangedAttack | Heal | Move | Work), Tier3 -> 4
         | _ -> 1
 
-    /// The share of a strike's damage a part takes in its own hits.
     let damageRatio (part: BodyPart) (boost: Boost) : float =
         match part, boost with
         | Tough, Tier1 -> 0.7
@@ -142,7 +134,6 @@ let partCountIn (body: BodyPart list) part =
 
     count
 
-/// A room's base mineral: the seven a `FIND_MINERALS` deposit can hold.
 [<CustomEquality; CustomComparison>]
 type Ore =
     | Hydrogen
@@ -178,15 +169,12 @@ type Ore =
 
 let allOres = [ Hydrogen; Oxygen; Utrium; Keanium; Lemergium; Zynthium; Catalyst ]
 
-/// What a lab makes of ore. The UH line alone, the one boost line v1 used; a
-/// compound joins the day a decision names it.
+/// The UH line alone, the one boost line v1 used; a compound joins the day a
+/// decision names it.
 [<CustomEquality; CustomComparison>]
 type Compound =
-    /// OH: H and O. Boosts nothing; UH2O's second reagent.
     | Hydroxide
-    /// UH: U and H. ATTACK ×2.
     | UtriumHydride
-    /// UH2O: UH and OH. ATTACK ×3.
     | UtriumAcid
 
     member this.Ordinal =
@@ -210,8 +198,8 @@ type Compound =
 
 let allCompounds = [ Hydroxide; UtriumHydride; UtriumAcid ]
 
-/// What a store holds, as far as a decision names it. A season's own resource
-/// is `Season`'s and joins here only as `Other` with the engine's string.
+/// A season's own resource is `Season`'s and joins here only as `Other` with
+/// the engine's string.
 [<CustomEquality; CustomComparison>]
 type Resource =
     | Energy
@@ -279,7 +267,6 @@ let resourceOfName (name: string) : Resource =
     | "UH2O" -> Compound UtriumAcid
     | other -> Other other
 
-/// An ore or a compound: what a lab holds.
 let isMineral =
     function
     | Ore _

@@ -1,26 +1,19 @@
-/// One tick over the modules, in order: each is timed, can be switched off,
-/// and a throw in one costs that module this tick and nothing else
-/// (`ARCHITECTURE.md` §2). The clock is passed in, so the decision stays
-/// deterministic and the accounting is testable.
+/// A throw in one module costs that module this tick and nothing else
+/// (`ARCHITECTURE.md` §2). The clock is passed in to keep `decide` deterministic.
 module Fabot.Core.Tick
 
 open Fabot.Core.World
 open Fabot.Core.Intents
 open Fabot.Core.State
 
-/// What the operator declares (`declarations`, `ARCHITECTURE.md` §4), read
-/// by `Main` and handed down.
 type Declarations =
     {
         /// The creep lifetimes of tower fire a colony's reserve holds.
         ReserveLifetimes: float
     }
 
-/// The declarations where the operator has declared nothing.
 let undeclared = { ReserveLifetimes = 2.0 }
 
-/// What every module reads: the tick's facts, the geometry built from them
-/// once (`ARCHITECTURE.md` §1), and the declarations.
 [<NoEquality; NoComparison>]
 type Context =
     {

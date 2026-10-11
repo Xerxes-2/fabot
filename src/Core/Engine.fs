@@ -14,7 +14,7 @@ let harvestPerWork = 2
 /// CARRY_CAPACITY.
 let carryPartCapacity = 50
 
-/// HARVEST_MINERAL_POWER: what one WORK part takes from a deposit an act.
+/// HARVEST_MINERAL_POWER.
 let mineralHarvestPerWork = 1
 
 /// EXTRACTOR_COOLDOWN. The cycle is one longer (`mineralHarvestCycle`): the
@@ -74,7 +74,7 @@ let storageCapacity = 1_000_000
 
 let terminalCapacity = 300_000
 
-/// TERMINAL_COOLDOWN: ticks a terminal is refused after a `send`.
+/// TERMINAL_COOLDOWN.
 let terminalCooldown = 10
 
 /// TERMINAL_MIN_SEND: below it `send` is refused.
@@ -88,14 +88,14 @@ let labReactionAmount = 5
 /// `runReaction`'s reach from the output lab to each reagent lab.
 let labReactionRange = 2
 
-/// REACTION_TIME: the output lab's cooldown after one reaction.
+/// REACTION_TIME.
 let reactionTime =
     function
     | Hydroxide -> 20
     | UtriumHydride -> 10
     | UtriumAcid -> 5
 
-/// REACTIONS read the other way: a compound's two reagents.
+/// REACTIONS.
 let reagentsOf =
     function
     | Hydroxide -> Ore Hydrogen, Ore Oxygen
@@ -106,7 +106,7 @@ let reagentsOf =
 /// the next tick alone.
 let observerRange = 10
 
-/// CONTROLLER_DOWNGRADE: the full downgrade timer at each level.
+/// CONTROLLER_DOWNGRADE.
 let controllerDowngrade (level: int) =
     match level with
     | 1 -> 20_000
@@ -122,8 +122,7 @@ let controllerDowngrade (level: int) =
 /// The downgrade timer below which `activateSafeMode` is ERR_TIRED.
 let safeModeDowngradeLine (level: int) = controllerDowngrade level / 2 - 5_000
 
-/// A terminal `send`'s energy fee over the linear room distance
-/// (`calcTerminalEnergyCost`).
+/// `calcTerminalEnergyCost`, over the linear room distance.
 let sendFee (range: int) (amount: int) =
     float amount * (1.0 - exp (-float range / 30.0)) |> ceil |> int
 
@@ -182,8 +181,6 @@ let towerFalloffRange = 20
 
 let towerFalloff = 0.75
 
-/// A tower act at this range: full to the optimal range, falling linearly to
-/// the falloff range, flat beyond, floored. Heal, attack and repair share it.
 let private towerPowerAt (power: int) (range: int) =
     if range <= towerOptimalRange then
         power
@@ -206,8 +203,7 @@ let towerRepairAt (range: int) = towerPowerAt towerPowerRepair range
 /// BODYPART_HITS.
 let partHits = 100
 
-/// The parts still acting at these hits: the engine destroys parts from the
-/// head, so the live ones are the tail, a part with any hit counting whole.
+/// The engine destroys parts from the head; a part with any hit left acts.
 let liveParts (body: BodyPart list) (hits: int) : BodyPart list =
     let live = (hits + partHits - 1) / partHits
     body |> List.skip (max 0 (List.length body - live))
@@ -215,8 +211,7 @@ let liveParts (body: BodyPart list) (hits: int) : BodyPart list =
 let private partHitsAt (n: int) (hits: int) (i: int) =
     max 0 (min partHits (hits - partHits * (n - 1 - i)))
 
-/// The parts acting at these hits, each counted at its boost's multiple
-/// (`calcBodyEffectiveness`). `boosts` is one a part head first, or empty.
+/// `calcBodyEffectiveness`. `boosts` is one a part, head first, or empty.
 let powerAt (body: BodyPart list) (boosts: Boost list) (hits: int) : BodyPart -> int =
     if List.isEmpty boosts then
         partCountIn (liveParts body hits)
@@ -229,9 +224,7 @@ let powerAt (body: BodyPart list) (boosts: Boost list) (hits: int) : BodyPart ->
             acting
             |> List.sumBy (fun (p, boost) -> if samePart p part then Boost.multiple p boost else 0)
 
-/// The hits a strike of `damage` takes off a body (`_applyDamage`): each
-/// boosted TOUGH from the head back takes its `damageRatio` share of what
-/// reaches it, the rest in full.
+/// The engine's `_applyDamage`.
 let damageTaken (body: BodyPart list) (boosts: Boost list) (hits: int) (damage: int) : int =
     if List.isEmpty boosts || damage <= 0 then
         damage
@@ -268,8 +261,7 @@ let toughHits (body: BodyPart list) (boosts: Boost list) (hits: int) : int =
             else
                 0)
 
-/// The damage a strike must deal to take `taken` hits: `damageTaken`'s
-/// inverse.
+/// `damageTaken`'s inverse.
 let damageFor (body: BodyPart list) (boosts: Boost list) (hits: int) (taken: int) : int =
     if List.isEmpty boosts || taken <= 0 then
         taken
@@ -299,7 +291,7 @@ let sourceRegenTime = 300
 /// BUILD_POWER.
 let buildPerWork = 5
 
-/// UPGRADE_CONTROLLER_POWER: energy one WORK part spends upgrading a tick.
+/// UPGRADE_CONTROLLER_POWER.
 let upgradeDrainPerWork = 1
 
 /// CONTROLLER_MAX_UPGRADE_PER_TICK at `controllerMaxLevel`, summed over every
@@ -308,7 +300,7 @@ let maxUpgradePerTick = 15
 
 let controllerMaxLevel = 8
 
-/// CONTROLLER_LEVELS: the progress a level needs to reach the next.
+/// CONTROLLER_LEVELS.
 let controllerLevelProgress (level: int) =
     match level with
     | 1 -> 200
@@ -367,10 +359,8 @@ let repairHitsPerEnergy = 100
 /// MAX_CONSTRUCTION_SITES, across every room.
 let maxConstructionSites = 100
 
-/// A room's side in tiles: the stride of every flat `y * 50 + x` grid.
 let roomSide = 50
 
-// CONTROLLER_STRUCTURES rows, by level from 0; the last entry holds above.
 let private spawnRow = [| 0; 1; 1; 1; 1; 1; 1; 2; 3 |]
 let private extensionRow = [| 0; 0; 5; 10; 20; 30; 40; 50; 60 |]
 let private linkRow = [| 0; 0; 0; 0; 0; 2; 3; 4; 6 |]
@@ -382,9 +372,8 @@ let private sixthRow = [| 0; 0; 0; 0; 0; 0; 1 |]
 let private labRow = [| 0; 0; 0; 0; 0; 0; 3; 6; 10 |]
 let private seventhRow = [| 0; 0; 0; 0; 0; 0; 0; 1 |]
 
-/// CONTROLLER_STRUCTURES: how many of a structure type (the engine's
-/// `STRUCTURE_*` string) a room may hold at a controller level, standing and
-/// sites together; 0 for a type the table does not name.
+/// CONTROLLER_STRUCTURES, keyed by the engine's `STRUCTURE_*` string; sites
+/// count with standing structures.
 let controllerStructures (structureType: string) (level: int) : int =
     let at (row: int[]) =
         if level < 0 then 0

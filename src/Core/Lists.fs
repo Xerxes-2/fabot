@@ -1,19 +1,12 @@
-/// `List.sortBy`, `sortByDescending` and `maxBy` with the key taken once an
-/// element. Fable's own ask the projection of both sides at every
-/// comparison, so a sort runs it O(n log n) times and a `maxBy` twice an
-/// element; v1 measured an expensive projection paying that live. Same
-/// answers as Fable's, ties included: the sorts are stable, and `maxBy`
-/// keeps the first of equal keys by `compare`. Auto-opened, so every
-/// `List.sortBy` in Core resolves here.
+/// Fable's `sortBy` and `maxBy` run the projection at every comparison, and
+/// v1 measured that live. These keep Fable's answers, ties included.
 ///
-/// No `minBy`: Fable's keeps the **last** of equal keys where .NET's keeps
-/// the first, so the bundle and `dotnet test` already part on a tie there,
-/// and one written here would move one of them.
+/// No `minBy`: Fable's keeps the last of equal keys and .NET's the first, so
+/// one written here would move the bundle or `dotnet test` on a tie.
 [<AutoOpen>]
 module Fabot.Core.Lists
 
-// The work, once: the wrappers below are inline only to hand it the
-// comparison their key type specialises, so a call site costs one call.
+// The wrappers are inline only to specialise `compare` to the key type.
 let sortedByKey (projection: 'T -> 'Key) (order: 'Key -> 'Key -> int) (list: 'T list) : 'T list =
     match list with
     | []

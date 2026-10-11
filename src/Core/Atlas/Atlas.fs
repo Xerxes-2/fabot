@@ -1,24 +1,18 @@
-// The tick's geometry, built once from `World`: a walk grid per visible room,
-// the room graph between rooms, and the one tick cache there is, the floods
-// (`ARCHITECTURE.md` §1). Every path query takes a footprint. Built twice
-// from one `World`, an Atlas answers identically: nothing in it is static
-// or survives the tick.
+// The floods are the one tick cache (`ARCHITECTURE.md` §1). Built twice from
+// one `World`, an Atlas answers identically: nothing in it survives the tick.
 namespace Fabot.Core
 
 open System.Collections.Generic
 open Fabot.Core.World
 open Fabot.Core.Grid
 
-/// How a body walks: the tiles it covers and its pace.
 type Mover =
     {
         Footprint: Footprint
         Factor: FatigueFactor
     }
 
-/// Where a walk ends: a footprint within `Range` of any of `Tiles` (tile
-/// indices) in `Room`. A walk from another room follows the room graph,
-/// around `Avoid` (never its two ends) and within `MaxHops` crossings.
+/// `Tiles` are tile indices; `Avoid` never holds a walk back from its ends.
 type Target =
     {
         Room: string
@@ -28,17 +22,13 @@ type Target =
         MaxHops: int
     }
 
-/// The tick cache's reads so far: a hit is a flood answered from the table, a
-/// miss a flood run.
 type Counts = { Hits: int; Misses: int }
 
-/// One visible room's ground this tick: a fatigue weight per tile, -1 where
-/// nothing may stand. Our creeps are no wall (who yields is `Move`'s call); a
-/// creep not ours yields to nothing we decide, so its tile is one this tick.
+/// Our creeps are no wall (who yields is `Move`'s call); a creep not ours
+/// yields to nothing we decide, so nothing may stand on its tile this tick.
 [<NoEquality; NoComparison>]
 type internal RoomGrid = { Weights: int[] }
 
-/// A room priced for one mover toward one target: the ticks from each tile.
 [<NoEquality; NoComparison>]
 type Field =
     private
@@ -49,8 +39,6 @@ type Field =
             Dist: int[]
         }
 
-/// This tick's grids and flood table; built by `Atlas.ofWorld`, dropped with
-/// the tick.
 [<NoEquality; NoComparison>]
 type Atlas =
     private
@@ -63,8 +51,6 @@ type Atlas =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Field =
-    // What a step onto `next` and the walk on from it cost, `unreached` when it
-    // leads nowhere: blocked, unreached, or a ring tile short of the goal.
     let private via (field: Field) (next: int) =
         let weight = weightOf field.Footprint field.Weights next
 
@@ -78,7 +64,6 @@ module Field =
             else
                 d + at weight field.Steps
 
-    // The cheapest next tile and the ticks through it; -1 for none.
     let private best (field: Field) (tile: int) : struct (int * int) =
         let mutable next = -1
         let mutable ticks = unreached
@@ -95,8 +80,6 @@ module Field =
 
         struct (next, ticks)
 
-    /// The ticks from a tile to the nearest goal; None where none is reached.
-    /// A tile the footprint cannot stand on is priced by its cheapest step off.
     let ticks (field: Field) (tile: int) : int option =
         let d =
             if weightOf field.Footprint field.Weights tile >= 0 then
@@ -107,8 +90,6 @@ module Field =
 
         if d = unreached then None else Some d
 
-    /// The direction of a cheapest step from a tile toward the goals, ties to
-    /// the lowest direction; None at a goal or where none is reached.
     let step (field: Field) (tile: int) : int option =
         match ticks field tile with
         | Some d when d > 0 ->
@@ -118,20 +99,15 @@ module Field =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Atlas =
-    /// Whether a tile is a room's controller buffer: in its controller's
-    /// upgrade range, with no source beside it.
     let isBuffer (room: Room) (pos: Pos) : bool =
         room.Controller
         |> Option.exists (fun c -> Pos.within Engine.upgradeRange c.Pos pos)
         && not (room.Sources |> Array.exists (fun s -> Pos.within 1 s.Pos pos))
 
-    /// Whether a link on the tile serves a source: within 2 of one, beside
-    /// its container.
+    /// Within 2: beside the source's container.
     let isSourceLink (room: Room) (pos: Pos) : bool =
         room.Sources |> Array.exists (fun s -> Pos.within 2 s.Pos pos)
 
-    /// The controller's link: of our links in its upgrade range serving no
-    /// source, the nearest it, ties by tile.
     let controllerLink (room: Room) : Structure option =
         room.Controller
         |> Option.bind (fun c ->
@@ -144,19 +120,14 @@ module Atlas =
             |> Array.sortBy (fun s -> Pos.range c.Pos s.Pos, Tiles.ofPos s.Pos)
             |> Array.tryHead)
 
-    /// What the controller's upgraders draw from: its link where one stands,
-    /// else the first container on a buffer tile (`isBuffer`).
     let buffer (room: Room) : Structure option =
         controllerLink room
         |> Option.orElseWith (fun () ->
             room.Structures
             |> Array.tryFind (fun s -> s.Kind = Kind.Container && isBuffer room s.Pos))
 
-    /// The seat a source's harvester digs from, and the id of the container
-    /// standing on it: of the tiles beside the source under a container or a
-    /// container site of ours, the farthest from the controller (so a
-    /// controller container on a seat is no post), a built one before a site,
-    /// then the first.
+    /// Farthest from the controller first, so a controller container on a seat
+    /// is no post.
     let postOf (room: Room) (source: Pos) : (Pos * string option) option =
         let fromController (p: Pos) =
             room.Controller
@@ -175,10 +146,8 @@ module Atlas =
             -(fromController p), Option.isNone built, p.Y * Tiles.side + p.X)
         |> Array.tryHead
 
-    /// The tiles a working body holds for its life, read off the structures
-    /// alone: each source's post (`postOf`) and a container buffer's tile
-    /// (`buffer`). A link's tile is solid, and its upgraders' tiles beside it
-    /// stay open: held, they priced every walk past the controller dearer.
+    /// A link buffer's upgrader tiles stay open: held, they priced every walk
+    /// past the controller dearer.
     let workSeats (room: Room) : int[] =
         Array.append
             (room.Sources |> Array.choose (fun s -> postOf room s.Pos |> Option.map fst))
@@ -188,11 +157,8 @@ module Atlas =
              |> Option.toArray)
         |> Array.map Tiles.ofPos
 
-    /// The walk grid and occupancy of every visible room. A road makes its
-    /// tile 1 (a tunnel too); a structure no creep of ours may stand on, of any
-    /// owner, a site of ours that the engine treats as an obstacle, and a
-    /// source, mineral or controller make it -1. A room whose terrain buffer is
-    /// not a whole room has no grid: routed by name, never walked.
+    /// A room whose terrain buffer is not a whole room has no grid: routed by
+    /// name, never walked.
     let ofWorld (world: World) : Atlas =
         let rooms = Dictionary<string, RoomGrid>()
 
@@ -251,18 +217,14 @@ module Atlas =
             Misses = atlas.Misses
         }
 
-    /// Whether a body of one tile may stand on a tile of a room this tick, a
-    /// tile one of ours stands on included; false in a room not visible.
     let passable (atlas: Atlas) (room: string) (tile: int) : bool =
         match atlas.Rooms.TryGetValue room with
         | true, grid -> tile >= 0 && tile < Tiles.count && grid.Weights.[tile] >= 0
         | _ -> false
 
-    // A tile a footprint may stand on and stay: passable, off the ring.
     let private seat (footprint: Footprint) (weights: int[]) (tile: int) =
         weightOf footprint weights tile >= 0 && not (onEdge footprint tile)
 
-    // Chebyshev range from what a footprint anchored at `anchor` covers to `tile`.
     let private reach (footprint: Footprint) (anchor: int) (tile: int) =
         match footprint with
         | One -> Tiles.range anchor tile
@@ -287,8 +249,6 @@ module Atlas =
             if reach footprint anchor tile <= range && seat footprint weights anchor then
                 into.Add anchor
 
-    /// The tiles a footprint may stand on with something it covers within
-    /// `range` of `target`, in tile order: passable, off the border ring.
     let seats (atlas: Atlas) (footprint: Footprint) (range: int) (target: Pos) : Pos list =
         match atlas.Rooms.TryGetValue target.Room with
         | true, grid ->
@@ -297,8 +257,6 @@ module Atlas =
             [ for tile in found -> Tiles.toPos target.Room tile ]
         | _ -> []
 
-    // Whether a crossing joins two rooms that share a border: some exit tile
-    // and its landing both passable, a room not visible counted open.
     let private linked (atlas: Atlas) (from: string) (onto: string) (exit: int) =
         let near =
             match atlas.Rooms.TryGetValue from with
@@ -319,10 +277,6 @@ module Atlas =
                 | Some weights -> weights.[Tiles.landing tile] >= 0
                 | None -> true))
 
-    /// The rooms a walk crosses from one room to another, both ends included,
-    /// by fewest crossings: a breadth-first search over the room graph within
-    /// `maxHops`, around `avoid` (the ends excepted), exits tried top, right,
-    /// bottom, left. None when no such chain exists.
     let route
         (atlas: Atlas)
         (avoid: Set<string>)
@@ -368,7 +322,6 @@ module Atlas =
             else
                 None
 
-    // The anchors a footprint leaves a room by through one exit edge.
     let private exitGoals (footprint: Footprint) (weights: int[]) (exit: int) : int[] =
         match footprint with
         | One -> Tiles.exitTiles exit |> Array.filter (fun tile -> weights.[tile] >= 0)
@@ -388,11 +341,6 @@ module Atlas =
                         yield anchor
             |]
 
-    /// A room priced for a mover toward a target: the goals are the seats
-    /// within range of the target's tiles when the room is the target's, else
-    /// the exit toward the next room of `route`. Flooded once a tick per room,
-    /// goals, footprint and pace; None for a room not visible, a body that
-    /// never steps, or no route.
     let field (atlas: Atlas) (mover: Mover) (target: Target) (room: string) : Field option =
         match atlas.Rooms.TryGetValue room with
         | true, grid when mover.Factor.Moves > 0 ->
@@ -459,14 +407,11 @@ module Atlas =
                     }
         | _ -> None
 
-    /// Ticks from a tile to the target (in another room: to leaving this one
-    /// toward it); None where it is not reached.
+    /// In another room: the ticks to leaving this one toward it.
     let travelTicks (atlas: Atlas) (mover: Mover) (target: Target) (from: Pos) : int option =
         field atlas mover target from.Room
         |> Option.bind (fun field -> Field.ticks field (Tiles.ofPos from))
 
-    /// The direction of a cheapest step from a tile toward the target; None at
-    /// the target or where it is not reached.
     let firstStep (atlas: Atlas) (mover: Mover) (target: Target) (from: Pos) : int option =
         field atlas mover target from.Room
         |> Option.bind (fun field -> Field.step field (Tiles.ofPos from))
