@@ -48,7 +48,10 @@ ones.
 - Simple and working beats clever, even if slower. Start with the simple
   rule (a fixed order, the engine's allowance, a plain threshold); replace it
   with a priced decision only when a soak shows the simple rule losing, and
-  say by how much in the commit.
+  say by how much in the commit. A simple rule lives in one function shaped
+  as its priced replacement would be (the facts it would read in, a rank or
+  a choice out), so the swap changes that function and nothing else; never
+  scatter a rule across its callers.
 - Where a decision is priced, it is priced when a commitment is made
   (`Exchange.cheapestWin`, `Strategy`), not re-read per tick.
 
