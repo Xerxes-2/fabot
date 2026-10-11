@@ -402,7 +402,7 @@ let tests =
 
             testPropertyWithConfig
                 config
-                "a planned walk lists passable tiles beside it, its tail nearer the target"
+                "a planned walk lists passable tiles beside it, its tail nearer the target or beside its head"
             <| fun (errand: Errand) ->
                 let atlas, mover, wish = planned errand
                 let at = wish.At
@@ -417,7 +417,7 @@ let tests =
                     || wish.Tail
                        |> Array.forall (fun tile ->
                            match ticks tile, ticks at with
-                           | Some near, Some far -> near < far
+                           | Some near, Some far -> near < far || Tiles.range tile wish.Head = 1
                            | _ -> false))
 
             testPropertyWithConfig

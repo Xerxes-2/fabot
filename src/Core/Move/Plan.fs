@@ -48,9 +48,10 @@ let stay (atlas: Atlas) (creep: Creep) (factor: FatigueFactor) (weight: int) : W
 /// stays, its working tiles that seat and the seats beside it, and it may be
 /// shoved onto those seats first, then onto any tile beside it off the ring.
 /// Elsewhere its head is the Atlas's first step, its onward the step after,
-/// and its tail every passable tile beside it nearer the target, nearest
-/// first: a body steps only closer, and onto the border ring only where its
-/// walk leaves the room. With no step to take it stays.
+/// and its tail every passable tile beside it nearer the target or beside its
+/// head, nearest first (the way round a body the Atlas's walk does not see),
+/// onto the border ring only where its walk leaves the room. With no step to
+/// take it stays.
 let toward (atlas: Atlas) (creep: Creep) (mover: Mover) (target: Target) (weight: int) : Wish =
     let room = creep.Pos.Room
     let at = Tiles.ofPos creep.Pos
@@ -97,7 +98,8 @@ let toward (atlas: Atlas) (creep: Creep) (mover: Mover) (target: Target) (weight
                     beside atlas creep
                     |> Array.filter (fun tile ->
                         tile <> head
-                        && ticks tile < here
+                        && (ticks tile < here
+                            || (ticks tile < unreached && Tiles.range tile head = 1))
                         && (ticks tile = 0 || not (Tiles.onEdge tile)))
                     |> Array.sortBy (fun tile -> ticks tile, tile)
 
