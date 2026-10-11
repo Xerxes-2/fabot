@@ -516,6 +516,11 @@ everything v1 used its self-written arena for, and more:
   whose sources have four or more), so no change is tuned to one kind of
   terrain. The extremes answer differently (a crowd of small bodies works
   only where seats are many), so they are read apart, never as a median.
+  A soak is a relative measure: A against B on the same rooms and seed,
+  reported as the difference, never as what live will do (live has
+  neighbours, season rules and the owner's hand, which no soak calibrates
+  against). A win is re-checked on another seed before it is believed; a
+  gap between soak and live surfaces as an incident and becomes a scenario.
 - **Nodes.** A long soak from a respawn reaches RCL3 in 10,000 ticks and
   never sees links, labs or power. Each node below is a start state built
   from Layout's own plan (the level's allowed structures on their planned
