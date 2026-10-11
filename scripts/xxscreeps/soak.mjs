@@ -91,7 +91,10 @@ const screepsrc = [
 ].join("\n");
 
 // ---- the world -------------------------------------------------------------
-const world = join(ENGINE, "worlds", "soak");
+// One world per run, so two soaks at once never share a server. The name is
+// kept short: the engine's unix sockets live under it, and a socket path has
+// a length limit.
+const world = join(ENGINE, "worlds", `soak-${(flags["--run"] ?? "default").replace(/[^A-Za-z0-9-]/g, "").slice(0, 24)}`);
 rmSync(world, { recursive: true, force: true });
 // A copied socket is a dead server's; only files and directories come over.
 cpSync(TEMPLATE, world, { recursive: true, filter: (src) => lstatSync(src).isFile() || lstatSync(src).isDirectory() });
