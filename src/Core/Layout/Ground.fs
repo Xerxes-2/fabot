@@ -187,40 +187,33 @@ let private valid (ground: Ground) (anchor: int) =
     && at anchor ground.Weights >= 0
     && spawnSlots anchor |> Array.exists (fun s -> s >= 0 && at s ground.Free)
 
-/// The plan's anchor: of the valid anchors, the one whose spawn slots hold
-/// the most of our standing spawns, then with the most free tiles within
-/// `coreRadius`, then the least summed range to the sources and the
-/// controller, then the lowest tile. With spawns standing only an anchor
-/// with one on its slots is a candidate; without, every tile is, so the
-/// anchor a room is founded on is the anchor its first spawn, once standing,
-/// gives again, and a spawn added on a slot only adds to that anchor's
-/// count. None when no tile qualifies.
-let anchorOf (ground: Ground) (spawns: int[]) : int option =
+/// The valid anchors, best first: the most of our standing spawns on its
+/// spawn slots, then the most free tiles within `coreRadius`, then the least
+/// summed range to the sources and the controller, then the lowest tile.
+/// With spawns standing only an anchor with one on its slots is a candidate;
+/// without, every tile is.
+let anchors (ground: Ground) (spawns: int[]) : int[] =
     let opens = openness ground
-    let mutable best = -1
-    let mutable bestKey = struct (0, 0, 0, 0)
 
-    let consider (a: int) =
-        if valid ground a then
-            let held =
-                spawnSlots a |> Array.sumBy (fun s -> if Array.contains s spawns then 1 else 0)
+    let candidates =
+        if spawns.Length = 0 then
+            [| 0 .. Tiles.count - 1 |]
+        else
+            [|
+                for s in spawns do
+                    for dx, dy in spawnOffsets do
+                        let x = Tiles.xOf s - dx
+                        let y = Tiles.yOf s - dy
 
-            let key = struct (-held, -(at a opens), reachSum ground a, a)
+                        if Tiles.inRoom x y then
+                            yield Tiles.index x y
+            |]
+            |> Array.distinct
 
-            if best < 0 || compare key bestKey < 0 then
-                best <- a
-                bestKey <- key
+    candidates
+    |> Array.filter (valid ground)
+    |> Array.sortBy (fun a ->
+        let held =
+            spawnSlots a |> Array.sumBy (fun s -> if Array.contains s spawns then 1 else 0)
 
-    if spawns.Length = 0 then
-        for a in 0 .. Tiles.count - 1 do
-            consider a
-    else
-        for s in spawns do
-            for dx, dy in spawnOffsets do
-                let x = Tiles.xOf s - dx
-                let y = Tiles.yOf s - dy
-
-                if Tiles.inRoom x y then
-                    consider (Tiles.index x y)
-
-    if best < 0 then None else Some best
+        struct (-held, -(at a opens), reachSum ground a, a))

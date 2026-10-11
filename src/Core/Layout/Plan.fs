@@ -668,8 +668,23 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         Unfit = List.ofSeq unfit
     }
 
-/// The plan of a room with the spawns that stand in it (tiles), around
-/// `Ground.anchorOf`'s anchor; for a room without one, the plan its first
-/// spawn founds. None when the room offers no anchor.
+/// The plan of a room with the spawns that stand in it (tiles): around the
+/// first of `Ground.anchors` whose plan stands its first spawn on a spawn
+/// slot, a standing spawn where any stands, so the spawn a room is founded
+/// with, built where the plan says, gives the plan again; else around the
+/// first. None when the room offers no anchor.
 let ofGround (ground: Ground) (spawns: int[]) : Plan option =
-    anchorOf ground spawns |> Option.map (fun anchor -> draw ground anchor spawns)
+    let candidates = anchors ground spawns
+
+    let seated (plan: Plan) =
+        plan.Items
+        |> Array.tryFind (fun i -> i.Kind = Kind.Spawn)
+        |> Option.exists (fun i ->
+            Array.contains i.Tile (spawnSlots plan.Anchor)
+            && (spawns.Length = 0 || Array.contains i.Tile spawns))
+
+    candidates
+    |> Seq.map (fun anchor -> draw ground anchor spawns)
+    |> Seq.tryFind seated
+    |> Option.orElseWith (fun () ->
+        Array.tryHead candidates |> Option.map (fun a -> draw ground a spawns))
