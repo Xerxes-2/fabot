@@ -1,7 +1,7 @@
 # fabot
 
 `ARCHITECTURE.md` is the only design document. The code decides anything it does
-not; no other file is a source of truth. v1 (commit `427ff628`) is source to
+not; no other file is a source of truth. v1 (the `v1` bookmark) is source to
 port from, never a fact about v2.
 
 Reading costs more than writing: every line is written once and read by
@@ -32,9 +32,9 @@ ones.
 
 ## Fixing behaviour
 
-- v1 (`427ff628`) ran live and solved much of the economy already. Before
+- v1 (`v1`) ran live and solved much of the economy already. Before
   designing a fix, find how v1 solved the problem (its code and
-  `docs/adr/`, read with `git show 427ff628:<path>`) and port that mechanism
+  `docs/adr/`, read with `git show v1:<path>`) and port that mechanism
   with its invariant; drop or replace it only when it was a one-incident
   patch or no longer applies, and say which in the commit.
 
@@ -125,7 +125,7 @@ Docs:
 
 1. `/code-review` has run on the diff and its findings are resolved.
 2. `jj describe` with a conventional-commit subject and one `Fixes #<n>` trailer line per issue.
-3. `jj bookmark set main -r @`, then `jj ship`: the gates (`npm test`: format check, line ceilings, `dotnet test`; then the build and `npm run smoke`), then `jj git push`. Its gates are the pre-push run; don't run `npm test` again before it. A pushed change is immutable.
+3. `jj ship [-r REV]` (`scripts/ship.sh`): the gates (`npm test`: format check, line ceilings, `dotnet test`; then the build and `npm run smoke`), then the `claude.session-branch` bookmark (`main` locally, set once with `jj config set --repo claude.session-branch main`) moved to REV and pushed. Its gates are the pre-push run; don't run `npm test` again before it. A pushed change is immutable.
 4. `npm run deploy` builds, smokes and uploads the bundle to the live server; the first tick after it is a cold reset.
 
 Squash TDD slices into one change per issue; push per issue.
@@ -160,5 +160,8 @@ unasked.
 on|off|clear`. The commands ARCHITECTURE.md names beyond these (`engagements`,
 `exchange`, `declare`, `replay`) land with their modules.
 
-v1 is archived at commit `427ff628`: `git show 427ff628:<path>` reads a file
-being ported. It is source to port from, never a fact about v2.
+v1 lives on the `v1` bookmark (`427ff628`, the code running live). It takes
+maintenance only — a live firefight or a deploy-blocking break — committed on
+top of `v1`, gated by its own `npm test`, pushed with `jj git push -b v1`, and
+deployed from a workspace on `v1`. Nothing ports from v2 to v1. For v2 it is
+source to port from (`git show v1:<path>`), never a fact about v2.

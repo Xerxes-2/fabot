@@ -622,8 +622,8 @@ Correctness is proven live, so the live loop has to be safe:
 
 ## 13. Port manifest
 
-v1 is archived at commit **`427ff628`** (main as of 2026-10-10, PR #681 merged).
-Read a v1 file with `git show 427ff628:<path>`; nothing of v1 stays in the tree.
+v1 is the `v1` bookmark (from `427ff628`, main before v2 landed), maintenance only.
+Read a v1 file with `git show v1:<path>`; nothing of v1 stays in the tree.
 
 Status: ✅ landed · ⏳ next · blank not started.
 

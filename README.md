@@ -4,7 +4,7 @@ Screeps seasonal-server bot in F#, compiled to JS by [Fable](https://fable.io).
 
 This is **v2**, a rewrite in progress: `ARCHITECTURE.md` is the design and
 `AGENTS.md` the working rules. v1 — the bot running live this season — is
-archived at commit `427ff628` (`git show 427ff628:<path>`).
+on the `v1` bookmark (`git show v1:<path>`), maintenance only.
 
 ## Prerequisites
 
