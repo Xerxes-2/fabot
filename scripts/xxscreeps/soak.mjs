@@ -19,6 +19,7 @@
 // cpu.jsonl, console.log and server.log; prints the samples as a table and a
 // summary.
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -101,8 +102,11 @@ const screepsrc = [
 // ---- the world -------------------------------------------------------------
 // One world per run, so two soaks at once never share a server. The name is
 // kept short: the engine's unix sockets live under it, and a socket path has
-// a length limit.
-const world = join(ENGINE, "worlds", `soak-${(flags["--run"] ?? "default").replace(/[^A-Za-z0-9-]/g, "").slice(0, 24)}`);
+// a length limit. A long run name keeps its head and a hash of the whole, so
+// two runs whose names share their first characters never share a world.
+const runName = (flags["--run"] ?? "default").replace(/[^A-Za-z0-9-]/g, "");
+const worldName = runName.length <= 24 ? runName : `${runName.slice(0, 15)}-${createHash("sha256").update(runName).digest("hex").slice(0, 8)}`;
+const world = join(ENGINE, "worlds", `soak-${worldName}`);
 rmSync(world, { recursive: true, force: true });
 // A copied socket is a dead server's; only files and directories come over.
 cpSync(TEMPLATE, world, { recursive: true, filter: (src) => lstatSync(src).isFile() || lstatSync(src).isDirectory() });
