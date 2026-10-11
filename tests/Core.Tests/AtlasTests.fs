@@ -70,6 +70,7 @@ let private worldOf (ground: Ground) : World =
             |]
         Spawns = [||]
         Creeps = [||]
+        OurSites = 0
     }
 
 /// A walk to price: the ground, a mover, a goal tile with its range, a start.

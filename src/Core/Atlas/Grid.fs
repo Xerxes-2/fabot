@@ -96,10 +96,10 @@ let stepTable (factor: FatigueFactor) : int[] =
 /// The flood's array accessors: checked on .NET, a bare JS index under Fable,
 /// whose own indexer re-tests indices the loop has already kept in range.
 [<Emit("$1[$0]")>]
-let at (_index: int) (_array: int[]) : int = _array.[_index]
+let at (_index: int) (_array: 'T[]) : 'T = _array.[_index]
 
 [<Emit("$1[$0] = $2")>]
-let setAt (_index: int) (_array: int[]) (_value: int) : unit = _array.[_index] <- _value
+let setAt (_index: int) (_array: 'T[]) (_value: 'T) : unit = _array.[_index] <- _value
 
 [<Emit("$1[$0]")>]
 let private heapAt (_index: int) (_heap: ResizeArray<int>) : int = _heap.[_index]

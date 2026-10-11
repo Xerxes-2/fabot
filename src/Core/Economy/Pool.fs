@@ -117,6 +117,11 @@ let private offer task (target: Pos) (value: float) capacity =
 let private insideDeadline (c: Controller) =
     c.Level > 0 && c.TicksToDowngrade < Engine.safeModeDowngradeLine c.Level
 
+/// Where a site of ours ranks: every site alike at the surplus band, its
+/// order Layout's, which places them in plan order. The one place a site is
+/// ranked.
+let siteRank (_: Derived) (_: SiteFact) : int = Price.surplusRank
+
 /// Every Task offered this tick, ground by ground in `Derived` order. A Task
 /// with no energy price is anchored at a band (`Price`).
 let pool (derived: Derived) : Offer[] =
@@ -177,7 +182,7 @@ let pool (derived: Derived) : Offer[] =
                 offer
                     (Build s.Id)
                     s.Pos
-                    (Price.valueOfRank Price.surplusRank)
+                    (Price.valueOfRank (siteRank derived s))
                     (Capacity.Load s.Left)
             )
 

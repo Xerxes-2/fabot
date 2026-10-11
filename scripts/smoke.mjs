@@ -72,6 +72,7 @@ const room = {
   energyCapacityAvailable: 300,
   controller: { id: "c1", my: true, owner: { username: "me" }, pos: at(30, 30), level: 1, progress: 10, progressTotal: 200, ticksToDowngrade: 20000, safeModeAvailable: 1 },
   find: (type) => found[type] ?? [],
+  createConstructionSite: () => 0,
 };
 spawn.room = room;
 creep.room = room;
@@ -88,6 +89,7 @@ globalThis.Game = {
   map: { getRoomTerrain: () => ({ getRawBuffer: () => terrain }) },
   spawns: { Spawn1: spawn },
   creeps: { a: creep },
+  constructionSites: { cs1: found[111][0] },
   getObjectById: (id) => ({ s1: spawn, src1: found[105][0], c1: room.controller, cs1: found[111][0], p1: found[106][0] })[id] ?? null,
 };
 

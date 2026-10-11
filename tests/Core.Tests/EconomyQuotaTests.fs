@@ -258,6 +258,7 @@ type Gens =
                             Rooms = rooms |> List.map fst |> Array.ofList
                             Spawns = rooms |> List.collect snd |> Array.ofList
                             Creeps = Array.ofList creeps
+                            OurSites = 0
                         }
                     Worked = if split then unowned else []
                     Claims = if split then [] else unowned

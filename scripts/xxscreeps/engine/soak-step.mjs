@@ -82,11 +82,16 @@ function sample(t, time, room) {
     stored: 0,
     dropped: 0,
     sites: 0,
+    built: {},
     cpu: null,
     bodies: [],
   };
   for (const o of room["#objects"]) {
     const mine = o["#user"] === ours;
+    // Our structures, and the roads and containers nobody owns, in our room.
+    const ownerless = o.structureType === "road" || o.structureType === "container";
+    if (o.structureType !== undefined && o["#lookType"] !== "constructionSite" && (mine || ownerless) && o.structureType !== "controller")
+      row.built[o.structureType] = (row.built[o.structureType] ?? 0) + 1;
     // A site carries its structure's type and no store: read it first.
     if (o["#lookType"] === "constructionSite") {
       if (mine) row.sites++;

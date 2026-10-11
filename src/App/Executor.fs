@@ -41,6 +41,26 @@ let private act (intent: Intent) : string * int =
             | Upgrade id -> on "upgrade" id creep.upgradeController
             | Reserve id -> on "reserve" id creep.reserveController
             | ClaimController id -> on "claim" id creep.claimController
+    | Room(name, CreateSite(x, y, kind)) ->
+        let verb = "site:" + Fabot.Core.World.Kind.name kind
+
+        match objectItem<IRoom> Game.rooms name with
+        | room when isNull (box room) -> verb, notFound
+        | room -> verb, room.createConstructionSite (x, y, Fabot.Core.World.Kind.name kind)
+    | Tower(id, act) ->
+        match Game.getObjectById id with
+        | tower when isNull tower -> "tower", notFound
+        | tower ->
+            let tower = unbox<ITower> tower
+
+            let on (verb: string) (target: string) (f: obj -> int) =
+                match Game.getObjectById target with
+                | t when isNull t -> verb, notFound
+                | t -> verb, f t
+
+            match act with
+            | Attack target -> on "attack" target tower.attack
+            | Heal target -> on "heal" target tower.heal
     | Spawn(id, SpawnCreep(body, name)) ->
         match Game.getObjectById id with
         | spawn when isNull spawn -> "spawn", notFound

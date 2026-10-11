@@ -19,6 +19,7 @@ let private world: Tick.Context =
             Rooms = [||]
             Spawns = [||]
             Creeps = [||]
+            OurSites = 0
         }
 
     {

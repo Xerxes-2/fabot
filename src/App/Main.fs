@@ -8,6 +8,8 @@ open Fabot.Core
 
 /// The modules, in the order they decide. Each lands here as it is built:
 /// Economy, Layout, Strategy, Fight.
+// `Layout.Run.layout` joins after `economy` once its long soak beats the
+// economy alone (ARCHITECTURE §10.2).
 let private modules: Tick.Module list = [ Economy.Run.economy ]
 
 /// The change this bundle was built from, off `scripts/bundle.mjs`'s banner.
@@ -32,6 +34,11 @@ let private recordFault (where: string) (message: string) =
 
 let private clock () = Game.cpu.getUsed ()
 
+/// The modules' standing output on the heap (`ARCHITECTURE.md` §4,
+/// `standing.*`): handed in with the state each tick and taken back after;
+/// empty after a reset, when each module re-derives it.
+let mutable private standing: Map<string, Layout.Shape.Standing> = Map.empty
+
 let private runTick () =
     let phases = ResizeArray<string * float>()
 
@@ -41,7 +48,11 @@ let private runTick () =
         phases.Add(name, clock () - start)
         result
 
-    let state = timed "memory" Wire.readState
+    let state =
+        { timed "memory" Wire.readState with
+            Layout = standing
+        }
+
     let world = timed "world" World.ofGame
     let atlas = timed "atlas" (fun () -> Atlas.ofWorld world)
 
@@ -55,6 +66,7 @@ let private runTick () =
         | Tick.Ran
         | Tick.Off -> ()
 
+    standing <- result.State.Layout
     let refusals = timed "execute" (fun () -> Executor.run result.Intents)
     timed "write" (fun () -> Wire.writeState result.State)
 

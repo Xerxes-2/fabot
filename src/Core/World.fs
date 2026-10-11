@@ -348,6 +348,9 @@ type World =
         Spawns: Spawn[]
         /// Ours, standing (still in an oven excluded).
         Creeps: Creep[]
+        /// Our construction sites in every room, seen or not
+        /// (`Game.constructionSites`): what MAX_CONSTRUCTION_SITES counts.
+        OurSites: int
     }
 
 /// Terrain at a tile of a room's raw buffer.

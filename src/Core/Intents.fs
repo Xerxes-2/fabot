@@ -21,12 +21,23 @@ type CreepAct =
 
 type SpawnAct = SpawnCreep of body: BodyPart list * name: string
 
+/// A room's own act: a construction site of ours on one of its tiles.
+type RoomAct = CreateSite of x: int * y: int * kind: World.Kind
+
+type TowerAct =
+    | Attack of target: string
+    | Heal of target: string
+
 type Intent =
     | Creep of name: string * CreepAct
     | Spawn of id: string * SpawnAct
+    | Room of name: string * RoomAct
+    | Tower of id: string * TowerAct
 
 /// The actor an intent names, for a refusal's report.
 let actorOf =
     function
     | Creep(name, _) -> name
     | Spawn(id, _) -> id
+    | Room(name, _) -> name
+    | Tower(id, _) -> id

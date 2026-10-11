@@ -63,6 +63,7 @@ let readState () : State =
                 |> Map.ofArray
             else
                 Map.empty
+        Layout = Map.empty
     }
 
 /// Write what the tick decided back to `Memory.v2`; the switches are the

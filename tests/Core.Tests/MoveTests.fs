@@ -241,6 +241,7 @@ let private worldOf (errand: Errand) : World =
             |]
         Spawns = [||]
         Creeps = [| errand.Creep |]
+        OurSites = 0
     }
 
 /// The errand's Atlas, its creep's pace, and the wish `Plan.toward` builds.

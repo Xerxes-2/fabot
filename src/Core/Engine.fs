@@ -364,3 +364,43 @@ let maxConstructionSites = 100
 
 /// A room's side in tiles: the stride of every flat `y * 50 + x` grid.
 let roomSide = 50
+
+// CONTROLLER_STRUCTURES rows, by level from 0; the last entry holds above.
+let private spawnRow = [| 0; 1; 1; 1; 1; 1; 1; 2; 3 |]
+let private extensionRow = [| 0; 0; 5; 10; 20; 30; 40; 50; 60 |]
+let private linkRow = [| 0; 0; 0; 0; 0; 2; 3; 4; 6 |]
+let private wallRow = [| 0; 0; 2500 |]
+let private storageRow = [| 0; 0; 0; 0; 1 |]
+let private towerRow = [| 0; 0; 0; 1; 1; 2; 2; 3; 6 |]
+let private eighthRow = [| 0; 0; 0; 0; 0; 0; 0; 0; 1 |]
+let private sixthRow = [| 0; 0; 0; 0; 0; 0; 1 |]
+let private labRow = [| 0; 0; 0; 0; 0; 0; 3; 6; 10 |]
+let private seventhRow = [| 0; 0; 0; 0; 0; 0; 0; 1 |]
+
+/// CONTROLLER_STRUCTURES: how many of a structure type (the engine's
+/// `STRUCTURE_*` string) a room may hold at a controller level, standing and
+/// sites together; 0 for a type the table does not name.
+let controllerStructures (structureType: string) (level: int) : int =
+    let at (row: int[]) =
+        if level < 0 then 0
+        elif level >= row.Length then row.[row.Length - 1]
+        else row.[level]
+
+    match structureType with
+    | "spawn" -> at spawnRow
+    | "extension" -> at extensionRow
+    | "link" -> at linkRow
+    | "road" -> 2500
+    | "constructedWall"
+    | "rampart" -> at wallRow
+    | "storage" -> at storageRow
+    | "tower" -> at towerRow
+    | "observer"
+    | "powerSpawn"
+    | "nuker" -> at eighthRow
+    | "extractor"
+    | "terminal" -> at sixthRow
+    | "lab" -> at labRow
+    | "container" -> 5
+    | "factory" -> at seventhRow
+    | _ -> 0

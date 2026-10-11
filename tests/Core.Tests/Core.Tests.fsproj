@@ -10,6 +10,7 @@
     <Compile Include="EconomyTests.fs" />
     <Compile Include="EconomyQuotaTests.fs" />
     <Compile Include="MoveTests.fs" />
+    <Compile Include="LayoutTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Core/Core.fsproj" />

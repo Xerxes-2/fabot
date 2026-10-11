@@ -223,4 +223,5 @@ let ofGame () : World =
         Rooms = rooms |> Array.map roomOf
         Spawns = spawns |> Array.map spawnOf
         Creeps = creeps |> Array.filter (fun c -> not c.spawning) |> Array.map creepOf
+        OurSites = (objectEntries Game.constructionSites).Length
     }
