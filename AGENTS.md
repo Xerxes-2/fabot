@@ -133,6 +133,8 @@ Docs:
 1. `/code-review` has run on the diff and its findings are resolved.
 2. `jj describe` with a conventional-commit subject and one `Fixes #<n>` trailer line per issue.
 3. `jj ship [-r REV]` (`scripts/ship.sh`): the gates (`npm test`: format check, line ceilings, `dotnet test`; then the build and `npm run smoke`), then the `claude.session-branch` bookmark (`main` locally, set once with `jj config set --repo claude.session-branch main`) moved to REV and pushed. Its gates are the pre-push run; don't run `npm test` again before it. A pushed change is immutable.
+   Before it, `jj log -r 'main..REV'`: every change listed ships, and a
+   workspace's change can sit under another's.
 4. `npm run deploy` builds, smokes and uploads the bundle to the live server; the first tick after it is a cold reset.
 
 Squash TDD slices into one change per issue; push per issue.
