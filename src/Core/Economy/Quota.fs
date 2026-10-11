@@ -199,6 +199,29 @@ let private haulShare (distance: Pos -> Pos -> int option) (derived: Derived) =
             min allowed (int (ceil (draw.[ci] * float allowed / float income)))
         | _ -> allowed
 
+/// The WORK a source's harvesters are sized to: its output's, and a spare.
+let private digWork (s: SourceFact) =
+    ceilDiv s.Rate Engine.harvestPerWork + harvestSpareWork
+
+/// What a source yields a tick: its rate where its seats hold enough of the
+/// nearest colony's harvester to dig it out, else what those seats dig. The
+/// income every row past the harvesters is hired against, never the rate
+/// alone: a seat short of the rate leaves the rest in the rock.
+let private dugAt (distance: Pos -> Pos -> int option) (derived: Derived) (s: SourceFact) =
+    match
+        nearest distance derived.Colonies (fun _ -> true) s.Pos
+        |> Option.bind (fun ci ->
+            sized Pattern.Harvester (digWork s) derived.Colonies.[ci].BankCapacity)
+    with
+    | Some body ->
+        let perSeat = partCountIn body Work * Engine.harvestPerWork
+
+        if s.Seats >= ceilDiv s.Rate perSeat then
+            s.Rate
+        else
+            s.Seats * perSeat
+    | None -> s.Rate
+
 /// What the ground wants beyond the workers: harvest and haul for each
 /// source, a reserver for each declared room's reservable controller, a
 /// claimer for each declared claim.
@@ -223,25 +246,19 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
             let spill = if Option.isSome s.Container then 0.0 else Price.pileDecay 1
 
             let dig =
-                { seated
-                      Pattern.Harvester
-                      s.Pos
-                      (ceilDiv rate Engine.harvestPerWork + harvestSpareWork)
-                      s.Seats
-                      (fun body ->
-                          Some(
-                              (float (min rate (partCountIn body Work * Engine.harvestPerWork))
-                               - spill)
-                              * life
-                          )) with
+                { seated Pattern.Harvester s.Pos (digWork s) s.Seats (fun body ->
+                      Some(
+                          (float (min rate (partCountIn body Work * Engine.harvestPerWork))
+                           - spill)
+                          * life
+                      )) with
                     Spill = spill
                 }
 
             demands.Add dig
 
             // The round trip to the nearest colony's sink, at the pace of the
-            // hauler it casts, and the dig its seats allow at the harvester it
-            // casts; a haul nobody can price hires nobody.
+            // hauler it casts; a haul nobody can price hires nobody.
             let caster = nearest distance derived.Colonies (fun _ -> true) s.Pos
 
             let trip =
@@ -250,16 +267,7 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
                     sized Pattern.Hauler Engine.maxBodyParts derived.Colonies.[ci].BankCapacity
                     |> Option.bind (fun body -> roundTrip leg body s.Pos (sinkOf derived ci) 1))
 
-            let allowed =
-                match caster |> Option.bind (fun ci -> bodyFor derived.Colonies.[ci] dig) with
-                | Some body ->
-                    let perSeat = partCountIn body Work * Engine.harvestPerWork
-
-                    if s.Seats >= ceilDiv rate perSeat then
-                        rate
-                    else
-                        s.Seats * perSeat
-                | None -> rate
+            let allowed = dugAt distance derived s
 
             match trip with
             | Some trip ->
@@ -331,7 +339,9 @@ let private workerDemands
                 |> Option.bind (nearest distance colonies (fun _ -> true))
 
         match owner with
-        | Some ci -> income.[ci] <- income.[ci] + ground.Income
+        | Some ci ->
+            for s in ground.Sources do
+                income.[ci] <- income.[ci] + dugAt distance derived s
         | None -> ())
 
     for d in others do
