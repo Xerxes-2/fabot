@@ -159,7 +159,9 @@ let haulLevel = levelOf Kind.Extension 0
 
 /// Ints sorted ascending in place: the engine's numeric sort under Fable,
 /// which the library's comparer-driven sort is several times slower than.
+#if FABLE_COMPILER_JAVASCRIPT
 [<Emit("$0.sort((a, b) => a - b)")>]
+#endif
 let private sortInts (_keys: int[]) : unit = Array.sortInPlace _keys
 
 /// The walks a road's sort key tells apart, so level, walk and tile share
