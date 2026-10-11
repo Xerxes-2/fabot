@@ -1,7 +1,8 @@
 // The line and comment-share ceilings in scripts/ceilings.json, checked, and
-// no issue or ADR citation in code. A directory's count is every line of every
-// .fs beneath it, minus a `<dir>/Kinds/*` entry's files, which are each held
-// to their own ceiling. Exits non-zero on any breach.
+// no issue or ADR citation in code. A directory's line count is every line of
+// every .fs beneath it, minus a `<dir>/Kinds/*` entry's files, which are each
+// held to their own ceiling. A comment share is per directory of src, over its
+// own .fs files. Exits non-zero on any breach.
 //
 // Usage: node scripts/ceiling.mjs
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -40,13 +41,13 @@ for (const [key, ceiling] of Object.entries(ceilings)) {
     const dir = key.slice(0, -2);
     if (!existsSync(dir)) continue;
     for (const file of fsFiles(dir))
-      rows.push([key, file, ...count([file]), ceiling]);
+      rows.push([file, count([file])[0], ceiling]);
   } else {
     if (!existsSync(key)) continue;
     const files = fsFiles(key).filter(
       (f) => !perFile.some((dir) => dir !== key && f.startsWith(dir + "/")),
     );
-    rows.push([key, key, ...count(files), ceiling]);
+    rows.push([key, count(files)[0], ceiling]);
   }
 }
 
@@ -69,16 +70,25 @@ if (cited.length > 0) {
   process.exit(1);
 }
 
-let over = 0;
-for (const [key, path, n, comments, c] of rows) {
-  const pct = n === 0 ? 0 : (100 * comments) / n;
-  const most = commentPct[key] ?? commentPct._default;
-  const breach = n > c || pct > most;
-  if (breach) over++;
-  console.log(
-    `${breach ? "OVER" : "ok  "} ${path} ${n}/${c} lines, ${pct.toFixed(1)}%/${most}% comments`,
+const dirs = [
+  ...new Set(fsFiles("src").map((f) => f.slice(0, f.lastIndexOf("/")))),
+];
+const shares = dirs.map((dir) => {
+  const [n, comments] = count(
+    fsFiles(dir).filter((f) => f.lastIndexOf("/") === dir.length),
   );
-}
+  return [dir, (100 * comments) / n, commentPct[dir] ?? commentPct._default];
+});
+
+const over =
+  rows.filter(([, n, c]) => n > c).length +
+  shares.filter(([, pct, most]) => pct > most).length;
+for (const [path, n, c] of rows)
+  console.log(`${n > c ? "OVER" : "ok  "} ${path} ${n}/${c} lines`);
+for (const [dir, pct, most] of shares)
+  console.log(
+    `${pct > most ? "OVER" : "ok  "} ${dir} ${pct.toFixed(1)}%/${most}% comments`,
+  );
 if (over > 0) {
   console.error(
     `ceiling: ${over} over; delete before adding, comments first (AGENTS.md)`,

@@ -1,5 +1,5 @@
 {
-  "_": "Never raised (AGENTS.md). Lines are every line of every .fs under the path; a path not built yet passes. comments: the most percent of a path's lines that are `//` comments, by the same key, else `_default`. counts: per-tick ceilings scripts/counts will check (ARCHITECTURE.md §9.3), filled as the counters land.",
+  "_": "Never raised (AGENTS.md). Lines are every line of every .fs under the path; a path not built yet passes. comments: the most percent of a src directory's own lines that are `//` comments, by the directory, else `_default`. counts: per-tick ceilings scripts/counts will check (ARCHITECTURE.md §9.3), filled as the counters land.",
   "lines": {
     "src/Core/Fight": 2500,
     "src/Core/Fight/Kinds/*": 400,
@@ -13,11 +13,9 @@
     "src/Core/Observe": 1000
   },
   "comments": {
-    "_default": 15,
-    "src/Core/Economy": 18,
-    "src/Core/Layout": 17,
-    "src/Core/Move": 21,
-    "src/Core/Atlas": 16
+    "_default": 7,
+    "src/App": 13,
+    "src/Core": 10
   },
   "counts": {}
 }
