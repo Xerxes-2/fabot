@@ -62,8 +62,9 @@ let private distance (atlas: Atlas) (a: Pos) (b: Pos) : int option =
 
 /// The seats a body works from: a source's post for the post's garrison
 /// (`Pool.garrisons`), its other seats for anyone else, every seat where the
-/// source has no post; an upgrade's, while its holder draws the buffer
-/// (`Pool.drawsBuffer`), the tiles beside the buffer in upgrade range; `None`
+/// source has no post; while its holder draws the buffer
+/// (`Pool.drawsBuffer`), an upgrade's, the tiles beside the buffer in upgrade
+/// range, and a build's or a repair's, the tiles beside the buffer; `None`
 /// for any other Task. A body digs from nowhere else, so a harvester's dig
 /// falls into the container and a light body keeps off the post. The one place a seat
 /// is chosen.
@@ -85,6 +86,12 @@ let private seatsOf (atlas: Atlas) (derived: Derived) (body: Body) (offer: Offer
                 None
             else
                 Some g.BufferSeats)
+    | Task.Build _
+    | Task.Repair _ when drawsBuffer body offer ->
+        derived.Grounds
+        |> Array.tryPick (fun g -> if g.Room = offer.Target.Room then g.Buffer else None)
+        |> Option.map (fun b -> Atlas.seats atlas One 1 b.Pos)
+        |> Option.filter (List.isEmpty >> not)
     | _ -> None
 
 /// Where a body walks for its Task: a digger to a seat of its (`seatsOf`) no
@@ -265,20 +272,20 @@ let decide (context: Context) (state: State) : Intent list * State =
             let body = bodies.[creep.Name]
             let seats = seatsOf atlas derived body offer
 
+            let buffer =
+                derived.Grounds
+                |> Array.tryPick (fun g -> if g.Room = creep.Pos.Room then g.Buffer else None)
+
+            match buffer with
+            | Some b when drawsBuffer body offer && Pos.within 1 creep.Pos b.Pos ->
+                acts.Add(Creep(creep.Name, CreepAct.Withdraw(b.Id, Energy)))
+            | _ -> ()
+
             if
                 Pos.within (rangeOf offer.Task) creep.Pos offer.Target
                 && seats |> Option.forall (List.contains creep.Pos)
                 && ready offer.Task
             then
-                let buffer =
-                    derived.Grounds
-                    |> Array.tryPick (fun g -> if g.Room = creep.Pos.Room then g.Buffer else None)
-
-                match buffer with
-                | Some b when drawsBuffer body offer && Pos.within 1 creep.Pos b.Pos ->
-                    acts.Add(Creep(creep.Name, CreepAct.Withdraw(b.Id, Energy)))
-                | _ -> ()
-
                 // The API refuses an upgrade from an empty store before the
                 // draw lands.
                 if body.Energy > 0 || not (drawsBuffer body offer) then

@@ -38,9 +38,10 @@ type Draw =
     /// A body that spends what it draws (a WORK part): the stock while no
     /// other sink is hungry, which a carrier would only pour back.
     | Spenders
-    /// On an Upgrade, the controller's buffer stocked: its holder draws as
-    /// it upgrades (`drawsBuffer`) and may hold it empty. The buffer is drawn
-    /// nowhere else, so what it holds goes to the controller alone.
+    /// On an Upgrade, a Build or a Repair, the controller's buffer stocked:
+    /// its holder draws it (`drawsBuffer`) and may hold it empty. The buffer
+    /// is drawn nowhere else, so what it holds goes to the controller or to
+    /// construction, never back to a refill.
     | Buffer
 
 /// One entry of the pool.
@@ -74,13 +75,16 @@ let garrisons (body: Body) (offer: Offer) : bool =
 let upgrades (body: Body) : bool =
     body.Pattern <> Pattern.Harvester && body.Work > 0 && body.Carry > 0
 
-/// Whether an Upgrade's holder draws the buffer this tick: what it holds
-/// falls short of a tick's upgrade. The engine withdraws before it upgrades,
-/// so the draw tops up what the upgrade spends.
+/// Whether a holder draws the buffer this tick: an Upgrade's while what it
+/// holds falls short of a tick's upgrade (the engine withdraws before it
+/// upgrades, so the draw tops up what the upgrade spends); a Build's or a
+/// Repair's while it holds nothing.
 let drawsBuffer (body: Body) (offer: Offer) : bool =
     offer.Draw = Draw.Buffer
     && body.Free > 0
-    && body.Energy < body.Work * Engine.upgradeDrainPerWork
+    && match offer.Task with
+       | Upgrade _ -> body.Energy < body.Work * Engine.upgradeDrainPerWork
+       | _ -> body.Energy = 0
 
 /// Whether a body's parts and store let it act on the offer now. One rule
 /// for a fresh match and a kept one: an intake while the store is at least
@@ -108,7 +112,7 @@ let fits (body: Body) (offer: Offer) : bool =
     | Pickup _ -> body.Carry > 0 && halfEmpty
     | Refill(_, resource) -> body.Carry > 0 && carried body resource > 0
     | Build _
-    | Repair _ -> body.Work > 0 && body.Carry > 0 && body.Energy > 0
+    | Repair _ -> body.Work > 0 && body.Carry > 0 && (body.Energy > 0 || offer.Draw = Draw.Buffer)
     | Reserve _
     | Claim _ -> body.Claim > 0
 
@@ -126,6 +130,7 @@ let share (body: Body) (offer: Offer) : int =
         match offer.Task with
         | Refill(_, resource) -> carried body resource
         | task when isIntake task -> body.Free
+        | _ when drawsBuffer body offer -> body.Free
         | _ -> body.Energy
 
 /// Whether an offer admits one more holder while its holders bring `held`
@@ -244,27 +249,35 @@ let pool (derived: Derived) : Offer[] =
             hungriest <- max hungriest value
             offers.Add(offer (Refill(r.Id, Energy)) r.Pos value (Capacity.Load r.Free))
 
+        let draw =
+            if ground.Buffer |> Option.exists (fun b -> b.Energy > 0) then
+                Draw.Buffer
+            else
+                Draw.Open
+
         for s in ground.Sites do
-            offers.Add(
-                offer
-                    (Build s.Id)
-                    s.Pos
-                    (Price.valueOfRank (siteRank derived s))
-                    (Capacity.Load s.Left)
-            )
+            offers.Add
+                { offer
+                      (Build s.Id)
+                      s.Pos
+                      (Price.valueOfRank (siteRank derived s))
+                      (Capacity.Load s.Left) with
+                    Draw = draw
+                }
 
         for r in ground.Repairs do
             let missing =
                 (r.HitsMax - r.Hits + Engine.repairHitsPerEnergy - 1)
                 / Engine.repairHitsPerEnergy
 
-            offers.Add(
-                offer
-                    (Repair r.Id)
-                    r.Pos
-                    (Price.rebuildAtRisk r.Rebuild r.Hits r.Decay)
-                    (Capacity.Load missing)
-            )
+            offers.Add
+                { offer
+                      (Repair r.Id)
+                      r.Pos
+                      (Price.rebuildAtRisk r.Rebuild r.Hits r.Decay)
+                      (Capacity.Load missing) with
+                    Draw = draw
+                }
 
         match ground.Controller with
         | Some c when c.Owner = Ours ->
@@ -280,11 +293,7 @@ let pool (derived: Derived) : Offer[] =
 
             let upgrade =
                 { offer (Upgrade c.Id) c.Pos (Price.valueOfRank Price.upgradeRank) capacity with
-                    Draw =
-                        if ground.Buffer |> Option.exists (fun b -> b.Energy > 0) then
-                            Draw.Buffer
-                        else
-                            Draw.Open
+                    Draw = draw
                 }
 
             offers.Add(
