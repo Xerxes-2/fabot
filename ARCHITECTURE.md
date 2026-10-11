@@ -511,9 +511,11 @@ everything v1 used its self-written arena for, and more:
   structure's payback, thousands of ticks, has time to show): the RCL and
   progress at the end, the tick each level is reached, the income in the last
   thousand ticks; the first ten thousand ticks alone decide nothing (§5).
-  Before it ships, the same over several rooms (`npm run soak:many`, five
-  rooms spread over the sector by default, medians printed), so no change is
-  tuned to one room's terrain.
+  Before it ships, the same over the two extremes of harvest seats
+  (`npm run soak:many`: rooms whose sources have one seat each, and rooms
+  whose sources have four or more), so no change is tuned to one kind of
+  terrain. The extremes answer differently (a crowd of small bodies works
+  only where seats are many), so they are read apart, never as a median.
 - **Nodes.** A long soak from a respawn reaches RCL3 in 10,000 ticks and
   never sees links, labs or power. Each node below is a start state built
   from Layout's own plan (the level's allowed structures on their planned
