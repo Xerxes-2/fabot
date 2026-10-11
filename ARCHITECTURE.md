@@ -540,13 +540,19 @@ everything v1 used its self-written arena for, and more:
   | S4 low CPU | N6 with the CPU limit at 20 | degradation, the bucket | bucket curve, income lost to degrading |
 
   Each push runs the one or two nodes its change touches (about a minute);
-  nightly runs them all with the five-room long soak. Nodes N1–N4 come first
+  nightly runs them all with the long soak over the seat extremes. Nodes N1–N4 come first
   (the economy and links), N5–N7 with their structures, E with Strategy, S
   with Fight. ❓ the node builder (`npm run soak -- --node N3`) is not built.
-- **Adversaries.** xxscreeps hosts several users: v1 as the opponent for
-  `Defend` (self-play), open-source bots (TooAngel is plain JS; Overmind and
-  The International need a build) for `Siege`/`Drain` when their turn comes.
-  NPCs do not hold a room; this is the only offline test offence has.
+- **Adversaries.** xxscreeps hosts several users. Self-play: the attacker is
+  our own bundle with only `Fight` in its modules, an engagement declared at
+  start and its squads standing, against the full bot defending; each game
+  is also an `Exchange` sample (§10.1). Self-play shares our blind spots (an
+  attacker that never drains never tests the defence against a drain), so
+  fixed opponents stay in the library: scripted tower drain, dismantle,
+  kite and blockade squads, v1, and open-source bots (TooAngel is plain JS;
+  Overmind and The International need a build). NPCs do not hold a room;
+  this is the only offline test offence has. ❓ the self-play harness, built
+  with `Defend`.
 - **Exchange calibration** (§10.1), generated.
 
 Coverage, read off xxscreeps 0.2.1's mods and changelog (2026-10-10): invader
