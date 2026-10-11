@@ -444,15 +444,71 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
             if not (at (t) taken) then
                 setAt (t) roadLevel (min (at (t) roadLevel) level)
 
-    // A container is walkable and takes the head of its way out from the
-    // road; one container serves every rock it stands beside.
+    // A container is walkable and takes a dead end beside its rock, off the
+    // head of its way out: a tile no way crosses, so no body walking past
+    // shoves its harvester off it. Where no such tile is, the head itself.
+    // One container serves every rock it stands beside.
     let rockLevel = haulLevel
 
-    for _, path in sourceWalks do
-        if not (at (List.head path) taken) then
-            plant Kind.Container (List.head path) rockLevel
+    // A tile a link may take: free of the plan, off the two rings.
+    let linkable (n: int) =
+        n >= 0
+        && at n weights >= 0
+        && not (at n taken)
+        && at n roadLevel = none
+        && Tiles.xOf n >= 2
+        && Tiles.yOf n >= 2
+        && Tiles.xOf n < Tiles.side - 2
+        && Tiles.yOf n < Tiles.side - 2
 
-        pave (List.tail path) rockLevel
+    let linkBeside (onto: int) (key: int -> int) : int option =
+        let mutable best = -1
+
+        for direction in 1..8 do
+            let n = Tiles.neighbour onto direction
+
+            if linkable n && (best < 0 || key n < key best || (key n = key best && n < best)) then
+                best <- n
+
+        if best < 0 then None else Some best
+
+    let sourceLink (container: int) =
+        linkBeside container (fun t -> Tiles.range t anchor)
+
+    // Off every way, with room beside it for its link.
+    let deadEnd (rock: int) (head: int) (t: int) =
+        t <> head
+        && Tiles.range t rock = 1
+        && Tiles.range t head = 1
+        && at t weights >= 0
+        && not (Tiles.onEdge t)
+        && not (at t taken)
+        && not (at t clear)
+        && at t roadLevel = none
+        && Tiles.within 1 t
+           |> Array.exists (fun n -> n <> t && linkable n && not (at n clear))
+
+    // Each source, its container's tile, its link's where held, and its way
+    // out. A dead end's link is held as it is planted, so no other container
+    // or link takes the room it was chosen for.
+    let posted =
+        sourceWalks
+        |> Array.map (fun (rock, path) ->
+            let head = List.head path
+
+            match Tiles.within 1 rock |> Array.tryFind (deadEnd rock head) with
+            | Some t when not (at head taken) ->
+                plant Kind.Container t rockLevel
+                pave path rockLevel
+                let link = sourceLink t
+                link |> Option.iter (fun l -> setAt l taken true)
+                rock, t, link, path
+            | _ ->
+                if not (at head taken) then
+                    plant Kind.Container head rockLevel
+
+                pave (List.tail path) rockLevel
+                rock, head, None, path)
 
     // The controller's container a tile further out than the first, where
     // upgraders stand round it within range 3 of the controller; the first
@@ -485,28 +541,8 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
 
     // The links past the hub's: the controller's, where upgraders reach it,
     // then each source's, the longest way out first; each beside its
-    // container on a tile no plan holds.
-    let linkBeside (onto: int) (key: int -> int) : int option =
-        let mutable best = -1
-
-        for direction in 1..8 do
-            let n = Tiles.neighbour onto direction
-
-            if
-                n >= 0
-                && (at (n) weights) >= 0
-                && not (at (n) taken)
-                && (at (n) roadLevel) = none
-                && Tiles.xOf n >= 2
-                && Tiles.yOf n >= 2
-                && Tiles.xOf n < Tiles.side - 2
-                && Tiles.yOf n < Tiles.side - 2
-                && (best < 0 || key n < key best || (key n = key best && n < best))
-            then
-                best <- n
-
-        if best < 0 then None else Some best
-
+    // container on a tile no plan holds, a dead end's held since it was
+    // planted.
     let links = ResizeArray<int>()
 
     let open' (t: int) =
@@ -535,8 +571,9 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         | _ -> ()
     | None -> ()
 
-    for _, path in sourceWalks |> Array.sortBy (fun (s, path) -> -(List.length path), s) do
-        match linkBeside (List.head path) (fun t -> Tiles.range t anchor) with
+    for _, container, held, _ in
+        posted |> Array.sortBy (fun (rock, _, _, path) -> -(List.length path), rock) do
+        match held |> Option.orElseWith (fun () -> sourceLink container) with
         | Some t ->
             setAt (t) taken (true)
             links.Add t
