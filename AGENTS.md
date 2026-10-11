@@ -143,10 +143,11 @@ A live firefight the user flags may be fixed in the current session without the 
 ### Working alongside
 
 - A background task or subagent notifies when it finishes: end the turn. Wait on the game with `npm run observe -- wait --ticks N`.
-- Stop a background job with TaskStop. Wait on one by its pid (`wait`,
-  `kill -0`), never a loop on `pgrep -f`/`pkill -f`: the waiting shell's
-  own command line matches. A PreToolUse hook (`no-self-pgrep.sh`) refuses
-  such a loop.
+- Stop a background job with TaskStop. A long job runs with
+  `run_in_background` and the turn ends: its exit notifies you (a
+  subagent too). Inside one command, wait by pid (`wait`, `kill -0`), never
+  a loop on `pgrep -f`/`pkill -f`, which matches its own shell; a
+  PreToolUse hook (`no-self-pgrep.sh`) refuses one.
 - A subagent that edits runs with `isolation: "worktree"`: the repo's WorktreeCreate hook (`.claude/hooks/worktree-create.sh`, registered in `.claude/settings.json`) gives it its own jj workspace at `.claude/worktrees/<name>` (ignored), based on `main` (`trunk()`, or `claude.worktree-base` when set), with `node_modules` linked, `.env` copied and the dotnet tools restored; anything machine-local goes in an untracked `.claude/worktree-setup.local.sh`. The subagent describes the workspace's own `@` (no `jj new` before its first edit, which leaves an empty change under its work) and never moves a bookmark or pushes.
 - Ship a subagent's change from the default workspace: `jj new <change>` (rebase it onto `main` first if `main` moved), then steps 3–4 with `-r <change>`. A subagent's workspace is removed when it stops with no work in it and no background task running (`subagent-stop.sh`); one holding work stays, so the agent can be resumed to amend it, until session end (`worktree-sweep.sh`); by hand, `.claude/hooks/worktree-sweep.sh --stale` forgets workspaces whose directory is gone and removes directories no workspace owns.
 - Another live session works in its own workspace too, or stays read-only.
