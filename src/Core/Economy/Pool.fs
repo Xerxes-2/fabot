@@ -194,10 +194,10 @@ let siteRank (_: Derived) (_: SiteFact) : int = Price.surplusRank
 
 /// What a tick of a repair's delay costs: a road's or a container's, the
 /// rebuild decay puts at risk; a rampart's, a site's, and the flow's
-/// while the next decay would take it, so a fresh one is not lost.
+/// below `rampartSafe`, so a fresh one is not lost.
 let repairValue (r: RepairFact) : float =
     match r.Kind with
-    | Kind.Rampart when r.Hits <= Engine.rampartDecayAmount -> Price.flowDraw 0.0
+    | Kind.Rampart when r.Hits <= rampartSafe -> Price.flowDraw 0.0
     | Kind.Rampart -> Price.valueOfRank Price.surplusRank
     | _ -> Price.rebuildAtRisk r.Rebuild r.Hits r.Decay
 

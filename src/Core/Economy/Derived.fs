@@ -138,7 +138,7 @@ type LinkFact =
 type SiteFact = { Id: string; Pos: Pos; Left: int }
 
 /// A decaying structure below the hits it is kept at: a road or a container
-/// whole, a rampart of ours at `rampartFloor`.
+/// whole, a rampart of ours at `rampartTarget`.
 [<NoEquality; NoComparison>]
 type RepairFact =
     {
@@ -333,9 +333,22 @@ let dugAt (capacity: int) (home: bool) (rate: int) (posted: bool) (seats: int) :
         min rate (diggers * partCountIn body Work * Engine.harvestPerWork)
     | None -> 0
 
-/// The hits a rampart of ours is repaired to: enough to hold a raid's
-/// dismantlers until the towers turn it, at a few thousand energy a room.
-let rampartFloor = 100_000
+/// The hits a rampart of ours is repaired to at a controller level: the low
+/// end of what other bots hold (Overmind, Hivemind, The International), so
+/// the walls grow with the room and never outbid its upgrading early.
+let rampartTarget (level: int) =
+    match level with
+    | l when l < 3 -> 0
+    | 3 -> 10_000
+    | 4 -> 50_000
+    | 5 -> 100_000
+    | 6 -> 500_000
+    | 7 -> 1_000_000
+    | _ -> 3_000_000
+
+/// Below these hits a rampart is repaired before anything that can wait:
+/// ten decay periods, the margin every bot keeps against losing one.
+let rampartSafe = 10 * Engine.rampartDecayAmount
 
 let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : Ground =
     let rate =
@@ -345,6 +358,9 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
             Engine.neutralOutputPerTick
 
     let ownedRoom = room.Controller |> Option.exists (fun c -> c.Owner = Ours)
+
+    let level =
+        room.Controller |> Option.map (fun c -> c.Level) |> Option.defaultValue 0
 
     let bufferId = Atlas.buffer room |> Option.map (fun b -> b.Id)
 
@@ -467,14 +483,14 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
         | _ -> ()
 
         match s.Kind with
-        | Kind.Rampart when s.Owner = Ours && s.Hits < min rampartFloor s.HitsMax ->
+        | Kind.Rampart when s.Owner = Ours && s.Hits < min (rampartTarget level) s.HitsMax ->
             repairs.Add
                 {
                     Id = s.Id
                     Kind = s.Kind
                     Pos = s.Pos
                     Hits = s.Hits
-                    HitsMax = min rampartFloor s.HitsMax
+                    HitsMax = min (rampartTarget level) s.HitsMax
                     Decay = float Engine.rampartDecayAmount / float Engine.rampartDecayTime
                     Rebuild = 0
                 }
