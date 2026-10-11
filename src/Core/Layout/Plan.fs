@@ -670,23 +670,50 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         Unfit = List.ofSeq unfit
     }
 
-/// The plan of a room with the spawns that stand in it (tiles): around the
-/// first of `Ground.anchors` whose plan stands its first spawn on a spawn
-/// slot, a standing spawn where any stands, so the spawn a room is founded
-/// with, built where the plan says, gives the plan again; else around the
-/// first. None when the room offers no anchor.
+/// The plan of a room with the spawns that stand in it (tiles): of the plans
+/// around `Ground.anchors`, the first that keeps the most standing spawns,
+/// then stands its first spawn on a spawn slot. So the spawns a plan places,
+/// built where it says, give the plan again: an anchor before it in the
+/// order seats no spawn, standing or not. None when the room offers no
+/// anchor.
+///
+/// A room without a spawn draws no more anchors than one standing spawn
+/// has (`spawnOffsets`); when none of them seats its spawn, the plan is the
+/// first anchor's.
 let ofGround (ground: Ground) (spawns: int[]) : Plan option =
     let candidates = anchors ground spawns
 
-    let seated (plan: Plan) =
-        plan.Items
-        |> Array.tryFind (fun i -> i.Kind = Kind.Spawn)
-        |> Option.exists (fun i ->
-            Array.contains i.Tile (spawnSlots plan.Anchor)
-            && (spawns.Length = 0 || Array.contains i.Tile spawns))
+    let score (plan: Plan) =
+        let placed =
+            plan.Items
+            |> Array.filter (fun i -> i.Kind = Kind.Spawn)
+            |> Array.map (fun i -> i.Tile)
 
-    candidates
-    |> Seq.map (fun anchor -> draw ground anchor spawns)
-    |> Seq.tryFind seated
-    |> Option.orElseWith (fun () ->
-        Array.tryHead candidates |> Option.map (fun a -> draw ground a spawns))
+        let kept = spawns |> Array.sumBy (fun s -> if Array.contains s placed then 1 else 0)
+
+        let seated =
+            placed
+            |> Array.tryHead
+            |> Option.exists (fun s -> Array.contains s (spawnSlots plan.Anchor))
+
+        2 * kept + (if seated then 1 else 0)
+
+    let tried =
+        if spawns.Length = 0 then
+            min spawnOffsets.Length candidates.Length
+        else
+            candidates.Length
+
+    let mutable best: (int * Plan) option = None
+    let mutable i = 0
+
+    while i < tried && best |> Option.forall (fun (s, _) -> s <= 2 * spawns.Length) do
+        let plan = draw ground candidates.[i] spawns
+        let s = score plan
+
+        if best |> Option.forall (fun (b, _) -> s > b) then
+            best <- Some(s, plan)
+
+        i <- i + 1
+
+    best |> Option.map snd

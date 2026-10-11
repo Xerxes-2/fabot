@@ -187,11 +187,10 @@ let private valid (ground: Ground) (anchor: int) =
     && at anchor ground.Weights >= 0
     && spawnSlots anchor |> Array.exists (fun s -> s >= 0 && at s ground.Free)
 
-/// The valid anchors, best first: the most of our standing spawns on its
-/// spawn slots, then the most free tiles within `coreRadius`, then the least
-/// summed range to the sources and the controller, then the lowest tile.
-/// With spawns standing only an anchor with one on its slots is a candidate;
-/// without, every tile is.
+/// The valid anchors, best first: the most free tiles within `coreRadius`,
+/// then the least summed range to the sources and the controller, then the
+/// lowest tile. With spawns standing only an anchor with one on its slots is
+/// a candidate; without, every tile is.
 let anchors (ground: Ground) (spawns: int[]) : int[] =
     let opens = openness ground
 
@@ -212,8 +211,4 @@ let anchors (ground: Ground) (spawns: int[]) : int[] =
 
     candidates
     |> Array.filter (valid ground)
-    |> Array.sortBy (fun a ->
-        let held =
-            spawnSlots a |> Array.sumBy (fun s -> if Array.contains s spawns then 1 else 0)
-
-        struct (-held, -(at a opens), reachSum ground a, a))
+    |> Array.sortBy (fun a -> struct (-(at a opens), reachSum ground a, a))
