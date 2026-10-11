@@ -1,21 +1,34 @@
-// The line ceilings in scripts/ceilings.json, checked, and no issue or ADR
-// citation in code. A directory's count is every line of every .fs beneath
-// it, minus a `<dir>/Kinds/*` entry's files, which are each held to their own
-// ceiling. Exits non-zero on any breach.
+// The line and comment-share ceilings in scripts/ceilings.json, checked, and
+// no issue or ADR citation in code. A directory's count is every line of every
+// .fs beneath it, minus a `<dir>/Kinds/*` entry's files, which are each held
+// to their own ceiling. Exits non-zero on any breach.
 //
 // Usage: node scripts/ceiling.mjs
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const { lines: ceilings } = JSON.parse(readFileSync(new URL("./ceilings.json", import.meta.url), "utf8"));
+const { lines: ceilings, comments: commentPct } = JSON.parse(
+  readFileSync(new URL("./ceilings.json", import.meta.url), "utf8"),
+);
 
 const fsFiles = (dir) =>
   readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
-    if (statSync(path).isDirectory()) return name === "bin" || name === "obj" ? [] : fsFiles(path);
+    if (statSync(path).isDirectory())
+      return name === "bin" || name === "obj" ? [] : fsFiles(path);
     return name.endsWith(".fs") ? [path] : [];
   });
-const lineCount = (path) => readFileSync(path, "utf8").split("\n").length - 1;
+const count = (files) =>
+  files.reduce(
+    ([lines, comments], f) => {
+      const text = readFileSync(f, "utf8").split("\n").slice(0, -1);
+      return [
+        lines + text.length,
+        comments + text.filter((l) => /^\s*\/\//.test(l)).length,
+      ];
+    },
+    [0, 0],
+  );
 
 const perFile = Object.keys(ceilings)
   .filter((key) => key.endsWith("/*"))
@@ -26,11 +39,14 @@ for (const [key, ceiling] of Object.entries(ceilings)) {
   if (key.endsWith("/*")) {
     const dir = key.slice(0, -2);
     if (!existsSync(dir)) continue;
-    for (const file of fsFiles(dir)) rows.push([file, lineCount(file), ceiling]);
+    for (const file of fsFiles(dir))
+      rows.push([key, file, ...count([file]), ceiling]);
   } else {
     if (!existsSync(key)) continue;
-    const files = fsFiles(key).filter((f) => !perFile.some((dir) => dir !== key && f.startsWith(dir + "/")));
-    rows.push([key, files.reduce((n, f) => n + lineCount(f), 0), ceiling]);
+    const files = fsFiles(key).filter(
+      (f) => !perFile.some((dir) => dir !== key && f.startsWith(dir + "/")),
+    );
+    rows.push([key, key, ...count(files), ceiling]);
   }
 }
 
@@ -44,16 +60,29 @@ const cited = ["src", "tests"]
       .map((line, i) => [file, i + 1, line])
       .filter(([, , line]) => /#\d{2,}\b|\bADR[- ]?\d{3,4}\b/.test(line)),
   );
-for (const [file, n, line] of cited) console.error(`CITE ${file}:${n}: ${line.trim()}`);
+for (const [file, n, line] of cited)
+  console.error(`CITE ${file}:${n}: ${line.trim()}`);
 if (cited.length > 0) {
-  console.error(`ceiling: ${cited.length} issue/ADR citation(s) in code; git log carries them (AGENTS.md)`);
+  console.error(
+    `ceiling: ${cited.length} issue/ADR citation(s) in code; git log carries them (AGENTS.md)`,
+  );
   process.exit(1);
 }
 
-const over = rows.filter(([, n, c]) => n > c);
-for (const [path, n, c] of rows) console.log(`${n > c ? "OVER" : "ok  "} ${path} ${n}/${c}`);
-if (over.length > 0) {
-  console.error(`ceiling: ${over.length} over; delete before adding (AGENTS.md)`);
+let over = 0;
+for (const [key, path, n, comments, c] of rows) {
+  const pct = n === 0 ? 0 : (100 * comments) / n;
+  const most = commentPct[key] ?? commentPct._default;
+  const breach = n > c || pct > most;
+  if (breach) over++;
+  console.log(
+    `${breach ? "OVER" : "ok  "} ${path} ${n}/${c} lines, ${pct.toFixed(1)}%/${most}% comments`,
+  );
+}
+if (over > 0) {
+  console.error(
+    `ceiling: ${over} over; delete before adding, comments first (AGENTS.md)`,
+  );
   process.exit(1);
 }
 if (rows.length === 0) console.log("ceiling: no module built yet");

@@ -20,8 +20,8 @@ ones.
 - `Fight` and `Economy` do not import each other; only `Strategy` imports
   `Season`. Declarations flow down §3's table, never up.
 - No room name, player name or object id in source. They are `declarations`.
-- Line ceilings (`scripts/ceilings.json`, `npm run ceiling`) are never raised. A change over the ceiling
-  pays for itself by deleting first.
+- Line and comment-share ceilings (`scripts/ceilings.json`, `npm run ceiling`)
+  are never raised. A change over either pays for itself by deleting first.
 - `decide` is deterministic: no clock, no unseeded random.
 - Derived facts are computed once into `Derived` and passed down. A decision
   function takes `Derived`, never `World`. The only tick cache is `Atlas`'s
@@ -44,8 +44,8 @@ ones.
   trace it through v2 and land the missing links together. A soak of one
   link without the rest measures the missing link.
 
-- Name the invariant the bug breaks, in one sentence that covers every body,
-  room or colony. A new rule that mops up after an old one is not a fix.
+- Name the invariant the bug breaks in the commit, in one sentence that covers
+  every body, room or colony. A new rule that mops up after an old one is not a fix.
 - A fight fix changes a phase rule, a tactic or `Exchange`. It never adds a
   per-tick check. If the bug is "we changed our mind mid-fight", the fix is in
   the event that re-evaluated, not a latch.
@@ -63,25 +63,20 @@ ones.
 
 ## Writing prose
 
-Docs and comments are not default deliverables. Write them only when asked,
-or when the fact passes the tests below.
-
-Ownership test: if someone changed the code and left this sentence alone,
-would the sentence become wrong? Then the code owns the fact. Do not write
-it. Put it in a type, a name, or a test instead.
-
-Prose earns its place only for what the code cannot say: why, a constraint,
-an external requirement (an engine rule, the owner's decision), a rejected
-alternative. An incident earns a comment only as the constraint it taught,
-never as its story.
+Docs and comments are written when asked, or when the fact passes the tests
+below.
 
 Comments:
-- No `///` doc comment that restates the signature or the name.
-- No comment that narrates the next line or the change history
-  ("now handles", "previously", "updated to").
-- No issue numbers, dates or ADR citations in code (`npm run ceiling` fails
-  on them); no TODO in code: an open item is an issue, or a ❓ in
-  `ARCHITECTURE.md`.
+- Code says *what*; a comment says only *why*. The default is no comment.
+  Reach first for a name, a type or a test; comment only what none of them
+  can hold: a reason, an engine constraint, the owner's decision, a rejected
+  alternative. One or two lines.
+- Paraphrase test: hide the code and read the comment. If it tells you what
+  the code does, it is a paraphrase; delete it. The surrounding code's
+  comment density is no precedent: match its naming, never its prose.
+- The invariant a fix restores, the incident and the change's story go in
+  the commit. An open item is an issue, or a ❓ in `ARCHITECTURE.md`.
+  `npm run ceiling` fails on an issue or ADR citation in code.
 
 Docs:
 - Docs live in `ARCHITECTURE.md` (the design), `AGENTS.md` (these rules) and
@@ -131,7 +126,8 @@ Docs:
 
 ### Shipping an issue
 
-1. `/code-review` has run on the diff and its findings are resolved.
+1. `/code-review` has run on the diff and its findings are resolved. Every
+   added comment line passes the paraphrase test, or a finding deletes it.
 2. `jj describe` with a conventional-commit subject and one `Fixes #<n>` trailer line per issue.
 3. `jj ship [-r REV]` (`scripts/ship.sh`): the gates (`npm test`: format check, line ceilings, `dotnet test`; then the build and `npm run smoke`), then the `claude.session-branch` bookmark (`main` locally, set once with `jj config set --repo claude.session-branch main`) moved to REV and pushed. Its gates are the pre-push run; don't run `npm test` again before it. A pushed change is immutable.
    Before it, `jj log -r 'main..REV'`: every change listed ships.
