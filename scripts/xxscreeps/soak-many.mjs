@@ -6,7 +6,7 @@
 //   --rooms  how many rooms, spread evenly over the ones a soak can stand in
 //            (`soak.mjs --list`, by name); default 5
 //   --room   these rooms instead
-//   --ticks  per room (default 10000), --seed (default 1)
+//   --ticks  per room (default 30000), --seed (default 1)
 //   --jobs   soaks at once (default 2: each holds a server and our sandbox)
 //   --tag    output names: soak-runs/<tag>-<room>/ (default many)
 //   --bot    the bundle every room runs (default dist/main.js)
@@ -37,7 +37,7 @@ const whole = (flag, fallback, min) => {
   if (!(Number.isInteger(n) && n >= min)) fail(`${flag} needs a whole number ≥ ${min}`);
   return n;
 };
-const ticks = whole("--ticks", 10000, 1);
+const ticks = whole("--ticks", 30000, 1);
 const seed = whole("--seed", 1, 0);
 const jobs = whole("--jobs", 2, 1);
 const tag = flags["--tag"] ?? "many";

@@ -201,12 +201,13 @@ interchangeable, and re-matching on a key change is cheap and does not
 oscillate (stickiness via `assignments` is enough). It becomes **one world
 pool**; a creep takes the nearest task it fits whatever colony spawned it.
 
-**The objective is long-run growth.** An investment (a structure, a bigger
-body, a container, a road) is priced by what it returns over the horizon it
-will stand, on the same scale as the work it competes with (upgrading, today's
-refill), so the economy invests first wherever the return pays. A slower start
+**The objective is long-run growth, by simple rules first.** A slower start
 that ends higher is the better economy; an early regression is accepted when
-the long soak (§10.2) improves.
+the long soak (§10.2) improves. Structures are built as their level allows, in
+Layout's plan order; bodies are sized to the bank. A rule is replaced by a
+priced decision only when a soak shows it losing: a pricing of every
+investment by its return was built and measured, cost twice the CPU and 580
+lines for no gain, and was not merged.
 
 Port with these cuts:
 - No fight tasks (`Guard`, `Defend`, `Assault`, `Flee`), no Safety band, no fight
@@ -506,9 +507,10 @@ everything v1 used its self-written arena for, and more:
 - **Soak.** The real sector's terrain and rooms, from one spawn for thousands
   of ticks: income curve, expansion cadence, losses to NPC waves, CPU curve.
   A change to the economy is read off this curve, not off a unit test. It is
-  judged on the long horizon (`npm run soak -- --ticks 10000`): the RCL and
+  judged on the long horizon (`npm run soak -- --ticks 30000`, where a
+  structure's payback, thousands of ticks, has time to show): the RCL and
   progress at the end, the tick each level is reached, the income in the last
-  thousand ticks; the first few thousand ticks alone decide nothing (§5).
+  thousand ticks; the first ten thousand ticks alone decide nothing (§5).
   Before it ships, the same over several rooms (`npm run soak:many`, five
   rooms spread over the sector by default, medians printed), so no change is
   tuned to one room's terrain.

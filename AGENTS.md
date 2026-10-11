@@ -45,9 +45,12 @@ ones.
   the event that re-evaluated, not a latch.
 - Net lines added by a fix should be ≤ 0. A positive diff says why in the
   commit.
-- Prices are set when a commitment is made (`Exchange.cheapestWin`,
-  `Strategy`, `Price`), not re-read per tick. A constant is an engine fact or
-  a named safety margin.
+- Simple and working beats clever, even if slower. Start with the simple
+  rule (a fixed order, the engine's allowance, a plain threshold); replace it
+  with a priced decision only when a soak shows the simple rule losing, and
+  say by how much in the commit.
+- Where a decision is priced, it is priced when a commitment is made
+  (`Exchange.cheapestWin`, `Strategy`), not re-read per tick.
 
 ## Writing prose
 
@@ -92,7 +95,7 @@ Docs:
 - An `Exchange` change is verified by the prediction error on the generated
   set not rising (§10.1).
 - An economy change is read off the soak's curves over the long horizon
-  (`npm run soak -- --ticks 10000`, `ARCHITECTURE.md` §5, §10.2): long-run
+  (`npm run soak -- --ticks 30000`, `ARCHITECTURE.md` §5, §10.2): long-run
   growth is the objective, and an early regression is accepted when the end
   of the run improves. Before shipping, `npm run soak:many` (five rooms):
   the medians must not regress.
