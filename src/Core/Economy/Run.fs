@@ -60,6 +60,39 @@ let private distance (atlas: Atlas) (a: Pos) (b: Pos) : int option =
         Atlas.route atlas Set.empty reachHops a.Room b.Room
         |> Option.map (fun rooms -> crossingTicks * (List.length rooms - 1))
 
+/// Where a body walks for its Task. A digger walks to a seat no other body
+/// stands on (`stood`), a harvester to its source's container first where
+/// one stands (`post`), so its dig is stored and one body on the nearest
+/// seat does not hold the crew short of the rest. The one place a seat is
+/// chosen.
+let private seatOf
+    (atlas: Atlas)
+    (stood: HashSet<Pos>)
+    (post: Dictionary<string, Pos>)
+    (creep: Creep)
+    (offer: Offer)
+    : Target =
+    let free (p: Pos) = p = creep.Pos || not (stood.Contains p)
+
+    let onto (tiles: Pos list) =
+        { targetOf offer with
+            Tiles = tiles |> List.map Tiles.ofPos |> Array.ofList
+            Range = 0
+        }
+
+    match offer.Task with
+    | Task.Harvest id when
+        post.ContainsKey id
+        && free post.[id]
+        && Bodies.patternOfName creep.Name = Some Bodies.Pattern.Harvester
+        ->
+        onto [ post.[id] ]
+    | Task.Harvest _ ->
+        match Atlas.seats atlas One (rangeOf offer.Task) offer.Target |> List.filter free with
+        | [] -> targetOf offer
+        | seats -> onto seats
+    | _ -> targetOf offer
+
 /// The act a Task's holder does once it stands within the Task's range.
 let private actOf (task: Task) : CreepAct =
     match task with
@@ -163,6 +196,17 @@ let decide (context: Context) (state: State) : Intent list * State =
         plan.Casts
         |> List.map (fun cast -> Spawn(cast.Spawn, SpawnCreep(cast.Body, cast.Name)))
 
+    let stood = HashSet<Pos>(world.Creeps |> Seq.map (fun c -> c.Pos))
+    let post = Dictionary<string, Pos>()
+
+    for ground in derived.Grounds do
+        for s in ground.Sources do
+            s.Container
+            |> Option.bind (fun id ->
+                world.Rooms
+                |> Array.tryPick (fun r -> r.Structures |> Array.tryFind (fun x -> x.Id = id)))
+            |> Option.iter (fun c -> post.[s.Id] <- c.Pos)
+
     let acts = ResizeArray<Intent>()
     let wishes = Dictionary<string, ResizeArray<Wish>>()
 
@@ -187,7 +231,12 @@ let decide (context: Context) (state: State) : Intent list * State =
 
             wishIn
                 creep.Pos.Room
-                (Plan.toward atlas creep mover (targetOf offer) (weightOf offer.Priority))
+                (Plan.toward
+                    atlas
+                    creep
+                    mover
+                    (seatOf atlas stood post creep offer)
+                    (weightOf offer.Priority))
         | None -> wishIn creep.Pos.Room (Plan.stay atlas creep mover.Factor 1)
 
     let moves = ResizeArray<Intent>()

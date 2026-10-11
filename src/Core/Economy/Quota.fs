@@ -126,6 +126,11 @@ let private seated pattern at wanted seats value =
 let private demand pattern at wanted value =
     seated pattern at wanted System.Int32.MaxValue value
 
+/// The body a colony casts for a demand: the most its bank buys, the key
+/// parts held to what the demand wants. The one place a body is chosen.
+let private bodyFor (colony: Colony) (d: Demand) : BodyPart list option =
+    sized d.Pattern d.Wanted colony.BankCapacity
+
 /// Where a colony's bodies leave from: its first spawn.
 let private homeOf (colony: Colony) = colony.Spawns.[0].Pos
 
@@ -168,6 +173,32 @@ type Leg = BodyPart list -> Pos -> Pos -> int -> int option
 let private roundTrip (leg: Leg) (body: BodyPart list) (fetch: Pos) (work: Pos) (range: int) =
     leg body fetch work range |> Option.map (fun there -> max 2 (2 * there))
 
+/// What a haul from a source delivers a tick, of the `allowed` it digs, by
+/// the colony that casts it: all of it where the colony banks in a storage;
+/// else its share of what the spawn draws, the standing bodies' upkeep, the
+/// rest of the dig left for the workers to fetch. A haul feeds only sinks.
+let private haulShare (distance: Pos -> Pos -> int option) (derived: Derived) =
+    let draw = Array.zeroCreate<float> derived.Colonies.Length
+
+    for b in derived.Bodies do
+        match nearest distance derived.Colonies (fun _ -> true) b.Pos with
+        | Some ci ->
+            let cost =
+                b.Work * Engine.partCost Work
+                + b.Carry * Engine.partCost Carry
+                + b.Move * Engine.partCost Move
+                + b.Claim * Engine.partCost Claim
+
+            draw.[ci] <- draw.[ci] + float cost / float (lifeOf b.Pattern)
+        | None -> ()
+
+    fun (caster: int option) (allowed: int) ->
+        match caster with
+        | Some ci when not (derived.Grounds.[ci].Stores |> Array.exists (fun s -> s.Owned)) ->
+            let income = max 1 derived.Grounds.[ci].Income
+            min allowed (int (ceil (draw.[ci] * float allowed / float income)))
+        | _ -> allowed
+
 /// What the ground wants beyond the workers: harvest and haul for each
 /// source, a reserver for each declared room's reservable controller, a
 /// claimer for each declared claim.
@@ -180,6 +211,7 @@ let private roundTrip (leg: Leg) (body: BodyPart list) (fetch: Pos) (work: Pos) 
 let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (derived: Derived) =
     let demands = ResizeArray<Demand>()
     let life = float Engine.creepLifetime
+    let hauled = haulShare distance derived
 
     derived.Grounds
     |> Array.iteri (fun gi ground ->
@@ -219,11 +251,7 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
                     |> Option.bind (fun body -> roundTrip leg body s.Pos (sinkOf derived ci) 1))
 
             let allowed =
-                match
-                    caster
-                    |> Option.bind (fun ci ->
-                        sized Pattern.Harvester dig.Wanted derived.Colonies.[ci].BankCapacity)
-                with
+                match caster |> Option.bind (fun ci -> bodyFor derived.Colonies.[ci] dig) with
                 | Some body ->
                     let perSeat = partCountIn body Work * Engine.harvestPerWork
 
@@ -239,7 +267,7 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
                     demand
                         Pattern.Hauler
                         s.Pos
-                        (ceilDiv (allowed * trip) Engine.carryPartCapacity)
+                        (ceilDiv (hauled caster allowed * trip) Engine.carryPartCapacity)
                         (fun body ->
                             let moved =
                                 float (partCountIn body Carry * Engine.carryPartCapacity)
@@ -309,7 +337,7 @@ let private workerDemands
     for d in others do
         match nearest distance colonies (fun _ -> true) d.At with
         | Some ci ->
-            match sized d.Pattern d.Wanted colonies.[ci].BankCapacity with
+            match bodyFor colonies.[ci] d with
             | Some body when partsOf d.Pattern body > 0 ->
                 let bodies = min d.Seats (ceilDiv d.Wanted (partsOf d.Pattern body))
 
@@ -520,7 +548,8 @@ let plan
             | None -> ())
 
     // The seats, each sized and priced at the colony that casts it.
-    let richest = colonies |> Array.fold (fun m c -> max m c.BankCapacity) 0
+    let richest =
+        colonies |> Array.sortByDescending (fun c -> c.BankCapacity) |> Array.tryHead
 
     let tickWorth ci =
         float derived.Grounds.[ci].Income / float colonies.[ci].Spawns.Length
@@ -537,17 +566,18 @@ let plan
                     && Engine.bodyCost (blockOf d.Pattern) <= colonies.[ci].BankCapacity)
                 d.At
 
-        let capacity =
-            match caster with
-            | Some ci -> colonies.[ci].BankCapacity
-            | None -> richest
+        let body =
+            caster
+            |> Option.map (fun ci -> colonies.[ci])
+            |> Option.orElse richest
+            |> Option.bind (fun colony -> bodyFor colony d)
 
         let mutable left = d.Left
         let mutable seatsLeft = d.SeatsLeft
         let mutable go = true
 
         while go && left > 0 && seatsLeft > 0 do
-            match sized d.Pattern left capacity with
+            match body with
             | Some body when partsOf d.Pattern body > 0 ->
                 let ret =
                     d.Value body
