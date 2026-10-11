@@ -565,7 +565,7 @@ everything v1 used its self-written arena for, and more:
   Each push runs the one or two nodes its change touches (about a minute);
   nightly runs them all with the long soak over the seat extremes. Nodes N1–N4 come first
   (the economy and links), N5–N7 with their structures, E with Strategy, S
-  with Fight. ❓ the node builder (`npm run soak -- --node N3`) is not built.
+  with Fight. `npm run soak -- --node N1` … `N4` builds those four (`scripts/plan`); ❓ the rest, with their structures.
 - **Adversaries.** xxscreeps hosts several users. Self-play: the attacker is
   our own bundle with only `Fight` in its modules, an engagement declared at
   start and its squads standing, against the full bot defending; each game

@@ -14,6 +14,10 @@
 //   --late   ticks the bot sits out at the start (default 0): a nudge to the
 //            early trajectory, so a soak:many spread measures how far a run
 //            drifts from a small change, which the seed alone does not
+//   --node   a start from §10.2's nodes (default ticks 5000): N1 is the
+//            respawn above; N2-N4 stand what Layout's plan (`scripts/plan`)
+//            builds by the node's level, the first spawn on its planned
+//            tile, and the node's stock in storage
 //
 // Needs `npm run build` (dist/main.js) and `npm run xx -- setup` (the engine
 // and its template world, under $FABOT_XXSCREEPS_HOME). Writes
@@ -28,7 +32,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -49,7 +53,7 @@ const listOnly = rest[0] === "--list";
 if (listOnly) rest.shift();
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late"].includes(a)) fail(usage);
+  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node"].includes(a)) fail(usage);
   const value = rest[++i];
   if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
   flags[a] = value;
@@ -59,7 +63,17 @@ const whole = (flag, fallback, min) => {
   if (!(Number.isInteger(n) && n >= min)) fail(`${flag} needs a whole number ≥ ${min}\n${usage}`);
   return n;
 };
-const ticks = whole("--ticks", 3000, 1);
+// Each node's level and storage stock; N4's links are what it judges, so
+// they are left to the bot.
+const NODES = {
+  N1: { level: 1, stored: 0, without: [] },
+  N2: { level: 3, stored: 0, without: [] },
+  N3: { level: 4, stored: 5000, without: [] },
+  N4: { level: 5, stored: 50000, without: ["link"] },
+};
+const node = flags["--node"] === undefined ? undefined : NODES[flags["--node"]];
+if (flags["--node"] !== undefined && !node) fail(`--node: one of ${Object.keys(NODES).join(", ")}`);
+const ticks = whole("--ticks", node ? 5000 : 3000, 1);
 const every = whole("--every", 100, 1);
 const seed = whole("--seed", 1, 0);
 const late = whole("--late", 0, 0);
@@ -114,7 +128,7 @@ const world = join(ENGINE, "worlds", `soak-${worldName}`);
 rmSync(world, { recursive: true, force: true });
 // A copied socket is a dead server's; only files and directories come over.
 cpSync(TEMPLATE, world, { recursive: true, filter: (src) => lstatSync(src).isFile() || lstatSync(src).isDirectory() });
-for (const f of ["seed", "colony.mjs", "soak-step.mjs"]) cpSync(join(HERE, "engine", f), join(world, f), { recursive: true });
+for (const f of ["seed", "colony.mjs", "node.mjs", "soak-step.mjs"]) cpSync(join(HERE, "engine", f), join(world, f), { recursive: true });
 writeFileSync(join(world, ".screepsrc.yaml"), screepsrc);
 // Mods resolve from the cwd only where a package.json stands.
 writeFileSync(join(world, "package.json"), '{ "private": true }\n');
@@ -137,12 +151,31 @@ if (listOnly) {
   process.exit(0);
 }
 const colony = JSON.parse(node24([XXSCREEPS, script("colony.mjs"), ...(flags["--room"] ? [flags["--room"]] : [])], world, true).trim().split("\n").at(-1));
-const run = flags["--run"] ?? `${colony.room}-seed${seed}`;
+const run = flags["--run"] ?? `${colony.room}${flags["--node"] ? `-${flags["--node"]}` : ""}-seed${seed}`;
 const out = join(REPO, "soak-runs", run);
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
+let built = null;
+if (node && node.level > 1) {
+  // FABOT_PLAN_BUILT: the caller built it once (soak-many's parallel runs).
+  const plan = join(REPO, "scripts/plan");
+  if (!process.env.FABOT_PLAN_BUILT) {
+    const res = spawnSync("dotnet", ["build", "-c", "Release", "--nologo", "-v", "q", plan], { stdio: ["ignore", "ignore", "inherit"] });
+    if (res.status !== 0) fail("scripts/plan did not build");
+  }
+  const ground = node24([XXSCREEPS, script("node.mjs"), "ground", colony.room], world, true).trim().split("\n").at(-1);
+  const res = spawnSync("dotnet", [join(plan, "bin/Release/net10.0/Plan.dll")], {
+    input: JSON.stringify({ ...JSON.parse(ground), level: node.level }),
+    encoding: "utf8",
+  });
+  if (res.status !== 0) fail(`scripts/plan failed: ${res.stderr}`);
+  built = JSON.parse(res.stdout).filter((s) => !node.without.includes(s.kind));
+  writeFileSync(join(world, "node.json"), JSON.stringify(built));
+  [colony.x, colony.y] = [built[0].x, built[0].y];
+}
 console.error(`colony: ${colony.room}, spawn at ${colony.x},${colony.y}; output ${out}`);
 node24([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
+if (built) node24([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME], world);
 
 // ---- the server, stepped ---------------------------------------------------
 const log = join(out, "server.log");
