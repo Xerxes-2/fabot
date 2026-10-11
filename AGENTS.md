@@ -36,7 +36,13 @@ ones.
   designing a fix, find how v1 solved the problem (its code and
   `docs/adr/`, read with `git show v1:<path>`) and port that mechanism
   with its invariant; drop or replace it only when it was a one-incident
-  patch or no longer applies, and say which in the commit.
+  patch or no longer applies, and say which in the commit. A v1 cap, floor
+  or extra body bolted onto a formula marks where the formula was wrong:
+  fix the formula, never drop the patch silently.
+- Port a mechanism with the links it depends on. The economy is one chain
+  per level (dig, carry, sinks, what spends the surplus); before a soak,
+  trace it through v2 and land the missing links together. A soak of one
+  link without the rest measures the missing link.
 
 - Name the invariant the bug breaks, in one sentence that covers every body,
   room or colony. A new rule that mops up after an old one is not a fix.
