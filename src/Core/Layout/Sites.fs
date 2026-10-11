@@ -34,6 +34,8 @@ type Census =
         Solid: bool[]
         /// Per tile: a road stands.
         Road: bool[]
+        /// Per tile: a rampart stands, any owner's.
+        Rampart: bool[]
         /// Per tile: a construction site stands, any owner's.
         Site: bool[]
         /// Per tile: a creep stands, any owner's. A site under a creep can
@@ -51,6 +53,7 @@ type Census =
 let censusOf (room: Room) (ours: Creep[]) : Census =
     let solid = Array.create Tiles.count false
     let road = Array.create Tiles.count false
+    let rampart = Array.create Tiles.count false
     let site = Array.create Tiles.count false
     let held = Dictionary<Kind, int>()
     let occupied = Array.create Tiles.count false
@@ -69,7 +72,7 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
 
         match s.Kind with
         | Kind.Road -> setAt t road true
-        | Kind.Rampart -> ()
+        | Kind.Rampart -> setAt t rampart true
         | _ -> setAt t solid true
 
         if s.Owner = Ours then
@@ -89,6 +92,7 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
     {
         Solid = solid
         Road = road
+        Rampart = rampart
         Site = site
         Occupied = occupied
         Held = held
@@ -115,7 +119,8 @@ let mayPlace (census: Census) (level: int) =
 /// when its level is not reached, its kind is at its allowance, or its tile
 /// holds a site or a structure it cannot share (a road shares only a
 /// rampart; any other kind a road or a rampart), or, for a kind no creep
-/// stands on, a creep.
+/// stands on, a creep. A rampart goes only over the structure it covers,
+/// standing.
 let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement list =
     let room = min budget (sitesInFlight - census.Pending)
     let placed = ResizeArray<Placement>()
@@ -135,7 +140,10 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
             placed.Count < room
             && item.Level <= level
             && not (at t census.Site)
-            && not (at t census.Solid)
+            && (if item.Kind = Kind.Rampart then
+                    at t census.Solid && not (at t census.Rampart)
+                else
+                    not (at t census.Solid))
             && (standable item.Kind || not (at t census.Occupied))
             && not (taken.Contains t)
             && not (item.Kind = Kind.Road && at t census.Road)

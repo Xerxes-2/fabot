@@ -137,13 +137,16 @@ type LinkFact =
 [<NoEquality; NoComparison>]
 type SiteFact = { Id: string; Pos: Pos; Left: int }
 
-/// A decaying structure below its full hits: a road or a container.
+/// A decaying structure below the hits it is kept at: a road or a container
+/// whole, a rampart of ours at `rampartFloor`.
 [<NoEquality; NoComparison>]
 type RepairFact =
     {
         Id: string
+        Kind: Kind
         Pos: Pos
         Hits: int
+        /// The hits a repair stops at.
         HitsMax: int
         /// Hits it loses a tick to decay, averaged over the decay period.
         Decay: float
@@ -330,6 +333,10 @@ let dugAt (capacity: int) (home: bool) (rate: int) (posted: bool) (seats: int) :
         min rate (diggers * partCountIn body Work * Engine.harvestPerWork)
     | None -> 0
 
+/// The hits a rampart of ours is repaired to: enough to hold a raid's
+/// dismantlers until the towers turn it, at a few thousand energy a room.
+let rampartFloor = 100_000
+
 let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : Ground =
     let rate =
         if held room then
@@ -460,6 +467,17 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
         | _ -> ()
 
         match s.Kind with
+        | Kind.Rampart when s.Owner = Ours && s.Hits < min rampartFloor s.HitsMax ->
+            repairs.Add
+                {
+                    Id = s.Id
+                    Kind = s.Kind
+                    Pos = s.Pos
+                    Hits = s.Hits
+                    HitsMax = min rampartFloor s.HitsMax
+                    Decay = float Engine.rampartDecayAmount / float Engine.rampartDecayTime
+                    Rebuild = 0
+                }
         | Kind.Road
         | Kind.Container when s.Hits < s.HitsMax ->
             let swamp = Terrain.isSwamp room.Terrain s.Pos.X s.Pos.Y
@@ -482,6 +500,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
             repairs.Add
                 {
                     Id = s.Id
+                    Kind = s.Kind
                     Pos = s.Pos
                     Hits = s.Hits
                     HitsMax = s.HitsMax

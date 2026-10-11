@@ -161,7 +161,7 @@ let private planOf (colony: Colony) =
         Plan.ofGround ground colony.Spawns |> Option.map (fun plan -> ground, plan))
 
 let private walkable (kind: Kind) =
-    kind = Kind.Road || kind = Kind.Container
+    kind = Kind.Road || kind = Kind.Container || kind = Kind.Rampart
 
 let private countOf (kind: Kind) (items: Item[]) =
     items |> Array.sumBy (fun i -> if i.Kind = kind then 1 else 0)
@@ -312,17 +312,23 @@ let tests =
 
             testPropertyWithConfig
                 config
-                "a plan builds only where the engine allows, one item a tile"
+                "a plan builds only where the engine allows, one item a tile but a rampart over another"
             <| fun (colony: Colony) ->
                 match planOf colony with
                 | None -> true
                 | Some(ground, plan) ->
-                    let tiles = plan.Items |> Array.map (fun i -> i.Tile)
+                    let ramparts, others =
+                        plan.Items |> Array.partition (fun i -> i.Kind = Kind.Rampart)
+
+                    let tiles = others |> Array.map (fun i -> i.Tile)
+                    let covered = ramparts |> Array.map (fun i -> i.Tile)
 
                     let fixedRock t =
                         Array.contains t ground.Sources || t = ground.Controller
 
                     Array.distinct tiles = tiles
+                    && Array.distinct covered = covered
+                    && covered |> Array.forall (fun t -> Array.contains t tiles)
                     && plan.Items
                        |> Array.forall (fun i ->
                            let x = Tiles.xOf i.Tile
@@ -385,7 +391,8 @@ let tests =
 
                     plan.Items
                     |> Array.forall (fun i ->
-                        if walkable i.Kind then seen.[i.Tile] else beside i.Tile)
+                        i.Kind = Kind.Rampart
+                        || (if walkable i.Kind then seen.[i.Tile] else beside i.Tile))
 
             testPropertyWithConfig config "the labs react: every lab within reach of two inputs"
             <| fun (colony: Colony) ->
@@ -553,33 +560,37 @@ let tests =
 
                     let tiles = placed |> List.map (fun p -> Tiles.index p.X p.Y)
 
-                    let occupied =
-                        set
-                            [
-                                for s in room.Sites -> Tiles.ofPos s.Pos
-                                for s in room.Structures do
-                                    if s.Kind <> Kind.Road && s.Kind <> Kind.Rampart then
-                                        yield Tiles.ofPos s.Pos
-                            ]
-
                     let cap = max 0 (min census.Budget (Sites.sitesInFlight - room.Sites.Length))
 
+                    let solid (s: Structure) =
+                        s.Kind <> Kind.Road && s.Kind <> Kind.Rampart
+
+                    // What a kind may go down over: a rampart only over a
+                    // standing structure no rampart covers yet; a road
+                    // shares a rampart, any other kind a road or a rampart.
+                    let clear (kind: Kind) (here: Structure[]) =
+                        if kind = Kind.Rampart then
+                            Array.exists solid here
+                            && not (here |> Array.exists (fun s -> s.Kind = Kind.Rampart))
+                        else
+                            here
+                            |> Array.forall (fun s ->
+                                s.Kind = Kind.Rampart || (s.Kind = Kind.Road && kind <> Kind.Road))
+
+                    let standing (t: int) =
+                        room.Structures |> Array.filter (fun s -> Tiles.ofPos s.Pos = t)
+
                     // An item the rules admit after what was placed: its
-                    // level reached, its kind short, its tile clear (a road
-                    // shares a rampart; any other kind a road or a rampart).
+                    // level reached, its kind short, its tile clear.
                     let admitted (i: Item) =
                         let t = i.Tile
-
-                        let here = room.Structures |> Array.filter (fun s -> Tiles.ofPos s.Pos = t)
 
                         let added = placed |> List.sumBy (fun q -> if q.Kind = i.Kind then 1 else 0)
 
                         i.Level <= census.Level
                         && not (room.Sites |> Array.exists (fun x -> Tiles.ofPos x.Pos = t))
                         && not (tiles |> List.contains t)
-                        && here
-                           |> Array.forall (fun s ->
-                               s.Kind = Kind.Rampart || (s.Kind = Kind.Road && i.Kind <> Kind.Road))
+                        && clear i.Kind (standing t)
                         && held i.Kind + added < Engine.controllerStructures
                             (Kind.name i.Kind)
                             census.Level
@@ -588,7 +599,12 @@ let tests =
                     && List.length placed <= cap
                     && (List.length placed = cap || not (Array.exists admitted plan.Items))
                     && List.distinct tiles = tiles
-                    && tiles |> List.forall (fun t -> not (occupied.Contains t))
+                    && placed
+                       |> List.forall (fun p ->
+                           let t = Tiles.index p.X p.Y
+
+                           not (room.Sites |> Array.exists (fun x -> Tiles.ofPos x.Pos = t))
+                           && clear p.Kind (standing t))
                     && placed
                        |> List.forall (fun p ->
                            let added =

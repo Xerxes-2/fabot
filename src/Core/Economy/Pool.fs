@@ -192,6 +192,15 @@ let private insideDeadline (c: Controller) =
 /// ranked.
 let siteRank (_: Derived) (_: SiteFact) : int = Price.surplusRank
 
+/// What a tick of a repair's delay costs: a road's or a container's, the
+/// rebuild decay puts at risk; a rampart's, a site's, and the flow's
+/// while the next decay would take it, so a fresh one is not lost.
+let repairValue (r: RepairFact) : float =
+    match r.Kind with
+    | Kind.Rampart when r.Hits <= Engine.rampartDecayAmount -> Price.flowDraw 0.0
+    | Kind.Rampart -> Price.valueOfRank Price.surplusRank
+    | _ -> Price.rebuildAtRisk r.Rebuild r.Hits r.Decay
+
 /// Every Task offered this tick, ground by ground in `Derived` order. A Task
 /// with no energy price is anchored at a band (`Price`).
 let pool (derived: Derived) : Offer[] =
@@ -271,11 +280,7 @@ let pool (derived: Derived) : Offer[] =
                 / Engine.repairHitsPerEnergy
 
             offers.Add
-                { offer
-                      (Repair r.Id)
-                      r.Pos
-                      (Price.rebuildAtRisk r.Rebuild r.Hits r.Decay)
-                      (Capacity.Load missing) with
+                { offer (Repair r.Id) r.Pos (repairValue r) (Capacity.Load missing) with
                     Draw = draw
                 }
 

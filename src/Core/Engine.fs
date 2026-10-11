@@ -359,6 +359,8 @@ let tombstoneDecayPerPart = 5
 /// RAMPART_DECAY_AMOUNT each RAMPART_DECAY_TIME.
 let rampartDecayAmount = 300
 
+let rampartDecayTime = 100
+
 /// REPAIR_COST: 0.01 energy a hit.
 let repairHitsPerEnergy = 100
 

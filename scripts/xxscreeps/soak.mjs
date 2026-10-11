@@ -64,12 +64,13 @@ const whole = (flag, fallback, min) => {
   return n;
 };
 // Each node's level and storage stock; N4's links are what it judges, so
-// they are left to the bot.
+// they are left to the bot, and every node's ramparts, which a node would
+// stand at full hits the bot never paid for.
 const NODES = {
   N1: { level: 1, stored: 0, without: [] },
-  N2: { level: 3, stored: 0, without: [] },
-  N3: { level: 4, stored: 5000, without: [] },
-  N4: { level: 5, stored: 50000, without: ["link"] },
+  N2: { level: 3, stored: 0, without: ["rampart"] },
+  N3: { level: 4, stored: 5000, without: ["rampart"] },
+  N4: { level: 5, stored: 50000, without: ["link", "rampart"] },
 };
 const node = flags["--node"] === undefined ? undefined : NODES[flags["--node"]];
 if (flags["--node"] !== undefined && !node) fail(`--node: one of ${Object.keys(NODES).join(", ")}`);

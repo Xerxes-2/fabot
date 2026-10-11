@@ -54,18 +54,19 @@ let priority (kind: Kind) =
     | Kind.Spawn -> 0
     | Kind.Extension -> 1
     | Kind.Tower -> 2
-    | Kind.Storage -> 3
-    | Kind.Container -> 4
-    | Kind.Link -> 5
-    | Kind.Road -> 6
-    | Kind.Terminal -> 7
-    | Kind.Extractor -> 8
-    | Kind.Lab -> 9
-    | Kind.Factory -> 10
-    | Kind.PowerSpawn -> 11
-    | Kind.Nuker -> 12
-    | Kind.Observer -> 13
-    | _ -> 14
+    | Kind.Rampart -> 3
+    | Kind.Storage -> 4
+    | Kind.Container -> 5
+    | Kind.Link -> 6
+    | Kind.Road -> 7
+    | Kind.Terminal -> 8
+    | Kind.Extractor -> 9
+    | Kind.Lab -> 10
+    | Kind.Factory -> 11
+    | Kind.PowerSpawn -> 12
+    | Kind.Nuker -> 13
+    | Kind.Observer -> 14
+    | _ -> 15
 
 // The reaction cluster among the open slots: two adjacent inputs (the pair
 // that leaves the widest window within reach of both) and the outputs within
@@ -141,6 +142,13 @@ let sized =
         Kind.Observer
         Kind.Lab
     ]
+
+/// The kinds a rampart covers: what a raid comes for.
+let private keep = [| Kind.Spawn; Kind.Tower; Kind.Storage; Kind.Terminal |]
+
+/// The level ramparts are kept from: the first tower's, the room's first
+/// defence.
+let rampartLevel = levelOf Kind.Tower 0
 
 /// What a step off the lattice pays over the ground's weight: a road leaves
 /// the lattice only to at round a wall the lattice cannot. A design
@@ -662,7 +670,27 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
                 Level = at t roadLevel
             })
 
-    let all = Array.concat [ items.ToArray(); extra.ToArray(); roads ]
+    // A rampart over each structure a raid comes for and each source's
+    // container its harvester cannot leave, from the room's first tower.
+    let ramparts =
+        let covered =
+            [|
+                for i in items do
+                    if Array.contains i.Kind keep then
+                        yield i.Tile, i.Level
+                for p in posted -> p.Container, rockLevel
+            |]
+
+        covered
+        |> Array.distinctBy fst
+        |> Array.map (fun (t, level) ->
+            {
+                Kind = Kind.Rampart
+                Tile = t
+                Level = max rampartLevel level
+            })
+
+    let all = Array.concat [ items.ToArray(); extra.ToArray(); roads; ramparts ]
 
     for kind in sized do
         if all |> Array.sumBy (fun i -> if i.Kind = kind then 1 else 0) < count kind then
