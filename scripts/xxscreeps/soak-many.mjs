@@ -146,20 +146,22 @@ const rowOf = (run) => {
   const refusals = Object.values(JSON.parse(read(run, "refusals.json") ?? "{}")).reduce((a, b) => a + b, 0);
   const last = samples.at(-1) ?? {};
   const at = (rcl) => levels.find((l) => l.rcl >= rcl)?.t;
-  // What the economy ends with, in energy: what went into the controller,
-  // into structures, and what is held. Every economy shows up here; a
+  // What the economy ends with, in energy, as the room stands at the last
+  // sample (the sampler's `worth`): every economy shows up here; a
   // diagnostic belongs in the run's own samples, not in this table.
   const ledger = last.ledger;
-  const k = (n) => (ledger ? `${Math.round(n / 1000)}k` : "-");
+  const w = last.worth;
+  const k = (n) => (w ? `${Math.round(n / 1000)}k` : "-");
   return {
     ok: !failed(run),
     rcl: last.rcl,
     rcl3: at(3),
     rcl4: at(4),
-    upgrade: k(ledger?.upgrade ?? 0),
-    build: k(ledger?.build ?? 0),
-    stock: k(ledger?.stock ?? 0),
-    worth: k((ledger?.upgrade ?? 0) + (ledger?.build ?? 0) + (ledger?.stock ?? 0)),
+    controller: k(w?.controller ?? 0),
+    structures: k((w?.structures ?? 0) + (w?.sites ?? 0)),
+    fortified: k(w?.fortification ?? 0),
+    stock: k(w?.stock ?? 0),
+    worth: k(w ? w.controller + w.structures + w.sites + w.fortification + w.stock : 0),
     faults: faults + refusals,
     // The ledger closes within a percent of what was dug, or the worth is
     // not to be read.
@@ -168,14 +170,14 @@ const rowOf = (run) => {
 };
 
 const cell = (v, w = 9) => String(v ?? "-").padStart(w);
-console.log(["room", "seed", "bundle", "ok", "rcl", "rcl3", "rcl4", "upgrade", "build", "stock", "worth", "faults"].map((h, i) => cell(h, i === 2 ? 12 : 9)).join(""));
+console.log(["room", "seed", "bundle", "ok", "rcl", "rcl3", "rcl4", "control", "structs", "fortify", "stock", "worth", "faults"].map((h, i) => cell(h, i === 2 ? 12 : 9)).join(""));
 for (const room of rooms)
   for (const seed of seeds)
     for (const bot of bots) {
       const run = runs.find((r) => r.room === room && r.seed === seed && r.bot === bot);
       const r = rowOf(run);
       console.log(
-        [room, seed, bot.name, r.ok ? "yes" : "NO", r.rcl, r.rcl3, r.rcl4, r.upgrade, r.build, r.stock, r.open ? `${r.worth}?` : r.worth, r.faults]
+        [room, seed, bot.name, r.ok ? "yes" : "NO", r.rcl, r.rcl3, r.rcl4, r.controller, r.structures, r.fortified, r.stock, r.open ? `${r.worth}?` : r.worth, r.faults]
           .map((v, i) => cell(v, i === 2 ? 12 : 9))
           .join(""),
       );

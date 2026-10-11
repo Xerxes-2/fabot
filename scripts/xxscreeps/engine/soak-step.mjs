@@ -80,6 +80,42 @@ const ATTACK = 1;
 const HEAL = 6;
 const PART_COST = { move: 50, work: 100, carry: 50, attack: 80, ranged_attack: 150, heal: 250, claim: 600, tough: 10 };
 const ledger = { dug: 0, regen: 0, spawn: 0, build: 0, upgrade: 0, repair: 0, tower: 0, decayed: 0, stock0: null, stock: 0 };
+// What a colony holds, in energy, as it stands: the controller's climb, every
+// structure at its construction cost (a road at its terrain's), ramparts' and
+// walls' hits at the repair rate, sites at their progress, and the stock.
+// Read off the room each sample, never summed from history: a structure that
+// decayed or was destroyed is worth nothing.
+const CONTROLLER_LEVELS = { 1: 200, 2: 45000, 3: 135000, 4: 405000, 5: 1215000, 6: 3645000, 7: 10935000 };
+const CONSTRUCTION_COST = {
+  spawn: 15000, extension: 3000, road: 300, constructedWall: 1, rampart: 1, link: 5000, storage: 30000, tower: 5000,
+  observer: 8000, powerSpawn: 100000, extractor: 5000, lab: 50000, terminal: 100000, container: 5000, nuker: 100000, factory: 100000,
+};
+const REPAIR_COST = 0.01;
+const world = await shard.loadWorld();
+const roadCost = (room, pos) => {
+  const t = world.map.getRoomTerrain(room).get(pos.x, pos.y);
+  return t & 1 ? 150 * 300 : t & 2 ? 5 * 300 : 300;
+};
+function worthOf(room, stock) {
+  const worth = { controller: 0, structures: 0, fortification: 0, sites: 0, stock };
+  for (const o of room["#objects"]) {
+    const mine = o["#user"] === ours;
+    const ownerless = o.structureType === "road" || o.structureType === "container";
+    if (o["#lookType"] === "constructionSite") {
+      if (mine) worth.sites += o.progress ?? 0;
+    } else if (o.structureType === "controller") {
+      if (!mine) continue;
+      for (let l = 1; l < room["#level"]; l++) worth.controller += CONTROLLER_LEVELS[l];
+      worth.controller += o["#progress"] ?? 0;
+    } else if (o.structureType === "rampart" || o.structureType === "constructedWall") {
+      if (mine || o.structureType === "constructedWall") worth.fortification += Math.floor(o.hits * REPAIR_COST);
+    } else if (o.structureType !== undefined && (mine || ownerless)) {
+      worth.structures += o.structureType === "road" ? roadCost(room.name, o.pos) : CONSTRUCTION_COST[o.structureType] ?? 0;
+    }
+  }
+  return worth;
+}
+
 const born = new Set();
 let lastPiles = new Map();
 let regenNext = 0;
@@ -246,6 +282,7 @@ for (let t = 0; t < ticks; t++) {
     const row = sample(t, time, room);
     row.cpu = cpu;
     row.ledger = ledgerRow();
+    row.worth = worthOf(room, ledger.stock);
     row.botCpu = fresh ? obs.cpu : null;
     row.faults = seenFaults.size;
     row.ms = Date.now() - started;
