@@ -700,8 +700,24 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         Room = ground.Room
         Anchor = anchor
         Items =
-            let keys =
-                Array.init all.Length (fun i -> priority (at i all).Kind * all.Length + i)
+            // A container whose rock other seats ring goes before the
+            // extensions: its harvester digs beside the crews. A rock's only
+            // seat waits for the bank, or a small harvester holds it a life.
+            let crowded =
+                posted
+                |> Array.filter (fun p ->
+                    Tiles.within 1 p.Rock
+                    |> Array.filter (fun n -> n <> p.Rock && at n weights >= 0)
+                    |> Array.length > 1)
+                |> Array.map (fun p -> p.Container)
+
+            let rank (i: Item) =
+                if i.Kind = Kind.Container && Array.contains i.Tile crowded then
+                    2 * priority Kind.Extension - 1
+                else
+                    2 * priority i.Kind
+
+            let keys = Array.init all.Length (fun i -> rank (at i all) * all.Length + i)
 
             sortInts keys
             keys |> Array.map (fun key -> at (key % all.Length) all)
