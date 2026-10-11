@@ -4,6 +4,7 @@ module Fabot.Core.Economy.Run
 
 open System.Collections.Generic
 open Fabot.Core
+open Fabot.Core.Vocabulary
 open Fabot.Core.World
 open Fabot.Core.Grid
 open Fabot.Core.Intents
@@ -27,14 +28,18 @@ let private crossingTicks = Engine.roomSide
 /// the bottom of the scale, so a dearer Task's body is the heavier.
 let private weightOf (priority: int) = max 1 (Price.bottomRank - priority + 1)
 
-let private targetOf (offer: Offer) : Target =
+/// Within `range` of one tile.
+let private targetAt (pos: Pos) (range: int) : Target =
     {
-        Room = offer.Target.Room
-        Tiles = [| Tiles.ofPos offer.Target |]
-        Range = rangeOf offer.Task
+        Room = pos.Room
+        Tiles = [| Tiles.ofPos pos |]
+        Range = range
         Avoid = Set.empty
         MaxHops = reachHops
     }
+
+let private targetOf (offer: Offer) : Target =
+    targetAt offer.Target (rangeOf offer.Task)
 
 /// Ticks from a tile to a target: this room's leg from the Atlas, and a
 /// room's side for each crossing past the first.
@@ -74,7 +79,7 @@ let private within (range: int) (a: Pos) (b: Pos) =
 let decide (context: Context) (state: State) : Intent list * State =
     let world = context.World
     let atlas = context.Atlas
-    let derived = Derived.ofWorld world [] []
+    let derived = Derived.ofWorld world atlas [] []
     let offers = Pool.pool derived
 
     let creeps = Dictionary<string, Creep>()
@@ -98,16 +103,65 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     let assignments = Matcher.matchAll travel offers derived.Bodies state.Assignments
 
-    let plan = Quota.plan (distance atlas) derived offers assignments
-
-    let casts =
-        plan.Casts
-        |> List.map (fun cast -> Spawn(cast.Spawn, SpawnCreep(cast.Body, cast.Name)))
-
     let byId = Dictionary<string, Offer>()
 
     for offer in offers do
         byId.[offer.Id] <- offer
+
+    // A body's walk to its work: at its own pace now, or fresh from a spawn
+    // (empty), its successor's.
+    let walk (fresh: bool) (body: Body) (from: Pos) =
+        match creeps.TryGetValue body.Name, Map.tryFind body.Name assignments with
+        | (true, creep), Some id ->
+            match byId.TryGetValue id with
+            | true, offer ->
+                let mover =
+                    if fresh then
+                        {
+                            Footprint = One
+                            Factor =
+                                creep.Body
+                                |> Array.map (fun p -> p.Kind)
+                                |> List.ofArray
+                                |> emptyFactor
+                        }
+                    else
+                        movers.[body.Name]
+
+                ticksTo atlas mover (targetOf offer) from
+            | _ -> None
+        | _ -> None
+
+    // A leg at the pace a body of the parts walks it loaded.
+    let leg (parts: BodyPart list) (from: Pos) (onto: Pos) (range: int) =
+        ticksTo
+            atlas
+            {
+                Footprint = One
+                Factor = loadedFactor parts
+            }
+            (targetAt onto range)
+            from
+
+    // A source dug out waits for its regeneration: its holders stay seated
+    // and do not act.
+    let dugOut = HashSet<string>()
+
+    for ground in derived.Grounds do
+        for s in ground.Sources do
+            if s.Energy = 0 then
+                dugOut.Add s.Id |> ignore
+
+    let ready (task: Task) =
+        match task with
+        | Task.Harvest id -> not (dugOut.Contains id)
+        | _ -> true
+
+    let plan = Quota.plan (distance atlas) leg walk derived offers assignments
+
+    let casts =
+        plan.Casts
+        |> List.map (fun cast -> Spawn(cast.Spawn, SpawnCreep(cast.Body, cast.Name)))
 
     let acts = ResizeArray<Intent>()
     let wishes = Dictionary<string, ResizeArray<Wish>>()
@@ -128,7 +182,7 @@ let decide (context: Context) (state: State) : Intent list * State =
                 | _ -> None)
         with
         | Some offer ->
-            if within (rangeOf offer.Task) creep.Pos offer.Target then
+            if within (rangeOf offer.Task) creep.Pos offer.Target && ready offer.Task then
                 acts.Add(Creep(creep.Name, actOf offer.Task))
 
             wishIn

@@ -16,13 +16,17 @@ type Assignments = Map<string, string>
 /// - A body keeps its Task while the Task is offered, the body fits it,
 ///   reaches it before it dies, and the holders kept before it leave room.
 ///   Holders are kept in ascending share, then nearest, so a set of holders
-///   the match admitted is kept whole while nothing changed.
+///   the match admitted is kept whole while nothing changed; a seated
+///   offer's in descending `Pool.seatValue`, so its seats hold the bodies
+///   that bring them the most.
 /// - The rest are matched greedily: of every unmatched body's best offer by
 ///   (rank, travel, holders), the smallest pair is matched first, ties to the
-///   body's then the offer's order, so a contested Task goes to the body that
-///   reaches it cheapest.
+///   body's name then the offer's order, so a contested Task goes to the body
+///   that reaches it cheapest.
 /// - A body is admitted while what the holders before it bring falls short of
-///   the capacity (`Pool.admits`).
+///   the capacity (`Pool.admits`); on a seated offer, the holders ahead of it
+///   by seat value, and a holder that falls behind a newcomer is released.
+///   The result does not depend on the order of `bodies`.
 let matchAll
     (travel: Body -> Offer -> int option)
     (pool: Offer[])
@@ -54,12 +58,45 @@ let matchAll
     let holders = Array.zeroCreate<int> offers
     let assigned = Array.create bodies.Length -1
 
+    let seated (oi: int) =
+        match pool.[oi].Capacity with
+        | Capacity.Seated _ -> true
+        | _ -> false
+
+    // Whether body `a` goes ahead of body `b` on a seated offer: what it
+    // brings the seat over its stay, then its name.
+    let ahead (oi: int) (a: int) (b: int) =
+        let va = seatValue bodies.[a] pool.[oi] (walk a oi)
+        let vb = seatValue bodies.[b] pool.[oi] (walk b oi)
+
+        va > vb
+        || (va = vb && System.String.CompareOrdinal(bodies.[a].Name, bodies.[b].Name) < 0)
+
+    // Whether a seated offer admits a body among the holders ahead of it.
+    let admitsAhead (bi: int) (oi: int) =
+        let mutable n = 0
+        let mutable sum = 0
+
+        for b in 0 .. bodies.Length - 1 do
+            if assigned.[b] = oi && b <> bi && ahead oi b bi then
+                n <- n + 1
+                sum <- sum + share bodies.[b] pool.[oi]
+
+        admits pool.[oi] sum n
+
     let take (bi: int) (oi: int) =
         assigned.[bi] <- oi
         held.[oi] <- held.[oi] + share bodies.[bi] pool.[oi]
         holders.[oi] <- holders.[oi] + 1
 
-    // The keep.
+    let release (bi: int) =
+        let oi = assigned.[bi]
+        assigned.[bi] <- -1
+        held.[oi] <- held.[oi] - share bodies.[bi] pool.[oi]
+        holders.[oi] <- holders.[oi] - 1
+
+    // The keep: a seated offer keeps its dearest holders, any other its
+    // lightest first.
     let kept = ResizeArray<struct (int * int * int * int)>()
 
     for bi in 0 .. bodies.Length - 1 do
@@ -67,17 +104,26 @@ let matchAll
         | Some tid ->
             match byId.TryGetValue tid with
             | true, oi when fits bodies.[bi] pool.[oi].Task && walk bi oi >= 0 ->
-                kept.Add(struct (share bodies.[bi] pool.[oi], walk bi oi, bi, oi))
+                let key =
+                    if seated oi then
+                        -(seatValue bodies.[bi] pool.[oi] (walk bi oi))
+                    else
+                        share bodies.[bi] pool.[oi]
+
+                kept.Add(struct (key, walk bi oi, bi, oi))
             | _ -> ()
         | None -> ()
 
     kept.Sort(fun (struct (s1, w1, b1, _)) (struct (s2, w2, b2, _)) ->
-        if s1 <> s2 then compare s1 s2
-        elif w1 <> w2 then compare w1 w2
-        else compare bodies.[b1].Name bodies.[b2].Name)
+        if s1 <> s2 then
+            compare s1 s2
+        elif w1 <> w2 then
+            compare w1 w2
+        else
+            System.String.CompareOrdinal(bodies.[b1].Name, bodies.[b2].Name))
 
     for struct (_, _, bi, oi) in kept do
-        if admits pool.[oi] held.[oi] then
+        if admits pool.[oi] held.[oi] holders.[oi] then
             take bi oi
 
     // The fresh match. Each body's best offer, recomputed only when the
@@ -90,13 +136,18 @@ let matchAll
     let before (r1, w1, l1) (r2, w2, l2) =
         r1 < r2 || (r1 = r2 && (w1 < w2 || (w1 = w2 && l1 < l2)))
 
+    // Open to the body: room among all the holders, or on a seated offer
+    // among those ahead of it.
+    let open' (bi: int) (oi: int) =
+        admits pool.[oi] held.[oi] holders.[oi] || (seated oi && admitsAhead bi oi)
+
     let score (bi: int) =
         bestOffer.[bi] <- -1
 
         for oi in 0 .. offers - 1 do
             let offer = pool.[oi]
 
-            if fits bodies.[bi] offer.Task && admits offer held.[oi] then
+            if fits bodies.[bi] offer.Task && open' bi oi then
                 let w = walk bi oi
 
                 if
@@ -115,20 +166,21 @@ let matchAll
         if assigned.[bi] < 0 then
             score bi
 
+    // The smallest pair first: (rank, travel, holders), then the body's name.
+    let first (a: int) (b: int) =
+        let ka = (bestRank.[a], bestWalk.[a], bestLoad.[a])
+        let kb = (bestRank.[b], bestWalk.[b], bestLoad.[b])
+
+        before ka kb
+        || (ka = kb && System.String.CompareOrdinal(bodies.[a].Name, bodies.[b].Name) < 0)
+
     let mutable go = true
 
     while go do
         let mutable pick = -1
 
         for bi in 0 .. bodies.Length - 1 do
-            if
-                assigned.[bi] < 0
-                && bestOffer.[bi] >= 0
-                && (pick < 0
-                    || before
-                        (bestRank.[bi], bestWalk.[bi], bestLoad.[bi])
-                        (bestRank.[pick], bestWalk.[pick], bestLoad.[pick]))
-            then
+            if assigned.[bi] < 0 && bestOffer.[bi] >= 0 && (pick < 0 || first bi pick) then
                 pick <- bi
 
         if pick < 0 then
@@ -137,8 +189,32 @@ let matchAll
             let oi = bestOffer.[pick]
             take pick oi
 
+            // A seat taken by a dearer body releases the holders that no
+            // longer fit behind it.
+            let released = ResizeArray<int>()
+
+            if seated oi then
+                let seatedHere =
+                    [| 0 .. bodies.Length - 1 |] |> Array.filter (fun b -> assigned.[b] = oi)
+
+                let ordered =
+                    seatedHere |> Array.sortWith (fun a b -> if ahead oi a b then -1 else 1)
+
+                let mutable n = 0
+                let mutable sum = 0
+
+                for b in ordered do
+                    if admits pool.[oi] sum n then
+                        n <- n + 1
+                        sum <- sum + share bodies.[b] pool.[oi]
+                    else
+                        released.Add b
+
+                for b in released do
+                    release b
+
             for bi in 0 .. bodies.Length - 1 do
-                if assigned.[bi] < 0 && bestOffer.[bi] = oi then
+                if assigned.[bi] < 0 && (bestOffer.[bi] = oi || released.Contains bi) then
                     score bi
 
     let mutable out = Map.empty

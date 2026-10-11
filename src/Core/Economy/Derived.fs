@@ -47,6 +47,11 @@ type SourceFact =
         Rate: int
         /// A container within reach of the source, which takes what it digs.
         Container: string option
+        /// The tiles a body can stand on to dig it: what bounds its holders
+        /// (`seatsAt`).
+        Seats: int
+        /// Energy left in it until it regenerates.
+        Energy: int
     }
 
 /// A mineral under our extractor, with ore left in it.
@@ -141,6 +146,9 @@ type Ground =
         Reservable: bool
         /// Ticks left on our reservation of its controller; 0 for none.
         OurReservation: int
+        /// The tiles a body can stand on to upgrade its controller
+        /// (`seatsAt`); 0 for no controller.
+        UpgradeSeats: int
     }
 
 /// A colony: a room whose controller is ours with a spawn of ours in it. A
@@ -234,7 +242,15 @@ let private held (room: Room) =
     | Some c -> c.Owner <> Nobody || Option.isSome c.Reservation
     | None -> false
 
-let private groundOf (me: string) (room: Room) : Ground =
+/// The tiles a one-tile body may stand on within `range` of a target;
+/// unbounded where the Atlas counts none (a room it has no grid for, or a
+/// target walled in, which nobody reaches anyway): not knowing is no bound.
+let private seatsAt (atlas: Atlas) (range: int) (target: Pos) =
+    match List.length (Atlas.seats atlas Grid.One range target) with
+    | 0 -> System.Int32.MaxValue
+    | n -> n
+
+let private groundOf (atlas: Atlas) (me: string) (room: Room) : Ground =
     let rate =
         if held room then
             Engine.heldOutputPerTick
@@ -265,6 +281,8 @@ let private groundOf (me: string) (room: Room) : Ground =
                     containers
                     |> Array.tryFind (fun c -> rangeIn s.Pos c.Pos = Some 1)
                     |> Option.map (fun c -> c.Id)
+                Seats = seatsAt atlas 1 s.Pos
+                Energy = s.Energy
             })
 
     let minerals =
@@ -403,13 +421,17 @@ let private groundOf (me: string) (room: Room) : Ground =
             match room.Controller |> Option.bind (fun c -> c.Reservation) with
             | Some(user, ticks) when user = me -> ticks
             | _ -> 0
+        UpgradeSeats =
+            room.Controller
+            |> Option.map (fun c -> seatsAt atlas (Task.rangeOf (Task.Upgrade c.Id)) c.Pos)
+            |> Option.defaultValue 0
     }
 
-/// The economy's facts this tick. `worked` are the rooms declared to the
-/// economy beyond the colonies' own (outposts, a claim's room once a spawn
-/// site stands); `claims` the rooms declared for a claim. A declared room out
-/// of sight contributes nothing.
-let ofWorld (world: World) (worked: string list) (claims: string list) : Derived =
+/// The economy's facts this tick, seats read off the tick's `atlas`. `worked`
+/// are the rooms declared to the economy beyond the colonies' own (outposts, a
+/// claim's room once a spawn site stands); `claims` the rooms declared for a
+/// claim. A declared room out of sight contributes nothing.
+let ofWorld (world: World) (atlas: Atlas) (worked: string list) (claims: string list) : Derived =
     let colonies =
         world.Rooms
         |> Array.choose (fun room ->
@@ -441,8 +463,8 @@ let ofWorld (world: World) (worked: string list) (claims: string list) : Derived
 
     let grounds =
         Array.append
-            (colonies |> Array.map (fst >> groundOf world.Me))
-            (declared |> Array.map (groundOf world.Me))
+            (colonies |> Array.map (fst >> groundOf atlas world.Me))
+            (declared |> Array.map (groundOf atlas world.Me))
 
     let bodies =
         world.Creeps

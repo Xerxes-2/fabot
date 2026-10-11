@@ -1,6 +1,7 @@
 /// The body patterns the economy casts and the arithmetic that sizes one to
 /// a bank. A pattern shapes what a body is good at, never what it is
-/// assigned: the matcher reads parts, not patterns.
+/// assigned: the matcher reads parts, not patterns, but for the harvester's
+/// seat (`Pool.fits`).
 module Fabot.Core.Economy.Bodies
 
 open Fabot.Core
@@ -11,7 +12,8 @@ open Fabot.Core.Vocabulary
 type Pattern =
     /// Digs, carries and spends: the generalist.
     | Worker
-    /// Heavy WORK that stands at a source's container and digs.
+    /// Heavy WORK that stands at a source's seat and digs, its dig falling
+    /// where it stands.
     | Harvester
     /// Carries and does not dig.
     | Hauler

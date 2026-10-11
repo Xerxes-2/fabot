@@ -279,7 +279,7 @@ let private distance (a: Pos) (b: Pos) =
         Some Engine.roomSide
 
 let private derive (g: Generated) =
-    Derived.ofWorld g.World g.Worked g.Claims
+    Derived.ofWorld g.World (Atlas.ofWorld g.World) g.Worked g.Claims
 
 /// Every third body assigned to an offer, picked by its index.
 let private assignedIn (derived: Derived.Derived) (pool: Offer[]) =
@@ -292,9 +292,15 @@ let private assignedIn (derived: Derived.Derived) (pool: Offer[]) =
         |> Array.map (fun (i, b) -> b.Name, pool.[(i * 7) % pool.Length].Id)
         |> Map.ofArray
 
+/// A leg in ticks: the tiles between its ends.
+let private leg (_: BodyPart list) (a: Pos) (b: Pos) (_: int) = distance a b
+
+/// A successor's walk: a room's side to every body's work.
+let private walk (_: bool) (_: Derived.Body) (_: Pos) = Some Engine.roomSide
+
 let private planOf (derived: Derived.Derived) =
     let pool = Pool.pool derived
-    Quota.plan distance derived pool (assignedIn derived pool)
+    Quota.plan distance leg walk derived pool (assignedIn derived pool)
 
 let private planned (g: Generated) = planOf (derive g)
 
@@ -320,7 +326,8 @@ let tests =
                        | Capacity.Unbounded -> true
                        | Capacity.Bodies n
                        | Capacity.Work n
-                       | Capacity.Load n -> n >= 0)
+                       | Capacity.Load n -> n >= 0
+                       | Capacity.Seated(seats, work) -> seats >= 0 && work >= 0)
 
             testPropertyWithConfig
                 config
@@ -371,6 +378,67 @@ let tests =
 
             testPropertyWithConfig config "no seat asks for nothing"
             <| fun (g: Generated) -> (planned g).Seats |> List.forall (fun s -> s.Parts > 0)
+
+            testPropertyWithConfig config "a source is cast no more harvesters than its seats"
+            <| fun (g: Generated) ->
+                let derived = derive g
+                let p = planOf derived
+
+                derived.Grounds
+                |> Array.forall (fun ground ->
+                    ground.Sources
+                    |> Array.forall (fun s ->
+                        p.Seats
+                        |> List.filter (fun seat ->
+                            seat.Pattern = Bodies.Pattern.Harvester && seat.At = s.Pos)
+                        |> List.length
+                        <= s.Seats))
+
+            testPropertyWithConfig
+                config
+                "a body counts only while its life outlasts its successor's spawn and walk"
+            <| fun (g: Generated) ->
+                let derived = derive g
+                let p = planOf derived
+                let walked = if derived.Colonies.Length > 0 then Engine.roomSide else 0
+
+                Bodies.allPatterns
+                |> List.forall (fun pattern ->
+                    let counted =
+                        Array.append derived.Bodies derived.Ovens
+                        |> Array.sumBy (fun b ->
+                            if
+                                b.Pattern = pattern
+                                && b.TicksToLive > b.Size * Engine.spawnTicksPerPart + walked
+                            then
+                                Derived.keyPartsIn pattern b
+                            else
+                                0)
+
+                    p.Wants |> List.forall (fun w -> w.Pattern <> pattern || w.Standing = counted))
+
+            testPropertyWithConfig
+                config
+                "no spawn idles while its colony can pay a seat it has not cast"
+            <| fun (g: Generated) ->
+                let derived = derive g
+                let p = planOf derived
+
+                derived.Colonies
+                |> Array.indexed
+                |> Array.forall (fun (ci, colony) ->
+                    let own = p.Casts |> List.filter (fun c -> c.Colony = colony.Room)
+                    let seats = p.Seats |> List.filter (fun s -> s.Colony = Some ci)
+
+                    let idle =
+                        (colony.Spawns |> Array.filter (fun s -> Option.isNone s.Spawning)).Length
+                        - own.Length
+
+                    let left = colony.Bank - (own |> List.sumBy (fun c -> Engine.bodyCost c.Body))
+
+                    idle = 0
+                    || (own |> List.filter (fun c -> not c.Floor) |> List.length) = seats.Length
+                    || seats |> List.exists (fun s -> Engine.bodyCost s.Body > left))
 
             testPropertyWithConfig
                 config
@@ -442,7 +510,7 @@ let tests =
                 let derived = derive g
                 let pool = Pool.pool derived
                 let assigned = assignedIn derived pool
-                let p = Quota.plan distance derived pool assigned
+                let p = Quota.plan distance leg walk derived pool assigned
 
                 let serves (room: string) (b: Derived.Body) =
                     (b.Pattern = Bodies.Pattern.Worker || b.Pattern = Bodies.Pattern.Hauler)

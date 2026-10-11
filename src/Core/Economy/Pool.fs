@@ -20,6 +20,8 @@ type Capacity =
     | Bodies of int
     /// Holders' live WORK parts.
     | Work of int
+    /// Holders, one to a seat, and their live WORK parts: whichever binds.
+    | Seated of seats: int * work: int
     /// Energy: an intake counts its holders' free room, a delivery what they
     /// carry of the resource.
     | Load of int
@@ -44,10 +46,12 @@ let private carried (body: Body) (resource: Resource) = Store.amountOf resource 
 /// Whether a body's parts and store let it act on the Task now. One rule for
 /// a fresh match and a kept one: an intake while the store has room, a
 /// delivery while it holds the resource. A harvester digs whatever its store
-/// holds: the engine drops the overflow onto the container it stands on.
+/// holds, the engine dropping the overflow where it stands, and takes nothing
+/// else: its seat is the work it was cast for, its CARRY the dig's buffer.
 let fits (body: Body) (task: Task) : bool =
     match task with
     | Harvest _ -> body.Work > 0 && (body.Pattern = Pattern.Harvester || body.Free > 0)
+    | _ when body.Pattern = Pattern.Harvester -> false
     | Withdraw _
     | Pickup _ -> body.Carry > 0 && body.Free > 0
     | Refill(_, resource) -> body.Carry > 0 && carried body resource > 0
@@ -62,21 +66,43 @@ let share (body: Body) (offer: Offer) : int =
     match offer.Capacity with
     | Capacity.Unbounded -> 0
     | Capacity.Bodies _ -> 1
-    | Capacity.Work _ -> body.Work
+    | Capacity.Work _
+    | Capacity.Seated _ -> body.Work
     | Capacity.Load _ ->
         match offer.Task with
         | Refill(_, resource) -> carried body resource
         | task when isIntake task -> body.Free
         | _ -> body.Energy
 
-/// Whether an offer admits one more holder while the holders it has bring
+/// Whether an offer admits one more holder while it has `holders` who bring
 /// `held` (`share` summed).
-let admits (offer: Offer) (held: int) : bool =
+let admits (offer: Offer) (held: int) (holders: int) : bool =
     match offer.Capacity with
     | Capacity.Unbounded -> true
     | Capacity.Bodies n
     | Capacity.Work n
     | Capacity.Load n -> held < n
+    | Capacity.Seated(seats, work) -> holders < seats && held < work
+
+/// What a body brings a seated offer over its stay, `walk` ticks away: the
+/// energy it digs or upgrades before it dies, or before its store fills (a
+/// dig into its store) or empties (an upgrade). 0 for any other offer.
+let seatValue (body: Body) (offer: Offer) (walk: int) : int =
+    match offer.Capacity with
+    | Capacity.Seated _ ->
+        let stay = max 0 (body.TicksToLive - walk)
+
+        match offer.Task with
+        | Harvest _ ->
+            let dig = body.Work * Engine.harvestPerWork * stay
+
+            if body.Pattern = Pattern.Harvester then
+                dig
+            else
+                min body.Free dig
+        | Upgrade _ -> min body.Energy (body.Work * Engine.upgradeDrainPerWork * stay)
+        | _ -> body.Work * stay
+    | _ -> 0
 
 let private offer task (target: Pos) (value: float) capacity =
     {
@@ -112,13 +138,18 @@ let pool (derived: Derived) : Offer[] =
             else
                 None
 
+        // Offered through a regeneration gap too: its holders keep their
+        // seats and wait to dig.
         for s in ground.Sources do
             offers.Add(
                 offer
                     (Harvest s.Id)
                     s.Pos
                     (float s.Rate)
-                    (Capacity.Work((s.Rate + Engine.harvestPerWork - 1) / Engine.harvestPerWork))
+                    (Capacity.Seated(
+                        s.Seats,
+                        (s.Rate + Engine.harvestPerWork - 1) / Engine.harvestPerWork
+                    ))
             )
 
         for m in ground.Minerals do
@@ -166,10 +197,13 @@ let pool (derived: Derived) : Offer[] =
         match ground.Controller with
         | Some c when c.Owner = Ours ->
             let capacity =
-                if c.Level >= Engine.controllerMaxLevel then
-                    Capacity.Work Engine.maxUpgradePerTick
-                else
-                    Capacity.Unbounded
+                Capacity.Seated(
+                    ground.UpgradeSeats,
+                    if c.Level >= Engine.controllerMaxLevel then
+                        Engine.maxUpgradePerTick
+                    else
+                        System.Int32.MaxValue
+                )
 
             let upgrade =
                 offer (Upgrade c.Id) c.Pos (Price.valueOfRank Price.upgradeRank) capacity

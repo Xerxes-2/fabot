@@ -91,6 +91,10 @@ let private offerGen (i: int) : Gen<Offer> =
                     Gen.choose (0, 3) |> Gen.map Capacity.Bodies
                     Gen.choose (0, 12) |> Gen.map Capacity.Work
                     Gen.choose (0, 400) |> Gen.map Capacity.Load
+                    Gen.map2
+                        (fun s w -> Capacity.Seated(s, w))
+                        (Gen.choose (0, 4))
+                        (Gen.choose (0, 12))
                 ]
 
         return
@@ -184,7 +188,8 @@ let private limitOf =
     | Capacity.Unbounded -> None
     | Capacity.Bodies n
     | Capacity.Work n
-    | Capacity.Load n -> Some n
+    | Capacity.Load n
+    | Capacity.Seated(_, n) -> Some n
 
 [<Tests>]
 let tests =
@@ -291,6 +296,20 @@ let tests =
                         Array.sum shares - Array.max shares < limit
                     | _ -> true)
 
+            testPropertyWithConfig config "no seated task holds more bodies than its seats"
+            <| fun (scene: Scene) ->
+                let out = matched scene scene.Assignments
+
+                scene.Pool
+                |> Array.forall (fun offer ->
+                    match offer.Capacity with
+                    | Capacity.Seated(seats, _) ->
+                        scene.Bodies
+                        |> Array.filter (fun b -> Map.tryFind b.Name out = Some offer.Id)
+                        |> Array.length
+                        <= seats
+                    | _ -> true)
+
             testPropertyWithConfig
                 config
                 "every assigned task is offered, fits the body and is reached in its life"
@@ -305,6 +324,15 @@ let tests =
                         match scene.Pool |> Array.tryFind (fun o -> o.Id = id) with
                         | Some offer -> fits b offer.Task && reaches scene b offer
                         | None -> false)
+
+            testPropertyWithConfig config "a match does not depend on the order of the bodies"
+            <| fun (scene: Scene) (seed: int) ->
+                let rng = System.Random seed
+                let shuffled = scene.Bodies |> Array.sortBy (fun _ -> rng.Next())
+
+                Matcher.matchAll scene.Travel scene.Pool shuffled scene.Assignments = matched
+                    scene
+                    scene.Assignments
 
             testPropertyWithConfig config "a match matched again is unchanged"
             <| fun (scene: Scene) ->
@@ -341,10 +369,17 @@ let tests =
                         else
                             0)
 
+                let holders (offer: Offer) =
+                    scene.Bodies
+                    |> Array.filter (fun b -> Map.tryFind b.Name out = Some offer.Id)
+                    |> Array.length
+
                 scene.Bodies
                 |> Array.forall (fun b ->
                     Map.containsKey b.Name out
                     || scene.Pool
                        |> Array.forall (fun o ->
-                           not (fits b o.Task && admits o (held o) && reaches scene b o)))
+                           not (
+                               fits b o.Task && admits o (held o) (holders o) && reaches scene b o
+                           )))
         ]
