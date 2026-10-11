@@ -1,34 +1,13 @@
-/// The matcher: keep each still-valid assignment, then match the rest of the
-/// bodies greedily over the world pool. Assignments in, assignments out. It
-/// knows no Task kinds: what a body may take is `Pool.fits`, what it brings
-/// to a capacity `Pool.share`, where a Task ranks its `Priority`.
+/// Knows no Task kinds: what a body may take is `Pool.fits`, what it brings to
+/// a capacity `Pool.share`, where a Task ranks its `Priority`.
 module Fabot.Core.Economy.Matcher
 
 open Fabot.Core.Economy.Derived
 open Fabot.Core.Economy.Pool
 
-/// Creep name → `taskId` of the Task it holds: the `assignments` store.
+/// Creep name → `taskId`.
 type Assignments = Map<string, string>
 
-/// `assignments` after this tick's match. `travel` prices a body's walk to an
-/// offer in ticks, `None` where it cannot get there: the Atlas's answer.
-///
-/// - A body keeps its Task while the Task is offered, the body fits it,
-///   reaches it before it dies, and the holders kept before it leave room.
-///   Holders are kept in ascending share, then nearest, so a set of holders
-///   the match admitted is kept whole while nothing changed; a seated
-///   offer's in descending `Pool.seatValue`, so its seats hold the bodies
-///   that bring them the most; a garrison on its post ahead of one still
-///   walking, so a newcomer takes a vacant post and never sends the
-///   incumbent across the room to another.
-/// - The rest are matched greedily: of every unmatched body's best offer by
-///   (rank, travel, holders), the smallest pair is matched first, ties to the
-///   body's name then the offer's order, so a contested Task goes to the body
-///   that reaches it cheapest.
-/// - A body is admitted while what the holders before it bring falls short of
-///   the capacity (`Pool.admits`); on a seated offer, the holders ahead of it
-///   by seat value, and a holder that falls behind a newcomer is released.
-///   The result does not depend on the order of `bodies`.
 let matchAll
     (travel: Body -> Offer -> int option)
     (pool: Offer[])
@@ -41,8 +20,8 @@ let matchAll
     for oi in 0 .. offers - 1 do
         byId.[pool.[oi].Id] <- oi
 
-    // Travel per pair, asked at most once: -2 unasked, -1 unreachable. A
-    // body never takes work it dies before reaching.
+    // -2 unasked, -1 unreachable. A body never takes work it dies before
+    // reaching.
     let walks = Array.create (bodies.Length * offers) -2
 
     let walk (bi: int) (oi: int) =
@@ -70,9 +49,6 @@ let matchAll
 
     let posted (bi: int) (oi: int) = garrison bi oi && walk bi oi = 0
 
-    // Whether body `a` goes ahead of body `b` on a seated offer: a garrison
-    // on its post, then what it brings the seat over its stay, then the
-    // nearer, then its name.
     let ahead (oi: int) (a: int) (b: int) =
         let va = seatValue bodies.[a] pool.[oi] (walk a oi)
         let vb = seatValue bodies.[b] pool.[oi] (walk b oi)
@@ -87,7 +63,6 @@ let matchAll
                 || (walk a oi = walk b oi
                     && System.String.CompareOrdinal(bodies.[a].Name, bodies.[b].Name) < 0)))
 
-    // Whether an offer admits a body among all its holders.
     let admitsNow (bi: int) (oi: int) =
         let seatedAlike =
             if garrison bi oi then
@@ -97,7 +72,6 @@ let matchAll
 
         admits pool.[oi] (garrison bi oi) held.[oi] seatedAlike
 
-    // Whether a seated offer admits a body among the holders ahead of it.
     let admitsAhead (bi: int) (oi: int) =
         let mutable seatedAlike = 0
         let mutable sum = 0
@@ -128,8 +102,8 @@ let matchAll
         if garrison bi oi then
             garrisoned.[oi] <- garrisoned.[oi] - 1
 
-    // The keep: a seated offer keeps its dearest holders, any other its
-    // lightest first.
+    // Lightest first keeps whole a set the match admitted while nothing
+    // changed; a garrison on its post first, so a newcomer never displaces it.
     let kept = ResizeArray<struct (bool * int * int * int * int)>()
 
     for bi in 0 .. bodies.Length - 1 do
@@ -161,8 +135,6 @@ let matchAll
         if admitsNow bi oi then
             take bi oi
 
-    // The fresh match. Each body's best offer, recomputed when the offer it
-    // was best on gains a holder, and by every body when a seat is released.
     let bestOffer = Array.create bodies.Length -1
     let bestRank = Array.zeroCreate<int> bodies.Length
     let bestWalk = Array.zeroCreate<int> bodies.Length
@@ -171,8 +143,6 @@ let matchAll
     let before (r1, w1, l1) (r2, w2, l2) =
         r1 < r2 || (r1 = r2 && (w1 < w2 || (w1 = w2 && l1 < l2)))
 
-    // Open to the body: room among all the holders, or on a seated offer
-    // among those ahead of it.
     let open' (bi: int) (oi: int) =
         admitsNow bi oi || (seated oi && admitsAhead bi oi)
 
@@ -201,7 +171,7 @@ let matchAll
         if assigned.[bi] < 0 then
             score bi
 
-    // The smallest pair first: (rank, travel, holders), then the body's name.
+    // So a contested Task goes to the body that reaches it cheapest.
     let first (a: int) (b: int) =
         let ka = (bestRank.[a], bestWalk.[a], bestLoad.[a])
         let kb = (bestRank.[b], bestWalk.[b], bestLoad.[b])
@@ -224,8 +194,6 @@ let matchAll
             let oi = bestOffer.[pick]
             take pick oi
 
-            // A seat taken by a dearer body releases the holders that no
-            // longer fit behind it.
             let released = ResizeArray<int>()
 
             if seated oi then

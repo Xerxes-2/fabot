@@ -1,6 +1,4 @@
-/// The economy's slice of the tick's `Derived` (`ARCHITECTURE.md` §1): every
-/// fact the pool, the quota and the matcher read, computed once from `World`.
-/// Below this file nothing in `Economy` reads `World`.
+/// Below this file nothing in `Economy` reads `World` (`ARCHITECTURE.md` §1).
 module Fabot.Core.Economy.Derived
 
 open Fabot.Core
@@ -8,61 +6,46 @@ open Fabot.Core.Vocabulary
 open Fabot.Core.World
 open Fabot.Core.Economy.Bodies
 
-/// One of our creeps as the economy reads it.
 [<NoEquality; NoComparison>]
 type Body =
     {
         Name: string
         Pos: Pos
-        /// Live parts of each kind: a part shot to no hits does nothing.
+        /// Live parts: a part shot to no hits does nothing.
         Work: int
         Carry: int
         Move: int
         Claim: int
-        /// Every part, dead ones counted: the length a successor is spawned at.
+        /// Dead parts counted: the length a successor is spawned at.
         Size: int
         Store: Store
         Energy: int
         Free: int
         TicksToLive: int
-        /// The pattern it was cast from: its name's, else its parts'.
         Pattern: Pattern
     }
 
-/// A body's count of its pattern's key part.
 let keyPartsIn (pattern: Pattern) (body: Body) : int =
     match keyPartOf pattern with
     | Carry -> body.Carry
     | Claim -> body.Claim
     | _ -> body.Work
 
-/// A source the economy digs, and the container beside it if one stands.
 [<NoEquality; NoComparison>]
 type SourceFact =
     {
         Id: string
         Pos: Pos
-        /// Energy a tick it yields: `Engine.heldOutputPerTick` in an owned or
-        /// reserved room, `neutralOutputPerTick` elsewhere.
         Rate: int
-        /// The seat a harvester digs it from (`Atlas.postOf`).
         Post: Pos option
-        /// The container standing on the post, which takes what it digs.
         Container: string option
-        /// Our link serving it (`Atlas.isSourceLink`), which its harvester
-        /// fills.
         Link: string option
-        /// The tiles a body can stand on to dig it: what bounds its holders
-        /// (`seatsAt`).
         Seats: int
-        /// Energy left in it until it regenerates.
         Energy: int
-        /// Energy a tick its diggers take out of it (`dugAt`): what every
-        /// income and flow is read off, never the rate alone.
+        /// What every income and flow is read off, never `Rate` alone.
         Dug: int
     }
 
-/// A mineral under our extractor, with ore left in it.
 [<NoEquality; NoComparison>]
 type MineralFact =
     {
@@ -71,7 +54,6 @@ type MineralFact =
         Resource: Resource
     }
 
-/// A spawn, extension or tower of ours with room for energy.
 [<NoEquality; NoComparison>]
 type RefillFact =
     {
@@ -81,19 +63,13 @@ type RefillFact =
         Free: int
     }
 
-/// What kind of store a `StoreFact` is.
 [<RequireQualifiedAccess>]
 type StoreKind =
-    /// A container, or the hub's link while it receives.
     | Container
     | Storage
-    /// What the upgraders draw from: the controller's link where one stands,
-    /// else its container.
     | Buffer
-    /// A tombstone or a ruin: a store that ends.
     | Remains
 
-/// A store holding energy, or our storage or buffer with room for it.
 [<NoEquality; NoComparison>]
 type StoreFact =
     {
@@ -102,24 +78,15 @@ type StoreFact =
         Kind: StoreKind
         Energy: int
         Free: int
-        /// Its share of its capacity held, 0 to 1.
         Fill: float
-        /// What the sources a container serves are dug a tick
-        /// (`SourceFact.Dug`); 0 for any other store.
         SourceDug: int
-        /// Ours: the storage the colony banks in.
         Owned: bool
     }
 
-/// What a link of ours is for, read off where it stands; a link with none
-/// does nothing.
 [<RequireQualifiedAccess>]
 type LinkRole =
-    /// `Atlas.isSourceLink`.
     | Source
-    /// `Atlas.controllerLink`.
     | Controller
-    /// Beside our storage.
     | Hub
 
 [<NoEquality; NoComparison>]
@@ -133,12 +100,9 @@ type LinkFact =
         Cooldown: int
     }
 
-/// A construction site of ours and what it still takes.
 [<NoEquality; NoComparison>]
 type SiteFact = { Id: string; Pos: Pos; Left: int }
 
-/// A decaying structure below the hits it is kept at: a road or a container
-/// whole, a rampart of ours at `rampartTarget`.
 [<NoEquality; NoComparison>]
 type RepairFact =
     {
@@ -146,15 +110,11 @@ type RepairFact =
         Kind: Kind
         Pos: Pos
         Hits: int
-        /// The hits a repair stops at.
         HitsMax: int
-        /// Hits it loses a tick to decay, averaged over the decay period.
         Decay: float
-        /// Energy to build it again once decay takes it.
         Rebuild: int
     }
 
-/// A dropped pile.
 [<NoEquality; NoComparison>]
 type PileFact =
     {
@@ -177,72 +137,47 @@ type Ground =
         Sites: SiteFact[]
         Repairs: RepairFact[]
         Piles: PileFact[]
-        /// Energy a tick its sources' diggers take (`SourceFact.Dug`): what
-        /// a tick the spawn waits is worth, posted or not.
         Income: int
-        /// Of the income, what the sources whose post holds a built container
-        /// dig: the only income a body is hired against.
+        /// The only income a body is hired against.
         Posted: int
-        /// Its controller is unowned and reserved by nobody or by us: a
-        /// reservation or a claim the engine accepts.
+        /// The engine accepts our reservation or claim on its controller.
         Reservable: bool
-        /// Ticks left on our reservation of its controller; 0 for none.
         OurReservation: int
-        /// The tiles a body can stand on to upgrade its controller
-        /// (`seatsAt`); 0 for no controller.
         UpgradeSeats: int
-        /// Its controller's buffer (`StoreKind.Buffer`), if one stands.
         Buffer: StoreFact option
-        /// Where carriers bring the buffer's energy: the hub's link where the
-        /// buffer is a link and one stands, else the buffer.
         Feed: StoreFact option
-        /// Our links, and the one the others send to: the controller's, else
-        /// the hub's.
         Links: LinkFact[]
         Receiver: LinkFact option
-        /// The tiles an upgrader stands on: beside the buffer, in the
-        /// controller's upgrade range, where it draws as it upgrades.
         BufferSeats: Pos list
     }
 
-/// A colony: a room whose controller is ours with a spawn of ours in it. A
-/// resource, not a decider (`ARCHITECTURE.md` §2).
+/// A resource, not a decider (`ARCHITECTURE.md` §2).
 [<NoEquality; NoComparison>]
 type Colony =
     {
         Room: string
         Controller: Controller
         Spawns: Spawn[]
-        /// Spawn energy banked, and what the bank holds full.
         Bank: int
         BankCapacity: int
     }
 
-/// The economy's facts this tick, one record.
 [<NoEquality; NoComparison>]
 type Derived =
     {
         Time: int
         /// Colony `i`'s room is `Grounds.[i]`.
         Colonies: Colony[]
-        /// The colonies' rooms first, in world order, then the declared ones.
         Grounds: Ground[]
-        /// Controllers in the rooms declared for a claim, unowned and
-        /// reserved by nobody or by us.
         Claims: Controller[]
         Bodies: Body[]
-        /// The bodies in our spawns' ovens, standing at their spawn: counted
-        /// against the quota as if they stood, so no seat is cast twice.
+        /// Counted against the quota as if they stood, so no seat is cast twice.
         Ovens: Body[]
-        /// Bodies that can dig or spend energy and carry it: Work and Carry.
         Workers: Body[]
-        /// Bodies that carry and do not dig.
         Carriers: Body[]
-        /// Bodies with a CLAIM part.
         Claimers: Body[]
-        /// Each source's post (`SourceFact.Post`), by the source's id.
         Posts: Map<string, Pos>
-        /// The creep lifetimes of tower fire a reserve holds (`Declarations`).
+        /// Creep lifetimes of tower fire a reserve holds.
         ReserveLifetimes: float
     }
 
@@ -278,41 +213,31 @@ let private bodyOf (name: string) (pos: Pos) (parts: Part[]) (store: Store) (lif
             |> Option.defaultWith (fun () -> patternOfParts work carry move claim)
     }
 
-/// An unowned controller reserved by nobody or by us: the engine accepts our
-/// reservation or claim on it.
 let private reservable (me: string) (c: Controller) =
     c.Owner = Nobody
     && (match c.Reservation with
         | Some(user, _) -> user = me
         | None -> true)
 
-/// Whether the room's sources yield the held rate: its controller is owned
-/// or reserved, by anyone (the engine's rule for a source's capacity).
+/// The engine's rule for a source's capacity: owned or reserved, by anyone.
 let private held (room: Room) =
     match room.Controller with
     | Some c -> c.Owner <> Nobody || Option.isSome c.Reservation
     | None -> false
 
-/// The tiles a one-tile body may stand on within `range` of a target;
-/// unbounded where the Atlas counts none (a room it has no grid for, or a
-/// target walled in, which nobody reaches anyway): not knowing is no bound.
+/// Unbounded where the Atlas counts none: not knowing is no bound.
 let private seatsAt (atlas: Atlas) (range: int) (target: Pos) =
     match List.length (Atlas.seats atlas Grid.One range target) with
     | 0 -> System.Int32.MaxValue
     | n -> n
 
-/// A harvester crew's WORK past the source's saturation: the dig finishes
-/// the source inside its regeneration window despite the ticks a body loses
-/// walking and dropping its load. A named margin.
+/// So the dig finishes the source inside its regeneration window despite the
+/// ticks a body loses walking and dropping its load.
 let harvestSpareWork = 1
 
-/// The WORK a source's harvester is sized to: its output's, and a spare.
 let digWork (rate: int) =
     (rate + Engine.harvestPerWork - 1) / Engine.harvestPerWork + harvestSpareWork
 
-/// What a source's diggers take out of it a tick at a bank of `capacity`:
-/// the one harvester its post seats (a home one where `home`), else a worker
-/// on each of its seats; never over its rate.
 let dugAt (capacity: int) (home: bool) (rate: int) (posted: bool) (seats: int) : int =
     let body =
         if not posted then
@@ -333,9 +258,8 @@ let dugAt (capacity: int) (home: bool) (rate: int) (posted: bool) (seats: int) :
         min rate (diggers * partCountIn body Work * Engine.harvestPerWork)
     | None -> 0
 
-/// The hits a rampart of ours is repaired to at a controller level: the low
-/// end of what other bots hold (Overmind, Hivemind, The International), so
-/// the walls grow with the room and never outbid its upgrading early.
+/// The low end of what other bots hold (Overmind, Hivemind, The
+/// International), so the walls never outbid the room's upgrading early.
 let rampartTarget (level: int) =
     match level with
     | l when l < 3 -> 0
@@ -346,8 +270,7 @@ let rampartTarget (level: int) =
     | 7 -> 1_000_000
     | _ -> 3_000_000
 
-/// Below these hits a rampart is repaired before anything that can wait:
-/// ten decay periods, the margin every bot keeps against losing one.
+/// Ten decay periods: the margin every bot keeps against losing a rampart.
 let rampartSafe = 10 * Engine.rampartDecayAmount
 
 let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : Ground =
@@ -553,8 +476,6 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
             Owned = false
         }
 
-    // The hub's link is the buffer's feed while the controller's stands,
-    // else it receives the sources' and is drawn like a container.
     let feed =
         match controllerLink, hubLink with
         | Some c, hub ->
@@ -623,10 +544,6 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
             | _ -> []
     }
 
-/// The economy's facts this tick, seats read off the tick's `atlas`. `worked`
-/// are the rooms declared to the economy beyond the colonies' own (outposts, a
-/// claim's room once a spawn site stands); `claims` the rooms declared for a
-/// claim. A declared room out of sight contributes nothing.
 let ofWorld
     (world: World)
     (atlas: Atlas)

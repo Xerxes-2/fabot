@@ -1,5 +1,3 @@
-/// The economy as one module of the tick: derive, pool, match, cast, act, and
-/// hand every creep's wish to its room's movement arbitration.
 module Fabot.Core.Economy.Run
 
 open System.Collections.Generic
@@ -15,20 +13,16 @@ open Fabot.Core.Economy.Task
 open Fabot.Core.Economy.Derived
 open Fabot.Core.Economy.Pool
 
-/// The room crossings a walk may plan through: a bound the route search
-/// needs, and the economy works no room further than its declarations.
+/// The route search needs a bound; the economy works no room further than its
+/// declarations.
 let private reachHops = 3
 
-/// Ticks a crossing into one more room is priced at, past the leg in this
-/// room: a room's side walked on plain. The Atlas prices this room's leg
-/// only; this keeps a far task from reading as near.
+/// The Atlas prices this room's leg only; this keeps a far task from reading
+/// as near.
 let private crossingTicks = Engine.roomSide
 
-/// A Task's push in the arbitration: one more than the ranks it stands above
-/// the bottom of the scale, so a dearer Task's body is the heavier.
 let private weightOf (priority: int) = max 1 (Price.bottomRank - priority + 1)
 
-/// Within `range` of one tile.
 let private targetAt (pos: Pos) (range: int) : Target =
     {
         Room = pos.Room
@@ -41,8 +35,6 @@ let private targetAt (pos: Pos) (range: int) : Target =
 let private targetOf (offer: Offer) : Target =
     targetAt offer.Target (rangeOf offer.Task)
 
-/// Ticks from a tile to a target: this room's leg from the Atlas, and a
-/// room's side for each crossing past the first.
 let private ticksTo (atlas: Atlas) (mover: Mover) (target: Target) (from: Pos) : int option =
     match Atlas.travelTicks atlas mover target from with
     | None -> None
@@ -51,8 +43,6 @@ let private ticksTo (atlas: Atlas) (mover: Mover) (target: Target) (from: Pos) :
         Atlas.route atlas target.Avoid target.MaxHops from.Room target.Room
         |> Option.map (fun rooms -> leg + crossingTicks * max 0 (List.length rooms - 2))
 
-/// Tiles between two positions for the quota's nearest-colony questions:
-/// Chebyshev in one room, a room's side a crossing between rooms.
 let private distance (atlas: Atlas) (a: Pos) (b: Pos) : int option =
     match Pos.range a b with
     | Some r -> Some r
@@ -60,14 +50,8 @@ let private distance (atlas: Atlas) (a: Pos) (b: Pos) : int option =
         Atlas.route atlas Set.empty reachHops a.Room b.Room
         |> Option.map (fun rooms -> crossingTicks * (List.length rooms - 1))
 
-/// The seats a body works from: a source's post for the post's garrison
-/// (`Pool.garrisons`), its other seats for anyone else, every seat where the
-/// source has no post; while its holder draws the buffer
-/// (`Pool.drawsBuffer`), an upgrade's, the tiles beside the buffer in upgrade
-/// range, and a build's or a repair's, the tiles beside the buffer; `None`
-/// for any other Task. A body digs from nowhere else, so a harvester's dig
-/// falls into the container and a light body keeps off the post. The one place a seat
-/// is chosen.
+/// A body digs from nowhere else, so a harvester's dig falls into the
+/// container and a light body keeps off the post.
 let private seatsOf (atlas: Atlas) (derived: Derived) (body: Body) (offer: Offer) =
     match offer.Task with
     | Task.Harvest id ->
@@ -94,9 +78,8 @@ let private seatsOf (atlas: Atlas) (derived: Derived) (body: Body) (offer: Offer
         |> Option.filter (List.isEmpty >> not)
     | _ -> None
 
-/// Where a body walks for its Task: a digger to a seat of its (`seatsOf`) no
-/// other body stands on (`stood`) where one is, so one body on the nearest
-/// seat does not hold the crew short of the rest.
+/// A seat no other body stands on, so one body on the nearest seat does not
+/// hold the crew short of the rest.
 let private seatOf
     (stood: HashSet<Pos>)
     (creep: Creep)
@@ -118,7 +101,6 @@ let private seatOf
         }
     | _ -> targetOf offer
 
-/// The act a Task's holder does once it stands within the Task's range.
 let private actOf (task: Task) : CreepAct =
     match task with
     | Task.Harvest id -> CreepAct.Harvest id
@@ -135,12 +117,8 @@ let private actOf (task: Task) : CreepAct =
 /// in whole hundreds loses the 3% and nothing to the rounding.
 let private linkBatch = 100
 
-/// The ground's link sends this tick: each link but the receiver
-/// (`Ground.Receiver`), off its cooldown, sends what it holds in whole
-/// batches, as soon as the receiver has room for one, the sources' first so
-/// the hub's never takes their room. The loss is the same share of any
-/// batch, and a send's cooldown only delays the next, which then carries
-/// what gathered meanwhile.
+/// The sources' links first, so the hub's never takes their room. A send need
+/// not wait to grow: the loss is the same share of any batch.
 let private linkSends (ground: Ground) : Intent list =
     match ground.Receiver with
     | None -> []
@@ -188,8 +166,7 @@ let decide (context: Context) (state: State) : Intent list * State =
     for offer in offers do
         byId.[offer.Id] <- offer
 
-    // A body's walk to its work: at its own pace now, or fresh from a spawn
-    // (empty), its successor's.
+    // `fresh`: its successor's walk, empty from a spawn.
     let walk (fresh: bool) (body: Body) (from: Pos) =
         match creeps.TryGetValue body.Name, Map.tryFind body.Name assignments with
         | (true, creep), Some id ->
@@ -212,7 +189,6 @@ let decide (context: Context) (state: State) : Intent list * State =
             | _ -> None
         | _ -> None
 
-    // A leg at the pace a body of the parts walks it loaded.
     let leg (parts: BodyPart list) (from: Pos) (onto: Pos) (range: int) =
         ticksTo
             atlas
@@ -223,8 +199,7 @@ let decide (context: Context) (state: State) : Intent list * State =
             (targetAt onto range)
             from
 
-    // A source dug out waits for its regeneration: its holders stay seated
-    // and do not act.
+    // A dug-out source's holders stay seated until it regenerates.
     let dugOut = HashSet<string>()
 
     for ground in derived.Grounds do
@@ -291,9 +266,6 @@ let decide (context: Context) (state: State) : Intent list * State =
                 if body.Energy > 0 || not (drawsBuffer body offer) then
                     acts.Add(Creep(creep.Name, actOf offer.Task))
 
-            // A post's harvester puts its dig into its source's link while a
-            // receiver stands and the link has room; the rest falls into the
-            // container.
             if garrisons body offer && body.Energy > 0 then
                 derived.Grounds
                 |> Array.tryPick (fun g ->
@@ -326,5 +298,4 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     casts @ List.ofSeq acts @ sends @ List.ofSeq moves, { state with Assignments = assignments }
 
-/// The economy as the tick runs it.
 let economy: Module = { Name = "economy"; Run = decide }

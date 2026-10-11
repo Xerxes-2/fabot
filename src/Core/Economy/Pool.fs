@@ -1,6 +1,5 @@
-/// The world pool: every Task offered this tick, where it ranks (its price,
-/// `Price`) and how many bodies it admits. One pool for every colony: a body
-/// takes the work it fits and reaches, whoever cast it (`ARCHITECTURE.md` §5).
+/// One pool for every colony: a body takes the work it fits and reaches,
+/// whoever cast it (`ARCHITECTURE.md` §5).
 module Fabot.Core.Economy.Pool
 
 open Fabot.Core
@@ -10,75 +9,50 @@ open Fabot.Core.Economy.Task
 open Fabot.Core.Economy.Bodies
 open Fabot.Core.Economy.Derived
 
-/// How many bodies a Task admits, counted in what its holders bring to it. A
-/// candidate is admitted while what the holders before it bring falls short
-/// of the number.
 [<RequireQualifiedAccess>]
 type Capacity =
     | Unbounded
-    /// Holders, one each.
     | Bodies of int
-    /// Holders' live WORK parts.
     | Work of int
-    /// Holders, one to a seat, and their live WORK parts: whichever binds.
-    /// Of the seats, `posts` are the garrisons' (`garrisons`) and the rest
-    /// everyone else's, so a light body never holds the seat a harvester
-    /// digs into a container from; with no post every seat is anyone's.
+    /// `posts` are the garrisons' seats, so a light body never holds the seat
+    /// a harvester digs into a container from.
     | Seated of seats: int * posts: int * work: int
-    /// Energy: an intake counts its holders' free room, a delivery what they
-    /// carry of the resource.
     | Load of int
 
-/// Which bodies a draw from a store is for.
 [<RequireQualifiedAccess>]
 type Draw =
-    /// Any body with room: a store the flow passes through, or the stock
-    /// while a sink other than itself is hungry.
     | Open
-    /// A body that spends what it draws (a WORK part): the stock while no
-    /// other sink is hungry, which a carrier would only pour back.
+    /// The stock while no other sink is hungry, which a carrier would only
+    /// pour back.
     | Spenders
-    /// On an Upgrade, a Build or a Repair, the controller's buffer stocked:
-    /// its holder draws it (`drawsBuffer`) and may hold it empty. The buffer
-    /// is drawn nowhere else, so what it holds goes to the controller or to
-    /// construction, never back to a refill.
+    /// The buffer is drawn nowhere else, so what it holds goes to the
+    /// controller or to construction, never back to a refill.
     | Buffer
 
-/// One entry of the pool.
 [<NoEquality; NoComparison>]
 type Offer =
     {
         Task: Task
-        /// `taskId Task`, taken once.
         Id: string
-        /// Where the target stands: what travel is priced to.
         Target: Pos
-        /// Where the Task ranks against every other, lower first.
+        /// Lower first.
         Priority: int
         Capacity: Capacity
-        /// Which bodies may take it, where it is a draw; `Open` for any other
-        /// Task.
         Draw: Draw
     }
 
-/// What a body carries of a resource.
 let private carried (body: Body) (resource: Resource) = Store.amountOf resource body.Store
 
-/// Whether a body holds a seated offer's post rather than its other seats: a
-/// harvester, where the offer has a post.
 let garrisons (body: Body) (offer: Offer) : bool =
     match offer.Capacity with
     | Capacity.Seated(_, posts, _) -> posts > 0 && body.Pattern = Pattern.Harvester
     | _ -> false
 
-/// Whether a body's parts let it upgrade.
 let upgrades (body: Body) : bool =
     body.Pattern <> Pattern.Harvester && body.Work > 0 && body.Carry > 0
 
-/// Whether a holder draws the buffer this tick: an Upgrade's while what it
-/// holds falls short of a tick's upgrade (the engine withdraws before it
-/// upgrades, so the draw tops up what the upgrade spends); a Build's or a
-/// Repair's while it holds nothing.
+/// The engine withdraws before it upgrades, so an Upgrade's draw tops up
+/// what the upgrade spends.
 let drawsBuffer (body: Body) (offer: Offer) : bool =
     offer.Draw = Draw.Buffer
     && body.Free > 0
@@ -86,13 +60,8 @@ let drawsBuffer (body: Body) (offer: Offer) : bool =
        | Upgrade _ -> body.Energy < body.Work * Engine.upgradeDrainPerWork
        | _ -> body.Energy = 0
 
-/// Whether a body's parts and store let it act on the offer now. One rule
-/// for a fresh match and a kept one: an intake while the store is at least
-/// half empty (a fuller body delivers first), or a dig already in reach until
-/// the store is full; a delivery while it holds the resource. A harvester
-/// digs whatever its store holds, the engine dropping the overflow where it
-/// stands, and takes nothing but a post: the seat it was cast for and `Quota`
-/// counts it in. An upgrader upgrades and nothing else: a delivery is a
+/// One rule for a fresh match and a kept one. A harvester digs whatever it
+/// holds, the engine dropping the overflow; an upgrader's delivery is a
 /// commute for its WORK.
 let fits (body: Body) (offer: Offer) : bool =
     let halfEmpty = body.Free > 0 && body.Free * 2 >= body.Store.Capacity
@@ -116,9 +85,8 @@ let fits (body: Body) (offer: Offer) : bool =
     | Reserve _
     | Claim _ -> body.Claim > 0
 
-/// What one holder counts against an offer's capacity. Where a seated offer
-/// has a post, only its garrison counts WORK: the other seats stay open while
-/// the garrison digs short of the work.
+/// Only a post's garrison counts WORK, so the other seats stay open while it
+/// digs short of the work.
 let share (body: Body) (offer: Offer) : int =
     match offer.Capacity with
     | Capacity.Unbounded -> 0
@@ -133,9 +101,6 @@ let share (body: Body) (offer: Offer) : int =
         | _ when drawsBuffer body offer -> body.Free
         | _ -> body.Energy
 
-/// Whether an offer admits one more holder while its holders bring `held`
-/// (`share` summed) and `seatedAlike` of them hold seats of the candidate's kind
-/// (`garrisons`).
 let admits (offer: Offer) (garrison: bool) (held: int) (seatedAlike: int) : bool =
     match offer.Capacity with
     | Capacity.Unbounded -> true
@@ -145,11 +110,8 @@ let admits (offer: Offer) (garrison: bool) (held: int) (seatedAlike: int) : bool
     | Capacity.Seated(seats, posts, work) ->
         held < work && seatedAlike < (if garrison then posts else seats - posts)
 
-/// What a body brings a seated offer over its stay, `walk` ticks away: the
-/// energy it digs or upgrades before it dies, or before its load is full (a
-/// dig into its store, counting what it already dug, so a digger part-way
-/// through its load is worth no less than an empty one) or empty (an
-/// upgrade off no stocked buffer). 0 for any other offer.
+/// A dig counts what the body already dug, so a digger part-way through its
+/// load is worth no less than an empty one.
 let seatValue (body: Body) (offer: Offer) (walk: int) : int =
     match offer.Capacity with
     | Capacity.Seated _ ->
@@ -183,31 +145,25 @@ let private offer task (target: Pos) (value: float) capacity =
         Draw = Draw.Open
     }
 
-/// The controller stands inside the downgrade line safe mode needs.
 let private insideDeadline (c: Controller) =
     c.Level > 0 && c.TicksToDowngrade < Engine.safeModeDowngradeLine c.Level
 
-/// Where a site of ours ranks: every site alike at the surplus band, its
-/// order Layout's, which places them in plan order. The one place a site is
-/// ranked.
+/// Every site alike: their order is Layout's plan order.
 let siteRank (_: Derived) (_: SiteFact) : int = Price.surplusRank
 
-/// What a tick of a repair's delay costs: a road's or a container's, the
-/// rebuild decay puts at risk; a rampart's, a site's, and the flow's
-/// below `rampartSafe`, so a fresh one is not lost.
+/// A rampart under `rampartSafe` is priced as the flow, so a fresh one is
+/// not lost.
 let repairValue (r: RepairFact) : float =
     match r.Kind with
     | Kind.Rampart when r.Hits <= rampartSafe -> Price.flowDraw 0.0
     | Kind.Rampart -> Price.valueOfRank Price.surplusRank
     | _ -> Price.rebuildAtRisk r.Rebuild r.Hits r.Decay
 
-/// Every Task offered this tick, ground by ground in `Derived` order. A Task
-/// with no energy price is anchored at a band (`Price`).
 let pool (derived: Derived) : Offer[] =
     let offers = ResizeArray<Offer>()
 
-    // Resources other than energy some body carries: what the storage is
-    // offered for, so no load is stranded.
+    // The storage is offered for every ore a body carries, so no load is
+    // stranded.
     let ores =
         derived.Bodies
         |> Array.collect (fun b -> b.Store.Held |> Array.map fst)
@@ -222,9 +178,8 @@ let pool (derived: Derived) : Offer[] =
             else
                 None
 
-        // Offered through a regeneration gap too: its holders keep their
-        // seats and wait to dig. Priced at the rate, the engine's cap on
-        // what its seats dig.
+        // Offered through a regeneration gap too, so its holders keep their
+        // seats. Priced at the rate, the engine's cap on what its seats dig.
         for s in ground.Sources do
             offers.Add(
                 offer
@@ -243,7 +198,6 @@ let pool (derived: Derived) : Offer[] =
                 offer (Harvest m.Id) m.Pos (Price.valueOfRank Price.bottomRank) (Capacity.Bodies 1)
             )
 
-        // The refills the stock supplies: its draw is priced off the hungriest.
         let mutable hungriest = 0.0
 
         for r in ground.Refills do
@@ -310,7 +264,6 @@ let pool (derived: Derived) : Offer[] =
                     upgrade
             )
         | Some c when ground.Reservable && Option.isNone colony ->
-            // What the reservation adds: every source at the held rate.
             let gain =
                 ground.Sources.Length * (Engine.heldOutputPerTick - Engine.neutralOutputPerTick)
 
@@ -319,16 +272,12 @@ let pool (derived: Derived) : Offer[] =
 
         let starved = colony |> Option.exists (fun c -> c.Bank < c.BankCapacity)
 
-        // The buffer is filled while a body that upgrades stands (or bakes)
-        // in the room to drink it.
         let drinks =
             Array.append derived.Bodies derived.Ovens
             |> Array.exists (fun b -> upgrades b && b.Pos.Room = ground.Room)
 
         let feed = ground.Feed |> Option.filter (fun f -> f.Free > 0 && drinks)
 
-        // The room the sinks other than the stock have: what a carrier's draw
-        // on the stock is for.
         let room =
             (ground.Refills |> Array.sumBy (fun r -> r.Free))
             + (feed |> Option.map (fun f -> f.Free) |> Option.defaultValue 0)
