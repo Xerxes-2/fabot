@@ -345,8 +345,6 @@ let tests =
                     && mover.Onward <> mover.At
                     && crowd.Passable.[mover.Onward]
                     ->
-                    // The body on the mover's step lists the onward step
-                    // first, then every other tile beside it.
                     let pushed =
                         {
                             Creep = "pushed"

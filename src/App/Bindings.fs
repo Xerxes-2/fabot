@@ -108,9 +108,7 @@ type IRoomPosition =
 type INuke =
     abstract id: string
     abstract pos: IRoomPosition
-    /// Ticks until it lands.
     abstract timeToLand: int
-    /// The room it was launched from.
     abstract launchRoomName: string
 
 type ISource =
@@ -127,8 +125,7 @@ type IEffect =
     /// Effect id: a natural effect (EFFECT_*) or a Power id.
     abstract effect: int
     /// Ticks the effect will last, relative to now (the HTTP API's raw
-    /// documents carry an absolute `endTime` instead, and
-    /// `docs/research/remote-mining.md` speaks in that vocabulary).
+    /// documents carry an absolute `endTime` instead).
     abstract ticksRemaining: int
 
 /// The `owner` sub-object every owned game object carries.
@@ -157,9 +154,7 @@ type IStructure =
     abstract owner: IOwner
     abstract store: IStore
     abstract pos: IRoomPosition
-    /// Current hit points.
     abstract hits: int
-    /// Maximum hit points.
     abstract hitsMax: int
     /// The effects standing on this structure; undefined when none does,
     /// the shape `safeMode` and `reservation` also arrive in.
@@ -187,7 +182,6 @@ type IResource =
 type IFallenCreep =
     abstract id: string
     abstract my: bool
-    /// Whose creep it was.
     abstract owner: IOwner
 
 /// A tombstone or a ruin: one binding, since the projection reads the same
@@ -212,14 +206,13 @@ type IConstructionSite =
 /// The line somebody has written onto a controller. Undefined until one is,
 /// and it outlives every body in the room.
 type ISign =
-    /// The text itself, at most a hundred characters.
+    /// At most a hundred characters.
     abstract text: string
 
 /// The reservation standing on a neutral controller: who holds it, and
 /// how long it has left. Undefined on a controller nothing reserves, and
 /// on every owned one — a reservation and an owner are exclusive.
 type IReservation =
-    /// The username holding it.
     abstract username: string
     /// Ticks left before it lapses; decays by one a tick, caps at 5,000.
     abstract ticksToEnd: int
@@ -234,11 +227,9 @@ type IController =
     /// The reservation standing on this controller; undefined when none
     /// does.
     abstract reservation: IReservation
-    /// Controller level (RCL).
     abstract level: int
     /// Ticks left on the downgrade timer; undefined on unowned controllers.
     abstract ticksToDowngrade: int
-    /// Safe-mode activations banked.
     abstract safeModeAvailable: int
     /// The sign standing on this controller, `undefined` until somebody
     /// writes one.
@@ -297,9 +288,7 @@ type IRoom =
 /// The body a spawn is building (`StructureSpawn.spawning`).
 [<AllowNullLiteral>]
 type ISpawning =
-    /// The name of the creep in the oven.
     abstract name: string
-    /// Ticks until the body stands.
     abstract remainingTime: int
 
 type ISpawn =
@@ -382,7 +371,7 @@ type ICreep =
     /// Hit one creep within range 3 for RANGED_ATTACK_POWER per RANGED_ATTACK
     /// part.
     abstract rangedAttack: target: obj -> int
-    /// Hit every creep and structure not ours within range 3 .
+    /// Hit every creep and structure not ours within range 3.
     abstract rangedMassAttack: unit -> int
     /// Single-step move by direction constant (TOP = 1, clockwise). The only
     /// movement API the bot uses; moveTo is not bound.

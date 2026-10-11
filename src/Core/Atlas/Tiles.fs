@@ -6,27 +6,21 @@ module Fabot.Core.Tiles
 
 open Fabot.Core.World
 
-/// A room's side in tiles.
 let side = Engine.roomSide
 
-/// Tiles in a room.
 let count = side * side
 
-/// The tile at `x`, `y`.
 let inline index (x: int) (y: int) = y * side + x
 
 let inline xOf (tile: int) = tile % side
 
 let inline yOf (tile: int) = tile / side
 
-/// Whether `x`, `y` is one of a room's own tiles.
 let inline inRoom (x: int) (y: int) =
     x >= 0 && x < side && y >= 0 && y < side
 
-/// A position's tile in its own room.
 let ofPos (pos: Pos) = index pos.X pos.Y
 
-/// A tile joined to its room.
 let toPos (room: string) (tile: int) : Pos =
     {
         Room = room
@@ -34,7 +28,7 @@ let toPos (room: string) (tile: int) : Pos =
         Y = yOf tile
     }
 
-/// Chebyshev range between two tiles of one room: the engine's `getRangeTo`.
+/// The engine's `getRangeTo`.
 let range (a: int) (b: int) =
     max (abs (xOf a - xOf b)) (abs (yOf a - yOf b))
 
@@ -48,7 +42,6 @@ let bottomLeft = 6
 let left = 7
 let topLeft = 8
 
-/// The column a step in `direction` moves by.
 let dx (direction: int) =
     match direction with
     | 2
@@ -59,7 +52,7 @@ let dx (direction: int) =
     | 8 -> -1
     | _ -> 0
 
-/// The row a step in `direction` moves by; rows grow downward.
+/// Rows grow downward.
 let dy (direction: int) =
     match direction with
     | 8

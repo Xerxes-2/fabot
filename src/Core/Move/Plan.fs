@@ -7,10 +7,8 @@ open Fabot.Core
 open Fabot.Core.World
 open Fabot.Core.Grid
 
-/// Whether a creep of this pace can step this tick: rested, with a live MOVE.
 let canMove (creep: Creep) (factor: FatigueFactor) : bool = creep.Fatigue = 0 && factor.Moves > 0
 
-// The passable tiles beside a creep, in tile order.
 let private beside (atlas: Atlas) (creep: Creep) : int[] =
     let at = Tiles.ofPos creep.Pos
 

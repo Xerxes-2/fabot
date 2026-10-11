@@ -27,7 +27,6 @@ type Outcome =
 type Report =
     {
         Module: string
-        /// CPU the module spent, by the clock passed in.
         Cpu: float
         Outcome: Outcome
     }
@@ -39,8 +38,6 @@ type Result =
         Reports: Report list
     }
 
-/// Run `modules` in order over one world. A module that throws keeps the
-/// state it was handed and adds no intents; the modules after it still run.
 let run (clock: unit -> float) (modules: Module list) (context: Context) (state: State) : Result =
     let step (intents, state, reports) (m: Module) =
         if Set.contains m.Name state.Off then

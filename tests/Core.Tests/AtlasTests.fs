@@ -176,7 +176,6 @@ let private reach (footprint: Footprint) (anchor: int) (tile: int) =
     let gap a t = max 0 (max (a - t) (t - a - span))
     max (gap (Tiles.xOf anchor) (Tiles.xOf tile)) (gap (Tiles.yOf anchor) (Tiles.yOf tile))
 
-/// The tiles a footprint anchored here covers.
 let private covered (footprint: Footprint) (anchor: int) =
     let x = Tiles.xOf anchor
     let y = Tiles.yOf anchor

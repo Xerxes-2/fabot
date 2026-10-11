@@ -16,7 +16,6 @@ type Wish =
         /// One tile today. A `Quad` is held where it stands: formation
         /// stepping is not arbitrated yet.
         Footprint: Footprint
-        /// The tile it stands on.
         At: int
         /// The tile it wants next; `At` to stay.
         Head: int
@@ -38,7 +37,6 @@ type Wish =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Wish =
-    /// Whether it asked for nothing but the tile it stands on.
     let stays (wish: Wish) = wish.Head = wish.At
 
     /// Whether the arbitration may place it anywhere but where it stands.

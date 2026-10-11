@@ -32,9 +32,8 @@ type Target =
 /// miss a flood run.
 type Counts = { Hits: int; Misses: int }
 
-/// One visible room's ground this tick: a fatigue weight per tile (road 1,
-/// plain 2, swamp 10, -1 where nothing may stand) and whether a creep stands
-/// there. A creep is no wall: who yields is `Move`'s call.
+/// One visible room's ground this tick: a fatigue weight per tile (-1 where
+/// nothing may stand) and whether a creep stands there. A creep is no wall: who yields is `Move`'s call.
 [<NoEquality; NoComparison>]
 type internal RoomGrid = { Weights: int[]; Occupied: bool[] }
 
@@ -182,7 +181,6 @@ module Atlas =
             Misses = 0
         }
 
-    /// The tick cache's hits and misses so far.
     let counts (atlas: Atlas) : Counts =
         {
             Hits = atlas.Hits
@@ -215,7 +213,6 @@ module Atlas =
 
             max (gap (Tiles.xOf anchor) (Tiles.xOf tile)) (gap (Tiles.yOf anchor) (Tiles.yOf tile))
 
-    // The seats within `range` of one tile.
     let private seatsNear
         (footprint: Footprint)
         (weights: int[])

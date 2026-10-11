@@ -4,7 +4,6 @@
 [<AutoOpen>]
 module Fabot.Core.Vocabulary
 
-/// A creep body part, the engine's full vocabulary.
 [<CustomEquality; CustomComparison>]
 type BodyPart =
     | Work
@@ -40,7 +39,6 @@ type BodyPart =
             | :? BodyPart as that -> compare this.Ordinal that.Ordinal
             | _ -> 1
 
-/// Whether two parts are one kind, as two ints.
 let samePart (a: BodyPart) (b: BodyPart) : bool = a.Ordinal = b.Ordinal
 
 /// The engine's `BODYPART` string.
@@ -55,7 +53,6 @@ let partName (part: BodyPart) : string =
     | Claim -> "claim"
     | Tough -> "tough"
 
-/// The part an engine string names, or `None` for one this vocabulary lacks.
 let partOfName (name: string) : BodyPart option =
     match name with
     | "work" -> Some Work
@@ -95,7 +92,6 @@ type Boost =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Boost =
-    /// The boost a compound gives a part, as the engine spells the compound.
     let ofCompound (part: BodyPart) (compound: string) : Boost =
         match part, compound with
         | Attack, "UH"
@@ -129,8 +125,7 @@ module Boost =
         | (Attack | RangedAttack | Heal | Move | Work), Tier3 -> 4
         | _ -> 1
 
-    /// The share of a strike's damage a part takes in its own hits: 0.7, 0.5
-    /// and 0.3 on a boosted TOUGH, 1 on any other part.
+    /// The share of a strike's damage a part takes in its own hits.
     let damageRatio (part: BodyPart) (boost: Boost) : float =
         match part, boost with
         | Tough, Tier1 -> 0.7
@@ -138,7 +133,6 @@ module Boost =
         | Tough, Tier3 -> 0.3
         | _ -> 1.0
 
-/// How many of one part a body holds, counted off the list.
 let partCountIn (body: BodyPart list) part =
     let mutable count = 0
 
@@ -225,7 +219,6 @@ type Resource =
     | Compound of Compound
     | Other of name: string
 
-    /// Ascending as the default order runs; `Other` orders by its string.
     member this.Ordinal =
         match this with
         | Energy -> 0
@@ -271,7 +264,6 @@ let resourceName (resource: Resource) : string =
     | Compound UtriumAcid -> "UH2O"
     | Other name -> name
 
-/// The resource an engine string names; anything unnamed here is `Other`.
 let resourceOfName (name: string) : Resource =
     match name with
     | "energy" -> Energy

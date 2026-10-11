@@ -8,7 +8,7 @@ open Fabot.Core.Vocabulary
 /// MAX_CREEP_SIZE. A body over it is refused and the spawn does nothing.
 let maxBodyParts = 50
 
-/// HARVEST_POWER: energy one WORK part digs from a source a tick.
+/// HARVEST_POWER.
 let harvestPerWork = 2
 
 /// CARRY_CAPACITY.
@@ -26,10 +26,10 @@ let mineralHarvestCycle = extractorCooldown + 1
 /// CREEP_LIFE_TIME.
 let creepLifetime = 1500
 
-/// CREEP_CLAIM_LIFE_TIME: a body with a CLAIM part lives this long.
+/// CREEP_CLAIM_LIFE_TIME.
 let claimLifetime = 600
 
-/// CREEP_SPAWN_TIME: ticks an oven spends a part.
+/// CREEP_SPAWN_TIME.
 let spawnTicksPerPart = 3
 
 /// BODYPART_COST.
@@ -46,7 +46,7 @@ let partCost (part: BodyPart) : int =
 
 let bodyCost (body: BodyPart list) : int = body |> List.sumBy partCost
 
-/// LAB_BOOST_ENERGY and LAB_BOOST_MINERAL: a lab's spend to boost one part.
+/// LAB_BOOST_ENERGY and LAB_BOOST_MINERAL.
 let boostEnergyPerPart = 20
 
 let boostMineralPerPart = 30
@@ -146,7 +146,7 @@ let dismantlePower = 50
 
 let extensionHits = 1000
 
-/// `rangedMassAttack` per RANGED_ATTACK part at this range: 10, 4, 1.
+/// `rangedMassAttack` per RANGED_ATTACK part at this range.
 let massAttackPowerAt (range: int) =
     match range with
     | 0
@@ -209,7 +209,6 @@ let liveParts (body: BodyPart list) (hits: int) : BodyPart list =
     let live = (hits + partHits - 1) / partHits
     body |> List.skip (max 0 (List.length body - live))
 
-/// The hits part `i` of an `n`-part body holds at these hits.
 let private partHitsAt (n: int) (hits: int) (i: int) =
     max 0 (min partHits (hits - partHits * (n - 1 - i)))
 
@@ -252,7 +251,6 @@ let damageTaken (body: BodyPart list) (boosts: Boost list) (hits: int) (damage: 
         // Math.round, which rounds a half up.
         damage - int (floor (reduced + 0.5))
 
-/// The hits a body holds in boosted TOUGH still standing.
 let toughHits (body: BodyPart list) (boosts: Boost list) (hits: int) : int =
     if List.isEmpty boosts then
         0
@@ -295,7 +293,7 @@ let neutralOutputPerTick = 5
 /// ENERGY_REGEN_TIME.
 let sourceRegenTime = 300
 
-/// BUILD_POWER: energy one WORK part puts into a site a tick.
+/// BUILD_POWER.
 let buildPerWork = 5
 
 /// UPGRADE_CONTROLLER_POWER: energy one WORK part spends upgrading a tick.

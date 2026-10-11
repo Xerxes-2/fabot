@@ -19,7 +19,6 @@ type Resolution =
         Searches: int
     }
 
-// The tiles a footprint anchored at `anchor` covers.
 let private covered (footprint: Footprint) (anchor: int) : int[] =
     match footprint with
     | One -> [| anchor |]
@@ -255,6 +254,5 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
         Searches = searches
     }
 
-/// Each moving creep's step, by name: `resolve`'s steps.
 let arbitrate (passable: int -> bool) (held: int[]) (wishes: Wish list) : (string * int) list =
     (resolve passable held wishes).Steps
