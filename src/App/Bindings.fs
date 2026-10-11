@@ -163,7 +163,8 @@ type IStructure =
     /// the expansion core a stronghold plants next door, 1 and up the bunker.
     abstract level: int
     /// Ticks before this structure may act again. Among the kinds we build,
-    /// defined on the extractor alone (`EXTRACTOR_COOLDOWN` is 5).
+    /// defined on the extractor (`EXTRACTOR_COOLDOWN` is 5) and the link
+    /// (`LINK_COOLDOWN` a tile of the last send's range).
     abstract cooldown: int
     /// Whether any creep may step onto this rampart; undefined on every
     /// other kind.
@@ -266,6 +267,11 @@ type ITower =
     abstract heal: target: obj -> int
     /// Put hits back on a structure, falling off with range; 10 energy an act.
     abstract repair: target: obj -> int
+
+/// `transferEnergy` sends to another link of ours in the room; the target is
+/// credited `amount` less LINK_LOSS_RATIO, rounded down.
+type ILink =
+    abstract transferEnergy: target: obj * amount: int -> int
 
 /// `send` moves a resource to another room's terminal, paying a fee out of
 /// this terminal's energy; `mod-season5/src/terminal-restriction.js` nulls it

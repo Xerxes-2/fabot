@@ -125,6 +125,33 @@ module Atlas =
         |> Option.exists (fun c -> Pos.within Engine.upgradeRange c.Pos pos)
         && not (room.Sources |> Array.exists (fun s -> Pos.within 1 s.Pos pos))
 
+    /// Whether a link on the tile serves a source: within 2 of one, beside
+    /// its container.
+    let isSourceLink (room: Room) (pos: Pos) : bool =
+        room.Sources |> Array.exists (fun s -> Pos.within 2 s.Pos pos)
+
+    /// The controller's link: of our links in its upgrade range serving no
+    /// source, the nearest it, ties by tile.
+    let controllerLink (room: Room) : Structure option =
+        room.Controller
+        |> Option.bind (fun c ->
+            room.Structures
+            |> Array.filter (fun s ->
+                s.Kind = Kind.Link
+                && s.Owner = Ours
+                && Pos.within Engine.upgradeRange c.Pos s.Pos
+                && not (isSourceLink room s.Pos))
+            |> Array.sortBy (fun s -> Pos.range c.Pos s.Pos, Tiles.ofPos s.Pos)
+            |> Array.tryHead)
+
+    /// What the controller's upgraders draw from: its link where one stands,
+    /// else the first container on a buffer tile (`isBuffer`).
+    let buffer (room: Room) : Structure option =
+        controllerLink room
+        |> Option.orElseWith (fun () ->
+            room.Structures
+            |> Array.tryFind (fun s -> s.Kind = Kind.Container && isBuffer room s.Pos))
+
     /// The seat a source's harvester digs from, and the id of the container
     /// standing on it: of the tiles beside the source under a container or a
     /// container site of ours, the farthest from the controller (so a
@@ -149,13 +176,16 @@ module Atlas =
         |> Array.tryHead
 
     /// The tiles a working body holds for its life, read off the structures
-    /// alone: each source's post (`postOf`) and the controller's buffer.
+    /// alone: each source's post (`postOf`) and a container buffer's tile
+    /// (`buffer`). A link's tile is solid, and its upgraders' tiles beside it
+    /// stay open: held, they priced every walk past the controller dearer.
     let workSeats (room: Room) : int[] =
         Array.append
             (room.Sources |> Array.choose (fun s -> postOf room s.Pos |> Option.map fst))
-            (room.Structures
-             |> Array.filter (fun s -> s.Kind = Kind.Container && isBuffer room s.Pos)
-             |> Array.map (fun s -> s.Pos))
+            (buffer room
+             |> Option.filter (fun b -> b.Kind = Kind.Container)
+             |> Option.map (fun b -> b.Pos)
+             |> Option.toArray)
         |> Array.map Tiles.ofPos
 
     /// The walk grid and occupancy of every visible room. A road makes its

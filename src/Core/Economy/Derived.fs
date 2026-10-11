@@ -49,6 +49,9 @@ type SourceFact =
         Post: Pos option
         /// The container standing on the post, which takes what it digs.
         Container: string option
+        /// Our link serving it (`Atlas.isSourceLink`), which its harvester
+        /// fills.
+        Link: string option
         /// The tiles a body can stand on to dig it: what bounds its holders
         /// (`seatsAt`).
         Seats: int
@@ -81,9 +84,11 @@ type RefillFact =
 /// What kind of store a `StoreFact` is.
 [<RequireQualifiedAccess>]
 type StoreKind =
+    /// A container, or the hub's link while it receives.
     | Container
     | Storage
-    /// The controller's container: what the upgraders draw from.
+    /// What the upgraders draw from: the controller's link where one stands,
+    /// else its container.
     | Buffer
     /// A tombstone or a ruin: a store that ends.
     | Remains
@@ -104,6 +109,28 @@ type StoreFact =
         SourceDug: int
         /// Ours: the storage the colony banks in.
         Owned: bool
+    }
+
+/// What a link of ours is for, read off where it stands; a link with none
+/// does nothing.
+[<RequireQualifiedAccess>]
+type LinkRole =
+    /// `Atlas.isSourceLink`.
+    | Source
+    /// `Atlas.controllerLink`.
+    | Controller
+    /// Beside our storage.
+    | Hub
+
+[<NoEquality; NoComparison>]
+type LinkFact =
+    {
+        Id: string
+        Pos: Pos
+        Role: LinkRole
+        Energy: int
+        Free: int
+        Cooldown: int
     }
 
 /// A construction site of ours and what it still takes.
@@ -163,6 +190,13 @@ type Ground =
         UpgradeSeats: int
         /// Its controller's buffer (`StoreKind.Buffer`), if one stands.
         Buffer: StoreFact option
+        /// Where carriers bring the buffer's energy: the hub's link where the
+        /// buffer is a link and one stands, else the buffer.
+        Feed: StoreFact option
+        /// Our links, and the one the others send to: the controller's, else
+        /// the hub's.
+        Links: LinkFact[]
+        Receiver: LinkFact option
         /// The tiles an upgrader stands on: beside the buffer, in the
         /// controller's upgrade range, where it draws as it upgrades.
         BufferSeats: Pos list
@@ -305,6 +339,41 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
 
     let ownedRoom = room.Controller |> Option.exists (fun c -> c.Owner = Ours)
 
+    let bufferId = Atlas.buffer room |> Option.map (fun b -> b.Id)
+
+    let storage =
+        room.Structures
+        |> Array.tryFind (fun s -> s.Kind = Kind.Storage && s.Owner = Ours)
+
+    let links =
+        room.Structures
+        |> Array.choose (fun s ->
+            if s.Kind <> Kind.Link || s.Owner <> Ours then
+                None
+            elif Atlas.isSourceLink room s.Pos then
+                Some LinkRole.Source
+            elif bufferId = Some s.Id then
+                Some LinkRole.Controller
+            elif storage |> Option.exists (fun st -> Pos.within 1 st.Pos s.Pos) then
+                Some LinkRole.Hub
+            else
+                None
+            |> Option.map (fun role ->
+                {
+                    Id = s.Id
+                    Pos = s.Pos
+                    Role = role
+                    Energy = Store.amountOf Energy s.Store
+                    Free = Store.free s.Store
+                    Cooldown = s.Cooldown
+                }))
+
+    let linkOf (role: LinkRole) =
+        links |> Array.tryFind (fun l -> l.Role = role)
+
+    let controllerLink = linkOf LinkRole.Controller
+    let hubLink = linkOf LinkRole.Hub
+
     let sources =
         room.Sources
         |> Array.map (fun s ->
@@ -317,6 +386,11 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
                 Rate = rate
                 Post = post |> Option.map fst
                 Container = post |> Option.bind snd
+                Link =
+                    links
+                    |> Array.tryFind (fun l ->
+                        l.Role = LinkRole.Source && Pos.within 2 s.Pos l.Pos)
+                    |> Option.map (fun l -> l.Id)
                 Seats = seats
                 Energy = s.Energy
                 Dug = dugAt capacity ownedRoom rate (Option.isSome post) seats
@@ -363,12 +437,9 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
             let dug = if s.Kind = Kind.Container then servedDug s.Pos else 0
 
             let kind =
-                if s.Kind = Kind.Storage then
-                    StoreKind.Storage
-                elif ownedRoom && Atlas.isBuffer room s.Pos then
-                    StoreKind.Buffer
-                else
-                    StoreKind.Container
+                if s.Kind = Kind.Storage then StoreKind.Storage
+                elif ownedRoom && bufferId = Some s.Id then StoreKind.Buffer
+                else StoreKind.Container
 
             if energy > 0 || owned || kind = StoreKind.Buffer then
                 stores.Add
@@ -435,6 +506,36 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
                     Owned = false
                 }
 
+    let storeOf (kind: StoreKind) (dug: int) (l: LinkFact) =
+        {
+            Id = l.Id
+            Pos = l.Pos
+            Kind = kind
+            Energy = l.Energy
+            Free = l.Free
+            Fill = float l.Energy / float (max 1 (l.Energy + l.Free))
+            SourceDug = dug
+            Owned = false
+        }
+
+    // The hub's link is the buffer's feed while the controller's stands,
+    // else it receives the sources' and is drawn like a container.
+    let feed =
+        match controllerLink, hubLink with
+        | Some c, hub ->
+            stores.Add(storeOf StoreKind.Buffer 0 c)
+            hub |> Option.map (storeOf StoreKind.Container 0)
+        | None, hub ->
+            hub
+            |> Option.iter (fun hub ->
+                let dug =
+                    sources |> Array.sumBy (fun s -> if Option.isSome s.Link then s.Dug else 0)
+
+                if hub.Energy > 0 then
+                    stores.Add(storeOf StoreKind.Container dug hub))
+
+            None
+
     let stores = stores.ToArray()
     let buffer = stores |> Array.tryFind (fun s -> s.Kind = StoreKind.Buffer)
 
@@ -476,6 +577,9 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
             |> Option.map (fun c -> seatsAt atlas (Task.rangeOf (Task.Upgrade c.Id)) c.Pos)
             |> Option.defaultValue 0
         Buffer = buffer
+        Feed = feed |> Option.orElse buffer
+        Links = links
+        Receiver = controllerLink |> Option.orElse hubLink
         BufferSeats =
             match buffer, room.Controller with
             | Some b, Some c ->

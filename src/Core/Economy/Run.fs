@@ -124,6 +124,31 @@ let private actOf (task: Task) : CreepAct =
     | Task.Reserve id -> CreepAct.Reserve id
     | Task.Claim id -> ClaimController id
 
+/// The smallest send: the engine credits `floor(amount × 0.97)`, so a send
+/// in whole hundreds loses the 3% and nothing to the rounding.
+let private linkBatch = 100
+
+/// The ground's link sends this tick: each link but the receiver
+/// (`Ground.Receiver`), off its cooldown, sends what it holds in whole
+/// batches, as soon as the receiver has room for one, the sources' first so
+/// the hub's never takes their room. The loss is the same share of any
+/// batch, and a send's cooldown only delays the next, which then carries
+/// what gathered meanwhile.
+let private linkSends (ground: Ground) : Intent list =
+    match ground.Receiver with
+    | None -> []
+    | Some receiver ->
+        let mutable room = receiver.Free
+
+        [
+            for l in ground.Links |> Array.sortBy (fun l -> l.Role <> LinkRole.Source) do
+                let amount = min l.Energy room / linkBatch * linkBatch
+
+                if l.Id <> receiver.Id && l.Cooldown = 0 && amount > 0 then
+                    room <- room - amount
+                    Link(l.Id, TransferEnergy(receiver.Id, amount))
+        ]
+
 let decide (context: Context) (state: State) : Intent list * State =
     let world = context.World
     let atlas = context.Atlas
@@ -259,6 +284,20 @@ let decide (context: Context) (state: State) : Intent list * State =
                 if body.Energy > 0 || not (drawsBuffer body offer) then
                     acts.Add(Creep(creep.Name, actOf offer.Task))
 
+            // A post's harvester puts its dig into its source's link while a
+            // receiver stands and the link has room; the rest falls into the
+            // container.
+            if garrisons body offer && body.Energy > 0 then
+                derived.Grounds
+                |> Array.tryPick (fun g ->
+                    g.Links
+                    |> Array.tryFind (fun l ->
+                        Option.isSome g.Receiver
+                        && l.Role = LinkRole.Source
+                        && l.Free > 0
+                        && Pos.within 1 creep.Pos l.Pos))
+                |> Option.iter (fun l -> acts.Add(Creep(creep.Name, Transfer(l.Id, Energy))))
+
             wishIn
                 creep.Pos.Room
                 (Plan.toward
@@ -276,7 +315,9 @@ let decide (context: Context) (state: State) : Intent list * State =
             Arbitrate.arbitrate (Atlas.passable atlas room) [||] (List.ofSeq list) do
             moves.Add(Creep(name, Move direction))
 
-    casts @ List.ofSeq acts @ List.ofSeq moves, { state with Assignments = assignments }
+    let sends = derived.Grounds |> Seq.collect linkSends |> List.ofSeq
+
+    casts @ List.ofSeq acts @ sends @ List.ofSeq moves, { state with Assignments = assignments }
 
 /// The economy as the tick runs it.
 let economy: Module = { Name = "economy"; Run = decide }

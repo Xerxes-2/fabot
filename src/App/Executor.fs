@@ -61,6 +61,11 @@ let private act (intent: Intent) : string * int =
             match act with
             | Attack target -> on "attack" target tower.attack
             | Heal target -> on "heal" target tower.heal
+    | Link(id, TransferEnergy(target, amount)) ->
+        match Game.getObjectById id, Game.getObjectById target with
+        | link, _ when isNull link -> "link", notFound
+        | _, t when isNull t -> "link", notFound
+        | link, t -> "link", (unbox<ILink> link).transferEnergy (t, amount)
     | Spawn(id, SpawnCreep(body, name)) ->
         match Game.getObjectById id with
         | spawn when isNull spawn -> "spawn", notFound

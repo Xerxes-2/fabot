@@ -578,7 +578,7 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
 
         pave (List.tail path) digLevel
 
-    // The links past the hub's: the controller's, where upgraders reach it,
+    // The links outside the hub: the controller's, where upgraders reach it,
     // then each source's, the longest way out first; each beside its
     // container on a tile no plan holds, a dead end's held since it was
     // planted.
@@ -618,16 +618,26 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         | None -> ()
 
     let hubLinks = items |> Seq.sumBy (fun i -> if i.Kind = Kind.Link then 1 else 0)
+    let outer = links |> Seq.truncate (count Kind.Link - hubLinks) |> Array.ofSeq
 
-    links
-    |> Seq.truncate (count Kind.Link - hubLinks)
-    |> Seq.iteri (fun i t ->
+    outer
+    |> Array.iteri (fun i t ->
         extra.Add
             {
                 Kind = Kind.Link
                 Tile = t
-                Level = levelOf Kind.Link (hubLinks + i)
+                Level = levelOf Kind.Link i
             })
+
+    // The hub's link comes after them: it only moves the storage's energy
+    // to the controller's link, paying the 3% loss on all of it to save a
+    // walk, where a source's link saves the whole haul from its source.
+    for k in 0 .. items.Count - 1 do
+        if items.[k].Kind = Kind.Link then
+            items.[k] <-
+                { items.[k] with
+                    Level = levelOf Kind.Link outer.Length
+                }
 
     // Roads by level, then nearest the anchor, then tile, keyed in one int.
     let roadKeys = ResizeArray<int>()

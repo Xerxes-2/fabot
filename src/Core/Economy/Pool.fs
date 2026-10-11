@@ -311,12 +311,13 @@ let pool (derived: Derived) : Offer[] =
             Array.append derived.Bodies derived.Ovens
             |> Array.exists (fun b -> upgrades b && b.Pos.Room = ground.Room)
 
+        let feed = ground.Feed |> Option.filter (fun f -> f.Free > 0 && drinks)
+
         // The room the sinks other than the stock have: what a carrier's draw
         // on the stock is for.
         let room =
             (ground.Refills |> Array.sumBy (fun r -> r.Free))
-            + (ground.Stores
-               |> Array.sumBy (fun s -> if s.Kind = StoreKind.Buffer && drinks then s.Free else 0))
+            + (feed |> Option.map (fun f -> f.Free) |> Option.defaultValue 0)
 
         for s in ground.Stores do
             if s.Energy > 0 && s.Kind <> StoreKind.Buffer then
@@ -340,15 +341,6 @@ let pool (derived: Derived) : Offer[] =
                         Draw = draw
                     }
 
-            if s.Kind = StoreKind.Buffer && s.Free > 0 && drinks then
-                offers.Add(
-                    offer
-                        (Refill(s.Id, Energy))
-                        s.Pos
-                        (Price.valueOfRank Price.bufferRank)
-                        (Capacity.Load s.Free)
-                )
-
             if s.Owned && s.Free > 0 then
                 for r in Array.append [| Energy |] ores do
                     offers.Add(
@@ -358,6 +350,15 @@ let pool (derived: Derived) : Offer[] =
                             (Price.valueOfRank Price.bottomRank)
                             (Capacity.Load s.Free)
                     )
+
+        for f in Option.toArray feed do
+            offers.Add(
+                offer
+                    (Refill(f.Id, Energy))
+                    f.Pos
+                    (Price.valueOfRank Price.bufferRank)
+                    (Capacity.Load f.Free)
+            )
 
         for p in ground.Piles do
             if p.Resource = Energy then

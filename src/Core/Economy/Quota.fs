@@ -199,13 +199,16 @@ let private ownerOf (distance: Pos -> Pos -> int option) (derived: Derived) (gi:
         |> Option.orElse (ground.Sources |> Array.tryHead |> Option.map (fun s -> s.Pos))
         |> Option.bind (nearest distance colonies (fun _ -> true))
 
-/// The energy a tick one source's haul must move: what its post digs, and
-/// what stands in its container and beside it over a creep's life, so a
-/// hauler cast now clears the backlog before it dies. Zero until its
-/// container is built: a dig that falls on the floor is the workers' to fetch.
-let private haulFlow (ground: Ground) (s: SourceFact) : float =
+/// The energy a tick one source's haul must move, and where from: what its
+/// post digs, and what stands in its container and beside it over a creep's
+/// life, so a hauler cast now clears the backlog before it dies. Of the dig,
+/// what its link carries (`carried`) is hauled from the hub's link where that
+/// receives it, and not at all where the controller's does. Nothing until
+/// its container is built: a dig that falls on the floor is the workers' to
+/// fetch.
+let private haulFlows (ground: Ground) (s: SourceFact) (post: Pos) (carried: float) =
     match s.Container with
-    | None -> 0.0
+    | None -> []
     | Some id ->
         let stored =
             ground.Stores |> Array.sumBy (fun st -> if st.Id = id then st.Energy else 0)
@@ -218,7 +221,34 @@ let private haulFlow (ground: Ground) (s: SourceFact) : float =
                 else
                     0)
 
-        float s.Dug + float (stored + piled) / float Engine.creepLifetime
+        let left =
+            float s.Dug - carried + float (stored + piled) / float Engine.creepLifetime
+
+        match ground.Receiver with
+        | Some r when r.Role = LinkRole.Hub && carried > 0.0 -> [ post, left; r.Pos, carried ]
+        | _ -> [ post, left ]
+
+/// What a ground's links carry a tick: no more than the receiver drains, the
+/// upgrading bodies' WORK at the controller (capped at the eighth level),
+/// where it is the controller's; the dig itself where it is the hub's, which
+/// the carriers drain into the storage.
+let private linkDrain (derived: Derived) (ground: Ground) : float =
+    match ground.Receiver, ground.Controller with
+    | Some r, Some c when r.Role = LinkRole.Controller ->
+        let work =
+            Array.append derived.Bodies derived.Ovens
+            |> Array.sumBy (fun b -> if upgrades b && b.Pos.Room = ground.Room then b.Work else 0)
+
+        let drain = work * Engine.upgradeDrainPerWork
+
+        float (
+            if c.Level >= Engine.controllerMaxLevel then
+                min drain Engine.maxUpgradePerTick
+            else
+                drain
+        )
+    | Some _, _ -> infinity
+    | None, _ -> 0.0
 
 /// What the ground wants beyond the spenders: a harvester on each source's
 /// post, the haul from each built container, a reserver for each declared
@@ -239,15 +269,19 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
     let digs = Array.init colonies.Length (fun _ -> ResizeArray<int * Demand>())
 
     let sinksOf ci =
+        let ground = derived.Grounds.[ci]
+
         homeOf colonies.[ci]
-        :: (derived.Grounds.[ci].Stores
-            |> Array.filter (fun st -> st.Kind = StoreKind.Buffer || st.Owned)
+        :: (Array.append
+                (Option.toArray ground.Feed)
+                (ground.Stores |> Array.filter (fun st -> st.Owned))
             |> Array.map (fun st -> st.Pos)
             |> List.ofArray)
 
     derived.Grounds
     |> Array.iteri (fun gi ground ->
         let owner = ownerOf distance derived gi
+        let mutable drain = linkDrain derived ground
 
         for s in ground.Sources do
             match s.Post with
@@ -269,18 +303,30 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
 
                 match owner with
                 | Some ci when Option.isSome s.Container ->
-                    let trip =
-                        sized Pattern.Hauler Engine.maxBodyParts colonies.[ci].BankCapacity
-                        |> Option.map (fun body ->
-                            sinksOf ci
-                            |> List.choose (fun sink -> roundTrip leg body post sink 1)
-                            |> List.fold max 0)
-                        |> Option.defaultValue 0
+                    let carried =
+                        if Option.isSome s.Link then
+                            min (float s.Dug) drain
+                        else
+                            0.0
 
-                    if trip > 0 then
-                        let flow = haulFlow ground s
-                        carries.[ci] <- carries.[ci] + flow * float trip
-                        flows.[ci] <- flows.[ci] + flow
+                    drain <- drain - carried
+                    let mutable hauled = false
+
+                    for fetch, flow in haulFlows ground s post carried do
+                        let trip =
+                            sized Pattern.Hauler Engine.maxBodyParts colonies.[ci].BankCapacity
+                            |> Option.map (fun body ->
+                                sinksOf ci
+                                |> List.choose (fun sink -> roundTrip leg body fetch sink 1)
+                                |> List.fold max 0)
+                            |> Option.defaultValue 0
+
+                        if trip > 0 then
+                            hauled <- true
+                            carries.[ci] <- carries.[ci] + flow * float trip
+                            flows.[ci] <- flows.[ci] + flow
+
+                    if hauled then
                         digs.[ci].Add(s.Rate, dig)
                 | _ -> ()
             | None -> ()

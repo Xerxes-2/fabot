@@ -11,8 +11,9 @@
 // CPU, the bot's own phases) and `console.log`. Each sample carries the
 // room's energy ledger, cumulative from the first tick (`ledger`): dug,
 // spawn regeneration, spent on bodies, building, upgrading, repairing and
-// towers, lost to pile decay, and the stock standing (stores, carried, piles);
-// dug + regen = spent + decayed + Δstock, less the residual it reports.
+// towers, lost to pile decay and to link sends, and the stock standing
+// (stores, carried, piles); dug + regen = spent + decayed + linked + Δstock,
+// less the residual it reports.
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
@@ -78,8 +79,12 @@ const REPAIR = 7;
 const UPGRADE = 9;
 const ATTACK = 1;
 const HEAL = 6;
+const TRANSFER = 12;
+// A send between links credits floor(amount × (1 − LINK_LOSS_RATIO)); a
+// creep's withdraw from a link logs a transfer from it too.
+const LINK_KEEPS = 1 - 0.03;
 const PART_COST = { move: 50, work: 100, carry: 50, attack: 80, ranged_attack: 150, heal: 250, claim: 600, tough: 10 };
-const ledger = { dug: 0, regen: 0, spawn: 0, build: 0, upgrade: 0, repair: 0, tower: 0, decayed: 0, stock0: null, stock: 0 };
+const ledger = { dug: 0, regen: 0, spawn: 0, build: 0, upgrade: 0, repair: 0, tower: 0, decayed: 0, linked: 0, stock0: null, stock: 0 };
 // What a colony holds, in energy, as it stands: the controller's climb, every
 // structure at its construction cost (a road at its terrain's), ramparts' and
 // walls' hits at the repair rate, sites at their progress, and the stock.
@@ -125,6 +130,7 @@ function account(room) {
   const objects = [...room["#objects"]];
   const sources = new Set(objects.filter((o) => o["#lookType"] === "source").map((o) => o.id));
   const towers = new Set(objects.filter((o) => o.structureType === "tower" && o["#user"] === ours).map((o) => o.id));
+  const links = new Set(objects.filter((o) => o.structureType === "link" && o["#user"] === ours).map((o) => o.id));
   ledger.regen += regenNext;
   for (const e of room["#eventLog"] ?? []) {
     const kind = e.event ?? e._$Variant;
@@ -134,7 +140,8 @@ function account(room) {
     else if (kind === REPAIR) {
       if (towers.has(e.objectId)) ledger.tower += e.energySpent ?? 10;
       else ledger.repair += e.energySpent ?? 0;
-    } else if ((kind === ATTACK || kind === HEAL) && towers.has(e.objectId)) ledger.tower += 10;
+    } else if (kind === TRANSFER && links.has(e.objectId) && links.has(e.targetId)) ledger.linked += e.amount - Math.floor(e.amount * LINK_KEEPS);
+    else if ((kind === ATTACK || kind === HEAL) && towers.has(e.objectId)) ledger.tower += 10;
   }
   const piles = new Map();
   let stock = 0;
@@ -170,7 +177,7 @@ function account(room) {
 function ledgerRow() {
   const { stock0, stock, ...flows } = ledger;
   const spent = flows.spawn + flows.build + flows.upgrade + flows.repair + flows.tower;
-  return { ...flows, stock, residual: flows.dug + flows.regen - spent - flows.decayed - (stock - stock0) };
+  return { ...flows, stock, residual: flows.dug + flows.regen - spent - flows.decayed - flows.linked - (stock - stock0) };
 }
 
 function sample(t, time, room) {
