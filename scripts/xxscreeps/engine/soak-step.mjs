@@ -87,15 +87,17 @@ function sample(t, time, room) {
   };
   for (const o of room["#objects"]) {
     const mine = o["#user"] === ours;
-    if (o.structureType === "controller") row.progress = o["#progress"] ?? 0;
+    // A site carries its structure's type and no store: read it first.
+    if (o["#lookType"] === "constructionSite") {
+      if (mine) row.sites++;
+    } else if (o.structureType === "controller") row.progress = o["#progress"] ?? 0;
     else if (o.structureType === "spawn" || o.structureType === "extension") {
       if (!mine) continue;
       row.energy += energyIn(o);
-      row.capacity += o.store.getCapacity("energy") ?? 0;
+      row.capacity += o.store?.getCapacity?.("energy") ?? 0;
     } else if (o.structureType === "container" || o.structureType === "storage") row.stored += energyIn(o);
     else if (o["#lookType"] === "resource" && o.resourceType === "energy") row.dropped += o.amount;
     else if (o["#lookType"] === "source") row.sources += o.energy;
-    else if (o["#lookType"] === "constructionSite" && mine) row.sites++;
     else if (o.body !== undefined) {
       if (mine) {
         row.creeps++;
