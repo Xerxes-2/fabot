@@ -18,7 +18,9 @@ type Assignments = Map<string, string>
 ///   Holders are kept in ascending share, then nearest, so a set of holders
 ///   the match admitted is kept whole while nothing changed; a seated
 ///   offer's in descending `Pool.seatValue`, so its seats hold the bodies
-///   that bring them the most.
+///   that bring them the most; a garrison on its post ahead of one still
+///   walking, so a newcomer takes a vacant post and never sends the
+///   incumbent across the room to another.
 /// - The rest are matched greedily: of every unmatched body's best offer by
 ///   (rank, travel, holders), the smallest pair is matched first, ties to the
 ///   body's name then the offer's order, so a contested Task goes to the body
@@ -64,19 +66,26 @@ let matchAll
         | Capacity.Seated _ -> true
         | _ -> false
 
-    // Whether body `a` goes ahead of body `b` on a seated offer: what it
-    // brings the seat over its stay, then the nearer, then its name.
+    let garrison (bi: int) (oi: int) = garrisons bodies.[bi] pool.[oi]
+
+    let posted (bi: int) (oi: int) = garrison bi oi && walk bi oi = 0
+
+    // Whether body `a` goes ahead of body `b` on a seated offer: a garrison
+    // on its post, then what it brings the seat over its stay, then the
+    // nearer, then its name.
     let ahead (oi: int) (a: int) (b: int) =
         let va = seatValue bodies.[a] pool.[oi] (walk a oi)
         let vb = seatValue bodies.[b] pool.[oi] (walk b oi)
+        let pa = posted a oi
+        let pb = posted b oi
 
-        va > vb
-        || (va = vb
+        (pa && not pb)
+        || (pa = pb && va > vb)
+        || (pa = pb
+            && va = vb
             && (walk a oi < walk b oi
                 || (walk a oi = walk b oi
                     && System.String.CompareOrdinal(bodies.[a].Name, bodies.[b].Name) < 0)))
-
-    let garrison (bi: int) (oi: int) = garrisons bodies.[bi] pool.[oi]
 
     // Whether an offer admits a body among all its holders.
     let admitsNow (bi: int) (oi: int) =
@@ -121,7 +130,7 @@ let matchAll
 
     // The keep: a seated offer keeps its dearest holders, any other its
     // lightest first.
-    let kept = ResizeArray<struct (int * int * int * int)>()
+    let kept = ResizeArray<struct (bool * int * int * int * int)>()
 
     for bi in 0 .. bodies.Length - 1 do
         match Map.tryFind bodies.[bi].Name assignments with
@@ -134,19 +143,21 @@ let matchAll
                     else
                         share bodies.[bi] pool.[oi]
 
-                kept.Add(struct (key, walk bi oi, bi, oi))
+                kept.Add(struct (not (posted bi oi), key, walk bi oi, bi, oi))
             | _ -> ()
         | None -> ()
 
-    kept.Sort(fun (struct (s1, w1, b1, _)) (struct (s2, w2, b2, _)) ->
-        if s1 <> s2 then
+    kept.Sort(fun (struct (p1, s1, w1, b1, _)) (struct (p2, s2, w2, b2, _)) ->
+        if p1 <> p2 then
+            compare p1 p2
+        elif s1 <> s2 then
             compare s1 s2
         elif w1 <> w2 then
             compare w1 w2
         else
             System.String.CompareOrdinal(bodies.[b1].Name, bodies.[b2].Name))
 
-    for struct (_, _, bi, oi) in kept do
+    for struct (_, _, _, bi, oi) in kept do
         if admitsNow bi oi then
             take bi oi
 
