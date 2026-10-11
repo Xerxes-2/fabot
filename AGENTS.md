@@ -49,7 +49,8 @@ port from, never a fact about v2.
 - An economy change is read off the soak's curves over the long horizon
   (`npm run soak -- --ticks 10000`, `ARCHITECTURE.md` §5, §10.2): long-run
   growth is the objective, and an early regression is accepted when the end
-  of the run improves.
+  of the run improves. Before shipping, `npm run soak:many` (five rooms):
+  the medians must not regress.
 - Unit tests only for invariants and pure arithmetic. A test that asserts one
   creep's action in one scenario is rejected in review.
 - `npm test` (unit) stays under a minute. Scenarios and soak run on `jj ship`

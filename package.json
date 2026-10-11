@@ -15,7 +15,8 @@
     "observe": "node --env-file-if-exists=.env scripts/observe.mjs",
     "cpuprofile": "node scripts/cpuprofile.mjs",
     "xx": "node scripts/xxscreeps/xx.mjs",
-    "soak": "node scripts/xxscreeps/soak.mjs"
+    "soak": "node scripts/xxscreeps/soak.mjs",
+    "soak:many": "node scripts/xxscreeps/soak-many.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

@@ -2,6 +2,7 @@
 // no creeps, as a respawn, for thousands of ticks of the vanilla engine.
 //
 // Usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>]
+//        npm run soak -- --list      the rooms a soak can stand in, as JSON
 //   --ticks  ticks to step (default 3000)
 //   --every  a sample every K ticks (default 100), and the last tick
 //   --seed   the engine's move tie-break seed (default 1): one seed, one run
@@ -38,6 +39,8 @@ const OUR_NAME = "fabot";
 // ---- arguments -------------------------------------------------------------
 const flags = {};
 const rest = process.argv.slice(2);
+const listOnly = rest[0] === "--list";
+if (listOnly) rest.shift();
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
   if (!["--ticks", "--every", "--seed", "--room", "--run"].includes(a)) fail(usage);
@@ -106,6 +109,12 @@ writeFileSync(join(world, "seed.txt"), `${seed}\n`);
 mkdirSync(join(world, "bot"), { recursive: true });
 cpSync(join(REPO, "dist/main.js"), join(world, "bot/main.js"));
 
+if (listOnly) {
+  // The rooms a soak can stand in, for `soak-many.mjs`; nothing is run.
+  console.log(node24([XXSCREEPS, script("colony.mjs"), "--list"], world, true).trim().split("\n").at(-1));
+  rmSync(world, { recursive: true, force: true });
+  process.exit(0);
+}
 const colony = JSON.parse(node24([XXSCREEPS, script("colony.mjs"), ...(flags["--room"] ? [flags["--room"]] : [])], world, true).trim().split("\n").at(-1));
 const run = flags["--run"] ?? `${colony.room}-seed${seed}`;
 const out = join(REPO, "soak-runs", run);

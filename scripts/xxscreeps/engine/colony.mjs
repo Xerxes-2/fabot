@@ -1,16 +1,18 @@
 // Offline, server stopped: choose where the soak's colony stands. Runs under
 // xxscreeps' own loader, cwd the world directory:
-//   xxscreeps.js file://…/colony.mjs [<room>]
+//   xxscreeps.js file://…/colony.mjs [<room> | --list]
 // The room is the given one, or the first by name with an unowned controller
 // and two sources. The spawn's tile is the plain one at range ≥ 3 from every
 // source, the controller and the edges, with no wall around it, nearest (sum
 // of ranges) to the sources and the controller; ties go to the lower y, then x.
 // Prints `{ "room": …, "x": …, "y": … }` and changes nothing: `manage bot add
-// --spawn` stands it.
+// --spawn` stands it. With `--list`, prints every room that fits, by name.
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
 import { Source } from "xxscreeps/mods/classic/source/source.js";
 
-const [wanted] = process.argv.slice(2);
+const [arg] = process.argv.slice(2);
+const listing = arg === "--list";
+const wanted = listing ? undefined : arg;
 const db = await Database.connect();
 const shard = await Shard.connect(db, "shard0");
 const world = await shard.loadWorld();
@@ -48,6 +50,7 @@ function spawnTile(name, { objects, controller, sources }) {
 }
 
 const candidates = wanted ? [wanted] : [...accessible].sort();
+const fitting = [];
 let chosen = null;
 for (const name of candidates) {
   const s = await survey(name);
@@ -57,13 +60,18 @@ for (const name of candidates) {
     continue;
   }
   const tile = spawnTile(name, s);
+  if (tile && listing) {
+    fitting.push(name);
+    continue;
+  }
   if (tile) {
     chosen = { room: name, x: tile.x, y: tile.y };
     break;
   }
   if (wanted) throw new Error(`${name}: no tile fits a spawn`);
 }
-if (!chosen) throw new Error("no room in this world has an unowned controller, two sources and a spawn tile");
-console.log(JSON.stringify(chosen));
+if (listing) console.log(JSON.stringify(fitting));
+else if (!chosen) throw new Error("no room in this world has an unowned controller, two sources and a spawn tile");
+else console.log(JSON.stringify(chosen));
 await shard[Symbol.asyncDispose]();
 await db[Symbol.asyncDispose]();

@@ -509,6 +509,9 @@ everything v1 used its self-written arena for, and more:
   judged on the long horizon (`npm run soak -- --ticks 10000`): the RCL and
   progress at the end, the tick each level is reached, the income in the last
   thousand ticks; the first few thousand ticks alone decide nothing (§5).
+  Before it ships, the same over several rooms (`npm run soak:many`, five
+  rooms spread over the sector by default, medians printed), so no change is
+  tuned to one room's terrain.
 - **Adversaries.** xxscreeps hosts several users: v1 as the opponent for
   `Defend` (self-play), open-source bots (TooAngel is plain JS; Overmind and
   The International need a build) for `Siege`/`Drain` when their turn comes.
