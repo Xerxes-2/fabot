@@ -149,18 +149,28 @@ let private workerBody (most: int) (capacity: int) =
 
     replicate work Work @ replicate carry Carry @ replicate move Move
 
-/// The harvester's rule: one Carry, `moves n` Moves for `n` Work, and every
-/// Work the bank buys up to `most`.
+/// The harvester's rule: every Work the bank buys up to `most` with `moves n`
+/// Moves for `n` Work, then one Carry where the bank has room for it. The
+/// dig falls into the container under it with no Carry; only a link takes
+/// it from the store, and a bank that holds links has the room.
 let private harvesterBody (moves: int -> int) (most: int) (capacity: int) =
     let bodyOf n =
-        replicate n Work @ [ Carry ] @ replicate (moves n) Move
+        replicate n Work @ replicate (moves n) Move
 
     let mutable n = min most ((Engine.maxBodyParts - 1) * 2 / 3)
 
     while n > 2 && Engine.bodyCost (bodyOf n) > capacity do
         n <- n - 1
 
-    bodyOf (max 2 n)
+    let n = max 2 n
+
+    let carry =
+        if Engine.bodyCost (Carry :: bodyOf n) <= capacity then
+            [ Carry ]
+        else
+            []
+
+    replicate n Work @ carry @ replicate (moves n) Move
 
 /// The upgrader's rule: one CARRY, the rest of the bank on WORK and MOVE
 /// pairs up to `most` WORK. The MOVEs walk it to the buffer once at road
