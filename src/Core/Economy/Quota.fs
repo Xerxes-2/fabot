@@ -135,10 +135,14 @@ let private nearest
 /// another.
 type Leg = BodyPart list -> Pos -> Pos -> int -> int option
 
-/// The walk there loaded, twice: the walk back empty is no slower, and one
+/// The walk there loaded and back empty: an empty Carry weighs nothing. One
 /// flood toward `work` prices both.
 let private roundTrip (leg: Leg) (body: BodyPart list) (fetch: Pos) (work: Pos) (range: int) =
-    leg body fetch work range |> Option.map (fun there -> max 2 (2 * there))
+    let empty = body |> List.filter (fun p -> p <> Carry)
+
+    match leg body fetch work range, leg empty fetch work range with
+    | Some there, Some back -> Some(max 2 (there + back))
+    | _ -> None
 
 /// `lifetimes` is the owner's number (`ARCHITECTURE.md` §5).
 let reserveTarget (lifetimes: float) (level: int) : int =
