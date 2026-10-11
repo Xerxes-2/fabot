@@ -43,7 +43,41 @@ port from, never a fact about v2.
 - Prices are set when a commitment is made (`Exchange.cheapestWin`,
   `Strategy`, `Price`), not re-read per tick. A constant is an engine fact or
   a named safety margin.
-- No issue numbers, dates or incident narratives in code. `git log` has them.
+
+## Writing prose
+
+Docs and comments are not default deliverables. Write them only when asked,
+or when the fact passes the tests below.
+
+Ownership test: if someone changed the code and left this sentence alone,
+would the sentence become wrong? Then the code owns the fact. Do not write
+it. Put it in a type, a name, or a test instead.
+
+Prose earns its place only for what the code cannot say: why, a constraint,
+an external requirement (an engine rule, the owner's decision), a rejected
+alternative. An incident earns a comment only as the constraint it taught,
+never as its story.
+
+Comments:
+- No `///` doc comment that restates the signature or the name.
+- No comment that narrates the next line or the change history
+  ("now handles", "previously", "updated to").
+- No issue numbers, dates or ADR citations in code (`npm run ceiling` fails
+  on them); no TODO in code: an open item is an issue, or a ❓ in
+  `ARCHITECTURE.md`.
+
+Docs:
+- Docs live in `ARCHITECTURE.md` (the design), `AGENTS.md` (these rules) and
+  `README.md` (setup). A `GLOSSARY.md` only once a term needs one. Do not
+  create other markdown files unless asked.
+- Before writing a fact, search for it. If it exists, link to it.
+- To add a section, look for one to delete first.
+- Plans, session notes and completion reports go in chat or the commit, not
+  in files.
+- No ADRs. A decision that is hard to reverse, surprising without context
+  and a real trade-off changes `ARCHITECTURE.md`, with its why in one or two
+  sentences there and the rest in the commit. Agreeing on a term with the
+  owner is not a trade-off: that goes in `GLOSSARY.md` or nowhere.
 
 ## Verification
 
