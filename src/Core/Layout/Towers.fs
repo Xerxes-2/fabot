@@ -10,7 +10,7 @@ open Fabot.Core.Intents
 // What a tower's shot from `from` takes off a creep: the falloff at its
 // range, through its boosted TOUGH.
 let private dealt (from: Pos) (creep: Creep) =
-    let range = max (abs (from.X - creep.Pos.X)) (abs (from.Y - creep.Pos.Y))
+    let range = Pos.range from creep.Pos |> Option.defaultValue 0
     let body = creep.Body |> Array.map (fun p -> p.Kind) |> List.ofArray
     let boosts = creep.Body |> Array.map (fun p -> p.Boost) |> List.ofArray
     Engine.damageTaken body boosts creep.Hits (Engine.towerAttackAt range)

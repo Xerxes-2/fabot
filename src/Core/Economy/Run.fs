@@ -54,14 +54,11 @@ let private ticksTo (atlas: Atlas) (mover: Mover) (target: Target) (from: Pos) :
 /// Tiles between two positions for the quota's nearest-colony questions:
 /// Chebyshev in one room, a room's side a crossing between rooms.
 let private distance (atlas: Atlas) (a: Pos) (b: Pos) : int option =
-    if a.Room = b.Room then
-        Some(max (abs (a.X - b.X)) (abs (a.Y - b.Y)))
-    else
+    match Pos.range a b with
+    | Some r -> Some r
+    | None ->
         Atlas.route atlas Set.empty reachHops a.Room b.Room
         |> Option.map (fun rooms -> crossingTicks * (List.length rooms - 1))
-
-let private within (range: int) (a: Pos) (b: Pos) =
-    a.Room = b.Room && max (abs (a.X - b.X)) (abs (a.Y - b.Y)) <= range
 
 /// The seats a body works from: a source's post for the post's garrison
 /// (`Pool.garrisons`), its other seats for anyone else, every seat where the
@@ -70,30 +67,24 @@ let private within (range: int) (a: Pos) (b: Pos) =
 /// other Task. A body digs from nowhere else, so a harvester's dig falls into
 /// the container and a light body keeps off the post. The one place a seat
 /// is chosen.
-let private seatsOf
-    (atlas: Atlas)
-    (posts: Dictionary<string, Pos>)
-    (buffers: Dictionary<string, Pos>)
-    (body: Body)
-    (offer: Offer)
-    =
+let private seatsOf (atlas: Atlas) (derived: Derived) (body: Body) (offer: Offer) =
     match offer.Task with
     | Task.Harvest id ->
-        match Atlas.seats atlas One (rangeOf offer.Task) offer.Target, posts.TryGetValue id with
+        match
+            Atlas.seats atlas One (rangeOf offer.Task) offer.Target, Map.tryFind id derived.Posts
+        with
         | [], _ -> None
-        | _, (true, post) when garrisons body offer -> Some [ post ]
-        | seats, (true, post) -> Some(seats |> List.filter (fun p -> p <> post))
-        | seats, _ -> Some seats
+        | _, Some post when garrisons body offer -> Some [ post ]
+        | seats, Some post -> Some(seats |> List.filter (fun p -> p <> post))
+        | seats, None -> Some seats
     | Task.Upgrade _ when body.Pattern = Bodies.Pattern.Upgrader ->
-        match buffers.TryGetValue offer.Target.Room with
-        | true, buffer ->
-            match
-                Atlas.seats atlas One 1 buffer
-                |> List.filter (within (rangeOf offer.Task) offer.Target)
-            with
-            | [] -> None
-            | seats -> Some seats
-        | _ -> None
+        derived.Grounds
+        |> Array.tryFind (fun g -> g.Room = offer.Target.Room)
+        |> Option.bind (fun g ->
+            if List.isEmpty g.BufferSeats then
+                None
+            else
+                Some g.BufferSeats)
     | _ -> None
 
 /// Where a body walks for its Task: a digger to a seat of its (`seatsOf`) no
@@ -221,22 +212,6 @@ let decide (context: Context) (state: State) : Intent list * State =
         |> List.map (fun cast -> Spawn(cast.Spawn, SpawnCreep(cast.Body, cast.Name)))
 
     let stood = HashSet<Pos>(world.Creeps |> Seq.map (fun c -> c.Pos))
-    let posts = Dictionary<string, Pos>()
-
-    // Each room's buffer, and the one holding energy an upgrader draws.
-    let buffers = Dictionary<string, Pos>()
-    let stocked = Dictionary<string, string>()
-
-    for ground in derived.Grounds do
-        for s in ground.Sources do
-            s.Post |> Option.iter (fun p -> posts.[s.Id] <- p)
-
-        for s in ground.Stores do
-            if s.Kind = StoreKind.Buffer then
-                buffers.[ground.Room] <- s.Pos
-
-                if s.Energy > 0 then
-                    stocked.[ground.Room] <- s.Id
 
     let bodies = Dictionary<string, Body>()
 
@@ -263,10 +238,10 @@ let decide (context: Context) (state: State) : Intent list * State =
         with
         | Some offer ->
             let body = bodies.[creep.Name]
-            let seats = seatsOf atlas posts buffers body offer
+            let seats = seatsOf atlas derived body offer
 
             if
-                within (rangeOf offer.Task) creep.Pos offer.Target
+                Pos.within (rangeOf offer.Task) creep.Pos offer.Target
                 && seats |> Option.forall (List.contains creep.Pos)
                 && ready offer.Task
             then
@@ -275,13 +250,18 @@ let decide (context: Context) (state: State) : Intent list * State =
                 // An upgrader beside its buffer draws as it upgrades: the
                 // engine withdraws before it upgrades, so the draw tops up
                 // what the upgrade spends and the Task never changes.
-                match offer.Task, stocked.TryGetValue creep.Pos.Room with
-                | Task.Upgrade _, (true, id) when
+                let buffer =
+                    derived.Grounds
+                    |> Array.tryPick (fun g -> if g.Room = creep.Pos.Room then g.Buffer else None)
+
+                match offer.Task, buffer with
+                | Task.Upgrade _, Some b when
                     body.Pattern = Bodies.Pattern.Upgrader
                     && body.Free > 0
-                    && within 1 creep.Pos buffers.[creep.Pos.Room]
+                    && b.Energy > 0
+                    && Pos.within 1 creep.Pos b.Pos
                     ->
-                    acts.Add(Creep(creep.Name, CreepAct.Withdraw(id, Energy)))
+                    acts.Add(Creep(creep.Name, CreepAct.Withdraw(b.Id, Energy)))
                 | _ -> ()
 
             wishIn

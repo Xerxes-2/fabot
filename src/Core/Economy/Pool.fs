@@ -38,8 +38,8 @@ type Draw =
     /// A body that spends what it draws (a WORK part): the stock while no
     /// other sink is hungry, which a carrier would only pour back.
     | Spenders
-    /// The controller's buffer: a body that spends, and the one store a
-    /// standing upgrader draws from.
+    /// The controller's buffer: an upgrader alone, which spends what it
+    /// draws on the controller and nowhere else.
     | Buffer
 
 /// One entry of the pool.
@@ -54,7 +54,8 @@ type Offer =
         /// Where the Task ranks against every other, lower first.
         Priority: int
         Capacity: Capacity
-        /// `Open` but for a draw.
+        /// Which bodies may take it, where it is a draw; `Open` for any other
+        /// Task.
         Draw: Draw
     }
 
@@ -77,6 +78,7 @@ let fits (body: Body) (offer: Offer) : bool =
         && body.Energy > 0
     | Withdraw _ when body.Pattern = Pattern.Upgrader -> offer.Draw = Draw.Buffer && body.Free > 0
     | _ when body.Pattern = Pattern.Upgrader -> false
+    | Withdraw _ when offer.Draw = Draw.Buffer -> false
     | Harvest _ -> body.Work > 0 && (body.Pattern = Pattern.Harvester || body.Free > 0)
     | _ when body.Pattern = Pattern.Harvester -> false
     | Withdraw _ when offer.Draw <> Draw.Open && body.Work = 0 -> false
@@ -112,16 +114,16 @@ let share (body: Body) (offer: Offer) : int =
         | _ -> body.Energy
 
 /// Whether an offer admits one more holder while its holders bring `held`
-/// (`share` summed) and `kin` of them hold seats of the candidate's kind
+/// (`share` summed) and `seatedAlike` of them hold seats of the candidate's kind
 /// (`garrisons`).
-let admits (offer: Offer) (garrison: bool) (held: int) (kin: int) : bool =
+let admits (offer: Offer) (garrison: bool) (held: int) (seatedAlike: int) : bool =
     match offer.Capacity with
     | Capacity.Unbounded -> true
     | Capacity.Bodies n
     | Capacity.Work n
     | Capacity.Load n -> held < n
     | Capacity.Seated(seats, posts, work) ->
-        held < work && kin < (if garrison then posts else seats - posts)
+        held < work && seatedAlike < (if garrison then posts else seats - posts)
 
 /// What a body brings a seated offer over its stay, `walk` ticks away: the
 /// energy it digs or upgrades before it dies, or before its load is full (a
@@ -186,7 +188,8 @@ let pool (derived: Derived) : Offer[] =
                 None
 
         // Offered through a regeneration gap too: its holders keep their
-        // seats and wait to dig.
+        // seats and wait to dig. Priced at the rate, the engine's cap on
+        // what its seats dig.
         for s in ground.Sources do
             offers.Add(
                 offer
@@ -275,20 +278,26 @@ let pool (derived: Derived) : Offer[] =
 
         let starved = colony |> Option.exists (fun c -> c.Bank < c.BankCapacity)
 
+        // The buffer is filled while an upgrader stands (or bakes) to drink
+        // it: nobody else draws it.
+        let drinks =
+            Array.append derived.Bodies derived.Ovens
+            |> Array.exists (fun b -> b.Pattern = Pattern.Upgrader && b.Pos.Room = ground.Room)
+
         // The room the sinks other than the stock have: what a carrier's draw
         // on the stock is for.
         let room =
             (ground.Refills |> Array.sumBy (fun r -> r.Free))
             + (ground.Stores
-               |> Array.sumBy (fun s -> if s.Kind = StoreKind.Buffer then s.Free else 0))
+               |> Array.sumBy (fun s -> if s.Kind = StoreKind.Buffer && drinks then s.Free else 0))
 
         for s in ground.Stores do
             if s.Energy > 0 then
                 let value =
                     match s.Kind with
                     | StoreKind.Remains -> Price.flowDraw (Price.transientLoss s.Energy)
-                    | StoreKind.Container when s.SourceRate > 0 ->
-                        Price.flowDraw (Price.overflowLoss s.SourceRate s.Fill)
+                    | StoreKind.Container when s.SourceDug > 0 ->
+                        Price.flowDraw (Price.overflowLoss s.SourceDug s.Fill)
                     | StoreKind.Container
                     | StoreKind.Buffer
                     | StoreKind.Storage -> Price.stockDraw starved hungriest
@@ -305,7 +314,7 @@ let pool (derived: Derived) : Offer[] =
                         Draw = draw
                     }
 
-            if s.Kind = StoreKind.Buffer && s.Free > 0 then
+            if s.Kind = StoreKind.Buffer && s.Free > 0 && drinks then
                 offers.Add(
                     offer
                         (Refill(s.Id, Energy))

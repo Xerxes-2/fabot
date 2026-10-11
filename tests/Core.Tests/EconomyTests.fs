@@ -406,7 +406,7 @@ let tests =
                         else
                             0)
 
-                let kin (body: Body) (offer: Offer) =
+                let seatedAlike (body: Body) (offer: Offer) =
                     scene.Bodies
                     |> Array.filter (fun b ->
                         Map.tryFind b.Name out = Some offer.Id
@@ -420,7 +420,7 @@ let tests =
                        |> Array.forall (fun o ->
                            not (
                                fits b o
-                               && admits o (garrisons b o) (held o) (kin b o)
+                               && admits o (garrisons b o) (held o) (seatedAlike b o)
                                && reaches scene b o
                            )))
         ]

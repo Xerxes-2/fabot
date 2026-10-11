@@ -80,17 +80,17 @@ let matchAll
 
     // Whether an offer admits a body among all its holders.
     let admitsNow (bi: int) (oi: int) =
-        let kin =
+        let seatedAlike =
             if garrison bi oi then
                 garrisoned.[oi]
             else
                 holders.[oi] - garrisoned.[oi]
 
-        admits pool.[oi] (garrison bi oi) held.[oi] kin
+        admits pool.[oi] (garrison bi oi) held.[oi] seatedAlike
 
     // Whether a seated offer admits a body among the holders ahead of it.
     let admitsAhead (bi: int) (oi: int) =
-        let mutable kin = 0
+        let mutable seatedAlike = 0
         let mutable sum = 0
 
         for b in 0 .. bodies.Length - 1 do
@@ -98,9 +98,9 @@ let matchAll
                 sum <- sum + share bodies.[b] pool.[oi]
 
                 if garrison b oi = garrison bi oi then
-                    kin <- kin + 1
+                    seatedAlike <- seatedAlike + 1
 
-        admits pool.[oi] (garrison bi oi) sum kin
+        admits pool.[oi] (garrison bi oi) sum seatedAlike
 
     let take (bi: int) (oi: int) =
         assigned.[bi] <- oi
@@ -229,9 +229,9 @@ let matchAll
                 let mutable sum = 0
 
                 for b in ordered do
-                    let kin = if garrison b oi then posted else n - posted
+                    let seatedAlike = if garrison b oi then posted else n - posted
 
-                    if admits pool.[oi] (garrison b oi) sum kin then
+                    if admits pool.[oi] (garrison b oi) sum seatedAlike then
                         n <- n + 1
                         sum <- sum + share bodies.[b] pool.[oi]
 

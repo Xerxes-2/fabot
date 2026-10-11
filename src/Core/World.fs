@@ -32,6 +32,19 @@ type Pos =
                 | c -> c
             | _ -> 1
 
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module Pos =
+    /// Chebyshev range between two tiles of one room; `None` across rooms.
+    let range (a: Pos) (b: Pos) : int option =
+        if a.Room = b.Room then
+            Some(max (abs (a.X - b.X)) (abs (a.Y - b.Y)))
+        else
+            None
+
+    /// Whether two tiles stand in one room within `range` of each other.
+    let within (range: int) (a: Pos) (b: Pos) : bool =
+        a.Room = b.Room && max (abs (a.X - b.X)) (abs (a.Y - b.Y)) <= range
+
 /// Who an object belongs to, as far as a decision asks.
 type Owner =
     | Ours

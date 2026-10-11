@@ -471,7 +471,7 @@ let tests =
 
             testPropertyWithConfig
                 config
-                "a colony whose dearest seat its bank cannot pay yet casts nothing cheaper"
+                "a seat its bank cannot pay yields: one passed over before a cast cost more than the bank left"
             <| fun (g: Generated) ->
                 let derived = derive g
                 let p = planOf derived
@@ -480,16 +480,24 @@ let tests =
                 |> Array.indexed
                 |> Array.forall (fun (ci, colony) ->
                     let own = p.Casts |> List.filter (fun c -> c.Colony = colony.Room)
+                    let floors = own |> List.filter (fun c -> c.Floor)
+                    let seated = own |> List.filter (fun c -> not c.Floor)
 
-                    let floor =
-                        own
-                        |> List.filter (fun c -> c.Floor)
-                        |> List.sumBy (fun c -> Engine.bodyCost c.Body)
+                    let mutable bank =
+                        colony.Bank - (floors |> List.sumBy (fun c -> Engine.bodyCost c.Body))
 
-                    match p.Seats |> List.tryFind (fun s -> s.Colony = Some ci) with
-                    | Some top when Engine.bodyCost top.Body > colony.Bank - floor ->
-                        own |> List.forall (fun c -> c.Floor)
-                    | _ -> true)
+                    let mutable left = seated
+                    let mutable ok = true
+
+                    for seat in p.Seats |> List.filter (fun s -> s.Colony = Some ci) do
+                        match left with
+                        | next :: rest when next.Body = seat.Body ->
+                            bank <- bank - Engine.bodyCost seat.Body
+                            left <- rest
+                        | _ :: _ -> ok <- ok && Engine.bodyCost seat.Body > bank
+                        | [] -> ()
+
+                    ok && List.isEmpty left)
 
             testPropertyWithConfig config "a seat's cast is the body its colony makes"
             <| fun (g: Generated) ->
@@ -524,7 +532,9 @@ let tests =
 
                 p.Casts
                 |> List.forall (fun c ->
-                    not c.Floor || not (derived.Bodies |> Array.exists (serves c.Colony)))
+                    not c.Floor
+                    || Bodies.patternOfName c.Name = Some Bodies.Pattern.Harvester
+                    || not (derived.Bodies |> Array.exists (serves c.Colony)))
 
             testPropertyWithConfig
                 config

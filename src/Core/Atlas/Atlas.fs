@@ -117,31 +117,44 @@ module Field =
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Atlas =
-    let private beside (range: int) (a: Pos) (b: Pos) =
-        a.Room = b.Room && max (abs (a.X - b.X)) (abs (a.Y - b.Y)) <= range
-
     /// Whether a tile is a room's controller buffer: in its controller's
     /// upgrade range, with no source beside it.
     let isBuffer (room: Room) (pos: Pos) : bool =
-        room.Controller |> Option.exists (fun c -> beside Engine.upgradeRange c.Pos pos)
-        && not (room.Sources |> Array.exists (fun s -> beside 1 s.Pos pos))
+        room.Controller
+        |> Option.exists (fun c -> Pos.within Engine.upgradeRange c.Pos pos)
+        && not (room.Sources |> Array.exists (fun s -> Pos.within 1 s.Pos pos))
+
+    /// The seat a source's harvester digs from, and the id of the container
+    /// standing on it: of the tiles beside the source under a container or a
+    /// container site of ours, the farthest from the controller (so a
+    /// controller container on a seat is no post), a built one before a site,
+    /// then the first.
+    let postOf (room: Room) (source: Pos) : (Pos * string option) option =
+        let fromController (p: Pos) =
+            room.Controller
+            |> Option.bind (fun c -> Pos.range c.Pos p)
+            |> Option.defaultValue 0
+
+        Array.append
+            (room.Structures
+             |> Array.filter (fun s -> s.Kind = Kind.Container)
+             |> Array.map (fun s -> s.Pos, Some s.Id))
+            (room.Sites
+             |> Array.filter (fun s -> s.Kind = Kind.Container && s.Owner = Ours)
+             |> Array.map (fun s -> s.Pos, None))
+        |> Array.filter (fun (p, _) -> Pos.within 1 source p && p <> source)
+        |> Array.sortBy (fun (p, built) ->
+            -(fromController p), Option.isNone built, p.Y * Tiles.side + p.X)
+        |> Array.tryHead
 
     /// The tiles a working body holds for its life, read off the structures
-    /// alone: a container or a container site of ours beside a source (its
-    /// harvester's post), and the controller's buffer.
+    /// alone: each source's post (`postOf`) and the controller's buffer.
     let workSeats (room: Room) : int[] =
-        let posts =
-            Array.append
-                (room.Structures
-                 |> Array.filter (fun s -> s.Kind = Kind.Container)
-                 |> Array.map (fun s -> s.Pos))
-                (room.Sites
-                 |> Array.filter (fun s -> s.Kind = Kind.Container && s.Owner = Ours)
-                 |> Array.map (fun s -> s.Pos))
-
-        posts
-        |> Array.filter (fun p ->
-            isBuffer room p || room.Sources |> Array.exists (fun s -> beside 1 s.Pos p))
+        Array.append
+            (room.Sources |> Array.choose (fun s -> postOf room s.Pos |> Option.map fst))
+            (room.Structures
+             |> Array.filter (fun s -> s.Kind = Kind.Container && isBuffer room s.Pos)
+             |> Array.map (fun s -> s.Pos))
         |> Array.map Tiles.ofPos
 
     /// The walk grid and occupancy of every visible room. A road makes its

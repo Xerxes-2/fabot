@@ -38,7 +38,8 @@ type Want =
     }
 
 /// A body to spawn: the colony and spawn that cast it, the parts, the name,
-/// and whether the supply floor cast it rather than a seat.
+/// and whether a floor (the anchor's or the supply's) cast it rather than a
+/// seat.
 [<NoEquality; NoComparison>]
 type Cast =
     {
@@ -212,11 +213,7 @@ let private haulFlow (ground: Ground) (s: SourceFact) : float =
         let piled =
             ground.Piles
             |> Array.sumBy (fun p ->
-                if
-                    p.Resource = Energy
-                    && p.Pos.Room = s.Pos.Room
-                    && max (abs (p.Pos.X - s.Pos.X)) (abs (p.Pos.Y - s.Pos.Y)) <= 1
-                then
+                if p.Resource = Energy && Pos.within 1 p.Pos s.Pos then
                     p.Amount
                 else
                     0)
@@ -360,10 +357,7 @@ let private spendDemands
     |> Array.iteri (fun gi ground ->
         match ownerOf distance derived gi with
         | Some ci ->
-            for s in ground.Sources do
-                if Option.isSome s.Container then
-                    income.[ci] <- income.[ci] + float s.Dug
-
+            income.[ci] <- income.[ci] + float ground.Posted
             owed.[ci] <- owed.[ci] + float (ground.Sites |> Array.sumBy (fun s -> s.Left)) / life
         | None -> ())
 
@@ -395,26 +389,37 @@ let private spendDemands
 
         let save = float (reserve - stock) / life |> min surplus |> max 0.0
 
-        let mouth =
+        // The upgrader the bank casts, where a buffer stands to seat it and
+        // the cast is a standing body.
+        let upgrader =
             sized Pattern.Upgrader Engine.maxBodyParts colony.BankCapacity
             |> Option.filter (fun body ->
-                ground.Stores |> Array.exists (fun s -> s.Kind = StoreKind.Buffer)
+                Option.isSome ground.Buffer
                 && standing (partCountIn body Work) (partCountIn body Carry))
 
-        let upgraders, mouthWork, eaten =
-            match mouth with
+        // No more upgraders than the buffer seats: one past them draws nothing.
+        let upgraders, upgraderWork, upgradersDrain =
+            match upgrader with
             | Some body ->
                 let work = partCountIn body Work
+                let seats = float ground.BufferSeats.Length
 
                 let lifeCost =
                     float (work * Engine.upgradeDrainPerWork) * life + float (Engine.bodyCost body)
 
-                let onIncome = (surplus - save - owed.[ci]) * life / lifeCost |> max 0.0 |> floor
-                let onStock = float (stock - reserve) / lifeCost |> max 0.0 |> floor
+                let onIncome =
+                    (surplus - save - owed.[ci]) * life / lifeCost |> max 0.0 |> floor |> min seats
+
+                let onStock =
+                    float (stock - reserve) / lifeCost
+                    |> max 0.0
+                    |> floor
+                    |> min (seats - onIncome)
+
                 int (onIncome + onStock), work, onIncome * lifeCost / life
             | None -> 0, 0, 0.0
 
-        let rest = surplus - save - eaten
+        let rest = surplus - save - upgradersDrain
 
         // A worker drains the controller while its load lasts, then walks to
         // its energy and back: the storage where one stands, else the
@@ -492,7 +497,7 @@ let private spendDemands
                 (max spend (floorBodies * bodyWork) + crews * bodyWork)
                 (max floorBodies ground.UpgradeSeats + crews)
                 (fun body -> Some(float (partsOf Pattern.Worker body) * life))
-            seated Pattern.Upgrader at (upgraders * mouthWork) upgraders (fun body ->
+            seated Pattern.Upgrader at (upgraders * upgraderWork) upgraders (fun body ->
                 Some(float (partsOf Pattern.Upgrader body) * life))
         |])
     |> Array.concat
@@ -518,13 +523,15 @@ let private castOrder (seat: Seat) : int * float =
 ///   counts toward the nearest demand of its pattern still short, taking one
 ///   of its seats, unless it is expiring: inside the lead of a successor cast
 ///   at the nearest colony.
+/// - A colony with a post, no harvester standing or baking in its room and
+///   a bank short of full casts a harvester from what is banked first, or
+///   nothing digs what refills it (the anchor floor).
 /// - A colony no worker or hauler standing in it or assigned to it can
-///   refill casts a worker from what is banked first, or its bank never
-///   fills again (the supply floor).
+///   refill casts a worker from what is banked, or its bank never fills
+///   again (the supply floor).
 /// - Each seat goes to its nearest colony with an idle spawn whose bank holds
-///   the pattern's block, sized to that bank, cast in `castOrder`.
-/// - A colony waits for its bank to pay its dearest seat rather than spend
-///   it on a cheaper one.
+///   the pattern's block, sized to that bank, cast in `castOrder`. A seat
+///   its bank cannot pay yields to the next it can: an order, never a veto.
 let plan
     (distance: Pos -> Pos -> int option)
     (leg: Leg)
@@ -625,6 +632,23 @@ let plan
                 Floor = floor
             }
 
+    // The anchor floor.
+    colonies
+    |> Array.iteri (fun ci colony ->
+        let ground = derived.Grounds.[ci]
+
+        let digging =
+            Array.append derived.Bodies derived.Ovens
+            |> Array.exists (fun b -> b.Pattern = Pattern.Harvester && b.Pos.Room = colony.Room)
+
+        match ground.Sources |> Array.tryFind (fun s -> Option.isSome s.Post) with
+        | Some s when idle.[ci].Count > 0 && not digging && colony.Bank < colony.BankCapacity ->
+            match homeHarvester (digWork s.Rate) bank.[ci] with
+            | Some body when Engine.bodyCost body <= bank.[ci] ->
+                castAt ci Pattern.Harvester body true
+            | _ -> ()
+        | _ -> ())
+
     // The supply floor.
     let roomOf = System.Collections.Generic.Dictionary<string, string>()
 
@@ -708,15 +732,10 @@ let plan
 
     let ordered = seats |> List.ofSeq |> List.sortBy castOrder
 
-    let waiting = Array.create colonies.Length false
-
     for seat in ordered do
         match seat.Colony with
-        | Some ci when not waiting.[ci] && idle.[ci].Count > 0 ->
-            if Engine.bodyCost seat.Body <= bank.[ci] then
-                castAt ci seat.Pattern seat.Body false
-            else
-                waiting.[ci] <- true
+        | Some ci when idle.[ci].Count > 0 && Engine.bodyCost seat.Body <= bank.[ci] ->
+            castAt ci seat.Pattern seat.Body false
         | _ -> ()
 
     {

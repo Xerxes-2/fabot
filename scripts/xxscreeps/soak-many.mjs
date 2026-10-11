@@ -146,7 +146,9 @@ const rowOf = (run) => {
   const refusals = Object.values(JSON.parse(read(run, "refusals.json") ?? "{}")).reduce((a, b) => a + b, 0);
   const last = samples.at(-1) ?? {};
   const at = (rcl) => levels.find((l) => l.rcl >= rcl)?.t;
-  // Shares of what was dug: lost to decay, put into the controller, built.
+  // Shares of what was dug: lost to decay, put into the controller, built,
+  // and what the ledger fails to close by (a tombstone drops its store as a
+  // pile, so it is stock until the pile decays).
   const ledger = last.ledger;
   const share = (n) => (ledger && ledger.dug > 0 ? `${((100 * n) / ledger.dug).toFixed(1)}%` : "-");
   return {
@@ -162,7 +164,7 @@ const rowOf = (run) => {
     lost: share(ledger?.decayed ?? 0),
     upgrade: share(ledger?.upgrade ?? 0),
     build: share(ledger?.build ?? 0),
-    residual: ledger?.residual,
+    residual: share(ledger?.residual ?? 0),
   };
 };
 

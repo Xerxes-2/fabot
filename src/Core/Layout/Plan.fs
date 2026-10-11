@@ -157,6 +157,16 @@ let private none = System.Int32.MaxValue
 /// At the first level a room's energy goes to its controller alone.
 let haulLevel = levelOf Kind.Extension 0
 
+/// A source's container as planted: its rock, its tile, the link held beside
+/// a dead end, and the rock's way out.
+type private Posted =
+    {
+        Rock: int
+        Container: int
+        Link: int option
+        Path: int list
+    }
+
 /// Ints sorted ascending in place: the engine's numeric sort under Fable,
 /// which the library's comparer-driven sort is several times slower than.
 #if FABLE_COMPILER_JAVASCRIPT
@@ -475,6 +485,20 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
     let sourceLink (container: int) =
         linkBeside container (fun t -> Tiles.range t anchor)
 
+    // Every walk's tiles, the ones paved after a dead end is chosen included.
+    let onWay = Array.create Tiles.count false
+
+    for _, path in sourceWalks do
+        for t in path do
+            setAt t onWay true
+
+    for t in controllerWalk do
+        setAt t onWay true
+
+    for _, path in mineralWalks do
+        for t in path do
+            setAt t onWay true
+
     // Off every way, with room beside it for its link.
     let deadEnd (rock: int) (head: int) (t: int) =
         t <> head
@@ -484,6 +508,7 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         && not (Tiles.onEdge t)
         && not (at t taken)
         && not (at t clear)
+        && not (at t onWay)
         && at t roadLevel = none
         && Tiles.within 1 t
            |> Array.exists (fun n -> n <> t && linkable n && not (at n clear))
@@ -502,13 +527,25 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
                 pave path rockLevel
                 let link = sourceLink t
                 link |> Option.iter (fun l -> setAt l taken true)
-                rock, t, link, path
+
+                {
+                    Rock = rock
+                    Container = t
+                    Link = link
+                    Path = path
+                }
             | _ ->
                 if not (at head taken) then
                     plant Kind.Container head rockLevel
 
                 pave (List.tail path) rockLevel
-                rock, head, None, path)
+
+                {
+                    Rock = rock
+                    Container = head
+                    Link = None
+                    Path = path
+                })
 
     // The controller's container a tile further out than the first, where
     // upgraders stand round it within range 3 of the controller; the first
@@ -571,9 +608,8 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         | _ -> ()
     | None -> ()
 
-    for _, container, held, _ in
-        posted |> Array.sortBy (fun (rock, _, _, path) -> -(List.length path), rock) do
-        match held |> Option.orElseWith (fun () -> sourceLink container) with
+    for p in posted |> Array.sortBy (fun p -> -(List.length p.Path), p.Rock) do
+        match p.Link |> Option.orElseWith (fun () -> sourceLink p.Container) with
         | Some t ->
             setAt (t) taken (true)
             links.Add t

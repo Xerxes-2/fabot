@@ -45,10 +45,7 @@ type SourceFact =
         /// Energy a tick it yields: `Engine.heldOutputPerTick` in an owned or
         /// reserved room, `neutralOutputPerTick` elsewhere.
         Rate: int
-        /// The seat a harvester digs it from: the one under a container or a
-        /// container site, farthest from the controller, so a controller
-        /// container on a seat is no post. A built container before a site,
-        /// then the first tile.
+        /// The seat a harvester digs it from (`Atlas.postOf`).
         Post: Pos option
         /// The container standing on the post, which takes what it digs.
         Container: string option
@@ -102,8 +99,9 @@ type StoreFact =
         Free: int
         /// Its share of its capacity held, 0 to 1.
         Fill: float
-        /// The rate of the source a container serves; 0 for any other store.
-        SourceRate: int
+        /// What the sources a container serves are dug a tick
+        /// (`SourceFact.Dug`); 0 for any other store.
+        SourceDug: int
         /// Ours: the storage the colony banks in.
         Owned: bool
     }
@@ -149,8 +147,12 @@ type Ground =
         Sites: SiteFact[]
         Repairs: RepairFact[]
         Piles: PileFact[]
-        /// Energy a tick its sources' diggers take (`SourceFact.Dug`).
+        /// Energy a tick its sources' diggers take (`SourceFact.Dug`): what
+        /// a tick the spawn waits is worth, posted or not.
         Income: int
+        /// Of the income, what the sources whose post holds a built container
+        /// dig: the only income a body is hired against.
+        Posted: int
         /// Its controller is unowned and reserved by nobody or by us: a
         /// reservation or a claim the engine accepts.
         Reservable: bool
@@ -159,6 +161,11 @@ type Ground =
         /// The tiles a body can stand on to upgrade its controller
         /// (`seatsAt`); 0 for no controller.
         UpgradeSeats: int
+        /// Its controller's buffer (`StoreKind.Buffer`), if one stands.
+        Buffer: StoreFact option
+        /// The tiles an upgrader stands on: beside the buffer, in the
+        /// controller's upgrade range, where it draws as it upgrades.
+        BufferSeats: Pos list
     }
 
 /// A colony: a room whose controller is ours with a spawn of ours in it. A
@@ -196,16 +203,11 @@ type Derived =
         Carriers: Body[]
         /// Bodies with a CLAIM part.
         Claimers: Body[]
+        /// Each source's post (`SourceFact.Post`), by the source's id.
+        Posts: Map<string, Pos>
         /// The creep lifetimes of tower fire a reserve holds (`Declarations`).
         ReserveLifetimes: float
     }
-
-/// Chebyshev range between two tiles of one room; `None` across rooms.
-let private rangeIn (a: Pos) (b: Pos) : int option =
-    if a.Room = b.Room then
-        Some(max (abs (a.X - b.X)) (abs (a.Y - b.Y)))
-    else
-        None
 
 let private bodyOf (name: string) (pos: Pos) (parts: Part[]) (store: Store) (life: int) : Body =
     let mutable work = 0
@@ -285,7 +287,12 @@ let dugAt (capacity: int) (home: bool) (rate: int) (posted: bool) (seats: int) :
 
     match body with
     | Some body ->
-        let diggers = if posted then 1 else seats
+        // Not knowing a source's seats is no crew.
+        let diggers =
+            if posted then 1
+            elif seats = System.Int32.MaxValue then 0
+            else seats
+
         min rate (diggers * partCountIn body Work * Engine.harvestPerWork)
     | None -> 0
 
@@ -298,45 +305,10 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
 
     let ownedRoom = room.Controller |> Option.exists (fun c -> c.Owner = Ours)
 
-    let containers = room.Structures |> Array.filter (fun s -> s.Kind = Kind.Container)
-
-    let footings =
-        Array.append
-            (containers |> Array.map (fun c -> c.Pos, Some c.Id))
-            (room.Sites
-             |> Array.filter (fun s -> s.Kind = Kind.Container && s.Owner = Ours)
-             |> Array.map (fun s -> s.Pos, None))
-
-    let fromController (p: Pos) =
-        room.Controller
-        |> Option.bind (fun c -> rangeIn c.Pos p)
-        |> Option.defaultValue 0
-
-    // A source's post, and the container standing on it.
-    let postOf (source: Pos) =
-        Atlas.seats atlas Grid.One 1 source
-        |> List.choose (fun seat ->
-            footings
-            |> Array.tryFind (fun (p, _) -> p = seat)
-            |> Option.map (fun (_, built) ->
-                (-(fromController seat), Option.isNone built), (seat, built)))
-        |> List.sortBy fst
-        |> List.tryHead
-        |> Option.map snd
-
-    let servedRate (pos: Pos) =
-        let mutable r = 0
-
-        for s in room.Sources do
-            if rangeIn s.Pos pos = Some 1 then
-                r <- rate
-
-        r
-
     let sources =
         room.Sources
         |> Array.map (fun s ->
-            let post = postOf s.Pos
+            let post = Atlas.postOf room s.Pos
             let seats = seatsAt atlas 1 s.Pos
 
             {
@@ -349,6 +321,10 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
                 Energy = s.Energy
                 Dug = dugAt capacity ownedRoom rate (Option.isSome post) seats
             })
+
+    let servedDug (pos: Pos) =
+        sources
+        |> Array.sumBy (fun s -> if Pos.range s.Pos pos = Some 1 then s.Dug else 0)
 
     let minerals =
         room.Minerals
@@ -384,7 +360,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
         | Kind.Storage ->
             let energy = Store.amountOf Energy s.Store
             let owned = s.Kind = Kind.Storage && s.Owner = Ours
-            let rate = if s.Kind = Kind.Container then servedRate s.Pos else 0
+            let dug = if s.Kind = Kind.Container then servedDug s.Pos else 0
 
             let kind =
                 if s.Kind = Kind.Storage then
@@ -407,7 +383,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
                                 float (Store.used s.Store) / float s.Store.Capacity
                             else
                                 0.0
-                        SourceRate = rate
+                        SourceDug = dug
                         Owned = owned
                     }
         | _ -> ()
@@ -455,9 +431,12 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
                     Energy = energy
                     Free = 0
                     Fill = 1.0
-                    SourceRate = 0
+                    SourceDug = 0
                     Owned = false
                 }
+
+    let stores = stores.ToArray()
+    let buffer = stores |> Array.tryFind (fun s -> s.Kind = StoreKind.Buffer)
 
     {
         Room = room.Name
@@ -465,7 +444,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
         Sources = sources
         Minerals = minerals
         Refills = refills.ToArray()
-        Stores = stores.ToArray()
+        Stores = stores
         Sites =
             room.Sites
             |> Array.filter (fun s -> s.Owner = Ours)
@@ -486,6 +465,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
                     Amount = p.Amount
                 })
         Income = sources |> Array.sumBy (fun s -> s.Dug)
+        Posted = sources |> Array.sumBy (fun s -> if Option.isSome s.Container then s.Dug else 0)
         Reservable = room.Controller |> Option.exists (reservable me)
         OurReservation =
             match room.Controller |> Option.bind (fun c -> c.Reservation) with
@@ -495,6 +475,13 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
             room.Controller
             |> Option.map (fun c -> seatsAt atlas (Task.rangeOf (Task.Upgrade c.Id)) c.Pos)
             |> Option.defaultValue 0
+        Buffer = buffer
+        BufferSeats =
+            match buffer, room.Controller with
+            | Some b, Some c ->
+                Atlas.seats atlas Grid.One 1 b.Pos
+                |> List.filter (Pos.within Engine.upgradeRange c.Pos)
+            | _ -> []
     }
 
 /// The economy's facts this tick, seats read off the tick's `atlas`. `worked`
@@ -576,5 +563,10 @@ let ofWorld
         Workers = bodies |> Array.filter (fun b -> b.Work > 0 && b.Carry > 0)
         Carriers = bodies |> Array.filter (fun b -> b.Carry > 0 && b.Work = 0)
         Claimers = bodies |> Array.filter (fun b -> b.Claim > 0)
+        Posts =
+            grounds
+            |> Array.collect (fun g ->
+                g.Sources |> Array.choose (fun s -> s.Post |> Option.map (fun p -> s.Id, p)))
+            |> Map.ofArray
         ReserveLifetimes = declarations.ReserveLifetimes
     }
