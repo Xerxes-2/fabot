@@ -1,4 +1,3 @@
-/// The one reader of `Game`: builds `Core.World.World` once a tick.
 module Fabot.World
 
 open Fable.Core
@@ -7,7 +6,7 @@ open Fabot.Bindings
 open Fabot.Core.Vocabulary
 open Fabot.Core.World
 
-/// FIND_CONSTRUCTION_SITES: every site in the room, any owner.
+/// FIND_CONSTRUCTION_SITES: any owner's.
 let private findConstructionSites = 111
 
 [<Emit("$0.getRawBuffer()")>]
@@ -194,7 +193,6 @@ let private spawnOf (spawn: ISpawn) : Spawn =
                     }
     }
 
-/// Our username: off a spawn, else a creep, else a controller of ours.
 let private me (spawns: ISpawn[]) (creeps: ICreep[]) (rooms: IRoom[]) : string =
     match spawns |> Array.tryHead, creeps |> Array.tryHead with
     | Some spawn, _ -> spawn.owner.username

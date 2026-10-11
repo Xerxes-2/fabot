@@ -1,6 +1,5 @@
-/// Memory and segments: the only code that touches either
-/// (`ARCHITECTURE.md` §4). `Memory.v2` is ours; v1's keys are never read or
-/// written, so a rollback to v1 finds its Memory as it left it.
+/// `Memory.v2` is ours; v1's keys are never read or written, so a rollback to
+/// v1 finds its Memory as it left it.
 module Fabot.Wire
 
 open Fable.Core
@@ -8,8 +7,7 @@ open Fable.Core.JsInterop
 open Fabot.Bindings
 open Fabot.Core.State
 
-/// Segment ids. Observe is read by `npm run observe`; the recorder's ring is
-/// pulled by `scripts/capture` (§9.1).
+/// Read by `npm run observe` and `scripts/capture`.
 let observeSegment = 1
 let recorderFirst = 10
 let recorderSlots = 5
@@ -40,10 +38,8 @@ let private switches () : obj =
         v2?switches <- fresh
         fresh
 
-/// `Memory.v2.switches.<module> = false` turns a module off; anything else
-/// leaves it on. `Memory.v2.assignments` maps a creep's name to its Task's
-/// id; a value that is not a string is dropped. The first touch of `Memory`
-/// is the engine's parse, so this is the read the tick's "memory" phase times.
+/// The first touch of `Memory` is the engine's parse, so this is the read the
+/// tick's "memory" phase times.
 let readState () : State =
     let s = switches ()
     let held = (root ())?assignments
@@ -66,14 +62,11 @@ let readState () : State =
         Layout = Map.empty
     }
 
-/// Write what the tick decided back to `Memory.v2`; the switches are the
-/// operator's and are left as they are.
+/// The switches are the operator's and are left as they are.
 let writeState (state: State) : unit =
     (root ())?assignments <-
         createObj (state.Assignments |> Map.toList |> List.map (fun (name, id) -> name ==> id))
 
-/// `Memory.v2.declarations`: `reserve`, the creep lifetimes of tower fire a
-/// reserve holds; what is absent, negative or not a number is undeclared.
 let readDeclarations () : Fabot.Core.Tick.Declarations =
     let declared = (root ())?declarations
 
@@ -81,10 +74,8 @@ let readDeclarations () : Fabot.Core.Tick.Declarations =
     | :? float as n when n >= 0.0 -> { ReserveLifetimes = n }
     | _ -> Fabot.Core.Tick.undeclared
 
-/// The recorder is off unless `Memory.v2.switches.recorder = true`.
 let recording () : bool = (switches ())?recorder = box true
 
-/// One fault, kept on the heap in a short ring and written with observe.
 type Fault =
     {
         Tick: int
@@ -98,7 +89,6 @@ type Observed =
         Version: string
         Bucket: int
         Total: float
-        /// Shell phases and modules, in order, with their CPU.
         Phases: (string * float) list
         Off: string list
         Faults: Fault list
@@ -139,13 +129,10 @@ let writeObserve (o: Observed) : unit =
 
     writeSegment observeSegment text
 
-/// `JSON.stringify` with a room's terrain buffer written as one digit a tile,
-/// 2,500 characters, instead of an object keyed by index.
+/// A terrain buffer would otherwise stringify as an object keyed by index.
 [<Emit("JSON.stringify($0, (_k, v) => v instanceof Uint8Array ? Array.from(v).join('') : v)")>]
 let private stringifyWorld (_value: obj) : string = jsNative
 
-/// Write this tick's world and the Memory string's size to the recorder's
-/// ring. A tick whose record would not fit a segment is skipped and says so.
 let record (time: int) (world: Fabot.Core.World.World) : string option =
     let text =
         stringifyWorld (

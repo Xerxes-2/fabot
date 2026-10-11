@@ -1,23 +1,19 @@
-/// The loop: read, decide, act, write, each phase timed and each module
-/// isolated (`ARCHITECTURE.md` §1, §2).
 module Fabot.Main
 
 open Fable.Core
 open Fabot.Bindings
 open Fabot.Core
 
-/// The modules, in the order they decide. Each lands here as it is built:
-/// Economy, Layout, Strategy, Fight.
+/// In decision order: Economy, Layout, Strategy, Fight.
 let private modules: Tick.Module list = [ Economy.Run.economy; Layout.Run.layout ]
 
-/// The change this bundle was built from, off `scripts/bundle.mjs`'s banner.
+/// Set by `scripts/bundle.mjs`'s banner.
 [<Emit("(typeof __FABOT_VERSION__ === 'string' ? __FABOT_VERSION__ : 'unbuilt')")>]
 let private version: string = jsNative
 
 let private faultsKept = 20
 
-/// The fault ring lives on the heap and starts empty after a reset; observe
-/// carries it out each tick.
+/// Heap only, so empty after a reset; observe carries it out each tick.
 let mutable private faults: Wire.Fault list = []
 
 let private recordFault (where: string) (message: string) =
@@ -32,9 +28,7 @@ let private recordFault (where: string) (message: string) =
 
 let private clock () = Game.cpu.getUsed ()
 
-/// The modules' standing output on the heap (`ARCHITECTURE.md` §4,
-/// `standing.*`): handed in with the state each tick and taken back after;
-/// empty after a reset, when each module re-derives it.
+/// Heap only, so empty after a reset, when each module re-derives it.
 let mutable private standing: Map<string, Layout.Shape.Standing> = Map.empty
 
 let private runTick () =
@@ -93,8 +87,7 @@ let private runTick () =
             Refusals = refusals
         }
 
-/// Exported as `loop` on the bundled `main` module; the engine calls it every
-/// tick. A throw outside any module is recorded, written, and rethrown.
+/// Exported as `loop` on the bundled `main` module, which the engine calls.
 let loop () =
     try
         runTick ()

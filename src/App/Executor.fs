@@ -1,11 +1,9 @@
-/// Turns intents into API calls and reports every refusal. It never decides.
 module Fabot.Executor
 
 open Fabot.Bindings
 open Fabot.Core.Vocabulary
 open Fabot.Core.Intents
 
-/// An intent the engine answered with a non-OK code, or whose actor is gone.
 type Refusal =
     {
         Actor: string
@@ -13,7 +11,6 @@ type Refusal =
         Code: int
     }
 
-/// The engine's ERR_NOT_FOUND, used for an actor that no longer stands.
 let private notFound = -5
 
 let private act (intent: Intent) : string * int =
@@ -22,8 +19,7 @@ let private act (intent: Intent) : string * int =
         match objectItem<ICreep> Game.creeps name with
         | creep when isNull (box creep) -> "creep", notFound
         | creep ->
-            // An act on a target the engine no longer finds is refused here,
-            // as the engine would refuse it.
+            // Refused here as the engine would refuse it.
             let on (verb: string) (id: string) (f: obj -> int) =
                 match Game.getObjectById id with
                 | target when isNull target -> verb, notFound
@@ -73,8 +69,7 @@ let private act (intent: Intent) : string * int =
             "spawn",
             (unbox<ISpawn> spawn).spawnCreep (body |> List.map partName |> Array.ofList, name)
 
-/// The code a refusal reports for an intent whose call threw: one bad
-/// intent costs itself, never the rest of the tick's.
+/// One bad intent costs itself, never the rest of the tick's.
 let threw = -100
 
 let run (intents: Intent list) : Refusal list =
