@@ -433,12 +433,13 @@ let private spendDemands
             | None ->
                 ground.Sources |> Array.map (fun s -> Option.defaultValue s.Pos s.Post, s.Dug)
 
-        // The WORK of the unit worker (the body each WORK past the standing
-        // ones is cast as) the rest keeps: each puts into the controller a
-        // tick what its loads and their round trips allow, and pays its share
-        // of its body.
+        let cast = sized Pattern.Worker Engine.maxBodyParts colony.BankCapacity
+
+        // The WORK on the body the bank casts the rest keeps: each puts into
+        // the controller a tick what its loads and their round trips allow,
+        // and pays its share of its body.
         let spend =
-            match sized Pattern.Worker 1 colony.BankCapacity with
+            match cast with
             | Some body when partsOf Pattern.Worker body > 0 ->
                 let work = partsOf Pattern.Worker body
 
@@ -470,10 +471,7 @@ let private spendDemands
                     int (ceil (max 0.0 rest / (drain + upkeep)))
             | _ -> 0
 
-        let bodyWork =
-            sized Pattern.Worker Engine.maxBodyParts colony.BankCapacity
-            |> Option.map (partsOf Pattern.Worker)
-            |> Option.defaultValue 1
+        let bodyWork = cast |> Option.map (partsOf Pattern.Worker) |> Option.defaultValue 1
 
         let floorBodies =
             if ground.Sites.Length > 0 || ground.Repairs.Length > 0 then
