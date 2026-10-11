@@ -32,6 +32,11 @@ v1 taught us four things this document is built around:
    assertions pin what the bot did, not whether it worked. v2 verifies
    outcomes in a real engine (§10) and keeps unit tests for arithmetic.
 
+The end is set once, at the farthest (v1's end moved several times, and each
+move left a layer): many colonies decided as one world, each at RCL8 with
+every structure placed and run, every engagement kind in §6.2 fought, within
+the CPU limit. Milestones (§13) order the way there; none is an end.
+
 Non-goals: multi-shard, generality across servers, a plugin system, any
 abstraction with one caller.
 
@@ -647,7 +652,7 @@ empty:
 | M2 structures | node builder (N1–N4), links (judged on nodes, not v1's arithmetic), labs, factory, the RCL8 set | each node beats the economy without that structure |
 | M3 defence | `Exchange`, `Defend`, the first tactics, casting, the self-play harness | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
 | M4 live | v2 replaces v1 | ❓ the owner decides from progress |
-| M5 reach | `Strategy` over many colonies, the offensive kinds | set when M4 is |
+| M5 reach | `Strategy` over many colonies, the offensive kinds | the end in §0 |
 
 Status: ✅ landed · ⏳ next · blank not started.
 
