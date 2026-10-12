@@ -467,22 +467,44 @@ unchanged build).
 
 The boundary is pure; the inside is written as a systems language. Everything
 below is the **default** a module's first line is written in; any of it yields
-to a measurement on the benchmark above, in either direction.
+to a measurement on the benchmark above, in either direction. The evidence is
+Fable 5's emitted JS and `ab.mjs`; node micro-timings ("×") are hints only.
+Most impact first:
 
 - Module boundaries take and return immutable records. Inside a function,
   arrays, `ResizeArray`, `Dictionary`, `mutable` locals and `for` loops on any
   path that runs per creep or per tile.
-- A per-tile loop reads arrays through the bare `Tiles.at` accessor, never
-  `arr.[i]` or `for x in arr`: Fable compiles both to a checked call, and the
-  neighbour table read through it cost the economy 23–43% (`ab.mjs`).
-- `[<Struct>]` does nothing under Fable: the bundle is byte-identical without
-  it, and a struct tuple is still a JS array. Absence is an `option`, which
-  Fable erases to the value or `undefined` (never nested); a sentinel stays
-  only in an `int[]` table, which compiles to a typed array.
-- `Map`/`Set` against `Dictionary` on the matcher's per-creep lookups measured
-  +1% (noise) at a colony's creep count. Hot-path records still carry
-  `[<NoEquality; NoComparison>]` so an accidental deep compare is a compile
-  error rather than a guess.
+- **Arrays on a per-tile or per-pair loop are read through `Tiles.at` /
+  `setAt`.** `arr.[i]`, `arr.[i] <- v`, `for x in arr` and `ResizeArray.[i]`
+  compile to a bounds-checked call: 23–43% of the economy (`ab.mjs`).
+- **No `seq`, comprehension or stepped range per tick.** `[| for … |]`,
+  `[ for … ]`, `[| a .. b |]` and `0 .. 2 .. n` build through Fable's seq
+  library (~100× a `ResizeArray` loop); `for x in` a list, seq or collection
+  is an enumerator in `try/finally`. A step of 1 or -1 is a plain `for`.
+- **Equality is `===` only on a primitive Fable can see.** A union case is
+  tested with `.IsCase` or `match`, never `=` (generic `equals`; `ab.mjs`
+  −1% bot). `=`, `<>` and `compare` on records, tuples, lists and options,
+  inside a non-`inline` generic function, or on an untyped tuple argument
+  emit generic `equals`/`compare`: compare fields, match `Some x when`, and
+  annotate primitive arguments.
+- **A `Dictionary`/`HashSet` key is an `int` or a `string`** (a native JS
+  `Map`/`Set`); a record, tuple or union key hashes (~40×). `Map`/`Set` are
+  AVL trees, which measured noise against `Dictionary` at the matcher's
+  sizes. `ContainsKey` then `.[k]` allocates nothing; `TryGetValue` allocates.
+- **Numeric arrays are typed arrays** (`int`, `float`, `byte`); `bool`, `char`
+  and reference elements are plain arrays. A sentinel stays only in a numeric
+  table; absence elsewhere is an `option`, erased to the value or
+  `undefined` (`voption` is the same; a nested or generic `'T option` wraps).
+- **`[<Struct>]` does nothing:** the bundle is byte-identical without it, and
+  a struct tuple is still a JS array unless destructured where it is built.
+  Hot-path records carry `[<NoEquality; NoComparison>]`, which emits nothing
+  but makes an accidental deep compare a compile error.
+- `inline` with `[<InlineIfLambda>]` erases a passed function; worth it per
+  tile only. Fable uncurries top-level and local functions.
+- Strings on a hot path: `+` or `$"{x}"`, never `sprintf` (~100×) or a typed
+  hole `%d{x}`.
+- A `try` inside an expression is an IIFE (~3×): hoist it out of loops.
+  `int64` is emulated.
 - No closure allocated per tick outlives the tick (v1's `Fresh` lesson,
   measured live; one tick retained measured nothing in `ab.mjs`, an
   accumulating one was not tried): a collection that is stored is built by a
