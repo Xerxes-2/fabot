@@ -28,6 +28,10 @@ import * as Tower from "xxscreeps/mods/classic/defense/tower.js";
 import * as Storage from "xxscreeps/mods/classic/logistics/storage.js";
 import * as Container from "xxscreeps/mods/classic/resource/container.js";
 import * as Road from "xxscreeps/mods/classic/road/road.js";
+import * as Link from "xxscreeps/mods/classic/logistics/link.js";
+import * as Extractor from "xxscreeps/mods/classic/mineral/extractor.js";
+import * as Terminal from "xxscreeps/mods/classic/brokerage/terminal.js";
+import * as Lab from "xxscreeps/mods/classic/chemistry/lab.js";
 
 const [mode, roomName, ...rest] = process.argv.slice(2);
 const db = await Database.connect();
@@ -60,6 +64,10 @@ if (mode === "ground") {
     storage: (pos) => Storage.create(pos, ours),
     container: (pos) => Container.create(pos),
     road: (pos) => Road.create(pos),
+    link: (pos) => Link.create(pos, ours),
+    extractor: (pos) => Extractor.create(pos, ours),
+    terminal: (pos) => Terminal.create(pos, ours),
+    lab: (pos) => Lab.create(pos, ours),
   };
   const state = new GameState(world, time, [room]);
   runWithState(state, () =>

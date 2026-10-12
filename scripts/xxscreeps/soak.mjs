@@ -15,7 +15,7 @@
 //            early trajectory, so a soak:many spread measures how far a run
 //            drifts from a small change, which the seed alone does not
 //   --node   a start from §10.2's nodes (default ticks 5000): N1 is the
-//            respawn above; N2-N4 stand what Layout's plan (`scripts/plan`)
+//            respawn above; N2-N5 stand what Layout's plan (`scripts/plan`)
 //            builds by the node's level, the first spawn on its planned
 //            tile, and the node's stock in storage; E1 is N4 with the two
 //            neighbours `colony.mjs` picks declared as outposts
@@ -42,7 +42,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4|E1] [--invaders room:every[:first],…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4|N5|E1] [--invaders room:every[:first],…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -82,6 +82,7 @@ const NODES = {
   N3: { level: 4, stored: 5000, without: ["rampart"] },
   N4: { level: 5, stored: 50000, without: ["link", "rampart"] },
   E1: { level: 5, stored: 50000, without: ["link", "rampart"], outposts: true },
+  N5: { level: 6, stored: 100000, without: ["rampart"] },
 };
 const node = flags["--node"] === undefined ? undefined : NODES[flags["--node"]];
 if (flags["--node"] !== undefined && !node) fail(`--node: one of ${Object.keys(NODES).join(", ")}`);

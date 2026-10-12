@@ -200,11 +200,6 @@ let pool (derived: Derived) : Offer[] =
                     }
                 )
 
-        for m in ground.Minerals do
-            offers.Add(
-                offer (Harvest m.Id) m.Pos (Price.valueOfRank Price.bottomRank) (Capacity.Bodies 1)
-            )
-
         let mutable hungriest = 0.0
 
         for r in ground.Refills do

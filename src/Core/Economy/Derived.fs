@@ -47,14 +47,6 @@ type SourceFact =
     }
 
 [<NoEquality; NoComparison>]
-type MineralFact =
-    {
-        Id: string
-        Pos: Pos
-        Resource: Resource
-    }
-
-[<NoEquality; NoComparison>]
 type RefillFact =
     {
         Id: string
@@ -131,7 +123,6 @@ type Ground =
         Room: string
         Controller: Controller option
         Sources: SourceFact[]
-        Minerals: MineralFact[]
         Refills: RefillFact[]
         Stores: StoreFact[]
         Sites: SiteFact[]
@@ -333,20 +324,6 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (rate: int) (ro
             | Some 1 -> s.Dug
             | _ -> 0)
 
-    let minerals =
-        room.Minerals
-        |> Array.filter (fun m ->
-            m.Amount > 0
-            && room.Structures
-               |> Array.exists (fun s ->
-                   s.Kind.IsExtractor && s.Owner.IsOurs && Pos.within 0 s.Pos m.Pos))
-        |> Array.map (fun m ->
-            {
-                Id = m.Id
-                Pos = m.Pos
-                Resource = m.Resource
-            })
-
     let refills = ResizeArray()
     let stores = ResizeArray()
     let repairs = ResizeArray()
@@ -486,7 +463,6 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (rate: int) (ro
         Room = room.Name
         Controller = room.Controller
         Sources = sources
-        Minerals = minerals
         Refills = refills.ToArray()
         Stores = stores
         Sites =
