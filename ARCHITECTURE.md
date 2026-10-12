@@ -707,7 +707,7 @@ empty:
 |---|---|---|
 | M1 economy | the rest of v1's economy mechanisms | the seat-extreme soak beats v1's bundle in both classes, on a second seed |
 | M1b outposts | declared outposts: reservation, remote harvest and haul, before M2 because RCL6+ structures spend more than a home's two sources give. No fighting before M3: an armed hostile or an Invader core seen in an outpost stands it down until every one seen there has run out its life (`sightings`; the owner's choice over porting a guard early, and over a claimer probing a blind room) | node E1 (with timed Invader waves): each outpost nets positive after its bodies and its stand-downs |
-| M2 structures | node builder (N1–N4) ✅, links ✅ (the controller's and the longest-way source's first: +5–17k worth over 20k ticks on N4; hub-first broke even, as v1's arithmetic said), labs, factory, the RCL8 set | each node beats the economy without that structure |
+| M2 structures | node builder (N1–N4) ✅, links ✅ (the controller's and the longest-way source's first: +5–17k worth over 20k ticks on N4; hub-first broke even, as v1's arithmetic said), node N5 ✅; labs, factory, the RCL8 set wait for a sink (owner's call: one room mines one ore, a reaction needs two, offline has no market, and v1 mined only for fight boosts) | links: the node beats the economy without them; the rest: judged with their sink, M3's boosts or several colonies |
 | M3 defence | `Exchange`, `Defend`, the first tactics, casting, the self-play harness | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
 | M4 live | v2 replaces v1 | ❓ the owner decides from progress |
 | M5 reach | `Strategy` over many colonies, the offensive kinds | the end in §0 |
