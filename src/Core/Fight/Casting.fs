@@ -19,8 +19,14 @@ let private blocks =
         [ Move; Attack ]
     ]
 
-/// v1's `guardCap`.
-let private copies = 2
+/// v1's `guardCap`: a home's Defend never disengages, and its loss budget,
+/// not a yield, bounds what it asks (§6.2).
+let homeCopies (_: Exchange.Body) = 2
+
+let copiesWithin (worth: int) (ticks: int) (spawns: int) (body: Exchange.Body) =
+    min
+        (worth / Engine.bodyCost body)
+        (spawns * ticks / (Engine.spawnTicksPerPart * List.length body))
 
 let affordable (capacity: int) : Exchange.Body list =
     blocks
@@ -28,9 +34,7 @@ let affordable (capacity: int) : Exchange.Body list =
         let most =
             min (capacity / Engine.bodyCost block) (Engine.maxBodyParts / List.length block)
 
-        List.init most (fun n ->
-            List.replicate copies (List.replicate (n + 1) block |> List.concat))
-        |> List.concat)
+        List.init most (fun n -> List.replicate (n + 1) block |> List.concat))
 
 let fighterOf (c: Creep) : Fighter.Fighter =
     let parts = List.ofArray c.Body
@@ -126,11 +130,12 @@ let price
     (theirs: Exchange.Side)
     (terrain: Exchange.Terrain)
     (capacity: int)
+    (copiesOf: Exchange.Body -> int)
     : (Exchange.Body list * Exchange.Outcome * Tactic) option =
     (if wins stance ours theirs terrain then
          Some []
      else
-         Exchange.cheapestWin stance ours (affordable capacity) theirs terrain)
+         Exchange.cheapestWin stance ours (affordable capacity) copiesOf theirs terrain)
     |> Option.map (fun set ->
         let landed =
             { ours with

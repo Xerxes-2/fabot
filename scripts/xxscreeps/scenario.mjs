@@ -101,6 +101,8 @@ const measures = {
   engagements: (_, __, dir) => engagementsOf(dir).length,
   // Acts the engine refused, every kind (the soak's refusals.json).
   refusals: (_, __, dir) => Object.values(JSON.parse(readFileSync(join(dir, "refusals.json"), "utf8"))).reduce((n, c) => n + c, 0),
+  // Raids an answered engagement saw die without disengaging.
+  raidsKilled: (_, __, dir) => engagementsOf(dir).filter(({ a }) => a.won === true).length,
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
   // The most levels the room stood below the highest it held before (`who`:
   // an opponent's room, else ours); a room lost stands at level 0.

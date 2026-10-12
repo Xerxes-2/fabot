@@ -149,11 +149,6 @@ let kite (sight: Sight) (order: string list) (centre: Pos) (creep: Creep) =
 
     strike sight order creep, wish
 
-/// A forming body walks to the room it will fight in, short of the group's
-/// reach, so the room stays in sight while the rest are cast.
-let muster (sight: Sight) (order: string list) (centre: Pos) (creep: Creep) =
-    strike sight order creep, toward sight creep centre (2 * Tracker.reach)
-
 let holdFast (sight: Sight) (order: string list) (creep: Creep) =
     strike sight order creep, hold sight creep
 
@@ -189,6 +184,22 @@ let retreat (sight: Sight) (creep: Creep) : CreepAct option * Wish =
     match home with
     | Some p -> toward sight creep p 2
     | None -> hold sight creep
+
+/// A forming body walks to the room it will fight in, short of the group's
+/// reach, so the room stays in sight while the rest are cast. Its set was
+/// priced landed whole, so one the raid closes on falls back home.
+let muster (sight: Sight) (order: string list) (centre: Pos) (creep: Creep) =
+    let pressed =
+        hostilesIn sight creep.Pos.Room
+        |> Array.exists (fun h ->
+            (live Attack h > 0 || live RangedAttack h > 0)
+            && Pos.within Tracker.reach creep.Pos h.Pos)
+
+    strike sight order creep,
+    (if pressed then
+         snd (retreat sight creep)
+     else
+         toward sight creep centre (2 * Tracker.reach))
 
 /// v1's heal reflex: a hurt healer heals itself, else the deepest wound beside
 /// it, else one within three at the ranged rate; each heal counts off what it

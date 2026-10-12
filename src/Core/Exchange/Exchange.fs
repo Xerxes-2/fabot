@@ -830,35 +830,50 @@ let outcome (stance: Stance) (ours: Side) (theirs: Side) (terrain: Terrain) : Ou
     else
         exchange (stanceAgainst stance ours theirs terrain) ours theirs terrain
 
-/// Sets of one body repeated up to its count in `affordable`, cheapest first:
-/// the simple rank a priced one (spawn time, walk, kill) would replace.
-let private rank (affordable: Body list) : Body list list =
-    affordable
-    |> List.groupBy (fun body -> body |> List.map partLetter |> System.String.Concat)
-    |> List.collect (fun (_, copies) ->
-        let body = List.head copies
-        [ 1 .. List.length copies ] |> List.map (fun n -> List.replicate n body))
-    |> List.sortBy (fun set ->
-        List.sumBy Engine.bodyCost set, List.sumBy List.length set, List.length set)
-
+/// The cheapest set of one body repeated, at most `copiesOf` it, that wins.
+/// One more of a body adds damage, hits and heal and never a slower walk or a
+/// shorter reach, so a win is monotone in its count and each body's fewest
+/// is found by bisection.
 let cheapestWin
     (stance: Stance)
     (ours: Side)
-    (affordable: Body list)
+    (bodies: Body list)
+    (copiesOf: Body -> int)
     (theirs: Side)
     (terrain: Terrain)
     : Body list option =
-    rank affordable
-    |> List.tryFind (fun set ->
+    let wins (body: Body) (n: int) =
         match
             outcome
                 stance
                 { ours with
-                    Bodies = ours.Bodies @ List.map cast set
+                    Bodies = ours.Bodies @ List.replicate n (cast body)
                 }
                 theirs
                 terrain
         with
         | Win _
         | Kite _ -> true
-        | Lose -> false)
+        | Lose -> false
+
+    let fewest (body: Body) =
+        let rec between loses won =
+            if won - loses <= 1 then
+                won
+            else
+                let mid = (loses + won) / 2
+
+                if wins body mid then between loses mid else between mid won
+
+        let most = copiesOf body
+
+        if most > 0 && wins body most then
+            Some(List.replicate (between 0 most) body)
+        else
+            None
+
+    bodies
+    |> List.choose fewest
+    |> List.sortBy (fun set ->
+        List.sumBy Engine.bodyCost set, List.sumBy List.length set, List.length set)
+    |> List.tryHead
