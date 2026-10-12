@@ -152,21 +152,16 @@ let private sortInts (_keys: int[]) : unit = Array.sortInPlace _keys
 let private roadSpan = 1 <<< 14
 
 let down (weights: int[]) (dist: int[]) (t: int) =
-    let mutable next = -1
-    let mutable best = unreached
+    if at t dist = 0 then
+        -1
+    else
+        Tiles.leastAround t unreached (fun n ->
+            let d = at n dist
 
-    if at t dist <> 0 then
-        for direction in 1..8 do
-            let n = Tiles.neighbour t direction
-
-            if n >= 0 && at n weights >= 0 then
-                let d = at n dist
-
-                if d <> unreached && not (d > 0 && Tiles.onEdge n) && d + at n weights < best then
-                    best <- d + at n weights
-                    next <- n
-
-    next
+            if at n weights < 0 || d = unreached || (d > 0 && Tiles.onEdge n) then
+                unreached
+            else
+                d + at n weights)
 
 let descend (weights: int[]) (dist: int[]) (start: int) : int list =
     let path = ResizeArray()
@@ -263,19 +258,12 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
 
     for t in 0 .. Tiles.count - 1 do
         if (at (t) ground.Free) && not (at (t) clear) && not (at t onLat) then
-            let mutable best = unreached
-            let mutable road = -1
-
-            for direction in 1..8 do
-                let n = Tiles.neighbour t direction
-
-                if n >= 0 && lattice n && (at (n) walk) < best then
-                    best <- (at (n) walk)
-                    road <- n
+            let road =
+                Tiles.leastAround t unreached (fun n -> if lattice n then at n walk else unreached)
 
             if road >= 0 then
-                setAt (t) access (road)
-                slotList.Add(best * Tiles.count + t)
+                setAt t access road
+                slotList.Add(at road walk * Tiles.count + t)
 
     let ordered =
         let keys = slotList.ToArray()
@@ -369,21 +357,11 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
             if (at (t) access) >= 0 then
                 (at (t) access)
             else
-                let mutable best = -1
-
-                for direction in 1..8 do
-                    let n = Tiles.neighbour t direction
-
-                    if
-                        n >= 0
-                        && (at (n) lane) >= 0
-                        && (at (n) walk) <> unreached
-                        && not (at (n) taken)
-                        && (best < 0 || (at (n) walk) < (at (best) walk))
-                    then
-                        best <- n
-
-                best
+                Tiles.leastAround t unreached (fun n ->
+                    if at n lane >= 0 && not (at n taken) then
+                        at n walk
+                    else
+                        unreached)
 
         while road >= 0 do
             setAt road roadLevel (min (at road roadLevel) (max level haulLevel))
@@ -421,8 +399,7 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
             setAt t onWay true
 
     let linkable (n: int) =
-        n >= 0
-        && at n weights >= 0
+        at n weights >= 0
         && not (at n taken)
         && not (at n onWay)
         && at n roadLevel = none
@@ -432,15 +409,9 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         && Tiles.yOf n < Tiles.side - 2
 
     let linkBeside (onto: int) (key: int -> int) : int option =
-        let mutable best = -1
-
-        for direction in 1..8 do
-            let n = Tiles.neighbour onto direction
-
-            if linkable n && (best < 0 || key n < key best || (key n = key best && n < best)) then
-                best <- n
-
-        if best < 0 then None else Some best
+        match Tiles.around onto |> Array.filter linkable with
+        | [||] -> None
+        | ns -> Some(ns |> Array.minBy (fun n -> key n, n))
 
     let sourceLink (container: int) =
         linkBeside container (fun t -> Tiles.range t anchor)
@@ -455,8 +426,7 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         && not (at t clear)
         && not (at t onWay)
         && at t roadLevel = none
-        && Tiles.within 1 t
-           |> Array.exists (fun n -> n <> t && linkable n && not (at n clear))
+        && Tiles.around t |> Array.exists (fun n -> linkable n && not (at n clear))
 
     // A dead end's link is held as it is planted, so no other container or
     // link takes the room it was chosen for.
@@ -522,15 +492,7 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
     let links = ResizeArray<int>()
 
     let open' (t: int) =
-        let mutable n = 0
-
-        for direction in 1..8 do
-            let m = Tiles.neighbour t direction
-
-            if m >= 0 && (at (m) weights) >= 0 then
-                n <- n + 1
-
-        n
+        Tiles.around t |> Array.sumBy (fun m -> if at m weights >= 0 then 1 else 0)
 
     match controllerSeat with
     | Some(first, container) ->
@@ -632,8 +594,8 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
             let crowded =
                 posted
                 |> Array.filter (fun p ->
-                    Tiles.within 1 p.Rock
-                    |> Array.filter (fun n -> n <> p.Rock && at n weights >= 0)
+                    Tiles.around p.Rock
+                    |> Array.filter (fun n -> at n weights >= 0)
                     |> Array.length > 1)
                 |> Array.map (fun p -> p.Container)
 

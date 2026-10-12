@@ -64,36 +64,23 @@ module Field =
             else
                 d + at weight field.Steps
 
-    let private best (field: Field) (tile: int) : struct (int * int) =
-        let mutable next = -1
-        let mutable ticks = unreached
-
-        for direction in 1..8 do
-            let n = Tiles.neighbour tile direction
-
-            if n >= 0 then
-                let t = via field n
-
-                if t < ticks then
-                    next <- n
-                    ticks <- t
-
-        struct (next, ticks)
+    let private best (field: Field) (tile: int) : int =
+        Tiles.leastAround tile unreached (via field)
 
     let ticks (field: Field) (tile: int) : int option =
         let d =
             if weightOf field.Footprint field.Weights tile >= 0 then
                 at tile field.Dist
             else
-                let struct (_, t) = best field tile
-                t
+                let next = best field tile
+                if next < 0 then unreached else via field next
 
         if d = unreached then None else Some d
 
     let step (field: Field) (tile: int) : int option =
         match ticks field tile with
         | Some d when d > 0 ->
-            let struct (next, _) = best field tile
+            let next = best field tile
             if next < 0 then None else Some(Tiles.direction tile next)
         | _ -> None
 

@@ -66,6 +66,45 @@ let neighbour (tile: int) (direction: int) =
     let y = yOf tile + dy direction
     if inRoom x y then index x y else -1
 
+/// A bare JS index under Fable, whose indexer (behind `for x in array` too)
+/// is a checked call: the economy ran 23% slower looping `around` through it.
+#if FABLE_COMPILER_JAVASCRIPT
+[<Fable.Core.Emit("$1[$0]")>]
+#endif
+let at (_index: int) (_array: 'T[]) : 'T = _array.[_index]
+
+let private aroundTable: int[][] =
+    Array.init count (fun t ->
+        let ns = ResizeArray<int>()
+
+        for d in 1..8 do
+            let n = neighbour t d
+
+            if n >= 0 then
+                ns.Add n
+
+        ns.ToArray())
+
+/// The in-room neighbours, in direction order.
+let around (tile: int) : int[] = at tile aroundTable
+
+/// The neighbour costing least under `bound`, the first in direction order
+/// on a tie; -1 when none does.
+let inline leastAround (tile: int) (bound: int) ([<InlineIfLambda>] cost: int -> int) : int =
+    let ns = around tile
+    let mutable best = -1
+    let mutable least = bound
+
+    for i in 0 .. ns.Length - 1 do
+        let n = at i ns
+        let c = cost n
+
+        if c < least then
+            best <- n
+            least <- c
+
+    best
+
 let direction (from: int) (onto: int) =
     let ddx = xOf onto - xOf from
     let ddy = yOf onto - yOf from

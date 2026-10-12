@@ -83,12 +83,7 @@ let seatWeight = 5 * Engine.swampWeight
 let stepTable (factor: FatigueFactor) : int[] =
     Array.init (seatWeight + 1) (stepTicks factor)
 
-/// The flood's array accessors: checked on .NET, a bare JS index under Fable,
-/// whose own indexer re-tests indices the loop has already kept in range.
-#if FABLE_COMPILER_JAVASCRIPT
-[<Emit("$1[$0]")>]
-#endif
-let at (_index: int) (_array: 'T[]) : 'T = _array.[_index]
+let inline at (index: int) (array: 'T[]) : 'T = Tiles.at index array
 
 #if FABLE_COMPILER_JAVASCRIPT
 [<Emit("$1[$0] = $2")>]
@@ -229,15 +224,12 @@ let flood (footprint: Footprint) (weights: int[]) (steps: int[]) (goals: int[]) 
         // the table.
         if at tile dist = d && (d = 0 || not (onEdge footprint tile)) then
             let price = at (weightOf footprint weights tile) steps
-            let x = Tiles.xOf tile
-            let y = Tiles.yOf tile
 
-            for direction in 1..8 do
-                let nx = x + Tiles.dx direction
-                let ny = y + Tiles.dy direction
+            if price >= 0 then
+                let around = Tiles.around tile
 
-                if price >= 0 && Tiles.inRoom nx ny then
-                    let next = Tiles.index nx ny
+                for i in 0 .. around.Length - 1 do
+                    let next = at i around
 
                     if weightOf footprint weights next >= 0 then
                         let candidate = d + price
