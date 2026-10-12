@@ -43,6 +43,14 @@ let private moduleOf (i: int) (throws: bool) : Tick.Module =
 
 let private modulesOf (throws: bool list) = throws |> List.mapi moduleOf
 
+/// What a module said: an `Intent` holds a wish and has no equality.
+let private said (intents: Intent list) =
+    intents
+    |> List.choose (fun i ->
+        match i with
+        | Creep(name, Say message) -> Some(name, message)
+        | _ -> None)
+
 /// A clock that advances one unit a reading.
 let private ticking () =
     let mutable t = 0.0
@@ -64,15 +72,16 @@ let tests =
                     throws
                     |> List.indexed
                     |> List.filter (fun (_, t) -> not t)
-                    |> List.map (fun (i, _) -> Creep($"c{i}", Say $"m{i}"))
+                    |> List.map (fun (i, _) -> $"c{i}", $"m{i}")
 
-                result.Intents = expected
+                said result.Intents = expected
 
-            testProperty "every module is reported once, in order, faults named"
+            testProperty "every module is reported once, in order, faults named, then the settling"
             <| fun (throws: bool list) ->
                 let result = Tick.run (ticking ()) (modulesOf throws) world State.empty
 
-                List.length result.Reports = List.length throws
+                List.length result.Reports = List.length throws + 1
+                && (List.last result.Reports).Module = "settle"
                 && List.forall2
                     (fun (r: Tick.Report) (i, t) ->
                         r.Module = $"m{i}"
@@ -80,7 +89,7 @@ let tests =
                             | Tick.Faulted message -> t && message = $"m{i} broke"
                             | Tick.Ran -> not t
                             | Tick.Off -> false))
-                    result.Reports
+                    (List.truncate (List.length throws) result.Reports)
                     (List.indexed throws)
 
             testProperty "a switched-off module runs nothing and spends nothing"
@@ -98,5 +107,5 @@ let tests =
 
                 report.Outcome = Tick.Off
                 && report.Cpu = 0.0
-                && not (List.contains (Creep($"c{off}", Say $"m{off}")) result.Intents)
+                && not (List.contains ($"c{off}", $"m{off}") (said result.Intents))
         ]

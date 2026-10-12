@@ -91,6 +91,89 @@ type Result =
         Reports: Report list
     }
 
+/// Each room's spawn queue (§6.5): floors, then the fight's asks, then the
+/// economy's, on its idle spawns while the bank pays; a fight ask the bank
+/// cannot pay yet holds the economy's behind it, one its capacity never pays
+/// holds nothing.
+let queue (world: World) (asks: (string * Ask) list) : Intent list =
+    let rank (a: Ask) =
+        match a.Rank with
+        | Rank.Floor -> 0
+        | Rank.Fight -> 1
+        | Rank.Economy -> 2
+
+    let rec serve (idle: Spawn list) (capacity: int) (bank: int) (held: bool) (asks: Ask list) =
+        match idle, asks with
+        | [], _
+        | _, [] -> []
+        | _, a :: _ when held && a.Rank.IsEconomy -> []
+        | spawn :: rest, a :: more when Engine.bodyCost a.Body <= bank ->
+            Spawn(spawn.Id, SpawnCreep(a.Body, a.Name))
+            :: serve rest capacity (bank - Engine.bodyCost a.Body) held more
+        | _, a :: more ->
+            serve
+                idle
+                capacity
+                bank
+                (held || a.Rank.IsFight && Engine.bodyCost a.Body <= capacity)
+                more
+
+    asks
+    |> List.groupBy fst
+    |> List.collect (fun (room, asks) ->
+        match world.Rooms |> Array.tryFind (fun r -> r.Name = room) with
+        | Some r ->
+            let idle =
+                world.Spawns
+                |> Array.filter (fun s -> s.Pos.Room = room && s.Spawning.IsNone)
+                |> List.ofArray
+
+            serve
+                idle
+                r.EnergyCapacity
+                r.EnergyAvailable
+                false
+                (asks |> List.map snd |> List.sortBy rank)
+        | None -> [])
+
+/// One arbitration per room over every module's wishes (§3's `Move`); a creep
+/// of ours that wishes nothing holds its tile.
+let arbitrate (context: Context) (wishes: (string * Move.Wish) list) : Intent list =
+    let wished = System.Collections.Generic.HashSet<string>()
+
+    for _, w in wishes do
+        wished.Add w.Creep |> ignore
+
+    wishes
+    |> List.groupBy fst
+    |> List.collect (fun (room, ws) ->
+        let held =
+            context.World.Creeps
+            |> Array.filter (fun c -> c.Pos.Room = room && not (wished.Contains c.Name))
+            |> Array.map (fun c -> Tiles.ofPos c.Pos)
+
+        Move.Arbitrate.arbitrate (Atlas.passable context.Atlas room) held (List.map snd ws)
+        |> List.map (fun (name, direction) -> Creep(name, CreepAct.Move direction)))
+
+let private settle (context: Context) (intents: Intent list) : Intent list =
+    let asks =
+        intents
+        |> List.choose (fun i ->
+            match i with
+            | Queue(room, ask) -> Some(room, ask)
+            | _ -> None)
+
+    let wishes =
+        intents
+        |> List.choose (fun i ->
+            match i with
+            | Wish(room, wish) -> Some(room, wish)
+            | _ -> None)
+
+    queue context.World asks
+    @ (intents |> List.filter (fun i -> not (i.IsQueue || i.IsWish)))
+    @ arbitrate context wishes
+
 let run (clock: unit -> float) (modules: Module list) (context: Context) (state: State) : Result =
     let step (intents, state, reports) (m: Module) =
         if Set.contains m.Name state.Off then
@@ -122,9 +205,35 @@ let run (clock: unit -> float) (modules: Module list) (context: Context) (state:
             List.rev produced @ intents, next, report :: reports
 
     let intents, state, reports = List.fold step ([], state, []) modules
+    let intents = List.rev intents
+    let start = clock ()
+
+    // A fault settling the fight's asks and wishes costs only the fight's.
+    let fights (i: Intent) =
+        match i with
+        | Queue(_, ask) -> ask.Rank.IsFight
+        | Wish(_, wish) -> fights wish.Creep
+        | _ -> false
+
+    let settled, outcome =
+        try
+            settle context intents, Ran
+        with error ->
+            try
+                settle context (intents |> List.filter (fights >> not)), Faulted error.Message
+            with error ->
+                intents |> List.filter (fun i -> not (i.IsQueue || i.IsWish)), Faulted error.Message
 
     {
-        Intents = List.rev intents
+        Intents = settled
         State = state
-        Reports = List.rev reports
+        Reports =
+            List.rev (
+                {
+                    Module = "settle"
+                    Cpu = clock () - start
+                    Outcome = outcome
+                }
+                :: reports
+            )
     }

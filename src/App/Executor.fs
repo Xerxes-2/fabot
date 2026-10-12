@@ -37,6 +37,11 @@ let private act (intent: Intent) : string * int =
             | Upgrade id -> on "upgrade" id creep.upgradeController
             | Reserve id -> on "reserve" id creep.reserveController
             | ClaimController id -> on "claim" id creep.claimController
+            | AttackCreep id -> on "attack" id creep.attack
+            | RangedAttackCreep id -> on "rangedAttack" id creep.rangedAttack
+            | RangedMassAttack -> "rangedMassAttack", creep.rangedMassAttack ()
+            | HealCreep id -> on "heal" id creep.heal
+            | RangedHealCreep id -> on "rangedHeal" id creep.rangedHeal
     | Room(name, CreateSite(x, y, kind)) ->
         let verb = "site:" + Fabot.Core.World.Kind.name kind
 
@@ -62,6 +67,8 @@ let private act (intent: Intent) : string * int =
         | link, _ when isNull link -> "link", notFound
         | _, t when isNull t -> "link", notFound
         | link, t -> "link", (unbox<ILink> link).transferEnergy (t, amount)
+    | Queue _
+    | Wish _ -> "unsettled", notFound
     | Spawn(id, SpawnCreep(body, name)) ->
         match Game.getObjectById id with
         | spawn when isNull spawn -> "spawn", notFound

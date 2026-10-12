@@ -54,6 +54,9 @@ Game ──World.ofGame──▶ World ──decide──▶ Intents ──Execu
   but its arguments. A recorded (State, World) replays the exact decision
   locally; that is the debugger (§10.4) and the benchmark (§9.1) at once.
   Inside, it is written imperatively (§9.2).
+- Modules emit spawn asks and move wishes as Intents; `Tick` settles them
+  after every module has run: one spawn queue per room, one movement
+  arbitration per room over every module's wishes.
 - `Executor` turns Intents into API calls; it never decides. Intents are typed
   by **actor** — creep, power creep, tower, lab, terminal, observer, spawn,
   controller — not creep-first with the rest bolted on.
@@ -141,7 +144,7 @@ cold tick never spends more than ❓ 60% of the limit.
 | `Fight` | tracker, engagements (one kind per file), tactics, casting | World, Atlas, Exchange, `State.Fight` | fight intents, casts, declarations, `State.Fight` | **new** (§6) |
 | `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Exchange, `State.Intel`, `Season` | declarations, opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
 | `Season` | this season's rules: what scores, its structures, its NPCs, its map quirks | World | declarations to Strategy, season intents | **new**, disposable (§8) |
-| `Move` | per-room movement arbitration and the step functions (chase, kite, flee, formation) | Intents, Atlas | move intents | port `Resolver.fs`, drop fight precedence |
+| `Move` | per-room movement arbitration, run by `Tick` over every module's wishes, and the step functions (chase, kite, flee, formation) | Intents, Atlas | move intents | port `Resolver.fs`, drop fight precedence |
 | `Executor` | API calls | Intents | Game | port |
 | `Observe` | what the operator reads: health, faults, per-module CPU, engagements, exchange error | everything | `State.Observe` | rewrite small |
 
@@ -297,7 +300,7 @@ Common to every kind:
   and is not re-matched. It leaves only when the engagement releases it or it
   dies. A long-lived kind rotates bodies through the generic event *body
   expiring within walk + spawn time* → ask a replacement.
-- Transitions fire on **events** — group split/merge/newcomer/lost, body died
+- Transitions fire on **events** — group split/merge/newcomer/left/lost, body died
   or landed, target gone, budget crossed, deadline, another engagement merged
   into this one, Strategy re-prioritised — never on a clock and never on a
   re-priced number. This is what removes the latches.
@@ -319,6 +322,10 @@ Common to every kind:
 - `* → Disengaging` when losses exceed the budget, or a group event re-runs the
   exchange and we no longer win, or the group is `Lost` past the grace.
 - `Disengaging → closed` when ours are home or the group is gone.
+- v2.0's record (`Fight/Shape.fs`) holds what `Defend` reads: the target is a
+  group id, the asks live in `fight.casts`; `Kind` and `Declares` join with
+  the second kind, `Predicted` with `engagements.log`. The plan chases while
+  the group stands in another room we hold or work.
 
 The other kinds, for the record's sake:
 - `Claim`: Strategy picked a room (§7.2); a claimer walks, claims; pioneers are
@@ -382,7 +389,10 @@ inside or outside an engagement.
 ### 6.5 Casting
 
 An engagement that needs bodies emits `Cast` asks with the engagement id and
-Strategy's priority. The spawn queue takes them above economy casts; the
+Strategy's priority. The spawn queue is `Tick`'s: per room, the economy's
+floor asks first and never displaced, then the fight's, then the economy's,
+which a fight ask still waiting on the bank holds; neither module reads the
+other's asks. The
 Caster logic that picks which colony spawns (hops, queue) ports from v1's
 `Caster.fs` mostly as is. `fight.casts` remembers what was asked so a body in
 an oven is not asked again. One room may hold three spawns; the queue is per
@@ -716,7 +726,7 @@ empty:
 | M1 economy | the rest of v1's economy mechanisms | the seat-extreme soak beats v1's bundle in both classes, on a second seed |
 | M1b outposts | declared outposts: reservation, remote harvest and haul, before M2 because RCL6+ structures spend more than a home's two sources give. No fighting before M3: an armed hostile or an Invader core seen in an outpost stands it down until every one seen there has run out its life (`sightings`; the owner's choice over porting a guard early, and over a claimer probing a blind room) | node E1 (with timed Invader waves): each outpost nets positive after its bodies and its stand-downs |
 | M2 structures | node builder (N1–N4) ✅, links ✅ (the controller's and the longest-way source's first: +5–17k worth over 20k ticks on N4; hub-first broke even, as v1's arithmetic said), node N5 ✅; labs, factory, the RCL8 set wait for a sink (owner's call: one room mines one ore, a reaction needs two, offline has no market, and v1 mined only for fight boosts) | links: the node beats the economy without them; the rest: judged with their sink, M3's boosts or several colonies |
-| M3 defence | `Exchange`, `Defend`, the first tactics, casting, the self-play harness | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
+| M3 defence | `Exchange` ✅, `Defend` ✅ (scenario `defend-kills-home-raid`), the first tactics ✅, casting ✅, the self-play harness | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
 | M4 live | v2 replaces v1 | ❓ the owner decides from progress |
 | M5 reach | `Strategy` over many colonies, the offensive kinds | the end in §0 |
 
@@ -728,13 +738,13 @@ Status: ✅ landed · ⏳ next · blank not started.
 | `App/World.fs`, `Main.fs` shell | `App/World.fs`, `Wire.fs`, `Main.fs`, `Core/Tick.fs` | ✅ `World`: terrain, controllers, sources, minerals, structures, sites, piles, remains, hostiles, our creeps with bodies and stores; per-module CPU, fault isolation, switches, recorder, observe segment |
 | `Types/Rules.fs` `Engine`, `Types/Vocabulary.fs`, `Types/Lists.fs` | `Core/Engine.fs`, `Core/Vocabulary.fs`, `Core/Lists.fs` | ✅ `Engine` less policy (`guardCap`) and season (`reactorCapacity`), plus part costs, regen time and level progress; `Vocabulary` less `Task` (Economy's) and with season resources as `Resource.Other` |
 | `Core/Atlas.fs`, `Grid.fs`, `Geometry.fs` | `Core/Atlas/Tiles.fs`, `Grid.fs`, `Atlas.fs` | ✅ tile index `y*50+x` (the terrain buffer's), the flood, footprint on every query, a minimal room graph, the flood table. Known gaps: a route is chosen without the footprint (a Quad can be routed through a one-tile gap); boosted CARRY is priced unboosted. `TileSet` waits for its first reader |
-| `Decide/Resolver.fs` | `Core/Move/*` | ✅ arbitration (two-tier eviction, best chain, displacer's onward last) and `Plan` wishes; re-derived each tick from `Atlas.firstStep` (§1's "path" key is not stored). Fight steps (kite, chase, flee) and formation stepping come with Fight |
+| `Decide/Resolver.fs` | `Core/Move/*` | ✅ arbitration (two-tier eviction, best chain, displacer's onward last) and `Plan` wishes; re-derived each tick from `Atlas.firstStep` (§1's "path" key is not stored). Fight steps ✅ in `Fight/Tactics.fs` (kite, close and pursue, retreat), without v1's threat maps; formation stepping comes with `Siege` |
 | `Decide/Pool, Matcher, Planner, Quota, Spawns, Price, Bodies` | `Core/Economy/*` | ✅ one world pool, matcher, quota and casts, wired as the `economy` module (`Economy/Run.fs`): match, cast, act in range, wish toward the target; assignments in `Memory.v2.assignments`. The RCL2–4 chain: a harvester on each source's post, haulers from built containers, the controller's buffer and its upgraders, the surplus split between upgraders and workers after the reserve (§5, `declarations.reserve`). Declared outposts (`declarations.outposts`) are worked while no hostile in `sightings` outlives the tick. Known gaps: claims are not yet declared; cross-room travel prices each room between at a room's side |
 | `Decide/Labs, Layout` | `Economy`, `Layout` | Layout ✅ in the tick after `economy`: a standing plan per room, sites in plan order as the level allows, towers on hostiles. Labs ⏳ |
 | `Types/Colonies.fs` declarations, `allies` | `declarations` data | not ported as code; the current rooms seed the first `declarations` |
 | `Decide/Facts.fs:2883–4056, 1038–1582, 2153–2196`, `Fighter.fs`, `Arrival.fs` | `Exchange` | ✅ `Core/Exchange/*`; `npm run exchange` is §10.1's generated set |
-| `Decide/Emitter.fs` strike/heal/glue | `Fight.Tactics` | port the functions, not the dispatch |
-| `Decide/Caster.fs` | `Fight.Casting` | port |
+| `Decide/Emitter.fs` strike/heal/glue | `Fight.Tactics` | ✅ the strike (swing, shot, volley where it outdeals the shot) and the heal reflex; glue not ported (a melee body closes to its target each tick) |
+| `Decide/Caster.fs` | `Fight.Casting` | ✅ a body to the spawn that lands it soonest, a home's Defend the home's, v1's guard, ranger and defender blocks; the lending floors and trespass prices dropped |
 | `Decide/Operations.fs`, `Types/Operation.fs` | — | shape only: `OpRecord`'s fields inform `Engagement`, its bidding informs `Strategy`. No code ports; re-read when `Siege` is due |
 | `Core/LightTick.fs` | — | not ported; per-module keys (§1) |
 | `Decide/Threat.fs`, rest of `Facts.fs`, `Observe.fs` fight parts, `WorldDanger.fs`, `Sightings.fs` latches | — | not ported |

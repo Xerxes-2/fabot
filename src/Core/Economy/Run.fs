@@ -249,7 +249,15 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     let casts =
         plan.Casts
-        |> List.map (fun cast -> Spawn(cast.Spawn, SpawnCreep(cast.Body, cast.Name)))
+        |> List.map (fun cast ->
+            Queue(
+                cast.Colony,
+                {
+                    Body = cast.Body
+                    Name = cast.Name
+                    Rank = if cast.Floor then Rank.Floor else Rank.Economy
+                }
+            ))
 
     let stood = HashSet<Pos>(world.Creeps |> Seq.map (fun c -> c.Pos))
 
@@ -358,17 +366,9 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     let moves = ResizeArray<Intent>()
 
-    let fighting = context.World.Creeps |> Array.filter (fun c -> Tick.fights c.Name)
-
     for KeyValue(room, list) in wishes do
-        let held =
-            fighting
-            |> Array.filter (fun c -> c.Pos.Room = room)
-            |> Array.map (fun c -> Tiles.ofPos c.Pos)
-
-        for name, direction in
-            Arbitrate.arbitrate (Atlas.passable atlas room) held (List.ofSeq list) do
-            moves.Add(Creep(name, Move direction))
+        for wish in list do
+            moves.Add(Intent.Wish(room, wish))
 
     let sends = derived.Grounds |> Seq.collect linkSends |> List.ofSeq
 

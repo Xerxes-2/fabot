@@ -16,6 +16,11 @@ type CreepAct =
     | Upgrade of controller: string
     | Reserve of controller: string
     | ClaimController of controller: string
+    | AttackCreep of target: string
+    | RangedAttackCreep of target: string
+    | RangedMassAttack
+    | HealCreep of target: string
+    | RangedHealCreep of target: string
 
 type SpawnAct = SpawnCreep of body: BodyPart list * name: string
 
@@ -27,12 +32,31 @@ type TowerAct =
     | Attack of target: string
     | Heal of target: string
 
+/// Where an ask stands in its room's queue (§6.5): a floor is never displaced,
+/// a fight's goes before the economy's and holds it while it waits on the bank.
+[<RequireQualifiedAccess>]
+type Rank =
+    | Floor
+    | Fight
+    | Economy
+
+type Ask =
+    {
+        Body: BodyPart list
+        Name: string
+        Rank: Rank
+    }
+
 type Intent =
     | Creep of name: string * CreepAct
     | Spawn of id: string * SpawnAct
     | Room of name: string * RoomAct
     | Tower of id: string * TowerAct
     | Link of id: string * LinkAct
+    /// Tick serves these from the room's queue (`Tick.queue`); none reaches `Executor`.
+    | Queue of room: string * Ask
+    /// Tick arbitrates every module's wishes in a room as one (`Tick.arbitrate`).
+    | Wish of room: string * Move.Wish
 
 let actorOf =
     function
@@ -41,3 +65,5 @@ let actorOf =
     | Room(name, _) -> name
     | Tower(id, _) -> id
     | Link(id, _) -> id
+    | Queue(room, _) -> room
+    | Wish(_, wish) -> wish.Creep

@@ -119,6 +119,9 @@ let upgradeRange = 3
 /// A Source Keeper rests within this range of its source or mineral and never pursues.
 let keeperPin = 1
 
+/// The username the engine's NPC raiders carry.
+let invaderUser = "Invader"
+
 let attackPower = 30
 
 let rangedAttackPower = 10

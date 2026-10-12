@@ -96,6 +96,9 @@ let private phases =
         "disengaging", Phase.Disengaging
     ]
 
+let private tactics =
+    [ "kite", Tactic.Kite; "close", Tactic.Close; "hold", Tactic.Hold ]
+
 let private engagementOf (o: obj) : Engagement option =
     let phase =
         phases
@@ -110,6 +113,15 @@ let private engagementOf (o: obj) : Engagement option =
                 Group = group
                 Room = room
                 Ours = listOf stringOf (field o "ours") |> Set.ofList
+                Plan =
+                    {
+                        Tactic =
+                            tactics
+                            |> List.tryFind (fun (name, _) -> box name = field o "tactic")
+                            |> Option.map snd
+                            |> Option.defaultValue Tactic.Close
+                        Order = listOf stringOf (field o "order")
+                    }
                 Phase = phase
                 Since = intOf (field o "since") |> Option.defaultValue 0
                 Lost = intOf (field o "lost") |> Option.defaultValue 0
@@ -129,12 +141,45 @@ let private engagementObj (e: Engagement) =
             "group" ==> e.Group
             "room" ==> e.Room
             "ours" ==> Array.ofSeq e.Ours
+            "tactic" ==> (tactics |> List.find (fun (_, t) -> t = e.Plan.Tactic) |> fst)
+            "order" ==> Array.ofList e.Plan.Order
             "phase" ==> (phases |> List.find (fun (_, p) -> p = e.Phase) |> fst)
             "since" ==> e.Since
             "lost" ==> e.Lost
             "budget" ==> e.Budget
             "priority" ==> e.Priority
             "unanswered" ==> e.Unanswered
+        ]
+
+let private castOf (o: obj) : Cast option =
+    let part (letter: char) =
+        Fabot.Core.Vocabulary.allBodyParts
+        |> List.tryFind (fun p -> Fabot.Core.Vocabulary.partLetter p = letter)
+
+    match intOf (field o "engagement"), field o "name", field o "room", field o "body" with
+    | Some engagement, (:? string as name), (:? string as room), (:? string as body) ->
+        let parts = body |> Seq.choose part |> List.ofSeq
+
+        if parts.Length = body.Length then
+            Some
+                {
+                    Engagement = engagement
+                    Name = name
+                    Room = room
+                    Body = parts
+                }
+        else
+            None
+    | _ -> None
+
+let private castObj (c: Cast) =
+    createObj
+        [
+            "engagement" ==> c.Engagement
+            "name" ==> c.Name
+            "room" ==> c.Room
+            "body"
+            ==> (c.Body |> List.map Fabot.Core.Vocabulary.partLetter |> System.String.Concat)
         ]
 
 /// The first touch of `Memory` is the engine's parse, so this is the read the
@@ -162,6 +207,7 @@ let readState () : State =
         Layout = Map.empty
         Groups = listOf groupOf (field fight "groups")
         Engagements = listOf engagementOf (field fight "engagements")
+        Casts = listOf castOf (field fight "casts")
     }
 
 /// The switches are the operator's and are left as they are.
@@ -174,6 +220,7 @@ let writeState (state: State) : unit =
             [
                 "groups" ==> (state.Groups |> List.map groupObj |> Array.ofList)
                 "engagements" ==> (state.Engagements |> List.map engagementObj |> Array.ofList)
+                "casts" ==> (state.Casts |> List.map castObj |> Array.ofList)
             ]
 
 let readDeclarations () : Fabot.Core.Tick.Declarations =

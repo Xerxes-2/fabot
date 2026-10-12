@@ -10,6 +10,7 @@ type State =
         Layout: Map<string, Layout.Shape.Standing>
         Groups: Fight.Shape.Group list
         Engagements: Fight.Shape.Engagement list
+        Casts: Fight.Shape.Cast list
     }
 
 let empty =
@@ -19,4 +20,5 @@ let empty =
         Layout = Map.empty
         Groups = []
         Engagements = []
+        Casts = []
     }

@@ -20,6 +20,14 @@ type Facts =
 let private enter (phase: Phase) (time: int) (e: Engagement) : Engagement =
     { e with Phase = phase; Since = time }
 
+let disengage (time: int) (e: Engagement) = enter Phase.Disengaging time e
+
+let standsAlone (time: int) (e: Engagement) =
+    if e.Phase.IsForming && not e.Ours.IsEmpty then
+        enter Phase.Approaching time e
+    else
+        e
+
 let step (facts: Facts) (e: Engagement) : Engagement option =
     let alive = Set.intersect e.Ours facts.Standing
 
