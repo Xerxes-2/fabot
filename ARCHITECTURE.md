@@ -366,6 +366,9 @@ val cheapestWin : stance: Stance -> ours: Side -> affordable: Body list -> their
 - `cheapestWin` is called once at open and once per event that changes a side.
   It chooses the body set; the engagement's `Plan` records the tactic the
   outcome implies, and `Predicted` records the outcome for §10.1.
+- Under `Hold` the raid comes to our post; one that strikes from past the reach
+  of any striker of ours and outlasts our towers picks its range instead, so it is
+  priced as a `Standoff`, and unanswered where that does not win (owner's call).
 - Nothing in `Fight` re-prices per tick. A tactic that needs a number every
   tick reads it off the `Plan` or asks `Atlas`.
 
@@ -656,7 +659,8 @@ everything v1 used its self-written arena for, and more:
   (`engine/raid/`, ours: a gun kites, a swing closes, a healer keeps to the
   hurt) has its bodies and boosts stood on our room's edge at its tick
   (`opponents[].raid`). Held is: no level or spawn lost and the raid gone
-  by the window's end (`defend-holds-*`, N3: a kiting raid, a healed pair,
+  by the window's end (`defend-holds-*`, N3: a kiting raid,
+  a healed pair,
   Invader waves). TooAngel (AGPL, so fetched at run time by its pinned
   tarball and integrity, never vendored: `engine/tooangel/fetch.json`)
   plays from next door in a world cached at tick 11000, its RCL3, and sends

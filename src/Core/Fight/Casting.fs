@@ -106,7 +106,10 @@ let price
             }
 
         let tactic (won: Tactic) =
-            if stance.IsHold then Tactic.Hold else won
+            if (Exchange.stanceAgainst stance landed theirs terrain).IsHold then
+                Tactic.Hold
+            else
+                won
 
         match Exchange.outcome stance landed theirs terrain with
         | Exchange.Win _ as won -> set, won, tactic Tactic.Close

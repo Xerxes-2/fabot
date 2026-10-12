@@ -780,12 +780,33 @@ let private exchange stance (ours: Side) (theirs: Side) (terrain: Terrain) : Out
     | first :: _ -> first
     | [] -> Lose
 
+/// A raid comes to our post only while it must: one that strikes from past
+/// the reach of any striker of ours and outlasts our towers picks its range,
+/// and the fight is a standoff (owner's call).
+let stanceAgainst (stance: Stance) (ours: Side) (theirs: Side) (terrain: Terrain) : Stance =
+    let reach =
+        match ours.Bodies |> List.filter strikes with
+        | [] -> 0
+        | striking -> striking |> List.map _.Reach |> List.min
+
+    if
+        stance = Stance.Hold
+        && theirs.Bodies |> List.exists (fun h -> h.Reach > reach)
+        && not (exchange Stance.Hold { ours with Bodies = [] } theirs terrain).IsWin
+    then
+        Stance.Standoff
+    else
+        stance
+
 /// Towers not ours strike the kite ground and the ring alike, refilled, and
 /// nothing prices them: no side of ours wins under them.
 let outcome (stance: Stance) (ours: Side) (theirs: Side) (terrain: Terrain) : Outcome =
-    if theirs.Bodies.IsEmpty then Win(0, { Dead = 0; Hits = 0 })
-    elif not theirs.Towers.IsEmpty then Lose
-    else exchange stance ours theirs terrain
+    if theirs.Bodies.IsEmpty then
+        Win(0, { Dead = 0; Hits = 0 })
+    elif not theirs.Towers.IsEmpty then
+        Lose
+    else
+        exchange (stanceAgainst stance ours theirs terrain) ours theirs terrain
 
 /// Sets of one body repeated up to its count in `affordable`, cheapest first:
 /// the simple rank a priced one (spawn time, walk, kill) would replace.
