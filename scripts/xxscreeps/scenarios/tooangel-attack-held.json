@@ -1,0 +1,28 @@
+{
+  "nightly": true,
+  "why": "TooAngel's melee squads, sent at our home from its own next door, are held: no level or spawn lost, its attackers gone",
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "at": 11000,
+    "bundle": "0e12424bd992",
+    "opponents": [
+      {
+        "name": "tooangel",
+        "bot": "scripts/xxscreeps/engine/tooangel",
+        "room": "W7N3",
+        "config": { "target": "W8N3", "first": 0, "every": 1500 }
+      }
+    ]
+  },
+  "ticks": 4500,
+  "assert": [
+    { "measure": "levelsLost", "max": 0 },
+    { "measure": "spawnsLost", "max": 0 },
+    { "measure": "attackersAtEnd", "max": 0 },
+    { "measure": "homeHostileTicks", "max": 300 },
+    { "measure": "engagements", "min": 3 },
+    { "measure": "predictedWinsLost", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

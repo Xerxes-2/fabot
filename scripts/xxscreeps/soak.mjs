@@ -33,7 +33,12 @@
 //            bot directory, `config` written beside it as `opponent.js`, the
 //            spawn on colony.mjs's tile unless x, y; `raid` its bodies stood
 //            on our room's edge (`engine/soak-step.mjs`). With --from they stand
-//            in the world already and only their code is swapped.
+//            in the world already and only their code is swapped. A bot
+//            directory's `fetch.json` { tarball, integrity, from, main }
+//            names code that is never in this tree: the tarball, fetched once
+//            into the cache and checked against its integrity, gives its
+//            `from` directory's files beside the directory's own, its
+//            main.js as `main`.
 //   --unsafe  our room without the engine's safe mode, which would decide
 //            every fight in it for us; implied by --opponents
 //
@@ -45,9 +50,9 @@
 // summary.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4|N5|E1] [--invaders room:every[:first],…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--unsafe]";
@@ -222,10 +227,28 @@ if (node && node.level > 1) {
 console.error(`colony: ${colony.room}${from ? ` from ${from}` : `, spawn at ${colony.x},${colony.y}`}; output ${out}`);
 if (from) node24([XXSCREEPS, "manage", "bot", "update", OUR_NAME, "./bot"], world);
 else node24([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
+async function fetched(spec, dir) {
+  const cache = join(CACHE, "opponents", createHash("sha256").update(spec.integrity).digest("hex").slice(0, 16));
+  if (!existsSync(join(cache, ".ok"))) {
+    const res = await fetch(spec.tarball);
+    if (!res.ok) fail(`${spec.tarball}: ${res.status}`);
+    const body = Buffer.from(await res.arrayBuffer());
+    const cut = spec.integrity.indexOf("-");
+    if (createHash(spec.integrity.slice(0, cut)).update(body).digest("base64") !== spec.integrity.slice(cut + 1)) fail(`${spec.tarball}: not the integrity fetch.json names`);
+    rmSync(cache, { recursive: true, force: true });
+    mkdirSync(cache, { recursive: true });
+    writeFileSync(join(cache, "package.tgz"), body);
+    if (spawnSync("tar", ["-xzf", "package.tgz"], { cwd: cache, stdio: "inherit" }).status !== 0) fail(`${spec.tarball}: tar failed`);
+    writeFileSync(join(cache, ".ok"), "");
+  }
+  for (const f of readdirSync(join(cache, spec.from)).filter((f) => f.endsWith(".js"))) cpSync(join(cache, spec.from, f), join(dir, f === "main.js" ? `${spec.main}.js` : f));
+}
 for (const o of opponents) {
   const dir = join(world, `bot-${o.name}`);
-  if (lstatSync(o.bot).isDirectory()) cpSync(o.bot, dir, { recursive: true });
-  else cpSync(o.bot, join(dir, "main.js"));
+  if (lstatSync(o.bot).isDirectory()) {
+    cpSync(o.bot, dir, { recursive: true, filter: (f) => basename(f) !== "fetch.json" });
+    if (existsSync(join(o.bot, "fetch.json"))) await fetched(JSON.parse(readFileSync(join(o.bot, "fetch.json"), "utf8")), dir);
+  } else cpSync(o.bot, join(dir, "main.js"));
   if (o.config) writeFileSync(join(dir, "opponent.js"), `module.exports = ${JSON.stringify(o.config)};\n`);
   if (from) {
     node24([XXSCREEPS, "manage", "bot", "update", o.name, `./bot-${o.name}`], world);

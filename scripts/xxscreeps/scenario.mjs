@@ -7,12 +7,14 @@
 // soak-runs/worlds/, and the bundle under test runs on from it as a deploy
 // would, Memory kept.
 //
-// Usage: npm run scenario -- [name...] [--bot main.js] [--jobs J]
-//   name    the scenarios to run (default all), by file name
+// Usage: npm run scenario -- [name...] [--bot main.js] [--jobs J] [--nightly]
+//   name    the scenarios to run (default all but the nightly ones), by file name
+//   --nightly  all of them, with those marked "nightly": a start that needs
+//           the network or a long first run, kept out of `jj ship`
 //   --bot   the bundle (default dist/main.js)
 //   --jobs  soaks at once (default half the cores)
 //
-// A scenario file: { "why": the invariant, "start": { "room", "seed",
+// A scenario file: { "why": the invariant, "nightly"?, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "unsafe"?, "at"?, "bundle"?,
 // "opponents"? (soak's --opponents) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
@@ -20,7 +22,7 @@
 // Exits non-zero when a bound fails or a soak does.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,7 +41,8 @@ const flags = {};
 const rest = process.argv.slice(2);
 for (let i = 0; i < rest.length; i++)
   if (rest[i] === "--bot" || rest[i] === "--jobs") flags[rest[i]] = rest[++i];
-  else if (rest[i].startsWith("--")) fail("usage: npm run scenario -- [name...] [--bot main.js] [--jobs J]");
+  else if (rest[i] === "--nightly") flags[rest[i]] = true;
+  else if (rest[i].startsWith("--")) fail("usage: npm run scenario -- [name...] [--bot main.js] [--jobs J] [--nightly]");
   else names.push(rest[i]);
 const bot = resolve(flags["--bot"] ?? join(REPO, "dist/main.js"));
 if (!existsSync(bot)) fail(`no bundle at ${bot}: npm run build first`);
@@ -47,7 +50,9 @@ const jobs = Number(flags["--jobs"] ?? Math.max(1, Math.floor(availableParalleli
 
 const all = readdirSync(LIBRARY).filter((f) => f.endsWith(".json")).map((f) => basename(f, ".json"));
 for (const n of names) if (!all.includes(n)) fail(`no scenario ${n}; the library: ${all.join(", ")}`);
-const scenarios = (names.length ? names : all).map((name) => ({ name, ...JSON.parse(readFileSync(join(LIBRARY, `${name}.json`), "utf8")) }));
+const scenarios = (names.length ? names : all)
+  .map((name) => ({ name, ...JSON.parse(readFileSync(join(LIBRARY, `${name}.json`), "utf8")) }))
+  .filter((s) => names.length || flags["--nightly"] || !s.nightly);
 
 // Ticks are counted from the bot's first, so a window means the same on every start.
 // Each engagement the run priced, as `prediction.mjs` reads a row; one never
@@ -92,6 +97,8 @@ const measures = {
   },
   // Engagements whose predicted Win or Kite was lost (§10.1).
   predictedWinsLost: (_, __, dir) => bugs(engagementsOf(dir)).length,
+  // Engagements opened: an attack the bot never answered tests nothing.
+  engagements: (_, __, dir) => engagementsOf(dir).length,
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
   // The most levels the room stood below the highest it held before (`who`:
   // an opponent's room, else ours); a room lost stands at level 0.
@@ -111,6 +118,12 @@ const measures = {
   creepsAtEnd: (samples, a) => sideOf(a)(at(samples, a.to ?? Infinity)).creeps,
   // Enemies standing in our room at the window's end.
   hostilesAtEnd: (samples, a) => at(samples, a.to ?? Infinity).hostiles,
+  // `Hostiles.armed` off part letters; WORK counts anywhere, as every sample is our room.
+  attackersAtEnd: (samples, a) => {
+    const bodies = at(samples, a.to ?? Infinity).foes.map((f) => f.split(" ")[1]);
+    const strikes = (b) => /[ar]/.test(b);
+    return bodies.filter((b) => strikes(b) || b.includes("w") || (b.includes("h") && bodies.some(strikes))).length;
+  },
 };
 for (const s of scenarios) for (const a of s.assert) if (!measures[a.measure]) fail(`${s.name}: no measure ${a.measure}`);
 for (const { name, start } of scenarios)
@@ -122,7 +135,13 @@ const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").up
 const seats = (opponents = []) => opponents.map(({ config, ...seat }) => seat);
 const recipe = ({ room, seed, late = 0, node, invaders, unsafe }, opponents) =>
   `${room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${tag(opponents)}`;
-const worldOf = (start) => `${recipe(start, seats(start.opponents))}-t${start.at}-${start.bundle}`;
+// A cached world is replayed only by the opponents' code that played it.
+const codeOf = (bot) => {
+  const path = resolve(REPO, bot);
+  const files = statSync(path).isDirectory() ? readdirSync(path).sort().map((f) => join(path, f)) : [path];
+  return files.reduce((h, f) => h.update(f).update(readFileSync(f)), createHash("sha256")).digest("hex").slice(0, 8);
+};
+const worldOf = (start) => `${recipe(start, seats(start.opponents).map((s) => ({ ...s, code: codeOf(s.bot === "@bot" ? bot : s.bot) })))}-t${start.at}-${start.bundle}`;
 const keyOf = (start) => `scenario-${basename(bot, ".js")}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}`;
 const runs = new Map();
 for (const s of scenarios) {

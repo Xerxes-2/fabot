@@ -82,6 +82,10 @@ let captureLog;
     if (line.startsWith("#capture ")) fs.writeSync((captureLog ??= fs.openSync(join(out, "capture.jsonl"), "w")), line.slice(9) + "\n");
     else fs.writeSync(consoleLog, `[${consoleTick ?? "?"}] ${line}\n`);
 });
+for (const o of opponents) {
+  const log = fs.openSync(join(out, `console-${o.name}.log`), "w");
+  (await getConsoleChannel(shard, o.id).subscribe()).listen((message) => fs.writeSync(log, `[${consoleTick ?? "?"}] ${message}\n`));
+}
 
 const nextTick = async (ms) => {
   const timeout = new Promise((resolve) => setTimeout(() => resolve(null), ms));
@@ -312,6 +316,7 @@ function sample(t, time, room) {
     built: {},
     cpu: null,
     bodies: [],
+    foes: [],
   };
   for (const o of room["#objects"]) {
     const mine = o["#user"] === ours;
@@ -339,7 +344,10 @@ function sample(t, time, room) {
         // processor stamps an action with the tick it leads to).
         const acts = (o["#actionLog"] ?? []).filter((a) => a.time === time).map((a) => a.type);
         row.bodies.push(`${o.name}@${o.pos.x},${o.pos.y} ${o.body.map((p) => p.type[0]).join("")} e${energyIn(o)} ${acts.join("+") || "-"}`);
-      } else row.hostiles++;
+      } else {
+        row.hostiles++;
+        row.foes.push(`${o.name}@${o.pos.x},${o.pos.y} ${o.body.map((p) => p.type[0]).join("")}`);
+      }
     }
   }
   const objects = [...room["#objects"]];
