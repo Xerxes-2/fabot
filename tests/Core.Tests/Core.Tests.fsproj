@@ -12,6 +12,7 @@
     <Compile Include="MoveTests.fs" />
     <Compile Include="LayoutTests.fs" />
     <Compile Include="TrackerTests.fs" />
+    <Compile Include="ExchangeTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Core/Core.fsproj" />

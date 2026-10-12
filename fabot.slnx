@@ -4,6 +4,7 @@
     <Project Path="src/Core/Core.fsproj" />
   </Folder>
   <Folder Name="/scripts/">
+    <Project Path="scripts/exchange/Exchange.fsproj" />
     <Project Path="scripts/plan/Plan.fsproj" />
   </Folder>
   <Folder Name="/tests/">

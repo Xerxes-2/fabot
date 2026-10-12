@@ -5,8 +5,8 @@
     "build:fable": "rm -rf build && dotnet fable src/App -o build/fable",
     "build": "npm run build:fable --silent && npm run bundle --silent",
     "bundle": "rm -rf dist && node scripts/bundle.mjs",
-    "format": "dotnet fantomas src tests scripts/plan",
-    "format:check": "dotnet fantomas --check src tests scripts/plan",
+    "format": "dotnet fantomas src tests scripts/plan scripts/exchange",
+    "format:check": "dotnet fantomas --check src tests scripts/plan scripts/exchange",
     "ceiling": "node scripts/ceiling.mjs",
     "test": "npm run format:check --silent && npm run ceiling --silent && dotnet test -c Release",
     "smoke": "node scripts/smoke.mjs",
@@ -18,7 +18,8 @@
     "xx": "node scripts/xxscreeps/xx.mjs",
     "soak": "node scripts/xxscreeps/soak.mjs",
     "soak:many": "node scripts/xxscreeps/soak-many.mjs",
-    "scenario": "node scripts/xxscreeps/scenario.mjs"
+    "scenario": "node scripts/xxscreeps/scenario.mjs",
+    "exchange": "node scripts/xxscreeps/exchange.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

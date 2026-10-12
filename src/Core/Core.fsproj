@@ -33,6 +33,8 @@
     <Compile Include="Layout/Derive.fs" />
     <Compile Include="Layout/Remote.fs" />
     <Compile Include="Layout/Run.fs" />
+    <Compile Include="Exchange/Fighter.fs" />
+    <Compile Include="Exchange/Exchange.fs" />
     <Compile Include="Fight/Tracker.fs" />
   </ItemGroup>
   <ItemGroup>

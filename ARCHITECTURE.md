@@ -622,7 +622,7 @@ everything v1 used its self-written arena for, and more:
   Overmind and The International need a build). NPCs do not hold a room;
   this is the only offline test offence has. ❓ the self-play harness, built
   with `Defend`.
-- **Exchange calibration** (§10.1), generated.
+- **Exchange calibration** (§10.1), generated: `npm run exchange`.
 
 Coverage, read off xxscreeps 0.2.1's mods and changelog (2026-10-10): invader
 AI (`classic/invader`), keeper lairs (`classic/source`), invader cores and
@@ -726,7 +726,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 | `Decide/Pool, Matcher, Planner, Quota, Spawns, Price, Bodies` | `Core/Economy/*` | ✅ one world pool, matcher, quota and casts, wired as the `economy` module (`Economy/Run.fs`): match, cast, act in range, wish toward the target; assignments in `Memory.v2.assignments`. The RCL2–4 chain: a harvester on each source's post, haulers from built containers, the controller's buffer and its upgraders, the surplus split between upgraders and workers after the reserve (§5, `declarations.reserve`). Declared outposts (`declarations.outposts`) are worked while no hostile in `sightings` outlives the tick. Known gaps: claims are not yet declared; cross-room travel prices each room between at a room's side |
 | `Decide/Labs, Layout` | `Economy`, `Layout` | Layout ✅ in the tick after `economy`: a standing plan per room, sites in plan order as the level allows, towers on hostiles. Labs ⏳ |
 | `Types/Colonies.fs` declarations, `allies` | `declarations` data | not ported as code; the current rooms seed the first `declarations` |
-| `Decide/Facts.fs:2883–4056, 1038–1582, 2153–2196`, `Fighter.fs`, `Arrival.fs` | `Exchange` | port, narrow the input type |
+| `Decide/Facts.fs:2883–4056, 1038–1582, 2153–2196`, `Fighter.fs`, `Arrival.fs` | `Exchange` | ✅ `Core/Exchange/*`; `npm run exchange` is §10.1's generated set. Known gaps: the approach under our towers is not priced, our side's hits pool where the raid focuses one body, a stance (`Hold`) is not an input |
 | `Decide/Emitter.fs` strike/heal/glue | `Fight.Tactics` | port the functions, not the dispatch |
 | `Decide/Caster.fs` | `Fight.Casting` | port |
 | `Decide/Operations.fs`, `Types/Operation.fs` | — | shape only: `OpRecord`'s fields inform `Engagement`, its bidding informs `Strategy`. No code ports; re-read when `Siege` is due |
