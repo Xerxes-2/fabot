@@ -62,6 +62,10 @@ let private act (intent: Intent) : string * int =
             match act with
             | Attack target -> on "attack" target tower.attack
             | Heal target -> on "heal" target tower.heal
+    | Controller(id, ActivateSafeMode) ->
+        match Game.getObjectById id with
+        | controller when isNull controller -> "safeMode", notFound
+        | controller -> "safeMode", (unbox<IController> controller).activateSafeMode ()
     | Link(id, TransferEnergy(target, amount)) ->
         match Game.getObjectById id, Game.getObjectById target with
         | link, _ when isNull link -> "link", notFound

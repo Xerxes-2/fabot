@@ -99,6 +99,8 @@ let private roomGen (i: int) =
                 Reservation = if not owned && reserved then Some(holder, 1200) else None
                 SafeMode = 0
                 SafeModeAvailable = 0
+                SafeModeCooldown = 0
+                UpgradeBlocked = 0
             }
 
         let! ns = Gen.choose (0, 2)

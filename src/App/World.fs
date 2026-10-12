@@ -95,6 +95,8 @@ let private controllerOf (c: IController) : Controller =
                 Some(c.reservation.username, c.reservation.ticksToEnd)
         SafeMode = orZero c.safeMode
         SafeModeAvailable = orZero c.safeModeAvailable
+        SafeModeCooldown = orZero c.safeModeCooldown
+        UpgradeBlocked = orZero c.upgradeBlocked
     }
 
 let private partOf (p: IBodyPartDef) : Part =

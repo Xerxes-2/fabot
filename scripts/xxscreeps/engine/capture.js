@@ -3,7 +3,7 @@
 // in the replay.
 const FINDS = [105, 116, 107, 111, 106, 118, 123, 103];
 const KEYS = ["id", "name", "structureType", "my", "hits", "hitsMax", "cooldown", "isPublic", "progress", "progressTotal", "energy", "energyCapacity",
-  "ticksToRegeneration", "mineralType", "mineralAmount", "resourceType", "amount", "level", "ticksToDowngrade", "safeModeAvailable", "safeMode",
+  "ticksToRegeneration", "mineralType", "mineralAmount", "resourceType", "amount", "level", "ticksToDowngrade", "safeModeAvailable", "safeMode", "safeModeCooldown", "upgradeBlocked",
   "ticksToLive", "fatigue", "spawning"];
 
 module.exports = (memory) => {

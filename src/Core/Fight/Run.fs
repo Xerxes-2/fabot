@@ -444,7 +444,42 @@ let decide (context: Context) (state: State) : Intent list * State =
                 | _ -> Tactics.close sight order centre c
         | _ -> Tactics.retreat sight c
 
+    let lastResort =
+        homes
+        |> Seq.choose (fun name ->
+            let room = rooms.[name]
+            let ours = room.Structures |> Array.filter (fun s -> s.Owner.IsOurs)
+
+            let raid =
+                engagements
+                |> List.filter (fun e -> e.Unanswered && e.Room = name && byId.ContainsKey e.Group)
+                |> List.collect (fun e -> Set.toList byId.[e.Group].Members)
+                |> Set.ofList
+
+            room.Controller
+            |> Option.map (fun c ->
+                ({
+                    Controller = c
+                    Towered = ours |> Array.exists (fun s -> s.Kind.IsTower)
+                    Raid = room.Hostiles |> Array.filter (fun h -> raid.Contains h.Id)
+                    Hostiles = room.Hostiles
+                    Ours = ours
+                    Bodies = world.Creeps |> Array.filter (fun c -> c.Pos.Room = name)
+                }
+                : Defend.Home)))
+        |> List.ofSeq
+
+    let running =
+        world.Rooms
+        |> Array.exists (fun r ->
+            r.Controller |> Option.exists (fun c -> c.Owner.IsOurs && c.SafeMode > 0))
+
     let acts = ResizeArray<Intent>()
+
+    match Defend.safeMode running lastResort with
+    | Some id -> acts.Add(Controller(id, ActivateSafeMode))
+    | None -> ()
+
     let swinging = HashSet<string>()
     let shooting = HashSet<string>()
 

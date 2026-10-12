@@ -302,6 +302,7 @@ function sample(t, time, room) {
     t,
     time,
     rcl: room["#level"],
+    safeMode: room["#safeModeUntil"] > time,
     progress: 0,
     creeps: 0,
     parts: 0,

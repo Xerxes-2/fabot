@@ -48,6 +48,8 @@ let main _ =
                         Reservation = None
                         SafeMode = 0
                         SafeModeAvailable = 0
+                        SafeModeCooldown = 0
+                        UpgradeBlocked = 0
                     }
             EnergyAvailable = 0
             EnergyCapacity = 0

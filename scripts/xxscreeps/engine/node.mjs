@@ -5,13 +5,15 @@
 //   xxscreeps.js file://…/node.mjs stand <room> <structures.json> <level> <stored> <username>
 //     after `manage bot add --spawn` stood the first spawn: the controller
 //     at <level> (progress 0, its downgrade timer full, the claim's safe
-//     mode kept), every other structure of the list ours at full hits on its
+//     mode kept and one more in stock for each level skipped), every other structure of the list ours at full hits on its
 //     tile, and <stored> energy in the storage.
 //   xxscreeps.js file://…/node.mjs declare <room> <username> <declarations.json>
 //     <username>'s Memory as `{ v2: { declarations } }`, what the bot reads
 //     its declarations from (src/App/Wire.fs); <room> is not read.
 //   xxscreeps.js file://…/node.mjs unsafe <room>
 //     <room>'s safe mode ended and none left to activate.
+//   xxscreeps.js file://…/node.mjs ended <room>
+//     <room>'s safe mode ended, its stock kept.
 import * as fs from "node:fs";
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
 import * as User from "xxscreeps/engine/db/user/index.js";
@@ -88,6 +90,7 @@ if (mode === "ground") {
         room["#insertObject"](object);
       }
       room["#flushObjects"](state);
+      room.controller.safeModeAvailable += level - room.controller.level;
       updateRoomStatus(room, level, ours);
       room.controller["#progress"] = 0;
       room.controller["#downgradeTime"] = time + CONTROLLER_DOWNGRADE[level];
@@ -103,12 +106,12 @@ if (mode === "ground") {
   await saveMemoryBlob(shard, await User.findUserByName(db, username), utf16ToBuffer(JSON.stringify({ v2: { declarations } })));
   await shard.save();
   console.log(`declared ${JSON.stringify(declarations)}`);
-} else if (mode === "unsafe") {
+} else if (mode === "unsafe" || mode === "ended") {
   room["#safeModeUntil"] = 0;
-  [...room["#objects"]].find((o) => o.structureType === "controller").safeModeAvailable = 0;
+  if (mode === "unsafe") [...room["#objects"]].find((o) => o.structureType === "controller").safeModeAvailable = 0;
   await Promise.all([shard.saveRoom(roomName, time, room), shard.saveRoom(roomName, time + 1, room)]);
   await shard.save();
-  console.log(`${roomName} without safe mode`);
+  console.log(`${roomName}'s safe mode ${mode}`);
 } else throw new Error(`node.mjs: unknown mode ${mode}`);
 await shard[Symbol.asyncDispose]();
 await db[Symbol.asyncDispose]();

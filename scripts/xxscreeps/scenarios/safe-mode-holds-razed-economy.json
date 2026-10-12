@@ -1,0 +1,23 @@
+{
+  "why": "a player's raid no cast answers, killing the refillers of a home with a tower, spends the safe mode before the economy is razed",
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "node": "N3",
+    "ended": true,
+    "opponents": [
+      {
+        "name": "raider",
+        "bot": "scripts/xxscreeps/engine/raid",
+        "room": "W7N3",
+        "raid": { "first": 1500, "bodies": [{ "tough": 4, "move": 10, "ranged_attack": 8, "heal": 6, "boosts": { "tough": "XGHO2", "ranged_attack": "XKHO2", "heal": "XLHO2" } }, { "tough": 4, "move": 10, "ranged_attack": 8, "heal": 6, "boosts": { "tough": "XGHO2", "ranged_attack": "XKHO2", "heal": "XLHO2" } }] }
+      }
+    ]
+  },
+  "ticks": 2500,
+  "assert": [
+    { "measure": "safeModeAt", "from": 1500, "max": 1900 },
+    { "measure": "fewestCreeps", "from": 1500, "min": 4 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

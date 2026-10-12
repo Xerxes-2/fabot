@@ -28,6 +28,8 @@ type RoomAct = CreateSite of x: int * y: int * kind: World.Kind
 
 type LinkAct = TransferEnergy of target: string * amount: int
 
+type ControllerAct = ActivateSafeMode
+
 type TowerAct =
     | Attack of target: string
     | Heal of target: string
@@ -52,6 +54,7 @@ type Intent =
     | Spawn of id: string * SpawnAct
     | Room of name: string * RoomAct
     | Tower of id: string * TowerAct
+    | Controller of id: string * ControllerAct
     | Link of id: string * LinkAct
     /// Tick serves these from the room's queue (`Tick.queue`); none reaches `Executor`.
     | Queue of room: string * Ask
@@ -64,6 +67,7 @@ let actorOf =
     | Spawn(id, _) -> id
     | Room(name, _) -> name
     | Tower(id, _) -> id
+    | Controller(id, _) -> id
     | Link(id, _) -> id
     | Queue(room, _) -> room
     | Wish(_, wish) -> wish.Creep

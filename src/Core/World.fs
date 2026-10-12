@@ -268,6 +268,8 @@ type Controller =
         Reservation: (string * int) option
         SafeMode: int
         SafeModeAvailable: int
+        SafeModeCooldown: int
+        UpgradeBlocked: int
     }
 
 [<Struct>]
