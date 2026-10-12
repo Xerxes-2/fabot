@@ -13,9 +13,7 @@
     "src/Core/Observe": 1000
   },
   "comments": {
-    "_default": 7,
-    "src/App": 13,
-    "src/Core": 10
+    "_default": 7
   },
   "counts": {}
 }

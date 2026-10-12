@@ -4,7 +4,6 @@ open Fable.Core
 open Fabot.Bindings
 open Fabot.Core
 
-/// In decision order: Economy, Layout, Strategy, Fight.
 let private modules: Tick.Module list = [ Economy.Run.economy; Layout.Run.layout ]
 
 /// Set by `scripts/bundle.mjs`'s banner.
