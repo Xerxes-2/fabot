@@ -219,12 +219,6 @@ let private reservable (me: string) (c: Controller) =
         | Some(user, _) -> user = me
         | None -> true)
 
-/// The engine's rule for a source's capacity: owned or reserved, by anyone.
-let private held (room: Room) =
-    match room.Controller with
-    | Some c -> not c.Owner.IsNobody || Option.isSome c.Reservation
-    | None -> false
-
 /// `None` where the Atlas counts none: unknown, not zero.
 let private seatsAt (atlas: Atlas) (range: int) (target: Pos) =
     match List.length (Atlas.seats atlas Grid.One range target) with
@@ -269,13 +263,7 @@ let rampartTarget (level: int) =
 /// Ten decay periods: the margin every bot keeps against losing a rampart.
 let rampartSafe = 10 * Engine.rampartDecayAmount
 
-let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : Ground =
-    let rate =
-        if held room then
-            Engine.heldOutputPerTick
-        else
-            Engine.neutralOutputPerTick
-
+let private groundOf (atlas: Atlas) (me: string) (capacity: int) (rate: int) (room: Room) : Ground =
     let ownedRoom = room.Controller |> Option.exists (fun c -> c.Owner.IsOurs)
 
     let level =
@@ -543,11 +531,50 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
             | _ -> []
     }
 
+let private blind (outpost: Tick.Outpost) : Room =
+    {
+        Name = outpost.Room
+        Terrain = [||]
+        Controller =
+            Some
+                {
+                    Id = outpost.Controller.Id
+                    Pos = outpost.Controller.Pos
+                    Owner = Nobody
+                    Level = 0
+                    Progress = 0
+                    ProgressTotal = 0
+                    TicksToDowngrade = 0
+                    Reservation = None
+                    SafeMode = 0
+                    SafeModeAvailable = 0
+                }
+        EnergyAvailable = 0
+        EnergyCapacity = 0
+        Sources =
+            outpost.Sources
+            |> List.map (fun s ->
+                {
+                    Id = s.Id
+                    Pos = s.Pos
+                    Energy = 0
+                    EnergyCapacity = 0
+                    TicksToRegeneration = 0
+                })
+            |> Array.ofList
+        Minerals = [||]
+        Structures = [||]
+        Sites = [||]
+        Piles = [||]
+        Remains = [||]
+        Hostiles = [||]
+    }
+
 let ofWorld
     (world: World)
     (atlas: Atlas)
     (declarations: Tick.Declarations)
-    (worked: string list)
+    (worked: Tick.Outpost list)
     (claims: string list)
     : Derived =
     let colonies =
@@ -575,19 +602,34 @@ let ofWorld
     let isColony name =
         colonies |> Array.exists (fun (room, _) -> room.Name = name)
 
-    let declared =
-        world.Rooms
-        |> Array.filter (fun room -> List.contains room.Name worked && not (isColony room.Name))
-
     // A declared room is dug by bodies its richest colony casts.
     let richest =
         colonies |> Array.fold (fun most (room, _) -> max most room.EnergyCapacity) 0
 
+    // At the rate the reserver holds, not this tick's: a body lives longer
+    // than a lapse lasts. The engine refuses a harvest on another's hold.
+    let remoteOf (outpost: Tick.Outpost) =
+        let room =
+            world.Rooms
+            |> Array.tryFind (fun r -> r.Name = outpost.Room)
+            |> Option.defaultWith (fun () -> blind outpost)
+
+        match room.Controller with
+        | Some c when not (reservable world.Me c) ->
+            groundOf atlas world.Me richest 0 { room with Sources = [||] }
+        | _ when richest >= Engine.bodyCost (blockOf Pattern.Claimer) ->
+            groundOf atlas world.Me richest Engine.heldOutputPerTick room
+        | _ -> groundOf atlas world.Me richest Engine.neutralOutputPerTick room
+
     let grounds =
         Array.append
             (colonies
-             |> Array.map (fun (room, _) -> groundOf atlas world.Me room.EnergyCapacity room))
-            (declared |> Array.map (groundOf atlas world.Me richest))
+             |> Array.map (fun (room, _) ->
+                 groundOf atlas world.Me room.EnergyCapacity Engine.heldOutputPerTick room))
+            (worked
+             |> List.filter (fun o -> not (isColony o.Room))
+             |> List.map remoteOf
+             |> Array.ofList)
 
     let bodies =
         world.Creeps

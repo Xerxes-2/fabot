@@ -6,13 +6,28 @@ open Fabot.Core.World
 open Fabot.Core.Intents
 open Fabot.Core.State
 
+type Declared = { Id: string; Pos: Pos }
+
+/// What is known of a room before it is seen.
+type Outpost =
+    {
+        Room: string
+        Controller: Declared
+        Sources: Declared list
+    }
+
 type Declarations =
     {
         /// The creep lifetimes of tower fire a colony's reserve holds.
         ReserveLifetimes: float
+        Outposts: Outpost list
     }
 
-let undeclared = { ReserveLifetimes = 2.0 }
+let undeclared =
+    {
+        ReserveLifetimes = 2.0
+        Outposts = []
+    }
 
 [<NoEquality; NoComparison>]
 type Context =
@@ -20,7 +35,30 @@ type Context =
         World: World
         Atlas: Atlas
         Declarations: Declarations
+        Sightings: Sightings
     }
+
+/// The route search needs a bound; nothing is worked further than this.
+let reachHops = 3
+
+let colonies (world: World) : string[] =
+    world.Rooms
+    |> Array.filter (fun r ->
+        r.Controller |> Option.exists (fun c -> c.Owner.IsOurs)
+        && world.Spawns |> Array.exists (fun s -> s.Pos.Room = r.Name))
+    |> Array.map (fun r -> r.Name)
+
+/// The declared outposts a colony's spawn reaches and no hostile seen there
+/// outlives (`ARCHITECTURE.md` §13, M1b): a stood-down room is no ground.
+let worked (context: Context) : Outpost list =
+    let homes = colonies context.World
+
+    context.Declarations.Outposts
+    |> List.filter (fun o ->
+        Sightings.clear context.Sightings context.World.Time o.Room
+        && homes
+           |> Array.exists (fun home ->
+               Option.isSome (Atlas.route context.Atlas Set.empty reachHops home o.Room)))
 
 type Module =
     {

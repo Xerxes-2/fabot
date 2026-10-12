@@ -31,6 +31,7 @@
     <Compile Include="Layout/Sites.fs" />
     <Compile Include="Layout/Towers.fs" />
     <Compile Include="Layout/Derive.fs" />
+    <Compile Include="Layout/Remote.fs" />
     <Compile Include="Layout/Run.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -18,6 +18,9 @@ let private rawMemory () : string = jsNative
 [<Emit("(typeof $0 === 'object' && $0 !== null)")>]
 let private isObject (_value: obj) : bool = jsNative
 
+[<Emit("(Array.isArray($0) ? $0 : null)")>]
+let private asArray (_value: obj) : obj[] = jsNative
+
 let private root () : obj =
     let v2 = Memory?v2
 
@@ -69,10 +72,43 @@ let writeState (state: State) : unit =
 
 let readDeclarations () : Fabot.Core.Tick.Declarations =
     let declared = (root ())?declarations
+    let field (o: obj) (name: string) : obj = if isObject o then o?(name) else null
 
-    match (if isObject declared then box declared?reserve else null) with
-    | :? float as n when n >= 0.0 -> { ReserveLifetimes = n }
-    | _ -> Fabot.Core.Tick.undeclared
+    let declaredAt (room: string) (o: obj) : Fabot.Core.Tick.Declared option =
+        match field o "id", field o "x", field o "y" with
+        | (:? string as id), (:? float as x), (:? float as y) ->
+            Some
+                {
+                    Id = id
+                    Pos = { Room = room; X = int x; Y = int y }
+                }
+        | _ -> None
+
+    let outpostOf (o: obj) : Fabot.Core.Tick.Outpost option =
+        match field o "room", asArray (field o "sources") with
+        | (:? string as room), sources when not (isNull sources) ->
+            let parsed = sources |> Array.choose (declaredAt room)
+
+            declaredAt room (field o "controller")
+            |> Option.filter (fun _ -> parsed.Length = sources.Length)
+            |> Option.map (fun controller ->
+                {
+                    Room = room
+                    Controller = controller
+                    Sources = List.ofArray parsed
+                })
+        | _ -> None
+
+    {
+        ReserveLifetimes =
+            match field declared "reserve" with
+            | :? float as n when n >= 0.0 -> n
+            | _ -> Fabot.Core.Tick.undeclared.ReserveLifetimes
+        Outposts =
+            match asArray (field declared "outposts") with
+            | null -> []
+            | outposts -> outposts |> Array.choose outpostOf |> List.ofArray
+    }
 
 let recording () : bool = (switches ())?recorder = box true
 

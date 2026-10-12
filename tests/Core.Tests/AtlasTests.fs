@@ -21,6 +21,7 @@ let private structure (kind: Kind) (walkable: bool) (x: int) (y: int) : Structur
         HitsMax = 1
         Store = Store.empty
         Cooldown = 0
+        Collapse = 0
         Walkable = walkable
     }
 

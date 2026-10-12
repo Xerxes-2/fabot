@@ -54,6 +54,14 @@ let private structureOf (s: IStructure) : Structure =
         HitsMax = orZero s.hitsMax
         Store = storeOf s?store
         Cooldown = orZero s.cooldown
+        Collapse =
+            if absent (box s.effects) then
+                0
+            else
+                s.effects
+                |> Array.tryFind (fun e -> e.effect = effectCollapseTimer)
+                |> Option.map (fun e -> e.ticksRemaining)
+                |> Option.defaultValue 0
         Walkable =
             match kind with
             | Kind.Rampart -> owner.IsOurs || s.isPublic

@@ -8,7 +8,8 @@
 // Prints `{ "room": …, "x": …, "y": … , "outposts": […] }` and changes
 // nothing: `manage bot add --spawn` stands it. The outposts are node E1's: of
 // the rooms an exit leads to, those with a controller nobody owns or reserves
-// and a source, most sources first, then by name; two at most. With `--list`,
+// and a source, most sources first, then by name; two at most; each as the
+// bot reads a declared outpost (src/App/Wire.fs), with its objects' ids. With `--list`,
 // prints every room that fits, by name.
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
 import { Source } from "xxscreeps/mods/classic/source/source.js";
@@ -56,10 +57,11 @@ async function outposts(name) {
   const fit = [];
   for (const next of Object.values(world.map.describeExits(name) ?? {})) {
     const s = accessible.includes(next) ? await survey(next) : null;
-    if (s?.controller && s.sources.length > 0 && !s.user) fit.push({ name: next, sources: s.sources.length });
+    if (s?.controller && s.sources.length > 0 && !s.user) fit.push({ name: next, ...s });
   }
-  fit.sort((a, b) => b.sources - a.sources || (a.name < b.name ? -1 : 1));
-  return fit.slice(0, 2).map((o) => o.name);
+  fit.sort((a, b) => b.sources.length - a.sources.length || (a.name < b.name ? -1 : 1));
+  const at = (o) => ({ id: o.id, x: o.pos.x, y: o.pos.y });
+  return fit.slice(0, 2).map((o) => ({ room: o.name, controller: at(o.controller), sources: o.sources.map(at) }));
 }
 
 const candidates = wanted ? [wanted] : [...accessible].sort();

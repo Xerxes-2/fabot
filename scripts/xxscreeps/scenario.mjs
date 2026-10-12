@@ -14,7 +14,7 @@
 //
 // A scenario file: { "why": the invariant, "start": { "room", "seed",
 // "late"?, "node"?, "at"?, "bundle"? }, "ticks", "assert": [{ "measure",
-// "from"?, "to"?, "max" }] }; a measure is one of `measures` below, read off
+// "from"?, "to"?, "max"?, "min"? }] }; a measure is one of `measures` below, read off
 // the soak's output over ticks [from, to), counted from the run's first tick.
 // Exits non-zero when a bound fails or a soak does.
 import { spawn, spawnSync } from "node:child_process";
@@ -65,6 +65,12 @@ const measures = {
   },
   // The first tick a container stands beside a source (never: Infinity).
   firstSourceContainer: (samples) => samples.find((s) => s.sourceContainers > 0)?.t ?? Infinity,
+  // The least any declared outpost netted after its bodies (`rooms`, the
+  // colony's own first); none declared: -Infinity.
+  poorestOutpost: (samples, a) => {
+    const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
+    return Math.min(...Object.keys(last.rooms).slice(1).map((r) => last.rooms[r].net - (first.rooms[r]?.net ?? 0)));
+  },
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
 };
 for (const s of scenarios) for (const a of s.assert) if (!measures[a.measure]) fail(`${s.name}: no measure ${a.measure}`);
@@ -137,10 +143,11 @@ for (const s of scenarios) {
   const samples = samplesOf(dir);
   for (const a of s.assert) {
     const value = measures[a.measure](samples, a, dir);
-    const ok = value <= a.max;
+    const ok = value <= (a.max ?? Infinity) && value >= (a.min ?? -Infinity);
     if (!ok) failed++;
     const window = a.from !== undefined || a.to !== undefined ? ` t${a.from ?? 0}-${a.to ?? s.ticks}` : "";
-    console.log(`${ok ? "pass" : "FAIL"} ${s.name}: ${a.measure}${window} ${value} (≤ ${a.max})`);
+    const bound = [a.min !== undefined && `≥ ${a.min}`, a.max !== undefined && `≤ ${a.max}`].filter(Boolean).join(", ");
+    console.log(`${ok ? "pass" : "FAIL"} ${s.name}: ${a.measure}${window} ${value} (${bound})`);
   }
 }
 console.log(`${failed ? `${failed} failed` : "all passed"} in ${((Date.now() - started) / 1000).toFixed(0)} s`);

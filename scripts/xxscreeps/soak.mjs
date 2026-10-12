@@ -210,7 +210,7 @@ if (node?.outposts) {
   if (colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);
   writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: colony.outposts }));
   node24([XXSCREEPS, script("node.mjs"), "declare", colony.room, OUR_NAME, "declarations.json"], world);
-  if (!flags["--invaders"]) waves.push(...colony.outposts.map((room, i) => `${room}:4000:${1000 + 1500 * i}`));
+  if (!flags["--invaders"]) waves.push(...colony.outposts.map((o, i) => `${o.room}:4000:${1000 + 1500 * i}`));
 }
 
 // ---- the server, stepped ---------------------------------------------------

@@ -210,6 +210,8 @@ type Structure =
         HitsMax: int
         Store: Store
         Cooldown: int
+        /// Ticks to an Invader core's collapse; 0 for none.
+        Collapse: int
         Walkable: bool
     }
 
@@ -353,3 +355,51 @@ module Terrain =
     let isSwamp (terrain: byte[]) (x: int) (y: int) =
         let t = terrain.[y * 50 + x]
         t &&& wall = 0uy && t &&& swamp <> 0uy
+
+/// WORK alone is no threat: it fells structures, never a body, and every
+/// rival's remote harvester carries it.
+type Sightings = Map<string, Map<string, int>>
+
+module Sightings =
+    /// A core with no collapse timer, held while it is seen standing.
+    let private never = System.Int32.MaxValue
+
+    let private armed (creep: Creep) =
+        creep.Body |> Array.exists (fun p -> p.Kind.IsAttack || p.Kind.IsRangedAttack)
+
+    let step (world: World) (previous: Sightings) : Sightings =
+        let mutable next =
+            previous
+            |> Map.map (fun _ seen -> seen |> Map.filter (fun _ gone -> gone > world.Time))
+            |> Map.filter (fun _ seen -> not seen.IsEmpty)
+
+        for room in world.Rooms do
+            let mutable seen =
+                match Map.tryFind room.Name next with
+                | Some seen -> seen |> Map.filter (fun _ gone -> gone <> never)
+                | None -> Map.empty
+
+            for creep in room.Hostiles do
+                if armed creep then
+                    seen <- Map.add creep.Id (world.Time + creep.TicksToLive) seen
+
+            for s in room.Structures do
+                if s.Kind.IsInvaderCore then
+                    seen <-
+                        Map.add
+                            s.Id
+                            (if s.Collapse > 0 then world.Time + s.Collapse else never)
+                            seen
+
+            next <-
+                if seen.IsEmpty then
+                    Map.remove room.Name next
+                else
+                    Map.add room.Name seen next
+
+        next
+
+    let clear (sightings: Sightings) (time: int) (room: string) : bool =
+        match Map.tryFind room sightings with
+        | Some seen -> seen |> Map.forall (fun _ gone -> gone <= time)
+        | None -> true

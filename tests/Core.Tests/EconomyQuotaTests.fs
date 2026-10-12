@@ -57,6 +57,7 @@ let private structureGen (room: string) (owned: bool) (i: int) =
                 HitsMax = hitsMax
                 Store = store [| Energy, energy |] capacity
                 Cooldown = 0
+                Collapse = 0
                 Walkable = Kind.walkable kind
             }
     }
@@ -226,7 +227,7 @@ let private creepGen (rooms: string list) (i: int) =
 type Generated =
     {
         World: World
-        Worked: string list
+        Worked: Tick.Outpost list
         Claims: string list
     }
 
@@ -243,9 +244,20 @@ type Gens =
 
             let unowned =
                 rooms
-                |> List.filter (fun (r, _) ->
-                    r.Controller |> Option.exists (fun c -> c.Owner = Nobody))
-                |> List.map (fun (r, _) -> r.Name)
+                |> List.choose (fun (r, _) ->
+                    r.Controller
+                    |> Option.filter (fun c -> c.Owner = Nobody)
+                    |> Option.map (fun c -> r, c))
+
+            let declared (r: Room, c: Controller) : Tick.Outpost =
+                {
+                    Room = r.Name
+                    Controller = ({ Id = c.Id; Pos = c.Pos }: Tick.Declared)
+                    Sources =
+                        r.Sources
+                        |> Array.map (fun s -> ({ Id = s.Id; Pos = s.Pos }: Tick.Declared))
+                        |> List.ofArray
+                }
 
             return
                 {
@@ -260,8 +272,12 @@ type Gens =
                             Creeps = Array.ofList creeps
                             OurSites = 0
                         }
-                    Worked = if split then unowned else []
-                    Claims = if split then [] else unowned
+                    Worked = if split then List.map declared unowned else []
+                    Claims =
+                        if split then
+                            []
+                        else
+                            unowned |> List.map (fun (r, _) -> r.Name)
                 }
         }
         |> Arb.fromGen

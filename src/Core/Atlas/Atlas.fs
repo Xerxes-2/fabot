@@ -404,6 +404,20 @@ module Atlas =
         field atlas mover target from.Room
         |> Option.bind (fun field -> Field.ticks field (Tiles.ofPos from))
 
+    let entryTicks (atlas: Atlas) (mover: Mover) (target: Target) (from: string) : int option =
+        match field atlas mover target target.Room, Tiles.exitToward target.Room from with
+        | Some field, Some exit ->
+            let band = Tiles.exitTiles exit
+            let mutable least = unreached
+
+            for i in 0 .. band.Length - 1 do
+                match Field.ticks field (at i band) with
+                | Some d when d < least -> least <- d
+                | _ -> ()
+
+            if least = unreached then None else Some least
+        | _ -> None
+
     let firstStep (atlas: Atlas) (mover: Mover) (target: Target) (from: Pos) : int option =
         field atlas mover target from.Room
         |> Option.bind (fun field -> Field.step field (Tiles.ofPos from))

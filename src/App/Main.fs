@@ -30,6 +30,10 @@ let private clock () = Game.cpu.getUsed ()
 /// Heap only, so empty after a reset, when each module re-derives it.
 let mutable private standing: Map<string, Layout.Shape.Standing> = Map.empty
 
+/// Heap only: after a reset every outpost reads clear, and the first body
+/// back in one that is not sees what stands there and stands it down again.
+let mutable private sightings: Core.World.Sightings = Map.empty
+
 let private runTick () =
     let phases = ResizeArray<string * float>()
 
@@ -44,7 +48,12 @@ let private runTick () =
             Layout = standing
         }
 
-    let world = timed "world" World.ofGame
+    let world =
+        timed "world" (fun () ->
+            let world = World.ofGame ()
+            sightings <- Core.World.Sightings.step world sightings
+            world)
+
     let atlas = timed "atlas" (fun () -> Atlas.ofWorld world)
 
     let result =
@@ -55,6 +64,7 @@ let private runTick () =
                 World = world
                 Atlas = atlas
                 Declarations = Wire.readDeclarations ()
+                Sightings = sightings
             }
             state
 

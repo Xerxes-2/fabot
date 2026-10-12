@@ -183,20 +183,22 @@ let pool (derived: Derived) : Offer[] =
 
         // Offered through a regeneration gap too, so its holders keep their
         // seats. Priced at the rate, the engine's cap on what its seats dig.
+        // Away from a colony only at a post: a worker never walks out to dig.
         for s in ground.Sources do
-            offers.Add(
-                { offer
-                      (Harvest s.Id)
-                      s.Pos
-                      (float s.Rate)
-                      (Capacity.Seated(
-                          Option.defaultValue System.Int32.MaxValue s.Seats,
-                          (if Option.isSome s.Post then 1 else 0),
-                          (s.Rate + Engine.harvestPerWork - 1) / Engine.harvestPerWork
-                      )) with
-                    Post = s.Post
-                }
-            )
+            if Option.isSome colony || Option.isSome s.Post then
+                offers.Add(
+                    { offer
+                          (Harvest s.Id)
+                          s.Pos
+                          (float s.Rate)
+                          (Capacity.Seated(
+                              Option.defaultValue System.Int32.MaxValue s.Seats,
+                              (if Option.isSome s.Post then 1 else 0),
+                              (s.Rate + Engine.harvestPerWork - 1) / Engine.harvestPerWork
+                          )) with
+                        Post = s.Post
+                    }
+                )
 
         for m in ground.Minerals do
             offers.Add(

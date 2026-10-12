@@ -71,6 +71,20 @@ let toward (atlas: Atlas) (creep: Creep) (mover: Mover) (target: Target) (weight
                 (Array.append inside outside)
                 (Array.append [| at |] inside)
                 weight
+        elif here = 0 then
+            // Landed on the band it wants out by: the engine moves a body across
+            // only as it steps onto an exit tile.
+            match beside atlas creep |> Array.filter (fun tile -> ticks tile = 0) with
+            | [||] -> stay atlas creep mover.Factor weight
+            | band ->
+                wish
+                    creep
+                    true
+                    (Tiles.at 0 band)
+                    None
+                    (Array.sub band 1 (band.Length - 1))
+                    [||]
+                    weight
         else
             match Field.step field at with
             | None -> stay atlas creep mover.Factor weight

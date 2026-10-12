@@ -13,12 +13,6 @@ open Fabot.Core.Economy.Task
 open Fabot.Core.Economy.Derived
 open Fabot.Core.Economy.Pool
 
-/// The route search needs a bound; the economy works no room further than its
-/// declarations.
-let private reachHops = 3
-
-/// The Atlas prices this room's leg only; this keeps a far task from reading
-/// as near.
 let private crossingTicks = Engine.roomSide
 
 let private weightOf (priority: int) = max 1 (Price.bottomRank - priority + 1)
@@ -29,7 +23,7 @@ let private targetAt (pos: Pos) (range: int) : Target =
         Tiles = [| Tiles.ofPos pos |]
         Range = range
         Avoid = Set.empty
-        MaxHops = reachHops
+        MaxHops = Tick.reachHops
     }
 
 let private targetOf (offer: Offer) : Target =
@@ -41,13 +35,20 @@ let private ticksTo (atlas: Atlas) (mover: Mover) (target: Target) (from: Pos) :
     | Some leg when from.Room = target.Room -> Some leg
     | Some leg ->
         Atlas.route atlas target.Avoid target.MaxHops from.Room target.Room
-        |> Option.map (fun rooms -> leg + crossingTicks * max 0 (List.length rooms - 2))
+        |> Option.map (fun rooms ->
+            let n = List.length rooms
+
+            let far =
+                Atlas.entryTicks atlas mover target (List.item (n - 2) rooms)
+                |> Option.defaultValue crossingTicks
+
+            leg + crossingTicks * (n - 2) + far)
 
 let private distance (atlas: Atlas) (a: Pos) (b: Pos) : int option =
     match Pos.range a b with
     | Some r -> Some r
     | None ->
-        Atlas.route atlas Set.empty reachHops a.Room b.Room
+        Atlas.route atlas Set.empty Tick.reachHops a.Room b.Room
         |> Option.map (fun rooms -> crossingTicks * (List.length rooms - 1))
 
 /// A body digs from nowhere else, so a harvester's dig falls into the
@@ -162,7 +163,10 @@ let private linkSends (ground: Ground) : Intent list =
 let decide (context: Context) (state: State) : Intent list * State =
     let world = context.World
     let atlas = context.Atlas
-    let derived = Derived.ofWorld world atlas context.Declarations [] []
+
+    let derived =
+        Derived.ofWorld world atlas context.Declarations (Tick.worked context) []
+
     let offers = Pool.pool derived
 
     let creeps = Dictionary<string, Creep>()
@@ -281,15 +285,39 @@ let decide (context: Context) (state: State) : Intent list * State =
                 acts.Add(Creep(creep.Name, CreepAct.Withdraw(b.Id, Energy)))
             | _ -> ()
 
-            if
+            // Away from a colony no crew raises a container nor stays to keep it.
+            let raising =
+                if
+                    garrisons body offer
+                    && body.Energy > 0
+                    && body.Free = 0
+                    && offer.Post |> Option.exists ((=) creep.Pos)
+                then
+                    derived.Grounds
+                    |> Array.skip derived.Colonies.Length
+                    |> Array.tryPick (fun g ->
+                        match g.Sites |> Array.tryFind (fun s -> s.Pos = creep.Pos) with
+                        | Some site -> Some(CreepAct.Build site.Id)
+                        | None ->
+                            g.Repairs
+                            |> Array.tryFind (fun r ->
+                                r.Pos = creep.Pos && r.Kind.IsContainer && 2 * r.Hits < r.HitsMax)
+                            |> Option.map (fun r -> CreepAct.Repair r.Id))
+                else
+                    None
+
+            match raising with
+            | Some act -> acts.Add(Creep(creep.Name, act))
+            | None when
                 Pos.within (rangeOf offer.Task) creep.Pos offer.Target
                 && seats |> Option.forall (List.contains creep.Pos)
                 && ready offer.Task
-            then
+                ->
                 // The API refuses an upgrade from an empty store before the
                 // draw lands.
                 if body.Energy > 0 || not (drawsBuffer body offer) then
                     acts.Add(Creep(creep.Name, actOf offer.Task))
+            | None -> ()
 
             if garrisons body offer && body.Energy > 0 then
                 derived.Grounds
@@ -310,6 +338,18 @@ let decide (context: Context) (state: State) : Intent list * State =
                     mover
                     (seatOf stood creep offer seats)
                     (weightOf offer.Priority))
+        | None when
+            derived.Colonies.Length > 0
+            && derived.Colonies |> Array.forall (fun c -> c.Room <> creep.Pos.Room)
+            ->
+            // Home, where it can be matched.
+            let home =
+                derived.Colonies
+                |> Array.map (fun c -> c.Spawns.[0].Pos)
+                |> Array.minBy (fun p ->
+                    distance atlas creep.Pos p |> Option.defaultValue System.Int32.MaxValue)
+
+            wishIn creep.Pos.Room (Plan.toward atlas creep mover (targetAt home 1) 1)
         | None -> wishIn creep.Pos.Room (Plan.stay atlas creep mover.Factor 1)
 
     let moves = ResizeArray<Intent>()

@@ -46,7 +46,7 @@ const shard = await Shard.connect(db, "shard0");
 const ours = await User.findUserByName(db, username);
 const svc = getServiceChannel(shard);
 const memory = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}");
-const roomNames = [roomName, ...(memory.v2?.declarations?.outposts ?? [])];
+const roomNames = [roomName, ...(memory.v2?.declarations?.outposts ?? []).map((o) => o.room)];
 const waves = wavesArg
   .split(",")
   .filter(Boolean)

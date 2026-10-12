@@ -27,6 +27,7 @@ let private structure (id: string) (kind: Kind) (owner: Owner) (tile: int) : Str
         HitsMax = 1
         Store = Store.empty
         Cooldown = 0
+        Collapse = 0
         Walkable = Kind.walkable kind
     }
 

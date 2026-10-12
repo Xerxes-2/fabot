@@ -217,6 +217,7 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
     let life = float Engine.creepLifetime
     let colonies = derived.Colonies
     let carries = Array.zeroCreate<float> colonies.Length
+    let visits = Array.zeroCreate<int> colonies.Length
     let flows = Array.zeroCreate<float> colonies.Length
     let digs = Array.init colonies.Length (fun _ -> ResizeArray<int * Demand>())
 
@@ -276,6 +277,20 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
                         if trip > 0 then
                             hauled <- true
                             carries.[ci] <- carries.[ci] + flow * float trip
+
+                            // A body that dies leaves its visit undone while its
+                            // successor walks a room out: no remote container
+                            // may fill in twice the gap between visits.
+                            if gi >= colonies.Length then
+                                visits.[ci] <-
+                                    visits.[ci]
+                                    + int (
+                                        ceil (
+                                            2.0 * flow * float trip
+                                            / float Engine.containerCapacity
+                                        )
+                                    )
+
                             flows.[ci] <- flows.[ci] + flow
 
                     if hauled then
@@ -293,14 +308,23 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
                 )
 
             demands.Add(
-                demand Pattern.Claimer c.Pos (claimPartsFor ground.OurReservation) (fun _ ->
+                seated Pattern.Claimer c.Pos (claimPartsFor ground.OurReservation) 1 (fun _ ->
                     Some gain)
             )
         | _ -> ())
 
     for ci in 0 .. colonies.Length - 1 do
         if carries.[ci] > 0.0 then
-            let wanted = int (ceil (carries.[ci] / float Engine.carryPartCapacity))
+            let perBody =
+                sized Pattern.Hauler Engine.maxBodyParts colonies.[ci].BankCapacity
+                |> Option.map (fun body -> partCountIn body Carry)
+                |> Option.defaultValue 0
+
+            let wanted =
+                max
+                    (int (ceil (carries.[ci] / float Engine.carryPartCapacity)))
+                    (visits.[ci] * perBody)
+
             let flow = flows.[ci]
             let digs = digs.[ci]
 

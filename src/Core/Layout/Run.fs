@@ -31,7 +31,18 @@ let decide (context: Context) (state: State) : Intent list * State =
     let world = context.World
     let colonies, standing = Derive.colonies world state.Layout
 
-    decideOver colonies (Engine.maxConstructionSites - world.OurSites),
+    let budget = Engine.maxConstructionSites - world.OurSites
+    let home = decideOver colonies budget
+
+    let placed =
+        home
+        |> List.sumBy (fun i ->
+            match i with
+            | Room(_, CreateSite _) -> 1
+            | _ -> 0)
+
+    home
+    @ Remote.sites context.Atlas world (Tick.worked context) home (budget - placed),
     { state with Layout = standing }
 
 let layout: Module = { Name = "layout"; Run = decide }
