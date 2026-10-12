@@ -453,10 +453,14 @@ benchmark meets three requirements:
    the same window; until it is, the harness is fixed, not the code.
    xxscreeps (§10) runs the same isolate and heap limit as live and may
    calibrate better than the node replay; whichever matches live is used.
-   Until v2 runs live there is nothing to calibrate against, and
-   `scripts/xxscreeps/ab.mjs` stands in: soak pairs run side by side, their
-   fingerprints must match, and the claim is the per-module CPU of each
-   tick's fastest round (an unchanged bundle reads within ±0.6%).
+   Until v2 runs live a soak stands in: `npm run soak -- --capture a-b`
+   writes those ticks' input and `npm run bench` replays it (an unchanged
+   bundle reads within ±0.4% per module; 600 ticks, 8 rounds, a minute).
+   Against the same window's xxscreeps phases `economy` is within 8% of its
+   share, `world` and `atlas` about half (❓ the fake's plain properties for
+   the engine's getters); ❓ the live recorder still writes the `World`, not
+   this capture. `scripts/xxscreeps/ab.mjs` (whole soaks side by side,
+   ±0.6%) re-checks a claim in the engine.
 
 A speed claim is an interleaved A/B on the representative benchmark with
 identical Memory fingerprints, or a count (floods, lookups, allocations). A
@@ -720,7 +724,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 | reactor / Thorium / programme code | — | not ported; `Season/` is per season |
 | `tests/**` | — | not ported; §10 |
 | `scripts/xxscreeps/*` | `scripts/xx` | port and extend (§10.2) |
-| `scripts/capture-*.mjs` | `observe capture` | ✅ pulls the recorder ring; ⏳ the replay harness (§9.1) |
+| `scripts/capture-*.mjs` | `observe capture` | ✅ pulls the recorder ring; ✅ the replay harness over a soak's capture, `scripts/bench.mjs` (§9.1) |
 | `scripts/bundle, upload, cpuprofile, screeps-api`, `ship.sh` | `scripts/` | ✅ kept |
 | `scripts/observe.mjs` | `scripts/observe.mjs` | ✅ rewritten small: health, cpu, faults, switches, capture, wait |
 | `scripts/profile, probe, spar, wire-check, cli-smoke, adr-check` and the rest | — | not ported; `smoke.mjs` and `ceiling.mjs` are new |

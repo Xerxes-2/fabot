@@ -42,6 +42,7 @@ let cpu = null;
 (await runnerUsageChannel(shard, ours).subscribe()).listen((usage) => (cpu = usage?.cpu ?? null));
 const consoleLog = fs.openSync(join(out, "console.log"), "w");
 let consoleTick = null;
+let captureLog;
 (await getConsoleChannel(shard, ours).subscribe()).listen((message) => {
   let lines;
   try {
@@ -49,7 +50,9 @@ let consoleTick = null;
   } catch {
     lines = [String(message)];
   }
-  for (const line of lines) fs.writeSync(consoleLog, `[${consoleTick ?? "?"}] ${line}\n`);
+  for (const line of lines)
+    if (line.startsWith("#capture ")) fs.writeSync((captureLog ??= fs.openSync(join(out, "capture.jsonl"), "w")), line.slice(9) + "\n");
+    else fs.writeSync(consoleLog, `[${consoleTick ?? "?"}] ${line}\n`);
 });
 
 const nextTick = async (ms) => {

@@ -18,6 +18,8 @@
 //            respawn above; N2-N4 stand what Layout's plan (`scripts/plan`)
 //            builds by the node's level, the first spawn on its planned
 //            tile, and the node's stock in storage
+//   --capture  ticks a-b[,c-d] (b excluded) to capture.jsonl, the input
+//            `scripts/bench.mjs` replays
 //
 // Needs `npm run build` (dist/main.js) and `npm run xx -- setup` (the engine
 // and its template world, under $FABOT_XXSCREEPS_HOME). Writes
@@ -32,7 +34,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4] [--capture a-b,…]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -53,7 +55,7 @@ const listOnly = rest[0] === "--list";
 if (listOnly) rest.shift();
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node"].includes(a)) fail(usage);
+  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture"].includes(a)) fail(usage);
   const value = rest[++i];
   if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
   flags[a] = value;
@@ -78,6 +80,8 @@ const ticks = whole("--ticks", node ? 5000 : 3000, 1);
 const every = whole("--every", 100, 1);
 const seed = whole("--seed", 1, 0);
 const late = whole("--late", 0, 0);
+const windows = (flags["--capture"] ?? "").split(",").filter(Boolean).map((w) => w.split("-").map(Number));
+if (windows.some((w) => w.length !== 2 || !w.every(Number.isInteger))) fail(`--capture: ticks a-b[,c-d]\n${usage}`);
 if (flags["--room"] !== undefined && !/^[WE]\d+[NS]\d+$/.test(flags["--room"])) fail(`--room: "${flags["--room"]}" is not a room name`);
 if (flags["--run"] !== undefined && !/^[\w.-]+$/.test(flags["--run"])) fail("--run: letters, digits, dots, dashes");
 // The bundle that plays: ours as built, or another (v1's, a baseline's) to
@@ -135,13 +139,18 @@ writeFileSync(join(world, ".screepsrc.yaml"), screepsrc);
 writeFileSync(join(world, "package.json"), '{ "private": true }\n');
 writeFileSync(join(world, "seed.txt"), `${seed}\n`);
 mkdirSync(join(world, "bot"), { recursive: true });
-if (late === 0) cpSync(bot, join(world, "bot/main.js"));
+if (late === 0 && windows.length === 0) cpSync(bot, join(world, "bot/main.js"));
 else {
-  // The bundle's exports are getters, so the wait wraps it from outside.
+  // The bundle's exports are getters, so the wait and the capture wrap it
+  // from outside; the capture runs after the loop, out of the bot's clock.
   cpSync(bot, join(world, "bot/fabot.js"));
+  cpSync(join(HERE, "engine/capture.js"), join(world, "bot/capture.js"));
   writeFileSync(
     join(world, "bot/main.js"),
-    `const bot = require("fabot");\nlet first;\nmodule.exports.loop = () => {\n  first ??= Game.time;\n  if (Game.time >= first + ${late}) bot.loop();\n};\n`,
+    `const bot = require("fabot");\nconst capture = require("capture");\nconst windows = ${JSON.stringify(windows)};\nlet first;\n` +
+      `module.exports.loop = () => {\n  first ??= Game.time;\n  const t = Game.time - first;\n` +
+      `  const memory = windows.some(([a, b]) => t >= a && t < b) ? RawMemory.get() : null;\n` +
+      `  if (t >= ${late}) bot.loop();\n  if (memory !== null) console.log("#capture " + capture(memory));\n};\n`,
   );
 }
 
