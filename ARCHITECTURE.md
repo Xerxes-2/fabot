@@ -339,13 +339,12 @@ by a narrow input:
 ```fsharp
 type Side = { Bodies: Fighter list; Ramparts: Map<Pos, int>; Towers: Tower list }  // rampart hits
 type Terrain = { Weight: int; RunOff: int }     // a summary, not the room's tiles
-val outcome : ours: Side -> theirs: Side -> terrain: Terrain -> Outcome
-// Outcome = Win of ticks * Losses | Kite of ticks | Lose
-val cheapestWin : ours: Side -> affordable: Body list -> theirs: Side -> terrain: Terrain -> Body list option
+val outcome : stance: Stance -> ours: Side -> theirs: Side -> terrain: Terrain -> Outcome
+// Outcome = Win of ticks * Losses | Kite of ticks | Lose; Stance = Hold | Standoff
+val cheapestWin : stance: Stance -> ours: Side -> affordable: Body list -> theirs: Side -> terrain: Terrain -> Body list option
 ```
 
 - `cheapestWin` adds to the bodies already standing (`ours`) before it casts.
-
 - `cheapestWin` is called once at open and once per event that changes a side.
   It chooses the body set; the engagement's `Plan` records the tactic the
   outcome implies, and `Predicted` records the outcome for §10.1.
@@ -729,7 +728,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 | `Decide/Pool, Matcher, Planner, Quota, Spawns, Price, Bodies` | `Core/Economy/*` | ✅ one world pool, matcher, quota and casts, wired as the `economy` module (`Economy/Run.fs`): match, cast, act in range, wish toward the target; assignments in `Memory.v2.assignments`. The RCL2–4 chain: a harvester on each source's post, haulers from built containers, the controller's buffer and its upgraders, the surplus split between upgraders and workers after the reserve (§5, `declarations.reserve`). Declared outposts (`declarations.outposts`) are worked while no hostile in `sightings` outlives the tick. Known gaps: claims are not yet declared; cross-room travel prices each room between at a room's side |
 | `Decide/Labs, Layout` | `Economy`, `Layout` | Layout ✅ in the tick after `economy`: a standing plan per room, sites in plan order as the level allows, towers on hostiles. Labs ⏳ |
 | `Types/Colonies.fs` declarations, `allies` | `declarations` data | not ported as code; the current rooms seed the first `declarations` |
-| `Decide/Facts.fs:2883–4056, 1038–1582, 2153–2196`, `Fighter.fs`, `Arrival.fs` | `Exchange` | ✅ `Core/Exchange/*`; `npm run exchange` is §10.1's generated set. Known gaps: a stance (`Hold`) is not an input |
+| `Decide/Facts.fs:2883–4056, 1038–1582, 2153–2196`, `Fighter.fs`, `Arrival.fs` | `Exchange` | ✅ `Core/Exchange/*`; `npm run exchange` is §10.1's generated set |
 | `Decide/Emitter.fs` strike/heal/glue | `Fight.Tactics` | port the functions, not the dispatch |
 | `Decide/Caster.fs` | `Fight.Casting` | port |
 | `Decide/Operations.fs`, `Types/Operation.fs` | — | shape only: `OpRecord`'s fields inform `Engagement`, its bidding informs `Strategy`. No code ports; re-read when `Siege` is due |

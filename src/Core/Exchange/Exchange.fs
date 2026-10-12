@@ -31,6 +31,13 @@ type Outcome =
 
 type Body = BodyPart list
 
+/// Holding a post the raid must come to, every pair stands at a swing's
+/// range; else the faster side picks the range.
+[<RequireQualifiedAccess>]
+type Stance =
+    | Hold
+    | Standoff
+
 /// A cast body lands no sooner than half a room's walk; no fight is read past
 /// two rooms' walk.
 let private castWalk = Engine.roomSide / 2
@@ -580,16 +587,17 @@ let private struckBack (price: Price) (damage: int) (struck: int) (swingers: int
         int (hits * net / (hits - int64 swingers) - net)
 
 /// A body that kites walks off its rampart.
-let private staysOn terrain (raid: Foe list) (fighter: Fighter) (tile: Pos) =
-    raid
-    |> List.forall (fun h ->
-        not (strikes h.F)
-        || (match standoffPick terrain raid fighter h with
-            | _, Picker.Theirs -> true
-            | range, Picker.Closes -> rangeTo tile h.F |> Option.exists (fun r -> r <= range)
-            | _, Picker.Kites -> false))
+let private staysOn terrain stance (raid: Foe list) (fighter: Fighter) (tile: Pos) =
+    stance = Stance.Hold
+    || raid
+       |> List.forall (fun h ->
+           not (strikes h.F)
+           || (match standoffPick terrain raid fighter h with
+               | _, Picker.Theirs -> true
+               | range, Picker.Closes -> rangeTo tile h.F |> Option.exists (fun r -> r <= range)
+               | _, Picker.Kites -> false))
 
-let private onRamparts terrain (ours: Side) raid =
+let private onRamparts terrain stance (ours: Side) raid =
     ours.Bodies
     |> List.mapFold
         (fun held (fighter: Fighter) ->
@@ -598,7 +606,7 @@ let private onRamparts terrain (ours: Side) raid =
                 |> Option.bind (fun at ->
                     Map.tryFind at ours.Ramparts |> Option.map (fun hits -> at, hits))
             with
-            | Some(tile, hits) when staysOn terrain raid fighter tile ->
+            | Some(tile, hits) when staysOn terrain stance raid fighter tile ->
                 { fighter with StrikesBack = 0 }, (tile, hits) :: held
             | _ -> fighter, held)
         []
@@ -639,7 +647,7 @@ let private arrivalOf (terrain: Terrain) (fighters: Fighter list) (raid: Fighter
 
 /// Our towers strike the raid until a weapon of either side reaches: the
 /// nearest pair's gap, both walking in, a cast body landing at `castWalk`.
-let private approachOf (terrain: Terrain) (fighters: Fighter list) (raid: Fighter list) =
+let private approachOf (terrain: Terrain) stance (fighters: Fighter list) (raid: Fighter list) =
     let closing (f: Fighter) (h: Fighter) =
         match f.Pos, h.Pos |> Option.bind (fun at -> rangeTo at f) with
         | None, _ -> Some(float castWalk)
@@ -647,7 +655,13 @@ let private approachOf (terrain: Terrain) (fighters: Fighter list) (raid: Fighte
         | Some _, Some range ->
             let gap = float (max 0 (range - max f.Reach h.Reach))
 
-            match pace terrain.Weight f.Gait, pace terrain.Weight h.Gait with
+            let walks =
+                if stance = Stance.Hold then
+                    None
+                else
+                    pace terrain.Weight f.Gait
+
+            match walks, pace terrain.Weight h.Gait with
             | Some ours, Some theirs -> Some(gap * float (ours * theirs) / float (ours + theirs))
             | Some ticks, None
             | None, Some ticks -> Some(gap * float ticks)
@@ -673,12 +687,27 @@ let private towersOn (towers: Tower list) (raid: Fighter list) =
     | _, [] -> List.length loaded * Engine.towerAttackAt Engine.towerFalloffRange
     | _, striking -> striking |> List.map on |> List.min
 
-let private exchange (ours: Side) (theirs: Side) (terrain: Terrain) : Outcome =
+let private exchange stance (ours: Side) (theirs: Side) (terrain: Terrain) : Outcome =
     let raid = theirs.Bodies |> List.mapi (fun i f -> { At = i; F = f })
-    let fighters, ramparts = onRamparts terrain ours raid
-    let mine, rangeOf, rows = rangesBetween terrain raid fighters
+    let fighters, ramparts = onRamparts terrain stance ours raid
+
+    let mine, rangeOf, rows =
+        match stance with
+        | Stance.Hold ->
+            let swing = List.map (fun _ -> Engine.meleeRange) fighters
+
+            List.zip swing swing,
+            (fun _ -> Engine.meleeRange),
+            raid |> List.filter (fun h -> strikes h.F) |> List.map (fun h -> h, swing)
+        | Stance.Standoff -> rangesBetween terrain raid fighters
+
     let back = hitBack theirs fighters (List.map fst mine) rows
-    let kited = theirs.Bodies |> List.filter strikes
+
+    let kited =
+        match stance with
+        | Stance.Hold -> []
+        | Stance.Standoff -> theirs.Bodies |> List.filter strikes
+
     let pairs = List.zip fighters mine
 
     let towers = towersOn ours.Towers theirs.Bodies
@@ -694,7 +723,7 @@ let private exchange (ours: Side) (theirs: Side) (terrain: Terrain) : Outcome =
             })
 
     let dealt = towers + List.sumBy _.Deals bodies
-    let approach = approachOf terrain fighters theirs.Bodies
+    let approach = approachOf terrain stance fighters theirs.Bodies
 
     let settle horizon (price: Price) =
         let struck = struckBack price dealt back.Struck back.Swingers
@@ -753,10 +782,10 @@ let private exchange (ours: Side) (theirs: Side) (terrain: Terrain) : Outcome =
 
 /// Towers not ours strike the kite ground and the ring alike, refilled, and
 /// nothing prices them: no side of ours wins under them.
-let outcome (ours: Side) (theirs: Side) (terrain: Terrain) : Outcome =
+let outcome (stance: Stance) (ours: Side) (theirs: Side) (terrain: Terrain) : Outcome =
     if theirs.Bodies.IsEmpty then Win(0, { Dead = 0; Hits = 0 })
     elif not theirs.Towers.IsEmpty then Lose
-    else exchange ours theirs terrain
+    else exchange stance ours theirs terrain
 
 /// Sets of one body repeated up to its count in `affordable`, cheapest first:
 /// the simple rank a priced one (spawn time, walk, kill) would replace.
@@ -770,6 +799,7 @@ let private rank (affordable: Body list) : Body list list =
         List.sumBy Engine.bodyCost set, List.sumBy List.length set, List.length set)
 
 let cheapestWin
+    (stance: Stance)
     (ours: Side)
     (affordable: Body list)
     (theirs: Side)
@@ -779,6 +809,7 @@ let cheapestWin
     |> List.tryFind (fun set ->
         match
             outcome
+                stance
                 { ours with
                     Bodies = ours.Bodies @ List.map cast set
                 }

@@ -67,7 +67,7 @@ let tests =
         [
             testPropertyWithConfig config "a fight won leaves one of our bodies standing"
             <| Prop.forAll (Arb.fromGen (Gen.zip3 side side terrain)) (fun (ours, theirs, ground) ->
-                match outcome ours (bare theirs) ground with
+                match outcome Stance.Standoff ours (bare theirs) ground with
                 | Win(_, losses) -> losses.Dead < List.length ours.Bodies
                 | Kite _
                 | Lose -> true)

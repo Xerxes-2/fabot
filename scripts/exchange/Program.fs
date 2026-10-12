@@ -63,6 +63,7 @@ let main _ =
         let kind, ticks, losses =
             match
                 outcome
+                    Stance.Standoff
                     (side (sample.GetProperty "ours"))
                     (side (sample.GetProperty "theirs"))
                     {
