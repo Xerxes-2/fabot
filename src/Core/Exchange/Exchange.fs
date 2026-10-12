@@ -219,74 +219,112 @@ let private prices terrain theirs raid horizon rangeOf : Price list =
 let private outHeals (price: Price) (ourDamage: int) =
     ourDamage > price.Healing && (price.Tough = 0 || ourDamage > price.ToughHealing)
 
-/// Each clock breaks its ramparts first at the whole damage, ours at the
-/// raid's and what its dismantlers take a tick (`broken`).
-let private wonAgainst (price: Price) ourDamage ourHealing (ourShield, broken) ourHits =
-    if price.Damage = 0 then
-        not price.Breaches || outHeals price ourDamage
-    elif not (outHeals price ourDamage) then
-        false
-    elif price.Damage <= ourHealing then
-        true
-    elif price.Tough = 0 && price.Shield = 0 && ourShield = 0 then
-        int64 price.Hits * int64 (price.Damage - ourHealing) < int64 ourHits
-                                                               * int64 (ourDamage - price.Healing)
-    else
-        let ours =
-            float price.Shield / float ourDamage
-            + (if price.Tough = 0 then
-                   0.0
-               else
-                   float price.Tough / float (ourDamage - price.ToughHealing))
-            + float price.Hits / float (ourDamage - price.Healing)
+type private Focused =
+    {
+        Deals: int
+        Heals: int
+        Hits: int
+        /// What its own swing is struck back a tick, focused or not.
+        Back: int
+    }
 
-        let theirs =
-            float ourShield / float (price.Damage + broken)
-            + float ourHits / float (price.Damage - ourHealing)
+type private Fight =
+    {
+        Won: bool
+        /// None where neither side ends the other.
+        Ticks: float option
+        Losses: Losses
+    }
 
-        // A tie is no win, whatever the float rounding of the two sums.
-        ours < theirs * (1.0 - 1e-9)
+/// The raid's layers (ramparts, TOUGH, hits) struck at `dealt` for `span`
+/// ticks: Ok the tick it falls, else what is left of them.
+let private spend (price: Price) dealt span (layers: float list) =
+    let rec go (layers: float list) rates span spent =
+        match layers, rates with
+        | layer :: rest, rate :: rates when layer <= 0.0 || rate > 0.0 && layer / rate < span ->
+            let took = if layer <= 0.0 then 0.0 else layer / rate
 
-let private fightTicks
+            go rest rates (span - took) (spent + took)
+            |> Result.mapError (fun left -> 0.0 :: left)
+        | layer :: rest, rate :: _ ->
+            Error((if rate <= 0.0 then layer else layer - span * rate) :: rest)
+        | _ -> Ok spent
+
+    go layers (List.map float [ dealt; dealt - price.ToughHealing; dealt - price.Healing ]) span 0.0
+
+/// Past our ramparts (`broken` is what its dismantlers take a tick) the raid
+/// kills ours one at a time, fewest hits first; ours fight with those standing.
+let private focusedAgainst
     (price: Price)
-    ourDamage
-    ourHealing
+    beside
+    (bodies: Focused list)
     (ourShield, broken)
-    ourHits
-    : float option =
+    : Fight =
+    let dealt (alive: (Focused * float) list) =
+        beside + List.sumBy (fst >> _.Deals) alive
+
+    let whole = bodies |> List.map (fun b -> b, float b.Hits)
+    let total = price.Damage + List.sumBy _.Back bodies
+
     let price =
         if price.Shield + price.Tough + price.Hits = 0 then
             { price with Hits = price.Razing }
         else
             price
 
-    let ours =
-        if not (outHeals price ourDamage) then
-            None
-        else
-            Some(
-                float price.Shield / float ourDamage
-                + (if price.Tough = 0 then
-                       0.0
-                   else
-                       float price.Tough / float (ourDamage - price.ToughHealing))
-                + float price.Hits / float (ourDamage - price.Healing)
-            )
+    let worn span (alive: (Focused * float) list) =
+        alive |> List.map (fun (b, left) -> b, max 0.0 (left - float b.Back * span))
 
-    let theirs =
-        if price.Damage <= ourHealing then
-            None
-        else
-            Some(
-                float ourShield / float (price.Damage + broken)
-                + float ourHits / float (price.Damage - ourHealing)
-            )
+    let ends won ticks dead (standing: (Focused * float) list) =
+        {
+            Won = won
+            Ticks = ticks
+            Losses =
+                {
+                    Dead = dead
+                    Hits = List.sumBy _.Hits bodies - int (List.sumBy snd standing)
+                }
+        }
 
-    match ours, theirs with
-    | Some a, Some b -> Some(min a b)
-    | Some a, None
-    | None, Some a -> Some a
-    | None, None -> None
+    let rec phase layers (alive: (Focused * float) list) elapsed dead =
+        match alive with
+        | [] -> ends false (Some elapsed) dead []
+        | (focus, left) :: rest ->
+            let rate = float (price.Damage + focus.Back - List.sumBy (fst >> _.Heals) alive)
+            let span = if rate <= 0.0 then infinity else left / rate
+
+            match spend price (dealt alive) span layers with
+            | Ok t ->
+                ends true (Some(elapsed + t)) dead ((focus, left - t * max 0.0 rate) :: worn t rest)
+            | Error _ when span = infinity -> ends false None dead alive
+            | Error layers -> phase layers (worn span rest) (elapsed + span) (dead + 1)
+
+    let layers = List.map float [ price.Shield; price.Tough; price.Hits ]
+    let order = List.sortBy (fun (b: Focused, _) -> b.Hits) whole
+
+    let fight =
+        let breaks = total + broken
+
+        match ourShield with
+        | 0 -> phase layers order 0.0 0
+        | _ ->
+            let span =
+                if breaks <= 0 then
+                    infinity
+                else
+                    float ourShield / float breaks
+
+            match spend price (dealt whole) span layers with
+            | Ok t -> ends true (Some t) 0 whole
+            | Error _ when span = infinity -> ends false None 0 whole
+            | Error layers -> phase layers (worn span order) span 0
+
+    if total = 0 then
+        { fight with
+            Won = not price.Breaches || outHeals price (dealt whole)
+        }
+    else
+        fight
 
 /// The ticks `hostile` takes, struck alone at `damage`, net of its side's
 /// heal, to fall behind `ours` on this ground, lose its last ATTACK, or die.
@@ -609,34 +647,6 @@ let private towersOn (towers: Tower list) (raid: Fighter list) =
     | _, [] -> List.length loaded * Engine.towerAttackAt Engine.towerFalloffRange
     | _, striking -> striking |> List.map on |> List.min
 
-let private lossesOver (fighters: Fighter list) (price: Price) healing (shield, broken) clock =
-    let rate = price.Damage - healing
-
-    let shieldTicks =
-        if shield = 0 then
-            0.0
-        else
-            float shield / float (price.Damage + broken)
-
-    let total = fighters |> List.sumBy _.Hits
-
-    let lost =
-        if rate <= 0 then
-            0
-        else
-            min total (int (max 0.0 (clock - shieldTicks) * float rate))
-
-    let dead =
-        fighters
-        |> List.map _.Hits
-        |> List.sort
-        |> List.scan (+) 0
-        |> List.tail
-        |> List.filter (fun hits -> hits <= lost)
-        |> List.length
-
-    { Dead = dead; Hits = lost }
-
 let private exchange (ours: Side) (theirs: Side) (terrain: Terrain) : Outcome =
     let raid = theirs.Bodies |> List.mapi (fun i f -> { At = i; F = f })
     let fighters, ramparts = onRamparts terrain ours raid
@@ -645,24 +655,41 @@ let private exchange (ours: Side) (theirs: Side) (terrain: Terrain) : Outcome =
     let kited = theirs.Bodies |> List.filter strikes
     let pairs = List.zip fighters mine
 
-    let dealt =
-        towersOn ours.Towers theirs.Bodies
-        + List.sumBy (fun (f, (range, _)) -> damageAt f range) pairs
+    let towers = towersOn ours.Towers theirs.Bodies
 
-    let healed = List.sumBy (fun (f, (_, range)) -> healAt f range) pairs
-    let hits = fighters |> List.sumBy _.Hits
+    let bodies =
+        pairs
+        |> List.map (fun (f, (range, healRange)) ->
+            {
+                Deals = damageAt f range
+                Heals = healAt f healRange
+                Hits = f.Hits
+                Back = 0
+            })
+
+    let dealt = towers + List.sumBy _.Deals bodies
 
     let settle horizon (price: Price) =
-        let damage = dealt + struckBack price dealt back.Struck back.Swingers
+        let struck = struckBack price dealt back.Struck back.Swingers
+        let damage = dealt + struck
+
+        let bodies =
+            List.map2
+                (fun (b: Focused) taken ->
+                    { b with
+                        Back = takenWhile price damage taken back.Strikers
+                    })
+                bodies
+                back.Taken
 
         let priced =
             { price with
-                Damage = price.Damage + takenWhile price damage (List.sum back.Taken) back.Strikers
+                Damage = price.Damage + List.sumBy _.Back bodies
             }
 
         let shield = List.sumBy snd ramparts, brokenBy terrain horizon price ramparts
-        let clock = fightTicks priced damage healed shield hits
-        let ticks = clock |> Option.map (ceil >> int) |> Option.defaultValue longest
+        let fight = focusedAgainst price (towers + struck) bodies shield
+        let ticks = fight.Ticks |> Option.map (ceil >> int) |> Option.defaultValue longest
 
         let outcome =
             if priced.Damage = 0 && not kited.IsEmpty then
@@ -672,16 +699,8 @@ let private exchange (ours: Side) (theirs: Side) (terrain: Terrain) : Outcome =
                     Kite ticks
                 else
                     Lose
-            elif wonAgainst priced damage healed shield hits then
-                Win(
-                    ticks,
-                    lossesOver
-                        fighters
-                        priced
-                        healed
-                        shield
-                        (Option.defaultValue (float longest) clock)
-                )
+            elif fight.Won then
+                Win(ticks, fight.Losses)
             else
                 Lose
 
