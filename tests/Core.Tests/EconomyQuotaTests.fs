@@ -390,11 +390,13 @@ let tests =
                 |> Array.forall (fun ground ->
                     ground.Sources
                     |> Array.forall (fun s ->
-                        p.Seats
-                        |> List.filter (fun seat ->
-                            seat.Pattern = Bodies.Pattern.Harvester && seat.At = s.Pos)
-                        |> List.length
-                        <= s.Seats))
+                        let cast =
+                            p.Seats
+                            |> List.filter (fun seat ->
+                                seat.Pattern = Bodies.Pattern.Harvester && seat.At = s.Pos)
+                            |> List.length
+
+                        s.Seats |> Option.forall (fun seats -> cast <= seats)))
 
             testPropertyWithConfig
                 config

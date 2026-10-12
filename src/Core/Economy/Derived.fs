@@ -40,7 +40,7 @@ type SourceFact =
         Post: Pos option
         Container: string option
         Link: string option
-        Seats: int
+        Seats: int option
         Energy: int
         /// What every income and flow is read off, never `Rate` alone.
         Dug: int
@@ -143,7 +143,7 @@ type Ground =
         /// The engine accepts our reservation or claim on its controller.
         Reservable: bool
         OurReservation: int
-        UpgradeSeats: int
+        UpgradeSeats: int option
         Buffer: StoreFact option
         Feed: StoreFact option
         Links: LinkFact[]
@@ -225,11 +225,11 @@ let private held (room: Room) =
     | Some c -> c.Owner <> Nobody || Option.isSome c.Reservation
     | None -> false
 
-/// Unbounded where the Atlas counts none: not knowing is no bound.
+/// `None` where the Atlas counts none: unknown, not zero.
 let private seatsAt (atlas: Atlas) (range: int) (target: Pos) =
     match List.length (Atlas.seats atlas Grid.One range target) with
-    | 0 -> System.Int32.MaxValue
-    | n -> n
+    | 0 -> None
+    | n -> Some n
 
 /// So the dig finishes the source inside its regeneration window despite the
 /// ticks a body loses walking and dropping its load.
@@ -238,7 +238,7 @@ let harvestSpareWork = 1
 let digWork (rate: int) =
     (rate + Engine.harvestPerWork - 1) / Engine.harvestPerWork + harvestSpareWork
 
-let dugAt (capacity: int) (home: bool) (rate: int) (posted: bool) (seats: int) : int =
+let dugAt (capacity: int) (home: bool) (rate: int) (posted: bool) (seats: int option) : int =
     let body =
         if not posted then
             Bodies.sized Pattern.Worker Engine.maxBodyParts capacity
@@ -250,10 +250,7 @@ let dugAt (capacity: int) (home: bool) (rate: int) (posted: bool) (seats: int) :
     match body with
     | Some body ->
         // Not knowing a source's seats is no crew.
-        let diggers =
-            if posted then 1
-            elif seats = System.Int32.MaxValue then 0
-            else seats
+        let diggers = if posted then 1 else Option.defaultValue 0 seats
 
         min rate (diggers * partCountIn body Work * Engine.harvestPerWork)
     | None -> 0
@@ -529,9 +526,9 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
             | Some(user, ticks) when user = me -> ticks
             | _ -> 0
         UpgradeSeats =
-            room.Controller
-            |> Option.map (fun c -> seatsAt atlas (Task.rangeOf (Task.Upgrade c.Id)) c.Pos)
-            |> Option.defaultValue 0
+            match room.Controller with
+            | Some c -> seatsAt atlas (Task.rangeOf (Task.Upgrade c.Id)) c.Pos
+            | None -> Some 0
         Buffer = buffer
         Feed = feed |> Option.orElse buffer
         Links = links

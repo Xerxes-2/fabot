@@ -460,17 +460,19 @@ let private spendDemands
         let crews =
             ground.Sources
             |> Array.sumBy (fun s ->
-                if Option.isNone s.Container && s.Seats < System.Int32.MaxValue then
-                    s.Seats - (if Option.isSome s.Post then 1 else 0)
-                else
-                    0)
+                match s.Seats with
+                | Some seats when Option.isNone s.Container ->
+                    seats - (if Option.isSome s.Post then 1 else 0)
+                | _ -> 0)
 
         [|
             seated
                 Pattern.Worker
                 at
                 (max spend (floorBodies * bodyWork) + crews * bodyWork)
-                (max floorBodies ground.UpgradeSeats + crews)
+                (match ground.UpgradeSeats with
+                 | Some seats -> max floorBodies seats + crews
+                 | None -> System.Int32.MaxValue)
                 (fun body -> Some(float (partsOf Pattern.Worker body) * life))
             seated Pattern.Upgrader at (upgraders * upgraderWork) upgraders (fun body ->
                 Some(float (partsOf Pattern.Upgrader body) * life))

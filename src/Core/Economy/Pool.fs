@@ -187,7 +187,7 @@ let pool (derived: Derived) : Offer[] =
                     s.Pos
                     (float s.Rate)
                     (Capacity.Seated(
-                        s.Seats,
+                        Option.defaultValue System.Int32.MaxValue s.Seats,
                         (if Option.isSome s.Post then 1 else 0),
                         (s.Rate + Engine.harvestPerWork - 1) / Engine.harvestPerWork
                     ))
@@ -242,7 +242,7 @@ let pool (derived: Derived) : Offer[] =
         | Some c when c.Owner = Ours ->
             let capacity =
                 Capacity.Seated(
-                    ground.UpgradeSeats,
+                    Option.defaultValue System.Int32.MaxValue ground.UpgradeSeats,
                     0,
                     if c.Level >= Engine.controllerMaxLevel then
                         Engine.maxUpgradePerTick
