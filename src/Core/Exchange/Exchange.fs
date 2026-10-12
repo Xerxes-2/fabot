@@ -387,7 +387,8 @@ let private keepsOff (terrain: Terrain) raid (fighter: Fighter) (hostile: Foe) =
 /// swings and closing costs it nothing its shot keeps off, or its swing is its weapon.
 let private closesIn (fighter: Fighter) (hostile: Fighter) =
     hostile.Attack > 0
-    && (damageAt fighter Engine.rangedRange >= damageAt fighter Engine.meleeRange
+    && (hostile.Invader && hostile.Heal = 0
+        || damageAt fighter Engine.rangedRange >= damageAt fighter Engine.meleeRange
         || Engine.attackPower * hostile.Attack >= Engine.rangedAttackPower * hostile.Ranged)
 
 [<RequireQualifiedAccess>]

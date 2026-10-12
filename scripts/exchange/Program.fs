@@ -1,7 +1,7 @@
 /// The generated set's predictions (`ARCHITECTURE.md` §10.1, `npm run exchange`).
 /// Reads samples on stdin as JSON
 /// `[{ id, room, terrain: { weight, runOff }, ours: side, theirs: side }]`, a
-/// side `{ bodies: [{ parts, boosts, hits, x, y }], towers: [{ x, y, energy }],
+/// side `{ bodies: [{ parts, boosts, hits, x, y, invader? }], towers: [{ x, y, energy }],
 /// ramparts: [{ x, y, hits }] }` (parts head first by engine name, boosts by
 /// compound or ""), and writes `[{ id, kind, ticks, dead, hits }]`.
 module Fabot.Exchange.Program
@@ -47,7 +47,11 @@ let main _ =
                                 parts
                                 (each b "boosts")
 
-                        Fighter.ofParts parts boosts (int b "hits") (Some(pos b)))
+                        let invader, flag = b.TryGetProperty "invader"
+
+                        { Fighter.ofParts parts boosts (int b "hits") (Some(pos b)) with
+                            Invader = invader && flag.GetBoolean()
+                        })
                 Ramparts =
                     each e "ramparts" |> List.map (fun r -> pos r, int r "hits") |> Map.ofList
                 Towers =

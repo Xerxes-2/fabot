@@ -70,11 +70,15 @@ const KINDS = {
   skirmisher: () => ({ ranged_attack: between(1, 4), heal: between(1, 3) }),
   tank: () => ({ tough: between(2, 6), attack: between(2, 6) }),
   dismantler: () => ({ work: between(2, 8) }),
+  brawler: () => ({ attack: between(1, 2), ranged_attack: between(3, 6) }),
 };
 // Head first as a body is cast: TOUGH, MOVE, the rest, HEAL last.
 const ORDER = ["tough", "move", "work", "attack", "ranged_attack", "heal"];
-function hostile() {
-  const counts = KINDS[pick(Object.keys(KINDS))]();
+// The Invader's AI drives a body with HEAL as a healer, which with no one
+// hurt suicides: its raids strike.
+const INVADERS = ["melee", "ranged", "tank", "brawler"];
+function hostile(kinds) {
+  const counts = KINDS[pick(kinds)]();
   const weight = Object.values(counts).reduce((a, b) => a + b, 0);
   counts.move = pick([weight, Math.ceil(weight / 2), Math.max(1, Math.floor(weight / 4))]);
   const parts = ORDER.flatMap((p) => repeat(p, counts[p] ?? 0));
@@ -105,7 +109,8 @@ function groundOf(kind) {
   return Array.from({ length: 50 }, (_, y) => Array.from({ length: 50 }, (_, x) => (wall(x, y) ? "1" : cell)).join(""));
 }
 // A room is ours (our controller, so our towers fire) or, one in ten, theirs;
-// its owner's towers stand and its bodies may start on its ramparts.
+// its owner's towers stand and its bodies may start on its ramparts. A raid
+// in our room is, one in four, the NPC Invader's, run by the engine's AI.
 const sided = (owner, side, bodies, row) => ({
   bodies,
   towers: owner === side ? Array.from({ length: between(0, 2) }, (_, k) => ({ x: 20 + 8 * k, y: row, energy: 1000 })) : [],
@@ -116,7 +121,9 @@ const samples = Array.from({ length: count }, (_, i) => {
   const room = `E${20 + (i % batch) % 10}S${20 + Math.floor((i % batch) / 10)}`;
   const terrain = pick(Object.keys(TERRAINS));
   const owner = random() < 0.1 ? "theirs" : "ours";
-  const theirs = Array.from({ length: between(1, 4) }, hostile).map((b, k) => ({ ...b, x: 21 + 2 * k, y: 15 }));
+  const invader = owner === "ours" && random() < 0.25;
+  const kinds = invader ? INVADERS : Object.keys(KINDS);
+  const theirs = Array.from({ length: between(1, 4) }, () => hostile(kinds)).map((b, k) => ({ ...b, invader, x: 21 + 2 * k, y: 15 }));
   const ours = OURS[i % 2].map((parts, k) => ({ parts, boosts: parts.map(() => ""), hits: 100 * parts.length, x: 24 + 2 * k, y: ROW }));
   return {
     id: `s${i}`,
@@ -209,7 +216,7 @@ const quantiles = (xs) => {
 };
 const describe = ({ s, p, a }) =>
   `  ${s.id} ${s.kind}: ${s.theirs.bodies.map((b) => b.parts.length + (b.boosts[0] ? "*" : "") + b.parts.filter((x) => x !== "move").map((x) => x[0]).join("")).join(" ")}` +
-  ` ${s.owner === "ours" ? "" : "their room, "}towers ${s[s.owner].towers.length}, ramparts ${s[s.owner].ramparts.length}; predicted ${p.kind} ${p.ticks}t, ${outcome(a)}${a.ticks === null ? "" : ` ${a.ticks}t`}`;
+  ` ${s.owner === "ours" ? "" : "their room, "}${s.theirs.bodies[0].invader ? "Invader, " : ""}towers ${s[s.owner].towers.length}, ramparts ${s[s.owner].ramparts.length}; predicted ${p.kind} ${p.ticks}t, ${outcome(a)}${a.ticks === null ? "" : ` ${a.ticks}t`}`;
 const lines = [
   `exchange generated set: ${count} duels, seed ${seed}, ${ticks} ticks at most`,
   `predicted→actual: ${Object.entries(table).sort().map(([k, n]) => `${k} ${n}`).join(", ")}`,

@@ -25,6 +25,7 @@ type Fighter =
         Gait: FatigueFactor
         /// Zero on a rampart, where a swing at it lands on the rampart.
         StrikesBack: int
+        Invader: bool
     }
 
 let ofParts (body: BodyPart list) (boosts: Boost list) (hits: int) (pos: Pos option) : Fighter =
@@ -51,6 +52,7 @@ let ofParts (body: BodyPart list) (boosts: Boost list) (hits: int) (pos: Pos opt
                 Moves = power Move
             }
         StrikesBack = Engine.attackPower * attack
+        Invader = false
     }
 
 let cast (body: BodyPart list) : Fighter =

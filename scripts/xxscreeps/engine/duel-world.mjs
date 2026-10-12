@@ -21,6 +21,8 @@ import { StructureController, updateRoomStatus } from "xxscreeps/mods/classic/co
 import * as ControllerProc from "xxscreeps/mods/classic/controller/processor.js";
 import * as Tower from "xxscreeps/mods/classic/defense/tower.js";
 import * as Rampart from "xxscreeps/mods/classic/defense/rampart.js";
+import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
+import { activateNPC } from "xxscreeps/mods/npc/processor.js";
 
 const [samplesPath, ourName, theirName] = process.argv.slice(2);
 const samples = JSON.parse(fs.readFileSync(samplesPath, "utf8"));
@@ -80,7 +82,8 @@ for (const s of samples) {
         }
         s[side].bodies.forEach((b, i) => {
           const body = b.parts.map((type, k) => ({ type, hits: 100, boost: b.boosts[k] || undefined }));
-          const creep = Creep.createWithBody(new RoomPosition(b.x, b.y, s.room), body, `${s.id}-${side}-${i}`, owner);
+          const creep = Creep.createWithBody(new RoomPosition(b.x, b.y, s.room), body, `${s.id}-${side}-${i}`, b.invader ? kInvaderUserId : owner);
+          if (b.invader) activateNPC(room, kInvaderUserId);
           creep["#ageTime"] = time + 1500;
           room["#insertObject"](placed(creep));
         });
