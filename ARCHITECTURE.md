@@ -133,7 +133,7 @@ cold tick never spends more than ❓ 60% of the limit.
 | `World` | this tick's facts, one record | Game | — | port, trim |
 | `Atlas` | geometry in two layers: the **room graph** (which rooms a route crosses, highway cost, rooms to avoid, hops) and the **tile grid** per room (terrain, floods, seats, work areas, first steps). Every tile query takes a **footprint** (1×1 today, 2×2 for a formation) | World, `intel.rooms` for avoided rooms | tick cache | port, add the graph layer, widen the query |
 | `Economy` | task pool, planner, matcher, quota, spawns, labs, terminals, market | World, Atlas, declarations, `State.Economy` | tasks, casts, `State.Economy` | port, trim (§5) |
-| `Layout` | construction and tower plans | World, Atlas | sites, tower intents | port |
+| `Layout` | construction and tower plans | World, Atlas, declarations (outposts' containers and roads) | sites, tower intents | port |
 | `Exchange` | who wins: pure fight arithmetic | bodies, terrain | — | port from `Facts.fs:2883–4056, 1038–1582`, `Fighter.fs`, `Arrival.fs`; narrow the input |
 | `Fight` | tracker, engagements (one kind per file), tactics, casting | World, Atlas, Exchange, `State.Fight` | fight intents, casts, declarations, `State.Fight` | **new** (§6) |
 | `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Exchange, `State.Intel`, `Season` | declarations, opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
@@ -183,7 +183,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `intel.rooms` | room → last seen, owner, structures summary, defence estimate, sources, controller | Strategy | segment | hundreds of rooms; read on a due tick |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
 | `observe.*` | health, faults, per-module CPU, counters | Main, then Observe | segment 1 | operator; calibrates the benchmark |
-| `sightings` | room → last seen tick + ids | World | heap | vision grace |
+| `sightings` | room → last seen tick + ids, and each hostile's death tick (seen tick + its ticksToLive) | World | heap | vision grace; when a stood-down outpost is clear |
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
 
 Rules:
@@ -703,7 +703,7 @@ empty:
 | Milestone | What | Exit |
 |---|---|---|
 | M1 economy | the rest of v1's economy mechanisms | the seat-extreme soak beats v1's bundle in both classes, on a second seed |
-| M1b outposts | declared outposts: reservation, remote harvest and haul, before M2 because RCL6+ structures spend more than a home's two sources give. No fighting before M3: a hostile in an outpost stands it down until the room is clear (the owner's choice over porting a guard early) | node E1 (with timed Invader waves): each outpost nets positive after its bodies and its stand-downs |
+| M1b outposts | declared outposts: reservation, remote harvest and haul, before M2 because RCL6+ structures spend more than a home's two sources give. No fighting before M3: an armed hostile or an Invader core seen in an outpost stands it down until every one seen there has run out its life (`sightings`; the owner's choice over porting a guard early, and over a claimer probing a blind room) | node E1 (with timed Invader waves): each outpost nets positive after its bodies and its stand-downs |
 | M2 structures | node builder (N1–N4) ✅, links ✅ (the controller's and the longest-way source's first: +5–17k worth over 20k ticks on N4; hub-first broke even, as v1's arithmetic said), labs, factory, the RCL8 set | each node beats the economy without that structure |
 | M3 defence | `Exchange`, `Defend`, the first tactics, casting, the self-play harness | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
 | M4 live | v2 replaces v1 | ❓ the owner decides from progress |
