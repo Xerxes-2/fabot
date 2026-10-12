@@ -453,6 +453,10 @@ benchmark meets three requirements:
    the same window; until it is, the harness is fixed, not the code.
    xxscreeps (§10) runs the same isolate and heap limit as live and may
    calibrate better than the node replay; whichever matches live is used.
+   Until v2 runs live there is nothing to calibrate against, and
+   `scripts/xxscreeps/ab.mjs` stands in: soak pairs run side by side, their
+   fingerprints must match, and the claim is the per-module CPU of each
+   tick's fastest round (an unchanged bundle reads within ±0.6%).
 
 A speed claim is an interleaved A/B on the representative benchmark with
 identical Memory fingerprints, or a count (floods, lookups, allocations). A
@@ -466,17 +470,23 @@ below is the **default** a module's first line is written in; any of it yields
 to a measurement on the benchmark above, in either direction.
 
 - Module boundaries take and return immutable records. Inside a function,
-  arrays, `ResizeArray`, `Dictionary`, `[<Struct>]` records, `mutable` locals
-  and `for` loops on any path that runs per creep or per tile.
-- `Map`/`Set` and structural `compare`/`equals` on a per-creep or per-tile path
-  are the **first hypothesis** the benchmark tests: Fable compiles them to deep
-  walks, and v1's flat profile is consistent with that — but it was never
-  measured on a representative harness. Until it is, hot-path records carry
+  arrays, `ResizeArray`, `Dictionary`, `mutable` locals and `for` loops on any
+  path that runs per creep or per tile.
+- A per-tile loop reads arrays through the bare `Tiles.at` accessor, never
+  `arr.[i]` or `for x in arr`: Fable compiles both to a checked call, and the
+  neighbour table read through it cost the economy 23–43% (`ab.mjs`).
+- `[<Struct>]` does nothing under Fable: the bundle is byte-identical without
+  it, and a struct tuple is still a JS array. Absence is an `option`, which
+  Fable erases to the value or `undefined` (never nested); a sentinel stays
+  only in an `int[]` table, which compiles to a typed array.
+- `Map`/`Set` against `Dictionary` on the matcher's per-creep lookups measured
+  +1% (noise) at a colony's creep count. Hot-path records still carry
   `[<NoEquality; NoComparison>]` so an accidental deep compare is a compile
   error rather than a guess.
-- No closure allocated per tick outlives the tick (v1's `Fresh` lesson, which
-  was measured live): a collection that is stored is built by a function that
-  captures nothing.
+- No closure allocated per tick outlives the tick (v1's `Fresh` lesson,
+  measured live; one tick retained measured nothing in `ab.mjs`, an
+  accumulating one was not tried): a collection that is stored is built by a
+  function that captures nothing.
 - `[<Emit>]` stubs take `_`-prefixed params.
 
 ### 9.3 Counts are a gate
