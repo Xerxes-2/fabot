@@ -12,6 +12,8 @@ type Facts =
         Standing: Set<string>
         InReach: bool
         Home: bool
+        /// It defends a home, which it never leaves to its towers alone.
+        Held: bool
         Asked: bool
         /// The group stands in a room we hold or work.
         Threatens: bool
@@ -20,7 +22,12 @@ type Facts =
 let private enter (phase: Phase) (time: int) (e: Engagement) : Engagement =
     { e with Phase = phase; Since = time }
 
-let disengage (time: int) (e: Engagement) = enter Phase.Disengaging time e
+/// A home's Defend never disengages: it stops asking, holds and is unanswered.
+let giveUp (held: bool) (time: int) (e: Engagement) =
+    if held then
+        { e with Unanswered = true }
+    else
+        enter Phase.Disengaging time e
 
 let standsAlone (time: int) (e: Engagement) =
     if e.Phase.IsForming && not e.Ours.IsEmpty then
@@ -38,23 +45,24 @@ let step (facts: Facts) (e: Engagement) : Engagement option =
         }
 
     let toward (phase: Phase) = Some(enter phase facts.Time e)
+    let quit () = Some(giveUp facts.Held facts.Time e)
 
     match facts.Group with
     | None -> None
     | Some _ when e.Phase.IsDisengaging -> if facts.Home then None else Some e
-    | Some _ when e.Lost > e.Budget -> toward Phase.Disengaging
+    | Some _ when e.Lost > e.Budget -> quit ()
     | Some g ->
         let left = g.Room <> e.Room
 
         match e.Phase with
-        | Phase.Forming when left && not facts.Threatens -> toward Phase.Disengaging
+        | Phase.Forming when left && not facts.Threatens -> quit ()
         | Phase.Forming when not facts.Asked && not e.Ours.IsEmpty -> toward Phase.Approaching
         | Phase.Approaching
         | Phase.Fighting when left && facts.Threatens -> toward Phase.Pursuing
         | Phase.Approaching
-        | Phase.Fighting when left -> toward Phase.Disengaging
+        | Phase.Fighting when left -> quit ()
         | Phase.Approaching when facts.InReach -> toward Phase.Fighting
-        | Phase.Pursuing when not facts.Threatens -> toward Phase.Disengaging
+        | Phase.Pursuing when not facts.Threatens -> quit ()
         | _ -> Some e
 
 let homePriority = 2.0

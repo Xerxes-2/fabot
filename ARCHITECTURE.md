@@ -322,6 +322,10 @@ Common to every kind:
 - `* → Disengaging` when losses exceed the budget, or a group event re-runs the
   exchange and we no longer win, or the group is `Lost` past the grace.
 - `Disengaging → closed` when ours are home or the group is gone.
+- A home's `Defend` never disengages (owner's decision): where an outpost's
+  would, it stops asking for bodies, its standing bodies hold on our
+  ramparts and the towers carry on; it is `unanswered` and closes only when
+  the group is gone.
 - v2.0's record (`Fight/Shape.fs`) holds what `Defend` reads: the target is a
   group id, the asks live in `fight.casts`; `Kind` and `Declares` join with
   the second kind, `Predicted` with `engagements.log`. The plan chases while

@@ -127,6 +127,7 @@ let decide (context: Context) (state: State) : Intent list * State =
             Home =
                 e.Ours
                 |> Set.forall (fun n -> ours.ContainsKey n && homes.Contains ours.[n].Pos.Room)
+            Held = homes.Contains e.Room
             Asked = waiting |> List.exists (fun c -> c.Engagement = e.Id)
             Threatens =
                 group
@@ -216,8 +217,12 @@ let decide (context: Context) (state: State) : Intent list * State =
         Atlas.route context.Atlas Set.empty Tick.reachHops from room
         |> Option.map (fun rooms -> Engine.roomSide * (List.length rooms - 1))
 
+    let spent (e: Engagement) =
+        homes.Contains e.Room && e.Lost > e.Budget
+
     let priced (e: Engagement) : Engagement =
         match byId.TryGetValue e.Group with
+        | _ when spent e -> e
         | true, g when rooms.ContainsKey g.Room && not e.Phase.IsDisengaging ->
             let room = rooms.[g.Room]
 
@@ -313,11 +318,33 @@ let decide (context: Context) (state: State) : Intent list * State =
                     e
             | None when e.Unanswered || e.Ours.IsEmpty && asked.IsEmpty ->
                 { e with Unanswered = true }
-            | None -> Defend.disengage world.Time e
+            | None -> Defend.giveUp (homes.Contains e.Room) world.Time e
         | _ -> e
+
+    // A home's Defend left open holds the home: a newcomer inside it is its
+    // target now, with a fresh budget, so a second raid is not left to towers.
+    let rehomed (e: Engagement) =
+        let inHome (id: int) =
+            byId.ContainsKey id
+            && byId.[id].Room = e.Room
+            && byId.[id].LastSeen = world.Time
+
+        match
+            events
+            |> List.tryPick (fun event ->
+                match event with
+                | Tracker.Event.Newcomer id when
+                    homes.Contains e.Room && inHome id && not (inHome e.Group)
+                    ->
+                    Some id
+                | _ -> None)
+        with
+        | Some id -> { e with Group = id; Budget = e.Lost }
+        | None -> e
 
     let engagements =
         stepped @ opened
+        |> List.map (fun (e, lost) -> rehomed e, lost)
         |> List.sortBy (fun (e, _) -> -e.Priority, e.Id)
         |> List.map (fun (e, lost) ->
             if lost || changed e || e.Since = world.Time && e.Phase.IsForming then
@@ -327,7 +354,7 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     let kept =
         engagements
-        |> List.filter (fun e -> not e.Phase.IsDisengaging)
+        |> List.filter (fun e -> not (e.Phase.IsDisengaging || spent e))
         |> List.map (fun e -> e.Id)
         |> Set.ofList
 
@@ -376,6 +403,7 @@ let decide (context: Context) (state: State) : Intent list * State =
             let order = e.Plan.Order
 
             match e.Phase with
+            | _ when e.Unanswered -> Tactics.rampart sight order c
             | Phase.Forming -> Tactics.holdFast sight order c
             | Phase.Pursuing -> Tactics.pursue sight order centre c
             | Phase.Disengaging -> Tactics.retreat sight c
