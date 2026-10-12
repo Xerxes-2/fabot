@@ -13,12 +13,14 @@
 //   --jobs  soaks at once (default half the cores)
 //
 // A scenario file: { "why": the invariant, "start": { "room", "seed",
-// "late"?, "node"?, "invaders"? (soak's --invaders), "at"?, "bundle"? }, "ticks", "assert": [{ "measure",
-// "from"?, "to"?, "max"?, "min"? }] }; a measure is one of `measures` below, read off
-// the soak's output over ticks [from, to), counted from the run's first tick.
+// "late"?, "node"?, "invaders"? (soak's --invaders), "at"?, "bundle"?, "opponents"? (soak's
+// --opponents) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
+// a measure is one of `measures` below, read off the soak's output over ticks
+// [from, to), counted from the run's first tick.
 // Exits non-zero when a bound fails or a soak does.
 import { spawn, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,6 +51,7 @@ const scenarios = (names.length ? names : all).map((name) => ({ name, ...JSON.pa
 // Ticks are counted from the bot's first, so a window means the same on every start.
 const samplesOf = (dir) => readFileSync(join(dir, "samples.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 const at = (samples, t) => samples.find((s) => s.t >= t) ?? samples.at(-1);
+const sideOf = (a) => (s) => (a.who ? s.others[a.who] : s);
 const within = (samples, a) => samples.filter((s) => s.t >= (a.from ?? 0) && s.t < (a.to ?? Infinity));
 const measures = {
   // Energy lost to pile decay.
@@ -78,16 +81,37 @@ const measures = {
     return last.rooms[home].hostile - (first.rooms[home]?.hostile ?? 0);
   },
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
+  // The most levels the room stood below the highest it held before (`who`:
+  // an opponent's room, else ours); a room lost stands at level 0.
+  levelsLost: (samples, a) => {
+    let top = 0;
+    let worst = 0;
+    for (const s of within(samples, a).map(sideOf(a))) {
+      top = Math.max(top, s.rcl);
+      worst = Math.max(worst, top - s.rcl);
+    }
+    return worst;
+  },
+  spawnsLost: (samples, a) => {
+    const spawns = within(samples, a).map((s) => sideOf(a)(s).spawns);
+    return spawns[0] - Math.min(...spawns);
+  },
+  creepsAtEnd: (samples, a) => sideOf(a)(at(samples, a.to ?? Infinity)).creeps,
+  // Enemies standing in our room at the window's end.
+  hostilesAtEnd: (samples, a) => at(samples, a.to ?? Infinity).hostiles,
 };
 for (const s of scenarios) for (const a of s.assert) if (!measures[a.measure]) fail(`${s.name}: no measure ${a.measure}`);
 for (const { name, start } of scenarios)
   if ((start.at === undefined) !== (start.bundle === undefined) || (start.at !== undefined && (start.node || !/^[0-9a-f]{8,40}$/.test(start.bundle))))
     fail(`${name}: a start "at" a tick names its "bundle" by commit id, and no node`);
 
-const recipe = ({ room, seed, late = 0, node, invaders }) =>
-  `${room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}`;
-const worldOf = (start) => `${recipe(start)}-t${start.at}-${start.bundle}`;
-const keyOf = (start) => `scenario-${basename(bot, ".js")}-${start.at ? worldOf(start) : recipe(start)}`;
+// A world holds its opponents' seats; their config is the scenario's.
+const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
+const seats = (opponents = []) => opponents.map(({ config, ...seat }) => seat);
+const recipe = ({ room, seed, late = 0, node, invaders }, opponents) =>
+  `${room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${tag(opponents)}`;
+const worldOf = (start) => `${recipe(start, seats(start.opponents))}-t${start.at}-${start.bundle}`;
+const keyOf = (start) => `scenario-${basename(bot, ".js")}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}`;
 const runs = new Map();
 for (const s of scenarios) {
   const run = runs.get(keyOf(s.start)) ?? { name: keyOf(s.start), start: s.start, ticks: 0 };
@@ -120,6 +144,14 @@ const soak = (args) =>
     const child = spawn("node", [join(HERE, "soak.mjs"), ...args], { stdio: "ignore", env: { ...process.env, FABOT_PLAN_BUILT: "1" } });
     child.on("exit", (code) => done(code));
   });
+// `bot`: a path from the repo, or "@bot", the bundle under test.
+const opponentsOf = (name, opponents) => {
+  if (!opponents) return [];
+  const file = join(REPO, "soak-runs", `opponents-${name}.json`);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(opponents.map((o) => ({ ...o, bot: o.bot === "@bot" ? bot : resolve(REPO, o.bot) }))));
+  return ["--opponents", file];
+};
 const play = async ({ name, start, ticks }) => {
   const recipe = ["--room", start.room, "--seed", String(start.seed), "--late", String(start.late ?? 0)];
   if (!start.at)
@@ -133,13 +165,14 @@ const play = async ({ name, start, ticks }) => {
       bot,
       ...(start.node ? ["--node", start.node] : []),
       ...(start.invaders ? ["--invaders", start.invaders] : []),
+      ...opponentsOf(name, start.opponents),
     ]);
   const world = join(REPO, "soak-runs/worlds", worldOf(start));
   if (!existsSync(world)) {
-    const code = await soak([...recipe, "--ticks", String(start.at), "--run", `world-${worldOf(start)}`, "--bot", bundleAt(start.bundle), "--save", world]);
+    const code = await soak([...recipe, "--ticks", String(start.at), "--run", `world-${worldOf(start)}`, "--bot", bundleAt(start.bundle), "--save", world, ...opponentsOf(`world-${name}`, start.opponents && seats(start.opponents))]);
     if (code !== 0) return code;
   }
-  return soak(["--room", start.room, "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, "--from", world]);
+  return soak(["--room", start.room, "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, "--from", world, ...opponentsOf(name, start.opponents)]);
 };
 const queue = [...runs.values()];
 console.error(`${scenarios.length} scenarios in ${queue.length} soaks, ${jobs} at a time`);
@@ -165,7 +198,7 @@ for (const s of scenarios) {
     if (!ok) failed++;
     const window = a.from !== undefined || a.to !== undefined ? ` t${a.from ?? 0}-${a.to ?? s.ticks}` : "";
     const bound = [a.min !== undefined && `≥ ${a.min}`, a.max !== undefined && `≤ ${a.max}`].filter(Boolean).join(", ");
-    console.log(`${ok ? "pass" : "FAIL"} ${s.name}: ${a.measure}${window} ${value} (${bound})`);
+    console.log(`${ok ? "pass" : "FAIL"} ${s.name}: ${a.measure}${a.who ? ` of ${a.who}` : ""}${window} ${value} (${bound})`);
   }
 }
 console.log(`${failed ? `${failed} failed` : "all passed"} in ${((Date.now() - started) / 1000).toFixed(0)} s`);

@@ -25,6 +25,8 @@
 // stood there, and as it stands: our creeps, hostiles, roads, containers.
 // <waves>: room:every[:first],… — an Invader wave (`waves/`) pushed in room
 // at t = first, first + every, …
+// <opponents.json>: [{ name, room }], the players seated beside ours; each
+// sample's `others` holds each one's room as it stands: level, spawns, creeps.
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
@@ -36,7 +38,7 @@ import { pushIntentsForRoomNextTick } from "xxscreeps/engine/processor/model.js"
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
 
-const [ticksArg, everyArg, roomName, username, out, wavesArg = ""] = process.argv.slice(2);
+const [ticksArg, everyArg, roomName, username, out, wavesArg = "", opponentsPath] = process.argv.slice(2);
 const ticks = Number(ticksArg);
 const every = Number(everyArg);
 const observeSegment = 1;
@@ -54,6 +56,9 @@ const waves = wavesArg
     const [room, every, first = every] = w.split(":");
     return { room, every: Number(every), first: Number(first) };
   });
+const opponents = await Promise.all(
+  (opponentsPath ? JSON.parse(fs.readFileSync(opponentsPath, "utf8")) : []).map(async (o) => ({ ...o, id: await User.findUserByName(db, o.name) })),
+);
 const sub = shard.channel.iterable()[Symbol.asyncIterator]();
 
 // The runner publishes a tick's usage before the processor closes that tick,
@@ -292,6 +297,7 @@ function sample(t, time, room) {
     progress: 0,
     creeps: 0,
     parts: 0,
+    spawns: 0,
     hostiles: 0,
     sources: 0,
     energy: 0,
@@ -315,6 +321,7 @@ function sample(t, time, room) {
     } else if (o.structureType === "controller") row.progress = o["#progress"] ?? 0;
     else if (o.structureType === "spawn" || o.structureType === "extension") {
       if (!mine) continue;
+      if (o.structureType === "spawn") row.spawns++;
       row.energy += energyIn(o);
       row.capacity += o.store?.getCapacity?.("energy") ?? 0;
     } else if (o.structureType === "container" || o.structureType === "storage") row.stored += energyIn(o);
@@ -408,6 +415,16 @@ for (let t = 0; t < ticks; t++) {
     row.ledger = ledgerRow();
     row.worth = worthOf(rooms, ledger.stock);
     row.rooms = roomLines(rooms);
+    row.others = {};
+    for (const o of opponents) {
+      const room = await shard.loadRoom(o.room, time);
+      const objects = [...room["#objects"]].filter((x) => x["#user"] === o.id);
+      row.others[o.name] = {
+        rcl: room["#user"] === o.id ? room["#level"] : 0,
+        spawns: objects.filter((x) => x.structureType === "spawn").length,
+        creeps: objects.filter((x) => x.body !== undefined).length,
+      };
+    }
     row.botCpu = fresh ? obs.cpu : null;
     row.faults = seenFaults.size;
     row.ms = Date.now() - started;

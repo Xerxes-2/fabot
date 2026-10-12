@@ -10,6 +10,8 @@
 //   xxscreeps.js file://…/node.mjs declare <room> <username> <declarations.json>
 //     <username>'s Memory as `{ v2: { declarations } }`, what the bot reads
 //     its declarations from (src/App/Wire.fs); <room> is not read.
+//   xxscreeps.js file://…/node.mjs unsafe <room>
+//     <room>'s safe mode ended and none left to activate.
 import * as fs from "node:fs";
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
 import * as User from "xxscreeps/engine/db/user/index.js";
@@ -101,6 +103,12 @@ if (mode === "ground") {
   await saveMemoryBlob(shard, await User.findUserByName(db, username), utf16ToBuffer(JSON.stringify({ v2: { declarations } })));
   await shard.save();
   console.log(`declared ${JSON.stringify(declarations)}`);
+} else if (mode === "unsafe") {
+  room["#safeModeUntil"] = 0;
+  [...room["#objects"]].find((o) => o.structureType === "controller").safeModeAvailable = 0;
+  await Promise.all([shard.saveRoom(roomName, time, room), shard.saveRoom(roomName, time + 1, room)]);
+  await shard.save();
+  console.log(`${roomName} without safe mode`);
 } else throw new Error(`node.mjs: unknown mode ${mode}`);
 await shard[Symbol.asyncDispose]();
 await db[Symbol.asyncDispose]();
