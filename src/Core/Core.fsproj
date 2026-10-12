@@ -33,6 +33,7 @@
     <Compile Include="Layout/Derive.fs" />
     <Compile Include="Layout/Remote.fs" />
     <Compile Include="Layout/Run.fs" />
+    <Compile Include="Fight/Tracker.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Fable.Core" Version="5.2.0" />
