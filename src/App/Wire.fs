@@ -41,11 +41,57 @@ let private switches () : obj =
         v2?switches <- fresh
         fresh
 
+let private field (o: obj) (name: string) : obj = if isObject o then o?(name) else null
+
+let private intOf (o: obj) : int option =
+    match o with
+    | :? float as n -> Some(int n)
+    | _ -> None
+
+let private stringOf (o: obj) : string option =
+    match o with
+    | :? string as s -> Some s
+    | _ -> None
+
+let private listOf (parse: obj -> 'a option) (o: obj) : 'a list =
+    match asArray o with
+    | null -> []
+    | items -> items |> Array.choose parse |> List.ofArray
+
+let private posOf (o: obj) : Fabot.Core.World.Pos option =
+    match field o "room", intOf (field o "x"), intOf (field o "y") with
+    | (:? string as room), Some x, Some y -> Some { Room = room; X = x; Y = y }
+    | _ -> None
+
+let private posObj (p: Fabot.Core.World.Pos) =
+    createObj [ "room" ==> p.Room; "x" ==> p.X; "y" ==> p.Y ]
+
+let private groupOf (o: obj) : Fabot.Core.Fight.Shape.Group option =
+    match intOf (field o "id"), intOf (field o "seen"), posOf o with
+    | Some id, Some seen, Some centre ->
+        Some
+            {
+                Id = id
+                Members = listOf stringOf (field o "members") |> Set.ofList
+                Room = centre.Room
+                LastSeen = seen
+                Centre = centre
+            }
+    | _ -> None
+
+let private groupObj (g: Fabot.Core.Fight.Shape.Group) =
+    let o = posObj g.Centre
+    o?id <- g.Id
+    o?seen <- g.LastSeen
+    o?members <- Array.ofSeq g.Members
+    o
+
 /// The first touch of `Memory` is the engine's parse, so this is the read the
 /// tick's "memory" phase times.
 let readState () : State =
     let s = switches ()
     let held = (root ())?assignments
+    let fight = (root ())?fight
 
     {
         Off =
@@ -63,6 +109,7 @@ let readState () : State =
             else
                 Map.empty
         Layout = Map.empty
+        Groups = listOf groupOf (field fight "groups")
     }
 
 /// The switches are the operator's and are left as they are.
@@ -70,9 +117,11 @@ let writeState (state: State) : unit =
     (root ())?assignments <-
         createObj (state.Assignments |> Map.toList |> List.map (fun (name, id) -> name ==> id))
 
+    (root ())?fight <-
+        createObj [ "groups" ==> (state.Groups |> List.map groupObj |> Array.ofList) ]
+
 let readDeclarations () : Fabot.Core.Tick.Declarations =
     let declared = (root ())?declarations
-    let field (o: obj) (name: string) : obj = if isObject o then o?(name) else null
 
     let declaredAt (room: string) (o: obj) : Fabot.Core.Tick.Declared option =
         match field o "id", field o "x", field o "y" with

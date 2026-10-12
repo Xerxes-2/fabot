@@ -4,7 +4,8 @@ open Fable.Core
 open Fabot.Bindings
 open Fabot.Core
 
-let private modules: Tick.Module list = [ Economy.Run.economy; Layout.Run.layout ]
+let private modules: Tick.Module list =
+    [ Fight.Run.fight; Economy.Run.economy; Layout.Run.layout ]
 
 /// Set by `scripts/bundle.mjs`'s banner.
 [<Emit("(typeof __FABOT_VERSION__ === 'string' ? __FABOT_VERSION__ : 'unbuilt')")>]

@@ -6,6 +6,7 @@ open FsCheck
 open FsCheck.FSharp
 open Fabot.Core.Vocabulary
 open Fabot.Core.World
+open Fabot.Core.Fight.Shape
 open Fabot.Core.Fight.Tracker
 
 let private grace = 3
@@ -92,7 +93,8 @@ let private historyGen: Gen<History> =
             if t > n then
                 Gen.constant (History(groups, now, t))
             else
-                nextGen now |> Gen.bind (run (t + 1) (fst (step grace groups now t)))
+                nextGen now
+                |> Gen.bind (run (t + 1) (fst (step grace 0 Set.empty groups now t)))
 
         return! run 1 [] (Array.ofList first)
     }
@@ -133,8 +135,10 @@ let tests =
                     let r = System.Random seed
                     xs |> Array.sortBy (fun _ -> r.Next())
 
-                step grace prev now tick = step
+                step grace 0 Set.empty prev now tick = step
                     grace
+                    0
+                    Set.empty
                     (prev |> Array.ofList |> shuffle |> List.ofArray)
                     (shuffle now)
                     tick
@@ -143,7 +147,7 @@ let tests =
                 config
                 "every hostile stands in exactly one group, and no id twice"
             <| fun (History(prev, now, tick)) ->
-                let groups, _ = step grace prev now tick
+                let groups, _ = step grace 0 Set.empty prev now tick
                 let ids = groups |> List.map (fun g -> g.Id)
                 let members = seen tick groups |> List.collect (fun g -> List.ofSeq g.Members)
 
@@ -157,9 +161,9 @@ let tests =
                 config
                 "a group is one cluster, no wider than its diameter, reaching no other"
             <| fun (History(prev, now, tick)) ->
-                let groups = seen tick (fst (step grace prev now tick))
+                let groups = seen tick (fst (step grace 0 Set.empty prev now tick))
                 let at = now |> Array.map (fun c -> c.Id, c) |> Map.ofArray
-                let armed = Hostiles.armed now
+                let armed = Hostiles.armed Set.empty now
 
                 let positions (g: Group) =
                     g.Members |> Seq.map (fun m -> at.[m]) |> List.ofSeq
@@ -210,21 +214,22 @@ let tests =
                 groups |> List.forall (fun g -> narrow g && connected g)
                 && groups |> List.forall (fun g -> groups |> List.forall (apart g))
 
-            testPropertyWithConfig config "a new id is none the previous tick held"
-            <| fun (History(prev, now, tick)) ->
+            testPropertyWithConfig config "a new id is past every id held"
+            <| fun (History(prev, now, tick)) (engaged: int) ->
+                let engaged = abs engaged % 20
                 let held = prev |> List.map (fun g -> g.Id) |> Set.ofList
-                let groups, events = step grace prev now tick
+                let groups, events = step grace engaged Set.empty prev now tick
 
                 events
                 |> List.forall (fun e ->
                     match e with
-                    | Event.Newcomer id -> not (held.Contains id)
+                    | Event.Newcomer id -> id > engaged && held |> Set.forall (fun h -> id > h)
                     | _ -> true)
                 && groups |> List.forall (fun g -> held.Contains g.Id || g.LastSeen = tick)
 
             testPropertyWithConfig config "a split keeps the id on the largest fragment"
             <| fun (History(prev, now, tick)) ->
-                let groups, events = step grace prev now tick
+                let groups, events = step grace 0 Set.empty prev now tick
                 let byId = groups |> List.map (fun g -> g.Id, g) |> Map.ofList
                 let before = prev |> List.map (fun g -> g.Id, g.Members) |> Map.ofList
 
@@ -243,9 +248,21 @@ let tests =
                            | None -> true
                     | _ -> true)
 
+            testPropertyWithConfig config "a group that loses a member from sight says so, once"
+            <| fun (History(prev, now, tick)) ->
+                let _, events = step grace 0 Set.empty prev now tick
+                let here = now |> Array.map (fun c -> c.Id) |> Set.ofArray
+
+                prev
+                |> List.forall (fun g ->
+                    let seen = g.Members |> Set.exists here.Contains
+                    let vanished = g.Members |> Set.exists (here.Contains >> not)
+                    let said = events |> List.filter (fun e -> e = Event.Left g.Id) |> List.length
+                    said = (if seen && vanished then 1 else 0))
+
             testPropertyWithConfig config "a merge keeps the older id"
             <| fun (History(prev, now, tick)) ->
-                let groups, events = step grace prev now tick
+                let groups, events = step grace 0 Set.empty prev now tick
                 let ids = groups |> List.map (fun g -> g.Id) |> Set.ofList
 
                 events
@@ -257,7 +274,7 @@ let tests =
 
             testPropertyWithConfig config "an unseen group is kept for the grace, then dropped"
             <| fun (History(prev, now, tick)) ->
-                let groups, _ = step grace prev now tick
+                let groups, _ = step grace 0 Set.empty prev now tick
 
                 groups |> List.forall (fun g -> tick - g.LastSeen <= grace)
                 && prev

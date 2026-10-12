@@ -360,11 +360,23 @@ module Hostiles =
     let private strikes (creep: Creep) =
         creep.Body |> Array.exists (fun p -> p.Kind.IsAttack || p.Kind.IsRangedAttack)
 
+    let owned (rooms: Room[]) : Set<string> =
+        rooms
+        |> Array.choose (fun r ->
+            match r.Controller with
+            | Some c when c.Owner.IsOurs -> Some r.Name
+            | _ -> None)
+        |> Set.ofArray
+
     /// HEAL and WORK threaten beside a striker (owner's call): alone they are
-    /// a rival's healer in transit or its remote harvester.
-    let armed (hostiles: Creep[]) (creep: Creep) =
+    /// a rival's healer in transit or its remote harvester, but WORK in a room
+    /// whose controller is ours can only be there to dismantle.
+    let armed (owned: Set<string>) (hostiles: Creep[]) (creep: Creep) =
+        let works = creep.Body |> Array.exists (fun p -> p.Kind.IsWork)
+
         strikes creep
-        || creep.Body |> Array.exists (fun p -> p.Kind.IsHeal || p.Kind.IsWork)
+        || works && owned.Contains creep.Pos.Room
+        || (works || creep.Body |> Array.exists (fun p -> p.Kind.IsHeal))
            && hostiles |> Array.exists (fun o -> o.Pos.Room = creep.Pos.Room && strikes o)
 
 type Sightings = Map<string, Map<string, int>>
@@ -377,11 +389,13 @@ module Sightings =
             |> Map.map (fun _ seen -> seen |> Map.filter (fun _ gone -> gone > world.Time))
             |> Map.filter (fun _ seen -> not seen.IsEmpty)
 
+        let owned = Hostiles.owned world.Rooms
+
         for room in world.Rooms do
             let mutable seen = Map.tryFind room.Name next |> Option.defaultValue Map.empty
 
             for creep in room.Hostiles do
-                if Hostiles.armed room.Hostiles creep then
+                if Hostiles.armed owned room.Hostiles creep then
                     seen <- Map.add creep.Id (world.Time + creep.TicksToLive) seen
 
             for s in room.Structures do

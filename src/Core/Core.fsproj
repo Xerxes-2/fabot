@@ -16,6 +16,7 @@
     <Compile Include="Move/Plan.fs" />
     <Compile Include="Intents.fs" />
     <Compile Include="Layout/Shape.fs" />
+    <Compile Include="Fight/Shape.fs" />
     <Compile Include="State.fs" />
     <Compile Include="Tick.fs" />
     <Compile Include="Economy/Task.fs" />
@@ -36,6 +37,7 @@
     <Compile Include="Exchange/Fighter.fs" />
     <Compile Include="Exchange/Exchange.fs" />
     <Compile Include="Fight/Tracker.fs" />
+    <Compile Include="Fight/Run.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Fable.Core" Version="5.2.0" />

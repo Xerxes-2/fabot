@@ -8,6 +8,7 @@ type State =
         Assignments: Map<string, string>
         /// Heap only, never in Memory: empty after a reset, so the first tick redraws.
         Layout: Map<string, Layout.Shape.Standing>
+        Groups: Fight.Shape.Group list
     }
 
 let empty =
@@ -15,4 +16,5 @@ let empty =
         Off = Set.empty
         Assignments = Map.empty
         Layout = Map.empty
+        Groups = []
     }

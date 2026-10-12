@@ -4,15 +4,7 @@ module Fabot.Core.Fight.Tracker
 open System.Collections.Generic
 open Fabot.Core
 open Fabot.Core.World
-
-type Group =
-    {
-        Id: int
-        Members: Set<string>
-        Room: string
-        LastSeen: int
-        Centre: Pos
-    }
+open Fabot.Core.Fight.Shape
 
 [<RequireQualifiedAccess>]
 type Event =
@@ -22,6 +14,8 @@ type Event =
     /// `from` ended inside the older `into`.
     | Merged of into: int * from: int
     | Lost of id: int
+    /// Some of its members are seen nowhere now (dead, or out of sight).
+    | Left of id: int
     | Dropped of id: int
 
 /// Ranged reach plus one step.
@@ -47,11 +41,11 @@ let linked (a: Pos) (b: Pos) : bool =
             abs (ax - bx) <= 1 && abs (ay - by) <= 1
         | _ -> false
 
-let private clusters (hostiles: Creep[]) : Creep[][] =
+let private clusters (owned: Set<string>) (hostiles: Creep[]) : Creep[][] =
     let sorted = hostiles |> Array.sortWith (fun a b -> compare a.Id b.Id)
     let n = sorted.Length
     let root = Array.init n id
-    let armed = sorted |> Array.map (Hostiles.armed sorted)
+    let armed = sorted |> Array.map (Hostiles.armed owned sorted)
 
     let rec find (i: int) =
         if root.[i] = i then
@@ -111,9 +105,18 @@ let private centre (members: Creep[]) : Pos =
 
     best
 
-let step (grace: int) (prev: Group list) (hostiles: Creep[]) (tick: int) : Group list * Event list =
+/// `held`: the highest group id an engagement holds; a new id is past it and
+/// every group's, so no id is reused while anything holds it.
+let step
+    (grace: int)
+    (held: int)
+    (owned: Set<string>)
+    (prev: Group list)
+    (hostiles: Creep[])
+    (tick: int)
+    : Group list * Event list =
     let prev = prev |> List.sortBy (fun g -> g.Id) |> Array.ofList
-    let cs = clusters hostiles
+    let cs = clusters owned hostiles
     let owner = Dictionary<string, int>()
 
     for gi in 0 .. prev.Length - 1 do
@@ -144,7 +147,7 @@ let step (grace: int) (prev: Group list) (hostiles: Creep[]) (tick: int) : Group
 
             b)
 
-    let mutable nextId = (prev |> Array.fold (fun m g -> max m g.Id) 0) + 1
+    let mutable nextId = (prev |> Array.fold (fun m g -> max m g.Id) held) + 1
 
     let groups = ResizeArray<Group>()
     let events = ResizeArray<Event>()
@@ -186,8 +189,16 @@ let step (grace: int) (prev: Group list) (hostiles: Creep[]) (tick: int) : Group
                 Centre = c
             }
 
+    let seen = HashSet<string>()
+
+    for h in hostiles do
+        seen.Add h.Id |> ignore
+
     for gi in 0 .. prev.Length - 1 do
         let g = prev.[gi]
+
+        if best.[gi] >= 0 && g.Members |> Set.exists (seen.Contains >> not) then
+            events.Add(Event.Left g.Id)
 
         if best.[gi] < 0 then
             if tick - g.LastSeen > grace then

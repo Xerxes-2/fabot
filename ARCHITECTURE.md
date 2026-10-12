@@ -250,17 +250,21 @@ spawn stands).
 
 ```fsharp
 type Group = { Id: int; Members: Set<string>; Room: string; LastSeen: int; Centre: Pos }
-val step : prev: Group list -> hostiles: HostileInfo list -> tick: int -> Group list
+val step : grace: int -> held: int -> owned: Set<string> -> prev: Group list
+           -> hostiles: Creep[] -> tick: int -> Group list * Event list
 ```
 
 - Armed hostiles are clustered by connected components at Chebyshev distance ≤ 4
   (ranged reach + one step), across a seam when the tiles are adjacent.
   Unarmed hostiles are tracked as singletons. Armed is ATTACK or
-  RANGED_ATTACK, and HEAL or WORK beside one in the room (owner's call).
+  RANGED_ATTACK, HEAL or WORK beside one in the room, and WORK alone in a
+  room whose controller is ours (owner's call).
 - Identity: next tick's clusters match previous groups by largest member
   overlap. A split keeps the id on the largest fragment; a merge keeps the older
-  id. Both are **events**. A new id is past every id a group or an
-  engagement holds, so a dropped group's id is never reused.
+  id. Both are **events**, as is `Left`: a member seen nowhere now (dead, or
+  out of sight) while the rest of its group stands. A new id is past every id a group or an
+  engagement holds (`held`, derived, not stored), so no id is reused while
+  anything holds it.
 - A group none of whose members is visible is `Lost` from `LastSeen`; dropped
   after `Tracker.lostGroupTicks` (30, the owner's starting value). This is the only vision grace in the
   fight.
