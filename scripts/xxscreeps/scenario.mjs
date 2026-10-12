@@ -13,8 +13,8 @@
 //   --jobs  soaks at once (default half the cores)
 //
 // A scenario file: { "why": the invariant, "start": { "room", "seed",
-// "late"?, "node"?, "invaders"? (soak's --invaders), "at"?, "bundle"?, "opponents"? (soak's
-// --opponents) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
+// "late"?, "node"?, "invaders"? (soak's --invaders), "unsafe"?, "at"?, "bundle"?,
+// "opponents"? (soak's --opponents) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick.
 // Exits non-zero when a bound fails or a soak does.
@@ -120,8 +120,8 @@ for (const { name, start } of scenarios)
 // A world holds its opponents' seats; their config is the scenario's.
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
 const seats = (opponents = []) => opponents.map(({ config, ...seat }) => seat);
-const recipe = ({ room, seed, late = 0, node, invaders }, opponents) =>
-  `${room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${tag(opponents)}`;
+const recipe = ({ room, seed, late = 0, node, invaders, unsafe }, opponents) =>
+  `${room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${tag(opponents)}`;
 const worldOf = (start) => `${recipe(start, seats(start.opponents))}-t${start.at}-${start.bundle}`;
 const keyOf = (start) => `scenario-${basename(bot, ".js")}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}`;
 const runs = new Map();
@@ -177,6 +177,7 @@ const play = async ({ name, start, ticks }) => {
       bot,
       ...(start.node ? ["--node", start.node] : []),
       ...(start.invaders ? ["--invaders", start.invaders] : []),
+      ...(start.unsafe ? ["--unsafe"] : []),
       ...opponentsOf(name, start.opponents),
     ]);
   const world = join(REPO, "soak-runs/worlds", worldOf(start));

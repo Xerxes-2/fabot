@@ -25,8 +25,11 @@
 // stood there, and as it stands: our creeps, hostiles, roads, containers.
 // <waves>: room:every[:first],… — an Invader wave (`waves/`) pushed in room
 // at t = first, first + every, …
-// <opponents.json>: [{ name, room }], the players seated beside ours; each
-// sample's `others` holds each one's room as it stands: level, spawns, creeps.
+// <opponents.json>: [{ name, room, raid? }], the players seated beside ours;
+// each sample's `others` holds each one's room as it stands: level, spawns,
+// creeps. A raid { first, every?, bodies: [{ part: count, boosts?: { part:
+// compound } }] } stands the opponent's bodies on <room>'s edge toward its
+// room (`waves/`) at t = first, first + every, …
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
@@ -115,6 +118,7 @@ const TRANSFER = 12;
 const LINK_KEEPS = 1 - 0.03;
 const CREEP_LIFE_TIME = 1500;
 const CREEP_CLAIM_LIFE_TIME = 600;
+const PARTS = ["tough", "move", "work", "carry", "attack", "ranged_attack", "heal"];
 const PART_COST = { move: 50, work: 100, carry: 50, attack: 80, ranged_attack: 150, heal: 250, claim: 600, tough: 10 };
 const ledger = { dug: 0, regen: 0, spawn: 0, build: 0, upgrade: 0, repair: 0, tower: 0, decayed: 0, linked: 0, stock0: null, stock: 0 };
 // What a colony holds, in energy, as it stands: the controller's climb, every
@@ -375,8 +379,8 @@ async function engaged(t, time, rooms) {
     const objects = rooms.flatMap((r) => [...r["#objects"]]);
     const theirs = objects.filter((o) => rec.members.has(o.id));
     if (theirs.length) rec.seen = t;
-    if (rec.contact === null && objects.some((o) => e.ours.includes(o.name) && o["#user"] === ours && theirs.some((h) => near(h.pos, o.pos, 3) && h.pos.roomName === o.pos.roomName)))
-      rec.contact = t;
+    const close = objects.some((o) => e.ours.includes(o.name) && o["#user"] === ours && theirs.some((h) => near(h.pos, o.pos, 3) && h.pos.roomName === o.pos.roomName));
+    if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;
   }
   for (const [id, rec] of open)
     if (!now.has(id)) {
@@ -442,6 +446,12 @@ for (let t = 0; t < ticks; t++) {
   const room = rooms[0];
   account(rooms, time);
   await engaged(t, time, rooms);
+  for (const o of opponents.filter(({ raid: r }) => r && (t === r.first || (r.every && t > r.first && (t - r.first) % r.every === 0)))) {
+    const toward = Object.entries(world.map.describeExits(roomName) ?? {}).filter(([, next]) => next === o.room).map(([dir]) => Number(dir));
+    const bodies = o.raid.bodies.map(({ boosts = {}, ...counts }) => PARTS.flatMap((p) => Array(counts[p] ?? 0).fill({ type: p, boost: boosts[p] })));
+    await pushIntentsForRoomNextTick(shard, roomName, o.id, { local: { soakRaid: [[o.id, bodies, toward.length ? toward : [1, 3, 5, 7]]] }, internal: true });
+    process.stderr.write(`t${t} raid of ${o.name} in ${roomName} from sides ${toward.join(",")}\n`);
+  }
   for (const wave of waves.filter((w) => t >= w.first && (t - w.first) % w.every === 0)) {
     const exits = Object.entries(world.map.describeExits(wave.room) ?? {});
     const users = await Promise.all(exits.map(([, next]) => shard.loadRoom(next, time).then((r) => r["#user"], () => null)));

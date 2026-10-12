@@ -1,0 +1,13 @@
+{
+  "why": "Invader waves on a home at RCL4 without safe mode are held: no level or spawn lost, each wave gone",
+  "start": { "room": "W8N3", "seed": 1, "node": "N3", "invaders": "W8N3:1000:1500", "unsafe": true },
+  "ticks": 3500,
+  "assert": [
+    { "measure": "levelsLost", "max": 0 },
+    { "measure": "spawnsLost", "max": 0 },
+    { "measure": "hostilesAtEnd", "max": 0 },
+    { "measure": "homeHostileTicks", "from": 1500, "max": 300 },
+    { "measure": "predictedWinsLost", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

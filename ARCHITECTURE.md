@@ -652,8 +652,12 @@ everything v1 used its self-written arena for, and more:
   this is the only offline test offence has. ✅ A scenario seats opponents
   beside ours (`start.opponents`: a bundle or a bot directory, each in its
   own room; ours without the engine's safe mode); `two-v2-neighbours` seats
-  a second v2, a smoke test until v2 has an offensive kind. ❓ self-play
-  with an attacking v2.
+  a second v2, a smoke test until v2 has an offensive kind. A scripted raid
+  (`engine/raid/`, ours: a gun kites, a swing closes, a healer keeps to the
+  hurt) has its bodies and boosts stood on our room's edge at its tick
+  (`opponents[].raid`). Held is: no level or spawn lost and the raid gone
+  by the window's end (`defend-holds-*`, N3: a kiting raid, a healed pair,
+  Invader waves). ❓ self-play with an attacking v2.
 - **Exchange calibration** (§10.1), generated: `npm run exchange`.
 
 Coverage, read off xxscreeps 0.2.1's mods and changelog (2026-10-10): invader
@@ -742,7 +746,7 @@ empty:
 | M1 economy | the rest of v1's economy mechanisms | the seat-extreme soak beats v1's bundle in both classes, on a second seed |
 | M1b outposts | declared outposts: reservation, remote harvest and haul, before M2 because RCL6+ structures spend more than a home's two sources give. No fighting before M3: an armed hostile or an Invader core seen in an outpost stands it down until every one seen there has run out its life or the room is seen without one (`sightings`; the owner's choice over porting a guard early, and over a claimer probing a blind room); M3's `Defend` walks its forming bodies there, which brings the room back in sight | node E1 (with timed Invader waves): each outpost nets positive after its bodies and its stand-downs |
 | M2 structures | node builder (N1–N4) ✅, links ✅ (the controller's and the longest-way source's first: +5–17k worth over 20k ticks on N4; hub-first broke even, as v1's arithmetic said), node N5 ✅; labs, factory, the RCL8 set wait for a sink (owner's call: one room mines one ore, a reaction needs two, offline has no market, and v1 mined only for fight boosts) | links: the node beats the economy without them; the rest: judged with their sink, M3's boosts or several colonies |
-| M3 defence | `Exchange` ✅, `Defend` ✅ (scenario `defend-kills-home-raid`), the first tactics ✅, casting ✅, the opponents harness ✅ (`two-v2-neighbours`) | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
+| M3 defence | `Exchange` ✅, `Defend` ✅ (scenario `defend-kills-home-raid`), the first tactics ✅, casting ✅, the opponents harness ✅ (`two-v2-neighbours`), scripted raids held ✅ (`defend-holds-*`) | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
 | M4 live | v2 replaces v1 | ❓ the owner decides from progress |
 | M5 reach | `Strategy` over many colonies, the offensive kinds | the end in §0 |
 

@@ -3,6 +3,8 @@
 // (`soak-step.mjs` pushes the internal intent `soakWave` with the exit sides
 // that lead to no owned or reserved room). xxscreeps' own goal doubles after
 // each raid, so it gives no steady rate to read a stand-down's cost off.
+// `soakRaid` stands a scripted raid (`raid/`) the same way: the owner's bodies
+// on the exit tiles of the sides given.
 import { registerIntentProcessor } from "xxscreeps/engine/processor/index.js";
 import { Game } from "xxscreeps/game/index.js";
 import { FIND_EXIT } from "xxscreeps/game/constants/index.js";
@@ -11,15 +13,32 @@ import { CREEP_LIFE_TIME } from "xxscreeps/mods/classic/creep/constants.js";
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { create } from "xxscreeps/mods/classic/invader/processor.js";
 import { activateNPC } from "xxscreeps/mods/npc/processor.js";
+import { createWithBody } from "xxscreeps/mods/classic/creep/creep.js";
 
 const side = { 1: (p) => p.y === 0, 3: (p) => p.x === 49, 5: (p) => p.y === 49, 7: (p) => p.x === 0 };
 
-registerIntentProcessor(Room, "soakWave", { internal: true }, (room, context, ...open) => {
+function edge(room, open) {
   const exits = room.find(FIND_EXIT).filter((p) => open.some((d) => side[d](p)));
-  if (exits.length === 0) return;
+  if (exits.length === 0) return exits;
   const origin = exits[Math.floor(exits.length * Math.random())];
-  exits.sort((a, b) => origin.getRangeTo(a) - origin.getRangeTo(b));
+  return exits.sort((a, b) => origin.getRangeTo(a) - origin.getRangeTo(b));
+}
+
+registerIntentProcessor(Room, "soakWave", { internal: true }, (room, context, ...open) => {
+  const exits = edge(room, open);
+  if (exits.length === 0) return;
   activateNPC(room, kInvaderUserId);
   ["melee", "healer", "ranged"].forEach((role, i) => exits[i] && room["#insertObject"](create(exits[i], role, "small", Game.time + CREEP_LIFE_TIME)));
+  context.setActive();
+});
+
+registerIntentProcessor(Room, "soakRaid", { internal: true }, (room, context, owner, bodies, open) => {
+  const exits = edge(room, open);
+  bodies.forEach((parts, i) => {
+    if (!exits[i]) return;
+    const creep = createWithBody(exits[i], parts.map(({ type, boost }) => ({ type, hits: 100, boost })), `raid-${Game.time}-${i}`, owner);
+    creep["#ageTime"] = Game.time + CREEP_LIFE_TIME;
+    room["#insertObject"](creep);
+  });
   context.setActive();
 });

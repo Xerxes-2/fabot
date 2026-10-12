@@ -29,11 +29,13 @@
 //   --from   a world --save wrote (needs --room): the bot is swapped for
 //            --bot, its Memory kept, as a deploy at that tick
 //   --opponents  a JSON file of players seated beside ours, each
-//            { name, bot, room, x?, y?, config? }: `bot` a bundle or a bot
-//            directory, `config` written beside it as `opponent.js`, the
-//            spawn on colony.mjs's tile unless x, y. With --from they stand
-//            in the world already and only their code is swapped. Our room
-//            fights without the engine's safe mode, which would decide it.
+//            { name, bot, room, x?, y?, config?, raid? }: `bot` a bundle or a
+//            bot directory, `config` written beside it as `opponent.js`, the
+//            spawn on colony.mjs's tile unless x, y; `raid` its bodies stood
+//            on our room's edge (`engine/soak-step.mjs`). With --from they stand
+//            in the world already and only their code is swapped.
+//   --unsafe  our room without the engine's safe mode, which would decide
+//            every fight in it for us; implied by --opponents
 //
 // Needs `npm run build` (dist/main.js) and `npm run xx -- setup` (the engine
 // and its template world, under $FABOT_XXSCREEPS_HOME). Writes
@@ -48,7 +50,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4|N5|E1] [--invaders room:every[:first],…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4|N5|E1] [--invaders room:every[:first],…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--unsafe]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -69,6 +71,10 @@ const listOnly = rest[0] === "--list";
 if (listOnly) rest.shift();
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
+  if (a === "--unsafe") {
+    flags[a] = true;
+    continue;
+  }
   if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from", "--invaders", "--opponents"].includes(a)) fail(usage);
   const value = rest[++i];
   if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
@@ -228,8 +234,8 @@ for (const o of opponents) {
   const seat = o.x === undefined ? JSON.parse(node24([XXSCREEPS, script("colony.mjs"), o.room], world, true).trim().split("\n").at(-1)) : o;
   node24([XXSCREEPS, "manage", "bot", "add", o.name, `./bot-${o.name}`, "--spawn", o.room, `${seat.x},${seat.y}`], world);
 }
-if (opponents.length) node24([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
-writeFileSync(join(world, "opponents.json"), JSON.stringify(opponents.map(({ name, room }) => ({ name, room }))));
+if (opponents.length || flags["--unsafe"]) node24([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
+writeFileSync(join(world, "opponents.json"), JSON.stringify(opponents.map(({ name, room, raid }) => ({ name, room, raid }))));
 if (built) node24([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME], world);
 if (node?.outposts) {
   if (colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);

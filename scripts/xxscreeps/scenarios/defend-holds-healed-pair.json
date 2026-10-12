@@ -1,0 +1,25 @@
+{
+  "why": "a boosted melee body with its boosted healer on a home at RCL4 is held: no level or spawn lost, the pair gone",
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "node": "N3",
+    "opponents": [
+      {
+        "name": "raider",
+        "bot": "scripts/xxscreeps/engine/raid",
+        "room": "W7N3",
+        "raid": { "first": 1500, "bodies": [{ "tough": 4, "move": 10, "attack": 6, "boosts": { "tough": "XGHO2" } }, { "tough": 2, "move": 8, "heal": 6, "boosts": { "tough": "XGHO2", "heal": "XLHO2" } }] }
+      }
+    ]
+  },
+  "ticks": 2500,
+  "assert": [
+    { "measure": "levelsLost", "max": 0 },
+    { "measure": "spawnsLost", "max": 0 },
+    { "measure": "hostilesAtEnd", "max": 0 },
+    { "measure": "homeHostileTicks", "from": 1500, "max": 300 },
+    { "measure": "predictedWinsLost", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}
