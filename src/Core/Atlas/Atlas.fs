@@ -1,5 +1,5 @@
-// The floods are the one tick cache (`ARCHITECTURE.md` §1). Built twice from
-// one `World`, an Atlas answers identically: nothing in it survives the tick.
+// The floods are the one cache (`ARCHITECTURE.md` §1). Built twice from one
+// `World`, an Atlas answers identically: a kept flood is one on equal weights.
 namespace Fabot.Core
 
 open System.Collections.Generic
@@ -26,7 +26,11 @@ type Target =
 /// Our creeps are no wall (who yields is `Move`'s call); a creep not ours
 /// yields to nothing we decide, so nothing may stand on its tile this tick.
 [<NoEquality; NoComparison>]
-type internal RoomGrid = { Weights: int[] }
+type internal RoomGrid =
+    {
+        Weights: int[]
+        Floods: Dictionary<string, int[]>
+    }
 
 [<NoEquality; NoComparison>]
 type Field =
@@ -43,7 +47,6 @@ type Atlas =
     private
         {
             Rooms: Dictionary<string, RoomGrid>
-            Floods: Dictionary<string, int[]>
             mutable Misses: int
         }
 
@@ -142,9 +145,23 @@ module Atlas =
              |> Option.toArray)
         |> Array.map Tiles.ofPos
 
+    let empty () : Atlas = { Rooms = Dictionary(); Misses = 0 }
+
+    /// ~10 kB each. A dropped resource's tile is a new goal, so a room's keys
+    /// are unbounded; past this the room floods afresh.
+    let private keptFloods = 500
+
+    let private same (a: int[]) (b: int[]) =
+        let mutable i = 0
+
+        while i < Tiles.count && at i a = at i b do
+            i <- i + 1
+
+        i = Tiles.count
+
     /// A room whose terrain buffer is not a whole room has no grid: routed by
     /// name, never walked.
-    let ofWorld (world: World) : Atlas =
+    let following (previous: Atlas) (world: World) : Atlas =
         let rooms = Dictionary<string, RoomGrid>()
 
         for room in world.Rooms |> Array.filter (fun r -> r.Terrain.Length = Tiles.count) do
@@ -189,13 +206,21 @@ module Atlas =
             for creep in room.Hostiles do
                 setAt (Tiles.ofPos creep.Pos) weights -1
 
-            rooms.[room.Name] <- { Weights = weights }
+            let floods =
+                if
+                    previous.Rooms.ContainsKey room.Name
+                    && previous.Rooms.[room.Name].Floods.Count < keptFloods
+                    && same previous.Rooms.[room.Name].Weights weights
+                then
+                    previous.Rooms.[room.Name].Floods
+                else
+                    Dictionary()
 
-        {
-            Rooms = rooms
-            Floods = Dictionary()
-            Misses = 0
-        }
+            rooms.[room.Name] <- { Weights = weights; Floods = floods }
+
+        { Rooms = rooms; Misses = 0 }
+
+    let ofWorld (world: World) : Atlas = following (empty ()) world
 
     let misses (atlas: Atlas) : int = atlas.Misses
 
@@ -367,8 +392,7 @@ module Atlas =
                 let factor = mover.Factor
 
                 let key =
-                    room
-                    + (if footprint.IsOne then "|1|" else "|4|")
+                    (if footprint.IsOne then "1|" else "4|")
                     + string (stepTicks factor Engine.roadWeight)
                     + "|"
                     + string (stepTicks factor Engine.plainWeight)
@@ -380,13 +404,13 @@ module Atlas =
                     + goalKey
 
                 let dist =
-                    if atlas.Floods.ContainsKey key then
+                    if grid.Floods.ContainsKey key then
                         tally "hit" 1
-                        atlas.Floods.[key]
+                        grid.Floods.[key]
                     else
                         atlas.Misses <- atlas.Misses + 1
                         let dist = flood footprint grid.Weights (stepTable factor) (build ())
-                        atlas.Floods.[key] <- dist
+                        grid.Floods.[key] <- dist
                         dist
 
                 Some

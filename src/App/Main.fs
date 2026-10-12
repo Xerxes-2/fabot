@@ -34,6 +34,9 @@ let mutable private standing: Map<string, Layout.Shape.Standing> = Map.empty
 /// back in one that is not sees what stands there and stands it down again.
 let mutable private sightings: Core.World.Sightings = Map.empty
 
+/// Heap only: after a reset every room floods afresh.
+let mutable private atlas: Atlas = Atlas.empty ()
+
 let private runTick () =
     let phases = ResizeArray<string * float>()
 
@@ -54,7 +57,7 @@ let private runTick () =
             sightings <- Core.World.Sightings.step world sightings
             world)
 
-    let atlas = timed "atlas" (fun () -> Atlas.ofWorld world)
+    atlas <- timed "atlas" (fun () -> Atlas.following atlas world)
 
     let result =
         Tick.run

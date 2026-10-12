@@ -24,7 +24,7 @@ ones.
   are never raised. A change over either pays for itself by deleting first.
 - `decide` is deterministic: no clock, no unseeded random.
 - Derived facts are computed once into `Derived` and passed down. A decision
-  function takes `Derived`, never `World`. The only tick cache is `Atlas`'s
+  function takes `Derived`, never `World`. The only cache is `Atlas`'s
   flood table; a new `TickMemo`, `Dictionary` cache or `lazy` outside
   `Derived` is an architecture change (stop and ask).
 - Count ceilings (`scripts/counts`, `scripts/ceilings.json`) are a gate like line

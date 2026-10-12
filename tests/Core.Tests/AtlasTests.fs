@@ -427,11 +427,13 @@ let tests =
                     Atlas.seats atlas One 1 obstacle |> List.contains obstacle |> not)
 
             testPropertyWithConfig config "a memoised answer is a fresh Atlas's answer"
-            <| fun (walk: Walk) ->
+            <| fun (walk: Walk) (before: Walk) (kept: bool) ->
                 let world = worldOf walk.Ground
-                let warm = Atlas.ofWorld world
                 let target = targetOf roomName walk
                 let start = Tiles.toPos roomName walk.Start
+                let stale = Atlas.ofWorld (worldOf (if kept then walk.Ground else before.Ground))
+                Atlas.travelTicks stale walk.Mover target start |> ignore
+                let warm = Atlas.following stale world
                 let first = Atlas.travelTicks warm walk.Mover target start
                 let again = Atlas.travelTicks warm walk.Mover target start
                 let step = Atlas.firstStep warm walk.Mover target start
@@ -441,7 +443,7 @@ let tests =
                 first = again
                 && first = Atlas.travelTicks fresh walk.Mover target start
                 && step = Atlas.firstStep fresh walk.Mover target start
-                && (walk.Mover.Factor.Moves = 0 || misses = 1)
+                && (walk.Mover.Factor.Moves = 0 || misses = (if kept then 0 else 1))
 
             testPropertyWithConfig config "toward another room, the walk ends on an exit into it"
             <| fun (walk: Walk) (exitPick: byte) ->

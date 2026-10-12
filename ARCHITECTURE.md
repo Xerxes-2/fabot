@@ -92,10 +92,13 @@ World ──▶ Derived ──▶ decisions ──▶ Intents
 - Decision functions in `Fight`, `Economy`, `Strategy` take `Derived` (and
   `Atlas`), not `World`. What a function reads is its signature; a `World`
   parameter below the deriving stage is a review flag.
-- **One tick cache exists**: `Atlas`'s flood table of goal-seeded reverse
+- **One cache exists**: `Atlas`'s flood table of goal-seeded reverse
   floods, keyed by (room, goal tiles and range — or the exit toward the next
   room —, footprint, pace class: the body's step ticks on road, plain and
-  swamp), living in the `Atlas` value of one tick, counting hits and misses.
+  swamp), counting hits and misses. A room's floods outlive the tick while
+  its weights are unchanged (owner's decision): within one tick half the
+  floods repeated, across ticks nearly all, and a flood is a pure function of
+  the weights, so a kept one is the fresh one and a heap reset only re-floods.
   Room routes are recomputed per cross-room query; if the counts show it,
   they join `Derived` (an owner decision). Floods are
   the only demand-driven derivation. Any other `TickMemo`, `Dictionary` cache
@@ -131,7 +134,7 @@ cold tick never spends more than ❓ 60% of the limit.
 | `Bindings` | the Screeps API surface | — | — | port verbatim |
 | `Engine` | server constants and formulas | — | — | port verbatim |
 | `World` | this tick's facts, one record | Game | — | port, trim |
-| `Atlas` | geometry in two layers: the **room graph** (which rooms a route crosses, highway cost, rooms to avoid, hops) and the **tile grid** per room (terrain, floods, seats, work areas, first steps). Every tile query takes a **footprint** (1×1 today, 2×2 for a formation) | World, `intel.rooms` for avoided rooms | tick cache | port, add the graph layer, widen the query |
+| `Atlas` | geometry in two layers: the **room graph** (which rooms a route crosses, highway cost, rooms to avoid, hops) and the **tile grid** per room (terrain, floods, seats, work areas, first steps). Every tile query takes a **footprint** (1×1 today, 2×2 for a formation) | World, `intel.rooms` for avoided rooms | flood table, kept across ticks per room while its weights hold | port, add the graph layer, widen the query |
 | `Economy` | task pool, planner, matcher, quota, spawns, labs, terminals, market | World, Atlas, declarations, `State.Economy` | tasks, casts, `State.Economy` | port, trim (§5) |
 | `Layout` | construction and tower plans | World, Atlas, declarations (outposts' containers and roads) | sites, tower intents | port |
 | `Exchange` | who wins: pure fight arithmetic | bodies, terrain | — | port from `Facts.fs:2883–4056, 1038–1582`, `Fighter.fs`, `Arrival.fs`; narrow the input |
