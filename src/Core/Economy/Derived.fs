@@ -214,7 +214,7 @@ let private bodyOf (name: string) (pos: Pos) (parts: Part[]) (store: Store) (lif
     }
 
 let private reservable (me: string) (c: Controller) =
-    c.Owner = Nobody
+    c.Owner.IsNobody
     && (match c.Reservation with
         | Some(user, _) -> user = me
         | None -> true)
@@ -222,7 +222,7 @@ let private reservable (me: string) (c: Controller) =
 /// The engine's rule for a source's capacity: owned or reserved, by anyone.
 let private held (room: Room) =
     match room.Controller with
-    | Some c -> c.Owner <> Nobody || Option.isSome c.Reservation
+    | Some c -> not c.Owner.IsNobody || Option.isSome c.Reservation
     | None -> false
 
 /// `None` where the Atlas counts none: unknown, not zero.
@@ -277,7 +277,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
         else
             Engine.neutralOutputPerTick
 
-    let ownedRoom = room.Controller |> Option.exists (fun c -> c.Owner = Ours)
+    let ownedRoom = room.Controller |> Option.exists (fun c -> c.Owner.IsOurs)
 
     let level =
         room.Controller |> Option.map (fun c -> c.Level) |> Option.defaultValue 0
@@ -285,13 +285,12 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
     let bufferId = Atlas.buffer room |> Option.map (fun b -> b.Id)
 
     let storage =
-        room.Structures
-        |> Array.tryFind (fun s -> s.Kind = Kind.Storage && s.Owner = Ours)
+        room.Structures |> Array.tryFind (fun s -> s.Kind.IsStorage && s.Owner.IsOurs)
 
     let links =
         room.Structures
         |> Array.choose (fun s ->
-            if s.Kind <> Kind.Link || s.Owner <> Ours then
+            if not s.Kind.IsLink || not s.Owner.IsOurs then
                 None
             elif Atlas.isSourceLink room s.Pos then
                 Some LinkRole.Source
@@ -331,8 +330,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
                 Container = post |> Option.bind snd
                 Link =
                     links
-                    |> Array.tryFind (fun l ->
-                        l.Role = LinkRole.Source && Pos.within 2 s.Pos l.Pos)
+                    |> Array.tryFind (fun l -> l.Role.IsSource && Pos.within 2 s.Pos l.Pos)
                     |> Option.map (fun l -> l.Id)
                 Seats = seats
                 Energy = s.Energy
@@ -348,8 +346,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
         |> Array.filter (fun m ->
             m.Amount > 0
             && room.Structures
-               |> Array.exists (fun s ->
-                   s.Kind = Kind.Extractor && s.Owner = Ours && s.Pos = m.Pos))
+               |> Array.exists (fun s -> s.Kind.IsExtractor && s.Owner.IsOurs && s.Pos = m.Pos))
         |> Array.map (fun m ->
             {
                 Id = m.Id
@@ -365,7 +362,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
         match s.Kind with
         | Kind.Spawn
         | Kind.Extension
-        | Kind.Tower when s.Owner = Ours && Store.free s.Store > 0 ->
+        | Kind.Tower when s.Owner.IsOurs && Store.free s.Store > 0 ->
             refills.Add
                 {
                     Id = s.Id
@@ -376,11 +373,11 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
         | Kind.Container
         | Kind.Storage ->
             let energy = Store.amountOf Energy s.Store
-            let owned = s.Kind = Kind.Storage && s.Owner = Ours
-            let dug = if s.Kind = Kind.Container then servedDug s.Pos else 0
+            let owned = s.Kind.IsStorage && s.Owner.IsOurs
+            let dug = if s.Kind.IsContainer then servedDug s.Pos else 0
 
             let kind =
-                if s.Kind = Kind.Storage then StoreKind.Storage
+                if s.Kind.IsStorage then StoreKind.Storage
                 elif ownedRoom && bufferId = Some s.Id then StoreKind.Buffer
                 else StoreKind.Container
 
@@ -403,7 +400,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
         | _ -> ()
 
         match s.Kind with
-        | Kind.Rampart when s.Owner = Ours && s.Hits < min (rampartTarget level) s.HitsMax ->
+        | Kind.Rampart when s.Owner.IsOurs && s.Hits < min (rampartTarget level) s.HitsMax ->
             repairs.Add
                 {
                     Id = s.Id
@@ -419,7 +416,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
             let swamp = Terrain.isSwamp room.Terrain s.Pos.X s.Pos.Y
 
             let decay, rebuild =
-                if s.Kind = Kind.Road then
+                if s.Kind.IsRoad then
                     let ratio = if swamp then Engine.roadSwampRatio else 1
 
                     float (Engine.roadDecayAmount * ratio) / float Engine.roadDecayTime,
@@ -490,7 +487,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
             None
 
     let stores = stores.ToArray()
-    let buffer = stores |> Array.tryFind (fun s -> s.Kind = StoreKind.Buffer)
+    let buffer = stores |> Array.tryFind (fun s -> s.Kind.IsBuffer)
 
     {
         Room = room.Name
@@ -501,7 +498,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
         Stores = stores
         Sites =
             room.Sites
-            |> Array.filter (fun s -> s.Owner = Ours)
+            |> Array.filter (fun s -> s.Owner.IsOurs)
             |> Array.map (fun s ->
                 {
                     Id = s.Id
@@ -552,7 +549,7 @@ let ofWorld
         world.Rooms
         |> Array.choose (fun room ->
             match room.Controller with
-            | Some c when c.Owner = Ours ->
+            | Some c when c.Owner.IsOurs ->
                 let spawns = world.Spawns |> Array.filter (fun s -> s.Pos.Room = room.Name)
 
                 if spawns.Length = 0 then

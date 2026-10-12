@@ -514,7 +514,7 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
             links.Add t
         | None -> ()
 
-    let hubLinks = items |> Seq.sumBy (fun i -> if i.Kind = Kind.Link then 1 else 0)
+    let hubLinks = items |> Seq.sumBy (fun i -> if i.Kind.IsLink then 1 else 0)
     let outer = links |> Seq.truncate (count Kind.Link - hubLinks) |> Array.ofSeq
 
     outer
@@ -598,7 +598,7 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
                 |> Array.map (fun p -> p.Container)
 
             let rank (i: Item) =
-                if i.Kind = Kind.Container && Array.contains i.Tile crowded then
+                if i.Kind.IsContainer && Array.contains i.Tile crowded then
                     2 * priority Kind.Extension - 1
                 else
                     2 * priority i.Kind
@@ -618,7 +618,7 @@ let ofGround (ground: Ground) (spawns: int[]) : Plan option =
     let score (plan: Plan) =
         let placed =
             plan.Items
-            |> Array.filter (fun i -> i.Kind = Kind.Spawn)
+            |> Array.filter (fun i -> i.Kind.IsSpawn)
             |> Array.map (fun i -> i.Tile)
 
         let kept = spawns |> Array.sumBy (fun s -> if Array.contains s placed then 1 else 0)

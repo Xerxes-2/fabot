@@ -58,7 +58,7 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
         | Kind.Rampart -> setAt t rampart true
         | _ -> setAt t solid true
 
-        if s.Owner = Ours then
+        if s.Owner.IsOurs then
             add s.Kind
 
     let mutable pending = 0
@@ -66,7 +66,7 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
     for s in room.Sites do
         setAt (Tiles.ofPos s.Pos) site true
 
-        if s.Owner = Ours then
+        if s.Owner.IsOurs then
             add s.Kind
 
             if standable s.Kind || not (at (Tiles.ofPos s.Pos) occupied) then
@@ -116,13 +116,13 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
             placed.Count < room
             && item.Level <= level
             && not (at t census.Site)
-            && (if item.Kind = Kind.Rampart then
+            && (if item.Kind.IsRampart then
                     at t census.Solid && not (at t census.Rampart)
                 else
                     not (at t census.Solid))
             && (standable item.Kind || not (at t census.Occupied))
             && not (taken.Contains t)
-            && not (item.Kind = Kind.Road && at t census.Road)
+            && not (item.Kind.IsRoad && at t census.Road)
             && heldOf census item.Kind + addedOf item.Kind < Engine.controllerStructures
                 (Kind.name item.Kind)
                 level

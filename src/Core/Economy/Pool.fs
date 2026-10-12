@@ -45,16 +45,16 @@ let private carried (body: Body) (resource: Resource) = Store.amountOf resource 
 
 let garrisons (body: Body) (offer: Offer) : bool =
     match offer.Capacity with
-    | Capacity.Seated(_, posts, _) -> posts > 0 && body.Pattern = Pattern.Harvester
+    | Capacity.Seated(_, posts, _) -> posts > 0 && body.Pattern.IsHarvester
     | _ -> false
 
 let upgrades (body: Body) : bool =
-    body.Pattern <> Pattern.Harvester && body.Work > 0 && body.Carry > 0
+    not body.Pattern.IsHarvester && body.Work > 0 && body.Carry > 0
 
 /// The engine withdraws before it upgrades, so an Upgrade's draw tops up
 /// what the upgrade spends.
 let drawsBuffer (body: Body) (offer: Offer) : bool =
-    offer.Draw = Draw.Buffer
+    offer.Draw.IsBuffer
     && body.Free > 0
     && match offer.Task with
        | Upgrade _ -> body.Energy < body.Work * Engine.upgradeDrainPerWork
@@ -67,21 +67,21 @@ let fits (body: Body) (offer: Offer) : bool =
     let halfEmpty = body.Free > 0 && body.Free * 2 >= body.Store.Capacity
 
     match offer.Task with
-    | Upgrade _ -> upgrades body && (body.Energy > 0 || offer.Draw = Draw.Buffer)
-    | _ when body.Pattern = Pattern.Upgrader -> false
+    | Upgrade _ -> upgrades body && (body.Energy > 0 || offer.Draw.IsBuffer)
+    | _ when body.Pattern.IsUpgrader -> false
     | Harvest _ ->
         body.Work > 0
         && (garrisons body offer
-            || body.Pattern <> Pattern.Harvester
+            || not body.Pattern.IsHarvester
                && (halfEmpty
                    || body.Free > 0 && Pos.within (rangeOf offer.Task) body.Pos offer.Target))
-    | _ when body.Pattern = Pattern.Harvester -> false
-    | Withdraw _ when offer.Draw <> Draw.Open && body.Work = 0 -> false
+    | _ when body.Pattern.IsHarvester -> false
+    | Withdraw _ when not offer.Draw.IsOpen && body.Work = 0 -> false
     | Withdraw _
     | Pickup _ -> body.Carry > 0 && halfEmpty
     | Refill(_, resource) -> body.Carry > 0 && carried body resource > 0
     | Build _
-    | Repair _ -> body.Work > 0 && body.Carry > 0 && (body.Energy > 0 || offer.Draw = Draw.Buffer)
+    | Repair _ -> body.Work > 0 && body.Carry > 0 && (body.Energy > 0 || offer.Draw.IsBuffer)
     | Reserve _
     | Claim _ -> body.Claim > 0
 
@@ -121,14 +121,14 @@ let seatValue (body: Body) (offer: Offer) (walk: int) : int =
         | Harvest _ ->
             let dig = body.Work * Engine.harvestPerWork * stay
 
-            if body.Pattern = Pattern.Harvester then
+            if body.Pattern.IsHarvester then
                 dig
             else
                 min (body.Free + body.Energy) dig
         | Upgrade _ ->
             let upgrade = body.Work * Engine.upgradeDrainPerWork * stay
 
-            if offer.Draw = Draw.Buffer then
+            if offer.Draw.IsBuffer then
                 upgrade
             else
                 min body.Energy upgrade
@@ -202,7 +202,7 @@ let pool (derived: Derived) : Offer[] =
 
         for r in ground.Refills do
             let value =
-                if r.Kind = Kind.Tower then
+                if r.Kind.IsTower then
                     Price.towerShort Price.homeRaidPrior r.Free
                 else
                     // A tick the spawn waits is a tick of the income its
@@ -239,7 +239,7 @@ let pool (derived: Derived) : Offer[] =
                 }
 
         match ground.Controller with
-        | Some c when c.Owner = Ours ->
+        | Some c when c.Owner.IsOurs ->
             let capacity =
                 Capacity.Seated(
                     Option.defaultValue System.Int32.MaxValue ground.UpgradeSeats,
@@ -283,7 +283,7 @@ let pool (derived: Derived) : Offer[] =
             + (feed |> Option.map (fun f -> f.Free) |> Option.defaultValue 0)
 
         for s in ground.Stores do
-            if s.Energy > 0 && s.Kind <> StoreKind.Buffer then
+            if s.Energy > 0 && not s.Kind.IsBuffer then
                 let value =
                     match s.Kind with
                     | StoreKind.Remains -> Price.flowDraw (Price.transientLoss s.Energy)

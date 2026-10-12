@@ -100,8 +100,8 @@ module Atlas =
         |> Option.bind (fun c ->
             room.Structures
             |> Array.filter (fun s ->
-                s.Kind = Kind.Link
-                && s.Owner = Ours
+                s.Kind.IsLink
+                && s.Owner.IsOurs
                 && Pos.within Engine.upgradeRange c.Pos s.Pos
                 && not (isSourceLink room s.Pos))
             |> Array.sortBy (fun s -> Pos.range c.Pos s.Pos, Tiles.ofPos s.Pos)
@@ -111,7 +111,7 @@ module Atlas =
         controllerLink room
         |> Option.orElseWith (fun () ->
             room.Structures
-            |> Array.tryFind (fun s -> s.Kind = Kind.Container && isBuffer room s.Pos))
+            |> Array.tryFind (fun s -> s.Kind.IsContainer && isBuffer room s.Pos))
 
     /// Farthest from the controller first, so a controller container on a seat
     /// is no post.
@@ -123,10 +123,10 @@ module Atlas =
 
         Array.append
             (room.Structures
-             |> Array.filter (fun s -> s.Kind = Kind.Container)
+             |> Array.filter (fun s -> s.Kind.IsContainer)
              |> Array.map (fun s -> s.Pos, Some s.Id))
             (room.Sites
-             |> Array.filter (fun s -> s.Kind = Kind.Container && s.Owner = Ours)
+             |> Array.filter (fun s -> s.Kind.IsContainer && s.Owner.IsOurs)
              |> Array.map (fun s -> s.Pos, None))
         |> Array.filter (fun (p, _) -> Pos.within 1 source p && p <> source)
         |> Array.sortBy (fun (p, built) ->
@@ -139,7 +139,7 @@ module Atlas =
         Array.append
             (room.Sources |> Array.choose (fun s -> postOf room s.Pos |> Option.map fst))
             (buffer room
-             |> Option.filter (fun b -> b.Kind = Kind.Container)
+             |> Option.filter (fun b -> b.Kind.IsContainer)
              |> Option.map (fun b -> b.Pos)
              |> Option.toArray)
         |> Array.map Tiles.ofPos

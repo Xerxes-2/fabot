@@ -36,7 +36,7 @@ let colonies (world: World) (standing: Map<string, Standing>) : Colony[] * Map<s
 
     for room in world.Rooms |> Array.sortBy (fun r -> r.Name) do
         match room.Controller with
-        | Some c when c.Owner = Ours ->
+        | Some c when c.Owner.IsOurs ->
             let spawns = spawnsIn world room.Name
             let key = keyOf room spawns
 
@@ -64,8 +64,8 @@ let colonies (world: World) (standing: Map<string, Standing>) : Colony[] * Map<s
                     Towers =
                         room.Structures
                         |> Array.filter (fun s ->
-                            s.Kind = Kind.Tower
-                            && s.Owner = Ours
+                            s.Kind.IsTower
+                            && s.Owner.IsOurs
                             && Store.amountOf Energy s.Store >= Engine.towerEnergyCost)
                         |> Array.sortBy (fun t -> t.Id)
                     Hostiles = room.Hostiles

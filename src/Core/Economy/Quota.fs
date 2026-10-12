@@ -99,7 +99,7 @@ let private demand pattern at wanted value =
     seated pattern at wanted System.Int32.MaxValue value
 
 let private bodyFor (colony: Colony) (d: Demand) : BodyPart list option =
-    if d.Pattern = Pattern.Harvester && d.At.Room = colony.Room then
+    if d.Pattern.IsHarvester && d.At.Room = colony.Room then
         homeHarvester d.Wanted colony.BankCapacity
     else
         sized d.Pattern d.Wanted colony.BankCapacity
@@ -169,13 +169,13 @@ let private haulFlows (ground: Ground) (s: SourceFact) (post: Pos) (carried: flo
         let left = float s.Dug - carried
 
         match ground.Receiver with
-        | Some r when r.Role = LinkRole.Hub && carried > 0.0 -> [ post, left; r.Pos, carried ]
+        | Some r when r.Role.IsHub && carried > 0.0 -> [ post, left; r.Pos, carried ]
         | _ -> [ post, left ]
 
 /// A hub receiver drains without limit: the carriers empty it into the storage.
 let private linkDrain (derived: Derived) (ground: Ground) : float =
     match ground.Receiver, ground.Controller with
-    | Some r, Some c when r.Role = LinkRole.Controller ->
+    | Some r, Some c when r.Role.IsController ->
         let work =
             Array.append derived.Bodies derived.Ovens
             |> Array.sumBy (fun b -> if upgrades b && b.Pos.Room = ground.Room then b.Work else 0)
@@ -574,7 +574,7 @@ let plan
 
         let digging =
             Array.append derived.Bodies derived.Ovens
-            |> Array.exists (fun b -> b.Pattern = Pattern.Harvester && b.Pos.Room = colony.Room)
+            |> Array.exists (fun b -> b.Pattern.IsHarvester && b.Pos.Room = colony.Room)
 
         match ground.Sources |> Array.tryFind (fun s -> Option.isSome s.Post) with
         | Some s when idle.[ci].Count > 0 && not digging && colony.Bank < colony.BankCapacity ->
@@ -591,7 +591,7 @@ let plan
         roomOf.[offer.Id] <- offer.Target.Room
 
     let serves (room: string) (body: Body) =
-        (body.Pattern = Pattern.Worker || body.Pattern = Pattern.Hauler)
+        (body.Pattern.IsWorker || body.Pattern.IsHauler)
         && (body.Pos.Room = room
             || (match Map.tryFind body.Name assignments with
                 | Some id ->

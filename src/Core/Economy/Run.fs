@@ -148,7 +148,7 @@ let private linkSends (ground: Ground) : Intent list =
         let mutable room = receiver.Free
 
         [
-            for l in ground.Links |> Array.sortBy (fun l -> l.Role <> LinkRole.Source) do
+            for l in ground.Links |> Array.sortBy (fun l -> not l.Role.IsSource) do
                 let amount = min l.Energy room / linkBatch * linkBatch
 
                 if l.Id <> receiver.Id && l.Cooldown = 0 && amount > 0 then
@@ -294,7 +294,7 @@ let decide (context: Context) (state: State) : Intent list * State =
                     g.Links
                     |> Array.tryFind (fun l ->
                         Option.isSome g.Receiver
-                        && l.Role = LinkRole.Source
+                        && l.Role.IsSource
                         && l.Free > 0
                         && Pos.within 1 creep.Pos l.Pos))
                 |> Option.iter (fun l -> acts.Add(Creep(creep.Name, Transfer(l.Id, Energy))))
