@@ -15,7 +15,7 @@
 //   --jobs  soaks at once (default half the cores)
 //
 // A scenario file: { "why": the invariant, "nightly"?, "start": { "room", "seed",
-// "late"?, "node"?, "invaders"? (soak's --invaders), "unsafe"?, "ended"?, "at"?, "bundle"?,
+// "late"?, "node"?, "invaders"? (soak's --invaders), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
 // "opponents"? (soak's --opponents) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick.
@@ -99,6 +99,8 @@ const measures = {
   predictedWinsLost: (_, __, dir) => bugs(engagementsOf(dir)).length,
   // Engagements opened: an attack the bot never answered tests nothing.
   engagements: (_, __, dir) => engagementsOf(dir).length,
+  // Acts the engine refused, every kind (the soak's refusals.json).
+  refusals: (_, __, dir) => Object.values(JSON.parse(readFileSync(join(dir, "refusals.json"), "utf8"))).reduce((n, c) => n + c, 0),
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
   // The most levels the room stood below the highest it held before (`who`:
   // an opponent's room, else ours); a room lost stands at level 0.
@@ -119,6 +121,8 @@ const measures = {
   // The first tick our room stood in safe mode (never: Infinity).
   safeModeAt: (samples, a) => within(samples, a).find((s) => s.safeMode)?.t ?? Infinity,
   creepsAtEnd: (samples, a) => sideOf(a)(at(samples, a.to ?? Infinity)).creeps,
+  // Invader cores standing in the declared outposts at the window's end.
+  coresAtEnd: (samples, a) => Object.values(at(samples, a.to ?? Infinity).rooms).reduce((n, r) => n + (r.cores ?? 0), 0),
   // Enemies standing in our room at the window's end.
   hostilesAtEnd: (samples, a) => at(samples, a.to ?? Infinity).hostiles,
   // `Hostiles.armed` off part letters; WORK counts anywhere, as every sample is our room.
@@ -136,8 +140,8 @@ for (const { name, start } of scenarios)
 // A world holds its opponents' seats; their config is the scenario's.
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
 const seats = (opponents = []) => opponents.map(({ config, ...seat }) => seat);
-const recipe = ({ room, seed, late = 0, node, invaders, unsafe, ended }, opponents) =>
-  `${room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${tag(opponents)}`;
+const recipe = ({ room, seed, late = 0, node, invaders, core, unsafe, ended }, opponents) =>
+  `${room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${tag(opponents)}`;
 // A cached world is replayed only by the opponents' code that played it.
 const codeOf = (bot) => {
   const path = resolve(REPO, bot);
@@ -199,6 +203,7 @@ const play = async ({ name, start, ticks }) => {
       bot,
       ...(start.node ? ["--node", start.node] : []),
       ...(start.invaders ? ["--invaders", start.invaders] : []),
+      ...(start.core ? ["--core", start.core] : []),
       ...(start.unsafe ? ["--unsafe"] : []),
       ...(start.ended ? ["--ended"] : []),
       ...opponentsOf(name, start.opponents),

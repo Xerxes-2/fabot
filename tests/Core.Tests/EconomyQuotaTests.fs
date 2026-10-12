@@ -58,6 +58,7 @@ let private structureGen (room: string) (owned: bool) (i: int) =
                 Store = store [| Energy, energy |] capacity
                 Cooldown = 0
                 Collapse = 0
+                Level = 0
                 Walkable = Kind.walkable kind
             }
     }

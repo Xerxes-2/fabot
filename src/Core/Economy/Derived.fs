@@ -131,9 +131,12 @@ type Ground =
         Income: int
         /// The only income a body is hired against.
         Posted: int
-        /// The engine accepts our reservation or claim on its controller.
+        /// The engine accepts our reservation or claim on its controller, or
+        /// a claimer attacks the Invader's hold off it.
         Reservable: bool
         OurReservation: int
+        /// Sources the Invader's hold refuses us a harvest from.
+        Withheld: int
         UpgradeSeats: int option
         Buffer: StoreFact option
         Feed: StoreFact option
@@ -209,6 +212,18 @@ let private reservable (me: string) (c: Controller) =
     && (match c.Reservation with
         | Some(user, _) -> user = me
         | None -> true)
+
+let invaderHeld (c: Controller) =
+    c.Reservation |> Option.exists (fun (user, _) -> user = Engine.invaderUser)
+
+/// v1's: a claimer attacks the Invader's hold off before it reserves.
+let private takeable (me: string) (c: Controller) = reservable me c || invaderHeld c
+
+/// What a claimer wins a tick: a held room's yield over a neutral one's, and
+/// every source the Invader's hold refuses.
+let reserveGain (ground: Ground) =
+    ground.Sources.Length * (Engine.heldOutputPerTick - Engine.neutralOutputPerTick)
+    + ground.Withheld * Engine.heldOutputPerTick
 
 /// `None` where the Atlas counts none: unknown, not zero.
 let private seatsAt (atlas: Atlas) (range: int) (target: Pos) =
@@ -486,11 +501,12 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (rate: int) (ro
                 })
         Income = sources |> Array.sumBy (fun s -> s.Dug)
         Posted = sources |> Array.sumBy (fun s -> if Option.isSome s.Container then s.Dug else 0)
-        Reservable = room.Controller |> Option.exists (reservable me)
+        Reservable = room.Controller |> Option.exists (takeable me)
         OurReservation =
             match room.Controller |> Option.bind (fun c -> c.Reservation) with
             | Some(user, ticks) when user = me -> ticks
             | _ -> 0
+        Withheld = 0
         UpgradeSeats =
             match room.Controller with
             | Some c -> seatsAt atlas (Task.rangeOf (Task.Upgrade c.Id)) c.Pos
@@ -594,7 +610,9 @@ let ofWorld
 
         match room.Controller with
         | Some c when not (reservable world.Me c) ->
-            groundOf atlas world.Me richest 0 { room with Sources = [||] }
+            { groundOf atlas world.Me richest 0 { room with Sources = [||] } with
+                Withheld = if invaderHeld c then room.Sources.Length else 0
+            }
         | _ when richest >= Engine.bodyCost (blockOf Pattern.Claimer) ->
             groundOf atlas world.Me richest Engine.heldOutputPerTick room
         | _ -> groundOf atlas world.Me richest Engine.neutralOutputPerTick room

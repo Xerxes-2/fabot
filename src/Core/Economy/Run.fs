@@ -102,7 +102,12 @@ let private seatOf
         }
     | _ -> targetOf offer
 
-let private actOf (task: Task) : CreepAct =
+let private actOf (derived: Derived) (task: Task) : CreepAct =
+    let held (id: string) =
+        derived.Grounds
+        |> Array.exists (fun g ->
+            g.Controller |> Option.exists (fun c -> c.Id = id && Derived.invaderHeld c))
+
     match task with
     | Task.Harvest id -> CreepAct.Harvest id
     | Task.Withdraw(id, r) -> CreepAct.Withdraw(id, r)
@@ -111,6 +116,7 @@ let private actOf (task: Task) : CreepAct =
     | Task.Build id -> CreepAct.Build id
     | Task.Repair id -> CreepAct.Repair id
     | Task.Upgrade id -> CreepAct.Upgrade id
+    | Task.Reserve id when held id -> Unreserve id
     | Task.Reserve id -> CreepAct.Reserve id
     | Task.Claim id -> ClaimController id
 
@@ -328,7 +334,7 @@ let decide (context: Context) (state: State) : Intent list * State =
                 // The API refuses an upgrade from an empty store before the
                 // draw lands.
                 if body.Energy > 0 || not (drawsBuffer body offer) then
-                    acts.Add(Creep(creep.Name, actOf offer.Task))
+                    acts.Add(Creep(creep.Name, actOf derived offer.Task))
             | None -> ()
 
             if garrisons body offer && body.Energy > 0 then

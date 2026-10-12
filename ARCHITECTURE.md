@@ -189,7 +189,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `intel.rooms` | room → last seen, owner, structures summary, defence estimate, sources, controller | Strategy | segment | hundreds of rooms; read on a due tick |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
 | `observe.*` | health, faults, per-module CPU, counters | Main, then Observe | segment 1 | operator; calibrates the benchmark |
-| `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse); a room in sight holds only what stands there now | World | heap | vision grace; when a stood-down outpost is clear |
+| `sightings` | room → each armed hostile's or stronghold core's (level ≥ 1) id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse); a room in sight holds only what stands there now | World | heap | vision grace; when a stood-down outpost is clear |
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
 
 Rules:
@@ -319,7 +319,10 @@ Common to every kind:
 
 `Defend` (v2.0):
 - Opened by Strategy when a group threatens: it stands in a room we hold or
-  work, or its centre drifts toward one.
+  work, or its centre drifts toward one. A level-0 Invader core strikes nothing
+  but holds its room's controller: the fight sees it as an armed hostile
+  without a body, which no exchange prices and the biggest melee body the bank
+  buys razes (v1's guard), so an engagement needs no structure target yet.
 - `Forming → Approaching` when every asked body stands (or the group reaches a
   held room first and the standing bodies win alone).
 - `Approaching → Fighting` when any of ours is in reach.
@@ -757,7 +760,7 @@ empty:
 | Milestone | What | Exit |
 |---|---|---|
 | M1 economy | the rest of v1's economy mechanisms | the seat-extreme soak beats v1's bundle in both classes, on a second seed |
-| M1b outposts | declared outposts: reservation, remote harvest and haul, before M2 because RCL6+ structures spend more than a home's two sources give. No fighting before M3: an armed hostile or an Invader core seen in an outpost stands it down until every one seen there has run out its life or the room is seen without one (`sightings`; the owner's choice over porting a guard early, and over a claimer probing a blind room); M3's `Defend` walks its forming bodies there, which brings the room back in sight | node E1 (with timed Invader waves): each outpost nets positive after its bodies and its stand-downs |
+| M1b outposts | declared outposts: reservation, remote harvest and haul, before M2 because RCL6+ structures spend more than a home's two sources give. No fighting before M3: an armed hostile or a stronghold core seen in an outpost stands it down until every one seen there has run out its life or the room is seen without one (`sightings`; the owner's choice over porting a guard early, and over a claimer probing a blind room); M3's `Defend` walks its forming bodies there, which brings the room back in sight | node E1 (with timed Invader waves): each outpost nets positive after its bodies and its stand-downs |
 | M2 structures | node builder (N1–N4) ✅, links ✅ (the controller's and the longest-way source's first: +5–17k worth over 20k ticks on N4; hub-first broke even, as v1's arithmetic said), node N5 ✅; labs, factory, the RCL8 set wait for a sink (owner's call: one room mines one ore, a reaction needs two, offline has no market, and v1 mined only for fight boosts) | links: the node beats the economy without them; the rest: judged with their sink, M3's boosts or several colonies |
 | M3 defence | `Exchange` ✅, `Defend` ✅ (scenario `defend-kills-home-raid`), the first tactics ✅, casting ✅, the opponents harness ✅ (`two-v2-neighbours`), scripted raids and TooAngel held ✅ (`defend-holds-*`, `tooangel-attack-held`) | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
 | M4 live | v2 replaces v1 | ❓ the owner decides from progress |

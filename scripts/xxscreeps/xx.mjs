@@ -77,6 +77,7 @@ if (command === "diff") {
 if (command === "setup") {
   if (args.length > 0 || Object.keys(flags).length > 0) fail(usage);
   setup();
+  setup(true);
   process.exit(0);
 }
 if (command !== "run" || args.length !== 1) fail(usage);

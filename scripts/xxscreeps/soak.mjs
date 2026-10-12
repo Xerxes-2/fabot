@@ -23,6 +23,9 @@
 //   --invaders  room:every[:first][,…]: an Invader wave (`engine/waves`) in
 //            room at t = first, first + every, … (first defaults to every);
 //            E1's default: its outposts every 4000, from 1000 and 2500
+//   --core   room:tick[,…]: a level-0 Invader core (`engine/core`) stood in
+//            room at t = tick, on the template imported with the stronghold
+//            mod (`npm run xx -- setup`)
 //   --capture  ticks a-b[,c-d] (b excluded) to capture.jsonl, the input
 //            `scripts/bench.mjs` replays
 //   --save   a directory to copy the world into after the last tick
@@ -57,7 +60,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4|N5|E1] [--invaders room:every[:first],…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--unsafe] [--ended]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4|N5|E1] [--invaders room:every[:first],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--unsafe] [--ended]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -82,7 +85,7 @@ for (let i = 0; i < rest.length; i++) {
     flags[a] = true;
     continue;
   }
-  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from", "--invaders", "--opponents"].includes(a)) fail(usage);
+  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from", "--invaders", "--core", "--opponents"].includes(a)) fail(usage);
   const value = rest[++i];
   if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
   flags[a] = value;
@@ -114,6 +117,8 @@ if (windows.some((w) => w.length !== 2 || !w.every(Number.isInteger))) fail(`--c
 if (flags["--room"] !== undefined && !/^[WE]\d+[NS]\d+$/.test(flags["--room"])) fail(`--room: "${flags["--room"]}" is not a room name`);
 const waves = (flags["--invaders"] ?? "").split(",").filter(Boolean);
 if (!waves.every((w) => /^[WE]\d+[NS]\d+:[1-9]\d*(:\d+)?$/.test(w))) fail(`--invaders: room:every[:first][,…]\n${usage}`);
+const cores = (flags["--core"] ?? "").split(",").filter(Boolean);
+if (!cores.every((c) => /^[WE]\d+[NS]\d+:\d+$/.test(c))) fail(`--core: room:tick[,…]\n${usage}`);
 if (flags["--run"] !== undefined && !/^[\w.-]+$/.test(flags["--run"])) fail("--run: letters, digits, dots, dashes");
 // The bundle that plays: ours as built, or another (v1's, a baseline's) to
 // compare against on the same room and seed.
@@ -125,7 +130,9 @@ const opponents = flags["--opponents"] ? JSON.parse(readFileSync(flags["--oppone
 for (const o of opponents)
   if (!/^[a-z][\w-]*$/.test(o.name ?? "") || o.name === OUR_NAME || !existsSync(o.bot ?? "") || !/^[WE]\d+[NS]\d+$/.test(o.room ?? ""))
     fail(`--opponents: ${JSON.stringify(o)} needs a name, a bot that exists and a room`);
-if (!existsSync(join(TEMPLATE, "screeps/shard0/data.json"))) fail(`no template world at ${TEMPLATE}: npm run xx -- setup first`);
+// A world's schema is its mods' (`xx.mjs` templateOf).
+const template = cores.length ? `${TEMPLATE}-stronghold` : TEMPLATE;
+if (!existsSync(join(template, "screeps/shard0/data.json"))) fail(`no template world at ${template}: npm run xx -- setup first`);
 
 // ---- the engine, on Node 24 through nix (as xx.mjs) ------------------------
 function node24(args, cwd, capture = false) {
@@ -148,6 +155,7 @@ const screepsrc = [
   "mods:",
   "  - ./seed/index.js",
   "  - xxscreeps/mods/classic",
+  ...(cores.length ? ["  - xxscreeps/mods/modern/stronghold", "  - ./core/index.js"] : []),
   "  - ./waves/index.js",
   "game:",
   "  tickSpeed: 60000",
@@ -171,12 +179,12 @@ const world = join(ENGINE, "worlds", `soak-${worldName}`);
 rmSync(world, { recursive: true, force: true });
 // A copied socket is a dead server's; only files and directories come over.
 const filesOnly = (src) => lstatSync(src).isFile() || lstatSync(src).isDirectory();
-cpSync(TEMPLATE, world, { recursive: true, filter: filesOnly });
+cpSync(template, world, { recursive: true, filter: filesOnly });
 if (from) {
   rmSync(join(world, "screeps"), { recursive: true });
   cpSync(from, join(world, "screeps"), { recursive: true });
 }
-for (const f of ["seed", "waves", "colony.mjs", "node.mjs", "soak-step.mjs"]) cpSync(join(HERE, "engine", f), join(world, f), { recursive: true });
+for (const f of ["seed", "waves", "core", "colony.mjs", "node.mjs", "soak-step.mjs"]) cpSync(join(HERE, "engine", f), join(world, f), { recursive: true });
 writeFileSync(join(world, ".screepsrc.yaml"), screepsrc);
 // Mods resolve from the cwd only where a package.json stands.
 writeFileSync(join(world, "package.json"), '{ "private": true }\n');
@@ -293,7 +301,7 @@ for (let i = 0; !sockets.every(existsSync); i++) {
   if (exited || i > 1200) fail(`the server did not come up; see ${log}`);
   await sleep(100);
 }
-const stepped = JSON.parse(node24([XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out, waves.join(","), "opponents.json"], world, true).trim().split("\n").at(-1));
+const stepped = JSON.parse(node24([XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out, waves.join(","), "opponents.json", cores.join(",")], world, true).trim().split("\n").at(-1));
 for (let i = 0; !exited && i < 150; i++) await sleep(100);
 if (flags["--save"]) {
   if (!exited) fail(`the server did not save on shutdown; no world in ${flags["--save"]}`);

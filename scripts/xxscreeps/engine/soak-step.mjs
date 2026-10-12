@@ -1,6 +1,6 @@
 // Online, the server up: pause the engine, step it one tick at a time and
 // watch one colony. Runs under xxscreeps' own loader, cwd the world:
-//   xxscreeps.js file://…/soak-step.mjs <ticks> <every> <room> <username> <out dir> [<waves>]
+//   xxscreeps.js file://…/soak-step.mjs <ticks> <every> <room> <username> <out dir> [<waves> [<opponents.json> [<cores>]]]
 // Every tick: our CPU (the runner's usage channel), our console, and the
 // observe segment our bot writes (segment 1: faults, refusals). Every
 // <every> ticks, and on the last: one sample of the room. Writes to <out dir>
@@ -22,7 +22,8 @@
 // dug, decayed, built, repaired, `bodies` (each of our bodies' cost spread
 // over its life, charged to the room it stands in each tick), `net` (dug less
 // decayed, repairs and bodies), ticks reserved by us and ticks a hostile
-// stood there, and as it stands: our creeps, hostiles, roads, containers.
+// stood there, and as it stands: our creeps, hostiles, roads, containers,
+// Invader cores.
 // <waves>: room:every[:first],… — an Invader wave (`waves/`) pushed in room
 // at t = first, first + every, …
 // <opponents.json>: [{ name, room, raid? }], the players seated beside ours;
@@ -30,6 +31,7 @@
 // creeps. A raid { first, every?, bodies: [{ part: count, boosts?: { part:
 // compound } }] } stands the opponent's bodies on <room>'s edge toward its
 // room (`waves/`) at t = first, first + every, …
+// <cores>: room:tick,… — a level-0 Invader core (`core/`) stood in room at t = tick.
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
@@ -41,7 +43,7 @@ import { pushIntentsForRoomNextTick } from "xxscreeps/engine/processor/model.js"
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
 
-const [ticksArg, everyArg, roomName, username, out, wavesArg = "", opponentsPath] = process.argv.slice(2);
+const [ticksArg, everyArg, roomName, username, out, wavesArg = "", opponentsPath, coresArg = ""] = process.argv.slice(2);
 const ticks = Number(ticksArg);
 const every = Number(everyArg);
 const observeSegment = 1;
@@ -58,6 +60,13 @@ const waves = wavesArg
   .map((w) => {
     const [room, every, first = every] = w.split(":");
     return { room, every: Number(every), first: Number(first) };
+  });
+const cores = coresArg
+  .split(",")
+  .filter(Boolean)
+  .map((c) => {
+    const [room, at] = c.split(":");
+    return { room, at: Number(at) };
   });
 const opponents = await Promise.all(
   (opponentsPath ? JSON.parse(fs.readFileSync(opponentsPath, "utf8")) : []).map(async (o) => ({ ...o, id: await User.findUserByName(db, o.name) })),
@@ -280,9 +289,10 @@ function roomLines(rooms) {
   return Object.fromEntries(
     rooms.map((room) => {
       const line = lines[room.name];
-      const now = { creeps: 0, hostiles: 0, roads: 0, containers: 0 };
+      const now = { creeps: 0, hostiles: 0, roads: 0, containers: 0, cores: 0 };
       for (const o of room["#objects"]) {
         if (o.body !== undefined) now[o["#user"] === ours ? "creeps" : "hostiles"]++;
+        else if (o.structureType === "invaderCore" && o["#lookType"] !== "ruin") now.cores++;
         else if (o["#lookType"] !== "constructionSite" && (o.structureType === "road" || o.structureType === "container")) now[`${o.structureType}s`]++;
       }
       const bodies = Math.round(line.bodies);
@@ -468,6 +478,10 @@ for (let t = 0; t < ticks; t++) {
     await pushIntentsForRoomNextTick(shard, wave.room, kInvaderUserId, { local: { soakWave: [open] }, internal: true });
     if (lines[wave.room]) lines[wave.room].waves++;
     process.stderr.write(`t${t} wave in ${wave.room} from sides ${open.join(",")}\n`);
+  }
+  for (const core of cores.filter((c) => t === c.at)) {
+    await pushIntentsForRoomNextTick(shard, core.room, kInvaderUserId, { local: { soakCore: [[]] }, internal: true });
+    process.stderr.write(`t${t} core in ${core.room}\n`);
   }
   if (room["#level"] !== levels.at(-1)?.rcl) levels.push({ t, time, rcl: room["#level"] });
   if (t % every === 0 || t === ticks - 1) {

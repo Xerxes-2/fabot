@@ -300,12 +300,7 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
 
         match ground.Controller with
         | Some c when ground.Reservable && gi >= colonies.Length ->
-            let gain =
-                float (
-                    ground.Sources.Length
-                    * (Engine.heldOutputPerTick - Engine.neutralOutputPerTick)
-                    * Engine.claimLifetime
-                )
+            let gain = float (reserveGain ground * Engine.claimLifetime)
 
             demands.Add(
                 seated Pattern.Claimer c.Pos (claimPartsFor ground.OurReservation) 1 (fun _ ->

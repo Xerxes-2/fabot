@@ -1,0 +1,11 @@
+{
+  "why": "a level-0 Invader core that holds an outpost's controller before we reserve it is razed, its hold attacked off, and no body is sent to harvest under it",
+  "start": { "room": "W8N3", "seed": 1, "node": "E1", "core": "W8N2:100" },
+  "ticks": 9000,
+  "assert": [
+    { "measure": "coresAtEnd", "to": 3000, "max": 0 },
+    { "measure": "poorestOutpost", "from": 6000, "min": 10000 },
+    { "measure": "refusals", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

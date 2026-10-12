@@ -212,6 +212,8 @@ type Structure =
         Cooldown: int
         /// Ticks to an Invader core's collapse, at the latest; 0 for any other structure.
         Collapse: int
+        /// An Invader core's level, 0 for an expansion core; 0 for any other structure.
+        Level: int
         Walkable: bool
     }
 
@@ -402,7 +404,7 @@ module Sightings =
                     seen <- Map.add creep.Id (world.Time + creep.TicksToLive) seen
 
             for s in room.Structures do
-                if s.Kind.IsInvaderCore then
+                if s.Kind.IsInvaderCore && s.Level > 0 then
                     seen <- Map.add s.Id (world.Time + s.Collapse) seen
 
             next <-

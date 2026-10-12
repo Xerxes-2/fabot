@@ -63,6 +63,7 @@ let private structureOf (s: IStructure) : Structure =
                 |> Option.map (fun e -> e.ticksRemaining)
                 |> Option.defaultWith (fun () ->
                     s.ticksToDeploy + Fabot.Core.Engine.strongholdLongestCollapse)
+        Level = if kind.IsInvaderCore then s.level else 0
         Walkable =
             match kind with
             | Kind.Rampart -> owner.IsOurs || s.isPublic

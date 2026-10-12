@@ -15,6 +15,7 @@ type CreepAct =
     | Repair of target: string
     | Upgrade of controller: string
     | Reserve of controller: string
+    | Unreserve of controller: string
     | ClaimController of controller: string
     | AttackCreep of target: string
     | RangedAttackCreep of target: string

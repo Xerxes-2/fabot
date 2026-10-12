@@ -102,6 +102,7 @@ let main _ =
                 Store = Store.empty
                 Cooldown = 0
                 Collapse = 0
+                Level = 0
                 Walkable = Kind.walkable kind
             }
 

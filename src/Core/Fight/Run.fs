@@ -48,7 +48,21 @@ let private merged
 
 let decide (context: Context) (state: State) : Intent list * State =
     let world = context.World
-    let hostiles = world.Rooms |> Array.collect (fun r -> r.Hostiles)
+    let foes = Dictionary<string, Creep[]>()
+    let cores = HashSet<string>()
+
+    for r in world.Rooms do
+        let razed =
+            r.Structures
+            |> Array.filter (fun s -> s.Kind.IsInvaderCore && s.Level = 0)
+            |> Array.map Casting.coreAsHostile
+
+        for c in razed do
+            cores.Add c.Id |> ignore
+
+        foes.[r.Name] <- Array.append r.Hostiles razed
+
+    let hostiles = world.Rooms |> Array.collect (fun r -> foes.[r.Name])
     let owned = Hostiles.owned world.Rooms
     let held = state.Engagements |> List.fold (fun most e -> max most e.Group) 0
 
@@ -160,7 +174,7 @@ let decide (context: Context) (state: State) : Intent list * State =
         let set = HashSet<string>()
 
         for h in hostiles do
-            if Hostiles.armed owned hostiles h then
+            if cores.Contains h.Id || Hostiles.armed owned hostiles h then
                 set.Add h.Id |> ignore
 
         set
@@ -251,11 +265,15 @@ let decide (context: Context) (state: State) : Intent list * State =
         | true, g when rooms.ContainsKey g.Room && not e.Phase.IsDisengaging ->
             let room = rooms.[g.Room]
 
-            let raid = room.Hostiles |> Array.filter (fun h -> armed.Contains h.Id)
+            let raid = foes.[room.Name] |> Array.filter (fun h -> armed.Contains h.Id)
 
             let theirs: Exchange.Exchange.Side =
                 {
-                    Bodies = raid |> Array.map Casting.fighterOf |> List.ofArray
+                    Bodies =
+                        raid
+                        |> Array.filter (fun h -> not (cores.Contains h.Id))
+                        |> Array.map Casting.fighterOf
+                        |> List.ofArray
                     Ramparts = Map.empty
                     Towers = []
                 }
@@ -295,6 +313,13 @@ let decide (context: Context) (state: State) : Intent list * State =
             | Some(set, outcome, tactic) ->
                 free.Clear()
 
+                let set =
+                    set
+                    @ Casting.razer
+                        capacity
+                        (raid |> Array.filter (fun h -> cores.Contains h.Id) |> Array.sumBy _.Hits)
+                        (bodies @ asked @ List.map Exchange.Fighter.cast set)
+
                 set
                 |> List.iteri (fun i body ->
                     match Casting.colonyFor colonies world.Spawns queued (walkTo e.Room) body with
@@ -325,7 +350,11 @@ let decide (context: Context) (state: State) : Intent list * State =
                                | _ -> 0)
                         Unanswered = false
                         Capacity = capacity
-                        Predicted = if e.Unanswered then Some outcome else e.Predicted
+                        // A core alone is no fight Exchange predicts (§10.1).
+                        Predicted =
+                            if not e.Unanswered then e.Predicted
+                            elif theirs.Bodies.IsEmpty then None
+                            else Some outcome
                     }
 
                 let standing =
@@ -404,7 +433,7 @@ let decide (context: Context) (state: State) : Intent list * State =
         }
 
     for r in world.Rooms do
-        sight.Hostiles.[r.Name] <- r.Hostiles
+        sight.Hostiles.[r.Name] <- foes.[r.Name]
 
         sight.Ramparts.[r.Name] <-
             r.Structures

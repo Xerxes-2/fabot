@@ -46,6 +46,38 @@ let fighterOf (c: Creep) : Fighter.Fighter =
             | _ -> false
     }
 
+/// A level-0 Invader core holds its room's controller and strikes nothing: a
+/// hostile without a body, which no exchange prices.
+let coreAsHostile (core: Structure) : Creep =
+    {
+        Id = core.Id
+        Name = core.Id
+        Owner = core.Owner
+        Pos = core.Pos
+        Body = [||]
+        Hits = core.Hits
+        HitsMax = core.HitsMax
+        TicksToLive = core.Collapse
+        Fatigue = 0
+        Store = Store.empty
+    }
+
+/// v1's guard on a core: the biggest melee body the bank buys, as a small one
+/// dies of age short of its 100,000 hits; none where ours raze `hits` in a life.
+let razer (capacity: int) (hits: int) (ours: Fighter.Fighter list) : Exchange.Body list =
+    let block = [ Move; Attack ]
+
+    let most =
+        min (capacity / Engine.bodyCost block) (Engine.maxBodyParts / List.length block)
+
+    let swing =
+        Engine.attackPower * List.sumBy (fun (f: Fighter.Fighter) -> f.Attack) ours
+
+    if most = 0 || swing * Engine.creepLifetime >= hits then
+        []
+    else
+        [ List.replicate most block |> List.concat ]
+
 let terrainAt (room: Room) (at: Pos) : Exchange.Terrain =
     let last = Engine.roomSide - 1
 

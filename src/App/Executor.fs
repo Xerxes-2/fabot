@@ -36,6 +36,7 @@ let private act (intent: Intent) : string * int =
             | Repair id -> on "repair" id creep.repair
             | Upgrade id -> on "upgrade" id creep.upgradeController
             | Reserve id -> on "reserve" id creep.reserveController
+            | Unreserve id -> on "unreserve" id creep.attackController
             | ClaimController id -> on "claim" id creep.claimController
             | AttackCreep id -> on "attack" id creep.attack
             | RangedAttackCreep id -> on "rangedAttack" id creep.rangedAttack

@@ -266,10 +266,7 @@ let pool (derived: Derived) : Offer[] =
                     upgrade
             )
         | Some c when ground.Reservable && Option.isNone colony ->
-            let gain =
-                ground.Sources.Length * (Engine.heldOutputPerTick - Engine.neutralOutputPerTick)
-
-            offers.Add(offer (Reserve c.Id) c.Pos (float gain) (Capacity.Bodies 1))
+            offers.Add(offer (Reserve c.Id) c.Pos (float (reserveGain ground)) (Capacity.Bodies 1))
         | _ -> ()
 
         let starved = colony |> Option.exists (fun c -> c.Bank < c.BankCapacity)
