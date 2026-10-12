@@ -553,7 +553,10 @@ everything v1 used its self-written arena for, and more:
   state at tick T (from the recorder or room history) seeded into xxscreeps,
   run N ticks, asserted on outcomes — held, losses ≤ X, the group dead by T+K.
   A fix is verified by its scenario passing and the library not regressing.
-  The library runs nightly.
+  The library runs nightly. `npm run scenario` runs `scripts/xxscreeps/scenarios/`:
+  each a start as a recipe (room, seed, late start or node; ❓ a live room's
+  state), its ticks and bounds on what the soak measured, scenarios on one
+  start sharing one soak; while it is small, `jj ship` runs all of it.
 - **Soak.** The real sector's terrain and rooms, from one spawn for thousands
   of ticks: income curve, expansion cadence, losses to NPC waves, CPU curve.
   A change to the economy is read off this curve, not off a unit test. It is
@@ -723,7 +726,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 | `Decide/Threat.fs`, rest of `Facts.fs`, `Observe.fs` fight parts, `WorldDanger.fs`, `Sightings.fs` latches | — | not ported |
 | reactor / Thorium / programme code | — | not ported; `Season/` is per season |
 | `tests/**` | — | not ported; §10 |
-| `scripts/xxscreeps/*` | `scripts/xx` | port and extend (§10.2) |
+| `scripts/xxscreeps/*` | `scripts/xx` | port and extend (§10.2); ✅ the scenario library, `scenario.mjs` |
 | `scripts/capture-*.mjs` | `observe capture` | ✅ pulls the recorder ring; ✅ the replay harness over a soak's capture, `scripts/bench.mjs` (§9.1) |
 | `scripts/bundle, upload, cpuprofile, screeps-api`, `ship.sh` | `scripts/` | ✅ kept |
 | `scripts/observe.mjs` | `scripts/observe.mjs` | ✅ rewritten small: health, cpu, faults, switches, capture, wait |

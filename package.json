@@ -17,7 +17,8 @@
     "bench": "node --max-old-space-size=256 scripts/bench.mjs",
     "xx": "node scripts/xxscreeps/xx.mjs",
     "soak": "node scripts/xxscreeps/soak.mjs",
-    "soak:many": "node scripts/xxscreeps/soak-many.mjs"
+    "soak:many": "node scripts/xxscreeps/soak-many.mjs",
+    "scenario": "node scripts/xxscreeps/scenario.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

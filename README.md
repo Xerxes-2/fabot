@@ -22,6 +22,7 @@ Without Nix: .NET SDK 10 and Node.js >= 24. Then:
 npm test         # format check, line ceilings, dotnet test
 npm run build    # Fable → esbuild → dist/main.js
 npm run smoke    # the bundle runs four ticks against a stub game
+npm run scenario # the scenario library on xxscreeps (needs `npm run xx -- setup`)
 npm run deploy   # build, smoke, upload — runs v2 live; v2 does nothing yet
 npm run observe -- health
 ```

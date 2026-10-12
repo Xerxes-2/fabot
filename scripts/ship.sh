@@ -25,6 +25,7 @@ branch=$(jj config get claude.session-branch 2>/dev/null || true)
 npm test
 npm run build
 npm run smoke
+npm run scenario
 
 jj bookmark set "$branch" -r "$rev"
 

@@ -269,6 +269,9 @@ function sample(t, time, room) {
       } else row.hostiles++;
     }
   }
+  const objects = [...room["#objects"]];
+  const atSource = (c) => objects.some((s) => s["#lookType"] === "source" && near(s.pos, c.pos, 1));
+  row.sourceContainers = objects.filter((o) => o.structureType === "container" && o["#lookType"] !== "constructionSite" && atSource(o)).length;
   return row;
 }
 
