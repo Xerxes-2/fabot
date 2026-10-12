@@ -113,6 +113,28 @@ let private actOf (task: Task) : CreepAct =
     | Task.Reserve id -> CreepAct.Reserve id
     | Task.Claim id -> ClaimController id
 
+/// Every body with room and no other resource aboard picks up dropped energy
+/// beside it, beside its Task's own act: the engine's pickup conflicts with
+/// no other, and a pile no Task reaches decays (v1's reflex). `taken`: the
+/// bodies whose act is already a pickup.
+let private pickups (derived: Derived) (taken: HashSet<string>) : Intent list =
+    [
+        for b in derived.Bodies do
+            if
+                b.Free > 0
+                && not (taken.Contains b.Name)
+                && b.Store.Held |> Array.forall (fun (r, _) -> r = Energy)
+            then
+                match
+                    derived.Grounds
+                    |> Array.tryPick (fun g ->
+                        g.Piles
+                        |> Array.tryFind (fun p -> p.Resource = Energy && Pos.within 1 b.Pos p.Pos))
+                with
+                | Some p -> yield Creep(b.Name, CreepAct.Pickup p.Id)
+                | None -> ()
+    ]
+
 /// The smallest send: the engine credits `floor(amount × 0.97)`, so a send
 /// in whole hundreds loses the 3% and nothing to the rounding.
 let private linkBatch = 100
@@ -296,6 +318,15 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     let sends = derived.Grounds |> Seq.collect linkSends |> List.ofSeq
 
-    casts @ List.ofSeq acts @ sends @ List.ofSeq moves, { state with Assignments = assignments }
+    let taken =
+        HashSet<string>(
+            acts
+            |> Seq.choose (function
+                | Creep(name, CreepAct.Pickup _) -> Some name
+                | _ -> None)
+        )
+
+    casts @ List.ofSeq acts @ pickups derived taken @ sends @ List.ofSeq moves,
+    { state with Assignments = assignments }
 
 let economy: Module = { Name = "economy"; Run = decide }
