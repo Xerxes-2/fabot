@@ -17,6 +17,7 @@ import { cpSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, rmSyn
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { bugs, misses, outcome, report, stood } from "./prediction.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
@@ -201,37 +202,18 @@ writeFileSync(join(out, "results.json"), JSON.stringify(actual));
 
 // ---- the report ------------------------------------------------------------
 const rows = samples.map((s) => ({ s, p: predictions[s.id], a: actual[s.id] }));
-const outcome = (a) => (a.won === true ? "won" : a.won === false ? "lost" : "stood");
-const table = {};
-for (const { p, a } of rows) table[`${p.kind}→${outcome(a)}`] = (table[`${p.kind}→${outcome(a)}`] ?? 0) + 1;
-const bugs = rows.filter(({ p, a }) => p.kind !== "lose" && a.won === false);
-const stood = rows.filter(({ p, a }) => p.kind !== "lose" && a.won === null);
-const misses = rows.filter(({ p, a }) => p.kind === "lose" && a.won === true);
-const timed = rows.filter(({ p, a }) => p.kind !== "lose" && a.won === true && a.ticks !== null);
-const quantiles = (xs) => {
-  if (xs.length === 0) return "none";
-  const sorted = [...xs].sort((a, b) => a - b);
-  const q = (f) => sorted[Math.min(sorted.length - 1, Math.floor(f * sorted.length))];
-  return `median ${q(0.5)} p10 ${q(0.1)} p90 ${q(0.9)} (n ${xs.length})`;
-};
 const describe = ({ s, p, a }) =>
   `  ${s.id} ${s.kind}: ${s.theirs.bodies.map((b) => b.parts.length + (b.boosts[0] ? "*" : "") + b.parts.filter((x) => x !== "move").map((x) => x[0]).join("")).join(" ")}` +
   ` ${s.owner === "ours" ? "" : "their room, "}${s.theirs.bodies[0].invader ? "Invader, " : ""}towers ${s[s.owner].towers.length}, ramparts ${s[s.owner].ramparts.length}; predicted ${p.kind} ${p.ticks}t, ${outcome(a)}${a.ticks === null ? "" : ` ${a.ticks}t`}`;
 const lines = [
   `exchange generated set: ${count} duels, seed ${seed}, ${ticks} ticks at most`,
-  `predicted→actual: ${Object.entries(table).sort().map(([k, n]) => `${k} ${n}`).join(", ")}`,
-  `predicted Win/Kite that lost (bugs): ${bugs.length}`,
-  `predicted Win/Kite that timed out (misses): ${stood.length}`,
-  `predicted Lose that won: ${misses.length}`,
-  `tick error, predicted − actual, on predicted wins won: ${quantiles(timed.map(({ p, a }) => p.ticks - a.ticks))}`,
-  `bodies lost error on predicted Win won: ${quantiles(timed.filter(({ p }) => p.kind === "win").map(({ p, a }) => p.dead - a.dead))}`,
-  `hits lost error on predicted Win won: ${quantiles(timed.filter(({ p }) => p.kind === "win").map(({ p, a }) => p.hits - a.hits))}`,
+  ...report(rows),
   "bugs:",
-  ...bugs.map(describe),
+  ...bugs(rows).map(describe),
   "predicted Win/Kite that timed out:",
-  ...stood.map(describe),
+  ...stood(rows).map(describe),
   "predicted Lose that won:",
-  ...misses.map(describe),
+  ...misses(rows).map(describe),
 ];
 writeFileSync(join(out, "report.txt"), lines.join("\n") + "\n");
 console.log(lines.join("\n"));

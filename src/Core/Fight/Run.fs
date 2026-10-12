@@ -176,6 +176,7 @@ let decide (context: Context) (state: State) : Intent list * State =
                 Priority = priority
                 Unanswered = true
                 Capacity = 0
+                Predicted = None
             },
             true)
 
@@ -281,7 +282,7 @@ let decide (context: Context) (state: State) : Intent list * State =
             match
                 Casting.price stance (Casting.sideIn room (bodies @ asked)) theirs terrain capacity
             with
-            | Some(set, dead, tactic) ->
+            | Some(set, outcome, tactic) ->
                 free.Clear()
 
                 set
@@ -307,9 +308,14 @@ let decide (context: Context) (state: State) : Intent list * State =
                                 Tactic = tactic
                                 Order = Casting.killOrder raid
                             }
-                        Budget = e.Lost + dead
+                        Budget =
+                            e.Lost
+                            + (match outcome with
+                               | Exchange.Exchange.Win(_, losses) -> losses.Dead
+                               | _ -> 0)
                         Unanswered = false
                         Capacity = capacity
+                        Predicted = if e.Unanswered then Some outcome else e.Predicted
                     }
 
                 let standing =

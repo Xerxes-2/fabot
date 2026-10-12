@@ -7,6 +7,7 @@ open Fable.Core.JsInterop
 open Fabot.Bindings
 open Fabot.Core.State
 open Fabot.Core.Fight.Shape
+open Fabot.Core.Exchange
 
 /// Read by `npm run observe` and `scripts/capture`.
 let observeSegment = 1
@@ -99,6 +100,39 @@ let private phases =
 let private tactics =
     [ "kite", Tactic.Kite; "close", Tactic.Close; "hold", Tactic.Hold ]
 
+/// As `npm run exchange` writes a prediction.
+let private outcomeObj (outcome: Exchange.Outcome) =
+    match outcome with
+    | Exchange.Win(ticks, losses) ->
+        createObj
+            [
+                "kind" ==> "win"
+                "ticks" ==> ticks
+                "dead" ==> losses.Dead
+                "hits" ==> losses.Hits
+            ]
+    | Exchange.Kite ticks -> createObj [ "kind" ==> "kite"; "ticks" ==> ticks ]
+    | Exchange.Lose -> createObj [ "kind" ==> "lose" ]
+
+let private outcomeOf (o: obj) : Exchange.Outcome option =
+    let count name =
+        intOf (field o name) |> Option.defaultValue 0
+
+    match field o "kind" with
+    | :? string as kind when kind = "win" ->
+        Some(
+            Exchange.Win(
+                count "ticks",
+                {
+                    Dead = count "dead"
+                    Hits = count "hits"
+                }
+            )
+        )
+    | :? string as kind when kind = "kite" -> Some(Exchange.Kite(count "ticks"))
+    | :? string as kind when kind = "lose" -> Some Exchange.Lose
+    | _ -> None
+
 let private engagementOf (o: obj) : Engagement option =
     let phase =
         phases
@@ -132,6 +166,7 @@ let private engagementOf (o: obj) : Engagement option =
                     | _ -> 0.0
                 Unanswered = field o "unanswered" = box true
                 Capacity = intOf (field o "capacity") |> Option.defaultValue 0
+                Predicted = outcomeOf (field o "predicted")
             }
     | _ -> None
 
@@ -151,6 +186,7 @@ let private engagementObj (e: Engagement) =
             "priority" ==> e.Priority
             "unanswered" ==> e.Unanswered
             "capacity" ==> e.Capacity
+            "predicted" ==> (e.Predicted |> Option.map outcomeObj |> Option.toObj)
         ]
 
 let private castOf (o: obj) : Cast option =

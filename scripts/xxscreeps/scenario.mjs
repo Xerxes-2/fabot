@@ -24,6 +24,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { availableParallelism, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { bugs, engagement, report } from "./prediction.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
@@ -49,6 +50,15 @@ for (const n of names) if (!all.includes(n)) fail(`no scenario ${n}; the library
 const scenarios = (names.length ? names : all).map((name) => ({ name, ...JSON.parse(readFileSync(join(LIBRARY, `${name}.json`), "utf8")) }));
 
 // Ticks are counted from the bot's first, so a window means the same on every start.
+// Each engagement the run priced, as `prediction.mjs` reads a row; one never
+// priced predicted nothing.
+const engagementsOf = (dir) =>
+  readFileSync(join(dir, "engagements.jsonl"), "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => JSON.parse(l))
+    .filter((e) => e.predicted)
+    .map((e) => ({ p: e.predicted, a: engagement(e) }));
 const samplesOf = (dir) => readFileSync(join(dir, "samples.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 const at = (samples, t) => samples.find((s) => s.t >= t) ?? samples.at(-1);
 const sideOf = (a) => (s) => (a.who ? s.others[a.who] : s);
@@ -80,6 +90,8 @@ const measures = {
     const home = Object.keys(last.rooms)[0];
     return last.rooms[home].hostile - (first.rooms[home]?.hostile ?? 0);
   },
+  // Engagements whose predicted Win or Kite was lost (§10.1).
+  predictedWinsLost: (_, __, dir) => bugs(engagementsOf(dir)).length,
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
   // The most levels the room stood below the highest it held before (`who`:
   // an opponent's room, else ours); a room lost stands at level 0.
@@ -200,6 +212,8 @@ for (const s of scenarios) {
     const bound = [a.min !== undefined && `≥ ${a.min}`, a.max !== undefined && `≤ ${a.max}`].filter(Boolean).join(", ");
     console.log(`${ok ? "pass" : "FAIL"} ${s.name}: ${a.measure}${a.who ? ` of ${a.who}` : ""}${window} ${value} (${bound})`);
   }
+  const rows = s.assert.some((a) => a.measure === "predictedWinsLost") ? engagementsOf(dir) : [];
+  if (rows.length) for (const line of [`${rows.length} engagements`, ...report(rows)]) console.log(`  ${s.name}: ${line}`);
 }
 console.log(`${failed ? `${failed} failed` : "all passed"} in ${((Date.now() - started) / 1000).toFixed(0)} s`);
 process.exit(failed ? 1 : 0);

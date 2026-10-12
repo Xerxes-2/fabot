@@ -86,7 +86,7 @@ let wins
     | Exchange.Lose -> false
     | _ -> true
 
-/// The bodies to ask beside `ours`, the dead the win costs and the tactic it
+/// The bodies to ask beside `ours`, the outcome they land and the tactic it
 /// is won by; None: no body the spawns buy wins.
 let price
     (stance: Exchange.Stance)
@@ -94,7 +94,7 @@ let price
     (theirs: Exchange.Side)
     (terrain: Exchange.Terrain)
     (capacity: int)
-    : (Exchange.Body list * int * Tactic) option =
+    : (Exchange.Body list * Exchange.Outcome * Tactic) option =
     (if wins stance ours theirs terrain then
          Some []
      else
@@ -109,8 +109,8 @@ let price
             if stance.IsHold then Tactic.Hold else won
 
         match Exchange.outcome stance landed theirs terrain with
-        | Exchange.Win(_, losses) -> set, losses.Dead, tactic Tactic.Close
-        | _ -> set, 0, tactic Tactic.Kite)
+        | Exchange.Win _ as won -> set, won, tactic Tactic.Close
+        | other -> set, other, tactic Tactic.Kite)
 
 let killOrder (hostiles: Creep[]) : string list =
     hostiles

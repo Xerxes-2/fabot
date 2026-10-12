@@ -330,7 +330,8 @@ Common to every kind:
   the group is gone.
 - v2.0's record (`Fight/Shape.fs`) holds what `Defend` reads: the target is a
   group id, the asks live in `fight.casts`; `Kind` and `Declares` join with
-  the second kind, `Predicted` with `engagements.log`. The plan chases while
+  the second kind; `Predicted` is the outcome priced each time it is answered
+  after standing unanswered. The plan chases while
   the group stands in another room we hold or work.
 
 The other kinds, for the record's sake:
@@ -569,6 +570,12 @@ terrain, towers) against `Defend`; a predicted `Win` that lost is an `Exchange`
 bug, a large error is a term the model lacks. This is the only real test of
 the arithmetic v2 prices its commitments with, and the quality metric of the
 "cast exactly enough" lever.
+
+✅ Offline: a scenario reads each engagement from our Memory every tick and
+reports its error by `scripts/xxscreeps/prediction.mjs`, which defines an
+engagement's outcome and the error once for it and `npm run exchange`;
+`predictedWinsLost` fails a fight scenario on an `Exchange` bug. ❓
+`engagements.log` and `observe exchange`, live.
 
 ### 10.2 xxscreeps is the engine
 

@@ -52,6 +52,10 @@ type Engagement =
         Unanswered: bool
         /// The bank it was last priced against; a larger one is an event.
         Capacity: int
+        /// What `Exchange` said each time it was answered after standing
+        /// unanswered (at open, or a given-up home's re-answered), set against
+        /// what happened (§10.1); None while it never was.
+        Predicted: Fabot.Core.Exchange.Exchange.Outcome option
     }
 
 /// A body asked of `Room`'s spawns under `Name`, until it stands.

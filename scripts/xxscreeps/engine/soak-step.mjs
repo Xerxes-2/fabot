@@ -344,6 +344,47 @@ function sample(t, time, room) {
   return row;
 }
 
+// What `prediction.mjs` reads an engagement's outcome from.
+const open = new Map();
+const engagementsOut = fs.openSync(join(out, "engagements.jsonl"), "w");
+const allRooms = await shard.data.sMembers("rooms");
+async function standing(ids) {
+  for (const name of allRooms) {
+    const r = await shard.loadRoom(name, time).catch(() => null);
+    if (r && [...r["#objects"]].some((o) => ids.has(o.id))) return true;
+  }
+  return false;
+}
+async function closed(e, t) {
+  const { members, ...rest } = e;
+  fs.writeSync(engagementsOut, JSON.stringify({ ...rest, closed: t, outlived: t === null || (await standing(members)) }) + "\n");
+}
+async function engaged(t, time, rooms) {
+  const fight = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}").v2?.fight ?? {};
+  const now = new Set();
+  for (const e of fight.engagements ?? []) {
+    now.add(e.id);
+    const rec = open.get(e.id) ?? { id: e.id, room: e.room, opened: t, members: new Set(), answered: false, gaveUp: false, disengaged: false, contact: null, seen: null };
+    open.set(e.id, rec);
+    for (const m of (fight.groups ?? []).find((g) => g.id === e.group)?.members ?? []) rec.members.add(m);
+    rec.predicted = e.predicted;
+    rec.dead = e.lost;
+    rec.answered ||= !e.unanswered;
+    rec.gaveUp ||= rec.answered && e.unanswered;
+    rec.disengaged ||= e.phase === "disengaging";
+    const objects = rooms.flatMap((r) => [...r["#objects"]]);
+    const theirs = objects.filter((o) => rec.members.has(o.id));
+    if (theirs.length) rec.seen = t;
+    if (rec.contact === null && objects.some((o) => e.ours.includes(o.name) && o["#user"] === ours && theirs.some((h) => near(h.pos, o.pos, 3) && h.pos.roomName === o.pos.roomName)))
+      rec.contact = t;
+  }
+  for (const [id, rec] of open)
+    if (!now.has(id)) {
+      open.delete(id);
+      await closed(rec, t);
+    }
+}
+
 // Keep asking for the pause until the first tick is through (`step.mjs`).
 const spam = setInterval(() => svc.publish({ type: "pause" }), 20);
 await svc.publish({ type: "pause" });
@@ -400,6 +441,7 @@ for (let t = 0; t < ticks; t++) {
   const rooms = await Promise.all(roomNames.map((name) => shard.loadRoom(name, time)));
   const room = rooms[0];
   account(rooms, time);
+  await engaged(t, time, rooms);
   for (const wave of waves.filter((w) => t >= w.first && (t - w.first) % w.every === 0)) {
     const exits = Object.entries(world.map.describeExits(wave.room) ?? {});
     const users = await Promise.all(exits.map(([, next]) => shard.loadRoom(next, time).then((r) => r["#user"], () => null)));
@@ -433,6 +475,7 @@ for (let t = 0; t < ticks; t++) {
   }
 }
 for (const log of pileLog.values()) if (log.decayed > 0) pileOut(log);
+for (const rec of open.values()) await closed(rec, null);
 fs.writeFileSync(join(out, "refusals.json"), JSON.stringify(refusals, null, 2) + "\n");
 fs.writeFileSync(join(out, "observe.json"), JSON.stringify(lastObs, null, 1) + "\n");
 fs.writeFileSync(join(out, "levels.json"), JSON.stringify(levels) + "\n");
