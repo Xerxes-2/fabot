@@ -63,7 +63,7 @@ let claimPartsFor (held: int) : int =
     max 2 (ceilDiv perTick Engine.reservePerClaim)
 
 let private lifeOf (pattern: Pattern) =
-    if pattern = Pattern.Claimer then
+    if pattern.IsClaimer then
         Engine.claimLifetime
     else
         Engine.creepLifetime
@@ -118,13 +118,18 @@ let private nearest
     (can: int -> bool)
     (at: Pos)
     =
-    [| 0 .. colonies.Length - 1 |]
-    |> Array.filter can
-    |> Array.choose (fun ci ->
-        distance (homeOf colonies.[ci]) at |> Option.map (fun ticks -> ci, ticks))
-    |> function
-        | [||] -> None
-        | reached -> Some(fst (Array.minBy snd reached))
+    let mutable best = -1
+    let mutable least = 0
+
+    for ci in 0 .. colonies.Length - 1 do
+        if can ci then
+            match distance (homeOf colonies.[ci]) at with
+            | Some ticks when best < 0 || ticks < least ->
+                best <- ci
+                least <- ticks
+            | _ -> ()
+
+    if best < 0 then None else Some best
 
 /// Ticks a body of the parts walks loaded from a tile to within a range of
 /// another.
@@ -133,7 +138,7 @@ type Leg = BodyPart list -> Pos -> Pos -> int -> int option
 /// The walk there loaded and back empty: an empty Carry weighs nothing, so
 /// each leg is its own flood toward `work`.
 let private roundTrip (leg: Leg) (body: BodyPart list) (fetch: Pos) (work: Pos) (range: int) =
-    let empty = body |> List.filter (fun p -> p <> Carry)
+    let empty = body |> List.filter (fun p -> not p.IsCarry)
 
     match leg body fetch work range, leg empty fetch work range with
     | Some there, Some back -> Some(max 2 (there + back))
@@ -498,7 +503,7 @@ let plan
 
     let all = Array.append (others.ToArray()) (spendDemands distance leg derived others)
 
-    let standing = System.Collections.Generic.Dictionary<Pattern, int>()
+    let standing = System.Collections.Generic.Dictionary<string, int>()
 
     // The walk at the body's own pace bounds the fresh one (an empty body is
     // never slower), so the fresh walk is asked only inside it.
@@ -522,27 +527,32 @@ let plan
 
     for body in Array.append derived.Bodies derived.Ovens do
         if not (expiringNow body) then
-            let pattern = body.Pattern
-            let parts = keyPartsIn pattern body
+            let pattern = nameOf body.Pattern
+            let parts = keyPartsIn body.Pattern body
 
             standing.[pattern] <-
-                (match standing.TryGetValue pattern with
-                 | true, n -> n
-                 | _ -> 0)
+                (if standing.ContainsKey pattern then
+                     standing.[pattern]
+                 else
+                     0)
                 + parts
 
-            match
-                all
-                |> Array.filter (fun d -> d.Pattern = pattern && d.Left > 0 && d.SeatsLeft > 0)
-            with
-            | [||] -> ()
-            | demands ->
-                let d =
-                    demands
-                    |> Array.minBy (fun d ->
-                        let ticks = distance body.Pos d.At
-                        Option.isNone ticks, ticks)
+            // The nearest open demand of the pattern; an unreachable one last.
+            let mutable pick = -1
+            let mutable least = System.Int32.MaxValue
 
+            for i in 0 .. all.Length - 1 do
+                let d = all.[i]
+
+                if nameOf d.Pattern = pattern && d.Left > 0 && d.SeatsLeft > 0 then
+                    let ticks = distance body.Pos d.At |> Option.defaultValue System.Int32.MaxValue
+
+                    if pick < 0 || ticks < least then
+                        pick <- i
+                        least <- ticks
+
+            if pick >= 0 then
+                let d = all.[pick]
                 d.Left <- max 0 (d.Left - parts)
                 d.SeatsLeft <- max 0 (d.SeatsLeft - 1)
 
@@ -551,11 +561,15 @@ let plan
         |> List.map (fun pattern ->
             {
                 Pattern = pattern
-                Wanted = all |> Array.sumBy (fun d -> if d.Pattern = pattern then d.Wanted else 0)
+                Wanted =
+                    all
+                    |> Array.sumBy (fun d ->
+                        if nameOf d.Pattern = nameOf pattern then d.Wanted else 0)
                 Standing =
-                    match standing.TryGetValue pattern with
-                    | true, n -> n
-                    | _ -> 0
+                    if standing.ContainsKey(nameOf pattern) then
+                        standing.[nameOf pattern]
+                    else
+                        0
             })
 
     let bank = colonies |> Array.map (fun c -> c.Bank)

@@ -5,6 +5,7 @@ module Fabot.Core.Layout.Plan
 open Fable.Core
 open Fabot.Core
 open Fabot.Core.World
+open Fabot.Core.Tiles
 open Fabot.Core.Grid
 open Fabot.Core.Layout.Ground
 open Fabot.Core.Layout.Shape
@@ -529,7 +530,7 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
     // The hub's link comes last: it pays the 3% loss on all the storage's
     // energy to save a walk, where a source's link saves a whole haul.
     for k in 0 .. items.Count - 1 do
-        if items.[k].Kind = Kind.Link then
+        if items.[k].Kind.IsLink then
             items.[k] <-
                 { items.[k] with
                     Level = levelOf Kind.Link outer.Length
@@ -579,7 +580,10 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
     let all = Array.concat [ items.ToArray(); extra.ToArray(); roads; ramparts ]
 
     for kind in sized do
-        if all |> Array.sumBy (fun i -> if i.Kind = kind then 1 else 0) < count kind then
+        if
+            all |> Array.sumBy (fun i -> if Kind.name i.Kind = Kind.name kind then 1 else 0) < count
+                kind
+        then
             unfit.Add(Kind.name kind)
 
     {

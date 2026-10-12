@@ -4,6 +4,7 @@ namespace Fabot.Core
 
 open System.Collections.Generic
 open Fabot.Core.World
+open Fabot.Core.Tiles
 open Fabot.Core.Grid
 
 type Mover =
@@ -21,8 +22,6 @@ type Target =
         Avoid: Set<string>
         MaxHops: int
     }
-
-type Counts = { Hits: int; Misses: int }
 
 /// Our creeps are no wall (who yields is `Move`'s call); a creep not ours
 /// yields to nothing we decide, so nothing may stand on its tile this tick.
@@ -45,7 +44,6 @@ type Atlas =
         {
             Rooms: Dictionary<string, RoomGrid>
             Floods: Dictionary<string, int[]>
-            mutable Hits: int
             mutable Misses: int
         }
 
@@ -194,15 +192,10 @@ module Atlas =
         {
             Rooms = rooms
             Floods = Dictionary()
-            Hits = 0
             Misses = 0
         }
 
-    let counts (atlas: Atlas) : Counts =
-        {
-            Hits = atlas.Hits
-            Misses = atlas.Misses
-        }
+    let misses (atlas: Atlas) : int = atlas.Misses
 
     let passable (atlas: Atlas) (room: string) (tile: int) : bool =
         match atlas.Rooms.TryGetValue room with
@@ -377,7 +370,6 @@ module Atlas =
                 let dist =
                     match atlas.Floods.TryGetValue key with
                     | true, dist ->
-                        atlas.Hits <- atlas.Hits + 1
                         tally "hit" 1
                         dist
                     | _ ->

@@ -170,7 +170,7 @@ let pool (derived: Derived) : Offer[] =
     let ores =
         derived.Bodies
         |> Array.collect (fun b -> b.Store.Held |> Array.map fst)
-        |> Array.filter (fun r -> r <> Energy)
+        |> Array.filter (fun r -> not r.IsEnergy)
         |> Array.distinct
 
     derived.Grounds
@@ -329,7 +329,7 @@ let pool (derived: Derived) : Offer[] =
             )
 
         for p in ground.Piles do
-            if p.Resource = Energy then
+            if p.Resource.IsEnergy then
                 offers.Add(
                     offer
                         (Pickup(p.Id, p.Resource))

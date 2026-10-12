@@ -444,5 +444,5 @@ let tests =
                 let atlas, mover, wish = planned errand
 
                 Plan.canMove errand.Creep mover.Factor
-                || (Wish.stays wish && not wish.Moves && (Atlas.counts atlas).Misses = 0)
+                || (Wish.stays wish && not wish.Moves && Atlas.misses atlas = 0)
         ]

@@ -56,7 +56,7 @@ let private structureOf (s: IStructure) : Structure =
         Cooldown = orZero s.cooldown
         Walkable =
             match kind with
-            | Kind.Rampart -> owner = Ours || s.isPublic
+            | Kind.Rampart -> owner.IsOurs || s.isPublic
             | _ -> Kind.walkable kind
     }
 

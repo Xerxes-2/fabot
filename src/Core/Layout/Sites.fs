@@ -3,6 +3,7 @@ module Fabot.Core.Layout.Sites
 open System.Collections.Generic
 open Fabot.Core
 open Fabot.Core.World
+open Fabot.Core.Tiles
 open Fabot.Core.Grid
 open Fabot.Core.Layout.Shape
 open Fabot.Core.Layout.Plan
@@ -14,7 +15,7 @@ let sitesInFlight = 5
 /// A site of any other kind under a creep is placed but not built while the
 /// creep stays.
 let private standable (kind: Kind) =
-    kind = Kind.Road || kind = Kind.Container || kind = Kind.Rampart
+    kind.IsRoad || kind.IsContainer || kind.IsRampart
 
 [<Struct; NoEquality; NoComparison>]
 type Placement = { X: int; Y: int; Kind: Kind }

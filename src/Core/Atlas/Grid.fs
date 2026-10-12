@@ -4,6 +4,7 @@ module Fabot.Core.Grid
 
 open Fable.Core
 open Fabot.Core.World
+open Fabot.Core.Tiles
 
 let unreached = System.Int32.MaxValue
 
@@ -82,13 +83,6 @@ let seatWeight = 5 * Engine.swampWeight
 /// The flood reads a table, not a closure.
 let stepTable (factor: FatigueFactor) : int[] =
     Array.init (seatWeight + 1) (stepTicks factor)
-
-let inline at (index: int) (array: 'T[]) : 'T = Tiles.at index array
-
-#if FABLE_COMPILER_JAVASCRIPT
-[<Emit("$1[$0] = $2")>]
-#endif
-let setAt (_index: int) (_array: 'T[]) (_value: 'T) : unit = _array.[_index] <- _value
 
 /// The bench's counts (`ARCHITECTURE.md` §9.3), read by `scripts/bench.mjs
 /// --counts`; nothing in the bot reads them.

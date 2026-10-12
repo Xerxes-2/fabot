@@ -281,7 +281,12 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
     let level =
         room.Controller |> Option.map (fun c -> c.Level) |> Option.defaultValue 0
 
-    let bufferId = Atlas.buffer room |> Option.map (fun b -> b.Id)
+    let built = Atlas.buffer room
+
+    let isBuffer (id: string) =
+        match built with
+        | Some b -> b.Id = id
+        | None -> false
 
     let storage =
         room.Structures |> Array.tryFind (fun s -> s.Kind.IsStorage && s.Owner.IsOurs)
@@ -293,7 +298,7 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
                 None
             elif Atlas.isSourceLink room s.Pos then
                 Some LinkRole.Source
-            elif bufferId = Some s.Id then
+            elif isBuffer s.Id then
                 Some LinkRole.Controller
             elif storage |> Option.exists (fun st -> Pos.within 1 st.Pos s.Pos) then
                 Some LinkRole.Hub
@@ -309,11 +314,8 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
                     Cooldown = s.Cooldown
                 }))
 
-    let linkOf (role: LinkRole) =
-        links |> Array.tryFind (fun l -> l.Role = role)
-
-    let controllerLink = linkOf LinkRole.Controller
-    let hubLink = linkOf LinkRole.Hub
+    let controllerLink = links |> Array.tryFind (fun l -> l.Role.IsController)
+    let hubLink = links |> Array.tryFind (fun l -> l.Role.IsHub)
 
     let sources =
         room.Sources
@@ -338,14 +340,18 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
 
     let servedDug (pos: Pos) =
         sources
-        |> Array.sumBy (fun s -> if Pos.range s.Pos pos = Some 1 then s.Dug else 0)
+        |> Array.sumBy (fun s ->
+            match Pos.range s.Pos pos with
+            | Some 1 -> s.Dug
+            | _ -> 0)
 
     let minerals =
         room.Minerals
         |> Array.filter (fun m ->
             m.Amount > 0
             && room.Structures
-               |> Array.exists (fun s -> s.Kind.IsExtractor && s.Owner.IsOurs && s.Pos = m.Pos))
+               |> Array.exists (fun s ->
+                   s.Kind.IsExtractor && s.Owner.IsOurs && Pos.within 0 s.Pos m.Pos))
         |> Array.map (fun m ->
             {
                 Id = m.Id
@@ -377,10 +383,10 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (room: Room) : 
 
             let kind =
                 if s.Kind.IsStorage then StoreKind.Storage
-                elif ownedRoom && bufferId = Some s.Id then StoreKind.Buffer
+                elif ownedRoom && isBuffer s.Id then StoreKind.Buffer
                 else StoreKind.Container
 
-            if energy > 0 || owned || kind = StoreKind.Buffer then
+            if energy > 0 || owned || kind.IsBuffer then
                 stores.Add
                     {
                         Id = s.Id
@@ -603,7 +609,7 @@ let ofWorld
                 s.Spawning
                 |> Option.map (fun oven ->
                     let life =
-                        if oven.Body |> Array.exists (fun p -> p.Kind = Claim) then
+                        if oven.Body |> Array.exists (fun p -> p.Kind.IsClaim) then
                             Engine.claimLifetime
                         else
                             Engine.creepLifetime

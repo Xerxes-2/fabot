@@ -67,11 +67,16 @@ let neighbour (tile: int) (direction: int) =
     if inRoom x y then index x y else -1
 
 /// A bare JS index under Fable, whose indexer (behind `for x in array` too)
-/// is a checked call: the economy ran 23% slower looping `around` through it.
+/// is a bounds-checked call: a per-tile or per-pair loop reads through these.
 #if FABLE_COMPILER_JAVASCRIPT
 [<Fable.Core.Emit("$1[$0]")>]
 #endif
 let at (_index: int) (_array: 'T[]) : 'T = _array.[_index]
+
+#if FABLE_COMPILER_JAVASCRIPT
+[<Fable.Core.Emit("$1[$0] = $2")>]
+#endif
+let setAt (_index: int) (_array: 'T[]) (_value: 'T) : unit = _array.[_index] <- _value
 
 let private aroundTable: int[][] =
     Array.init count (fun t ->

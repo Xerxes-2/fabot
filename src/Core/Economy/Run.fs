@@ -118,23 +118,25 @@ let private actOf (task: Task) : CreepAct =
 /// no other, and a pile no Task reaches decays. Not a harvester, whose dig
 /// falls where it stands. `taken`: the bodies whose act is already a pickup.
 let private pickups (derived: Derived) (taken: HashSet<string>) : Intent list =
-    [
-        for b in derived.Bodies do
-            if
-                b.Free > 0
-                && not b.Pattern.IsHarvester
-                && not (taken.Contains b.Name)
-                && b.Store.Held |> Array.forall (fun (r, _) -> r = Energy)
-            then
-                match
-                    derived.Grounds
-                    |> Array.tryPick (fun g ->
-                        g.Piles
-                        |> Array.tryFind (fun p -> p.Resource = Energy && Pos.within 1 b.Pos p.Pos))
-                with
-                | Some p -> yield Creep(b.Name, CreepAct.Pickup p.Id)
-                | None -> ()
-    ]
+    let picks = ResizeArray<Intent>()
+
+    for b in derived.Bodies do
+        if
+            b.Free > 0
+            && not b.Pattern.IsHarvester
+            && not (taken.Contains b.Name)
+            && b.Store.Held |> Array.forall (fun (r, _) -> r.IsEnergy)
+        then
+            match
+                derived.Grounds
+                |> Array.tryPick (fun g ->
+                    g.Piles
+                    |> Array.tryFind (fun p -> p.Resource.IsEnergy && Pos.within 1 b.Pos p.Pos))
+            with
+            | Some p -> picks.Add(Creep(b.Name, CreepAct.Pickup p.Id))
+            | None -> ()
+
+    List.ofSeq picks
 
 /// The smallest send: the engine credits `floor(amount × 0.97)`, so a send
 /// in whole hundreds loses the 3% and nothing to the rounding.
@@ -319,13 +321,12 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     let sends = derived.Grounds |> Seq.collect linkSends |> List.ofSeq
 
-    let taken =
-        HashSet<string>(
-            acts
-            |> Seq.choose (function
-                | Creep(name, CreepAct.Pickup _) -> Some name
-                | _ -> None)
-        )
+    let taken = HashSet<string>()
+
+    for act in acts do
+        match act with
+        | Creep(name, CreepAct.Pickup _) -> taken.Add name |> ignore
+        | _ -> ()
 
     casts @ List.ofSeq acts @ pickups derived taken @ sends @ List.ofSeq moves,
     { state with Assignments = assignments }

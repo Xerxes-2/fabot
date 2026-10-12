@@ -435,12 +435,12 @@ let tests =
                 let again = Atlas.travelTicks warm walk.Mover target start
                 let step = Atlas.firstStep warm walk.Mover target start
                 let fresh = Atlas.ofWorld world
-                let counts = Atlas.counts warm
+                let misses = Atlas.misses warm
 
                 first = again
                 && first = Atlas.travelTicks fresh walk.Mover target start
                 && step = Atlas.firstStep fresh walk.Mover target start
-                && (walk.Mover.Factor.Moves = 0 || counts = { Hits = 2; Misses = 1 })
+                && (walk.Mover.Factor.Moves = 0 || misses = 1)
 
             testPropertyWithConfig config "toward another room, the walk ends on an exit into it"
             <| fun (walk: Walk) (exitPick: byte) ->

@@ -4,6 +4,7 @@ module Fabot.Core.Layout.Ground
 
 open Fabot.Core
 open Fabot.Core.World
+open Fabot.Core.Tiles
 open Fabot.Core.Grid
 
 [<NoEquality; NoComparison>]
