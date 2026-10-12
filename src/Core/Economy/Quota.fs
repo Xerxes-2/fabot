@@ -162,11 +162,25 @@ let private ownerOf (distance: Pos -> Pos -> int option) (derived: Derived) (gi:
         |> Option.orElse (ground.Sources |> Array.tryHead |> Option.map (fun s -> s.Pos))
         |> Option.bind (nearest distance colonies (fun _ -> true))
 
+/// The backlog is spread over a creep's life, so a hauler cast now clears it
+/// before it dies. A dig that falls on the floor is the workers' to fetch.
 let private haulFlows (ground: Ground) (s: SourceFact) (post: Pos) (carried: float) =
     match s.Container with
     | None -> []
-    | Some _ ->
-        let left = float s.Dug - carried
+    | Some id ->
+        let stored =
+            ground.Stores |> Array.sumBy (fun st -> if st.Id = id then st.Energy else 0)
+
+        let piled =
+            ground.Piles
+            |> Array.sumBy (fun p ->
+                if p.Resource = Energy && Pos.within 1 p.Pos s.Pos then
+                    p.Amount
+                else
+                    0)
+
+        let left =
+            float s.Dug - carried + float (stored + piled) / float Engine.creepLifetime
 
         match ground.Receiver with
         | Some r when r.Role.IsHub && carried > 0.0 -> [ post, left; r.Pos, carried ]
