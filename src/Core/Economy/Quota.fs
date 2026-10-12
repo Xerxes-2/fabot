@@ -130,8 +130,8 @@ let private nearest
 /// another.
 type Leg = BodyPart list -> Pos -> Pos -> int -> int option
 
-/// The walk there loaded and back empty: an empty Carry weighs nothing. One
-/// flood toward `work` prices both.
+/// The walk there loaded and back empty: an empty Carry weighs nothing, so
+/// each leg is its own flood toward `work`.
 let private roundTrip (leg: Leg) (body: BodyPart list) (fetch: Pos) (work: Pos) (range: int) =
     let empty = body |> List.filter (fun p -> p <> Carry)
 
