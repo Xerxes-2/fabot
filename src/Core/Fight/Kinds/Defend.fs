@@ -10,6 +10,7 @@ type Facts =
         Time: int
         Group: Group option
         Standing: Set<string>
+        AgingOut: Set<string>
         InReach: bool
         Home: bool
         /// It defends a home, which it never leaves to its towers alone.
@@ -40,7 +41,7 @@ let step (facts: Facts) (e: Engagement) : Engagement option =
 
     let e =
         { e with
-            Ours = alive
+            Ours = Set.difference alive facts.AgingOut
             Lost = e.Lost + e.Ours.Count - alive.Count
         }
 

@@ -77,6 +77,12 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     let standing = world.Creeps |> Array.map (fun c -> c.Name) |> Set.ofArray
 
+    let agingOut =
+        world.Creeps
+        |> Array.filter (fun c -> c.TicksToLive <= 1)
+        |> Array.map (fun c -> c.Name)
+        |> Set.ofArray
+
     let engagements, into = merged events state.Engagements
     let alive = engagements |> List.map (fun e -> e.Id) |> Set.ofList
 
@@ -123,6 +129,7 @@ let decide (context: Context) (state: State) : Intent list * State =
             Time = world.Time
             Group = group
             Standing = standing
+            AgingOut = agingOut
             InReach = e.Ours |> Set.exists near
             Home =
                 e.Ours
@@ -137,7 +144,8 @@ let decide (context: Context) (state: State) : Intent list * State =
     let stepped =
         engagements
         |> List.choose (fun e ->
-            Defend.step (factsOf e) e |> Option.map (fun next -> next, next.Lost > e.Lost))
+            Defend.step (factsOf e) e
+            |> Option.map (fun next -> next, next.Ours.Count < e.Ours.Count))
 
     let targeted =
         stepped
@@ -195,7 +203,9 @@ let decide (context: Context) (state: State) : Intent list * State =
             stepped |> List.fold (fun all (e, _) -> Set.union all e.Ours) Set.empty
 
         world.Creeps
-        |> Array.filter (fun c -> Tick.fights c.Name && not (committed.Contains c.Name))
+        |> Array.filter (fun c ->
+            Tick.fights c.Name
+            && not (committed.Contains c.Name || agingOut.Contains c.Name))
         |> Array.map (fun c -> c.Name)
         |> ResizeArray
 
@@ -359,12 +369,12 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     let engagements =
         stepped @ opened
-        |> List.map (fun (e, lost) -> rehomed e, lost)
+        |> List.map (fun (e, left) -> rehomed e, left)
         |> List.sortBy (fun (e, _) -> -e.Priority, e.Id)
-        |> List.map (fun (e, lost) ->
+        |> List.map (fun (e, left) ->
             let grew = e.Unanswered && capacityOf e > e.Capacity
 
-            if lost || grew || changed e || e.Since = world.Time && e.Phase.IsForming then
+            if left || grew || changed e || e.Since = world.Time && e.Phase.IsForming then
                 priced e
             else
                 e)
