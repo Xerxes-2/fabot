@@ -111,7 +111,7 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
 
     // A creep reached before is explored again only at a better (score, home):
     // what a chain makes past it depends only on the creeps already on it.
-    let rec explore (i: int) (from: int) (score: int) (home: int) (onward: int) =
+    let rec explore (i: int) (from: int) (score: int) (home: int) (onward: int option) =
         onPath.[i] <- true
         let wish = order.[i]
         let leaving = Wish.value wish from
@@ -139,17 +139,15 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
 
         let before = taken
 
+        let skip = defaultArg onward from
+
         for tile in candidates.[i] do
-            if tile <> from && tile <> onward then
+            if tile <> from && tile <> skip then
                 step tile
 
-        if
-            onward >= 0
-            && onward <> from
-            && taken = before
-            && Array.contains onward candidates.[i]
-        then
-            step onward
+        match onward with
+        | Some o when o <> from && taken = before && Array.contains o candidates.[i] -> step o
+        | _ -> ()
 
         onPath.[i] <- false
 
@@ -185,7 +183,7 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
                 bestHome <- 0
                 taken <- 0
                 holder.[from] <- -1
-                explore i from 0 0 -1
+                explore i from 0 0 None
 
                 if bestChain.Count > 0 then
                     clock <- clock + 1

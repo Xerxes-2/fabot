@@ -118,18 +118,13 @@ let private nearest
     (can: int -> bool)
     (at: Pos)
     =
-    let mutable best = -1
-    let mutable bestTicks = System.Int32.MaxValue
-
-    for ci in 0 .. colonies.Length - 1 do
-        if can ci then
-            match distance (homeOf colonies.[ci]) at with
-            | Some ticks when ticks < bestTicks ->
-                best <- ci
-                bestTicks <- ticks
-            | _ -> ()
-
-    if best < 0 then None else Some best
+    [| 0 .. colonies.Length - 1 |]
+    |> Array.filter can
+    |> Array.choose (fun ci ->
+        distance (homeOf colonies.[ci]) at |> Option.map (fun ticks -> ci, ticks))
+    |> function
+        | [||] -> None
+        | reached -> Some(fst (Array.minBy snd reached))
 
 /// Ticks a body of the parts walks loaded from a tile to within a range of
 /// another.
@@ -536,23 +531,20 @@ let plan
                  | _ -> 0)
                 + parts
 
-            let mutable best = -1
-            let mutable bestTicks = System.Int32.MaxValue
+            match
+                all
+                |> Array.filter (fun d -> d.Pattern = pattern && d.Left > 0 && d.SeatsLeft > 0)
+            with
+            | [||] -> ()
+            | demands ->
+                let d =
+                    demands
+                    |> Array.minBy (fun d ->
+                        let ticks = distance body.Pos d.At
+                        Option.isNone ticks, ticks)
 
-            for k in 0 .. all.Length - 1 do
-                let d = all.[k]
-
-                if d.Pattern = pattern && d.Left > 0 && d.SeatsLeft > 0 then
-                    let ticks =
-                        distance body.Pos d.At |> Option.defaultValue (System.Int32.MaxValue - 1)
-
-                    if ticks < bestTicks then
-                        best <- k
-                        bestTicks <- ticks
-
-            if best >= 0 then
-                all.[best].Left <- max 0 (all.[best].Left - parts)
-                all.[best].SeatsLeft <- max 0 (all.[best].SeatsLeft - 1)
+                d.Left <- max 0 (d.Left - parts)
+                d.SeatsLeft <- max 0 (d.SeatsLeft - 1)
 
     let wants =
         allPatterns

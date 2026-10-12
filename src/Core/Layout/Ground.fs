@@ -16,8 +16,7 @@ type Ground =
         Free: bool[]
         Sources: int[]
         Minerals: int[]
-        /// The controller's tile; -1 for none.
-        Controller: int
+        Controller: int option
     }
 
 /// Upgraders work within range 3 of the controller; this leaves them the two
@@ -60,10 +59,7 @@ let ofRoom (room: Room) : Ground option =
         let sources = room.Sources |> Array.map (fun s -> Tiles.ofPos s.Pos) |> Array.sort
         let minerals = room.Minerals |> Array.map (fun m -> Tiles.ofPos m.Pos) |> Array.sort
 
-        let controller =
-            match room.Controller with
-            | Some c -> Tiles.ofPos c.Pos
-            | None -> -1
+        let controller = room.Controller |> Option.map (fun c -> Tiles.ofPos c.Pos)
 
         for t in sources do
             setAt t weights -1
@@ -71,8 +67,7 @@ let ofRoom (room: Room) : Ground option =
         for t in minerals do
             setAt t weights -1
 
-        if controller >= 0 then
-            setAt controller weights -1
+        controller |> Option.iter (fun c -> setAt c weights -1)
 
         let free = Array.zeroCreate Tiles.count
         let edge = exitKeep + 1
@@ -94,9 +89,10 @@ let ofRoom (room: Room) : Ground option =
             for t in Tiles.within 1 rock do
                 setAt t free false
 
-        if controller >= 0 then
-            for t in Tiles.within controllerKeep controller do
-                setAt t free false
+        controller
+        |> Option.iter (fun c ->
+            for t in Tiles.within controllerKeep c do
+                setAt t free false)
 
         Some
             {
@@ -130,10 +126,8 @@ let private reachSum (ground: Ground) (tile: int) =
     for s in ground.Sources do
         sum <- sum + Tiles.range tile s
 
-    if ground.Controller >= 0 then
-        sum <- sum + Tiles.range tile ground.Controller
-
     sum
+    + (ground.Controller |> Option.map (Tiles.range tile) |> Option.defaultValue 0)
 
 let private openness (ground: Ground) : int[] =
     let n = Tiles.side + 1

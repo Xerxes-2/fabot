@@ -235,14 +235,12 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
             | path -> Some(s, path))
 
     let controllerWalk =
-        if ground.Controller >= 0 then
-            match wayOut ground.Controller with
-            | [] ->
-                unfit.Add "controller unreached"
-                []
-            | path -> path
-        else
+        match ground.Controller |> Option.map wayOut with
+        | Some [] ->
+            unfit.Add "controller unreached"
             []
+        | Some path -> path
+        | None -> []
 
     let mineralWalks =
         ground.Minerals
@@ -468,16 +466,16 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
             plant Kind.Container t rockLevel
 
     let controllerSeat =
-        match controllerWalk with
-        | first :: second :: rest when Tiles.range second ground.Controller <= 3 ->
+        match ground.Controller, controllerWalk with
+        | Some c, first :: second :: rest when Tiles.range second c <= 3 ->
             seat second
             pave rest rockLevel
-            Some(first, second)
-        | first :: rest ->
+            Some(c, first, second)
+        | Some c, first :: rest ->
             seat first
             pave rest rockLevel
-            Some(first, first)
-        | [] -> None
+            Some(c, first, first)
+        | _ -> None
 
     let digLevel = levelOf Kind.Extractor 0
 
@@ -495,12 +493,12 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         Tiles.around t |> Array.sumBy (fun m -> if at m weights >= 0 then 1 else 0)
 
     match controllerSeat with
-    | Some(first, container) ->
+    | Some(controller, first, container) ->
         // Off the walk's first tile, which is left for an upgrader.
         match
             linkBeside container (fun t ->
                 if t = first then 100
-                elif Tiles.range t ground.Controller <= 3 then -(open' t)
+                elif Tiles.range t controller <= 3 then -(open' t)
                 else 0)
         with
         | Some t when t <> first ->

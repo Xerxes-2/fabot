@@ -201,7 +201,11 @@ let matchAll
                     [| 0 .. bodies.Length - 1 |] |> Array.filter (fun b -> assigned.[b] = oi)
 
                 let ordered =
-                    seatedHere |> Array.sortWith (fun a b -> if ahead oi a b then -1 else 1)
+                    seatedHere
+                    |> Array.sortWith (fun a b ->
+                        if ahead oi a b then -1
+                        elif ahead oi b a then 1
+                        else 0)
 
                 let mutable posted = 0
                 let mutable n = 0

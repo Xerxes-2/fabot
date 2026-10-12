@@ -324,7 +324,7 @@ let tests =
                     let covered = ramparts |> Array.map (fun i -> i.Tile)
 
                     let fixedRock t =
-                        Array.contains t ground.Sources || t = ground.Controller
+                        Array.contains t ground.Sources || Some t = ground.Controller
 
                     Array.distinct tiles = tiles
                     && Array.distinct covered = covered

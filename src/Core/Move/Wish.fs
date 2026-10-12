@@ -14,8 +14,8 @@ type Wish =
         Footprint: Footprint
         At: int
         Head: int
-        /// -1 for none. A body it shoves off its head is put there last.
-        Onward: int
+        /// A body it shoves off its head is put there last.
+        Onward: int option
         /// Best first.
         Tail: int[]
         /// Its work area when it stands inside it, else empty; holds `At` when

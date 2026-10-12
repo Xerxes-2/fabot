@@ -17,7 +17,7 @@ let private wish
     (creep: Creep)
     (moves: bool)
     (head: int)
-    (onward: int)
+    (onward: int option)
     (tail: int[])
     (working: int[])
     (weight: int)
@@ -37,7 +37,7 @@ let private wish
 let stay (atlas: Atlas) (creep: Creep) (factor: FatigueFactor) (weight: int) : Wish =
     let at = Tiles.ofPos creep.Pos
     let tail = beside atlas creep |> Array.filter (Tiles.onEdge >> not)
-    wish creep (canMove creep factor) at -1 tail [||] weight
+    wish creep (canMove creep factor) at None tail [||] weight
 
 /// The tail is the way round a body the Atlas's walk does not see.
 let toward (atlas: Atlas) (creep: Creep) (mover: Mover) (target: Target) (weight: int) : Wish =
@@ -67,7 +67,7 @@ let toward (atlas: Atlas) (creep: Creep) (mover: Mover) (target: Target) (weight
                 creep
                 true
                 at
-                -1
+                None
                 (Array.append inside outside)
                 (Array.append [| at |] inside)
                 weight
@@ -77,10 +77,7 @@ let toward (atlas: Atlas) (creep: Creep) (mover: Mover) (target: Target) (weight
             | Some direction ->
                 let head = Tiles.neighbour at direction
 
-                let onward =
-                    match Field.step field head with
-                    | Some next -> Tiles.neighbour head next
-                    | None -> -1
+                let onward = Field.step field head |> Option.map (Tiles.neighbour head)
 
                 let tail =
                     beside atlas creep

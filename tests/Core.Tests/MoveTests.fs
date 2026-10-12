@@ -46,7 +46,7 @@ let private wishGen (name: string) (at: int) =
         let near = around at
         let! stays = Gen.frequency [ 1, Gen.constant true; 2, Gen.constant false ]
         let! step = Gen.elements near
-        let! onward = Gen.elements (Array.append [| -1 |] (around step))
+        let! onward = Gen.elements (Array.append [| None |] (around step |> Array.map Some))
         let! tail = Gen.subListOf near
         let! tail = Gen.shuffle tail
         // A work area is only ever handed to a body standing inside it.
@@ -68,7 +68,7 @@ let private wishGen (name: string) (at: int) =
                 Footprint = One
                 At = at
                 Head = (if stays then at else step)
-                Onward = (if stays then -1 else onward)
+                Onward = (if stays then None else onward)
                 Tail = tail
                 Working = working
                 Weight = weight
@@ -208,7 +208,7 @@ let private duel (crowd: Crowd) =
         else
             { wish with
                 Head = wish.At
-                Onward = -1
+                Onward = None
                 Working =
                     (if wish.Working.Length = 0 then
                          [| wish.At |]
@@ -339,12 +339,11 @@ let tests =
                 "a body shoved off a step lands on the shover's onward step only when nothing else is free"
             <| fun (crowd: Crowd) ->
                 match crowd.Wishes with
-                | mover :: _ when
+                | ({ Onward = Some onward } as mover) :: _ when
                     not (Wish.stays mover)
                     && crowd.Passable.[mover.Head]
-                    && mover.Onward >= 0
-                    && mover.Onward <> mover.At
-                    && crowd.Passable.[mover.Onward]
+                    && onward <> mover.At
+                    && crowd.Passable.[onward]
                     ->
                     let pushed =
                         {
@@ -352,11 +351,11 @@ let tests =
                             Footprint = One
                             At = mover.Head
                             Head = mover.Head
-                            Onward = -1
+                            Onward = None
                             Tail =
                                 Array.append
-                                    [| mover.Onward |]
-                                    (around mover.Head |> Array.filter ((<>) mover.Onward))
+                                    [| onward |]
+                                    (around mover.Head |> Array.filter ((<>) onward))
                             Working = [||]
                             Weight = 1
                             Moves = true
@@ -366,8 +365,7 @@ let tests =
 
                     Arbitrate.arbitrate (fun tile -> crowd.Passable.[tile]) [||] wishes
                     |> ends wishes
-                    |> List.forall (fun (wish, tile) ->
-                        wish.Creep <> "pushed" || tile <> mover.Onward)
+                    |> List.forall (fun (wish, tile) -> wish.Creep <> "pushed" || tile <> onward)
                 | _ -> true
 
             testPropertyWithConfig
