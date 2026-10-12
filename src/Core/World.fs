@@ -391,8 +391,9 @@ module Sightings =
 
         let owned = Hostiles.owned world.Rooms
 
+        // A room in sight holds what stands there now: a wave killed reopens it.
         for room in world.Rooms do
-            let mutable seen = Map.tryFind room.Name next |> Option.defaultValue Map.empty
+            let mutable seen = Map.empty
 
             for creep in room.Hostiles do
                 if Hostiles.armed owned room.Hostiles creep then

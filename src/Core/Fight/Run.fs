@@ -404,7 +404,8 @@ let decide (context: Context) (state: State) : Intent list * State =
 
             match e.Phase with
             | _ when e.Unanswered -> Tactics.rampart sight order c
-            | Phase.Forming -> Tactics.holdFast sight order c
+            | Phase.Forming when homes.Contains e.Room -> Tactics.holdFast sight order c
+            | Phase.Forming -> Tactics.muster sight order centre c
             | Phase.Pursuing -> Tactics.pursue sight order centre c
             | Phase.Disengaging -> Tactics.retreat sight c
             | Phase.Approaching

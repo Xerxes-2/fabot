@@ -149,6 +149,11 @@ let kite (sight: Sight) (order: string list) (centre: Pos) (creep: Creep) =
 
     strike sight order creep, wish
 
+/// A forming body walks to the room it will fight in, short of the group's
+/// reach, so the room stays in sight while the rest are cast.
+let muster (sight: Sight) (order: string list) (centre: Pos) (creep: Creep) =
+    strike sight order creep, toward sight creep centre (2 * Tracker.reach)
+
 let holdFast (sight: Sight) (order: string list) (creep: Creep) =
     strike sight order creep, hold sight creep
 
