@@ -34,7 +34,7 @@ type Field =
         {
             Footprint: Footprint
             Weights: int[]
-            Steps: int[]
+            Factor: FatigueFactor
             Dist: int[]
         }
 
@@ -60,7 +60,7 @@ module Field =
             if d = unreached || (d > 0 && onEdge field.Footprint next) then
                 unreached
             else
-                d + at weight field.Steps
+                d + stepTicks field.Factor weight
 
     let private best (field: Field) (tile: int) : int =
         Tiles.leastAround tile unreached (via field)
@@ -336,10 +336,12 @@ module Atlas =
                 if room = target.Room then
                     let sorted = Array.sort target.Tiles
                     let tiles = ResizeArray()
+                    let mutable goalKey = "r" + string target.Range + ":"
 
                     for i in 0 .. sorted.Length - 1 do
                         if i = 0 || at i sorted <> at (i - 1) sorted then
                             tiles.Add(at i sorted)
+                            goalKey <- goalKey + (if i = 0 then "" else ",") + string (at i sorted)
 
                     let build () =
                         let found = ResizeArray()
@@ -350,7 +352,7 @@ module Atlas =
 
                         found.ToArray()
 
-                    Some("r" + string target.Range + ":" + System.String.Join(",", tiles), build)
+                    Some(goalKey, build)
                 else
                     match route atlas target.Avoid target.MaxHops room target.Room with
                     | Some(_ :: next :: _) ->
@@ -362,21 +364,20 @@ module Atlas =
             match goals with
             | None -> None
             | Some(goalKey, build) ->
-                let steps = stepTable mover.Factor
+                let factor = mover.Factor
 
                 let key =
-                    System.String.Join(
-                        "|",
-                        room,
-                        (match footprint with
-                         | One -> "1"
-                         | Quad -> "4"),
-                        string (at Engine.roadWeight steps),
-                        string (at Engine.plainWeight steps),
-                        string (at Engine.swampWeight steps),
-                        string (at seatWeight steps),
-                        goalKey
-                    )
+                    room
+                    + (if footprint.IsOne then "|1|" else "|4|")
+                    + string (stepTicks factor Engine.roadWeight)
+                    + "|"
+                    + string (stepTicks factor Engine.plainWeight)
+                    + "|"
+                    + string (stepTicks factor Engine.swampWeight)
+                    + "|"
+                    + string (stepTicks factor seatWeight)
+                    + "|"
+                    + goalKey
 
                 let dist =
                     if atlas.Floods.ContainsKey key then
@@ -384,7 +385,7 @@ module Atlas =
                         atlas.Floods.[key]
                     else
                         atlas.Misses <- atlas.Misses + 1
-                        let dist = flood footprint grid.Weights steps (build ())
+                        let dist = flood footprint grid.Weights (stepTable factor) (build ())
                         atlas.Floods.[key] <- dist
                         dist
 
@@ -392,7 +393,7 @@ module Atlas =
                     {
                         Footprint = footprint
                         Weights = grid.Weights
-                        Steps = steps
+                        Factor = factor
                         Dist = dist
                     }
         else
