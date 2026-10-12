@@ -1,0 +1,9 @@
+{
+  "why": "an Invader raid standing in a home with no tower is killed by a Defend's cast, where nothing else ends it before it ages out",
+  "start": { "room": "W8N3", "seed": 1, "node": "N1", "invaders": "W8N3:1000:2000" },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "homeHostileTicks", "from": 3000, "max": 700 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

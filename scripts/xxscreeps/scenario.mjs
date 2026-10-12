@@ -13,7 +13,7 @@
 //   --jobs  soaks at once (default half the cores)
 //
 // A scenario file: { "why": the invariant, "start": { "room", "seed",
-// "late"?, "node"?, "at"?, "bundle"? }, "ticks", "assert": [{ "measure",
+// "late"?, "node"?, "invaders"? (soak's --invaders), "at"?, "bundle"? }, "ticks", "assert": [{ "measure",
 // "from"?, "to"?, "max"?, "min"? }] }; a measure is one of `measures` below, read off
 // the soak's output over ticks [from, to), counted from the run's first tick.
 // Exits non-zero when a bound fails or a soak does.
@@ -71,6 +71,12 @@ const measures = {
     const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
     return Math.min(...Object.keys(last.rooms).slice(1).map((r) => last.rooms[r].net - (first.rooms[r]?.net ?? 0)));
   },
+  // Ticks an enemy stood in the colony's own room.
+  homeHostileTicks: (samples, a) => {
+    const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
+    const home = Object.keys(last.rooms)[0];
+    return last.rooms[home].hostile - (first.rooms[home]?.hostile ?? 0);
+  },
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
 };
 for (const s of scenarios) for (const a of s.assert) if (!measures[a.measure]) fail(`${s.name}: no measure ${a.measure}`);
@@ -78,7 +84,8 @@ for (const { name, start } of scenarios)
   if ((start.at === undefined) !== (start.bundle === undefined) || (start.at !== undefined && (start.node || !/^[0-9a-f]{8,40}$/.test(start.bundle))))
     fail(`${name}: a start "at" a tick names its "bundle" by commit id, and no node`);
 
-const recipe = ({ room, seed, late = 0, node }) => `${room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}`;
+const recipe = ({ room, seed, late = 0, node, invaders }) =>
+  `${room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}`;
 const worldOf = (start) => `${recipe(start)}-t${start.at}-${start.bundle}`;
 const keyOf = (start) => `scenario-${basename(bot, ".js")}-${start.at ? worldOf(start) : recipe(start)}`;
 const runs = new Map();
@@ -115,7 +122,18 @@ const soak = (args) =>
   });
 const play = async ({ name, start, ticks }) => {
   const recipe = ["--room", start.room, "--seed", String(start.seed), "--late", String(start.late ?? 0)];
-  if (!start.at) return soak([...recipe, "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.node ? ["--node", start.node] : [])]);
+  if (!start.at)
+    return soak([
+      ...recipe,
+      "--ticks",
+      String(ticks),
+      "--run",
+      name,
+      "--bot",
+      bot,
+      ...(start.node ? ["--node", start.node] : []),
+      ...(start.invaders ? ["--invaders", start.invaders] : []),
+    ]);
   const world = join(REPO, "soak-runs/worlds", worldOf(start));
   if (!existsSync(world)) {
     const code = await soak([...recipe, "--ticks", String(start.at), "--run", `world-${worldOf(start)}`, "--bot", bundleAt(start.bundle), "--save", world]);
