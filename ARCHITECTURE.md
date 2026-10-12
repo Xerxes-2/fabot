@@ -337,11 +337,14 @@ The other kinds, for the record's sake:
 by a narrow input:
 
 ```fsharp
-type Side = { Bodies: Fighter list; Ramparts: Set<Pos>; Towers: Tower list }
+type Side = { Bodies: Fighter list; Ramparts: Map<Pos, int>; Towers: Tower list }  // rampart hits
+type Terrain = { Weight: int; RunOff: int }     // a summary, not the room's tiles
 val outcome : ours: Side -> theirs: Side -> terrain: Terrain -> Outcome
 // Outcome = Win of ticks * Losses | Kite of ticks | Lose
-val cheapestWin : affordable: Body list -> theirs: Side -> terrain: Terrain -> Body list option
+val cheapestWin : ours: Side -> affordable: Body list -> theirs: Side -> terrain: Terrain -> Body list option
 ```
+
+- `cheapestWin` adds to the bodies already standing (`ours`) before it casts.
 
 - `cheapestWin` is called once at open and once per event that changes a side.
   It chooses the body set; the engagement's `Plan` records the tactic the
