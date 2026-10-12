@@ -115,13 +115,14 @@ let private actOf (task: Task) : CreepAct =
 
 /// Every body with room and no other resource aboard picks up dropped energy
 /// beside it, beside its Task's own act: the engine's pickup conflicts with
-/// no other, and a pile no Task reaches decays (v1's reflex). `taken`: the
-/// bodies whose act is already a pickup.
+/// no other, and a pile no Task reaches decays. Not a harvester, whose dig
+/// falls where it stands. `taken`: the bodies whose act is already a pickup.
 let private pickups (derived: Derived) (taken: HashSet<string>) : Intent list =
     [
         for b in derived.Bodies do
             if
                 b.Free > 0
+                && not b.Pattern.IsHarvester
                 && not (taken.Contains b.Name)
                 && b.Store.Held |> Array.forall (fun (r, _) -> r = Energy)
             then

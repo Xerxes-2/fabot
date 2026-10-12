@@ -2,6 +2,7 @@
 /// a capacity `Pool.share`, where a Task ranks its `Priority`.
 module Fabot.Core.Economy.Matcher
 
+open Fabot.Core.World
 open Fabot.Core.Economy.Derived
 open Fabot.Core.Economy.Pool
 
@@ -47,7 +48,11 @@ let matchAll
 
     let garrison (bi: int) (oi: int) = garrisons bodies.[bi] pool.[oi]
 
-    let posted (bi: int) (oi: int) = garrison bi oi && walk bi oi = 0
+    let posted (bi: int) (oi: int) =
+        garrison bi oi
+        && match pool.[oi].Post with
+           | Some post -> Pos.within 0 bodies.[bi].Pos post
+           | None -> false
 
     let ahead (oi: int) (a: int) (b: int) =
         let va = seatValue bodies.[a] pool.[oi] (walk a oi)

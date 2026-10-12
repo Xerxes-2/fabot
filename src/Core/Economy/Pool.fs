@@ -39,6 +39,8 @@ type Offer =
         Priority: int
         Capacity: Capacity
         Draw: Draw
+        /// The tile a seated offer's garrison digs from.
+        Post: Pos option
     }
 
 let private carried (body: Body) (resource: Resource) = Store.amountOf resource body.Store
@@ -143,6 +145,7 @@ let private offer task (target: Pos) (value: float) capacity =
         Priority = Price.economyRank value
         Capacity = capacity
         Draw = Draw.Open
+        Post = None
     }
 
 let private insideDeadline (c: Controller) =
@@ -182,15 +185,17 @@ let pool (derived: Derived) : Offer[] =
         // seats. Priced at the rate, the engine's cap on what its seats dig.
         for s in ground.Sources do
             offers.Add(
-                offer
-                    (Harvest s.Id)
-                    s.Pos
-                    (float s.Rate)
-                    (Capacity.Seated(
-                        Option.defaultValue System.Int32.MaxValue s.Seats,
-                        (if Option.isSome s.Post then 1 else 0),
-                        (s.Rate + Engine.harvestPerWork - 1) / Engine.harvestPerWork
-                    ))
+                { offer
+                      (Harvest s.Id)
+                      s.Pos
+                      (float s.Rate)
+                      (Capacity.Seated(
+                          Option.defaultValue System.Int32.MaxValue s.Seats,
+                          (if Option.isSome s.Post then 1 else 0),
+                          (s.Rate + Engine.harvestPerWork - 1) / Engine.harvestPerWork
+                      )) with
+                    Post = s.Post
+                }
             )
 
         for m in ground.Minerals do

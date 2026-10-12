@@ -255,12 +255,11 @@ let dugAt (capacity: int) (home: bool) (rate: int) (posted: bool) (seats: int op
         min rate (diggers * partCountIn body Work * Engine.harvestPerWork)
     | None -> 0
 
-/// The low end of what other bots hold (Overmind, Hivemind, The
-/// International), so the walls never outbid the room's upgrading early.
+/// Low while the room grows, so the walls never outbid its upgrading; a
+/// room fallen under the first tower's level keeps that level's.
 let rampartTarget (level: int) =
     match level with
-    | l when l < 3 -> 0
-    | 3 -> 10_000
+    | l when l <= 3 -> 10_000
     | 4 -> 50_000
     | 5 -> 100_000
     | 6 -> 500_000
