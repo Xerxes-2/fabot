@@ -1,8 +1,5 @@
-/// Fable's `sortBy` and `maxBy` run the projection at every comparison, and
-/// v1 measured that live. These keep Fable's answers, ties included.
-///
-/// No `minBy`: Fable's keeps the last of equal keys and .NET's the first, so
-/// one written here would move the bundle or `dotnet test` on a tie.
+/// Fable's `sortBy` and `maxBy` run the projection at every comparison; v1 measured it.
+/// No `minBy`: Fable's keeps the last of equal keys and .NET's the first.
 [<AutoOpen>]
 module Fabot.Core.Lists
 

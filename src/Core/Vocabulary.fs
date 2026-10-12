@@ -40,7 +40,6 @@ type BodyPart =
 
 let samePart (a: BodyPart) (b: BodyPart) : bool = a.Ordinal = b.Ordinal
 
-/// The engine's `BODYPART` string.
 let partName (part: BodyPart) : string =
     match part with
     | Work -> "work"
@@ -109,8 +108,7 @@ module Boost =
         | Work, "XZH2O" -> Tier3
         | _ -> Unboosted
 
-    /// `calcBodyEffectiveness`. TOUGH's boost is on the damage it takes
-    /// (`damageRatio`), not here.
+    /// `calcBodyEffectiveness`; TOUGH's boost is in `damageRatio`.
     let multiple (part: BodyPart) (boost: Boost) : int =
         match part, boost with
         | (Attack | RangedAttack | Heal | Move | Work), Tier1 -> 2
@@ -169,8 +167,7 @@ type Ore =
 
 let allOres = [ Hydrogen; Oxygen; Utrium; Keanium; Lemergium; Zynthium; Catalyst ]
 
-/// The UH line alone, the one boost line v1 used; a compound joins the day a
-/// decision names it.
+/// The UH line alone; a compound joins the day a decision names it.
 [<CustomEquality; CustomComparison>]
 type Compound =
     | Hydroxide
@@ -198,8 +195,7 @@ type Compound =
 
 let allCompounds = [ Hydroxide; UtriumHydride; UtriumAcid ]
 
-/// A season's own resource is `Season`'s and joins here only as `Other` with
-/// the engine's string.
+/// A season's own resource stays `Season`'s and joins here only as `Other`.
 [<CustomEquality; CustomComparison>]
 type Resource =
     | Energy
@@ -236,7 +232,6 @@ type Resource =
                 | _ -> compare this.Ordinal that.Ordinal
             | _ -> 1
 
-/// The engine's `RESOURCE_*` string.
 let resourceName (resource: Resource) : string =
     match resource with
     | Energy -> "energy"

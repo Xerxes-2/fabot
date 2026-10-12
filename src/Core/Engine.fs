@@ -1,38 +1,30 @@
-/// The server's fixed numbers and formulas. A number belongs here when
-/// changing it would be a lie about the server; a number the bot chose is a
+/// The server's fixed numbers and formulas. A number the bot chose is a
 /// `Tuning` field, owned by the module that reads it.
 module Fabot.Core.Engine
 
 open Fabot.Core.Vocabulary
 
-/// MAX_CREEP_SIZE. A body over it is refused and the spawn does nothing.
+/// MAX_CREEP_SIZE: a larger body is refused.
 let maxBodyParts = 50
 
-/// HARVEST_POWER.
 let harvestPerWork = 2
 
-/// CARRY_CAPACITY.
 let carryPartCapacity = 50
 
-/// HARVEST_MINERAL_POWER.
 let mineralHarvestPerWork = 1
 
-/// EXTRACTOR_COOLDOWN. The cycle is one longer (`mineralHarvestCycle`): the
-/// intent pass runs before the object pass, so digs land six ticks apart.
 let extractorCooldown = 5
 
+/// The intent pass runs before the object pass, so digs land one tick later.
 let mineralHarvestCycle = extractorCooldown + 1
 
-/// CREEP_LIFE_TIME.
 let creepLifetime = 1500
 
-/// CREEP_CLAIM_LIFE_TIME.
 let claimLifetime = 600
 
 /// CREEP_SPAWN_TIME.
 let spawnTicksPerPart = 3
 
-/// BODYPART_COST.
 let partCost (part: BodyPart) : int =
     match part with
     | Work -> 100
@@ -46,20 +38,16 @@ let partCost (part: BodyPart) : int =
 
 let bodyCost (body: BodyPart list) : int = body |> List.sumBy partCost
 
-/// LAB_BOOST_ENERGY and LAB_BOOST_MINERAL.
 let boostEnergyPerPart = 20
 
 let boostMineralPerPart = 30
 
-/// CONTROLLER_RESERVE_MAX.
 let reservationCap = 5000
 
-/// CONTROLLER_RESERVE: ticks `reserveController` adds a CLAIM part a tick.
-/// The reservation also decays by one a tick, so N parts gain N - 1.
+/// CONTROLLER_RESERVE. The reservation decays by one a tick, so N parts gain N - 1.
 let reservePerClaim = 1
 
-/// NUKE_DAMAGE at the centre tile and within `nukeRadius` of it; a rampart on
-/// a tile takes it first.
+/// NUKE_DAMAGE; a rampart on the tile takes it first.
 let nukeDamageCentre = 10_000_000
 
 let nukeDamageRing = 5_000_000
@@ -74,39 +62,31 @@ let storageCapacity = 1_000_000
 
 let terminalCapacity = 300_000
 
-/// TERMINAL_COOLDOWN.
 let terminalCooldown = 10
 
-/// TERMINAL_MIN_SEND: below it `send` is refused.
 let terminalMinSend = 100
 
 let labMineralCapacity = 3_000
 
-/// LAB_REACTION_AMOUNT: what one `runReaction` takes of each reagent.
 let labReactionAmount = 5
 
-/// `runReaction`'s reach from the output lab to each reagent lab.
 let labReactionRange = 2
 
-/// REACTION_TIME.
 let reactionTime =
     function
     | Hydroxide -> 20
     | UtriumHydride -> 10
     | UtriumAcid -> 5
 
-/// REACTIONS.
 let reagentsOf =
     function
     | Hydroxide -> Ore Hydrogen, Ore Oxygen
     | UtriumHydride -> Ore Utrium, Ore Hydrogen
     | UtriumAcid -> Compound Hydroxide, Compound UtriumHydride
 
-/// OBSERVER_RANGE, Chebyshev over the room grid. The observed room is visible
-/// the next tick alone.
+/// Chebyshev over the room grid; the observed room is visible the next tick alone.
 let observerRange = 10
 
-/// CONTROLLER_DOWNGRADE.
 let controllerDowngrade (level: int) =
     match level with
     | 1 -> 20_000
@@ -133,22 +113,17 @@ let rangedRange = 3
 /// The reach of upgradeController, build and repair.
 let upgradeRange = 3
 
-/// A Source Keeper rests within this range of its source or mineral and never
-/// pursues; freshly cast, it walks there from its lair for a few ticks.
+/// A Source Keeper rests within this range of its source or mineral and never pursues.
 let keeperPin = 1
 
-/// ATTACK_POWER.
 let attackPower = 30
 
-/// RANGED_ATTACK_POWER, one target at range 1..3.
 let rangedAttackPower = 10
 
-/// DISMANTLE_POWER.
 let dismantlePower = 50
 
 let extensionHits = 1000
 
-/// `rangedMassAttack` per RANGED_ATTACK part at this range.
 let massAttackPowerAt (range: int) =
     match range with
     | 0
@@ -157,7 +132,6 @@ let massAttackPowerAt (range: int) =
     | 3 -> 1
     | _ -> 0
 
-/// HEAL_POWER at range 1; RANGED_HEAL_POWER at 2..3.
 let healPower = 12
 
 let rangedHealPower = 4
@@ -170,7 +144,7 @@ let towerPowerRepair = 800
 
 let towerCapacity = 1000
 
-/// TOWER_ENERGY_COST: a tower holding less does nothing.
+/// A tower holding less does nothing.
 let towerEnergyCost = 10
 
 let towerHits = 3000
@@ -200,7 +174,6 @@ let towerAttackAt (range: int) = towerPowerAt towerPowerAttack range
 
 let towerRepairAt (range: int) = towerPowerAt towerPowerRepair range
 
-/// BODYPART_HITS.
 let partHits = 100
 
 /// The engine destroys parts from the head; a part with any hit left acts.
@@ -261,7 +234,6 @@ let toughHits (body: BodyPart list) (boosts: Boost list) (hits: int) : int =
             else
                 0)
 
-/// `damageTaken`'s inverse.
 let damageFor (body: BodyPart list) (boosts: Boost list) (hits: int) (taken: int) : int =
     if List.isEmpty boosts || taken <= 0 then
         taken
@@ -279,16 +251,13 @@ let damageFor (body: BodyPart list) (boosts: Boost list) (hits: int) (taken: int
 
         int (ceil (damage + float left - 1e-9))
 
-/// SOURCE_ENERGY_CAPACITY over ENERGY_REGEN_TIME: a source in an owned or
-/// reserved room yields 3,000 per 300 ticks, a neutral one half.
+/// A source in a neutral room yields half.
 let heldOutputPerTick = 10
 
 let neutralOutputPerTick = 5
 
-/// ENERGY_REGEN_TIME.
 let sourceRegenTime = 300
 
-/// BUILD_POWER.
 let buildPerWork = 5
 
 /// UPGRADE_CONTROLLER_POWER.
@@ -300,7 +269,6 @@ let maxUpgradePerTick = 15
 
 let controllerMaxLevel = 8
 
-/// CONTROLLER_LEVELS.
 let controllerLevelProgress (level: int) =
     match level with
     | 1 -> 200
@@ -345,10 +313,8 @@ let containerBuildCost = 5_000
 
 let containerHits = 250_000
 
-/// TOMBSTONE_DECAY_PER_PART.
 let tombstoneDecayPerPart = 5
 
-/// RAMPART_DECAY_AMOUNT each RAMPART_DECAY_TIME.
 let rampartDecayAmount = 300
 
 let rampartDecayTime = 100

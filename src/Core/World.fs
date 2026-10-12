@@ -4,8 +4,7 @@ module Fabot.Core.World
 
 open Fabot.Core.Vocabulary
 
-/// Compared by hand: Fable's structural compare on a record walks every
-/// field, and positions are compared per tile per tick.
+/// Compared by hand: Fable's record compare walks every field, per tile per tick.
 [<CustomEquality; CustomComparison>]
 type Pos =
     {
@@ -76,7 +75,6 @@ module Store =
 
     let free (store: Store) : int = max 0 (store.Capacity - used store)
 
-/// The structure kinds a decision names; the rest arrive as `Other`.
 [<RequireQualifiedAccess; CustomEquality; CustomComparison>]
 type Kind =
     | Spawn
@@ -145,7 +143,6 @@ type Kind =
             | _ -> 1
 
 module Kind =
-    /// The engine's `STRUCTURE_*` string.
     let ofName (name: string) : Kind =
         match name with
         | "spawn" -> Kind.Spawn

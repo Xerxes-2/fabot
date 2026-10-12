@@ -5,10 +5,8 @@ type State =
     {
         /// A module named here is skipped and its last output not replayed.
         Off: Set<string>
-        /// Creep name → Task id. Owned by Economy.
         Assignments: Map<string, string>
-        /// Heap only, never in Memory: empty after a reset, so the first tick
-        /// redraws. Owned by Layout.
+        /// Heap only, never in Memory: empty after a reset, so the first tick redraws.
         Layout: Map<string, Layout.Shape.Standing>
     }
 
