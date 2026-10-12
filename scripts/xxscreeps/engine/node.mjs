@@ -7,6 +7,9 @@
 //     at <level> (progress 0, its downgrade timer full, the claim's safe
 //     mode kept), every other structure of the list ours at full hits on its
 //     tile, and <stored> energy in the storage.
+//   xxscreeps.js file://…/node.mjs declare <room> <username> <declarations.json>
+//     <username>'s Memory as `{ v2: { declarations } }`, what the bot reads
+//     its declarations from (src/App/Wire.fs); <room> is not read.
 import * as fs from "node:fs";
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
 import * as User from "xxscreeps/engine/db/user/index.js";
@@ -16,6 +19,8 @@ import { flushUsers } from "xxscreeps/game/room/room.js";
 import { updateUserRoomRelationships } from "xxscreeps/engine/processor/model.js";
 import { updateRoomStatus } from "xxscreeps/mods/classic/controller/controller.js";
 import { CONTROLLER_DOWNGRADE } from "xxscreeps/mods/classic/controller/constants.js";
+import { saveMemoryBlob } from "xxscreeps/mods/meta/memory/model.js";
+import { utf16ToBuffer } from "xxscreeps/utility/string.js";
 import { Source } from "xxscreeps/mods/classic/source/source.js";
 import { Mineral } from "xxscreeps/mods/classic/mineral/mineral.js";
 import * as Extension from "xxscreeps/mods/classic/spawn/extension.js";
@@ -82,6 +87,12 @@ if (mode === "ground") {
   await Promise.all([updateUserRoomRelationships(shard, room, previous), shard.saveRoom(roomName, time, room), shard.saveRoom(roomName, time + 1, room)]);
   await Promise.all([db.save(), shard.save()]);
   console.log(`stood ${list.length} structures at level ${level} in ${roomName}`);
+} else if (mode === "declare") {
+  const [username, path] = rest;
+  const declarations = JSON.parse(fs.readFileSync(path, "utf8"));
+  await saveMemoryBlob(shard, await User.findUserByName(db, username), utf16ToBuffer(JSON.stringify({ v2: { declarations } })));
+  await shard.save();
+  console.log(`declared ${JSON.stringify(declarations)}`);
 } else throw new Error(`node.mjs: unknown mode ${mode}`);
 await shard[Symbol.asyncDispose]();
 await db[Symbol.asyncDispose]();

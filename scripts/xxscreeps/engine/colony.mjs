@@ -5,8 +5,11 @@
 // and two sources. The spawn's tile is the plain one at range ≥ 3 from every
 // source, the controller and the edges, with no wall around it, nearest (sum
 // of ranges) to the sources and the controller; ties go to the lower y, then x.
-// Prints `{ "room": …, "x": …, "y": … }` and changes nothing: `manage bot add
-// --spawn` stands it. With `--list`, prints every room that fits, by name.
+// Prints `{ "room": …, "x": …, "y": … , "outposts": […] }` and changes
+// nothing: `manage bot add --spawn` stands it. The outposts are node E1's: of
+// the rooms an exit leads to, those with a controller nobody owns or reserves
+// and a source, most sources first, then by name; two at most. With `--list`,
+// prints every room that fits, by name.
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
 import { Source } from "xxscreeps/mods/classic/source/source.js";
 
@@ -26,7 +29,7 @@ async function survey(name) {
   const objects = [...room["#objects"]];
   const controller = objects.find((o) => o.structureType === "controller");
   const sources = objects.filter((o) => o instanceof Source);
-  return { objects, controller, sources };
+  return { objects, controller, sources, user: room["#user"] };
 }
 
 function spawnTile(name, { objects, controller, sources }) {
@@ -49,6 +52,16 @@ function spawnTile(name, { objects, controller, sources }) {
   return best;
 }
 
+async function outposts(name) {
+  const fit = [];
+  for (const next of Object.values(world.map.describeExits(name) ?? {})) {
+    const s = accessible.includes(next) ? await survey(next) : null;
+    if (s?.controller && s.sources.length > 0 && !s.user) fit.push({ name: next, sources: s.sources.length });
+  }
+  fit.sort((a, b) => b.sources - a.sources || (a.name < b.name ? -1 : 1));
+  return fit.slice(0, 2).map((o) => o.name);
+}
+
 const candidates = wanted ? [wanted] : [...accessible].sort();
 const fitting = [];
 let chosen = null;
@@ -65,7 +78,7 @@ for (const name of candidates) {
     continue;
   }
   if (tile) {
-    chosen = { room: name, x: tile.x, y: tile.y };
+    chosen = { room: name, x: tile.x, y: tile.y, outposts: await outposts(name) };
     break;
   }
   if (wanted) throw new Error(`${name}: no tile fits a spawn`);

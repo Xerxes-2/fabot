@@ -1,6 +1,6 @@
 // Online, the server up: pause the engine, step it one tick at a time and
 // watch one colony. Runs under xxscreeps' own loader, cwd the world:
-//   xxscreeps.js file://…/soak-step.mjs <ticks> <every> <room> <username> <out dir>
+//   xxscreeps.js file://…/soak-step.mjs <ticks> <every> <room> <username> <out dir> [<waves>]
 // Every tick: our CPU (the runner's usage channel), our console, and the
 // observe segment our bot writes (segment 1: faults, refusals). Every
 // <every> ticks, and on the last: one sample of the room. Writes to <out dir>
@@ -16,16 +16,27 @@
 // less the residual it reports. `decay.jsonl`: each energy pile that
 // decayed, once it is gone or the run ends, with its tile's role and the
 // tombstone or ruin it fell out of.
+// The colony's rooms are <room> and the outposts its Memory declares
+// (`v2.declarations.outposts`, read at the start): the ledger and the worth
+// sum over them, and each sample's `rooms` holds one line a room, cumulative:
+// dug, decayed, built, repaired, `bodies` (each of our bodies' cost spread
+// over its life, charged to the room it stands in each tick), `net` (dug less
+// decayed, repairs and bodies), ticks reserved by us and ticks a hostile
+// stood there, and as it stands: our creeps, hostiles, roads, containers.
+// <waves>: room:every[:first],… — an Invader wave (`waves/`) pushed in room
+// at t = first, first + every, …
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
 import * as User from "xxscreeps/engine/db/user/index.js";
 import { getServiceChannel } from "xxscreeps/engine/service/index.js";
 import { getConsoleChannel, runnerUsageChannel } from "xxscreeps/engine/runner/model.js";
-import { loadMemorySegmentBlob } from "xxscreeps/mods/meta/memory/model.js";
+import { loadMemorySegmentBlob, loadUserMemoryString } from "xxscreeps/mods/meta/memory/model.js";
+import { pushIntentsForRoomNextTick } from "xxscreeps/engine/processor/model.js";
+import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
 
-const [ticksArg, everyArg, roomName, username, out] = process.argv.slice(2);
+const [ticksArg, everyArg, roomName, username, out, wavesArg = ""] = process.argv.slice(2);
 const ticks = Number(ticksArg);
 const every = Number(everyArg);
 const observeSegment = 1;
@@ -34,6 +45,15 @@ const db = await Database.connect();
 const shard = await Shard.connect(db, "shard0");
 const ours = await User.findUserByName(db, username);
 const svc = getServiceChannel(shard);
+const memory = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}");
+const roomNames = [roomName, ...(memory.v2?.declarations?.outposts ?? [])];
+const waves = wavesArg
+  .split(",")
+  .filter(Boolean)
+  .map((w) => {
+    const [room, every, first = every] = w.split(":");
+    return { room, every: Number(every), first: Number(first) };
+  });
 const sub = shard.channel.iterable()[Symbol.asyncIterator]();
 
 // The runner publishes a tick's usage before the processor closes that tick,
@@ -88,6 +108,8 @@ const TRANSFER = 12;
 // A send between links credits floor(amount × (1 − LINK_LOSS_RATIO)); a
 // creep's withdraw from a link logs a transfer from it too.
 const LINK_KEEPS = 1 - 0.03;
+const CREEP_LIFE_TIME = 1500;
+const CREEP_CLAIM_LIFE_TIME = 600;
 const PART_COST = { move: 50, work: 100, carry: 50, attack: 80, ranged_attack: 150, heal: 250, claim: 600, tough: 10 };
 const ledger = { dug: 0, regen: 0, spawn: 0, build: 0, upgrade: 0, repair: 0, tower: 0, decayed: 0, linked: 0, stock0: null, stock: 0 };
 // What a colony holds, in energy, as it stands: the controller's climb, every
@@ -106,9 +128,9 @@ const roadCost = (room, pos) => {
   const t = world.map.getRoomTerrain(room).get(pos.x, pos.y);
   return t & 1 ? 150 * 300 : t & 2 ? 5 * 300 : 300;
 };
-function worthOf(room, stock) {
+function worthOf(rooms, stock) {
   const worth = { controller: 0, structures: 0, fortification: 0, sites: 0, stock };
-  for (const o of room["#objects"]) {
+  for (const room of rooms) for (const o of room["#objects"]) {
     const mine = o["#user"] === ours;
     const ownerless = o.structureType === "road" || o.structureType === "container";
     if (o["#lookType"] === "constructionSite") {
@@ -148,61 +170,88 @@ function roleOf(pos, objects) {
 const pileOut = (p) => fs.writeSync(decayOut, JSON.stringify(p) + "\n");
 let regenNext = 0;
 
-// One tick of the ledger, off the room as the tick left it.
-function account(room, time) {
-  const objects = [...room["#objects"]];
-  const sources = new Set(objects.filter((o) => o["#lookType"] === "source").map((o) => o.id));
-  const towers = new Set(objects.filter((o) => o.structureType === "tower" && o["#user"] === ours).map((o) => o.id));
-  const links = new Set(objects.filter((o) => o.structureType === "link" && o["#user"] === ours).map((o) => o.id));
+// One tick of the ledger, off the colony's rooms as the tick left them.
+const lines = Object.fromEntries(roomNames.map((r) => [r, { dug: 0, decayed: 0, build: 0, repair: 0, bodies: 0, reserved: 0, hostile: 0, waves: 0 }]));
+function account(rooms, time) {
   ledger.regen += regenNext;
-  for (const e of room["#eventLog"] ?? []) {
-    const kind = e.event ?? e._$Variant;
-    if (kind === HARVEST && sources.has(e.targetId)) ledger.dug += e.amount;
-    else if (kind === BUILD) ledger.build += e.energySpent ?? 0;
-    else if (kind === UPGRADE) ledger.upgrade += e.energySpent ?? 0;
-    else if (kind === REPAIR) {
-      if (towers.has(e.objectId)) ledger.tower += e.energySpent ?? 10;
-      else ledger.repair += e.energySpent ?? 0;
-    } else if (kind === TRANSFER && links.has(e.objectId) && links.has(e.targetId)) ledger.linked += e.amount - Math.floor(e.amount * LINK_KEEPS);
-    else if ((kind === ATTACK || kind === HEAL) && towers.has(e.objectId)) ledger.tower += 10;
-  }
+  regenNext = 0;
   const piles = new Map();
   let stock = 0;
-  let bank = 0;
-  const spawns = [];
-  for (const o of objects) {
-    if (o["#lookType"] === "resource") {
-      if (o.resourceType !== "energy") continue;
-      piles.set(o.id, o.amount);
-      stock += o.amount;
-      const before = lastPiles.get(o.id);
-      if (before !== undefined) ledger.decayed += Math.ceil(before / 1000);
-      let log = pileLog.get(o.id);
-      if (log === undefined) {
-        const g = graves.get(`${o.pos.x},${o.pos.y}`);
-        const grave = g !== undefined && g.time >= time - 1 ? g.who : null;
-        log = { x: o.pos.x, y: o.pos.y, role: roleOf(o.pos, objects), grave, first: time, last: time, peak: 0, decayed: 0 };
-        pileLog.set(o.id, log);
+  for (const room of rooms) {
+    const line = lines[room.name];
+    const objects = [...room["#objects"]];
+    const sources = new Set(objects.filter((o) => o["#lookType"] === "source").map((o) => o.id));
+    const towers = new Set(objects.filter((o) => o.structureType === "tower" && o["#user"] === ours).map((o) => o.id));
+    const links = new Set(objects.filter((o) => o.structureType === "link" && o["#user"] === ours).map((o) => o.id));
+    for (const e of room["#eventLog"] ?? []) {
+      const kind = e.event ?? e._$Variant;
+      if (kind === HARVEST && sources.has(e.targetId)) {
+        ledger.dug += e.amount;
+        line.dug += e.amount;
+      } else if (kind === BUILD) {
+        ledger.build += e.energySpent ?? 0;
+        line.build += e.energySpent ?? 0;
+      } else if (kind === UPGRADE) ledger.upgrade += e.energySpent ?? 0;
+      else if (kind === REPAIR) {
+        if (towers.has(e.objectId)) ledger.tower += e.energySpent ?? 10;
+        else {
+          ledger.repair += e.energySpent ?? 0;
+          line.repair += e.energySpent ?? 0;
+        }
+      } else if (kind === TRANSFER && links.has(e.objectId) && links.has(e.targetId)) ledger.linked += e.amount - Math.floor(e.amount * LINK_KEEPS);
+      else if ((kind === ATTACK || kind === HEAL) && towers.has(e.objectId)) ledger.tower += 10;
+    }
+    if (room["#user"] === ours && room.controller?.["#user"] !== ours && room.controller?.["#reservationEndTime"] > time) line.reserved++;
+    let bank = 0;
+    let hostile = false;
+    const spawns = [];
+    for (const o of objects) {
+      if (o["#lookType"] === "resource") {
+        if (o.resourceType !== "energy") continue;
+        piles.set(o.id, o.amount);
+        stock += o.amount;
+        const before = lastPiles.get(o.id);
+        if (before !== undefined) {
+          ledger.decayed += Math.ceil(before / 1000);
+          line.decayed += Math.ceil(before / 1000);
+        }
+        let log = pileLog.get(o.id);
+        if (log === undefined) {
+          const g = graves.get(`${room.name} ${o.pos.x},${o.pos.y}`);
+          const grave = g !== undefined && g.time >= time - 1 ? g.who : null;
+          log = { room: room.name, x: o.pos.x, y: o.pos.y, role: roleOf(o.pos, objects), grave, first: time, last: time, peak: 0, decayed: 0 };
+          pileLog.set(o.id, log);
+        }
+        log.last = time;
+        log.peak = Math.max(log.peak, o.amount);
+        if (before !== undefined) log.decayed += Math.ceil(before / 1000);
+        continue;
       }
-      log.last = time;
-      log.peak = Math.max(log.peak, o.amount);
-      if (before !== undefined) log.decayed += Math.ceil(before / 1000);
-      continue;
+      if (o["#lookType"] === "tombstone" || o["#lookType"] === "ruin") {
+        const who = o["#creep"] ? `${o["#creep"].name} ttl${o["#creep"].ticksToLive} e${energyIn(o)}` : "ruin";
+        graves.set(`${room.name} ${o.pos.x},${o.pos.y}`, { time, who });
+      }
+      if (o.body !== undefined && o["#user"] !== ours) {
+        hostile = true;
+        continue;
+      }
+      if (o.body !== undefined) {
+        const cost = o.body.reduce((sum, p) => sum + (PART_COST[p.type] ?? 0), 0);
+        if (!born.has(o.name)) {
+          born.add(o.name);
+          ledger.spawn += cost;
+        }
+        line.bodies += cost / (o.body.some((p) => p.type === "claim") ? CREEP_CLAIM_LIFE_TIME : CREEP_LIFE_TIME);
+      }
+      stock += energyIn(o);
+      if ((o.structureType === "spawn" || o.structureType === "extension") && o["#user"] === ours) {
+        bank += energyIn(o);
+        if (o.structureType === "spawn") spawns.push(o);
+      }
     }
-    if (o["#lookType"] === "tombstone" || o["#lookType"] === "ruin") {
-      const who = o["#creep"] ? `${o["#creep"].name} ttl${o["#creep"].ticksToLive} e${energyIn(o)}` : "ruin";
-      graves.set(`${o.pos.x},${o.pos.y}`, { time, who });
-    }
-    if (o.body !== undefined && o["#user"] !== ours) continue;
-    if (o.body !== undefined && !born.has(o.name)) {
-      born.add(o.name);
-      ledger.spawn += o.body.reduce((sum, p) => sum + (PART_COST[p.type] ?? 0), 0);
-    }
-    stock += energyIn(o);
-    if ((o.structureType === "spawn" || o.structureType === "extension") && o["#user"] === ours) {
-      bank += energyIn(o);
-      if (o.structureType === "spawn") spawns.push(o);
-    }
+    if (hostile) line.hostile++;
+    // A spawn regains one a tick while it and the room's bank are under 300.
+    if (bank < 300) regenNext += spawns.filter((sp) => energyIn(sp) < 300).length;
   }
   lastPiles = piles;
   for (const [id, log] of pileLog)
@@ -210,10 +259,23 @@ function account(room, time) {
       if (log.decayed > 0) pileOut(log);
       pileLog.delete(id);
     }
-  // A spawn regains one a tick while it and the room's bank are under 300.
-  regenNext = bank < 300 ? spawns.filter((sp) => energyIn(sp) < 300).length : 0;
   if (ledger.stock0 === null) ledger.stock0 = stock;
   ledger.stock = stock;
+}
+
+function roomLines(rooms) {
+  return Object.fromEntries(
+    rooms.map((room) => {
+      const line = lines[room.name];
+      const now = { creeps: 0, hostiles: 0, roads: 0, containers: 0 };
+      for (const o of room["#objects"]) {
+        if (o.body !== undefined) now[o["#user"] === ours ? "creeps" : "hostiles"]++;
+        else if (o["#lookType"] !== "constructionSite" && (o.structureType === "road" || o.structureType === "container")) now[`${o.structureType}s`]++;
+      }
+      const bodies = Math.round(line.bodies);
+      return [room.name, { ...line, bodies, net: line.dug - line.decayed - line.repair - bodies, ...now }];
+    }),
+  );
 }
 
 function ledgerRow() {
@@ -328,14 +390,24 @@ for (let t = 0; t < ticks; t++) {
     }
   }
   fs.writeSync(cpuOut, JSON.stringify({ t, time, cpu, observed: fresh ? obs.cpu : null, phases: fresh ? obs.phases : null }) + "\n");
-  const room = await shard.loadRoom(roomName, time);
-  account(room, time);
+  const rooms = await Promise.all(roomNames.map((name) => shard.loadRoom(name, time)));
+  const room = rooms[0];
+  account(rooms, time);
+  for (const wave of waves.filter((w) => t >= w.first && (t - w.first) % w.every === 0)) {
+    const exits = Object.entries(world.map.describeExits(wave.room) ?? {});
+    const users = await Promise.all(exits.map(([, next]) => shard.loadRoom(next, time).then((r) => r["#user"], () => null)));
+    const open = exits.filter((_, i) => users[i] == null).map(([dir]) => Number(dir));
+    await pushIntentsForRoomNextTick(shard, wave.room, kInvaderUserId, { local: { soakWave: [open] }, internal: true });
+    if (lines[wave.room]) lines[wave.room].waves++;
+    process.stderr.write(`t${t} wave in ${wave.room} from sides ${open.join(",")}\n`);
+  }
   if (room["#level"] !== levels.at(-1)?.rcl) levels.push({ t, time, rcl: room["#level"] });
   if (t % every === 0 || t === ticks - 1) {
     const row = sample(t, time, room);
     row.cpu = cpu;
     row.ledger = ledgerRow();
-    row.worth = worthOf(room, ledger.stock);
+    row.worth = worthOf(rooms, ledger.stock);
+    row.rooms = roomLines(rooms);
     row.botCpu = fresh ? obs.cpu : null;
     row.faults = seenFaults.size;
     row.ms = Date.now() - started;

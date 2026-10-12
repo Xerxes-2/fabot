@@ -17,7 +17,12 @@
 //   --node   a start from §10.2's nodes (default ticks 5000): N1 is the
 //            respawn above; N2-N4 stand what Layout's plan (`scripts/plan`)
 //            builds by the node's level, the first spawn on its planned
-//            tile, and the node's stock in storage
+//            tile, and the node's stock in storage; E1 is N4 with the two
+//            neighbours `colony.mjs` picks declared as outposts
+//            (Memory.v2.declarations.outposts) and an Invader wave in each
+//   --invaders  room:every[:first][,…]: an Invader wave (`engine/waves`) in
+//            room at t = first, first + every, … (first defaults to every);
+//            E1's default: its outposts every 4000, from 1000 and 2500
 //   --capture  ticks a-b[,c-d] (b excluded) to capture.jsonl, the input
 //            `scripts/bench.mjs` replays
 //   --save   a directory to copy the world into after the last tick
@@ -37,7 +42,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4|E1] [--invaders room:every[:first],…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -58,7 +63,7 @@ const listOnly = rest[0] === "--list";
 if (listOnly) rest.shift();
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from"].includes(a)) fail(usage);
+  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from", "--invaders"].includes(a)) fail(usage);
   const value = rest[++i];
   if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
   flags[a] = value;
@@ -76,6 +81,7 @@ const NODES = {
   N2: { level: 3, stored: 0, without: ["rampart"] },
   N3: { level: 4, stored: 5000, without: ["rampart"] },
   N4: { level: 5, stored: 50000, without: ["link", "rampart"] },
+  E1: { level: 5, stored: 50000, without: ["link", "rampart"], outposts: true },
 };
 const node = flags["--node"] === undefined ? undefined : NODES[flags["--node"]];
 if (flags["--node"] !== undefined && !node) fail(`--node: one of ${Object.keys(NODES).join(", ")}`);
@@ -86,6 +92,8 @@ const late = whole("--late", 0, 0);
 const windows = (flags["--capture"] ?? "").split(",").filter(Boolean).map((w) => w.split("-").map(Number));
 if (windows.some((w) => w.length !== 2 || !w.every(Number.isInteger))) fail(`--capture: ticks a-b[,c-d]\n${usage}`);
 if (flags["--room"] !== undefined && !/^[WE]\d+[NS]\d+$/.test(flags["--room"])) fail(`--room: "${flags["--room"]}" is not a room name`);
+const waves = (flags["--invaders"] ?? "").split(",").filter(Boolean);
+if (!waves.every((w) => /^[WE]\d+[NS]\d+:[1-9]\d*(:\d+)?$/.test(w))) fail(`--invaders: room:every[:first][,…]\n${usage}`);
 if (flags["--run"] !== undefined && !/^[\w.-]+$/.test(flags["--run"])) fail("--run: letters, digits, dots, dashes");
 // The bundle that plays: ours as built, or another (v1's, a baseline's) to
 // compare against on the same room and seed.
@@ -116,6 +124,7 @@ const screepsrc = [
   "mods:",
   "  - ./seed/index.js",
   "  - xxscreeps/mods/classic",
+  "  - ./waves/index.js",
   "game:",
   "  tickSpeed: 60000",
   "  respawnTimeout: 0",
@@ -143,7 +152,7 @@ if (from) {
   rmSync(join(world, "screeps"), { recursive: true });
   cpSync(from, join(world, "screeps"), { recursive: true });
 }
-for (const f of ["seed", "colony.mjs", "node.mjs", "soak-step.mjs"]) cpSync(join(HERE, "engine", f), join(world, f), { recursive: true });
+for (const f of ["seed", "waves", "colony.mjs", "node.mjs", "soak-step.mjs"]) cpSync(join(HERE, "engine", f), join(world, f), { recursive: true });
 writeFileSync(join(world, ".screepsrc.yaml"), screepsrc);
 // Mods resolve from the cwd only where a package.json stands.
 writeFileSync(join(world, "package.json"), '{ "private": true }\n');
@@ -197,6 +206,12 @@ console.error(`colony: ${colony.room}${from ? ` from ${from}` : `, spawn at ${co
 if (from) node24([XXSCREEPS, "manage", "bot", "update", OUR_NAME, "./bot"], world);
 else node24([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
 if (built) node24([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME], world);
+if (node?.outposts) {
+  if (colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);
+  writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: colony.outposts }));
+  node24([XXSCREEPS, script("node.mjs"), "declare", colony.room, OUR_NAME, "declarations.json"], world);
+  if (!flags["--invaders"]) waves.push(...colony.outposts.map((room, i) => `${room}:4000:${1000 + 1500 * i}`));
+}
 
 // ---- the server, stepped ---------------------------------------------------
 const log = join(out, "server.log");
@@ -221,7 +236,7 @@ for (let i = 0; !sockets.every(existsSync); i++) {
   if (exited || i > 1200) fail(`the server did not come up; see ${log}`);
   await sleep(100);
 }
-const stepped = JSON.parse(node24([XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out], world, true).trim().split("\n").at(-1));
+const stepped = JSON.parse(node24([XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out, waves.join(",")], world, true).trim().split("\n").at(-1));
 for (let i = 0; !exited && i < 150; i++) await sleep(100);
 if (flags["--save"]) {
   if (!exited) fail(`the server did not save on shutdown; no world in ${flags["--save"]}`);
@@ -281,5 +296,10 @@ console.log(
     `slow steps ${slow.length ? slow.map((t) => `t${t}`).join(", ") : "none"}`,
   ].join("; "),
 );
+if (Object.keys(last.rooms).length > 1)
+  for (const [name, r] of Object.entries(last.rooms))
+    console.log(
+      `  ${name}: dug ${r.dug} bodies ${r.bodies} net ${r.net}; reserved ${r.reserved} ticks; hostile ${r.hostile} ticks, ${r.waves} waves; ${r.creeps} creeps, ${r.roads} roads, ${r.containers} containers`,
+    );
 for (const f of faults.slice(0, 10)) console.log(`  fault t${f.tick} ${f.where}: ${f.message}`);
 if (faults.length > 10) console.log(`  … ${faults.length - 10} more in ${join(out, "faults.jsonl")}`);
