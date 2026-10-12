@@ -554,8 +554,10 @@ everything v1 used its self-written arena for, and more:
   run N ticks, asserted on outcomes — held, losses ≤ X, the group dead by T+K.
   A fix is verified by its scenario passing and the library not regressing.
   The library runs nightly. `npm run scenario` runs `scripts/xxscreeps/scenarios/`:
-  each a start as a recipe (room, seed, late start or node; ❓ a live room's
-  state), its ticks and bounds on what the soak measured, scenarios on one
+  each a start as a recipe (room, seed, late start or node, or the world a
+  soak of a pinned commit left at tick T, cached once, so a late-game bound
+  costs its last N ticks; the bundle under test runs on from it as a deploy
+  would), its ticks and bounds on what the soak measured, scenarios on one
   start sharing one soak; while it is small, `jj ship` runs all of it.
 - **Soak.** The real sector's terrain and rooms, from one spawn for thousands
   of ticks: income curve, expansion cadence, losses to NPC waves, CPU curve.

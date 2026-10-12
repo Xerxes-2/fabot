@@ -20,6 +20,9 @@
 //            tile, and the node's stock in storage
 //   --capture  ticks a-b[,c-d] (b excluded) to capture.jsonl, the input
 //            `scripts/bench.mjs` replays
+//   --save   a directory to copy the world into after the last tick
+//   --from   a world --save wrote (needs --room): the bot is swapped for
+//            --bot, its Memory kept, as a deploy at that tick
 //
 // Needs `npm run build` (dist/main.js) and `npm run xx -- setup` (the engine
 // and its template world, under $FABOT_XXSCREEPS_HOME). Writes
@@ -34,7 +37,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4] [--capture a-b,…]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -55,7 +58,7 @@ const listOnly = rest[0] === "--list";
 if (listOnly) rest.shift();
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture"].includes(a)) fail(usage);
+  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from"].includes(a)) fail(usage);
   const value = rest[++i];
   if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
   flags[a] = value;
@@ -88,6 +91,8 @@ if (flags["--run"] !== undefined && !/^[\w.-]+$/.test(flags["--run"])) fail("--r
 // compare against on the same room and seed.
 const bot = resolve(flags["--bot"] ?? join(REPO, "dist/main.js"));
 if (!existsSync(bot)) fail(flags["--bot"] ? `--bot: no file at ${bot}` : "no dist/main.js: npm run build first");
+const from = flags["--from"] && resolve(flags["--from"]);
+if (from && (!flags["--room"] || node || late || windows.length)) fail(`--from needs --room, and takes no --node, --late or --capture\n${usage}`);
 if (!existsSync(join(TEMPLATE, "screeps/shard0/data.json"))) fail(`no template world at ${TEMPLATE}: npm run xx -- setup first`);
 
 // ---- the engine, on Node 24 through nix (as xx.mjs) ------------------------
@@ -132,7 +137,12 @@ const worldName = runName.length <= 24 ? runName : `${runName.slice(0, 15)}-${cr
 const world = join(ENGINE, "worlds", `soak-${worldName}`);
 rmSync(world, { recursive: true, force: true });
 // A copied socket is a dead server's; only files and directories come over.
-cpSync(TEMPLATE, world, { recursive: true, filter: (src) => lstatSync(src).isFile() || lstatSync(src).isDirectory() });
+const filesOnly = (src) => lstatSync(src).isFile() || lstatSync(src).isDirectory();
+cpSync(TEMPLATE, world, { recursive: true, filter: filesOnly });
+if (from) {
+  rmSync(join(world, "screeps"), { recursive: true });
+  cpSync(from, join(world, "screeps"), { recursive: true });
+}
 for (const f of ["seed", "colony.mjs", "node.mjs", "soak-step.mjs"]) cpSync(join(HERE, "engine", f), join(world, f), { recursive: true });
 writeFileSync(join(world, ".screepsrc.yaml"), screepsrc);
 // Mods resolve from the cwd only where a package.json stands.
@@ -160,7 +170,7 @@ if (listOnly) {
   rmSync(world, { recursive: true, force: true });
   process.exit(0);
 }
-const colony = JSON.parse(node24([XXSCREEPS, script("colony.mjs"), ...(flags["--room"] ? [flags["--room"]] : [])], world, true).trim().split("\n").at(-1));
+const colony = from ? { room: flags["--room"] } : JSON.parse(node24([XXSCREEPS, script("colony.mjs"), ...(flags["--room"] ? [flags["--room"]] : [])], world, true).trim().split("\n").at(-1));
 const run = flags["--run"] ?? `${colony.room}${flags["--node"] ? `-${flags["--node"]}` : ""}-seed${seed}`;
 const out = join(REPO, "soak-runs", run);
 rmSync(out, { recursive: true, force: true });
@@ -183,8 +193,9 @@ if (node && node.level > 1) {
   writeFileSync(join(world, "node.json"), JSON.stringify(built));
   [colony.x, colony.y] = [built[0].x, built[0].y];
 }
-console.error(`colony: ${colony.room}, spawn at ${colony.x},${colony.y}; output ${out}`);
-node24([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
+console.error(`colony: ${colony.room}${from ? ` from ${from}` : `, spawn at ${colony.x},${colony.y}`}; output ${out}`);
+if (from) node24([XXSCREEPS, "manage", "bot", "update", OUR_NAME, "./bot"], world);
+else node24([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
 if (built) node24([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME], world);
 
 // ---- the server, stepped ---------------------------------------------------
@@ -212,6 +223,11 @@ for (let i = 0; !sockets.every(existsSync); i++) {
 }
 const stepped = JSON.parse(node24([XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out], world, true).trim().split("\n").at(-1));
 for (let i = 0; !exited && i < 150; i++) await sleep(100);
+if (flags["--save"]) {
+  if (!exited) fail(`the server did not save on shutdown; no world in ${flags["--save"]}`);
+  rmSync(flags["--save"], { recursive: true, force: true });
+  cpSync(join(world, "screeps"), resolve(flags["--save"]), { recursive: true, filter: filesOnly });
+}
 stop();
 
 // ---- the report ------------------------------------------------------------

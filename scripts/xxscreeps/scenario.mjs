@@ -1,7 +1,11 @@
 // The scenario library (ARCHITECTURE.md §10.2): each scenario in scenarios/
 // is a start, a number of ticks and bounds on what the run measured. Starts
 // are recipes (room, seed, late, node), so no world is checked in; scenarios
-// with one start share one soak, run to the longest of their ticks.
+// with one start share one soak, run to the longest of their ticks. A start
+// `at` tick T resumes the world a soak of `bundle` left at T: that bundle is
+// pinned to a commit so the world is played once and cached under
+// soak-runs/worlds/, and the bundle under test runs on from it as a deploy
+// would, Memory kept.
 //
 // Usage: npm run scenario -- [name...] [--bot main.js] [--jobs J]
 //   name    the scenarios to run (default all), by file name
@@ -9,12 +13,13 @@
 //   --jobs  soaks at once (default half the cores)
 //
 // A scenario file: { "why": the invariant, "start": { "room", "seed",
-// "late"?, "node"? }, "ticks", "assert": [{ "measure", "from"?, "to"?,
-// "max" }] }; a measure is one of `measures` below, read off the soak's
-// output over ticks [from, to). Exits non-zero when a bound fails or a soak does.
+// "late"?, "node"?, "at"?, "bundle"? }, "ticks", "assert": [{ "measure",
+// "from"?, "to"?, "max" }] }; a measure is one of `measures` below, read off
+// the soak's output over ticks [from, to), counted from the run's first tick.
+// Exits non-zero when a bound fails or a soak does.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { availableParallelism } from "node:os";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -63,8 +68,13 @@ const measures = {
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
 };
 for (const s of scenarios) for (const a of s.assert) if (!measures[a.measure]) fail(`${s.name}: no measure ${a.measure}`);
+for (const { name, start } of scenarios)
+  if ((start.at === undefined) !== (start.bundle === undefined) || (start.at !== undefined && (start.node || !/^[0-9a-f]{8,40}$/.test(start.bundle))))
+    fail(`${name}: a start "at" a tick names its "bundle" by commit id, and no node`);
 
-const keyOf = ({ room, seed, late = 0, node }) => `scenario-${basename(bot, ".js")}-${room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}`;
+const recipe = ({ room, seed, late = 0, node }) => `${room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}`;
+const worldOf = (start) => `${recipe(start)}-t${start.at}-${start.bundle}`;
+const keyOf = (start) => `scenario-${basename(bot, ".js")}-${start.at ? worldOf(start) : recipe(start)}`;
 const runs = new Map();
 for (const s of scenarios) {
   const run = runs.get(keyOf(s.start)) ?? { name: keyOf(s.start), start: s.start, ticks: 0 };
@@ -75,19 +85,43 @@ for (const s of scenarios) {
 // Built once here: parallel builds of one project collide.
 if ([...runs.values()].some((r) => r.start.node) && spawnSync("dotnet", ["build", "-c", "Release", "--nologo", "-v", "q", join(REPO, "scripts/plan")], { stdio: "inherit" }).status !== 0)
   fail("scripts/plan did not build");
+// Built outside the repo: inside it, jj would name the build after this workspace.
+const bundleAt = (commit) => {
+  const out = join(REPO, "soak-runs/bundles", `${commit}.js`);
+  if (existsSync(out)) return out;
+  console.error(`building ${commit}`);
+  const src = mkdtempSync(join(tmpdir(), "fabot-"));
+  const sh = (cmd) => spawnSync("sh", ["-c", cmd], { cwd: src, stdio: ["ignore", "ignore", "inherit"] }).status === 0 || fail(`${commit}: ${cmd} failed`);
+  sh(`git -C '${REPO}' archive ${commit} | tar -x`);
+  symlinkSync(join(REPO, "node_modules"), join(src, "node_modules"));
+  sh("dotnet tool restore && npm run build --silent");
+  mkdirSync(dirname(out), { recursive: true });
+  cpSync(join(src, "dist/main.js"), out);
+  rmSync(src, { recursive: true, force: true });
+  return out;
+};
+for (const { start } of runs.values()) if (start.bundle) bundleAt(start.bundle);
 const started = Date.now();
-const soak = ({ name, start, ticks }) =>
+const soak = (args) =>
   new Promise((done) => {
-    const args = ["--room", start.room, "--seed", String(start.seed), "--late", String(start.late ?? 0), "--ticks", String(ticks), "--run", name, "--bot", bot];
-    if (start.node) args.push("--node", start.node);
     const child = spawn("node", [join(HERE, "soak.mjs"), ...args], { stdio: "ignore", env: { ...process.env, FABOT_PLAN_BUILT: "1" } });
     child.on("exit", (code) => done(code));
   });
+const play = async ({ name, start, ticks }) => {
+  const recipe = ["--room", start.room, "--seed", String(start.seed), "--late", String(start.late ?? 0)];
+  if (!start.at) return soak([...recipe, "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.node ? ["--node", start.node] : [])]);
+  const world = join(REPO, "soak-runs/worlds", worldOf(start));
+  if (!existsSync(world)) {
+    const code = await soak([...recipe, "--ticks", String(start.at), "--run", `world-${worldOf(start)}`, "--bot", bundleAt(start.bundle), "--save", world]);
+    if (code !== 0) return code;
+  }
+  return soak(["--room", start.room, "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, "--from", world]);
+};
 const queue = [...runs.values()];
 console.error(`${scenarios.length} scenarios in ${queue.length} soaks, ${jobs} at a time`);
 await Promise.all(
   Array.from({ length: jobs }, async () => {
-    for (let run; (run = queue.shift()); ) run.code = await soak(run);
+    for (let run; (run = queue.shift()); ) run.code = await play(run);
   }),
 );
 
