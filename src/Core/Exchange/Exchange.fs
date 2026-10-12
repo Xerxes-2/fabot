@@ -259,6 +259,7 @@ let private focusedAgainst
     beside
     (bodies: Focused list)
     (ourShield, broken)
+    (towers, approach)
     : Fight =
     let dealt (alive: (Focused * float) list) =
         beside + List.sumBy (fst >> _.Deals) alive
@@ -299,25 +300,30 @@ let private focusedAgainst
             | Error _ when span = infinity -> ends false None dead alive
             | Error layers -> phase layers (worn span rest) (elapsed + span) (dead + 1)
 
-    let layers = List.map float [ price.Shield; price.Tough; price.Hits ]
     let order = List.sortBy (fun (b: Focused, _) -> b.Hits) whole
 
     let fight =
         let breaks = total + broken
 
-        match ourShield with
-        | 0 -> phase layers order 0.0 0
-        | _ ->
-            let span =
-                if breaks <= 0 then
-                    infinity
-                else
-                    float ourShield / float breaks
+        match
+            spend price towers approach (List.map float [ price.Shield; price.Tough; price.Hits ])
+        with
+        | Ok t -> ends true (Some t) 0 whole
+        | Error layers ->
 
-            match spend price (dealt whole) span layers with
-            | Ok t -> ends true (Some t) 0 whole
-            | Error _ when span = infinity -> ends false None 0 whole
-            | Error layers -> phase layers (worn span order) span 0
+            match ourShield with
+            | 0 -> phase layers order 0.0 0
+            | _ ->
+                let span =
+                    if breaks <= 0 then
+                        infinity
+                    else
+                        float ourShield / float breaks
+
+                match spend price (dealt whole) span layers with
+                | Ok t -> ends true (Some t) 0 whole
+                | Error _ when span = infinity -> ends false None 0 whole
+                | Error layers -> phase layers (worn span order) span 0
 
     if total = 0 then
         { fight with
@@ -631,6 +637,26 @@ let private arrivalOf (terrain: Terrain) (fighters: Fighter list) (raid: Fighter
             max most walk)
         0
 
+/// Our towers strike the raid until a weapon of either side reaches: the
+/// nearest pair's gap, both walking in, a cast body landing at `castWalk`.
+let private approachOf (terrain: Terrain) (fighters: Fighter list) (raid: Fighter list) =
+    let closing (f: Fighter) (h: Fighter) =
+        match f.Pos, h.Pos |> Option.bind (fun at -> rangeTo at f) with
+        | None, _ -> Some(float castWalk)
+        | Some _, None -> None
+        | Some _, Some range ->
+            let gap = float (max 0 (range - max f.Reach h.Reach))
+
+            match pace terrain.Weight f.Gait, pace terrain.Weight h.Gait with
+            | Some ours, Some theirs -> Some(gap * float (ours * theirs) / float (ours + theirs))
+            | Some ticks, None
+            | None, Some ticks -> Some(gap * float ticks)
+            | None, None -> None
+
+    match List.allPairs fighters raid |> List.choose (fun (f, h) -> closing f h) with
+    | [] -> 0.0
+    | ticks -> List.min ticks
+
 let private towersOn (towers: Tower list) (raid: Fighter list) =
     let loaded = towers |> List.filter (fun t -> t.Energy >= Engine.towerEnergyCost)
 
@@ -668,6 +694,7 @@ let private exchange (ours: Side) (theirs: Side) (terrain: Terrain) : Outcome =
             })
 
     let dealt = towers + List.sumBy _.Deals bodies
+    let approach = approachOf terrain fighters theirs.Bodies
 
     let settle horizon (price: Price) =
         let struck = struckBack price dealt back.Struck back.Swingers
@@ -688,7 +715,7 @@ let private exchange (ours: Side) (theirs: Side) (terrain: Terrain) : Outcome =
             }
 
         let shield = List.sumBy snd ramparts, brokenBy terrain horizon price ramparts
-        let fight = focusedAgainst price (towers + struck) bodies shield
+        let fight = focusedAgainst price (towers + struck) bodies shield (towers, approach)
         let ticks = fight.Ticks |> Option.map (ceil >> int) |> Option.defaultValue longest
 
         let outcome =
