@@ -703,6 +703,7 @@ empty:
 | Milestone | What | Exit |
 |---|---|---|
 | M1 economy | the rest of v1's economy mechanisms | the seat-extreme soak beats v1's bundle in both classes, on a second seed |
+| M1b outposts | declared outposts: reservation, remote harvest and haul, before M2 because RCL6+ structures spend more than a home's two sources give. No fighting before M3: a hostile in an outpost stands it down until the room is clear (the owner's choice over porting a guard early) | node E1 (with timed Invader waves): each outpost nets positive after its bodies and its stand-downs |
 | M2 structures | node builder (N1–N4) ✅, links ✅ (the controller's and the longest-way source's first: +5–17k worth over 20k ticks on N4; hub-first broke even, as v1's arithmetic said), labs, factory, the RCL8 set | each node beats the economy without that structure |
 | M3 defence | `Exchange`, `Defend`, the first tactics, casting, the self-play harness | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
 | M4 live | v2 replaces v1 | ❓ the owner decides from progress |
