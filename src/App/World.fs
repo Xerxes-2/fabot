@@ -55,13 +55,14 @@ let private structureOf (s: IStructure) : Structure =
         Store = storeOf s?store
         Cooldown = orZero s.cooldown
         Collapse =
-            if absent (box s.effects) then
+            if not kind.IsInvaderCore then
                 0
             else
                 s.effects
                 |> Array.tryFind (fun e -> e.effect = effectCollapseTimer)
                 |> Option.map (fun e -> e.ticksRemaining)
-                |> Option.defaultValue 0
+                |> Option.defaultWith (fun () ->
+                    s.ticksToDeploy + Fabot.Core.Engine.strongholdLongestCollapse)
         Walkable =
             match kind with
             | Kind.Rampart -> owner.IsOurs || s.isPublic

@@ -133,11 +133,14 @@ function structure(s, pos, level, room) {
       // Already deployed: the scenario's own ramparts, towers, containers
       // and roads stand for the template's (deploy time 0). A level 1-5
       // core runs its `bunker<level>` behaviour until the room's collapse
-      // tick; a level-0 one is an expansion core. No deposit type: no loot,
-      // as the live core's "normal" earns none in the vanilla tables.
+      // tick; a level-0 one is an expansion core, which carries its parent
+      // stronghold's collapse (`strongholds.js` expandStronghold). No deposit
+      // type: no loot, as the live core's "normal" earns none in the vanilla tables.
       const core = InvaderCore.create(pos, s.level, 0);
       if (s.level > 0) core["#templateName"] = `bunker${s.level}`;
-      if (room.strongholdCollapse > 0) core["#collapseTime"] = time + (room.strongholdCollapse - scenario.time);
+      const collapse = room.strongholdCollapse || (s.level === 0 ? Math.max(0, ...scenario.rooms.map((r) => r.strongholdCollapse ?? 0)) : 0);
+      if (collapse > 0) core["#collapseTime"] = time + (collapse - scenario.time);
+      else warnings.push(`${s.id}: no stronghold collapse; it stands for good, as no live core does`);
       return core;
     }
     case "spawn":

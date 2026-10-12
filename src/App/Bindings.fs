@@ -112,6 +112,8 @@ type IStructure =
     abstract effects: IEffect[]
     /// Invader core only: 0 is a stronghold's expansion core, 1 and up the bunker.
     abstract level: int
+    /// Invader core only: absent once deployed.
+    abstract ticksToDeploy: int
     abstract cooldown: int
     abstract isPublic: bool
 

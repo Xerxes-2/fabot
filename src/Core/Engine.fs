@@ -22,6 +22,9 @@ let creepLifetime = 1500
 
 let claimLifetime = 600
 
+/// STRONGHOLD_DECAY_TICKS ×1.1: the longest a deployed core stands.
+let strongholdLongestCollapse = 82_500
+
 /// CREEP_SPAWN_TIME.
 let spawnTicksPerPart = 3
 

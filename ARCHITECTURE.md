@@ -183,7 +183,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `intel.rooms` | room → last seen, owner, structures summary, defence estimate, sources, controller | Strategy | segment | hundreds of rooms; read on a due tick |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
 | `observe.*` | health, faults, per-module CPU, counters | Main, then Observe | segment 1 | operator; calibrates the benchmark |
-| `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse) | World | heap | vision grace; when a stood-down outpost is clear |
+| `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) | World | heap | vision grace; when a stood-down outpost is clear |
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
 
 Rules:
