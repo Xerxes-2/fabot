@@ -27,10 +27,8 @@ type Event =
 /// Ranged reach plus one step.
 let reach = 4
 
-/// A healer is clustered with what it heals.
-let armed (creep: Creep) : bool =
-    creep.Body
-    |> Array.exists (fun p -> p.Kind.IsAttack || p.Kind.IsRangedAttack || p.Kind.IsHeal)
+/// The owner's starting value, to be tuned.
+let lostGroupTicks = 30
 
 /// A seam's two tiles are one apart.
 let worldOf (pos: Pos) : int * int =
@@ -53,6 +51,7 @@ let private clusters (hostiles: Creep[]) : Creep[][] =
     let sorted = hostiles |> Array.sortWith (fun a b -> compare a.Id b.Id)
     let n = sorted.Length
     let root = Array.init n id
+    let armed = sorted |> Array.map (Hostiles.armed sorted)
 
     let rec find (i: int) =
         if root.[i] = i then
@@ -63,9 +62,9 @@ let private clusters (hostiles: Creep[]) : Creep[][] =
             r
 
     for i in 0 .. n - 1 do
-        if armed sorted.[i] then
+        if armed.[i] then
             for j in i + 1 .. n - 1 do
-                if armed sorted.[j] && linked sorted.[i].Pos sorted.[j].Pos then
+                if armed.[j] && linked sorted.[i].Pos sorted.[j].Pos then
                     let a = find i
                     let b = find j
 

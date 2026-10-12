@@ -356,13 +356,20 @@ module Terrain =
         let t = terrain.[y * 50 + x]
         t &&& wall = 0uy && t &&& swamp <> 0uy
 
-/// WORK alone is no threat: it fells structures, never a body, and every
-/// rival's remote harvester carries it.
+module Hostiles =
+    let private strikes (creep: Creep) =
+        creep.Body |> Array.exists (fun p -> p.Kind.IsAttack || p.Kind.IsRangedAttack)
+
+    /// HEAL and WORK threaten beside a striker (owner's call): alone they are
+    /// a rival's healer in transit or its remote harvester.
+    let armed (hostiles: Creep[]) (creep: Creep) =
+        strikes creep
+        || creep.Body |> Array.exists (fun p -> p.Kind.IsHeal || p.Kind.IsWork)
+           && hostiles |> Array.exists (fun o -> o.Pos.Room = creep.Pos.Room && strikes o)
+
 type Sightings = Map<string, Map<string, int>>
 
 module Sightings =
-    let private armed (creep: Creep) =
-        creep.Body |> Array.exists (fun p -> p.Kind.IsAttack || p.Kind.IsRangedAttack)
 
     let step (world: World) (previous: Sightings) : Sightings =
         let mutable next =
@@ -374,7 +381,7 @@ module Sightings =
             let mutable seen = Map.tryFind room.Name next |> Option.defaultValue Map.empty
 
             for creep in room.Hostiles do
-                if armed creep then
+                if Hostiles.armed room.Hostiles creep then
                     seen <- Map.add creep.Id (world.Time + creep.TicksToLive) seen
 
             for s in room.Structures do

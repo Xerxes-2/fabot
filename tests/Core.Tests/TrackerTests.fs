@@ -159,6 +159,7 @@ let tests =
             <| fun (History(prev, now, tick)) ->
                 let groups = seen tick (fst (step grace prev now tick))
                 let at = now |> Array.map (fun c -> c.Id, c) |> Map.ofArray
+                let armed = Hostiles.armed now
 
                 let positions (g: Group) =
                     g.Members |> Seq.map (fun m -> at.[m]) |> List.ofSeq

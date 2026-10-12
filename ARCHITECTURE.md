@@ -255,12 +255,14 @@ val step : prev: Group list -> hostiles: HostileInfo list -> tick: int -> Group 
 
 - Armed hostiles are clustered by connected components at Chebyshev distance ≤ 4
   (ranged reach + one step), across a seam when the tiles are adjacent.
-  Unarmed hostiles are tracked as singletons.
+  Unarmed hostiles are tracked as singletons. Armed is ATTACK or
+  RANGED_ATTACK, and HEAL or WORK beside one in the room (owner's call).
 - Identity: next tick's clusters match previous groups by largest member
   overlap. A split keeps the id on the largest fragment; a merge keeps the older
-  id. Both are **events**.
+  id. Both are **events**. A new id is past every id a group or an
+  engagement holds, so a dropped group's id is never reused.
 - A group none of whose members is visible is `Lost` from `LastSeen`; dropped
-  after `Tuning.LostGroupTicks` (❓ 30). This is the only vision grace in the
+  after `Tracker.lostGroupTicks` (30, the owner's starting value). This is the only vision grace in the
   fight.
 - Pure; property-tested: ids stable under a permutation of the input; no group
   wider than the cluster diameter; no id reused in one tick.
