@@ -146,13 +146,27 @@ let matchAll
     let open' (bi: int) (oi: int) =
         admitsNow bi oi || (seated oi && admitsAhead bi oi)
 
+    // Best rank first, the pool's order within one, so a body walks to no offer
+    // ranked below the best it reaches.
+    let ranked =
+        Array.init offers id
+        |> Array.sortWith (fun a b ->
+            if pool.[a].Priority <> pool.[b].Priority then
+                compare pool.[a].Priority pool.[b].Priority
+            else
+                compare a b)
+
     let score (bi: int) =
         bestOffer.[bi] <- -1
+        let mutable k = 0
 
-        for oi in 0 .. offers - 1 do
+        while k < offers do
+            let oi = ranked.[k]
             let offer = pool.[oi]
+            let below = bestOffer.[bi] >= 0 && offer.Priority > bestRank.[bi]
+            k <- if below then offers else k + 1
 
-            if fits bodies.[bi] offer && open' bi oi then
+            if not below && fits bodies.[bi] offer && open' bi oi then
                 let w = walk bi oi
 
                 if

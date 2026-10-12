@@ -90,16 +90,12 @@ let inline at (index: int) (array: 'T[]) : 'T = Tiles.at index array
 #endif
 let setAt (_index: int) (_array: 'T[]) (_value: 'T) : unit = _array.[_index] <- _value
 
+/// The bench's counts (`ARCHITECTURE.md` §9.3), read by `scripts/bench.mjs
+/// --counts`; nothing in the bot reads them.
 #if FABLE_COMPILER_JAVASCRIPT
-[<Emit("$1[$0]")>]
+[<Emit("globalThis.__fabotCount?.($0, $1)")>]
 #endif
-let private heapAt (_index: int) (_heap: ResizeArray<int>) : int = _heap.[_index]
-
-#if FABLE_COMPILER_JAVASCRIPT
-[<Emit("$1[$0] = $2")>]
-#endif
-let private setHeapAt (_index: int) (_heap: ResizeArray<int>) (_value: int) : unit =
-    _heap.[_index] <- _value
+let tally (_what: string) (_n: int) : unit = ()
 
 let weightOf (footprint: Footprint) (weights: int[]) (tile: int) : int =
     match footprint with
@@ -130,112 +126,119 @@ let onEdge (footprint: Footprint) (tile: int) : bool =
         let y = Tiles.yOf tile
         x = 0 || y = 0 || x >= Tiles.side - 2 || y >= Tiles.side - 2
 
-[<NoEquality; NoComparison>]
-type private Heap =
-    {
-        Keys: ResizeArray<int>
-        mutable Size: int
-    }
+/// An inner tile's neighbours, as offsets: cheaper than its `Tiles.around` row.
+let private offsets =
+    [|
+        -Tiles.side
+        1
+        Tiles.side
+        -1
+        -Tiles.side - 1
+        -Tiles.side + 1
+        Tiles.side - 1
+        Tiles.side + 1
+    |]
 
-let private push (heap: Heap) (key: int) =
-    let keys = heap.Keys
-
-    if heap.Size >= keys.Count then
-        keys.Add 0
-
-    let mutable hole = heap.Size
-    heap.Size <- heap.Size + 1
-    let mutable climbing = hole > 0
-
-    while climbing do
-        let parent = (hole - 1) / 2
-        let parentKey = heapAt parent keys
-
-        if parentKey > key then
-            setHeapAt hole keys parentKey
-            hole <- parent
-            climbing <- hole > 0
-        else
-            climbing <- false
-
-    setHeapAt hole keys key
-
-let private pop (heap: Heap) =
-    let keys = heap.Keys
-    let top = heapAt 0 keys
-    heap.Size <- heap.Size - 1
-    let size = heap.Size
-
-    if size > 0 then
-        let key = heapAt size keys
-        let mutable hole = 0
-        let mutable sinking = true
-
-        while sinking do
-            let left = 2 * hole + 1
-
-            if left >= size then
-                sinking <- false
-            else
-                let right = left + 1
-                let mutable child = left
-                let mutable childKey = heapAt left keys
-
-                if right < size then
-                    let rightKey = heapAt right keys
-
-                    if rightKey < childKey then
-                        child <- right
-                        childKey <- rightKey
-
-                if childKey < key then
-                    setHeapAt hole keys childKey
-                    hole <- child
-                else
-                    sinking <- false
-
-        setHeapAt hole keys key
-
-    top
-
-/// The dearest step is 245 ticks (49 weighted parts on one MOVE, onto swamp),
-/// so no path's distance × tiles + tile overflows an int key.
+/// Dial's queue: no step costs more than the table's dearest, so a ring of one
+/// bucket more holds every queued distance apart.
 let flood (footprint: Footprint) (weights: int[]) (steps: int[]) (goals: int[]) : int[] =
     let dist = Array.create Tiles.count unreached
-    let heap = { Keys = ResizeArray<int>(); Size = 0 }
+    // The step onto a tile; -1 where no walk leaves it.
+    let price = Array.zeroCreate<int> Tiles.count
+    let next = Array.zeroCreate<int> Tiles.count
+    let prev = Array.zeroCreate<int> Tiles.count
+    let mutable dearest = 0
 
-    for goal in goals do
-        if
-            goal >= 0
-            && goal < Tiles.count
-            && weightOf footprint weights goal >= 0
-            && at goal dist > 0
-        then
+    for i in 0 .. steps.Length - 1 do
+        dearest <- max dearest (at i steps)
+
+    let ring = dearest + 1
+    let head = Array.create ring -1
+    let mutable queued = 0
+    let mutable relaxed = 0
+
+    let stepOn (weight: int) =
+        if weight < steps.Length then at weight steps else -1
+
+    let link (tile: int) (d: int) =
+        let b = d % ring
+        let h = at b head
+        setAt tile next h
+        setAt tile prev -1
+
+        if h >= 0 then
+            setAt h prev tile
+
+        setAt b head tile
+        queued <- queued + 1
+
+    let unlink (tile: int) =
+        let p = at tile prev
+        let n = at tile next
+
+        if p >= 0 then
+            setAt p next n
+        else
+            setAt (at tile dist % ring) head n
+
+        if n >= 0 then
+            setAt n prev p
+
+        queued <- queued - 1
+
+    // A blocked tile reads -1 until the end, so no candidate beats it. A
+    // non-goal border tile leads nowhere: a body stepping onto it leaves.
+    for t in 0 .. Tiles.count - 1 do
+        let w = weightOf footprint weights t
+
+        if w < 0 then setAt t dist -1
+        elif onEdge footprint t then setAt t price -1
+        else setAt t price (stepOn w)
+
+    for i in 0 .. goals.Length - 1 do
+        let goal = at i goals
+
+        if goal >= 0 && goal < Tiles.count && at goal dist > 0 then
             setAt goal dist 0
-            push heap goal
+            setAt goal price (stepOn (weightOf footprint weights goal))
+            link goal 0
 
-    while heap.Size > 0 do
-        let key = pop heap
-        let tile = key % Tiles.count
-        let d = key / Tiles.count
+    let mutable d = 0
+    let mutable b = 0
 
-        // A non-goal border tile leads nowhere: a body stepping onto it leaves.
-        // Only a tile the footprint stands on is pushed, so its weight indexes
-        // the table.
-        if at tile dist = d && (d = 0 || not (onEdge footprint tile)) then
-            let price = at (weightOf footprint weights tile) steps
+    while queued > 0 do
+        let tile = at b head
 
-            if price >= 0 then
-                let around = Tiles.around tile
+        if tile < 0 then
+            d <- d + 1
+            b <- if b + 1 = ring then 0 else b + 1
+        else
+            unlink tile
+            let p = at tile price
+
+            if p >= 0 then
+                relaxed <- relaxed + 1
+                let candidate = d + p
+                let x = Tiles.xOf tile
+                let y = Tiles.yOf tile
+                let inner = x > 0 && y > 0 && x < Tiles.side - 1 && y < Tiles.side - 1
+                let around = if inner then offsets else Tiles.around tile
+                let origin = if inner then tile else 0
 
                 for i in 0 .. around.Length - 1 do
-                    let next = at i around
+                    let n = origin + at i around
+                    let old = at n dist
 
-                    if weightOf footprint weights next >= 0 then
-                        let candidate = d + price
+                    if candidate < old then
+                        if old <> unreached then
+                            unlink n
 
-                        if candidate < at next dist then
-                            setAt next dist candidate
-                            push heap (candidate * Tiles.count + next)
+                        setAt n dist candidate
+                        link n candidate
 
+    for t in 0 .. Tiles.count - 1 do
+        if at t dist < 0 then
+            setAt t dist unreached
+
+    tally "flood" relaxed
     dist

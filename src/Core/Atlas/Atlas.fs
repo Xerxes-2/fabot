@@ -378,6 +378,7 @@ module Atlas =
                     match atlas.Floods.TryGetValue key with
                     | true, dist ->
                         atlas.Hits <- atlas.Hits + 1
+                        tally "hit" 1
                         dist
                     | _ ->
                         atlas.Misses <- atlas.Misses + 1

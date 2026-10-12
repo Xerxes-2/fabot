@@ -6,7 +6,11 @@
 // --cold ticks are apart. A claim is the min-of-rounds B/A with identical
 // fingerprints (each tick's intents and Memory).
 //
+// --counts replays A once and prints §9.3's counts a tick per window instead:
+// floods, flood-table hits, tiles relaxed, by the caller's named frames.
+//
 // Usage: npm run bench -- --a A.js [--b B.js] [--rounds R] [--cold K] capture.jsonl…
+//        npm run bench -- --a A.js --counts capture.jsonl…
 //   node --cpu-prof --max-old-space-size=256 scripts/bench.mjs --a A.js …   one bundle's profile
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -14,7 +18,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { getHeapStatistics } from "node:v8";
 
-const usage = "usage: npm run bench -- --a A.js [--b B.js] [--rounds R] [--cold K] capture.jsonl…";
+const usage = "usage: npm run bench -- --a A.js [--b B.js] [--rounds R] [--cold K | --counts] capture.jsonl…";
 const fail = (m) => {
   console.error(m);
   process.exit(1);
@@ -23,7 +27,8 @@ const flags = {};
 const files = [];
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++)
-  if (argv[i].startsWith("--")) {
+  if (argv[i] === "--counts") flags.counts = true;
+  else if (argv[i].startsWith("--")) {
     if (!["--a", "--b", "--rounds", "--cold"].includes(argv[i]) || argv[i + 1] === undefined) fail(usage);
     flags[argv[i]] = argv[++i];
   } else files.push(argv[i]);
@@ -124,6 +129,29 @@ function runTick(bot, tick) {
   Object.assign(ms, { bot: observed.cpu, stringify, tick: observed.cpu + stringify });
   const print = createHash("sha256").update(JSON.stringify(intents)).update(memory).digest("hex").slice(0, 12);
   return { ms, print, faults: observed.faults.filter((f) => f.tick === tick.time) };
+}
+
+if (flags.counts) {
+  Error.stackTraceLimit = 40;
+  const skip = new Set(["flood", "AtlasModule_field", "AtlasModule_travelTicks", "ticksTo", "Object.loop", "loop", "runTick", "run"]);
+  let tally;
+  globalThis.__fabotCount = (what, n) => {
+    const who = [...new Error().stack.matchAll(/at (?:Object\.)?([\w$]+) \(/g)].map((m) => m[1]).filter((f) => !skip.has(f) && !f.startsWith("__")).slice(0, 2).join("<");
+    const row = (tally[who] ??= { floods: 0, hits: 0, tiles: 0 });
+    if (what === "hit") row.hits += n;
+    else (row.floods++, (row.tiles += n));
+  };
+  for (const [wi, w] of windows.entries()) {
+    tally = {};
+    const bot = load(bundles.A);
+    for (const tick of w) runTick(bot, tick);
+    const rows = Object.entries(tally).sort((a, b) => b[1].tiles - a[1].tiles);
+    const sum = (k) => rows.reduce((s, [, r]) => s + r[k], 0);
+    const per = (x) => (x / w.length).toFixed(1);
+    console.log(`window ${wi} (${w.length} ticks): ${per(sum("floods"))} floods a tick, hit rate ${((100 * sum("hits")) / (sum("hits") + sum("floods"))).toFixed(1)}%, ${(sum("tiles") / sum("floods")).toFixed(0)} tiles a flood`);
+    for (const [who, r] of rows) console.log(`  ${who.padEnd(48)} floods ${per(r.floods).padStart(7)} hits ${per(r.hits).padStart(7)} tiles ${per(r.tiles).padStart(9)}`);
+  }
+  process.exit(0);
 }
 
 // runs[side][round][i]: the i-th tick of all windows in order.
