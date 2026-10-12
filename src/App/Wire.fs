@@ -6,6 +6,7 @@ open Fable.Core
 open Fable.Core.JsInterop
 open Fabot.Bindings
 open Fabot.Core.State
+open Fabot.Core.Fight.Shape
 
 /// Read by `npm run observe` and `scripts/capture`.
 let observeSegment = 1
@@ -66,7 +67,7 @@ let private posOf (o: obj) : Fabot.Core.World.Pos option =
 let private posObj (p: Fabot.Core.World.Pos) =
     createObj [ "room" ==> p.Room; "x" ==> p.X; "y" ==> p.Y ]
 
-let private groupOf (o: obj) : Fabot.Core.Fight.Shape.Group option =
+let private groupOf (o: obj) : Group option =
     match intOf (field o "id"), intOf (field o "seen"), posOf o with
     | Some id, Some seen, Some centre ->
         Some
@@ -79,12 +80,62 @@ let private groupOf (o: obj) : Fabot.Core.Fight.Shape.Group option =
             }
     | _ -> None
 
-let private groupObj (g: Fabot.Core.Fight.Shape.Group) =
+let private groupObj (g: Group) =
     let o = posObj g.Centre
     o?id <- g.Id
     o?seen <- g.LastSeen
     o?members <- Array.ofSeq g.Members
     o
+
+let private phases =
+    [
+        "forming", Phase.Forming
+        "approaching", Phase.Approaching
+        "fighting", Phase.Fighting
+        "pursuing", Phase.Pursuing
+        "disengaging", Phase.Disengaging
+    ]
+
+let private engagementOf (o: obj) : Engagement option =
+    let phase =
+        phases
+        |> List.tryFind (fun (name, _) -> box name = field o "phase")
+        |> Option.map snd
+
+    match intOf (field o "id"), intOf (field o "group"), field o "room", phase with
+    | Some id, Some group, (:? string as room), Some phase ->
+        Some
+            {
+                Id = id
+                Group = group
+                Room = room
+                Ours = listOf stringOf (field o "ours") |> Set.ofList
+                Phase = phase
+                Since = intOf (field o "since") |> Option.defaultValue 0
+                Lost = intOf (field o "lost") |> Option.defaultValue 0
+                Budget = intOf (field o "budget") |> Option.defaultValue 0
+                Priority =
+                    match field o "priority" with
+                    | :? float as p -> p
+                    | _ -> 0.0
+                Unanswered = field o "unanswered" = box true
+            }
+    | _ -> None
+
+let private engagementObj (e: Engagement) =
+    createObj
+        [
+            "id" ==> e.Id
+            "group" ==> e.Group
+            "room" ==> e.Room
+            "ours" ==> Array.ofSeq e.Ours
+            "phase" ==> (phases |> List.find (fun (_, p) -> p = e.Phase) |> fst)
+            "since" ==> e.Since
+            "lost" ==> e.Lost
+            "budget" ==> e.Budget
+            "priority" ==> e.Priority
+            "unanswered" ==> e.Unanswered
+        ]
 
 /// The first touch of `Memory` is the engine's parse, so this is the read the
 /// tick's "memory" phase times.
@@ -110,6 +161,7 @@ let readState () : State =
                 Map.empty
         Layout = Map.empty
         Groups = listOf groupOf (field fight "groups")
+        Engagements = listOf engagementOf (field fight "engagements")
     }
 
 /// The switches are the operator's and are left as they are.
@@ -118,7 +170,11 @@ let writeState (state: State) : unit =
         createObj (state.Assignments |> Map.toList |> List.map (fun (name, id) -> name ==> id))
 
     (root ())?fight <-
-        createObj [ "groups" ==> (state.Groups |> List.map groupObj |> Array.ofList) ]
+        createObj
+            [
+                "groups" ==> (state.Groups |> List.map groupObj |> Array.ofList)
+                "engagements" ==> (state.Engagements |> List.map engagementObj |> Array.ofList)
+            ]
 
 let readDeclarations () : Fabot.Core.Tick.Declarations =
     let declared = (root ())?declarations

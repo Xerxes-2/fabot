@@ -161,7 +161,11 @@ let private linkSends (ground: Ground) : Intent list =
         ]
 
 let decide (context: Context) (state: State) : Intent list * State =
-    let world = context.World
+    let world =
+        { context.World with
+            Creeps = context.World.Creeps |> Array.filter (fun c -> not (Tick.fights c.Name))
+        }
+
     let atlas = context.Atlas
 
     let derived =
@@ -354,9 +358,16 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     let moves = ResizeArray<Intent>()
 
+    let fighting = context.World.Creeps |> Array.filter (fun c -> Tick.fights c.Name)
+
     for KeyValue(room, list) in wishes do
+        let held =
+            fighting
+            |> Array.filter (fun c -> c.Pos.Room = room)
+            |> Array.map (fun c -> Tiles.ofPos c.Pos)
+
         for name, direction in
-            Arbitrate.arbitrate (Atlas.passable atlas room) [||] (List.ofSeq list) do
+            Arbitrate.arbitrate (Atlas.passable atlas room) held (List.ofSeq list) do
             moves.Add(Creep(name, Move direction))
 
     let sends = derived.Grounds |> Seq.collect linkSends |> List.ofSeq

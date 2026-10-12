@@ -38,6 +38,12 @@ type Context =
         Sightings: Sightings
     }
 
+/// A body cast under this name is Fight's for its life, so no creep is in
+/// both Fight and Economy (`ARCHITECTURE.md` §2).
+let fightPrefix = "fight-"
+
+let fights (name: string) = name.StartsWith fightPrefix
+
 /// The route search needs a bound; nothing is worked further than this.
 let reachHops = 3
 

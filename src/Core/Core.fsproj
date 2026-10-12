@@ -37,6 +37,7 @@
     <Compile Include="Exchange/Fighter.fs" />
     <Compile Include="Exchange/Exchange.fs" />
     <Compile Include="Fight/Tracker.fs" />
+    <Compile Include="Fight/Kinds/Defend.fs" />
     <Compile Include="Fight/Run.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -625,6 +625,7 @@ let ofWorld
             world.Spawns
             |> Array.choose (fun s ->
                 s.Spawning
+                |> Option.filter (fun oven -> not (Tick.fights oven.Name))
                 |> Option.map (fun oven ->
                     let life =
                         if oven.Body |> Array.exists (fun p -> p.Kind.IsClaim) then
