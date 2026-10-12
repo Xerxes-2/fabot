@@ -175,6 +175,7 @@ let decide (context: Context) (state: State) : Intent list * State =
                 Budget = 0
                 Priority = priority
                 Unanswered = true
+                Capacity = 0
             },
             true)
 
@@ -217,6 +218,19 @@ let decide (context: Context) (state: State) : Intent list * State =
         Atlas.route context.Atlas Set.empty Tick.reachHops from room
         |> Option.map (fun rooms -> Engine.roomSide * (List.length rooms - 1))
 
+    // A home's Defend is the home's alone.
+    let coloniesOf (e: Engagement) =
+        world.Rooms
+        |> Array.filter (fun r ->
+            homes.Contains r.Name
+            && (if homes.Contains e.Room then
+                    r.Name = e.Room
+                else
+                    Option.isSome (walkTo e.Room r.Name)))
+
+    let capacityOf (e: Engagement) =
+        coloniesOf e |> Array.fold (fun most r -> max most r.EnergyCapacity) 0
+
     let spent (e: Engagement) =
         homes.Contains e.Room && e.Lost > e.Budget
 
@@ -248,17 +262,8 @@ let decide (context: Context) (state: State) : Intent list * State =
                 |> Seq.map (fun c -> Exchange.Fighter.cast c.Body)
                 |> List.ofSeq
 
-            // A home's Defend is the home's alone.
-            let colonies =
-                world.Rooms
-                |> Array.filter (fun r ->
-                    homes.Contains r.Name
-                    && (if homes.Contains e.Room then
-                            r.Name = e.Room
-                        else
-                            Option.isSome (walkTo e.Room r.Name)))
-
-            let capacity = colonies |> Array.fold (fun most r -> max most r.EnergyCapacity) 0
+            let colonies = coloniesOf e
+            let capacity = capacityOf e
             let terrain = Casting.terrainAt room g.Centre
 
             // A home is a post the raid comes to where our ramparts stand on it;
@@ -304,6 +309,7 @@ let decide (context: Context) (state: State) : Intent list * State =
                             }
                         Budget = e.Lost + dead
                         Unanswered = false
+                        Capacity = capacity
                     }
 
                 let standing =
@@ -317,7 +323,10 @@ let decide (context: Context) (state: State) : Intent list * State =
                 else
                     e
             | None when e.Unanswered || e.Ours.IsEmpty && asked.IsEmpty ->
-                { e with Unanswered = true }
+                { e with
+                    Unanswered = true
+                    Capacity = capacity
+                }
             | None -> Defend.giveUp (homes.Contains e.Room) world.Time e
         | _ -> e
 
@@ -347,7 +356,9 @@ let decide (context: Context) (state: State) : Intent list * State =
         |> List.map (fun (e, lost) -> rehomed e, lost)
         |> List.sortBy (fun (e, _) -> -e.Priority, e.Id)
         |> List.map (fun (e, lost) ->
-            if lost || changed e || e.Since = world.Time && e.Phase.IsForming then
+            let grew = e.Unanswered && capacityOf e > e.Capacity
+
+            if lost || grew || changed e || e.Since = world.Time && e.Phase.IsForming then
                 priced e
             else
                 e)

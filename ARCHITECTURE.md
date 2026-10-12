@@ -302,7 +302,9 @@ Common to every kind:
   expiring within walk + spawn time* → ask a replacement.
 - Transitions fire on **events** — group split/merge/newcomer/left/lost, body died
   or landed, target gone, budget crossed, deadline, another engagement merged
-  into this one, Strategy re-prioritised — never on a clock and never on a
+  into this one, Strategy re-prioritised, the affordable set grew (the largest
+  energy capacity among the colonies that may cast for an unanswered
+  engagement, a home's or an outpost's, rose past what it was priced at) — never on a clock and never on a
   re-priced number. This is what removes the latches.
 - A group that appears inside a room an engagement targets belongs to that
   engagement; only a group outside any targeted room can open a `Defend`. Two

@@ -50,6 +50,8 @@ type Engagement =
         Priority: float
         /// Starved: towers and ramparts answer it alone.
         Unanswered: bool
+        /// The bank it was last priced against; a larger one is an event.
+        Capacity: int
     }
 
 /// A body asked of `Room`'s spawns under `Name`, until it stands.

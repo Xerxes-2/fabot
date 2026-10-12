@@ -131,6 +131,7 @@ let private engagementOf (o: obj) : Engagement option =
                     | :? float as p -> p
                     | _ -> 0.0
                 Unanswered = field o "unanswered" = box true
+                Capacity = intOf (field o "capacity") |> Option.defaultValue 0
             }
     | _ -> None
 
@@ -149,6 +150,7 @@ let private engagementObj (e: Engagement) =
             "budget" ==> e.Budget
             "priority" ==> e.Priority
             "unanswered" ==> e.Unanswered
+            "capacity" ==> e.Capacity
         ]
 
 let private castOf (o: obj) : Cast option =
