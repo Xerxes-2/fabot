@@ -152,40 +152,42 @@ module Atlas =
             let terrain = room.Terrain
 
             for i in 0 .. Tiles.count - 1 do
-                let t = terrain.[i]
+                let t = at i terrain
 
-                weights.[i] <-
-                    if t &&& Terrain.wall <> 0uy then -1
-                    elif t &&& Terrain.swamp <> 0uy then Engine.swampWeight
-                    else Engine.plainWeight
+                setAt
+                    i
+                    weights
+                    (if t &&& Terrain.wall <> 0uy then -1
+                     elif t &&& Terrain.swamp <> 0uy then Engine.swampWeight
+                     else Engine.plainWeight)
 
             for s in room.Structures do
                 match s.Kind with
-                | Kind.Road -> weights.[Tiles.ofPos s.Pos] <- Engine.roadWeight
+                | Kind.Road -> setAt (Tiles.ofPos s.Pos) weights Engine.roadWeight
                 | _ -> ()
 
             for tile in workSeats room do
-                weights.[tile] <- seatWeight
+                setAt tile weights seatWeight
 
             for s in room.Structures do
                 if not s.Walkable then
-                    weights.[Tiles.ofPos s.Pos] <- -1
+                    setAt (Tiles.ofPos s.Pos) weights -1
 
             for site in room.Sites do
                 match site.Owner with
-                | Ours when not (Kind.walkable site.Kind) -> weights.[Tiles.ofPos site.Pos] <- -1
+                | Ours when not (Kind.walkable site.Kind) -> setAt (Tiles.ofPos site.Pos) weights -1
                 | _ -> ()
 
             for source in room.Sources do
-                weights.[Tiles.ofPos source.Pos] <- -1
+                setAt (Tiles.ofPos source.Pos) weights -1
 
             for mineral in room.Minerals do
-                weights.[Tiles.ofPos mineral.Pos] <- -1
+                setAt (Tiles.ofPos mineral.Pos) weights -1
 
-            room.Controller |> Option.iter (fun c -> weights.[Tiles.ofPos c.Pos] <- -1)
+            room.Controller |> Option.iter (fun c -> setAt (Tiles.ofPos c.Pos) weights -1)
 
             for creep in room.Hostiles do
-                weights.[Tiles.ofPos creep.Pos] <- -1
+                setAt (Tiles.ofPos creep.Pos) weights -1
 
             rooms.[room.Name] <- { Weights = weights }
 
@@ -198,9 +200,10 @@ module Atlas =
     let misses (atlas: Atlas) : int = atlas.Misses
 
     let passable (atlas: Atlas) (room: string) (tile: int) : bool =
-        match atlas.Rooms.TryGetValue room with
-        | true, grid -> tile >= 0 && tile < Tiles.count && grid.Weights.[tile] >= 0
-        | _ -> false
+        atlas.Rooms.ContainsKey room
+        && tile >= 0
+        && tile < Tiles.count
+        && at tile atlas.Rooms.[room].Weights >= 0
 
     let private seat (footprint: Footprint) (weights: int[]) (tile: int) =
         weightOf footprint weights tile >= 0 && not (onEdge footprint tile)
@@ -225,36 +228,39 @@ module Atlas =
             | One -> range
             | Quad -> range + 1
 
-        for anchor in Tiles.within spread tile do
+        let near = Tiles.within spread tile
+
+        for i in 0 .. near.Length - 1 do
+            let anchor = at i near
+
             if reach footprint anchor tile <= range && seat footprint weights anchor then
                 into.Add anchor
 
     let seats (atlas: Atlas) (footprint: Footprint) (range: int) (target: Pos) : Pos list =
-        match atlas.Rooms.TryGetValue target.Room with
-        | true, grid ->
+        if atlas.Rooms.ContainsKey target.Room then
             let found = ResizeArray()
-            seatsNear footprint grid.Weights range (Tiles.ofPos target) found
-            [ for tile in found -> Tiles.toPos target.Room tile ]
-        | _ -> []
+            seatsNear footprint atlas.Rooms.[target.Room].Weights range (Tiles.ofPos target) found
+            found.ToArray() |> Array.map (Tiles.toPos target.Room) |> List.ofArray
+        else
+            []
 
     let private linked (atlas: Atlas) (from: string) (onto: string) (exit: int) =
-        let near =
-            match atlas.Rooms.TryGetValue from with
-            | true, grid -> Some grid.Weights
-            | _ -> None
+        let weightsOf room =
+            if atlas.Rooms.ContainsKey room then
+                Some atlas.Rooms.[room].Weights
+            else
+                None
 
-        let far =
-            match atlas.Rooms.TryGetValue onto with
-            | true, grid -> Some grid.Weights
-            | _ -> None
+        let near = weightsOf from
+        let far = weightsOf onto
 
         Tiles.exitTiles exit
         |> Array.exists (fun tile ->
             (match near with
-             | Some weights -> weights.[tile] >= 0
+             | Some weights -> at tile weights >= 0
              | None -> true)
             && (match far with
-                | Some weights -> weights.[Tiles.landing tile] >= 0
+                | Some weights -> at (Tiles.landing tile) weights >= 0
                 | None -> true))
 
     let route
@@ -304,7 +310,7 @@ module Atlas =
 
     let private exitGoals (footprint: Footprint) (weights: int[]) (exit: int) : int[] =
         match footprint with
-        | One -> Tiles.exitTiles exit |> Array.filter (fun tile -> weights.[tile] >= 0)
+        | One -> Tiles.exitTiles exit |> Array.filter (fun tile -> at tile weights >= 0)
         | Quad ->
             let inner = Tiles.side - 2
 
@@ -322,18 +328,23 @@ module Atlas =
             |]
 
     let field (atlas: Atlas) (mover: Mover) (target: Target) (room: string) : Field option =
-        match atlas.Rooms.TryGetValue room with
-        | true, grid when mover.Factor.Moves > 0 ->
+        if mover.Factor.Moves > 0 && atlas.Rooms.ContainsKey room then
+            let grid = atlas.Rooms.[room]
             let footprint = mover.Footprint
 
             let goals =
                 if room = target.Room then
-                    let tiles = Array.sort (Array.distinct target.Tiles)
+                    let sorted = Array.sort target.Tiles
+                    let tiles = ResizeArray()
+
+                    for i in 0 .. sorted.Length - 1 do
+                        if i = 0 || at i sorted <> at (i - 1) sorted then
+                            tiles.Add(at i sorted)
 
                     let build () =
                         let found = ResizeArray()
 
-                        for tile in tiles do
+                        for tile in tiles.ToArray() do
                             if tile >= 0 && tile < Tiles.count then
                                 seatsNear footprint grid.Weights target.Range tile found
 
@@ -360,19 +371,18 @@ module Atlas =
                         (match footprint with
                          | One -> "1"
                          | Quad -> "4"),
-                        string steps.[Engine.roadWeight],
-                        string steps.[Engine.plainWeight],
-                        string steps.[Engine.swampWeight],
-                        string steps.[seatWeight],
+                        string (at Engine.roadWeight steps),
+                        string (at Engine.plainWeight steps),
+                        string (at Engine.swampWeight steps),
+                        string (at seatWeight steps),
                         goalKey
                     )
 
                 let dist =
-                    match atlas.Floods.TryGetValue key with
-                    | true, dist ->
+                    if atlas.Floods.ContainsKey key then
                         tally "hit" 1
-                        dist
-                    | _ ->
+                        atlas.Floods.[key]
+                    else
                         atlas.Misses <- atlas.Misses + 1
                         let dist = flood footprint grid.Weights steps (build ())
                         atlas.Floods.[key] <- dist
@@ -385,7 +395,8 @@ module Atlas =
                         Steps = steps
                         Dist = dist
                     }
-        | _ -> None
+        else
+            None
 
     /// In another room: the ticks to leaving this one toward it.
     let travelTicks (atlas: Atlas) (mover: Mover) (target: Target) (from: Pos) : int option =
