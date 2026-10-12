@@ -671,18 +671,29 @@ let private approachOf (terrain: Terrain) stance (fighters: Fighter list) (raid:
     | [] -> 0.0
     | ticks -> List.min ticks
 
-let private towersOn (towers: Tower list) (raid: Fighter list) =
+/// A raider that walks in strikes from its range of the body it strikes, the
+/// one farthest from the tower.
+let private towersOn
+    (towers: Tower list)
+    (strikesFrom: Foe -> (Fighter * int) list)
+    (raid: Foe list)
+    =
     let loaded = towers |> List.filter (fun t -> t.Energy >= Engine.towerEnergyCost)
 
-    let on (h: Fighter) =
+    let on (h: Foe) =
         loaded
         |> List.sumBy (fun t ->
-            h.Pos
-            |> Option.bind (Pos.range t.Pos)
-            |> Option.defaultValue Engine.towerFalloffRange
+            let here = rangeTo t.Pos h.F |> Option.defaultValue Engine.towerFalloffRange
+
+            match
+                strikesFrom h
+                |> List.choose (fun (f, range) -> rangeTo t.Pos f |> Option.map ((+) range))
+            with
+            | [] -> here
+            | struck -> List.max struck
             |> Engine.towerAttackAt)
 
-    match loaded, raid |> List.filter strikes with
+    match loaded, raid |> List.filter (fun h -> strikes h.F) with
     | [], _ -> 0
     | _, [] -> List.length loaded * Engine.towerAttackAt Engine.towerFalloffRange
     | _, striking -> striking |> List.map on |> List.min
@@ -710,7 +721,15 @@ let private exchange stance (ours: Side) (theirs: Side) (terrain: Terrain) : Out
 
     let pairs = List.zip fighters mine
 
-    let towers = towersOn ours.Towers theirs.Bodies
+    let strikesFrom (h: Foe) =
+        match stance, rows |> List.tryFind (fun (r, _) -> r.At = h.At) with
+        | _, Some _ when stationary h.F -> []
+        | Stance.Hold, Some _ -> fighters |> List.map (fun f -> f, h.F.Reach)
+        | Stance.Standoff, Some(_, ranges) -> List.zip fighters ranges
+        | _, None -> []
+
+    let towers = towersOn ours.Towers strikesFrom raid
+    let walkingIn = towersOn ours.Towers (fun _ -> []) raid
 
     let bodies =
         pairs
@@ -744,7 +763,10 @@ let private exchange stance (ours: Side) (theirs: Side) (terrain: Terrain) : Out
             }
 
         let shield = List.sumBy snd ramparts, brokenBy terrain horizon price ramparts
-        let fight = focusedAgainst price (towers + struck) bodies shield (towers, approach)
+
+        let fight =
+            focusedAgainst price (towers + struck) bodies shield (walkingIn, approach)
+
         let ticks = fight.Ticks |> Option.map (ceil >> int) |> Option.defaultValue longest
 
         let outcome =

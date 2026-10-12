@@ -1,0 +1,25 @@
+{
+  "why": "a kiting raid with boosted TOUGH and HEAL, out of a melee Hold's reach and past the tower's kill, on a home at RCL4 is held: no level or spawn lost, the raiders gone",
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "node": "N3",
+    "opponents": [
+      {
+        "name": "raider",
+        "bot": "scripts/xxscreeps/engine/raid",
+        "room": "W7N3",
+        "raid": { "first": 1500, "bodies": [{ "tough": 2, "move": 9, "ranged_attack": 4, "heal": 3, "boosts": { "tough": "XGHO2", "heal": "XLHO2" } }, { "tough": 2, "move": 9, "ranged_attack": 4, "heal": 3, "boosts": { "tough": "XGHO2", "heal": "XLHO2" } }] }
+      }
+    ]
+  },
+  "ticks": 2500,
+  "assert": [
+    { "measure": "levelsLost", "max": 0 },
+    { "measure": "spawnsLost", "max": 0 },
+    { "measure": "hostilesAtEnd", "max": 0 },
+    { "measure": "homeHostileTicks", "from": 1500, "max": 300 },
+    { "measure": "predictedWinsLost", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

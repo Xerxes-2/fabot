@@ -72,19 +72,23 @@ const KINDS = {
   tank: () => ({ tough: between(2, 6), attack: between(2, 6) }),
   dismantler: () => ({ work: between(2, 8) }),
   brawler: () => ({ attack: between(1, 2), ranged_attack: between(3, 6) }),
+  kiter: () => ({ tough: between(1, 3), ranged_attack: between(2, 5), heal: between(1, 4) }),
 };
+const KITER = ["tough", "ranged_attack", "heal"];
 // Head first as a body is cast: TOUGH, MOVE, the rest, HEAL last.
 const ORDER = ["tough", "move", "work", "attack", "ranged_attack", "heal"];
 // The Invader's AI drives a body with HEAL as a healer, which with no one
 // hurt suicides: its raids strike.
 const INVADERS = ["melee", "ranged", "tank", "brawler"];
 function hostile(kinds) {
-  const counts = KINDS[pick(kinds)]();
+  const kind = pick(kinds);
+  const counts = KINDS[kind]();
   const weight = Object.values(counts).reduce((a, b) => a + b, 0);
   counts.move = pick([weight, Math.ceil(weight / 2), Math.max(1, Math.floor(weight / 4))]);
   const parts = ORDER.flatMap((p) => repeat(p, counts[p] ?? 0));
   const tier = random() < 0.3 ? between(0, 2) : null;
-  const boosts = parts.map((p) => (tier === null ? "" : COMPOUNDS[p][tier]));
+  const tiers = kind === "kiter" ? Object.fromEntries(KITER.map((p) => [p, pick([null, 0, 1, 2])])) : {};
+  const boosts = parts.map((p) => (tier !== null ? COMPOUNDS[p][tier] : tiers[p] != null ? COMPOUNDS[p][tiers[p]] : ""));
   return { parts, boosts, hits: 100 * parts.length };
 }
 
@@ -203,7 +207,7 @@ writeFileSync(join(out, "results.json"), JSON.stringify(actual));
 // ---- the report ------------------------------------------------------------
 const rows = samples.map((s) => ({ s, p: predictions[s.id], a: actual[s.id] }));
 const describe = ({ s, p, a }) =>
-  `  ${s.id} ${s.kind}: ${s.theirs.bodies.map((b) => b.parts.length + (b.boosts[0] ? "*" : "") + b.parts.filter((x) => x !== "move").map((x) => x[0]).join("")).join(" ")}` +
+  `  ${s.id} ${s.kind}: ${s.theirs.bodies.map((b) => b.parts.length + (b.boosts.some(Boolean) ? "*" : "") + b.parts.filter((x) => x !== "move").map((x) => x[0]).join("")).join(" ")}` +
   ` ${s.owner === "ours" ? "" : "their room, "}${s.theirs.bodies[0].invader ? "Invader, " : ""}towers ${s[s.owner].towers.length}, ramparts ${s[s.owner].ramparts.length}; predicted ${p.kind} ${p.ticks}t, ${outcome(a)}${a.ticks === null ? "" : ` ${a.ticks}t`}`;
 const lines = [
   `exchange generated set: ${count} duels, seed ${seed}, ${ticks} ticks at most`,
