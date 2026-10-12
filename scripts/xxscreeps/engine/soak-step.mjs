@@ -13,7 +13,9 @@
 // spawn regeneration, spent on bodies, building, upgrading, repairing and
 // towers, lost to pile decay and to link sends, and the stock standing
 // (stores, carried, piles); dug + regen = spent + decayed + linked + Δstock,
-// less the residual it reports.
+// less the residual it reports. `decay.jsonl`: each energy pile that
+// decayed, once it is gone or the run ends, with its tile's role and the
+// tombstone or ruin it fell out of.
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
@@ -123,10 +125,28 @@ function worthOf(room, stock) {
 
 const born = new Set();
 let lastPiles = new Map();
+const pileLog = new Map();
+const graves = new Map();
+const near = (a, b, r) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= r;
+function roleOf(pos, objects) {
+  const by = (pred) => objects.filter(pred);
+  if (by((o) => o["#lookType"] === "constructionSite" && near(o.pos, pos, 0)).length) return "on a site";
+  const sources = by((o) => o["#lookType"] === "source");
+  const controller = by((o) => o.structureType === "controller")[0];
+  const containers = by((o) => o.structureType === "container" && o["#lookType"] !== "constructionSite");
+  const atSource = (c) => sources.some((s) => near(s.pos, c.pos, 1));
+  const onTile = containers.find((c) => near(c.pos, pos, 0));
+  if (onTile) return atSource(onTile) ? "on source container" : "on other container";
+  if (sources.some((s) => near(s.pos, pos, 1))) return "beside source";
+  if (controller && containers.some((c) => !atSource(c) && near(c.pos, controller.pos, 3) && near(c.pos, pos, 1))) return "beside controller buffer";
+  if (by((o) => o.structureType === "spawn" || o.structureType === "extension").some((o) => near(o.pos, pos, 1))) return "beside spawn/extension";
+  return "elsewhere";
+}
+const pileOut = (p) => fs.writeSync(decayOut, JSON.stringify(p) + "\n");
 let regenNext = 0;
 
 // One tick of the ledger, off the room as the tick left it.
-function account(room) {
+function account(room, time) {
   const objects = [...room["#objects"]];
   const sources = new Set(objects.filter((o) => o["#lookType"] === "source").map((o) => o.id));
   const towers = new Set(objects.filter((o) => o.structureType === "tower" && o["#user"] === ours).map((o) => o.id));
@@ -154,7 +174,21 @@ function account(room) {
       stock += o.amount;
       const before = lastPiles.get(o.id);
       if (before !== undefined) ledger.decayed += Math.ceil(before / 1000);
+      let log = pileLog.get(o.id);
+      if (log === undefined) {
+        const g = graves.get(`${o.pos.x},${o.pos.y}`);
+        const grave = g !== undefined && g.time >= time - 1 ? g.who : null;
+        log = { x: o.pos.x, y: o.pos.y, role: roleOf(o.pos, objects), grave, first: time, last: time, peak: 0, decayed: 0 };
+        pileLog.set(o.id, log);
+      }
+      log.last = time;
+      log.peak = Math.max(log.peak, o.amount);
+      if (before !== undefined) log.decayed += Math.ceil(before / 1000);
       continue;
+    }
+    if (o["#lookType"] === "tombstone" || o["#lookType"] === "ruin") {
+      const who = o["#creep"] ? `${o["#creep"].name} ttl${o["#creep"].ticksToLive} e${energyIn(o)}` : "ruin";
+      graves.set(`${o.pos.x},${o.pos.y}`, { time, who });
     }
     if (o.body !== undefined && o["#user"] !== ours) continue;
     if (o.body !== undefined && !born.has(o.name)) {
@@ -168,6 +202,11 @@ function account(room) {
     }
   }
   lastPiles = piles;
+  for (const [id, log] of pileLog)
+    if (!piles.has(id)) {
+      if (log.decayed > 0) pileOut(log);
+      pileLog.delete(id);
+    }
   // A spawn regains one a tick while it and the room's bank are under 300.
   regenNext = bank < 300 ? spawns.filter((sp) => energyIn(sp) < 300).length : 0;
   if (ledger.stock0 === null) ledger.stock0 = stock;
@@ -240,6 +279,7 @@ if (time === null) throw new Error("the engine ran no first tick in 120 s");
 const samplesOut = fs.openSync(join(out, "samples.jsonl"), "w");
 const faultsOut = fs.openSync(join(out, "faults.jsonl"), "w");
 const cpuOut = fs.openSync(join(out, "cpu.jsonl"), "w");
+const decayOut = fs.openSync(join(out, "decay.jsonl"), "w");
 const seenFaults = new Set();
 const levels = [];
 const refusals = {};
@@ -283,7 +323,7 @@ for (let t = 0; t < ticks; t++) {
   }
   fs.writeSync(cpuOut, JSON.stringify({ t, time, cpu, observed: fresh ? obs.cpu : null, phases: fresh ? obs.phases : null }) + "\n");
   const room = await shard.loadRoom(roomName, time);
-  account(room);
+  account(room, time);
   if (room["#level"] !== levels.at(-1)?.rcl) levels.push({ t, time, rcl: room["#level"] });
   if (t % every === 0 || t === ticks - 1) {
     const row = sample(t, time, room);
@@ -297,6 +337,7 @@ for (let t = 0; t < ticks; t++) {
     process.stderr.write(`t${t} rcl${row.rcl} ${row.progress} creeps ${row.creeps} (${row.ms} ms)\n`);
   }
 }
+for (const log of pileLog.values()) if (log.decayed > 0) pileOut(log);
 fs.writeFileSync(join(out, "refusals.json"), JSON.stringify(refusals, null, 2) + "\n");
 fs.writeFileSync(join(out, "observe.json"), JSON.stringify(lastObs, null, 1) + "\n");
 fs.writeFileSync(join(out, "levels.json"), JSON.stringify(levels) + "\n");
