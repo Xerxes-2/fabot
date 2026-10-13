@@ -221,9 +221,9 @@ let private me (spawns: ISpawn[]) (creeps: ICreep[]) (rooms: IRoom[]) : string =
         |> Option.defaultValue ""
 
 let ofGame () : World =
-    let spawns = objectValues<ISpawn> Game.spawns
-    let creeps = objectValues<ICreep> Game.creeps
-    let rooms = objectValues<IRoom> Game.rooms
+    let spawns = valuesByKey<ISpawn> Game.spawns
+    let creeps = valuesByKey<ICreep> Game.creeps
+    let rooms = valuesByKey<IRoom> Game.rooms
 
     {
         Time = Game.time

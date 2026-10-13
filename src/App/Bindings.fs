@@ -292,8 +292,8 @@ let writeSegment (_id: int) (_text: string) : unit = jsNative
 [<Emit("JSON.stringify($0)")>]
 let jsonStringify (_value: obj) : string = jsNative
 
-[<Emit("Object.values($0)")>]
-let objectValues<'T> (_o: obj) : 'T[] = jsNative
+[<Emit("Object.keys($0).sort().map(k => $0[k])")>]
+let valuesByKey<'T> (_o: obj) : 'T[] = jsNative
 
 [<Emit("Object.entries($0)")>]
 let objectEntries (_o: obj) : (string * obj)[] = jsNative
