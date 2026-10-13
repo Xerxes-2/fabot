@@ -333,6 +333,33 @@ module Atlas =
             else
                 None
 
+    /// Each room `route` reaches from `from`, at its route's length less one.
+    let hopsFrom (atlas: Atlas) (maxHops: int) (from: string) : Dictionary<string, int> =
+        let hops = Dictionary<string, int>()
+        hops.[from] <- 0
+        let mutable frontier = ResizeArray [ from ]
+        let mutable depth = 0
+
+        while frontier.Count > 0 && depth < maxHops do
+            let next = ResizeArray()
+            depth <- depth + 1
+
+            for i in 0 .. frontier.Count - 1 do
+                let room = frontier.[i]
+
+                for e in 0..3 do
+                    let exit = Tiles.top + 2 * e
+
+                    match Tiles.roomToward room exit with
+                    | Some there when not (hops.ContainsKey there) && linked atlas room there exit ->
+                        hops.[there] <- depth
+                        next.Add there
+                    | _ -> ()
+
+            frontier <- next
+
+        hops
+
     let private exitGoals (footprint: Footprint) (weights: int[]) (exit: int) : int[] =
         match footprint with
         | One -> Tiles.exitTiles exit |> Array.filter (fun tile -> at tile weights >= 0)

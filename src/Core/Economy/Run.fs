@@ -44,12 +44,16 @@ let private ticksTo (atlas: Atlas) (mover: Mover) (target: Target) (from: Pos) :
 
             leg + crossingTicks * (n - 2) + far)
 
-let private distance (atlas: Atlas) (a: Pos) (b: Pos) : int option =
+let private distance (derived: Derived) (a: Pos) (b: Pos) : int option =
     match Pos.range a b with
     | Some r -> Some r
     | None ->
-        Atlas.route atlas Set.empty Tick.reachHops a.Room b.Room
-        |> Option.map (fun rooms -> crossingTicks * (List.length rooms - 1))
+        let hops = derived.Hops.[a.Room]
+
+        if hops.ContainsKey b.Room then
+            Some(crossingTicks * hops.[b.Room])
+        else
+            None
 
 /// A body digs from nowhere else, so a harvester's dig falls into the
 /// container and a light body keeps off the post.
@@ -251,7 +255,7 @@ let decide (context: Context) (state: State) : Intent list * State =
         | Task.Harvest id -> not (dugOut.Contains id)
         | _ -> true
 
-    let plan = Quota.plan (distance atlas) leg walk derived offers assignments
+    let plan = Quota.plan (distance derived) leg walk derived offers assignments
 
     let casts =
         plan.Casts
@@ -365,7 +369,7 @@ let decide (context: Context) (state: State) : Intent list * State =
                 derived.Colonies
                 |> Array.map (fun c -> c.Spawns.[0].Pos)
                 |> Array.minBy (fun p ->
-                    distance atlas creep.Pos p |> Option.defaultValue System.Int32.MaxValue)
+                    distance derived creep.Pos p |> Option.defaultValue System.Int32.MaxValue)
 
             wishIn creep.Pos.Room (Plan.toward atlas creep mover (targetAt home 1) 1)
         | None -> wishIn creep.Pos.Room (Plan.stay atlas creep mover.Factor 1)
