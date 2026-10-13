@@ -386,7 +386,9 @@ let private spendDemands
 
         let reserve, stock =
             match storage with
-            | Some s -> reserveTarget derived.ReserveLifetimes colony.Controller.Level, s.Energy
+            | Some _ ->
+                reserveTarget derived.ReserveLifetimes colony.Controller.Level,
+                ground.Stores |> Array.sumBy (fun s -> if s.Kind.IsStorage then s.Energy else 0)
             | None -> 0, 0
 
         let save = float (reserve - stock) / life |> min surplus |> max 0.0

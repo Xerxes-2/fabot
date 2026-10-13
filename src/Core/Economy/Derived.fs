@@ -359,15 +359,20 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (rate: int) (ro
                     Free = Store.free s.Store
                 }
         | Kind.Container
-        | Kind.Storage ->
+        | Kind.Storage
+        | Kind.Terminal when not s.Kind.IsTerminal || s.Owner.IsOurs ->
             let energy = Store.amountOf Energy s.Store
             let owned = s.Kind.IsStorage && s.Owner.IsOurs
             let dug = if s.Kind.IsContainer then servedDug s.Pos else 0
 
+            // A terminal is never filled: nothing sends from it.
             let kind =
-                if s.Kind.IsStorage then StoreKind.Storage
-                elif ownedRoom && isBuffer s.Id then StoreKind.Buffer
-                else StoreKind.Container
+                if s.Kind.IsStorage || s.Kind.IsTerminal then
+                    StoreKind.Storage
+                elif ownedRoom && isBuffer s.Id then
+                    StoreKind.Buffer
+                else
+                    StoreKind.Container
 
             if energy > 0 || owned || kind.IsBuffer then
                 stores.Add
