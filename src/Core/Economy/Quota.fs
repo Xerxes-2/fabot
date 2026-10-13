@@ -576,7 +576,14 @@ let plan
             for i in 0 .. all.Length - 1 do
                 let d = all.[i]
 
-                if nameOf d.Pattern = pattern && d.Left > 0 && d.SeatsLeft > 0 then
+                // One cast for another room's seat upgrades whichever
+                // controller it reaches first.
+                if
+                    nameOf d.Pattern = pattern
+                    && d.Left > 0
+                    && d.SeatsLeft > 0
+                    && (not d.Pattern.IsUpgrader || d.At.Room = at.Room)
+                then
                     let ticks = distance at d.At |> Option.defaultValue System.Int32.MaxValue
 
                     if pick < 0 || ticks < least then
@@ -671,7 +678,8 @@ let plan
                 colonies
                 (fun ci ->
                     idle.[ci].Count > 0
-                    && Engine.bodyCost (blockOf d.Pattern) <= colonies.[ci].BankCapacity)
+                    && Engine.bodyCost (blockOf d.Pattern) <= colonies.[ci].BankCapacity
+                    && (not d.Pattern.IsUpgrader || colonies.[ci].Room = d.At.Room))
                 d.At
 
         let body =
