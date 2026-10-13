@@ -493,11 +493,10 @@ benchmark meets three requirements:
    Until v2 runs live a soak stands in: `npm run soak -- --capture a-b`
    writes those ticks' input and `npm run bench` replays it (an unchanged
    bundle reads within ±0.4% per module; 600 ticks, 8 rounds, a minute).
-   Against the same window's xxscreeps phases `economy` is within 8% of its
-   share, `world` and `atlas` about half (❓ the fake's plain properties for
-   the engine's getters); ❓ the live recorder still writes the `World`, not
-   this capture. `scripts/xxscreeps/ab.mjs` (whole soaks side by side,
-   ±0.6%) re-checks a claim in the engine.
+   The bench builds `Game` as the official engine does, which xxscreeps does
+   not, so ❓ its calibration waits for live; ❓ the live recorder still writes
+   the `World`, not this capture. `scripts/xxscreeps/ab.mjs` (whole soaks
+   side by side, ±0.6%) re-checks a claim in the engine.
 
 A speed claim is an interleaved A/B on the representative benchmark with
 identical Memory fingerprints, or a count (floods, lookups, allocations). A

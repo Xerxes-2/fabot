@@ -1,10 +1,11 @@
 // The benchmark (ARCHITECTURE.md §9.1) over a soak's capture (`npm run soak
-// -- --capture a-b`). The cost model is live's: Memory parsed from the string
-// on first touch and stringified after the loop, 0.2 a call on `getUsed`
-// (xxscreeps charges neither, so its `memory` and `execute` read lower).
-// A window starts from a fresh load, as after a global reset: its first
-// --cold ticks are apart. A claim is the min-of-rounds B/A with identical
-// fingerprints (each tick's intents and Memory).
+// -- --capture a-b`) through the official engine's `Game` (`bench-game.mjs`),
+// Memory stringified after the loop. xxscreeps reuses last tick's Memory
+// object and charges no intent, so its `memory`, `write` and `execute` read
+// lower. A window starts from a fresh load, as after a global reset: its first
+// --cold ticks are apart, the JIT still settling (the atlas reads 5× its
+// steady cost over the first 40). A claim is the min-of-rounds B/A with
+// identical fingerprints (each tick's intents and Memory).
 //
 // --counts replays A once and prints §9.3's counts a tick per window instead:
 // floods, flood-table hits, tiles relaxed, by the caller's named frames.
@@ -17,6 +18,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { getHeapStatistics } from "node:v8";
+import { stand } from "./bench-game.mjs";
 
 const usage = "usage: npm run bench -- --a A.js [--b B.js] [--rounds R] [--cold K | --counts] capture.jsonl…";
 const fail = (m) => {
@@ -34,7 +36,7 @@ for (let i = 0; i < argv.length; i++)
   } else files.push(argv[i]);
 if (!flags["--a"] || files.length === 0) fail(usage);
 const rounds = Number(flags["--rounds"] ?? 5);
-const cold = Number(flags["--cold"] ?? 3);
+const cold = Number(flags["--cold"] ?? 50);
 const bundles = { A: resolve(flags["--a"]), ...(flags["--b"] ? { B: resolve(flags["--b"]) } : {}) };
 const sides = Object.keys(bundles);
 
@@ -48,67 +50,6 @@ for (const f of files)
     else windows.push([tick]);
   }
 
-const VERBS = ["move", "say", "harvest", "transfer", "withdraw", "pickup", "build", "repair", "dismantle", "upgradeController", "reserveController",
-  "attackController", "claimController", "signController", "claimReactor", "drop", "attack", "heal", "rangedHeal", "rangedAttack", "rangedMassAttack",
-  "spawnCreep", "transferEnergy", "setPublic", "destroy", "remove", "observeRoom", "runReaction", "send", "activateSafeMode"];
-const STORE = {
-  getCapacity() {
-    return this.capacity;
-  },
-  getUsedCapacity(r) {
-    return r === undefined ? Object.values(this).reduce((s, n) => s + n, 0) : (this[r] ?? 0);
-  },
-  getFreeCapacity(r) {
-    return this.capacity - this.getUsedCapacity(r);
-  },
-};
-const idOf = (a) => (a !== null && typeof a === "object" && !Array.isArray(a) ? (a.id ?? a.name) : a);
-
-function stand(tick, intents, clock) {
-  const actor = {};
-  for (const verb of VERBS)
-    actor[verb] = function (...args) {
-      intents.push([this.id ?? this.name, verb, ...args.map(idOf)]);
-      return 0;
-    };
-  const byId = new Map();
-  for (const [key, s] of Object.entries(tick.objects)) {
-    const o = Object.assign(Object.create(actor), s);
-    if (s.store) o.store = Object.defineProperty(Object.assign(Object.create(STORE), s.store.held), "capacity", { value: s.store.capacity });
-    byId.set(key, o);
-  }
-  const named = (ids) => Object.fromEntries(Object.entries(ids).map(([name, id]) => [name, byId.get(id)]));
-  const rooms = {};
-  const terrain = {};
-  for (const r of tick.rooms) {
-    const found = Object.fromEntries(Object.entries(r.find).map(([type, ids]) => [type, ids.map((id) => byId.get(id))]));
-    terrain[r.name] = r.terrain;
-    rooms[r.name] = {
-      name: r.name,
-      energyAvailable: r.energyAvailable,
-      energyCapacityAvailable: r.energyCapacityAvailable,
-      controller: r.controller === undefined ? undefined : byId.get(r.controller),
-      find: (type) => found[type] ?? [],
-      createConstructionSite: (...args) => (intents.push([r.name, "createConstructionSite", ...args]), 0),
-    };
-  }
-  let parsed;
-  const segments = {};
-  Object.defineProperty(globalThis, "Memory", { configurable: true, get: () => (parsed ??= JSON.parse(tick.memory)) });
-  globalThis.RawMemory = { segments, get: () => tick.memory };
-  globalThis.Game = {
-    time: tick.time,
-    cpu: { ...tick.cpu, getUsed: clock, getHeapStatistics },
-    map: { getRoomTerrain: (name) => ({ getRawBuffer: () => terrain[name].slice() }) },
-    rooms,
-    creeps: named(tick.creeps),
-    spawns: named(tick.spawns),
-    constructionSites: Object.fromEntries(tick.constructionSites.map((id) => [id, byId.get(id)])),
-    getObjectById: (id) => byId.get(id) ?? null,
-  };
-  return { segments, memory: () => (parsed === undefined ? tick.memory : JSON.stringify(parsed)) };
-}
-
 const require = createRequire(import.meta.url);
 const load = (path) => {
   delete require.cache[path];
@@ -118,7 +59,7 @@ const load = (path) => {
 function runTick(bot, tick) {
   const intents = [];
   let start;
-  const game = stand(tick, intents, () => performance.now() - start + 0.2 * intents.length);
+  const game = stand(tick, intents, getHeapStatistics, () => performance.now() - start);
   start = performance.now();
   bot.loop();
   const flushed = performance.now();
@@ -182,6 +123,7 @@ console.log(
 const phases = [...new Set(runs.A[0].flatMap((t) => Object.keys(t.ms)))];
 const table = (pick) => {
   const n = coldAt.filter(pick).length;
+  if (n === 0) return console.log("  none: no window is longer than --cold");
   const at = (s, p) => {
     const perRound = runs[s].map((round) => round.reduce((sum, t, i) => sum + (pick(coldAt[i]) ? (t.ms[p] ?? 0) : 0), 0) / n);
     const min = runs[s][0].reduce((sum, _, i) => sum + (pick(coldAt[i]) ? Math.min(...runs[s].map((round) => round[i].ms[p] ?? 0)) : 0), 0) / n;

@@ -1,4 +1,4 @@
-// The fields `Bindings.fs` binds, for `scripts/bench.mjs`'s fake `Game`
+// The fields `Bindings.fs` binds, for `scripts/bench-game.mjs`
 // (ARCHITECTURE.md §9.1): a field bound there and missing here reads absent
 // in the replay.
 const FINDS = [105, 116, 107, 111, 106, 118, 123, 103];
