@@ -88,7 +88,7 @@ type Home =
 /// steps one tile a tick; one tile more covers a skipped tick.
 let private claimerReach = Engine.meleeRange + 2
 
-/// Two 16-CARRY haulers: two cheap bodies under it the home casts again itself.
+/// Two 16-CARRY haulers: a home that never holds them casts its hands again itself.
 let private refillingFloor = 32
 
 let private live (kind: BodyPart) (c: Creep) =
@@ -130,18 +130,25 @@ let private razed (home: Home) =
     let carry (c: Creep) =
         c.Body |> Array.sumBy (fun p -> if p.Kind.IsCarry then 1 else 0)
 
+    // v1's refiller held a Refill, which is Economy's to know; a hauler's body stands in.
     let hands =
         home.Bodies
-        |> Array.filter (fun c -> carry c > 0 && not (covered.Contains c.Pos))
+        |> Array.filter (fun c ->
+            carry c > 0
+            && not (c.Body |> Array.exists (fun p -> p.Kind.IsWork))
+            && not (Tiles.onEdge (Tiles.ofPos c.Pos)))
 
-    let struck = hands |> Array.filter (fun c -> reaches false raid c.Pos)
+    let struck (c: Creep) =
+        c.Hits < c.HitsMax && not (covered.Contains c.Pos) && reaches false raid c.Pos
+
+    let left = hands |> Array.filter (struck >> not) |> Array.sumBy carry
+
+    let whole = Array.sumBy carry hands
     let spawns, banks = share Kind.Spawn, share Kind.Extension
 
     half (fst spawns) (snd spawns)
     || fst banks >= 2 && half (fst banks) (snd banks)
-    || struck.Length >= 2
-       && Array.sumBy carry struck >= refillingFloor
-       && half (Array.sumBy carry struck) (Array.sumBy carry hands)
+    || left < whole && whole >= refillingFloor && left < refillingFloor
 
 let private keep = set [ Kind.Spawn; Kind.Tower; Kind.Storage; Kind.Terminal ]
 

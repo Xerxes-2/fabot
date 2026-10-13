@@ -315,8 +315,9 @@ Common to every kind:
   forever: `Defend` falls back to towers and ramparts and is marked
   `unanswered`; an offensive kind closes. A home's unanswered `Defend` also
   spends the shard's one safe mode where no tower stands, or its raid reaches
-  a hit spawn, tower, storage or terminal or half the home's spawns,
-  extensions or carrying bodies, as a claimer in reach of the controller does.
+  a hit spawn, tower, storage or terminal or half the home's spawns or
+  extensions, or strikes a hauler and leaves the home's haulers under the CARRY
+  that refills it, as a claimer in reach of the controller does.
 - Lives in Memory. `observe` reads it directly: the engagement *is* the raid log.
 
 `Defend` (v2.0):
