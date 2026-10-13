@@ -183,9 +183,9 @@ let private config =
 let private matched (scene: Scene) assignments =
     Matcher.matchAll scene.Travel scene.Pool scene.Bodies assignments
 
-/// Whether a body gets to an offer before it dies.
+/// Whether a body lives to take an offer.
 let private reaches (scene: Scene) (body: Body) (offer: Offer) =
-    scene.Travel body offer |> Option.exists (fun t -> t < body.TicksToLive)
+    scene.Travel body offer |> Option.exists (outlives body offer)
 
 let private limitOf =
     function

@@ -93,6 +93,17 @@ let fits (body: Body) (offer: Offer) : bool =
     | Reserve _
     | Claim _ -> body.Claim > 0
 
+/// The walk back is read as the walk there: a load's sink is not known when
+/// it is matched.
+let outlives (body: Body) (offer: Offer) (walk: int) : bool =
+    let legs =
+        match offer.Task with
+        | Withdraw _
+        | Pickup _ -> 2
+        | _ -> 1
+
+    legs * walk < body.TicksToLive
+
 /// Only a post's garrison counts WORK, so the other seats stay open while it
 /// digs short of the work.
 let share (body: Body) (offer: Offer) : int =

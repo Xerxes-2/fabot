@@ -21,8 +21,7 @@ let matchAll
     for oi in 0 .. offers - 1 do
         byId.[pool.[oi].Id] <- oi
 
-    // -2 unasked, -1 unreachable. A body never takes work it dies before
-    // reaching.
+    // -2 unasked, -1 unreachable or outlived (`Pool.outlives`).
     let walks = Array.create (bodies.Length * offers) -2
 
     let walk (bi: int) (oi: int) =
@@ -31,7 +30,7 @@ let matchAll
         if walks.[at] = -2 then
             walks.[at] <-
                 match travel bodies.[bi] pool.[oi] with
-                | Some t when t < bodies.[bi].TicksToLive -> max 0 t
+                | Some t when outlives bodies.[bi] pool.[oi] t -> max 0 t
                 | _ -> -1
 
         walks.[at]
