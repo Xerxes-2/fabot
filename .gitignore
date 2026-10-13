@@ -10,3 +10,4 @@ obj/
 .claude/worktrees/
 .claude/*.local.*
 soak-runs/
+captures/

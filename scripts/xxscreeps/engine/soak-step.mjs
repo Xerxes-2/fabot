@@ -1,6 +1,6 @@
 // Online, the server up: pause the engine, step it one tick at a time and
 // watch one colony. Runs under xxscreeps' own loader, cwd the world:
-//   xxscreeps.js file://…/soak-step.mjs <ticks> <every> <room> <username> <out dir> [<waves> [<opponents.json> [<cores>]]]
+//   xxscreeps.js file://…/soak-step.mjs <ticks> <every> <room[,room…]> <username> <out dir> [<waves> [<opponents.json> [<cores>]]]
 // Every tick: our CPU (the runner's usage channel), our console, and the
 // observe segment our bot writes (segment 1: faults, refusals). Every
 // <every> ticks, and on the last: one sample of the room. Writes to <out dir>
@@ -16,7 +16,8 @@
 // less the residual it reports. `decay.jsonl`: each energy pile that
 // decayed, once it is gone or the run ends, with its tile's role and the
 // tombstone or ruin it fell out of.
-// The colony's rooms are <room> and the outposts its Memory declares
+// The colony's rooms are <room> (several homes: each sample's `homes` holds
+// one sample a home, the first's at its top) and the outposts its Memory declares
 // (`v2.declarations.outposts`, read at the start): the ledger and the worth
 // sum over them, and each sample's `rooms` holds one line a room, cumulative:
 // dug, decayed, built, repaired, `bodies` (each of our bodies' cost spread
@@ -43,7 +44,9 @@ import { pushIntentsForRoomNextTick } from "xxscreeps/engine/processor/model.js"
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
 
-const [ticksArg, everyArg, roomName, username, out, wavesArg = "", opponentsPath, coresArg = ""] = process.argv.slice(2);
+const [ticksArg, everyArg, roomArg, username, out, wavesArg = "", opponentsPath, coresArg = ""] = process.argv.slice(2);
+const homes = roomArg.split(",");
+const roomName = homes[0];
 const ticks = Number(ticksArg);
 const every = Number(everyArg);
 const observeSegment = 1;
@@ -53,7 +56,7 @@ const shard = await Shard.connect(db, "shard0");
 const ours = await User.findUserByName(db, username);
 const svc = getServiceChannel(shard);
 const memory = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}");
-const roomNames = [roomName, ...(memory.v2?.declarations?.outposts ?? []).map((o) => o.room)];
+const roomNames = [...homes, ...(memory.v2?.declarations?.outposts ?? []).map((o) => o.room)];
 const waves = wavesArg
   .split(",")
   .filter(Boolean)
@@ -507,6 +510,7 @@ for (let t = 0; t < ticks; t++) {
         creeps: objects.filter((x) => x.body !== undefined).length,
       };
     }
+    if (homes.length > 1) row.homes = Object.fromEntries(homes.map((h, i) => [h, (({ bodies, foes, ...s }) => s)(sample(t, time, rooms[i]))]));
     row.botCpu = fresh ? obs.cpu : null;
     row.faults = seenFaults.size;
     row.ms = Date.now() - started;

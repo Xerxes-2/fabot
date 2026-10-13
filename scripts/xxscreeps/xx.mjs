@@ -48,6 +48,14 @@ const ENGINE = join(CACHE, "engine");
 const TEMPLATE = join(ENGINE, "template");
 const XXSCREEPS = join(ENGINE, "node_modules/xxscreeps/xxscreeps.js");
 const OUR_NAME = "fabot";
+// A world's schema is its mods': a scenario with an invader core stands on a
+// template imported with the modern stronghold mod beside the classic ones;
+// a live capture (`soak --world`) on one with every structure kind.
+const VARIANTS = {
+  "": [],
+  stronghold: ["xxscreeps/mods/modern/stronghold"],
+  modern: ["xxscreeps/mods/modern/stronghold", "xxscreeps/mods/modern/observer", "xxscreeps/mods/modern/powerspawn"],
+};
 
 // ---- arguments: every refusal before any nix, dotnet or engine call ---------
 const [command, ...rest] = process.argv.slice(2);
@@ -76,8 +84,7 @@ if (command === "diff") {
 }
 if (command === "setup") {
   if (args.length > 0 || Object.keys(flags).length > 0) fail(usage);
-  setup();
-  setup(true);
+  for (const variant of Object.keys(VARIANTS)) setup(variant);
   process.exit(0);
 }
 if (command !== "run" || args.length !== 1) fail(usage);
@@ -113,7 +120,7 @@ function must(status, what) {
   if (status !== 0) fail(`${what} failed (exit ${status})`);
 }
 
-function setup(stronghold = false) {
+function setup(variant = "") {
   mkdirSync(ENGINE, { recursive: true });
   const manifest = {
     name: "fabot-xxscreeps",
@@ -137,32 +144,30 @@ function setup(stronghold = false) {
     must(nix(build, "npm", ["rebuild", "isolated-vm", "ivm-inspect", "--foreground-scripts"], { cwd: ENGINE }), "npm rebuild");
     must(node24(probe, ENGINE), "loading isolated-vm");
   }
-  const template = templateOf(stronghold);
+  const template = templateOf(variant);
   if (!existsSync(join(template, "screeps/shard0/data.json"))) {
     console.error(`importing a world into ${template}`);
     rmSync(template, { recursive: true, force: true });
     mkdirSync(template, { recursive: true });
-    writeFileSync(join(template, ".screepsrc.yaml"), screepsrc(false, stronghold));
+    writeFileSync(join(template, ".screepsrc.yaml"), screepsrc(false, variant));
     must(node24([XXSCREEPS, "import"], template), "xxscreeps import");
   }
 }
 
-// A world's schema is its mods': a scenario with an invader core stands on a
-// template imported with the modern stronghold mod beside the classic ones.
-function templateOf(stronghold) {
-  return stronghold ? `${TEMPLATE}-stronghold` : TEMPLATE;
+function templateOf(variant) {
+  return variant ? `${TEMPLATE}-${variant}` : TEMPLATE;
 }
 
 // One tick a minute when not paused: a pause that missed the first tick
 // shows as a timeout, not as a run that ran on. One processor thread keeps
 // the seeded tie-breaks in one sequence; one runner thread holds every
 // sandbox the snapshot asks for.
-function screepsrc(ours, stronghold) {
+function screepsrc(ours, variant) {
   return [
     "mods:",
     ...(ours ? ["  - ./heapsnap/index.js", "  - ./seed/index.js"] : []),
     "  - xxscreeps/mods/classic",
-    ...(stronghold ? ["  - xxscreeps/mods/modern/stronghold"] : []),
+    ...VARIANTS[variant].map((m) => `  - ${m}`),
     "game:",
     "  tickSpeed: 60000",
     "  respawnTimeout: 0",
@@ -234,15 +239,15 @@ const scenario = JSON.parse(readFileSync(scenarioPath, "utf8"));
 const arena = arenaPath ? readTrace(arenaPath) : undefined;
 if (bot === "replay" && !arena) fail("--bot replay needs the arena trace beside the scenario (<slug>.arena.jsonl)");
 
-const stronghold = scenario.rooms.some((r) => r.structures.some((s) => s.kind === "invaderCore"));
-setup(stronghold);
+const variant = scenario.rooms.some((r) => r.structures.some((s) => s.kind === "invaderCore")) ? "stronghold" : "";
+setup(variant);
 
 const world = join(ENGINE, "worlds", slug);
 rmSync(world, { recursive: true, force: true });
 // A copied socket is a dead server's; only files and directories come over.
-cpSync(templateOf(stronghold), world, { recursive: true, filter: (src) => lstatSync(src).isFile() || lstatSync(src).isDirectory() });
+cpSync(templateOf(variant), world, { recursive: true, filter: (src) => lstatSync(src).isFile() || lstatSync(src).isDirectory() });
 cpSync(join(HERE, "engine"), world, { recursive: true, filter: (src) => !/\/(standin|replay)$/.test(src) });
-writeFileSync(join(world, ".screepsrc.yaml"), screepsrc(true, stronghold));
+writeFileSync(join(world, ".screepsrc.yaml"), screepsrc(true, variant));
 // Mods resolve from the cwd only where a package.json stands (`config/mods.js`).
 writeFileSync(join(world, "package.json"), '{ "private": true }\n');
 writeFileSync(join(world, "seed.txt"), `${seed}\n`);

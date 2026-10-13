@@ -42,6 +42,10 @@
 //            into the cache and checked against its integrity, gives its
 //            `from` directory's files beside the directory's own, its
 //            main.js as `main`.
+//   --world  a live capture (`scripts/capture-world.mjs`) as the world, at its
+//            tick (`engine/live.mjs`): our user the capture's, every home of
+//            ours a colony the samples follow, the capture's outposts declared;
+//            stood on the template with every structure kind (`xx.mjs`)
 //   --unsafe  our room without the engine's safe mode, which would decide
 //            every fight in it for us; implied by --opponents
 //   --ended   our room's starting safe mode ended, its stock kept to activate,
@@ -60,7 +64,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4|N5|E1] [--invaders room:every[:first],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--unsafe] [--ended]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4|N5|E1] [--invaders room:every[:first],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -72,7 +76,6 @@ const CACHE = process.env.FABOT_XXSCREEPS_HOME ?? join(process.env.XDG_CACHE_HOM
 const ENGINE = join(CACHE, "engine");
 const TEMPLATE = join(ENGINE, "template");
 const XXSCREEPS = join(ENGINE, "node_modules/xxscreeps/xxscreeps.js");
-const OUR_NAME = "fabot";
 
 // ---- arguments -------------------------------------------------------------
 const flags = {};
@@ -85,7 +88,7 @@ for (let i = 0; i < rest.length; i++) {
     flags[a] = true;
     continue;
   }
-  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from", "--invaders", "--core", "--opponents"].includes(a)) fail(usage);
+  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from", "--invaders", "--core", "--opponents", "--world"].includes(a)) fail(usage);
   const value = rest[++i];
   if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
   flags[a] = value;
@@ -124,14 +127,18 @@ if (flags["--run"] !== undefined && !/^[\w.-]+$/.test(flags["--run"])) fail("--r
 // compare against on the same room and seed.
 const bot = resolve(flags["--bot"] ?? join(REPO, "dist/main.js"));
 if (!existsSync(bot)) fail(flags["--bot"] ? `--bot: no file at ${bot}` : "no dist/main.js: npm run build first");
+const live = flags["--world"] && JSON.parse(readFileSync(flags["--world"], "utf8"));
+const OUR_NAME = live?.username ?? "fabot";
 const from = flags["--from"] && resolve(flags["--from"]);
 if (from && (!flags["--room"] || node || late || windows.length)) fail(`--from needs --room, and takes no --node, --late or --capture\n${usage}`);
 const opponents = flags["--opponents"] ? JSON.parse(readFileSync(flags["--opponents"], "utf8")) : [];
 for (const o of opponents)
   if (!/^[a-z][\w-]*$/.test(o.name ?? "") || o.name === OUR_NAME || !existsSync(o.bot ?? "") || !/^[WE]\d+[NS]\d+$/.test(o.room ?? ""))
     fail(`--opponents: ${JSON.stringify(o)} needs a name, a bot that exists and a room`);
+if (live && (from || node || late || flags["--room"] || opponents.length || cores.length || flags["--unsafe"] || flags["--ended"]))
+  fail(`--world takes no --from, --node, --late, --room, --opponents, --core, --unsafe or --ended\n${usage}`);
 // A world's schema is its mods' (`xx.mjs` templateOf).
-const template = cores.length ? `${TEMPLATE}-stronghold` : TEMPLATE;
+const template = live ? `${TEMPLATE}-modern` : cores.length ? `${TEMPLATE}-stronghold` : TEMPLATE;
 if (!existsSync(join(template, "screeps/shard0/data.json"))) fail(`no template world at ${template}: npm run xx -- setup first`);
 
 // ---- the engine, on Node 24 through nix (as xx.mjs) ------------------------
@@ -155,7 +162,9 @@ const screepsrc = [
   "mods:",
   "  - ./seed/index.js",
   "  - xxscreeps/mods/classic",
-  ...(cores.length ? ["  - xxscreeps/mods/modern/stronghold", "  - ./core/index.js"] : []),
+  ...(cores.length || live ? ["  - xxscreeps/mods/modern/stronghold"] : []),
+  ...(cores.length ? ["  - ./core/index.js"] : []),
+  ...(live ? ["  - xxscreeps/mods/modern/observer", "  - xxscreeps/mods/modern/powerspawn"] : []),
   "  - ./waves/index.js",
   "game:",
   "  tickSpeed: 60000",
@@ -184,7 +193,7 @@ if (from) {
   rmSync(join(world, "screeps"), { recursive: true });
   cpSync(from, join(world, "screeps"), { recursive: true });
 }
-for (const f of ["seed", "waves", "core", "colony.mjs", "node.mjs", "soak-step.mjs"]) cpSync(join(HERE, "engine", f), join(world, f), { recursive: true });
+for (const f of ["seed", "waves", "core", "colony.mjs", "node.mjs", "live.mjs", "soak-step.mjs"]) cpSync(join(HERE, "engine", f), join(world, f), { recursive: true });
 writeFileSync(join(world, ".screepsrc.yaml"), screepsrc);
 // Mods resolve from the cwd only where a package.json stands.
 writeFileSync(join(world, "package.json"), '{ "private": true }\n');
@@ -211,8 +220,12 @@ if (listOnly) {
   rmSync(world, { recursive: true, force: true });
   process.exit(0);
 }
-const colony = from ? { room: flags["--room"] } : JSON.parse(node24([XXSCREEPS, script("colony.mjs"), ...(flags["--room"] ? [flags["--room"]] : [])], world, true).trim().split("\n").at(-1));
-const run = flags["--run"] ?? `${colony.room}${flags["--node"] ? `-${flags["--node"]}` : ""}-seed${seed}`;
+const homes = (live?.rooms ?? [])
+  .filter((r) => r.objects.some((o) => o.type === "controller" && o.user === live.userId) && r.objects.some((o) => o.type === "spawn" && o.user === live.userId))
+  .map((r) => r.name);
+if (live && homes.length === 0) fail(`--world: no room of ${live.username}'s with a spawn`);
+const colony = live ? { room: homes.join(",") } : from ? { room: flags["--room"] } : JSON.parse(node24([XXSCREEPS, script("colony.mjs"), ...(flags["--room"] ? [flags["--room"]] : [])], world, true).trim().split("\n").at(-1));
+const run = flags["--run"] ?? `${live ? "world" : colony.room}${flags["--node"] ? `-${flags["--node"]}` : ""}-seed${seed}`;
 const out = join(REPO, "soak-runs", run);
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
@@ -234,8 +247,13 @@ if (node && node.level > 1) {
   writeFileSync(join(world, "node.json"), JSON.stringify(built));
   [colony.x, colony.y] = [built[0].x, built[0].y];
 }
-console.error(`colony: ${colony.room}${from ? ` from ${from}` : `, spawn at ${colony.x},${colony.y}`}; output ${out}`);
+console.error(`colony: ${colony.room}${from ? ` from ${from}` : live ? ` from ${flags["--world"]}` : `, spawn at ${colony.x},${colony.y}`}; output ${out}`);
 if (from) node24([XXSCREEPS, "manage", "bot", "update", OUR_NAME, "./bot"], world);
+else if (live) {
+  node24([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot"], world);
+  cpSync(flags["--world"], join(world, "capture.json"));
+  node24([XXSCREEPS, script("live.mjs"), "capture.json"], world);
+}
 else node24([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
 async function fetched(spec, dir) {
   const cache = join(CACHE, "opponents", createHash("sha256").update(spec.integrity).digest("hex").slice(0, 16));
