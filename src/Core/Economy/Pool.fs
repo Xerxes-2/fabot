@@ -72,13 +72,10 @@ let fits (body: Body) (offer: Offer) : bool =
     let halfEmpty = body.Free > 0 && body.Free * 2 >= body.Store.Capacity
 
     match offer.Task with
-    // An upgrader waits out a dry buffer at its seat rather than walk to
-    // another colony's controller; it is cast in the room it upgrades.
-    | Upgrade _ ->
-        upgrades body
-        && (body.Energy > 0
-            || offer.Draw.IsBuffer
-            || body.Pattern.IsUpgrader && body.Pos.Room = offer.Target.Room)
+    // An upgrader is cast by, and counts for, the room it stands in, so it
+    // waits out a dry buffer there rather than walk to another's controller.
+    | Upgrade _ when body.Pattern.IsUpgrader -> body.Pos.Room = offer.Target.Room && upgrades body
+    | Upgrade _ -> upgrades body && (body.Energy > 0 || offer.Draw.IsBuffer)
     | _ when body.Pattern.IsUpgrader -> false
     | Harvest _ ->
         body.Work > 0
