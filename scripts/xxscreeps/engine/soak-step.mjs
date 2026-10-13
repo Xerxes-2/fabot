@@ -15,7 +15,10 @@
 // (stores, carried, piles); dug + regen = spent + decayed + linked + Δstock,
 // less the residual it reports. `decay.jsonl`: each energy pile that
 // decayed, once it is gone or the run ends, with its tile's role and the
-// tombstone or ruin it fell out of.
+// tombstone or ruin it fell out of. `bodies.jsonl`: each body, ours or not,
+// once it is gone from the colony's rooms or the run ends: its parts, the ticks it
+// was first and last seen, its ticks to live then, and its ticks by room and
+// by action.
 // The colony's rooms are <room> (several homes: each sample's `homes` holds
 // one sample a home, the first's at its top) and the outposts its Memory declares
 // (`v2.declarations.outposts`, read at the start): the ledger and the worth
@@ -197,6 +200,7 @@ const born = new Set();
 let lastPiles = new Map();
 const pileLog = new Map();
 const graves = new Map();
+const lives = new Map();
 const near = (a, b, r) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= r;
 function roleOf(pos, objects) {
   const by = (pred) => objects.filter(pred);
@@ -276,12 +280,21 @@ function account(rooms, time) {
         const who = o["#creep"] ? `${o["#creep"].name} ttl${o["#creep"].ticksToLive} e${energyIn(o)}` : "ruin";
         graves.set(`${room.name} ${o.pos.x},${o.pos.y}`, { time, who });
       }
+      const cost = o.body?.reduce((sum, p) => sum + (PART_COST[p.type] ?? 0), 0);
+      if (o.body !== undefined) {
+        const key = `${o["#user"]} ${o.name}`;
+        const life = lives.get(key) ?? { name: o.name, ours: o["#user"] === ours, body: o.body.map((p) => p.type[0]).join(""), cost, first: time, rooms: {}, acts: {} };
+        lives.set(key, life);
+        life.last = time;
+        life.ttl = o["#ageTime"] - time;
+        life.rooms[room.name] = (life.rooms[room.name] ?? 0) + 1;
+        for (const a of (o["#actionLog"] ?? []).filter((a) => a.time === time)) life.acts[a.type] = (life.acts[a.type] ?? 0) + 1;
+      }
       if (o.body !== undefined && o["#user"] !== ours) {
         hostile = true;
         continue;
       }
       if (o.body !== undefined) {
-        const cost = o.body.reduce((sum, p) => sum + (PART_COST[p.type] ?? 0), 0);
         if (!born.has(o.name)) {
           born.add(o.name);
           // A body standing at the first tick was paid for before the run.
@@ -300,6 +313,11 @@ function account(rooms, time) {
     if (bank < 300) regenNext += spawns.filter((sp) => energyIn(sp) < 300).length;
   }
   lastPiles = piles;
+  for (const [key, life] of lives)
+    if (life.last !== time) {
+      fs.writeSync(livesOut, JSON.stringify(life) + "\n");
+      lives.delete(key);
+    }
   for (const [id, log] of pileLog)
     if (!piles.has(id)) {
       if (log.decayed > 0) pileOut(log);
@@ -452,6 +470,7 @@ const samplesOut = fs.openSync(join(out, "samples.jsonl"), "w");
 const faultsOut = fs.openSync(join(out, "faults.jsonl"), "w");
 const cpuOut = fs.openSync(join(out, "cpu.jsonl"), "w");
 const decayOut = fs.openSync(join(out, "decay.jsonl"), "w");
+const livesOut = fs.openSync(join(out, "bodies.jsonl"), "w");
 const seenFaults = new Set();
 const levels = [];
 const refusals = {};
@@ -544,6 +563,7 @@ for (let t = 0; t < ticks; t++) {
   }
 }
 for (const log of pileLog.values()) if (log.decayed > 0) pileOut(log);
+for (const life of lives.values()) fs.writeSync(livesOut, JSON.stringify(life) + "\n");
 for (const rec of open.values()) await closed(rec, null);
 fs.writeFileSync(join(out, "refusals.json"), JSON.stringify(refusals, null, 2) + "\n");
 fs.writeFileSync(join(out, "observe.json"), JSON.stringify(lastObs, null, 1) + "\n");

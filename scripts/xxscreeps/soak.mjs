@@ -55,7 +55,7 @@
 // and its template world, under $FABOT_XXSCREEPS_HOME). Writes
 // soak-runs/<run>/ (outside build/, which `npm run build` wipes):
 // samples.jsonl, faults.jsonl, refusals.json, levels.json, slow.json, lost.json, observe.json,
-// cpu.jsonl, console.log and server.log; prints the samples as a table and a
+// cpu.jsonl, bodies.jsonl, console.log and server.log; prints the samples as a table and a
 // summary.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
