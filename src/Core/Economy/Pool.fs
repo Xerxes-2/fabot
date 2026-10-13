@@ -240,11 +240,12 @@ let pool (derived: Derived) : Offer[] =
 
         let mutable hungriest = 0.0
 
-        let shut =
+        let ringFree = ground.Refills |> Array.sumBy (fun r -> r.Free)
+
+        let shutTo (free: int) =
             if
-                ground.Stores
-                |> Array.exists (fun s ->
-                    s.Owned && s.Energy >= (ground.Refills |> Array.sumBy (fun r -> r.Free)))
+                Option.isSome colony
+                && ground.Stores |> Array.exists (fun s -> s.Owned && s.Energy >= free)
             then
                 Set.remove ground.Room colonyRooms
             else
@@ -261,7 +262,7 @@ let pool (derived: Derived) : Offer[] =
 
             offers.Add
                 { offer (Refill(r.Id, Energy)) r.Pos value (Capacity.Load r.Free) with
-                    Shut = shut
+                    Shut = shutTo ringFree
                 }
 
         let draw =
@@ -328,8 +329,7 @@ let pool (derived: Derived) : Offer[] =
         let feed = ground.Feed |> Option.filter (fun f -> f.Free > 0 && drinks)
 
         let room =
-            (ground.Refills |> Array.sumBy (fun r -> r.Free))
-            + (feed |> Option.map (fun f -> f.Free) |> Option.defaultValue 0)
+            ringFree + (feed |> Option.map (fun f -> f.Free) |> Option.defaultValue 0)
 
         for s in ground.Stores do
             if s.Energy > 0 && not s.Kind.IsBuffer then
@@ -364,13 +364,14 @@ let pool (derived: Derived) : Offer[] =
                     )
 
         for f in Option.toArray feed do
-            offers.Add(
-                offer
-                    (Refill(f.Id, Energy))
-                    f.Pos
-                    (Price.valueOfRank Price.bufferRank)
-                    (Capacity.Load f.Free)
-            )
+            offers.Add
+                { offer
+                      (Refill(f.Id, Energy))
+                      f.Pos
+                      (Price.valueOfRank Price.bufferRank)
+                      (Capacity.Load f.Free) with
+                    Shut = shutTo room
+                }
 
         for p in ground.Piles do
             if p.Resource.IsEnergy then
