@@ -531,6 +531,15 @@ let plan
     let all = Array.append (others.ToArray()) (spendDemands distance leg derived others)
 
     let standing = System.Collections.Generic.Dictionary<string, int>()
+    let targets = System.Collections.Generic.Dictionary<string, Pos>()
+
+    for offer in pool do
+        targets.[offer.Id] <- offer.Target
+
+    let workAt (body: Body) =
+        match Map.tryFind body.Name assignments with
+        | Some id when targets.ContainsKey id -> targets.[id]
+        | _ -> body.Pos
 
     // The walk at the body's own pace bounds the fresh one (an empty body is
     // never slower), so the fresh walk is asked only inside it.
@@ -567,12 +576,13 @@ let plan
             // The nearest open demand of the pattern; an unreachable one last.
             let mutable pick = -1
             let mutable least = System.Int32.MaxValue
+            let at = workAt body
 
             for i in 0 .. all.Length - 1 do
                 let d = all.[i]
 
                 if nameOf d.Pattern = pattern && d.Left > 0 && d.SeatsLeft > 0 then
-                    let ticks = distance body.Pos d.At |> Option.defaultValue System.Int32.MaxValue
+                    let ticks = distance at d.At |> Option.defaultValue System.Int32.MaxValue
 
                     if pick < 0 || ticks < least then
                         pick <- i
@@ -640,20 +650,9 @@ let plan
         | _ -> ())
 
     // The supply floor: with nobody to refill it, the bank never fills again.
-    let roomOf = System.Collections.Generic.Dictionary<string, string>()
-
-    for offer in pool do
-        roomOf.[offer.Id] <- offer.Target.Room
-
     let serves (room: string) (body: Body) =
         (body.Pattern.IsWorker || body.Pattern.IsHauler)
-        && (body.Pos.Room = room
-            || (match Map.tryFind body.Name assignments with
-                | Some id ->
-                    match roomOf.TryGetValue id with
-                    | true, r -> r = room
-                    | _ -> false
-                | None -> false))
+        && (body.Pos.Room = room || (workAt body).Room = room)
 
     colonies
     |> Array.iteri (fun ci colony ->
