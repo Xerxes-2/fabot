@@ -157,13 +157,21 @@ let exitOf (tile: int) =
     elif y = last then bottom
     else left
 
+let private exitBands =
+    Array.init 9 (fun exit ->
+        match exit with
+        | 1 -> Array.init (side - 2) (fun i -> index (i + 1) 0)
+        | 3 -> Array.init (side - 2) (fun i -> index last (i + 1))
+        | 5 -> Array.init (side - 2) (fun i -> index (i + 1) last)
+        | 7 -> Array.init (side - 2) (fun i -> index 0 (i + 1))
+        | _ -> [||])
+
+/// Shared: never written.
 let exitTiles (exit: int) : int[] =
-    match exit with
-    | 1 -> Array.init (side - 2) (fun i -> index (i + 1) 0)
-    | 3 -> Array.init (side - 2) (fun i -> index last (i + 1))
-    | 5 -> Array.init (side - 2) (fun i -> index (i + 1) last)
-    | 7 -> Array.init (side - 2) (fun i -> index 0 (i + 1))
-    | _ -> [||]
+    if exit >= 0 && exit < exitBands.Length then
+        exitBands.[exit]
+    else
+        [||]
 
 let landing (tile: int) =
     let x = xOf tile

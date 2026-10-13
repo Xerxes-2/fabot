@@ -308,8 +308,12 @@ module Atlas =
             while frontier.Count > 0 && hops < maxHops && not (parent.ContainsKey onto) do
                 let next = ResizeArray()
 
-                for room in frontier do
-                    for exit in [ Tiles.top; Tiles.right; Tiles.bottom; Tiles.left ] do
+                for i in 0 .. frontier.Count - 1 do
+                    let room = frontier.[i]
+
+                    for e in 0..3 do
+                        let exit = Tiles.top + 2 * e
+
                         match Tiles.roomToward room exit with
                         | Some there when
                             not (parent.ContainsKey there)
