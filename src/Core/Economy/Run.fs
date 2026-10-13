@@ -347,7 +347,7 @@ let decide (context: Context) (state: State) : Intent list * State =
                 ->
                 // The API refuses an upgrade from an empty store before the
                 // draw lands.
-                if body.Energy > 0 || not (drawsBuffer body offer) then
+                if body.Energy > 0 || not (drawsBuffer body offer || offer.Task.IsUpgrade) then
                     acts.Add(Creep(creep.Name, actOf derived offer.Task))
             | None -> ()
 

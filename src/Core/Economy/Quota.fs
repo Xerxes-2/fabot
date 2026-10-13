@@ -391,18 +391,25 @@ let private spendDemands
 
         let save = float (reserve - stock) / life |> min surplus |> max 0.0
 
+        let upgradable =
+            if colony.Controller.Level >= Engine.controllerMaxLevel then
+                Engine.maxUpgradePerTick
+            else
+                System.Int32.MaxValue
+
         let upgrader =
-            sized Pattern.Upgrader Engine.maxBodyParts colony.BankCapacity
+            sized Pattern.Upgrader upgradable colony.BankCapacity
             |> Option.filter (fun body ->
                 Option.isSome ground.Buffer
                 && standing (partCountIn body Work) (partCountIn body Carry))
 
-        // No more upgraders than the buffer seats: one past them draws nothing.
+        // No more upgraders than the buffer seats or the Work the controller
+        // takes: one past them draws nothing.
         let upgraders, upgraderWork, upgradersDrain =
             match upgrader with
             | Some body ->
                 let work = partCountIn body Work
-                let seats = float ground.BufferSeats.Length
+                let seats = float (min ground.BufferSeats.Length (upgradable / work))
 
                 let lifeCost =
                     float (work * Engine.upgradeDrainPerWork) * life + float (Engine.bodyCost body)

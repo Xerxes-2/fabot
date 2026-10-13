@@ -264,7 +264,8 @@ function account(rooms, time) {
         const cost = o.body.reduce((sum, p) => sum + (PART_COST[p.type] ?? 0), 0);
         if (!born.has(o.name)) {
           born.add(o.name);
-          ledger.spawn += cost;
+          // A body standing at the first tick was paid for before the run.
+          if (ledger.stock0 !== null) ledger.spawn += cost;
         }
         line.bodies += cost / (o.body.some((p) => p.type === "claim") ? CREEP_CLAIM_LIFE_TIME : CREEP_LIFE_TIME);
       }
