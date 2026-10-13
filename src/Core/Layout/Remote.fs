@@ -115,12 +115,14 @@ let sites
 
     let sinkFor (room: string) =
         colonies
-        |> Array.sortBy (fun c ->
+        |> Array.map (fun c ->
             Atlas.route atlas Set.empty Tick.reachHops room c
             |> Option.map List.length
-            |> Option.defaultValue System.Int32.MaxValue)
+            |> Option.defaultValue System.Int32.MaxValue,
+            c)
+        |> Array.sortBy fst
         |> Array.tryHead
-        |> Option.bind (fun c ->
+        |> Option.bind (fun (_, c) ->
             rooms.[c].Structures
             |> Array.tryFind (fun s -> s.Kind.IsStorage && s.Owner.IsOurs)
             |> Option.map (fun s -> s.Pos)
