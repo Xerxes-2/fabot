@@ -182,6 +182,15 @@ let pool (derived: Derived) : Offer[] =
         |> Array.filter (fun r -> not r.IsEnergy)
         |> Array.distinct
 
+    // A tick a spawn waits is a tick of the income bodies earn, and every
+    // colony's alike: travel picks the ring, so a richer room's never draws a
+    // body past its own.
+    let ringWorth =
+        let n = derived.Colonies.Length
+
+        float (derived.Grounds |> Array.truncate n |> Array.sumBy (fun g -> g.Income))
+        / float (max 1 n)
+
     derived.Grounds
     |> Array.iteri (fun i ground ->
         let colony =
@@ -216,9 +225,7 @@ let pool (derived: Derived) : Offer[] =
                 if r.Kind.IsTower then
                     Price.towerShort Price.homeRaidPrior r.Free
                 else
-                    // A tick the spawn waits is a tick of the income its
-                    // bodies earn.
-                    float ground.Income
+                    ringWorth
 
             hungriest <- max hungriest value
             offers.Add(offer (Refill(r.Id, Energy)) r.Pos value (Capacity.Load r.Free))
