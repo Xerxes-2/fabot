@@ -470,6 +470,45 @@ let tests =
                 | Some(_, ticks), _ -> ticks = 0
                 | None, _ -> true
 
+            testProperty "a route read off a tree is the route searched"
+            <| fun (walled: (sbyte * sbyte * byte) list) (maxHops: byte) (dx: sbyte) (dy: sbyte) ->
+                let blank =
+                    worldOf
+                        {
+                            Terrain = Array.zeroCreate Tiles.count
+                            Roads = []
+                            Walls = []
+                        }
+
+                let rooms =
+                    [|
+                        for x in -2 .. 2 do
+                            for y in -2 .. 2 do
+                                let terrain = Array.zeroCreate Tiles.count
+
+                                for wx, wy, exit in walled do
+                                    if int wx % 3 = x && int wy % 3 = y then
+                                        for t in Tiles.exitTiles (1 + 2 * (int exit % 4)) do
+                                            terrain.[t] <- Terrain.wall
+
+                                { blank.Rooms.[0] with
+                                    Name = Tiles.roomName x y
+                                    Terrain = terrain
+                                }
+                    |]
+
+                let atlas = Atlas.ofWorld { blank with Rooms = rooms }
+                let hops = 1 + int maxHops % 4
+                let from = Tiles.roomName 0 0
+                let onto = Tiles.roomName (int dx % 3) (int dy % 3)
+
+                Atlas.routeIn (Atlas.tree atlas hops from) from onto = Atlas.route
+                    atlas
+                    Set.empty
+                    hops
+                    from
+                    onto
+
             testProperty "a route crosses shared borders, around the avoided, by fewest crossings"
             <| fun (dx: sbyte) (dy: sbyte) (avoided: (sbyte * sbyte) list) ->
                 let atlas =

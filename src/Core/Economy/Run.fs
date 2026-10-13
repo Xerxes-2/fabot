@@ -29,31 +29,40 @@ let private targetAt (pos: Pos) (range: int) : Target =
 let private targetOf (offer: Offer) : Target =
     targetAt offer.Target (rangeOf offer.Task)
 
-let private ticksTo (atlas: Atlas) (mover: Mover) (target: Target) (from: Pos) : int option =
-    match Atlas.travelTicks atlas mover target from with
-    | None -> None
-    | Some leg when from.Room = target.Room -> Some leg
-    | Some leg ->
-        Atlas.route atlas target.Avoid target.MaxHops from.Room target.Room
-        |> Option.map (fun rooms ->
-            let n = List.length rooms
+/// `Atlas.route` without a search from a room `Derived` holds the tree of.
+let private routeOf (atlas: Atlas) (derived: Derived) (target: Target) (from: string) =
+    if
+        target.Avoid.IsEmpty
+        && target.MaxHops = Tick.reachHops
+        && derived.Routes.ContainsKey from
+    then
+        Atlas.routeIn derived.Routes.[from] from target.Room
+    else
+        Atlas.route atlas target.Avoid target.MaxHops from target.Room
 
-            let far =
-                Atlas.entryTicks atlas mover target (List.item (n - 2) rooms)
-                |> Option.defaultValue crossingTicks
+let private ticksTo (atlas: Atlas) (derived: Derived) (mover: Mover) (target: Target) (from: Pos) =
+    if from.Room = target.Room then
+        Atlas.travelTicks atlas mover target from
+    else
+        routeOf atlas derived target from.Room
+        |> Option.bind (fun rooms ->
+            Atlas.fieldOnRoute atlas mover target rooms
+            |> Option.bind (fun field -> Field.ticks field (Tiles.ofPos from))
+            |> Option.map (fun leg ->
+                let n = List.length rooms
 
-            leg + crossingTicks * (n - 2) + far)
+                let far =
+                    Atlas.entryTicks atlas mover target (List.item (n - 2) rooms)
+                    |> Option.defaultValue crossingTicks
 
-let private distance (derived: Derived) (a: Pos) (b: Pos) : int option =
+                leg + crossingTicks * (n - 2) + far))
+
+let private distance (atlas: Atlas) (derived: Derived) (a: Pos) (b: Pos) : int option =
     match Pos.range a b with
     | Some r -> Some r
     | None ->
-        let hops = derived.Hops.[a.Room]
-
-        if hops.ContainsKey b.Room then
-            Some(crossingTicks * hops.[b.Room])
-        else
-            None
+        routeOf atlas derived (targetAt b 0) a.Room
+        |> Option.map (fun rooms -> crossingTicks * (List.length rooms - 1))
 
 /// A body digs from nowhere else, so a harvester's dig falls into the
 /// container and a light body keeps off the post.
@@ -199,7 +208,7 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     let travel (body: Body) (offer: Offer) =
         match movers.TryGetValue body.Name with
-        | true, mover -> ticksTo atlas mover (targetOf offer) body.Pos
+        | true, mover -> ticksTo atlas derived mover (targetOf offer) body.Pos
         | _ -> None
 
     let assignments = Matcher.matchAll travel offers derived.Bodies state.Assignments
@@ -228,13 +237,14 @@ let decide (context: Context) (state: State) : Intent list * State =
                     else
                         movers.[body.Name]
 
-                ticksTo atlas mover (targetOf offer) from
+                ticksTo atlas derived mover (targetOf offer) from
             | _ -> None
         | _ -> None
 
     let leg (parts: BodyPart list) (from: Pos) (onto: Pos) (range: int) =
         ticksTo
             atlas
+            derived
             {
                 Footprint = One
                 Factor = loadedFactor parts
@@ -255,7 +265,7 @@ let decide (context: Context) (state: State) : Intent list * State =
         | Task.Harvest id -> not (dugOut.Contains id)
         | _ -> true
 
-    let plan = Quota.plan (distance derived) leg walk derived offers assignments
+    let plan = Quota.plan (distance atlas derived) leg walk derived offers assignments
 
     let casts =
         plan.Casts
@@ -369,7 +379,7 @@ let decide (context: Context) (state: State) : Intent list * State =
                 derived.Colonies
                 |> Array.map (fun c -> c.Spawns.[0].Pos)
                 |> Array.minBy (fun p ->
-                    distance derived creep.Pos p |> Option.defaultValue System.Int32.MaxValue)
+                    distance atlas derived creep.Pos p |> Option.defaultValue System.Int32.MaxValue)
 
             wishIn creep.Pos.Room (Plan.toward atlas creep mover (targetAt home 1) 1)
         | None -> wishIn creep.Pos.Room (Plan.stay atlas creep mover.Factor 1)

@@ -288,65 +288,20 @@ module Atlas =
                 | Some weights -> at (Tiles.landing tile) weights >= 0
                 | None -> true))
 
-    let route
+    let private search
         (atlas: Atlas)
         (avoid: Set<string>)
         (maxHops: int)
         (from: string)
         (onto: string)
-        : string list option =
-        if from = onto then
-            Some [ from ]
-        elif (Tiles.roomCoords from).IsNone || (Tiles.roomCoords onto).IsNone then
-            None
-        else
-            let parent = Dictionary<string, string>()
-            parent.[from] <- from
-            let mutable frontier = ResizeArray [ from ]
-            let mutable hops = 0
-
-            while frontier.Count > 0 && hops < maxHops && not (parent.ContainsKey onto) do
-                let next = ResizeArray()
-
-                for i in 0 .. frontier.Count - 1 do
-                    let room = frontier.[i]
-
-                    for e in 0..3 do
-                        let exit = Tiles.top + 2 * e
-
-                        match Tiles.roomToward room exit with
-                        | Some there when
-                            not (parent.ContainsKey there)
-                            && (there = onto || not (Set.contains there avoid))
-                            && linked atlas room there exit
-                            ->
-                            parent.[there] <- room
-                            next.Add there
-                        | _ -> ()
-
-                frontier <- next
-                hops <- hops + 1
-
-            if parent.ContainsKey onto then
-                let mutable chain = [ onto ]
-
-                while List.head chain <> from do
-                    chain <- parent.[List.head chain] :: chain
-
-                Some chain
-            else
-                None
-
-    /// Each room `route` reaches from `from`, at its route's length less one.
-    let hopsFrom (atlas: Atlas) (maxHops: int) (from: string) : Dictionary<string, int> =
-        let hops = Dictionary<string, int>()
-        hops.[from] <- 0
+        : Dictionary<string, string> =
+        let parent = Dictionary<string, string>()
+        parent.[from] <- from
         let mutable frontier = ResizeArray [ from ]
-        let mutable depth = 0
+        let mutable hops = 0
 
-        while frontier.Count > 0 && depth < maxHops do
+        while frontier.Count > 0 && hops < maxHops && not (parent.ContainsKey onto) do
             let next = ResizeArray()
-            depth <- depth + 1
 
             for i in 0 .. frontier.Count - 1 do
                 let room = frontier.[i]
@@ -355,14 +310,55 @@ module Atlas =
                     let exit = Tiles.top + 2 * e
 
                     match Tiles.roomToward room exit with
-                    | Some there when not (hops.ContainsKey there) && linked atlas room there exit ->
-                        hops.[there] <- depth
+                    | Some there when
+                        not (parent.ContainsKey there)
+                        && (there = onto || not (Set.contains there avoid))
+                        && linked atlas room there exit
+                        ->
+                        parent.[there] <- room
                         next.Add there
                     | _ -> ()
 
             frontier <- next
+            hops <- hops + 1
 
-        hops
+        parent
+
+    /// `route`'s answer, read off the `tree` from `from`.
+    let routeIn
+        (tree: Dictionary<string, string>)
+        (from: string)
+        (onto: string)
+        : string list option =
+        if from = onto then
+            Some [ from ]
+        elif tree.ContainsKey onto then
+            let mutable chain = [ onto ]
+
+            while List.head chain <> from do
+                chain <- tree.[List.head chain] :: chain
+
+            Some chain
+        else
+            None
+
+    let tree (atlas: Atlas) (maxHops: int) (from: string) : Dictionary<string, string> =
+        search atlas Set.empty maxHops from ""
+
+    let route
+        (atlas: Atlas)
+        (avoid: Set<string>)
+        (maxHops: int)
+        (from: string)
+        (onto: string)
+        : string list option =
+        if
+            from <> onto
+            && ((Tiles.roomCoords from).IsNone || (Tiles.roomCoords onto).IsNone)
+        then
+            None
+        else
+            routeIn (search atlas avoid maxHops from onto) from onto
 
     let private exitGoals (footprint: Footprint) (weights: int[]) (exit: int) : int[] =
         match footprint with
@@ -383,7 +379,13 @@ module Atlas =
                         yield anchor
             |]
 
-    let field (atlas: Atlas) (mover: Mover) (target: Target) (room: string) : Field option =
+    let private fieldOn
+        (atlas: Atlas)
+        (mover: Mover)
+        (target: Target)
+        (room: string)
+        (onward: unit -> string list option)
+        : Field option =
         if mover.Factor.Moves > 0 && atlas.Rooms.ContainsKey room then
             let grid = atlas.Rooms.[room]
             let footprint = mover.Footprint
@@ -410,7 +412,7 @@ module Atlas =
 
                     Some(goalKey, build)
                 else
-                    match route atlas target.Avoid target.MaxHops room target.Room with
+                    match onward () with
                     | Some(_ :: next :: _) ->
                         Tiles.exitToward room next
                         |> Option.map (fun exit ->
@@ -453,6 +455,19 @@ module Atlas =
                     }
         else
             None
+
+    let field (atlas: Atlas) (mover: Mover) (target: Target) (room: string) : Field option =
+        fieldOn atlas mover target room (fun () ->
+            route atlas target.Avoid target.MaxHops room target.Room)
+
+    /// `field` out of another room on a known route to the target's.
+    let fieldOnRoute
+        (atlas: Atlas)
+        (mover: Mover)
+        (target: Target)
+        (rooms: string list)
+        : Field option =
+        fieldOn atlas mover target (List.head rooms) (fun () -> Some rooms)
 
     /// In another room: the ticks to leaving this one toward it.
     let travelTicks (atlas: Atlas) (mover: Mover) (target: Target) (from: Pos) : int option =

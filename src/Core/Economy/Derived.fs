@@ -174,8 +174,8 @@ type Derived =
         Posts: Map<string, Pos>
         /// Creep lifetimes of tower fire a reserve holds.
         ReserveLifetimes: float
-        /// From each room a spawn or body stands in, `Atlas.hopsFrom`'s.
-        Hops: Dictionary<string, Dictionary<string, int>>
+        /// From each room a spawn or body stands in, `Atlas.tree`'s.
+        Routes: Dictionary<string, Dictionary<string, string>>
     }
 
 let private bodyOf (name: string) (pos: Pos) (parts: Part[]) (store: Store) (life: int) : Body =
@@ -634,17 +634,17 @@ let ofWorld
         world.Creeps
         |> Array.map (fun c -> bodyOf c.Name c.Pos c.Body c.Store c.TicksToLive)
 
-    let hops = Dictionary<string, Dictionary<string, int>>()
+    let routes = Dictionary<string, Dictionary<string, string>>()
 
-    let hopsFrom (room: string) =
-        if not (hops.ContainsKey room) then
-            hops.[room] <- Atlas.hopsFrom atlas Tick.reachHops room
+    let treeOf (room: string) =
+        if not (routes.ContainsKey room) then
+            routes.[room] <- Atlas.tree atlas Tick.reachHops room
 
     for s in world.Spawns do
-        hopsFrom s.Pos.Room
+        treeOf s.Pos.Room
 
     for c in world.Creeps do
-        hopsFrom c.Pos.Room
+        treeOf c.Pos.Room
 
     {
         Time = world.Time
@@ -678,5 +678,5 @@ let ofWorld
                 g.Sources |> Array.choose (fun s -> s.Post |> Option.map (fun p -> s.Id, p)))
             |> Map.ofArray
         ReserveLifetimes = declarations.ReserveLifetimes
-        Hops = hops
+        Routes = routes
     }

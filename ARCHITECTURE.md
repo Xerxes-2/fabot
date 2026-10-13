@@ -102,8 +102,10 @@ World ──▶ Derived ──▶ decisions ──▶ Intents
   its weights are unchanged (owner's decision): within one tick half the
   floods repeated, across ticks nearly all, and a flood is a pure function of
   the weights, so a kept one is the fresh one and a heap reset only re-floods.
-  Room routes are recomputed per cross-room query; if the counts show it,
-  they join `Derived` (an owner decision). Floods are
+  Room routes are searched once a tick into `Derived`, one tree from each
+  room a spawn or body stands in (owner's decision): Economy prices every
+  body against every offer, so a search per query cost thousands a tick at
+  six colonies, and none is kept across ticks. Floods are
   the only demand-driven derivation. Any other `TickMemo`, `Dictionary` cache
   or `lazy` outside `Derived` is an architecture change (`AGENTS.md`).
 - **Counts are a gate** (§9.3): floods, Atlas misses, `Exchange.outcome` calls
