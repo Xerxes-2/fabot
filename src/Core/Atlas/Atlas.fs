@@ -91,6 +91,7 @@ module Atlas =
         room.Controller
         |> Option.exists (fun c -> Pos.within Engine.upgradeRange c.Pos pos)
         && not (room.Sources |> Array.exists (fun s -> Pos.within 1 s.Pos pos))
+        && not (room.Minerals |> Array.exists (fun m -> Pos.within 1 m.Pos pos))
 
     /// Within 2: beside the source's container.
     let isSourceLink (room: Room) (pos: Pos) : bool =

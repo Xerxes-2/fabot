@@ -1,0 +1,9 @@
+{
+  "why": "a source's link stands beside the container its miner works from, wherever that container stands, so the miner fills it and it sends",
+  "start": { "room": "W8N3", "seed": 1, "node": "T4" },
+  "ticks": 3000,
+  "assert": [
+    { "measure": "postedLinksAtEnd", "min": 1 },
+    { "measure": "linked", "min": 1 }
+  ]
+}

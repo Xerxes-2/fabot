@@ -367,7 +367,9 @@ function sample(t, time, room) {
   }
   const objects = [...room["#objects"]];
   const atSource = (c) => objects.some((s) => s["#lookType"] === "source" && near(s.pos, c.pos, 1));
-  row.sourceContainers = objects.filter((o) => o.structureType === "container" && o["#lookType"] !== "constructionSite" && atSource(o)).length;
+  const sourceContainers = objects.filter((o) => o.structureType === "container" && o["#lookType"] !== "constructionSite" && atSource(o));
+  row.sourceContainers = sourceContainers.length;
+  row.postedLinks = objects.filter((o) => o.structureType === "link" && o["#lookType"] !== "constructionSite" && sourceContainers.some((c) => near(c.pos, o.pos, 1))).length;
   return row;
 }
 

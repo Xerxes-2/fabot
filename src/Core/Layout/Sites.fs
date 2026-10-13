@@ -31,6 +31,9 @@ type Census =
         /// Tiles whose container's rock, else controller, has one already:
         /// one standing off the plan's tile is kept, never doubled.
         Served: bool[]
+        /// None once a link serves the source: one standing off the plan's
+        /// tile is kept, never doubled.
+        Posts: (int * (int * int[]) option)[]
         /// Every owner's, and sites: CONTROLLER_STRUCTURES counts them all.
         Held: Dictionary<Kind, int>
         /// One under a creep is not counted, so it never holds back the rest.
@@ -74,15 +77,22 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
             if standable s.Kind || not (at (Tiles.ofPos s.Pos) occupied) then
                 pending <- pending + 1
 
-    let containers =
+    let standing (kind: Kind) =
         [|
             for s in room.Structures do
-                if s.Kind.IsContainer then
+                if s.Kind = kind then
                     yield s.Pos
             for s in room.Sites do
-                if s.Kind.IsContainer then
+                if s.Kind = kind then
                     yield s.Pos
         |]
+
+    let containers = standing Kind.Container
+
+    let rocks =
+        Array.append
+            (room.Sources |> Array.map (fun s -> s.Pos))
+            (room.Minerals |> Array.map (fun m -> m.Pos))
 
     let served = Array.create Tiles.count false
 
@@ -92,14 +102,31 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
         for t in Tiles.within Engine.upgradeRange (Tiles.ofPos c.Pos) do
             setAt t served true)
 
-    for rock in
-        Array.append
-            (room.Sources |> Array.map (fun s -> s.Pos))
-            (room.Minerals |> Array.map (fun m -> m.Pos)) do
-        let kept = containers |> Array.exists (Pos.within 1 rock)
+    for rock in rocks do
+        if containers |> Array.exists (Pos.within 1 rock) then
+            for t in Tiles.within 1 (Tiles.ofPos rock) do
+                setAt t served true
 
-        for t in Tiles.within 1 (Tiles.ofPos rock) do
-            setAt t served kept
+    let links = standing Kind.Link
+
+    let unheld (t: int) =
+        at t room.Terrain &&& Terrain.wall = 0uy
+        && not (at t solid || at t road || at t site)
+        && not (rocks |> Array.exists (fun r -> Tiles.ofPos r = t))
+        && room.Controller |> Option.forall (fun c -> Tiles.ofPos c.Pos <> t)
+        && min (Tiles.xOf t) (Tiles.yOf t) >= 2
+        && max (Tiles.xOf t) (Tiles.yOf t) < Tiles.side - 2
+
+    let posts =
+        room.Sources
+        |> Array.choose (fun s ->
+            if links |> Array.exists (Pos.within 2 s.Pos) then
+                Some(Tiles.ofPos s.Pos, None)
+            else
+                Atlas.postOf room s.Pos
+                |> Option.map (fun (p, _) ->
+                    let post = Tiles.ofPos p
+                    Tiles.ofPos s.Pos, Some(post, Tiles.around post |> Array.filter unheld)))
 
     {
         Solid = solid
@@ -108,6 +135,7 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
         Site = site
         Occupied = occupied
         Served = served
+        Posts = posts
         Held = held
         Pending = pending
     }
@@ -139,10 +167,30 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
 
     let taken = HashSet<int>()
 
-    for item in plan.Items do
-        let t = item.Tile
+    // A source's link stands beside the post its miner works from, which
+    // another bot may have set off the plan's container tile. The roads the
+    // plan drew there lead to that unbuilt container, and the tile farthest
+    // from the anchor lies behind the miner, off the way in. The last open
+    // tile is the miner's way in.
+    let tileOf (item: Item) =
+        match
+            census.Posts
+            |> Array.tryFind (fun (rock, _) -> item.Kind.IsLink && Tiles.range item.Tile rock <= 2)
+        with
+        | Some(_, None) -> None
+        | Some(_, Some(post, beside)) when Tiles.range item.Tile post <> 1 ->
+            beside
+            |> Array.filter (fun t ->
+                plan.Items |> Array.forall (fun i -> i.Tile <> t || i.Kind.IsRoad))
+            |> Array.sortBy (fun t ->
+                plan.Items |> Array.exists (fun i -> i.Tile = t), -(Tiles.range t plan.Anchor), t)
+            |> Array.tryHead
+            |> Option.filter (fun _ -> beside.Length > 1)
+        | _ -> Some item.Tile
 
-        if
+    for item in plan.Items do
+        match tileOf item with
+        | Some t when
             placed.Count < room
             && item.Level <= level
             && not (at t census.Site)
@@ -157,7 +205,7 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
             && heldOf census item.Kind + addedOf item.Kind < Engine.controllerStructures
                 (Kind.name item.Kind)
                 level
-        then
+            ->
             taken.Add t |> ignore
             added.[item.Kind] <- addedOf item.Kind + 1
 
@@ -167,5 +215,6 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
                     Y = Tiles.yOf t
                     Kind = item.Kind
                 }
+        | _ -> ()
 
     List.ofSeq placed

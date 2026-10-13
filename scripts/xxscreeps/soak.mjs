@@ -64,7 +64,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|N5|T7|E1] [--invaders room:every[:first],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|E1] [--invaders room:every[:first],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -108,6 +108,7 @@ const NODES = {
   // N3 as another bot built it: each container on another tile serving its source or controller.
   T3: { level: 4, stored: 5000, without: ["rampart"], moved: true },
   N4: { level: 5, stored: 50000, without: ["link", "rampart"] },
+  T4: { level: 5, stored: 50000, without: ["link", "rampart"], moved: true },
   E1: { level: 5, stored: 50000, without: ["link", "rampart"], outposts: true },
   N5: { level: 6, stored: 100000, without: ["rampart"] },
   // An RCL7 node as another bot left it: its roads and containers worn to

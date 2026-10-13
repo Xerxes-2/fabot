@@ -94,6 +94,10 @@ const measures = {
   // The first tick a container stands beside a source (never: Infinity).
   firstSourceContainer: (samples) => samples.find((s) => s.sourceContainers > 0)?.t ?? Infinity,
   sourceContainersAtEnd: (samples, a) => at(samples, a.to ?? Infinity).sourceContainers,
+  // Links standing beside a source's container.
+  postedLinksAtEnd: (samples, a) => at(samples, a.to ?? Infinity).postedLinks,
+  // Energy lost to link transfers: none means no link ever sent.
+  linked: (samples, a) => at(samples, a.to ?? Infinity).ledger.linked - at(samples, a.from ?? 0).ledger.linked,
   // The least any declared outpost netted after its bodies (`rooms`, the
   // colony's own first); none declared: -Infinity.
   poorestOutpost: (samples, a) => {
