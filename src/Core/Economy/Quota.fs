@@ -216,7 +216,7 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
     let life = float Engine.creepLifetime
     let colonies = derived.Colonies
     let carries = Array.zeroCreate<float> colonies.Length
-    let visits = Array.zeroCreate<int> colonies.Length
+    let remote = Array.zeroCreate<float> colonies.Length
     let flows = Array.zeroCreate<float> colonies.Length
     let digs = Array.init colonies.Length (fun _ -> ResizeArray<int * Demand>())
 
@@ -277,18 +277,8 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
                             hauled <- true
                             carries.[ci] <- carries.[ci] + flow * float trip
 
-                            // A body that dies leaves its visit undone while its
-                            // successor walks a room out: no remote container
-                            // may fill in twice the gap between visits.
                             if gi >= colonies.Length then
-                                visits.[ci] <-
-                                    visits.[ci]
-                                    + int (
-                                        ceil (
-                                            2.0 * flow * float trip
-                                            / float Engine.containerCapacity
-                                        )
-                                    )
+                                remote.[ci] <- remote.[ci] + flow * float trip
 
                             flows.[ci] <- flows.[ci] + flow
 
@@ -314,10 +304,15 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
                 |> Option.map (fun body -> partCountIn body Carry)
                 |> Option.defaultValue 0
 
+            // One body leaves a remote container filling for its whole round
+            // trip a room out.
             let wanted =
-                max
-                    (int (ceil (carries.[ci] / float Engine.carryPartCapacity)))
-                    (visits.[ci] * perBody)
+                let flowing = int (ceil (carries.[ci] / float Engine.carryPartCapacity))
+
+                if remote.[ci] * 2.0 >= float (perBody * Engine.carryPartCapacity) then
+                    max flowing (2 * perBody)
+                else
+                    flowing
 
             let flow = flows.[ci]
             let digs = digs.[ci]
