@@ -131,11 +131,12 @@ let price
     (terrain: Exchange.Terrain)
     (capacity: int)
     (copiesOf: Exchange.Body -> int)
+    (tickWorth: int)
     : (Exchange.Body list * Exchange.Outcome * Tactic) option =
     (if wins stance ours theirs terrain then
          Some []
      else
-         Exchange.cheapestWin stance ours (affordable capacity) copiesOf theirs terrain)
+         Exchange.cheapestWin stance ours (affordable capacity) copiesOf tickWorth theirs terrain)
     |> Option.map (fun set ->
         let landed =
             { ours with

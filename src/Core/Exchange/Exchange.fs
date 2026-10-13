@@ -830,19 +830,19 @@ let outcome (stance: Stance) (ours: Side) (theirs: Side) (terrain: Terrain) : Ou
     else
         exchange (stanceAgainst stance ours theirs terrain) ours theirs terrain
 
-/// The cheapest set of one body repeated, at most `copiesOf` it, that wins.
-/// One more of a body adds damage, hits and heal and never a slower walk or a
-/// shorter reach, so a win is monotone in its count and each body's fewest
-/// is found by bisection.
+/// The cheapest cast can be a marginal win that loses its bodies, so lost hits
+/// and ticks are priced too. A win is monotone in one body's count, so its
+/// fewest is bisected, then grown while one more saves what it costs.
 let cheapestWin
     (stance: Stance)
     (ours: Side)
     (bodies: Body list)
     (copiesOf: Body -> int)
+    (tickWorth: int)
     (theirs: Side)
     (terrain: Terrain)
     : Body list option =
-    let wins (body: Body) (n: int) =
+    let cost (body: Body) (n: int) =
         match
             outcome
                 stance
@@ -852,28 +852,43 @@ let cheapestWin
                 theirs
                 terrain
         with
-        | Win _
-        | Kite _ -> true
-        | Lose -> false
+        | Win(ticks, losses) ->
+            Some(
+                Engine.bodyCost body * n
+                + Engine.bodyCost body * losses.Hits / (Engine.partHits * List.length body)
+                + tickWorth * ticks
+            )
+        | Kite ticks -> Some(Engine.bodyCost body * n + tickWorth * ticks)
+        | Lose -> None
 
-    let fewest (body: Body) =
+    let cheapest (body: Body) =
+        let most = copiesOf body
+
         let rec between loses won =
             if won - loses <= 1 then
                 won
             else
                 let mid = (loses + won) / 2
 
-                if wins body mid then between loses mid else between mid won
+                if (cost body mid).IsSome then
+                    between loses mid
+                else
+                    between mid won
 
-        let most = copiesOf body
+        let rec onward n spent =
+            match if n < most then cost body (n + 1) else None with
+            | Some next when next < spent -> onward (n + 1) next
+            | _ -> n, spent
 
-        if most > 0 && wins body most then
-            Some(List.replicate (between 0 most) body)
-        else
-            None
+        match if most > 0 then cost body most else None with
+        | Some _ ->
+            let fewest = between 0 most
+            let n, spent = onward fewest (cost body fewest).Value
+            Some(List.replicate n body, spent)
+        | _ -> None
 
     bodies
-    |> List.choose fewest
-    |> List.sortBy (fun set ->
-        List.sumBy Engine.bodyCost set, List.sumBy List.length set, List.length set)
+    |> List.choose cheapest
+    |> List.sortBy (fun (set, spent) -> spent, List.sumBy List.length set, List.length set)
     |> List.tryHead
+    |> Option.map fst

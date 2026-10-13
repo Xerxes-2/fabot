@@ -309,22 +309,25 @@ let decide (context: Context) (state: State) : Intent list * State =
 
             // An outpost is worth the yield the raid's life would stand it down
             // for; a core is the razer's and holds nothing at the wave's cost.
-            let copiesOf =
+            let copiesOf, tickWorth =
                 match context.Declarations.Outposts |> List.tryFind (fun o -> o.Room = e.Room) with
                 | Some outpost when not (homes.Contains e.Room) ->
+                    let tickWorth = outpost.Sources.Length * Engine.heldOutputPerTick
+
                     let ticks =
                         raid
                         |> Array.filter (fun h -> not (cores.Contains h.Id))
                         |> Array.fold (fun most h -> max most h.TicksToLive) 0
 
                     Casting.copiesWithin
-                        (outpost.Sources.Length * Engine.heldOutputPerTick * ticks)
+                        (tickWorth * ticks)
                         ticks
                         (world.Spawns
                          |> Array.filter (fun s ->
                              colonies |> Array.exists (fun r -> r.Name = s.Pos.Room))
-                         |> Array.length)
-                | _ -> Casting.homeCopies
+                         |> Array.length),
+                    tickWorth
+                | _ -> Casting.homeCopies, 0
 
             match
                 Casting.price
@@ -334,6 +337,7 @@ let decide (context: Context) (state: State) : Intent list * State =
                     terrain
                     capacity
                     copiesOf
+                    tickWorth
             with
             | Some(set, outcome, tactic) ->
                 free.Clear()
