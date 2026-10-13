@@ -267,7 +267,7 @@ let tests =
                        <= k * Engine.bodyCost (Bodies.blockOf Bodies.Pattern.Worker)
 
             testProperty
-                "a reserver's CLAIM brings the reservation to the cap in one life, one less does not"
+                "a reserver's CLAIM leaves the reservation within a claim life of the cap, one less does not"
             <| fun (held: int) ->
                 let held = abs held % (Engine.reservationCap + 1)
                 let n = Quota.claimPartsFor held
@@ -275,9 +275,9 @@ let tests =
                 let gain parts =
                     (parts * Engine.reservePerClaim - 1) * Engine.claimLifetime
 
-                let short = Engine.reservationCap - held
+                let short = Engine.reservationCap - held - Engine.claimLifetime
 
-                n >= 2 && gain n >= short && (n = 2 || gain (n - 1) < short)
+                n >= 1 && gain n >= short && (n = 1 || gain (n - 1) < short)
 
             testPropertyWithConfig config "a harvester fits its post whatever its store holds"
             <| fun (scene: Scene) ->

@@ -54,13 +54,12 @@ let expiring (body: Body) (walk: int) : bool = body.TicksToLive <= lead body wal
 
 let private ceilDiv (n: int) (d: int) = (n + d - 1) / d
 
-/// N parts add `N × reservePerClaim` a tick while the reservation decays one.
-/// Never under two: one part only holds the reservation still.
+/// The engine drops what a part adds at the cap; one claim life short of it
+/// outlasts the successor's walk.
 let claimPartsFor (held: int) : int =
-    let perTick =
-        ceilDiv (max 0 (Engine.reservationCap - held)) Engine.claimLifetime + 1
+    let short = max 0 (Engine.reservationCap - held - Engine.claimLifetime)
 
-    max 2 (ceilDiv perTick Engine.reservePerClaim)
+    1 + ceilDiv (ceilDiv short Engine.claimLifetime) Engine.reservePerClaim
 
 let private lifeOf (pattern: Pattern) =
     if pattern.IsClaimer then
