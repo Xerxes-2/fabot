@@ -6,8 +6,8 @@ open Fabot.Core
 
 let heldRate = float Engine.heldOutputPerTick
 
-/// Inside one rank travel decides; ranks are coarse (a factor of √2) so a
-/// rank does not jitter with every unit a store gains.
+/// Ranks are coarse (a factor of √2) so a rank does not jitter with every
+/// unit a store gains.
 let private ranksPerHalving = 2.0
 
 let bandRanks = 10
@@ -45,6 +45,11 @@ let valueOfRank (rank: int) : float =
     heldRate / System.Math.Pow(2.0, float rank / ranksPerHalving)
 
 let economyRank (value: float) : int = max (urgentRank + 1) (rankOf value)
+
+/// A rank and a walk on one scale: a walk a whole life long costs the ranks
+/// from the held rate to the bottom, the only tick count the ranks have.
+let walked (rank: int) (walk: int) : int =
+    rank * Engine.creepLifetime + walk * bottomRank
 
 let flowDraw (loss: float) : float = heldRate + max 0.0 loss
 

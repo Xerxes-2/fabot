@@ -1,5 +1,5 @@
 /// Knows no Task kinds: what a body may take is `Pool.fits`, what it brings to
-/// a capacity `Pool.share`, where a Task ranks its `Priority`.
+/// a capacity `Pool.share`, where a Task ranks its `Priority` and walk.
 module Fabot.Core.Economy.Matcher
 
 open Fabot.Core.World
@@ -137,7 +137,7 @@ let matchAll
             take bi oi
 
     let bestOffer = Array.create bodies.Length -1
-    let bestRank = Array.zeroCreate<int> bodies.Length
+    let bestCost = Array.zeroCreate<int> bodies.Length
     let bestWalk = Array.zeroCreate<int> bodies.Length
     let bestLoad = Array.zeroCreate<int> bodies.Length
 
@@ -147,8 +147,8 @@ let matchAll
     let open' (bi: int) (oi: int) =
         admitsNow bi oi || (seated oi && admitsAhead bi oi)
 
-    // Best rank first, the pool's order within one, so a body walks to no offer
-    // ranked below the best it reaches.
+    // Best rank first, the pool's order within one, so no offer is walked
+    // whose rank alone costs more than the best reached.
     let ranked =
         Array.init offers id
         |> Array.sortWith (fun a b ->
@@ -164,7 +164,7 @@ let matchAll
         while k < offers do
             let oi = ranked.[k]
             let offer = pool.[oi]
-            let below = bestOffer.[bi] >= 0 && offer.Priority > bestRank.[bi]
+            let below = bestOffer.[bi] >= 0 && Price.walked offer.Priority 0 > bestCost.[bi]
             k <- if below then offers else k + 1
 
             if not below && fits bodies.[bi] offer && open' bi oi then
@@ -174,11 +174,11 @@ let matchAll
                     w >= 0
                     && (bestOffer.[bi] < 0
                         || before
-                            (offer.Priority, w, holders.[oi])
-                            (bestRank.[bi], bestWalk.[bi], bestLoad.[bi]))
+                            (Price.walked offer.Priority w, w, holders.[oi])
+                            (bestCost.[bi], bestWalk.[bi], bestLoad.[bi]))
                 then
                     bestOffer.[bi] <- oi
-                    bestRank.[bi] <- offer.Priority
+                    bestCost.[bi] <- Price.walked offer.Priority w
                     bestWalk.[bi] <- w
                     bestLoad.[bi] <- holders.[oi]
 
@@ -188,8 +188,8 @@ let matchAll
 
     // So a contested Task goes to the body that reaches it cheapest.
     let first (a: int) (b: int) =
-        let ka = (bestRank.[a], bestWalk.[a], bestLoad.[a])
-        let kb = (bestRank.[b], bestWalk.[b], bestLoad.[b])
+        let ka = (bestCost.[a], bestWalk.[a], bestLoad.[a])
+        let kb = (bestCost.[b], bestWalk.[b], bestLoad.[b])
 
         before ka kb
         || (ka = kb && System.String.CompareOrdinal(bodies.[a].Name, bodies.[b].Name) < 0)
