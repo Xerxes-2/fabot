@@ -85,6 +85,7 @@ const measures = {
   },
   // The first tick a container stands beside a source (never: Infinity).
   firstSourceContainer: (samples) => samples.find((s) => s.sourceContainers > 0)?.t ?? Infinity,
+  sourceContainersAtEnd: (samples, a) => at(samples, a.to ?? Infinity).sourceContainers,
   // The least any declared outpost netted after its bodies (`rooms`, the
   // colony's own first); none declared: -Infinity.
   poorestOutpost: (samples, a) => {

@@ -558,8 +558,7 @@ let tests =
                     let placed = Sites.place counted census.Level plan census.Budget
 
                     let held (kind: Kind) =
-                        (room.Structures
-                         |> Array.sumBy (fun s -> if s.Owner = Ours && s.Kind = kind then 1 else 0))
+                        (room.Structures |> Array.sumBy (fun s -> if s.Kind = kind then 1 else 0))
                         + (room.Sites |> Array.sumBy (fun s -> if s.Kind = kind then 1 else 0))
 
                     let tiles = placed |> List.map (fun p -> Tiles.index p.X p.Y)
@@ -594,6 +593,7 @@ let tests =
                         i.Level <= census.Level
                         && not (room.Sites |> Array.exists (fun x -> Tiles.ofPos x.Pos = t))
                         && not (tiles |> List.contains t)
+                        && not (i.Kind = Kind.Container && counted.Served.[t])
                         && clear i.Kind (standing t)
                         && held i.Kind + added < Engine.controllerStructures
                             (Kind.name i.Kind)

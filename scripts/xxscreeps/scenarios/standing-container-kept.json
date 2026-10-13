@@ -1,0 +1,9 @@
+{
+  "why": "a container standing off the plan's tile serves its source or controller, so no second one goes down beside it and the container cap refuses nothing",
+  "start": { "room": "W8N3", "seed": 1, "node": "T3" },
+  "ticks": 1500,
+  "assert": [
+    { "measure": "sourceContainersAtEnd", "max": 2 },
+    { "measure": "refusals", "max": 0 }
+  ]
+}

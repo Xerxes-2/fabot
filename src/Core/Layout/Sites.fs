@@ -28,7 +28,10 @@ type Census =
         Rampart: bool[]
         Site: bool[]
         Occupied: bool[]
-        /// Sites too: CONTROLLER_STRUCTURES counts them.
+        /// Tiles whose container's rock, else controller, has one already:
+        /// one standing off the plan's tile is kept, never doubled.
+        Served: bool[]
+        /// Every owner's, and sites: CONTROLLER_STRUCTURES counts them all.
         Held: Dictionary<Kind, int>
         /// One under a creep is not counted, so it never holds back the rest.
         Pending: int
@@ -59,19 +62,44 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
         | Kind.Rampart -> setAt t rampart true
         | _ -> setAt t solid true
 
-        if s.Owner.IsOurs then
-            add s.Kind
+        add s.Kind
 
     let mutable pending = 0
 
     for s in room.Sites do
         setAt (Tiles.ofPos s.Pos) site true
+        add s.Kind
 
         if s.Owner.IsOurs then
-            add s.Kind
-
             if standable s.Kind || not (at (Tiles.ofPos s.Pos) occupied) then
                 pending <- pending + 1
+
+    let containers =
+        [|
+            for s in room.Structures do
+                if s.Kind.IsContainer then
+                    yield s.Pos
+            for s in room.Sites do
+                if s.Kind.IsContainer then
+                    yield s.Pos
+        |]
+
+    let served = Array.create Tiles.count false
+
+    room.Controller
+    |> Option.filter (fun _ -> containers |> Array.exists (Atlas.isBuffer room))
+    |> Option.iter (fun c ->
+        for t in Tiles.within Engine.upgradeRange (Tiles.ofPos c.Pos) do
+            setAt t served true)
+
+    for rock in
+        Array.append
+            (room.Sources |> Array.map (fun s -> s.Pos))
+            (room.Minerals |> Array.map (fun m -> m.Pos)) do
+        let kept = containers |> Array.exists (Pos.within 1 rock)
+
+        for t in Tiles.within 1 (Tiles.ofPos rock) do
+            setAt t served kept
 
     {
         Solid = solid
@@ -79,6 +107,7 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
         Rampart = rampart
         Site = site
         Occupied = occupied
+        Served = served
         Held = held
         Pending = pending
     }
@@ -123,6 +152,7 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
                     not (at t census.Solid))
             && (standable item.Kind || not (at t census.Occupied))
             && not (taken.Contains t)
+            && not (item.Kind.IsContainer && at t census.Served)
             && not (item.Kind.IsRoad && at t census.Road)
             && heldOf census item.Kind + addedOf item.Kind < Engine.controllerStructures
                 (Kind.name item.Kind)

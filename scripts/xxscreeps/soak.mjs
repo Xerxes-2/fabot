@@ -64,7 +64,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|N4|N5|E1] [--invaders room:every[:first],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|N5|E1] [--invaders room:every[:first],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -105,6 +105,8 @@ const NODES = {
   N1: { level: 1, stored: 0, without: [] },
   N2: { level: 3, stored: 0, without: ["rampart"] },
   N3: { level: 4, stored: 5000, without: ["rampart"] },
+  // N3 as another bot built it: each container on another tile serving its source or controller.
+  T3: { level: 4, stored: 5000, without: ["rampart"], moved: true },
   N4: { level: 5, stored: 50000, without: ["link", "rampart"] },
   E1: { level: 5, stored: 50000, without: ["link", "rampart"], outposts: true },
   N5: { level: 6, stored: 100000, without: ["rampart"] },
@@ -244,6 +246,18 @@ if (node && node.level > 1) {
   });
   if (res.status !== 0) fail(`scripts/plan failed: ${res.stderr}`);
   built = JSON.parse(res.stdout).filter((s) => !node.without.includes(s.kind));
+  if (node.moved) {
+    const { terrain, sources, controller } = JSON.parse(ground);
+    const range = (a, [x, y]) => Math.max(Math.abs(a.x - x), Math.abs(a.y - y));
+    const used = new Set(built.map((s) => s.y * 50 + s.x));
+    for (const c of built.filter((s) => s.kind === "container")) {
+      const rock = sources.find((r) => range(c, r) === 1);
+      const serves = (t) => (rock ? range(t, rock) === 1 : range(t, controller) <= 3 && !sources.some((r) => range(t, r) <= 1));
+      const tiles = Array.from({ length: 2304 }, (_, i) => ({ x: (i % 48) + 1, y: Math.floor(i / 48) + 1 }));
+      const seat = tiles.find((t) => serves(t) && terrain[t.y * 50 + t.x] !== "1" && !used.has(t.y * 50 + t.x) && range(t, rock ?? controller) > 0);
+      if (seat) [c.x, c.y] = [seat.x, seat.y], used.add(seat.y * 50 + seat.x);
+    }
+  }
   writeFileSync(join(world, "node.json"), JSON.stringify(built));
   [colony.x, colony.y] = [built[0].x, built[0].y];
 }
