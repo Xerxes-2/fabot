@@ -4,6 +4,7 @@
   "ticks": 12000,
   "assert": [
     { "measure": "poorestOutpost", "min": 20000 },
-    { "measure": "raidsKilled", "min": 4 }
+    { "measure": "raidsKilled", "min": 4 },
+    { "measure": "mostCast", "max": 6000 }
   ]
 }

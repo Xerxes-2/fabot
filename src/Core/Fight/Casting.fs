@@ -23,10 +23,8 @@ let private blocks =
 /// not a yield, bounds what it asks (§6.2).
 let homeCopies (_: Exchange.Body) = 2
 
-let copiesWithin (worth: int) (ticks: int) (spawns: int) (body: Exchange.Body) =
-    min
-        (worth / Engine.bodyCost body)
-        (spawns * ticks / (Engine.spawnTicksPerPart * List.length body))
+let copiesWithin (worth: int) (spawnTicks: int) (body: Exchange.Body) =
+    min (worth / Engine.bodyCost body) (spawnTicks / (Engine.spawnTicksPerPart * List.length body))
 
 let affordable (capacity: int) : Exchange.Body list =
     blocks

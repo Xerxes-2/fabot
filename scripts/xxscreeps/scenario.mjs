@@ -57,11 +57,13 @@ const scenarios = (names.length ? names : all)
 // Ticks are counted from the bot's first, so a window means the same on every start.
 // Each engagement the run priced, as `prediction.mjs` reads a row; one never
 // priced predicted nothing.
-const engagementsOf = (dir) =>
+const rowsOf = (dir) =>
   readFileSync(join(dir, "engagements.jsonl"), "utf8")
     .split("\n")
     .filter(Boolean)
-    .map((l) => JSON.parse(l))
+    .map((l) => JSON.parse(l));
+const engagementsOf = (dir) =>
+  rowsOf(dir)
     .filter((e) => e.predicted)
     .map((e) => ({ p: e.predicted, a: engagement(e) }));
 const samplesOf = (dir) => readFileSync(join(dir, "samples.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -103,6 +105,8 @@ const measures = {
   refusals: (_, __, dir) => Object.values(JSON.parse(readFileSync(join(dir, "refusals.json"), "utf8"))).reduce((n, c) => n + c, 0),
   // Raids an answered engagement saw die without disengaging.
   raidsKilled: (_, __, dir) => engagementsOf(dir).filter(({ a }) => a.won === true).length,
+  // The most energy one engagement cast, of the bodies that stood in it.
+  mostCast: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.cast ?? 0)),
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
   // The most levels the room stood below the highest it held before (`who`:
   // an opponent's room, else ours); a room lost stands at level 0.

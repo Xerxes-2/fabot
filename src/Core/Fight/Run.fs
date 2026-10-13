@@ -281,16 +281,23 @@ let decide (context: Context) (state: State) : Intent list * State =
 
             let joining = List.ofSeq free
 
-            let bodies =
+            let fielding =
                 (Set.toList e.Ours @ joining)
                 |> List.filter ours.ContainsKey
-                |> List.map (fun n -> Casting.fighterOf ours.[n])
+                |> List.map (fun n -> ours.[n])
 
-            let asked =
+            let bodies = fielding |> List.map Casting.fighterOf
+
+            let askedBodies =
                 casts
                 |> Seq.filter (fun c -> c.Engagement = e.Id)
-                |> Seq.map (fun c -> Exchange.Fighter.cast c.Body)
+                |> Seq.map _.Body
                 |> List.ofSeq
+
+            let asked = askedBodies |> List.map Exchange.Fighter.cast
+
+            let coreHits =
+                raid |> Array.filter (fun h -> cores.Contains h.Id) |> Array.sumBy _.Hits
 
             let colonies = coloniesOf e
             let capacity = capacityOf e
@@ -320,13 +327,24 @@ let decide (context: Context) (state: State) : Intent list * State =
                         |> Array.filter (fun h -> not (cores.Contains h.Id))
                         |> Array.fold (fun most h -> max most h.TicksToLive) 0
 
+                    let spawns =
+                        world.Spawns
+                        |> Array.filter (fun s ->
+                            colonies |> Array.exists (fun r -> r.Name = s.Pos.Room))
+                        |> Array.length
+
+                    let razing = Casting.razer capacity coreHits []
+
+                    let fielded =
+                        (fielding |> List.map (fun c -> c.Body |> Array.map _.Kind |> List.ofArray))
+                        @ askedBodies
+                        |> List.filter (fun b -> not (List.contains b razing))
+                        |> List.sumBy Engine.bodyCost
+
                     Casting.copiesWithin
-                        (tickWorth * ticks)
-                        ticks
-                        (world.Spawns
-                         |> Array.filter (fun s ->
-                             colonies |> Array.exists (fun r -> r.Name = s.Pos.Room))
-                         |> Array.length),
+                        (tickWorth * ticks - fielded)
+                        (spawns * ticks
+                         - Engine.spawnTicksPerPart * List.sumBy List.length askedBodies),
                     tickWorth
                 | _ -> Casting.homeCopies, 0
 
@@ -347,7 +365,7 @@ let decide (context: Context) (state: State) : Intent list * State =
                     set
                     @ Casting.razer
                         capacity
-                        (raid |> Array.filter (fun h -> cores.Contains h.Id) |> Array.sumBy _.Hits)
+                        coreHits
                         (bodies @ asked @ List.map Exchange.Fighter.cast set)
 
                 set

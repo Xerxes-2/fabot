@@ -367,7 +367,9 @@ function sample(t, time, room) {
   return row;
 }
 
-// What `prediction.mjs` reads an engagement's outcome from.
+// What `prediction.mjs` reads an engagement's outcome from; `cast`: the energy
+// of the bodies it asked that stood in it.
+const LETTER_COST = Object.fromEntries(Object.entries(PART_COST).map(([t, c]) => [t === "claim" ? "K" : t[0].toUpperCase(), c]));
 const open = new Map();
 const engagementsOut = fs.openSync(join(out, "engagements.jsonl"), "w");
 const allRooms = await shard.data.sMembers("rooms");
@@ -379,7 +381,7 @@ async function standing(ids) {
   return false;
 }
 async function closed(e, t) {
-  const { members, ...rest } = e;
+  const { members, casts, ...rest } = e;
   fs.writeSync(engagementsOut, JSON.stringify({ ...rest, closed: t, outlived: t === null || (await standing(members)) }) + "\n");
 }
 async function engaged(t, time, rooms) {
@@ -387,8 +389,13 @@ async function engaged(t, time, rooms) {
   const now = new Set();
   for (const e of fight.engagements ?? []) {
     now.add(e.id);
-    const rec = open.get(e.id) ?? { id: e.id, room: e.room, opened: t, members: new Set(), answered: false, gaveUp: false, disengaged: false, contact: null, seen: null };
+    const rec = open.get(e.id) ?? { id: e.id, room: e.room, opened: t, members: new Set(), answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, casts: new Map(), cast: 0 };
     open.set(e.id, rec);
+    for (const c of (fight.casts ?? []).filter((c) => c.engagement === e.id)) rec.casts.set(c.name, c.body);
+    for (const n of e.ours.filter((n) => rec.casts.has(n))) {
+      rec.cast += [...rec.casts.get(n)].reduce((sum, p) => sum + LETTER_COST[p], 0);
+      rec.casts.delete(n);
+    }
     for (const m of (fight.groups ?? []).find((g) => g.id === e.group)?.members ?? []) rec.members.add(m);
     rec.predicted = e.predicted;
     rec.dead = e.lost;
