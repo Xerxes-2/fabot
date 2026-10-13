@@ -213,6 +213,8 @@ The task pool + matcher is right for the economy: tasks are independent, bodies
 interchangeable, and re-matching on a key change is cheap and does not
 oscillate (stickiness via `assignments` is enough). It becomes **one world
 pool**; a creep takes the nearest task it fits whatever colony spawned it.
+One exception: a colony whose storage can fill its spawn ring keeps the ring
+to bodies in its own room, since rank before walk sent loads across colonies.
 
 **The objective is long-run growth, by simple rules first.** A slower start
 that ends higher is the better economy; an early regression is accepted when

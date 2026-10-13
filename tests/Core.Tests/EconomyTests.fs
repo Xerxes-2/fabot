@@ -108,6 +108,7 @@ let private offerGen (i: int) : Gen<Offer> =
                 Capacity = capacity
                 Draw = draw
                 Post = None
+                Shut = Set.empty
             }
     }
 
@@ -296,6 +297,7 @@ let tests =
                             Capacity = Capacity.Seated(1, 1, 1)
                             Draw = Draw.Open
                             Post = None
+                            Shut = Set.empty
                         })
 
             testPropertyWithConfig config "an upgrader fits only an upgrade"

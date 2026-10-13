@@ -41,6 +41,9 @@ type Offer =
         Draw: Draw
         /// The tile a seated offer's garrison digs from.
         Post: Pos option
+        /// Rooms a body may not take it from: another colony's, whose own
+        /// stock fills it.
+        Shut: Set<string>
     }
 
 let private carried (body: Body) (resource: Resource) = Store.amountOf resource body.Store
@@ -87,7 +90,10 @@ let fits (body: Body) (offer: Offer) : bool =
     | Withdraw _ when not offer.Draw.IsOpen && body.Work = 0 -> false
     | Withdraw _
     | Pickup _ -> body.Carry > 0 && halfEmpty
-    | Refill(_, resource) -> body.Carry > 0 && carried body resource > 0
+    | Refill(_, resource) ->
+        body.Carry > 0
+        && carried body resource > 0
+        && not (offer.Shut.Contains body.Pos.Room)
     | Build _
     | Repair _ -> body.Work > 0 && body.Carry > 0 && (body.Energy > 0 || offer.Draw.IsBuffer)
     | Reserve _
@@ -163,6 +169,7 @@ let private offer task (target: Pos) (value: float) capacity =
         Capacity = capacity
         Draw = Draw.Open
         Post = None
+        Shut = Set.empty
     }
 
 let private insideDeadline (c: Controller) =
@@ -202,6 +209,8 @@ let pool (derived: Derived) : Offer[] =
         float (derived.Grounds |> Array.truncate n |> Array.sumBy (fun g -> g.Income))
         / float (max 1 n)
 
+    let colonyRooms = derived.Colonies |> Array.map (fun c -> c.Room) |> Set.ofArray
+
     derived.Grounds
     |> Array.iteri (fun i ground ->
         let colony =
@@ -231,6 +240,16 @@ let pool (derived: Derived) : Offer[] =
 
         let mutable hungriest = 0.0
 
+        let shut =
+            if
+                ground.Stores
+                |> Array.exists (fun s ->
+                    s.Owned && s.Energy >= (ground.Refills |> Array.sumBy (fun r -> r.Free)))
+            then
+                Set.remove ground.Room colonyRooms
+            else
+                Set.empty
+
         for r in ground.Refills do
             let value =
                 if r.Kind.IsTower then
@@ -239,7 +258,11 @@ let pool (derived: Derived) : Offer[] =
                     ringWorth
 
             hungriest <- max hungriest value
-            offers.Add(offer (Refill(r.Id, Energy)) r.Pos value (Capacity.Load r.Free))
+
+            offers.Add
+                { offer (Refill(r.Id, Energy)) r.Pos value (Capacity.Load r.Free) with
+                    Shut = shut
+                }
 
         let draw =
             if ground.Buffer |> Option.exists (fun b -> b.Energy > 0) then
