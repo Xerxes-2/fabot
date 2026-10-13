@@ -155,12 +155,15 @@ let private insideDeadline (c: Controller) =
 let siteRank (_: Derived) (_: SiteFact) : int = Price.surplusRank
 
 /// A rampart under `rampartSafe` is priced as the flow, so a fresh one is
-/// not lost.
+/// not lost. A structure that outlives a creep's life loses nothing while it
+/// waits for the next, so it waits behind the sites.
 let repairValue (r: RepairFact) : float =
     match r.Kind with
     | Kind.Rampart when r.Hits <= rampartSafe -> Price.flowDraw 0.0
-    | Kind.Rampart -> Price.valueOfRank Price.surplusRank
-    | _ -> Price.rebuildAtRisk r.Rebuild r.Hits r.Decay
+    | Kind.Rampart -> Price.valueOfRank (Price.surplusRank + 1)
+    | _ when float r.Hits < r.Decay * float Engine.creepLifetime ->
+        Price.rebuildAtRisk r.Rebuild r.Hits r.Decay
+    | _ -> Price.valueOfRank (Price.surplusRank + 1)
 
 let pool (derived: Derived) : Offer[] =
     let offers = ResizeArray<Offer>()

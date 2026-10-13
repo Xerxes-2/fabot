@@ -73,6 +73,14 @@ const within = (samples, a) => samples.filter((s) => s.t >= (a.from ?? 0) && s.t
 const measures = {
   // Energy lost to pile decay.
   decayed: (samples, a) => at(samples, a.to ?? Infinity).ledger.decayed - at(samples, a.from ?? 0).ledger.decayed,
+  // Roads and containers lost between samples, over every room the soak follows.
+  decayedAway: (samples, a) => {
+    const standing = (s) => Object.values(s.rooms).reduce((n, r) => n + r.roads + r.containers, 0);
+    const seen = within(samples, a);
+    return seen.slice(1).reduce((n, s, i) => n + Math.max(0, standing(seen[i]) - standing(s)), 0);
+  },
+  // Energy spent on construction.
+  build: (samples, a) => at(samples, a.to ?? Infinity).ledger.build - at(samples, a.from ?? 0).ledger.build,
   // Harvesters seen digging from more than one tile.
   harvestersOnTwoPosts: (samples, a) => {
     const tiles = new Map();

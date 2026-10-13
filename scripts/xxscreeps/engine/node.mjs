@@ -2,11 +2,11 @@
 // under xxscreeps' own loader, cwd the world directory:
 //   xxscreeps.js file://…/node.mjs ground <room>
 //     prints the room's ground as `scripts/plan` reads it
-//   xxscreeps.js file://…/node.mjs stand <room> <structures.json> <level> <stored> <username>
+//   xxscreeps.js file://…/node.mjs stand <room> <structures.json> <level> <stored> <username> [<worn>]
 //     after `manage bot add --spawn` stood the first spawn: the controller
 //     at <level> (progress 0, its downgrade timer full, the claim's safe
 //     mode kept and one more in stock for each level skipped), every other structure of the list ours at full hits on its
-//     tile, and <stored> energy in the storage.
+//     tile (its roads and containers at <worn> of them, default 1), and <stored> energy in the storage.
 //   xxscreeps.js file://…/node.mjs declare <room> <username> <declarations.json>
 //     <username>'s Memory as `{ v2: { declarations } }`, what the bot reads
 //     its declarations from (src/App/Wire.fs); <room> is not read.
@@ -28,6 +28,7 @@ import { utf16ToBuffer } from "xxscreeps/utility/string.js";
 import { Source } from "xxscreeps/mods/classic/source/source.js";
 import { Mineral } from "xxscreeps/mods/classic/mineral/mineral.js";
 import * as Extension from "xxscreeps/mods/classic/spawn/extension.js";
+import * as Spawn from "xxscreeps/mods/classic/spawn/spawn.js";
 import * as Tower from "xxscreeps/mods/classic/defense/tower.js";
 import * as Storage from "xxscreeps/mods/classic/logistics/storage.js";
 import * as Container from "xxscreeps/mods/classic/resource/container.js";
@@ -58,13 +59,14 @@ if (mode === "ground") {
     }),
   );
 } else if (mode === "stand") {
-  const [listPath, levelArg, storedArg, username] = rest;
+  const [listPath, levelArg, storedArg, username, wornArg = "1"] = rest;
   const level = Number(levelArg);
   const ours = await User.findUserByName(db, username);
   const list = JSON.parse(fs.readFileSync(listPath, "utf8"));
   const create = {
     extension: (pos) => Extension.create(pos, level, ours),
     tower: (pos) => Tower.create(pos, ours),
+    spawn: (pos, i) => Spawn.create(pos, ours, `Node${i}`),
     storage: (pos) => Storage.create(pos, ours),
     container: (pos) => Container.create(pos),
     road: (pos) => Road.create(pos),
@@ -77,16 +79,17 @@ if (mode === "ground") {
   runWithState(state, () =>
     runAsUser(ours, () => {
       const spawns = [...room["#objects"]].filter((o) => o.structureType === "spawn");
-      const [first, ...others] = list.filter((s) => s.kind === "spawn");
-      if (spawns.length !== 1 || spawns[0].pos.x !== first.x || spawns[0].pos.y !== first.y || others.length > 0)
+      const [first] = list.filter((s) => s.kind === "spawn");
+      if (spawns.length !== 1 || spawns[0].pos.x !== first.x || spawns[0].pos.y !== first.y)
         throw new Error(`${roomName}: the plan's first spawn is not the one standing`);
       // Ids in list order, so the engine's tie-breaks by object order repeat.
       let nextId = 0;
-      for (const s of list.filter((s) => s.kind !== "spawn")) {
+      for (const s of list.filter((s) => s !== first)) {
         if (!create[s.kind]) throw new Error(`no ${s.kind} in a node`);
-        const object = create[s.kind](new RoomPosition(s.x, s.y, roomName));
+        const object = create[s.kind](new RoomPosition(s.x, s.y, roomName), nextId);
         object.id = (++nextId).toString(16).padStart(24, "0");
         if (s.kind === "storage") object.store["#add"]("energy", Number(storedArg));
+        if (s.kind === "road" || s.kind === "container") object.hits = Math.ceil(object.hits * Number(wornArg));
         room["#insertObject"](object);
       }
       room["#flushObjects"](state);
