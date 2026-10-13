@@ -21,6 +21,7 @@ type Facts =
         Asked: bool
         /// The group stands in a room we hold or work.
         Threatens: bool
+        Clear: bool
     }
 
 let private enter (phase: Phase) (time: int) (e: Engagement) : Engagement =
@@ -51,8 +52,10 @@ let step (facts: Facts) (e: Engagement) : Engagement option =
     let toward (phase: Phase) = Some(enter phase facts.Time e)
     let quit () = Some(giveUp facts.Held facts.Time e)
 
+    // Losing sight is not the raid leaving (owner's call); a home is always in sight.
     match facts.Group with
-    | None -> None
+    | None when facts.Held || facts.Clear -> None
+    | None -> if e.Phase.IsDisengaging && facts.Home then None else Some e
     | Some _ when e.Phase.IsDisengaging -> if facts.Home then None else Some e
     | Some _ when e.Lost > e.Budget -> quit ()
     | Some g ->

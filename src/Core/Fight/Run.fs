@@ -153,6 +153,7 @@ let decide (context: Context) (state: State) : Intent list * State =
             Threatens =
                 group
                 |> Option.exists (fun g -> homes.Contains g.Room || worked.Contains g.Room)
+            Clear = Sightings.clear context.Sightings world.Time e.Room
         }
 
     let stepped =
@@ -404,20 +405,27 @@ let decide (context: Context) (state: State) : Intent list * State =
             | None -> Defend.giveUp (homes.Contains e.Room) world.Time e
         | _ -> e
 
-    // A home's Defend left open holds the home: a newcomer inside it is its
-    // target now, with a fresh budget, so a second raid is not left to towers.
+    // A Defend left open holds its room: a newcomer inside it is its target
+    // now, with a fresh budget, where its own group is not there (a home's,
+    // so a second raid is not left to towers) or was lost from sight.
     let rehomed (e: Engagement) =
-        let inHome (id: int) =
+        let inRoom (id: int) =
             byId.ContainsKey id
             && byId.[id].Room = e.Room
             && byId.[id].LastSeen = world.Time
+
+        let gone =
+            if homes.Contains e.Room then
+                not (inRoom e.Group)
+            else
+                not (byId.ContainsKey e.Group)
 
         match
             events
             |> List.tryPick (fun event ->
                 match event with
                 | Tracker.Event.Newcomer id when
-                    homes.Contains e.Room && inHome id && not (inHome e.Group)
+                    gone && inRoom id && byId.[id].Members |> Set.exists armed.Contains
                     ->
                     Some id
                 | _ -> None)
@@ -480,10 +488,16 @@ let decide (context: Context) (state: State) : Intent list * State =
     let act (c: Creep) =
         match engagedIn.TryGetValue c.Name with
         | true, e ->
+            // A group lost from sight is sought in its room, which brings it back in sight.
             let centre =
                 match byId.TryGetValue e.Group with
                 | true, g -> g.Centre
-                | _ -> c.Pos
+                | _ ->
+                    {
+                        Room = e.Room
+                        X = Engine.roomSide / 2
+                        Y = Engine.roomSide / 2
+                    }
 
             let order = e.Plan.Order
 
