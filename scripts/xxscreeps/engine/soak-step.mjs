@@ -96,15 +96,14 @@ let captureLog;
   for (const line of lines)
     if (line.startsWith("#capture ")) fs.writeSync((captureLog ??= fs.openSync(join(out, "capture.jsonl"), "w")), line.slice(9) + "\n");
     else {
-      if (consoleTick !== null && /^ERR Script (timed out|was disposed)/.test(line)) lost.add(consoleTick);
+      if (/^ERR Script (timed out|was disposed)/.test(line)) lost.add(consoleTick);
       fs.writeSync(consoleLog, `[${consoleTick ?? "?"}] ${line}\n`);
     }
 });
 // Ticks lost: our bot's tick cut off by its time limit (its CPU or the
-// host's load), or the engine abandoning intents in one of its rooms; the
-// first, which builds the isolate, excepted. A run holding one is no
-// measurement. An opponent's room alone is left out: the engine abandons one
-// now and then on a quiet host.
+// host's load), or the engine abandoning intents in one of its rooms. A run
+// holding one is no measurement. An opponent's room alone is left out: the
+// engine abandons one now and then on a quiet host.
 const lost = new Set();
 const serverLog = fs.openSync(join(out, "server.log"), "r");
 let serverRead = 0;
@@ -465,6 +464,7 @@ await svc.publish({ type: "pause" });
 let time = await nextTick(120_000);
 clearInterval(spam);
 if (time === null) throw new Error("the engine ran no first tick in 120 s");
+if (lost.delete(null)) lost.add(time);
 
 const samplesOut = fs.openSync(join(out, "samples.jsonl"), "w");
 const faultsOut = fs.openSync(join(out, "faults.jsonl"), "w");
