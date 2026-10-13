@@ -37,7 +37,6 @@ let matchAll
 
     let held = Array.zeroCreate<int> offers
     let holders = Array.zeroCreate<int> offers
-    let garrisoned = Array.zeroCreate<int> offers
     let assigned = Array.create bodies.Length -1
 
     let seated (oi: int) =
@@ -67,21 +66,16 @@ let matchAll
                 || (walk a oi = walk b oi
                     && System.String.CompareOrdinal(bodies.[a].Name, bodies.[b].Name) < 0)))
 
-    let admitsNow (bi: int) (oi: int) =
-        let seatedAlike =
-            if garrison bi oi then
-                garrisoned.[oi]
-            else
-                holders.[oi] - garrisoned.[oi]
+    // So a successor walks out while its predecessor still works.
+    let outlasts (holder: int) (bi: int) (oi: int) =
+        bodies.[holder].TicksToLive > walk bi oi
 
-        admits pool.[oi] (garrison bi oi) held.[oi] seatedAlike
-
-    let admitsAhead (bi: int) (oi: int) =
+    let admitsOver (bi: int) (oi: int) (counts: int -> bool) =
         let mutable seatedAlike = 0
         let mutable sum = 0
 
         for b in 0 .. bodies.Length - 1 do
-            if assigned.[b] = oi && b <> bi && ahead oi b bi then
+            if assigned.[b] = oi && b <> bi && outlasts b bi oi && counts b then
                 sum <- sum + share bodies.[b] pool.[oi]
 
                 if garrison b oi = garrison bi oi then
@@ -89,22 +83,25 @@ let matchAll
 
         admits pool.[oi] (garrison bi oi) sum seatedAlike
 
+    let admitsNow (bi: int) (oi: int) =
+        if seated oi then
+            admitsOver bi oi (fun _ -> true)
+        else
+            admits pool.[oi] false held.[oi] 0
+
+    let admitsAhead (bi: int) (oi: int) =
+        admitsOver bi oi (fun b -> ahead oi b bi)
+
     let take (bi: int) (oi: int) =
         assigned.[bi] <- oi
         held.[oi] <- held.[oi] + share bodies.[bi] pool.[oi]
         holders.[oi] <- holders.[oi] + 1
-
-        if garrison bi oi then
-            garrisoned.[oi] <- garrisoned.[oi] + 1
 
     let release (bi: int) =
         let oi = assigned.[bi]
         assigned.[bi] <- -1
         held.[oi] <- held.[oi] - share bodies.[bi] pool.[oi]
         holders.[oi] <- holders.[oi] - 1
-
-        if garrison bi oi then
-            garrisoned.[oi] <- garrisoned.[oi] - 1
 
     // Lightest first keeps whole a set the match admitted while nothing
     // changed; a garrison on its post first, so a newcomer never displaces it.
@@ -225,19 +222,15 @@ let matchAll
                         elif ahead oi b a then 1
                         else 0)
 
-                let mutable posted = 0
-                let mutable n = 0
-                let mutable sum = 0
+                let admitted = ResizeArray<int>()
 
                 for b in ordered do
-                    let seatedAlike = if garrison b oi then posted else n - posted
+                    let over = admitted |> Seq.filter (fun a -> outlasts a b oi) |> Array.ofSeq
+                    let sum = over |> Array.sumBy (fun a -> share bodies.[a] pool.[oi])
+                    let alike = over |> Array.filter (fun a -> garrison a oi = garrison b oi)
 
-                    if admits pool.[oi] (garrison b oi) sum seatedAlike then
-                        n <- n + 1
-                        sum <- sum + share bodies.[b] pool.[oi]
-
-                        if garrison b oi then
-                            posted <- posted + 1
+                    if admits pool.[oi] (garrison b oi) sum alike.Length then
+                        admitted.Add b
                     else
                         released.Add b
 
