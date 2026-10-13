@@ -1,1 +1,1 @@
-export const manifest = { dependencies: [], provides: ["processor"] };
+export const manifest = { dependencies: [], provides: ["driver", "processor"] };

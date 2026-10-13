@@ -58,7 +58,10 @@ for (const s of samples) {
   const context = { shard, state, didUpdate() {}, setActive() {}, wakeAt() {}, sendRoomIntent() {}, task: (t) => tasks.push(t) };
   runWithState(state, () =>
     runAsUser(users.ours, () => {
+      // Removed before any insert: a flush fills each hole with the last
+      // object, and a generated room's count is random.
       for (const object of [...room["#objects"]]) room["#removeObject"](object);
+      room["#flushObjects"](state);
       room["#user"] = null;
       room["#level"] = 0;
       const controller = createRoomObject(new StructureController(), new RoomPosition(s.controller.x, s.controller.y, s.room));

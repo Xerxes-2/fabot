@@ -19,7 +19,7 @@
 // "opponents"? (soak's --opponents) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick.
-// Exits non-zero when a bound fails or a soak does.
+// Exits non-zero when a bound fails or a soak does, or loses ticks twice.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -161,13 +161,17 @@ const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").up
 const seats = (opponents = []) => opponents.map(({ config, ...seat }) => seat);
 const recipe = ({ room, seed, late = 0, node, invaders, core, unsafe, ended }, opponents) =>
   `${room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${tag(opponents)}`;
-// A cached world is replayed only by the opponents' code that played it.
-const codeOf = (bot) => {
-  const path = resolve(REPO, bot);
-  const files = statSync(path).isDirectory() ? readdirSync(path).sort().map((f) => join(path, f)) : [path];
-  return files.reduce((h, f) => h.update(f).update(readFileSync(f)), createHash("sha256")).digest("hex").slice(0, 8);
-};
-const worldOf = (start) => `${recipe(start, seats(start.opponents).map((s) => ({ ...s, code: codeOf(s.bot === "@bot" ? bot : s.bot) })))}-t${start.at}-${start.bundle}`;
+// A cached world is replayed only by the opponents' code that played it, and
+// the engine mods and world scripts it was stood and played under.
+const codeOf = (...paths) =>
+  paths
+    .map((p) => resolve(REPO, p))
+    .flatMap((path) => (statSync(path).isDirectory() ? readdirSync(path).sort().map((f) => join(path, f)) : [path]))
+    .reduce((h, f) => h.update(f).update(readFileSync(f)), createHash("sha256"))
+    .digest("hex")
+    .slice(0, 8);
+const harness = codeOf(...["seed", "waves", "core", "colony.mjs", "node.mjs", "live.mjs"].map((f) => join(HERE, "engine", f)));
+const worldOf = (start) => `${recipe(start, seats(start.opponents).map((s) => ({ ...s, code: codeOf(s.bot === "@bot" ? bot : s.bot) })))}-t${start.at}-${start.bundle}-h${harness}`;
 const keyOf = (start) => `scenario-${basename(bot, ".js")}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}`;
 const runs = new Map();
 for (const s of scenarios) {
@@ -230,22 +234,40 @@ const play = async ({ name, start, ticks }) => {
   const world = join(REPO, "soak-runs/worlds", worldOf(start));
   if (!existsSync(world)) {
     const code = await soak([...recipe, "--ticks", String(start.at), "--run", `world-${worldOf(start)}`, "--bot", bundleAt(start.bundle), "--save", world, ...opponentsOf(`world-${name}`, start.opponents && seats(start.opponents))]);
-    if (code !== 0) return code;
+    if (code !== 0) {
+      rmSync(world, { recursive: true, force: true });
+      return code;
+    }
   }
   return soak(["--room", start.room, "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, "--from", world, ...opponentsOf(name, start.opponents)]);
 };
-const queue = [...runs.values()];
-console.error(`${scenarios.length} scenarios in ${queue.length} soaks, ${jobs} at a time`);
-await Promise.all(
-  Array.from({ length: jobs }, async () => {
-    for (let run; (run = queue.shift()); ) run.code = await play(run);
-  }),
-);
+const playAll = (list, jobs) => {
+  const queue = [...list];
+  return Promise.all(
+    Array.from({ length: jobs }, async () => {
+      for (let run; (run = queue.shift()); ) run.code = await play(run);
+    }),
+  );
+};
+console.error(`${scenarios.length} scenarios in ${runs.size} soaks, ${jobs} at a time`);
+await playAll(runs.values(), jobs);
+// A soak that lost ticks (soak.mjs's exit 3) measured nothing: once more, fewer at a time.
+const LOST = 3;
+const invalid = [...runs.values()].filter((r) => r.code === LOST);
+if (invalid.length) {
+  console.error(`${invalid.length} soaks lost ticks; again, ${Math.max(1, jobs >> 1)} at a time`);
+  await playAll(invalid, Math.max(1, jobs >> 1));
+}
 
 let failed = 0;
 for (const s of scenarios) {
   const run = runs.get(keyOf(s.start));
   const dir = join(REPO, "soak-runs", run.name);
+  if (run.code === LOST) {
+    failed++;
+    console.log(`INVALID ${s.name}: ticks lost on both tries (a script timeout or abandoned intents); see ${dir}/lost.json`);
+    continue;
+  }
   if (run.code !== 0) {
     failed++;
     console.log(`FAIL ${s.name}: the soak failed (exit ${run.code}); see ${dir}/server.log`);

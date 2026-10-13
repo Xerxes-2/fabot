@@ -54,7 +54,7 @@
 // Needs `npm run build` (dist/main.js) and `npm run xx -- setup` (the engine
 // and its template world, under $FABOT_XXSCREEPS_HOME). Writes
 // soak-runs/<run>/ (outside build/, which `npm run build` wipes):
-// samples.jsonl, faults.jsonl, refusals.json, levels.json, slow.json, observe.json,
+// samples.jsonl, faults.jsonl, refusals.json, levels.json, slow.json, lost.json, observe.json,
 // cpu.jsonl, console.log and server.log; prints the samples as a table and a
 // summary.
 import { spawn, spawnSync } from "node:child_process";
@@ -354,6 +354,7 @@ const refusals = JSON.parse(readFileSync(join(out, "refusals.json"), "utf8"));
 // Steps the engine took past the step's wait (a slow or abandoned bot tick).
 const slow = JSON.parse(readFileSync(join(out, "slow.json"), "utf8"));
 const levels = JSON.parse(readFileSync(join(out, "levels.json"), "utf8"));
+const lost = JSON.parse(readFileSync(join(out, "lost.json"), "utf8"));
 
 const columns = [
   ["t", (s) => s.t],
@@ -404,3 +405,8 @@ if (Object.keys(last.rooms).length > 1)
     );
 for (const f of faults.slice(0, 10)) console.log(`  fault t${f.tick} ${f.where}: ${f.message}`);
 if (faults.length > 10) console.log(`  … ${faults.length - 10} more in ${join(out, "faults.jsonl")}`);
+// Exit 3: no measurement, which `scenario.mjs` reruns.
+if (lost.length) {
+  console.error(`${run}: no measurement: ${lost.length} ticks lost to a script timeout or abandoned intents (${lost.slice(0, 10).join(", ")}${lost.length > 10 ? ", …" : ""}); see lost.json`);
+  process.exit(3);
+}

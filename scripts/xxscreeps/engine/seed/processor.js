@@ -38,3 +38,18 @@ RoomProcessor.prototype.process = function (...args) {
   this.intents = new Map([...this.intents].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
   return processRoom.apply(this, args);
 };
+
+// A body crossing into a room is an intent its old room sent, and the rooms
+// sending to one room finish in the order timing gives: the new room takes
+// them in their content's order.
+const swap = (target, key, value) => new Proxy(target, { get: (t, k) => (k === key ? value : typeof t[k] === "function" ? t[k].bind(t) : t[k]) });
+const finalizeRoom = RoomProcessor.prototype.finalize;
+RoomProcessor.prototype.finalize = async function (...args) {
+  const shard = this.shard;
+  this.shard = swap(shard, "scratch", swap(shard.scratch, "lRange", async (...range) => (await shard.scratch.lRange(...range)).sort()));
+  try {
+    return await finalizeRoom.apply(this, args);
+  } finally {
+    this.shard = shard;
+  }
+};

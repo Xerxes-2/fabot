@@ -5,9 +5,9 @@
 // observe segment our bot writes (segment 1: faults, refusals). Every
 // <every> ticks, and on the last: one sample of the room. Writes to <out dir>
 // `samples.jsonl` (one sample a line), `faults.jsonl` (each fault once),
-// `refusals.json` (counts by act and code), `levels.json` (the tick each
-// controller level was first seen), `observe.json` (the last segment
-// read), `cpu.jsonl` (tick, engine-reported
+// `refusals.json` (counts by act and code), `lost.json` (the ticks lost),
+// `levels.json` (the tick each controller level was first seen),
+// `observe.json` (the last segment read), `cpu.jsonl` (tick, engine-reported
 // CPU, the bot's own phases) and `console.log`. Each sample carries the
 // room's energy ledger, cumulative from the first tick (`ledger`): dug,
 // spawn regeneration, spent on bodies, building, upgrading, repairing and
@@ -92,8 +92,28 @@ let captureLog;
   }
   for (const line of lines)
     if (line.startsWith("#capture ")) fs.writeSync((captureLog ??= fs.openSync(join(out, "capture.jsonl"), "w")), line.slice(9) + "\n");
-    else fs.writeSync(consoleLog, `[${consoleTick ?? "?"}] ${line}\n`);
+    else {
+      if (consoleTick !== null && /^ERR Script (timed out|was disposed)/.test(line)) lost.add(consoleTick);
+      fs.writeSync(consoleLog, `[${consoleTick ?? "?"}] ${line}\n`);
+    }
 });
+// Ticks lost: our bot's tick cut off by its time limit (its CPU or the
+// host's load), or the engine abandoning intents in one of its rooms; the
+// first, which builds the isolate, excepted. A run holding one is no
+// measurement. An opponent's room alone is left out: the engine abandons one
+// now and then on a quiet host.
+const lost = new Set();
+const serverLog = fs.openSync(join(out, "server.log"), "r");
+let serverRead = 0;
+function abandoned() {
+  const size = fs.fstatSync(serverLog).size;
+  if (size <= serverRead) return;
+  const text = Buffer.alloc(size - serverRead);
+  serverRead += fs.readSync(serverLog, text, 0, text.length, serverRead);
+  const lines = text.toString();
+  for (const [, rooms, tick] of lines.matchAll(/Abandoning intents in rooms \[(.*)\] for tick (\d+)/g))
+    if (rooms.split(", ").some((r) => roomNames.includes(r))) lost.add(Number(tick));
+}
 for (const o of opponents) {
   const log = fs.openSync(join(out, `console-${o.name}.log`), "w");
   (await getConsoleChannel(shard, o.id).subscribe()).listen((message) => fs.writeSync(log, `[${consoleTick ?? "?"}] ${message}\n`));
@@ -456,6 +476,7 @@ for (let t = 0; t < ticks; t++) {
     }
     if (time === null) throw new Error(`no tick after two pausedTicks at t${t}; see the server log`);
   }
+  abandoned();
   const obs = await observed();
   // A segment the bot did not rewrite this tick is last tick's: count it once.
   const fresh = obs !== null && obs.tick !== lastObserved;
@@ -516,6 +537,7 @@ for (let t = 0; t < ticks; t++) {
     if (homes.length > 1) row.homes = Object.fromEntries(homes.map((h, i) => [h, (({ bodies, foes, ...s }) => s)(sample(t, time, rooms[i]))]));
     row.botCpu = fresh ? obs.cpu : null;
     row.faults = seenFaults.size;
+    row.lost = lost.size;
     row.ms = Date.now() - started;
     fs.writeSync(samplesOut, JSON.stringify(row) + "\n");
     process.stderr.write(`t${t} rcl${row.rcl} ${row.progress} creeps ${row.creeps} (${row.ms} ms)\n`);
@@ -527,6 +549,8 @@ fs.writeFileSync(join(out, "refusals.json"), JSON.stringify(refusals, null, 2) +
 fs.writeFileSync(join(out, "observe.json"), JSON.stringify(lastObs, null, 1) + "\n");
 fs.writeFileSync(join(out, "levels.json"), JSON.stringify(levels) + "\n");
 fs.writeFileSync(join(out, "slow.json"), JSON.stringify(slowTicks) + "\n");
+abandoned();
+fs.writeFileSync(join(out, "lost.json"), JSON.stringify([...lost].sort((a, b) => a - b)) + "\n");
 console.log(JSON.stringify({ ticks, ms: Date.now() - started }));
 
 await svc.publish({ type: "shutdown" });
