@@ -204,7 +204,10 @@ let patternTableTests =
                         }
                         {
                             Name = "tapper"
-                            Block = List.replicate 19 Move @ List.replicate 19 BodyPart.Claim
+                            Block =
+                                List.replicate 23 Move
+                                @ List.replicate 5 RangedAttack
+                                @ List.replicate 18 BodyPart.Claim
                         }
                         {
                             Name = "convoy"
