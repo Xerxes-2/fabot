@@ -279,7 +279,10 @@ let decide (context: Context) (state: State) : Intent list * State =
                     Towers = []
                 }
 
-            let joining = List.ofSeq free
+            let joining =
+                free
+                |> Seq.filter (fun n -> (walkTo e.Room ours.[n].Pos.Room).IsSome)
+                |> List.ofSeq
 
             let fielding =
                 (Set.toList e.Ours @ joining)
@@ -359,7 +362,8 @@ let decide (context: Context) (state: State) : Intent list * State =
                     tickWorth
             with
             | Some(set, outcome, tactic) ->
-                free.Clear()
+                for n in joining do
+                    free.Remove n |> ignore
 
                 let set =
                     set

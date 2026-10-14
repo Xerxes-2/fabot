@@ -176,9 +176,18 @@ let rampart (sight: Sight) (order: string list) (creep: Creep) =
 
 let retreat (sight: Sight) (creep: Creep) : CreepAct option * Wish =
     let home =
-        sight.Homes
-        |> Array.sortBy (fun p -> (if p.Room = creep.Pos.Room then 0 else 1), p.Room, p.X, p.Y)
-        |> Array.tryHead
+        match sight.Homes |> Array.filter (fun p -> p.Room = creep.Pos.Room) with
+        | [||] ->
+            let tree = Atlas.tree sight.Atlas Tick.reachHops creep.Pos.Room
+
+            sight.Homes
+            |> Array.choose (fun p ->
+                Atlas.routeIn tree creep.Pos.Room p.Room
+                |> Option.map (fun rooms -> List.length rooms, p))
+            |> Array.sortBy (fun (hops, p) -> hops, p.Room, p.X, p.Y)
+            |> Array.tryHead
+            |> Option.map snd
+        | here -> here |> Array.sortBy (fun p -> p.X, p.Y) |> Array.tryHead
 
     None,
     match home with
