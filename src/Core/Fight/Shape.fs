@@ -43,6 +43,7 @@ type Engagement =
         Ours: Set<string>
         Plan: Plan
         Phase: Phase
+        Opened: int
         Since: int
         Lost: int
         /// The bodies it may lose before it disengages.

@@ -139,6 +139,8 @@ let private engagementOf (o: obj) : Engagement option =
         |> List.tryFind (fun (name, _) -> box name = field o "phase")
         |> Option.map snd
 
+    let since = intOf (field o "since") |> Option.defaultValue 0
+
     match intOf (field o "id"), intOf (field o "group"), field o "room", phase with
     | Some id, Some group, (:? string as room), Some phase ->
         Some
@@ -157,7 +159,9 @@ let private engagementOf (o: obj) : Engagement option =
                         Order = listOf stringOf (field o "order")
                     }
                 Phase = phase
-                Since = intOf (field o "since") |> Option.defaultValue 0
+                // Saved before it was kept: its phase's start is the latest it can have opened.
+                Opened = intOf (field o "opened") |> Option.defaultValue since
+                Since = since
                 Lost = intOf (field o "lost") |> Option.defaultValue 0
                 Budget = intOf (field o "budget") |> Option.defaultValue 0
                 Priority =
@@ -180,6 +184,7 @@ let private engagementObj (e: Engagement) =
             "tactic" ==> (tactics |> List.find (fun (_, t) -> t = e.Plan.Tactic) |> fst)
             "order" ==> Array.ofList e.Plan.Order
             "phase" ==> (phases |> List.find (fun (_, p) -> p = e.Phase) |> fst)
+            "opened" ==> e.Opened
             "since" ==> e.Since
             "lost" ==> e.Lost
             "budget" ==> e.Budget

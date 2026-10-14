@@ -321,6 +321,9 @@ let containerHits = 250_000
 
 let tombstoneDecayPerPart = 5
 
+/// A creep aged out is buried on its last tick: its tombstone's creep has this left.
+let agedOutTicksToLive = 1
+
 let rampartDecayAmount = 300
 
 let rampartDecayTime = 100

@@ -177,6 +177,20 @@ let private roomOf (room: IRoom) : Room =
                     Id = t.id
                     Pos = posOf t.pos
                     Store = storeOf (box t.store)
+                    Fallen =
+                        if absent (box t.creep) then
+                            None
+                        else
+                            // The engine's fallen creep keeps no hits or fatigue.
+                            Some
+                                {
+                                    Creep =
+                                        { creepOf t.creep with
+                                            Hits = 0
+                                            Fatigue = 0
+                                        }
+                                    Died = t.deathTime
+                                }
                 })
         Hostiles = find<ICreep> room findHostileCreeps |> Array.map creepOf
     }

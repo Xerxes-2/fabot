@@ -82,6 +82,9 @@ type Home =
         Hostiles: Creep[]
         Ours: Structure[]
         Bodies: Creep[]
+        Time: int
+        Opened: int
+        Fallen: Fallen[]
     }
 
 /// A tap is range 1 from where the claimer stood at the tick's start and it
@@ -94,7 +97,7 @@ let private refillingFloor = 32
 let private live (kind: BodyPart) (c: Creep) =
     c.Body |> Array.exists (fun p -> p.Kind = kind && p.Hits > 0)
 
-let private reaches (structure: bool) (raid: Creep[]) (at: Pos) =
+let private reaches (structure: bool) (step: int) (raid: Creep[]) (at: Pos) =
     raid
     |> Array.exists (fun h ->
         let range =
@@ -105,7 +108,9 @@ let private reaches (structure: bool) (raid: Creep[]) (at: Pos) =
             else
                 -1
 
-        Pos.within range h.Pos at)
+        range >= 0 && Pos.within (range + step) h.Pos at)
+
+let private killDrift = 3
 
 let private half (lost: int) (whole: int) = whole > 0 && 2 * lost >= whole
 
@@ -123,7 +128,7 @@ let private razed (home: Home) =
 
         let lost =
             all
-            |> Array.filter (fun s -> not (covered.Contains s.Pos) && reaches true raid s.Pos)
+            |> Array.filter (fun s -> not (covered.Contains s.Pos) && reaches true 0 raid s.Pos)
 
         lost.Length, all.Length
 
@@ -131,24 +136,35 @@ let private razed (home: Home) =
         c.Body |> Array.sumBy (fun p -> if p.Kind.IsCarry then 1 else 0)
 
     // v1's refiller held a Refill, which is Economy's to know; a hauler's body stands in.
-    let hands =
-        home.Bodies
-        |> Array.filter (fun c ->
-            carry c > 0
-            && not (c.Body |> Array.exists (fun p -> p.Kind.IsWork))
-            && not (Tiles.onEdge (Tiles.ofPos c.Pos)))
+    let hand (c: Creep) =
+        carry c > 0
+        && not (c.Body |> Array.exists (fun p -> p.Kind.IsWork))
+        && not (Tiles.onEdge (Tiles.ofPos c.Pos))
+
+    let hands = home.Bodies |> Array.filter hand
 
     let struck (c: Creep) =
-        c.Hits < c.HitsMax && not (covered.Contains c.Pos) && reaches false raid c.Pos
+        c.Hits < c.HitsMax && not (covered.Contains c.Pos) && reaches false 0 raid c.Pos
+
+    // A raider steps a tile a tick from its kill; past a few it is not told from a stranger.
+    let killed =
+        home.Fallen
+        |> Array.filter (fun f ->
+            f.Died >= home.Opened
+            && f.Creep.Owner.IsOurs
+            && f.Creep.TicksToLive > Engine.agedOutTicksToLive
+            && hand f.Creep
+            && reaches false (min killDrift (home.Time - f.Died)) raid f.Creep.Pos)
+        |> Array.map (fun f -> f.Creep)
 
     let left = hands |> Array.filter (struck >> not) |> Array.sumBy carry
-
-    let whole = Array.sumBy carry hands
+    let whole = Array.sumBy carry hands + Array.sumBy carry killed
     let spawns, banks = share Kind.Spawn, share Kind.Extension
 
-    half (fst spawns) (snd spawns)
-    || fst banks >= 2 && half (fst banks) (snd banks)
-    || left < whole && whole >= refillingFloor && left < refillingFloor
+    not (Array.isEmpty raid)
+    && (half (fst spawns) (snd spawns)
+        || fst banks >= 2 && half (fst banks) (snd banks)
+        || left < whole && whole >= refillingFloor && left < refillingFloor)
 
 let private keep = set [ Kind.Spawn; Kind.Tower; Kind.Storage; Kind.Terminal ]
 
@@ -159,7 +175,7 @@ let private lastResort (home: Home) =
     && (not home.Towered
         || home.Ours
            |> Array.exists (fun s ->
-               keep.Contains s.Kind && s.Hits < s.HitsMax && reaches true home.Raid s.Pos)
+               keep.Contains s.Kind && s.Hits < s.HitsMax && reaches true 0 home.Raid s.Pos)
         || razed home)
 
 let private fireable (c: Controller) =

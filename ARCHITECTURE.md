@@ -181,7 +181,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | Store | Shape | Owner | Lives in | Why |
 |---|---|---|---|---|
 | `assignments` | creep → task id | Economy | Memory | sticky matching |
-| `fight.engagements` | id → Engagement (§6.2) | Fight | Memory | the commitment; read every tick |
+| `fight.engagements` | id → Engagement (§6.2), with the tick it opened, never moved | Fight | Memory | the commitment; read every tick; a home's deaths since it opened are its raid's |
 | `fight.groups` | id → Group (§6.1) | Fight | Memory | hostile identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | never cast twice |
 | `declarations` | homes, outposts, errands, avoided rooms, allies, claims | Strategy | Memory | what the world is for us, as data |
@@ -319,8 +319,9 @@ Common to every kind:
   `unanswered`; an offensive kind closes. A home's unanswered `Defend` also
   spends the shard's one safe mode where no tower stands, or its raid reaches
   a hit spawn, tower, storage or terminal or half the home's spawns or
-  extensions, or strikes a hauler and leaves the home's haulers under the CARRY
-  that refills it, as a claimer in reach of the controller does.
+  extensions, or strikes haulers or has killed them since a player's raid
+  opened and leaves the home's haulers under the CARRY that refills it, as a
+  claimer in reach of the controller does.
 - Lives in Memory. `observe` reads it directly: the engagement *is* the raid log.
 
 `Defend` (v2.0):

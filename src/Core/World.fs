@@ -253,9 +253,6 @@ type Pile =
         Amount: int
     }
 
-/// A tombstone or a ruin.
-type Remains = { Id: string; Pos: Pos; Store: Store }
-
 type Controller =
     {
         Id: string
@@ -296,6 +293,17 @@ type Creep =
         TicksToLive: int
         Fatigue: int
         Store: Store
+    }
+
+type Fallen = { Creep: Creep; Died: int }
+
+/// A tombstone or a ruin.
+type Remains =
+    {
+        Id: string
+        Pos: Pos
+        Store: Store
+        Fallen: Fallen option
     }
 
 type Room =

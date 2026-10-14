@@ -123,19 +123,6 @@ type IResource =
     abstract pos: IRoomPosition
     abstract amount: int
 
-type IFallenCreep =
-    abstract id: string
-    abstract my: bool
-    abstract owner: IOwner
-
-/// One binding for tombstone and ruin: the projection reads the same three
-/// fields off both, and `creep.withdraw` takes any store.
-type ITombstone =
-    abstract id: string
-    abstract pos: IRoomPosition
-    abstract store: IStore
-    abstract creep: IFallenCreep
-
 type IConstructionSite =
     abstract id: string
     abstract structureType: string
@@ -256,6 +243,15 @@ type ICreep =
     abstract move: direction: int -> int
     /// The omitted `public` argument keeps bubbles private to our own viewer.
     abstract say: message: string -> int
+
+/// One binding for tombstone and ruin: `creep.withdraw` takes any store, and
+/// a ruin's `creep` is absent.
+type ITombstone =
+    abstract id: string
+    abstract pos: IRoomPosition
+    abstract store: IStore
+    abstract creep: ICreep
+    abstract deathTime: int
 
 type ITerrain =
     abstract get: x: int * y: int -> int

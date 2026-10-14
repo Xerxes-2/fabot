@@ -136,6 +136,7 @@ let decide (context: Context) (state: State) : Intent list * State =
         | Some id ->
             { e with
                 Group = id
+                Opened = world.Time
                 Budget = e.Lost
                 Unanswered = true
                 Predicted = None
@@ -234,6 +235,7 @@ let decide (context: Context) (state: State) : Intent list * State =
                 Ours = Set.empty
                 Plan = { Tactic = Tactic.Close; Order = [] }
                 Phase = Phase.Forming
+                Opened = world.Time
                 Since = world.Time
                 Lost = 0
                 Budget = 0
@@ -555,9 +557,12 @@ let decide (context: Context) (state: State) : Intent list * State =
             let room = rooms.[name]
             let ours = room.Structures |> Array.filter (fun s -> s.Owner.IsOurs)
 
-            let raid =
+            let raiding =
                 engagements
                 |> List.filter (fun e -> e.Unanswered && e.Room = name && byId.ContainsKey e.Group)
+
+            let raid =
+                raiding
                 |> List.collect (fun e -> Set.toList byId.[e.Group].Members)
                 |> Set.ofList
 
@@ -570,6 +575,16 @@ let decide (context: Context) (state: State) : Intent list * State =
                     Hostiles = room.Hostiles
                     Ours = ours
                     Bodies = world.Creeps |> Array.filter (fun c -> c.Pos.Room = name)
+                    Time = world.Time
+                    Opened =
+                        raiding
+                        |> List.filter (fun e ->
+                            room.Hostiles
+                            |> Array.exists (fun h ->
+                                h.Owner <> Theirs Engine.invaderUser
+                                && byId.[e.Group].Members.Contains h.Id))
+                        |> List.fold (fun first e -> min first e.Opened) world.Time
+                    Fallen = room.Remains |> Array.choose (fun r -> r.Fallen)
                 }
                 : Defend.Home)))
         |> List.ofSeq

@@ -2,6 +2,7 @@
 module Fabot.Core.Tests.DefendTests
 
 open Expecto
+open Fabot.Core
 open Fabot.Core.Vocabulary
 open Fabot.Core.World
 open Fabot.Core.Fight.Kinds
@@ -30,8 +31,29 @@ let private creep (owner: Owner) (kinds: BodyPart list) (pos: Pos) (hurt: bool) 
         Store = Store.empty
     }
 
-let private home (haulers: (int * int * bool) list) : Defend.Home =
-    let raider = creep (Theirs "rival") [ RangedAttack; Move ] (at 25 25) false
+type private Dead =
+    {
+        Carry: int
+        TicksLeft: int
+        Died: int
+    }
+
+let private now = 1000
+let private opened = now - 10
+
+let private slain (carry: int) =
+    {
+        Carry = carry
+        TicksLeft = 1000
+        Died = now - 1
+    }
+
+let private home
+    (raider: Owner)
+    (haulers: (int * int * bool) list)
+    (fallen: Dead list)
+    : Defend.Home =
+    let raider = creep raider [ RangedAttack; Move ] (at 25 25) false
 
     {
         Controller =
@@ -53,12 +75,31 @@ let private home (haulers: (int * int * bool) list) : Defend.Home =
         Raid = [| raider |]
         Hostiles = [| raider |]
         Ours = [||]
+        Time = now
+        Opened = opened
         Bodies =
             [|
                 for i, (carry, dx, hurt) in List.indexed haulers ->
                     creep Ours (List.replicate carry Carry @ [ Move ]) (at (22 + dx) (23 + i)) hurt
             |]
+        Fallen =
+            [|
+                for i, dead in List.indexed (List.truncate 5 fallen) ->
+                    {
+                        Creep =
+                            { creep
+                                  Ours
+                                  (List.replicate dead.Carry Carry @ [ Move ])
+                                  (at 26 (23 + i))
+                                  false with
+                                TicksToLive = dead.TicksLeft
+                            }
+                        Died = dead.Died
+                    }
+            |]
     }
+
+let private rival = home (Theirs "rival")
 
 /// Up to four haulers in a column across the raider's reach: CARRY 1–25 each, a step off it.
 let private haulers (spec: (int * int * bool) list) =
@@ -76,13 +117,15 @@ let tests =
                 let unhurt =
                     (16, 0, false) :: haulers spec |> List.map (fun (c, dx, _) -> c, dx, false)
 
-                Defend.safeMode false [ home unhurt ] = None
+                Defend.safeMode false [ rival unhurt [] ] = None
 
             testProperty "a raid striking every hauler of a home at the floor spends it"
             <| fun (spec: (int * int * bool) list) ->
                 let struck = (16, 0, true) :: (16, 1, true) :: haulers spec |> List.truncate 4
 
-                (Defend.safeMode false [ home (struck |> List.map (fun (c, dx, _) -> c, dx, true)) ])
+                (Defend.safeMode
+                    false
+                    [ rival (struck |> List.map (fun (c, dx, _) -> c, dx, true)) [] ])
                     .IsSome
 
             testProperty "a home that never held the floor never spends it on its carriers"
@@ -93,5 +136,56 @@ let tests =
                 let under =
                     all |> List.take (List.scan (+) 0 carry |> List.findIndexBack (fun s -> s < 32))
 
-                Defend.safeMode false [ home under ] = None
+                Defend.safeMode false [ rival under [] ] = None
+
+            testProperty "haulers aged out beside a raid never spend it"
+            <| fun (spec: (int * int * bool) list) (aged: bool list) ->
+                let unhurt = haulers spec |> List.map (fun (c, dx, _) -> c, dx, false)
+
+                let fallen =
+                    List.replicate
+                        (2 + aged.Length)
+                        { slain 16 with
+                            TicksLeft = Engine.agedOutTicksToLive
+                        }
+
+                Defend.safeMode false [ rival unhurt fallen ] = None
+
+            testProperty "haulers killed and standing under the floor together never spend it"
+            <| fun (spec: (int * int * bool) list) (killed: (int * int * bool) list) ->
+                let all =
+                    List.map (fun h -> true, h) (haulers killed)
+                    @ List.map (fun h -> false, h) (haulers spec)
+
+                let carry = all |> List.map (fun (_, (c, _, _)) -> c)
+
+                let under =
+                    all |> List.take (List.scan (+) 0 carry |> List.findIndexBack (fun s -> s < 32))
+
+                let standing =
+                    under
+                    |> List.filter (fst >> not)
+                    |> List.map (fun (_, (c, dx, _)) -> c, dx, true)
+
+                let fallen = under |> List.filter fst |> List.map (fun (_, (c, _, _)) -> slain c)
+
+                Defend.safeMode false [ rival standing fallen ] = None
+
+            testProperty "haulers killed beside an Invader raid never spend it"
+            <| fun (spec: (int * int * bool) list) (killed: (int * int * bool) list) ->
+                let fallen = haulers killed |> List.map (fun (c, _, _) -> slain c)
+
+                Defend.safeMode false [ home (Theirs Engine.invaderUser) (haulers spec) fallen ] = None
+
+            testProperty "haulers Invaders killed before a player raid opened never spend it"
+            <| fun (spec: (int * int * bool) list) (earlier: uint16) ->
+                let before (carry: int) =
+                    { slain carry with
+                        Died = opened - 1 - int earlier
+                    }
+
+                let fallen =
+                    before 16 :: before 16 :: (haulers spec |> List.map (fun (c, _, _) -> before c))
+
+                Defend.safeMode false [ rival [] fallen ] = None
         ]
