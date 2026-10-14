@@ -186,10 +186,11 @@ const screepsrc = [
 // ---- the world -------------------------------------------------------------
 // One world per run, so two soaks at once never share a server. The name is
 // kept short: the engine's unix sockets live under it, and a socket path has
-// a length limit. A long run name keeps its head and a hash of the whole, so
-// two runs whose names share their first characters never share a world.
+// a length limit. The name keeps the run's head and a hash of the run and the
+// checkout, so two runs of one name from two workspaces (every scenario run
+// of a dist/main.js is named alike) never share a world.
 const runName = (flags["--run"] ?? "default").replace(/[^A-Za-z0-9-]/g, "");
-const worldName = runName.length <= 24 ? runName : `${runName.slice(0, 15)}-${createHash("sha256").update(runName).digest("hex").slice(0, 8)}`;
+const worldName = `${runName.slice(0, 15)}-${createHash("sha256").update(REPO).update(runName).digest("hex").slice(0, 8)}`;
 const world = join(ENGINE, "worlds", `soak-${worldName}`);
 rmSync(world, { recursive: true, force: true });
 // A copied socket is a dead server's; only files and directories come over.
