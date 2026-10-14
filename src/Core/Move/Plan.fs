@@ -7,6 +7,10 @@ open Fabot.Core.Grid
 
 let canMove (creep: Creep) (factor: FatigueFactor) : bool = creep.Fatigue = 0 && factor.Moves > 0
 
+/// Within two ticks: what a walker meeting it head-on waits to swap with.
+let restsSoon (creep: Creep) (factor: FatigueFactor) : bool =
+    factor.Moves > 0 && creep.Fatigue <= 4 * factor.Moves
+
 let private beside (atlas: Atlas) (creep: Creep) : int[] =
     let at = Tiles.ofPos creep.Pos
 
@@ -43,9 +47,10 @@ let stay (atlas: Atlas) (creep: Creep) (factor: FatigueFactor) (weight: int) : W
 let toward (atlas: Atlas) (creep: Creep) (mover: Mover) (target: Target) (weight: int) : Wish =
     let room = creep.Pos.Room
     let at = Tiles.ofPos creep.Pos
+    let moves = canMove creep mover.Factor
 
     match
-        (if canMove creep mover.Factor then
+        (if restsSoon creep mover.Factor then
              Atlas.field atlas mover target room
          else
              None)
@@ -65,7 +70,7 @@ let toward (atlas: Atlas) (creep: Creep) (mover: Mover) (target: Target) (weight
 
             wish
                 creep
-                true
+                moves
                 at
                 None
                 (Array.append inside outside)
@@ -79,7 +84,7 @@ let toward (atlas: Atlas) (creep: Creep) (mover: Mover) (target: Target) (weight
             | band ->
                 wish
                     creep
-                    true
+                    moves
                     (Tiles.at 0 band)
                     None
                     (Array.sub band 1 (band.Length - 1))
@@ -102,4 +107,4 @@ let toward (atlas: Atlas) (creep: Creep) (mover: Mover) (target: Target) (weight
                         && (ticks tile = 0 || not (Tiles.onEdge tile)))
                     |> Array.sortBy (fun tile -> ticks tile, tile)
 
-                wish creep true head onward tail [||] weight
+                wish creep moves head onward tail [||] weight

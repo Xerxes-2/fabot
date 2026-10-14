@@ -39,11 +39,18 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
         if inRoom tile then
             blocked.[tile] <- true
 
+    // A swap a tick or two away beats the way round: with a held body that
+    // steps onto this tile, or a mover through the same head onto it.
+    let stepsOnto = Array.create Tiles.count -1
+
     for wish in wishes do
         if not (Wish.movable wish) then
             for tile in covered wish.Footprint wish.At do
                 if inRoom tile then
                     blocked.[tile] <- true
+
+            if inRoom wish.At then
+                stepsOnto.[wish.At] <- if Wish.stays wish then -1 else wish.Head
 
     let holder = Array.create Tiles.count -1
     let placed = ResizeArray<Wish>()
@@ -56,6 +63,13 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
     let order = placed.ToArray()
     let n = order.Length
     let tileOf = order |> Array.map (fun wish -> wish.At)
+
+    let headOn (wish: Wish) =
+        order
+        |> Array.exists (fun other ->
+            other.Head = wish.Head
+            && other.Onward = Some wish.At
+            && other.Creep <> wish.Creep)
 
     let candidates =
         order
@@ -74,10 +88,12 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
                 then
                     found.Add tile
 
-            consider wish.Head
+            if not (inRoom wish.Head && stepsOnto.[wish.Head] = at) then
+                consider wish.Head
 
-            for tile in wish.Tail do
-                consider tile
+                if found.Count = 0 || not (headOn wish) then
+                    for tile in wish.Tail do
+                        consider tile
 
             found.Add at
             found.ToArray())

@@ -459,6 +459,35 @@ async function engaged(t, time, rooms) {
     }
 }
 
+// Ticks our bodies lost beside a road: grounded past a step onto a tile off
+// it but beside it (never a walk's own choice while the road is free), or a
+// stop of at most 4 ticks on it ended by a step onto a tile a body held.
+let roadLoss = 0;
+const trails = new Map();
+let onRoad = [];
+function detours(rooms) {
+  const objects = rooms.flatMap((r) => [...r["#objects"]]);
+  const key = (p, dx = 0, dy = 0) => `${p.roomName}:${p.x + dx},${p.y + dy}`;
+  const roads = new Set(objects.filter((o) => o.structureType === "road").map((o) => key(o.pos)));
+  const besideRoad = (p) => [-1, 0, 1].some((dx) => [-1, 0, 1].some((dy) => roads.has(key(p, dx, dy))));
+  for (const o of objects)
+    if (o.body !== undefined && o["#user"] === ours) {
+      const was = trails.get(o.name);
+      const tile = key(o.pos);
+      if (was?.tile === tile) {
+        if (was.moved) was.wait = { tiles: roads.has(tile) ? onRoad.filter((b) => b.pos.roomName === o.pos.roomName && near(b.pos, o.pos, 1)).map((b) => key(b.pos)) : [], ticks: 1 };
+        else if (was.wait) was.wait.ticks++;
+        was.moved = false;
+        continue;
+      }
+      if (was?.wait?.tiles.includes(tile) && was.wait.ticks <= 4) roadLoss += was.wait.ticks;
+      const moves = o.body.filter((p) => p.type === "move" && p.hits > 0).length;
+      if (!roads.has(tile) && besideRoad(o.pos)) roadLoss += Math.ceil(o.fatigue / (2 * Math.max(1, moves)));
+      trails.set(o.name, { tile, moved: true, wait: null });
+    }
+  onRoad = objects.filter((o) => o.body !== undefined && roads.has(key(o.pos)));
+}
+
 // Keep asking for the pause until the first tick is through (`step.mjs`).
 const spam = setInterval(() => svc.publish({ type: "pause" }), 20);
 await svc.publish({ type: "pause" });
@@ -519,6 +548,7 @@ for (let t = 0; t < ticks; t++) {
   const room = rooms[0];
   account(rooms, time);
   await engaged(t, time, rooms);
+  detours(rooms);
   for (const o of opponents.filter(({ raid: r }) => r && (t === r.first || (r.every && t > r.first && (t - r.first) % r.every === 0)))) {
     const toward = Object.entries(world.map.describeExits(roomName) ?? {}).filter(([, next]) => next === o.room).map(([dir]) => Number(dir));
     const bodies = o.raid.bodies.map(({ boosts = {}, ...counts }) => PARTS.flatMap((p) => Array(counts[p] ?? 0).fill({ type: p, boost: boosts[p] })));
@@ -556,6 +586,7 @@ for (let t = 0; t < ticks; t++) {
     }
     if (homes.length > 1) row.homes = Object.fromEntries(homes.map((h, i) => [h, (({ bodies, foes, ...s }) => s)(sample(t, time, rooms[i]))]));
     row.botCpu = fresh ? obs.cpu : null;
+    row.roadLoss = roadLoss;
     row.faults = seenFaults.size;
     row.lost = lost.size;
     row.ms = Date.now() - started;

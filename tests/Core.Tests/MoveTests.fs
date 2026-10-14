@@ -195,6 +195,19 @@ let private placedIn (crowd: Crowd) = ends crowd.Wishes (resolve crowd)
 let private score (placed: (Wish * int) list) =
     placed |> List.sumBy (fun (wish, tile) -> Wish.value wish tile)
 
+let private met (crowd: Crowd) (wish: Wish) =
+    crowd.Wishes
+    |> List.exists (fun other ->
+        not (Wish.movable other) && other.At = wish.Head && other.Head = wish.At)
+
+let private headOn (crowd: Crowd) (wish: Wish) =
+    crowd.Wishes
+    |> List.exists (fun other ->
+        Wish.movable other
+        && other.Head = wish.Head
+        && other.Onward = Some wish.At
+        && other.Creep <> wish.Creep)
+
 let private listed (wish: Wish) (tile: int) =
     tile = wish.Head || Array.contains tile wish.Tail
 
@@ -378,6 +391,8 @@ let tests =
                 placed
                 |> List.forall (fun (wish, tile) ->
                     not wish.Moves
+                    || met crowd wish
+                    || headOn crowd wish
                     || Array.append [| wish.Head |] wish.Tail
                        |> Array.forall (fun free ->
                            Set.contains free taken
@@ -445,5 +460,29 @@ let tests =
                 let atlas, mover, wish = planned errand
 
                 Plan.canMove errand.Creep mover.Factor
-                || (Wish.stays wish && not wish.Moves && Atlas.misses atlas = 0)
+                || (not wish.Moves
+                    && (Plan.restsSoon errand.Creep mover.Factor
+                        || Wish.stays wish && Atlas.misses atlas = 0))
+
+            testPropertyWithConfig
+                config
+                "a mover met head-on by a held body that steps onto its tile once rested waits to swap"
+            <| fun (crowd: Crowd) ->
+                placedIn crowd
+                |> List.forall (fun (wish, tile) -> not (met crowd wish) || tile = wish.At)
+
+            testPropertyWithConfig
+                config
+                "a mover met head-on through its step ends on its step or its own tile"
+            <| fun (crowd: Crowd) ->
+                placedIn crowd
+                |> List.forall (fun (wish, tile) ->
+                    let free =
+                        crowd.Passable.[wish.Head]
+                        && not (Array.contains wish.Head crowd.Held)
+                        && crowd.Wishes
+                           |> List.forall (fun other ->
+                               Wish.movable other || other.At <> wish.Head)
+
+                    not (headOn crowd wish && free) || tile = wish.Head || tile = wish.At)
         ]
