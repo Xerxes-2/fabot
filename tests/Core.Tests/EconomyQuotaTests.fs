@@ -498,7 +498,7 @@ let tests =
 
             testPropertyWithConfig
                 config
-                "a seat its bank cannot pay yields: one passed over before a cast cost more than the bank left"
+                "a seat its bank cannot pay yields to the next, never to an upgrader"
             <| fun (g: Generated) ->
                 let derived = derive g
                 let p = planOf derived
@@ -515,13 +515,20 @@ let tests =
 
                     let mutable left = seated
                     let mutable ok = true
+                    let mutable waiting = false
 
                     for seat in p.Seats |> List.filter (fun s -> s.Colony = Some ci) do
+                        let upgrader = seat.Pattern = Bodies.Pattern.Upgrader
+
                         match left with
                         | next :: rest when next.Body = seat.Body ->
+                            ok <- ok && not (upgrader && waiting)
                             bank <- bank - Engine.bodyCost seat.Body
                             left <- rest
-                        | _ :: _ -> ok <- ok && Engine.bodyCost seat.Body > bank
+                        | _ :: _ ->
+                            let short = Engine.bodyCost seat.Body > bank
+                            ok <- ok && (short || upgrader && waiting)
+                            waiting <- waiting || short
                         | [] -> ()
 
                     ok && List.isEmpty left)

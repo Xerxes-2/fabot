@@ -511,7 +511,7 @@ let private castOrder (seat: Seat) : int * float =
     | Some r, _ -> 1, -r
 
 /// A seat its bank cannot pay yields to the next it can: an order, never a
-/// veto.
+/// veto. Never to an upgrader.
 let plan
     (distance: Pos -> Pos -> int option)
     (leg: Leg)
@@ -723,10 +723,15 @@ let plan
 
     let ordered = seats |> List.ofSeq |> List.sortBy castOrder
 
+    let waiting = Array.zeroCreate<bool> colonies.Length
+
     for seat in ordered do
         match seat.Colony with
-        | Some ci when idle.[ci].Count > 0 && Engine.bodyCost seat.Body <= bank.[ci] ->
-            castAt ci seat.Pattern seat.Body false
+        | Some ci when idle.[ci].Count > 0 && not (seat.Pattern.IsUpgrader && waiting.[ci]) ->
+            if Engine.bodyCost seat.Body <= bank.[ci] then
+                castAt ci seat.Pattern seat.Body false
+            else
+                waiting.[ci] <- true
         | _ -> ()
 
     {
