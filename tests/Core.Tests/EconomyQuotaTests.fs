@@ -549,26 +549,28 @@ let tests =
 
             testPropertyWithConfig
                 config
-                "the supply floor casts only where no worker or hauler serves"
+                "the supply floor casts only where nothing of its kind or a hauler works in the home"
             <| fun (g: Generated) ->
                 let derived = derive g
                 let pool = Pool.pool derived
                 let assigned = assignedIn derived pool
                 let p = Quota.plan distance leg walk derived pool assigned
 
-                let serves (room: string) (b: Derived.Body) =
-                    (b.Pattern = Bodies.Pattern.Worker || b.Pattern = Bodies.Pattern.Hauler)
-                    && (b.Pos.Room = room
-                        || match Map.tryFind b.Name assigned with
-                           | Some id ->
-                               pool |> Array.exists (fun o -> o.Id = id && o.Target.Room = room)
-                           | None -> false)
+                let serves (room: string) (kind: Bodies.Pattern option) (b: Derived.Body) =
+                    (Some b.Pattern = kind || b.Pattern = Bodies.Pattern.Hauler)
+                    && (Map.tryFind b.Name assigned
+                        |> Option.bind (fun id -> pool |> Array.tryFind (fun o -> o.Id = id))
+                        |> Option.map (fun o -> o.Target.Room)
+                        |> Option.defaultValue b.Pos.Room) = room
 
                 p.Casts
                 |> List.forall (fun c ->
                     not c.Floor
                     || Bodies.patternOfName c.Name = Some Bodies.Pattern.Harvester
-                    || not (derived.Bodies |> Array.exists (serves c.Colony)))
+                    || not (
+                        derived.Bodies
+                        |> Array.exists (serves c.Colony (Bodies.patternOfName c.Name))
+                    ))
 
             testPropertyWithConfig
                 config

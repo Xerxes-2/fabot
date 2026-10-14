@@ -652,15 +652,33 @@ let plan
         | _ -> ())
 
     // The supply floor: with nobody to refill it, the bank never fills again.
-    let serves (room: string) (body: Body) =
-        (body.Pattern.IsWorker || body.Pattern.IsHauler)
-        && (body.Pos.Room = room || (workAt body).Room = room)
+    // A worker builds and upgrades between loads; a stock is carried by a hauler.
+    let refiller ci =
+        if derived.Grounds.[ci].Stores |> Array.exists (fun s -> s.Owned && s.Energy > 0) then
+            Pattern.Hauler
+        else
+            Pattern.Worker
+
+    let owners =
+        derived.Grounds
+        |> Array.mapi (fun gi ground -> ground.Room, ownerOf distance derived gi)
+        |> Map.ofArray
+
+    let serves (ci: int) (pattern: Pattern) (body: Body) =
+        (body.Pattern = pattern || body.Pattern.IsHauler)
+        && [ (workAt body).Room; body.Pos.Room ]
+           |> List.exists (fun room -> Map.tryFind room owners = Some(Some ci))
 
     colonies
-    |> Array.iteri (fun ci colony ->
-        if idle.[ci].Count > 0 && not (derived.Bodies |> Array.exists (serves colony.Room)) then
-            match sized Pattern.Worker Engine.maxBodyParts bank.[ci] with
-            | Some body -> castAt ci Pattern.Worker body true
+    |> Array.iteri (fun ci _ ->
+        let pattern = refiller ci
+
+        if
+            idle.[ci].Count > 0
+            && not (Array.append derived.Bodies derived.Ovens |> Array.exists (serves ci pattern))
+        then
+            match sized pattern Engine.maxBodyParts bank.[ci] with
+            | Some body -> castAt ci pattern body true
             | None -> ())
 
     let richest =
