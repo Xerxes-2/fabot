@@ -6,7 +6,8 @@
 #     this workspace's own frozen "cc-base:" copy, still mutable, with no other child;
 #   - its @ holds work: label it "cc: <name>" if undescribed, forget the workspace. The
 #     change stays in the DAG to be shipped or abandoned from the main workspace.
-# Then delete the directory. Paths outside .claude/worktrees/ are left alone.
+# Then kill what still runs in it (kill-cwd.sh) and delete the directory. Paths
+# outside .claude/worktrees/ are left alone.
 set -uo pipefail
 
 p=$(jq -r '.worktree_path // empty' <<<"$(cat)")
@@ -32,4 +33,5 @@ if j workspace list -T 'name ++ "\n"' 2>/dev/null | grep -qx "$ws"; then
     j workspace forget "$ws" >&2
   fi
 fi
+"$main/.claude/hooks/kill-cwd.sh" "$p"
 rm -rf "$p"

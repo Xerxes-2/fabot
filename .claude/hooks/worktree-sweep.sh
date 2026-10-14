@@ -6,7 +6,8 @@
 #   .claude/hooks/worktree-sweep.sh <session_id>   one session's leftovers
 #   .claude/hooks/worktree-sweep.sh --all          every registered workspace, live ones too
 #   .claude/hooks/worktree-sweep.sh --stale        forget cc-* workspaces whose directory is
-#                                                  gone, and drop directories no workspace owns
+#                                                  gone (killing what still runs there), and
+#                                                  drop directories no workspace owns
 set -uo pipefail
 
 here=$(cd "$(dirname "$0")/../.." && pwd)
@@ -20,6 +21,7 @@ stale() {
   while IFS=$'\t' read -r ws dir; do
     [[ "$ws" == cc-* ]] || continue
     if [ ! -d "$dir" ]; then
+      "$main/.claude/hooks/kill-cwd.sh" "$dir"
       jj -R "$main" --ignore-working-copy workspace forget "$ws" >&2 && echo "forgot $ws (no directory)" >&2
     fi
   done < <(jj -R "$main" --ignore-working-copy workspace list -T 'name ++ "\t" ++ self.root() ++ "\n"' 2>/dev/null)
