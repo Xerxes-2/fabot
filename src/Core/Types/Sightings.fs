@@ -707,6 +707,7 @@ module RowName =
     let medic = "medic"
     let escort = "escort"
     let tapper = "tapper"
+    let convoy = "convoy"
     let miner = "miner"
     let dismantler = "dismantler"
 
@@ -726,6 +727,7 @@ module RowName =
             medic
             escort
             tapper
+            convoy
             miner
             dismantler
         ]

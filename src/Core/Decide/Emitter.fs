@@ -1015,7 +1015,10 @@ let healReflex (view: ColonyView) (threats: Threats) (plan: Fabot.Core.IntentPla
 
     // A shield is spent only by a fighter that owes nothing itself.
     let patientFor (healer: CreepInfo) (owed: Map<string, int>) =
-        if squadRoleByName healer.Name = Some Escort then
+        if
+            squadRoleByName healer.Name = Some Escort
+            || squadRoleByName healer.Name = Some Convoy
+        then
             squadWound healer owed |> Option.orElse (woundFor healer owed)
         elif isFighterBody healer && Map.find healer.Name owed <= 0 then
             pressingFor healer owed

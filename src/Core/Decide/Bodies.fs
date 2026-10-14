@@ -147,6 +147,13 @@ let tapperPattern =
         Block = List.replicate 19 Move @ List.replicate 19 BodyPart.Claim
     }
 
+/// A `Declaim`'s tapper's own escort: the escort's body.
+let convoyPattern =
+    {
+        Name = RowName.convoy
+        Block = escortPattern.Block
+    }
+
 /// An [[assault]]'s breacher (#490): `docs/research/boosts.md` §4.1's D,
 /// MOVE then WORK, so damage lames it on the rampart it
 /// stands beside before it slows the dismantle, and cast with one MOVE last
@@ -213,6 +220,7 @@ let patternTable =
         medicPattern
         escortPattern
         tapperPattern
+        convoyPattern
         minerPattern
         dismantlerPattern
     ]
@@ -342,6 +350,7 @@ let squadPatternOf (role: SquadRole) : BodyPattern =
     | Medic -> medicPattern
     | Escort -> escortPattern
     | Tapper -> tapperPattern
+    | Convoy -> convoyPattern
 
 /// The squad role a cast carries in its name.
 let squadRoleByName (name: string) : SquadRole option =

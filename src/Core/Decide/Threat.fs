@@ -41,6 +41,9 @@ type Formation =
         /// A tapper's: once the targets are down, the tiles beside the
         /// controller no rampart touches; the squad's way back before.
         TapFrom: Set<RoomPos>
+        /// A tapper's escort's: beside the tapper wherever it stands, else
+        /// the escorts' ground.
+        Convoy: Set<RoomPos>
         /// The controller a tapper taps, off this tick's vision.
         Controller: (string * RoomPos) option
         /// The bodies it admits, by name and role: the casts of its slots.
@@ -1970,6 +1973,7 @@ module Brief =
                     Front = Set.empty
                     Behind = Set.empty
                     TapFrom = Set.empty
+                    Convoy = Set.empty
                     Controller = None
                     Roles = Map.empty
                 }
@@ -3044,6 +3048,7 @@ module Threats =
     let squadGroundIn (threats: Threats) (task: Task) (creep: string) : Set<RoomPos> =
         match formationOf threats task, squadRoleOf threats task creep with
         | Some formation, Some Tapper -> formation.TapFrom
+        | Some formation, Some Convoy -> formation.Convoy
         | Some formation, Some role when SquadRole.behind role -> formation.Behind
         | Some formation, Some _ -> formation.Front
         | _ -> Set.empty
@@ -5169,6 +5174,7 @@ let private withAssaults
                 |> List.filter (fun role ->
                     match role with
                     | Tapper -> tapDue
+                    | Convoy -> declaiming && facts.Taken
                     | role when SquadRole.dismantles role -> not facts.Taken
                     | _ -> true)
 
@@ -5177,6 +5183,7 @@ let private withAssaults
             // The tapper walks to its tile on the squad's launch and never
             // holds it: its cast lands once a block, not with the squad.
             let tappers, members = holders |> List.partition (snd >> (=) Tapper)
+            let members = members |> List.filter (snd >> (<>) Convoy)
             let file = Formation.frontFirst members
 
             let rally =
@@ -5197,7 +5204,7 @@ let private withAssaults
 
             let filled =
                 SquadRole.all
-                |> List.filter ((<>) Tapper)
+                |> List.filter (fun role -> role <> Tapper && role <> Convoy)
                 |> List.forall (fun role ->
                     SquadRole.slots role (List.map snd members) >= SquadRole.slots role slots)
 
@@ -5456,6 +5463,12 @@ let private withAssaults
                 // A tap lapses on its own clock, not the squad's: its tapper
                 // walks to its tile whether or not the squad has launched.
                 TapFrom = if facts.Taken && not facts.SafeMode then tapFrom else back
+                // Beside the tapper on its walk in (user, 2026-10-14): one
+                // walking alone through the room died to its rangers.
+                Convoy =
+                    match tappers |> List.choose (fst >> tileOf) with
+                    | at :: _ -> besideIn at
+                    | [] -> launchedOr behind
                 Controller = controller
                 Roles = casts |> Map.filter (fun _ role -> List.contains role slots)
             },

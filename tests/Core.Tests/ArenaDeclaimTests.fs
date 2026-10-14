@@ -136,7 +136,7 @@ let private declaimRun (target: ArenaRoom) (rivals: Body list) (stop: Arena -> b
 
     let squad =
         assault.Squad
-        |> List.filter ((<>) "tapper")
+        |> List.filter (fun row -> row <> "tapper" && row <> "convoy")
         |> List.mapi (fun i row ->
             let pattern = Fabot.Core.Decide.Bodies.patternByName $"{row}-" |> Option.get
             let at = RoomPos.at "W15S28" (tile (30 + i) 38)
@@ -149,7 +149,7 @@ let private declaimRun (target: ArenaRoom) (rivals: Body list) (stop: Arena -> b
     let final, trace = start |> runUntil stop ticks
     start, final, trace
 
-/// The assault switched on as declared, its squad but the tapper standing
+/// The assault switched on as declared, its squad but the tapper and convoy standing
 /// south-east of W15S28's spawns, `rivals` in the room. Run until both
 /// targets are down, every body of ours is dead, or `ticks` are spent.
 let private breachRun (rivals: Body list) (ticks: int) =
@@ -615,5 +615,96 @@ let arenaDeclaimTests =
                      |> List.map (fun id -> diedOn id trace))
 
                 Expect.isEmpty lost "nobody of ours lost to a fight"
+            }
+
+            test
+                "a convoy walks each tapper in past three 4R9M5H waiting mid-room on its path, every cycle, the tapper lives and the taps land on the block" {
+                let target = w18s26Now () |> withSafeModeCooldown (seen + 2_000) |> insisting
+                let ranger = parts [ RangedAttack, 4; Move, 9; Heal, 5 ]
+
+                let ambush (wave: int) (a: Arena) =
+                    { a with
+                        Bodies =
+                            a.Bodies
+                            @ [
+                                for i, (x, y) in List.indexed [ 20, 33; 21, 33; 20, 34 ] ->
+                                    body
+                                        $"Ambush{wave}-{i}"
+                                        trep
+                                        ranger
+                                        (at x y)
+                                        (Some(Kite(LowestHits, 3)))
+                            ]
+                    }
+
+                // A fresh three on the path as each tapper walks in.
+                let _, start, first = declaimRun target trepidimous (fun _ -> false) 1_150
+
+                let final, rest =
+                    ((start, []), [ 1; 2; 3 ])
+                    ||> List.fold (fun (a, trace) wave ->
+                        let next, more = ambush wave a |> run 1_000
+                        next, trace @ more)
+
+                ignore final
+                let trace = first @ rest
+                let failure = describe rest
+
+                let taps =
+                    trace
+                    |> List.collect (fun t ->
+                        t.Events
+                        |> List.choose (function
+                            | ControllerAttacked(_, by) -> Some(t.Time, by)
+                            | _ -> None))
+
+                Expect.isGreaterThanOrEqual (List.length taps) 3 $"taps: {taps}"
+
+                for (a, _), (b, _) in List.pairwise taps do
+                    Expect.equal (b - a) 1_000 $"on the block: {taps}"
+
+                Expect.isNone (safeModeOn trace) "no safe mode"
+
+                for previous, now in List.pairwise trace do
+                    for e in now.Events do
+                        match e with
+                        | Died id when not (id.StartsWith "worker") && id.Contains "-Spawn" ->
+                            let hits =
+                                previous.Bodies
+                                |> List.tryFind (fun b -> b.Id = id)
+                                |> Option.map _.Hits
+
+                            Expect.isTrue
+                                (hits |> Option.forall (fun h -> h >= 1_000))
+                                $"{id} died of age, not of a fight: {hits}\n{failure}"
+                        | _ -> ()
+
+                let ambushed =
+                    [
+                        for wave in 1..3 do
+                            for i in 0..2 -> $"Ambush{wave}-{i}"
+                    ]
+                    |> List.map (fun id -> id, diedOn id trace)
+
+                // The convoy beside a tapper in the room on most of its walk.
+                let walkedWith =
+                    trace
+                    |> List.filter (fun t ->
+                        let tappers =
+                            t.Bodies
+                            |> List.filter (fun b ->
+                                b.Id.StartsWith "tapper" && b.At.Room = "W18S26")
+
+                        let convoys = t.Bodies |> List.filter (fun b -> b.Id.StartsWith "convoy")
+
+                        tappers
+                        |> List.exists (fun tapper ->
+                            convoys
+                            |> List.exists (fun c ->
+                                RoomPos.range c.At tapper.At |> Option.exists (fun r -> r <= 2))))
+                    |> List.length
+
+                printfn "CONVOY taps %A ambush %A beside %d" taps ambushed walkedWith
+                Expect.isGreaterThan walkedWith 0 "a convoy beside a tapper"
             }
         ]

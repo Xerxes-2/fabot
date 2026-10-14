@@ -39,12 +39,15 @@ type SquadRole =
     /// A `Declaim`'s CLAIM body: cast to land as the controller's block
     /// lapses, and taps it from a tile no rampart touches.
     | Tapper
+    /// A `Declaim`'s tapper's own escort: beside the tapper wherever it
+    /// walks, with the squad while none does.
+    | Convoy
 
 [<RequireQualifiedAccess>]
 module SquadRole =
     /// Every role, in the order a squad casts them: the fronts the medic
     /// walks behind first.
-    let all = [ Sapper; Probe; Medic; Escort; Tapper ]
+    let all = [ Sapper; Probe; Medic; Escort; Convoy; Tapper ]
 
     /// Whether the role walks behind the front rather than leading it.
     let behind (role: SquadRole) = role = Medic || role = Escort

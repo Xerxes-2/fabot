@@ -207,6 +207,13 @@ let patternTableTests =
                             Block = List.replicate 19 Move @ List.replicate 19 BodyPart.Claim
                         }
                         {
+                            Name = "convoy"
+                            Block =
+                                List.replicate 24 Move
+                                @ List.replicate 16 RangedAttack
+                                @ List.replicate 8 Heal
+                        }
+                        {
                             Name = "miner"
                             Block = [ Work; Work; Move ]
                         }

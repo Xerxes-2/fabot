@@ -1750,7 +1750,7 @@ let assaultViewTests =
 
                 Expect.equal
                     (assault.Squad, assault.Mode, assault.Active)
-                    ([ "sapper"; "sapper"; "escort"; "escort"; "tapper" ], Declaim, true)
+                    ([ "sapper"; "sapper"; "escort"; "escort"; "convoy"; "tapper" ], Declaim, true)
                     "two sappers, two escorts and a tapper, a declaim, on"
             }
 

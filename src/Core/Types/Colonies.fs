@@ -945,7 +945,7 @@ module Assault =
             RoomName = "W18S26"
             Enemy = "Trepidimous"
             Breach = []
-            Squad = [ "sapper"; "sapper"; "escort"; "escort"; "tapper" ]
+            Squad = [ "sapper"; "sapper"; "escort"; "escort"; "convoy"; "tapper" ]
             Mode = Declaim
             Targets = [ { X = 10; Y = 22 }; { X = 11; Y = 22 } ]
             Entry = Some "W17S26"
