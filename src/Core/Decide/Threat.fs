@@ -38,6 +38,11 @@ type Formation =
         /// A medic's: the rally ground, or, launched, the tiles beside the
         /// leading sapper that are not the front.
         Behind: Set<RoomPos>
+        /// A tapper's: once the targets are down, the tiles beside the
+        /// controller no rampart touches; the squad's way back before.
+        TapFrom: Set<RoomPos>
+        /// The controller a tapper taps, off this tick's vision.
+        Controller: (string * RoomPos) option
         /// The bodies it admits, by name and role: the casts of its slots.
         Roles: Map<string, SquadRole>
     }
@@ -1964,6 +1969,8 @@ module Brief =
                     Target = None
                     Front = Set.empty
                     Behind = Set.empty
+                    TapFrom = Set.empty
+                    Controller = None
                     Roles = Map.empty
                 }
 
@@ -3035,6 +3042,7 @@ module Threats =
     /// body it does not admit.
     let squadGroundIn (threats: Threats) (task: Task) (creep: string) : Set<RoomPos> =
         match formationOf threats task, squadRoleOf threats task creep with
+        | Some formation, Some Tapper -> formation.TapFrom
         | Some formation, Some role when SquadRole.behind role -> formation.Behind
         | Some formation, Some _ -> formation.Front
         | _ -> Set.empty
@@ -5089,7 +5097,8 @@ let private assaultLaunchShare = 0.8
 /// walk from home, a room's side a crossing.
 let internal assaultPooled (view: ColonyView) atlas (launched: bool) (facts: AssaultFacts) : bool =
     match facts.Assault.Mode with
-    | Provoke -> true
+    | Provoke
+    | Declaim -> true
     | Strike when launched -> facts.BarredUntil |> Option.exists (fun until -> until > view.Time)
     | Strike ->
         let cast =
@@ -5137,8 +5146,36 @@ let private withAssaults
 
         let groundOf (facts: AssaultFacts) =
             let room = facts.Assault.RoomName
-            let slots = facts.Assault.Squad |> List.choose squadRoleOfRow
-            let members = Formation.holding held (Assault room) casts
+            let declaiming = Option.isSome facts.TapAt
+
+            // A tapper is wanted once its tile is open, cast as early as a
+            // CLAIM body's 600 ticks let it outlive the block by a room's
+            // side: whatever the spawn's queue makes of its start, it lands
+            // in time.
+            let tapDue =
+                match facts.TapAt with
+                | Some at when facts.Taken ->
+                    at
+                    <= view.Time
+                       + Engine.spawnTicksPerPart * List.length tapperPattern.Block
+                       + Engine.claimLifetime
+                       - Engine.roomSide
+                | _ -> false
+
+            let slots =
+                facts.Assault.Squad
+                |> List.choose squadRoleOfRow
+                |> List.filter (fun role ->
+                    match role with
+                    | Tapper -> tapDue
+                    | role when SquadRole.dismantles role -> not facts.Taken
+                    | _ -> true)
+
+            let holders = Formation.holding held (Assault room) casts
+
+            // The tapper walks to its tile on the squad's launch and never
+            // holds it: its cast lands once a block, not with the squad.
+            let tappers, members = holders |> List.partition (snd >> (=) Tapper)
             let file = Formation.frontFirst members
 
             let rally =
@@ -5149,6 +5186,7 @@ let private withAssaults
 
             let filled =
                 SquadRole.all
+                |> List.filter ((<>) Tapper)
                 |> List.forall (fun role ->
                     SquadRole.slots role (List.map snd members) >= SquadRole.slots role slots)
 
@@ -5178,7 +5216,7 @@ let private withAssaults
                     room
                     rally
                     file
-                    (filled && fit && not facts.SafeMode && not facts.Taken)
+                    (filled && fit && not facts.SafeMode && (declaiming || not facts.Taken))
                     (Formation.linked view file || away)
 
             // A tile declared to come down, breach or target, as the dark
@@ -5198,11 +5236,13 @@ let private withAssaults
 
             // A rival on a rampart beside the work tile takes no hit back:
             // the front keeps off every tile beside one but the target's.
+            let coveredBut (tile: RoomPos) (step: RoomPos) =
+                facts.Ramparts
+                |> List.exists (fun rampart ->
+                    rampart <> RoomPos.pos tile && range rampart (RoomPos.pos step) <= 1)
+
             let workFrom (tile: RoomPos) =
-                let covered (step: RoomPos) =
-                    facts.Ramparts
-                    |> List.exists (fun rampart ->
-                        rampart <> RoomPos.pos tile && range rampart (RoomPos.pos step) <= 1)
+                let covered = coveredBut tile
 
                 // A rival standing on the target itself: its ring a step
                 // out, until it leaves or dies.
@@ -5250,6 +5290,14 @@ let private withAssaults
             // the leader's own tile too: a medic the file put between the two
             // trades places with the leader for nothing and steps through to
             // the far side of the target, rather than standing in its way.
+            let controller =
+                facts.Controller |> Option.map (fun (id, tile) -> id, RoomPos.at room tile)
+
+            let tapFrom =
+                match controller with
+                | Some(_, tile) -> workFrom tile
+                | None -> front
+
             let behind =
                 match leader with
                 | Some(_, tile) ->
@@ -5266,7 +5314,17 @@ let private withAssaults
                     match Set.difference (Set.union (besideIn tile) besideFront) front with
                     | clear when Set.isEmpty clear -> besideIn tile
                     | clear -> clear
-                | None -> rally
+                // No front left (a declaim's targets down): round the tap
+                // tile, off it and off every tile a rampart touches.
+                | None ->
+                    let round =
+                        Set.difference (tapFrom |> Seq.collect besideIn |> Set.ofSeq) tapFrom
+
+                    match
+                        round |> Set.filter (coveredBut (RoomPos.at room { X = -1; Y = -1 }) >> not)
+                    with
+                    | clear when Set.isEmpty clear -> rally
+                    | clear -> clear
 
             let inRoom =
                 members
@@ -5288,6 +5346,7 @@ let private withAssaults
 
             let launchedOr ground = if launched then ground else back
 
+
             {
                 Slots = slots
                 Launched = launched
@@ -5295,16 +5354,24 @@ let private withAssaults
                 Target = target
                 Front = launchedOr front
                 Behind = launchedOr behind
+                // A tap lapses on its own clock, not the squad's: its tapper
+                // walks to its tile whether or not the squad has launched.
+                TapFrom = if facts.Taken && not facts.SafeMode then tapFrom else back
+                Controller = controller
                 Roles = casts |> Map.filter (fun _ role -> List.contains role slots)
             },
-            // Its targets down (#496): its work is done once its casts are out.
-            not facts.Taken || not (List.isEmpty inRoom)
+            // Its targets down (#496): its work is done once its casts are
+            // out, a declaim's once the controller is nobody's.
+            declaiming
+            || not facts.Taken
+            || not (List.isEmpty inRoom)
+            || not (List.isEmpty tappers)
 
         // No squad is cast while safe mode runs in its room, which a squad
         // bought then waits out, nor once its targets are down (#496).
         let moded =
             view.Assaults
-            |> List.filter (fun facts -> facts.SafeMode || facts.Taken)
+            |> List.filter (fun facts -> facts.SafeMode || facts.Taken && Option.isNone facts.TapAt)
             |> List.map (fun facts -> facts.Assault.RoomName)
             |> Set.ofList
 

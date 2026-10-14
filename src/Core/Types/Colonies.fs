@@ -819,6 +819,12 @@ type AssaultMode =
     /// Waits for a window, and walks on to its targets, by default the
     /// room's towers, then its spawns.
     | Strike
+    /// Pooled whenever on, like a `Provoke`, and pooled on past its targets
+    /// while the controller is its enemy's: a tapper `attackController`s it
+    /// from a tile no rampart touches each time its block lapses, so no safe
+    /// mode can be raised and every tap takes the room nearer nobody's.
+    /// ADR-0098
+    | Declaim
 
 /// An [[assault]]: a rival's room a human has sent a squad against, cast by
 /// the colony that declares it (#490). ADR-0084
@@ -939,8 +945,8 @@ module Assault =
             RoomName = "W18S26"
             Enemy = "Trepidimous"
             Breach = []
-            Squad = [ "sapper"; "sapper"; "escort"; "escort" ]
-            Mode = Provoke
+            Squad = [ "sapper"; "sapper"; "escort"; "escort"; "tapper" ]
+            Mode = Declaim
             Targets = [ { X = 10; Y = 22 }; { X = 11; Y = 22 } ]
             Entry = Some "W17S26"
             MaxHops = None

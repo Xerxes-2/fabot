@@ -736,7 +736,7 @@ let errandTests =
 
                 Expect.isNone
                     (Map.tryFind reactor blind.Spatial.Stores)
-                    "and absent entry by entry the tick the relay gaps, never zero (ADR 0004)"
+                    "and absent entry by entry the tick the relay gaps, never zero"
 
                 Expect.equal
                     (SpatialInfo.placementOf blind.Spatial reactor)
@@ -1728,7 +1728,7 @@ let assaultViewTests =
             }
 
             test
-                "W18S26's controller is declared from W15S28, (10,22) then (11,22) in by W17S26, two sappers and two escorts, paused" {
+                "W18S26's controller is declared from W15S28, (10,22) then (11,22) in by W17S26, two sappers, two escorts and a tapper, paused" {
                 let declaring =
                     Colony.declared
                     |> List.filter (fun colony ->
@@ -1750,8 +1750,8 @@ let assaultViewTests =
 
                 Expect.equal
                     (assault.Squad, assault.Mode, assault.Active)
-                    ([ "sapper"; "sapper"; "escort"; "escort" ], Provoke, false)
-                    "two sappers and two escorts, paused"
+                    ([ "sapper"; "sapper"; "escort"; "escort"; "tapper" ], Declaim, false)
+                    "two sappers, two escorts and a tapper, a declaim, paused"
             }
 
             test

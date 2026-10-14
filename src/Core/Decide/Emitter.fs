@@ -1179,9 +1179,18 @@ let private actionIntents
         |> Option.toList
     | Defend room -> defendIntent view atlas threats room creep |> Option.toList
     // A launched sapper or probe takes its target down from beside it; a
-    // medic's act is the heal reflex's, an escort's the weapon reflex's.
+    // tapper taps whenever it stands beside the controller, the engine
+    // refusing it while the block runs, so the first tick it lapses lands
+    // one; a medic's act is the heal reflex's.
     | Assault _ ->
+        let at = SpatialInfo.creepPlacementOf view.Spatial creep.Name
+
         match Threats.formationOf threats task with
+        | Some { Controller = Some(id, tile) } when
+            Threats.squadRoleOf threats task creep.Name = Some Tapper
+            && at |> Option.bind (RoomPos.range tile) |> Option.exists (fun r -> r <= 1)
+            ->
+            [ AttackController(creep.Name, id) ]
         | Some formation when
             formation.Launched
             && Threats.squadRoleOf threats task creep.Name

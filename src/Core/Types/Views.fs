@@ -69,6 +69,13 @@ type AssaultFacts =
         /// beside one is open to a melee no shot of ours reaches. Empty while
         /// the room is dark.
         Ramparts: Pos list
+        /// The room's controller, by id and tile, off this tick's vision.
+        Controller: (string * Pos) option
+        /// A `Declaim`'s next tap: the first tick its controller's block
+        /// lets one land, while that controller is its enemy's as seen or
+        /// remembered (`World.RivalControllers`). None for any other mode,
+        /// and once the controller is seen anybody else's or nobody's.
+        TapAt: int option
         /// Whether safe mode runs in the room: vision this tick, or the
         /// controller remembered (`World.RivalControllers`, #491).
         SafeMode: bool
@@ -1585,7 +1592,8 @@ module ColonyView =
 
                 match assault.Mode, assault.Targets with
                 | _, _ :: _ -> breach @ declared
-                | Provoke, [] -> breach
+                | Provoke, []
+                | Declaim, [] -> breach
                 | Strike, [] -> breach @ placed BuiltKind.Tower @ placed BuiltKind.Spawn)
 
         {
@@ -1598,6 +1606,22 @@ module ColonyView =
                     | None -> Set.contains assault.RoomName taken)
             Towers = placed BuiltKind.Tower |> List.map snd
             Ramparts = ramparts |> Map.keys |> List.ofSeq
+            Controller =
+                facts.TargetKinds
+                |> Map.tryFindKey (fun _ kind -> kind = Controller)
+                |> Option.bind (fun id ->
+                    Map.tryFind id facts.Layer.TargetPositions |> Option.map (fun tile -> id, tile))
+            TapAt =
+                let held =
+                    Map.tryFind assault.RoomName world.RivalControllers
+                    |> Option.filter (fun c -> c.Owner = assault.Enemy)
+
+                let lost =
+                    facts.Control |> Option.exists (fun control -> control.Owner <> Ownership.Rival)
+
+                match assault.Mode, held with
+                | Declaim, Some c when not lost -> Some c.UpgradeBlockedUntil
+                | _ -> None
             SafeMode =
                 remembered || facts.Control |> Option.exists (fun control -> control.SafeMode)
             BarredUntil =

@@ -136,6 +136,17 @@ let escortPattern =
         Block = List.replicate 24 Move @ List.replicate 16 RangedAttack @ List.replicate 8 Heal
     }
 
+/// A `Declaim`'s tapper: the most CLAIM an RCL8 bank buys at a tile a tick,
+/// MOVE first. 12,350. Each part takes 300
+/// off the downgrade timer a tap; a part is 650 where the 1,000 ticks a tap
+/// waits take 1,000 for nothing, so the declaim's length, not its energy, is
+/// what the body size buys.
+let tapperPattern =
+    {
+        Name = RowName.tapper
+        Block = List.replicate 19 Move @ List.replicate 19 BodyPart.Claim
+    }
+
 /// An [[assault]]'s breacher (#490): `docs/research/boosts.md` §4.1's D,
 /// MOVE then WORK, so damage lames it on the rampart it
 /// stands beside before it slows the dismantle, and cast with one MOVE last
@@ -201,6 +212,7 @@ let patternTable =
         probePattern
         medicPattern
         escortPattern
+        tapperPattern
         minerPattern
         dismantlerPattern
     ]
@@ -329,6 +341,7 @@ let squadPatternOf (role: SquadRole) : BodyPattern =
     | Probe -> probePattern
     | Medic -> medicPattern
     | Escort -> escortPattern
+    | Tapper -> tapperPattern
 
 /// The squad role a cast carries in its name.
 let squadRoleByName (name: string) : SquadRole option =

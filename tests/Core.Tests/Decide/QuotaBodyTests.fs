@@ -203,6 +203,10 @@ let patternTableTests =
                                 @ List.replicate 8 Heal
                         }
                         {
+                            Name = "tapper"
+                            Block = List.replicate 19 Move @ List.replicate 19 BodyPart.Claim
+                        }
+                        {
                             Name = "miner"
                             Block = [ Work; Work; Move ]
                         }

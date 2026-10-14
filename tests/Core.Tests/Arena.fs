@@ -338,6 +338,8 @@ type ArenaRoom =
         /// Whether its rival owner raises safe mode the tick a structure of
         /// theirs here is struck, whenever the engine lets them (#491).
         Panics: bool
+        /// Whether its rival owner tries safe mode every tick, struck or not.
+        Insists: bool
         Stronghold: ArenaStronghold option
     }
 
@@ -561,12 +563,17 @@ let room (name: string) : ArenaRoom =
         Bank = 0
         Reactor = None
         Panics = false
+        Insists = false
         Stronghold = None
     }
 
 /// Its rival owner raises safe mode here once struck, when the engine lets
 /// them (#491).
 let panicking (r: ArenaRoom) : ArenaRoom = { r with Panics = true }
+
+/// Its rival owner tries safe mode here every tick.
+let insisting (r: ArenaRoom) : ArenaRoom =
+    { r with Panics = true; Insists = true }
 
 /// The sector Reactor standing on a tile of the room, holding `thorium`,
 /// flagged `owner`'s, its streak not yet begun.
@@ -4289,6 +4296,8 @@ let step (a: Arena) : Arena * TickTrace =
                 controllerRoom c |> Option.map (fun r -> n, Act.ClaimController r)
             | UpgradeController(n, c) ->
                 controllerRoom c |> Option.map (fun r -> n, Act.UpgradeController r)
+            | AttackController(n, c) ->
+                controllerRoom c |> Option.map (fun r -> n, Act.AttackController r)
             | BuildSite(n, s) -> Some(n, Act.Build s)
             | WithdrawFromStore(n, s, Energy, amount) -> Some(n, Act.Withdraw(s, amount))
             | AttackCreep(n, h) -> Some(n, Act.Attack h)
@@ -4644,7 +4653,7 @@ let step (a: Arena) : Arena * TickTrace =
                        | true, (_, now) -> now.Hits < s.Hits
                        | _ -> true)
 
-            if struck then
+            if struck || r.Insists then
                 match activated a.Time rooms c with
                 | Some raised ->
                     rooms <- Map.add name { r with Controller = Some raised } rooms

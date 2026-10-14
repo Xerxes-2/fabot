@@ -1,5 +1,6 @@
 /// W18S26's controller assault: the breach to a tile beside its controller
-/// no rampart touches, against Trepidimous's bodies in the room.
+/// no rampart touches, against Trepidimous's bodies in the room, and the taps
+/// from it that hold its safe mode down.
 module Fabot.Core.Tests.ArenaDeclaimTests
 
 open Expecto
@@ -120,7 +121,7 @@ let private walk () =
 /// `Assault.w18s26Controller` switched on as declared, its squad standing
 /// south-east of W15S28's spawns, `rivals` in the room. Run until both
 /// targets are down, every body of ours is dead, or `ticks` are spent.
-let private breachRun (rivals: Body list) (ticks: int) =
+let private declaimRun (target: ArenaRoom) (rivals: Body list) (stop: Arena -> bool) (ticks: int) =
     let assault =
         { Assault.w18s26Controller with
             Active = true
@@ -135,24 +136,32 @@ let private breachRun (rivals: Body list) (ticks: int) =
 
     let squad =
         assault.Squad
+        |> List.filter ((<>) "tapper")
         |> List.mapi (fun i row ->
             let pattern = Fabot.Core.Decide.Bodies.patternByName $"{row}-" |> Option.get
             let at = RoomPos.at "W15S28" (tile (30 + i) 38)
             body $"{row}-1172000{i + 1}-Spawn3" Side.Ours (castOf pattern 1) at None)
 
     let start =
-        arena (seen + 1) ([ w15s28 (); w18s26Now () ] @ walk ()) colonies (squad @ rivals)
+        arena (seen + 1) ([ w15s28 (); target ] @ walk ()) colonies (squad @ rivals)
+        |> withCasts ("worker" :: List.distinct assault.Squad)
 
+    let final, trace = start |> runUntil stop ticks
+    start, final, trace
+
+/// The assault switched on as declared, its squad but the tapper standing
+/// south-east of W15S28's spawns, `rivals` in the room. Run until both
+/// targets are down, every body of ours is dead, or `ticks` are spent.
+let private breachRun (rivals: Body list) (ticks: int) =
     let standing (a: Arena) =
-        assault.Targets
+        Assault.w18s26Controller.Targets
         |> List.filter (fun t -> a.Rooms["W18S26"].Structures |> List.exists (fun s -> s.At = t))
 
     let over (a: Arena) =
         a.Bodies |> List.forall (fun b -> b.Side <> Side.Ours)
         || List.isEmpty (standing a)
 
-    let final, trace = start |> runUntil over ticks
-    start, final, trace
+    declaimRun (w18s26Now ()) rivals over ticks
 
 let private fellOn (at: Pos) (trace: TickTrace list) =
     trace
@@ -202,6 +211,15 @@ let private trepidimous =
         walksIn "Melee2" melee (w17s26 25 25) 500
         walksIn "Small3" (parts [ Attack, 5; Move, 5 ]) (w17s26 26 25) 650
     ]
+
+/// The tick safe mode was raised in W18S26, if it was.
+let private safeModeOn (trace: TickTrace list) =
+    trace
+    |> List.tryPick (fun t ->
+        t.Events
+        |> List.tryPick (function
+            | SafeModeActivated _ -> Some t.Time
+            | _ -> None))
 
 /// Source Keepers' tiles in W16S26 at t1,172,250, which the walk crosses.
 let private keepers = [ 4, 6; 42, 8; 36, 38; 14, 43 ]
@@ -253,5 +271,40 @@ let arenaDeclaimTests =
 
                 for b in start.Bodies |> List.filter (fun b -> b.Side = Side.Ours) do
                     Expect.isTrue (survived b.Id trace) $"{b.Id} lives\n{failure}"
+            }
+
+            test
+                "past the breach a tapper lands on every tick the block lapses, one a life, and a rival trying safe mode every tick never raises it" {
+                // Its cooldown ends after the first tap, not at t1,199,019.
+                let target = w18s26Now () |> withSafeModeCooldown (seen + 2_000) |> insisting
+
+                let _, _, trace = declaimRun target trepidimous (fun _ -> false) 7_000
+                let failure = describe trace
+
+                let taps =
+                    trace
+                    |> List.collect (fun t ->
+                        t.Events
+                        |> List.choose (function
+                            | ControllerAttacked(_, by) -> Some(t.Time, by)
+                            | _ -> None))
+
+                // Measured: t1,173,693, then every 1,000 to t1,178,693.
+                Expect.isGreaterThanOrEqual (List.length taps) 6 $"six taps: {taps}"
+
+                Expect.isLessThan
+                    (fst taps.Head)
+                    1_199_019
+                    "the first before the cooldown ends live"
+
+                for (a, _), (b, _) in List.pairwise taps do
+                    Expect.equal (b - a) 1_000 $"the block lapses and the next lands: {taps}"
+
+                Expect.equal
+                    (taps |> List.map snd |> List.distinct |> List.length)
+                    (List.length taps)
+                    "a tapper a tap, each cast by its life"
+
+                Expect.isNone (safeModeOn trace) $"no safe mode\n{failure}"
             }
         ]
