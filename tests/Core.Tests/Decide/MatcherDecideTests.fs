@@ -1773,6 +1773,7 @@ let fightOnlyDecideTests =
                         Time = time
                         PowerCreeps = []
                         Objects = Set.empty
+                        Covered = Set.empty
                     }
 
                 let plan =
@@ -1792,6 +1793,7 @@ let fightOnlyDecideTests =
                 let now =
                     { glance 1 with
                         Objects = LightTick.lookups last |> Set.ofList
+                        Covered = Set.empty
                     }
 
                 let fight =

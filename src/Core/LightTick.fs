@@ -85,6 +85,9 @@ type Glance =
         /// controller, the Reactor, an observer. Looked up only on a tick
         /// that may be light.
         Objects: Set<string>
+        /// The tiles of every rampart not ours in a room a hostile stands in:
+        /// a body on one takes no hit of ours.
+        Covered: Set<RoomPos>
     }
 
 /// Something of ours a hostile can strike from where it stands (`now`) or
@@ -1030,6 +1033,24 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
         |> List.distinctBy (fun hostile -> hostile.Tile.Room)
         |> List.map (fun hostile -> LightForce.Hostile(hostile.Tile.Room, hostile.Owner))
 
+    // An assault's squad in contact (user, 2026-10-14): an armed body off a
+    // rampart within its escorts' engage reach and a step of a cast of ours.
+    // Replayed, a chase against a kiting body stood every other tick; one on
+    // a rampart takes no hit, so there is nothing to chase.
+    let squad =
+        hostiles
+        |> List.filter (fun hostile ->
+            hostile.Armed
+            && not (HostileInfo.isKeeperOwner hostile.Owner)
+            && not (Set.contains hostile.Tile now.Covered)
+            && now.Creeps
+               |> Map.exists (fun name creep ->
+                   Option.isSome (Fabot.Core.Decide.Bodies.squadRoleByName name)
+                   && RoomPos.range creep.Tile hostile.Tile
+                      |> Option.exists (fun r -> r <= Engine.rangedRange + 3)))
+        |> List.distinctBy (fun hostile -> hostile.Tile.Room)
+        |> List.map (fun hostile -> LightForce.Hostile(hostile.Tile.Room, hostile.Owner))
+
     let fought =
         last.Plans
         |> Map.toList
@@ -1207,6 +1228,7 @@ let forcing (last: LastFull) (now: Glance) : LightForce list =
             deferred
             home
             unforeseen
+            @ (squad |> List.filter (fun force -> not (List.contains force unforeseen)))
             fought
             creepsChanged
             onBorder

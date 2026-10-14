@@ -453,6 +453,18 @@ let private glance () : LightTick.Glance =
                 ]
         // A light tick's alone (`standingOf`): a forced tick never asks.
         Objects = Fresh.setOfSeq Seq.empty
+        Covered =
+            Fresh.setOfSeq (
+                seq {
+                    for room in rooms do
+                        if (room.find findHostileCreeps).Length > 0 then
+                            for o in room.find findHostileStructures do
+                                let s = unbox<IStructure> o
+
+                                if s.structureType = "rampart" then
+                                    yield tileOf room.name s.pos
+                }
+            )
     }
 
 /// Of the objects the last full tick's acts name (`LightTick.lookups`), the

@@ -19,6 +19,42 @@ let forcedTests =
             }
 
             test
+                "an armed body off a rampart within an escort's engage reach and a step forces a full tick, so a squad chases a kiting body every tick; one past it, or on a rampart, forces nothing" {
+                let withEscort =
+                    { quiet with
+                        Creeps = Map.add "escort-1-Spawn1" (creepAt 25 25 4800) quiet.Creeps
+                    }
+
+                let saw = LightTick.lastFull withEscort Map.empty []
+
+                let kiting x =
+                    { withEscort with
+                        Hostiles =
+                            [
+                                { hostile x 25 "Trepidimous" true with
+                                    Weapon = Some Engine.rangedRange
+                                }
+                            ]
+                    }
+
+                Expect.contains
+                    (LightTick.forcing saw (kiting 31))
+                    (LightForce.Hostile(room, "Trepidimous"))
+                    "six off the escort, kiting"
+
+                Expect.equal (LightTick.forced saw (kiting 33)) None "eight off"
+
+                Expect.equal
+                    (LightTick.forced
+                        saw
+                        { kiting 31 with
+                            Covered = Set.singleton (tile 31 25)
+                        })
+                    None
+                    "six off on a rampart: no hit of ours lands on it"
+            }
+
+            test
                 "an armed hostile in a home room out of reach of everything of ours forces nothing; within reach of a creep, a full tick" {
                 // #549: armed on paper is no fact a replay misses; a body
                 // that can hurt something of ours this tick is.

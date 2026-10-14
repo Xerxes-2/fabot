@@ -387,6 +387,7 @@ let movementTests =
                         Time = run
                         PowerCreeps = []
                         Objects = Set.empty
+                        Covered = Set.empty
                     }
 
                 let full = decidedAt 14

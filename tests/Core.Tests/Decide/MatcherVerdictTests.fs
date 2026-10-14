@@ -415,6 +415,7 @@ let fullMineContainerTests =
                             Time = 0
                             PowerCreeps = []
                             Objects = Set.ofList [ "min-a" ]
+                            Covered = Set.empty
                         }
 
                     LightTick.intents (LightTick.lastFull glance Map.empty intents) glance

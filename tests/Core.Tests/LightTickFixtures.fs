@@ -47,6 +47,7 @@ let internal quiet: Glance =
                     "obs-1"
                     "spawn"
                 ]
+        Covered = Set.empty
     }
 
 /// The full tick that saw `quiet`: the digger harvesting where it stands and
