@@ -142,6 +142,11 @@ const measures = {
   // The first tick our room stood in safe mode (never: Infinity).
   safeModeAt: (samples, a) => within(samples, a).find((s) => s.safeMode)?.t ?? Infinity,
   creepsAtEnd: (samples, a) => sideOf(a)(at(samples, a.to ?? Infinity)).creeps,
+  // A core engagement that loses sight must not drop its razer's asks.
+  closedOnCore: (samples, _, dir) => rowsOf(dir).filter((e) => e.core && e.closed !== null && (at(samples, e.closed).rooms[e.room]?.cores ?? 0) > 0).length,
+  // A wave's engagement left open holds its bodies and asks: the most ticks
+  // one with no core stayed open after its group was last seen.
+  heldPastWave: (samples, _, dir) => Math.max(0, ...rowsOf(dir).filter((e) => !e.core).map((e) => (e.closed ?? samples.at(-1).t) - (e.seen ?? e.opened))),
   // Invader cores standing in the declared outposts at the window's end.
   coresAtEnd: (samples, a) => Object.values(at(samples, a.to ?? Infinity).rooms).reduce((n, r) => n + (r.cores ?? 0), 0),
   // Enemies standing in our room at the window's end.

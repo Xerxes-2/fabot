@@ -98,6 +98,52 @@ let decide (context: Context) (state: State) : Intent list * State =
         |> Set.ofArray
 
     let engagements, into = merged events state.Engagements
+
+    let armed =
+        let set = HashSet<string>()
+
+        for h in hostiles do
+            if cores.Contains h.Id || Hostiles.armed owned hostiles h then
+                set.Add h.Id |> ignore
+
+        set
+
+    // A Defend left open holds its room: a newcomer inside it is its target
+    // now, with a fresh budget, where its own group is not there (a home's,
+    // so a second raid is not left to towers) or was lost from sight.
+    let rehomed (e: Engagement) =
+        let inRoom (id: int) =
+            byId.ContainsKey id
+            && byId.[id].Room = e.Room
+            && byId.[id].LastSeen = world.Time
+
+        let gone =
+            if homes.Contains e.Room then
+                not (inRoom e.Group)
+            else
+                not (byId.ContainsKey e.Group)
+
+        match
+            events
+            |> List.tryPick (fun event ->
+                match event with
+                | Tracker.Event.Newcomer id when
+                    gone && inRoom id && byId.[id].Members |> Set.exists armed.Contains
+                    ->
+                    Some id
+                | _ -> None)
+        with
+        | Some id ->
+            { e with
+                Group = id
+                Budget = e.Lost
+                Unanswered = true
+                Predicted = None
+            }
+        | None -> e
+
+    let engagements = engagements |> List.map rehomed
+
     let alive = engagements |> List.map (fun e -> e.Id) |> Set.ofList
 
     let landed, waiting =
@@ -153,7 +199,11 @@ let decide (context: Context) (state: State) : Intent list * State =
             Threatens =
                 group
                 |> Option.exists (fun g -> homes.Contains g.Room || worked.Contains g.Room)
-            Clear = Sightings.clear context.Sightings world.Time e.Room
+            // A core in sight stands in a group of its own, so a room in sight
+            // holds open only the engagement on that group.
+            Clear =
+                Sightings.clear context.Sightings world.Time e.Room
+                || foes.ContainsKey e.Room && Sightings.unarmed context.Sightings world.Time e.Room
         }
 
     let stepped =
@@ -170,15 +220,6 @@ let decide (context: Context) (state: State) : Intent list * State =
                 | true, g -> [ g.Room ]
                 | _ -> []))
         |> Set.ofList
-
-    let armed =
-        let set = HashSet<string>()
-
-        for h in hostiles do
-            if cores.Contains h.Id || Hostiles.armed owned hostiles h then
-                set.Add h.Id |> ignore
-
-        set
 
     // Past every id held last tick, so none closed this tick is reused by one opened.
     let firstId = 1 + (state.Engagements |> List.fold (fun most e -> max most e.Id) 0)
@@ -427,37 +468,8 @@ let decide (context: Context) (state: State) : Intent list * State =
             | None -> Defend.giveUp (homes.Contains e.Room) world.Time e
         | _ -> e
 
-    // A Defend left open holds its room: a newcomer inside it is its target
-    // now, with a fresh budget, where its own group is not there (a home's,
-    // so a second raid is not left to towers) or was lost from sight.
-    let rehomed (e: Engagement) =
-        let inRoom (id: int) =
-            byId.ContainsKey id
-            && byId.[id].Room = e.Room
-            && byId.[id].LastSeen = world.Time
-
-        let gone =
-            if homes.Contains e.Room then
-                not (inRoom e.Group)
-            else
-                not (byId.ContainsKey e.Group)
-
-        match
-            events
-            |> List.tryPick (fun event ->
-                match event with
-                | Tracker.Event.Newcomer id when
-                    gone && inRoom id && byId.[id].Members |> Set.exists armed.Contains
-                    ->
-                    Some id
-                | _ -> None)
-        with
-        | Some id -> { e with Group = id; Budget = e.Lost }
-        | None -> e
-
     let engagements =
         stepped @ opened
-        |> List.map (fun (e, left) -> rehomed e, left)
         |> List.sortBy (fun (e, _) -> -e.Priority, e.Id)
         |> List.map (fun (e, left) ->
             let grew = e.Unanswered && capacityOf e > e.Capacity

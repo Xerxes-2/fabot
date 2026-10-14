@@ -411,7 +411,7 @@ function sample(t, time, room) {
 }
 
 // What `prediction.mjs` reads an engagement's outcome from; `cast`: the energy
-// of the bodies it asked that stood in it.
+// of the bodies it asked that stood in it; `core`: an Invader core was in its group.
 const LETTER_COST = Object.fromEntries(Object.entries(PART_COST).map(([t, c]) => [t === "claim" ? "K" : t[0].toUpperCase(), c]));
 const open = new Map();
 const engagementsOut = fs.openSync(join(out, "engagements.jsonl"), "w");
@@ -448,6 +448,7 @@ async function engaged(t, time, rooms) {
     const objects = rooms.flatMap((r) => [...r["#objects"]]);
     const theirs = objects.filter((o) => rec.members.has(o.id));
     if (theirs.length) rec.seen = t;
+    rec.core ||= theirs.some((o) => o.structureType === "invaderCore");
     const close = objects.some((o) => e.ours.includes(o.name) && o["#user"] === ours && theirs.some((h) => near(h.pos, o.pos, 3) && h.pos.roomName === o.pos.roomName));
     if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;
   }

@@ -61,7 +61,7 @@ let worked (context: Context) : Outpost list =
 
     context.Declarations.Outposts
     |> List.filter (fun o ->
-        Sightings.clear context.Sightings context.World.Time o.Room
+        Sightings.unarmed context.Sightings context.World.Time o.Room
         && homes
            |> Array.exists (fun home ->
                Option.isSome (Atlas.route context.Atlas Set.empty reachHops home o.Room)))

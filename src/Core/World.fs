@@ -383,29 +383,40 @@ module Hostiles =
         || (works || creep.Body |> Array.exists (fun p -> p.Kind.IsHeal))
            && hostiles |> Array.exists (fun o -> o.Pos.Room = creep.Pos.Room && strikes o)
 
-type Sightings = Map<string, Map<string, int>>
+type Seen = { Gone: int; Armed: bool }
+
+type Sightings = Map<string, Map<string, Seen>>
 
 module Sightings =
 
     let step (world: World) (previous: Sightings) : Sightings =
         let mutable next =
             previous
-            |> Map.map (fun _ seen -> seen |> Map.filter (fun _ gone -> gone > world.Time))
+            |> Map.map (fun _ seen -> seen |> Map.filter (fun _ s -> s.Gone > world.Time))
             |> Map.filter (fun _ seen -> not seen.IsEmpty)
 
         let owned = Hostiles.owned world.Rooms
 
         // A room in sight holds what stands there now: a wave killed reopens it.
         for room in world.Rooms do
-            let mutable seen = Map.empty
-
-            for creep in room.Hostiles do
-                if Hostiles.armed owned room.Hostiles creep then
-                    seen <- Map.add creep.Id (world.Time + creep.TicksToLive) seen
-
-            for s in room.Structures do
-                if s.Kind.IsInvaderCore && s.Level > 0 then
-                    seen <- Map.add s.Id (world.Time + s.Collapse) seen
+            let seen =
+                Map.ofList
+                    [
+                        for creep in room.Hostiles do
+                            if Hostiles.armed owned room.Hostiles creep then
+                                creep.Id,
+                                {
+                                    Gone = world.Time + creep.TicksToLive
+                                    Armed = true
+                                }
+                        for s in room.Structures do
+                            if s.Kind.IsInvaderCore then
+                                s.Id,
+                                {
+                                    Gone = world.Time + s.Collapse
+                                    Armed = s.Level > 0
+                                }
+                    ]
 
             next <-
                 if seen.IsEmpty then
@@ -415,7 +426,11 @@ module Sightings =
 
         next
 
-    let clear (sightings: Sightings) (time: int) (room: string) : bool =
+    let private none (counts: Seen -> bool) (sightings: Sightings) (time: int) (room: string) =
         match Map.tryFind room sightings with
-        | Some seen -> seen |> Map.forall (fun _ gone -> gone <= time)
+        | Some seen -> seen |> Map.forall (fun _ s -> s.Gone <= time || not (counts s))
         | None -> true
+
+    let clear = none (fun _ -> true)
+
+    let unarmed = none _.Armed
