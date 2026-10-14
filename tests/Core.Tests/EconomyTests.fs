@@ -334,7 +334,7 @@ let tests =
 
             testPropertyWithConfig
                 config
-                "no seated task holds more garrisons than its posts, nor other bodies than its other seats"
+                "at no tick does a seated task hold more garrisons than its posts, nor other bodies than its other seats"
             <| fun (scene: Scene) ->
                 let out = matched scene scene.Assignments
 
@@ -342,12 +342,23 @@ let tests =
                 |> Array.forall (fun offer ->
                     match offer.Capacity with
                     | Capacity.Seated(seats, posts, _) ->
-                        let garrisons, others =
+                        let holders =
                             scene.Bodies
                             |> Array.filter (fun b -> Map.tryFind b.Name out = Some offer.Id)
-                            |> Array.partition (fun b -> garrisons b offer)
 
-                        garrisons.Length <= posts && others.Length <= seats - posts
+                        let arrives b =
+                            scene.Travel b offer |> Option.defaultValue 0 |> max 0
+
+                        holders
+                        |> Array.forall (fun b ->
+                            let present =
+                                holders
+                                |> Array.filter (fun a ->
+                                    garrisons a offer = garrisons b offer
+                                    && arrives a <= arrives b
+                                    && a.TicksToLive > arrives b)
+
+                            present.Length <= (if garrisons b offer then posts else seats - posts))
                     | _ -> true)
 
             testPropertyWithConfig
