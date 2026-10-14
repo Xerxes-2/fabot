@@ -23,8 +23,8 @@ type Formation =
         /// in, under four fifths before — or while safe mode runs in the
         /// room.
         Launched: bool
-        /// At home, beside the exit its chain into the rival's room leaves by
-        /// (`Formation.musterAtHome`). Empty where no chain reaches the room.
+        /// In its entry room, beside the crossing into the rival's room
+        /// (`Formation.musterBefore`). Empty where no chain reaches the room.
         Rally: Set<RoomPos>
         /// What its sappers take down this tick (`AssaultFacts.Targets`'
         /// head), None while the room is dark or nothing is left.
@@ -2100,15 +2100,16 @@ module Formation =
         | Some rally when not (Set.isEmpty rally) -> rally
         | _ -> onChain (Atlas.route atlas (SpatialInfo.homeName view.Spatial) room)
 
-    /// An Assault's rally ground: at home, beside the crossing out toward the
-    /// next room on its chain, off the idle ground (`Atlas.idleGroundIn`) —
-    /// the rings of the spawns, extensions and stores — where any of it is
-    /// left. Empty where no chain reaches its room.
-    let internal musterAtHome atlas (reachIn: string -> Set<Pos>) (chain: string list option) =
-        match chain with
-        | Some(home :: next :: _) ->
-            let ground = besideCrossing atlas reachIn home next
-            let idle = Atlas.idleGroundIn atlas home |> RoomPos.setAt home
+    /// An Assault's rally ground: in the last room of its chain before its
+    /// target (its entry), beside the crossing into the target, off the idle
+    /// ground (`Atlas.idleGroundIn`) — the rings of the spawns, extensions
+    /// and stores — where any of it is left. Each cast walks there alone.
+    /// Empty where no chain reaches its room.
+    let internal musterBefore atlas (reachIn: string -> Set<Pos>) (chain: string list option) =
+        match chain |> Option.map List.rev with
+        | Some(target :: entry :: _) ->
+            let ground = besideCrossing atlas reachIn entry target
+            let idle = Atlas.idleGroundIn atlas entry |> RoomPos.setAt entry
 
             match Set.difference ground idle with
             | clear when Set.isEmpty clear -> ground
@@ -5179,10 +5180,20 @@ let private withAssaults
             let file = Formation.frontFirst members
 
             let rally =
-                Formation.musterAtHome
+                Formation.musterBefore
                     atlas
                     (Threats.reachIn threats)
                     (Atlas.siegeRoute atlas home room)
+
+            // Launched only from its entry (user, 2026-10-14): a file held
+            // whole from home spent most of its sappers' lives on the walk.
+            let arrived =
+                let entry = rally |> Seq.tryHead |> Option.map _.Room
+
+                members
+                |> List.forall (fun (name, _) ->
+                    tileOf name
+                    |> Option.exists (fun tile -> tile.Room = room || Some tile.Room = entry))
 
             let filled =
                 SquadRole.all
@@ -5216,7 +5227,11 @@ let private withAssaults
                     room
                     rally
                     file
-                    (filled && fit && not facts.SafeMode && (declaiming || not facts.Taken))
+                    (filled
+                     && fit
+                     && arrived
+                     && not facts.SafeMode
+                     && (declaiming || not facts.Taken))
                     (Formation.linked view file || away)
 
             // A tile declared to come down, breach or target, as the dark

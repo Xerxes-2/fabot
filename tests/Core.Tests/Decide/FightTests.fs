@@ -348,7 +348,7 @@ let assaultTests =
             }
 
             test
-                "a file strung past two of its leader walks on in a room between home and the rival's, and holds for a broken file; at home and in the rival's room the leader holds for the rest" {
+                "a file at its entry launched holds for the rest; one in a room off its entry is not launched and walks to the rally, each cast alone; in the rival's room the leader holds for the rest" {
                 let holds (ground: Formation) (leader: RoomPos) =
                     Set.contains leader ground.Front
                     && ground.Front
@@ -368,21 +368,12 @@ let assaultTests =
                 let file = [ 25, 20; 26, 20; 27, 20; 28, 20 ]
                 let broken = [ 25, 20; 26, 20; 27, 20; 31, 20 ]
 
-                let walking = assaultGroundOf (assaultThreats (between file))
+                // The owner's call (2026-10-14): launched only from the entry.
+                for squad in [ file; broken ] do
+                    let walking = assaultGroundOf (assaultThreats (between squad))
 
-                Expect.isTrue walking.Launched "the premise: one file, launched"
-
-                Expect.isTrue
-                    (walking.Front |> Set.forall (fun tile -> tile.Room = "W1N2"))
-                    $"between, the sappers walk on to the breach: {walking.Front}"
-
-                let gapped = assaultGroundOf (assaultThreats (between broken))
-
-                Expect.isTrue gapped.Launched "every cast out of home: still on its walk"
-
-                Expect.isTrue
-                    (holds gapped (RoomPos.at "W2N1" { X = 25; Y = 20 }))
-                    $"a medic three off the file: the leader holds for it: {gapped.Front}"
+                    Expect.isFalse walking.Launched "off its entry: not launched"
+                    Expect.equal walking.Front walking.Rally "to the rally, each alone"
 
                 let inside =
                     assaultGroundOf (

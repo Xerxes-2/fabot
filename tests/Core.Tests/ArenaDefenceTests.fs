@@ -1220,7 +1220,7 @@ let arenaDefenceTests =
             }
 
             test
-                "the link raid's squad musters at W15S28 by the exit its walk leaves by, off the spawns and extensions, its walk entering W18S26 from W18S27 in seven crossings and crossing no rival's room" {
+                "the link raid's squad musters in W18S27 by the crossing into W18S26, its walk entering W18S26 from W18S27 in seven crossings and crossing no rival's room" {
                 let start, _, _ = linkProbe false 0
                 let view = viewOf start "W15S28"
                 let atlas = Fabot.Core.Atlas.ofView view
@@ -1277,25 +1277,18 @@ let arenaDefenceTests =
 
                 Expect.isNonEmpty rally "a rally ground"
 
+                // The owner's call (2026-10-14): in the entry, not at home.
                 Expect.isTrue
-                    (rally |> Set.forall (fun tile -> tile.Room = "W15S28"))
-                    $"at home: {rally}"
+                    (rally |> Set.forall (fun tile -> tile.Room = "W18S27"))
+                    $"in its entry: {rally}"
 
-                let next = List.item 1 chain.Value
-
-                let exits = Fabot.Core.Atlas.seams atlas "W15S28" next |> List.map fst
+                let exits = Fabot.Core.Atlas.seams atlas "W18S27" "W18S26" |> List.map fst
 
                 Expect.isTrue
                     (rally
                      |> Set.forall (fun tile ->
                          exits |> List.exists (fun exit -> range (RoomPos.pos tile) exit <= 3)))
-                    $"within three of the exit toward {next}: {rally}"
-
-                let idle = Fabot.Core.Atlas.idleGroundIn atlas "W15S28"
-
-                Expect.isTrue
-                    (rally |> Set.forall (fun tile -> not (Set.contains (RoomPos.pos tile) idle)))
-                    $"off the ground beside the spawns, extensions and stores: {rally}"
+                    $"within three of the exit into W18S26: {rally}"
             }
 
             test
