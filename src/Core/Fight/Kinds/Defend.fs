@@ -55,15 +55,15 @@ let step (facts: Facts) (e: Engagement) : Engagement option =
     // Losing sight is not the raid leaving (owner's call); a home is always in sight.
     match facts.Group with
     | None when facts.Held || facts.Clear -> None
-    | None -> if e.Phase.IsDisengaging && facts.Home then None else Some e
-    | Some _ when e.Phase.IsDisengaging -> if facts.Home then None else Some e
+    | _ when e.Phase.IsDisengaging -> if facts.Home then None else Some e
     | Some _ when e.Lost > e.Budget -> quit ()
-    | Some g ->
-        let left = g.Room <> e.Room
+    | group ->
+        let left = group |> Option.exists (fun g -> g.Room <> e.Room)
 
         match e.Phase with
         | Phase.Forming when left && not facts.Threatens -> quit ()
         | Phase.Forming when not facts.Asked && not e.Ours.IsEmpty -> toward Phase.Approaching
+        | _ when group.IsNone -> Some e
         | Phase.Approaching
         | Phase.Fighting when left && facts.Threatens -> toward Phase.Pursuing
         | Phase.Approaching

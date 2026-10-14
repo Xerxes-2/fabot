@@ -1,0 +1,10 @@
+{
+  "why": "an outpost Defend's set, cast one body at a time by a slow bank, fights the wave together: no body is lost alone before the rest land, and both outposts' first waves are killed",
+  "start": { "room": "W8N3", "seed": 2, "node": "E1" },
+  "ticks": 3000,
+  "assert": [
+    { "measure": "predictedWinsLost", "max": 0 },
+    { "measure": "raidsKilled", "min": 2 },
+    { "measure": "faults", "max": 0 }
+  ]
+}
