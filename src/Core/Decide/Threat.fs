@@ -5214,12 +5214,25 @@ let private withAssaults
             // Hurt: under half once in, so the squad turns back; under four
             // fifths at rally, so it waits for its medics. A probe has none
             // to wait for (#493): it holds on until safe mode or its death.
+            // A Declaim fights where it stands until it dies (user,
+            // 2026-10-14): no fall-back on its hits, and no recall for a
+            // recast once a cast is in. Safe mode still turns it back.
+            let holdsOn = facts.Assault.Mode = Declaim
+
             let fit =
                 let least = if inside then assaultRetreatShare else assaultLaunchShare
 
-                members
-                |> List.forall (fun (name, role) ->
-                    role = Probe || Map.tryFind name share |> Option.exists (fun s -> s >= least))
+                holdsOn
+                || members
+                   |> List.forall (fun (name, role) ->
+                       role = Probe
+                       || Map.tryFind name share |> Option.exists (fun s -> s >= least))
+
+            let engaged =
+                holdsOn
+                && members
+                   |> List.exists (fun (name, _) ->
+                       tileOf name |> Option.exists (fun tile -> tile.Room = room))
 
             let launched =
                 Formation.launched
@@ -5227,12 +5240,10 @@ let private withAssaults
                     room
                     rally
                     file
-                    (filled
-                     && fit
-                     && arrived
+                    ((filled && fit && arrived || engaged)
                      && not facts.SafeMode
                      && (declaiming || not facts.Taken))
-                    (Formation.linked view file || away)
+                    (engaged || Formation.linked view file || away)
 
             // A tile declared to come down, breach or target, as the dark
             // room's front: an assault may declare no breach.
@@ -5293,7 +5304,7 @@ let private withAssaults
 
             // Strung out under fire: every cast within two of the leader, or
             // the leader holds its tile and the rest close on it.
-            let strung = Formation.strung view atlas home room front file leader
+            let strung = not holdsOn && Formation.strung view atlas home room front file leader
 
             let front =
                 match leader with
@@ -5317,8 +5328,38 @@ let private withAssaults
                 tiles |> Set.filter (coveredBut (RoomPos.at room { X = -1; Y = -1 }) >> not)
 
 
+            // A Declaim's escorts step out to the enemy's armed bodies within
+            // a few tiles of any cast, to a shot of them off every rampart's
+            // reach, ahead of their place beside the sappers.
+            let threatening =
+                if not holdsOn then
+                    Set.empty
+                else
+                    let near =
+                        members
+                        |> List.choose (fun (name, _) -> tileOf name)
+                        |> List.filter (fun tile -> tile.Room = room)
+
+                    view.Hostiles
+                    |> List.filter (fun hostile ->
+                        hostile.Owner = facts.Assault.Enemy
+                        && hostile.Pos.Room = room
+                        && HostileInfo.armed view.Hostiles hostile
+                        && not (List.contains (RoomPos.pos hostile.Pos) facts.Ramparts)
+                        && near
+                           |> List.exists (fun tile ->
+                               RoomPos.range tile hostile.Pos
+                               |> Option.exists (fun r -> r <= Engine.rangedRange + 2)))
+                    |> Seq.collect (fun hostile ->
+                        (Set.singleton hostile.Pos, [ 1 .. Engine.rangedRange ])
+                        ||> List.fold (fun reached _ ->
+                            reached |> Seq.collect besideIn |> Set.ofSeq |> Set.union reached))
+                    |> Set.ofSeq
+                    |> open'
+
             let behind =
                 match leader with
+                | _ when not (Set.isEmpty threatening) -> threatening
                 | Some(_, tile) ->
                     let besideFront =
                         if strung || Set.contains tile front then
@@ -5330,9 +5371,12 @@ let private withAssaults
                             |> Set.ofSeq
                             |> Set.add tile
 
+                    // A Declaim's off every tile beside a rival rampart where
+                    // any is left: it no longer falls back from one.
                     match Set.difference (Set.union (besideIn tile) besideFront) front with
                     | clear when Set.isEmpty clear -> besideIn tile
-                    | clear -> clear
+                    | clear when not holdsOn || Set.isEmpty (open' clear) -> clear
+                    | clear -> open' clear
                 // No front left (a declaim's targets down), while no tapper
                 // walks or taps: within a shot of the enemy's rebuilders, else
                 // onto its sites, which a step removes; else round the tap

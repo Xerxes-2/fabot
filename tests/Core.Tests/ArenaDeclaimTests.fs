@@ -228,6 +228,24 @@ let private rebuilders =
         yield body "Harvester2" trep harvester (at 31 5) (Some Hold)
     ]
 
+/// Trepidimous's second wave live at t1,174,430: three 4R 9M 5H rangers
+/// kiting at three and focusing the lowest hits, and a 17A 18M chasing the
+/// nearest, waiting in the room's south-west corner and coming on at
+/// t+700 while the sappers work.
+let private secondWave =
+    let ranger = parts [ RangedAttack, 4; Move, 9; Heal, 5 ]
+    let leash = Some(at 25 25, 30)
+
+    let late (behaviour: Behaviour) =
+        Some(Phases [ 700, Hold; 701, behaviour ])
+
+    [
+        body "Crunchy3730" trep ranger (at 4 40) (late (Kite(LowestHits, 3)))
+        body "Trace3466" trep ranger (at 5 40) (late (Kite(LowestHits, 3)))
+        body "Moonlight3642" trep ranger (at 4 41) (late (Kite(LowestHits, 3)))
+        body "Melee4" trep melee (at 5 41) (late (Chase(Nearest, leash)))
+    ]
+
 /// The tick safe mode was raised in W18S26, if it was.
 let private safeModeOn (trace: TickTrace list) =
     trace
@@ -512,5 +530,90 @@ let arenaDeclaimTests =
                                 $"{id} died of age, not of a fight: {hits}"
                         | _ -> ()
 
+            }
+
+            test
+                "under a second wave of rangers focusing one body, the squad never falls back, its escorts heal each other and the sappers, and both ramparts fall in one life, the taps on the block" {
+                let target = w18s26Now () |> withSafeModeCooldown (seen + 2_000) |> insisting
+
+                let start, _, trace =
+                    declaimRun target (trepidimous @ secondWave) (fun _ -> false) 3_600
+
+                let failure = describe trace
+                let ours = start.Bodies |> List.filter (fun b -> b.Side = Side.Ours)
+
+                // Once in W18S26 no cast steps back out while a target stands.
+                let done' = fellOn (tile 11 22) trace |> Option.defaultValue 10_000
+
+                for b in ours do
+                    let rooms =
+                        pathOf b.Id trace
+                        |> List.filter (fun (tick, _) -> tick < done')
+                        |> List.map (fun (_, s) -> s.At.Room)
+
+                    match rooms |> List.tryFindIndex ((=) "W18S26") with
+                    | Some first ->
+                        Expect.isTrue
+                            (rooms |> List.skip first |> List.forall ((=) "W18S26"))
+                            $"{b.Id} holds on in the room\n{failure}"
+                    | None -> failtest $"{b.Id} never went in\n{failure}"
+
+                for t in [ tile 10 22; tile 11 22 ] do
+                    Expect.isLessThan
+                        (fellOn t trace |> Option.defaultValue 10_000)
+                        1_499
+                        $"{t} down within one squad's life\n{failure}"
+
+                let healedOthers =
+                    trace
+                    |> List.exists (fun t ->
+                        t.Ours
+                        |> List.exists (function
+                            | HealCreep(a, b)
+                            | RangedHealCreep(a, b) -> a.StartsWith "escort" && a <> b
+                            | _ -> false))
+
+                Expect.isTrue healedOthers "an escort heals another"
+
+                for id in [ "Crunchy3730"; "Trace3466"; "Moonlight3642"; "Melee4" ] do
+                    Expect.isSome (diedOn id trace) $"{id} killed\n{failure}"
+
+                let taps =
+                    trace
+                    |> List.collect (fun t ->
+                        t.Events
+                        |> List.choose (function
+                            | ControllerAttacked _ -> Some t.Time
+                            | _ -> None))
+
+                Expect.isGreaterThanOrEqual (List.length taps) 2 $"taps: {taps}"
+
+                for a, b in List.pairwise taps do
+                    Expect.equal (b - a) 1_000 $"on the block: {taps}"
+
+                Expect.isNone (safeModeOn trace) "no safe mode"
+
+                let lost =
+                    List.pairwise trace
+                    |> List.collect (fun (previous, now) ->
+                        now.Events
+                        |> List.choose (function
+                            | Died id when not (id.StartsWith "worker") && id.Contains "-Spawn" ->
+                                previous.Bodies
+                                |> List.tryFind (fun b -> b.Id = id)
+                                |> Option.filter (fun b -> b.Hits < 1_000)
+                                |> Option.map (fun _ -> id)
+                            | _ -> None))
+
+                printfn
+                    "WAVE lost %A fell %A %A taps %A rangers %A"
+                    lost
+                    (fellOn (tile 10 22) trace)
+                    (fellOn (tile 11 22) trace)
+                    taps
+                    ([ "Crunchy3730"; "Trace3466"; "Moonlight3642"; "Melee4" ]
+                     |> List.map (fun id -> diedOn id trace))
+
+                Expect.isEmpty lost "nobody of ours lost to a fight"
             }
         ]

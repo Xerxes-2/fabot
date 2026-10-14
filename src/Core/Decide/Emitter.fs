@@ -993,9 +993,31 @@ let healReflex (view: ColonyView) (threats: Threats) (plan: Fabot.Core.IntentPla
             healer
             owed
 
+    // A squad's cast heals the deepest wound of its squad in reach,
+    // itself among them (user, 2026-10-14): a wounded escort healing only
+    // itself left the rest to bleed.
+    let squadWound (healer: CreepInfo) (owed: Map<string, int>) =
+        tileOf healer
+        |> Option.bind (fun at ->
+            view.Creeps
+            |> List.choose (fun other ->
+                if
+                    Option.isNone (squadRoleByName other.Name) || Map.find other.Name owed <= 0
+                then
+                    None
+                else
+                    tileOf other
+                    |> Option.bind (RoomPos.range at)
+                    |> Option.filter (fun r -> r <= Engine.rangedRange)
+                    |> Option.map (fun r -> other, r))
+            |> List.sortBy (fun (other, r) -> -(Map.find other.Name owed), r, other.Name)
+            |> List.tryHead)
+
     // A shield is spent only by a fighter that owes nothing itself.
     let patientFor (healer: CreepInfo) (owed: Map<string, int>) =
-        if isFighterBody healer && Map.find healer.Name owed <= 0 then
+        if squadRoleByName healer.Name = Some Escort then
+            squadWound healer owed |> Option.orElse (woundFor healer owed)
+        elif isFighterBody healer && Map.find healer.Name owed <= 0 then
             pressingFor healer owed
             |> Option.orElse (shieldFor healer owed)
             |> Option.orElse (woundFor healer owed)
