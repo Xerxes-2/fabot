@@ -212,6 +212,22 @@ let private trepidimous =
         walksIn "Small3" (parts [ Attack, 5; Move, 5 ]) (w17s26 26 25) 650
     ]
 
+/// Trepidimous's rebuilders: two 12W 12C 12M builders holding 600 energy on
+/// a spawn site at (20,15), and two 6W 3C 3M harvesters at the sources, the
+/// one at (32,4) beside the far line's ramparts.
+let private rebuilders =
+    let builder = parts [ Work, 12; Carry, 12; Move, 12 ]
+    let harvester = parts [ Work, 6; Carry, 3; Move, 3 ]
+
+    [
+        for id, x in [ "Builder1", 20; "Builder2", 21 ] ->
+            { body id trep builder (at x 16) (Some(Do [ Act.Build "site-spawn-20-15" ])) with
+                Energy = 600
+            }
+        yield body "Harvester1" trep harvester (at 24 42) (Some Hold)
+        yield body "Harvester2" trep harvester (at 31 5) (Some Hold)
+    ]
+
 /// The tick safe mode was raised in W18S26, if it was.
 let private safeModeOn (trace: TickTrace list) =
     trace
@@ -411,6 +427,12 @@ let arenaDeclaimTests =
                 // Measured: the tower down at t428, (10,22) at t807. Crescent1952
                 // then stands on (11,22) to its death at t1,499, as long as the
                 // squad's; the next squad takes it down at t2,794.
+                Expect.isSome tower $"the tower down\n{failure}"
+
+                Expect.isLessThan
+                    tower.Value
+                    (fellOn (tile 10 22) trace |> Option.defaultValue 0)
+                    "the tower first"
 
                 for t in [ tile 10 22; tile 11 22 ] do
                     Expect.isSome (fellOn t trace) $"{t} down\n{failure}"
@@ -439,12 +461,56 @@ let arenaDeclaimTests =
                         | _ -> ()
 
                 ignore start
-
-                printfn
-                    "TOWERRUN %A %A %A"
-                    tower
-                    (fellOn (tile 10 22) trace)
-                    (fellOn (tile 11 22) trace)
             }
 
+
+            test
+                "past the breach, while no tapper needs them, the escorts shoot Trepidimous's builders and harvesters from off its ramparts, losing nobody, the taps on the block" {
+                let target =
+                    w18s26Now ()
+                    |> withSite trep "spawn" (Some "Spawn1") 0 (tile 20 15)
+                    |> withSafeModeCooldown (seen + 2_000)
+                    |> insisting
+
+                let _, _, trace =
+                    declaimRun target (trepidimous @ rebuilders) (fun _ -> false) 4_000
+
+                let failure = describe trace
+
+                for id in [ "Builder1"; "Builder2"; "Harvester1"; "Harvester2" ] do
+                    Expect.isSome (diedOn id trace) $"{id} killed\n{failure}"
+
+                for t in Assault.w18s26Controller.Targets do
+                    Expect.isSome (fellOn t trace) $"{t} down"
+
+                let taps =
+                    trace
+                    |> List.collect (fun t ->
+                        t.Events
+                        |> List.choose (function
+                            | ControllerAttacked _ -> Some t.Time
+                            | _ -> None))
+
+                Expect.isGreaterThanOrEqual (List.length taps) 3 $"taps: {taps}"
+
+                for a, b in List.pairwise taps do
+                    Expect.equal (b - a) 1_000 $"on the block: {taps}"
+
+                Expect.isNone (safeModeOn trace) "no safe mode"
+
+                for previous, now in List.pairwise trace do
+                    for e in now.Events do
+                        match e with
+                        | Died id when not (id.StartsWith "worker") && id.Contains "-Spawn" ->
+                            let hits =
+                                previous.Bodies
+                                |> List.tryFind (fun b -> b.Id = id)
+                                |> Option.map _.Hits
+
+                            Expect.isTrue
+                                (hits |> Option.forall (fun h -> h >= 1_000))
+                                $"{id} died of age, not of a fight: {hits}"
+                        | _ -> ()
+
+            }
         ]
