@@ -739,4 +739,64 @@ let arenaDeclaimTests =
                 printfn "CONVOY taps %A ambush %A beside %d" taps ambushed walkedWith
                 Expect.isGreaterThan walkedWith 0 "a convoy beside a tapper"
             }
+
+            test
+                "past the tap tile two sappers on a line whose ramparts each leave one open work tile work two of them at once, losing nobody, the taps on the block" {
+                // W18S26's west line alone, the tap tile already clear.
+                let target =
+                    { w18s26Now () with
+                        Structures =
+                            w18s26Now().Structures
+                            |> List.filter (fun s -> s.At.X <= 2 && s.At.Y <= 10)
+                            |> List.map (fun s -> { s with Hits = 60_000 })
+                    }
+                    |> withSafeModeCooldown (seen + 2_000)
+                    |> insisting
+
+                let _, _, trace = declaimRun target [] (fun _ -> false) 2_500
+
+                let working =
+                    trace
+                    |> List.map (fun t ->
+                        t.Ours
+                        |> List.filter (function
+                            | DismantleStructure _ -> true
+                            | _ -> false)
+                        |> List.length)
+
+                let busy = working |> List.filter (fun n -> n > 0)
+                let both = busy |> List.filter (fun n -> n >= 2) |> List.length
+
+                let taps =
+                    trace
+                    |> List.collect (fun t ->
+                        t.Events
+                        |> List.choose (function
+                            | ControllerAttacked _ -> Some t.Time
+                            | _ -> None))
+
+                printfn "LINE busy %d both %d taps %A" busy.Length both taps
+
+                Expect.isGreaterThan (2 * both) busy.Length "both sappers on most working ticks"
+                Expect.isGreaterThanOrEqual (List.length taps) 2 $"taps: {taps}"
+
+                for a, b in List.pairwise taps do
+                    Expect.equal (b - a) 1_000 $"on the block: {taps}"
+
+                Expect.isNone (safeModeOn trace) "no safe mode"
+
+                for previous, now in List.pairwise trace do
+                    for e in now.Events do
+                        match e with
+                        | Died id when not (id.StartsWith "worker") && id.Contains "-Spawn" ->
+                            let hits =
+                                previous.Bodies
+                                |> List.tryFind (fun b -> b.Id = id)
+                                |> Option.map _.Hits
+
+                            Expect.isTrue
+                                (hits |> Option.forall (fun h -> h >= 1_000))
+                                $"{id} died of age, not of a fight: {hits}"
+                        | _ -> ()
+            }
         ]

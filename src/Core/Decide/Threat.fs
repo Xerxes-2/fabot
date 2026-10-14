@@ -29,6 +29,9 @@ type Formation =
         /// What its sappers take down this tick (`AssaultFacts.Targets`'
         /// head), None while the room is dark or nothing is left.
         Target: (string * RoomPos) option
+        /// A declaim's next rampart, which a sapper works while the head's
+        /// open work tiles are fewer than its sappers.
+        Also: (string * RoomPos) option
         /// A sapper's and a probe's ground: the rally ground — the way out
         /// (`wayOut`) first while a cast of a squad not launched stands in
         /// the room — or, launched, the tiles beside its target: beside the
@@ -1970,6 +1973,7 @@ module Brief =
                     Launched = false
                     Rally = Set.empty
                     Target = None
+                    Also = None
                     Front = Set.empty
                     Behind = Set.empty
                     TapFrom = Set.empty
@@ -5298,9 +5302,50 @@ let private withAssaults
                 | open' when Set.isEmpty open' -> ground
                 | open' -> open'
 
+            // Past the tap tile, a rampart with fewer open work tiles than
+            // sappers (a line's, each tile beside the next) lends the rest
+            // the one after it: two sappers queued on one tile live.
+            let sappers = members |> List.filter (snd >> SquadRole.dismantles) |> List.length
+
+            // The next rampart no rival stands on: one held only lends a
+            // ring two tiles out, from which nothing is dismantled.
+            let also =
+                match facts.Targets with
+                | Some(_ :: rest) when holdsOn && facts.Taken ->
+                    rest
+                    |> List.map (fun (id, tile) -> id, RoomPos.at room tile)
+                    |> List.tryFind (fun (_, tile) ->
+                        view.Hostiles |> List.forall (fun hostile -> hostile.Pos <> tile))
+                | _ -> None
+
+            // Past the tap tile no sapper works from a tile beside the
+            // controller while another is left: the tapper stands there.
+            let offTap (ground: Set<RoomPos>) =
+                match facts.Controller with
+                | Some(_, controller) when holdsOn && facts.Taken ->
+                    let tap = besideIn (RoomPos.at room controller)
+
+                    match Set.difference ground tap with
+                    | left when Set.isEmpty left -> ground
+                    | left -> left
+                | _ -> ground
+
             let front =
                 match target, facts.Targets with
-                | Some(_, tile), _ -> workFrom tile
+                | Some(_, tile), _ ->
+                    let head = workFrom tile
+
+                    let opened =
+                        head
+                        |> Set.filter (fun step ->
+                            facts.Ramparts
+                            |> List.forall (fun rampart ->
+                                rampart = RoomPos.pos tile || range rampart (RoomPos.pos step) > 1))
+
+                    match also with
+                    | Some(_, next) when Set.count opened < sappers ->
+                        Set.union head (workFrom next) |> offTap
+                    | _ -> offTap head
                 | None, None ->
                     breach |> List.tryHead |> Option.map besideIn |> Option.defaultValue Set.empty
                 // Nothing left standing: a `Provoke` holds the breach it made,
@@ -5464,6 +5509,7 @@ let private withAssaults
                 Launched = launched
                 Rally = rally
                 Target = target
+                Also = also
                 Front = launchedOr front
                 Behind = launchedOr behind
                 // A tap lapses on its own clock, not the squad's: its tapper

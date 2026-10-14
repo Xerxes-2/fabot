@@ -1221,9 +1221,10 @@ let private actionIntents
             && Threats.squadRoleOf threats task creep.Name
                |> Option.exists SquadRole.dismantles
             ->
-            formation.Target
-            |> Option.filter (fun (_, tile) ->
-                SpatialInfo.creepPlacementOf view.Spatial creep.Name
+            [ formation.Target; formation.Also ]
+            |> List.choose id
+            |> List.tryFind (fun (_, tile) ->
+                at
                 |> Option.bind (RoomPos.range tile)
                 |> Option.exists (fun r -> r <= Engine.meleeRange))
             |> Option.map (fun (id, _) -> DismantleStructure(creep.Name, id))
