@@ -257,7 +257,10 @@ let censusSignatureTests =
                             |> withNeighbour
                                 "W1N2"
                                 { RoomLayer.empty with
-                                    RivalSites = Set.ofList rivals
+                                    RivalSites =
+                                        rivals
+                                        |> List.map (fun tile -> tile, BuiltKind.Other)
+                                        |> Map.ofList
                                 }
                     }
 

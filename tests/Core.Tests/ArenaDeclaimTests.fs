@@ -307,4 +307,79 @@ let arenaDeclaimTests =
 
                 Expect.isNone (safeModeOn trace) $"no safe mode\n{failure}"
             }
+
+            test
+                "a rival's tower site placed past the breach is stepped on by an escort once no tapper needs it, its road and rampart decoys never, losing nobody, the taps on the block" {
+                let target = w18s26Now () |> withSafeModeCooldown (seen + 2_000) |> insisting
+                let _, mid, before = declaimRun target trepidimous (fun _ -> false) 1_300
+
+                // Where Trepidimous's tower site stood live at t1,172,185.
+                let placed =
+                    { mid with
+                        Rooms =
+                            mid.Rooms
+                            |> Map.add
+                                "W18S26"
+                                (mid.Rooms["W18S26"] |> withSite trep "tower" None 2_500 (tile 18 8))
+                    }
+
+                let _, after = placed |> run 3_000
+                let trace = before @ after
+                let failure = describe after
+
+                let stomped =
+                    after
+                    |> List.tryPick (fun t ->
+                        t.Events
+                        |> List.tryPick (function
+                            | SiteStomped("site-tower-18-8", by) -> Some(t.Tick, by)
+                            | _ -> None))
+
+                // Measured: placed at t1,300, stepped on at t2,531, the tick
+                // after the second tapper's tap released it.
+                Expect.isSome stomped $"stepped on\n{failure}"
+                Expect.stringStarts (snd stomped.Value) "escort-" "by an escort"
+
+                let taps =
+                    trace
+                    |> List.collect (fun t ->
+                        t.Events
+                        |> List.choose (function
+                            | ControllerAttacked _ -> Some t.Time
+                            | _ -> None))
+
+                Expect.isGreaterThanOrEqual (List.length taps) 3 $"taps: {taps}"
+
+                for a, b in List.pairwise taps do
+                    Expect.equal (b - a) 1_000 $"on the block: {taps}"
+
+                Expect.isNone (safeModeOn trace) "no safe mode"
+
+                // Every body of ours that died did so whole: of age.
+                for t in List.pairwise trace do
+                    let previous, now = t
+
+                    for e in now.Events do
+                        match e with
+                        | Died id when not (id.StartsWith "worker") && id.Contains "-Spawn3" ->
+                            let hits =
+                                previous.Bodies
+                                |> List.tryFind (fun b -> b.Id = id)
+                                |> Option.map _.Hits
+
+                            Expect.isTrue
+                                (hits |> Option.forall (fun h -> h >= 1_000))
+                                $"{id} died of age, not of a fight: {hits}"
+                        | _ -> ()
+
+                let decoys =
+                    after
+                    |> List.collect (fun t ->
+                        t.Events
+                        |> List.choose (function
+                            | SiteStomped(site, _) when site <> "site-tower-18-8" -> Some site
+                            | _ -> None))
+
+                Expect.isEmpty decoys "no road or rampart site stepped on"
+            }
         ]

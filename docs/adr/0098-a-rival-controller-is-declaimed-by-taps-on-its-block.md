@@ -11,7 +11,7 @@ We decided **a `Declaim` mode on the Assault (ADR 0084), not a new declaration k
 1. **A `tapper` squad row** (19M 19C, 12,350: the most CLAIM an RCL8 bank buys at full pace). Every CLAIM part takes 300 off the timer for 650 energy, while the 1,000 ticks a tap must wait take 1,000 for free. A big body therefore buys a shorter declaim, not a cheaper one, and fewer taps that must not be missed.
 2. **It is cast by its life, not its walk.** It is wanted once the targets are down, and only when the block lapses within its spawn time plus 600 minus a room's side. A busy spawn queue then delays its start without making it late. The block's end is `World.RivalControllers`, which Memory keeps across a reset.
 3. **It walks on its own clock.** It goes to the tiles beside the controller that no rampart touches, whether or not the squad has launched. It emits `attackController` every tick it stands there and lets the engine refuse it until the block lapses. Light ticks replay the act.
-4. **A Declaim stays pooled past its targets while the controller is its enemy's.** Sappers are wanted only while targets stand, and the escorts hold round the tap tile.
+4. **A Declaim stays pooled past its targets while the controller is its enemy's.** Sappers are wanted only while targets stand, and the escorts hold round the tap tile. While no sapper or tapper needs them, they step onto the rival's construction sites instead, which removes each one (`movement.js`; xxscreeps does the same). This holds unless a rampart covers the site or safe mode runs. Only sites that would rebuild its economy or defence count; a road, container, rampart or wall site is free to lay as a decoy and is left (2026-10-14).
 
 ## Consequences
 

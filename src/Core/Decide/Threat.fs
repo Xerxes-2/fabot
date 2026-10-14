@@ -5314,15 +5314,21 @@ let private withAssaults
                     match Set.difference (Set.union (besideIn tile) besideFront) front with
                     | clear when Set.isEmpty clear -> besideIn tile
                     | clear -> clear
-                // No front left (a declaim's targets down): round the tap
-                // tile, off it and off every tile a rampart touches.
+                // No front left (a declaim's targets down): onto the rival's
+                // sites, which a step removes, while no tapper walks or taps,
+                // else round the tap tile; off it and off every tile a rampart
+                // touches.
                 | None ->
+                    let open' (tiles: Set<RoomPos>) =
+                        tiles |> Set.filter (coveredBut (RoomPos.at room { X = -1; Y = -1 }) >> not)
+
+                    let sites = facts.Sites |> List.map (RoomPos.at room) |> Set.ofList |> open'
+
                     let round =
                         Set.difference (tapFrom |> Seq.collect besideIn |> Set.ofSeq) tapFrom
 
-                    match
-                        round |> Set.filter (coveredBut (RoomPos.at room { X = -1; Y = -1 }) >> not)
-                    with
+                    match open' round with
+                    | _ when List.isEmpty tappers && not (Set.isEmpty sites) -> sites
                     | clear when Set.isEmpty clear -> rally
                     | clear -> clear
 

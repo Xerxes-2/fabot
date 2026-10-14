@@ -302,8 +302,9 @@ type RoomLayer =
         /// (`Atlas.collidingSiteTilesIn`). Not an obstacle either: the engine
         /// blocks a creep on an obstacle-type site of its **own owner's** and a
         /// hostile creep walking onto one destroys it, so these tiles stay out
-        /// of `Obstacles` and out of the pricing.
-        RivalSites: Set<Pos>
+        /// of `Obstacles` and out of the pricing. By tile, the kind each
+        /// becomes: an assault steps only on one worth the step.
+        RivalSites: Map<Pos, BuiltKind>
         /// The objects besides creeps the engine's `rangedMassAttack` strikes
         /// (#537), by tile, under their owner's username: every structure
         /// somebody else owns, whatever its kind, and every power creep; a
@@ -323,7 +324,7 @@ module RoomLayer =
             CreepPositions = Map.empty
             Obstacles = Set.empty
             Roads = Set.empty
-            RivalSites = Set.empty
+            RivalSites = Map.empty
             Foreign = Map.empty
         }
 

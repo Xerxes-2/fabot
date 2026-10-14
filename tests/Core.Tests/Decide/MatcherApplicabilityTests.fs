@@ -530,6 +530,7 @@ let squadCapacityTests =
                                     Taken = false
                                     Towers = []
                                     Ramparts = []
+                                    Sites = []
                                     Controller = None
                                     TapAt = None
                                     SafeMode = false

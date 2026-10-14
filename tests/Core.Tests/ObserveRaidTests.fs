@@ -1791,6 +1791,7 @@ let private probedAt time (life: int) (tile: RoomPos option) (safeMode: bool) =
                     Taken = false
                     Towers = []
                     Ramparts = []
+                    Sites = []
                     Controller = None
                     TapAt = None
                     SafeMode = safeMode

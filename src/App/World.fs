@@ -321,7 +321,9 @@ let private seenFacts
     // presumes the site is ours.
     let rivalSites =
         room.find findHostileConstructionSites
-        |> Array.map (fun o -> posOf (o :?> IConstructionSite).pos)
+        |> Array.map (fun o ->
+            let site = o :?> IConstructionSite
+            posOf site.pos, builtKindOf site.structureType)
 
     // The structures we own here: `needsOwner` kinds are checked against
     // their ids (FIND_STRUCTURES carries every owner's), and the
@@ -529,7 +531,7 @@ let private seenFacts
                 // owner's own creep on an obstacle-type site, and a hostile
                 // that walks onto one destroys it, so a rival's site prices
                 // nothing.
-                RivalSites = Set.ofArray rivalSites
+                RivalSites = Map.ofArray rivalSites
                 // The engine's mass attack strikes every object whose user is
                 // not ours, and a power bank (#537). Two on one tile keep the
                 // one we may not strike.

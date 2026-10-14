@@ -1078,6 +1078,11 @@ let extractorOn (atlas: Atlas) (mineralId: string) : string option =
 let cooldownOf (atlas: Atlas) (targetId: string) : int =
     Map.tryFind targetId atlas.Spatial.Cooldowns |> Option.defaultValue 0
 
+/// The tiles of `collidingSiteTilesIn` another player's sites hold: the half
+/// no builder of ours will ever clear.
+let rivalSiteTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
+    (layerOf atlas room).RivalSites |> Map.keys |> Set.ofSeq
+
 /// Tiles of one room a construction site cannot go down on today. The engine
 /// takes one construction site per tile, so a pick onto an occupied tile is
 /// answered ERR_INVALID_TARGET once a tick for as long as that site stands
@@ -1102,11 +1107,8 @@ let collidingSiteTilesIn (atlas: Atlas) (room: string) : Set<Pos> =
             | Site _ -> true
             | _ -> false)
 
-    Set.union ours (layerOf atlas room).RivalSites
+    Set.union ours (rivalSiteTilesIn atlas room)
 
-/// The tiles of `collidingSiteTilesIn` another player's sites hold: the half
-/// no builder of ours will ever clear.
-let rivalSiteTilesIn (atlas: Atlas) (room: string) : Set<Pos> = (layerOf atlas room).RivalSites
 
 /// Tiles holding a built Storage — the tile a Link footing is anchored on
 /// once the reservation has become a structure.

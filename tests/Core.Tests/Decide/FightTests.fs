@@ -127,6 +127,7 @@ let private assaultingBy squad mode (targets: (string * Pos) list option) bodies
                     Taken = false
                     Towers = []
                     Ramparts = []
+                    Sites = []
                     Controller = None
                     TapAt = None
                     SafeMode = false

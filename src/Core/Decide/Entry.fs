@@ -264,7 +264,8 @@ let private signaturesOf (view: ColonyView) (memo: PlanMemo option) : Signed =
             // is a recompute where a missed input is a stall until a reset.
             let rivals =
                 layer.RivalSites
-                |> Set.toList
+                |> Map.keys
+                |> List.ofSeq
                 |> List.map (fun tile -> $"Rival@{room}:{tile.X},{tile.Y}")
                 |> String.concat ";"
 

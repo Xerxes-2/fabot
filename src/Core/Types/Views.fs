@@ -69,6 +69,12 @@ type AssaultFacts =
         /// beside one is open to a melee no shot of ours reaches. Empty while
         /// the room is dark.
         Ramparts: Pos list
+        /// Every construction site of another player's in the room that would
+        /// restore its economy or defence, off this tick's vision: a body of
+        /// ours stepping onto one removes it (`movement.js`), unless a rampart
+        /// stands over it or safe mode runs. A road, container, rampart or
+        /// wall site is free to lay as a decoy, and is left.
+        Sites: Pos list
         /// The room's controller, by id and tile, off this tick's vision.
         Controller: (string * Pos) option
         /// A `Declaim`'s next tap: the first tick its controller's block
@@ -1266,7 +1272,7 @@ module ColonyView =
                     // A rival's site is a placement fact (#248) and nothing is
                     // ever placed in a transit room; carried here the census
                     // signature would sign it and throw the plan memo away.
-                    RivalSites = Set.empty
+                    RivalSites = Map.empty
                 }
             TargetKinds = decaying
             Hits = Map.empty
@@ -1606,6 +1612,17 @@ module ColonyView =
                     | None -> Set.contains assault.RoomName taken)
             Towers = placed BuiltKind.Tower |> List.map snd
             Ramparts = ramparts |> Map.keys |> List.ofSeq
+            Sites =
+                facts.Layer.RivalSites
+                |> Map.filter (fun _ kind ->
+                    match kind with
+                    | BuiltKind.Road
+                    | BuiltKind.Container
+                    | BuiltKind.Rampart
+                    | BuiltKind.Other -> false
+                    | _ -> true)
+                |> Map.keys
+                |> List.ofSeq
             Controller =
                 facts.TargetKinds
                 |> Map.tryFindKey (fun _ kind -> kind = Controller)
