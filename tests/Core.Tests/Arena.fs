@@ -1272,8 +1272,9 @@ let private factsOf (a: Arena) (name: string) (r: ArenaRoom) : RoomFacts =
                         rivalSites
                         |> List.map (fun site ->
                             site.At,
-                            reverseOf builtKindName allBuiltKinds site.Kind
-                            |> Option.defaultValue BuiltKind.Other)
+                            (reverseOf builtKindName allBuiltKinds site.Kind
+                             |> Option.defaultValue BuiltKind.Other,
+                             site.Progress))
                         |> Map.ofList
                     // Every structure another side owns (`World.factsOf`).
                     Foreign =

@@ -70,11 +70,12 @@ type AssaultFacts =
         /// the room is dark.
         Ramparts: Pos list
         /// Every construction site of another player's in the room that would
-        /// restore its economy or defence, off this tick's vision: a body of
-        /// ours stepping onto one removes it (`movement.js`), unless a rampart
-        /// stands over it or safe mode runs. A road, container, rampart or
-        /// wall site is free to lay as a decoy, and is left.
-        Sites: Pos list
+        /// restore its economy or defence and that somebody is building, by
+        /// tile and kind, off this tick's vision: a body of ours stepping onto
+        /// one removes it (`movement.js`), unless a rampart stands over it or
+        /// safe mode runs. A road, container, rampart or wall site, or one
+        /// nobody has begun, is free to lay as a decoy, and is left.
+        Sites: (Pos * BuiltKind) list
         /// The room's controller, by id and tile, off this tick's vision.
         Controller: (string * Pos) option
         /// A `Declaim`'s next tap: the first tick its controller's block
@@ -1575,21 +1576,31 @@ module ColonyView =
         let rampartOn tile =
             Map.tryFind tile ramparts |> Option.map (fun id -> id, tile) |> Option.toList
 
-        // A declared target's tile: its rampart, then what it covers.
+        // A declaim's every tower first, wherever it stands: once built it
+        // outshoots the escorts' heal on the breach and the tap tile. Then
+        // each declared target's tile: its rampart, then what it covers.
+        let towers =
+            match assault.Mode with
+            | Declaim ->
+                placed BuiltKind.Tower
+                |> List.collect (fun (id, tile) -> rampartOn tile @ [ id, tile ])
+            | _ -> []
+
         let declared =
-            assault.Targets
-            |> List.collect (fun tile ->
-                rampartOn tile
-                @ (facts.TargetKinds
-                   |> Map.toList
-                   |> List.filter (fun (id, kind) ->
-                       match kind with
-                       | Structure BuiltKind.Rampart
-                       | Structure BuiltKind.Road -> false
-                       | Structure _ -> Map.tryFind id facts.Layer.TargetPositions = Some tile
-                       | _ -> false)
-                   |> List.map (fun (id, _) -> id, tile)
-                   |> List.sort))
+            towers
+            @ (assault.Targets
+               |> List.collect (fun tile ->
+                   rampartOn tile
+                   @ (facts.TargetKinds
+                      |> Map.toList
+                      |> List.filter (fun (id, kind) ->
+                          match kind with
+                          | Structure BuiltKind.Rampart
+                          | Structure BuiltKind.Road -> false
+                          | Structure _ -> Map.tryFind id facts.Layer.TargetPositions = Some tile
+                          | _ -> false)
+                      |> List.map (fun (id, _) -> id, tile)
+                      |> List.sort)))
 
         let targets =
             facts.Control
@@ -1614,15 +1625,15 @@ module ColonyView =
             Ramparts = ramparts |> Map.keys |> List.ofSeq
             Sites =
                 facts.Layer.RivalSites
-                |> Map.filter (fun _ kind ->
+                |> Map.toList
+                |> List.choose (fun (tile, (kind, progress)) ->
                     match kind with
                     | BuiltKind.Road
                     | BuiltKind.Container
                     | BuiltKind.Rampart
-                    | BuiltKind.Other -> false
-                    | _ -> true)
-                |> Map.keys
-                |> List.ofSeq
+                    | BuiltKind.Other -> None
+                    | _ when progress > 0 -> Some(tile, kind)
+                    | _ -> None)
             Controller =
                 facts.TargetKinds
                 |> Map.tryFindKey (fun _ kind -> kind = Controller)

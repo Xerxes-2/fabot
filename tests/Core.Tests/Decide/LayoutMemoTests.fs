@@ -259,7 +259,7 @@ let censusSignatureTests =
                                 { RoomLayer.empty with
                                     RivalSites =
                                         rivals
-                                        |> List.map (fun tile -> tile, BuiltKind.Other)
+                                        |> List.map (fun tile -> tile, (BuiltKind.Other, 0))
                                         |> Map.ofList
                                 }
                     }

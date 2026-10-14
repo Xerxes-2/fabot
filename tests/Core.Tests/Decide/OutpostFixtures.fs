@@ -195,7 +195,7 @@ let internal rivalSites room tiles (colony: ColonyView) =
         { layer with
             RivalSites =
                 (layer.RivalSites, tiles)
-                ||> List.fold (fun sites tile -> Map.add tile BuiltKind.Other sites)
+                ||> List.fold (fun sites tile -> Map.add tile (BuiltKind.Other, 0) sites)
         })
 
 /// Two Seats and two ways out. `(10,45)` is a row nearer the border and

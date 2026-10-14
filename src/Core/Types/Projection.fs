@@ -303,8 +303,9 @@ type RoomLayer =
         /// blocks a creep on an obstacle-type site of its **own owner's** and a
         /// hostile creep walking onto one destroys it, so these tiles stay out
         /// of `Obstacles` and out of the pricing. By tile, the kind each
-        /// becomes: an assault steps only on one worth the step.
-        RivalSites: Map<Pos, BuiltKind>
+        /// becomes and its progress: an assault steps only on one worth the
+        /// step, that somebody is building.
+        RivalSites: Map<Pos, BuiltKind * int>
         /// The objects besides creeps the engine's `rangedMassAttack` strikes
         /// (#537), by tile, under their owner's username: every structure
         /// somebody else owns, whatever its kind, and every power creep; a

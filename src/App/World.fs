@@ -323,7 +323,7 @@ let private seenFacts
         room.find findHostileConstructionSites
         |> Array.map (fun o ->
             let site = o :?> IConstructionSite
-            posOf site.pos, builtKindOf site.structureType)
+            posOf site.pos, (builtKindOf site.structureType, site.progress))
 
     // The structures we own here: `needsOwner` kinds are checked against
     // their ids (FIND_STRUCTURES carries every owner's), and the

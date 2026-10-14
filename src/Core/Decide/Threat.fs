@@ -5298,6 +5298,10 @@ let private withAssaults
                 | Some(_, tile) -> workFrom tile
                 | None -> front
 
+            let open' (tiles: Set<RoomPos>) =
+                tiles |> Set.filter (coveredBut (RoomPos.at room { X = -1; Y = -1 }) >> not)
+
+
             let behind =
                 match leader with
                 | Some(_, tile) ->
@@ -5319,10 +5323,8 @@ let private withAssaults
                 // else round the tap tile; off it and off every tile a rampart
                 // touches.
                 | None ->
-                    let open' (tiles: Set<RoomPos>) =
-                        tiles |> Set.filter (coveredBut (RoomPos.at room { X = -1; Y = -1 }) >> not)
-
-                    let sites = facts.Sites |> List.map (RoomPos.at room) |> Set.ofList |> open'
+                    let sites =
+                        facts.Sites |> List.map (fst >> RoomPos.at room) |> Set.ofList |> open'
 
                     let round =
                         Set.difference (tapFrom |> Seq.collect besideIn |> Set.ofSeq) tapFrom

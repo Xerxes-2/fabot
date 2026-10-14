@@ -237,7 +237,7 @@ let arenaDeclaimTests =
 
                 // Measured: the three rangers dead at t495–509, (10,22) down
                 // at t747, (11,22) at t1,094.
-                for t in Assault.w18s26Controller.Targets do
+                for t in [ tile 10 22; tile 11 22 ] do
                     Expect.isSome (fellOn t trace) $"{t} down\n{failure}"
 
                 for b in ours do
@@ -382,4 +382,69 @@ let arenaDeclaimTests =
 
                 Expect.isEmpty decoys "no road or rampart site stepped on"
             }
+
+            test
+                "a tower standing at (18,8) with 1,000 energy is taken down first, then (10,22) and (11,22), a tower site nobody began left alone, losing nobody" {
+                let target =
+                    w18s26Now ()
+                    |> withStructures [ towerOf trep (tile 18 8) 1_000 ]
+                    |> withSite trep "tower" None 0 (tile 6 14)
+                    |> withTowerDuties [ HealHurt; Shoot Nearest ]
+
+                let over (a: Arena) =
+                    a.Bodies |> List.forall (fun b -> b.Side <> Side.Ours)
+                    || [ tile 10 22; tile 11 22 ]
+                       |> List.forall (fun t ->
+                           a.Rooms["W18S26"].Structures |> List.exists (fun s -> s.At = t) |> not)
+
+                let start, _, trace = declaimRun target trepidimous over 3_500
+                let failure = describe trace
+
+                let tower =
+                    trace
+                    |> List.tryPick (fun t ->
+                        t.Events
+                        |> List.tryPick (function
+                            | Destroyed "tower-18-8" -> Some t.Tick
+                            | _ -> None))
+
+                // Measured: the tower down at t428, (10,22) at t807. Crescent1952
+                // then stands on (11,22) to its death at t1,499, as long as the
+                // squad's; the next squad takes it down at t2,794.
+
+                for t in [ tile 10 22; tile 11 22 ] do
+                    Expect.isSome (fellOn t trace) $"{t} down\n{failure}"
+
+                Expect.isFalse
+                    (trace
+                     |> List.exists (fun t ->
+                         t.Events
+                         |> List.exists (function
+                             | SiteStomped _ -> true
+                             | _ -> false)))
+                    "the site nobody began stands"
+
+                for previous, now in List.pairwise trace do
+                    for e in now.Events do
+                        match e with
+                        | Died id when not (id.StartsWith "worker") && id.Contains "-Spawn" ->
+                            let hits =
+                                previous.Bodies
+                                |> List.tryFind (fun b -> b.Id = id)
+                                |> Option.map _.Hits
+
+                            Expect.isTrue
+                                (hits |> Option.forall (fun h -> h >= 1_000))
+                                $"{id} died of age, not of a fight: {hits}"
+                        | _ -> ()
+
+                ignore start
+
+                printfn
+                    "TOWERRUN %A %A %A"
+                    tower
+                    (fellOn (tile 10 22) trace)
+                    (fellOn (tile 11 22) trace)
+            }
+
         ]

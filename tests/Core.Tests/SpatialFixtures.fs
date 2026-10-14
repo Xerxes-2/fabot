@@ -55,7 +55,7 @@ let withRivalSites (tiles: Pos list) (spatial: SpatialInfo) : SpatialInfo =
     spatial
     |> withHome (fun layer ->
         { layer with
-            RivalSites = tiles |> List.map (fun tile -> tile, BuiltKind.Other) |> Map.ofList
+            RivalSites = tiles |> List.map (fun tile -> tile, (BuiltKind.Other, 0)) |> Map.ofList
         })
 
 /// The home layer with these tiles paved. The Roads twin, replacing likewise.
