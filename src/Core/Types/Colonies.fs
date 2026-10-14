@@ -950,7 +950,7 @@ module Assault =
             Targets = [ { X = 10; Y = 22 }; { X = 11; Y = 22 } ]
             Entry = Some "W17S26"
             MaxHops = None
-            Active = false
+            Active = true
         }
 
     /// W17S24's west line, x2 y18–21 (#491's arena): broken from W18S24 by

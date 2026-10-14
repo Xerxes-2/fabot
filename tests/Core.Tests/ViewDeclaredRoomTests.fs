@@ -1662,7 +1662,7 @@ let assaultViewTests =
         "an assault room carries the ground, the rival's line as walls, and what the sappers take down"
         [
             test
-                "no declared assault is switched on: the link raid waits out Dread358 (2026-10-04); the probe stays off (#493)" {
+                "only W18S26's controller assault is switched on (the user, 2026-10-14); the link raid and the probe stay off (#493)" {
                 let worked =
                     Colony.declared
                     |> List.collect (fun colony ->
@@ -1671,8 +1671,8 @@ let assaultViewTests =
 
                 Expect.equal
                     worked
-                    []
-                    "the user paused the link raid until its defender dies; the probe answered and stays off"
+                    [ "W15S28", Assault.w18s26Controller ]
+                    "the controller assault alone; the link raid and the probe stay off"
 
                 Expect.equal
                     (Assault.w18s26.RoomName, Assault.w18s26.Squad, Assault.w18s26.Mode)
@@ -1728,7 +1728,7 @@ let assaultViewTests =
             }
 
             test
-                "W18S26's controller is declared from W15S28, (10,22) then (11,22) in by W17S26, two sappers, two escorts and a tapper, paused" {
+                "W18S26's controller is declared from W15S28, (10,22) then (11,22) in by W17S26, two sappers, two escorts and a tapper, on" {
                 let declaring =
                     Colony.declared
                     |> List.filter (fun colony ->
@@ -1750,8 +1750,8 @@ let assaultViewTests =
 
                 Expect.equal
                     (assault.Squad, assault.Mode, assault.Active)
-                    ([ "sapper"; "sapper"; "escort"; "escort"; "tapper" ], Declaim, false)
-                    "two sappers, two escorts and a tapper, a declaim, paused"
+                    ([ "sapper"; "sapper"; "escort"; "escort"; "tapper" ], Declaim, true)
+                    "two sappers, two escorts and a tapper, a declaim, on"
             }
 
             test
