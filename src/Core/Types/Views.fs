@@ -64,6 +64,11 @@ type AssaultFacts =
         /// The room's towers' tiles, off this tick's vision: what prices a
         /// fall-back's walk out (#492). Empty while the room is dark.
         Towers: Pos list
+        /// Every rampart of the rival's standing in the room, by tile, off
+        /// this tick's vision: a body standing on one takes no hit, so a tile
+        /// beside one is open to a melee no shot of ours reaches. Empty while
+        /// the room is dark.
+        Ramparts: Pos list
         /// Whether safe mode runs in the room: vision this tick, or the
         /// controller remembered (`World.RivalControllers`, #491).
         SafeMode: bool
@@ -1592,6 +1597,7 @@ module ColonyView =
                     | Some _ -> List.isEmpty declared
                     | None -> Set.contains assault.RoomName taken)
             Towers = placed BuiltKind.Tower |> List.map snd
+            Ramparts = ramparts |> Map.keys |> List.ofSeq
             SafeMode =
                 remembered || facts.Control |> Option.exists (fun control -> control.SafeMode)
             BarredUntil =

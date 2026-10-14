@@ -928,6 +928,25 @@ module Assault =
             Active = false
         }
 
+    /// W18S26's controller (user, 2026-10-14): Odiodin took its towers,
+    /// spawns and stores, and the far line's (30,44) was never rebuilt, so
+    /// the walk in from W17S26 is open to the controller's own ramparts.
+    /// The controller's other neighbours are walls: (10,22) and (11,22) down
+    /// leave (10,22) a tap tile no rampart touches, the fewest hits of the
+    /// four ways (1.78M at t1,172,185).
+    let w18s26Controller: Assault =
+        {
+            RoomName = "W18S26"
+            Enemy = "Trepidimous"
+            Breach = []
+            Squad = [ "sapper"; "sapper"; "escort"; "escort" ]
+            Mode = Provoke
+            Targets = [ { X = 10; Y = 22 }; { X = 11; Y = 22 } ]
+            Entry = Some "W17S26"
+            MaxHops = None
+            Active = false
+        }
+
     /// W17S24's west line, x2 y18–21 (#491's arena): broken from W18S24 by
     /// the default squad at y20, one rampart opening it — every one of the
     /// four, broken in turn, put the spawn down at t1,455 and not t453 — then
@@ -1566,9 +1585,8 @@ module Colony =
                 Perimeter = []
                 RampartFloors = Map.empty
                 FirstSpawn = None
-                // W18S26's south line, seven crossings out by W18S27 on the
-                // assault's own budget (#494).
-                Assaults = [ Assault.w18s26Link ]
+                // W18S26's controller, five crossings out by W17S26.
+                Assaults = [ Assault.w18s26Controller ]
             }
             // The sixth colony (2026-09-28, `docs/research/sixth-colony.md`),
             // in the slot W11S29 gave up once its deposit was mined out.

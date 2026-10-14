@@ -1179,7 +1179,7 @@ let private actionIntents
         |> Option.toList
     | Defend room -> defendIntent view atlas threats room creep |> Option.toList
     // A launched sapper or probe takes its target down from beside it; a
-    // medic's act is the heal reflex's.
+    // medic's act is the heal reflex's, an escort's the weapon reflex's.
     | Assault _ ->
         match Threats.formationOf threats task with
         | Some formation when
@@ -1307,8 +1307,7 @@ let private strikesBy
     | Some(Defend room as task) when isRangerBody creep ->
         Threats.briefFor threats task
         |> Option.map (fun brief -> room, brief.Targets, true)
-    | Some(Defend _)
-    | Some(Assault _) -> None
+    | Some(Defend _) -> None
     | _ when armed -> reflex ()
     | _ -> None
 

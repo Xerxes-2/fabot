@@ -582,6 +582,7 @@ let quotasRecordTests =
                         "sapper"
                         "probe"
                         "medic"
+                        "escort"
                         "reserver"
                         "anchor"
                         "hauler"

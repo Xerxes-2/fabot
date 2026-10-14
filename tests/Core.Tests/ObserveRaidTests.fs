@@ -1790,6 +1790,7 @@ let private probedAt time (life: int) (tile: RoomPos option) (safeMode: bool) =
                     Targets = Some [ "rampart-1", { X = 20; Y = 30 } ]
                     Taken = false
                     Towers = []
+                    Ramparts = []
                     SafeMode = safeMode
                     BarredUntil = None
                 }

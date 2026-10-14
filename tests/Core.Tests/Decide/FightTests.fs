@@ -126,6 +126,7 @@ let private assaultingBy squad mode (targets: (string * Pos) list option) bodies
                     Targets = targets
                     Taken = false
                     Towers = []
+                    Ramparts = []
                     SafeMode = false
                     // A provoked safe mode's whole 20,000 ticks ahead.
                     BarredUntil = Some(colony.Time + 20_000)
@@ -258,7 +259,7 @@ let assaultTests =
                 Expect.equal
                     (SquadRole.all
                      |> List.map (fun role -> Capacity.capOf (CapScope.Role role) capacity))
-                    [ Some 2; Some 0; Some 2 ]
+                    [ Some 2; Some 0; Some 2; Some 0 ]
                     "two sapper slots and two medic slots"
 
                 Expect.equal
@@ -723,7 +724,7 @@ let assaultTests =
                 Expect.equal
                     (SquadRole.all
                      |> List.map (fun role -> Capacity.capOf (CapScope.Role role) capacity))
-                    [ Some 0; Some 1; Some 0 ]
+                    [ Some 0; Some 1; Some 0; Some 0 ]
                     "one probe slot"
 
                 Expect.equal

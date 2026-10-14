@@ -123,6 +123,7 @@
     <Compile Include="ArenaRangerTests.fs" />
     <Compile Include="ArenaDefenceTests.fs" />
     <Compile Include="ArenaSiegeTests.fs" />
+    <Compile Include="ArenaDeclaimTests.fs" />
     <Compile Include="ArenaLaneTests.fs" />
     <Compile Include="ArenaStandDownTests.fs" />
     <Compile Include="ArenaChaseTests.fs" />

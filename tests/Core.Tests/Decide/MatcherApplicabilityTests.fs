@@ -529,6 +529,7 @@ let squadCapacityTests =
                                     Targets = None
                                     Taken = false
                                     Towers = []
+                                    Ramparts = []
                                     SafeMode = false
                                     BarredUntil = Some(mother.Time + 20_000)
                                 }

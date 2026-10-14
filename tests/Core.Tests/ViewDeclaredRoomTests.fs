@@ -1728,25 +1728,30 @@ let assaultViewTests =
             }
 
             test
-                "W18S26's link is declared from W15S28 off its south line, in by W18S27 on a budget of seven crossings (#494)" {
+                "W18S26's controller is declared from W15S28, (10,22) then (11,22) in by W17S26, two sappers and two escorts, paused" {
                 let declaring =
                     Colony.declared
-                    |> List.filter (fun colony -> List.contains Assault.w18s26Link colony.Assaults)
+                    |> List.filter (fun colony ->
+                        List.contains Assault.w18s26Controller colony.Assaults)
                     |> List.map (fun colony -> colony.Home)
 
                 Expect.equal declaring [ "W15S28" ] "declared once, by W15S28"
 
-                let link = Assault.w18s26Link
+                let assault = Assault.w18s26Controller
 
                 Expect.equal
-                    (link.RoomName, link.Breach, link.Targets, link.Entry, link.MaxHops)
-                    ("W18S26", [ { X = 25; Y = 47 } ], [ { X = 25; Y = 41 } ], Some "W18S27", Some 7)
-                    "the south line at (25,47), then the link at (25,41), in from W18S27, seven crossings"
+                    (assault.RoomName,
+                     assault.Breach,
+                     assault.Targets,
+                     assault.Entry,
+                     assault.MaxHops)
+                    ("W18S26", [], [ { X = 10; Y = 22 }; { X = 11; Y = 22 } ], Some "W17S26", None)
+                    "no breach, (10,22) then (11,22), in from W17S26 on the tuning's budget"
 
                 Expect.equal
-                    (link.Squad, link.Mode, link.Active)
-                    (Assault.breachers, Provoke, false)
-                    "the default squad, paused"
+                    (assault.Squad, assault.Mode, assault.Active)
+                    ([ "sapper"; "sapper"; "escort"; "escort" ], Provoke, false)
+                    "two sappers and two escorts, paused"
             }
 
             test

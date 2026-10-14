@@ -128,6 +128,14 @@ let medicPattern =
         Block = List.replicate 18 Move @ List.replicate 18 Heal
     }
 
+/// An [[assault]]'s escort: the ranger's block eight times over, MOVE then
+/// RANGED_ATTACK then HEAL, one MOVE last (`withMoveLast`). 5,650.
+let escortPattern =
+    {
+        Name = RowName.escort
+        Block = List.replicate 24 Move @ List.replicate 16 RangedAttack @ List.replicate 8 Heal
+    }
+
 /// An [[assault]]'s breacher (#490): `docs/research/boosts.md` §4.1's D,
 /// MOVE then WORK, so damage lames it on the rampart it
 /// stands beside before it slows the dismantle, and cast with one MOVE last
@@ -192,6 +200,7 @@ let patternTable =
         sapperPattern
         probePattern
         medicPattern
+        escortPattern
         minerPattern
         dismantlerPattern
     ]
@@ -319,6 +328,7 @@ let squadPatternOf (role: SquadRole) : BodyPattern =
     | Sapper -> sapperPattern
     | Probe -> probePattern
     | Medic -> medicPattern
+    | Escort -> escortPattern
 
 /// The squad role a cast carries in its name.
 let squadRoleByName (name: string) : SquadRole option =

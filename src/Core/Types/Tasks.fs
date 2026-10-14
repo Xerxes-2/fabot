@@ -32,12 +32,19 @@ type SquadRole =
     | Probe
     /// The healer walking behind it.
     | Medic
+    /// A ranged body walking behind it, shooting what comes at it: where
+    /// towers are gone and the rival's bodies are the fire, a kill outlasts
+    /// a heal.
+    | Escort
 
 [<RequireQualifiedAccess>]
 module SquadRole =
     /// Every role, in the order a squad casts them: the fronts the medic
     /// walks behind first.
-    let all = [ Sapper; Probe; Medic ]
+    let all = [ Sapper; Probe; Medic; Escort ]
+
+    /// Whether the role walks behind the front rather than leading it.
+    let behind (role: SquadRole) = role = Medic || role = Escort
 
     /// Whether the role takes structures down: an assault's front.
     let dismantles (role: SquadRole) = role = Sapper || role = Probe

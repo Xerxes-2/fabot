@@ -2126,14 +2126,14 @@ module Formation =
     /// head the leader.
     let internal frontFirst (members: (string * SquadRole) list) : string list =
         members
-        |> List.sortBy (fun (name, role) -> (if role = Medic then 1 else 0), name)
+        |> List.sortBy (fun (name, role) -> (if SquadRole.behind role then 1 else 0), name)
         |> List.map fst
 
     /// The leading cast that is no medic, and where it stands: the body a
     /// medic walks behind.
     let internal leader (view: ColonyView) (members: (string * SquadRole) list) =
         members
-        |> List.filter (snd >> (<>) Medic)
+        |> List.filter (snd >> SquadRole.behind >> not)
         |> frontFirst
         |> List.tryHead
         |> Option.bind (fun name ->
@@ -3035,7 +3035,7 @@ module Threats =
     /// body it does not admit.
     let squadGroundIn (threats: Threats) (task: Task) (creep: string) : Set<RoomPos> =
         match formationOf threats task, squadRoleOf threats task creep with
-        | Some formation, Some Medic -> formation.Behind
+        | Some formation, Some role when SquadRole.behind role -> formation.Behind
         | Some formation, Some _ -> formation.Front
         | _ -> Set.empty
 
@@ -5181,10 +5181,13 @@ let private withAssaults
                     (filled && fit && not facts.SafeMode && not facts.Taken)
                     (Formation.linked view file || away)
 
-            let breach = facts.Assault.Breach |> List.map (RoomPos.at room)
+            // A tile declared to come down, breach or target, as the dark
+            // room's front: an assault may declare no breach.
+            let breach =
+                facts.Assault.Breach @ facts.Assault.Targets |> List.map (RoomPos.at room)
 
-            // The target: vision's head, else the first declared breach tile
-            // while the room is dark.
+            // The target: vision's head, else the first declared tile while
+            // the room is dark.
             let target =
                 match facts.Targets with
                 | Some targets ->
@@ -5193,9 +5196,34 @@ let private withAssaults
                     |> Option.map (fun (id, tile) -> id, RoomPos.at room tile)
                 | None -> None
 
+            // A rival on a rampart beside the work tile takes no hit back:
+            // the front keeps off every tile beside one but the target's.
+            let workFrom (tile: RoomPos) =
+                let covered (step: RoomPos) =
+                    facts.Ramparts
+                    |> List.exists (fun rampart ->
+                        rampart <> RoomPos.pos tile && range rampart (RoomPos.pos step) <= 1)
+
+                // A rival standing on the target itself: its ring a step
+                // out, until it leaves or dies.
+                let held = view.Hostiles |> List.exists (fun hostile -> hostile.Pos = tile)
+
+                let ground =
+                    if held then
+                        besideIn tile
+                        |> Seq.collect besideIn
+                        |> Set.ofSeq
+                        |> Set.filter (fun step -> RoomPos.range tile step = Some 2)
+                    else
+                        besideIn tile
+
+                match ground |> Set.filter (covered >> not) with
+                | open' when Set.isEmpty open' -> ground
+                | open' -> open'
+
             let front =
                 match target, facts.Targets with
-                | Some(_, tile), _ -> besideIn tile
+                | Some(_, tile), _ -> workFrom tile
                 | None, None ->
                     breach |> List.tryHead |> Option.map besideIn |> Option.defaultValue Set.empty
                 // Nothing left standing: a `Provoke` holds the breach it made,

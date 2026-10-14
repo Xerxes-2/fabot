@@ -1534,6 +1534,7 @@ let saveQuotas (home: string) (quotas: Quotas) =
                 | CastRow.Squad Sapper -> "sapper"
                 | CastRow.Squad Probe -> "probe"
                 | CastRow.Squad Medic -> "medic"
+                | CastRow.Squad Escort -> "escort"
 
             a?wanted <- cast.Ask.Wanted
             a?blocks <- cast.Ask.Blocks
