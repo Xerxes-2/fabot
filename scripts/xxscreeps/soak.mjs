@@ -42,7 +42,8 @@
 //            into the cache and checked against its integrity, gives its
 //            `from` directory's files beside the directory's own, its
 //            main.js as `main`.
-//   --world  a live capture (`scripts/capture-world.mjs`) as the world, at its
+//   --world  a live capture (`scripts/capture-world.mjs`), or a crafted world
+//            of its shape (`worlds/`, terrain as 50 rows), as the world, at its
 //            tick (`engine/live.mjs`): our user the capture's, every home of
 //            ours a colony the samples follow, the capture's outposts declared;
 //            stood on the template with every structure kind (`xx.mjs`)
@@ -270,7 +271,8 @@ console.error(`colony: ${colony.room}${from ? ` from ${from}` : live ? ` from ${
 if (from) node24([XXSCREEPS, "manage", "bot", "update", OUR_NAME, "./bot"], world);
 else if (live) {
   node24([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot"], world);
-  cpSync(flags["--world"], join(world, "capture.json"));
+  const flat = (rooms = []) => rooms.map((r) => ({ ...r, terrain: [r.terrain].flat().join("") }));
+  writeFileSync(join(world, "capture.json"), JSON.stringify({ ...live, rooms: flat(live.rooms), terrain: flat(live.terrain) }));
   node24([XXSCREEPS, script("live.mjs"), "capture.json"], world);
 }
 else node24([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);

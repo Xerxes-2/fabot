@@ -1,0 +1,6 @@
+{
+  "why": "a body met head-on on a 1-wide road through swamp swaps or waits, never shoved into the swamp",
+  "start": { "world": "scripts/xxscreeps/worlds/swamp-road.json", "seed": 1 },
+  "ticks": 3000,
+  "assert": [{ "measure": "faults", "max": 0 }]
+}

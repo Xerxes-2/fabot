@@ -1,6 +1,7 @@
 // The scenario library (ARCHITECTURE.md §10.2): each scenario in scenarios/
 // is a start, a number of ticks and bounds on what the run measured. Starts
-// are recipes (room, seed, late, node), so no world is checked in; scenarios
+// are recipes (room, seed, late, node), or a small crafted world checked in
+// for what no recipe stands (a road through swamp); scenarios
 // with one start share one soak, run to the longest of their ticks. A start
 // `at` tick T resumes the world a soak of `bundle` left at T: that bundle is
 // pinned to a commit so the world is played once and cached under
@@ -16,7 +17,8 @@
 //
 // A scenario file: { "why": the invariant, "nightly"?, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
-// "opponents"? (soak's --opponents) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
+// "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
+// (soak's --world; crafted ones under worlds/), "seed" }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick.
 // Exits non-zero when a bound fails or a soak does, or loses ticks twice.
@@ -155,12 +157,14 @@ for (const s of scenarios) for (const a of s.assert) if (!measures[a.measure]) f
 for (const { name, start } of scenarios)
   if ((start.at === undefined) !== (start.bundle === undefined) || (start.at !== undefined && (start.node || !/^[0-9a-f]{8,40}$/.test(start.bundle))))
     fail(`${name}: a start "at" a tick names its "bundle" by commit id, and no node`);
+for (const { name, start } of scenarios)
+  if (start.world && Object.keys(start).some((k) => k !== "world" && k !== "seed")) fail(`${name}: a "world" start takes a "seed" and nothing else`);
 
 // A world holds its opponents' seats; their config is the scenario's.
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
 const seats = (opponents = []) => opponents.map(({ config, ...seat }) => seat);
-const recipe = ({ room, seed, late = 0, node, invaders, core, unsafe, ended }, opponents) =>
-  `${room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${tag(opponents)}`;
+const recipe = ({ world, room, seed, late = 0, node, invaders, core, unsafe, ended }, opponents) =>
+  `${world ? basename(world, ".json") : room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${tag(opponents)}`;
 // A cached world is replayed only by the opponents' code that played it, and
 // the engine mods and world scripts it was stood and played under.
 const codeOf = (...paths) =>
@@ -214,6 +218,7 @@ const opponentsOf = (name, opponents) => {
   return ["--opponents", file];
 };
 const play = async ({ name, start, ticks }) => {
+  if (start.world) return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot]);
   const recipe = ["--room", start.room, "--seed", String(start.seed), "--late", String(start.late ?? 0)];
   if (!start.at)
     return soak([
