@@ -5175,7 +5175,11 @@ let private withAssaults
                     match role with
                     | Tapper -> tapDue
                     | Convoy -> declaiming && facts.Taken
-                    | role when SquadRole.dismantles role -> not facts.Taken
+                    // A declaim's sappers on past its tap tile while any
+                    // rampart stands (`AssaultFacts.Targets`).
+                    | role when SquadRole.dismantles role ->
+                        not facts.Taken
+                        || declaiming && facts.Targets |> Option.exists (List.isEmpty >> not)
                     | _ -> true)
 
             let holders = Formation.holding held (Assault room) casts
@@ -5364,6 +5368,54 @@ let private withAssaults
                     |> Set.ofSeq
                     |> open'
 
+            // With no front to guard (a declaim's targets down), while no
+            // tapper walks or taps: within a shot of the enemy's rebuilders,
+            // else onto its sites, which a step removes; else round the tap
+            // tile. Off it and off every tile a rampart touches. A convoy
+            // with no tapper to walk in does this too, beside the sappers'
+            // demolition.
+            let idle =
+                let sites = facts.Sites |> List.map (fst >> RoomPos.at room) |> Set.ofList |> open'
+
+                // Its rebuilders: the enemy's bodies with no weapon and no
+                // heal, off a rampart, shot from no nearer an armed one
+                // than its reach and a step.
+                let enemies =
+                    view.Hostiles
+                    |> List.filter (fun hostile ->
+                        hostile.Owner = facts.Assault.Enemy && hostile.Pos.Room = room)
+
+                let armed = enemies |> List.filter (HostileInfo.armed view.Hostiles)
+
+                let prey =
+                    enemies
+                    |> List.filter (fun hostile ->
+                        not (HostileInfo.armed view.Hostiles hostile)
+                        && partCountIn hostile.Body Heal = 0
+                        && not (List.contains (RoomPos.pos hostile.Pos) facts.Ramparts))
+
+                let inShot =
+                    prey
+                    |> Seq.collect (fun hostile ->
+                        (Set.singleton hostile.Pos, [ 1 .. Engine.rangedRange ])
+                        ||> List.fold (fun reached _ ->
+                            reached |> Seq.collect besideIn |> Set.ofSeq |> Set.union reached))
+                    |> Set.ofSeq
+                    |> Set.filter (fun step ->
+                        armed
+                        |> List.forall (fun hostile ->
+                            RoomPos.range hostile.Pos step
+                            |> Option.forall (fun r -> r > Engine.rangedRange + 1)))
+                    |> open'
+
+                let round = Set.difference (tapFrom |> Seq.collect besideIn |> Set.ofSeq) tapFrom
+
+                match open' round with
+                | _ when List.isEmpty tappers && not (Set.isEmpty inShot) -> inShot
+                | _ when List.isEmpty tappers && not (Set.isEmpty sites) -> sites
+                | clear when Set.isEmpty clear -> rally
+                | clear -> clear
+
             let behind =
                 match leader with
                 | _ when not (Set.isEmpty threatening) -> threatening
@@ -5384,53 +5436,7 @@ let private withAssaults
                     | clear when Set.isEmpty clear -> besideIn tile
                     | clear when not holdsOn || Set.isEmpty (open' clear) -> clear
                     | clear -> open' clear
-                // No front left (a declaim's targets down), while no tapper
-                // walks or taps: within a shot of the enemy's rebuilders, else
-                // onto its sites, which a step removes; else round the tap
-                // tile. Off it and off every tile a rampart touches.
-                | None ->
-                    let sites =
-                        facts.Sites |> List.map (fst >> RoomPos.at room) |> Set.ofList |> open'
-
-                    // Its rebuilders: the enemy's bodies with no weapon and no
-                    // heal, off a rampart, shot from no nearer an armed one
-                    // than its reach and a step.
-                    let enemies =
-                        view.Hostiles
-                        |> List.filter (fun hostile ->
-                            hostile.Owner = facts.Assault.Enemy && hostile.Pos.Room = room)
-
-                    let armed = enemies |> List.filter (HostileInfo.armed view.Hostiles)
-
-                    let prey =
-                        enemies
-                        |> List.filter (fun hostile ->
-                            not (HostileInfo.armed view.Hostiles hostile)
-                            && partCountIn hostile.Body Heal = 0
-                            && not (List.contains (RoomPos.pos hostile.Pos) facts.Ramparts))
-
-                    let inShot =
-                        prey
-                        |> Seq.collect (fun hostile ->
-                            (Set.singleton hostile.Pos, [ 1 .. Engine.rangedRange ])
-                            ||> List.fold (fun reached _ ->
-                                reached |> Seq.collect besideIn |> Set.ofSeq |> Set.union reached))
-                        |> Set.ofSeq
-                        |> Set.filter (fun step ->
-                            armed
-                            |> List.forall (fun hostile ->
-                                RoomPos.range hostile.Pos step
-                                |> Option.forall (fun r -> r > Engine.rangedRange + 1)))
-                        |> open'
-
-                    let round =
-                        Set.difference (tapFrom |> Seq.collect besideIn |> Set.ofSeq) tapFrom
-
-                    match open' round with
-                    | _ when List.isEmpty tappers && not (Set.isEmpty inShot) -> inShot
-                    | _ when List.isEmpty tappers && not (Set.isEmpty sites) -> sites
-                    | clear when Set.isEmpty clear -> rally
-                    | clear -> clear
+                | None -> idle
 
             let inRoom =
                 members
@@ -5468,7 +5474,7 @@ let private withAssaults
                 Convoy =
                     match tappers |> List.choose (fst >> tileOf) with
                     | at :: _ -> besideIn at
-                    | [] -> launchedOr behind
+                    | [] -> launchedOr (if declaiming && facts.Taken then idle else behind)
                 Controller = controller
                 Roles = casts |> Map.filter (fun _ role -> List.contains role slots)
             },

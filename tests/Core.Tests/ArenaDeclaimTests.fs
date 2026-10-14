@@ -308,7 +308,7 @@ let arenaDeclaimTests =
             }
 
             test
-                "past the breach a tapper lands on every tick the block lapses, one a life, and a rival trying safe mode every tick never raises it" {
+                "past the breach a tapper lands on every tick the block lapses, one a life, a rival trying safe mode every tick never raises it, and the sappers go on through the room's other ramparts, losing nobody" {
                 // Its cooldown ends after the first tap, not at t1,199,019.
                 let target = w18s26Now () |> withSafeModeCooldown (seen + 2_000) |> insisting
 
@@ -340,10 +340,38 @@ let arenaDeclaimTests =
                     "a tapper a tap, each cast by its life"
 
                 Expect.isNone (safeModeOn trace) $"no safe mode\n{failure}"
+
+                // Past the tap tile the sappers work through the room's other
+                // ramparts (user, 2026-10-14), losing nobody.
+                let demolished =
+                    trace
+                    |> List.sumBy (fun t ->
+                        t.Events
+                        |> List.filter (function
+                            | Destroyed d -> d.StartsWith "rampart"
+                            | _ -> false)
+                        |> List.length)
+
+                printfn "DEMOLISHED %d" demolished
+                Expect.isGreaterThan demolished 4 "the demolition goes on"
+
+                for previous, now in List.pairwise trace do
+                    for e in now.Events do
+                        match e with
+                        | Died id when not (id.StartsWith "worker") && id.Contains "-Spawn" ->
+                            let hits =
+                                previous.Bodies
+                                |> List.tryFind (fun b -> b.Id = id)
+                                |> Option.map _.Hits
+
+                            Expect.isTrue
+                                (hits |> Option.forall (fun h -> h >= 1_000))
+                                $"{id} died of age, not of a fight: {hits}"
+                        | _ -> ()
             }
 
             test
-                "a rival's tower site placed past the breach is stepped on by an escort once no tapper needs it, its road and rampart decoys never, losing nobody, the taps on the block" {
+                "a rival's tower site placed past the breach is stepped on by an escort or the convoy once no tapper needs it, its road and rampart decoys never, losing nobody, the taps on the block" {
                 let target = w18s26Now () |> withSafeModeCooldown (seen + 2_000) |> insisting
                 let _, mid, before = declaimRun target trepidimous (fun _ -> false) 1_300
 
@@ -372,7 +400,11 @@ let arenaDeclaimTests =
                 // Measured: placed at t1,300, stepped on at t2,531, the tick
                 // after the second tapper's tap released it.
                 Expect.isSome stomped $"stepped on\n{failure}"
-                Expect.stringStarts (snd stomped.Value) "escort-" "by an escort"
+
+                Expect.isTrue
+                    ((snd stomped.Value).StartsWith "escort-"
+                     || (snd stomped.Value).StartsWith "convoy-")
+                    "by an escort or the convoy"
 
                 let taps =
                     trace

@@ -45,9 +45,10 @@ type SquadRole =
 
 [<RequireQualifiedAccess>]
 module SquadRole =
-    /// Every role, in the order a squad casts them: the fronts the medic
-    /// walks behind first.
-    let all = [ Sapper; Probe; Medic; Escort; Convoy; Tapper ]
+    /// Every role, in the order a squad casts them: a declaim's tapper and
+    /// its convoy first, for a tap a busy spawn makes late is a safe-mode
+    /// window; then the fronts the medic walks behind.
+    let all = [ Tapper; Convoy; Sapper; Probe; Medic; Escort ]
 
     /// Whether the role walks behind the front rather than leading it.
     let behind (role: SquadRole) = role = Medic || role = Escort

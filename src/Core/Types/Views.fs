@@ -1602,13 +1602,35 @@ module ColonyView =
                       |> List.map (fun (id, _) -> id, tile)
                       |> List.sort)))
 
+        // A declaim's every other rampart after its declared ones (user,
+        // 2026-10-14), nearest its controller first: what its sappers take
+        // down once the tap tile is clear. Never in `Taken`, which gates the
+        // taps.
+        let demolition =
+            match assault.Mode with
+            | Declaim ->
+                let named = declared |> List.map fst |> Set.ofList
+
+                let from =
+                    facts.TargetKinds
+                    |> Map.tryFindKey (fun _ kind -> kind = Controller)
+                    |> Option.bind (fun id -> Map.tryFind id facts.Layer.TargetPositions)
+
+                ramparts
+                |> Map.toList
+                |> List.filter (fun (_, id) -> not (Set.contains id named))
+                |> List.sortBy (fun (tile, id) ->
+                    (from |> Option.map (fun c -> range c tile) |> Option.defaultValue 0), id)
+                |> List.map (fun (tile, id) -> id, tile)
+            | _ -> []
+
         let targets =
             facts.Control
             |> Option.map (fun _ ->
                 let breach = assault.Breach |> List.collect rampartOn
 
                 match assault.Mode, assault.Targets with
-                | _, _ :: _ -> breach @ declared
+                | _, _ :: _ -> breach @ declared @ demolition
                 | Provoke, []
                 | Declaim, [] -> breach
                 | Strike, [] -> breach @ placed BuiltKind.Tower @ placed BuiltKind.Spawn)
