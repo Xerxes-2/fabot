@@ -101,11 +101,13 @@ let private w18s26Now () =
             structureOf "rampart" (Some trep) hits 30_000_000 (tile x y))
     )
 
-/// W15S28, RCL8: the colony that casts the squad.
+/// W15S28, RCL8: the colony that casts the squad, from its three spawns.
 let private w15s28 () =
     room "W15S28"
     |> withController Ownership.Ours None 8 0
     |> withSpawn "Spawn3" { X = 18; Y = 30 } 12_900
+    |> withSpawn "Spawn8" { X = 17; Y = 35 } 12_900
+    |> withSpawn "Spawn9" { X = 24; Y = 30 } 12_900
 
 /// Every room a walk from W15S28 to W18S26 may cross, and the rooms beside
 /// W18S26: W15–W18 by S25–S29, and W19S26.
@@ -323,21 +325,31 @@ let arenaDeclaimTests =
                             | ControllerAttacked(_, by) -> Some(t.Time, by)
                             | _ -> None))
 
-                // Measured: t1,173,693, then every 1,000 to t1,178,693.
-                Expect.isGreaterThanOrEqual (List.length taps) 6 $"six taps: {taps}"
+                // Measured: see the commit.
+                Expect.isGreaterThanOrEqual
+                    (taps |> List.map fst |> List.distinct |> List.length)
+                    5
+                    $"five cycles: {taps}"
 
                 Expect.isLessThan
                     (fst taps.Head)
                     1_199_019
                     "the first before the cooldown ends live"
 
-                for (a, _), (b, _) in List.pairwise taps do
+                for a, b in List.pairwise (taps |> List.map fst |> List.distinct) do
                     Expect.equal (b - a) 1_000 $"the block lapses and the next lands: {taps}"
 
                 Expect.equal
                     (taps |> List.map snd |> List.distinct |> List.length)
                     (List.length taps)
                     "a tapper a tap, each cast by its life"
+
+                // Two tappers declared (user, 2026-10-14): both on every lapse,
+                // 2 x 5,400 off the timer a cycle.
+                // The first lapse is the cast's own (one spawn here casts the
+                // pair one after the other); every one after, both.
+                for time, together in taps |> List.countBy fst |> List.tail do
+                    Expect.equal together 2 $"both tappers at t{time}: {taps}"
 
                 Expect.isNone (safeModeOn trace) $"no safe mode\n{failure}"
 
@@ -416,7 +428,7 @@ let arenaDeclaimTests =
 
                 Expect.isGreaterThanOrEqual (List.length taps) 3 $"taps: {taps}"
 
-                for a, b in List.pairwise taps do
+                for a, b in List.pairwise (List.distinct taps) do
                     Expect.equal (b - a) 1_000 $"on the block: {taps}"
 
                 Expect.isNone (safeModeOn trace) "no safe mode"
@@ -543,7 +555,7 @@ let arenaDeclaimTests =
 
                 Expect.isGreaterThanOrEqual (List.length taps) 3 $"taps: {taps}"
 
-                for a, b in List.pairwise taps do
+                for a, b in List.pairwise (List.distinct taps) do
                     Expect.equal (b - a) 1_000 $"on the block: {taps}"
 
                 Expect.isNone (safeModeOn trace) "no safe mode"
@@ -620,7 +632,7 @@ let arenaDeclaimTests =
 
                 Expect.isGreaterThanOrEqual (List.length taps) 2 $"taps: {taps}"
 
-                for a, b in List.pairwise taps do
+                for a, b in List.pairwise (List.distinct taps) do
                     Expect.equal (b - a) 1_000 $"on the block: {taps}"
 
                 Expect.isNone (safeModeOn trace) "no safe mode"
@@ -692,7 +704,7 @@ let arenaDeclaimTests =
 
                 Expect.isGreaterThanOrEqual (List.length taps) 3 $"taps: {taps}"
 
-                for (a, _), (b, _) in List.pairwise taps do
+                for a, b in List.pairwise (taps |> List.map fst |> List.distinct) do
                     Expect.equal (b - a) 1_000 $"on the block: {taps}"
 
                 Expect.isNone (safeModeOn trace) "no safe mode"
@@ -780,7 +792,7 @@ let arenaDeclaimTests =
                 Expect.isGreaterThan (2 * both) busy.Length "both sappers on most working ticks"
                 Expect.isGreaterThanOrEqual (List.length taps) 2 $"taps: {taps}"
 
-                for a, b in List.pairwise taps do
+                for a, b in List.pairwise (List.distinct taps) do
                     Expect.equal (b - a) 1_000 $"on the block: {taps}"
 
                 Expect.isNone (safeModeOn trace) "no safe mode"

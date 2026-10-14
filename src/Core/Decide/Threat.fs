@@ -5186,6 +5186,17 @@ let private withAssaults
                         || declaiming && facts.Targets |> Option.exists (List.isEmpty >> not)
                     | _ -> true)
 
+            // A tapper is admitted only while its life reaches the block's
+            // lapse: one whose tap is done would otherwise take a later slot
+            // and hold the cast for it waiting (live, "none-free").
+            let outlivesBlock name =
+                match facts.TapAt with
+                | Some at ->
+                    ColonyView.bodies view
+                    |> List.exists (fun creep ->
+                        creep.Name = name && creep.TicksToLive >= at - view.Time)
+                | None -> true
+
             let holders = Formation.holding held (Assault room) casts
 
             // The tapper walks to its tile on the squad's launch and never
@@ -5375,9 +5386,18 @@ let private withAssaults
             let controller =
                 facts.Controller |> Option.map (fun (id, tile) -> id, RoomPos.at room tile)
 
+            // One tile each for the declared tappers: the tiles no rampart
+            // touches first, every free one beside the controller if they
+            // are too few.
             let tapFrom =
                 match controller with
-                | Some(_, tile) -> workFrom tile
+                | Some(_, tile) ->
+                    let clear = workFrom tile
+
+                    if Set.count clear < SquadRole.slots Tapper slots then
+                        Set.union clear (besideIn tile)
+                    else
+                        clear
                 | None -> front
 
             let open' (tiles: Set<RoomPos>) =
@@ -5522,7 +5542,10 @@ let private withAssaults
                     | at :: _ -> besideIn at
                     | [] -> launchedOr (if declaiming && facts.Taken then idle else behind)
                 Controller = controller
-                Roles = casts |> Map.filter (fun _ role -> List.contains role slots)
+                Roles =
+                    casts
+                    |> Map.filter (fun name role ->
+                        List.contains role slots && (role <> Tapper || outlivesBlock name))
             },
             // Its targets down (#496): its work is done once its casts are
             // out, a declaim's once the controller is nobody's.
