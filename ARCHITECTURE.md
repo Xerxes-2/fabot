@@ -627,7 +627,8 @@ everything v1 used its self-written arena for, and more:
   seed, and the bot sitting out its first ticks: the seed only breaks ties,
   and a room with few ties drifts from a small change the seed never
   makes), and a loss smaller than the room's own spread across the starts
-  is noise. Players' same-tick contested intents resolve in user-id order,
+  is noise. An RCL8 room's controller progress buys only GCL, so it is
+  read apart and never counts as a room's regression. Players' same-tick contested intents resolve in user-id order,
   so a run repeats but is one-sided (the Invader usually moves first); a
   gap between soak and live surfaces as an incident and becomes a scenario.
 - **Nodes.** A long soak from a respawn reaches RCL3 in 10,000 ticks and
