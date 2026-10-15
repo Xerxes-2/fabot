@@ -4,8 +4,10 @@
 // object and charges no intent, so its `memory`, `write` and `execute` read
 // lower. A window starts from a fresh load, as after a global reset: its first
 // --cold ticks are apart, the JIT still settling (the atlas reads 5× its
-// steady cost over the first 40). A claim is the min-of-rounds B/A with
-// identical fingerprints (each tick's intents and Memory).
+// steady cost over the first 40). A round streams the capture a tick at a
+// time: the heap is the live limit, and a takeover capture outgrows it. A
+// claim is the min-of-rounds B/A with identical fingerprints (each tick's
+// intents and Memory).
 //
 // --counts replays A once and prints §9.3's counts a tick per window instead:
 // floods, flood-table hits, tiles relaxed, by the caller's named frames.
@@ -14,9 +16,10 @@
 //        npm run bench -- --a A.js --counts capture.jsonl…
 //   node --cpu-prof --max-old-space-size=256 scripts/bench.mjs --a A.js …   one bundle's profile
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { createReadStream } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { getHeapStatistics } from "node:v8";
 import { stand } from "./bench-game.mjs";
 
@@ -40,15 +43,18 @@ const cold = Number(flags["--cold"] ?? 50);
 const bundles = { A: resolve(flags["--a"]), ...(flags["--b"] ? { B: resolve(flags["--b"]) } : {}) };
 const sides = Object.keys(bundles);
 
-const windows = [];
-for (const f of files)
-  for (const line of readFileSync(f, "utf8").split("\n").filter(Boolean)) {
-    const tick = JSON.parse(line);
-    for (const r of tick.rooms) r.terrain = Uint8Array.from(r.terrain, Number);
-    const w = windows.at(-1);
-    if (w && w.at(-1).time === tick.time - 1) w.push(tick);
-    else windows.push([tick]);
-  }
+async function* replay() {
+  let last;
+  for (const f of files)
+    for await (const line of createInterface({ input: createReadStream(f), crlfDelay: Infinity })) {
+      if (!line) continue;
+      const tick = JSON.parse(line);
+      for (const r of tick.rooms) r.terrain = Uint8Array.from(r.terrain, Number);
+      const i = last && last.time === tick.time - 1 ? last.i + 1 : 0;
+      last = { time: tick.time, i };
+      yield [tick, i];
+    }
+}
 
 const require = createRequire(import.meta.url);
 const load = (path) => {
@@ -82,14 +88,18 @@ if (flags.counts) {
     if (what === "hit") row.hits += n;
     else (row.floods++, (row.tiles += n));
   };
-  for (const [wi, w] of windows.entries()) {
-    tally = {};
-    const bot = load(bundles.A);
-    for (const tick of w) runTick(bot, tick);
-    const rows = Object.entries(tally).sort((a, b) => b[1].tiles - a[1].tiles);
+  const windows = [];
+  let bot;
+  for await (const [tick, i] of replay()) {
+    if (i === 0) (windows.push((tally = {})), (bot = load(bundles.A)));
+    runTick(bot, tick);
+    tally.length = i + 1;
+  }
+  for (const [wi, { length, ...w }] of windows.entries()) {
+    const rows = Object.entries(w).sort((a, b) => b[1].tiles - a[1].tiles);
     const sum = (k) => rows.reduce((s, [, r]) => s + r[k], 0);
-    const per = (x) => (x / w.length).toFixed(1);
-    console.log(`window ${wi} (${w.length} ticks): ${per(sum("floods"))} floods a tick, hit rate ${((100 * sum("hits")) / (sum("hits") + sum("floods"))).toFixed(1)}%, ${(sum("tiles") / sum("floods")).toFixed(0)} tiles a flood`);
+    const per = (x) => (x / length).toFixed(1);
+    console.log(`window ${wi} (${length} ticks): ${per(sum("floods"))} floods a tick, hit rate ${((100 * sum("hits")) / (sum("hits") + sum("floods"))).toFixed(1)}%, ${(sum("tiles") / sum("floods")).toFixed(0)} tiles a flood`);
     for (const [who, r] of rows) console.log(`  ${who.padEnd(48)} floods ${per(r.floods).padStart(7)} hits ${per(r.hits).padStart(7)} tiles ${per(r.tiles).padStart(9)}`);
   }
   process.exit(0);
@@ -97,15 +107,16 @@ if (flags.counts) {
 
 // runs[side][round][i]: the i-th tick of all windows in order.
 const runs = Object.fromEntries(sides.map((s) => [s, []]));
-const coldAt = windows.flatMap((w) => w.map((_, i) => i < cold));
+const coldAt = [];
+let windows = 0;
 for (let r = 0; r < rounds; r++) {
   for (const s of sides) runs[s].push([]);
-  for (const w of windows) {
-    const bots = Object.fromEntries(sides.map((s) => [s, load(bundles[s])]));
-    w.forEach((tick, i) => {
-      const order = (r + i) % 2 === 0 ? sides : [...sides].reverse();
-      for (const s of order) runs[s][r].push(runTick(bots[s], tick));
-    });
+  let bots;
+  for await (const [tick, i] of replay()) {
+    if (i === 0) bots = Object.fromEntries(sides.map((s) => [s, load(bundles[s])]));
+    if (r === 0) (coldAt.push(i < cold), (windows += i === 0));
+    const order = (r + i) % 2 === 0 ? sides : [...sides].reverse();
+    for (const s of order) runs[s][r].push(runTick(bots[s], tick));
   }
   console.error(`round ${r + 1}/${rounds}`);
 }
@@ -116,7 +127,7 @@ for (const f of faults.slice(0, 5)) console.log(`fault ${f}`);
 const unstable = sides.filter((s) => runs[s].some((round) => round.some((t, i) => t.print !== runs[s][0][i].print)));
 const differ = sides.length === 2 ? runs.A[0].filter((t, i) => t.print !== runs.B[0][i].print).length : 0;
 console.log(
-  `${windows.length} windows, ${ticks} ticks (${coldAt.filter(Boolean).length} cold), ${rounds} rounds; ` +
+  `${windows} windows, ${ticks} ticks (${coldAt.filter(Boolean).length} cold), ${rounds} rounds; ` +
     `fingerprints ${unstable.length ? `UNSTABLE in ${unstable}` : "stable"}${sides.length === 2 ? `, A/B ${differ ? `DIFFER on ${differ} ticks` : "identical"}` : ""}`,
 );
 
