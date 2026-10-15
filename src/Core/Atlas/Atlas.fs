@@ -446,8 +446,6 @@ module Atlas =
                     + "|"
                     + string (stepTicks factor Engine.swampWeight)
                     + "|"
-                    + string (stepTicks factor seatWeight)
-                    + "|"
                     + goalKey
 
                 let dist =

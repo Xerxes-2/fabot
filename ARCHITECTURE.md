@@ -98,10 +98,11 @@ World ──▶ Derived ──▶ decisions ──▶ Intents
 - **One cache exists**: `Atlas`'s flood table of goal-seeded reverse
   floods, keyed by (room, goal tiles and range — or the exit toward the next
   room —, footprint, pace class: the body's step ticks on road, plain and
-  swamp), counting hits and misses. A room's floods outlive the tick while
-  its weights are unchanged (owner's decision): within one tick half the
-  floods repeated, across ticks nearly all, and a flood is a pure function of
-  the weights, so a kept one is the fresh one and a heap reset only re-floods.
+  swamp; a seat's price follows from swamp's), counting hits and misses. A
+  room's floods outlive the tick while its weights are unchanged (owner's
+  decision): within one tick half the floods repeated, across ticks nearly
+  all, and a flood is a pure function of the weights, so a kept one is the
+  fresh one and a heap reset only re-floods.
   Room routes are searched once a tick into `Derived`, one tree from each
   room a spawn or body stands in (owner's decision): Economy prices every
   body against every offer, so a search per query cost thousands a tick at

@@ -70,15 +70,20 @@ let stepUnits (factor: FatigueFactor) (weight: int) =
     else
         max 1 ((weight * factor.Weight + factor.Moves - 1) / factor.Moves)
 
-/// Exact per step: a body cannot step again until its fatigue is zero, so a
-/// path's ticks are the sum of its steps'.
-let stepTicks (factor: FatigueFactor) (weight: int) =
-    let units = stepUnits factor weight
-    if units < 0 then -1 else (units + 1) / 2
-
 /// The detour a walk takes before it waits on a seated body; finite, so the
 /// seat's own walk and the only way through still reach it.
-let seatWeight = 5 * Engine.swampWeight
+let private seatSwamps = 5
+
+let seatWeight = seatSwamps * Engine.swampWeight
+
+/// Exact per step: a body cannot step again until its fatigue is zero, so a
+/// path's ticks are the sum of its steps'. A seat's price follows from swamp's,
+/// so the pace class keys a flood.
+let stepTicks (factor: FatigueFactor) (weight: int) =
+    let seat = weight = seatWeight
+    let units = stepUnits factor (if seat then Engine.swampWeight else weight)
+    let ticks = if units < 0 then -1 else (units + 1) / 2
+    if seat && ticks > 0 then seatSwamps * ticks else ticks
 
 /// The flood reads a table, not a closure.
 let stepTable (factor: FatigueFactor) : int[] =
