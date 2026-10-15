@@ -43,7 +43,7 @@ import * as User from "xxscreeps/engine/db/user/index.js";
 import { getServiceChannel } from "xxscreeps/engine/service/index.js";
 import { getConsoleChannel, runnerUsageChannel } from "xxscreeps/engine/runner/model.js";
 import { loadMemorySegmentBlob, loadUserMemoryString } from "xxscreeps/mods/meta/memory/model.js";
-import { pushIntentsForRoomNextTick } from "xxscreeps/engine/processor/model.js";
+import { getProcessorChannel, pushIntentsForRoomNextTick } from "xxscreeps/engine/processor/model.js";
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
 
@@ -102,8 +102,8 @@ let captureLog;
 });
 // Ticks lost: our bot's tick cut off by its time limit (its CPU or the
 // host's load), or the engine abandoning intents in one of its rooms. A run
-// holding one is no measurement. An opponent's room alone is left out: the
-// engine abandons one now and then on a quiet host.
+// holding one is no measurement. An opponent's room alone is left out: its
+// bot's ticks are not ours to measure.
 const lost = new Set();
 const serverLog = fs.openSync(join(out, "server.log"), "r");
 let serverRead = 0;
@@ -121,12 +121,20 @@ for (const o of opponents) {
   (await getConsoleChannel(shard, o.id).subscribe()).listen((message) => fs.writeSync(log, `[${consoleTick ?? "?"}] ${message}\n`));
 }
 
+// The processor drops a wake-up that lands while its worker goes idle, and the tick waits out the abandon
+// with every intent in; a resent one takes only rooms no runner still owes, so a stuck bot is still abandoned.
+const processor = getProcessorChannel(shard);
 const nextTick = async (ms) => {
   const timeout = new Promise((resolve) => setTimeout(() => resolve(null), ms));
-  for (;;) {
-    const res = await Promise.race([sub.next(), timeout]);
-    if (res === null) return null;
-    if (res.value?.type === "tick") return res.value.time;
+  const wake = setInterval(() => shard.data.get("time").then((time) => processor.publish({ type: "process", time: Number(time) }), () => {}), 1000);
+  try {
+    for (;;) {
+      const res = await Promise.race([sub.next(), timeout]);
+      if (res === null) return null;
+      if (res.value?.type === "tick") return res.value.time;
+    }
+  } finally {
+    clearInterval(wake);
   }
 };
 
