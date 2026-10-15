@@ -105,12 +105,32 @@ let close (sight: Sight) (order: string list) (centre: Pos) (creep: Creep) =
 
 let pursue = close
 
+/// How far `kind` of `h` strikes next tick, a step nearer; -1 for none.
+let private reach (kind: BodyPart) (h: Creep) =
+    match kind, live kind h with
+    | _, 0 -> -1
+    | RangedAttack, _ -> Engine.rangedRange + min 1 (live Move h)
+    | _ -> Engine.meleeRange + min 1 (live Move h)
+
+let private stepTo (creep: Creep) (tile: int) : Wish =
+    {
+        Creep = creep.Name
+        Footprint = Grid.One
+        At = Tiles.ofPos creep.Pos
+        Head = tile
+        Onward = None
+        Tail = [||]
+        Working = [||]
+        Weight = weight
+        Moves = true
+    }
+
 /// v1's kiteStep without its threat maps: off every swing's next reach, else
 /// to a shot's range of the head.
 let kite (sight: Sight) (order: string list) (centre: Pos) (creep: Creep) =
     let swings =
         hostilesIn sight creep.Pos.Room
-        |> Array.filter (fun h -> live Attack h > 0 && Pos.within 2 creep.Pos h.Pos)
+        |> Array.filter (fun h -> Pos.within (reach Attack h) creep.Pos h.Pos)
 
     let gap (tile: int) =
         let at = Tiles.toPos creep.Pos.Room tile
@@ -133,21 +153,89 @@ let kite (sight: Sight) (order: string list) (centre: Pos) (creep: Creep) =
                 |> Option.filter (fun t -> gap t > gap here)
 
             match step with
-            | Some t when Plan.canMove creep (moverOf creep).Factor ->
-                {
-                    Creep = creep.Name
-                    Footprint = Grid.One
-                    At = here
-                    Head = t
-                    Onward = None
-                    Tail = [||]
-                    Working = [||]
-                    Weight = weight
-                    Moves = true
-                }
+            | Some t when Plan.canMove creep (moverOf creep).Factor -> stepTo creep t
             | _ -> hold sight creep
 
     strike sight order creep, wish
+
+/// The raid's strikes onto `at` next tick; none outside the raid's room, which
+/// costs a raid a tick to follow into.
+let private threat (raid: Creep[]) (at: Pos) =
+    raid
+    |> Array.sumBy (fun h ->
+        (if Pos.within (reach RangedAttack h) at h.Pos then
+             Engine.rangedAttackPower * live RangedAttack h
+         else
+             0)
+        + (if Pos.within (reach Attack h) at h.Pos then
+               Engine.attackPower * live Attack h
+           else
+               0))
+
+/// A Doomed body, whose full hits fall within the line, fights on: stepping
+/// out cannot save it.
+let private rescued (raid: Creep[]) (creep: Creep) =
+    let focus =
+        (raid
+         |> Array.sumBy (fun h ->
+             Engine.rangedAttackPower * live RangedAttack h
+             + Engine.attackPower * live Attack h))
+        - Engine.healPower * live Heal creep
+
+    let ticksOut =
+        1
+        + (raid
+           |> Array.fold (fun most h -> max most (reach RangedAttack h) |> max (reach Attack h)) 0)
+
+    focus > 0 && creep.Hits < ticksOut * focus && creep.HitsMax > ticksOut * focus
+
+/// Only while a mate fights on: the gate never empties the line.
+let exposed (sight: Sight) (raidRoom: string) (members: Creep[]) (creep: Creep) =
+    let raid = hostilesIn sight raidRoom
+
+    rescued raid creep
+    && members |> Array.exists (fun m -> m.Name <> creep.Name && not (rescued raid m))
+
+/// To the nearest tile out of the raid's next reach (an exit hands the body to
+/// the next room), beside the most mates that heal it.
+let stepBack (sight: Sight) (raidRoom: string) (members: Creep[]) (creep: Creep) : Wish =
+    let room = creep.Pos.Room
+    let raid = hostilesIn sight raidRoom
+
+    // A body crosses an exit by stepping onto it, not by standing on it.
+    let crosses (t: int, first: int) = first >= 0 && Tiles.onEdge t
+
+    let safe (t: int, first: int) =
+        room <> raidRoom || crosses (t, first) || threat raid (Tiles.toPos room t) = 0
+
+    let apart (t: int) =
+        members
+        |> Array.filter (fun m -> m.Name <> creep.Name && live Heal m > 0)
+        |> Array.sumBy (fun m -> Pos.range (Tiles.toPos room t) m.Pos |> Option.defaultValue 9)
+
+    let rec search (ring: (int * int) list) (seen: Set<int>) depth =
+        match ring |> List.filter safe with
+        | [] when depth = 0 || ring.IsEmpty -> None
+        | [] ->
+            let next =
+                ring
+                |> List.filter (crosses >> not)
+                |> List.collect (fun (t, first) ->
+                    Tiles.around t
+                    |> Array.filter (fun n ->
+                        not (seen.Contains n) && Atlas.passable sight.Atlas room n)
+                    |> Array.map (fun n -> n, (if first < 0 then n else first))
+                    |> List.ofArray)
+                |> List.distinctBy fst
+
+            search next (next |> List.fold (fun s (t, _) -> Set.add t s) seen) (depth - 1)
+        | found -> found |> List.minBy (fun (t, _) -> apart t, t) |> snd |> Some
+
+    let here = Tiles.ofPos creep.Pos
+
+    match search [ here, -1 ] (Set.singleton here) (2 * Engine.rangedRange) with
+    | Some t when t >= 0 && Plan.canMove creep (moverOf creep).Factor -> stepTo creep t
+    | _ -> hold sight creep
 
 /// To a shot's range of the group, as one.
 let blob (sight: Sight) (centre: Pos) (members: Creep[]) : Wish list =

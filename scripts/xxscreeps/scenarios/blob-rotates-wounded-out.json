@@ -1,0 +1,11 @@
+{
+  "why": "a blob whose Invaders focus the fewest hits in reach loses no body to the focus: a member the raid would kill before it walks out of reach steps out and heals while the others fight, so the raid dies and no member falls under a quarter of its hits",
+  "start": { "world": "scripts/xxscreeps/worlds/blob-gap-swamp.json", "seed": 1, "invaders": "W2N1:3000:400", "wave": "ranged,ranged,ranged,healer,melee" },
+  "ticks": 700,
+  "assert": [
+    { "measure": "bodiesLost", "max": 0 },
+    { "measure": "raidsKilled", "min": 1 },
+    { "measure": "fightLowestHits", "min": 25 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

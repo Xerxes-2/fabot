@@ -535,16 +535,17 @@ let decide (context: Context) (state: State) : Intent list * State =
                 Y = Engine.roomSide / 2
             }
 
+    let membersOf (e: Engagement) =
+        e.Ours
+        |> Seq.filter ours.ContainsKey
+        |> Seq.map (fun n -> ours.[n])
+        |> Array.ofSeq
+
     let walking = Dictionary<string, Move.Wish>()
 
     for e in engagements do
         if e.Phase.IsApproaching && e.Plan.Tactic.IsBlob && not e.Unanswered then
-            let members =
-                e.Ours
-                |> Seq.filter ours.ContainsKey
-                |> Seq.map (fun n -> ours.[n])
-                |> Seq.filter (swings >> not)
-                |> Array.ofSeq
+            let members = membersOf e |> Array.filter (swings >> not)
 
             if members.Length > 0 then
                 for wish in Tactics.blob sight (centreOf e) members do
@@ -566,6 +567,8 @@ let decide (context: Context) (state: State) : Intent list * State =
                 match e.Plan.Tactic with
                 | _ when walking.ContainsKey c.Name ->
                     Tactics.strike sight order c, walking.[c.Name]
+                | Tactic.Blob when Tactics.exposed sight centre.Room (membersOf e) c ->
+                    Tactics.strike sight order c, Tactics.stepBack sight centre.Room (membersOf e) c
                 | Tactic.Kite when not (swings c) -> Tactics.kite sight order centre c
                 | Tactic.Hold -> Tactics.rampart sight order c
                 | _ -> Tactics.close sight order centre c
