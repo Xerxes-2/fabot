@@ -939,7 +939,7 @@ module Assault =
     /// the walk in from W17S26 is open to the controller's own ramparts.
     /// The controller's other neighbours are walls: (10,22) and (11,22) down
     /// leave (10,22) a tap tile no rampart touches, the fewest hits of the
-    /// four ways (1.78M at t1,172,185).
+    /// four ways (1.78M at t1,172,185). Done: unclaimed by t1,192,635.
     let w18s26Controller: Assault =
         {
             RoomName = "W18S26"
@@ -950,7 +950,7 @@ module Assault =
             Targets = [ { X = 10; Y = 22 }; { X = 11; Y = 22 } ]
             Entry = Some "W17S26"
             MaxHops = None
-            Active = true
+            Active = false
         }
 
     /// W17S24's west line, x2 y18–21 (#491's arena): broken from W18S24 by
