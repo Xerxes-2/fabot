@@ -110,6 +110,7 @@ const measures = {
   sourceContainersAtEnd: (samples, a) => at(samples, a.to ?? Infinity).sourceContainers,
   // Links standing beside a source's container.
   postedLinksAtEnd: (samples, a) => at(samples, a.to ?? Infinity).postedLinks,
+  linksAtEnd: (samples, a) => at(samples, a.to ?? Infinity).built.link ?? 0,
   // Energy lost to link transfers: none means no link ever sent.
   linked: (samples, a) => at(samples, a.to ?? Infinity).ledger.linked - at(samples, a.from ?? 0).ledger.linked,
   // The least any declared outpost netted after its bodies (`rooms`, the

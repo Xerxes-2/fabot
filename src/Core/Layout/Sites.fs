@@ -37,6 +37,9 @@ type Census =
         /// None once a link serves the source: one standing off the plan's
         /// tile is kept, never doubled.
         Posts: (int * (int * int[]) option)[]
+        Buffer: (int * int) option
+        /// A solid site there waits on its upgrader as under any creep.
+        Seat: bool[]
         /// Every owner's, and sites: CONTROLLER_STRUCTURES counts them all.
         /// By `Kind.Ordinal`.
         Held: int[]
@@ -123,6 +126,18 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
     room.Controller
     |> Option.iter (fun c -> setAt (Tiles.ofPos c.Pos) walkable false)
 
+    let seat = Array.create Tiles.count false
+
+    let buffer =
+        Option.map2
+            (fun (c: Controller) (b: Structure) -> Tiles.ofPos c.Pos, b)
+            room.Controller
+            (Atlas.buffer room)
+
+    for c, b in Option.toArray buffer do
+        for t in Atlas.upgraderSeats (fun t -> at t walkable) c (Tiles.ofPos b.Pos) do
+            setAt t seat true
+
     let links = standing Kind.Link.Ordinal
 
     let unheld (t: int) =
@@ -151,6 +166,11 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
         Walkable = walkable
         Served = served
         Posts = posts
+        Buffer =
+            buffer
+            |> Option.filter (fun (_, b) -> b.Kind.IsContainer)
+            |> Option.map (fun (c, b) -> c, Tiles.ofPos b.Pos)
+        Seat = seat
         Held = held
         Pending = pending
     }
@@ -194,6 +214,15 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
 
     let taken = HashSet<int>()
 
+    let planned = Array.create Tiles.count false
+    let solid = Array.create Tiles.count false
+
+    for i in plan.Items do
+        setAt i.Tile planned true
+
+        if not (Kind.walkable i.Kind) then
+            setAt i.Tile solid true
+
     // A source's link stands beside the post its miner works from, which
     // another bot may have set off the plan's container tile. The roads the
     // plan drew there lead to that unbuilt container, and the tile farthest
@@ -205,6 +234,16 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
             |> Array.tryFind (fun (rock, _) -> item.Kind.IsLink && Tiles.range item.Tile rock <= 2)
         with
         | Some(_, None) -> None
+        | None when item.Kind.IsLink && at item.Tile census.Seat && census.Buffer.IsSome ->
+            let c, b = census.Buffer.Value
+            let walkable t = at t census.Walkable
+
+            let open' t =
+                walkable t
+                && not (at t census.Solid || at t census.Road || at t census.Site)
+                && not (at t planned)
+
+            controllerLink walkable open' (fun t -> t = item.Tile || not (at t solid)) c b
         | Some(_, Some(post, beside)) when
             Tiles.range item.Tile post <> 1 || closes census post item.Tile
             ->
@@ -218,11 +257,10 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
             |> Option.filter (fun _ -> beside.Length > 1)
         | _ -> Some item.Tile
 
-    for item in plan.Items do
+    for item in plan.Items |> Array.filter (fun i -> i.Level <= level) do
         match tileOf item with
         | Some t when
             placed.Count < room
-            && item.Level <= level
             && not (at t census.Site)
             && (if item.Kind.IsRampart then
                     at t census.Solid && not (at t census.Rampart)

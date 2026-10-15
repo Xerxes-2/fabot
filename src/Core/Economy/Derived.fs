@@ -525,9 +525,15 @@ let private groundOf (atlas: Atlas) (me: string) (capacity: int) (rate: int) (ro
         Receiver = controllerLink |> Option.orElse hubLink
         BufferSeats =
             match buffer, room.Controller with
-            | Some b, Some c ->
-                Atlas.seats atlas Grid.One 1 b.Pos
-                |> List.filter (Pos.within Engine.upgradeRange c.Pos)
+            | Some b, Some c when atlas.Rooms.ContainsKey room.Name ->
+                let weights = atlas.Rooms.[room.Name].Weights
+
+                Atlas.upgraderSeats
+                    (fun t -> weights.[t] >= 0 && not (Tiles.onEdge t))
+                    (Tiles.ofPos c.Pos)
+                    (Tiles.ofPos b.Pos)
+                |> Array.map (Tiles.toPos room.Name)
+                |> List.ofArray
             | _ -> []
     }
 

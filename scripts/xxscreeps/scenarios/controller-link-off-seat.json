@@ -1,0 +1,6 @@
+{
+  "why": "the controller's link is sited off the seats of a container another bot set, so an upgrader standing on one never holds its site back",
+  "start": { "world": "scripts/xxscreeps/worlds/upgrader-on-link-seat.json", "seed": 1 },
+  "ticks": 5000,
+  "assert": [{ "measure": "linksAtEnd", "min": 3 }]
+}

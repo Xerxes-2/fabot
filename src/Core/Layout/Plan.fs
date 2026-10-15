@@ -177,9 +177,33 @@ let descend (weights: int[]) (dist: int[]) (start: int) : int list =
     else
         []
 
+/// Sharing one of the container's seats, so a body there draws from either.
+let controllerLink
+    (walkable: int -> bool)
+    (linkable: int -> bool)
+    (standable: int -> bool)
+    (controller: int)
+    (container: int)
+    : int option =
+    let seated =
+        Tiles.within Engine.upgradeRange controller
+        |> Array.filter (fun t -> Tiles.range t container > 1 && linkable t)
+        |> Array.map (fun t -> t, Atlas.upgraderSeats walkable controller t)
+        |> Array.filter (fun (_, seats) ->
+            Array.exists (fun n -> Tiles.range n container <= 1) seats
+            && Array.forall standable seats)
+
+    if seated.Length = 0 then
+        None
+    else
+        seated
+        |> Array.minBy (fun (t, seats) -> -seats.Length, Tiles.range t container, t)
+        |> fst
+        |> Some
+
 /// `spawns` only order the spawn slots, so a spawn on a slot never moves the
 /// plan. Ways are laid before slots are handed out, so no structure stands on one.
-let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
+let private drawWith (onFirst: bool) (ground: Ground) (anchor: int) (spawns: int[]) : Plan * bool =
     let weights = ground.Weights
     let unfit = ResizeArray<string>()
 
@@ -251,6 +275,22 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
                 unfit.Add "mineral unreached"
                 None
             | path -> Some(m, path))
+
+    let controllerSeat =
+        match ground.Controller, controllerWalk with
+        | Some c, _ :: second :: rest when
+            not onFirst && Tiles.range second c <= Engine.upgradeRange
+            ->
+            Some(c, second, rest)
+        | Some c, first :: rest -> Some(c, first, rest)
+        | _ -> None
+
+    let walkable t = at t weights >= 0
+    let held = Array.create Tiles.count false
+
+    for c, buffer, _ in Option.toArray controllerSeat do
+        for n in Atlas.upgraderSeats walkable c buffer do
+            setAt n held true
 
     let access = Array.create Tiles.count -1
     let slotList = ResizeArray<int>()
@@ -397,7 +437,7 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         for t in path do
             setAt t onWay true
 
-    let linkable (n: int) =
+    let free (n: int) =
         at n weights >= 0
         && not (at n taken)
         && not (at n onWay)
@@ -406,6 +446,8 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
         && Tiles.yOf n >= 2
         && Tiles.xOf n < Tiles.side - 2
         && Tiles.yOf n < Tiles.side - 2
+
+    let linkable (n: int) = free n && not (at n held)
 
     let linkBeside (onto: int) (key: int -> int) : int option =
         match Tiles.around onto |> Array.filter linkable with
@@ -460,23 +502,11 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
                     Path = path
                 })
 
-    // The controller's container a tile further out, leaving the first for
-    // an upgrader to stand on.
-    let seat (t: int) =
-        if not (at t taken) then
-            plant Kind.Container t rockLevel
+    for _, buffer, rest in Option.toArray controllerSeat do
+        if not (at buffer taken) then
+            plant Kind.Container buffer rockLevel
 
-    let controllerSeat =
-        match ground.Controller, controllerWalk with
-        | Some c, first :: second :: rest when Tiles.range second c <= 3 ->
-            seat second
-            pave rest rockLevel
-            Some(c, first, second)
-        | Some c, first :: rest ->
-            seat first
-            pave rest rockLevel
-            Some(c, first, first)
-        | _ -> None
+        pave rest rockLevel
 
     let digLevel = levelOf Kind.Extractor 0
 
@@ -490,23 +520,33 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
 
     let links = ResizeArray<int>()
 
-    let open' (t: int) =
-        Tiles.around t |> Array.sumBy (fun m -> if at m weights >= 0 then 1 else 0)
+    let standable (t: int) =
+        not (at t taken) || extra.Exists(fun i -> i.Tile = t && i.Kind.IsContainer)
 
-    match controllerSeat with
-    | Some(controller, first, container) ->
-        // Off the walk's first tile, which is left for an upgrader.
-        match
-            linkBeside container (fun t ->
-                if t = first then 100
-                elif Tiles.range t controller <= 3 then -(open' t)
-                else 0)
-        with
-        | Some t when t <> first ->
-            setAt (t) taken (true)
+    let mutable linked = Option.isNone controllerSeat
+
+    let open' (t: int) =
+        Tiles.around t |> Array.sumBy (fun m -> if walkable m then 1 else 0)
+
+    for c, container, _ in Option.toArray controllerSeat do
+        match controllerLink walkable linkable standable c container with
+        | Some t ->
+            setAt t taken true
             links.Add t
-        | _ -> ()
-    | None -> ()
+            linked <- true
+
+            for n in Atlas.upgraderSeats walkable c t do
+                setAt n held true
+        // A link built late beats none.
+        | None when onFirst ->
+            Tiles.around container
+            |> Array.filter (fun t -> free t && Tiles.range t c <= Engine.upgradeRange)
+            |> Array.sortBy (fun t -> -(open' t), t)
+            |> Array.tryHead
+            |> Option.iter (fun t ->
+                setAt t taken true
+                links.Add t)
+        | None -> ()
 
     for p in posted |> Array.sortBy (fun p -> -(List.length p.Path), p.Rock) do
         match p.Link |> Option.orElseWith (fun () -> sourceLink p.Container) with
@@ -601,7 +641,7 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
                     |> Array.length > 1)
                 |> Array.map (fun p -> p.Container)
 
-            let buffer = controllerSeat |> Option.map (fun (_, _, t) -> t)
+            let buffer = controllerSeat |> Option.map (fun (_, t, _) -> t)
 
             // The upgraders' only seat: a room that reaches a level with lower
             // items unbuilt builds it with them.
@@ -621,7 +661,15 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
             sortInts keys
             keys |> Array.map (fun key -> at (key % all.Length) all)
         Unfit = List.ofSeq unfit
-    }
+    },
+    linked
+
+/// The controller's container a tile further out, leaving the first for an
+/// upgrader to stand on.
+let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
+    match drawWith false ground anchor spawns with
+    | plan, true -> plan
+    | _ -> fst (drawWith true ground anchor spawns)
 
 /// Scored so the spawns a plan places, built where it says, give the plan
 /// again: an anchor before it in the order seats no spawn, standing or not.

@@ -398,6 +398,104 @@ let tests =
                         i.Kind = Kind.Rampart
                         || (if walkable i.Kind then seen.[i.Tile] else beside i.Tile))
 
+            testPropertyWithConfig
+                config
+                "no controller link's site lands on a seat of a buffer another bot set"
+            <| fun (colony: Colony) (pick: int) ->
+                match planOf colony with
+                | Some(ground, plan) when ground.Controller.IsSome ->
+                    let controller = ground.Controller.Value
+                    let rocks = Array.append ground.Sources ground.Minerals
+
+                    let offPlan =
+                        Tiles.within Engine.upgradeRange controller
+                        |> Array.filter (fun t ->
+                            ground.Weights.[t] >= 0
+                            && rocks |> Array.forall (fun r -> Tiles.range r t > 1)
+                            && plan.Items
+                               |> Array.forall (fun i -> i.Tile <> t || i.Kind = Kind.Road))
+
+                    offPlan.Length = 0
+                    || (let buffer = offPlan.[abs (pick % offPlan.Length)]
+
+                        let room =
+                            { colony.Room with
+                                Structures =
+                                    Array.append
+                                        colony.Room.Structures
+                                        [| structure "buffer" Kind.Container Ours buffer |]
+                            }
+
+                        let census = Sites.censusOf room [||]
+
+                        plan.Items
+                        |> Array.filter (fun i -> i.Kind.IsLink)
+                        |> Array.forall (fun i ->
+                            Sites.place
+                                census
+                                Engine.controllerMaxLevel
+                                { plan with Items = [| i |] }
+                                1
+                            |> List.forall (fun p ->
+                                let t = Tiles.index p.X p.Y
+
+                                Tiles.range t buffer > 1
+                                || Tiles.range t controller > Engine.upgradeRange
+                                || ground.Sources |> Array.exists (fun r -> Tiles.range r t <= 2))))
+                | _ -> true
+
+            testPropertyWithConfig
+                config
+                "the controller's link is planned off the upgraders' seats where any tile is"
+            <| fun (colony: Colony) ->
+                match planOf colony with
+                | Some(ground, plan) when ground.Controller.IsSome ->
+                    let controller = ground.Controller.Value
+
+                    let tiles (kind: Kind) =
+                        plan.Items
+                        |> Array.filter (fun i -> i.Kind = kind)
+                        |> Array.map (fun i -> i.Tile)
+
+                    let rocks = Array.append ground.Sources ground.Minerals
+
+                    let nearest (kind: Kind) (off: int[]) (reach: int) =
+                        tiles kind
+                        |> Array.filter (fun t ->
+                            Tiles.range t controller <= Engine.upgradeRange
+                            && off |> Array.forall (fun o -> Tiles.range o t > reach))
+                        |> Array.sortBy (fun t -> Tiles.range t controller, t)
+                        |> Array.tryHead
+
+                    let seats buffer =
+                        Atlas.upgraderSeats (fun t -> ground.Weights.[t] >= 0) controller buffer
+                        |> Array.filter (fun t -> t <> buffer)
+
+                    let solid =
+                        plan.Items
+                        |> Array.filter (fun i -> not (walkable i.Kind))
+                        |> Array.map (fun i -> i.Tile)
+
+                    let container = nearest Kind.Container rocks 1
+
+                    let link =
+                        nearest Kind.Link (Array.append ground.Sources (tiles Kind.Storage)) 2
+
+                    let on buffer t = Array.contains t (seats buffer)
+
+                    let clear l =
+                        solid |> Array.forall (fun t -> not (on l t))
+
+                    // A link goes on a seat only on the second draw, whose
+                    // container takes the walk's first tile, and holds none.
+                    match container with
+                    | Some c ->
+                        link
+                        |> Option.forall (fun l ->
+                            if on c l then Tiles.range c controller = 1 else clear l)
+                    | None -> link |> Option.forall clear
+                | _ -> true
+
             testPropertyWithConfig config "the labs react: every lab within reach of two inputs"
             <| fun (colony: Colony) ->
                 match planOf colony with

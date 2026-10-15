@@ -121,6 +121,11 @@ module Atlas =
             room.Structures
             |> Array.tryFind (fun s -> s.Kind.IsContainer && isBuffer room s.Pos))
 
+    /// No site is built under a creep, so these are kept clear of solid ones.
+    let upgraderSeats (walkable: int -> bool) (controller: int) (buffer: int) : int[] =
+        Tiles.within 1 buffer
+        |> Array.filter (fun t -> walkable t && Tiles.range t controller <= Engine.upgradeRange)
+
     /// Farthest from the controller first, so a controller container on a seat
     /// is no post.
     let postOf (room: Room) (source: Pos) : (Pos * string option) option =
