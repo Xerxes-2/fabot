@@ -295,10 +295,7 @@ let pool (derived: Derived) : Offer[] =
                 Capacity.Seated(
                     Option.defaultValue System.Int32.MaxValue ground.UpgradeSeats,
                     0,
-                    if c.Level >= Engine.controllerMaxLevel then
-                        Engine.maxUpgradePerTick
-                    else
-                        System.Int32.MaxValue
+                    upgradableAt c.Level
                 )
 
             let upgrade =
@@ -325,6 +322,29 @@ let pool (derived: Derived) : Offer[] =
             |> Array.exists (fun b -> upgrades b && b.Pos.Room = ground.Room)
 
         let feed = ground.Feed |> Option.filter (fun f -> f.Free > 0 && drinks)
+
+        // An upgrader waiting on its buffer loses a tick of what the row hired
+        // it at.
+        let feedWorth =
+            match feed, ground.Buffer, colony with
+            | Some _, Some buffer, Some c ->
+                let upgradable = upgradableAt c.Controller.Level
+
+                let upgraders =
+                    derived.Bodies
+                    |> Array.sumBy (fun b ->
+                        if b.Pattern.IsUpgrader && b.Pos.Room = ground.Room then
+                            1
+                        else
+                            0)
+
+                sized Pattern.Upgrader upgradable c.BankCapacity
+                |> Option.map (fun body ->
+                    upgraderHire upgradable upgraders body * (1.0 - buffer.Fill))
+                |> Option.defaultValue 0.0
+            | _ -> 0.0
+
+        hungriest <- max hungriest feedWorth
 
         let room =
             ringFree + (feed |> Option.map (fun f -> f.Free) |> Option.defaultValue 0)
@@ -366,7 +386,7 @@ let pool (derived: Derived) : Offer[] =
                 { offer
                       (Refill(f.Id, Energy))
                       f.Pos
-                      (Price.valueOfRank Price.bufferRank)
+                      (max (Price.valueOfRank Price.bufferRank) feedWorth)
                       (Capacity.Load f.Free) with
                     Shut = shutTo room
                 }

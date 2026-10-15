@@ -194,6 +194,19 @@ let sized (pattern: Pattern) (most: int) (capacity: int) : BodyPart list option 
 
         Some(withMoveLast body)
 
+/// The energy a controller takes a tick: past it an upgrader drinks nothing.
+let upgradableAt (level: int) : int =
+    if level >= Engine.controllerMaxLevel then
+        Engine.maxUpgradePerTick
+    else
+        System.Int32.MaxValue
+
+/// A tick of what `n` upgraders of the body are hired at: their drink, as
+/// much as the controller takes, and their cost over a life.
+let upgraderHire (upgradable: int) (n: int) (body: BodyPart list) : float =
+    float (min upgradable (n * partCountIn body Work * Engine.upgradeDrainPerWork))
+    + float (n * Engine.bodyCost body) / float Engine.creepLifetime
+
 /// For a seat in the casting colony's own room, which it walks once: legs
 /// never cost it a Work.
 let homeHarvester (most: int) (capacity: int) : BodyPart list option =

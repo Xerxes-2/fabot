@@ -90,6 +90,11 @@ const measures = {
   // Energy spent on construction.
   build: (samples, a) => at(samples, a.to ?? Infinity).ledger.build - at(samples, a.from ?? 0).ledger.build,
   upgrade: (samples, a) => at(samples, a.to ?? Infinity).ledger.upgrade - at(samples, a.from ?? 0).ledger.upgrade,
+  // Percent of samples whose buffer stood empty with an upgrader beside it.
+  dryBuffer: (samples, a) => {
+    const seen = within(samples, a);
+    return Math.round((100 * seen.filter((s) => s.dry).length) / Math.max(1, seen.length));
+  },
   // Harvesters seen digging from more than one tile.
   harvestersOnTwoPosts: (samples, a) => {
     const tiles = new Map();

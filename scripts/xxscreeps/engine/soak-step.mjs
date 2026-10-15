@@ -407,6 +407,18 @@ function sample(t, time, room) {
   const sourceContainers = objects.filter((o) => o.structureType === "container" && o["#lookType"] !== "constructionSite" && atSource(o));
   row.sourceContainers = sourceContainers.length;
   row.postedLinks = objects.filter((o) => o.structureType === "link" && o["#lookType"] !== "constructionSite" && sourceContainers.some((c) => near(c.pos, o.pos, 1))).length;
+  // The buffer as `Atlas.buffer` picks it: the controller's nearest link off a source, else its container off a rock.
+  const controller = objects.find((o) => o.structureType === "controller");
+  const built = (o, type) => o.structureType === type && o["#lookType"] !== "constructionSite";
+  const beside = (o, r, kinds) => objects.some((s) => kinds.includes(s["#lookType"]) && near(s.pos, o.pos, r));
+  const range = (o) => Math.max(Math.abs(o.pos.x - controller.pos.x), Math.abs(o.pos.y - controller.pos.y));
+  const buffer =
+    controller &&
+    (objects
+      .filter((o) => built(o, "link") && o["#user"] === ours && range(o) <= 3 && !beside(o, 2, ["source"]))
+      .sort((a, b) => range(a) - range(b) || a.pos.y * 50 + a.pos.x - (b.pos.y * 50 + b.pos.x))[0] ??
+      objects.find((o) => built(o, "container") && range(o) <= 3 && !beside(o, 1, ["source", "mineral"])));
+  row.dry = !!buffer && energyIn(buffer) === 0 && objects.some((o) => o.body !== undefined && o["#user"] === ours && o.name.startsWith("upgrader-") && near(o.pos, buffer.pos, 1));
   return row;
 }
 

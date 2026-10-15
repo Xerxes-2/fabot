@@ -198,14 +198,7 @@ let private linkDrain (derived: Derived) (ground: Ground) : float =
             Array.append derived.Bodies derived.Ovens
             |> Array.sumBy (fun b -> if upgrades b && b.Pos.Room = ground.Room then b.Work else 0)
 
-        let drain = work * Engine.upgradeDrainPerWork
-
-        float (
-            if c.Level >= Engine.controllerMaxLevel then
-                min drain Engine.maxUpgradePerTick
-            else
-                drain
-        )
+        float (min (work * Engine.upgradeDrainPerWork) (upgradableAt c.Level))
     | Some _, _ -> infinity
     | None, _ -> 0.0
 
@@ -387,11 +380,7 @@ let private spendDemands
 
         let save = float (reserve - stock) / life |> min surplus |> max 0.0
 
-        let upgradable =
-            if colony.Controller.Level >= Engine.controllerMaxLevel then
-                Engine.maxUpgradePerTick
-            else
-                System.Int32.MaxValue
+        let upgradable = upgradableAt colony.Controller.Level
 
         let upgrader =
             sized Pattern.Upgrader upgradable colony.BankCapacity
@@ -407,8 +396,7 @@ let private spendDemands
                 let work = partCountIn body Work
                 let seats = float (min ground.BufferSeats.Length (upgradable / work))
 
-                let lifeCost =
-                    float (work * Engine.upgradeDrainPerWork) * life + float (Engine.bodyCost body)
+                let lifeCost = upgraderHire upgradable 1 body * life
 
                 // The sites are paid from the stock: a level's plan keeps its
                 // window of sites standing, so a charge on income idles the seat.
