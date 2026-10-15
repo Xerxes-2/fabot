@@ -237,6 +237,8 @@ module Atlas =
         && tile < Tiles.count
         && at tile atlas.Rooms.[room].Weights >= 0
 
+    let sees (atlas: Atlas) (room: string) : bool = atlas.Rooms.ContainsKey room
+
     let private seat (footprint: Footprint) (weights: int[]) (tile: int) =
         weightOf footprint weights tile >= 0 && not (onEdge footprint tile)
 

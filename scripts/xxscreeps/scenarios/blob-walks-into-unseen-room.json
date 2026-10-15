@@ -1,0 +1,10 @@
+{
+  "why": "a mixed blob (three rangers, a WORK:MOVE and a MOVE:HEAL body) walks to an outpost's raid through a room none of ours sees, as one: no member parked for the unseen walk. A lone member's walk is about 84 (33 steps to the home's exit, 49 across the unseen room); seeds 1-5 measured 85-88 at 3.2-3.3% stalls (members queued at the home's swamp patch), main 101-103 at 19%",
+  "start": { "world": "scripts/xxscreeps/worlds/blob-unseen-room.json", "seed": 1, "invaders": "W3N1:3000:600" },
+  "ticks": 800,
+  "assert": [
+    { "measure": "blobStallTicks", "max": 4 },
+    { "measure": "blobArrival", "max": 89 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

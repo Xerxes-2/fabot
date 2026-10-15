@@ -38,32 +38,31 @@ let wishes (atlas: Atlas) (target: Target) (weight: int) (members: Creep[]) : Wi
     let mover = slowest members
     let fieldIn (room: string) = Atlas.field atlas mover target room
 
-    // Out of another room: the ticks to its exit, then the least on from a
-    // landing, so a walk's every step is one tick nearer.
     let rec left (hops: int) (room: string) (tile: int) : int =
-        match fieldIn room |> Option.bind (fun field -> Field.ticks field tile) with
-        | None -> unreached
-        | Some ticks when room = target.Room -> ticks
-        | Some _ when hops = 0 -> unreached
-        | Some ticks ->
-            match beyond hops room with
-            | rest when rest = unreached -> unreached
-            | rest -> ticks + rest
-
-    and beyond (hops: int) (room: string) : int =
         match fieldIn room with
+        // No field: one plain crossing, so a member short of it ranks behind one past it.
+        | None when not (Atlas.sees atlas room) ->
+            Tiles.side * stepTicks mover.Factor Engine.plainWeight
         | None -> unreached
         | Some field ->
-            [ Tiles.top; Tiles.right; Tiles.bottom; Tiles.left ]
-            |> List.collect (fun exit ->
-                match Tiles.roomToward room exit with
+            let rec exit (t: int) =
+                match Field.step field t with
+                | Some direction -> exit (Tiles.neighbour t direction)
+                | None -> t
+
+            match Field.ticks field tile with
+            | None -> unreached
+            | Some ticks when room = target.Room -> ticks
+            | Some _ when hops = 0 -> unreached
+            | Some ticks ->
+                let edge = exit tile
+
+                match Tiles.roomToward room (Tiles.exitOf edge) with
                 | Some next ->
-                    Tiles.exitTiles exit
-                    |> Array.filter (fun tile -> Field.ticks field tile = Some 0)
-                    |> Array.map (fun tile -> left (hops - 1) next (Tiles.landing tile))
-                    |> List.ofArray
-                | None -> [])
-            |> List.fold min unreached
+                    match left (hops - 1) next (Tiles.landing edge) with
+                    | rest when rest = unreached -> unreached
+                    | rest -> ticks + rest
+                | None -> unreached
 
     let lags =
         members
@@ -101,7 +100,7 @@ let wishes (atlas: Atlas) (target: Target) (weight: int) (members: Creep[]) : Wi
         creep.Name = anchor.Name
         || Tiles.seamRange (Tiles.toPos creep.Pos.Room tile) head
            |> Option.exists (fun range -> range <= r)
-        || lag creep > lag anchor
+        || lag creep >= lag anchor
 
     // A step into swamp falls behind: a walker sidesteps no slower than its
     // head, one waiting is shoved at most a plain step back, so one behind passes.
