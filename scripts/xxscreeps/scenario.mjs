@@ -18,7 +18,7 @@
 // A scenario file: { "why": the invariant, "nightly"?, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "wave"? (soak's --wave), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
 // "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
-// (soak's --world; crafted ones under worlds/), "seed", "invaders"?, "wave"? }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
+// (soak's --world; crafted ones under worlds/), "seed", "invaders"?, "wave"?, "opponents"? (the world's own users) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick.
 // Exits non-zero when a bound fails or a soak does, or loses ticks twice.
@@ -143,6 +143,8 @@ const measures = {
   fightDamageSpread: (_, __, dir) => Math.max(1, ...foughtOf(dir).map((f) => Math.max(...Object.values(f.taken)) / Math.max(1, mean(Object.values(f.taken))))),
   fightLowestHits: (_, __, dir) => Math.min(100, ...foughtOf(dir).flatMap((f) => Object.values(f.low).map((l) => 100 * l))),
   fightWoundedOut: (_, __, dir) => Math.min(100, ...foughtOf(dir).filter((f) => f.wounded).map((f) => (100 * f.out) / f.wounded)),
+  // The most ticks a siege took from its open to its breach (one that never breached: Infinity).
+  breachTicks: (_, __, dir) => Math.max(...rowsOf(dir).filter((e) => e.kind === "siege").map((e) => (e.closed === null || e.disengaged ? Infinity : e.closed - e.opened)), ...(rowsOf(dir).some((e) => e.kind === "siege") ? [] : [Infinity])),
   bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),
   // The most energy one engagement cast, of the bodies that stood in it.
   mostCast: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.cast ?? 0)),
@@ -187,7 +189,7 @@ for (const { name, start } of scenarios)
   if ((start.at === undefined) !== (start.bundle === undefined) || (start.at !== undefined && (start.node || !/^[0-9a-f]{8,40}$/.test(start.bundle))))
     fail(`${name}: a start "at" a tick names its "bundle" by commit id, and no node`);
 for (const { name, start } of scenarios)
-  if (start.world && Object.keys(start).some((k) => !["world", "seed", "invaders", "wave"].includes(k))) fail(`${name}: a "world" start takes a "seed", "invaders", "wave" and nothing else`);
+  if (start.world && Object.keys(start).some((k) => !["world", "seed", "invaders", "wave", "opponents"].includes(k))) fail(`${name}: a "world" start takes a "seed", "invaders", "wave", "opponents" and nothing else`);
 
 // A world holds its opponents' seats; their config is the scenario's.
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
@@ -248,7 +250,7 @@ const opponentsOf = (name, opponents) => {
 };
 const play = async ({ name, start, ticks }) => {
   if (start.world)
-    return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.invaders ? ["--invaders", start.invaders] : []), ...(start.wave ? ["--wave", start.wave] : [])]);
+    return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.invaders ? ["--invaders", start.invaders] : []), ...(start.wave ? ["--wave", start.wave] : []), ...opponentsOf(name, start.opponents)]);
   const recipe = ["--room", start.room, "--seed", String(start.seed), "--late", String(start.late ?? 0)];
   if (!start.at)
     return soak([

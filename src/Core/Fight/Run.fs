@@ -30,7 +30,11 @@ let private merged
     |> List.sortBy (fun e -> e.Id)
     |> List.fold
         (fun (kept: Engagement list, into: Map<int, int>) e ->
-            match kept |> List.tryFind (fun k -> k.Group = e.Group) with
+            match
+                kept
+                |> List.tryFind (fun k ->
+                    k.Objective.IsDefend && e.Objective.IsDefend && k.Group = e.Group)
+            with
             | Some older ->
                 kept
                 |> List.map (fun k ->
@@ -143,7 +147,8 @@ let decide (context: Context) (state: State) : Intent list * State =
             }
         | None -> e
 
-    let engagements = engagements |> List.map rehomed
+    let engagements =
+        engagements |> List.map (fun e -> if e.Objective.IsDefend then rehomed e else e)
 
     let alive = engagements |> List.map (fun e -> e.Id) |> Set.ofList
 
@@ -207,10 +212,65 @@ let decide (context: Context) (state: State) : Intent list * State =
                 || foes.ContainsKey e.Room && Sightings.unarmed context.Sightings world.Time e.Room
         }
 
+    let rival (s: Structure) =
+        not s.Owner.IsOurs && (s.Kind.IsRampart || s.Kind.IsWall)
+
+    let inSight (room: string) =
+        world.Rooms |> Array.tryFind (fun r -> r.Name = room)
+
+    let barrierAt (room: Room) =
+        room.Structures
+        |> Array.filter rival
+        |> Array.map (fun s -> s.Id, s)
+        |> Map.ofArray
+
+    // A planned barrier fallen advances the plan, never re-prices it.
+    let engagements =
+        engagements
+        |> List.map (fun e ->
+            match e.Objective, inSight e.Room with
+            | Objective.Siege _, Some room ->
+                let standing = barrierAt room
+
+                { e with
+                    Plan =
+                        { e.Plan with
+                            Order = e.Plan.Order |> List.filter standing.ContainsKey
+                        }
+                }
+            | _ -> e)
+
+    let nextBarrier (e: Engagement) =
+        inSight e.Room
+        |> Option.bind (fun room ->
+            e.Plan.Order
+            |> List.tryHead
+            |> Option.bind (fun id -> Map.tryFind id (barrierAt room)))
+
+    let siegeFacts (e: Engagement) (target: string) : Siege.Facts =
+        {
+            Time = world.Time
+            Standing = standing
+            AgingOut = agingOut
+            Asked = waiting |> List.exists (fun c -> c.Engagement = e.Id)
+            Home =
+                e.Ours
+                |> Set.forall (fun n -> ours.ContainsKey n && homes.Contains ours.[n].Pos.Room)
+            UnderFire =
+                e.Ours |> Set.exists (fun n -> ours.ContainsKey n && ours.[n].Pos.Room = e.Room)
+            Open =
+                inSight e.Room
+                |> Option.exists (fun room ->
+                    not e.Unanswered && e.Plan.Order.IsEmpty
+                    || room.Structures |> Array.forall (fun s -> s.Id <> target))
+        }
+
     let stepped =
         engagements
         |> List.choose (fun e ->
-            Defend.step (factsOf e) e
+            match e.Objective with
+            | Objective.Defend -> Defend.step (factsOf e) e
+            | Objective.Siege target -> Siege.step (siegeFacts e target) e
             |> Option.map (fun next -> next, next.Ours.Count < e.Ours.Count))
 
     let targeted =
@@ -230,6 +290,7 @@ let decide (context: Context) (state: State) : Intent list * State =
         |> List.mapi (fun i (g, priority) ->
             {
                 Id = firstId + i
+                Objective = Objective.Defend
                 Group = g.Id
                 Room = g.Room
                 Ours = Set.empty
@@ -302,6 +363,238 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     let spent (e: Engagement) =
         homes.Contains e.Room && e.Lost > e.Budget
+
+    let ask (e: Engagement) (set: Exchange.Exchange.Body list) =
+        set
+        |> List.iteri (fun i body ->
+            match Casting.colonyFor (coloniesOf e) world.Spawns queued (walkTo e.Room) body with
+            | Some colony ->
+                queue colony body
+
+                casts.Add
+                    {
+                        Engagement = e.Id
+                        Name = $"{Tick.fightPrefix}{world.Time}-{e.Id}-{i}"
+                        Room = colony
+                        Body = body
+                    }
+            | None -> ())
+
+    let membersOf (e: Engagement) =
+        e.Ours
+        |> Seq.filter ours.ContainsKey
+        |> Seq.map (fun n -> ours.[n])
+        |> Array.ofSeq
+
+    let towersIn (room: Room) =
+        room.Structures |> Array.filter (fun s -> s.Kind.IsTower && not s.Owner.IsOurs)
+
+    let breachIn
+        (room: Room)
+        (target: Structure)
+        (colony: string)
+        (set: Exchange.Fighter.Fighter list)
+        =
+        let barriers = barrierAt room |> Map.values |> Array.ofSeq
+        let line = barriers |> Array.map _.Pos
+
+        let entry =
+            Atlas.route context.Atlas Set.empty Tick.reachHops colony room.Name
+            |> Option.bind (fun rooms ->
+                [ Tiles.top; Tiles.right; Tiles.bottom; Tiles.left ]
+                |> List.tryFind (fun exit ->
+                    rooms.Length >= 2
+                    && Tiles.roomToward room.Name exit = Some rooms.[rooms.Length - 2]))
+
+        let gait =
+            set
+            |> List.map _.Gait
+            |> List.filter (fun g -> g.Moves > 0)
+            |> List.sortBy (fun g -> -(Grid.stepTicks g Engine.plainWeight))
+            |> List.tryHead
+
+        match Atlas.weights context.Atlas room.Name, entry, gait with
+        | Some weights, Some exit, Some gait ->
+            for b in barriers do
+                Tiles.ofPos b.Pos
+                |> fun t ->
+                    if
+                        room.Structures
+                        |> Array.forall (fun s -> s.Pos <> b.Pos || s.Walkable || rival s)
+                    then
+                        weights.[t] <-
+                            if Terrain.isSwamp room.Terrain b.Pos.X b.Pos.Y then
+                                Engine.swampWeight
+                            else
+                                Engine.plainWeight
+
+            let ground: Exchange.Exchange.Ground =
+                {
+                    Room = room.Name
+                    Weights = weights
+                    Barriers =
+                        barriers
+                        |> Array.groupBy (fun b -> Tiles.ofPos b.Pos)
+                        |> Array.map (fun (t, on) ->
+                            t, Array.sumBy (fun (b: Structure) -> b.Hits) on)
+                        |> Map.ofArray
+                }
+
+            let repair =
+                Engine.repairPower
+                * Array.sumBy (fun h -> (Casting.fighterOf h).Work) foes.[room.Name]
+
+            let rate =
+                Engine.dismantlePower
+                * List.sumBy (fun (f: Exchange.Fighter.Fighter) -> f.Work) set
+                - repair
+
+            let towers = towersIn room |> Array.map _.Pos |> List.ofArray
+
+            let attempt seated =
+                Exchange.Exchange.breachPlan
+                    ground
+                    gait
+                    towers
+                    (Exchange.Exchange.pooledHeal seated set)
+                    rate
+                    (Tiles.exitTiles exit |> Array.filter (fun t -> weights.[t] >= 0))
+                    (Tiles.around (Tiles.ofPos target.Pos))
+
+            let seatsOf (plan: (int * int) list, _) =
+                match plan with
+                | (_, work) :: _ -> Tactics.seatsAt context.Atlas line room.Name work
+                | [] -> set.Length
+
+            // Every barrier on a tile, its rampart first: the tile stands
+            // in the plan until it is walkable.
+            let idsAt (tile: int) =
+                barriers
+                |> Array.filter (fun b -> Tiles.ofPos b.Pos = tile)
+                |> Array.sortBy (fun b -> not b.Kind.IsRampart, b.Id)
+                |> Array.map _.Id
+                |> List.ofArray
+
+            // Seats follow the planned barrier: priced with every medic beside
+            // the struck body, then with those its seats hold.
+            attempt set.Length
+            |> Option.bind (fun first ->
+                let seats = seatsOf first
+                attempt seats |> Option.filter (fun plan -> seatsOf plan >= seats))
+            |> Option.map (fun (plan, ticks) ->
+                List.collect (fst >> idsAt) plan,
+                Exchange.Exchange.Win(ticks, { Dead = 0; Hits = 0 }))
+        | _ -> None
+
+    // Whole, as cast: a part struck off is healed back, and only a body lost
+    // re-prices the set.
+    let fielded (e: Engagement) =
+        (e.Ours
+         |> Set.toList
+         |> List.filter ours.ContainsKey
+         |> List.map (fun n -> ours.[n].Body |> Array.map _.Kind |> List.ofArray))
+        @ (waiting |> List.filter (fun c -> c.Engagement = e.Id) |> List.map _.Body)
+        |> List.map Exchange.Fighter.cast
+
+    // Priced at the first sight of its room, where an offensive kind no set
+    // the bank buys staffs closes (§6.2); after, only on an event.
+    let besieged (e: Engagement) (target: string) (left: bool) : Engagement option =
+        let colony = coloniesOf e |> Array.map _.Name |> Array.sort |> Array.tryHead
+
+        match inSight e.Room, colony with
+        | Some room, Some colony ->
+            match room.Structures |> Array.tryFind (fun s -> s.Id = target) with
+            | None -> Some e
+            | Some target when e.Unanswered ->
+                let capacity = capacityOf e
+
+                match
+                    Casting.siege
+                        capacity
+                        (List.map Exchange.Fighter.cast >> breachIn room target colony)
+                with
+                // A way in with nothing to break is no siege: closed before it casts.
+                | Some(set, (order, outcome)) when not order.IsEmpty ->
+                    ask e set
+
+                    Some
+                        { e with
+                            Plan =
+                                {
+                                    Tactic = Tactic.Blob Tactic.Close
+                                    Order = order
+                                }
+                            Budget = e.Lost
+                            Unanswered = false
+                            Capacity = capacity
+                            Predicted = Some outcome
+                        }
+                | _ -> None
+            | Some _ when e.Phase.IsDisengaging -> Some e
+            | Some target ->
+                let set = fielded e
+                let inRoom = membersOf e |> Array.filter (fun m -> m.Pos.Room = room.Name)
+
+                let struck (b: Structure) =
+                    Exchange.Exchange.towerStrike
+                        (towersIn room |> Array.map _.Pos |> List.ofArray)
+                        b.Pos
+
+                let unreached (b: Structure) =
+                    inRoom.Length > 0
+                    && inRoom
+                       |> Array.forall (fun m ->
+                           Atlas.field
+                               context.Atlas
+                               {
+                                   Footprint = Grid.One
+                                   Factor = Grid.factorOf m
+                               }
+                               {
+                                   Room = room.Name
+                                   Tiles = [| Tiles.ofPos b.Pos |]
+                                   Range = Engine.meleeRange
+                                   Avoid = Set.empty
+                                   MaxHops = Tick.reachHops
+                               }
+                               room.Name
+                           |> Option.bind (fun field -> Field.ticks field (Tiles.ofPos m.Pos))
+                           |> Option.isNone)
+
+                let late =
+                    match e.Predicted with
+                    | Some(Exchange.Exchange.Win(ticks, _)) ->
+                        e.Phase.IsFighting && world.Time > e.Since + ticks
+                    | _ -> false
+
+                let event =
+                    left
+                    || landed |> List.exists (fun c -> c.Engagement = e.Id)
+                    || late
+                    || nextBarrier e
+                       |> Option.exists (fun b ->
+                           struck b > Exchange.Exchange.pooledHeal set.Length set || unreached b)
+
+                if not event then
+                    Some e
+                else
+                    // Once: a new plan whose first barrier the set still cannot
+                    // reach is no plan, or the event would fire every tick.
+                    let reached (order: string list) =
+                        match order with
+                        | first :: _ ->
+                            Map.tryFind first (barrierAt room) |> Option.exists (unreached >> not)
+                        | [] -> true
+
+                    match breachIn room target colony set with
+                    | Some(order, outcome) ->
+                        { Siege.replanned world.Time (reached order) e with
+                            Plan = { e.Plan with Order = order }
+                            Predicted = Some outcome
+                        }
+                        |> Some
+                    | None -> Some(Siege.replanned world.Time false e)
+        | _ -> Some e
 
     let priced (e: Engagement) : Engagement =
         match byId.TryGetValue e.Group with
@@ -415,20 +708,7 @@ let decide (context: Context) (state: State) : Intent list * State =
                         coreHits
                         (bodies @ asked @ List.map Exchange.Fighter.cast set)
 
-                set
-                |> List.iteri (fun i body ->
-                    match Casting.colonyFor colonies world.Spawns queued (walkTo e.Room) body with
-                    | Some colony ->
-                        queue colony body
-
-                        casts.Add
-                            {
-                                Engagement = e.Id
-                                Name = $"{Tick.fightPrefix}{world.Time}-{e.Id}-{i}"
-                                Room = colony
-                                Body = body
-                            }
-                    | None -> ())
+                ask e set
 
                 let e =
                     { e with
@@ -473,13 +753,16 @@ let decide (context: Context) (state: State) : Intent list * State =
     let engagements =
         stepped @ opened
         |> List.sortBy (fun (e, _) -> -e.Priority, e.Id)
-        |> List.map (fun (e, left) ->
+        |> List.choose (fun (e, left) ->
             let grew = e.Unanswered && capacityOf e > e.Capacity
 
-            if left || grew || changed e || e.Since = world.Time && e.Phase.IsForming then
-                priced e
-            else
-                e)
+            match e.Objective with
+            | Objective.Siege target -> besieged e target left
+            | Objective.Defend when
+                left || grew || changed e || e.Since = world.Time && e.Phase.IsForming
+                ->
+                Some(priced e)
+            | Objective.Defend -> Some e)
 
     let kept =
         engagements
@@ -526,20 +809,15 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     // A group lost from sight is sought in its room, which brings it back in sight.
     let centreOf (e: Engagement) =
-        match byId.TryGetValue e.Group with
-        | true, g -> g.Centre
+        match e.Objective, byId.TryGetValue e.Group, nextBarrier e with
+        | Objective.Siege _, _, Some b -> b.Pos
+        | Objective.Defend, (true, g), _ -> g.Centre
         | _ ->
             {
                 Room = e.Room
                 X = Engine.roomSide / 2
                 Y = Engine.roomSide / 2
             }
-
-    let membersOf (e: Engagement) =
-        e.Ours
-        |> Seq.filter ours.ContainsKey
-        |> Seq.map (fun n -> ours.[n])
-        |> Array.ofSeq
 
     let walking = Dictionary<string, Move.Wish>()
 
@@ -551,8 +829,35 @@ let decide (context: Context) (state: State) : Intent list * State =
                 for wish in Tactics.blob sight (centreOf e) members do
                     walking.[wish.Creep] <- wish
 
+    let fronts = Dictionary<int, Tactics.Front>()
+
+    for e in engagements do
+        match e.Objective, inSight e.Room, nextBarrier e with
+        | Objective.Siege _, Some room, Some wall ->
+            let towers =
+                towersIn room
+                |> Array.filter (fun s -> Store.amountOf Energy s.Store >= Engine.towerEnergyCost)
+                |> Array.map _.Pos
+
+            fronts.[e.Id] <-
+                {
+                    Breach = wall.Pos
+                    Wall = wall.Id
+                    Line = room.Structures |> Array.filter rival |> Array.map _.Pos
+                    Towers = towers
+                    Strike =
+                        towers
+                        |> Array.sumBy (fun t ->
+                            Pos.range t wall.Pos
+                            |> Option.map Engine.towerAttackAt
+                            |> Option.defaultValue 0)
+                }
+        | _ -> ()
+
     let act (c: Creep) =
         match engagedIn.TryGetValue c.Name with
+        | true, e when e.Phase.IsFighting && fronts.ContainsKey e.Id ->
+            Tactics.siege sight e.Plan.Order fronts.[e.Id] (membersOf e) c
         | true, e ->
             let centre = centreOf e
             let order = e.Plan.Order
@@ -624,6 +929,18 @@ let decide (context: Context) (state: State) : Intent list * State =
     | Some id -> acts.Add(Controller(id, ActivateSafeMode))
     | None -> ()
 
+    let incoming =
+        engagements
+        |> List.choose (fun e ->
+            match fronts.TryGetValue e.Id with
+            | true, front ->
+                Tactics.focusOf
+                    front
+                    (membersOf e |> Array.filter (fun m -> m.Pos.Room = front.Breach.Room))
+                |> Option.map (fun focus -> focus.Name, front.Strike)
+            | _ -> None)
+        |> Map.ofList
+
     let swinging = HashSet<string>()
     let shooting = HashSet<string>()
 
@@ -654,7 +971,7 @@ let decide (context: Context) (state: State) : Intent list * State =
              }
          )))
     @ List.ofSeq acts
-    @ Tactics.heals fighters world.Creeps swinging shooting,
+    @ Tactics.heals fighters world.Creeps incoming swinging shooting,
     { state with
         Groups = groups
         Engagements = engagements |> List.sortBy (fun e -> e.Id)

@@ -1,0 +1,33 @@
+{
+  "why": "the plan breaks the one thin rampart (20k, far from the tower) on the way to the spawn, not the 300k line nearer it, and loses no body: its only planned barrier is the thin one and one rampart falls. Seeds 1-5 all measured 838 ticks from open to breach (705 casting, 26 walking to the room, 107 under fire) and 8,700 cast; breaking a 300k rampart at the set's 1,500 a tick alone takes 200 ticks, past the bound's 32 of margin",
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-thin-far.json",
+    "seed": 1,
+    "opponents": [
+      {
+        "name": "rival",
+        "bot": "scripts/xxscreeps/engine/keep",
+        "room": "W2N1"
+      }
+    ]
+  },
+  "ticks": 1000,
+  "assert": [
+    {
+      "measure": "bodiesLost",
+      "max": 0
+    },
+    {
+      "measure": "breachTicks",
+      "max": 870
+    },
+    {
+      "measure": "mostCast",
+      "max": 8700
+    },
+    {
+      "measure": "faults",
+      "max": 0
+    }
+  ]
+}

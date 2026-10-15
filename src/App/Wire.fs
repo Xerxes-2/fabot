@@ -152,6 +152,11 @@ let private engagementOf (o: obj) : Engagement option =
         Some
             {
                 Id = id
+                Objective =
+                    match field o "kind", field o "target" with
+                    | :? string as kind, (:? string as target) when kind = "siege" ->
+                        Objective.Siege target
+                    | _ -> Objective.Defend
                 Group = group
                 Room = room
                 Ours = listOf stringOf (field o "ours") |> Set.ofList
@@ -181,8 +186,11 @@ let private engagementOf (o: obj) : Engagement option =
     | _ -> None
 
 let private engagementObj (e: Engagement) =
-    createObj
-        [
+    createObj (
+        (match e.Objective with
+         | Objective.Siege target -> [ "kind" ==> "siege"; "target" ==> target ]
+         | Objective.Defend -> [])
+        @ [
             "id" ==> e.Id
             "group" ==> e.Group
             "room" ==> e.Room
@@ -199,6 +207,7 @@ let private engagementObj (e: Engagement) =
             "capacity" ==> e.Capacity
             "predicted" ==> (e.Predicted |> Option.map outcomeObj |> Option.toObj)
         ]
+    )
 
 let private castOf (o: obj) : Cast option =
     let part (letter: char) =

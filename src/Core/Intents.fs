@@ -22,6 +22,7 @@ type CreepAct =
     | RangedMassAttack
     | HealCreep of target: string
     | RangedHealCreep of target: string
+    | Dismantle of target: string
 
 type SpawnAct = SpawnCreep of body: BodyPart list * name: string
 

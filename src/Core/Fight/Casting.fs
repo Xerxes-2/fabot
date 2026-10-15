@@ -155,6 +155,30 @@ let price
         | Exchange.Win _ as won -> set, won, tactic Tactic.Close
         | other -> set, other, tactic Tactic.Kite)
 
+/// No more medics heal one body from beside it than the tiles around it.
+let private aroundOne = 8
+
+/// Two dismantlers of the most WORK the bank buys, then the fewest MOVE:HEAL
+/// medics `priced` breaks the way in with.
+let siege
+    (capacity: int)
+    (priced: Exchange.Body list -> 'plan option)
+    : (Exchange.Body list * 'plan) option =
+    let most (block: Exchange.Body) =
+        min (capacity / Engine.bodyCost block) (Engine.maxBodyParts / block.Length)
+        |> fun n -> List.replicate n block |> List.concat
+
+    let dismantler = most [ Work; Move ]
+    let medic = most [ Move; Heal ]
+
+    if dismantler.IsEmpty then
+        None
+    else
+        [ 0..aroundOne ]
+        |> List.tryPick (fun n ->
+            let set = [ dismantler; dismantler ] @ List.replicate n medic
+            priced set |> Option.map (fun plan -> set, plan))
+
 let killOrder (hostiles: Creep[]) : string list =
     hostiles
     |> Array.map (fun h ->

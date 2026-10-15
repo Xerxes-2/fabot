@@ -485,7 +485,7 @@ async function engaged(t, time, rooms) {
   const now = new Set();
   for (const e of fight.engagements ?? []) {
     now.add(e.id);
-    const rec = open.get(e.id) ?? { id: e.id, room: e.room, opened: t, members: new Set(), answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, casts: new Map(), cast: 0 };
+    const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, casts: new Map(), cast: 0 };
     open.set(e.id, rec);
     for (const c of (fight.casts ?? []).filter((c) => c.engagement === e.id)) rec.casts.set(c.name, c.body);
     for (const n of e.ours.filter((n) => rec.casts.has(n))) {
@@ -498,7 +498,12 @@ async function engaged(t, time, rooms) {
     rec.answered ||= !e.unanswered;
     rec.gaveUp ||= rec.answered && e.unanswered;
     rec.disengaged ||= e.phase === "disengaging";
-    const objects = rooms.flatMap((r) => [...r["#objects"]]);
+    if (e.phase !== "forming") rec.mustered ??= t;
+    if (e.phase === "fighting") rec.fighting ??= t;
+    if (e.order?.length && !e.unanswered) rec.order ??= e.order;
+    // A siege's room is the rival's, which no sample follows.
+    const seen = roomNames.includes(e.room) ? rooms : [...rooms, await shard.loadRoom(e.room, time)];
+    const objects = seen.flatMap((r) => [...r["#objects"]]);
     const theirs = objects.filter((o) => rec.members.has(o.id));
     if (theirs.length) rec.seen = t;
     rec.core ||= theirs.some((o) => o.structureType === "invaderCore");
@@ -656,6 +661,7 @@ for (let t = 0; t < ticks; t++) {
         rcl: room["#user"] === o.id ? room["#level"] : 0,
         spawns: objects.filter((x) => x.structureType === "spawn").length,
         creeps: objects.filter((x) => x.body !== undefined).length,
+        ramparts: objects.filter((x) => x.structureType === "rampart").length,
       };
     }
     if (homes.length > 1) row.homes = Object.fromEntries(homes.map((h, i) => [h, (({ bodies, foes, ...s }) => s)(sample(t, time, rooms[i]))]));

@@ -48,7 +48,8 @@
 //            of its shape (`worlds/`, terrain as 50 rows), as the world, at its
 //            tick (`engine/live.mjs`): our user the capture's, every home of
 //            ours a colony the samples follow, the capture's outposts declared;
-//            stood on the template with every structure kind (`xx.mjs`)
+//            stood on the template with every structure kind (`xx.mjs`); its
+//            --opponents are its own users, their code seated on their rooms
 //   --unsafe  our room without the engine's safe mode, which would decide
 //            every fight in it for us; implied by --opponents
 //   --ended   our room's starting safe mode ended, its stock kept to activate,
@@ -146,8 +147,9 @@ const opponents = flags["--opponents"] ? JSON.parse(readFileSync(flags["--oppone
 for (const o of opponents)
   if (!/^[a-z][\w-]*$/.test(o.name ?? "") || o.name === OUR_NAME || !existsSync(o.bot ?? "") || !/^[WE]\d+[NS]\d+$/.test(o.room ?? ""))
     fail(`--opponents: ${JSON.stringify(o)} needs a name, a bot that exists and a room`);
-if (live && (from || node || late || flags["--room"] || opponents.length || cores.length || flags["--unsafe"] || flags["--ended"]))
-  fail(`--world takes no --from, --node, --late, --room, --opponents, --core, --unsafe or --ended\n${usage}`);
+if (live && (from || node || late || flags["--room"] || cores.length || flags["--unsafe"] || flags["--ended"]))
+  fail(`--world takes no --from, --node, --late, --room, --core, --unsafe or --ended\n${usage}`);
+if (live && opponents.some((o) => !Object.values(live.users).includes(o.name))) fail("--world: an opponent is one of the world's users, its rooms the world's");
 // A world's schema is its mods' (`xx.mjs` templateOf).
 const template = live ? `${TEMPLATE}-modern` : cores.length ? `${TEMPLATE}-stronghold` : TEMPLATE;
 if (!existsSync(join(template, "screeps/shard0/data.json"))) fail(`no template world at ${template}: npm run xx -- setup first`);
@@ -303,7 +305,7 @@ for (const o of opponents) {
     if (existsSync(join(o.bot, "fetch.json"))) await fetched(JSON.parse(readFileSync(join(o.bot, "fetch.json"), "utf8")), dir);
   } else cpSync(o.bot, join(dir, "main.js"));
   if (o.config) writeFileSync(join(dir, "opponent.js"), `module.exports = ${JSON.stringify(o.config)};\n`);
-  if (from) {
+  if (from || live) {
     node24([XXSCREEPS, "manage", "bot", "update", o.name, `./bot-${o.name}`], world);
     continue;
   }
@@ -313,7 +315,7 @@ for (const o of opponents) {
 writeFileSync(join(world, "opponents.json"), JSON.stringify(opponents.map(({ name, room, raid }) => ({ name, room, raid }))));
 if (built) node24([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME, String(node.worn ?? 1)], world);
 if (flags["--ended"]) node24([XXSCREEPS, script("node.mjs"), "ended", colony.room], world);
-else if (opponents.length || flags["--unsafe"]) node24([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
+else if ((opponents.length && !live) || flags["--unsafe"]) node24([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
 if (node?.outposts) {
   if (colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);
   writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: colony.outposts }));

@@ -128,6 +128,8 @@ let rangedAttackPower = 10
 
 let dismantlePower = 50
 
+let repairPower = 100
+
 let extensionHits = 1000
 
 let massAttackPowerAt (range: int) =

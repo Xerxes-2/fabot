@@ -36,10 +36,19 @@ type Tactic =
 /// first struck first.
 type Plan = { Tactic: Tactic; Order: string list }
 
-/// `Group` is the target; `Room` the room held or worked it threatened.
+[<RequireQualifiedAccess>]
+type Objective =
+    | Defend
+    /// Into its room to the rival structure `target`; the plan's order is the
+    /// barriers on the way, first broken first.
+    | Siege of target: string
+
+/// A Defend's target is `Group`, and `Room` the room held or worked it
+/// threatened; a Siege's is in its objective, and `Group` none (0).
 type Engagement =
     {
         Id: int
+        Objective: Objective
         Group: int
         Room: string
         Ours: Set<string>

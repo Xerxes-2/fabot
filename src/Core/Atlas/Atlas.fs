@@ -231,6 +231,11 @@ module Atlas =
 
     let misses (atlas: Atlas) : int = atlas.Misses
 
+    let weights (atlas: Atlas) (room: string) : int[] option =
+        match atlas.Rooms.TryGetValue room with
+        | true, grid -> Some(Array.copy grid.Weights)
+        | _ -> None
+
     let passable (atlas: Atlas) (room: string) (tile: int) : bool =
         atlas.Rooms.ContainsKey room
         && tile >= 0

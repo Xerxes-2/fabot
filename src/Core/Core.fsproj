@@ -39,6 +39,7 @@
     <Compile Include="Layout/Run.fs" />
     <Compile Include="Fight/Tracker.fs" />
     <Compile Include="Fight/Kinds/Defend.fs" />
+    <Compile Include="Fight/Kinds/Siege.fs" />
     <Compile Include="Fight/Casting.fs" />
     <Compile Include="Fight/Tactics.fs" />
     <Compile Include="Fight/Run.fs" />

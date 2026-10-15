@@ -352,7 +352,12 @@ The other kinds, for the record's sake:
   economy bodies on a `Build spawn` declaration; closes when the spawn stands.
   Groups in the room are its targets.
 - `Siege`: muster → travel (formation) → breach (dismantle/attack under tower
-  fire; `Exchange` prices towers and ramparts) → clear → done.
+  fire; `Exchange` prices towers and ramparts) → clear → done. Its target is
+  a `Structure` (spawn, then towers); the breach is derived, not stored:
+  `Exchange.breachPlan` finds the cheapest way in (walk plus each barrier's
+  hits over the set's dismantle rate less the repair, no tile where the towers
+  outstrike the set's heal), at open and on events, and the plan's order is
+  its barriers. A stored breach goes stale the moment the rival builds.
 - `Drain`: approach → drain (edge dance, heal) → rotate → …; closes when the
   towers are empty or the deadline passes.
 - `KeeperDuty`: a perpetual cycle over lairs by respawn time; declares the room

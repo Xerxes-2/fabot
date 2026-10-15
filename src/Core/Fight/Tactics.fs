@@ -256,6 +256,107 @@ let blob (sight: Sight) (centre: Pos) (members: Creep[]) : Wish list =
         weight
         members
 
+/// A medic's seat beside a dismantler: open ground off every tile beside the
+/// rival's line, where a body would be struck from a rampart.
+let private seat (atlas: Atlas) (line: Pos[]) (room: string) (t: int) =
+    not (Tiles.onEdge t)
+    && Atlas.passable atlas room t
+    && not (
+        line
+        |> Array.exists (fun p -> Pos.within Engine.meleeRange p (Tiles.toPos room t))
+    )
+
+let seatsAt (atlas: Atlas) (line: Pos[]) (room: string) (work: int) : int =
+    Tiles.around work |> Array.filter (seat atlas line room) |> Array.length
+
+/// A siege's breach as its members read it this tick.
+[<NoEquality; NoComparison>]
+type Front =
+    {
+        Breach: Pos
+        Wall: string
+        Line: Pos[]
+        Towers: Pos[]
+        /// What the towers deal a body working the breach.
+        Strike: int
+    }
+
+let private nearestTower (front: Front) (at: Pos) =
+    front.Towers
+    |> Array.fold (fun least t -> min least (Pos.range t at |> Option.defaultValue 99)) 99
+
+/// Assumed, as the scripted rival does: towers aim at the nearest of the set.
+let focusOf (front: Front) (members: Creep[]) : Creep option =
+    members
+    |> Array.sortBy (fun m -> nearestTower front m.Pos, m.Name)
+    |> Array.tryHead
+
+let siege (sight: Sight) (order: string list) (front: Front) (members: Creep[]) (creep: Creep) =
+    let room = creep.Pos.Room
+    let here = Tiles.ofPos creep.Pos
+
+    let dismantles (c: Creep) =
+        c.Body |> Array.exists (fun p -> p.Kind.IsWork)
+
+    let net = front.Strike - Engine.healPower * Array.sumBy (live Heal) members
+
+    let relieved (c: Creep) = live Work c = 0 || c.Hits < 2 * net
+
+    let atBreach (c: Creep) =
+        Pos.within Engine.meleeRange c.Pos front.Breach
+
+    let dismantlers = members |> Array.filter dismantles
+
+    if dismantles creep then
+        if
+            relieved creep
+            && dismantlers |> Array.exists (fun d -> d.Name <> creep.Name && not (relieved d))
+        then
+            let off =
+                Tiles.around here
+                |> Array.filter (fun t ->
+                    not (Tiles.onEdge t)
+                    && Atlas.passable sight.Atlas room t
+                    && not (Pos.within Engine.meleeRange (Tiles.toPos room t) front.Breach))
+                |> Array.sortBy (fun t -> -(nearestTower front (Tiles.toPos room t)), t)
+                |> Array.tryHead
+
+            None,
+            match off with
+            | Some t when Plan.canMove creep (moverOf creep).Factor -> stepTo creep t
+            | _ -> hold sight creep
+        elif atBreach creep then
+            Some(Dismantle front.Wall), hold sight creep
+        else
+            None, toward sight creep front.Breach Engine.meleeRange
+    else
+        let anchor =
+            focusOf front (dismantlers |> Array.filter (fun d -> d.Pos.Room = front.Breach.Room))
+            |> Option.orElse (
+                dismantlers
+                |> Array.sortBy (fun d -> Pos.range d.Pos front.Breach, d.Name)
+                |> Array.tryHead
+            )
+
+        let wish =
+            match anchor with
+            | None -> toward sight creep front.Breach Engine.rangedRange
+            | Some d ->
+                let seats =
+                    Tiles.around (Tiles.ofPos d.Pos)
+                    |> Array.filter (seat sight.Atlas front.Line d.Pos.Room)
+                    |> Array.sort
+
+                let medics =
+                    members |> Array.filter (dismantles >> not) |> Array.map _.Name |> Array.sort
+
+                match Array.tryItem (Array.findIndex ((=) creep.Name) medics) seats with
+                | Some t when d.Pos.Room = room && t = here -> hold sight creep
+                | Some t -> toward sight creep (Tiles.toPos d.Pos.Room t) 0
+                | None -> toward sight creep d.Pos Engine.meleeRange
+
+        strike sight order creep, wish
+
 let holdFast (sight: Sight) (order: string list) (creep: Creep) =
     strike sight order creep, hold sight creep
 
@@ -305,16 +406,18 @@ let retreat (sight: Sight) (creep: Creep) : CreepAct option * Wish =
 /// it, else one within three at the ranged rate; each heal counts off what it
 /// closes. The engine keeps one of a swing and a heal, and one of a shot and a
 /// ranged heal: a swinging body does not heal, a shooting one heals beside it.
+/// A heal lands in the tick's sum with the strikes, so what is `incoming` is owed.
 let heals
     (healers: Creep[])
     (patients: Creep[])
+    (incoming: Map<string, int>)
     (swinging: HashSet<string>)
     (shooting: HashSet<string>)
     : Intent list =
     let owed = Dictionary<string, int>()
 
     for p in patients do
-        owed.[p.Name] <- p.HitsMax - p.Hits
+        owed.[p.Name] <- p.HitsMax - p.Hits + (Map.tryFind p.Name incoming |> Option.defaultValue 0)
 
     let acts = ResizeArray<Intent>()
 

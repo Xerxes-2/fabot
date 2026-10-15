@@ -1,0 +1,33 @@
+{
+  "why": "a siege set breaks into a rampart-lined room held by one tower and a repairer and loses no body: Exchange.breachPlan picks the barrier on the cheapest way to the spawn, two dismantlers break it while two MOVE:HEAL medics seated beside the struck one pool heal. Seeds 1-5 all measured 836 ticks from open to breach (705 casting, 26 walking to the room, 105 under fire) and 8,700 cast; the tick bound adds 34 (about a third of the time under fire). The cast is Exchange's price of the bank, the same on every seed, so its bound has no slack",
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-breach.json",
+    "seed": 1,
+    "opponents": [
+      {
+        "name": "rival",
+        "bot": "scripts/xxscreeps/engine/keep",
+        "room": "W2N1"
+      }
+    ]
+  },
+  "ticks": 1000,
+  "assert": [
+    {
+      "measure": "bodiesLost",
+      "max": 0
+    },
+    {
+      "measure": "breachTicks",
+      "max": 870
+    },
+    {
+      "measure": "mostCast",
+      "max": 8700
+    },
+    {
+      "measure": "faults",
+      "max": 0
+    }
+  ]
+}

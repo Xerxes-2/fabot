@@ -830,6 +830,105 @@ let outcome (stance: Stance) (ours: Side) (theirs: Side) (terrain: Terrain) : Ou
     else
         exchange (stanceAgainst stance ours theirs terrain) ours theirs terrain
 
+let pooledHeal (seated: int) (ours: Fighter list) : int =
+    let beside, apart =
+        ours
+        |> List.map _.Heal
+        |> List.sortDescending
+        |> List.splitAt (min seated ours.Length)
+
+    Engine.healPower * List.sum beside + Engine.rangedHealPower * List.sum apart
+
+/// What towers deal a body at `at`, the one strike a breach is gated and
+/// re-priced by.
+let towerStrike (towers: Pos list) (at: Pos) : int =
+    towers
+    |> List.sumBy (fun p ->
+        Pos.range p at |> Option.map Engine.towerAttackAt |> Option.defaultValue 0)
+
+/// A rival room as a breach is planned over it: each tile's step weight (-1
+/// where no body walks) and the hits on each barrier tile, its rival ramparts' and walls' together.
+[<NoEquality; NoComparison>]
+type Ground =
+    {
+        Room: string
+        Weights: int[]
+        Barriers: Map<int, int>
+    }
+
+/// The cheapest way from `sources` onto a goal: each step's walk at `gait`,
+/// and the ticks to break a barrier stepped onto at `rate`. A tile the towers
+/// strike past `heal` is never stepped on. Its barriers in order, each with the
+/// tile it is broken from, and the ticks.
+let breachPlan
+    (ground: Ground)
+    (gait: FatigueFactor)
+    (towers: Pos list)
+    (heal: int)
+    (rate: int)
+    (sources: int[])
+    (goals: int[])
+    : ((int * int) list * int) option =
+    let struck (t: int) =
+        towerStrike towers (Tiles.toPos ground.Room t)
+
+    let cost (t: int) =
+        let weight = ground.Weights.[t]
+        let step = if weight < 0 then -1 else stepTicks gait weight
+
+        if step < 0 || Tiles.onEdge t || struck t > heal then
+            None
+        else
+            match Map.tryFind t ground.Barriers with
+            | Some hits when rate > 0 -> Some(step + (hits + rate - 1) / rate)
+            | Some _ -> None
+            | None -> Some step
+
+    let dist = Array.create Tiles.count System.Int32.MaxValue
+    let prev = Array.create Tiles.count -1
+    let goal = Set.ofArray goals
+
+    let rec search (queue: Set<int * int>) =
+        if queue.IsEmpty then
+            None
+        else
+            let d, t = queue.MinimumElement
+            let queue = queue.Remove(d, t)
+
+            if d > dist.[t] then
+                search queue
+            elif goal.Contains t then
+                Some t
+            else
+                Tiles.around t
+                |> Array.fold
+                    (fun (q: Set<int * int>) n ->
+                        match cost n with
+                        | Some c when d + c < dist.[n] ->
+                            dist.[n] <- d + c
+                            prev.[n] <- t
+                            q.Add(d + c, n)
+                        | _ -> q)
+                    queue
+                |> search
+
+    for t in sources do
+        dist.[t] <- 0
+
+    search (sources |> Array.map (fun t -> 0, t) |> Set.ofArray)
+    |> Option.map (fun last ->
+        let rec walk (t: int) (path: int list) =
+            if prev.[t] < 0 then
+                t :: path
+            else
+                walk prev.[t] (t :: path)
+
+        walk last []
+        |> List.pairwise
+        |> List.filter (fun (_, t) -> ground.Barriers.ContainsKey t)
+        |> List.map (fun (from, barrier) -> barrier, from),
+        dist.[last])
+
 /// The cheapest cast can be a marginal win that loses its bodies, so lost hits
 /// and ticks are priced too. A win is monotone in one body's count, so its
 /// fewest is bisected, then grown while one more saves what it costs.

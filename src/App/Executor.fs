@@ -43,6 +43,7 @@ let private act (intent: Intent) : string * int =
             | RangedMassAttack -> "rangedMassAttack", creep.rangedMassAttack ()
             | HealCreep id -> on "heal" id creep.heal
             | RangedHealCreep id -> on "rangedHeal" id creep.rangedHeal
+            | Dismantle id -> on "dismantle" id creep.dismantle
     | Room(name, CreateSite(x, y, kind)) ->
         let verb = "site:" + Fabot.Core.World.Kind.name kind
 
