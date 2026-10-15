@@ -78,6 +78,12 @@ module Field =
 
         if d = unreached then None else Some d
 
+    /// The ticks onward from a neighbour of `next`, through it.
+    let onto (field: Field) (next: int) : int option =
+        match via field next with
+        | d when d = unreached -> None
+        | d -> Some d
+
     let step (field: Field) (tile: int) : int option =
         match ticks field tile with
         | Some d when d > 0 ->

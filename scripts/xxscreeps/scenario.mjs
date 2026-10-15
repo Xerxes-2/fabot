@@ -18,7 +18,7 @@
 // A scenario file: { "why": the invariant, "nightly"?, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
 // "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
-// (soak's --world; crafted ones under worlds/), "seed" }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
+// (soak's --world; crafted ones under worlds/), "seed", "invaders"? }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick.
 // Exits non-zero when a bound fails or a soak does, or loses ticks twice.
@@ -68,6 +68,7 @@ const engagementsOf = (dir) =>
   rowsOf(dir)
     .filter((e) => e.predicted)
     .map((e) => ({ p: e.predicted, a: engagement(e) }));
+const walksOf = (dir) => rowsOf(dir).flatMap((e) => (e.blob ? [e.blob] : []));
 const samplesOf = (dir) => readFileSync(join(dir, "samples.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 const at = (samples, t) => samples.find((s) => s.t >= t) ?? samples.at(-1);
 const sideOf = (a) => (s) => (a.who ? s.others[a.who] : s);
@@ -122,6 +123,14 @@ const measures = {
   refusals: (_, __, dir) => Object.values(JSON.parse(readFileSync(join(dir, "refusals.json"), "utf8"))).reduce((n, c) => n + c, 0),
   // Raids an answered engagement saw die without disengaging.
   raidsKilled: (_, __, dir) => engagementsOf(dir).filter(({ a }) => a.won === true).length,
+  // Over the sets of two or more that walked to their raid (soak-step's
+  // `blob`), the worst: the percent of approaching ticks every member stood
+  // within ⌊n/2⌋ + 1 of the median member (none walked: -Infinity), the
+  // percent of member-ticks one stood still free of fatigue, and the median
+  // member's ticks from the muster to within 3 of the raid (none: Infinity).
+  blobAnchorRange: (_, __, dir) => Math.min(...walksOf(dir).map((w) => (100 * w.near) / w.ticks), ...(walksOf(dir).length ? [] : [-Infinity])),
+  blobStallTicks: (_, __, dir) => Math.max(...walksOf(dir).map((w) => (100 * w.stalls) / Math.max(1, w.memberTicks)), ...(walksOf(dir).length ? [] : [Infinity])),
+  blobArrival: (_, __, dir) => Math.max(...walksOf(dir).map((w) => w.arrival ?? Infinity), ...(walksOf(dir).length ? [] : [Infinity])),
   // The most energy one engagement cast, of the bodies that stood in it.
   mostCast: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.cast ?? 0)),
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
@@ -165,7 +174,7 @@ for (const { name, start } of scenarios)
   if ((start.at === undefined) !== (start.bundle === undefined) || (start.at !== undefined && (start.node || !/^[0-9a-f]{8,40}$/.test(start.bundle))))
     fail(`${name}: a start "at" a tick names its "bundle" by commit id, and no node`);
 for (const { name, start } of scenarios)
-  if (start.world && Object.keys(start).some((k) => k !== "world" && k !== "seed")) fail(`${name}: a "world" start takes a "seed" and nothing else`);
+  if (start.world && Object.keys(start).some((k) => !["world", "seed", "invaders"].includes(k))) fail(`${name}: a "world" start takes a "seed", "invaders" and nothing else`);
 
 // A world holds its opponents' seats; their config is the scenario's.
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
@@ -225,7 +234,8 @@ const opponentsOf = (name, opponents) => {
   return ["--opponents", file];
 };
 const play = async ({ name, start, ticks }) => {
-  if (start.world) return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot]);
+  if (start.world)
+    return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.invaders ? ["--invaders", start.invaders] : [])]);
   const recipe = ["--room", start.room, "--seed", String(start.seed), "--late", String(start.late ?? 0)];
   if (!start.at)
     return soak([

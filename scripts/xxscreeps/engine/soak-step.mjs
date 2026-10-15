@@ -424,8 +424,44 @@ async function standing(ids) {
   return false;
 }
 async function closed(e, t) {
-  const { members, casts, ...rest } = e;
-  fs.writeSync(engagementsOut, JSON.stringify({ ...rest, closed: t, outlived: t === null || (await standing(members)) }) + "\n");
+  const { members, casts, walk, ...rest } = e;
+  const arrivals = Object.values(walk?.arrived ?? {}).sort((a, b) => a - b);
+  const blob = walk && { ...walk, last: undefined, arrived: undefined, arrival: arrivals.length ? arrivals[(arrivals.length - 1) >> 1] : null };
+  fs.writeSync(engagementsOut, JSON.stringify({ ...rest, blob, closed: t, outlived: t === null || (await standing(members)) }) + "\n");
+}
+// World tiles, where adjacent rooms' edge tiles coincide (x = roomX·49 + x).
+const seam = (a, b) => {
+  const at = (p) => {
+    const [, ew, x, ns, y] = /^([WE])(\d+)([NS])(\d+)$/.exec(p.roomName);
+    return [(ew === "E" ? +x : -x - 1) * 49 + p.x, (ns === "S" ? +y : -y - 1) * 49 + p.y];
+  };
+  const [p, q] = [at(a), at(b)];
+  return Math.max(Math.abs(p[0] - q[0]), Math.abs(p[1] - q[1]));
+};
+// A set of two or more on its way to the raid, each tick it approaches:
+// whether every member stands within ⌊n/2⌋ + 1 of the median member by range
+// to the raid (`near` of `ticks`), and the members that stood still free of
+// fatigue (`stalls` of `memberTicks`); `arrived`: each member's ticks from the
+// muster to its first within 3 of the raid.
+function walking(rec, phase, bodies, theirs, t) {
+  if (phase === "approaching" && bodies.length >= 2 && theirs.length) rec.walk ??= { muster: t, ticks: 0, near: 0, memberTicks: 0, stalls: 0, arrived: {}, last: {} };
+  const w = rec.walk;
+  if (!w || !theirs.length) return;
+  const toRaid = (o) => Math.min(...theirs.map((h) => seam(o.pos, h.pos)));
+  if (phase === "approaching") {
+    const ranked = [...bodies].sort((a, b) => toRaid(a) - toRaid(b) || (a.name < b.name ? -1 : 1));
+    const anchor = ranked[(ranked.length - 1) >> 1];
+    w.ticks++;
+    if (bodies.every((o) => seam(o.pos, anchor.pos) <= (bodies.length >> 1) + 1)) w.near++;
+    for (const o of bodies.filter((o) => w.last[o.name])) {
+      w.memberTicks++;
+      if (w.last[o.name].fatigue === 0 && seam(w.last[o.name].pos, o.pos) === 0) w.stalls++;
+    }
+  }
+  for (const o of bodies) {
+    w.last[o.name] = { pos: o.pos, fatigue: o.fatigue };
+    if (w.arrived[o.name] === undefined && toRaid(o) <= 3) w.arrived[o.name] = t - w.muster;
+  }
 }
 async function engaged(t, time, rooms) {
   const fight = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}").v2?.fight ?? {};
@@ -451,6 +487,7 @@ async function engaged(t, time, rooms) {
     rec.core ||= theirs.some((o) => o.structureType === "invaderCore");
     const close = objects.some((o) => e.ours.includes(o.name) && o["#user"] === ours && theirs.some((h) => near(h.pos, o.pos, 3) && h.pos.roomName === o.pos.roomName));
     if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;
+    walking(rec, e.phase, objects.filter((o) => o.body !== undefined && o["#user"] === ours && e.ours.includes(o.name)), theirs, t);
   }
   for (const [id, rec] of open)
     if (!now.has(id)) {

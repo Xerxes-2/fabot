@@ -242,13 +242,19 @@ let tests =
 
             test "an exit's landing is on the opposite exit, and lands back" {
                 for exit in [ Tiles.top; Tiles.right; Tiles.bottom; Tiles.left ] do
+                    let room = Tiles.roomToward roomName exit |> Option.get
+
                     for tile in Tiles.exitTiles exit do
                         let landing = Tiles.landing tile
                         Expect.equal (Tiles.exitOf tile) exit "on its exit"
                         Expect.equal (Tiles.exitOf landing) ((exit + 3) % 8 + 1) "opposite"
                         Expect.equal (Tiles.landing landing) tile "and back"
 
-                    let room = Tiles.roomToward roomName exit |> Option.get
+                        Expect.equal
+                            (Tiles.seamRange (Tiles.toPos roomName tile) (Tiles.toPos room landing))
+                            (Some 0)
+                            "one tile across the seam"
+
                     Expect.equal (Tiles.exitToward roomName room) (Some exit) "the room across"
             }
 

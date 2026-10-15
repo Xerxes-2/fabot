@@ -149,6 +149,20 @@ let kite (sight: Sight) (order: string list) (centre: Pos) (creep: Creep) =
 
     strike sight order creep, wish
 
+/// To a shot's range of the group, as one.
+let blob (sight: Sight) (centre: Pos) (members: Creep[]) : Wish list =
+    Blob.wishes
+        sight.Atlas
+        {
+            Room = centre.Room
+            Tiles = [| Tiles.ofPos centre |]
+            Range = Engine.rangedRange
+            Avoid = Set.empty
+            MaxHops = Tick.reachHops
+        }
+        weight
+        members
+
 let holdFast (sight: Sight) (order: string list) (creep: Creep) =
     strike sight order creep, hold sight creep
 

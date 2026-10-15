@@ -220,6 +220,20 @@ let roomCoords (name: string) : (int * int) option =
         | Some x, Some y -> Some(x, y)
         | _ -> None
 
+/// Across rooms, where adjacent rooms' edge tiles are one tile.
+let seamRange (a: Pos) (b: Pos) : int option =
+    if a.Room = b.Room then
+        Pos.range a b
+    else
+        match roomCoords a.Room, roomCoords b.Room with
+        | Some(ax, ay), Some(bx, by) ->
+            Some(
+                max
+                    (abs ((ax - bx) * (side - 1) + a.X - b.X))
+                    (abs ((ay - by) * (side - 1) + a.Y - b.Y))
+            )
+        | _ -> None
+
 let roomName (x: int) (y: int) : string =
     let axis outward inward value =
         if value < 0 then

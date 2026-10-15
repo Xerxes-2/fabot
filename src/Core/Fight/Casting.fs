@@ -144,6 +144,12 @@ let price
         let tactic (won: Tactic) =
             if (Exchange.stanceAgainst stance landed theirs terrain).IsHold then
                 Tactic.Hold
+            elif
+                won.IsClose
+                && landed.Bodies.Length > 1
+                && landed.Bodies |> List.forall (fun f -> f.Attack = 0)
+            then
+                Tactic.Blob
             else
                 won
 

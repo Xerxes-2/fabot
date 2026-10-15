@@ -98,7 +98,12 @@ let private phases =
     ]
 
 let private tactics =
-    [ "kite", Tactic.Kite; "close", Tactic.Close; "hold", Tactic.Hold ]
+    [
+        "kite", Tactic.Kite
+        "close", Tactic.Close
+        "hold", Tactic.Hold
+        "blob", Tactic.Blob
+    ]
 
 /// As `npm run exchange` writes a prediction.
 let private outcomeObj (outcome: Exchange.Outcome) =

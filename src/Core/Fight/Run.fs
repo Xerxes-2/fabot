@@ -521,20 +521,39 @@ let decide (context: Context) (state: State) : Intent list * State =
 
     let fighters = world.Creeps |> Array.filter (fun c -> Tick.fights c.Name)
 
+    let swings (c: Creep) =
+        c.Body |> Array.exists (fun p -> p.Kind.IsAttack)
+
+    // A group lost from sight is sought in its room, which brings it back in sight.
+    let centreOf (e: Engagement) =
+        match byId.TryGetValue e.Group with
+        | true, g -> g.Centre
+        | _ ->
+            {
+                Room = e.Room
+                X = Engine.roomSide / 2
+                Y = Engine.roomSide / 2
+            }
+
+    let walking = Dictionary<string, Move.Wish>()
+
+    for e in engagements do
+        if e.Phase.IsApproaching && e.Plan.Tactic.IsBlob && not e.Unanswered then
+            let members =
+                e.Ours
+                |> Seq.filter ours.ContainsKey
+                |> Seq.map (fun n -> ours.[n])
+                |> Seq.filter (swings >> not)
+                |> Array.ofSeq
+
+            if members.Length > 0 then
+                for wish in Tactics.blob sight (centreOf e) members do
+                    walking.[wish.Creep] <- wish
+
     let act (c: Creep) =
         match engagedIn.TryGetValue c.Name with
         | true, e ->
-            // A group lost from sight is sought in its room, which brings it back in sight.
-            let centre =
-                match byId.TryGetValue e.Group with
-                | true, g -> g.Centre
-                | _ ->
-                    {
-                        Room = e.Room
-                        X = Engine.roomSide / 2
-                        Y = Engine.roomSide / 2
-                    }
-
+            let centre = centreOf e
             let order = e.Plan.Order
 
             match e.Phase with
@@ -545,8 +564,9 @@ let decide (context: Context) (state: State) : Intent list * State =
             | Phase.Approaching
             | Phase.Fighting ->
                 match e.Plan.Tactic with
-                | Tactic.Kite when not (c.Body |> Array.exists (fun p -> p.Kind.IsAttack)) ->
-                    Tactics.kite sight order centre c
+                | _ when walking.ContainsKey c.Name ->
+                    Tactics.strike sight order c, walking.[c.Name]
+                | Tactic.Kite when not (swings c) -> Tactics.kite sight order centre c
                 | Tactic.Hold -> Tactics.rampart sight order c
                 | _ -> Tactics.close sight order centre c
         | _ -> Tactics.retreat sight c

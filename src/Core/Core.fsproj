@@ -14,6 +14,7 @@
     <Compile Include="Move/Wish.fs" />
     <Compile Include="Move/Arbitrate.fs" />
     <Compile Include="Move/Plan.fs" />
+    <Compile Include="Move/Blob.fs" />
     <Compile Include="Intents.fs" />
     <Compile Include="Layout/Shape.fs" />
     <Compile Include="Exchange/Fighter.fs" />
