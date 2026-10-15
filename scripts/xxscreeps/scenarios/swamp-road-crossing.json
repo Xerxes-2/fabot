@@ -4,6 +4,6 @@
   "ticks": 3000,
   "assert": [
     { "measure": "faults", "max": 0 },
-    { "measure": "roadLoss", "max": 550 }
+    { "measure": "roadLoss", "to": 3000, "max": 550 }
   ]
 }

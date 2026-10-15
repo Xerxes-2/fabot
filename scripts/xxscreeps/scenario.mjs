@@ -86,6 +86,7 @@ const measures = {
   roadLoss: (samples, a) => at(samples, a.to ?? Infinity).roadLoss - at(samples, a.from ?? 0).roadLoss,
   // Energy spent on construction.
   build: (samples, a) => at(samples, a.to ?? Infinity).ledger.build - at(samples, a.from ?? 0).ledger.build,
+  upgrade: (samples, a) => at(samples, a.to ?? Infinity).ledger.upgrade - at(samples, a.from ?? 0).ledger.upgrade,
   // Harvesters seen digging from more than one tile.
   harvestersOnTwoPosts: (samples, a) => {
     const tiles = new Map();

@@ -346,7 +346,7 @@ let private spendDemands
     let n = colonies.Length
     let life = float Engine.creepLifetime
     let income = Array.zeroCreate<float> n
-    let owed = Array.zeroCreate<float> n
+    let owed = Array.zeroCreate<int> n
     let upkeep = Array.zeroCreate<float> n
 
     derived.Grounds
@@ -354,7 +354,7 @@ let private spendDemands
         match ownerOf distance derived gi with
         | Some ci ->
             income.[ci] <- income.[ci] + float ground.Posted
-            owed.[ci] <- owed.[ci] + float (ground.Sites |> Array.sumBy (fun s -> s.Left)) / life
+            owed.[ci] <- owed.[ci] + (ground.Sites |> Array.sumBy (fun s -> s.Left))
         | None -> ())
 
     for d in others do
@@ -410,11 +410,12 @@ let private spendDemands
                 let lifeCost =
                     float (work * Engine.upgradeDrainPerWork) * life + float (Engine.bodyCost body)
 
-                let onIncome =
-                    (surplus - save - owed.[ci]) * life / lifeCost |> max 0.0 |> floor |> min seats
+                // The sites are paid from the stock: a level's plan keeps its
+                // window of sites standing, so a charge on income idles the seat.
+                let onIncome = (surplus - save) * life / lifeCost |> max 0.0 |> floor |> min seats
 
                 let onStock =
-                    float (stock - reserve) / lifeCost
+                    float (stock - reserve - owed.[ci]) / lifeCost
                     |> max 0.0
                     |> floor
                     |> min (seats - onIncome)

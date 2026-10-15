@@ -601,13 +601,22 @@ let draw (ground: Ground) (anchor: int) (spawns: int[]) : Plan =
                     |> Array.length > 1)
                 |> Array.map (fun p -> p.Container)
 
+            let buffer = controllerSeat |> Option.map (fun (_, _, t) -> t)
+
+            // The upgraders' only seat: a room that reaches a level with lower
+            // items unbuilt builds it with them.
             let rank (i: Item) =
                 if i.Kind.IsContainer && Array.contains i.Tile crowded then
                     2 * priority Kind.Extension - 1
+                elif i.Kind.IsContainer && Some i.Tile = buffer then
+                    2 * priority Kind.Extension
                 else
                     2 * priority i.Kind
 
-            let keys = Array.init all.Length (fun i -> rank (at i all) * all.Length + i)
+            let keys =
+                Array.init all.Length (fun i ->
+                    let item = at i all
+                    ((rank item * (Engine.controllerMaxLevel + 2) + item.Level) * all.Length) + i)
 
             sortInts keys
             keys |> Array.map (fun key -> at (key % all.Length) all)
