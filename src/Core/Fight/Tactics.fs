@@ -174,13 +174,17 @@ let private threat (raid: Creep[]) (at: Pos) =
 
 /// A Doomed body, whose full hits fall within the line, fights on: stepping
 /// out cannot save it.
-let private rescued (raid: Creep[]) (creep: Creep) =
+let private rescued (raid: Creep[]) (members: Creep[]) (creep: Creep) =
     let focus =
         (raid
          |> Array.sumBy (fun h ->
              Engine.rangedAttackPower * live RangedAttack h
              + Engine.attackPower * live Attack h))
-        - Engine.healPower * live Heal creep
+        - (members
+           |> Array.filter (fun m ->
+               Pos.within Engine.meleeRange m.Pos creep.Pos
+               && (m.Name = creep.Name || m.Hits = m.HitsMax))
+           |> Array.sumBy (fun m -> Engine.healPower * live Heal m))
 
     let ticksOut =
         1
@@ -193,8 +197,9 @@ let private rescued (raid: Creep[]) (creep: Creep) =
 let exposed (sight: Sight) (raidRoom: string) (members: Creep[]) (creep: Creep) =
     let raid = hostilesIn sight raidRoom
 
-    rescued raid creep
-    && members |> Array.exists (fun m -> m.Name <> creep.Name && not (rescued raid m))
+    rescued raid members creep
+    && members
+       |> Array.exists (fun m -> m.Name <> creep.Name && not (rescued raid members m))
 
 /// To the nearest tile out of the raid's next reach (an exit hands the body to
 /// the next room), beside the most mates that heal it.
