@@ -315,12 +315,21 @@ let private assignedIn (derived: Derived.Derived) (pool: Offer[]) =
 /// A leg in ticks: the tiles between its ends.
 let private leg (_: BodyPart list) (a: Pos) (b: Pos) (_: int) = distance a b
 
+let private near (derived: Derived.Derived) (can: int -> bool) (at: Pos) =
+    derived.Colonies
+    |> Array.indexed
+    |> Array.filter (fst >> can)
+    |> Array.choose (fun (i, c) -> distance c.Spawns.[0].Pos at |> Option.map (fun d -> d, i))
+    |> Array.sort
+    |> Array.tryHead
+    |> Option.map snd
+
 /// A successor's walk: a room's side to every body's work.
 let private walk (_: bool) (_: Derived.Body) (_: Pos) = Some Engine.roomSide
 
 let private planOf (derived: Derived.Derived) =
     let pool = Pool.pool derived
-    Quota.plan distance leg walk derived pool (assignedIn derived pool)
+    Quota.plan distance (near derived) leg walk derived pool (assignedIn derived pool)
 
 let private planned (g: Generated) = planOf (derive g)
 
@@ -554,7 +563,7 @@ let tests =
                 let derived = derive g
                 let pool = Pool.pool derived
                 let assigned = assignedIn derived pool
-                let p = Quota.plan distance leg walk derived pool assigned
+                let p = Quota.plan distance (near derived) leg walk derived pool assigned
 
                 let serves (room: string) (kind: Bodies.Pattern option) (b: Derived.Body) =
                     (Some b.Pattern = kind || b.Pattern = Bodies.Pattern.Hauler)

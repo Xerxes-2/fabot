@@ -111,24 +111,7 @@ let private sinkOf (derived: Derived) (ci: int) =
     |> Option.map (fun s -> s.Pos)
     |> Option.defaultValue (homeOf derived.Colonies.[ci])
 
-let private nearest
-    (distance: Pos -> Pos -> int option)
-    (colonies: Colony[])
-    (can: int -> bool)
-    (at: Pos)
-    =
-    let mutable best = -1
-    let mutable least = 0
-
-    for ci in 0 .. colonies.Length - 1 do
-        if can ci then
-            match distance (homeOf colonies.[ci]) at with
-            | Some ticks when best < 0 || ticks < least ->
-                best <- ci
-                least <- ticks
-            | _ -> ()
-
-    if best < 0 then None else Some best
+type Near = (int -> bool) -> Pos -> int option
 
 /// Ticks a body of the parts walks loaded from a tile to within a range of
 /// another.
@@ -153,7 +136,7 @@ let reserveTarget (lifetimes: float) (level: int) : int =
     * lifetimes
     |> int
 
-let private ownerOf (distance: Pos -> Pos -> int option) (derived: Derived) (gi: int) =
+let private ownerOf (near: Near) (derived: Derived) (gi: int) =
     let colonies = derived.Colonies
 
     if gi < colonies.Length then
@@ -164,7 +147,7 @@ let private ownerOf (distance: Pos -> Pos -> int option) (derived: Derived) (gi:
         ground.Controller
         |> Option.map (fun c -> c.Pos)
         |> Option.orElse (ground.Sources |> Array.tryHead |> Option.map (fun s -> s.Pos))
-        |> Option.bind (nearest distance colonies (fun _ -> true))
+        |> Option.bind (near (fun _ -> true))
 
 /// The backlog is spread over a creep's life, so a hauler cast now clears it
 /// before it dies. A dig that falls on the floor is the workers' to fetch.
@@ -204,7 +187,7 @@ let private linkDrain (derived: Derived) (ground: Ground) : float =
 
 /// A haul trip is to the dearest sink, not the nearest: a ring fills in a
 /// trip, and the flow that goes on all day is to the far sink.
-let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (derived: Derived) =
+let private groundDemands (near: Near) (leg: Leg) (derived: Derived) =
     let demands = ResizeArray<Demand>()
     let life = float Engine.creepLifetime
     let colonies = derived.Colonies
@@ -225,7 +208,7 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
 
     derived.Grounds
     |> Array.iteri (fun gi ground ->
-        let owner = ownerOf distance derived gi
+        let owner = ownerOf near derived gi
         let mutable drain = linkDrain derived ground
 
         for s in ground.Sources do
@@ -329,12 +312,11 @@ let private groundDemands (distance: Pos -> Pos -> int option) (leg: Leg) (deriv
 
     demands
 
-let private spendDemands
-    (distance: Pos -> Pos -> int option)
-    (leg: Leg)
-    (derived: Derived)
-    (others: ResizeArray<Demand>)
-    =
+let private castable (colonies: Colony[]) (d: Demand) (ci: int) =
+    Engine.bodyCost (blockOf d.Pattern) <= colonies.[ci].BankCapacity
+    && (not d.Pattern.IsUpgrader || colonies.[ci].Room = d.At.Room)
+
+let private spendDemands (near: Near) (leg: Leg) (derived: Derived) (others: ResizeArray<Demand>) =
     let colonies = derived.Colonies
     let n = colonies.Length
     let life = float Engine.creepLifetime
@@ -344,14 +326,14 @@ let private spendDemands
 
     derived.Grounds
     |> Array.iteri (fun gi ground ->
-        match ownerOf distance derived gi with
+        match ownerOf near derived gi with
         | Some ci ->
             income.[ci] <- income.[ci] + float ground.Posted
             owed.[ci] <- owed.[ci] + (ground.Sites |> Array.sumBy (fun s -> s.Left))
         | None -> ())
 
     for d in others do
-        match nearest distance colonies (fun _ -> true) d.At with
+        match near (castable colonies d) d.At with
         | Some ci ->
             match bodyFor colonies.[ci] d with
             | Some body when partsOf d.Pattern body > 0 ->
@@ -503,6 +485,7 @@ let private castOrder (seat: Seat) : int * float =
 /// veto. Never to an upgrader.
 let plan
     (distance: Pos -> Pos -> int option)
+    (near: Near)
     (leg: Leg)
     (walk: bool -> Body -> Pos -> int option)
     (derived: Derived)
@@ -510,9 +493,8 @@ let plan
     (assignments: Map<string, string>)
     : Plan =
     let colonies = derived.Colonies
-    let others = groundDemands distance leg derived
-
-    let all = Array.append (others.ToArray()) (spendDemands distance leg derived others)
+    let others = groundDemands near leg derived
+    let all = Array.append (others.ToArray()) (spendDemands near leg derived others)
 
     let standing = System.Collections.Generic.Dictionary<string, int>()
     let targets = System.Collections.Generic.Dictionary<string, Pos>()
@@ -533,7 +515,7 @@ let plan
         if body.TicksToLive <= spawnTime then
             true
         else
-            match nearest distance colonies (fun _ -> true) body.Pos with
+            match near (fun _ -> true) body.Pos with
             | Some ci ->
                 let home = homeOf colonies.[ci]
 
@@ -650,7 +632,7 @@ let plan
 
     let owners =
         derived.Grounds
-        |> Array.mapi (fun gi ground -> ground.Room, ownerOf distance derived gi)
+        |> Array.mapi (fun gi ground -> ground.Room, ownerOf near derived gi)
         |> Map.ofArray
 
     let serves (ci: int) (pattern: Pattern) (body: Body) =
@@ -679,15 +661,7 @@ let plan
     let seats = ResizeArray<Seat>()
 
     for d in all do
-        let caster =
-            nearest
-                distance
-                colonies
-                (fun ci ->
-                    idle.[ci].Count > 0
-                    && Engine.bodyCost (blockOf d.Pattern) <= colonies.[ci].BankCapacity
-                    && (not d.Pattern.IsUpgrader || colonies.[ci].Room = d.At.Room))
-                d.At
+        let caster = near (fun ci -> idle.[ci].Count > 0 && castable colonies d ci) d.At
 
         let body =
             caster

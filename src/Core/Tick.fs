@@ -47,6 +47,43 @@ let fights (name: string) = name.StartsWith fightPrefix
 /// The route search needs a bound; nothing is worked further than this.
 let reachHops = 3
 
+let targetAt (pos: Pos) (range: int) : Target =
+    {
+        Room = pos.Room
+        Tiles = [| Tiles.ofPos pos |]
+        Range = range
+        Avoid = Set.empty
+        MaxHops = reachHops
+    }
+
+/// Ticks and crossings are not one unit.
+let nearest
+    (atlas: Atlas)
+    (route: Target -> string -> string list option)
+    (homes: Pos[])
+    (can: int -> bool)
+    (at: Pos)
+    : int option =
+    let walker =
+        {
+            Footprint = Grid.One
+            Factor = Grid.loadedFactor [ BodyPart.Move ]
+        }
+
+    let least (measure: Pos -> int option) =
+        Array.init homes.Length id
+        |> Array.filter can
+        |> Array.choose (fun i -> measure homes.[i] |> Option.map (fun d -> d, i))
+        |> Array.sort
+        |> Array.tryHead
+        |> Option.map snd
+
+    least (fun home -> Atlas.ticksTo atlas route walker (targetAt home 1) at)
+    |> Option.orElseWith (fun () ->
+        least (fun home ->
+            route (targetAt at 0) home.Room
+            |> Option.map (fun rooms -> Atlas.crossingTicks * (List.length rooms - 1))))
+
 let colonies (world: World) : string[] =
     world.Rooms
     |> Array.filter (fun r ->

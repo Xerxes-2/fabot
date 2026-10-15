@@ -13,18 +13,7 @@ open Fabot.Core.Economy.Task
 open Fabot.Core.Economy.Derived
 open Fabot.Core.Economy.Pool
 
-let private crossingTicks = Engine.roomSide
-
 let private weightOf (priority: int) = max 1 (Price.bottomRank - priority + 1)
-
-let private targetAt (pos: Pos) (range: int) : Target =
-    {
-        Room = pos.Room
-        Tiles = [| Tiles.ofPos pos |]
-        Range = range
-        Avoid = Set.empty
-        MaxHops = Tick.reachHops
-    }
 
 let private targetOf (offer: Offer) : Target =
     targetAt offer.Target (rangeOf offer.Task)
@@ -40,29 +29,15 @@ let private routeOf (atlas: Atlas) (derived: Derived) (target: Target) (from: st
     else
         Atlas.route atlas target.Avoid target.MaxHops from target.Room
 
-let private ticksTo (atlas: Atlas) (derived: Derived) (mover: Mover) (target: Target) (from: Pos) =
-    if from.Room = target.Room then
-        Atlas.travelTicks atlas mover target from
-    else
-        routeOf atlas derived target from.Room
-        |> Option.bind (fun rooms ->
-            Atlas.fieldOnRoute atlas mover target rooms
-            |> Option.bind (fun field -> Field.ticks field (Tiles.ofPos from))
-            |> Option.map (fun leg ->
-                let n = List.length rooms
-
-                let far =
-                    Atlas.entryTicks atlas mover target (List.item (n - 2) rooms)
-                    |> Option.defaultValue crossingTicks
-
-                leg + crossingTicks * (n - 2) + far))
+let private ticksTo (atlas: Atlas) (derived: Derived) =
+    Atlas.ticksTo atlas (routeOf atlas derived)
 
 let private distance (atlas: Atlas) (derived: Derived) (a: Pos) (b: Pos) : int option =
     match Pos.range a b with
     | Some r -> Some r
     | None ->
         routeOf atlas derived (targetAt b 0) a.Room
-        |> Option.map (fun rooms -> crossingTicks * (List.length rooms - 1))
+        |> Option.map (fun rooms -> Atlas.crossingTicks * (List.length rooms - 1))
 
 /// A body digs from nowhere else, so a harvester's dig falls into the
 /// container and a light body keeps off the post.
@@ -263,7 +238,14 @@ let decide (context: Context) (state: State) : Intent list * State =
         | Task.Harvest id -> not (dugOut.Contains id)
         | _ -> true
 
-    let plan = Quota.plan (distance atlas derived) leg walk derived offers assignments
+    let near =
+        Tick.nearest
+            atlas
+            (routeOf atlas derived)
+            (derived.Colonies |> Array.map (fun c -> c.Spawns.[0].Pos))
+
+    let plan =
+        Quota.plan (distance atlas derived) near leg walk derived offers assignments
 
     let casts =
         plan.Casts

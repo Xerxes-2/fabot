@@ -505,6 +505,31 @@ module Atlas =
             if least = unreached then None else Some least
         | _ -> None
 
+    let crossingTicks = Engine.roomSide
+
+    let ticksTo
+        (atlas: Atlas)
+        (route: Target -> string -> string list option)
+        (mover: Mover)
+        (target: Target)
+        (from: Pos)
+        =
+        if from.Room = target.Room then
+            travelTicks atlas mover target from
+        else
+            route target from.Room
+            |> Option.bind (fun rooms ->
+                fieldOnRoute atlas mover target rooms
+                |> Option.bind (fun field -> Field.ticks field (Tiles.ofPos from))
+                |> Option.map (fun leg ->
+                    let n = List.length rooms
+
+                    let far =
+                        entryTicks atlas mover target (List.item (n - 2) rooms)
+                        |> Option.defaultValue crossingTicks
+
+                    leg + crossingTicks * (n - 2) + far))
+
     let firstStep (atlas: Atlas) (mover: Mover) (target: Target) (from: Pos) : int option =
         field atlas mover target from.Room
         |> Option.bind (fun field -> Field.step field (Tiles.ofPos from))

@@ -113,38 +113,33 @@ let sites
                 intents.Add(Room(room.Name, CreateSite(pos.X, pos.Y, kind)))
         | _ -> ()
 
-    let sinkFor (room: string) =
-        let tree = Atlas.tree atlas Tick.reachHops room
-
+    let homes =
         colonies
-        |> Array.map (fun c ->
-            Atlas.routeIn tree room c
-            |> Option.map List.length
-            |> Option.defaultValue System.Int32.MaxValue,
-            c)
-        |> Array.sortBy fst
-        |> Array.tryHead
-        |> Option.bind (fun (_, c) ->
-            rooms.[c].Structures
+        |> Array.choose (fun c -> world.Spawns |> Array.tryFind (fun s -> s.Pos.Room = c))
+        |> Array.map (fun s -> s.Pos)
+
+    let route (target: Target) (from: string) =
+        Atlas.route atlas target.Avoid target.MaxHops from target.Room
+
+    let sinkFor (room: Room) =
+        room.Controller
+        |> Option.map (fun c -> c.Pos)
+        |> Option.orElse (room.Sources |> Array.tryHead |> Option.map (fun s -> s.Pos))
+        |> Option.bind (Tick.nearest atlas route homes (fun _ -> true))
+        |> Option.map (fun i ->
+            rooms.[homes.[i].Room].Structures
             |> Array.tryFind (fun s -> s.Kind.IsStorage && s.Owner.IsOurs)
             |> Option.map (fun s -> s.Pos)
-            |> Option.orElse (
-                world.Spawns
-                |> Array.tryFind (fun s -> s.Pos.Room = c)
-                |> Option.map (fun s -> s.Pos)
-            ))
+            |> Option.defaultValue homes.[i])
 
     for o in outposts do
-        match rooms.TryGetValue o.Room, sinkFor o.Room with
-        | (true, room), Some sink ->
-            let home =
-                {
-                    Room = sink.Room
-                    Tiles = [| Tiles.ofPos sink |]
-                    Range = 1
-                    Avoid = Set.empty
-                    MaxHops = Tick.reachHops
-                }
+        match
+            match rooms.TryGetValue o.Room with
+            | true, room -> sinkFor room |> Option.map (fun sink -> room, sink)
+            | _ -> None
+        with
+        | Some(room, sink) ->
+            let home = Tick.targetAt sink 1
 
             for s in room.Sources do
                 match Atlas.postOf room s.Pos with
