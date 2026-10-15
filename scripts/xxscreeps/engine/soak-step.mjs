@@ -544,6 +544,23 @@ function detours(rooms) {
   onRoad = objects.filter((o) => o.body !== undefined && roads.has(key(o.pos)));
 }
 
+// The most ticks a body of ours stood on one tile carrying energy, acting on
+// nothing and handed nothing.
+let stillLoaded = 0;
+const stills = new Map();
+function stoodLoaded(rooms, time) {
+  for (const o of rooms.flatMap((r) => [...r["#objects"]]))
+    if (o.body !== undefined && o["#user"] === ours) {
+      const tile = `${o.pos.roomName}:${o.pos.x},${o.pos.y}`;
+      const energy = energyIn(o);
+      const was = stills.get(o.name);
+      const idle = energy > 0 && was?.tile === tile && was.energy === energy && !(o["#actionLog"] ?? []).some((a) => a.time === time);
+      const ticks = idle ? was.ticks + 1 : 0;
+      stills.set(o.name, { tile, energy, ticks });
+      stillLoaded = Math.max(stillLoaded, ticks);
+    }
+}
+
 // Keep asking for the pause until the first tick is through (`step.mjs`).
 const spam = setInterval(() => svc.publish({ type: "pause" }), 20);
 await svc.publish({ type: "pause" });
@@ -605,6 +622,7 @@ for (let t = 0; t < ticks; t++) {
   account(rooms, time);
   await engaged(t, time, rooms);
   detours(rooms);
+  stoodLoaded(rooms, time);
   for (const o of opponents.filter(({ raid: r }) => r && (t === r.first || (r.every && t > r.first && (t - r.first) % r.every === 0)))) {
     const toward = Object.entries(world.map.describeExits(roomName) ?? {}).filter(([, next]) => next === o.room).map(([dir]) => Number(dir));
     const bodies = o.raid.bodies.map(({ boosts = {}, ...counts }) => PARTS.flatMap((p) => Array(counts[p] ?? 0).fill({ type: p, boost: boosts[p] })));
@@ -643,6 +661,7 @@ for (let t = 0; t < ticks; t++) {
     if (homes.length > 1) row.homes = Object.fromEntries(homes.map((h, i) => [h, (({ bodies, foes, ...s }) => s)(sample(t, time, rooms[i]))]));
     row.botCpu = fresh ? obs.cpu : null;
     row.roadLoss = roadLoss;
+    row.stillLoaded = stillLoaded;
     row.faults = seenFaults.size;
     row.lost = lost.size;
     row.ms = Date.now() - started;

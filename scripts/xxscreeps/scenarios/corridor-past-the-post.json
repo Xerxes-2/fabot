@@ -1,0 +1,9 @@
+{
+  "why": "a source's link never leaves its miner's post the only way through a one-wide corridor, so no loaded body waits on the miner; the bound is a source's regeneration (300 ticks), what a digger waits beside one dug out, and slack",
+  "start": { "world": "scripts/xxscreeps/worlds/corridor-post.json", "seed": 1 },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "faults", "max": 0 },
+    { "measure": "stillLoaded", "max": 350 }
+  ]
+}

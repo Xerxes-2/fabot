@@ -28,6 +28,7 @@ type Census =
         Rampart: bool[]
         Site: bool[]
         Occupied: bool[]
+        Walkable: bool[]
         /// Tiles whose container's rock, else controller, has one already:
         /// one standing off the plan's tile is kept, never doubled.
         Served: bool[]
@@ -48,6 +49,9 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
     let held = Dictionary<Kind, int>()
     let occupied = Array.create Tiles.count false
 
+    let walkable =
+        Array.init Tiles.count (fun t -> at t room.Terrain &&& Terrain.wall = 0uy)
+
     for c in Array.append ours room.Hostiles do
         setAt (Tiles.ofPos c.Pos) occupied true
 
@@ -65,6 +69,9 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
         | Kind.Rampart -> setAt t rampart true
         | _ -> setAt t solid true
 
+        if not s.Walkable then
+            setAt t walkable false
+
         add s.Kind
 
     let mutable pending = 0
@@ -72,6 +79,9 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
     for s in room.Sites do
         setAt (Tiles.ofPos s.Pos) site true
         add s.Kind
+
+        if not (Kind.walkable s.Kind) then
+            setAt (Tiles.ofPos s.Pos) walkable false
 
         if s.Owner.IsOurs then
             if standable s.Kind || not (at (Tiles.ofPos s.Pos) occupied) then
@@ -107,13 +117,17 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
             for t in Tiles.within 1 (Tiles.ofPos rock) do
                 setAt t served true
 
+    for rock in rocks do
+        setAt (Tiles.ofPos rock) walkable false
+
+    room.Controller
+    |> Option.iter (fun c -> setAt (Tiles.ofPos c.Pos) walkable false)
+
     let links = standing Kind.Link
 
     let unheld (t: int) =
-        at t room.Terrain &&& Terrain.wall = 0uy
+        at t walkable
         && not (at t solid || at t road || at t site)
-        && not (rocks |> Array.exists (fun r -> Tiles.ofPos r = t))
-        && room.Controller |> Option.forall (fun c -> Tiles.ofPos c.Pos <> t)
         && min (Tiles.xOf t) (Tiles.yOf t) >= 2
         && max (Tiles.xOf t) (Tiles.yOf t) < Tiles.side - 2
 
@@ -134,11 +148,31 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
         Rampart = rampart
         Site = site
         Occupied = occupied
+        Walkable = walkable
         Served = served
         Posts = posts
         Held = held
         Pending = pending
     }
+
+/// Whether a structure on `t` parts the tiles beside it but across `post`,
+/// where a miner works and steps aside for no walker. Beside, not the whole
+/// room: a walk round the room prices dearer than a step through the miner.
+let private closes (census: Census) (post: int) (t: int) =
+    let beside =
+        Tiles.around t |> Array.filter (fun n -> n <> post && at n census.Walkable)
+
+    let reached = ResizeArray<int>(Array.truncate 1 beside)
+    let mutable i = 0
+
+    while i < reached.Count do
+        for n in beside do
+            if Tiles.range n reached.[i] = 1 && not (reached.Contains n) then
+                reached.Add n
+
+        i <- i + 1
+
+    reached.Count < beside.Length
 
 let private heldOf (census: Census) (kind: Kind) =
     match census.Held.TryGetValue kind with
@@ -178,10 +212,13 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
             |> Array.tryFind (fun (rock, _) -> item.Kind.IsLink && Tiles.range item.Tile rock <= 2)
         with
         | Some(_, None) -> None
-        | Some(_, Some(post, beside)) when Tiles.range item.Tile post <> 1 ->
+        | Some(_, Some(post, beside)) when
+            Tiles.range item.Tile post <> 1 || closes census post item.Tile
+            ->
             beside
             |> Array.filter (fun t ->
-                plan.Items |> Array.forall (fun i -> i.Tile <> t || i.Kind.IsRoad))
+                plan.Items |> Array.forall (fun i -> i.Tile <> t || i.Kind.IsRoad)
+                && not (closes census post t))
             |> Array.sortBy (fun t ->
                 plan.Items |> Array.exists (fun i -> i.Tile = t), -(Tiles.range t plan.Anchor), t)
             |> Array.tryHead
