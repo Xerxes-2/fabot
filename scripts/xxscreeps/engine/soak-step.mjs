@@ -47,7 +47,7 @@ import { pushIntentsForRoomNextTick } from "xxscreeps/engine/processor/model.js"
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
 
-const [ticksArg, everyArg, roomArg, username, out, wavesArg = "", opponentsPath, coresArg = ""] = process.argv.slice(2);
+const [ticksArg, everyArg, roomArg, username, out, wavesArg = "", opponentsPath, coresArg = "", waveArg = "melee,healer,ranged"] = process.argv.slice(2);
 const homes = roomArg.split(",");
 const roomName = homes[0];
 const ticks = Number(ticksArg);
@@ -424,10 +424,11 @@ async function standing(ids) {
   return false;
 }
 async function closed(e, t) {
-  const { members, casts, walk, ...rest } = e;
+  const { members, casts, walk, fight, ...rest } = e;
   const arrivals = Object.values(walk?.arrived ?? {}).sort((a, b) => a - b);
   const blob = walk && { ...walk, last: undefined, arrived: undefined, arrival: arrivals.length ? arrivals[(arrivals.length - 1) >> 1] : null };
-  fs.writeSync(engagementsOut, JSON.stringify({ ...rest, blob, closed: t, outlived: t === null || (await standing(members)) }) + "\n");
+  const fought = fight && { ...fight, last: undefined };
+  fs.writeSync(engagementsOut, JSON.stringify({ ...rest, blob, fought, closed: t, outlived: t === null || (await standing(members)) }) + "\n");
 }
 // World tiles, where adjacent rooms' edge tiles coincide (x = roomX·49 + x).
 const seam = (a, b) => {
@@ -463,6 +464,22 @@ function walking(rec, phase, bodies, theirs, t) {
     if (w.arrived[o.name] === undefined && toRaid(o) <= 3) w.arrived[o.name] = t - w.muster;
   }
 }
+function fought(rec, phase, bodies, theirs) {
+  if (phase === "fighting" && bodies.length >= 2) rec.fight ??= { taken: {}, low: {}, last: {}, wounded: 0, out: 0 };
+  const f = rec.fight;
+  if (!f) return;
+  const live = (h, type) => h.body.some((p) => p.type === type && p.hits > 0);
+  const reach = (h) => (live(h, "ranged_attack") ? 3 : live(h, "attack") ? 1 : -2) + 1;
+  for (const o of bodies) {
+    f.taken[o.name] = (f.taken[o.name] ?? 0) + Math.max(0, (f.last[o.name] ?? o.hits) - o.hits);
+    f.last[o.name] = o.hits;
+    f.low[o.name] = Math.min(f.low[o.name] ?? 1, o.hits / o.hitsMax);
+    if (o.hits < o.hitsMax / 2 && theirs.length) {
+      f.wounded++;
+      if (theirs.every((h) => h.pos.roomName !== o.pos.roomName || seam(h.pos, o.pos) > reach(h))) f.out++;
+    }
+  }
+}
 async function engaged(t, time, rooms) {
   const fight = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}").v2?.fight ?? {};
   const now = new Set();
@@ -487,7 +504,9 @@ async function engaged(t, time, rooms) {
     rec.core ||= theirs.some((o) => o.structureType === "invaderCore");
     const close = objects.some((o) => e.ours.includes(o.name) && o["#user"] === ours && theirs.some((h) => near(h.pos, o.pos, 3) && h.pos.roomName === o.pos.roomName));
     if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;
-    walking(rec, e.phase, objects.filter((o) => o.body !== undefined && o["#user"] === ours && e.ours.includes(o.name)), theirs, t);
+    const bodies = objects.filter((o) => o.body !== undefined && o["#user"] === ours && e.ours.includes(o.name));
+    walking(rec, e.phase, bodies, theirs, t);
+    fought(rec, e.phase, bodies, theirs);
   }
   for (const [id, rec] of open)
     if (!now.has(id)) {
@@ -596,7 +615,7 @@ for (let t = 0; t < ticks; t++) {
     const exits = Object.entries(world.map.describeExits(wave.room) ?? {});
     const users = await Promise.all(exits.map(([, next]) => shard.loadRoom(next, time).then((r) => r["#user"], () => null)));
     const open = exits.filter((_, i) => users[i] == null).map(([dir]) => Number(dir));
-    await pushIntentsForRoomNextTick(shard, wave.room, kInvaderUserId, { local: { soakWave: [open] }, internal: true });
+    await pushIntentsForRoomNextTick(shard, wave.room, kInvaderUserId, { local: { soakWave: [[open, waveArg.split(",")]] }, internal: true });
     if (lines[wave.room]) lines[wave.room].waves++;
     process.stderr.write(`t${t} wave in ${wave.room} from sides ${open.join(",")}\n`);
   }

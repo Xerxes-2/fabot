@@ -1,8 +1,9 @@
 // A soak's timed Invader wave (ARCHITECTURE.md §10.2, nodes E1 and S1): the
 // raid the engine sends after a room's harvest goal, sent when the soak asks
 // (`soak-step.mjs` pushes the internal intent `soakWave` with the exit sides
-// that lead to no owned or reserved room). xxscreeps' own goal doubles after
-// each raid, so it gives no steady rate to read a stand-down's cost off.
+// that lead to no owned or reserved room, and the wave's `role[:size]`s).
+// xxscreeps' own goal doubles after each raid, so it gives no steady rate to
+// read a stand-down's cost off.
 // `soakRaid` stands a scripted raid (`raid/`) the same way: the owner's bodies
 // on the exit tiles of the sides given.
 import { registerIntentProcessor } from "xxscreeps/engine/processor/index.js";
@@ -24,11 +25,14 @@ function edge(room, open) {
   return exits.sort((a, b) => origin.getRangeTo(a) - origin.getRangeTo(b));
 }
 
-registerIntentProcessor(Room, "soakWave", { internal: true }, (room, context, ...open) => {
+registerIntentProcessor(Room, "soakWave", { internal: true }, (room, context, open, roles) => {
   const exits = edge(room, open);
   if (exits.length === 0) return;
   activateNPC(room, kInvaderUserId);
-  ["melee", "healer", "ranged"].forEach((role, i) => exits[i] && room["#insertObject"](create(exits[i], role, "small", Game.time + CREEP_LIFE_TIME)));
+  roles.forEach((spec, i) => {
+    const [role, size = "small"] = spec.split(":");
+    if (exits[i]) room["#insertObject"](create(exits[i], role, size, Game.time + CREEP_LIFE_TIME));
+  });
   context.setActive();
 });
 

@@ -16,9 +16,9 @@
 //   --jobs  soaks at once (default half the cores)
 //
 // A scenario file: { "why": the invariant, "nightly"?, "start": { "room", "seed",
-// "late"?, "node"?, "invaders"? (soak's --invaders), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
+// "late"?, "node"?, "invaders"? (soak's --invaders), "wave"? (soak's --wave), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
 // "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
-// (soak's --world; crafted ones under worlds/), "seed", "invaders"? }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
+// (soak's --world; crafted ones under worlds/), "seed", "invaders"?, "wave"? }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick.
 // Exits non-zero when a bound fails or a soak does, or loses ticks twice.
@@ -69,6 +69,8 @@ const engagementsOf = (dir) =>
     .filter((e) => e.predicted)
     .map((e) => ({ p: e.predicted, a: engagement(e) }));
 const walksOf = (dir) => rowsOf(dir).flatMap((e) => (e.blob ? [e.blob] : []));
+const foughtOf = (dir) => rowsOf(dir).flatMap((e) => (e.fought ? [e.fought] : []));
+const mean = (xs) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
 const samplesOf = (dir) => readFileSync(join(dir, "samples.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 const at = (samples, t) => samples.find((s) => s.t >= t) ?? samples.at(-1);
 const sideOf = (a) => (s) => (a.who ? s.others[a.who] : s);
@@ -132,6 +134,15 @@ const measures = {
   blobAnchorRange: (_, __, dir) => Math.min(...walksOf(dir).map((w) => (100 * w.near) / w.ticks), ...(walksOf(dir).length ? [] : [-Infinity])),
   blobStallTicks: (_, __, dir) => Math.max(...walksOf(dir).map((w) => (100 * w.stalls) / Math.max(1, w.memberTicks)), ...(walksOf(dir).length ? [] : [Infinity])),
   blobArrival: (_, __, dir) => Math.max(...walksOf(dir).map((w) => w.arrival ?? Infinity), ...(walksOf(dir).length ? [] : [Infinity])),
+  // Over the sets of two or more that fought (soak-step's `fought`), the
+  // worst: the most hits one member lost over the mean of its set's, its
+  // lowest share of its hits in percent, and the percent of member-ticks
+  // under half hits stood out of the raid's reach (none: 100); and every
+  // engagement's bodies lost.
+  fightDamageSpread: (_, __, dir) => Math.max(1, ...foughtOf(dir).map((f) => Math.max(...Object.values(f.taken)) / Math.max(1, mean(Object.values(f.taken))))),
+  fightLowestHits: (_, __, dir) => Math.min(100, ...foughtOf(dir).flatMap((f) => Object.values(f.low).map((l) => 100 * l))),
+  fightWoundedOut: (_, __, dir) => Math.min(100, ...foughtOf(dir).filter((f) => f.wounded).map((f) => (100 * f.out) / f.wounded)),
+  bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),
   // The most energy one engagement cast, of the bodies that stood in it.
   mostCast: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.cast ?? 0)),
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
@@ -175,13 +186,13 @@ for (const { name, start } of scenarios)
   if ((start.at === undefined) !== (start.bundle === undefined) || (start.at !== undefined && (start.node || !/^[0-9a-f]{8,40}$/.test(start.bundle))))
     fail(`${name}: a start "at" a tick names its "bundle" by commit id, and no node`);
 for (const { name, start } of scenarios)
-  if (start.world && Object.keys(start).some((k) => !["world", "seed", "invaders"].includes(k))) fail(`${name}: a "world" start takes a "seed", "invaders" and nothing else`);
+  if (start.world && Object.keys(start).some((k) => !["world", "seed", "invaders", "wave"].includes(k))) fail(`${name}: a "world" start takes a "seed", "invaders", "wave" and nothing else`);
 
 // A world holds its opponents' seats; their config is the scenario's.
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
 const seats = (opponents = []) => opponents.map(({ config, ...seat }) => seat);
-const recipe = ({ world, room, seed, late = 0, node, invaders, core, unsafe, ended }, opponents) =>
-  `${world ? basename(world, ".json") : room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${tag(opponents)}`;
+const recipe = ({ world, room, seed, late = 0, node, invaders, wave, core, unsafe, ended }, opponents) =>
+  `${world ? basename(world, ".json") : room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${wave ? `-w${wave.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${tag(opponents)}`;
 // A cached world is replayed only by the opponents' code that played it, and
 // the engine mods and world scripts it was stood and played under.
 const codeOf = (...paths) =>
@@ -236,7 +247,7 @@ const opponentsOf = (name, opponents) => {
 };
 const play = async ({ name, start, ticks }) => {
   if (start.world)
-    return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.invaders ? ["--invaders", start.invaders] : [])]);
+    return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.invaders ? ["--invaders", start.invaders] : []), ...(start.wave ? ["--wave", start.wave] : [])]);
   const recipe = ["--room", start.room, "--seed", String(start.seed), "--late", String(start.late ?? 0)];
   if (!start.at)
     return soak([
@@ -248,7 +259,7 @@ const play = async ({ name, start, ticks }) => {
       "--bot",
       bot,
       ...(start.node ? ["--node", start.node] : []),
-      ...(start.invaders ? ["--invaders", start.invaders] : []),
+      ...(start.invaders ? ["--invaders", start.invaders] : []), ...(start.wave ? ["--wave", start.wave] : []),
       ...(start.core ? ["--core", start.core] : []),
       ...(start.unsafe ? ["--unsafe"] : []),
       ...(start.ended ? ["--ended"] : []),
