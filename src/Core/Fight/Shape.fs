@@ -29,8 +29,8 @@ type Tactic =
     | Close
     /// On our ramparts: a home is a post the raid comes to.
     | Hold
-    /// `Close` for a ranged set, which approaches as one.
-    | Blob
+    /// A ranged set that approaches as one, then fights by `fights`.
+    | Blob of fights: Tactic
 
 /// Set when a side is priced, never between: `Order` is the hostiles' ids,
 /// first struck first.

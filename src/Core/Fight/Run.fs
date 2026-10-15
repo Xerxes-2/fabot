@@ -567,9 +567,10 @@ let decide (context: Context) (state: State) : Intent list * State =
                 match e.Plan.Tactic with
                 | _ when walking.ContainsKey c.Name ->
                     Tactics.strike sight order c, walking.[c.Name]
-                | Tactic.Blob when Tactics.exposed sight centre.Room (membersOf e) c ->
+                | Tactic.Blob Tactic.Close when Tactics.exposed sight centre.Room (membersOf e) c ->
                     Tactics.strike sight order c, Tactics.stepBack sight centre.Room (membersOf e) c
-                | Tactic.Kite when not (swings c) -> Tactics.kite sight order centre c
+                | Tactic.Kite
+                | Tactic.Blob Tactic.Kite when not (swings c) -> Tactics.kite sight order centre c
                 | Tactic.Hold -> Tactics.rampart sight order c
                 | _ -> Tactics.close sight order centre c
         | _ -> Tactics.retreat sight c

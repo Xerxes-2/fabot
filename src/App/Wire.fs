@@ -102,7 +102,8 @@ let private tactics =
         "kite", Tactic.Kite
         "close", Tactic.Close
         "hold", Tactic.Hold
-        "blob", Tactic.Blob
+        "blob", Tactic.Blob Tactic.Close
+        "blob-kite", Tactic.Blob Tactic.Kite
     ]
 
 /// As `npm run exchange` writes a prediction.
