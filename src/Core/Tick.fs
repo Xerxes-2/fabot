@@ -57,14 +57,15 @@ let colonies (world: World) : string[] =
 /// The declared outposts a colony's spawn reaches and no hostile seen there
 /// outlives (`ARCHITECTURE.md` §13, M1b): a stood-down room is no ground.
 let worked (context: Context) : Outpost list =
-    let homes = colonies context.World
+    let trees =
+        colonies context.World
+        |> Array.map (fun home -> home, Atlas.tree context.Atlas reachHops home)
 
     context.Declarations.Outposts
     |> List.filter (fun o ->
         Sightings.unarmed context.Sightings context.World.Time o.Room
-        && homes
-           |> Array.exists (fun home ->
-               Option.isSome (Atlas.route context.Atlas Set.empty reachHops home o.Room)))
+        && trees
+           |> Array.exists (fun (home, tree) -> home = o.Room || tree.ContainsKey o.Room))
 
 type Module =
     {
@@ -90,6 +91,22 @@ type Result =
         State: State
         Reports: Report list
     }
+
+let private byRoom (pairs: (string * 'T) list) : (string * 'T[])[] =
+    let pairs = Array.ofList pairs
+    let groups = System.Collections.Generic.Dictionary<string, ResizeArray<'T>>()
+    let rooms = ResizeArray<string>()
+
+    for i in 0 .. pairs.Length - 1 do
+        let room, value = Tiles.at i pairs
+
+        if not (groups.ContainsKey room) then
+            groups.[room] <- ResizeArray()
+            rooms.Add room
+
+        groups.[room].Add value
+
+    rooms.ToArray() |> Array.map (fun room -> room, groups.[room].ToArray())
 
 /// Each room's spawn queue (§6.5): floors, then the fight's asks, then the
 /// economy's, on its idle spawns while the bank pays; a fight ask the bank
@@ -118,8 +135,8 @@ let queue (world: World) (asks: (string * Ask) list) : Intent list =
                 (held || a.Rank.IsFight && Engine.bodyCost a.Body <= capacity)
                 more
 
-    asks
-    |> List.groupBy fst
+    byRoom asks
+    |> List.ofArray
     |> List.collect (fun (room, asks) ->
         match world.Rooms |> Array.tryFind (fun r -> r.Name = room) with
         | Some r ->
@@ -133,26 +150,28 @@ let queue (world: World) (asks: (string * Ask) list) : Intent list =
                 r.EnergyCapacity
                 r.EnergyAvailable
                 false
-                (asks |> List.map snd |> List.sortBy rank)
+                (List.ofArray asks |> List.sortBy rank)
         | None -> [])
 
 /// One arbitration per room over every module's wishes (§3's `Move`); a creep
 /// of ours that wishes nothing holds its tile.
 let arbitrate (context: Context) (wishes: (string * Move.Wish) list) : Intent list =
     let wished = System.Collections.Generic.HashSet<string>()
+    let wishes = byRoom wishes
 
-    for _, w in wishes do
-        wished.Add w.Creep |> ignore
+    for _, ws in wishes do
+        for w in ws do
+            wished.Add w.Creep |> ignore
 
     wishes
-    |> List.groupBy fst
+    |> List.ofArray
     |> List.collect (fun (room, ws) ->
         let held =
             context.World.Creeps
             |> Array.filter (fun c -> c.Pos.Room = room && not (wished.Contains c.Name))
             |> Array.map (fun c -> Tiles.ofPos c.Pos)
 
-        Move.Arbitrate.arbitrate (Atlas.passable context.Atlas room) held (List.map snd ws)
+        Move.Arbitrate.arbitrate (Atlas.passable context.Atlas room) held (List.ofArray ws)
         |> List.map (fun (name, direction) -> Creep(name, CreepAct.Move direction)))
 
 let private settle (context: Context) (intents: Intent list) : Intent list =

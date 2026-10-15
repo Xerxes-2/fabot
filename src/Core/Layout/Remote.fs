@@ -114,9 +114,11 @@ let sites
         | _ -> ()
 
     let sinkFor (room: string) =
+        let tree = Atlas.tree atlas Tick.reachHops room
+
         colonies
         |> Array.map (fun c ->
-            Atlas.route atlas Set.empty Tick.reachHops room c
+            Atlas.routeIn tree room c
             |> Option.map List.length
             |> Option.defaultValue System.Int32.MaxValue,
             c)

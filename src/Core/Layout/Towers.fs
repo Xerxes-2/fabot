@@ -19,17 +19,19 @@ let fire (towers: Structure[]) (hostiles: Creep[]) (ours: Creep[]) : Intent list
         |> Array.sortBy (fun c -> c.Hits - c.HitsMax, c.Name)
         |> Array.tryHead
 
-    [
-        for tower in towers do
-            if hostiles.Length > 0 then
-                let target =
-                    hostiles
-                    |> Array.sortBy (fun h -> -(dealt tower.Pos h), h.Hits, h.Id)
-                    |> Array.head
+    let acts = ResizeArray<Intent>()
 
-                yield Tower(tower.Id, Attack target.Id)
-            else
-                match wounded with
-                | Some creep -> yield Tower(tower.Id, Heal creep.Id)
-                | None -> ()
-    ]
+    for tower in towers do
+        if hostiles.Length > 0 then
+            let target =
+                hostiles
+                |> Array.sortBy (fun h -> -(dealt tower.Pos h), h.Hits, h.Id)
+                |> Array.head
+
+            acts.Add(Tower(tower.Id, Attack target.Id))
+        else
+            match wounded with
+            | Some creep -> acts.Add(Tower(tower.Id, Heal creep.Id))
+            | None -> ()
+
+    List.ofSeq acts

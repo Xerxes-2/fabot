@@ -17,6 +17,8 @@ let sitesInFlight = 5
 let private standable (kind: Kind) =
     kind.IsRoad || kind.IsContainer || kind.IsRampart
 
+let private kinds = (Kind.Other "").Ordinal + 1
+
 [<Struct; NoEquality; NoComparison>]
 type Placement = { X: int; Y: int; Kind: Kind }
 
@@ -36,7 +38,8 @@ type Census =
         /// tile is kept, never doubled.
         Posts: (int * (int * int[]) option)[]
         /// Every owner's, and sites: CONTROLLER_STRUCTURES counts them all.
-        Held: Dictionary<Kind, int>
+        /// By `Kind.Ordinal`.
+        Held: int[]
         /// One under a creep is not counted, so it never holds back the rest.
         Pending: int
     }
@@ -46,7 +49,7 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
     let road = Array.create Tiles.count false
     let rampart = Array.create Tiles.count false
     let site = Array.create Tiles.count false
-    let held = Dictionary<Kind, int>()
+    let held = Array.zeroCreate<int> kinds
     let occupied = Array.create Tiles.count false
 
     let walkable =
@@ -54,12 +57,6 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
 
     for c in Array.append ours room.Hostiles do
         setAt (Tiles.ofPos c.Pos) occupied true
-
-    let add (kind: Kind) =
-        held.[kind] <-
-            (match held.TryGetValue kind with
-             | true, n -> n + 1
-             | _ -> 1)
 
     for s in room.Structures do
         let t = Tiles.ofPos s.Pos
@@ -72,13 +69,13 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
         if not s.Walkable then
             setAt t walkable false
 
-        add s.Kind
+        setAt s.Kind.Ordinal held (at s.Kind.Ordinal held + 1)
 
     let mutable pending = 0
 
     for s in room.Sites do
         setAt (Tiles.ofPos s.Pos) site true
-        add s.Kind
+        setAt s.Kind.Ordinal held (at s.Kind.Ordinal held + 1)
 
         if not (Kind.walkable s.Kind) then
             setAt (Tiles.ofPos s.Pos) walkable false
@@ -87,17 +84,20 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
             if standable s.Kind || not (at (Tiles.ofPos s.Pos) occupied) then
                 pending <- pending + 1
 
-    let standing (kind: Kind) =
-        [|
-            for s in room.Structures do
-                if s.Kind = kind then
-                    yield s.Pos
-            for s in room.Sites do
-                if s.Kind = kind then
-                    yield s.Pos
-        |]
+    let standing (ordinal: int) =
+        let found = ResizeArray<Pos>()
 
-    let containers = standing Kind.Container
+        for i in 0 .. room.Structures.Length - 1 do
+            if (at i room.Structures).Kind.Ordinal = ordinal then
+                found.Add (at i room.Structures).Pos
+
+        for i in 0 .. room.Sites.Length - 1 do
+            if (at i room.Sites).Kind.Ordinal = ordinal then
+                found.Add (at i room.Sites).Pos
+
+        found.ToArray()
+
+    let containers = standing Kind.Container.Ordinal
 
     let rocks =
         Array.append
@@ -123,7 +123,7 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
     room.Controller
     |> Option.iter (fun c -> setAt (Tiles.ofPos c.Pos) walkable false)
 
-    let links = standing Kind.Link
+    let links = standing Kind.Link.Ordinal
 
     let unheld (t: int) =
         at t walkable
@@ -174,10 +174,7 @@ let private closes (census: Census) (post: int) (t: int) =
 
     reached.Count < beside.Length
 
-let private heldOf (census: Census) (kind: Kind) =
-    match census.Held.TryGetValue kind with
-    | true, n -> n
-    | _ -> 0
+let private heldOf (census: Census) (kind: Kind) = at kind.Ordinal census.Held
 
 /// Below the haul's level no road or container is due, so only a kind short
 /// of its allowance can be placed; false lets the caller skip the plan.
@@ -192,12 +189,8 @@ let mayPlace (census: Census) (level: int) =
 let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement list =
     let room = min budget (sitesInFlight - census.Pending)
     let placed = ResizeArray<Placement>()
-    let added = Dictionary<Kind, int>()
-
-    let addedOf (kind: Kind) =
-        match added.TryGetValue kind with
-        | true, n -> n
-        | _ -> 0
+    let added = Array.zeroCreate<int> kinds
+    let addedOf (kind: Kind) = at kind.Ordinal added
 
     let taken = HashSet<int>()
 
@@ -244,7 +237,7 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
                 level
             ->
             taken.Add t |> ignore
-            added.[item.Kind] <- addedOf item.Kind + 1
+            setAt item.Kind.Ordinal added (addedOf item.Kind + 1)
 
             placed.Add
                 {

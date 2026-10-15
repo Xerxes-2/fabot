@@ -407,24 +407,29 @@ module Sightings =
 
         // A room in sight holds what stands there now: a wave killed reopens it.
         for room in world.Rooms do
-            let seen =
-                Map.ofList
-                    [
-                        for creep in room.Hostiles do
-                            if Hostiles.armed owned room.Hostiles creep then
-                                creep.Id,
-                                {
-                                    Gone = world.Time + creep.TicksToLive
-                                    Armed = true
-                                }
-                        for s in room.Structures do
-                            if s.Kind.IsInvaderCore then
-                                s.Id,
-                                {
-                                    Gone = world.Time + s.Collapse
-                                    Armed = s.Level > 0
-                                }
-                    ]
+            let mutable seen = Map.empty
+
+            for creep in room.Hostiles do
+                if Hostiles.armed owned room.Hostiles creep then
+                    seen <-
+                        Map.add
+                            creep.Id
+                            {
+                                Gone = world.Time + creep.TicksToLive
+                                Armed = true
+                            }
+                            seen
+
+            for s in room.Structures do
+                if s.Kind.IsInvaderCore then
+                    seen <-
+                        Map.add
+                            s.Id
+                            {
+                                Gone = world.Time + s.Collapse
+                                Armed = s.Level > 0
+                            }
+                            seen
 
             next <-
                 if seen.IsEmpty then

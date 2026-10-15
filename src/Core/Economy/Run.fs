@@ -164,20 +164,18 @@ let private linkBatch = 100
 
 /// The sources' links first, so the hub's never takes their room. A send need
 /// not wait to grow: the loss is the same share of any batch.
-let private linkSends (ground: Ground) : Intent list =
+let private linkSends (sends: ResizeArray<Intent>) (ground: Ground) =
     match ground.Receiver with
-    | None -> []
+    | None -> ()
     | Some receiver ->
         let mutable room = receiver.Free
 
-        [
-            for l in ground.Links |> Array.sortBy (fun l -> not l.Role.IsSource) do
-                let amount = min l.Energy room / linkBatch * linkBatch
+        for l in ground.Links |> Array.sortBy (fun l -> not l.Role.IsSource) do
+            let amount = min l.Energy room / linkBatch * linkBatch
 
-                if l.Id <> receiver.Id && l.Cooldown = 0 && amount > 0 then
-                    room <- room - amount
-                    Link(l.Id, TransferEnergy(receiver.Id, amount))
-        ]
+            if l.Id <> receiver.Id && l.Cooldown = 0 && amount > 0 then
+                room <- room - amount
+                sends.Add(Link(l.Id, TransferEnergy(receiver.Id, amount)))
 
 let decide (context: Context) (state: State) : Intent list * State =
     let world =
@@ -390,7 +388,10 @@ let decide (context: Context) (state: State) : Intent list * State =
         for wish in list do
             moves.Add(Intent.Wish(room, wish))
 
-    let sends = derived.Grounds |> Seq.collect linkSends |> List.ofSeq
+    let sends = ResizeArray<Intent>()
+
+    for g in derived.Grounds do
+        linkSends sends g
 
     let taken = HashSet<string>()
 
@@ -399,7 +400,11 @@ let decide (context: Context) (state: State) : Intent list * State =
         | Creep(name, CreepAct.Pickup _) -> taken.Add name |> ignore
         | _ -> ()
 
-    casts @ List.ofSeq acts @ pickups derived taken @ sends @ List.ofSeq moves,
+    casts
+    @ List.ofSeq acts
+    @ pickups derived taken
+    @ List.ofSeq sends
+    @ List.ofSeq moves,
     { state with Assignments = assignments }
 
 let economy: Module = { Name = "economy"; Run = decide }

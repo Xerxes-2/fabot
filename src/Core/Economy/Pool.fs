@@ -192,10 +192,11 @@ let pool (derived: Derived) : Offer[] =
     // The storage is offered for every ore a body carries, so no load is
     // stranded.
     let ores =
+        let seen = System.Collections.Generic.HashSet<string>()
+
         derived.Bodies
         |> Array.collect (fun b -> b.Store.Held |> Array.map fst)
-        |> Array.filter (fun r -> not r.IsEnergy)
-        |> Array.distinct
+        |> Array.filter (fun r -> not r.IsEnergy && seen.Add(resourceName r))
 
     // A tick a spawn waits is a tick of the income bodies earn, and every
     // colony's alike: travel picks the ring, so a richer room's never draws a

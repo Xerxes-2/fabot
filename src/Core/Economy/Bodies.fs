@@ -166,9 +166,17 @@ let private wholeBlocks (block: BodyPart list) (most: int) (capacity: int) =
         |> min (Engine.maxBodyParts / List.length block)
         |> min most
 
-    block
-    |> List.distinct
-    |> List.collect (fun part -> replicate (repeats * partCountIn block part) part)
+    let parts = Array.ofList block
+    let body = ResizeArray<BodyPart>()
+
+    for i in 0 .. parts.Length - 1 do
+        let part = Tiles.at i parts
+
+        if Array.findIndex (samePart part) parts = i then
+            for _ in 1 .. repeats * partCountIn block part do
+                body.Add part
+
+    List.ofArray (body.ToArray())
 
 let sized (pattern: Pattern) (most: int) (capacity: int) : BodyPart list option =
     if capacity < Engine.bodyCost (blockOf pattern) then
