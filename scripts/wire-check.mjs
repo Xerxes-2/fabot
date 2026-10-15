@@ -3311,7 +3311,7 @@ wire("traffic: no watch removes the key, and makes no ops leaf where none stands
 // admission over the leaf as stored, so the CLI refuses what the bot would.
 wire("ops check: a spec is admitted dry or live, or refused by the bot's own reason", async () => {
   const { checkOpSpec } = await import(MODULE);
-  const holders = { W21S23: "Trepidimous", W21S24: "", W20S23: "", W18S26: "Trepidimous", W18S27: "" };
+  const holders = { W21S23: "Trepidimous", W21S24: "", W20S23: "", W18S28: "Trepidimous", W18S27: "" };
   const row = { id: "c2", template: "exitCamp", enemy: "Trepidimous", rooms: ["W21S23", "W21S24"], deadline: 1005000 };
   const check = (r, live = false, adding = true, stored = null) =>
     checkOpSpec(1000000, "Xerxes-2", holders, stored, r, live, adding);
@@ -3327,8 +3327,7 @@ wire("ops check: a spec is admitted dry or live, or refused by the bot's own rea
     [{ maxEnergy: 0 }, "no budget"],
     [{ deadline: 999000 }, "deadline past"],
     [{ id: "camp" }, "a code op's id: camp"],
-    // The code camp's south exit: the sweep's room before the camp's home.
-    [{ rooms: ["W18S26", "W18S27"], id: "c3" }, "code op sweep holds W18S27"],
+    [{ rooms: ["W18S28", "W18S27"], id: "c3" }, "code op sweep holds W18S27"],
     [{ template: "sweep", rooms: ["W21S24"] }, "no live sweep"],
     [{ rooms: "W21S23" }, "garbled"],
   ]) {

@@ -15,10 +15,21 @@ open Fabot.Core.Tests.RoomInvariantFixtures
 /// (#317, #438). A room no capture is loaded for carries no border and is
 /// joined to nothing, which keeps the search inside the rooms the projection
 /// would hold. It holds no sighting: who owns W18S26 and W19S29 is
-/// `Colony.rivals`' declaration, as on a cold heap (#459).
-let private shippedLinked (rooms: string list) =
+/// `Colony.rivals`' declaration, as on a cold heap (#459), but for the rooms
+/// `unowned` names, seen nobody's.
+let private shippedLinkedSeen (unowned: string list) (rooms: string list) =
     let world =
         { World.empty with
+            Sightings =
+                unowned
+                |> List.map (fun room ->
+                    room,
+                    {
+                        Tick = 0
+                        Targets = lazy Set.empty
+                        Rival = None
+                    })
+                |> Map.ofList
             Rooms =
                 rooms
                 |> List.distinct
@@ -37,6 +48,8 @@ let private shippedLinked (rooms: string list) =
         }
 
     World.linked (Tuning.keeperMargin Tuning.defaults) world
+
+let private shippedLinked = shippedLinkedSeen []
 
 [<Tests>]
 let outpostDeclarationTests =
@@ -188,14 +201,15 @@ let outpostDeclarationTests =
             test "a chain of real border rings joins every declared salvage room to its home" {
                 // The outpost case above, over the third declaration kind, the salvage,
                 // through the same shipped predicates: a salvage room no chain
-                // reaches is refused, and its dismantler is never cast. None is
-                // declared since W11S29 left (#666); this holds the next one to it.
+                // reaches is refused, and its dismantler is never cast. Each
+                // seen nobody's: a room anybody holds has nothing to salvage
+                // (`salvageTargets`), and a declared rival's is watched.
                 let linked =
-                    shippedLinked (
-                        Colony.declared
-                        |> List.collect (fun colony ->
-                            colony.Home :: Salvage.roomsProjected colony.Salvage colony.Home)
-                    )
+                    shippedLinkedSeen
+                        (Colony.declared |> List.collect _.Salvage)
+                        (Colony.declared
+                         |> List.collect (fun colony ->
+                             colony.Home :: Salvage.roomsProjected colony.Salvage colony.Home))
 
                 let unreachable =
                     Colony.declared

@@ -1376,6 +1376,16 @@ let salvageTests =
                     (Set.intersect salvage kept |> Set.toList)
                     "no room is taken down by one list and kept by another"
             }
+
+            test
+                "W17S25 salvages W18S26, unowned since t1,192,635 (user, 2026-10-15), and no other room" {
+                Expect.equal
+                    (Colony.declared
+                     |> List.collect (fun colony ->
+                         colony.Salvage |> List.map (fun room -> colony.Home, room)))
+                    [ "W17S25", "W18S26" ]
+                    "the one salvage room, by the nearest colony"
+            }
         ]
 
 /// One of Trepidimous' rooms as vision showed it at tick 1,000, able to

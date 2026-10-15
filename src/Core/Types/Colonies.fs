@@ -1649,7 +1649,9 @@ module Colony =
                 Home = "W17S25"
                 Outposts = [ Outpost.w17s26; Outpost.w18s25 ]
                 Errands = []
-                Salvage = []
+                // What Trepidimous left in W18S26 once it went unowned
+                // (user, 2026-10-15): two crossings, the nearest colony.
+                Salvage = [ "W18S26" ]
                 Mother = Some "W15S28"
                 Consignee = Some "W15S28"
                 // Trepidimous next door (#446): an exact vertex min cut over
