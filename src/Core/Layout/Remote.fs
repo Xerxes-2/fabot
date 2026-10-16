@@ -118,8 +118,28 @@ let sites
         |> Array.choose (fun c -> world.Spawns |> Array.tryFind (fun s -> s.Pos.Room = c))
         |> Array.map (fun s -> s.Pos)
 
+    // `Atlas.route` searches the graph per call, and every home and outpost in
+    // one `sites` wants the same trees: search each room once.
+    let trees = Dictionary<string, Dictionary<string, string>>()
+
+    let treeOf (room: string) =
+        match trees.TryGetValue room with
+        | true, tree -> tree
+        | _ ->
+            let tree = Atlas.tree atlas Tick.reachHops room
+            trees.[room] <- tree
+            tree
+
     let route (target: Target) (from: string) =
-        Atlas.route atlas target.Avoid target.MaxHops from target.Room
+        if
+            target.Avoid.IsEmpty
+            && target.MaxHops = Tick.reachHops
+            && Option.isSome (Tiles.roomCoords from)
+            && Option.isSome (Tiles.roomCoords target.Room)
+        then
+            Atlas.routeIn (treeOf from) from target.Room
+        else
+            Atlas.route atlas target.Avoid target.MaxHops from target.Room
 
     let sinkFor (room: Room) =
         room.Controller
@@ -133,38 +153,42 @@ let sites
             |> Option.defaultValue homes.[i])
 
     for o in outposts do
-        match
-            match rooms.TryGetValue o.Room with
-            | true, room -> sinkFor room |> Option.map (fun sink -> room, sink)
-            | _ -> None
-        with
-        | Some(room, sink) ->
-            let home = Tick.targetAt sink 1
+        match rooms.TryGetValue o.Room with
+        | true, room ->
+            // A room at its site limit places nothing: the walk is not drawn.
+            let tiles = open' room
 
-            for s in room.Sources do
-                match Atlas.postOf room s.Pos with
-                | Some(post, Some _) ->
-                    for p in walk atlas home post do
-                        place p Kind.Road
-                | Some(_, None) -> ()
-                | None ->
-                    let tiles = open' room
+            if budget > 0 && pending.[room.Name] < Sites.sitesInFlight then
+                match sinkFor room with
+                | Some sink ->
+                    let home = Tick.targetAt sink 1
 
-                    let seat =
-                        Tiles.within 1 (Tiles.ofPos s.Pos)
-                        |> Array.filter (fun t ->
-                            t <> Tiles.ofPos s.Pos
-                            && not (Tiles.onEdge t)
-                            && not (tiles.Contains t)
-                            && not (Terrain.isWall room.Terrain (Tiles.xOf t) (Tiles.yOf t)))
-                        |> Array.choose (fun t ->
-                            Atlas.travelTicks atlas hauler home (Tiles.toPos room.Name t)
-                            |> Option.map (fun ticks -> ticks, t))
-                        |> Array.sortBy (fun (ticks, t) -> ticks * Tiles.count + t)
-                        |> Array.tryHead
+                    for s in room.Sources do
+                        match Atlas.postOf room s.Pos with
+                        | Some(post, Some _) ->
+                            for p in walk atlas home post do
+                                place p Kind.Road
+                        | Some(_, None) -> ()
+                        | None ->
+                            let seat =
+                                Tiles.within 1 (Tiles.ofPos s.Pos)
+                                |> Array.filter (fun t ->
+                                    t <> Tiles.ofPos s.Pos
+                                    && not (Tiles.onEdge t)
+                                    && not (tiles.Contains t)
+                                    && not (
+                                        Terrain.isWall room.Terrain (Tiles.xOf t) (Tiles.yOf t)
+                                    ))
+                                |> Array.choose (fun t ->
+                                    Atlas.travelTicks atlas hauler home (Tiles.toPos room.Name t)
+                                    |> Option.map (fun ticks -> ticks, t))
+                                |> Array.sortBy (fun (ticks, t) -> ticks * Tiles.count + t)
+                                |> Array.tryHead
 
-                    seat
-                    |> Option.iter (fun (_, t) -> place (Tiles.toPos room.Name t) Kind.Container)
+                            seat
+                            |> Option.iter (fun (_, t) ->
+                                place (Tiles.toPos room.Name t) Kind.Container)
+                | None -> ()
         | _ -> ()
 
     List.ofSeq intents
