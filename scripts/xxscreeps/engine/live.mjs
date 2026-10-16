@@ -15,6 +15,7 @@ import { makeWriter } from "xxscreeps/schema/write.js";
 import { TerrainWriter, packExits } from "xxscreeps/game/terrain.js";
 import { computeRoomMeta } from "xxscreeps/mods/modern/sector/terrain.js";
 import { GameState, runAsUser, runWithState } from "xxscreeps/game/index.js";
+import { STRONGHOLD_DECAY_TICKS } from "xxscreeps/game/constants/structure.js";
 import { createRoomObject } from "xxscreeps/game/object.js";
 import { RoomPosition } from "xxscreeps/game/position.js";
 import { flushUsers } from "xxscreeps/game/room/room.js";
@@ -28,6 +29,7 @@ import * as ControllerProc from "xxscreeps/mods/classic/controller/processor.js"
 import { Source } from "xxscreeps/mods/classic/source/source.js";
 import { kSourceKeeperUserId } from "xxscreeps/mods/classic/source/game.js";
 import * as KeeperLair from "xxscreeps/mods/classic/source/keeper-lair.js";
+import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { activateNPC } from "xxscreeps/mods/npc/processor.js";
 import { Mineral } from "xxscreeps/mods/classic/mineral/mineral.js";
 import * as Extractor from "xxscreeps/mods/classic/mineral/extractor.js";
@@ -52,6 +54,11 @@ import * as Nuker from "xxscreeps/mods/modern/nuker/nuker.js";
 
 const [capturePath] = process.argv.slice(2);
 const capture = JSON.parse(fs.readFileSync(capturePath, "utf8"));
+// The modern stronghold mod, loaded only for a capture with an invader core:
+// the core is the one object the classic mods do not know.
+const InvaderCore = [...capture.rooms, ...(capture.terrain ?? [])].some((r) => (r.objects ?? []).some((o) => o.type === "invaderCore"))
+  ? await import("xxscreeps/mods/modern/stronghold/invader-core.js")
+  : null;
 const db = await Database.connect();
 const shard = await Shard.connect(db, "shard0");
 const warnings = [];
@@ -171,6 +178,16 @@ function structure(o, level) {
       lair["#nextSpawnTime"] = ahead(o.nextSpawnTime);
       return lair;
     }
+    case "invaderCore": {
+      // Deployed (deploy time 0), as `engine/world.mjs` stands one: a level
+      // 1-5 core runs its `bunker<level>` behaviour until its collapse — a
+      // capture's `decayTime`, or a fresh stronghold's own decay window.
+      const core = InvaderCore.create(at(o), o.level ?? 0, 0);
+      if ((o.level ?? 0) > 0) core["#templateName"] = "bunker" + (o.level ?? 0);
+      const collapse = o.decayTime ?? 0;
+      core["#collapseTime"] = collapse > time ? collapse : time + STRONGHOLD_DECAY_TICKS;
+      return core;
+    }
     default:
       return null;
   }
@@ -232,7 +249,10 @@ for (const r of [...capture.rooms, ...ring]) {
           object = Site.create(at(o), o.structureType, owner(o.user), o.progressTotal, o.name);
           object.progress = o.progress ?? 0;
         } else if (o.type === "creep") {
-          if (o.user !== capture.userId) {
+          // An NPC's creep the engine drives (an Invader core's defenders, a
+          // Source Keeper) stands; another player's, with no code, would only
+          // stand.
+          if (o.user !== capture.userId && !User.npcUsers[o.user]) {
             leave("another player's creep");
             continue;
           }
@@ -244,7 +264,7 @@ for (const r of [...capture.rooms, ...ring]) {
             at(o),
             o.body.map((p) => ({ type: p.type, hits: p.hits, boost: p.boost ?? undefined })),
             o.name,
-            ours,
+            o.user === capture.userId ? ours : o.user,
           );
           object.hits = o.hits;
           object.fatigue = o.fatigue ?? 0;
@@ -270,6 +290,7 @@ for (const r of [...capture.rooms, ...ring]) {
         insert(object, o);
       }
       if (r.objects.some((o) => o.type === "keeperLair")) activateNPC(room, kSourceKeeperUserId);
+      if (r.objects.some((o) => o.type === "invaderCore")) activateNPC(room, kInvaderUserId);
       room["#flushObjects"](state);
     }),
   );

@@ -151,6 +151,8 @@ const measures = {
   fightWoundedOut: (_, __, dir) => Math.min(100, ...foughtOf(dir).filter((f) => f.wounded).map((f) => (100 * f.out) / f.wounded)),
   // The most ticks a siege took from its open to its breach (one that never breached: Infinity).
   breachTicks: (_, __, dir) => Math.max(...rowsOf(dir).filter((e) => e.kind === "siege").map((e) => (e.closed === null || e.disengaged ? Infinity : e.closed - e.opened)), ...(rowsOf(dir).some((e) => e.kind === "siege") ? [] : [Infinity])),
+  // The least hits a siege's target (a spawn, a core) ever stood at (none seen: Infinity).
+  siegeTargetLow: (_, __, dir) => Math.min(Infinity, ...rowsOf(dir).filter((e) => e.kind === "siege" && e.target).map((e) => e.target.low)),
   bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),
   // The most energy one engagement cast, of the bodies that stood in it.
   mostCast: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.cast ?? 0)),

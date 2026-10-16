@@ -524,6 +524,12 @@ async function engaged(t, time, rooms) {
     // A siege's room is the rival's, which no sample follows.
     const seen = roomNames.includes(e.room) ? rooms : [...rooms, await shard.loadRoom(e.room, time)];
     const objects = seen.flatMap((r) => [...r["#objects"]]);
+    // The least hits a siege's target (a spawn, a core) has stood at: not a
+    // group member, so nothing else reads it.
+    if (e.target !== undefined) {
+      const target = objects.find((o) => o.id === e.target);
+      if (target !== undefined) rec.target = { low: Math.min(rec.target?.low ?? Infinity, target.hits) };
+    }
     const theirs = objects.filter((o) => rec.members.has(o.id));
     if (theirs.length) rec.seen = t;
     rec.core ||= theirs.some((o) => o.structureType === "invaderCore");
