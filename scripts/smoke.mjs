@@ -121,7 +121,7 @@ if (r.Sources.length !== 1 || r.Structures.length !== 2 || r.Sites.length !== 1 
   fail(`room facts lost: ${JSON.stringify({ s: r.Sources.length, st: r.Structures.length, si: r.Sites.length, p: r.Piles.length })}`);
 const [k] = w.Creeps;
 if (k.Body.length !== 3 || k.Store.Capacity !== 50) fail(`creep facts lost: ${JSON.stringify(k).slice(0, 200)}`);
-if (Memory.fabot.v1 !== "left alone") fail("v1's Memory was touched");
+if (Memory.fabot !== undefined) fail(`v1's Memory was kept: ${JSON.stringify(Memory.fabot)}`);
 const held = Memory.v2.assignments?.a;
 if (typeof held !== "string") fail(`the creep holds no task: ${JSON.stringify(Memory.v2.assignments)}`);
 if (observe.refusals.some((r) => r.code === -100)) fail(`an intent threw: ${JSON.stringify(observe.refusals)}`);

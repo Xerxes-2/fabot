@@ -174,9 +174,10 @@ read on a key change, on demand or by the operator goes in **segments**
 (`RawMemory.segments`, read when asked). The heap is a cache and is rebuildable
 from the other two (§1, cold start).
 
-Everything v2 keeps in Memory is under `Memory.v2`; v1's keys are never read
-or written, so a rollback to v1 finds its Memory as it left it, and clearing
-them is an operator's deliberate step. Segment ids: 1 observe, 10–14 the
+Everything v2 keeps in Memory is under `Memory.v2`; v1's keys are dropped on
+the first tick that sees them, so the `fabot` blob a takeover finds is parsed
+once rather than every tick after (a rollback to v1 finds it gone and builds it
+fresh). Segment ids: 1 observe, 10–14 the
 recorder's ring; the rest are assigned here as their stores land.
 
 | Store | Shape | Owner | Lives in | Why |

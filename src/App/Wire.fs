@@ -1,5 +1,5 @@
-/// `Memory.v2` is ours; v1's keys are never read or written, so a rollback to
-/// v1 finds its Memory as it left it.
+/// `Memory.v2` is ours; v1's keys are dropped on the first tick that sees them,
+/// since their parse is what every tick's first touch of `Memory` pays.
 module Fabot.Wire
 
 open Fable.Core
@@ -17,6 +17,9 @@ let recorderSlots = 5
 [<Emit("RawMemory.get()")>]
 let private rawMemory () : string = jsNative
 
+[<Emit("delete $0[$1]")>]
+let private dropField (_o: obj) (_name: string) : unit = jsNative
+
 [<Emit("(typeof $0 === 'object' && $0 !== null)")>]
 let private isObject (_value: obj) : bool = jsNative
 
@@ -24,6 +27,9 @@ let private isObject (_value: obj) : bool = jsNative
 let private asArray (_value: obj) : obj[] = jsNative
 
 let private root () : obj =
+    if isObject (Memory?fabot) then
+        dropField Memory "fabot"
+
     let v2 = Memory?v2
 
     if isObject v2 then
