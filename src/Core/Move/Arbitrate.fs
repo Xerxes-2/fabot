@@ -31,9 +31,40 @@ let private offered (a: Wish) (b: Wish) =
 
 let inline private above (s: int) (h: int) (s0: int) (h0: int) = s > s0 || (s = s0 && h > h0)
 
+/// The four tables a resolution reads, kept across the rooms of one tick: a
+/// room refills them from empty anyway, so they are allocations otherwise.
+type Scratch =
+    {
+        Blocked: bool[]
+        StepsOnto: int[]
+        Holder: int[]
+        ChangedAt: int[]
+    }
+
+let scratch () : Scratch =
+    {
+        Blocked = Array.zeroCreate<bool> Tiles.count
+        StepsOnto = Array.create Tiles.count -1
+        Holder = Array.create Tiles.count -1
+        ChangedAt = Array.zeroCreate<int> Tiles.count
+    }
+
 /// `held`: the tiles of bodies outside the wishes (theirs, and ours with none).
-let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resolution =
-    let blocked = Array.zeroCreate<bool> Tiles.count
+let resolve
+    (scratch: Scratch)
+    (passable: int -> bool)
+    (held: int[])
+    (wishes: Wish list)
+    : Resolution =
+    let blocked = scratch.Blocked
+    let stepsOnto = scratch.StepsOnto
+    let holder = scratch.Holder
+    let changedAt = scratch.ChangedAt
+
+    Array.fill blocked 0 Tiles.count false
+    Array.fill stepsOnto 0 Tiles.count -1
+    Array.fill holder 0 Tiles.count -1
+    Array.fill changedAt 0 Tiles.count 0
 
     for tile in held do
         if inRoom tile then
@@ -41,7 +72,6 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
 
     // A swap a tick or two away beats the way round: with a held body that
     // steps onto this tile, or a mover through the same head onto it.
-    let stepsOnto = Array.create Tiles.count -1
     let wishes = Array.ofList wishes
 
     for wish in wishes do
@@ -53,7 +83,6 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
             if inRoom wish.At then
                 stepsOnto.[wish.At] <- if Wish.stays wish then -1 else wish.Head
 
-    let holder = Array.create Tiles.count -1
     let placed = ResizeArray<Wish>()
 
     for wish in wishes |> Array.filter Wish.movable |> Array.sortWith offered do
@@ -168,7 +197,6 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
 
         onPath.[i] <- false
 
-    let changedAt = Array.zeroCreate<int> Tiles.count
     let searchedAt = Array.create n -1
     let mutable clock = 0
     let mutable searches = 0
@@ -229,5 +257,13 @@ let resolve (passable: int -> bool) (held: int[]) (wishes: Wish list) : Resoluti
         Searches = searches
     }
 
+let arbitrateWith
+    (scratch: Scratch)
+    (passable: int -> bool)
+    (held: int[])
+    (wishes: Wish list)
+    : (string * int) list =
+    (resolve scratch passable held wishes).Steps
+
 let arbitrate (passable: int -> bool) (held: int[]) (wishes: Wish list) : (string * int) list =
-    (resolve passable held wishes).Steps
+    arbitrateWith (scratch ()) passable held wishes

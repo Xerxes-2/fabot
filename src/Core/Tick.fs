@@ -201,6 +201,7 @@ let queue (world: World) (asks: (string * Ask) list) : Intent list =
 let arbitrate (context: Context) (wishes: (string * Move.Wish) list) : Intent list =
     let wished = System.Collections.Generic.HashSet<string>()
     let wishes = byRoom wishes
+    let scratch = Move.Arbitrate.scratch ()
 
     for _, ws in wishes do
         for w in ws do
@@ -214,7 +215,11 @@ let arbitrate (context: Context) (wishes: (string * Move.Wish) list) : Intent li
             |> Array.filter (fun c -> c.Pos.Room = room && not (wished.Contains c.Name))
             |> Array.map (fun c -> Tiles.ofPos c.Pos)
 
-        Move.Arbitrate.arbitrate (Atlas.passable context.Atlas room) held (List.ofArray ws)
+        Move.Arbitrate.arbitrateWith
+            scratch
+            (Atlas.passable context.Atlas room)
+            held
+            (List.ofArray ws)
         |> List.map (fun (name, direction) -> Creep(name, CreepAct.Move direction)))
 
 let private settle (context: Context) (intents: Intent list) : Intent list =
