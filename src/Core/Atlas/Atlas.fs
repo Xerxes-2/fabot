@@ -48,6 +48,7 @@ type Atlas =
         {
             Rooms: Dictionary<string, RoomGrid>
             mutable Misses: int
+            mutable Hits: int
         }
 
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
@@ -157,7 +158,12 @@ module Atlas =
              |> Option.toArray)
         |> Array.map Tiles.ofPos
 
-    let empty () : Atlas = { Rooms = Dictionary(); Misses = 0 }
+    let empty () : Atlas =
+        {
+            Rooms = Dictionary()
+            Misses = 0
+            Hits = 0
+        }
 
     /// ~10 kB each. A dropped resource's tile is a new goal, so a room's keys
     /// are unbounded; past this the room floods afresh.
@@ -230,11 +236,13 @@ module Atlas =
 
             rooms.[room.Name] <- { Weights = weights; Floods = floods }
 
-        { Rooms = rooms; Misses = 0 }
+        { Rooms = rooms; Misses = 0; Hits = 0 }
 
     let ofWorld (world: World) : Atlas = following (empty ()) world
 
     let misses (atlas: Atlas) : int = atlas.Misses
+
+    let hits (atlas: Atlas) : int = atlas.Hits
 
     let weights (atlas: Atlas) (room: string) : int[] option =
         match atlas.Rooms.TryGetValue room with
@@ -456,6 +464,7 @@ module Atlas =
                 let dist =
                     if grid.Floods.ContainsKey key then
                         tally "hit" 1
+                        atlas.Hits <- atlas.Hits + 1
                         grid.Floods.[key]
                     else
                         atlas.Misses <- atlas.Misses + 1

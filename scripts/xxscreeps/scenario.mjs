@@ -33,6 +33,9 @@ import { sweep } from "./prune.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
+// A count ceiling holds for every scenario (`ARCHITECTURE.md` §9.3), so an assert
+// naming one takes its bound from there rather than repeating the number.
+const countCeilings = JSON.parse(readFileSync(join(REPO, "scripts/ceilings.json"), "utf8")).counts;
 const LIBRARY = join(HERE, "scenarios");
 const fail = (m) => {
   console.error(m);
@@ -75,6 +78,20 @@ const walksOf = (dir) => rowsOf(dir).flatMap((e) => (e.blob ? [e.blob] : []));
 const foughtOf = (dir) => rowsOf(dir).flatMap((e) => (e.fought ? [e.fought] : []));
 const mean = (xs) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
 const samplesOf = (dir) => readFileSync(join(dir, "samples.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+// The bot's per-tick counts (`ARCHITECTURE.md` §9.3), as `soak-step` reads them off
+// the observe segment; a tick whose segment was not rewritten carries last tick's.
+const countsOf = (dir, a) =>
+  readFileSync(join(dir, "cpu.jsonl"), "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => JSON.parse(l))
+    .filter((r) => r.counts && r.t >= (a.from ?? 0) && r.t < (a.to ?? Infinity))
+    .map((r) => Object.fromEntries(r.counts));
+// A run that reported no counts fails its ceiling: Infinity is over any max.
+const withCounts = (dir, a, f) => {
+  const rows = countsOf(dir, a);
+  return rows.length ? f(rows) : Infinity;
+};
 const at = (samples, t) => samples.find((s) => s.t >= t) ?? samples.at(-1);
 const sideOf = (a) => (s) => (a.who ? s.others[a.who] : s);
 const within = (samples, a) => samples.filter((s) => s.t >= (a.from ?? 0) && s.t < (a.to ?? Infinity));
@@ -194,6 +211,15 @@ const measures = {
     const strikes = (b) => /[ar]/.test(b);
     return bodies.filter((b) => strikes(b) || b.includes("w") || (b.includes("h") && bodies.some(strikes))).length;
   },
+  // The most floods one tick ran (a miss is one flood), and the percent of
+  // `fieldOn` lookups that missed: §1's "counting hits and misses".
+  floodsMost: (_, a, dir) => withCounts(dir, a, (rows) => Math.max(0, ...rows.map((c) => c.atlasMisses ?? 0))),
+  atlasMissRate: (_, a, dir) =>
+    withCounts(dir, a, (rows) => {
+      const hits = rows.reduce((n, c) => n + (c.atlasHits ?? 0), 0);
+      const misses = rows.reduce((n, c) => n + (c.atlasMisses ?? 0), 0);
+      return Number(((100 * misses) / Math.max(1, hits + misses)).toFixed(2));
+    }),
 };
 for (const s of scenarios) for (const a of s.assert) if (!measures[a.measure]) fail(`${s.name}: no measure ${a.measure}`);
 for (const { name, start } of scenarios)
@@ -324,10 +350,11 @@ for (const s of scenarios) {
   const samples = samplesOf(dir);
   for (const a of s.assert) {
     const value = measures[a.measure](samples, a, dir);
-    const ok = value <= (a.max ?? Infinity) && value >= (a.min ?? -Infinity);
+    const max = a.max ?? countCeilings[a.measure] ?? Infinity;
+    const ok = value <= max && value >= (a.min ?? -Infinity);
     if (!ok) failed++;
     const window = a.from !== undefined || a.to !== undefined ? ` t${a.from ?? 0}-${a.to ?? s.ticks}` : "";
-    const bound = [a.min !== undefined && `≥ ${a.min}`, a.max !== undefined && `≤ ${a.max}`].filter(Boolean).join(", ");
+    const bound = [a.min !== undefined && `≥ ${a.min}`, max !== Infinity && `≤ ${max}`].filter(Boolean).join(", ");
     console.log(`${ok ? "pass" : "FAIL"} ${s.name}: ${a.measure}${a.who ? ` of ${a.who}` : ""}${window} ${value} (${bound})`);
   }
   const rows = s.assert.some((a) => a.measure === "predictedWinsLost") ? engagementsOf(dir) : [];

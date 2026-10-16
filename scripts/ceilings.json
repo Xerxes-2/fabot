@@ -1,5 +1,5 @@
 {
-  "_": "Never raised (AGENTS.md). Lines are every line of every .fs under the path; a path not built yet passes. comments: the most percent of a src directory's own lines that are `//` comments, by the directory, else `_default`. counts: per-tick ceilings scripts/counts will check (ARCHITECTURE.md §9.3), filled as the counters land.",
+  "_": "Never raised (AGENTS.md). Lines are every line of every .fs under the path; a path not built yet passes. comments: the most percent of a src directory's own lines that are `//` comments, by the directory, else `_default`. counts: the most a per-tick count the bot reports in its observe segment (ARCHITECTURE.md §9.3) may stand at, over a scenario's whole run: `floodsMost` the floods one tick ran, `atlasMissRate` the percent of `fieldOn` lookups that flooded. `npm run scenario` asserts them.",
   "lines": {
     "src/Core/Fight": 2500,
     "src/Core/Fight/Kinds/*": 400,
@@ -15,5 +15,8 @@
   "comments": {
     "_default": 7
   },
-  "counts": {}
+  "counts": {
+    "floodsMost": 60,
+    "atlasMissRate": 5
+  }
 }

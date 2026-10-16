@@ -4,6 +4,8 @@
   "ticks": 3000,
   "assert": [
     { "measure": "postedLinksAtEnd", "min": 1 },
-    { "measure": "linked", "min": 1 }
+    { "measure": "linked", "min": 1 },
+    { "measure": "floodsMost" },
+    { "measure": "atlasMissRate" }
   ]
 }

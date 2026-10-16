@@ -4,6 +4,8 @@
   "ticks": 3000,
   "assert": [
     { "measure": "build", "min": 15000 },
-    { "measure": "decayedAway", "max": 0 }
+    { "measure": "decayedAway", "max": 0 },
+    { "measure": "floodsMost" },
+    { "measure": "atlasMissRate" }
   ]
 }

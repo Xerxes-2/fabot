@@ -8,7 +8,7 @@
 // `refusals.json` (counts by act and code), `lost.json` (the ticks lost),
 // `levels.json` (the tick each controller level was first seen),
 // `observe.json` (the last segment read), `cpu.jsonl` (tick, engine-reported
-// CPU, the bot's own phases) and `console.log`. Each sample carries the
+// CPU, the bot's own phases and counts) and `console.log`. Each sample carries the
 // room's energy ledger, cumulative from the first tick (`ledger`): dug,
 // spawn regeneration, spent on bodies, building, upgrading, repairing and
 // towers, lost to pile decay and to link sends, and the stock standing
@@ -647,7 +647,7 @@ for (let t = 0; t < ticks; t++) {
       refusals[key] = (refusals[key] ?? 0) + 1;
     }
   }
-  fs.writeSync(cpuOut, JSON.stringify({ t, time, cpu, observed: fresh ? obs.cpu : null, phases: fresh ? obs.phases : null }) + "\n");
+  fs.writeSync(cpuOut, JSON.stringify({ t, time, cpu, observed: fresh ? obs.cpu : null, phases: fresh ? obs.phases : null, counts: fresh ? obs.counts : null }) + "\n");
   const rooms = await Promise.all(roomNames.map((name) => shard.loadRoom(name, time)));
   const room = rooms[0];
   account(rooms, time);

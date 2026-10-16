@@ -336,6 +336,7 @@ type Observed =
         Bucket: int
         Total: float
         Phases: (string * float) list
+        Counts: (string * int) list
         Off: string list
         Faults: Fault list
         Refusals: Executor.Refusal list
@@ -353,6 +354,10 @@ let writeObserve (o: Observed) : unit =
                     "phases"
                     ==> (o.Phases
                          |> List.map (fun (name, ms) -> [| box name; box ms |])
+                         |> Array.ofList)
+                    "counts"
+                    ==> (o.Counts
+                         |> List.map (fun (name, n) -> [| box name; box n |])
                          |> Array.ofList)
                     "off" ==> Array.ofList o.Off
                     "faults"
