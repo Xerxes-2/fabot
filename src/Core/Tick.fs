@@ -71,12 +71,18 @@ let nearest
         }
 
     let least (measure: Pos -> int option) =
-        Array.init homes.Length id
-        |> Array.filter can
-        |> Array.choose (fun i -> measure homes.[i] |> Option.map (fun d -> d, i))
-        |> Array.sort
-        |> Array.tryHead
-        |> Option.map snd
+        let mutable best = -1
+        let mutable bestD = System.Int32.MaxValue
+
+        for i in 0 .. homes.Length - 1 do
+            if can i then
+                match measure homes.[i] with
+                | Some d when d < bestD ->
+                    best <- i
+                    bestD <- d
+                | _ -> ()
+
+        if best < 0 then None else Some best
 
     least (fun home -> Atlas.ticksTo atlas route walker (targetAt home 1) at)
     |> Option.orElseWith (fun () ->
