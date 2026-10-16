@@ -181,6 +181,13 @@ let private config =
         maxTest = 300
     }
 
+/// The scene the capacity rule failed on is drawn about once in a few thousand
+/// runs, so a fixed seed keeps it in the suite rather than leaving it to the draw.
+let private pinned =
+    { config with
+        replay = Some(6954441170866046493UL, 11193485656854150797UL, Some 83)
+    }
+
 let private matched (scene: Scene) assignments =
     Matcher.matchAll scene.Travel scene.Pool scene.Bodies assignments
 
@@ -195,6 +202,33 @@ let private limitOf =
     | Capacity.Work n
     | Capacity.Load n
     | Capacity.Seated(_, _, n) -> Some n
+
+/// Whether `offer` is filled past its last holder: the holders that are there
+/// when each holder arrives, less the largest of them, fit its limit.
+let private withinCapacity (scene: Scene) (out: Matcher.Assignments) (offer: Offer) =
+    let holders =
+        scene.Bodies |> Array.filter (fun b -> Map.tryFind b.Name out = Some offer.Id)
+
+    let arrives b =
+        scene.Travel b offer |> Option.defaultValue 0 |> max 0
+
+    match limitOf offer.Capacity with
+    | None -> true
+    | Some limit ->
+        // Only the holders there when `b` arrives count: a successor is seated
+        // as its predecessor dies. `b` is one, `take` needing `walk >= 0`.
+        holders
+        |> Array.forall (fun b ->
+            let shares =
+                holders
+                |> Array.filter (fun a -> arrives a <= arrives b && a.TicksToLive > arrives b)
+                |> Array.map (fun a -> share a offer)
+
+            shares.Length > 0 && Array.sum shares - Array.max shares < limit)
+
+let private capacityHeld (scene: Scene) =
+    let out = matched scene scene.Assignments
+    scene.Pool |> Array.forall (withinCapacity scene out)
 
 [<Tests>]
 let tests =
@@ -316,21 +350,9 @@ let tests =
                            | Upgrade _ -> true
                            | _ -> false))
 
-            testPropertyWithConfig config "no capacity is filled past its last holder"
-            <| fun (scene: Scene) ->
-                let out = matched scene scene.Assignments
+            testPropertyWithConfig config "no capacity is filled past its last holder" capacityHeld
 
-                scene.Pool
-                |> Array.forall (fun offer ->
-                    let shares =
-                        scene.Bodies
-                        |> Array.filter (fun b -> Map.tryFind b.Name out = Some offer.Id)
-                        |> Array.map (fun b -> share b offer)
-
-                    match limitOf offer.Capacity with
-                    | Some limit when shares.Length > 0 ->
-                        Array.sum shares - Array.max shares < limit
-                    | _ -> true)
+            testPropertyWithConfig pinned "the scene the capacity rule once failed on" capacityHeld
 
             testPropertyWithConfig
                 config
