@@ -27,8 +27,8 @@ ones.
   function takes `Derived`, never `World`. The only cache is `Atlas`'s
   flood table; a new `TickMemo`, `Dictionary` cache or `lazy` outside
   `Derived` is an architecture change (stop and ask).
-- Count ceilings (`scripts/counts`, `scripts/ceilings.json`) are a gate like line
-  ceilings: never raised.
+- Count ceilings (`scripts/ceilings.json`, read by `npm run scenario`) are a
+  gate like line ceilings: never raised.
 
 ## Fixing behaviour
 

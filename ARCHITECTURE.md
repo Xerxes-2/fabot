@@ -567,14 +567,15 @@ Most impact first:
 
 ### 9.3 Counts are a gate
 
-`scripts/counts <capture>` replays a capture and prints, per tick: floods run,
-Atlas cache hits/misses, `Exchange.outcome` calls, `Derived` lazies forced,
-intel rows read, Memory bytes. Because `decide` is deterministic the numbers
-are exact, so `scripts/ceilings.json` holds ceilings for them beside the line
-ceilings — never raised; lowered when a change earns it. This is how "the same
-thing computed many times" is caught: by a number, at `jj ship`, not by a
-reviewer noticing. A count ceiling is the first performance regression test
-and needs no representative benchmark to be trusted.
+The bot reports the per-tick counts it has in the observe segment: floods run
+and Atlas cache hits/misses today, `Exchange.outcome` calls, `Derived` lazies
+forced, intel rows read and Memory bytes as they land. Because `decide` is
+deterministic the numbers are exact, so `scripts/ceilings.json` holds ceilings
+for them beside the line ceilings — never raised; lowered when a change earns
+it — and `npm run scenario` reads them. This is how "the same thing computed
+many times" is caught: by a number, at `jj ship`, not by a reviewer noticing. A
+count ceiling is the first performance regression test and needs no
+representative benchmark to be trusted.
 
 ## 10. Verification
 
