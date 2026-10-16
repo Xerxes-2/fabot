@@ -297,23 +297,39 @@ module Atlas =
             []
 
     let private linked (atlas: Atlas) (from: string) (onto: string) (exit: int) =
-        let weightsOf room =
-            if atlas.Rooms.ContainsKey room then
-                Some atlas.Rooms.[room].Weights
+        let near =
+            if atlas.Rooms.ContainsKey from then
+                Some atlas.Rooms.[from].Weights
             else
                 None
 
-        let near = weightsOf from
-        let far = weightsOf onto
+        let far =
+            if atlas.Rooms.ContainsKey onto then
+                Some atlas.Rooms.[onto].Weights
+            else
+                None
 
-        Tiles.exitTiles exit
-        |> Array.exists (fun tile ->
-            (match near with
-             | Some weights -> at tile weights >= 0
-             | None -> true)
-            && (match far with
+        let band = Tiles.exitTiles exit
+        let mutable i = 0
+        let mutable hit = false
+
+        while not hit && i < band.Length do
+            let tile = at i band
+
+            let nearWalkable =
+                match near with
+                | Some weights -> at tile weights >= 0
+                | None -> true
+
+            let farWalkable =
+                match far with
                 | Some weights -> at (Tiles.landing tile) weights >= 0
-                | None -> true))
+                | None -> true
+
+            hit <- nearWalkable && farWalkable
+            i <- i + 1
+
+        hit
 
     let private search
         (atlas: Atlas)
@@ -419,21 +435,29 @@ module Atlas =
 
             let goals =
                 if room = target.Room then
-                    let sorted = Array.sort target.Tiles
-                    let tiles = ResizeArray()
+                    let sorted =
+                        if target.Tiles.Length > 1 then
+                            Array.sort target.Tiles
+                        else
+                            target.Tiles
+
                     let mutable goalKey = "r" + string target.Range + ":"
+                    let mutable first = true
 
                     for i in 0 .. sorted.Length - 1 do
                         if i = 0 || at i sorted <> at (i - 1) sorted then
-                            tiles.Add(at i sorted)
-                            goalKey <- goalKey + (if i = 0 then "" else ",") + string (at i sorted)
+                            goalKey <- goalKey + (if first then "" else ",") + string (at i sorted)
+                            first <- false
 
                     let build () =
                         let found = ResizeArray()
 
-                        for tile in tiles.ToArray() do
-                            if tile >= 0 && tile < Tiles.count then
-                                seatsNear footprint grid.Weights target.Range tile found
+                        for i in 0 .. sorted.Length - 1 do
+                            if i = 0 || at i sorted <> at (i - 1) sorted then
+                                let tile = at i sorted
+
+                                if tile >= 0 && tile < Tiles.count then
+                                    seatsNear footprint grid.Weights target.Range tile found
 
                         found.ToArray()
 
