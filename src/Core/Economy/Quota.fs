@@ -187,7 +187,7 @@ let private linkDrain (derived: Derived) (ground: Ground) : float =
 
 /// A haul trip is to the dearest sink, not the nearest: a ring fills in a
 /// trip, and the flow that goes on all day is to the far sink.
-let private groundDemands (near: Near) (leg: Leg) (derived: Derived) =
+let private groundDemands (owners: Map<string, int>) (leg: Leg) (derived: Derived) =
     let demands = ResizeArray<Demand>()
     let life = float Engine.creepLifetime
     let colonies = derived.Colonies
@@ -208,7 +208,7 @@ let private groundDemands (near: Near) (leg: Leg) (derived: Derived) =
 
     derived.Grounds
     |> Array.iteri (fun gi ground ->
-        let owner = ownerOf near derived gi
+        let owner = Map.tryFind ground.Room owners
         let mutable drain = linkDrain derived ground
 
         for s in ground.Sources do
@@ -316,7 +316,13 @@ let private castable (colonies: Colony[]) (d: Demand) (ci: int) =
     Engine.bodyCost (blockOf d.Pattern) <= colonies.[ci].BankCapacity
     && (not d.Pattern.IsUpgrader || colonies.[ci].Room = d.At.Room)
 
-let private spendDemands (near: Near) (leg: Leg) (derived: Derived) (others: ResizeArray<Demand>) =
+let private spendDemands
+    (owners: Map<string, int>)
+    (near: Near)
+    (leg: Leg)
+    (derived: Derived)
+    (others: ResizeArray<Demand>)
+    =
     let colonies = derived.Colonies
     let n = colonies.Length
     let life = float Engine.creepLifetime
@@ -325,15 +331,19 @@ let private spendDemands (near: Near) (leg: Leg) (derived: Derived) (others: Res
     let upkeep = Array.zeroCreate<float> n
 
     derived.Grounds
-    |> Array.iteri (fun gi ground ->
-        match ownerOf near derived gi with
+    |> Array.iter (fun ground ->
+        match Map.tryFind ground.Room owners with
         | Some ci ->
             income.[ci] <- income.[ci] + float ground.Posted
             owed.[ci] <- owed.[ci] + (ground.Sites |> Array.sumBy (fun s -> s.Left))
         | None -> ())
 
     for d in others do
-        match near (castable colonies d) d.At with
+        match
+            Map.tryFind d.At.Room owners
+            |> Option.filter (castable colonies d)
+            |> Option.orElseWith (fun () -> near (castable colonies d) d.At)
+        with
         | Some ci ->
             match bodyFor colonies.[ci] d with
             | Some body when partsOf d.Pattern body > 0 ->
@@ -493,8 +503,17 @@ let plan
     (assignments: Map<string, string>)
     : Plan =
     let colonies = derived.Colonies
-    let others = groundDemands near leg derived
-    let all = Array.append (others.ToArray()) (spendDemands near leg derived others)
+
+    let owners =
+        derived.Grounds
+        |> Array.mapi (fun gi ground -> ground.Room, ownerOf near derived gi)
+        |> Array.choose (fun (room, owner) -> owner |> Option.map (fun ci -> room, ci))
+        |> Map.ofArray
+
+    let others = groundDemands owners leg derived
+
+    let all =
+        Array.append (others.ToArray()) (spendDemands owners near leg derived others)
 
     let standing = System.Collections.Generic.Dictionary<string, int>()
     let targets = System.Collections.Generic.Dictionary<string, Pos>()
@@ -515,7 +534,10 @@ let plan
         if body.TicksToLive <= spawnTime then
             true
         else
-            match near (fun _ -> true) body.Pos with
+            match
+                Map.tryFind body.Pos.Room owners
+                |> Option.orElseWith (fun () -> near (fun _ -> true) body.Pos)
+            with
             | Some ci ->
                 let home = homeOf colonies.[ci]
 
@@ -630,15 +652,10 @@ let plan
         else
             Pattern.Worker
 
-    let owners =
-        derived.Grounds
-        |> Array.mapi (fun gi ground -> ground.Room, ownerOf near derived gi)
-        |> Map.ofArray
-
     let serves (ci: int) (pattern: Pattern) (body: Body) =
         (body.Pattern = pattern || body.Pattern.IsHauler)
         && [ (workAt body).Room; body.Pos.Room ]
-           |> List.exists (fun room -> Map.tryFind room owners = Some(Some ci))
+           |> List.exists (fun room -> Map.tryFind room owners = Some ci)
 
     colonies
     |> Array.iteri (fun ci _ ->
@@ -661,7 +678,10 @@ let plan
     let seats = ResizeArray<Seat>()
 
     for d in all do
-        let caster = near (fun ci -> idle.[ci].Count > 0 && castable colonies d ci) d.At
+        let caster =
+            match Map.tryFind d.At.Room owners with
+            | Some ci when idle.[ci].Count > 0 && castable colonies d ci -> Some ci
+            | _ -> near (fun ci -> idle.[ci].Count > 0 && castable colonies d ci) d.At
 
         let body =
             caster
