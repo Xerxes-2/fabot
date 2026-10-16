@@ -691,7 +691,7 @@ let tests =
                         i.Level <= census.Level
                         && not (room.Sites |> Array.exists (fun x -> Tiles.ofPos x.Pos = t))
                         && not (tiles |> List.contains t)
-                        && not (i.Kind = Kind.Container && counted.Served.[t])
+                        && not (i.Kind = Kind.Container && counted.Served.[t] > 0uy)
                         && clear i.Kind (standing t)
                         && held i.Kind + added < Engine.controllerStructures
                             (Kind.name i.Kind)

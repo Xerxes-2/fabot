@@ -22,24 +22,26 @@ let private kinds = (Kind.Other "").Ordinal + 1
 [<Struct; NoEquality; NoComparison>]
 type Placement = { X: int; Y: int; Kind: Kind }
 
+/// A `byte` per tile, not a `bool`: a `bool[]` costs `Tiles.count` element
+/// writes a room a tick, where a typed array is zeroed by its allocation.
 [<NoEquality; NoComparison>]
 type Census =
     {
-        Solid: bool[]
-        Road: bool[]
-        Rampart: bool[]
-        Site: bool[]
-        Occupied: bool[]
-        Walkable: bool[]
+        Solid: byte[]
+        Road: byte[]
+        Rampart: byte[]
+        Site: byte[]
+        Occupied: byte[]
+        Walkable: byte[]
         /// Tiles whose container's rock, else controller, has one already:
         /// one standing off the plan's tile is kept, never doubled.
-        Served: bool[]
+        Served: byte[]
         /// None once a link serves the source: one standing off the plan's
         /// tile is kept, never doubled.
         Posts: (int * (int * int[]) option)[]
         Buffer: (int * int) option
         /// A solid site there waits on its upgrader as under any creep.
-        Seat: bool[]
+        Seat: byte[]
         /// Every owner's, and sites: CONTROLLER_STRUCTURES counts them all.
         /// By `Kind.Ordinal`.
         Held: int[]
@@ -48,43 +50,45 @@ type Census =
     }
 
 let censusOf (room: Room) (ours: Creep[]) : Census =
-    let solid = Array.create Tiles.count false
-    let road = Array.create Tiles.count false
-    let rampart = Array.create Tiles.count false
-    let site = Array.create Tiles.count false
+    let solid = Array.zeroCreate<byte> Tiles.count
+    let road = Array.zeroCreate<byte> Tiles.count
+    let rampart = Array.zeroCreate<byte> Tiles.count
+    let site = Array.zeroCreate<byte> Tiles.count
     let held = Array.zeroCreate<int> kinds
-    let occupied = Array.create Tiles.count false
+    let occupied = Array.zeroCreate<byte> Tiles.count
+    let walkable = Array.zeroCreate<byte> Tiles.count
 
-    let walkable =
-        Array.init Tiles.count (fun t -> at t room.Terrain &&& Terrain.wall = 0uy)
+    for t in 0 .. Tiles.count - 1 do
+        if at t room.Terrain &&& Terrain.wall = 0uy then
+            setAt t walkable 1uy
 
     for c in Array.append ours room.Hostiles do
-        setAt (Tiles.ofPos c.Pos) occupied true
+        setAt (Tiles.ofPos c.Pos) occupied 1uy
 
     for s in room.Structures do
         let t = Tiles.ofPos s.Pos
 
         match s.Kind with
-        | Kind.Road -> setAt t road true
-        | Kind.Rampart -> setAt t rampart true
-        | _ -> setAt t solid true
+        | Kind.Road -> setAt t road 1uy
+        | Kind.Rampart -> setAt t rampart 1uy
+        | _ -> setAt t solid 1uy
 
         if not s.Walkable then
-            setAt t walkable false
+            setAt t walkable 0uy
 
         setAt s.Kind.Ordinal held (at s.Kind.Ordinal held + 1)
 
     let mutable pending = 0
 
     for s in room.Sites do
-        setAt (Tiles.ofPos s.Pos) site true
+        setAt (Tiles.ofPos s.Pos) site 1uy
         setAt s.Kind.Ordinal held (at s.Kind.Ordinal held + 1)
 
         if not (Kind.walkable s.Kind) then
-            setAt (Tiles.ofPos s.Pos) walkable false
+            setAt (Tiles.ofPos s.Pos) walkable 0uy
 
         if s.Owner.IsOurs then
-            if standable s.Kind || not (at (Tiles.ofPos s.Pos) occupied) then
+            if standable s.Kind || at (Tiles.ofPos s.Pos) occupied = 0uy then
                 pending <- pending + 1
 
     let standing (ordinal: int) =
@@ -107,26 +111,25 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
             (room.Sources |> Array.map (fun s -> s.Pos))
             (room.Minerals |> Array.map (fun m -> m.Pos))
 
-    let served = Array.create Tiles.count false
+    let served = Array.zeroCreate<byte> Tiles.count
 
     room.Controller
     |> Option.filter (fun _ -> containers |> Array.exists (Atlas.isBuffer room))
     |> Option.iter (fun c ->
         for t in Tiles.within Engine.upgradeRange (Tiles.ofPos c.Pos) do
-            setAt t served true)
+            setAt t served 1uy)
 
     for rock in rocks do
         if containers |> Array.exists (Pos.within 1 rock) then
             for t in Tiles.within 1 (Tiles.ofPos rock) do
-                setAt t served true
+                setAt t served 1uy
 
     for rock in rocks do
-        setAt (Tiles.ofPos rock) walkable false
+        setAt (Tiles.ofPos rock) walkable 0uy
 
-    room.Controller
-    |> Option.iter (fun c -> setAt (Tiles.ofPos c.Pos) walkable false)
+    room.Controller |> Option.iter (fun c -> setAt (Tiles.ofPos c.Pos) walkable 0uy)
 
-    let seat = Array.create Tiles.count false
+    let seat = Array.zeroCreate<byte> Tiles.count
 
     let buffer =
         Option.map2
@@ -135,14 +138,16 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
             (Atlas.buffer room)
 
     for c, b in Option.toArray buffer do
-        for t in Atlas.upgraderSeats (fun t -> at t walkable) c (Tiles.ofPos b.Pos) do
-            setAt t seat true
+        for t in Atlas.upgraderSeats (fun t -> at t walkable > 0uy) c (Tiles.ofPos b.Pos) do
+            setAt t seat 1uy
 
     let links = standing Kind.Link.Ordinal
 
     let unheld (t: int) =
-        at t walkable
-        && not (at t solid || at t road || at t site)
+        at t walkable > 0uy
+        && at t solid = 0uy
+        && at t road = 0uy
+        && at t site = 0uy
         && min (Tiles.xOf t) (Tiles.yOf t) >= 2
         && max (Tiles.xOf t) (Tiles.yOf t) < Tiles.side - 2
 
@@ -180,7 +185,8 @@ let censusOf (room: Room) (ours: Creep[]) : Census =
 /// room: a walk round the room prices dearer than a step through the miner.
 let private closes (census: Census) (post: int) (t: int) =
     let beside =
-        Tiles.around t |> Array.filter (fun n -> n <> post && at n census.Walkable)
+        Tiles.around t
+        |> Array.filter (fun n -> n <> post && at n census.Walkable > 0uy)
 
     let reached = ResizeArray<int>(Array.truncate 1 beside)
     let mutable i = 0
@@ -214,14 +220,14 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
 
     let taken = HashSet<int>()
 
-    let planned = Array.create Tiles.count false
-    let solid = Array.create Tiles.count false
+    let planned = Array.zeroCreate<byte> Tiles.count
+    let solid = Array.zeroCreate<byte> Tiles.count
 
     for i in plan.Items do
-        setAt i.Tile planned true
+        setAt i.Tile planned 1uy
 
         if not (Kind.walkable i.Kind) then
-            setAt i.Tile solid true
+            setAt i.Tile solid 1uy
 
     // A source's link stands beside the post its miner works from, which
     // another bot may have set off the plan's container tile. The roads the
@@ -234,16 +240,18 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
             |> Array.tryFind (fun (rock, _) -> item.Kind.IsLink && Tiles.range item.Tile rock <= 2)
         with
         | Some(_, None) -> None
-        | None when item.Kind.IsLink && at item.Tile census.Seat && census.Buffer.IsSome ->
+        | None when item.Kind.IsLink && at item.Tile census.Seat > 0uy && census.Buffer.IsSome ->
             let c, b = census.Buffer.Value
-            let walkable t = at t census.Walkable
+            let walkable t = at t census.Walkable > 0uy
 
             let open' t =
                 walkable t
-                && not (at t census.Solid || at t census.Road || at t census.Site)
-                && not (at t planned)
+                && at t census.Solid = 0uy
+                && at t census.Road = 0uy
+                && at t census.Site = 0uy
+                && at t planned = 0uy
 
-            controllerLink walkable open' (fun t -> t = item.Tile || not (at t solid)) c b
+            controllerLink walkable open' (fun t -> t = item.Tile || at t solid = 0uy) c b
         | Some(_, Some(post, beside)) when
             Tiles.range item.Tile post <> 1 || closes census post item.Tile
             ->
@@ -261,15 +269,15 @@ let place (census: Census) (level: int) (plan: Plan) (budget: int) : Placement l
         match tileOf item with
         | Some t when
             placed.Count < room
-            && not (at t census.Site)
+            && at t census.Site = 0uy
             && (if item.Kind.IsRampart then
-                    at t census.Solid && not (at t census.Rampart)
+                    at t census.Solid > 0uy && at t census.Rampart = 0uy
                 else
-                    not (at t census.Solid))
-            && (standable item.Kind || not (at t census.Occupied))
+                    at t census.Solid = 0uy)
+            && (standable item.Kind || at t census.Occupied = 0uy)
             && not (taken.Contains t)
-            && not (item.Kind.IsContainer && at t census.Served)
-            && not (item.Kind.IsRoad && at t census.Road)
+            && (not item.Kind.IsContainer || at t census.Served = 0uy)
+            && (not item.Kind.IsRoad || at t census.Road = 0uy)
             && heldOf census item.Kind + addedOf item.Kind < Engine.controllerStructures
                 (Kind.name item.Kind)
                 level
