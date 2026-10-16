@@ -30,6 +30,7 @@ import { cpSync, existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { sweep } from "./prune.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
@@ -112,6 +113,7 @@ const runs = bots.flatMap((bot) =>
   ),
 );
 
+sweep(RUNS);
 const cached = (run) => !flags["--fresh"] && existsSync(join(CACHE, run.key, "levels.json"));
 // Two bundles of the same code share their runs.
 const todo = runs.filter((r, i) => !cached(r) && runs.findIndex((o) => o.key === r.key) === i);

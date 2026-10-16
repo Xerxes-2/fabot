@@ -29,6 +29,7 @@ import { availableParallelism, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bugs, engagement, report } from "./prediction.mjs";
+import { sweep } from "./prune.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
@@ -55,6 +56,8 @@ for (const n of names) if (!all.includes(n)) fail(`no scenario ${n}; the library
 const scenarios = (names.length ? names : all)
   .map((name) => ({ name, ...JSON.parse(readFileSync(join(LIBRARY, `${name}.json`), "utf8")) }))
   .filter((s) => names.length || flags["--nightly"] || !s.nightly);
+
+sweep(join(REPO, "soak-runs"));
 
 // Ticks are counted from the bot's first, so a window means the same on every start.
 // Each engagement the run priced, as `prediction.mjs` reads a row; one never

@@ -321,3 +321,5 @@ if (arena) {
 } else {
   console.log(`${notes}no arena trace beside the scenario: ${join(out, `${slug}.${tag}.xxscreeps.txt`)} alone`);
 }
+// The world is rebuilt from the template on every run; it is kept nowhere.
+rmSync(world, { recursive: true, force: true });

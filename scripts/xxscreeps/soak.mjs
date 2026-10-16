@@ -54,6 +54,7 @@
 //            every fight in it for us; implied by --opponents
 //   --ended   our room's starting safe mode ended, its stock kept to activate,
 //            opponents or not
+//   --keep   leave the run's world in the cache's worlds/ (default removed)
 //
 // Needs `npm run build` (dist/main.js) and `npm run xx -- setup` (the engine
 // and its template world, under $FABOT_XXSCREEPS_HOME). Writes
@@ -68,7 +69,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|E1] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|E1] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended] [--keep]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -88,7 +89,7 @@ const listOnly = rest[0] === "--list";
 if (listOnly) rest.shift();
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (a === "--unsafe" || a === "--ended") {
+  if (a === "--unsafe" || a === "--ended" || a === "--keep") {
     flags[a] = true;
     continue;
   }
@@ -354,6 +355,9 @@ if (flags["--save"]) {
   cpSync(join(world, "screeps"), resolve(flags["--save"]), { recursive: true, filter: filesOnly });
 }
 stop();
+// The world is derived from the template on every run, and its sockets and DB
+// are worth gigabytes over a session; --keep leaves it to be read back.
+if (!flags["--keep"]) rmSync(world, { recursive: true, force: true });
 
 // ---- the report ------------------------------------------------------------
 const lines = (f) => readFileSync(join(out, f), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
