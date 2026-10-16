@@ -18,6 +18,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { bugs, misses, outcome, report, stood } from "./prediction.mjs";
+import { sweep } from "./prune.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../..");
@@ -42,6 +43,7 @@ if (!existsSync(join(TEMPLATE, "screeps/shard0/data.json"))) fail(`no template w
 const out = join(REPO, "build/exchange", `seed${seed}`);
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
+sweep(join(REPO, "soak-runs"));
 
 // ---- the draw --------------------------------------------------------------
 let state = seed >>> 0;
@@ -154,8 +156,8 @@ const predictions = Object.fromEntries(JSON.parse(predicted.stdout).map((p) => [
 writeFileSync(join(out, "predictions.json"), JSON.stringify(predictions));
 
 // ---- the duels, a world a batch --------------------------------------------
-function node24(args, cwd) {
-  const res = spawnSync("nix", ["shell", "nixpkgs#nodejs_24", "-c", "node", ...args], { cwd, stdio: ["ignore", "ignore", "inherit"] });
+function node26(args, cwd) {
+  const res = spawnSync("nix", ["shell", "nixpkgs#nodejs_26", "-c", "node", ...args], { cwd, stdio: ["ignore", "ignore", "inherit"] });
   if (res.status !== 0) fail(`node ${args.slice(1).join(" ")} failed (exit ${res.status})`);
 }
 const screepsrc = ["mods:", "  - ./seed/index.js", "  - xxscreeps/mods/classic", "game:", "  tickSpeed: 60000", "  respawnTimeout: 0",
@@ -172,10 +174,10 @@ async function duel(index, members) {
   writeFileSync(join(world, "package.json"), '{ "private": true }\n');
   writeFileSync(join(world, "seed.txt"), `${seed}\n`);
   writeFileSync(join(world, "samples.json"), JSON.stringify(members));
-  for (const user of ["fabot", "rival"]) node24([XXSCREEPS, "manage", "bot", "add", user, "./duel"], world);
-  node24([XXSCREEPS, pathToFileURL(join(world, "duel-world.mjs")).href, "samples.json", "fabot", "rival"], world);
+  for (const user of ["fabot", "rival"]) node26([XXSCREEPS, "manage", "bot", "add", user, "./duel"], world);
+  node26([XXSCREEPS, pathToFileURL(join(world, "duel-world.mjs")).href, "samples.json", "fabot", "rival"], world);
   const log = join(out, `server-${index}.log`);
-  const server = spawn("nix", ["shell", "nixpkgs#nodejs_24", "-c", "node", XXSCREEPS, "start", "--no-backend"], {
+  const server = spawn("nix", ["shell", "nixpkgs#nodejs_26", "-c", "node", XXSCREEPS, "start", "--no-backend"], {
     cwd: world,
     detached: true,
     stdio: ["ignore", openSync(log, "w"), openSync(log, "a")],
@@ -188,7 +190,7 @@ async function duel(index, members) {
     await sleep(100);
   }
   const results = join(out, `results-${index}.json`);
-  node24([XXSCREEPS, pathToFileURL(join(world, "duel-step.mjs")).href, String(ticks), results], world);
+  node26([XXSCREEPS, pathToFileURL(join(world, "duel-step.mjs")).href, String(ticks), results], world);
   for (let i = 0; !exited && i < 150; i++) await sleep(100);
   if (!exited) process.kill(-server.pid, "SIGKILL");
   rmSync(world, { recursive: true, force: true });

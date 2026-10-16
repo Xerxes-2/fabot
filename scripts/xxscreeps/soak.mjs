@@ -155,9 +155,9 @@ if (live && opponents.some((o) => !Object.values(live.users).includes(o.name))) 
 const template = live ? `${TEMPLATE}-modern` : cores.length ? `${TEMPLATE}-stronghold` : TEMPLATE;
 if (!existsSync(join(template, "screeps/shard0/data.json"))) fail(`no template world at ${template}: npm run xx -- setup first`);
 
-// ---- the engine, on Node 24 through nix (as xx.mjs) ------------------------
-function node24(args, cwd, capture = false) {
-  const res = spawnSync("nix", ["shell", "nixpkgs#nodejs_24", "-c", "node", ...args], {
+// ---- the engine, on Node 26 through nix (as xx.mjs) ------------------------
+function node26(args, cwd, capture = false) {
+  const res = spawnSync("nix", ["shell", "nixpkgs#nodejs_26", "-c", "node", ...args], {
     cwd,
     stdio: capture ? ["ignore", "pipe", "inherit"] : "inherit",
     encoding: "utf8",
@@ -231,7 +231,7 @@ else {
 
 if (listOnly) {
   // The rooms a soak can stand in, for `soak-many.mjs`; nothing is run.
-  console.log(node24([XXSCREEPS, script("colony.mjs"), "--list"], world, true).trim().split("\n").at(-1));
+  console.log(node26([XXSCREEPS, script("colony.mjs"), "--list"], world, true).trim().split("\n").at(-1));
   rmSync(world, { recursive: true, force: true });
   process.exit(0);
 }
@@ -239,7 +239,7 @@ const homes = (live?.rooms ?? [])
   .filter((r) => r.objects.some((o) => o.type === "controller" && o.user === live.userId) && r.objects.some((o) => o.type === "spawn" && o.user === live.userId))
   .map((r) => r.name);
 if (live && homes.length === 0) fail(`--world: no room of ${live.username}'s with a spawn`);
-const colony = live ? { room: homes.join(",") } : from ? { room: flags["--room"] } : JSON.parse(node24([XXSCREEPS, script("colony.mjs"), ...(flags["--room"] ? [flags["--room"]] : [])], world, true).trim().split("\n").at(-1));
+const colony = live ? { room: homes.join(",") } : from ? { room: flags["--room"] } : JSON.parse(node26([XXSCREEPS, script("colony.mjs"), ...(flags["--room"] ? [flags["--room"]] : [])], world, true).trim().split("\n").at(-1));
 const run = flags["--run"] ?? `${live ? "world" : colony.room}${flags["--node"] ? `-${flags["--node"]}` : ""}-seed${seed}`;
 const out = join(REPO, "soak-runs", run);
 rmSync(out, { recursive: true, force: true });
@@ -252,7 +252,7 @@ if (node && node.level > 1) {
     const res = spawnSync("dotnet", ["build", "-c", "Release", "--nologo", "-v", "q", plan], { stdio: ["ignore", "ignore", "inherit"] });
     if (res.status !== 0) fail("scripts/plan did not build");
   }
-  const ground = node24([XXSCREEPS, script("node.mjs"), "ground", colony.room], world, true).trim().split("\n").at(-1);
+  const ground = node26([XXSCREEPS, script("node.mjs"), "ground", colony.room], world, true).trim().split("\n").at(-1);
   const res = spawnSync("dotnet", [join(plan, "bin/Release/net10.0/Plan.dll")], {
     input: JSON.stringify({ ...JSON.parse(ground), level: node.level }),
     encoding: "utf8",
@@ -275,14 +275,14 @@ if (node && node.level > 1) {
   [colony.x, colony.y] = [built[0].x, built[0].y];
 }
 console.error(`colony: ${colony.room}${from ? ` from ${from}` : live ? ` from ${flags["--world"]}` : `, spawn at ${colony.x},${colony.y}`}; output ${out}`);
-if (from) node24([XXSCREEPS, "manage", "bot", "update", OUR_NAME, "./bot"], world);
+if (from) node26([XXSCREEPS, "manage", "bot", "update", OUR_NAME, "./bot"], world);
 else if (live) {
-  node24([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot"], world);
+  node26([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot"], world);
   const flat = (rooms = []) => rooms.map((r) => ({ ...r, terrain: [r.terrain].flat().join("") }));
   writeFileSync(join(world, "capture.json"), JSON.stringify({ ...live, rooms: flat(live.rooms), terrain: flat(live.terrain) }));
-  node24([XXSCREEPS, script("live.mjs"), "capture.json"], world);
+  node26([XXSCREEPS, script("live.mjs"), "capture.json"], world);
 }
-else node24([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
+else node26([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
 async function fetched(spec, dir) {
   const cache = join(CACHE, "opponents", createHash("sha256").update(spec.integrity).digest("hex").slice(0, 16));
   if (!existsSync(join(cache, ".ok"))) {
@@ -307,26 +307,26 @@ for (const o of opponents) {
   } else cpSync(o.bot, join(dir, "main.js"));
   if (o.config) writeFileSync(join(dir, "opponent.js"), `module.exports = ${JSON.stringify(o.config)};\n`);
   if (from || live) {
-    node24([XXSCREEPS, "manage", "bot", "update", o.name, `./bot-${o.name}`], world);
+    node26([XXSCREEPS, "manage", "bot", "update", o.name, `./bot-${o.name}`], world);
     continue;
   }
-  const seat = o.x === undefined ? JSON.parse(node24([XXSCREEPS, script("colony.mjs"), o.room], world, true).trim().split("\n").at(-1)) : o;
-  node24([XXSCREEPS, "manage", "bot", "add", o.name, `./bot-${o.name}`, "--spawn", o.room, `${seat.x},${seat.y}`], world);
+  const seat = o.x === undefined ? JSON.parse(node26([XXSCREEPS, script("colony.mjs"), o.room], world, true).trim().split("\n").at(-1)) : o;
+  node26([XXSCREEPS, "manage", "bot", "add", o.name, `./bot-${o.name}`, "--spawn", o.room, `${seat.x},${seat.y}`], world);
 }
 writeFileSync(join(world, "opponents.json"), JSON.stringify(opponents.map(({ name, room, raid }) => ({ name, room, raid }))));
-if (built) node24([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME, String(node.worn ?? 1)], world);
-if (flags["--ended"]) node24([XXSCREEPS, script("node.mjs"), "ended", colony.room], world);
-else if ((opponents.length && !live) || flags["--unsafe"]) node24([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
+if (built) node26([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME, String(node.worn ?? 1)], world);
+if (flags["--ended"]) node26([XXSCREEPS, script("node.mjs"), "ended", colony.room], world);
+else if ((opponents.length && !live) || flags["--unsafe"]) node26([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
 if (node?.outposts) {
   if (colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);
   writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: colony.outposts }));
-  node24([XXSCREEPS, script("node.mjs"), "declare", colony.room, OUR_NAME, "declarations.json"], world);
+  node26([XXSCREEPS, script("node.mjs"), "declare", colony.room, OUR_NAME, "declarations.json"], world);
   if (!flags["--invaders"]) waves.push(...colony.outposts.map((o, i) => `${o.room}:4000:${1000 + 1500 * i}`));
 }
 
 // ---- the server, stepped ---------------------------------------------------
 const log = join(out, "server.log");
-const server = spawn("nix", ["shell", "nixpkgs#nodejs_24", "-c", "node", XXSCREEPS, "start", "--no-backend"], {
+const server = spawn("nix", ["shell", "nixpkgs#nodejs_26", "-c", "node", XXSCREEPS, "start", "--no-backend"], {
   cwd: world,
   detached: true,
   stdio: ["ignore", openSync(log, "w"), openSync(log, "a")],
@@ -347,7 +347,7 @@ for (let i = 0; !sockets.every(existsSync); i++) {
   if (exited || i > 1200) fail(`the server did not come up; see ${log}`);
   await sleep(100);
 }
-const stepped = JSON.parse(node24([XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out, waves.join(","), "opponents.json", cores.join(","), wave], world, true).trim().split("\n").at(-1));
+const stepped = JSON.parse(node26([XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out, waves.join(","), "opponents.json", cores.join(","), wave], world, true).trim().split("\n").at(-1));
 for (let i = 0; !exited && i < 150; i++) await sleep(100);
 if (flags["--save"]) {
   if (!exited) fail(`the server did not save on shutdown; no world in ${flags["--save"]}`);

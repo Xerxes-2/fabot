@@ -17,9 +17,10 @@
 //                 directory holding a main.js
 //       --heap    a heap snapshot of our isolate after that tick (default the last)
 //       --filter  the `dotnet test` filter part that reaches the test (default `arena`)
+//       --keep    leave the run's world in the cache's worlds/ (default removed)
 //   xx.mjs diff <arena.jsonl> <xxscreeps.jsonl>
 //
-// The engine runs on Node 24 through `nix shell nixpkgs#nodejs_24`, never the
+// The engine runs on Node 26 through `nix shell nixpkgs#nodejs_26`, never the
 // system Node; xxscreeps and its native builds live in
 // $FABOT_XXSCREEPS_HOME (default ~/.cache/fabot-xxscreeps), never in the repo.
 // Output goes to build/xxscreeps/<slug>/: the scenario, the arena trace, and
@@ -32,7 +33,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, diff, readTrace } from "./trace.mjs";
 
 const usage = `usage: xx.mjs setup
-       xx.mjs run <slug | scenario.json> [--ticks N] [--bot standin|replay|dist|<dir>] [--seed N] [--heap [tick]] [--filter <test name part>] [--out dir]
+       xx.mjs run <slug | scenario.json> [--ticks N] [--bot standin|replay|dist|<dir>] [--seed N] [--heap [tick]] [--filter <test name part>] [--out dir] [--keep]
        xx.mjs diff <arena.jsonl> <xxscreeps.jsonl>`;
 
 function fail(message) {
@@ -67,6 +68,8 @@ for (let i = 0; i < rest.length; i++) {
     const value = rest[++i];
     if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
     flags[a] = value;
+  } else if (a === "--keep") {
+    flags[a] = true;
   } else if (a === "--heap") {
     flags[a] = rest[i + 1] !== undefined && /^\d+$/.test(rest[i + 1]) ? Number(rest[++i]) : "last";
   } else if (a.startsWith("--")) {
@@ -113,8 +116,8 @@ function nix(packages, cmd, cmdArgs, options = {}) {
   if (res.error) fail(`nix: ${res.error.message}`);
   return res.status;
 }
-function node24(cmdArgs, cwd) {
-  return nix(["nodejs_24"], "node", cmdArgs, { cwd });
+function node26(cmdArgs, cwd) {
+  return nix(["nodejs_26"], "node", cmdArgs, { cwd });
 }
 function must(status, what) {
   if (status !== 0) fail(`${what} failed (exit ${status})`);
@@ -122,27 +125,32 @@ function must(status, what) {
 
 function setup(variant = "") {
   mkdirSync(ENGINE, { recursive: true });
+  // Unreleased master's natives: npm's 0.2.1 tarball still pins Node 24's,
+  // whose isolated-vm does not build on the Node 26 the engine runs. Replace
+  // this with a `VERSION` bump once that release lands.
+  const scripted = { "isolated-vm": "7.0.1", "ivm-inspect": "6.0.0" };
   const manifest = {
     name: "fabot-xxscreeps",
     private: true,
     dependencies: { xxscreeps: VERSION },
-    allowScripts: { "isolated-vm@6.0.2": true, "ivm-inspect@5.0.0": true },
+    overrides: { ...scripted, "@xxscreeps/pathfinder": "0.5.0" },
+    allowScripts: Object.fromEntries(Object.entries(scripted).map(([p, v]) => [`${p}@${v}`, true])),
   };
   writeFileSync(join(ENGINE, "package.json"), JSON.stringify(manifest, null, 2) + "\n");
-  const installed = existsSync(join(ENGINE, "node_modules/xxscreeps/package.json"))
-    ? JSON.parse(readFileSync(join(ENGINE, "node_modules/xxscreeps/package.json"), "utf8")).version
-    : null;
-  const build = ["nodejs_24", "python3", "gcc", "gnumake"];
-  if (installed !== VERSION) {
+  const versionOf = (p) =>
+    existsSync(join(ENGINE, `node_modules/${p}/package.json`)) ? JSON.parse(readFileSync(join(ENGINE, `node_modules/${p}/package.json`), "utf8")).version : null;
+  const installed = versionOf("xxscreeps");
+  const build = ["nodejs_26", "python3", "gcc", "gnumake"];
+  if (installed !== VERSION || Object.entries(manifest.overrides).some(([p, v]) => versionOf(p) !== v)) {
     console.error(`installing xxscreeps ${VERSION} in ${ENGINE}`);
     must(nix(build, "npm", ["install", "--no-audit", "--no-fund"], { cwd: ENGINE }), "npm install");
   }
-  // The native builds must be Node 24's: the system Node's ABI is not.
+  // The native builds must be this engine's Node's: the system Node's ABI is not.
   const probe = ["-e", "require('isolated-vm'); require('ivm-inspect')"];
-  if (node24(probe, ENGINE) !== 0) {
-    console.error("building isolated-vm and ivm-inspect against Node 24");
+  if (node26(probe, ENGINE) !== 0) {
+    console.error("building isolated-vm and ivm-inspect for the engine's Node");
     must(nix(build, "npm", ["rebuild", "isolated-vm", "ivm-inspect", "--foreground-scripts"], { cwd: ENGINE }), "npm rebuild");
-    must(node24(probe, ENGINE), "loading isolated-vm");
+    must(node26(probe, ENGINE), "loading isolated-vm");
   }
   const template = templateOf(variant);
   if (!existsSync(join(template, "screeps/shard0/data.json"))) {
@@ -150,7 +158,7 @@ function setup(variant = "") {
     rmSync(template, { recursive: true, force: true });
     mkdirSync(template, { recursive: true });
     writeFileSync(join(template, ".screepsrc.yaml"), screepsrc(false, variant));
-    must(node24([XXSCREEPS, "import"], template), "xxscreeps import");
+    must(node26([XXSCREEPS, "import"], template), "xxscreeps import");
   }
 }
 
@@ -243,6 +251,7 @@ const variant = scenario.rooms.some((r) => r.structures.some((s) => s.kind === "
 setup(variant);
 
 const world = join(ENGINE, "worlds", slug);
+if (!flags["--keep"]) process.on("exit", () => rmSync(world, { recursive: true, force: true }));
 rmSync(world, { recursive: true, force: true });
 // A copied socket is a dead server's; only files and directories come over.
 cpSync(templateOf(variant), world, { recursive: true, filter: (src) => lstatSync(src).isFile() || lstatSync(src).isDirectory() });
@@ -265,19 +274,19 @@ if (bot === "standin") {
   cpSync(bot === "dist" ? join(REPO, "dist/main.js") : join(bot, "main.js"), join(botDir, "main.js"));
 }
 
-must(node24([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot"], world), "manage bot add");
+must(node26([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot"], world), "manage bot add");
 const players = new Set(
   [...scenario.bodies.map((b) => b.side), ...scenario.rooms.flatMap((r) => r.structures.map((s) => s.owner))].filter((s) => s?.startsWith("player:")),
 );
-for (const p of players) must(node24([XXSCREEPS, "manage", "user", "create", p.slice(7)], world), `manage user create ${p}`);
-must(node24([XXSCREEPS, pathToFileURL(join(world, "world.mjs")).href, scenarioPath, join(REPO, "tests/Core.Tests/rooms"), OUR_NAME], world), "standing the scenario");
+for (const p of players) must(node26([XXSCREEPS, "manage", "user", "create", p.slice(7)], world), `manage user create ${p}`);
+must(node26([XXSCREEPS, pathToFileURL(join(world, "world.mjs")).href, scenarioPath, join(REPO, "tests/Core.Tests/rooms"), OUR_NAME], world), "standing the scenario");
 if (bot === "replay") {
   writeFileSync(join(botDir, "replay.js"), `module.exports = ${JSON.stringify(replayOf(scenario, arena))};\n`);
-  must(node24([XXSCREEPS, "manage", "bot", "update", OUR_NAME, "./bot"], world), "manage bot update");
+  must(node26([XXSCREEPS, "manage", "bot", "update", OUR_NAME, "./bot"], world), "manage bot update");
 }
 
 const log = join(out, `${slug}.${tag}.server.log`);
-const server = spawn("nix", ["shell", "nixpkgs#nodejs_24", "-c", "node", XXSCREEPS, "start", "--no-backend"], {
+const server = spawn("nix", ["shell", "nixpkgs#nodejs_26", "-c", "node", XXSCREEPS, "start", "--no-backend"], {
   cwd: world,
   detached: true,
   stdio: ["ignore", openSync(log, "w"), openSync(log, "a")],
@@ -304,7 +313,7 @@ const xxPath = join(out, `${slug}.${tag}.xxscreeps.jsonl`);
 const heapPath = join(out, `${slug}.${tag}.heapsnapshot`);
 const steps = ticks ?? arena?.length ?? 300;
 const heapArgs = flags["--heap"] === undefined ? [] : [String(flags["--heap"] === "last" ? steps - 1 : flags["--heap"]), heapPath];
-const stepped = node24([XXSCREEPS, pathToFileURL(join(world, "step.mjs")).href, String(steps), xxPath, ...heapArgs], world);
+const stepped = node26([XXSCREEPS, pathToFileURL(join(world, "step.mjs")).href, String(steps), xxPath, ...heapArgs], world);
 for (let i = 0; !exited && i < 150; i++) await sleep(100);
 stop();
 must(stepped, `stepping (server log: ${log})`);
@@ -321,5 +330,3 @@ if (arena) {
 } else {
   console.log(`${notes}no arena trace beside the scenario: ${join(out, `${slug}.${tag}.xxscreeps.txt`)} alone`);
 }
-// The world is rebuilt from the template on every run; it is kept nowhere.
-rmSync(world, { recursive: true, force: true });
