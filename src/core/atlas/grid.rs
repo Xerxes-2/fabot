@@ -145,7 +145,7 @@ pub fn value(w: Weight) -> Option<i32> {
     w.map(|w| i32::from(w.get()))
 }
 
-pub fn weight_of(footprint: Footprint, weights: &[Weight], tile: Tile) -> Weight {
+pub fn weight_of(footprint: Footprint, weights: &[Weight; tiles::COUNT], tile: Tile) -> Weight {
     match footprint {
         Footprint::One => weights[tile],
         Footprint::Quad => {
@@ -239,7 +239,7 @@ impl Dial {
 /// bucket more holds every queued distance apart.
 pub fn flood(
     footprint: Footprint,
-    weights: &[Weight],
+    weights: &[Weight; tiles::COUNT],
     steps: &[Option<u16>],
     goals: &[Tile],
 ) -> tiles::Table<i32> {

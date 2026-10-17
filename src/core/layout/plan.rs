@@ -183,7 +183,7 @@ struct Posted {
 /// Walks past it sort together.
 const ROAD_SPAN: i32 = 1 << 14;
 
-pub fn down(weights: &[Weight], dist: &[i32], t: Tile) -> Option<Tile> {
+pub fn down(weights: &[Weight; tiles::COUNT], dist: &[i32], t: Tile) -> Option<Tile> {
     if dist[t] == 0 {
         None
     } else {
@@ -194,7 +194,7 @@ pub fn down(weights: &[Weight], dist: &[i32], t: Tile) -> Option<Tile> {
     }
 }
 
-pub fn descend(weights: &[Weight], dist: &[i32], start: Tile) -> Vec<Tile> {
+pub fn descend(weights: &[Weight; tiles::COUNT], dist: &[i32], start: Tile) -> Vec<Tile> {
     let mut path: Vec<Tile> = Vec::new();
     let mut here = down(weights, dist, start);
 
@@ -276,11 +276,11 @@ fn fill(
 /// plan. Ways are laid before slots are handed out, so no structure stands on
 /// one.
 fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> (Plan, bool) {
-    let weights: &[Weight] = &ground.weights;
+    let weights: &[Weight; tiles::COUNT] = &ground.weights;
     let mut unfit: Vec<Cow<'static, str>> = Vec::new();
 
     let mut on_lat = vec![false; tiles::COUNT];
-    let mut lane: Vec<Weight> = vec![None; tiles::COUNT];
+    let mut lane: tiles::Table<Weight> = tiles::table(None);
 
     for t in tiles::all() {
         let on = on_lattice(anchor, t);
@@ -320,7 +320,12 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         }
     }
 
-    fn way_out(lane: &[Weight], walk: &[i32], clear: &mut [bool], rock: Tile) -> Vec<Tile> {
+    fn way_out(
+        lane: &[Weight; tiles::COUNT],
+        walk: &[i32],
+        clear: &mut [bool],
+        rock: Tile,
+    ) -> Vec<Tile> {
         let path = descend(lane, walk, rock);
 
         for &t in &path {
@@ -881,7 +886,7 @@ pub fn of_ground(ground: &Ground, spawns: &[Tile]) -> Option<Plan> {
 }
 
 struct Board<'a> {
-    weights: &'a [Weight],
+    weights: &'a [Weight; tiles::COUNT],
     anchor: Tile,
     walk: tiles::Table<i32>,
     taken: Vec<bool>,

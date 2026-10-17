@@ -33,14 +33,14 @@ pub struct Target {
 /// yields to nothing we decide, so nothing may stand on its tile this tick.
 #[derive(Clone, Debug)]
 pub struct RoomGrid {
-    pub weights: Rc<Vec<Weight>>,
+    pub weights: Rc<Table<Weight>>,
     pub floods: HashMap<String, Rc<Table<i32>>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Field {
     pub footprint: Footprint,
-    pub weights: Rc<Vec<Weight>>,
+    pub weights: Rc<Table<Weight>>,
     pub factor: FatigueFactor,
     pub dist: Rc<Table<i32>>,
 }
@@ -198,7 +198,7 @@ impl Atlas {
     /// are unbounded; past this the room floods afresh.
     const KEPT_FLOODS: usize = 500;
 
-    fn same(a: &[Weight], b: &[Weight]) -> bool {
+    fn same(a: &[Weight; tiles::COUNT], b: &[Weight; tiles::COUNT]) -> bool {
         a == b
     }
 
@@ -212,7 +212,7 @@ impl Atlas {
             .iter()
             .filter(|r| r.terrain.len() == tiles::COUNT)
         {
-            let mut weights: Vec<Weight> = vec![None; tiles::COUNT];
+            let mut weights: Table<Weight> = tiles::table(None);
             let terrain = &room.terrain;
 
             for (weight, t) in weights.iter_mut().zip(terrain) {
@@ -296,7 +296,7 @@ impl Atlas {
         self.hits
     }
 
-    pub fn weights(&self, room: &str) -> Option<Vec<Weight>> {
+    pub fn weights(&self, room: &str) -> Option<Table<Weight>> {
         self.rooms.get(room).map(|grid| (*grid.weights).clone())
     }
 
@@ -310,7 +310,7 @@ impl Atlas {
         self.rooms.contains_key(room)
     }
 
-    fn seat(footprint: Footprint, weights: &[Weight], tile: Tile) -> bool {
+    fn seat(footprint: Footprint, weights: &[Weight; tiles::COUNT], tile: Tile) -> bool {
         weight_of(footprint, weights, tile).is_some() && !on_edge(footprint, tile)
     }
 
@@ -327,7 +327,7 @@ impl Atlas {
 
     fn seats_near(
         footprint: Footprint,
-        weights: &[Weight],
+        weights: &[Weight; tiles::COUNT],
         range: i32,
         tile: Tile,
         into: &mut Vec<Tile>,
@@ -450,7 +450,7 @@ impl Atlas {
         }
     }
 
-    fn exit_goals(footprint: Footprint, weights: &[Weight], exit: i32) -> Vec<Tile> {
+    fn exit_goals(footprint: Footprint, weights: &[Weight; tiles::COUNT], exit: i32) -> Vec<Tile> {
         match footprint {
             Footprint::One => tiles::exit_tiles(exit)
                 .iter()

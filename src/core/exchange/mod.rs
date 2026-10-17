@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::core::engine;
 use crate::core::grid::{self, FatigueFactor, Weight, step_ticks};
 use crate::core::lists;
-use crate::core::tiles::{self, Tile};
+use crate::core::tiles::{self, Table, Tile};
 use crate::core::vocabulary::BodyPart;
 use crate::core::world::Pos;
 
@@ -72,7 +72,7 @@ pub enum Stance {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ground {
     pub room: String,
-    pub weights: Vec<Weight>,
+    pub weights: Table<Weight>,
     pub barriers: BTreeMap<Tile, i32>,
 }
 
@@ -1596,7 +1596,7 @@ mod tests {
 
             let ground = Ground {
                 room: ROOM.to_string(),
-                weights: vec![grid::weight(2); 2500],
+                weights: tiles::table(grid::weight(2)),
                 barriers: hits
                     .iter()
                     .enumerate()

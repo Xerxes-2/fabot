@@ -2,7 +2,7 @@
 //! ground does.
 use crate::core::engine;
 use crate::core::grid::{self, Weight};
-use crate::core::tiles::{self, Tile};
+use crate::core::tiles::{self, Table, Tile};
 use crate::core::world::{Room, terrain};
 
 #[derive(Clone, Debug)]
@@ -10,8 +10,8 @@ pub struct Ground {
     pub room: String,
     /// Our own structures are not read: the plan is drawn on the ground,
     /// never on itself.
-    pub weights: Vec<Weight>,
-    pub free: Vec<bool>,
+    pub weights: Table<Weight>,
+    pub free: Table<bool>,
     pub sources: Vec<Tile>,
     pub minerals: Vec<Tile>,
     pub controller: Option<Tile>,
@@ -49,19 +49,16 @@ pub fn of_room(room: &Room) -> Option<Ground> {
         return None;
     }
 
-    let mut weights: Vec<Weight> = room
-        .terrain
-        .iter()
-        .map(|t| {
-            if t & terrain::WALL != 0 {
-                None
-            } else if t & terrain::SWAMP != 0 {
-                grid::weight(engine::SWAMP_WEIGHT)
-            } else {
-                grid::weight(engine::PLAIN_WEIGHT)
-            }
-        })
-        .collect();
+    let mut weights: Table<Weight> = tiles::table(None);
+    for (weight, t) in weights.iter_mut().zip(&room.terrain) {
+        *weight = if t & terrain::WALL != 0 {
+            None
+        } else if t & terrain::SWAMP != 0 {
+            grid::weight(engine::SWAMP_WEIGHT)
+        } else {
+            grid::weight(engine::PLAIN_WEIGHT)
+        };
+    }
 
     for t in obstacles(room) {
         weights[t] = None;
@@ -88,7 +85,7 @@ pub fn of_room(room: &Room) -> Option<Ground> {
         weights[c] = None;
     }
 
-    let mut free = vec![false; tiles::COUNT];
+    let mut free = tiles::table(false);
     let edge = EXIT_KEEP + 1;
 
     for i in tiles::all() {
