@@ -1,4 +1,5 @@
-// Upload dist/main.js to the Screeps server as the `main` module.
+// Upload a bundle (default dist/main.js; `npm run upload -- dist/fabot-rs.js`)
+// to the Screeps server as the `main` module.
 // Config via .env (loaded by `node --env-file-if-exists=.env`):
 //   SCREEPS_TOKEN   - auth token (required)
 //   SCREEPS_API_URL - API base, default https://screeps.com/season (seasonal server)
@@ -13,9 +14,9 @@ if (!token) {
 const apiUrl = (process.env.SCREEPS_API_URL ?? "https://screeps.com/season").replace(/\/$/, "");
 const branch = process.env.SCREEPS_BRANCH; // undefined -> server uses the active branch
 
-const main = await readFile(new URL("../dist/main.js", import.meta.url), "utf8");
+const main = await readFile(process.argv[2] ?? new URL("../dist/main.js", import.meta.url), "utf8");
 // The change the bundle names (`scripts/bundle.mjs`, #634), for the record.
-const banner = main.match(/^var __FABOT_VERSION__ = ("(?:[^"\\]|\\.)*");/);
+const banner = main.match(/^(?:var |globalThis\.)__FABOT_VERSION__ = ("(?:[^"\\]|\\.)*");/);
 const version = banner ? JSON.parse(banner[1]) : "unnamed (no version banner)";
 
 const res = await fetch(`${apiUrl}/api/user/code`, {
