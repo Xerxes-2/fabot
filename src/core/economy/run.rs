@@ -113,7 +113,7 @@ pub struct Walked<'a> {
     pub creeps: &'a BTreeMap<String, &'a Creep>,
     pub movers: &'a BTreeMap<String, Mover>,
     pub offers: &'a [Offer],
-    pub by_id: &'a BTreeMap<String, usize>,
+    pub by_id: &'a BTreeMap<&'a str, usize>,
     pub assignments: &'a Assignments,
 }
 
@@ -143,7 +143,7 @@ impl Walks for Walked<'_> {
     fn walk(&mut self, fresh: bool, body: &Body, from: &Pos) -> Option<i32> {
         let creep = *self.creeps.get(&body.name)?;
         let id = self.assignments.get(&body.name)?;
-        let oi = *self.by_id.get(id)?;
+        let oi = *self.by_id.get(id.as_str())?;
         let offer = &self.offers[oi];
 
         let mover = if fresh {
@@ -362,10 +362,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         );
     }
 
-    let mut by_id: BTreeMap<String, usize> = BTreeMap::new();
-    for (i, offer) in offers.iter().enumerate() {
-        by_id.insert(offer.id.clone(), i);
-    }
+    let by_id: BTreeMap<&str, usize> = offers
+        .iter()
+        .enumerate()
+        .map(|(i, offer)| (offer.id.as_str(), i))
+        .collect();
 
     let homes: Vec<Pos> = derived
         .colonies
@@ -451,7 +452,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
         let assigned = assignments
             .get(&creep.name)
-            .and_then(|id| by_id.get(id))
+            .and_then(|id| by_id.get(id.as_str()))
             .map(|oi| &offers[*oi]);
 
         match assigned {
