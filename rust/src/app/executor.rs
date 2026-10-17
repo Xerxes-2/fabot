@@ -1,4 +1,5 @@
 //! `Executor` turns each intent into one API call (`ARCHITECTURE.md` §1).
+use crate::app::js::field;
 use js_sys::{Array, Function, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
 
@@ -15,10 +16,6 @@ pub struct Refusal {
 
 const NOT_FOUND: i32 = -5;
 const THREW: i32 = -100;
-
-fn field(o: &JsValue, name: &str) -> JsValue {
-    Reflect::get(o, &JsValue::from_str(name)).unwrap_or(JsValue::UNDEFINED)
-}
 
 fn args(values: &[JsValue]) -> Array {
     let array = Array::new();

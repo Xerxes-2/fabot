@@ -2,7 +2,7 @@
 // that the Fable output loads, reads, writes and does not throw. Not a test of
 // behaviour; that is xxscreeps' (ARCHITECTURE.md §10).
 //
-// Usage: node scripts/smoke.mjs   (after `npm run build`)
+// Usage: node scripts/smoke.mjs [bundle]   (after `npm run build`)
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 
@@ -94,8 +94,9 @@ globalThis.Game = {
 };
 
 const require = createRequire(import.meta.url);
-const main = require("../dist/main.js");
-if (typeof main.loop !== "function") fail("dist/main.js exports no loop");
+const bundle = process.argv[2] ?? "../dist/main.js";
+const main = require(bundle);
+if (typeof main.loop !== "function") fail(`${bundle} exports no loop`);
 
 for (let t = 0; t < 3; t++) {
   Game.time = 100 + t;
@@ -126,5 +127,5 @@ const held = Memory.v2.assignments?.a;
 if (typeof held !== "string") fail(`the creep holds no task: ${JSON.stringify(Memory.v2.assignments)}`);
 if (observe.refusals.some((r) => r.code === -100)) fail(`an intent threw: ${JSON.stringify(observe.refusals)}`);
 
-const version = readFileSync(new URL("../dist/main.js", import.meta.url), "utf8").split("\n")[0];
+const version = readFileSync(new URL(bundle, import.meta.url), "utf8").split("\n")[0];
 console.log(`smoke: 4 ticks clean (${version.match(/"(.*)"/)?.[1] ?? "unnamed"})`);

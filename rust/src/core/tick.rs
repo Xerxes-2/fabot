@@ -86,13 +86,12 @@ pub fn nearest(
             let mut best: Option<usize> = None;
             let mut best_d = i32::MAX;
             for (i, home) in homes.iter().enumerate() {
-                if can(i) {
-                    if let Some(d) = measure(atlas, home) {
-                        if d < best_d {
-                            best = Some(i);
-                            best_d = d;
-                        }
-                    }
+                if can(i)
+                    && let Some(d) = measure(atlas, home)
+                    && d < best_d
+                {
+                    best = Some(i);
+                    best_d = d;
                 }
             }
             best

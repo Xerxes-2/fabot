@@ -51,7 +51,6 @@ pub struct Offer {
     pub task: Task,
     pub id: String,
     pub target: Pos,
-    /// Lower first.
     pub priority: i32,
     pub capacity: Capacity,
     pub draw: Draw,

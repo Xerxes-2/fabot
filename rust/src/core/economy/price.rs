@@ -30,15 +30,15 @@ pub const DEADLINE_RANK: i32 = -BAND_RANKS;
 pub const URGENT_RANK: i32 = -BAND_RANKS / 2;
 
 pub fn rank_of(value: f64) -> i32 {
-    if !(value > 0.0) {
-        BOTTOM_RANK
-    } else {
+    if value > 0.0 {
         let rank = RANKS_PER_HALVING * (HELD_RATE / value).ln() / 2.0f64.ln();
         if rank >= BOTTOM_RANK as f64 {
             BOTTOM_RANK
         } else {
             (rank + 0.5).floor() as i32
         }
+    } else {
+        BOTTOM_RANK
     }
 }
 

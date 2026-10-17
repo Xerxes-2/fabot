@@ -21,7 +21,7 @@ pub fn y_of(tile: i32) -> i32 {
 }
 
 pub fn in_room(x: i32, y: i32) -> bool {
-    x >= 0 && x < SIDE && y >= 0 && y < SIDE
+    (0..SIDE).contains(&x) && (0..SIDE).contains(&y)
 }
 
 pub fn of_pos(pos: &Pos) -> i32 {
@@ -49,8 +49,8 @@ pub const TOP_LEFT: i32 = 8;
 
 pub fn dx(direction: i32) -> i32 {
     match direction {
-        2 | 3 | 4 => 1,
-        6 | 7 | 8 => -1,
+        2..=4 => 1,
+        6..=8 => -1,
         _ => 0,
     }
 }
@@ -59,7 +59,7 @@ pub fn dx(direction: i32) -> i32 {
 pub fn dy(direction: i32) -> i32 {
     match direction {
         8 | 1 | 2 => -1,
-        4 | 5 | 6 => 1,
+        4..=6 => 1,
         _ => 0,
     }
 }
@@ -181,7 +181,7 @@ fn exit_bands() -> &'static Vec<Vec<i32>> {
 
 /// Shared: never written.
 pub fn exit_tiles(exit: i32) -> &'static [i32] {
-    if exit >= 0 && exit < 9 {
+    if (0..9).contains(&exit) {
         &exit_bands()[exit as usize]
     } else {
         &[]
@@ -213,8 +213,8 @@ pub fn room_coords(name: &str) -> Option<(i32, i32)> {
     }
     let number = |start: usize, stop: usize| -> i32 {
         let mut value = 0;
-        for i in start..stop {
-            value = value * 10 + (bytes[i] - b'0') as i32;
+        for byte in &bytes[start..stop] {
+            value = value * 10 + (byte - b'0') as i32;
         }
         value
     };

@@ -677,28 +677,28 @@ pub fn of_world(
     let mut colony_rooms: Vec<&Room> = Vec::new();
 
     for room in &world.rooms {
-        if let Some(c) = &room.controller {
-            if c.owner.is_ours() {
-                let spawns: Vec<Spawn> = world
-                    .spawns
-                    .iter()
-                    .filter(|s| s.pos.room == room.name)
-                    .cloned()
-                    .collect();
+        if let Some(c) = &room.controller
+            && c.owner.is_ours()
+        {
+            let spawns: Vec<Spawn> = world
+                .spawns
+                .iter()
+                .filter(|s| s.pos.room == room.name)
+                .cloned()
+                .collect();
 
-                if spawns.is_empty() {
-                    continue;
-                }
-
-                colony_rooms.push(room);
-                colonies.push(Colony {
-                    room: room.name.clone(),
-                    controller: c.clone(),
-                    spawns,
-                    bank: room.energy_available,
-                    bank_capacity: room.energy_capacity,
-                });
+            if spawns.is_empty() {
+                continue;
             }
+
+            colony_rooms.push(room);
+            colonies.push(Colony {
+                room: room.name.clone(),
+                controller: c.clone(),
+                spawns,
+                bank: room.energy_available,
+                bank_capacity: room.energy_capacity,
+            });
         }
     }
 

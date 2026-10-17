@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use super::shape::Tactic;
-use crate::core::exchange::{Fighter, exchange, fighter};
+use crate::core::exchange::{self, Fighter, fighter};
 use crate::core::vocabulary::{BodyPart, Boost, Resource};
 use crate::core::world::{Creep, Kind, Owner, Pos, Room, Spawn, Store, Structure, terrain};
 use crate::core::{engine, lists};

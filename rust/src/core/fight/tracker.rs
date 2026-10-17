@@ -423,7 +423,7 @@ mod tests {
             let dy = rng.between(-1, 1);
             let a = at("W2N1", west, y);
             let b = at("W1N1", east, y + dy);
-            assert_eq!(linked(&a, &b), (49 - west) + east + 1 <= 1);
+            assert_eq!(linked(&a, &b), (49 - west) + east < 1);
         }
     }
 

@@ -114,7 +114,25 @@ pub fn step_table(factor: FatigueFactor) -> Vec<i32> {
 
 /// The bench's counts (`ARCHITECTURE.md` §9.3), read by `scripts/bench.mjs
 /// --counts`; nothing in the bot reads them.
-pub fn tally(_what: &str, _n: i32) {}
+pub fn tally(what: &str, n: i32) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+
+        let counter = crate::app::js::field(&js_sys::global(), "__fabotCount");
+        if counter.is_function() {
+            let counter: &js_sys::Function = counter.unchecked_ref();
+            let _ = counter.call2(
+                &wasm_bindgen::JsValue::NULL,
+                &wasm_bindgen::JsValue::from_str(what),
+                &wasm_bindgen::JsValue::from_f64(n as f64),
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (what, n);
+}
 
 pub fn weight_of(footprint: Footprint, weights: &[i32], tile: i32) -> i32 {
     match footprint {
@@ -287,9 +305,9 @@ pub fn flood(footprint: Footprint, weights: &[i32], steps: &[i32], goals: &[i32]
         }
     }
 
-    for t in 0..tiles::COUNT {
-        if dist[t] < 0 {
-            dist[t] = UNREACHED;
+    for d in dist.iter_mut() {
+        if *d < 0 {
+            *d = UNREACHED;
         }
     }
     tally("flood", dial.relaxed);

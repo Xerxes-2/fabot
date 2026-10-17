@@ -22,6 +22,9 @@ fn kinds() -> i32 {
     Kind::Other(String::new()).ordinal() + 1
 }
 
+/// `(tile, ticks a hauler needs to the source, the tiles a post may stand on)`.
+type Post = (i32, Option<(i32, Vec<i32>)>);
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Placement {
     pub x: i32,
@@ -44,7 +47,7 @@ pub struct Census {
     pub served: Vec<u8>,
     /// None once a link serves the source: one standing off the plan's tile is
     /// kept, never doubled.
-    pub posts: Vec<(i32, Option<(i32, Vec<i32>)>)>,
+    pub posts: Vec<Post>,
     pub buffer: Option<(i32, i32)>,
     /// A solid site there waits on its upgrader as under any creep.
     pub seat: Vec<u8>,
@@ -137,11 +140,11 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
 
     let mut served = vec![0u8; tiles::COUNT];
 
-    if let Some(c) = &room.controller {
-        if containers.iter().any(|p| Atlas::is_buffer(room, p)) {
-            for t in tiles::within(engine::UPGRADE_RANGE, tiles::of_pos(&c.pos)) {
-                served[t as usize] = 1;
-            }
+    if let Some(c) = &room.controller
+        && containers.iter().any(|p| Atlas::is_buffer(room, p))
+    {
+        for t in tiles::within(engine::UPGRADE_RANGE, tiles::of_pos(&c.pos)) {
+            served[t as usize] = 1;
         }
     }
 
@@ -186,7 +189,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
             && tiles::x_of(t).max(tiles::y_of(t)) < tiles::SIDE - 2
     };
 
-    let mut posts: Vec<(i32, Option<(i32, Vec<i32>)>)> = Vec::new();
+    let mut posts: Vec<Post> = Vec::new();
 
     for s in &room.sources {
         if links.iter().any(|p| p.within(2, &s.pos)) {

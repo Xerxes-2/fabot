@@ -21,7 +21,7 @@
     "scenario": "node scripts/xxscreeps/scenario.mjs",
     "exchange": "node scripts/xxscreeps/exchange.mjs",
     "build:rust": "node scripts/rust.mjs",
-    "test:rust": "cargo test --manifest-path rust/Cargo.toml",
+    "test:rust": "cargo fmt --manifest-path rust/Cargo.toml --check && cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path rust/Cargo.toml",
     "parity": "node scripts/xxscreeps/parity.mjs"
   },
   "devDependencies": {

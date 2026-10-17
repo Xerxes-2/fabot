@@ -32,10 +32,10 @@ fn merged(
             let mut out = e.clone();
 
             for event in events {
-                if let tracker::Event::Merged { into, from } = event {
-                    if out.group == *from {
-                        out.group = *into;
-                    }
+                if let tracker::Event::Merged { into, from } = event
+                    && out.group == *from
+                {
+                    out.group = *into;
                 }
             }
 
@@ -941,11 +941,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     // A planned barrier fallen advances the plan, never re-prices it.
     for e in engagements.iter_mut() {
-        if matches!(e.objective, Objective::Siege(_)) {
-            if let Some(room) = scene.in_sight(&e.room) {
-                let barriers = scene.barrier_at(room);
-                e.plan.order.retain(|id| barriers.contains_key(id.as_str()));
-            }
+        if matches!(e.objective, Objective::Siege(_))
+            && let Some(room) = scene.in_sight(&e.room)
+        {
+            let barriers = scene.barrier_at(room);
+            e.plan.order.retain(|id| barriers.contains_key(id.as_str()));
         }
     }
 

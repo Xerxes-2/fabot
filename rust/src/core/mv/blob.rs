@@ -67,7 +67,7 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
                 };
                 match field.ticks(tile) {
                     None => grid::UNREACHED,
-                    Some(ticks) if room == &target.room => ticks,
+                    Some(ticks) if room == target.room => ticks,
                     Some(_) if hops == 0 => grid::UNREACHED,
                     Some(ticks) => {
                         let edge = exit(&field, tile);
@@ -170,7 +170,7 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
     let step_back = 2 * step_ticks(mover.factor, engine::PLAIN_WEIGHT);
 
     let mut out = Vec::with_capacity(members.len());
-    for (creep, wish) in members.iter().zip(walks.into_iter()) {
+    for (creep, wish) in members.iter().zip(walks) {
         let waits = if creep.name == anchor.name {
             lagging
         } else {

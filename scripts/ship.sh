@@ -27,6 +27,12 @@ npm run build
 npm run smoke
 npm run scenario
 
+# The Rust tree is the port; until `src/` is deleted both ship, so both are gated.
+npm run test:rust
+npm run build:rust
+node scripts/smoke.mjs ../dist/fabot-rs.js
+npm run scenario -- --bot dist/fabot-rs.js
+
 jj bookmark set "$branch" -r "$rev"
 
 # Shipped from @, jj itself starts a new @: what origin holds is immutable.

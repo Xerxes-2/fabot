@@ -4,27 +4,22 @@
 //! `structureType`, `store` and `cooldown`, an Invader core's collapse) are
 //! read from the object itself, so a modded structure or a lost field costs
 //! nothing.
-use js_sys::{Array, Reflect};
-use screeps::{
-    HasPosition, MaybeHasId, OwnedStructureProperties, Position, ResourceType,
-    SharedCreepProperties, find, game, objects,
-};
+use js_sys::{Array, Object as JsObject, Reflect};
+use screeps::{OwnedStructureProperties, ResourceType, SharedCreepProperties, find, game, objects};
 use wasm_bindgen::{JsCast, JsValue};
+
+use super::js::{field, int_or_zero};
 
 use crate::core::engine;
 use crate::core::vocabulary::{self, BodyPart, Boost, Resource};
 use crate::core::world::*;
 
-fn field(v: &JsValue, name: &str) -> JsValue {
-    Reflect::get(v, &JsValue::from_str(name)).unwrap_or(JsValue::UNDEFINED)
+fn id_of(v: &JsValue) -> String {
+    field(v, "id").as_string().unwrap_or_default()
 }
 
 fn absent(v: &JsValue) -> bool {
     v.is_undefined() || v.is_null()
-}
-
-fn int_of(v: &JsValue) -> i32 {
-    v.as_f64().map(|n| n as i32).unwrap_or(0)
 }
 
 fn jsval<T: JsCast>(v: &T) -> JsValue {
@@ -33,7 +28,8 @@ fn jsval<T: JsCast>(v: &T) -> JsValue {
 
 /// The engine's `__packedPos` packs the room name y-major and this crate's
 /// `Position` reads it x-major, so the coordinate getters are the only source
-/// of a room name: `Position` is right only where the two agree (W1N1).
+/// of a room name: `Position` is right only where the two agree (the two pack
+/// the room y-major, this engine's own ids x-major).
 fn pos_of(pos: &objects::RoomPosition) -> Pos {
     Pos::new(pos.room_name().to_string(), pos.x() as i32, pos.y() as i32)
 }
@@ -102,7 +98,7 @@ fn owner_of(owner: Option<objects::Owner>) -> Owner {
 
 fn creep_of(creep: &objects::Creep) -> Creep {
     Creep {
-        id: String::from(creep.try_js_raw_id().unwrap_or_default()),
+        id: id_of(creep.as_ref()),
         name: creep.name(),
         owner: if creep.my() {
             Owner::Ours
@@ -152,7 +148,7 @@ fn fallen_creep(creep: &JsValue) -> Creep {
                 let boost = field(&part, "boost");
                 Part {
                     kind,
-                    hits: int_of(&field(&part, "hits")),
+                    hits: int_or_zero(&field(&part, "hits")),
                     boost: if absent(&boost) {
                         Boost::Unboosted
                     } else {
@@ -180,49 +176,38 @@ fn fallen_creep(creep: &JsValue) -> Creep {
         },
         pos: Pos::new(
             field(&pos, "roomName").as_string().unwrap_or_default(),
-            int_of(&field(&pos, "x")),
-            int_of(&field(&pos, "y")),
+            int_or_zero(&field(&pos, "x")),
+            int_or_zero(&field(&pos, "y")),
         ),
         body,
-        hits: int_of(&field(creep, "hits")),
-        hits_max: int_of(&field(creep, "hitsMax")),
-        ticks_to_live: int_of(&field(creep, "ticksToLive")),
-        fatigue: int_of(&field(creep, "fatigue")),
+        hits: int_or_zero(&field(creep, "hits")),
+        hits_max: int_or_zero(&field(creep, "hitsMax")),
+        ticks_to_live: int_or_zero(&field(creep, "ticksToLive")),
+        fatigue: int_or_zero(&field(creep, "fatigue")),
         store: store_at(&field(creep, "store")),
     }
-}
-
-fn ownable(kind: &Kind) -> bool {
-    !matches!(
-        kind,
-        Kind::Road | Kind::Wall | Kind::Portal | Kind::PowerBank | Kind::Other(_)
-    )
 }
 
 fn structure_of(s: &JsValue) -> Structure {
     let base: &objects::Structure = s.unchecked_ref();
     let kind = Kind::of_name(&field(s, "structureType").as_string().unwrap_or_default());
-    let owner = if ownable(&kind) {
-        let owned: &objects::OwnedStructure = s.unchecked_ref();
-        if owned.my() {
-            Owner::Ours
-        } else {
-            owner_of(owned.owner())
-        }
+    let owned: &objects::OwnedStructure = s.unchecked_ref();
+    let owner = if owned.my() {
+        Owner::Ours
     } else {
-        Owner::Nobody
+        owner_of(owned.owner())
     };
     Structure {
-        id: String::from(base.try_js_raw_id().unwrap_or_default()),
+        id: id_of(base.as_ref()),
         pos: pos_of(&base.js_pos()),
         owner: owner.clone(),
         hits: base.hits() as i32,
         hits_max: base.hits_max() as i32,
         store: store_at(&field(s, "store")),
-        cooldown: int_of(&field(s, "cooldown")),
+        cooldown: int_or_zero(&field(s, "cooldown")),
         collapse: collapse_of(s, &kind),
         level: if kind.is_invader_core() {
-            int_of(&field(s, "level"))
+            int_or_zero(&field(s, "level"))
         } else {
             0
         },
@@ -243,19 +228,19 @@ fn collapse_of(s: &JsValue, kind: &Kind) -> i32 {
     let found = match effects.dyn_into::<Array>() {
         Ok(array) => (0..array.length())
             .map(|i| array.get(i))
-            .find(|e| int_of(&field(e, "effect")) == 1002),
+            .find(|e| int_or_zero(&field(e, "effect")) == 1002),
         Err(_) => None,
     };
     match found {
-        Some(e) => int_of(&field(&e, "ticksRemaining")),
-        None => int_of(&field(s, "ticksToDeploy")) + engine::STRONGHOLD_LONGEST_COLLAPSE,
+        Some(e) => int_or_zero(&field(&e, "ticksRemaining")),
+        None => int_or_zero(&field(s, "ticksToDeploy")) + engine::STRONGHOLD_LONGEST_COLLAPSE,
     }
 }
 
 fn site_of(s: &JsValue) -> Site {
     let base: &objects::ConstructionSite = s.unchecked_ref();
     Site {
-        id: String::from(base.try_js_raw_id().unwrap_or_default()),
+        id: id_of(base.as_ref()),
         kind: Kind::of_name(&field(s, "structureType").as_string().unwrap_or_default()),
         pos: pos_of(&base.js_pos()),
         owner: if base.my() {
@@ -275,7 +260,7 @@ fn site_of(s: &JsValue) -> Site {
 
 fn controller_of(c: &objects::StructureController) -> Controller {
     Controller {
-        id: String::from(c.try_js_raw_id().unwrap_or_default()),
+        id: id_of(c.as_ref()),
         pos: pos_of(&c.js_pos()),
         owner: if c.my() {
             Owner::Ours
@@ -298,7 +283,7 @@ fn controller_of(c: &objects::StructureController) -> Controller {
 
 fn source_of(s: &objects::Source) -> Source {
     Source {
-        id: String::from(s.try_js_raw_id().unwrap_or_default()),
+        id: id_of(s.as_ref()),
         pos: pos_of(&s.js_pos()),
         energy: s.energy() as i32,
         energy_capacity: s.energy_capacity() as i32,
@@ -308,7 +293,7 @@ fn source_of(s: &objects::Source) -> Source {
 
 fn mineral_of(m: &objects::Mineral) -> Mineral {
     Mineral {
-        id: String::from(m.try_js_raw_id().unwrap_or_default()),
+        id: id_of(m.as_ref()),
         pos: pos_of(&m.js_pos()),
         resource: resource_of(m.mineral_type()),
         amount: m.mineral_amount() as i32,
@@ -317,7 +302,7 @@ fn mineral_of(m: &objects::Mineral) -> Mineral {
 
 fn pile_of(p: &objects::Resource) -> Pile {
     Pile {
-        id: String::from(p.try_js_raw_id().unwrap_or_default()),
+        id: id_of(p.as_ref()),
         pos: pos_of(&p.js_pos()),
         resource: resource_of(p.resource_type()),
         amount: p.amount() as i32,
@@ -332,8 +317,8 @@ fn remains_of_js(r: &JsValue) -> Remains {
             field(&field(r, "pos"), "roomName")
                 .as_string()
                 .unwrap_or_default(),
-            int_of(&field(&field(r, "pos"), "x")),
-            int_of(&field(&field(r, "pos"), "y")),
+            int_or_zero(&field(&field(r, "pos"), "x")),
+            int_or_zero(&field(&field(r, "pos"), "y")),
         ),
         store: store_at(&field(r, "store")),
         fallen: if absent(&creep) {
@@ -341,7 +326,7 @@ fn remains_of_js(r: &JsValue) -> Remains {
         } else {
             Some(Fallen {
                 creep: fallen_of(&creep),
-                died: int_of(&field(r, "deathTime")),
+                died: int_or_zero(&field(r, "deathTime")),
             })
         },
     }
@@ -430,7 +415,7 @@ fn room_of(room: &objects::Room) -> Room {
 
 fn spawn_of(spawn: &objects::StructureSpawn, creeps: &JsValue) -> Spawn {
     Spawn {
-        id: String::from(spawn.try_js_raw_id().unwrap_or_default()),
+        id: id_of(spawn.as_ref()),
         name: spawn.name(),
         pos: pos_of(&spawn.js_pos()),
         spawning: spawn.spawning().map(|s| {
@@ -453,7 +438,7 @@ fn spawn_of(spawn: &objects::StructureSpawn, creeps: &JsValue) -> Spawn {
                                 let boost = field(&part, "boost");
                                 Part {
                                     kind,
-                                    hits: int_of(&field(&part, "hits")),
+                                    hits: int_or_zero(&field(&part, "hits")),
                                     boost: if absent(&boost) {
                                         Boost::Unboosted
                                     } else {
@@ -539,8 +524,15 @@ pub fn of_game() -> World {
         rooms,
         spawns,
         creeps,
-        our_sites: game::construction_sites().entries().count() as i32,
+        our_sites: site_count(),
     }
+}
+
+/// Every construction site, seen or not: keys counted, not parsed.
+fn site_count() -> i32 {
+    let game = field(&js_sys::global(), "Game");
+    let sites = field(&game, "constructionSites");
+    JsObject::keys(&JsObject::from(sites)).length() as i32
 }
 
 /// `Game.getObjectById` as `Executor` reads it: absent is a refusal, never an error.

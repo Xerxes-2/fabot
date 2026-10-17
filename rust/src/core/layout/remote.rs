@@ -91,11 +91,11 @@ fn opened(
     let mut n = room.sites.iter().filter(|s| s.owner.is_ours()).count() as i32;
 
     for i in planned {
-        if let Intent::Room(r, RoomAct::CreateSite(x, y, _)) = i {
-            if r == &room.name {
-                tiles_open.insert(tiles::index(*x, *y));
-                n += 1;
-            }
+        if let Intent::Room(r, RoomAct::CreateSite(x, y, _)) = i
+            && r == &room.name
+        {
+            tiles_open.insert(tiles::index(*x, *y));
+            n += 1;
         }
     }
 
@@ -262,15 +262,14 @@ pub fn sites(
                                         tiles::x_of(t),
                                         tiles::y_of(t),
                                     )
-                                {
-                                    if let Some(ticks) = Atlas::travel_ticks(
+                                    && let Some(ticks) = Atlas::travel_ticks(
                                         atlas,
                                         HAULER,
                                         &home,
                                         &tiles::to_pos(&room.name, t),
-                                    ) {
-                                        seats.push((ticks, t));
-                                    }
+                                    )
+                                {
+                                    seats.push((ticks, t));
                                 }
                             }
 

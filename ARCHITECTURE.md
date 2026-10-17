@@ -8,8 +8,12 @@ Items marked ❓ are open: the owner decides them before the module is started.
 
 ## 0. What v2 is
 
-A Screeps seasonal-server bot in F# compiled by Fable. v2 is a port of v1's
-economy and a redesign of everything that assumed a unit smaller than the world.
+A Screeps seasonal-server bot in Rust, compiled to WASM and bundled into one JS
+file. The F#/Fable tree it is written from (`src/`) still builds and still runs
+the live gates: it is the port's source of truth for behaviour and nothing else,
+and `npm run parity` (§10.2) is what holds the two to the same tick. v2 is a
+port of v1's economy and a redesign of everything that assumed a unit smaller
+than the world.
 v1 taught us four things this document is built around:
 
 1. **The unit is the world.** v1 was written for one colony; the assumption
@@ -519,6 +523,11 @@ unchanged build).
 
 ### 9.2 F# dialect — defaults, not rules
 
+Binds `src/`. `rust/` keeps the defaults that carry over (arrays, loops and
+mutable locals on a per-creep path; no allocation a tick can avoid) and has one
+of its own: `World::of_game` is the only reader of the game, every field it
+reads a typed binding except the few `screeps-game-api` does not model.
+
 The boundary is pure; the inside is written as a systems language. Everything
 below is the **default** a module's first line is written in; any of it yields
 to a measurement on the benchmark above, in either direction. The evidence is
@@ -616,6 +625,13 @@ everything v1 used its self-written arena for, and more:
   costs its last N ticks; the bundle under test runs on from it as a deploy
   would), its ticks and bounds on what the soak measured, scenarios on one
   start sharing one soak; while it is small, `jj ship` runs all of it.
+- **Parity.** While both trees exist, one capture replays through both bundles
+  (`npm run parity -- --a dist/main.js --b dist/fabot-rs.js <capture.jsonl>`) and
+  a tick is equal only when its intents, `Memory` and the recorder ring are
+  byte-identical; a fault on either side fails the run, so "the two agree" never
+  hides a fault both make. `jj ship` builds and smokes both bundles, runs
+  `npm run test:rust` (fmt, clippy, `cargo test`) and the scenario library
+  against both.
 - **Soak.** The real sector's terrain and rooms, from one spawn for thousands
   of ticks: income curve, expansion cadence, losses to NPC waves, CPU curve.
   A change to the economy is read off this curve, not off a unit test. It is

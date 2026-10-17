@@ -1,8 +1,9 @@
 // Behaviour parity of two bundles on one capture: the same tick, in, must
-// produce the same intents and the same Memory, out (`ARCHITECTURE.md` §10.1's
-// seam). A capture already carries the whole World of every tick, so this is
-// the decision boundary itself, replayed tick for tick; the first tick the two
-// disagree on is the one to diff.
+// produce the same intents, the same Memory and the same recorder ring, out
+// (`ARCHITECTURE.md` §10.3). A capture already carries the whole World of every
+// tick, so this is the decision boundary itself, replayed tick for tick; the
+// first tick the two disagree on is the one to diff. A fault on either side
+// fails the run, so "the two agree" never hides a fault both make.
 //
 // Usage: npm run parity -- --a base.js --b new.js [--limit N] capture.jsonl…
 import { createReadStream } from "node:fs";
@@ -42,6 +43,7 @@ async function captures() {
   return ticks;
 }
 
+const RECORDER = [10, 11, 12, 13, 14];
 const ticks = await captures();
 const require = createRequire(import.meta.url);
 
@@ -61,6 +63,7 @@ function replay(path) {
       intents,
       acts: JSON.stringify(intents),
       memory: game.memory(),
+      recorded: RECORDER.map((id) => game.segments[id] ?? "").join("\u0000"),
       faults: (observed.faults ?? []).filter((f) => f.tick === tick.time),
       observe: { faults: (observed.faults ?? []).length, refusals: (observed.refusals ?? []).length },
     });
@@ -72,9 +75,24 @@ const sides = { A: replay(resolve(flags["--a"])), B: replay(resolve(flags["--b"]
 
 const firstDifference = (a, b) => {
   let i = 0;
-  while (i < a.length && i < b.length && a[i].acts === b[i].acts && a[i].memory === b[i].memory) i++;
+  while (
+    i < a.length &&
+    i < b.length &&
+    a[i].acts === b[i].acts &&
+    a[i].memory === b[i].memory &&
+    a[i].recorded === b[i].recorded
+  )
+    i++;
   return i;
 };
+
+for (const [name, side] of Object.entries(sides)) {
+  const faulted = side.findIndex((tick) => tick.faults.length);
+  if (faulted < 0) continue;
+  console.log(`parity: ${name} faulted at the tick ${ticks[faulted].time}`);
+  console.log(`  ${JSON.stringify(side[faulted].faults)}`);
+  process.exit(1);
+}
 
 const at = firstDifference(sides.A, sides.B);
 if (at === Math.min(sides.A.length, sides.B.length)) {
@@ -105,6 +123,16 @@ if (a.memory !== b.memory) {
   console.log(`    B …${b.memory.slice(Math.max(0, i - 60), i + 120)}`);
 } else {
   console.log("  memory: identical");
+}
+if (a.recorded !== b.recorded) {
+  const x = a.recorded.split("\u0000");
+  const y = b.recorded.split("\u0000");
+  const ring = RECORDER.findIndex((_, i) => x[i] !== y[i]);
+  console.log(`  recorder: segment ${RECORDER[ring]} differs`);
+  let i = 0;
+  while (i < x[ring].length && i < y[ring].length && x[ring][i] === y[ring][i]) i++;
+  console.log(`    A …${x[ring].slice(Math.max(0, i - 60), i + 120)}`);
+  console.log(`    B …${y[ring].slice(Math.max(0, i - 60), i + 120)}`);
 }
 for (const [name, side] of Object.entries({ A: a, B: b })) {
   if (side.faults.length) console.log(`  ${name} faults: ${JSON.stringify(side.faults)}`);

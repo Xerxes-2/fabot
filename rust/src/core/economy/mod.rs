@@ -49,12 +49,10 @@ pub(crate) mod dice {
             x
         }
 
-        /// In `0..n`.
         pub fn below(&mut self, n: i32) -> i32 {
             (self.next() % n as u64) as i32
         }
 
-        /// From `lo` to `hi`, both ends in.
         pub fn between(&mut self, lo: i32, hi: i32) -> i32 {
             lo + self.below(hi - lo + 1)
         }

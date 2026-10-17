@@ -27,6 +27,7 @@ struct Heap {
 }
 
 thread_local! {
+    static HOOKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static HEAP: RefCell<Heap> = RefCell::new(Heap {
         faults: Vec::new(),
         standing: BTreeMap::new(),
@@ -158,6 +159,12 @@ fn faulted_by(faults: &mut Vec<wire::Fault>, error: &str) {
 /// Exported as `loop` on the bundled `main` module, which the engine calls.
 #[wasm_bindgen(js_name = loop)]
 pub fn tick() {
+    HOOKED.with(|hooked| {
+        if !hooked.replace(true) {
+            super::hook_panics();
+        }
+    });
+
     if let Err(error) = run_tick() {
         HEAP.with(|heap| {
             let mut heap = heap.borrow_mut();

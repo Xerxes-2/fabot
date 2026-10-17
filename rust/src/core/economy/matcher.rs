@@ -586,15 +586,13 @@ mod tests {
             let out = matched(&scene, &scene.assignments);
 
             for b in &scene.bodies {
-                if let Some(id) = scene.assignments.get(&b.name) {
-                    if let Some(offer) = scene.pool.iter().find(|o| &o.id == id) {
-                        if offer.capacity == Capacity::Unbounded
-                            && pool::fits(b, offer)
-                            && reaches(&scene, b, offer)
-                        {
-                            assert_eq!(out.get(&b.name), Some(id));
-                        }
-                    }
+                if let Some(id) = scene.assignments.get(&b.name)
+                    && let Some(offer) = scene.pool.iter().find(|o| &o.id == id)
+                    && offer.capacity == Capacity::Unbounded
+                    && pool::fits(b, offer)
+                    && reaches(&scene, b, offer)
+                {
+                    assert_eq!(out.get(&b.name), Some(id));
                 }
             }
         }

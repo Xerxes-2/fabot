@@ -1,5 +1,5 @@
 {
-  description = "fabot devshell: dotnet SDK 10 + Node.js 24";
+  description = "fabot devshell: dotnet SDK 10 + Node.js 24 + Rust with wasm-pack";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
@@ -22,6 +22,11 @@
             packages = [
               dotnet
               pkgs.nodejs_24
+              pkgs.cargo
+              pkgs.rustc
+              pkgs.rustfmt
+              pkgs.clippy
+              pkgs.wasm-pack
             ];
 
             # dotnet tools (fable, fantomas) are restored per-repo via

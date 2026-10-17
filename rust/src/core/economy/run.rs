@@ -35,10 +35,11 @@ fn target_of(offer: &Offer) -> Target {
 
 /// `Atlas::route` without a search from a room `Derived` holds the tree of.
 fn route_of(atlas: &Atlas, derived: &Derived, target: &Target, from: &str) -> Option<Vec<String>> {
-    if target.avoid.is_empty() && target.max_hops == tick::REACH_HOPS {
-        if let Some(tree) = derived.routes.get(from) {
-            return Atlas::route_in(tree, from, &target.room);
-        }
+    if target.avoid.is_empty()
+        && target.max_hops == tick::REACH_HOPS
+        && let Some(tree) = derived.routes.get(from)
+    {
+        return Atlas::route_in(tree, from, &target.room);
     }
     atlas.route(&target.avoid, target.max_hops, from, &target.room)
 }
@@ -465,13 +466,14 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                     .filter(|g| g.room == creep.pos.room)
                     .find_map(|g| g.buffer.as_ref());
 
-                if let Some(b) = buffer {
-                    if pool::draws_buffer(body, offer) && creep.pos.within(1, &b.pos) {
-                        acts.push(Intent::Creep(
-                            creep.name.clone(),
-                            CreepAct::Withdraw(b.id.clone(), Resource::Energy),
-                        ));
-                    }
+                if let Some(b) = buffer
+                    && pool::draws_buffer(body, offer)
+                    && creep.pos.within(1, &b.pos)
+                {
+                    acts.push(Intent::Creep(
+                        creep.name.clone(),
+                        CreepAct::Withdraw(b.id.clone(), Resource::Energy),
+                    ));
                 }
 
                 // Away from a colony no crew raises a container nor stays to

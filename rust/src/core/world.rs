@@ -585,7 +585,6 @@ impl World {
     }
 }
 
-/// The parts of a creep's body, as the engine reports a live part.
 pub fn part_hits(part: &Part) -> i32 {
     part.hits
 }

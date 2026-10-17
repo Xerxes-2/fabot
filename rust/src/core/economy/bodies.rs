@@ -152,7 +152,7 @@ fn worker_body(most: i32, capacity: i32) -> Vec<BodyPart> {
     let mut go = true;
 
     while go {
-        if slots >= 1 && budget >= carry_cost && work + carry + 1 <= 2 * moves {
+        if slots >= 1 && budget >= carry_cost && work + carry < 2 * moves {
             carry += 1;
             budget -= carry_cost;
             slots -= 1;

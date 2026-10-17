@@ -6,6 +6,7 @@ use js_sys::{Array, Object, Reflect};
 use screeps::raw_memory;
 use wasm_bindgen::{JsCast, JsValue};
 
+use super::js::{field, int_of};
 use crate::core::exchange::{Losses, Outcome};
 use crate::core::fight::shape::{Cast, Engagement, Group, Objective, Phase, Plan, Tactic};
 use crate::core::state::State;
@@ -15,10 +16,6 @@ use crate::core::world::{Pos, World};
 
 /// Read by `npm run observe` and `scripts/capture`.
 pub const OBSERVE_SEGMENT: u8 = 1;
-
-fn field(o: &JsValue, name: &str) -> JsValue {
-    Reflect::get(o, &JsValue::from_str(name)).unwrap_or(JsValue::UNDEFINED)
-}
 
 fn set_field(o: &JsValue, name: &str, value: &JsValue) {
     let _ = Reflect::set(o, &JsValue::from_str(name), value);
@@ -31,10 +28,6 @@ fn drop_field(o: &JsValue, name: &str) {
 
 fn is_object(v: &JsValue) -> bool {
     v.is_object() && !v.is_null()
-}
-
-fn int_of(v: &JsValue) -> Option<i32> {
-    v.as_f64().map(|n| n as i32)
 }
 
 fn string_of(v: &JsValue) -> Option<String> {
@@ -535,8 +528,8 @@ pub fn write_segment(id: u8, text: &str) {
 }
 
 /// The recorder's ring: the last five ticks' `World` and Memory size.
-pub fn record(time: i32, _world: &World) -> Option<String> {
-    Some(format!("recorder: tick {} is not ported", time))
+pub fn record(time: i32, world: &World) -> Option<String> {
+    super::record::record(time, world)
 }
 
 /// The bundle's banner, set by `scripts/rust.mjs` on the global.

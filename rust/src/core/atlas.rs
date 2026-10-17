@@ -190,10 +190,10 @@ impl Atlas {
             .iter()
             .filter_map(|s| Atlas::post_of(room, &s.pos).map(|(p, _)| tiles::of_pos(&p)))
             .collect();
-        if let Some(b) = Atlas::buffer(room) {
-            if b.kind.is_container() {
-                seats.push(tiles::of_pos(&b.pos));
-            }
+        if let Some(b) = Atlas::buffer(room)
+            && b.kind.is_container()
+        {
+            seats.push(tiles::of_pos(&b.pos));
         }
         seats
     }
@@ -414,14 +414,13 @@ impl Atlas {
             for room in &frontier {
                 for e in 0..4 {
                     let exit = tiles::TOP + 2 * e;
-                    if let Some(there) = tiles::room_toward(room, exit) {
-                        if !parent.contains_key(&there)
-                            && (there == onto || !avoid.contains(&there))
-                            && self.linked(room, &there, exit)
-                        {
-                            parent.insert(there.clone(), room.clone());
-                            next.push(there);
-                        }
+                    if let Some(there) = tiles::room_toward(room, exit)
+                        && !parent.contains_key(&there)
+                        && (there == onto || !avoid.contains(&there))
+                        && self.linked(room, &there, exit)
+                    {
+                        parent.insert(there.clone(), room.clone());
+                        next.push(there);
                     }
                 }
             }
@@ -527,16 +526,14 @@ impl Atlas {
             (goal_key, goals)
         } else {
             match onward() {
-                Some(rooms) if rooms.len() >= 2 => match tiles::exit_toward(room, &rooms[1]) {
-                    Some(exit) => {
-                        let grid = &self.rooms[room];
-                        (
-                            format!("x{}", exit),
-                            Atlas::exit_goals(footprint, &grid.weights, exit),
-                        )
-                    }
-                    None => return None,
-                },
+                Some(rooms) if rooms.len() >= 2 => {
+                    let exit = tiles::exit_toward(room, &rooms[1])?;
+                    let grid = &self.rooms[room];
+                    (
+                        format!("x{}", exit),
+                        Atlas::exit_goals(footprint, &grid.weights, exit),
+                    )
+                }
                 _ => return None,
             }
         };
@@ -606,10 +603,10 @@ impl Atlas {
             (Some(field), Some(exit)) => {
                 let mut least = UNREACHED;
                 for &tile in tiles::exit_tiles(exit) {
-                    if let Some(d) = field.ticks(tile) {
-                        if d < least {
-                            least = d;
-                        }
+                    if let Some(d) = field.ticks(tile)
+                        && d < least
+                    {
+                        least = d;
                     }
                 }
                 if least == UNREACHED {

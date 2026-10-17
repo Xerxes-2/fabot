@@ -13,18 +13,17 @@ pub fn decide_over(colonies: &[derive::Colony], budget: i32) -> Vec<Intent> {
     let mut intents: Vec<Intent> = Vec::new();
 
     for colony in colonies {
-        if let Some(plan) = &colony.plan {
-            if budget > 0
-                && colony.census.pending < sites::SITES_IN_FLIGHT
-                && sites::may_place(&colony.census, colony.level)
-            {
-                for p in sites::place(&colony.census, colony.level, plan, budget) {
-                    budget -= 1;
-                    intents.push(Intent::Room(
-                        colony.room.clone(),
-                        RoomAct::CreateSite(p.x, p.y, p.kind),
-                    ));
-                }
+        if let Some(plan) = &colony.plan
+            && budget > 0
+            && colony.census.pending < sites::SITES_IN_FLIGHT
+            && sites::may_place(&colony.census, colony.level)
+        {
+            for p in sites::place(&colony.census, colony.level, plan, budget) {
+                budget -= 1;
+                intents.push(Intent::Room(
+                    colony.room.clone(),
+                    RoomAct::CreateSite(p.x, p.y, p.kind),
+                ));
             }
         }
 

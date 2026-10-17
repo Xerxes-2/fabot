@@ -9,6 +9,38 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+// The banner `scripts/bundle.mjs` writes for the F# bundle, same rule: the
+// change and commit the build came from, `+dirty` while it can still be
+// rewritten, `unknown` outside a jj repo.
+const jj = (rev) =>
+  execFileSync(
+    "jj",
+    [
+      "log",
+      "-r",
+      rev,
+      "--limit",
+      "1",
+      "--no-graph",
+      "-T",
+      'change_id.short() ++ " " ++ commit_id.short() ++ " " ++ ' +
+        'if(empty && !description, "bare", "-") ++ " " ++ if(immutable, "pushed", "-")',
+    ],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+  )
+    .trim()
+    .split(" ");
+
+const version = () => {
+  try {
+    let [change, commit, bare, pushed] = jj("@");
+    if (bare === "bare") [change, commit, bare, pushed] = jj("@-");
+    return `${change} ${commit}${pushed === "pushed" ? "" : "+dirty"}`;
+  } catch {
+    return "unknown";
+  }
+};
 const CRATE = join(REPO, "rust");
 const OUT = join(REPO, "dist", "fabot-rs.js");
 
@@ -23,7 +55,8 @@ const loader = `const wasmPath = \`\${__dirname}/fabot_bg.wasm\`;
 const wasmBytes = require('fs').readFileSync(wasmPath);`;
 if (!glue.includes(loader)) throw new Error("rust.mjs: wasm-pack's loader changed; the inline patch is stale");
 
-const prelude = `
+const prelude = `globalThis.__FABOT_VERSION__ = ${JSON.stringify(version())};
+
 // The engine's sandbox has no TextDecoder and no filesystem: decode the module
 // that is our own code and decode UTF-8 the way the runtime would.
 if (typeof TextDecoder === "undefined") {

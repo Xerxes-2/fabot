@@ -34,10 +34,7 @@ pub fn greatest_by_key<T: Clone, K: Clone>(
     projection: impl Fn(&T) -> K,
     order: impl Fn(&K, &K) -> Ordering,
     list: &[T],
-) -> T
-where
-    T: Clone,
-{
+) -> T {
     let mut best = list[0].clone();
     let mut best_key = projection(&best);
     for item in &list[1..] {

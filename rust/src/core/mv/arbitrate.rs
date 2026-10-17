@@ -300,10 +300,12 @@ impl<'a> Search<'a> {
             }
         }
 
-        if let Some(o) = onward {
-            if o != from && self.taken == before && candidates.contains(&o) {
-                self.step(i, o, score, home, leaving, leaving_home, wish.onward);
-            }
+        if let Some(o) = onward
+            && o != from
+            && self.taken == before
+            && candidates.contains(&o)
+        {
+            self.step(i, o, score, home, leaving, leaving_home, wish.onward);
         }
 
         self.on_path[i] = false;

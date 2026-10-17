@@ -464,16 +464,16 @@ fn spend_demands(
             .filter(|ci| castable(colonies, d, *ci))
             .or_else(|| walks.near(&|ci| castable(colonies, d, ci), &d.at));
 
-        if let Some(ci) = caster {
-            if let Some(body) = body_for(&colonies[ci], d) {
-                let parts = parts_of(d.pattern, &body);
+        if let Some(ci) = caster
+            && let Some(body) = body_for(&colonies[ci], d)
+        {
+            let parts = parts_of(d.pattern, &body);
 
-                if parts > 0 {
-                    let bodies = d.seats.min(ceil_div(d.wanted, parts));
+            if parts > 0 {
+                let bodies = d.seats.min(ceil_div(d.wanted, parts));
 
-                    upkeep[ci] += bodies as f64
-                        * (engine::body_cost(&body) as f64 / life_of(d.pattern) as f64 + d.spill);
-                }
+                upkeep[ci] += bodies as f64
+                    * (engine::body_cost(&body) as f64 / life_of(d.pattern) as f64 + d.spill);
             }
         }
     }
@@ -690,28 +690,30 @@ fn expiring_now(
     }
 }
 
-fn cast_at(
-    casts: &mut Vec<Cast>,
-    idle: &mut [Vec<usize>],
-    bank: &mut [i32],
-    colonies: &[Colony],
+/// The ledger and the idle spawns a cast spends, so a cast names only what it
+/// makes.
+struct Foundry<'a> {
+    casts: &'a mut Vec<Cast>,
+    idle: &'a mut Vec<Vec<usize>>,
+    bank: &'a mut [i32],
+    colonies: &'a [Colony],
     time: i32,
-    ci: usize,
-    pattern: Pattern,
-    body: Vec<BodyPart>,
-    floor: bool,
-) {
-    let index = idle[ci].remove(0);
-    let spawn = &colonies[ci].spawns[index];
-    bank[ci] -= engine::body_cost(&body);
+}
 
-    casts.push(Cast {
-        colony: colonies[ci].room.clone(),
-        spawn: spawn.id.clone(),
-        name: bodies::cast_name(pattern, time, &spawn.name),
-        body,
-        floor,
-    });
+impl Foundry<'_> {
+    fn at(&mut self, ci: usize, pattern: Pattern, body: Vec<BodyPart>, floor: bool) {
+        let index = self.idle[ci].remove(0);
+        let spawn = &self.colonies[ci].spawns[index];
+        self.bank[ci] -= engine::body_cost(&body);
+
+        self.casts.push(Cast {
+            colony: self.colonies[ci].room.clone(),
+            spawn: spawn.id.clone(),
+            name: bodies::cast_name(pattern, self.time, &spawn.name),
+            body,
+            floor,
+        });
+    }
 }
 
 /// A seat its bank cannot pay yields to the next it can: an order, never a
@@ -825,6 +827,13 @@ pub fn plan(
         .collect();
 
     let mut casts: Vec<Cast> = Vec::new();
+    let mut foundry = Foundry {
+        casts: &mut casts,
+        idle: &mut idle,
+        bank: &mut bank,
+        colonies,
+        time: derived.time,
+    };
 
     // The anchor floor: with no harvester, nothing digs what refills the bank.
     for (ci, colony) in colonies.iter().enumerate() {
@@ -840,24 +849,15 @@ pub fn plan(
             continue;
         };
 
-        if idle[ci].is_empty() || digging || colony.bank >= colony.bank_capacity {
+        if foundry.idle[ci].is_empty() || digging || colony.bank >= colony.bank_capacity {
             continue;
         }
 
-        if let Some(body) = bodies::home_harvester(super::derived::dig_work(s.rate), bank[ci]) {
-            if engine::body_cost(&body) <= bank[ci] {
-                cast_at(
-                    &mut casts,
-                    &mut idle,
-                    &mut bank,
-                    colonies,
-                    derived.time,
-                    ci,
-                    Pattern::Harvester,
-                    body,
-                    true,
-                );
-            }
+        if let Some(body) =
+            bodies::home_harvester(super::derived::dig_work(s.rate), foundry.bank[ci])
+            && engine::body_cost(&body) <= foundry.bank[ci]
+        {
+            foundry.at(ci, Pattern::Harvester, body, true);
         }
     }
 
@@ -881,7 +881,7 @@ pub fn plan(
                     .any(|room| owners.get(room) == Some(&ci))
         };
 
-        if idle[ci].is_empty()
+        if foundry.idle[ci].is_empty()
             || derived
                 .bodies
                 .iter()
@@ -891,18 +891,9 @@ pub fn plan(
             continue;
         }
 
-        if let Some(body) = bodies::sized(pattern, engine::MAX_BODY_PARTS as i32, bank[ci]) {
-            cast_at(
-                &mut casts,
-                &mut idle,
-                &mut bank,
-                colonies,
-                derived.time,
-                ci,
-                pattern,
-                body,
-                true,
-            );
+        if let Some(body) = bodies::sized(pattern, engine::MAX_BODY_PARTS as i32, foundry.bank[ci])
+        {
+            foundry.at(ci, pattern, body, true);
         }
     }
 
@@ -924,9 +915,9 @@ pub fn plan(
 
     for d in &all {
         let caster = match owners.get(&d.at.room).copied() {
-            Some(ci) if !idle[ci].is_empty() && castable(colonies, d, ci) => Some(ci),
+            Some(ci) if !foundry.idle[ci].is_empty() && castable(colonies, d, ci) => Some(ci),
             _ => walks.near(
-                &|ci| !idle[ci].is_empty() && castable(colonies, d, ci),
+                &|ci| !foundry.idle[ci].is_empty() && castable(colonies, d, ci),
                 &d.at,
             ),
         };
@@ -979,37 +970,38 @@ pub fn plan(
 
     let mut waiting = vec![false; colonies.len()];
 
-    for seat in &seats {
-        match seat.colony {
-            Some(ci) if !idle[ci].is_empty() && !(seat.pattern.is_upgrader() && waiting[ci]) => {
-                let body = if seat.pattern.is_hauler() && served[ci] > 1 {
-                    bodies::sized(seat.pattern, parts_of(seat.pattern, &seat.body), bank[ci])
-                } else {
-                    Some(seat.body.clone())
-                };
+    let mut seated: Vec<Seat> = Vec::with_capacity(seats.len());
 
-                match body {
-                    Some(fit) if engine::body_cost(&fit) <= bank[ci] => cast_at(
-                        &mut casts,
-                        &mut idle,
-                        &mut bank,
-                        colonies,
-                        derived.time,
-                        ci,
-                        seat.pattern,
-                        fit,
-                        false,
-                    ),
-                    _ => waiting[ci] = true,
+    for mut seat in seats {
+        if let Some(ci) = seat.colony
+            && !foundry.idle[ci].is_empty()
+            && !(seat.pattern.is_upgrader() && waiting[ci])
+        {
+            let body = if seat.pattern.is_hauler() && served[ci] > 1 {
+                bodies::sized(
+                    seat.pattern,
+                    parts_of(seat.pattern, &seat.body),
+                    foundry.bank[ci],
+                )
+            } else {
+                Some(seat.body.clone())
+            };
+
+            match body {
+                Some(fit) if engine::body_cost(&fit) <= foundry.bank[ci] => {
+                    foundry.at(ci, seat.pattern, fit.clone(), false);
+                    seat.body = fit;
                 }
+                _ => waiting[ci] = true,
             }
-            _ => (),
         }
+
+        seated.push(seat);
     }
 
     Plan {
         wants,
-        seats,
+        seats: seated,
         casts,
     }
 }
