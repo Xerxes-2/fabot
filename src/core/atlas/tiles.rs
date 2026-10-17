@@ -55,6 +55,17 @@ impl<T> IndexMut<Tile> for Vec<T> {
     }
 }
 
+/// One value a tile, in tile order.
+pub type Table<T> = Box<[T; COUNT]>;
+
+/// Built on the heap: a `Box::new` of the array builds it on the stack first.
+pub fn table<T: Clone>(value: T) -> Table<T> {
+    vec![value; COUNT]
+        .into_boxed_slice()
+        .try_into()
+        .unwrap_or_else(|_| unreachable!())
+}
+
 pub fn all() -> impl Iterator<Item = Tile> {
     (0..COUNT as u16).map(Tile)
 }

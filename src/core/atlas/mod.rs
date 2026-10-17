@@ -9,7 +9,7 @@ pub mod tiles;
 use self::grid::{
     FatigueFactor, Footprint, UNREACHED, Weight, flood, on_edge, step_table, step_ticks, weight_of,
 };
-use self::tiles::Tile;
+use self::tiles::{Table, Tile};
 use super::engine;
 use super::world::{Kind, Owner, Pos, Room, World};
 
@@ -34,7 +34,7 @@ pub struct Target {
 #[derive(Clone, Debug)]
 pub struct RoomGrid {
     pub weights: Rc<Vec<Weight>>,
-    pub floods: HashMap<String, Rc<Vec<i32>>>,
+    pub floods: HashMap<String, Rc<Table<i32>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -42,7 +42,7 @@ pub struct Field {
     pub footprint: Footprint,
     pub weights: Rc<Vec<Weight>>,
     pub factor: FatigueFactor,
-    pub dist: Rc<Vec<i32>>,
+    pub dist: Rc<Table<i32>>,
 }
 
 #[derive(Clone, Debug)]

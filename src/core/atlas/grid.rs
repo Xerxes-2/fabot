@@ -242,8 +242,8 @@ pub fn flood(
     weights: &[Weight],
     steps: &[Option<u16>],
     goals: &[Tile],
-) -> Vec<i32> {
-    let mut dist = vec![UNREACHED; tiles::COUNT];
+) -> tiles::Table<i32> {
+    let mut dist = tiles::table(UNREACHED);
     // The step off a tile; None where no walk leaves it.
     let mut price: [Option<u16>; tiles::COUNT] = [None; tiles::COUNT];
     let dearest = steps.iter().flatten().max().copied().unwrap_or(0);
@@ -278,7 +278,7 @@ pub fn flood(
             b = if b + 1 == dial.ring { 0 } else { b + 1 };
             continue;
         };
-        dial.unlink(tile, &dist);
+        dial.unlink(tile, &*dist);
         if let Some(p) = price[tile] {
             dial.relaxed += 1;
             let candidate = d + i32::from(p);
@@ -297,7 +297,7 @@ pub fn flood(
                 let old = dist[n];
                 if candidate < old {
                     if old != UNREACHED {
-                        dial.unlink(n, &dist);
+                        dial.unlink(n, &*dist);
                     }
                     dist[n] = candidate;
                     dial.link(n, candidate);

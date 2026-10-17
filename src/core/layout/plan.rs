@@ -304,7 +304,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
 
     for t in tiles::all() {
         if lattice(t) && walk[t] != UNREACHED {
-            let mut step = down(&lane, &walk, t);
+            let mut step = down(&lane, &*walk, t);
 
             while let Some(at) = step
                 && !walked[at]
@@ -315,7 +315,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
                     clear[at] = true;
                 }
 
-                step = down(&lane, &walk, at);
+                step = down(&lane, &*walk, at);
             }
         }
     }
@@ -332,7 +332,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
 
     let mut source_walks: Vec<(Tile, Vec<Tile>)> = Vec::new();
     for s in &ground.sources {
-        let path = way_out(&lane, &walk, &mut clear, *s);
+        let path = way_out(&lane, &*walk, &mut clear, *s);
         if path.is_empty() {
             unfit.push("source unreached".into());
         } else {
@@ -342,7 +342,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
 
     let controller_walk: Vec<Tile> = match ground.controller {
         Some(c) => {
-            let path = way_out(&lane, &walk, &mut clear, c);
+            let path = way_out(&lane, &*walk, &mut clear, c);
             if path.is_empty() {
                 unfit.push("controller unreached".into());
                 Vec::new()
@@ -355,7 +355,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
 
     let mut mineral_walks: Vec<(Tile, Vec<Tile>)> = Vec::new();
     for m in &ground.minerals {
-        let path = way_out(&lane, &walk, &mut clear, *m);
+        let path = way_out(&lane, &*walk, &mut clear, *m);
         if path.is_empty() {
             unfit.push("mineral unreached".into());
         } else {
@@ -520,7 +520,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
 
         while let Some(at) = road {
             road_level[at] = road_level[at].min(level.max(haul_level()));
-            road = down(&lane, &walk, at);
+            road = down(&lane, &*walk, at);
         }
     }
 
@@ -883,7 +883,7 @@ pub fn of_ground(ground: &Ground, spawns: &[Tile]) -> Option<Plan> {
 struct Board<'a> {
     weights: &'a [Weight],
     anchor: Tile,
-    walk: Vec<i32>,
+    walk: tiles::Table<i32>,
     taken: Vec<bool>,
     road_level: Vec<i32>,
     clear: Vec<bool>,
