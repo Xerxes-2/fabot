@@ -1,7 +1,7 @@
 // Offline, server stopped: a soak node's start (ARCHITECTURE.md §10.2). Runs
 // under xxscreeps' own loader, cwd the world directory:
 //   xxscreeps.js file://…/node.mjs ground <room>
-//     prints the room's ground as `scripts/plan` reads it
+//     prints the room's ground as `src/bin/plan.rs` reads it
 //   xxscreeps.js file://…/node.mjs stand <room> <structures.json> <level> <stored> <username> [<worn>]
 //     after `manage bot add --spawn` stood the first spawn: the controller
 //     at <level> (progress 0, its downgrade timer full, the claim's safe
@@ -9,7 +9,7 @@
 //     tile (its roads and containers at <worn> of them, default 1), and <stored> energy in the storage.
 //   xxscreeps.js file://…/node.mjs declare <room> <username> <declarations.json>
 //     <username>'s Memory as `{ v2: { declarations } }`, what the bot reads
-//     its declarations from (src/App/Wire.fs); <room> is not read.
+//     its declarations from (src/app/wire.rs); <room> is not read.
 //   xxscreeps.js file://…/node.mjs unsafe <room>
 //     <room>'s safe mode ended and none left to activate.
 //   xxscreeps.js file://…/node.mjs ended <room>

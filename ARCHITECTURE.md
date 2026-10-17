@@ -9,9 +9,8 @@ Items marked ❓ are open: the owner decides them before the module is started.
 ## 0. What v2 is
 
 A Screeps seasonal-server bot in Rust, compiled to WASM and bundled into one JS
-file. The F#/Fable tree it is written from (`src/`) still builds and still runs
-the live gates: it is the port's source of truth for behaviour and nothing else,
-and `npm run parity` (§10.2) is what holds the two to the same tick. v2 is a
+file, ported tick for tick from an F#/Fable tree that stands on the `fable`
+bookmark, never changed again. v2 is a
 port of v1's economy and a redesign of everything that assumed a unit smaller
 than the world.
 v1 taught us four things this document is built around:
@@ -111,8 +110,8 @@ World ──▶ Derived ──▶ decisions ──▶ Intents
   room a spawn or body stands in (owner's decision): Economy prices every
   body against every offer, so a search per query cost thousands a tick at
   six colonies, and none is kept across ticks. Floods are
-  the only demand-driven derivation. Any other `TickMemo`, `Dictionary` cache
-  or `lazy` outside `Derived` is an architecture change (`AGENTS.md`).
+  the only demand-driven derivation. Any other memo, `HashMap` cache or
+  lazy cell outside `Derived` is an architecture change (`AGENTS.md`).
 - **Counts are a gate** (§9.3): floods, Atlas misses, `Exchange.outcome` calls
   and intel reads per tick on a replay capture are deterministic numbers with
   ceilings; a change that doubles the floods fails `jj ship` without anyone
@@ -203,7 +202,7 @@ recorder's ring; the rest are assigned here as their stores land.
 Rules:
 - Memory and segments are written once a tick by `Main`, from `State'`. No
   module calls `Memory.*` or `RawMemory.*`.
-- No `TickMemo` and no `mutable` module-level binding outside `Main` and the
+- No `thread_local!` or `static` outside the driver (`app/driver.rs`) and the
   heap rows above. A cache inside a function's tick scope is fine.
 - No room name, player name or object id in source. v1's `Colonies.fs` carried
   seventeen outposts and `allies = ["Odiodin"]`; all of it is `declarations`.
@@ -347,7 +346,7 @@ Common to every kind:
   would, it stops asking for bodies, its standing bodies hold on our
   ramparts and the towers carry on; it is `unanswered` and closes only when
   the group is gone.
-- v2.0's record (`Fight/Shape.fs`) holds what `Defend` reads: the target is a
+- v2.0's record (`fight/shape.rs`) holds what `Defend` reads: the target is a
   group id, the asks live in `fight.casts`; `Kind` and `Declares` join with
   the second kind; `Predicted` is the outcome priced each time it is answered
   after standing unanswered. The plan chases while
@@ -521,60 +520,22 @@ identical Memory fingerprints, or a count (floods, lookups, allocations). A
 workstation's wall clock alone settles nothing (v1 measured ±6% drift on an
 unchanged build).
 
-### 9.2 F# dialect — defaults, not rules
-
-Binds `src/`. `rust/` keeps the defaults that carry over (arrays, loops and
-mutable locals on a per-creep path; no allocation a tick can avoid) and has two
-of its own: `World::of_game` is the only reader of the game, every field it
-reads a typed binding except the few `screeps-game-api` does not model; and the
-seam builds each property name and reads each field once, gating on `Kind`
-where the engine gives the field to only some kinds.
+### 9.2 Rust dialect — defaults, not rules
 
 The boundary is pure; the inside is written as a systems language. Everything
 below is the **default** a module's first line is written in; any of it yields
-to a measurement on the benchmark above, in either direction. The evidence is
-Fable 5's emitted JS and `ab.mjs`; node micro-timings ("×") are hints only.
-Most impact first:
+to a measurement on the benchmark above, in either direction:
 
-- Module boundaries take and return immutable records. Inside a function,
-  arrays, `ResizeArray`, `Dictionary`, `mutable` locals and `for` loops on any
-  path that runs per creep or per tile.
-- **Arrays on a per-tile or per-pair loop are read through `Tiles.at` /
-  `setAt`.** `arr.[i]`, `arr.[i] <- v`, `for x in arr` and `ResizeArray.[i]`
-  compile to a bounds-checked call: 23–43% of the economy (`ab.mjs`).
-- **No `seq`, comprehension or stepped range per tick.** `[| for … |]`,
-  `[ for … ]`, `[| a .. b |]` and `0 .. 2 .. n` build through Fable's seq
-  library (~100× a `ResizeArray` loop); `for x in` a list, seq or collection
-  is an enumerator in `try/finally`. A step of 1 or -1 is a plain `for`.
-- **Equality is `===` only on a primitive Fable can see.** A union case is
-  tested with `.IsCase` or `match`, never `=` (generic `equals`; `ab.mjs`
-  −1% bot). `=`, `<>` and `compare` on records, tuples, lists and options,
-  inside a non-`inline` generic function, or on an untyped tuple argument
-  emit generic `equals`/`compare`: compare fields, match `Some x when`, and
-  annotate primitive arguments.
-- **A `Dictionary`/`HashSet` key is an `int` or a `string`** (a native JS
-  `Map`/`Set`); a record, tuple or union key hashes (~40×). `Map`/`Set` are
-  AVL trees, which measured noise against `Dictionary` at the matcher's
-  sizes. `ContainsKey` then `.[k]` allocates nothing; `TryGetValue` allocates.
-- **Numeric arrays are typed arrays** (`int`, `float`, `byte`); `bool`, `char`
-  and reference elements are plain arrays. A sentinel stays only in a numeric
-  table; absence elsewhere is an `option`, erased to the value or
-  `undefined` (`voption` is the same; a nested or generic `'T option` wraps).
-- **`[<Struct>]` does nothing:** the bundle is byte-identical without it, and
-  a struct tuple is still a JS array unless destructured where it is built.
-  Hot-path records carry `[<NoEquality; NoComparison>]`, which emits nothing
-  but makes an accidental deep compare a compile error.
-- `inline` with `[<InlineIfLambda>]` erases a passed function; worth it per
-  tile only. Fable uncurries top-level and local functions.
-- Strings on a hot path: `+` or `$"{x}"`, never `sprintf` (~100×) or a typed
-  hole `%d{x}`.
-- A `try` inside an expression is an IIFE (~3×): hoist it out of loops.
-  `int64` is emulated.
-- No closure allocated per tick outlives the tick (v1's `Fresh` lesson,
-  measured live; one tick retained measured nothing in `ab.mjs`, an
-  accumulating one was not tried): a collection that is stored is built by a
-  function that captures nothing.
-- `[<Emit>]` stubs take `_`-prefixed params.
+- Module boundaries take and return owned values. Inside a function, `Vec`s,
+  mutable locals and loops on any path that runs per creep or per tile, and
+  no allocation a tick can avoid.
+- `World::of_game` is the only reader of the game: every field it reads a
+  typed binding except the few `screeps-game-api` does not model.
+- A call across the wasm–JS seam is the seam's cost: on the live-sized capture
+  ~90% of what reading the world cost over the F# reader was the number of
+  calls, not the work in them (2026-10-17). The seam builds each property name
+  once, reads each field once, and gates on `Kind` where the engine gives a
+  field to only some kinds.
 
 ### 9.3 Counts are a gate
 
@@ -627,13 +588,6 @@ everything v1 used its self-written arena for, and more:
   costs its last N ticks; the bundle under test runs on from it as a deploy
   would), its ticks and bounds on what the soak measured, scenarios on one
   start sharing one soak; while it is small, `jj ship` runs all of it.
-- **Parity.** While both trees exist, one capture replays through both bundles
-  (`npm run parity -- --a dist/main.js --b dist/fabot-rs.js <capture.jsonl>`) and
-  a tick is equal only when its intents, `Memory` and the recorder ring are
-  byte-identical; a fault on either side fails the run, so "the two agree" never
-  hides a fault both make. `jj ship` builds and smokes both bundles, runs
-  `npm run test:rust` (fmt, clippy, `cargo test`) and the scenario library
-  against both.
 - **Soak.** The real sector's terrain and rooms, from one spawn for thousands
   of ticks: income curve, expansion cadence, losses to NPC waves, CPU curve.
   A change to the economy is read off this curve, not off a unit test. It is
@@ -739,7 +693,7 @@ nix.
 ### 10.3 Unit tests, where the engine would obscure
 
 Two kinds, both under a minute in `npm test`:
-1. **Invariants** over generated inputs (FsCheck): Memory round-trips; a
+1. **Invariants** over generated inputs (a fixed-seed draw, `core/tests`): Memory round-trips; a
    Tracker id is stable under permutation; `Ours` is disjoint from
    `assignments`; no two bodies resolved onto one tile; no idle spawn while a
    cast is affordable.
@@ -804,15 +758,15 @@ Status: ✅ landed · ⏳ next · blank not started.
 
 | v1 | v2 | Action |
 |---|---|---|
-| `App/Bindings.fs` | `App/Bindings.fs` | ✅ verbatim, plus `cpu.limit` and segment writes |
-| `App/World.fs`, `Main.fs` shell | `App/World.fs`, `Wire.fs`, `Main.fs`, `Core/Tick.fs` | ✅ `World`: terrain, controllers, sources, minerals, structures, sites, piles, remains, hostiles, our creeps with bodies and stores; per-module CPU, fault isolation, switches, recorder, observe segment |
-| `Types/Rules.fs` `Engine`, `Types/Vocabulary.fs`, `Types/Lists.fs` | `Core/Engine.fs`, `Core/Vocabulary.fs`, `Core/Lists.fs` | ✅ `Engine` less policy (`guardCap`) and season (`reactorCapacity`), plus part costs, regen time and level progress; `Vocabulary` less `Task` (Economy's) and with season resources as `Resource.Other` |
-| `Core/Atlas.fs`, `Grid.fs`, `Geometry.fs` | `Core/Atlas/Tiles.fs`, `Grid.fs`, `Atlas.fs` | ✅ tile index `y*50+x` (the terrain buffer's), the flood, footprint on every query, a minimal room graph, the flood table. Known gaps: a route is chosen without the footprint (a Quad can be routed through a one-tile gap); boosted CARRY is priced unboosted. `TileSet` waits for its first reader |
-| `Decide/Resolver.fs` | `Core/Move/*` | ✅ arbitration (two-tier eviction, best chain, displacer's onward last) and `Plan` wishes; re-derived each tick from `Atlas.firstStep` (§1's "path" key is not stored). Fight steps ✅ in `Fight/Tactics.fs` (kite, close and pursue, retreat), without v1's threat maps; formation stepping comes with `Siege` |
-| `Decide/Pool, Matcher, Planner, Quota, Spawns, Price, Bodies` | `Core/Economy/*` | ✅ one world pool, matcher, quota and casts, wired as the `economy` module (`Economy/Run.fs`): match, cast, act in range, wish toward the target; assignments in `Memory.v2.assignments`. The RCL2–4 chain: a harvester on each source's post, haulers from built containers, the controller's buffer and its upgraders, the surplus split between upgraders and workers after the reserve (§5, `declarations.reserve`). Declared outposts (`declarations.outposts`) are worked while no armed one in `sightings` outlives the tick. Known gaps: claims are not yet declared; cross-room travel prices each room between at a room's side |
+| `App/Bindings.fs` | `screeps-game-api`, `app/js.rs` | ✅ plus `cpu.limit` and segment writes |
+| `App/World.fs`, `Main.fs` shell | `app/world.rs`, `wire.rs`, `driver.rs`, `core/tick.rs` | ✅ `World`: terrain, controllers, sources, minerals, structures, sites, piles, remains, hostiles, our creeps with bodies and stores; per-module CPU, fault isolation, switches, recorder, observe segment |
+| `Types/Rules.fs` `Engine`, `Types/Vocabulary.fs`, `Types/Lists.fs` | `core/engine.rs`, `vocabulary.rs`, `lists.rs` | ✅ `Engine` less policy (`guardCap`) and season (`reactorCapacity`), plus part costs, regen time and level progress; `Vocabulary` less `Task` (Economy's) and with season resources as `Resource.Other` |
+| `Core/Atlas.fs`, `Grid.fs`, `Geometry.fs` | `core/atlas/` | ✅ tile index `y*50+x` (the terrain buffer's), the flood, footprint on every query, a minimal room graph, the flood table. Known gaps: a route is chosen without the footprint (a Quad can be routed through a one-tile gap); boosted CARRY is priced unboosted. `TileSet` waits for its first reader |
+| `Decide/Resolver.fs` | `core/mv/` | ✅ arbitration (two-tier eviction, best chain, displacer's onward last) and `Plan` wishes; re-derived each tick from `Atlas.firstStep` (§1's "path" key is not stored). Fight steps ✅ in `fight/tactics.rs` (kite, close and pursue, retreat), without v1's threat maps; formation stepping comes with `Siege` |
+| `Decide/Pool, Matcher, Planner, Quota, Spawns, Price, Bodies` | `core/economy/` | ✅ one world pool, matcher, quota and casts, wired as the `economy` module (`economy/run.rs`): match, cast, act in range, wish toward the target; assignments in `Memory.v2.assignments`. The RCL2–4 chain: a harvester on each source's post, haulers from built containers, the controller's buffer and its upgraders, the surplus split between upgraders and workers after the reserve (§5, `declarations.reserve`). Declared outposts (`declarations.outposts`) are worked while no armed one in `sightings` outlives the tick. Known gaps: claims are not yet declared; cross-room travel prices each room between at a room's side |
 | `Decide/Labs, Layout` | `Economy`, `Layout` | Layout ✅ in the tick after `economy`: a standing plan per room, sites in plan order as the level allows, towers on hostiles. Labs ⏳ |
 | `Types/Colonies.fs` declarations, `allies` | `declarations` data | not ported as code; the current rooms seed the first `declarations`. ✅ `declarations.allies` (player names): an ally's creeps leave `Hostiles` as the world is read, so nothing answers them |
-| `Decide/Facts.fs:2883–4056, 1038–1582, 2153–2196`, `Fighter.fs`, `Arrival.fs` | `Exchange` | ✅ `Core/Exchange/*`; `npm run exchange` is §10.1's generated set |
+| `Decide/Facts.fs:2883–4056, 1038–1582, 2153–2196`, `Fighter.fs`, `Arrival.fs` | `Exchange` | ✅ `core/exchange/`; `npm run exchange` is §10.1's generated set |
 | `Decide/Emitter.fs` strike/heal/glue | `Fight.Tactics` | ✅ the strike (swing, shot, volley where it outdeals the shot) and the heal reflex; glue not ported (a melee body closes to its target each tick) |
 | `Decide/Caster.fs` | `Fight.Casting` | ✅ a body to the spawn that lands it soonest, a home's Defend the home's, v1's guard, ranger and defender blocks; the lending floors and trespass prices dropped |
 | `Decide/Operations.fs`, `Types/Operation.fs` | — | shape only: `OpRecord`'s fields inform `Engagement`, its bidding informs `Strategy`. No code ports; re-read when `Siege` is due |
@@ -822,7 +776,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 | `tests/**` | — | not ported; §10 |
 | `scripts/xxscreeps/*` | `scripts/xx` | port and extend (§10.2); ✅ the scenario library, `scenario.mjs` |
 | `scripts/capture-*.mjs` | `observe capture` | ✅ pulls the recorder ring; ✅ the replay harness over a soak's capture, `scripts/bench.mjs` (§9.1) |
-| `scripts/bundle, upload, cpuprofile, screeps-api`, `ship.sh` | `scripts/` | ✅ kept |
+| `scripts/bundle, upload, cpuprofile, screeps-api`, `ship.sh` | `scripts/` | ✅ kept; the bundle is `rust.mjs`'s |
 | `scripts/observe.mjs` | `scripts/observe.mjs` | ✅ rewritten small: health, cpu, faults, switches, capture, wait |
 | `scripts/profile, probe, spar, wire-check, cli-smoke, adr-check` and the rest | — | not ported; `smoke.mjs` and `ceiling.mjs` are new |
 | `docs/adr`, `docs/research`, `CONTEXT.md` | — | not ported; this file |

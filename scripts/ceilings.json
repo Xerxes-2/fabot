@@ -1,16 +1,16 @@
 {
-  "_": "Never raised (AGENTS.md). Lines are every line of every .fs under the path; a path not built yet passes. comments: the most percent of a src directory's own lines that are `//` comments, by the directory, else `_default`. counts: the most a per-tick count the bot reports in its observe segment (ARCHITECTURE.md §9.3) may stand at, over a scenario's whole run: `floodsMost` the floods one tick ran, `atlasMissRate` the percent of `fieldOn` lookups that flooded. `npm run scenario` asserts them.",
+  "_": "Never raised (AGENTS.md). Lines are every line of every .rs under the path but its `#[cfg(test)]` items (each F#-era ceiling times its module's Rust-to-F# line ratio at the port, floored to 50); a path not built yet passes. comments: the most percent of a src directory's own lines that are `//` comments, by the directory, else `_default`. counts: the most a per-tick count the bot reports in its observe segment (ARCHITECTURE.md §9.3) may stand at, over a scenario's whole run: `floodsMost` the floods one tick ran, `atlasMissRate` the percent of `fieldOn` lookups that flooded. `npm run scenario` asserts them.",
   "lines": {
-    "src/Core/Fight": 2500,
-    "src/Core/Fight/Kinds/*": 400,
-    "src/Core/Exchange": 2500,
-    "src/Core/Economy": 6000,
-    "src/Core/Layout": 3000,
-    "src/Core/Strategy": 2000,
-    "src/Core/Move": 2000,
-    "src/Core/Atlas": 3500,
-    "src/Core/Season": 1500,
-    "src/Core/Observe": 1000
+    "src/core/fight": 3600,
+    "src/core/fight/kinds/*": 550,
+    "src/core/exchange": 3650,
+    "src/core/economy": 7900,
+    "src/core/layout": 4900,
+    "src/core/strategy": 2800,
+    "src/core/mv": 2700,
+    "src/core/atlas": 4050,
+    "src/core/season": 2100,
+    "src/core/observe": 1400
   },
   "comments": {
     "_default": 7

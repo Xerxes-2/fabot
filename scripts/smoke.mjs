@@ -1,5 +1,5 @@
 // Run the built bundle for a few ticks against a stub game: the cheapest check
-// that the Fable output loads, reads, writes and does not throw. Not a test of
+// that the bundle loads, reads, writes and does not throw. Not a test of
 // behaviour; that is xxscreeps' (ARCHITECTURE.md §10).
 //
 // Usage: node scripts/smoke.mjs [bundle]   (after `npm run build`)

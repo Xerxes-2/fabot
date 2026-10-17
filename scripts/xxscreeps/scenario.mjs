@@ -253,8 +253,8 @@ for (const s of scenarios) {
 }
 
 // Built once here: parallel builds of one project collide.
-if ([...runs.values()].some((r) => r.start.node) && spawnSync("dotnet", ["build", "-c", "Release", "--nologo", "-v", "q", join(REPO, "scripts/plan")], { stdio: "inherit" }).status !== 0)
-  fail("scripts/plan did not build");
+if ([...runs.values()].some((r) => r.start.node) && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
+  fail("the plan tool did not build");
 // Built outside the repo: inside it, jj would name the build after this workspace.
 const bundleAt = (commit) => {
   const out = join(REPO, "soak-runs/bundles", `${commit}.js`);
@@ -264,7 +264,8 @@ const bundleAt = (commit) => {
   const sh = (cmd) => spawnSync("sh", ["-c", cmd], { cwd: src, stdio: ["ignore", "ignore", "inherit"] }).status === 0 || fail(`${commit}: ${cmd} failed`);
   sh(`git -C '${REPO}' archive ${commit} | tar -x`);
   symlinkSync(join(REPO, "node_modules"), join(src, "node_modules"));
-  sh("dotnet tool restore && npm run build --silent");
+  // A commit from before the port builds the F# bundle, with its own tools.
+  sh(existsSync(join(src, "src/App")) ? "dotnet tool restore && npm run build --silent" : "npm run build --silent");
   mkdirSync(dirname(out), { recursive: true });
   cpSync(join(src, "dist/main.js"), out);
   rmSync(src, { recursive: true, force: true });

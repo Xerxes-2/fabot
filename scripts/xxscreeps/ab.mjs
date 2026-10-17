@@ -53,8 +53,8 @@ const bots = { A: resolve(flags["--a"]), B: resolve(flags["--b"]) };
 
 // A node's plan is built once here, not by every run at once.
 const node = soakFlags.includes("--node");
-if (node && spawnSync("dotnet", ["build", "-c", "Release", "--nologo", "-v", "q", join(REPO, "scripts/plan")], { stdio: "inherit" }).status !== 0)
-  fail("scripts/plan did not build");
+if (node && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
+  fail("the plan tool did not build");
 
 const soak = (side, round) =>
   new Promise((done, failed) => {

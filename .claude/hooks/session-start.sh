@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SessionStart hook, cloud sessions only: the setup that needs the repo checkout
-# (the environment's setup script runs before the clone and installs dotnet + jj).
+# (the environment's setup script runs before the clone and installs the Rust toolchain, wasm-pack and jj).
 # Idempotent; output goes to stderr so it never lands in the session context.
 #
 # A cloud session may push only the branch it was cloned on, so that branch stands in
@@ -41,7 +41,5 @@ cd "$CLAUDE_PROJECT_DIR"
   jj config set --repo aliases.ship \
     '["util", "exec", "--", "bash", "-c", "exec \"$JJ_WORKSPACE_ROOT/scripts/ship.sh\" \"$@\"", "ship"]'
 
-  dotnet tool restore
-  dotnet restore
   npm install --no-audit --no-fund
 } >&2

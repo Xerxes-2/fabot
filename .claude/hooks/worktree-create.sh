@@ -18,7 +18,7 @@
 # call WorktreeRemove for hook-made subagent worktrees.
 #
 # Setup of the new workspace: node_modules linked from the main workspace, .env
-# copied when present, dotnet tools restored; then, if present and executable,
+# copied when present; then, if present and executable,
 # .claude/worktree-setup.local.sh <workspace> <main> for anything machine-local.
 set -euo pipefail
 
@@ -65,7 +65,6 @@ fi
 {
   [ -e "$dest/node_modules" ] || [ ! -d "$main/node_modules" ] || ln -s "$main/node_modules" "$dest/node_modules"
   [ -e "$dest/.env" ] || [ ! -f "$main/.env" ] || cp "$main/.env" "$dest/.env"
-  (cd "$dest" && dotnet tool restore >/dev/null 2>&1) || echo "worktree-create: dotnet tool restore failed" >&2
   local_setup="$main/.claude/worktree-setup.local.sh"
   if [ -x "$local_setup" ]; then
     "$local_setup" "$dest" "$main" || echo "worktree-create: $local_setup failed ($?)" >&2

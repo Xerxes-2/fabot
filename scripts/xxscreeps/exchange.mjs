@@ -148,10 +148,10 @@ const samples = Array.from({ length: count }, (_, i) => {
 writeFileSync(join(out, "samples.json"), JSON.stringify(samples));
 
 // ---- the predictions -------------------------------------------------------
-const project = join(REPO, "scripts/exchange");
-if (spawnSync("dotnet", ["build", "-c", "Release", "--nologo", "-v", "q", project], { stdio: ["ignore", "ignore", "inherit"] }).status !== 0) fail("scripts/exchange did not build");
-const predicted = spawnSync("dotnet", [join(project, "bin/Release/net10.0/Exchange.dll")], { input: JSON.stringify(samples), encoding: "utf8", maxBuffer: 1 << 28 });
-if (predicted.status !== 0) fail(`scripts/exchange failed: ${predicted.stderr}`);
+const built = spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "exchange", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: ["ignore", "ignore", "inherit"] });
+if (built.status !== 0) fail("the exchange tool did not build");
+const predicted = spawnSync(join(REPO, "target/release/exchange"), { input: JSON.stringify(samples), encoding: "utf8", maxBuffer: 1 << 28 });
+if (predicted.status !== 0) fail(`the exchange tool failed: ${predicted.stderr}`);
 const predictions = Object.fromEntries(JSON.parse(predicted.stdout).map((p) => [p.id, p]));
 writeFileSync(join(out, "predictions.json"), JSON.stringify(predictions));
 

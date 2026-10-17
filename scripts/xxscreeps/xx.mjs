@@ -5,10 +5,8 @@
 // Usage:
 //   xx.mjs setup
 //       install xxscreeps (and build isolated-vm) in the cache, import a world
-//   xx.mjs run <slug | scenario.json> [--ticks N] [--bot standin|replay|dist|<dir>]
-//              [--seed N] [--heap [tick]] [--filter <test name part>] [--out dir]
-//       <slug>    an arena test's `crossValidate "<slug>"`: the test is run
-//                 with the dump on, writing its start and its trace
+//   xx.mjs run <scenario.json> [--ticks N] [--bot standin|replay|dist|<dir>]
+//              [--seed N] [--heap [tick]] [--out dir]
 //       --seed    the engine's move tie-break seed (default 1): one seed is
 //                 one run, every time; a few seeds give the spread
 //       --bot     who drives our bodies: the #535 melee stand-in (default),
@@ -16,7 +14,6 @@
 //                 can then part the traces), our `dist/main.js`, or a
 //                 directory holding a main.js
 //       --heap    a heap snapshot of our isolate after that tick (default the last)
-//       --filter  the `dotnet test` filter part that reaches the test (default `arena`)
 //       --keep    leave the run's world in the cache's worlds/ (default removed)
 //   xx.mjs diff <arena.jsonl> <xxscreeps.jsonl>
 //
@@ -33,7 +30,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, diff, readTrace } from "./trace.mjs";
 
 const usage = `usage: xx.mjs setup
-       xx.mjs run <slug | scenario.json> [--ticks N] [--bot standin|replay|dist|<dir>] [--seed N] [--heap [tick]] [--filter <test name part>] [--out dir] [--keep]
+       xx.mjs run <scenario.json> [--ticks N] [--bot standin|replay|dist|<dir>] [--seed N] [--heap [tick]] [--out dir] [--keep]
        xx.mjs diff <arena.jsonl> <xxscreeps.jsonl>`;
 
 function fail(message) {
@@ -58,13 +55,13 @@ const VARIANTS = {
   modern: ["xxscreeps/mods/modern/stronghold", "xxscreeps/mods/modern/observer", "xxscreeps/mods/modern/powerspawn"],
 };
 
-// ---- arguments: every refusal before any nix, dotnet or engine call ---------
+// ---- arguments: every refusal before any nix or engine call ----------------
 const [command, ...rest] = process.argv.slice(2);
 const flags = {};
 const args = [];
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (["--ticks", "--bot", "--seed", "--filter", "--out"].includes(a)) {
+  if (["--ticks", "--bot", "--seed", "--out"].includes(a)) {
     const value = rest[++i];
     if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
     flags[a] = value;
@@ -93,10 +90,9 @@ if (command === "setup") {
 if (command !== "run" || args.length !== 1) fail(usage);
 
 const target = args[0];
-const fromFile = target.endsWith(".json");
-if (fromFile && !existsSync(target)) fail(`no scenario at ${target}`);
-if (!fromFile && !/^[a-z0-9][a-z0-9-]*$/.test(target)) fail(`"${target}" is neither a scenario .json nor a slug (lowercase letters, digits, dashes)\n${usage}`);
-const slug = fromFile ? basename(target).replace(/\.scenario\.json$|\.json$/, "") : target;
+if (!target.endsWith(".json")) fail(`"${target}" is not a scenario .json\n${usage}`);
+if (!existsSync(target)) fail(`no scenario at ${target}`);
+const slug = basename(target).replace(/\.scenario\.json$|\.json$/, "");
 const ticks = flags["--ticks"] === undefined ? undefined : Number(flags["--ticks"]);
 if (ticks !== undefined && !(Number.isInteger(ticks) && ticks > 0)) fail(`--ticks needs a positive whole number\n${usage}`);
 const seed = Number(flags["--seed"] ?? 1);
@@ -223,26 +219,9 @@ function replayOf(scenario, arena) {
 
 // ---- run -------------------------------------------------------------------
 mkdirSync(out, { recursive: true });
-let scenarioPath;
-let arenaPath;
-if (fromFile) {
-  scenarioPath = resolve(target);
-  const sibling = scenarioPath.replace(/\.scenario\.json$|\.json$/, ".arena.jsonl");
-  arenaPath = existsSync(sibling) ? sibling : undefined;
-} else {
-  scenarioPath = join(out, `${slug}.scenario.json`);
-  arenaPath = join(out, `${slug}.arena.jsonl`);
-  rmSync(scenarioPath, { force: true });
-  console.error(`running the arena test that calls crossValidate "${slug}"`);
-  const res = spawnSync("dotnet", ["test", join(REPO, "tests/Core.Tests"), "-c", "Release", "--filter", `FullyQualifiedName~${flags["--filter"] ?? "arena"}`], {
-    stdio: ["ignore", "ignore", "inherit"],
-    env: { ...process.env, FABOT_ARENA_DUMP: slug, FABOT_ARENA_DUMP_DIR: out },
-  });
-  if (res.error) fail(`dotnet: ${res.error.message}`);
-  if (!existsSync(scenarioPath)) {
-    fail(`no test under the filter called crossValidate "${slug}" (dotnet test exit ${res.status}); --filter reaches it`);
-  }
-}
+const scenarioPath = resolve(target);
+const sibling = scenarioPath.replace(/\.scenario\.json$|\.json$/, ".arena.jsonl");
+const arenaPath = existsSync(sibling) ? sibling : undefined;
 const scenario = JSON.parse(readFileSync(scenarioPath, "utf8"));
 const arena = arenaPath ? readTrace(arenaPath) : undefined;
 if (bot === "replay" && !arena) fail("--bot replay needs the arena trace beside the scenario (<slug>.arena.jsonl)");

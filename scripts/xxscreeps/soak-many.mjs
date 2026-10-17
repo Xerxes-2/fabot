@@ -96,7 +96,7 @@ const scriptsHash = hash(
     .sort()
     .map((f) => readFileSync(f)),
   // A node is built from the plan of this tree's Layout, whatever the bundle.
-  ...(node ? [join(REPO, "scripts/plan/Program.fs"), ...readdirSync(join(REPO, "src/Core/Layout")).sort().map((f) => join(REPO, "src/Core/Layout", f))].map((f) => readFileSync(f)) : []),
+  ...(node ? [join(REPO, "src/bin/plan.rs"), ...readdirSync(join(REPO, "src/core/layout")).sort().map((f) => join(REPO, "src/core/layout", f))].map((f) => readFileSync(f)) : []),
   node,
 );
 for (const b of bots) b.code = hash(readFileSync(b.file, "utf8").replace(/^var __FABOT_VERSION__ = .*$/m, ""));
@@ -131,8 +131,8 @@ function soak(run) {
 }
 
 // Built once here: parallel builds of one project collide.
-if (node && todo.length && spawnSync("dotnet", ["build", "-c", "Release", "--nologo", "-v", "q", join(REPO, "scripts/plan")], { stdio: "inherit" }).status !== 0)
-  fail("scripts/plan did not build");
+if (node && todo.length && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
+  fail("the plan tool did not build");
 const codes = {};
 const queue = [...todo];
 await Promise.all(

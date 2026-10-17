@@ -27,8 +27,14 @@ jobs:
           purge-primary-key: never
           gc-max-store-size-linux: 2G
 
-      - name: Restore dotnet tools
-        run: nix develop -c dotnet tool restore
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
 
       - name: Cache npm downloads
         # v6, not v4: v5 moved the action onto the Node 24 runtime (runner
@@ -44,7 +50,7 @@ jobs:
       - name: Install npm dependencies
         run: nix develop -c npm ci --no-audit --no-fund
 
-      # The local gate whole: format check, line ceilings, dotnet test.
+      # The local gate whole: format check, line ceilings, clippy, cargo test.
       - name: Test
         run: nix develop -c npm test
 

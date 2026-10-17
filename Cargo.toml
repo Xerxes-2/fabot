@@ -1,0 +1,31 @@
+[package]
+name = "fabot"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+js-sys = "0.3"
+screeps-game-api = "0.23.5"
+wasm-bindgen = "0.2"
+serde_json = { version = "1", optional = true }
+
+# The soak's node plan and the generated set's predictions, built natively.
+[features]
+tools = ["dep:serde_json"]
+
+[[bin]]
+name = "plan"
+required-features = ["tools"]
+
+[[bin]]
+name = "exchange"
+required-features = ["tools"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

@@ -1,8 +1,9 @@
 // The line and comment-share ceilings in scripts/ceilings.json, checked, and
 // no issue or ADR citation in code. A directory's line count is every line of
-// every .fs beneath it, minus a `<dir>/Kinds/*` entry's files, which are each
-// held to their own ceiling. A comment share is per directory of src, over its
-// own .fs files. Exits non-zero on any breach.
+// every .rs beneath it, minus a `<dir>/kinds/*` entry's files, which are each
+// held to their own ceiling. A comment share is per directory of the bot's
+// source, over its own .rs files. Neither counts a `#[cfg(test)]` item nor
+// the shared suites under `core/tests`. Exits non-zero on any breach.
 //
 // Usage: node scripts/ceiling.mjs
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -12,17 +13,37 @@ const { lines: ceilings, comments: commentPct } = JSON.parse(
   readFileSync(new URL("./ceilings.json", import.meta.url), "utf8"),
 );
 
-const fsFiles = (dir) =>
+const SRC = "src";
+const SUITES = `${SRC}/core/tests`;
+
+const rsFiles = (dir) =>
   readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
-    if (statSync(path).isDirectory())
-      return name === "bin" || name === "obj" ? [] : fsFiles(path);
-    return name.endsWith(".fs") ? [path] : [];
+    if (statSync(path).isDirectory()) return rsFiles(path);
+    return name.endsWith(".rs") ? [path] : [];
   });
+const shipped = (dir) =>
+  rsFiles(dir).filter((f) => !f.startsWith(SUITES + "/") && !f.startsWith(`${SRC}/bin/`));
+
+// The lines the bot ships: a top-level `#[cfg(test)]` item is dropped, to the
+// `;` that ends a declaration or the `}` at column 0 that closes a block.
+const shippedLines = (file) => {
+  const text = readFileSync(file, "utf8").split("\n").slice(0, -1);
+  const out = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "#[cfg(test)]") {
+      out.push(text[i]);
+      continue;
+    }
+    if (text[i + 1]?.trimEnd().endsWith(";")) i += 1;
+    else while (i < text.length && text[i] !== "}") i++;
+  }
+  return out;
+};
 const count = (files) =>
   files.reduce(
     ([lines, comments], f) => {
-      const text = readFileSync(f, "utf8").split("\n").slice(0, -1);
+      const text = shippedLines(f);
       return [
         lines + text.length,
         comments + text.filter((l) => /^\s*\/\//.test(l)).length,
@@ -40,11 +61,11 @@ for (const [key, ceiling] of Object.entries(ceilings)) {
   if (key.endsWith("/*")) {
     const dir = key.slice(0, -2);
     if (!existsSync(dir)) continue;
-    for (const file of fsFiles(dir))
+    for (const file of shipped(dir))
       rows.push([file, count([file])[0], ceiling]);
   } else {
     if (!existsSync(key)) continue;
-    const files = fsFiles(key).filter(
+    const files = shipped(key).filter(
       (f) => !perFile.some((dir) => dir !== key && f.startsWith(dir + "/")),
     );
     rows.push([key, count(files)[0], ceiling]);
@@ -52,15 +73,12 @@ for (const [key, ceiling] of Object.entries(ceilings)) {
 }
 
 // AGENTS.md: no issue numbers or ADR citations in code; git log has them.
-const cited = ["src", "tests"]
-  .filter(existsSync)
-  .flatMap(fsFiles)
-  .flatMap((file) =>
-    readFileSync(file, "utf8")
-      .split("\n")
-      .map((line, i) => [file, i + 1, line])
-      .filter(([, , line]) => /#\d{2,}\b|\bADR[- ]?\d{3,4}\b/.test(line)),
-  );
+const cited = rsFiles(SRC).flatMap((file) =>
+  readFileSync(file, "utf8")
+    .split("\n")
+    .map((line, i) => [file, i + 1, line])
+    .filter(([, , line]) => /#\d{2,}\b|\bADR[- ]?\d{3,4}\b/.test(line)),
+);
 for (const [file, n, line] of cited)
   console.error(`CITE ${file}:${n}: ${line.trim()}`);
 if (cited.length > 0) {
@@ -71,11 +89,11 @@ if (cited.length > 0) {
 }
 
 const dirs = [
-  ...new Set(fsFiles("src").map((f) => f.slice(0, f.lastIndexOf("/")))),
+  ...new Set(shipped(SRC).map((f) => f.slice(0, f.lastIndexOf("/")))),
 ];
 const shares = dirs.map((dir) => {
   const [n, comments] = count(
-    fsFiles(dir).filter((f) => f.lastIndexOf("/") === dir.length),
+    shipped(dir).filter((f) => f.lastIndexOf("/") === dir.length),
   );
   return [dir, (100 * comments) / n, commentPct[dir] ?? commentPct._default];
 });

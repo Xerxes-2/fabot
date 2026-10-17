@@ -2,7 +2,7 @@
 // runs. The engine gives a code package no `fs` and no `require` of a sibling
 // `.wasm`, so the module is inlined as base64 and decoded by a small JS
 // decoder; `TextDecoder` is absent in the engine's sandbox, so it is polyfilled
-// here. Output is `dist/fabot-rs.js` until the port is the bot the gates run.
+// here. Output is `dist/main.js`.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -10,9 +10,9 @@ import { fileURLToPath } from "node:url";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-// The banner `scripts/bundle.mjs` writes for the F# bundle, same rule: the
-// change and commit the build came from, `+dirty` while it can still be
-// rewritten, `unknown` outside a jj repo.
+// The banner names the change and commit the build came from: `@`, or `@-`
+// when `@` is an empty undescribed change on top of it (`jj new` after a
+// ship); `+dirty` while it can still be rewritten, `unknown` outside a jj repo.
 const jj = (rev) =>
   execFileSync(
     "jj",
@@ -41,16 +41,15 @@ const version = () => {
     return "unknown";
   }
 };
-const CRATE = join(REPO, "rust");
-const OUT = join(REPO, "dist", "fabot-rs.js");
+const OUT = join(REPO, "dist", "main.js");
 
-execFileSync("wasm-pack", ["build", CRATE, "--target", "nodejs", "--release", "--out-dir", "pkg", "--out-name", "fabot"], {
+execFileSync("wasm-pack", ["build", REPO, "--target", "nodejs", "--release", "--out-dir", "pkg", "--out-name", "fabot"], {
   stdio: "inherit",
-  cwd: CRATE,
+  cwd: REPO,
 });
 
-const glue = readFileSync(join(CRATE, "pkg", "fabot.js"), "utf8");
-const wasm = readFileSync(join(CRATE, "pkg", "fabot_bg.wasm"));
+const glue = readFileSync(join(REPO, "pkg", "fabot.js"), "utf8");
+const wasm = readFileSync(join(REPO, "pkg", "fabot_bg.wasm"));
 const loader = `const wasmPath = \`\${__dirname}/fabot_bg.wasm\`;
 const wasmBytes = require('fs').readFileSync(wasmPath);`;
 if (!glue.includes(loader)) throw new Error("rust.mjs: wasm-pack's loader changed; the inline patch is stale");

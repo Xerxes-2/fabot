@@ -15,7 +15,7 @@
 //            early trajectory, so a soak:many spread measures how far a run
 //            drifts from a small change, which the seed alone does not
 //   --node   a start from §10.2's nodes (default ticks 5000): N1 is the
-//            respawn above; N2-T7 stand what Layout's plan (`scripts/plan`)
+//            respawn above; N2-T7 stand what Layout's plan (`src/bin/plan.rs`)
 //            builds by the node's level, the first spawn on its planned
 //            tile, and the node's stock in storage; E1 is N4 with the two
 //            neighbours `colony.mjs` picks declared as outposts
@@ -248,17 +248,16 @@ mkdirSync(out, { recursive: true });
 let built = null;
 if (node && node.level > 1) {
   // FABOT_PLAN_BUILT: the caller built it once (soak-many's parallel runs).
-  const plan = join(REPO, "scripts/plan");
   if (!process.env.FABOT_PLAN_BUILT) {
-    const res = spawnSync("dotnet", ["build", "-c", "Release", "--nologo", "-v", "q", plan], { stdio: ["ignore", "ignore", "inherit"] });
-    if (res.status !== 0) fail("scripts/plan did not build");
+    const res = spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: ["ignore", "ignore", "inherit"] });
+    if (res.status !== 0) fail("the plan tool did not build");
   }
   const ground = node26([XXSCREEPS, script("node.mjs"), "ground", colony.room], world, true).trim().split("\n").at(-1);
-  const res = spawnSync("dotnet", [join(plan, "bin/Release/net10.0/Plan.dll")], {
+  const res = spawnSync(join(REPO, "target/release/plan"), {
     input: JSON.stringify({ ...JSON.parse(ground), level: node.level }),
     encoding: "utf8",
   });
-  if (res.status !== 0) fail(`scripts/plan failed: ${res.stderr}`);
+  if (res.status !== 0) fail(`the plan tool failed: ${res.stderr}`);
   built = JSON.parse(res.stdout).filter((s) => !node.without.includes(s.kind));
   if (node.moved) {
     const { terrain, sources, controller } = JSON.parse(ground);

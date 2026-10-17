@@ -1,5 +1,5 @@
 {
-  description = "fabot devshell: dotnet SDK 10 + Node.js 24 + Rust with wasm-pack";
+  description = "fabot devshell: Node.js 24 + Rust with wasm-pack";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
@@ -14,30 +14,16 @@
     in
     {
       devShells = forAllSystems (pkgs: {
-        default =
-          let
-            dotnet = pkgs.dotnet-sdk_10;
-          in
-          pkgs.mkShell {
-            packages = [
-              dotnet
-              pkgs.nodejs_24
-              pkgs.cargo
-              pkgs.rustc
-              pkgs.rustfmt
-              pkgs.clippy
-              pkgs.wasm-pack
-            ];
-
-            # dotnet tools (fable, fantomas) are restored per-repo via
-            # `dotnet tool restore`; keep telemetry off in ephemeral shells.
-            DOTNET_CLI_TELEMETRY_OPTOUT = "1";
-            DOTNET_NOLOGO = "1";
-
-            # Override any host DOTNET_ROOT (e.g. /usr/share/dotnet) so child
-            # processes the SDK spawns (fsc, tools) resolve this SDK's runtime.
-            DOTNET_ROOT = "${dotnet}/share/dotnet";
-          };
+        default = pkgs.mkShell {
+          packages = [
+            pkgs.nodejs_24
+            pkgs.cargo
+            pkgs.rustc
+            pkgs.rustfmt
+            pkgs.clippy
+            pkgs.wasm-pack
+          ];
+        };
       });
     };
 }

@@ -102,7 +102,7 @@ if (mode === "under") {
   console.log(`${name} subtree ms ${(total / 1000).toFixed(1)}`);
   top(agg, 20);
 } else {
-  // Frames that are the F# runtime or a collection combinator name no
+  // Frames that are a runtime's or a collection combinator name no
   // caller anyone would go and change, so the chain steps over them.
   const LIBRARY =
     /^(SetTree|MapTree|FSharp|fold|map|filter|choose|collect|iterate|exists|forAll|ofList|ofSeq|ofArray|toList|toArray|add\d*|contains\d*|tryFind\d*|compare|equals|Equals|CompareTo|Compare|GetHashCode|loop\d*|\(anonymous\)|sortWith|sortBy|List_|Array_|Seq_|singleton|union|unionMany|delay|getEnumerator|GetEnumerator|MoveNext|System\.|Dictionary|memoised|has|get|set|partition|sumBy|minBy|maxBy|groupBy|distinct|count|length|item|append|concat|reverse|head|tail|isEmpty|min|max|remove|difference|intersect|toSet|ofSet|keys|values)/;

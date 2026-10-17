@@ -9,7 +9,7 @@
 // nothing: `manage bot add --spawn` stands it. The outposts are node E1's: of
 // the rooms an exit leads to, those with a controller nobody owns or reserves
 // and a source, most sources first, then by name; two at most; each as the
-// bot reads a declared outpost (src/App/Wire.fs), with its objects' ids. With `--list`,
+// bot reads a declared outpost (src/app/wire.rs), with its objects' ids. With `--list`,
 // prints every room that fits, by name.
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
 import { Source } from "xxscreeps/mods/classic/source/source.js";

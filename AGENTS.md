@@ -12,8 +12,8 @@ ones.
 ## Boundaries
 
 - A module's state is the row it owns in `ARCHITECTURE.md` §4. Adding a store,
-  a `TickMemo`, a module-level `mutable`, a Memory or segment read outside
-  `Main`, a `Tuning` field, or any cooldown / latch / grace / hold-while /
+  a memo, a `thread_local!` or `static`, a Memory or segment read outside
+  the driver (`app/driver.rs`), a `Tuning` field, or any cooldown / latch / grace / hold-while /
   hysteresis: **stop and ask the owner.** These are architecture changes and
   never fixes. Owner away: label the issue `needs-owner`, park it, take other
   work. Never work around it.
@@ -25,7 +25,7 @@ ones.
 - `decide` is deterministic: no clock, no unseeded random.
 - Derived facts are computed once into `Derived` and passed down. A decision
   function takes `Derived`, never `World`. The only cache is `Atlas`'s
-  flood table; a new `TickMemo`, `Dictionary` cache or `lazy` outside
+  flood table; a new memo, `HashMap` cache or lazy cell outside
   `Derived` is an architecture change (stop and ask).
 - Count ceilings (`scripts/ceilings.json`, read by `npm run scenario`) are a
   gate like line ceilings: never raised.
@@ -129,9 +129,9 @@ Docs:
 1. `/code-review` has run on the diff and its findings are resolved. Every
    added comment line passes the paraphrase test, or a finding deletes it.
 2. `jj describe` with a conventional-commit subject and one `Fixes #<n>` trailer line per issue.
-3. `jj ship [-r REV]` (`scripts/ship.sh`): the gates (`npm test`: format check, line ceilings, `dotnet test`; then the build, `npm run smoke` and `npm run scenario`), then the `claude.session-branch` bookmark (`main` locally, set once with `jj config set --repo claude.session-branch main`) moved to REV and pushed. Its gates are the pre-push run; don't run `npm test` again before it. A pushed change is immutable.
+3. `jj ship [-r REV]` (`scripts/ship.sh`): the gates (`npm test`: `cargo fmt --check`, line ceilings, clippy, `cargo test`; then the build, `npm run smoke` and `npm run scenario`), then the `claude.session-branch` bookmark (`main` locally, set once with `jj config set --repo claude.session-branch main`) moved to REV and pushed. Its gates are the pre-push run; don't run `npm test` again before it. A pushed change is immutable.
    Before it, `jj log -r 'main..REV'`: every change listed ships.
-4. `npm run deploy` builds, smokes and uploads the Rust bundle to the live server; the first tick after it is a cold reset.
+4. `npm run deploy` builds, smokes and uploads the bundle to the live server; the first tick after it is a cold reset.
 
 Squash TDD slices into one change per issue; push per issue.
 
@@ -149,7 +149,7 @@ A live firefight the user flags may be fixed in the current session without the 
   `until` loop never ends if the condition never comes.
 - A subagent that edits runs isolated — Claude Code passes `isolation: "worktree"`, pi passes
   `worktree_path: "auto"` to `.pi/extensions/worktree.ts`, which runs the hooks Claude Code ran
-  itself. The repo's WorktreeCreate hook (`.claude/hooks/worktree-create.sh`, registered in `.claude/settings.json`) gives it its own jj workspace at `.claude/worktrees/<name>` (ignored), based on `main` (`trunk()`, or `claude.worktree-base` when set), with `node_modules` linked, `.env` copied and the dotnet tools restored; anything machine-local goes in an untracked `.claude/worktree-setup.local.sh`. The subagent describes the workspace's own `@` (no `jj new` before its first edit, which leaves an empty change under its work) and never moves a bookmark or pushes.
+  itself. The repo's WorktreeCreate hook (`.claude/hooks/worktree-create.sh`, registered in `.claude/settings.json`) gives it its own jj workspace at `.claude/worktrees/<name>` (ignored), based on `main` (`trunk()`, or `claude.worktree-base` when set), with `node_modules` linked and `.env` copied; anything machine-local goes in an untracked `.claude/worktree-setup.local.sh`. The subagent describes the workspace's own `@` (no `jj new` before its first edit, which leaves an empty change under its work) and never moves a bookmark or pushes.
 - Ship a subagent's change from the default workspace: `jj new <change>` (rebase it onto `main` first if `main` moved), then steps 3–4 with `-r <change>`. A subagent's workspace is removed when it stops with no work in it and no background task running (`subagent-stop.sh`); one holding work stays, so the agent can be resumed to amend it, until session end (`worktree-sweep.sh`); by hand, `.claude/hooks/worktree-sweep.sh --stale` forgets workspaces whose directory is gone and removes directories no workspace owns. Each removal first kills what still runs in the workspace (`kill-cwd.sh`).
 - Another live session works in its own workspace too, or stays read-only.
 
@@ -164,9 +164,8 @@ A cloud session (claude.ai/code) may push only the branch it was cloned on, so t
 
 ## Live game
 
-**The live server runs v2's Rust bundle** (since 2026-10-17): `npm run deploy`
-builds, smokes and uploads `dist/fabot-rs.js`; `npm run deploy:fable` uploads
-the F# bundle instead. Never deploy unasked. Live declarations (outposts,
+**The live server runs v2** (since 2026-10-17): `npm run deploy` builds,
+smokes and uploads `dist/main.js`. Never deploy unasked. Live declarations (outposts,
 allies, reserve) are set with `observe declare`.
 
 `npm run observe -- health` first after a deploy; then `cpu`, `faults`,
@@ -174,7 +173,8 @@ allies, reserve) are set with `observe declare`.
 on|off|clear`. The commands ARCHITECTURE.md names beyond these (`engagements`,
 `exchange`, `declare`, `replay`) land with their modules.
 
-v1 lives on the `v1` bookmark (`9677b5e8`, the code that ran live before v2).
-It is a rollback only: deployed from a workspace on `v1`, never changed again.
+v1 lives on the `v1` bookmark (`9677b5e8`, the code that ran live before v2),
+and v2's F#/Fable tree on `fable` (the last commit that held it). Both are
+rollbacks only: deployed from a workspace on the bookmark, never changed again.
 Nothing ports from v2 to v1. For v2 it is
 source to port from (`git show v1:<path>`), never a fact about v2.
