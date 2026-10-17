@@ -9,6 +9,11 @@ use crate::core::world::Creep;
 
 pub const UNREACHED: i32 = i32::MAX;
 
+/// A wall's distance inside a flood: no walk is shorter, so the test that
+/// keeps a longer walk off a tile keeps every walk off a wall. A wall check
+/// apart cost the economy 2% (bench-live).
+const WALL: i32 = -1;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Footprint {
     One,
@@ -246,11 +251,10 @@ pub fn flood(
 
     let step_on = |weight: NonZeroU8| steps.get(weight.get() as usize).copied().flatten();
 
-    // A blocked tile reads -1 until the end, so no candidate beats it. A
-    // non-goal border tile leads nowhere: a body stepping onto it leaves.
+    // A non-goal border tile leads nowhere: a body stepping onto it leaves.
     for t in tiles::all() {
         match weight_of(footprint, weights, t) {
-            None => dist[t] = -1,
+            None => dist[t] = WALL,
             Some(_) if on_edge(footprint, t) => (),
             Some(w) => price[t] = step_on(w),
         }
@@ -303,7 +307,7 @@ pub fn flood(
     }
 
     for d in dist.iter_mut() {
-        if *d < 0 {
+        if *d == WALL {
             *d = UNREACHED;
         }
     }
