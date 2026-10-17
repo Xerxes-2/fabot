@@ -1,0 +1,289 @@
+//! A declared outpost has no spawn to anchor a plan on, so its container and
+//! road are placed off the haul's own walk home.
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+use crate::core::atlas::{Atlas, Mover, Target};
+use crate::core::grid::Footprint;
+use crate::core::intents::{Intent, RoomAct};
+use crate::core::tick::{self, Outpost};
+use crate::core::tiles;
+use crate::core::world::{terrain, Kind, Owner, Pos, Room, World};
+
+use super::sites::SITES_IN_FLIGHT;
+
+const HAULER: Mover = Mover {
+    footprint: Footprint::One,
+    factor: crate::core::grid::FatigueFactor {
+        weight: 2,
+        moves: 1,
+    },
+};
+
+/// Bounds a walk that never arrives.
+const LONGEST: usize = ((tick::REACH_HOPS + 1) * 2 * tiles::SIDE) as usize;
+
+/// The engine refuses a site under anyone else's hold.
+fn ours(me: &str, room: &Room) -> bool {
+    room.controller.as_ref().is_none_or(|c| match &c.owner {
+        Owner::Ours => true,
+        Owner::Nobody => c.reservation.as_ref().is_none_or(|(user, _)| user == me),
+        Owner::Theirs(_) => false,
+    })
+}
+
+/// The engine builds nothing on the border.
+fn walk(atlas: &mut Atlas, target: &Target, from: &Pos) -> Vec<Pos> {
+    let mut path: Vec<Pos> = Vec::new();
+    let mut room = from.room.clone();
+    let mut tile = tiles::of_pos(from);
+    let mut field = atlas.field(HAULER, target, &room);
+
+    while field.is_some() && path.len() < LONGEST {
+        let step = field.as_ref().and_then(|f| f.step(tile));
+
+        match step {
+            None => field = None,
+            Some(direction) => {
+                let next = tiles::neighbour(tile, direction);
+
+                if tiles::on_edge(next) {
+                    match tiles::room_toward(&room, tiles::exit_of(next)) {
+                        Some(onto) => {
+                            room = onto;
+                            tile = tiles::landing(next);
+                            field = atlas.field(HAULER, target, &room);
+                        }
+                        None => field = None,
+                    }
+                } else {
+                    tile = next;
+                    path.push(tiles::to_pos(&room, tile));
+                }
+            }
+        }
+    }
+
+    path
+}
+
+fn opened(
+    taken: &mut BTreeMap<String, BTreeSet<i32>>,
+    pending: &mut BTreeMap<String, i32>,
+    planned: &[Intent],
+    room: &Room,
+) {
+    if taken.contains_key(&room.name) {
+        return;
+    }
+
+    let mut tiles_open: BTreeSet<i32> = BTreeSet::new();
+
+    for s in &room.structures {
+        if !s.kind.is_rampart() {
+            tiles_open.insert(tiles::of_pos(&s.pos));
+        }
+    }
+
+    for s in &room.sites {
+        tiles_open.insert(tiles::of_pos(&s.pos));
+    }
+
+    let mut n = room.sites.iter().filter(|s| s.owner.is_ours()).count() as i32;
+
+    for i in planned {
+        if let Intent::Room(r, RoomAct::CreateSite(x, y, _)) = i {
+            if r == &room.name {
+                tiles_open.insert(tiles::index(*x, *y));
+                n += 1;
+            }
+        }
+    }
+
+    taken.insert(room.name.clone(), tiles_open);
+    pending.insert(room.name.clone(), n);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn place(
+    rooms: &BTreeMap<String, &Room>,
+    taken: &mut BTreeMap<String, BTreeSet<i32>>,
+    pending: &mut BTreeMap<String, i32>,
+    planned: &[Intent],
+    budget: &mut i32,
+    intents: &mut Vec<Intent>,
+    pos: &Pos,
+    kind: &Kind,
+) {
+    let room = match rooms.get(&pos.room) {
+        Some(room) => *room,
+        None => return,
+    };
+
+    if *budget <= 0 {
+        return;
+    }
+
+    opened(taken, pending, planned, room);
+    let tile = tiles::of_pos(pos);
+    let now = pending[&room.name];
+
+    if now < SITES_IN_FLIGHT && taken.get_mut(&room.name).unwrap().insert(tile) {
+        pending.insert(room.name.clone(), now + 1);
+        *budget -= 1;
+        intents.push(Intent::Room(
+            room.name.clone(),
+            RoomAct::CreateSite(pos.x, pos.y, kind.clone()),
+        ));
+    }
+}
+
+fn sink_for(
+    atlas: &mut Atlas,
+    route: &dyn Fn(&Target, &str) -> Option<Vec<String>>,
+    homes: &[Pos],
+    rooms: &BTreeMap<String, &Room>,
+    room: &Room,
+) -> Option<Pos> {
+    let from = room
+        .controller
+        .as_ref()
+        .map(|c| c.pos.clone())
+        .or_else(|| room.sources.first().map(|s| s.pos.clone()))?;
+
+    let i = tick::nearest(atlas, route, homes, |_| true, &from)?;
+
+    let found = rooms
+        .get(&homes[i].room)
+        .and_then(|home| {
+            home.structures
+                .iter()
+                .find(|s| s.kind.is_storage() && s.owner.is_ours())
+        })
+        .map(|s| s.pos.clone());
+
+    Some(found.unwrap_or_else(|| homes[i].clone()))
+}
+
+/// v1's seat: the shortest walk out toward home. The owner's rule: the walk
+/// is paved once its container stands.
+pub fn sites(
+    atlas: &mut Atlas,
+    world: &World,
+    outposts: &[Outpost],
+    planned: &[Intent],
+    budget: i32,
+) -> Vec<Intent> {
+    let mut intents: Vec<Intent> = Vec::new();
+    let mut budget = budget;
+    let mut taken: BTreeMap<String, BTreeSet<i32>> = BTreeMap::new();
+    let mut pending: BTreeMap<String, i32> = BTreeMap::new();
+    let mut rooms: BTreeMap<String, &Room> = BTreeMap::new();
+
+    let colonies = tick::colonies(world);
+
+    for room in &world.rooms {
+        if colonies.contains(&room.name)
+            || (outposts.iter().any(|o| o.room == room.name) && ours(&world.me, room))
+        {
+            rooms.insert(room.name.clone(), room);
+        }
+    }
+
+    // `Atlas.route` searches the graph per call, and every home and outpost in
+    // one `sites` wants the same trees: search each room once. Every target
+    // `nearest` prices is at the reach with no avoid, so a tree is its route;
+    // an `Atlas` cannot be lent to `nearest` and to its route at once.
+    let mut trees: HashMap<String, HashMap<String, String>> = HashMap::new();
+    for room in &world.rooms {
+        trees.insert(room.name.clone(), atlas.tree(tick::REACH_HOPS, &room.name));
+    }
+
+    let route = |target: &Target, from: &str| -> Option<Vec<String>> {
+        match trees.get(from) {
+            Some(tree) => Atlas::route_in(tree, from, &target.room),
+            None if from == target.room => Some(vec![from.to_string()]),
+            None => None,
+        }
+    };
+
+    let homes: Vec<Pos> = colonies
+        .iter()
+        .filter_map(|c| world.spawns.iter().find(|s| &s.pos.room == c).map(|s| s.pos.clone()))
+        .collect();
+
+    for o in outposts {
+        let room = match rooms.get(&o.room) {
+            Some(room) => *room,
+            None => continue,
+        };
+
+        // A room at its site limit places nothing: the walk is not drawn.
+        opened(&mut taken, &mut pending, planned, room);
+
+        if budget > 0 && pending[&room.name] < SITES_IN_FLIGHT {
+            let sink = sink_for(atlas, &route, &homes, &rooms, room);
+
+            if let Some(sink) = sink {
+                let home = tick::target_at(&sink, 1);
+
+                for s in &room.sources {
+                    match Atlas::post_of(room, &s.pos) {
+                        Some((post, Some(_))) => {
+                            for p in walk(atlas, &home, &post) {
+                                place(
+                                    &rooms,
+                                    &mut taken,
+                                    &mut pending,
+                                    planned,
+                                    &mut budget,
+                                    &mut intents,
+                                    &p,
+                                    &Kind::Road,
+                                );
+                            }
+                        }
+                        Some((_, None)) => (),
+                        None => {
+                            let open_tiles = taken[&room.name].clone();
+                            let mut seats: Vec<(i32, i32)> = Vec::new();
+
+                            for t in tiles::within(1, tiles::of_pos(&s.pos)) {
+                                if t != tiles::of_pos(&s.pos)
+                                    && !tiles::on_edge(t)
+                                    && !open_tiles.contains(&t)
+                                    && !terrain::is_wall(&room.terrain, tiles::x_of(t), tiles::y_of(t))
+                                {
+                                    if let Some(ticks) = Atlas::travel_ticks(
+                                        atlas,
+                                        HAULER,
+                                        &home,
+                                        &tiles::to_pos(&room.name, t),
+                                    ) {
+                                        seats.push((ticks, t));
+                                    }
+                                }
+                            }
+
+                            seats.sort_by_key(|(ticks, t)| *ticks * tiles::COUNT as i32 + *t);
+
+                            if let Some((_, t)) = seats.first() {
+                                place(
+                                    &rooms,
+                                    &mut taken,
+                                    &mut pending,
+                                    planned,
+                                    &mut budget,
+                                    &mut intents,
+                                    &tiles::to_pos(&room.name, *t),
+                                    &Kind::Container,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    intents
+}
