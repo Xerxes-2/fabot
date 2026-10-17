@@ -188,8 +188,8 @@ const OFFSETS: [isize; 8] = [-SIDE, 1, SIDE, -1, -SIDE - 1, -SIDE + 1, SIDE - 1,
 struct Dial {
     ring: usize,
     head: Vec<Option<Tile>>,
-    next: Vec<Option<Tile>>,
-    prev: Vec<Option<Tile>>,
+    next: [Option<Tile>; tiles::COUNT],
+    prev: [Option<Tile>; tiles::COUNT],
     queued: i32,
     relaxed: i32,
 }
@@ -199,8 +199,8 @@ impl Dial {
         Dial {
             ring,
             head: vec![None; ring],
-            next: vec![None; tiles::COUNT],
-            prev: vec![None; tiles::COUNT],
+            next: [None; tiles::COUNT],
+            prev: [None; tiles::COUNT],
             queued: 0,
             relaxed: 0,
         }
@@ -245,7 +245,7 @@ pub fn flood(
 ) -> Vec<i32> {
     let mut dist = vec![UNREACHED; tiles::COUNT];
     // The step off a tile; None where no walk leaves it.
-    let mut price: Vec<Option<u16>> = vec![None; tiles::COUNT];
+    let mut price: [Option<u16>; tiles::COUNT] = [None; tiles::COUNT];
     let dearest = steps.iter().flatten().max().copied().unwrap_or(0);
     let mut dial = Dial::new(dearest as usize + 1);
 
