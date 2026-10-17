@@ -42,18 +42,18 @@ fn above(s: i32, h: i32, s0: i32, h0: i32) -> bool {
 /// room refills them from empty anyway, so they are allocations otherwise.
 #[derive(Clone, Debug)]
 pub struct Scratch {
-    blocked: Vec<bool>,
-    steps_onto: Vec<Option<Tile>>,
-    holder: Vec<Option<usize>>,
-    changed_at: Vec<i32>,
+    blocked: [bool; tiles::COUNT],
+    steps_onto: [Option<Tile>; tiles::COUNT],
+    holder: [Option<usize>; tiles::COUNT],
+    changed_at: [i32; tiles::COUNT],
 }
 
 pub fn scratch() -> Scratch {
     Scratch {
-        blocked: vec![false; tiles::COUNT],
-        steps_onto: vec![None; tiles::COUNT],
-        holder: vec![None; tiles::COUNT],
-        changed_at: vec![0; tiles::COUNT],
+        blocked: [false; tiles::COUNT],
+        steps_onto: [None; tiles::COUNT],
+        holder: [None; tiles::COUNT],
+        changed_at: [0; tiles::COUNT],
     }
 }
 
@@ -159,8 +159,8 @@ pub fn resolve(
         order: &order,
         candidates: &candidates,
         tile_of: tile_of.clone(),
-        holder: holder.clone(),
-        changed_at: changed_at.clone(),
+        holder: *holder,
+        changed_at: *changed_at,
         on_path: vec![false; n],
         label_stamp: vec![0; n],
         label_score: vec![0; n],
@@ -244,8 +244,8 @@ struct Search<'a> {
     order: &'a [Wish],
     candidates: &'a [Vec<Tile>],
     tile_of: Vec<Tile>,
-    holder: Vec<Option<usize>>,
-    changed_at: Vec<i32>,
+    holder: [Option<usize>; tiles::COUNT],
+    changed_at: [i32; tiles::COUNT],
     on_path: Vec<bool>,
     label_stamp: Vec<i32>,
     label_score: Vec<i32>,
