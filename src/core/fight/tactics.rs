@@ -11,7 +11,7 @@ use crate::core::tick;
 use crate::core::tiles::Tile;
 use crate::core::vocabulary::{BodyPart, same_part};
 use crate::core::world::{Creep, Pos};
-use crate::core::{engine, lists, tiles};
+use crate::core::{engine, tiles};
 
 pub struct Sight<'a> {
     pub atlas: &'a mut Atlas,
@@ -47,9 +47,10 @@ fn ranked<'a>(sight: &Sight<'a>, order: &[String], creep: &Creep) -> Vec<&'a Cre
         .filter_map(|id| near.iter().find(|h| &h.id == id))
         .collect();
 
-    let rest: Vec<&Creep> = near.iter().filter(|h| !order.contains(&h.id)).collect();
+    let mut rest: Vec<&Creep> = near.iter().filter(|h| !order.contains(&h.id)).collect();
+    rest.sort_by(|a, b| a.id.cmp(&b.id));
 
-    first.extend(lists::sort_by(|h: &&Creep| h.id.clone(), &rest));
+    first.extend(rest);
     first
 }
 
@@ -223,9 +224,10 @@ pub fn kite(
             .filter(|t| !tiles::on_edge(*t) && sight.atlas.passable(&room, *t))
             .collect();
 
-        let step = lists::sort_by(|t: &Tile| (-gap(*t), *t), &steps)
-            .into_iter()
-            .next()
+        let step = steps
+            .iter()
+            .copied()
+            .min_by_key(|t| (-gap(*t), *t))
             .filter(|t| gap(*t) > gap(here));
 
         match step {
@@ -459,12 +461,10 @@ fn nearest_tower(front: &Front, at: &Pos) -> i32 {
 
 /// Assumed, as the scripted rival does: towers aim at the nearest of the set.
 pub fn focus_of<'a>(front: &Front, members: &[&'a Creep]) -> Option<&'a Creep> {
-    lists::sort_by(
-        |m: &&Creep| (nearest_tower(front, &m.pos), m.name.clone()),
-        members,
-    )
-    .into_iter()
-    .next()
+    members
+        .iter()
+        .copied()
+        .min_by_key(|m| (nearest_tower(front, &m.pos), &m.name))
 }
 
 pub fn siege(
@@ -504,12 +504,10 @@ pub fn siege(
                 })
                 .collect();
 
-            let off = lists::sort_by(
-                |t: &Tile| (-(nearest_tower(front, &tiles::to_pos(&room, *t))), *t),
-                &off,
-            )
-            .into_iter()
-            .next();
+            let off = off
+                .iter()
+                .copied()
+                .min_by_key(|t| (-(nearest_tower(front, &tiles::to_pos(&room, *t))), *t));
 
             (
                 None,
@@ -537,12 +535,10 @@ pub fn siege(
             .collect();
 
         let anchor = focus_of(front, &at_breach_room).or_else(|| {
-            lists::sort_by(
-                |d: &&Creep| (d.pos.range(&front.breach), d.name.clone()),
-                &dismantlers,
-            )
-            .into_iter()
-            .next()
+            dismantlers
+                .iter()
+                .copied()
+                .min_by_key(|d| (d.pos.range(&front.breach), &d.name))
         });
 
         let wish = match anchor {
@@ -595,12 +591,10 @@ pub fn rampart(sight: &mut Sight, order: &[String], creep: &Creep) -> (Option<Cr
     let wish = if ramparts.contains(&creep.pos) {
         hold(sight, creep)
     } else {
-        let nearest = lists::sort_by(
-            |p: &Pos| (creep.pos.range(p).unwrap_or(99), p.x, p.y),
-            &ramparts,
-        )
-        .into_iter()
-        .next();
+        let nearest = ramparts
+            .iter()
+            .min_by_key(|p| (creep.pos.range(p).unwrap_or(99), p.x, p.y))
+            .cloned();
 
         match nearest {
             Some(p) => toward(sight, creep, &p, 0),
@@ -632,17 +626,14 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> (Option<CreepAct>, Wish) {
             })
             .collect();
 
-        lists::sort_by(
-            |(hops, p): &(i32, Pos)| (*hops, p.room.clone(), p.x, p.y),
-            &routed,
-        )
-        .into_iter()
-        .next()
-        .map(|(_, p)| p)
-    } else {
-        lists::sort_by(|p: &Pos| (p.x, p.y), &here)
+        routed
             .into_iter()
-            .next()
+            .min_by(|(a_hops, a), (b_hops, b)| {
+                (a_hops, &a.room, a.x, a.y).cmp(&(b_hops, &b.room, b.x, b.y))
+            })
+            .map(|(_, p)| p)
+    } else {
+        here.into_iter().min_by_key(|p| (p.x, p.y))
     };
 
     (
@@ -678,7 +669,9 @@ pub fn heals(
 
     let mut acts: Vec<Intent> = Vec::new();
 
-    for healer in lists::sort_by(|c: &&Creep| c.name.clone(), healers) {
+    let mut healers = healers.to_vec();
+    healers.sort_by(|a, b| a.name.cmp(&b.name));
+    for healer in healers {
         let parts = live(BodyPart::Heal, healer);
 
         if parts > 0 && !swinging.contains(&healer.name) {
@@ -702,18 +695,13 @@ pub fn heals(
                     })
                     .collect();
 
-                lists::sort_by(
-                    |(p, r): &(&Creep, i32)| {
-                        (
-                            *r > engine::MELEE_RANGE,
-                            -owed.get(&p.name).copied().unwrap_or(0),
-                            p.name.clone(),
-                        )
-                    },
-                    &hurt,
-                )
-                .into_iter()
-                .next()
+                hurt.into_iter().min_by_key(|(p, r)| {
+                    (
+                        *r > engine::MELEE_RANGE,
+                        -owed.get(&p.name).copied().unwrap_or(0),
+                        p.name.clone(),
+                    )
+                })
             };
 
             match patient {

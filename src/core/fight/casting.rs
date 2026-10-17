@@ -4,10 +4,10 @@
 use std::collections::BTreeMap;
 
 use super::shape::Tactic;
+use crate::core::engine;
 use crate::core::exchange::{self, Fighter, fighter};
 use crate::core::vocabulary::{BodyPart, Boost, Resource};
 use crate::core::world::{Creep, Kind, Owner, Pos, Room, Spawn, Store, Structure, terrain};
-use crate::core::{engine, lists};
 
 pub type Body = Vec<BodyPart>;
 
@@ -263,18 +263,13 @@ pub fn kill_order(hostiles: &[Creep]) -> Vec<String> {
         })
         .collect();
 
-    lists::sorted_by_key_by(
-        |(id, rank): &(String, (bool, f64))| (rank.0, rank.1, id.clone()),
-        |a: &(bool, f64, String), b: &(bool, f64, String)| {
-            a.0.cmp(&b.0)
-                .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-                .then(a.2.cmp(&b.2))
-        },
-        &ranked,
-    )
-    .into_iter()
-    .map(|(id, _)| id)
-    .collect()
+    let mut ranked = ranked;
+    ranked.sort_by(|(a_id, a), (b_id, b)| {
+        a.0.cmp(&b.0)
+            .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .then(a_id.cmp(b_id))
+    });
+    ranked.into_iter().map(|(id, _)| id).collect()
 }
 
 /// The colony that lands a body soonest of those whose bank buys it: its

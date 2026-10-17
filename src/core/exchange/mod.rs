@@ -8,7 +8,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::engine;
 use crate::core::grid::{self, FatigueFactor, Weight, step_ticks};
-use crate::core::lists;
 use crate::core::tiles::{self, Table, Tile};
 use crate::core::vocabulary::BodyPart;
 use crate::core::world::Pos;
@@ -243,7 +242,7 @@ fn price_as(
     let focus: Option<Foe> = if patients.is_empty() {
         None
     } else {
-        Some(lists::max_by(|h: &Foe| heal_on(h), patients))
+        patients.iter().rev().max_by_key(|h| heal_on(h)).cloned()
     };
 
     let dropped: i32 = match &focus {
@@ -480,7 +479,8 @@ fn focused_against(
         }
     };
 
-    let order = lists::sort_by(|(b, _): &(Focused, f64)| b.hits, &whole);
+    let mut order = whole.clone();
+    order.sort_by_key(|(b, _)| b.hits);
 
     let fight = {
         let breaks = total + broken;
@@ -1264,7 +1264,8 @@ pub fn outcome(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> 
 }
 
 pub fn pooled_heal(seated: i32, ours: &[Fighter]) -> i32 {
-    let heals = lists::sort_by_descending(|f: &Fighter| f.heal, ours);
+    let mut heals = ours.to_vec();
+    heals.sort_by_key(|f| std::cmp::Reverse(f.heal));
     let seated = seated.min(ours.len() as i32).max(0) as usize;
     let (beside, apart) = heals.split_at(seated);
 
@@ -1456,19 +1457,16 @@ pub fn cheapest_win(
 
     let priced: Vec<(Vec<Body>, i32)> = bodies.iter().filter_map(cheapest).collect();
 
-    lists::sort_by(
-        |(set, spent): &(Vec<Body>, i32)| {
+    priced
+        .into_iter()
+        .min_by_key(|(set, spent)| {
             (
                 *spent,
-                set.iter().map(|b| b.len() as i32).sum::<i32>(),
-                set.len() as i32,
+                set.iter().map(|b| b.len()).sum::<usize>(),
+                set.len(),
             )
-        },
-        &priced,
-    )
-    .into_iter()
-    .next()
-    .map(|(set, _)| set)
+        })
+        .map(|(set, _)| set)
 }
 
 #[cfg(test)]

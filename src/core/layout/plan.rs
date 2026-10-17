@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use crate::core::atlas::Atlas;
 use crate::core::engine;
 use crate::core::grid::{self, Footprint, UNREACHED, Weight};
-use crate::core::lists;
 use crate::core::tiles::{self, Tile};
 use crate::core::world::Kind;
 
@@ -100,9 +99,9 @@ fn lab_cluster(inputs: &[Tile], rank: &[i32], is_open: impl Fn(Tile) -> bool) ->
                     }
 
                     if window.len() as i32 >= labs - 2 {
-                        let sorted = lists::sorted_by_key(|t| rank[*t], &window);
+                        window.sort_by_key(|t| rank[*t]);
                         let outputs: Vec<Tile> =
-                            sorted.into_iter().take((labs - 2) as usize).collect();
+                            window.into_iter().take((labs - 2) as usize).collect();
 
                         let cost =
                             rank[a] + rank[b] + outputs.iter().map(|t| rank[*t]).sum::<i32>();

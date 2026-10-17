@@ -5,7 +5,6 @@ pub mod exchange;
 pub mod fight;
 pub mod intents;
 pub mod layout;
-pub mod lists;
 pub mod mv;
 pub mod state;
 pub mod tick;

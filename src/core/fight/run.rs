@@ -18,7 +18,7 @@ use crate::core::vocabulary::{BodyPart, Resource};
 use crate::core::world::{
     self, Creep, Owner, Pos, Room, Sightings, Structure, World, hostiles, sightings,
 };
-use crate::core::{engine, lists, tiles};
+use crate::core::{engine, tiles};
 
 /// A merge keeps the older group's id; two engagements on one group are one,
 /// the older surviving with both's bodies, losses and budget. Also each
@@ -44,7 +44,8 @@ fn merged(
         })
         .collect();
 
-    let ranked = lists::sort_by(|e: &Engagement| e.id, &retargeted);
+    let mut ranked = retargeted;
+    ranked.sort_by_key(|e| e.id);
 
     let mut kept: Vec<Engagement> = Vec::new();
     let mut into: BTreeMap<i32, i32> = BTreeMap::new();
@@ -344,12 +345,10 @@ impl<'a> Scene<'a> {
         let gaits: Vec<grid::FatigueFactor> =
             set.iter().map(|f| f.gait).filter(|g| g.moves > 0).collect();
 
-        let gait = lists::sort_by(
-            |g: &grid::FatigueFactor| std::cmp::Reverse(grid::step_ticks(*g, engine::PLAIN_WEIGHT)),
-            &gaits,
-        )
-        .into_iter()
-        .next();
+        let gait = gaits
+            .iter()
+            .copied()
+            .min_by_key(|g| std::cmp::Reverse(grid::step_ticks(*g, engine::PLAIN_WEIGHT)));
 
         let mut weights = atlas.weights(&room.name)?;
         let exit = entry?;
@@ -1044,15 +1043,12 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     let mut ranked: Vec<(Engagement, bool)> = stepped;
     ranked.extend(opened);
-    let ranked = lists::sorted_by_key_by(
-        |(e, _): &(Engagement, bool)| (-e.priority, e.id),
-        |a: &(f64, i32), b: &(f64, i32)| {
-            a.0.partial_cmp(&b.0)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then(a.1.cmp(&b.1))
-        },
-        &ranked,
-    );
+    ranked.sort_by(|(a, _), (b, _)| {
+        b.priority
+            .partial_cmp(&a.priority)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.id.cmp(&b.id))
+    });
 
     let mut decided: Vec<Engagement> = Vec::new();
 

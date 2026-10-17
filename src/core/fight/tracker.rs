@@ -2,8 +2,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::shape::Group;
+use crate::core::tiles;
 use crate::core::world::{Creep, Pos, hostiles};
-use crate::core::{lists, tiles};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -66,8 +66,8 @@ fn find(root: &mut [usize], mut i: usize) -> usize {
 }
 
 fn clusters<'a>(owned: &BTreeSet<String>, hostiles: &'a [Creep]) -> Vec<Vec<&'a Creep>> {
-    let all: Vec<&Creep> = hostiles.iter().collect();
-    let sorted: Vec<&Creep> = lists::sort_by(|c: &&Creep| c.id.clone(), &all);
+    let mut sorted: Vec<&Creep> = hostiles.iter().collect();
+    sorted.sort_by(|a, b| a.id.cmp(&b.id));
     let n = sorted.len();
     let mut root: Vec<usize> = (0..n).collect();
     let armed: Vec<bool> = sorted
@@ -144,7 +144,8 @@ pub fn step(
     hostiles: &[Creep],
     tick: i32,
 ) -> (Vec<Group>, Vec<Event>) {
-    let prev = lists::sort_by(|g: &Group| g.id, prev);
+    let mut prev = prev.to_vec();
+    prev.sort_by_key(|g| g.id);
     let cs = clusters(owned, hostiles);
     let mut owner: BTreeMap<String, usize> = BTreeMap::new();
 

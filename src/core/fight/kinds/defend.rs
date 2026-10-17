@@ -3,10 +3,10 @@
 use std::collections::BTreeSet;
 
 use super::super::shape::{Engagement, Group, Phase};
+use crate::core::engine;
 use crate::core::tiles::{self};
 use crate::core::vocabulary::BodyPart;
 use crate::core::world::{Controller, Creep, Fallen, Kind, Owner, Pos, Structure};
-use crate::core::{engine, lists};
 
 pub struct Facts {
     pub time: i32,
@@ -301,15 +301,13 @@ pub fn opens(
         })
         .collect();
 
-    let ranked = lists::sorted_by_key_by(
-        |(g, priority): &(Group, f64)| (-*priority, g.id),
-        |a: &(f64, i32), b: &(f64, i32)| {
-            a.0.partial_cmp(&b.0)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then(a.1.cmp(&b.1))
-        },
-        &ranked,
-    );
+    let mut ranked = ranked;
+    ranked.sort_by(|(a, a_priority), (b, b_priority)| {
+        b_priority
+            .partial_cmp(a_priority)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.id.cmp(&b.id))
+    });
 
     let mut targeted = targeted.clone();
     let mut opened: Vec<(Group, f64)> = Vec::new();

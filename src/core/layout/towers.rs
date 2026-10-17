@@ -1,7 +1,6 @@
 //! Repair is economy work and not here.
 use crate::core::engine;
 use crate::core::intents::{Intent, TowerAct};
-use crate::core::lists;
 use crate::core::world::{self, Creep, Pos, Structure};
 
 fn dealt(from: &Pos, creep: &Creep) -> i32 {
@@ -13,30 +12,24 @@ fn dealt(from: &Pos, creep: &Creep) -> i32 {
 
 /// `towers` each hold the energy for one act.
 pub fn fire(towers: &[Structure], hostiles: &[Creep], ours: &[Creep]) -> Vec<Intent> {
-    let wounded = lists::sort_by(
-        |c: &Creep| (c.hits - c.hits_max, c.name.clone()),
-        &ours
-            .iter()
-            .filter(|c| c.hits < c.hits_max)
-            .cloned()
-            .collect::<Vec<_>>(),
-    )
-    .into_iter()
-    .next();
+    let wounded = ours
+        .iter()
+        .filter(|c| c.hits < c.hits_max)
+        .min_by_key(|c| (c.hits - c.hits_max, &c.name));
 
     let mut acts: Vec<Intent> = Vec::new();
 
     for tower in towers {
         if !hostiles.is_empty() {
-            let target = lists::sort_by(
-                |h: &Creep| (-dealt(&tower.pos, h), h.hits, h.id.clone()),
-                hostiles,
-            )
-            .into_iter()
-            .next();
+            let target = hostiles
+                .iter()
+                .min_by_key(|h| (-dealt(&tower.pos, h), h.hits, &h.id));
 
             if let Some(target) = target {
-                acts.push(Intent::Tower(tower.id.clone(), TowerAct::Attack(target.id)));
+                acts.push(Intent::Tower(
+                    tower.id.clone(),
+                    TowerAct::Attack(target.id.clone()),
+                ));
             }
         } else if let Some(creep) = &wounded {
             acts.push(Intent::Tower(

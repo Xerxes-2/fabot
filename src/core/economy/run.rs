@@ -304,7 +304,9 @@ fn link_sends(sends: &mut Vec<Intent>, ground: &Ground) {
 
     let mut room = receiver.free;
 
-    for l in crate::core::lists::sort_by(|l: &LinkFact| !l.role.is_source(), &ground.links) {
+    let mut links: Vec<&LinkFact> = ground.links.iter().collect();
+    links.sort_by_key(|l| !l.role.is_source());
+    for l in links {
         let amount = room.min(l.energy) / LINK_BATCH * LINK_BATCH;
 
         if l.id != receiver.id && l.cooldown == 0 && amount > 0 {
