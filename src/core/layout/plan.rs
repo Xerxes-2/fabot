@@ -279,8 +279,8 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
     let weights: &[Weight; tiles::COUNT] = &ground.weights;
     let mut unfit: Vec<Cow<'static, str>> = Vec::new();
 
-    let mut on_lat = vec![false; tiles::COUNT];
-    let mut lane: tiles::Table<Weight> = tiles::table(None);
+    let mut on_lat = [false; tiles::COUNT];
+    let mut lane: [Weight; tiles::COUNT] = [None; tiles::COUNT];
 
     for t in tiles::all() {
         let on = on_lattice(anchor, t);
@@ -297,10 +297,10 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
     );
     let walk = grid::flood(Footprint::One, &lane, &steps(), &[anchor]);
 
-    let mut clear = vec![false; tiles::COUNT];
+    let mut clear = [false; tiles::COUNT];
     let lattice = |t: Tile| -> bool { on_lat[t] && lane[t].is_some() };
 
-    let mut walked = vec![false; tiles::COUNT];
+    let mut walked = [false; tiles::COUNT];
 
     for t in tiles::all() {
         if lattice(t) && walk[t] != UNREACHED {
@@ -380,7 +380,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         };
 
     let walkable = |t: Tile| weights[t].is_some();
-    let mut held = vec![false; tiles::COUNT];
+    let mut held = [false; tiles::COUNT];
 
     if let Some((c, buffer, _)) = &controller_seat {
         for n in Atlas::upgrader_seats(walkable, *c, *buffer) {
@@ -388,7 +388,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         }
     }
 
-    let mut access: Vec<Option<Tile>> = vec![None; tiles::COUNT];
+    let mut access: [Option<Tile>; tiles::COUNT] = [None; tiles::COUNT];
     let mut slot_list: Vec<(i32, Tile)> = Vec::new();
 
     for t in tiles::all() {
@@ -413,12 +413,12 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
     keys.sort_unstable();
     let ordered: Vec<Tile> = keys.iter().map(|(_, t)| *t).collect();
 
-    let mut rank = vec![NONE; tiles::COUNT];
+    let mut rank = [NONE; tiles::COUNT];
     for (i, t) in ordered.iter().enumerate() {
         rank[*t] = i as i32;
     }
 
-    let mut taken = vec![false; tiles::COUNT];
+    let mut taken = [false; tiles::COUNT];
     let mut picked: Vec<(Kind, Tile)> = Vec::new();
     let mut cursor = 0usize;
 
@@ -499,7 +499,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         &mut picked,
     );
 
-    let mut road_level = vec![NONE; tiles::COUNT];
+    let mut road_level = [NONE; tiles::COUNT];
     let mut ranks: BTreeMap<Kind, i32> = BTreeMap::new();
     let mut items: Vec<Item> = Vec::new();
 
@@ -538,7 +538,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         taken,
         road_level,
         clear,
-        on_way: vec![false; tiles::COUNT],
+        on_way: [false; tiles::COUNT],
         held,
         items,
         extra: Vec::new(),
@@ -889,11 +889,11 @@ struct Board<'a> {
     weights: &'a [Weight; tiles::COUNT],
     anchor: Tile,
     walk: tiles::Table<i32>,
-    taken: Vec<bool>,
-    road_level: Vec<i32>,
-    clear: Vec<bool>,
-    on_way: Vec<bool>,
-    held: Vec<bool>,
+    taken: [bool; tiles::COUNT],
+    road_level: [i32; tiles::COUNT],
+    clear: [bool; tiles::COUNT],
+    on_way: [bool; tiles::COUNT],
+    held: [bool; tiles::COUNT],
     items: Vec<Item>,
     extra: Vec<Item>,
 }
