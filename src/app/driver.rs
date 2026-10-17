@@ -87,7 +87,7 @@ fn run_tick() -> Result<(), String> {
         sightings: &sightings,
     };
 
-    let result = tick::run(clock, tick::module_list(), &mut context, state);
+    let mut result = tick::run(clock, tick::module_list(), &mut context, state);
 
     for report in &result.reports {
         phases.push((report.module.to_string(), report.cpu));
@@ -96,7 +96,6 @@ fn run_tick() -> Result<(), String> {
         }
     }
 
-    let standing = result.state.layout.clone();
     let start = clock();
     let refusals: Vec<Refusal> = executor::run(&result.intents);
     let execute_cpu = clock() - start;
@@ -132,6 +131,7 @@ fn run_tick() -> Result<(), String> {
         refusals,
     };
     wire::write_observe(&observed);
+    let standing = std::mem::take(&mut result.state.layout);
 
     HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
