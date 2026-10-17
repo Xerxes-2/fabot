@@ -1,0 +1,26 @@
+/// Ahead of `State` so `State` can hold the standing plan.
+use crate::core::world::Kind;
+
+/// `Level`: from which the engine allows it (its rank among its kind against
+/// CONTROLLER_STRUCTURES), or the level a rule gives a road or container.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Item {
+    pub kind: Kind,
+    pub tile: i32,
+    pub level: i32,
+}
+
+/// `items` in the order they are placed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Plan {
+    pub room: String,
+    pub anchor: i32,
+    pub items: Vec<Item>,
+    pub unfit: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Standing {
+    pub key: String,
+    pub plan: Option<Plan>,
+}

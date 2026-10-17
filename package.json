@@ -19,7 +19,10 @@
     "soak": "node scripts/xxscreeps/soak.mjs",
     "soak:many": "node scripts/xxscreeps/soak-many.mjs",
     "scenario": "node scripts/xxscreeps/scenario.mjs",
-    "exchange": "node scripts/xxscreeps/exchange.mjs"
+    "exchange": "node scripts/xxscreeps/exchange.mjs",
+    "build:rust": "node scripts/rust.mjs",
+    "test:rust": "cargo test --manifest-path rust/Cargo.toml",
+    "parity": "node scripts/xxscreeps/parity.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

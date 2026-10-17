@@ -511,6 +511,7 @@ let plan
         |> Map.ofArray
 
     /// A colony that feeds outposts cannot wait for a bank that holds its whole hauler.
+    /// A lone room can, and regresses when it casts to the bank instead.
     let served = Array.zeroCreate colonies.Length
 
     for KeyValue(_, ci) in owners do

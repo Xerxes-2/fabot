@@ -1,0 +1,172 @@
+//! A set that walks as one: one field priced at its slowest body, each member
+//! kept near the median member along the walk.
+use crate::core::atlas::{Atlas, Field, Mover, Target};
+use crate::core::grid::{self, factor_of, step_ticks, FatigueFactor, Footprint};
+use crate::core::mv::{plan, Wish};
+use crate::core::tiles;
+use crate::core::world::Creep;
+use crate::core::engine;
+
+/// ⌈(n−1)/2⌉: less, and a file of n deadlocks in a corridor.
+pub fn radius(n: usize) -> i32 {
+    (n / 2) as i32
+}
+
+fn slowest(members: &[&Creep]) -> Mover {
+    let factors: Vec<FatigueFactor> = members.iter().map(|c| factor_of(c)).collect();
+    let mut moving: Vec<FatigueFactor> = factors.iter().copied().filter(|f| f.moves > 0).collect();
+    moving.sort_by_key(|f| {
+        (
+            -step_ticks(*f, engine::PLAIN_WEIGHT),
+            -step_ticks(*f, engine::SWAMP_WEIGHT),
+            -step_ticks(*f, engine::ROAD_WEIGHT),
+        )
+    });
+    Mover {
+        footprint: Footprint::One,
+        factor: moving.first().copied().unwrap_or(factors[0]),
+    }
+}
+
+/// None for a body that cannot move.
+fn fatigue_ticks(creep: &Creep) -> Option<i32> {
+    let moves = factor_of(creep).moves;
+    if moves == 0 {
+        None
+    } else {
+        Some((creep.fatigue + 2 * moves - 1) / (2 * moves))
+    }
+}
+
+pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep]) -> Vec<Wish> {
+    let mover = slowest(members);
+
+    fn left(atlas: &mut Atlas, mover: Mover, target: &Target, hops: i32, room: &str, tile: i32) -> i32 {
+        let field = atlas.field(mover, target, room);
+        match field {
+            // No field: one plain crossing, so a member short of it ranks behind one past it.
+            None if !atlas.sees(room) => {
+                tiles::SIDE * step_ticks(mover.factor, engine::PLAIN_WEIGHT)
+            }
+            None => grid::UNREACHED,
+            Some(field) => {
+                let exit = |field: &Field, mut t: i32| -> i32 {
+                    loop {
+                        match field.step(t) {
+                            Some(direction) => t = tiles::neighbour(t, direction),
+                            None => return t,
+                        }
+                    }
+                };
+                match field.ticks(tile) {
+                    None => grid::UNREACHED,
+                    Some(ticks) if room == &target.room => ticks,
+                    Some(_) if hops == 0 => grid::UNREACHED,
+                    Some(ticks) => {
+                        let edge = exit(&field, tile);
+                        match tiles::room_toward(room, tiles::exit_of(edge)) {
+                            Some(next) => {
+                                let rest = left(atlas, mover, target, hops - 1, &next, tiles::landing(edge));
+                                if rest == grid::UNREACHED {
+                                    grid::UNREACHED
+                                } else {
+                                    ticks + rest
+                                }
+                            }
+                            None => grid::UNREACHED,
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let lags: Vec<i32> = members
+        .iter()
+        .map(|c| {
+            let ticks = left(atlas, mover, target, target.max_hops, &c.pos.room, tiles::of_pos(&c.pos));
+            match (ticks, fatigue_ticks(c)) {
+                (t, Some(resting)) if t != grid::UNREACHED => t + resting,
+                _ => grid::UNREACHED,
+            }
+        })
+        .collect();
+
+    let index_of = |creep: &Creep| members.iter().position(|c| c.name == creep.name).unwrap();
+    let lag = |creep: &Creep| lags[index_of(creep)];
+
+    let mut ranked: Vec<&Creep> = members.to_vec();
+    ranked.sort_by_key(|c| (lag(c), c.name.clone()));
+    let anchor = ranked[(ranked.len() - 1) / 2];
+    let r = radius(members.len());
+
+    let walks: Vec<Wish> = members
+        .iter()
+        .map(|c| plan::toward(atlas, c, mover, target, weight))
+        .collect();
+
+    let anchor_wish = walks[index_of(anchor)].clone();
+
+    // Ticks behind and out of reach of its step: one behind on terrain alone,
+    // in reach, closes no faster for the anchor waiting.
+    let lagging = members.iter().any(|c| {
+        lag(c) != grid::UNREACHED
+            && lag(c) - lag(anchor) > r + 1
+            && tiles::seam_range(&c.pos, &tiles::to_pos(&anchor.pos.room, anchor_wish.head))
+                .map(|range| range > r + 1)
+                .unwrap_or(true)
+    });
+
+    let head_tile = if lagging { anchor_wish.at } else { anchor_wish.head };
+    let head = tiles::to_pos(&anchor.pos.room, head_tile);
+
+    let fits = |creep: &Creep, tile: i32| -> bool {
+        creep.name == anchor.name
+            || tiles::seam_range(&tiles::to_pos(&creep.pos.room, tile), &head)
+                .map(|range| range <= r)
+                .unwrap_or(false)
+            || lag(creep) >= lag(anchor)
+    };
+
+    // A step into swamp falls behind: a walker sidesteps no slower than its
+    // head, one waiting is shoved at most a plain step back, so one behind passes.
+    let keeps = |atlas: &mut Atlas, slack: i32, creep: &Creep, tile: i32| -> bool {
+        match atlas.field(mover, target, &creep.pos.room) {
+            Some(field) => match field.ticks(tiles::of_pos(&creep.pos)) {
+                Some(here) if here > 0 => field.onto(tile).is_some_and(|ticks| ticks <= here + slack),
+                _ => true,
+            },
+            None => true,
+        }
+    };
+
+    let step_back = 2 * step_ticks(mover.factor, engine::PLAIN_WEIGHT);
+
+    let mut out = Vec::with_capacity(members.len());
+    for (creep, wish) in members.iter().zip(walks.into_iter()) {
+        let waits = if creep.name == anchor.name {
+            lagging
+        } else {
+            !(wish.stays() || fits(creep, wish.head))
+        };
+        if waits {
+            let stay = plan::stay(atlas, creep, mover.factor, weight);
+            let tail = stay
+                .tail
+                .iter()
+                .copied()
+                .filter(|tile| fits(creep, *tile) && keeps(atlas, step_back, creep, *tile))
+                .collect();
+            out.push(Wish { tail, ..stay });
+        } else {
+            let tail = wish
+                .tail
+                .iter()
+                .copied()
+                .filter(|tile| fits(creep, *tile) && keeps(atlas, 0, creep, *tile))
+                .collect();
+            out.push(Wish { tail, ..wish });
+        }
+    }
+    out
+}

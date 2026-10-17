@@ -1,0 +1,132 @@
+/// The caller reads the creep's pace once (`Grid.factorOf`) and hands it in.
+use crate::core::atlas::{Atlas, Field, Mover, Target};
+use crate::core::grid::{self, FatigueFactor, Footprint};
+use crate::core::tiles;
+use crate::core::world::Creep;
+use crate::core::mv::Wish;
+
+pub fn can_move(creep: &Creep, factor: FatigueFactor) -> bool {
+    creep.fatigue == 0 && factor.moves > 0
+}
+
+/// Within two ticks: what a walker meeting it head-on waits to swap with.
+pub fn rests_soon(creep: &Creep, factor: FatigueFactor) -> bool {
+    factor.moves > 0 && creep.fatigue <= 4 * factor.moves
+}
+
+fn beside(atlas: &Atlas, creep: &Creep) -> Vec<i32> {
+    let at = tiles::of_pos(&creep.pos);
+    tiles::within(1, at)
+        .into_iter()
+        .filter(|tile| *tile != at && atlas.passable(&creep.pos.room, *tile))
+        .collect()
+}
+
+fn wish(
+    creep: &Creep,
+    moves: bool,
+    head: i32,
+    onward: Option<i32>,
+    tail: Vec<i32>,
+    working: Vec<i32>,
+    weight: i32,
+) -> Wish {
+    Wish {
+        creep: creep.name.clone(),
+        footprint: Footprint::One,
+        at: tiles::of_pos(&creep.pos),
+        head,
+        onward,
+        tail,
+        working,
+        weight,
+        moves,
+    }
+}
+
+pub fn stay(atlas: &Atlas, creep: &Creep, factor: FatigueFactor, weight: i32) -> Wish {
+    let at = tiles::of_pos(&creep.pos);
+    let tail = beside(atlas, creep)
+        .into_iter()
+        .filter(|tile| !tiles::on_edge(*tile))
+        .collect();
+    wish(creep, can_move(creep, factor), at, None, tail, Vec::new(), weight)
+}
+
+/// The tail is the way round a body the Atlas's walk does not see.
+pub fn toward(
+    atlas: &mut Atlas,
+    creep: &Creep,
+    mover: Mover,
+    target: &Target,
+    weight: i32,
+) -> Wish {
+    let room = &creep.pos.room;
+    let at = tiles::of_pos(&creep.pos);
+    let moves = can_move(creep, mover.factor);
+
+    let field: Option<Field> = if rests_soon(creep, mover.factor) {
+        atlas.field(mover, target, room)
+    } else {
+        None
+    };
+
+    let Some(field) = field else {
+        return stay(atlas, creep, mover.factor, weight);
+    };
+
+    let ticks = |tile: i32| field.ticks(tile).unwrap_or(grid::UNREACHED);
+    let here = ticks(at);
+
+    if here == 0 && room == &target.room {
+        let near = beside(atlas, creep);
+        let (inside, outside): (Vec<i32>, Vec<i32>) = near
+            .into_iter()
+            .filter(|tile| !tiles::on_edge(*tile))
+            .partition(|tile| ticks(*tile) == 0);
+        let mut tail = inside.clone();
+        tail.extend(outside);
+        let mut working = vec![at];
+        working.extend(inside);
+        wish(creep, moves, at, None, tail, working, weight)
+    } else if here == 0 {
+        // Landed on the band it wants out by: the engine moves a body across
+        // only as it steps onto an exit tile.
+        let band: Vec<i32> = beside(atlas, creep)
+            .into_iter()
+            .filter(|tile| ticks(*tile) == 0)
+            .collect();
+        if band.is_empty() {
+            stay(atlas, creep, mover.factor, weight)
+        } else {
+            wish(
+                creep,
+                moves,
+                band[0],
+                None,
+                band[1..].to_vec(),
+                Vec::new(),
+                weight,
+            )
+        }
+    } else {
+        match field.step(at) {
+            None => stay(atlas, creep, mover.factor, weight),
+            Some(direction) => {
+                let head = tiles::neighbour(at, direction);
+                let onward = field.step(head).map(|d| tiles::neighbour(head, d));
+                let mut tail: Vec<i32> = beside(atlas, creep)
+                    .into_iter()
+                    .filter(|tile| {
+                        *tile != head
+                            && (ticks(*tile) < here
+                                || (ticks(*tile) < grid::UNREACHED && tiles::range(*tile, head) == 1))
+                            && (ticks(*tile) == 0 || !tiles::on_edge(*tile))
+                    })
+                    .collect();
+                tail.sort_by_key(|tile| (ticks(*tile), *tile));
+                wish(creep, moves, head, onward, tail, Vec::new(), weight)
+            }
+        }
+    }
+}
