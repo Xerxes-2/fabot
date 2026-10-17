@@ -1,4 +1,5 @@
 /// Below this file nothing in `Economy` reads `World` (`ARCHITECTURE.md` §1).
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use crate::core::atlas::{Atlas, Tree};
@@ -714,10 +715,9 @@ pub fn of_world(
     // At the rate the reserver holds, not this tick's: a body lives longer
     // than a lapse lasts. The engine refuses a harvest on another's hold.
     let remote_of = |outpost: &Outpost| -> Ground {
-        let room = world
+        let room: Cow<Room> = world
             .room(&outpost.room)
-            .cloned()
-            .unwrap_or_else(|| blind(outpost));
+            .map_or_else(|| Cow::Owned(blind(outpost)), Cow::Borrowed);
 
         let withheld = |c: &Controller| {
             if invader_held(c) {
@@ -730,7 +730,7 @@ pub fn of_world(
         match &room.controller {
             Some(c) if !reservable(&world.me, c) => {
                 let sources = withheld(c);
-                let mut bare = room.clone();
+                let mut bare = room.clone().into_owned();
                 bare.sources = Vec::new();
                 let mut ground = ground_of(atlas, &world.me, richest, 0, &bare);
                 ground.withheld = sources;
