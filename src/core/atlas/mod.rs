@@ -498,7 +498,7 @@ impl Atlas {
         mover: Mover,
         target: &Target,
         room: &str,
-        onward: impl FnOnce() -> Option<Vec<String>>,
+        onward: impl FnOnce(&Atlas) -> Option<Vec<String>>,
     ) -> Option<Field> {
         if mover.factor.moves <= 0 || !self.rooms.contains_key(room) {
             return None;
@@ -513,7 +513,7 @@ impl Atlas {
                 tiles: targets,
             }
         } else {
-            match onward() {
+            match onward(self) {
                 Some(rooms) if rooms.len() >= 2 => Goal::Exit(tiles::exit_toward(room, &rooms[1])?),
                 _ => return None,
             }
@@ -575,8 +575,9 @@ impl Atlas {
     }
 
     pub fn field(&mut self, mover: Mover, target: &Target, room: &str) -> Option<Field> {
-        let route = self.route(&target.avoid, target.max_hops, room, &target.room);
-        self.field_on(mover, target, room, || route)
+        self.field_on(mover, target, room, |atlas| {
+            atlas.route(&target.avoid, target.max_hops, room, &target.room)
+        })
     }
 
     /// `field` out of another room on a known route to the target's.
@@ -588,7 +589,7 @@ impl Atlas {
     ) -> Option<Field> {
         let first = rooms.first()?.clone();
         let rooms = rooms.to_vec();
-        self.field_on(mover, target, &first, || Some(rooms))
+        self.field_on(mover, target, &first, |_| Some(rooms))
     }
 
     /// In another room: the ticks to leaving this one toward it.
