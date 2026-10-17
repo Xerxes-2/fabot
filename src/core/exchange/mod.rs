@@ -1310,8 +1310,8 @@ pub fn breach_plan(
         }
     };
 
-    let mut dist = vec![i32::MAX; tiles::COUNT];
-    let mut prev: Vec<Option<Tile>> = vec![None; tiles::COUNT];
+    let mut dist = [i32::MAX; tiles::COUNT];
+    let mut prev: [Option<Tile>; tiles::COUNT] = [None; tiles::COUNT];
     let goal: BTreeSet<Tile> = goals.iter().copied().collect();
 
     for &t in sources {
