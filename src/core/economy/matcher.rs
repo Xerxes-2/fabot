@@ -30,13 +30,11 @@ pub fn match_all(
         best_cost: vec![0; bodies.len()],
         best_walk: vec![0; bodies.len()],
         best_load: vec![0; bodies.len()],
-        by_id: {
-            let mut by_id = HashMap::default();
-            for (oi, offer) in pool.iter().enumerate() {
-                by_id.insert(offer.id.clone(), oi);
-            }
-            by_id
-        },
+        by_id: pool
+            .iter()
+            .enumerate()
+            .map(|(oi, offer)| (offer.id.as_str(), oi))
+            .collect(),
     };
     matched.run(assignments)
 }
@@ -53,7 +51,7 @@ struct Matcher<'a> {
     best_cost: Vec<i32>,
     best_walk: Vec<i32>,
     best_load: Vec<i32>,
-    by_id: HashMap<String, usize>,
+    by_id: HashMap<&'a str, usize>,
 }
 
 /// `Unreached` also when the body dies first (`Pool::outlives`).
@@ -225,7 +223,7 @@ impl Matcher<'_> {
             let Some(id) = assignments.get(&self.bodies[bi].name) else {
                 continue;
             };
-            let Some(oi) = self.by_id.get(id).copied() else {
+            let Some(oi) = self.by_id.get(id.as_str()).copied() else {
                 continue;
             };
 
