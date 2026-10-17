@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
@@ -21,16 +22,16 @@ impl Pos {
         }
     }
 
+    pub fn index(&self) -> i32 {
+        self.y * 50 + self.x
+    }
+
     pub fn range(&self, b: &Pos) -> Option<i32> {
-        if self.room == b.room {
-            Some((self.x - b.x).abs().max((self.y - b.y).abs()))
-        } else {
-            None
-        }
+        (self.room == b.room).then(|| (self.x - b.x).abs().max((self.y - b.y).abs()))
     }
 
     pub fn within(&self, range: i32, b: &Pos) -> bool {
-        self.room == b.room && (self.x - b.x).abs().max((self.y - b.y).abs()) <= range
+        self.range(b).map(|r| r <= range).unwrap_or_default()
     }
 }
 
@@ -43,7 +44,7 @@ impl PartialOrd for Pos {
 impl Ord for Pos {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.room.cmp(&other.room) {
-            Ordering::Equal => (self.y * 50 + self.x).cmp(&(other.y * 50 + other.x)),
+            Ordering::Equal => self.index().cmp(&other.index()),
             c => c,
         }
     }
@@ -88,13 +89,12 @@ impl Store {
     pub fn amount_of(&self, resource: &Resource) -> i32 {
         self.held
             .iter()
-            .filter(|(r, _)| r == resource)
-            .map(|(_, amount)| *amount)
+            .filter_map(|(r, n)| (r == resource).then_some(n))
             .sum()
     }
 
     pub fn used(&self) -> i32 {
-        self.held.iter().map(|(_, amount)| *amount).sum()
+        self.held.iter().map(|(_, amount)| amount).sum()
     }
 
     pub fn free(&self) -> i32 {
@@ -180,29 +180,29 @@ impl Kind {
         }
     }
 
-    pub fn name(&self) -> String {
+    pub fn name(&self) -> Cow<'static, str> {
         match self {
-            Kind::Spawn => "spawn".to_string(),
-            Kind::Extension => "extension".to_string(),
-            Kind::Tower => "tower".to_string(),
-            Kind::Road => "road".to_string(),
-            Kind::Container => "container".to_string(),
-            Kind::Storage => "storage".to_string(),
-            Kind::Link => "link".to_string(),
-            Kind::Rampart => "rampart".to_string(),
-            Kind::Wall => "constructedWall".to_string(),
-            Kind::Extractor => "extractor".to_string(),
-            Kind::Terminal => "terminal".to_string(),
-            Kind::Observer => "observer".to_string(),
-            Kind::Lab => "lab".to_string(),
-            Kind::Factory => "factory".to_string(),
-            Kind::PowerSpawn => "powerSpawn".to_string(),
-            Kind::Nuker => "nuker".to_string(),
-            Kind::KeeperLair => "keeperLair".to_string(),
-            Kind::InvaderCore => "invaderCore".to_string(),
-            Kind::PowerBank => "powerBank".to_string(),
-            Kind::Portal => "portal".to_string(),
-            Kind::Other(name) => name.clone(),
+            Kind::Spawn => "spawn".into(),
+            Kind::Extension => "extension".into(),
+            Kind::Tower => "tower".into(),
+            Kind::Road => "road".into(),
+            Kind::Container => "container".into(),
+            Kind::Storage => "storage".into(),
+            Kind::Link => "link".into(),
+            Kind::Rampart => "rampart".into(),
+            Kind::Wall => "constructedWall".into(),
+            Kind::Extractor => "extractor".into(),
+            Kind::Terminal => "terminal".into(),
+            Kind::Observer => "observer".into(),
+            Kind::Lab => "lab".into(),
+            Kind::Factory => "factory".into(),
+            Kind::PowerSpawn => "powerSpawn".into(),
+            Kind::Nuker => "nuker".into(),
+            Kind::KeeperLair => "keeperLair".into(),
+            Kind::InvaderCore => "invaderCore".into(),
+            Kind::PowerBank => "powerBank".into(),
+            Kind::Portal => "portal".into(),
+            Kind::Other(name) => name.to_owned().into(),
         }
     }
 
@@ -507,8 +507,7 @@ pub mod hostiles {
             .collect()
     }
 
-    /// An ally's creeps are no one's to answer, so no reader sees them.
-    pub fn spare(allies: &BTreeSet<String>, world: &mut World) {
+    pub fn non_ally(allies: &BTreeSet<String>, world: &mut World) {
         for room in &mut world.rooms {
             room.hostiles
                 .retain(|c| !matches!(&c.owner, Owner::Theirs(user) if allies.contains(user)));
@@ -545,20 +544,11 @@ pub mod sightings {
     use super::{Seen, Sightings, World, hostiles};
     use std::collections::BTreeMap;
 
-    pub fn step(world: &World, previous: &Sightings) -> Sightings {
-        let mut next: Sightings = previous
-            .iter()
-            .map(|(room, seen)| {
-                (
-                    room.clone(),
-                    seen.iter()
-                        .filter(|(_, s)| s.gone > world.time)
-                        .map(|(id, s)| (id.clone(), *s))
-                        .collect::<BTreeMap<_, _>>(),
-                )
-            })
-            .filter(|(_, seen)| !seen.is_empty())
-            .collect();
+    pub fn step(world: &World, previous: Sightings) -> Sightings {
+        let mut next = previous;
+        next.iter_mut()
+            .for_each(|(_, seen)| seen.retain(|_, s| s.gone > world.time));
+        next.retain(|_, r| !r.is_empty());
 
         let owned = hostiles::owned(&world.rooms);
 

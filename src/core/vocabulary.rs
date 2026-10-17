@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::{borrow::Cow, cmp::Ordering};
 
 /// Each union compares by a hand-written ordinal: Fable's generic union
 /// equality walks the case structure, and v1 measured it on hot paths.
@@ -275,20 +275,20 @@ impl Ord for Resource {
     }
 }
 
-pub fn resource_name(resource: &Resource) -> String {
+pub fn resource_name(resource: &Resource) -> Cow<'static, str> {
     match resource {
-        Resource::Energy => "energy".to_string(),
-        Resource::Ore(Ore::Hydrogen) => "H".to_string(),
-        Resource::Ore(Ore::Oxygen) => "O".to_string(),
-        Resource::Ore(Ore::Utrium) => "U".to_string(),
-        Resource::Ore(Ore::Keanium) => "K".to_string(),
-        Resource::Ore(Ore::Lemergium) => "L".to_string(),
-        Resource::Ore(Ore::Zynthium) => "Z".to_string(),
-        Resource::Ore(Ore::Catalyst) => "X".to_string(),
-        Resource::Compound(Compound::Hydroxide) => "OH".to_string(),
-        Resource::Compound(Compound::UtriumHydride) => "UH".to_string(),
-        Resource::Compound(Compound::UtriumAcid) => "UH2O".to_string(),
-        Resource::Other(name) => name.clone(),
+        Resource::Energy => "energy".into(),
+        Resource::Ore(Ore::Hydrogen) => "H".into(),
+        Resource::Ore(Ore::Oxygen) => "O".into(),
+        Resource::Ore(Ore::Utrium) => "U".into(),
+        Resource::Ore(Ore::Keanium) => "K".into(),
+        Resource::Ore(Ore::Lemergium) => "L".into(),
+        Resource::Ore(Ore::Zynthium) => "Z".into(),
+        Resource::Ore(Ore::Catalyst) => "X".into(),
+        Resource::Compound(Compound::Hydroxide) => "OH".into(),
+        Resource::Compound(Compound::UtriumHydride) => "UH".into(),
+        Resource::Compound(Compound::UtriumAcid) => "UH2O".into(),
+        Resource::Other(name) => name.to_owned().into(),
     }
 }
 

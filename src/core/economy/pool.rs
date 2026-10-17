@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 /// One pool for every colony: a body takes the work it fits and reaches,
 /// whoever cast it (`ARCHITECTURE.md` §5).
 use std::collections::BTreeSet;
@@ -235,7 +236,7 @@ pub fn pool(derived: &Derived) -> Vec<Offer> {
     // The storage is offered for every ore a body carries, so no load is
     // stranded.
     let ores: Vec<Resource> = {
-        let mut seen: BTreeSet<String> = BTreeSet::new();
+        let mut seen: BTreeSet<Cow<'static, str>> = BTreeSet::new();
         let mut ores = Vec::new();
         for body in &derived.bodies {
             for (resource, _) in &body.store.held {

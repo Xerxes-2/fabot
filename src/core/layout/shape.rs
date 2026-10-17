@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 /// Ahead of `State` so `State` can hold the standing plan.
 use crate::core::world::Kind;
 
@@ -16,7 +18,7 @@ pub struct Plan {
     pub room: String,
     pub anchor: i32,
     pub items: Vec<Item>,
-    pub unfit: Vec<String>,
+    pub unfit: Vec<Cow<'static, str>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

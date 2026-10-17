@@ -1,6 +1,7 @@
 //! Drawn once for the eighth level, so nothing moves or is rebuilt as the
 //! room levels up. A diagonal lattice, so a hauler on one road tile reaches up
 //! to four.
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use crate::core::atlas::Atlas;
@@ -282,7 +283,7 @@ fn fill(
 /// one.
 fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (Plan, bool) {
     let weights: &[i32] = &ground.weights;
-    let mut unfit: Vec<String> = Vec::new();
+    let mut unfit: Vec<Cow<'static, str>> = Vec::new();
 
     let mut on_lat = vec![false; tiles::COUNT];
     let mut lane = vec![0i32; tiles::COUNT];
@@ -339,7 +340,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
     for s in &ground.sources {
         let path = way_out(&lane, &walk, &mut clear, *s);
         if path.is_empty() {
-            unfit.push("source unreached".to_string());
+            unfit.push("source unreached".into());
         } else {
             source_walks.push((*s, path));
         }
@@ -349,7 +350,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
         Some(c) => {
             let path = way_out(&lane, &walk, &mut clear, c);
             if path.is_empty() {
-                unfit.push("controller unreached".to_string());
+                unfit.push("controller unreached".into());
                 Vec::new()
             } else {
                 path
@@ -362,7 +363,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
     for m in &ground.minerals {
         let path = way_out(&lane, &walk, &mut clear, *m);
         if path.is_empty() {
-            unfit.push("mineral unreached".to_string());
+            unfit.push("mineral unreached".into());
         } else {
             mineral_walks.push((*m, path));
         }

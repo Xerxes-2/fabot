@@ -72,8 +72,8 @@ fn run_tick() -> Result<(), String> {
     let declarations: Declarations = wire::read_declarations();
     let start = clock();
     let mut world = world::of_game(&mut terrain);
-    crate::core::world::hostiles::spare(&declarations.allies, &mut world);
-    sightings = crate::core::world::sightings::step(&world, &sightings);
+    crate::core::world::hostiles::non_ally(&declarations.allies, &mut world);
+    sightings = crate::core::world::sightings::step(&world, sightings);
     phases.push(("world".to_string(), clock() - start));
 
     let start = clock();

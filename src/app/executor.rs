@@ -67,9 +67,9 @@ fn act(intent: &Intent) -> (String, i32) {
                         Err(()) => (verb("threw"), THREW),
                     }
                 }
-                CreepAct::Harvest(id) => {
-                    on("harvest", id, |t| call(&creep, "harvest", &[t.clone()]))
-                }
+                CreepAct::Harvest(id) => on("harvest", id, |t| {
+                    call(&creep, "harvest", std::slice::from_ref(t))
+                }),
                 CreepAct::Transfer(id, resource) => on("transfer", id, |t| {
                     call(
                         &creep,
@@ -90,38 +90,46 @@ fn act(intent: &Intent) -> (String, i32) {
                         ],
                     )
                 }),
-                CreepAct::Pickup(id) => on("pickup", id, |t| call(&creep, "pickup", &[t.clone()])),
-                CreepAct::Build(id) => on("build", id, |t| call(&creep, "build", &[t.clone()])),
-                CreepAct::Repair(id) => on("repair", id, |t| call(&creep, "repair", &[t.clone()])),
+                CreepAct::Pickup(id) => on("pickup", id, |t| {
+                    call(&creep, "pickup", std::slice::from_ref(t))
+                }),
+                CreepAct::Build(id) => on("build", id, |t| {
+                    call(&creep, "build", std::slice::from_ref(t))
+                }),
+                CreepAct::Repair(id) => on("repair", id, |t| {
+                    call(&creep, "repair", std::slice::from_ref(t))
+                }),
                 CreepAct::Upgrade(id) => on("upgrade", id, |t| {
-                    call(&creep, "upgradeController", &[t.clone()])
+                    call(&creep, "upgradeController", std::slice::from_ref(t))
                 }),
                 CreepAct::Reserve(id) => on("reserve", id, |t| {
-                    call(&creep, "reserveController", &[t.clone()])
+                    call(&creep, "reserveController", std::slice::from_ref(t))
                 }),
                 CreepAct::Unreserve(id) => on("unreserve", id, |t| {
-                    call(&creep, "attackController", &[t.clone()])
+                    call(&creep, "attackController", std::slice::from_ref(t))
                 }),
                 CreepAct::ClaimController(id) => on("claim", id, |t| {
-                    call(&creep, "claimController", &[t.clone()])
+                    call(&creep, "claimController", std::slice::from_ref(t))
                 }),
-                CreepAct::AttackCreep(id) => {
-                    on("attack", id, |t| call(&creep, "attack", &[t.clone()]))
-                }
+                CreepAct::AttackCreep(id) => on("attack", id, |t| {
+                    call(&creep, "attack", std::slice::from_ref(t))
+                }),
                 CreepAct::RangedAttackCreep(id) => on("rangedAttack", id, |t| {
-                    call(&creep, "rangedAttack", &[t.clone()])
+                    call(&creep, "rangedAttack", std::slice::from_ref(t))
                 }),
                 CreepAct::RangedMassAttack => match call(&creep, "rangedMassAttack", &[]) {
                     Ok(code) => (verb("rangedMassAttack"), code),
                     Err(()) => (verb("threw"), THREW),
                 },
-                CreepAct::HealCreep(id) => on("heal", id, |t| call(&creep, "heal", &[t.clone()])),
-                CreepAct::RangedHealCreep(id) => on("rangedHeal", id, |t| {
-                    call(&creep, "rangedHeal", &[t.clone()])
+                CreepAct::HealCreep(id) => on("heal", id, |t| {
+                    call(&creep, "heal", std::slice::from_ref(t))
                 }),
-                CreepAct::Dismantle(id) => {
-                    on("dismantle", id, |t| call(&creep, "dismantle", &[t.clone()]))
-                }
+                CreepAct::RangedHealCreep(id) => on("rangedHeal", id, |t| {
+                    call(&creep, "rangedHeal", std::slice::from_ref(t))
+                }),
+                CreepAct::Dismantle(id) => on("dismantle", id, |t| {
+                    call(&creep, "dismantle", std::slice::from_ref(t))
+                }),
             }
         }
         Intent::Room(name, RoomAct::CreateSite(x, y, kind)) => {
@@ -141,12 +149,12 @@ fn act(intent: &Intent) -> (String, i32) {
         Intent::Tower(id, act) => match world::object_by_id(id) {
             None => ("tower".to_string(), NOT_FOUND),
             Some(tower) => match act {
-                TowerAct::Attack(target) => {
-                    on("attack", target, |t| call(&tower, "attack", &[t.clone()]))
-                }
-                TowerAct::Heal(target) => {
-                    on("heal", target, |t| call(&tower, "heal", &[t.clone()]))
-                }
+                TowerAct::Attack(target) => on("attack", target, |t| {
+                    call(&tower, "attack", std::slice::from_ref(t))
+                }),
+                TowerAct::Heal(target) => on("heal", target, |t| {
+                    call(&tower, "heal", std::slice::from_ref(t))
+                }),
             },
         },
         Intent::Controller(id, ControllerAct::ActivateSafeMode) => match world::object_by_id(id) {
