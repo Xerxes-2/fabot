@@ -1,6 +1,7 @@
 /// The pool, the match, the quota, and the acts and walks they imply.
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::core::HashMap;
 use crate::core::atlas::{Atlas, Mover, Target};
 use crate::core::grid::{self, Footprint};
 use crate::core::intents::{Ask, CreepAct, Intent, LinkAct, Rank};
@@ -113,7 +114,7 @@ pub struct Walked<'a> {
     pub creeps: &'a BTreeMap<&'a str, &'a Creep>,
     pub movers: &'a BTreeMap<&'a str, Mover>,
     pub offers: &'a [Offer],
-    pub by_id: &'a BTreeMap<&'a str, usize>,
+    pub by_id: &'a HashMap<&'a str, usize>,
     pub assignments: &'a Assignments,
 }
 
@@ -359,7 +360,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         })
         .collect();
 
-    let by_id: BTreeMap<&str, usize> = offers
+    let by_id: HashMap<&str, usize> = offers
         .iter()
         .enumerate()
         .map(|(i, offer)| (offer.id.as_str(), i))
