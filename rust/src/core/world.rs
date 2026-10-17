@@ -206,6 +206,41 @@ impl Kind {
         }
     }
 
+    /// The kinds the engine gives a `store`: the seam reads none on the rest.
+    pub fn has_store(&self) -> bool {
+        matches!(
+            self,
+            Kind::Spawn
+                | Kind::Extension
+                | Kind::Tower
+                | Kind::Container
+                | Kind::Storage
+                | Kind::Link
+                | Kind::Terminal
+                | Kind::Lab
+                | Kind::Factory
+                | Kind::PowerSpawn
+                | Kind::Nuker
+                | Kind::InvaderCore
+                | Kind::Other(_)
+        )
+    }
+
+    /// The kinds the engine gives a `cooldown`.
+    pub fn has_cooldown(&self) -> bool {
+        matches!(
+            self,
+            Kind::Tower
+                | Kind::Link
+                | Kind::Lab
+                | Kind::Extractor
+                | Kind::Terminal
+                | Kind::Factory
+                | Kind::Nuker
+                | Kind::PowerSpawn
+        )
+    }
+
     /// A rampart is walkable only if ours or public: `Structure.Walkable`.
     pub fn walkable(&self) -> bool {
         matches!(

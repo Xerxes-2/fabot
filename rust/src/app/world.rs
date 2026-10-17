@@ -34,6 +34,38 @@ fn pos_of(pos: &objects::RoomPosition) -> Pos {
     Pos::new(pos.room_name().to_string(), pos.x() as i32, pos.y() as i32)
 }
 
+/// A position in the room being read: its name is already in hand, so the
+/// packed position's room is never parsed.
+fn pos_in(room: &str, pos: &objects::RoomPosition) -> Pos {
+    Pos::new(room.to_string(), pos.x() as i32, pos.y() as i32)
+}
+
+fn kind_of_type(ty: screeps::StructureType) -> Kind {
+    match ty {
+        screeps::StructureType::Spawn => Kind::Spawn,
+        screeps::StructureType::Extension => Kind::Extension,
+        screeps::StructureType::Tower => Kind::Tower,
+        screeps::StructureType::Road => Kind::Road,
+        screeps::StructureType::Container => Kind::Container,
+        screeps::StructureType::Storage => Kind::Storage,
+        screeps::StructureType::Link => Kind::Link,
+        screeps::StructureType::Rampart => Kind::Rampart,
+        screeps::StructureType::Wall => Kind::Wall,
+        screeps::StructureType::Extractor => Kind::Extractor,
+        screeps::StructureType::Terminal => Kind::Terminal,
+        screeps::StructureType::Observer => Kind::Observer,
+        screeps::StructureType::Lab => Kind::Lab,
+        screeps::StructureType::Factory => Kind::Factory,
+        screeps::StructureType::PowerSpawn => Kind::PowerSpawn,
+        screeps::StructureType::Nuker => Kind::Nuker,
+        screeps::StructureType::KeeperLair => Kind::KeeperLair,
+        screeps::StructureType::InvaderCore => Kind::InvaderCore,
+        screeps::StructureType::PowerBank => Kind::PowerBank,
+        screeps::StructureType::Portal => Kind::Portal,
+        _ => Kind::Other(ty.to_string()),
+    }
+}
+
 fn resource_of(ty: ResourceType) -> Resource {
     vocabulary::resource_of_name(&ty.to_string())
 }
@@ -188,9 +220,9 @@ fn fallen_creep(creep: &JsValue) -> Creep {
     }
 }
 
-fn structure_of(s: &JsValue) -> Structure {
-    let base: &objects::Structure = s.unchecked_ref();
-    let kind = Kind::of_name(&field(s, "structureType").as_string().unwrap_or_default());
+fn structure_of(base: &objects::Structure, room: &str) -> Structure {
+    let kind = kind_of_type(base.structure_type());
+    let s: &JsValue = base.as_ref();
     let owned: &objects::OwnedStructure = s.unchecked_ref();
     let owner = if owned.my() {
         Owner::Ours
@@ -198,13 +230,21 @@ fn structure_of(s: &JsValue) -> Structure {
         owner_of(owned.owner())
     };
     Structure {
-        id: id_of(base.as_ref()),
-        pos: pos_of(&base.js_pos()),
+        id: id_of(s),
+        pos: pos_in(room, &base.js_pos()),
         owner: owner.clone(),
         hits: base.hits() as i32,
         hits_max: base.hits_max() as i32,
-        store: store_at(&field(s, "store")),
-        cooldown: int_or_zero(&field(s, "cooldown")),
+        store: if kind.has_store() {
+            store_at(&field(s, "store"))
+        } else {
+            Store::empty()
+        },
+        cooldown: if kind.has_cooldown() {
+            int_or_zero(&field(s, "cooldown"))
+        } else {
+            0
+        },
         collapse: collapse_of(s, &kind),
         level: if kind.is_invader_core() {
             int_or_zero(&field(s, "level"))
@@ -237,12 +277,12 @@ fn collapse_of(s: &JsValue, kind: &Kind) -> i32 {
     }
 }
 
-fn site_of(s: &JsValue) -> Site {
-    let base: &objects::ConstructionSite = s.unchecked_ref();
+fn site_of(base: &objects::ConstructionSite, room: &str) -> Site {
+    let s: &JsValue = base.as_ref();
     Site {
-        id: id_of(base.as_ref()),
-        kind: Kind::of_name(&field(s, "structureType").as_string().unwrap_or_default()),
-        pos: pos_of(&base.js_pos()),
+        id: id_of(s),
+        kind: kind_of_type(base.structure_type()),
+        pos: pos_in(room, &base.js_pos()),
         owner: if base.my() {
             Owner::Ours
         } else {
@@ -374,8 +414,8 @@ fn room_of(room: &objects::Room) -> Room {
     }
 
     Room {
-        name,
-        terrain: terrain_of(&room.name().to_string()),
+        name: name.clone(),
+        terrain: terrain_of(&name),
         controller,
         energy_available: room.energy_available() as i32,
         energy_capacity: room.energy_capacity_available() as i32,
@@ -392,12 +432,12 @@ fn room_of(room: &objects::Room) -> Room {
         structures: room
             .find(find::RoomObject::Structures, None)
             .iter()
-            .map(|s| structure_of(&jsval(s)))
+            .map(|s| structure_of(s.unchecked_ref(), &name))
             .collect(),
         sites: room
             .find(find::RoomObject::ConstructionSites, None)
             .iter()
-            .map(|s| site_of(&jsval(s)))
+            .map(|s| site_of(s.unchecked_ref(), &name))
             .collect(),
         piles: room
             .find(find::DROPPED_RESOURCES, None)

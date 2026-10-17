@@ -524,9 +524,11 @@ unchanged build).
 ### 9.2 F# dialect — defaults, not rules
 
 Binds `src/`. `rust/` keeps the defaults that carry over (arrays, loops and
-mutable locals on a per-creep path; no allocation a tick can avoid) and has one
+mutable locals on a per-creep path; no allocation a tick can avoid) and has two
 of its own: `World::of_game` is the only reader of the game, every field it
-reads a typed binding except the few `screeps-game-api` does not model.
+reads a typed binding except the few `screeps-game-api` does not model; and the
+seam builds each property name and reads each field once, gating on `Kind`
+where the engine gives the field to only some kinds.
 
 The boundary is pure; the inside is written as a systems language. Everything
 below is the **default** a module's first line is written in; any of it yields
