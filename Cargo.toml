@@ -38,6 +38,11 @@ redundant_closure_for_method_calls = "warn"
 single_match_else = "warn"
 uninlined_format_args = "warn"
 
+# Unit tests run 8x faster optimised, overflow checks kept; no LTO, so a
+# rebuild stays a second.
+[profile.test]
+opt-level = 2
+
 [profile.release]
 opt-level = 3
 lto = true
