@@ -14,7 +14,7 @@ pub const UNREACHED: i32 = i32::MAX;
 /// apart cost the economy 2% (bench-live).
 const WALL: i32 = -1;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Footprint {
     One,
     Quad,

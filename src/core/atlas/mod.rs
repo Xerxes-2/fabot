@@ -36,7 +36,22 @@ pub struct Target {
 #[derive(Clone, Debug)]
 pub struct RoomGrid {
     pub weights: Rc<Table<Weight>>,
-    pub floods: HashMap<String, Rc<Table<i32>>>,
+    pub floods: HashMap<FloodKey, Rc<Table<i32>>>,
+}
+
+/// What a flood is a function of besides the room's weights: the mover's
+/// footprint and pace, and its goals.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FloodKey {
+    footprint: Footprint,
+    steps: [Option<i32>; 3],
+    goal: Goal,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum Goal {
+    Seats { range: i32, tiles: Vec<Tile> },
+    Exit(i32),
 }
 
 #[derive(Clone, Debug)]
@@ -489,34 +504,29 @@ impl Atlas {
             return None;
         }
         let footprint = mover.footprint;
-        let (goal_key, goals): (String, Vec<Tile>) = if room == target.room {
+        let (goal, goals): (Goal, Vec<Tile>) = if room == target.room {
             let mut sorted = target.tiles.clone();
-            if sorted.len() > 1 {
-                sorted.sort_unstable();
-            }
-            let mut goal_key = format!("r{}:", target.range);
-            let mut first = true;
+            sorted.sort_unstable();
+            sorted.dedup();
             let grid = &self.rooms[room];
             let mut goals = Vec::new();
-            for i in 0..sorted.len() {
-                if i == 0 || sorted[i] != sorted[i - 1] {
-                    goal_key.push_str(if first { "" } else { "," });
-                    goal_key.push_str(&sorted[i].to_string());
-                    first = false;
-                    let tile = sorted[i];
-                    if tile.index() < tiles::COUNT {
-                        Atlas::seats_near(footprint, &grid.weights, target.range, tile, &mut goals);
-                    }
+            for &tile in &sorted {
+                if tile.index() < tiles::COUNT {
+                    Atlas::seats_near(footprint, &grid.weights, target.range, tile, &mut goals);
                 }
             }
-            (goal_key, goals)
+            let goal = Goal::Seats {
+                range: target.range,
+                tiles: sorted,
+            };
+            (goal, goals)
         } else {
             match onward() {
                 Some(rooms) if rooms.len() >= 2 => {
                     let exit = tiles::exit_toward(room, &rooms[1])?;
                     let grid = &self.rooms[room];
                     (
-                        format!("x{}", exit),
+                        Goal::Exit(exit),
                         Atlas::exit_goals(footprint, &grid.weights, exit),
                     )
                 }
@@ -525,18 +535,16 @@ impl Atlas {
         };
 
         let factor = mover.factor;
-        let key = format!(
-            "{}|{:?}|{:?}|{:?}|{}",
-            if footprint == Footprint::One {
-                "1"
-            } else {
-                "4"
-            },
-            step_ticks(factor, engine::ROAD_WEIGHT),
-            step_ticks(factor, engine::PLAIN_WEIGHT),
-            step_ticks(factor, engine::SWAMP_WEIGHT),
-            goal_key
-        );
+        let key = FloodKey {
+            footprint,
+            steps: [
+                engine::ROAD_WEIGHT,
+                engine::PLAIN_WEIGHT,
+                engine::SWAMP_WEIGHT,
+            ]
+            .map(|w| step_ticks(factor, w)),
+            goal,
+        };
 
         let grid = self.rooms.get_mut(room).unwrap();
         let dist = match grid.floods.get(&key) {
