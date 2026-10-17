@@ -274,8 +274,8 @@ pub fn place(census: &Census, level: i32, plan: &Plan, budget: i32) -> Vec<Place
 
     let mut taken: BTreeSet<Tile> = BTreeSet::new();
 
-    let mut planned = vec![0u8; tiles::COUNT];
-    let mut solid = vec![0u8; tiles::COUNT];
+    let mut planned = [0u8; tiles::COUNT];
+    let mut solid = [0u8; tiles::COUNT];
 
     for i in &plan.items {
         planned[i.tile] = 1;
