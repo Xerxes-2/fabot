@@ -198,6 +198,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `observe.*` | health, faults, per-module CPU, counters | Main, then Observe | segment 1 | operator; calibrates the benchmark |
 | `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) and whether it is armed; a room in sight holds only what stands there now. A level-0 core is unarmed: it keeps its core engagement open but stands nothing down | World | heap | vision grace; when a stood-down outpost is clear |
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
+| `terrain` | room → its raw terrain buffer, kept from the first tick it is seen | World | heap | terrain never changes, and reading it is calls across the seam (§9.2) |
 
 Rules:
 - Memory and segments are written once a tick by `Main`, from `State'`. No

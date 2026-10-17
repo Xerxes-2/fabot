@@ -2,6 +2,7 @@
 //! in one pass and hands over its numbers and its strings whole; this decodes
 //! them in the order it wrote them. A call across the seam costs more than the
 //! field it reads, so the reader makes a handful a tick.
+use std::collections::HashMap;
 use std::str::Split;
 
 use js_sys::{Array, Int32Array, Reflect};
@@ -25,10 +26,13 @@ fn absent(v: &JsValue) -> bool {
     v.is_undefined() || v.is_null()
 }
 
+pub type Terrains = HashMap<String, Vec<u8>>;
+
 struct Reader<'a> {
     ints: Vec<i32>,
     at: usize,
     strs: Split<'a, char>,
+    terrain: &'a mut Terrains,
 }
 
 impl Reader<'_> {
@@ -208,8 +212,18 @@ impl Reader<'_> {
 
     fn room(&mut self) -> Room {
         let name = self.s();
+        let terrain = match self.terrain.get(&name) {
+            Some(terrain) => terrain.clone(),
+            None => {
+                let terrain = terrain_of(&name);
+                if !terrain.is_empty() {
+                    self.terrain.insert(name.clone(), terrain.clone());
+                }
+                terrain
+            }
+        };
         Room {
-            terrain: terrain_of(&name),
+            terrain,
             energy_available: self.n(),
             energy_capacity: self.n(),
             controller: if self.flag() {
@@ -269,7 +283,7 @@ impl Reader<'_> {
     }
 }
 
-pub fn of_game() -> World {
+pub fn of_game(terrain: &mut Terrains) -> World {
     let packed = read();
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
@@ -277,6 +291,7 @@ pub fn of_game() -> World {
         ints,
         at: 0,
         strs: text.split('\0'),
+        terrain,
     };
     let time = r.n();
     let bucket = r.n();

@@ -24,6 +24,8 @@ struct Heap {
     sightings: Sightings,
     /// Heap only: after a reset every room floods afresh.
     atlas: Atlas,
+    /// A room's terrain never changes, so it is read once a room a reset.
+    terrain: world::Terrains,
 }
 
 thread_local! {
@@ -33,6 +35,7 @@ thread_local! {
         standing: BTreeMap::new(),
         sightings: Sightings::new(),
         atlas: Atlas::empty(),
+        terrain: world::Terrains::new(),
     });
 }
 
@@ -50,13 +53,14 @@ fn run_tick() -> Result<(), String> {
     let clock = || game_cpu::get_used();
     let mut phases: Vec<(String, f64)> = Vec::new();
 
-    let (mut sightings, mut atlas, mut faults, standing) = HEAP.with(|heap| {
+    let (mut sightings, mut atlas, mut faults, standing, mut terrain) = HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
         (
             std::mem::take(&mut heap.sightings),
             std::mem::replace(&mut heap.atlas, Atlas::empty()),
             std::mem::take(&mut heap.faults),
             std::mem::take(&mut heap.standing),
+            std::mem::take(&mut heap.terrain),
         )
     });
 
@@ -67,7 +71,7 @@ fn run_tick() -> Result<(), String> {
 
     let declarations: Declarations = wire::read_declarations();
     let start = clock();
-    let mut world = world::of_game();
+    let mut world = world::of_game(&mut terrain);
     crate::core::world::hostiles::spare(&declarations.allies, &mut world);
     sightings = crate::core::world::sightings::step(&world, &sightings);
     phases.push(("world".to_string(), clock() - start));
@@ -135,6 +139,7 @@ fn run_tick() -> Result<(), String> {
         heap.standing = standing;
         heap.sightings = sightings;
         heap.atlas = atlas;
+        heap.terrain = terrain;
     });
 
     Ok(())
