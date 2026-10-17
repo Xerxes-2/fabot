@@ -55,6 +55,7 @@ const wasmBytes = require('fs').readFileSync(wasmPath);`;
 if (!glue.includes(loader)) throw new Error("rust.mjs: wasm-pack's loader changed; the inline patch is stale");
 
 const prelude = `globalThis.__FABOT_VERSION__ = ${JSON.stringify(version())};
+${readFileSync(join(REPO, "src", "app", "read.js"), "utf8")}
 
 // The engine's sandbox has no TextDecoder and no filesystem: decode the module
 // that is our own code and decode UTF-8 the way the runtime would.

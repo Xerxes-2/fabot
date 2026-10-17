@@ -529,13 +529,12 @@ to a measurement on the benchmark above, in either direction:
 - Module boundaries take and return owned values. Inside a function, `Vec`s,
   mutable locals and loops on any path that runs per creep or per tile, and
   no allocation a tick can avoid.
-- `World::of_game` is the only reader of the game: every field it reads a
-  typed binding except the few `screeps-game-api` does not model.
 - A call across the wasm–JS seam is the seam's cost: on the live-sized capture
   ~90% of what reading the world cost over the F# reader was the number of
-  calls, not the work in them (2026-10-17). The seam builds each property name
-  once, reads each field once, and gates on `Kind` where the engine gives a
-  field to only some kinds.
+  calls, not the work in them (2026-10-17). So `World::of_game`, the only
+  reader of the game, takes it from `app/read.js` in one pass, its numbers in
+  one `Int32Array` and its strings in one string, decoded in the order written;
+  a field goes on that pass, never a call of its own.
 
 ### 9.3 Counts are a gate
 

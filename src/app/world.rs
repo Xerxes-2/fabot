@@ -1,374 +1,297 @@
-//! `World.ofGame`: the one reader of the game's objects. `screeps-game-api`
-//! supplies the typed bindings and `Game`, the find passes and the object
-//! handles; the handful of fields the crate does not model (a structure's
-//! `structureType`, `store` and `cooldown`, an Invader core's collapse) are
-//! read from the object itself, so a modded structure or a lost field costs
-//! nothing.
-use js_sys::{Array, Object as JsObject, Reflect};
-use screeps::{OwnedStructureProperties, ResourceType, SharedCreepProperties, find, game, objects};
+//! `World.ofGame`: the one reader of the game's objects. `read.js` walks them
+//! in one pass and hands over its numbers and its strings whole; this decodes
+//! them in the order it wrote them. A call across the seam costs more than the
+//! field it reads, so the reader makes a handful a tick.
+use std::str::Split;
+
+use js_sys::{Array, Int32Array, Reflect};
+use screeps::{ResourceType, game};
+use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 
-use super::js::{field, int_or_zero};
+use super::js::field;
 
 use crate::core::engine;
-use crate::core::vocabulary::{self, BodyPart, Boost, Resource};
+use crate::core::vocabulary::{self, BodyPart, Boost};
 use crate::core::world::*;
 
-fn id_of(v: &JsValue) -> String {
-    field(v, "id").as_string().unwrap_or_default()
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = __fabotRead)]
+    fn read() -> Array;
 }
 
 fn absent(v: &JsValue) -> bool {
     v.is_undefined() || v.is_null()
 }
 
-fn jsval<T: JsCast>(v: &T) -> JsValue {
-    v.unchecked_ref::<JsValue>().clone()
+struct Reader<'a> {
+    ints: Vec<i32>,
+    at: usize,
+    strs: Split<'a, char>,
 }
 
-/// The engine's `__packedPos` packs the room name y-major and this crate's
-/// `Position` reads it x-major, so the coordinate getters are the only source
-/// of a room name: `Position` is right only where the two agree (the two pack
-/// the room y-major, this engine's own ids x-major).
-fn pos_of(pos: &objects::RoomPosition) -> Pos {
-    Pos::new(pos.room_name().to_string(), pos.x() as i32, pos.y() as i32)
-}
-
-/// A position in the room being read: its name is already in hand, so the
-/// packed position's room is never parsed.
-fn pos_in(room: &str, pos: &objects::RoomPosition) -> Pos {
-    Pos::new(room.to_string(), pos.x() as i32, pos.y() as i32)
-}
-
-fn kind_of_type(ty: screeps::StructureType) -> Kind {
-    match ty {
-        screeps::StructureType::Spawn => Kind::Spawn,
-        screeps::StructureType::Extension => Kind::Extension,
-        screeps::StructureType::Tower => Kind::Tower,
-        screeps::StructureType::Road => Kind::Road,
-        screeps::StructureType::Container => Kind::Container,
-        screeps::StructureType::Storage => Kind::Storage,
-        screeps::StructureType::Link => Kind::Link,
-        screeps::StructureType::Rampart => Kind::Rampart,
-        screeps::StructureType::Wall => Kind::Wall,
-        screeps::StructureType::Extractor => Kind::Extractor,
-        screeps::StructureType::Terminal => Kind::Terminal,
-        screeps::StructureType::Observer => Kind::Observer,
-        screeps::StructureType::Lab => Kind::Lab,
-        screeps::StructureType::Factory => Kind::Factory,
-        screeps::StructureType::PowerSpawn => Kind::PowerSpawn,
-        screeps::StructureType::Nuker => Kind::Nuker,
-        screeps::StructureType::KeeperLair => Kind::KeeperLair,
-        screeps::StructureType::InvaderCore => Kind::InvaderCore,
-        screeps::StructureType::PowerBank => Kind::PowerBank,
-        screeps::StructureType::Portal => Kind::Portal,
-        _ => Kind::Other(ty.to_string()),
+impl Reader<'_> {
+    fn n(&mut self) -> i32 {
+        self.at += 1;
+        self.ints[self.at - 1]
     }
-}
 
-fn resource_of(ty: ResourceType) -> Resource {
-    vocabulary::resource_of_name(&ty.to_string())
-}
+    fn flag(&mut self) -> bool {
+        self.n() != 0
+    }
 
-fn store_of(store: &objects::Store) -> Store {
-    Store {
-        held: store
-            .store_types()
+    fn s(&mut self) -> String {
+        self.strs.next().unwrap_or_default().to_string()
+    }
+
+    fn list<T>(&mut self, mut each: impl FnMut(&mut Self) -> T) -> Vec<T> {
+        let count = self.n();
+        (0..count).map(|_| each(self)).collect()
+    }
+
+    fn owner(&mut self) -> Owner {
+        let tag = self.n();
+        let name = self.s();
+        match tag {
+            1 => Owner::Ours,
+            2 => Owner::Theirs(name),
+            _ => Owner::Nobody,
+        }
+    }
+
+    fn pos(&mut self) -> Pos {
+        let room = self.s();
+        let x = self.n();
+        let y = self.n();
+        Pos::new(room, x, y)
+    }
+
+    fn pos_in(&mut self, room: &str) -> Pos {
+        let x = self.n();
+        let y = self.n();
+        Pos::new(room, x, y)
+    }
+
+    /// Only the resources `screeps-game-api` names count, as its `store_types` read them.
+    fn store(&mut self) -> Store {
+        let held = self
+            .list(|r| (r.s(), r.n()))
             .into_iter()
-            .filter_map(|ty| match store.get(ty) {
-                Some(amount) if amount > 0 => Some((resource_of(ty), amount as i32)),
-                _ => None,
-            })
-            .collect(),
-        capacity: capacity_of(store),
+            .filter(|(name, amount)| *amount > 0 && name.parse::<ResourceType>().is_ok())
+            .map(|(name, amount)| (vocabulary::resource_of_name(&name), amount))
+            .collect();
+        Store {
+            held,
+            capacity: self.n(),
+        }
     }
-}
 
-/// `getCapacity() ?? getCapacity('energy') ?? 0`.
-fn capacity_of(store: &objects::Store) -> i32 {
-    match store.get_capacity(None) {
-        0 => store.get_capacity(Some(ResourceType::Energy)) as i32,
-        capacity => capacity as i32,
-    }
-}
-
-fn store_at(v: &JsValue) -> Store {
-    if absent(v) {
-        Store::empty()
-    } else {
-        store_of(v.unchecked_ref())
-    }
-}
-
-fn part_of(part: screeps::Part) -> BodyPart {
-    match part {
-        screeps::Part::Work => BodyPart::Work,
-        screeps::Part::Carry => BodyPart::Carry,
-        screeps::Part::Move => BodyPart::Move,
-        screeps::Part::Attack => BodyPart::Attack,
-        screeps::Part::RangedAttack => BodyPart::RangedAttack,
-        screeps::Part::Heal => BodyPart::Heal,
-        screeps::Part::Claim => BodyPart::Claim,
-        screeps::Part::Tough => BodyPart::Tough,
-        _ => BodyPart::Tough,
-    }
-}
-
-fn boost_of(kind: BodyPart, boost: Option<ResourceType>) -> Boost {
-    match boost {
-        Some(ty) => vocabulary::boost::of_compound(kind, &ty.to_string()),
-        None => Boost::Unboosted,
-    }
-}
-
-fn owner_of(owner: Option<objects::Owner>) -> Owner {
-    match owner {
-        Some(owner) => Owner::Theirs(owner.username()),
-        None => Owner::Nobody,
-    }
-}
-
-fn creep_of(creep: &objects::Creep) -> Creep {
-    Creep {
-        id: id_of(creep.as_ref()),
-        name: creep.name(),
-        owner: if creep.my() {
-            Owner::Ours
-        } else {
-            Owner::Theirs(creep.owner().username())
-        },
-        pos: pos_of(&creep.js_pos()),
-        body: creep
-            .body()
-            .into_iter()
-            .map(|part| {
-                let kind = part_of(part.part());
-                Part {
-                    kind,
-                    hits: part.hits() as i32,
-                    boost: boost_of(kind, part.boost()),
-                }
-            })
-            .collect(),
-        hits: creep.hits() as i32,
-        hits_max: creep.hits_max() as i32,
-        ticks_to_live: creep.ticks_to_live().unwrap_or(0) as i32,
-        fatigue: creep.fatigue() as i32,
-        store: store_of(&creep.store()),
-    }
-}
-
-/// The engine's fallen creep keeps no hits or fatigue.
-fn fallen_of(creep: &JsValue) -> Creep {
-    let mut creep = fallen_creep(creep);
-    creep.hits = 0;
-    creep.fatigue = 0;
-    creep
-}
-
-/// A tombstone's `creep` is a bare object the crate does not type.
-fn fallen_creep(creep: &JsValue) -> Creep {
-    let body = match field(creep, "body").dyn_into::<Array>() {
-        Ok(array) => (0..array.length())
-            .map(|i| {
-                let part = array.get(i);
-                let kind = field(&part, "type")
-                    .as_string()
-                    .as_deref()
-                    .and_then(vocabulary::part_of_name)
-                    .unwrap_or(BodyPart::Tough);
-                let boost = field(&part, "boost");
-                Part {
-                    kind,
-                    hits: int_or_zero(&field(&part, "hits")),
-                    boost: if absent(&boost) {
-                        Boost::Unboosted
-                    } else {
-                        vocabulary::boost::of_compound(kind, &boost.as_string().unwrap_or_default())
-                    },
-                }
-            })
-            .collect(),
-        Err(_) => Vec::new(),
-    };
-    let pos = field(creep, "pos");
-    Creep {
-        id: field(creep, "id").as_string().unwrap_or_default(),
-        name: field(creep, "name").as_string().unwrap_or_default(),
-        owner: match field(creep, "my").as_bool() {
-            Some(true) => Owner::Ours,
-            _ => {
-                let owner = field(creep, "owner");
-                if absent(&owner) {
-                    Owner::Nobody
+    fn body(&mut self) -> Vec<Part> {
+        self.list(|r| {
+            let kind = vocabulary::part_of_name(&r.s()).unwrap_or(BodyPart::Tough);
+            let hits = r.n();
+            let boost = r.s();
+            Part {
+                kind,
+                hits,
+                boost: if boost.is_empty() {
+                    Boost::Unboosted
                 } else {
-                    Owner::Theirs(field(&owner, "username").as_string().unwrap_or_default())
-                }
+                    vocabulary::boost::of_compound(kind, &boost)
+                },
             }
-        },
-        pos: Pos::new(
-            field(&pos, "roomName").as_string().unwrap_or_default(),
-            int_or_zero(&field(&pos, "x")),
-            int_or_zero(&field(&pos, "y")),
-        ),
-        body,
-        hits: int_or_zero(&field(creep, "hits")),
-        hits_max: int_or_zero(&field(creep, "hitsMax")),
-        ticks_to_live: int_or_zero(&field(creep, "ticksToLive")),
-        fatigue: int_or_zero(&field(creep, "fatigue")),
-        store: store_at(&field(creep, "store")),
+        })
     }
-}
 
-fn structure_of(base: &objects::Structure, room: &str) -> Structure {
-    let kind = kind_of_type(base.structure_type());
-    let s: &JsValue = base.as_ref();
-    let owned: &objects::OwnedStructure = s.unchecked_ref();
-    let owner = if owned.my() {
-        Owner::Ours
-    } else {
-        owner_of(owned.owner())
-    };
-    Structure {
-        id: id_of(s),
-        pos: pos_in(room, &base.js_pos()),
-        owner: owner.clone(),
-        hits: base.hits() as i32,
-        hits_max: base.hits_max() as i32,
-        store: if kind.has_store() {
-            store_at(&field(s, "store"))
+    fn creep(&mut self) -> Creep {
+        Creep {
+            id: self.s(),
+            name: self.s(),
+            owner: self.owner(),
+            pos: self.pos(),
+            body: self.body(),
+            hits: self.n(),
+            hits_max: self.n(),
+            ticks_to_live: self.n(),
+            fatigue: self.n(),
+            store: self.store(),
+        }
+    }
+
+    fn controller(&mut self) -> Controller {
+        Controller {
+            id: self.s(),
+            pos: self.pos(),
+            owner: self.owner(),
+            level: self.n(),
+            progress: self.n(),
+            progress_total: self.n(),
+            ticks_to_downgrade: self.n(),
+            reservation: if self.flag() {
+                Some((self.s(), self.n()))
+            } else {
+                None
+            },
+            safe_mode: self.n(),
+            safe_mode_available: self.n(),
+            safe_mode_cooldown: self.n(),
+            upgrade_blocked: self.n(),
+        }
+    }
+
+    fn structure(&mut self, room: &str) -> Structure {
+        let kind = Kind::of_name(&self.s());
+        let id = self.s();
+        let pos = self.pos_in(room);
+        let owner = self.owner();
+        let hits = self.n();
+        let hits_max = self.n();
+        let store = if kind.has_store() {
+            self.store()
         } else {
             Store::empty()
-        },
-        cooldown: if kind.has_cooldown() {
-            int_or_zero(&field(s, "cooldown"))
+        };
+        let cooldown = if kind.has_cooldown() { self.n() } else { 0 };
+        let (collapse, level) = if kind.is_invader_core() {
+            let running = self.flag();
+            let ticks = self.n();
+            let collapse = if running {
+                ticks
+            } else {
+                ticks + engine::STRONGHOLD_LONGEST_COLLAPSE
+            };
+            (collapse, self.n())
         } else {
-            0
-        },
-        collapse: collapse_of(s, &kind),
-        level: if kind.is_invader_core() {
-            int_or_zero(&field(s, "level"))
-        } else {
-            0
-        },
-        walkable: if kind.is_rampart() {
-            owner.is_ours() || field(s, "isPublic").as_bool() == Some(true)
+            (0, 0)
+        };
+        let walkable = if kind.is_rampart() {
+            let public = self.flag();
+            owner.is_ours() || public
         } else {
             kind.walkable()
-        },
-        kind,
+        };
+        Structure {
+            id,
+            kind,
+            pos,
+            owner,
+            hits,
+            hits_max,
+            store,
+            cooldown,
+            collapse,
+            level,
+            walkable,
+        }
     }
-}
 
-fn collapse_of(s: &JsValue, kind: &Kind) -> i32 {
-    if !kind.is_invader_core() {
-        return 0;
-    }
-    let effects = field(s, "effects");
-    let found = match effects.dyn_into::<Array>() {
-        Ok(array) => (0..array.length())
-            .map(|i| array.get(i))
-            .find(|e| int_or_zero(&field(e, "effect")) == 1002),
-        Err(_) => None,
-    };
-    match found {
-        Some(e) => int_or_zero(&field(&e, "ticksRemaining")),
-        None => int_or_zero(&field(s, "ticksToDeploy")) + engine::STRONGHOLD_LONGEST_COLLAPSE,
-    }
-}
-
-fn site_of(base: &objects::ConstructionSite, room: &str) -> Site {
-    let s: &JsValue = base.as_ref();
-    Site {
-        id: id_of(s),
-        kind: kind_of_type(base.structure_type()),
-        pos: pos_in(room, &base.js_pos()),
-        owner: if base.my() {
-            Owner::Ours
-        } else {
-            let owner = base.owner();
-            if jsval(&owner).is_null() {
-                Owner::Nobody
+    /// A tombstone's creep keeps no hits or fatigue.
+    fn remains(&mut self) -> Remains {
+        Remains {
+            id: self.s(),
+            pos: self.pos(),
+            store: self.store(),
+            fallen: if self.flag() {
+                let mut creep = self.creep();
+                creep.hits = 0;
+                creep.fatigue = 0;
+                Some(Fallen {
+                    creep,
+                    died: self.n(),
+                })
             } else {
-                Owner::Theirs(owner.username())
-            }
-        },
-        progress: base.progress() as i32,
-        progress_total: base.progress_total() as i32,
+                None
+            },
+        }
+    }
+
+    fn room(&mut self) -> Room {
+        let name = self.s();
+        Room {
+            terrain: terrain_of(&name),
+            energy_available: self.n(),
+            energy_capacity: self.n(),
+            controller: if self.flag() {
+                Some(self.controller())
+            } else {
+                None
+            },
+            sources: self.list(|r| Source {
+                id: r.s(),
+                pos: r.pos(),
+                energy: r.n(),
+                energy_capacity: r.n(),
+                ticks_to_regeneration: r.n(),
+            }),
+            minerals: self.list(|r| Mineral {
+                id: r.s(),
+                pos: r.pos(),
+                resource: vocabulary::resource_of_name(&r.s()),
+                amount: r.n(),
+            }),
+            structures: self.list(|r| r.structure(&name)),
+            sites: self.list(|r| Site {
+                kind: Kind::of_name(&r.s()),
+                id: r.s(),
+                pos: r.pos_in(&name),
+                owner: r.owner(),
+                progress: r.n(),
+                progress_total: r.n(),
+            }),
+            piles: self.list(|r| Pile {
+                id: r.s(),
+                pos: r.pos(),
+                resource: vocabulary::resource_of_name(&r.s()),
+                amount: r.n(),
+            }),
+            remains: self.list(|r| r.remains()),
+            hostiles: self.list(|r| r.creep()),
+            name,
+        }
+    }
+
+    fn spawn(&mut self) -> Spawn {
+        Spawn {
+            id: self.s(),
+            name: self.s(),
+            pos: self.pos(),
+            spawning: if self.flag() {
+                Some(Oven {
+                    name: self.s(),
+                    remaining: self.n(),
+                    body: self.body(),
+                })
+            } else {
+                None
+            },
+        }
     }
 }
 
-fn controller_of(c: &objects::StructureController) -> Controller {
-    Controller {
-        id: id_of(c.as_ref()),
-        pos: pos_of(&c.js_pos()),
-        owner: if c.my() {
-            Owner::Ours
-        } else {
-            owner_of(c.owner())
-        },
-        level: c.level() as i32,
-        progress: c.progress().unwrap_or(0) as i32,
-        progress_total: c.progress_total().unwrap_or(0) as i32,
-        ticks_to_downgrade: c.ticks_to_downgrade().unwrap_or(0) as i32,
-        reservation: c
-            .reservation()
-            .map(|r| (r.username(), r.ticks_to_end() as i32)),
-        safe_mode: c.safe_mode().unwrap_or(0) as i32,
-        safe_mode_available: c.safe_mode_available() as i32,
-        safe_mode_cooldown: c.safe_mode_cooldown().unwrap_or(0) as i32,
-        upgrade_blocked: c.upgrade_blocked().unwrap_or(0) as i32,
-    }
-}
-
-fn source_of(s: &objects::Source) -> Source {
-    Source {
-        id: id_of(s.as_ref()),
-        pos: pos_of(&s.js_pos()),
-        energy: s.energy() as i32,
-        energy_capacity: s.energy_capacity() as i32,
-        ticks_to_regeneration: s.ticks_to_regeneration().unwrap_or(0) as i32,
-    }
-}
-
-fn mineral_of(m: &objects::Mineral) -> Mineral {
-    Mineral {
-        id: id_of(m.as_ref()),
-        pos: pos_of(&m.js_pos()),
-        resource: resource_of(m.mineral_type()),
-        amount: m.mineral_amount() as i32,
-    }
-}
-
-fn pile_of(p: &objects::Resource) -> Pile {
-    Pile {
-        id: id_of(p.as_ref()),
-        pos: pos_of(&p.js_pos()),
-        resource: resource_of(p.resource_type()),
-        amount: p.amount() as i32,
-    }
-}
-
-fn remains_of_js(r: &JsValue) -> Remains {
-    let creep = field(r, "creep");
-    Remains {
-        id: field(r, "id").as_string().unwrap_or_default(),
-        pos: Pos::new(
-            field(&field(r, "pos"), "roomName")
-                .as_string()
-                .unwrap_or_default(),
-            int_or_zero(&field(&field(r, "pos"), "x")),
-            int_or_zero(&field(&field(r, "pos"), "y")),
-        ),
-        store: store_at(&field(r, "store")),
-        fallen: if absent(&creep) {
-            None
-        } else {
-            Some(Fallen {
-                creep: fallen_of(&creep),
-                died: int_or_zero(&field(r, "deathTime")),
-            })
-        },
+pub fn of_game() -> World {
+    let packed = read();
+    let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
+    let text = packed.get(1).as_string().unwrap_or_default();
+    let mut r = Reader {
+        ints,
+        at: 0,
+        strs: text.split('\0'),
+    };
+    let time = r.n();
+    let bucket = r.n();
+    let rooms = r.list(|r| r.room());
+    let spawns = r.list(|r| r.spawn());
+    let creeps = r.list(|r| r.creep());
+    World {
+        time,
+        me: r.s(),
+        cpu_limit: game::cpu::limit() as f64,
+        bucket,
+        rooms,
+        spawns,
+        creeps,
+        our_sites: r.n(),
     }
 }
 
@@ -400,179 +323,6 @@ fn terrain_of(name: &str) -> Vec<u8> {
         Ok(raw) => js_sys::Uint8Array::new(&raw).to_vec(),
         Err(_) => Vec::new(),
     }
-}
-
-fn room_of(room: &objects::Room) -> Room {
-    let name = room.name().to_string();
-    let controller = room.controller().as_ref().map(controller_of);
-
-    let mut remains: Vec<Remains> = Vec::new();
-    for ty in [find::RoomObject::Tombstones, find::RoomObject::Ruins] {
-        for object in room.find(ty, None) {
-            remains.push(remains_of_js(&jsval(&object)));
-        }
-    }
-
-    Room {
-        name: name.clone(),
-        terrain: terrain_of(&name),
-        controller,
-        energy_available: room.energy_available() as i32,
-        energy_capacity: room.energy_capacity_available() as i32,
-        sources: room
-            .find(find::SOURCES, None)
-            .iter()
-            .map(source_of)
-            .collect(),
-        minerals: room
-            .find(find::MINERALS, None)
-            .iter()
-            .map(mineral_of)
-            .collect(),
-        structures: room
-            .find(find::RoomObject::Structures, None)
-            .iter()
-            .map(|s| structure_of(s.unchecked_ref(), &name))
-            .collect(),
-        sites: room
-            .find(find::RoomObject::ConstructionSites, None)
-            .iter()
-            .map(|s| site_of(s.unchecked_ref(), &name))
-            .collect(),
-        piles: room
-            .find(find::DROPPED_RESOURCES, None)
-            .iter()
-            .map(pile_of)
-            .collect(),
-        remains,
-        hostiles: room
-            .find(find::HOSTILE_CREEPS, None)
-            .iter()
-            .map(creep_of)
-            .collect(),
-    }
-}
-
-fn spawn_of(spawn: &objects::StructureSpawn, creeps: &JsValue) -> Spawn {
-    Spawn {
-        id: id_of(spawn.as_ref()),
-        name: spawn.name(),
-        pos: pos_of(&spawn.js_pos()),
-        spawning: spawn.spawning().map(|s| {
-            let name: String = s.name().into();
-            let creep = field(creeps, &name);
-            Oven {
-                remaining: s.remaining_time() as i32,
-                body: if absent(&creep) {
-                    Vec::new()
-                } else {
-                    match field(&creep, "body").dyn_into::<Array>() {
-                        Ok(array) => (0..array.length())
-                            .map(|i| {
-                                let part = array.get(i);
-                                let kind = field(&part, "type")
-                                    .as_string()
-                                    .as_deref()
-                                    .and_then(vocabulary::part_of_name)
-                                    .unwrap_or(BodyPart::Tough);
-                                let boost = field(&part, "boost");
-                                Part {
-                                    kind,
-                                    hits: int_or_zero(&field(&part, "hits")),
-                                    boost: if absent(&boost) {
-                                        Boost::Unboosted
-                                    } else {
-                                        vocabulary::boost::of_compound(
-                                            kind,
-                                            &boost.as_string().unwrap_or_default(),
-                                        )
-                                    },
-                                }
-                            })
-                            .collect(),
-                        Err(_) => Vec::new(),
-                    }
-                },
-                name,
-            }
-        }),
-    }
-}
-
-fn game_creeps() -> JsValue {
-    match Reflect::get(&js_sys::global(), &JsValue::from_str("Game")) {
-        Ok(game) => field(&game, "creeps"),
-        Err(_) => JsValue::UNDEFINED,
-    }
-}
-
-pub fn of_game() -> World {
-    let time = game::time() as i32;
-    let cpu_limit = game::cpu::limit() as f64;
-    let bucket = game::cpu::bucket();
-
-    let mut room_entries: Vec<(String, objects::Room)> = game::rooms()
-        .entries()
-        .map(|(name, room)| (name.to_string(), room))
-        .collect();
-    room_entries.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let mut creep_entries: Vec<(String, objects::Creep)> = game::creeps().entries().collect();
-    creep_entries.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let mut spawn_entries: Vec<(String, objects::StructureSpawn)> =
-        game::spawns().entries().collect();
-    spawn_entries.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let creeps_js = game_creeps();
-    let rooms = room_entries
-        .iter()
-        .map(|(_, r)| room_of(r))
-        .collect::<Vec<_>>();
-    let spawns = spawn_entries
-        .iter()
-        .map(|(_, s)| spawn_of(s, &creeps_js))
-        .collect::<Vec<_>>();
-    let creeps = creep_entries
-        .iter()
-        .filter(|(_, c)| !c.spawning())
-        .map(|(_, c)| creep_of(c))
-        .collect::<Vec<_>>();
-
-    let me = match (spawn_entries.first(), creep_entries.first()) {
-        (Some((_, spawn)), _) => spawn
-            .owner()
-            .map(|owner| owner.username())
-            .unwrap_or_default(),
-        (None, Some((_, creep))) => creep.owner().username(),
-        (None, None) => room_entries
-            .iter()
-            .find_map(|(_, room)| {
-                room.controller()
-                    .filter(|c| c.my())
-                    .and_then(|c| c.owner())
-                    .map(|owner| owner.username())
-            })
-            .unwrap_or_default(),
-    };
-
-    World {
-        time,
-        me,
-        cpu_limit,
-        bucket,
-        rooms,
-        spawns,
-        creeps,
-        our_sites: site_count(),
-    }
-}
-
-/// Every construction site, seen or not: keys counted, not parsed.
-fn site_count() -> i32 {
-    let game = field(&js_sys::global(), "Game");
-    let sites = field(&game, "constructionSites");
-    JsObject::keys(&JsObject::from(sites)).length() as i32
 }
 
 /// `Game.getObjectById` as `Executor` reads it: absent is a refusal, never an error.

@@ -34,7 +34,3 @@ pub fn field(v: &JsValue, name: &str) -> JsValue {
 pub fn int_of(v: &JsValue) -> Option<i32> {
     v.as_f64().map(|n| n as i32)
 }
-
-pub fn int_or_zero(v: &JsValue) -> i32 {
-    int_of(v).unwrap_or(0)
-}
