@@ -18,15 +18,15 @@ pub enum Task {
 /// Injective because an object id and a resource name hold no `:`.
 pub fn task_id(task: &Task) -> String {
     match task {
-        Task::Harvest(id) => format!("h:{}", id),
+        Task::Harvest(id) => format!("h:{id}"),
         Task::Withdraw(id, r) => format!("w:{}:{}", id, resource_name(r)),
         Task::Pickup(id, r) => format!("p:{}:{}", id, resource_name(r)),
         Task::Refill(id, r) => format!("f:{}:{}", id, resource_name(r)),
-        Task::Build(id) => format!("b:{}", id),
-        Task::Repair(id) => format!("r:{}", id),
-        Task::Upgrade(id) => format!("u:{}", id),
-        Task::Reserve(id) => format!("v:{}", id),
-        Task::Claim(id) => format!("c:{}", id),
+        Task::Build(id) => format!("b:{id}"),
+        Task::Repair(id) => format!("r:{id}"),
+        Task::Upgrade(id) => format!("u:{id}"),
+        Task::Reserve(id) => format!("v:{id}"),
+        Task::Claim(id) => format!("c:{id}"),
     }
 }
 
@@ -114,7 +114,7 @@ mod tests {
             let (ta, tb) = (dice::object_id(&mut dice), dice::object_id(&mut dice));
             let a = dice::task(&mut dice, &ta);
             let b = dice::task(&mut dice, &tb);
-            assert!(task_id(&a) != task_id(&b) || format!("{:?}", a) == format!("{:?}", b));
+            assert!(task_id(&a) != task_id(&b) || format!("{a:?}") == format!("{b:?}"));
         }
     }
 }

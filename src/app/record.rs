@@ -43,7 +43,7 @@ fn tag(name: &str, fields: Vec<JsValue>) -> JsValue {
 }
 
 fn n(value: i32) -> JsValue {
-    JsValue::from_f64(value as f64)
+    JsValue::from(value)
 }
 
 fn f(value: f64) -> JsValue {
@@ -366,7 +366,7 @@ fn length(value: &str) -> usize {
 
 pub fn record(time: i32, world: &World) -> Option<String> {
     let memory = raw_memory::get();
-    let memory_bytes = memory.as_string().map(|each| length(&each)).unwrap_or(0);
+    let memory_bytes = memory.as_string().map_or(0, |each| length(&each));
 
     let recorded = object(vec![
         ("tick", n(time)),
@@ -386,6 +386,6 @@ pub fn record(time: i32, world: &World) -> Option<String> {
         ));
     }
 
-    raw_memory::segments().set((FIRST as i32 + time % SLOTS) as u8, text);
+    raw_memory::segments().set((i32::from(FIRST) + time % SLOTS) as u8, text);
     None
 }

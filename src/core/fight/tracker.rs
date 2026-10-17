@@ -94,12 +94,11 @@ fn clusters<'a>(owned: &BTreeSet<String>, hostiles: &'a [Creep]) -> Vec<Vec<&'a 
 
     for (i, creep) in sorted.iter().enumerate() {
         let r = find(&mut root, i);
-        match by_root.get(&r) {
-            Some(&at) => order[at].push(creep),
-            None => {
-                by_root.insert(r, order.len());
-                order.push(vec![creep]);
-            }
+        if let Some(&at) = by_root.get(&r) {
+            order[at].push(creep)
+        } else {
+            by_root.insert(r, order.len());
+            order.push(vec![creep]);
         }
     }
 
@@ -339,7 +338,7 @@ mod tests {
     }
 
     fn pool() -> Vec<String> {
-        (0..15).map(|i| format!("h{}", i)).collect()
+        (0..15).map(|i| format!("h{i}")).collect()
     }
 
     /// Two rooms sharing a seam, and tiles crowded near it so clusters touch.

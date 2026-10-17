@@ -178,7 +178,7 @@ fn target_of(room: &str, walk: &Walk) -> Target {
 
 /// Chebyshev range from what a footprint anchored at `anchor` covers to `tile`.
 fn reach(footprint: Footprint, anchor: Tile, tile: Tile) -> i32 {
-    let span = if footprint.is_quad() { 1 } else { 0 };
+    let span = i32::from(footprint.is_quad());
     let gap = |a: i32, t: i32| 0.max((a - t).max(t - a - span));
     gap(tiles::x_of(anchor), tiles::x_of(tile)).max(gap(tiles::y_of(anchor), tiles::y_of(tile)))
 }
@@ -475,7 +475,7 @@ fn a_memoised_answer_is_a_fresh_atlass_answer() {
         assert_eq!(first, fresh.travel_ticks(walk.mover, &target, &start));
         assert_eq!(step, fresh.first_step(walk.mover, &target, &start));
         if walk.mover.factor.moves != 0 {
-            assert_eq!(warm.misses(), if kept { 0 } else { 1 });
+            assert_eq!(warm.misses(), i32::from(!kept));
         }
     }
 }

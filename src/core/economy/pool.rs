@@ -223,7 +223,7 @@ pub fn repair_value(r: &RepairFact) -> f64 {
     match r.kind {
         Kind::Rampart if r.hits <= super::derived::RAMPART_SAFE => price::flow_draw(0.0),
         Kind::Rampart => price::value_of_rank(price::SURPLUS_RANK + 1),
-        _ if (r.hits as f64) < r.decay * engine::CREEP_LIFETIME as f64 => {
+        _ if f64::from(r.hits) < r.decay * f64::from(engine::CREEP_LIFETIME) => {
             price::rebuild_at_risk(r.rebuild, r.hits, r.decay)
         }
         _ => price::value_of_rank(price::SURPLUS_RANK + 1),
@@ -255,7 +255,7 @@ pub fn pool(derived: &Derived) -> Vec<Offer> {
     let ring_worth: f64 = {
         let n = derived.colonies.len();
         let income: i32 = derived.grounds.iter().take(n).map(|g| g.income).sum();
-        income as f64 / n.max(1) as f64
+        f64::from(income) / n.max(1) as f64
     };
 
     let colony_rooms: BTreeSet<String> = derived.colonies.iter().map(|c| c.room.clone()).collect();
@@ -271,10 +271,10 @@ pub fn pool(derived: &Derived) -> Vec<Offer> {
                 let mut harvest = offer(
                     Task::Harvest(s.id.clone()),
                     &s.pos,
-                    s.rate as f64,
+                    f64::from(s.rate),
                     Capacity::Seated {
                         seats: s.seats.unwrap_or(i32::MAX),
-                        posts: if s.post.is_some() { 1 } else { 0 },
+                        posts: i32::from(s.post.is_some()),
                         work: (s.rate + engine::HARVEST_PER_WORK - 1) / engine::HARVEST_PER_WORK,
                     },
                 );
@@ -372,7 +372,7 @@ pub fn pool(derived: &Derived) -> Vec<Offer> {
                 offers.push(offer(
                     Task::Reserve(c.id.clone()),
                     &c.pos,
-                    super::derived::reserve_gain(ground) as f64,
+                    f64::from(super::derived::reserve_gain(ground)),
                     Capacity::Bodies(1),
                 ));
             }
@@ -398,27 +398,19 @@ pub fn pool(derived: &Derived) -> Vec<Offer> {
                 let upgraders: i32 = derived
                     .bodies
                     .iter()
-                    .map(|b| {
-                        if b.pattern.is_upgrader() && b.pos.room == ground.room {
-                            1
-                        } else {
-                            0
-                        }
-                    })
+                    .map(|b| i32::from(b.pattern.is_upgrader() && b.pos.room == ground.room))
                     .sum();
 
-                bodies::sized(Pattern::Upgrader, upgradable, c.bank_capacity)
-                    .map(|body| {
-                        bodies::upgrader_hire(upgradable, upgraders, &body) * (1.0 - buffer.fill)
-                    })
-                    .unwrap_or(0.0)
+                bodies::sized(Pattern::Upgrader, upgradable, c.bank_capacity).map_or(0.0, |body| {
+                    bodies::upgrader_hire(upgradable, upgraders, &body) * (1.0 - buffer.fill)
+                })
             }
             _ => 0.0,
         };
 
         hungriest = hungriest.max(feed_worth);
 
-        let room = ring_free + feed.map(|f| f.free).unwrap_or(0);
+        let room = ring_free + feed.map_or(0, |f| f.free);
 
         for s in &ground.stores {
             if s.energy > 0 && !s.kind.is_buffer() {
@@ -462,7 +454,7 @@ pub fn pool(derived: &Derived) -> Vec<Offer> {
             }
         }
 
-        for f in feed.into_iter() {
+        if let Some(f) = feed {
             let mut refill = offer(
                 Task::Refill(f.id.clone(), Resource::Energy),
                 &f.pos,

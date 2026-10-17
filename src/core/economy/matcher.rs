@@ -552,7 +552,7 @@ mod tests {
                             assert!(pool::fits(b, offer));
                             assert!(reaches(&scene, b, offer));
                         }
-                        None => panic!("{} is offered", id),
+                        None => panic!("{id} is offered"),
                     }
                 }
             }

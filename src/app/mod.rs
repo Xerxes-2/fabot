@@ -17,7 +17,7 @@ fn hook_panics() {
         let message = info
             .payload()
             .downcast_ref::<&str>()
-            .map(|text| text.to_string())
+            .map(std::string::ToString::to_string)
             .or_else(|| info.payload().downcast_ref::<String>().cloned())
             .unwrap_or_default();
         if let Ok(console) = js_sys::Reflect::get(

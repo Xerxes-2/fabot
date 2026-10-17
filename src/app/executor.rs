@@ -30,13 +30,13 @@ fn call(obj: &JsValue, verb: &str, values: &[JsValue]) -> Result<i32, ()> {
     let result: Result<JsValue, JsValue> =
         Reflect::apply(function.unchecked_ref::<Function>(), obj, &args(values));
     match result {
-        Ok(v) => Ok(v.as_f64().map(|n| n as i32).unwrap_or(0)),
+        Ok(v) => Ok(v.as_f64().map_or(0, |n| n as i32)),
         Err(_) => Err(()),
     }
 }
 
 fn num(n: i32) -> JsValue {
-    JsValue::from_f64(n as f64)
+    JsValue::from(n)
 }
 
 fn on(verb: &str, target: &str, f: impl FnOnce(&JsValue) -> Result<i32, ()>) -> (String, i32) {

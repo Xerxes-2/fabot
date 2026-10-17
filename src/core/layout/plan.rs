@@ -851,10 +851,9 @@ pub fn of_ground(ground: &Ground, spawns: &[Tile]) -> Option<Plan> {
 
         let seated = placed
             .first()
-            .map(|s| ground::spawn_slots(plan.anchor).contains(s))
-            .unwrap_or(false);
+            .is_some_and(|s| ground::spawn_slots(plan.anchor).contains(s));
 
-        2 * kept + if seated { 1 } else { 0 }
+        2 * kept + i32::from(seated)
     };
 
     let tried = if spawns.is_empty() {
@@ -983,7 +982,7 @@ impl Board<'_> {
     fn open_count(&self, t: Tile) -> i32 {
         tiles::around(t)
             .iter()
-            .map(|m| if self.walkable(*m) { 1 } else { 0 })
+            .map(|m| i32::from(self.walkable(*m)))
             .sum()
     }
 }
@@ -1029,9 +1028,7 @@ mod tests {
                 assert!(
                     engine::controller_structures(name, level)
                         <= engine::controller_structures(name, level + 1),
-                    "{} at {}",
-                    name,
-                    level
+                    "{name} at {level}"
                 );
             }
         }
@@ -1069,9 +1066,8 @@ mod tests {
     #[test]
     fn a_plan_builds_only_where_the_engine_allows_one_item_a_tile_but_a_rampart_over_another() {
         for colony in fx::samples(1).take(fx::MAX_TEST) {
-            let (ground, plan) = match fx::plan_of(&colony) {
-                Some(found) => found,
-                None => continue,
+            let Some((ground, plan)) = fx::plan_of(&colony) else {
+                continue;
             };
 
             let ramparts: Vec<Item> = plan
@@ -1125,9 +1121,8 @@ mod tests {
     #[test]
     fn no_kind_past_its_allowance_and_a_fit_plan_seats_every_sized_kind_whole() {
         for colony in fx::samples(2).take(fx::MAX_TEST) {
-            let plan = match fx::plan_of(&colony) {
-                Some((_, plan)) => plan,
-                None => continue,
+            let Some((_, plan)) = fx::plan_of(&colony) else {
+                continue;
             };
 
             let mut kinds = vec![Kind::Link, Kind::Container, Kind::Extractor, Kind::Road];
@@ -1149,9 +1144,8 @@ mod tests {
     #[test]
     fn each_items_level_admits_it_and_every_lower_rank_of_its_kind() {
         for colony in fx::samples(3).take(fx::MAX_TEST) {
-            let plan = match fx::plan_of(&colony) {
-                Some((_, plan)) => plan,
-                None => continue,
+            let Some((_, plan)) = fx::plan_of(&colony) else {
+                continue;
             };
 
             for kind in rankable() {
@@ -1177,9 +1171,8 @@ mod tests {
     #[test]
     fn every_planned_structure_can_be_walked_to_from_the_anchor() {
         for colony in fx::samples(4).take(fx::MAX_TEST) {
-            let (ground, plan) = match fx::plan_of(&colony) {
-                Some(found) => found,
-                None => continue,
+            let Some((ground, plan)) = fx::plan_of(&colony) else {
+                continue;
             };
 
             let seen = fx::reached(&ground, &plan);
@@ -1206,14 +1199,12 @@ mod tests {
         use crate::core::atlas::Atlas;
 
         for colony in fx::samples(5).take(fx::MAX_TEST) {
-            let (ground, plan) = match fx::plan_of(&colony) {
-                Some(found) => found,
-                None => continue,
+            let Some((ground, plan)) = fx::plan_of(&colony) else {
+                continue;
             };
 
-            let controller = match ground.controller {
-                Some(controller) => controller,
-                None => continue,
+            let Some(controller) = ground.controller else {
+                continue;
             };
 
             let tiles_of = |kind: &Kind| -> Vec<Tile> {
@@ -1291,9 +1282,8 @@ mod tests {
     #[test]
     fn the_labs_react_every_lab_within_reach_of_two_inputs() {
         for colony in fx::samples(6).take(fx::MAX_TEST) {
-            let plan = match fx::plan_of(&colony) {
-                Some((_, plan)) => plan,
-                None => continue,
+            let Some((_, plan)) = fx::plan_of(&colony) else {
+                continue;
             };
 
             let labs: Vec<Tile> = plan
@@ -1344,9 +1334,8 @@ mod tests {
     #[test]
     fn a_rooms_founding_spawn_standing_where_its_plan_says_leaves_the_plan_unchanged() {
         for colony in fx::samples(8).take(fx::MAX_TEST) {
-            let (ground, plan) = match fx::plan_of(&fx::bare(&colony)) {
-                Some(found) => found,
-                None => continue,
+            let Some((ground, plan)) = fx::plan_of(&fx::bare(&colony)) else {
+                continue;
             };
 
             match plan.items.iter().find(|i| i.kind.is_spawn()) {
@@ -1362,9 +1351,8 @@ mod tests {
     #[test]
     fn a_second_and_third_spawn_on_their_planned_tiles_never_move_the_plan() {
         for colony in fx::samples(9).take(fx::MAX_TEST) {
-            let (ground, plan) = match fx::plan_of(&fx::bare(&colony)) {
-                Some(found) => found,
-                None => continue,
+            let Some((ground, plan)) = fx::plan_of(&fx::bare(&colony)) else {
+                continue;
             };
 
             let spawns: Vec<Tile> = plan
@@ -1380,7 +1368,7 @@ mod tests {
 
                 match of_ground(&ground, &taken) {
                     Some(grown) => assert!(fx::same(&plan, &grown)),
-                    None => panic!("no plan from {} spawns", n),
+                    None => panic!("no plan from {n} spawns"),
                 }
             }
         }

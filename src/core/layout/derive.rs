@@ -34,7 +34,7 @@ fn spawns_in(world: &World, room: &str) -> Vec<Tile> {
 fn join(values: &[Tile]) -> String {
     values
         .iter()
-        .map(|v| v.to_string())
+        .map(std::string::ToString::to_string)
         .collect::<Vec<String>>()
         .join(",")
 }
@@ -138,7 +138,7 @@ mod tests {
                 .spawns
                 .iter()
                 .enumerate()
-                .map(|(i, t)| fx::spawn_named(&format!("p{}", i), *t))
+                .map(|(i, t)| fx::spawn_named(&format!("p{i}"), *t))
                 .collect();
 
             let world = fx::world_of(colony.room.clone(), spawns.clone(), Vec::new());

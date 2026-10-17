@@ -420,10 +420,9 @@ impl Atlas {
         let near = near.map(|g| &g.weights);
         let far = far.map(|g| &g.weights);
         for &tile in tiles::exit_tiles(exit) {
-            let near_walkable = near.map(|weights| weights[tile].is_some()).unwrap_or(true);
+            let near_walkable = near.is_none_or(|weights| weights[tile].is_some());
             let far_walkable = far
-                .map(|weights| tiles::landing(tile).is_some_and(|l| weights[l].is_some()))
-                .unwrap_or(true);
+                .is_none_or(|weights| tiles::landing(tile).is_some_and(|l| weights[l].is_some()));
             if near_walkable && far_walkable {
                 return true;
             }
@@ -563,38 +562,29 @@ impl Atlas {
         };
 
         let grid = self.rooms.get_mut(room).unwrap();
-        let dist = match grid.floods.get(&key) {
-            Some(dist) => {
-                self.hits += 1;
-                dist.clone()
-            }
-            None => {
-                self.misses += 1;
-                let goals = match &key.goal {
-                    Goal::Seats {
-                        range,
-                        tiles: targets,
-                    } => {
-                        let mut goals = Vec::new();
-                        for &tile in targets {
-                            if tile.index() < tiles::COUNT {
-                                Atlas::seats_near(
-                                    footprint,
-                                    &grid.weights,
-                                    *range,
-                                    tile,
-                                    &mut goals,
-                                );
-                            }
+        let dist = if let Some(dist) = grid.floods.get(&key) {
+            self.hits += 1;
+            dist.clone()
+        } else {
+            self.misses += 1;
+            let goals = match &key.goal {
+                Goal::Seats {
+                    range,
+                    tiles: targets,
+                } => {
+                    let mut goals = Vec::new();
+                    for &tile in targets {
+                        if tile.index() < tiles::COUNT {
+                            Atlas::seats_near(footprint, &grid.weights, *range, tile, &mut goals);
                         }
-                        goals
                     }
-                    Goal::Exit(exit) => Atlas::exit_goals(footprint, &grid.weights, *exit),
-                };
-                let dist = Rc::new(flood(footprint, &grid.weights, &step_table(factor), &goals));
-                grid.floods.insert(key, dist.clone());
-                dist
-            }
+                    goals
+                }
+                Goal::Exit(exit) => Atlas::exit_goals(footprint, &grid.weights, *exit),
+            };
+            let dist = Rc::new(flood(footprint, &grid.weights, &step_table(factor), &goals));
+            grid.floods.insert(key, dist.clone());
+            dist
         };
 
         Some(Field {

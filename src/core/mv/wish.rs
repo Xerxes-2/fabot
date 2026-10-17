@@ -39,10 +39,8 @@ impl Wish {
             0
         } else if tile == self.head {
             weight
-        } else if self.tail.contains(&tile) {
-            1
         } else {
-            0
+            i32::from(self.tail.contains(&tile))
         };
         if !self.working.is_empty() && !self.working.contains(&tile) {
             asked - weight - 1

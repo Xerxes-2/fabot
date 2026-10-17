@@ -258,7 +258,7 @@ pub fn kill_order(hostiles: &[Creep]) -> Vec<String> {
             let damage = engine::ATTACK_POWER * f.attack + engine::RANGED_ATTACK_POWER * f.ranged;
             (
                 h.id.clone(),
-                (f.heal == 0, -(damage as f64 / h.hits.max(1) as f64)),
+                (f.heal == 0, -(f64::from(damage) / f64::from(h.hits.max(1)))),
             )
         })
         .collect();
@@ -285,7 +285,7 @@ pub fn colony_for(
         let idle = spawns
             .iter()
             .filter(|s| s.pos.room == room)
-            .map(|s| s.spawning.as_ref().map(|o| o.remaining).unwrap_or(0))
+            .map(|s| s.spawning.as_ref().map_or(0, |o| o.remaining))
             .fold(i32::MAX, i32::min);
 
         i64::from(idle) + i64::from(queued.get(room).copied().unwrap_or(0))

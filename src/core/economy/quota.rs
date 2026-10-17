@@ -168,10 +168,11 @@ fn round_trip(
 
 /// `lifetimes` is the owner's number (`ARCHITECTURE.md` §5).
 pub fn reserve_target(lifetimes: f64, level: i32) -> i32 {
-    ((engine::controller_structures("tower", level)
-        * engine::TOWER_ENERGY_COST
-        * engine::CREEP_LIFETIME) as f64
-        * lifetimes) as i32
+    (f64::from(
+        engine::controller_structures("tower", level)
+            * engine::TOWER_ENERGY_COST
+            * engine::CREEP_LIFETIME,
+    ) * lifetimes) as i32
 }
 
 fn owner_of(walks: &mut dyn Walks, derived: &Derived, gi: usize) -> Option<usize> {
@@ -216,8 +217,8 @@ fn haul_flows(ground: &Ground, s: &SourceFact, post: &Pos, carried: f64) -> Vec<
                 })
                 .sum();
 
-            let left =
-                s.dug as f64 - carried + (stored + piled) as f64 / engine::CREEP_LIFETIME as f64;
+            let left = f64::from(s.dug) - carried
+                + f64::from(stored + piled) / f64::from(engine::CREEP_LIFETIME);
 
             match &ground.receiver {
                 Some(r) if r.role.is_hub() && carried > 0.0 => {
@@ -246,7 +247,7 @@ fn link_drain(derived: &Derived, ground: &Ground) -> f64 {
                 })
                 .sum();
 
-            (work * engine::UPGRADE_DRAIN_PER_WORK).min(bodies::upgradable_at(c.level)) as f64
+            f64::from((work * engine::UPGRADE_DRAIN_PER_WORK).min(bodies::upgradable_at(c.level)))
         }
         (Some(_), _) => f64::INFINITY,
         (None, _) => 0.0,
@@ -261,7 +262,7 @@ fn ground_demands(
     derived: &Derived,
 ) -> Vec<Demand> {
     let mut demands: Vec<Demand> = Vec::new();
-    let life = engine::CREEP_LIFETIME as f64;
+    let life = f64::from(engine::CREEP_LIFETIME);
     let colonies = &derived.colonies;
     let n = colonies.len();
     let mut carries = vec![0.0f64; n];
@@ -298,20 +299,21 @@ fn ground_demands(
             };
 
             let rate = s.rate;
-            let mut dig = seated(
-                Pattern::Harvester,
-                &s.pos,
-                super::derived::dig_work(rate),
-                1,
-                Box::new(move |body| {
-                    Some(
-                        (rate.min(part_count_in(body, BodyPart::Work) * engine::HARVEST_PER_WORK)
-                            as f64
-                            - spill)
-                            * life,
-                    )
-                }),
-            );
+            let mut dig =
+                seated(
+                    Pattern::Harvester,
+                    &s.pos,
+                    super::derived::dig_work(rate),
+                    1,
+                    Box::new(move |body| {
+                        Some(
+                            (f64::from(rate.min(
+                                part_count_in(body, BodyPart::Work) * engine::HARVEST_PER_WORK,
+                            )) - spill)
+                                * life,
+                        )
+                    }),
+                );
             dig.spill = spill;
 
             let dig_left = Rc::clone(&dig.left);
@@ -321,7 +323,7 @@ fn ground_demands(
             match owner {
                 Some(ci) if s.container.is_some() => {
                     let carried = if s.link.is_some() {
-                        (s.dug as f64).min(drain)
+                        f64::from(s.dug).min(drain)
                     } else {
                         0.0
                     };
@@ -335,20 +337,19 @@ fn ground_demands(
                             engine::MAX_BODY_PARTS as i32,
                             colonies[ci].bank_capacity,
                         )
-                        .map(|body| {
+                        .map_or(0, |body| {
                             sinks_of(ci)
                                 .iter()
                                 .filter_map(|sink| round_trip(walks, &body, &fetch, sink, 1))
                                 .fold(0, i32::max)
-                        })
-                        .unwrap_or(0);
+                        });
 
                         if trip > 0 {
                             hauled = true;
-                            carries[ci] += flow * trip as f64;
+                            carries[ci] += flow * f64::from(trip);
 
                             if gi >= colonies.len() {
-                                remote[ci] += flow * trip as f64;
+                                remote[ci] += flow * f64::from(trip);
                             }
 
                             flows[ci] += flow;
@@ -365,7 +366,7 @@ fn ground_demands(
 
         match &ground.controller {
             Some(c) if ground.reservable && gi >= colonies.len() => {
-                let gain = (super::derived::reserve_gain(ground) * engine::CLAIM_LIFETIME) as f64;
+                let gain = f64::from(super::derived::reserve_gain(ground) * engine::CLAIM_LIFETIME);
 
                 demands.push(seated(
                     Pattern::Claimer,
@@ -386,15 +387,14 @@ fn ground_demands(
                 engine::MAX_BODY_PARTS as i32,
                 colonies[ci].bank_capacity,
             )
-            .map(|body| part_count_in(&body, BodyPart::Carry))
-            .unwrap_or(0);
+            .map_or(0, |body| part_count_in(&body, BodyPart::Carry));
 
             // One body leaves a remote container filling for its whole round
             // trip a room out.
             let wanted = {
-                let flowing = (carries[ci] / engine::CARRY_PART_CAPACITY as f64).ceil() as i32;
+                let flowing = (carries[ci] / f64::from(engine::CARRY_PART_CAPACITY)).ceil() as i32;
 
-                if remote[ci] * 2.0 >= (per_body * engine::CARRY_PART_CAPACITY) as f64 {
+                if remote[ci] * 2.0 >= f64::from(per_body * engine::CARRY_PART_CAPACITY) {
                     flowing.max(2 * per_body)
                 } else {
                     flowing
@@ -409,7 +409,8 @@ fn ground_demands(
                 &home_of(&colonies[ci]),
                 wanted,
                 Box::new(move |body| {
-                    let moved = part_count_in(body, BodyPart::Carry) as f64 * flow / wanted as f64;
+                    let moved =
+                        f64::from(part_count_in(body, BodyPart::Carry)) * flow / f64::from(wanted);
 
                     // A haul moves only what a dig leaves, so the harvesters
                     // are bought first.
@@ -420,7 +421,7 @@ fn ground_demands(
                         })
                         .sum();
 
-                    Some((dug as f64).min(moved) * life)
+                    Some(f64::from(dug).min(moved) * life)
                 }),
             ));
         }
@@ -446,14 +447,14 @@ fn spend_demands(
 ) -> Vec<Demand> {
     let colonies = &derived.colonies;
     let n = colonies.len();
-    let life = engine::CREEP_LIFETIME as f64;
+    let life = f64::from(engine::CREEP_LIFETIME);
     let mut income = vec![0.0f64; n];
     let mut owed = vec![0i32; n];
     let mut upkeep = vec![0.0f64; n];
 
     for ground in &derived.grounds {
         if let Some(ci) = owners.get(&ground.room) {
-            income[*ci] += ground.posted as f64;
+            income[*ci] += f64::from(ground.posted);
             owed[*ci] += ground.sites.iter().map(|s| s.left).sum::<i32>();
         }
     }
@@ -473,8 +474,9 @@ fn spend_demands(
             if parts > 0 {
                 let bodies = d.seats.min(ceil_div(d.wanted, parts));
 
-                upkeep[ci] += bodies as f64
-                    * (engine::body_cost(&body) as f64 / life_of(d.pattern) as f64 + d.spill);
+                upkeep[ci] += f64::from(bodies)
+                    * (f64::from(engine::body_cost(&body)) / f64::from(life_of(d.pattern))
+                        + d.spill);
             }
         }
     }
@@ -499,7 +501,7 @@ fn spend_demands(
             None => (0, 0),
         };
 
-        let save = ((reserve - stock) as f64 / life).min(surplus).max(0.0);
+        let save = (f64::from(reserve - stock) / life).min(surplus).max(0.0);
 
         let upgradable = bodies::upgradable_at(colony.controller.level);
 
@@ -517,7 +519,7 @@ fn spend_demands(
         let (upgraders, upgrader_work, upgraders_drain) = match &upgrader {
             Some(body) => {
                 let work = part_count_in(body, BodyPart::Work);
-                let seats = (ground.buffer_seats.len() as i32).min(upgradable / work) as f64;
+                let seats = f64::from((ground.buffer_seats.len() as i32).min(upgradable / work));
 
                 let life_cost = bodies::upgrader_hire(upgradable, 1, body) * life;
 
@@ -528,7 +530,7 @@ fn spend_demands(
                     .floor()
                     .min(seats);
 
-                let on_stock = ((stock - reserve - owed[ci]) as f64 / life_cost)
+                let on_stock = (f64::from(stock - reserve - owed[ci]) / life_cost)
                     .max(0.0)
                     .floor()
                     .min(seats - on_income);
@@ -578,18 +580,18 @@ fn spend_demands(
                     }
                 }
 
-                let upgrading = (part_count_in(body, BodyPart::Carry) * engine::CARRY_PART_CAPACITY)
-                    as f64
-                    / (work * engine::UPGRADE_DRAIN_PER_WORK) as f64;
+                let upgrading =
+                    f64::from(part_count_in(body, BodyPart::Carry) * engine::CARRY_PART_CAPACITY)
+                        / f64::from(work * engine::UPGRADE_DRAIN_PER_WORK);
 
                 if weights == 0 {
                     0
                 } else {
-                    let drain = engine::UPGRADE_DRAIN_PER_WORK as f64 * upgrading
-                        / (upgrading + weighted as f64 / weights as f64);
+                    let drain = f64::from(engine::UPGRADE_DRAIN_PER_WORK) * upgrading
+                        / (upgrading + f64::from(weighted) / f64::from(weights));
 
-                    let upkeep =
-                        engine::body_cost(body) as f64 / (work * life_of(Pattern::Worker)) as f64;
+                    let upkeep = f64::from(engine::body_cost(body))
+                        / f64::from(work * life_of(Pattern::Worker));
 
                     (rest.max(0.0) / (drain + upkeep)).ceil() as i32
                 }
@@ -597,10 +599,7 @@ fn spend_demands(
             _ => 0,
         };
 
-        let body_work = cast
-            .as_ref()
-            .map(|b| parts_of(Pattern::Worker, b))
-            .unwrap_or(1);
+        let body_work = cast.as_ref().map_or(1, |b| parts_of(Pattern::Worker, b));
 
         let floor_bodies = if !ground.sites.is_empty() || !ground.repairs.is_empty() {
             2
@@ -614,9 +613,7 @@ fn spend_demands(
             .sources
             .iter()
             .map(|s| match s.seats {
-                Some(seats) if s.container.is_none() => {
-                    seats - (if s.post.is_some() { 1 } else { 0 })
-                }
+                Some(seats) if s.container.is_none() => seats - i32::from(s.post.is_some()),
                 _ => 0,
             })
             .sum();
@@ -631,14 +628,14 @@ fn spend_demands(
             at,
             spend.max(floor_bodies * body_work) + crews * body_work,
             seats,
-            Box::new(move |body| Some(parts_of(Pattern::Worker, body) as f64 * life)),
+            Box::new(move |body| Some(f64::from(parts_of(Pattern::Worker, body)) * life)),
         ));
         out.push(seated(
             Pattern::Upgrader,
             at,
             upgraders * upgrader_work,
             upgraders,
-            Box::new(move |body| Some(parts_of(Pattern::Upgrader, body) as f64 * life)),
+            Box::new(move |body| Some(f64::from(parts_of(Pattern::Upgrader, body)) * life)),
         ));
     }
 
@@ -901,7 +898,7 @@ pub fn plan(
     }
 
     let mut richest: Option<&Colony> = None;
-    for colony in colonies.iter() {
+    for colony in colonies {
         let better = match richest {
             Some(r) => colony.bank_capacity > r.bank_capacity,
             None => true,
@@ -911,8 +908,9 @@ pub fn plan(
         }
     }
 
-    let tick_worth =
-        |ci: usize| -> f64 { derived.grounds[ci].income as f64 / colonies[ci].spawns.len() as f64 };
+    let tick_worth = |ci: usize| -> f64 {
+        f64::from(derived.grounds[ci].income) / colonies[ci].spawns.len() as f64
+    };
 
     let mut seats: Vec<Seat> = Vec::new();
 
@@ -1178,9 +1176,8 @@ mod tests {
     fn no_reservation_or_claim_is_offered_on_another_players_reservation() {
         for g in worlds(103) {
             for o in pool::pool(&derive(&g)) {
-                let id = match &o.task {
-                    Task::Reserve(id) | Task::Claim(id) => id,
-                    _ => continue,
+                let (Task::Reserve(id) | Task::Claim(id)) = &o.task else {
+                    continue;
                 };
 
                 assert!(controllers(&g).iter().any(|c| {
@@ -1297,11 +1294,7 @@ mod tests {
                     .sum();
 
                 for w in &p.wants {
-                    assert!(
-                        w.pattern != pattern || w.standing == counted,
-                        "{:?}",
-                        pattern
-                    );
+                    assert!(w.pattern != pattern || w.standing == counted, "{pattern:?}");
                 }
             }
         }
@@ -1383,8 +1376,7 @@ mod tests {
                 assert_eq!(
                     standing(&baked, pattern),
                     standing(&bare, pattern) + oven,
-                    "{:?}",
-                    pattern
+                    "{pattern:?}"
                 );
             }
         }
@@ -1464,8 +1456,7 @@ mod tests {
                 let at = assignments
                     .get(&b.name)
                     .and_then(|id| offers.iter().find(|o| &o.id == id))
-                    .map(|o| o.target.room.clone())
-                    .unwrap_or_else(|| b.pos.room.clone());
+                    .map_or_else(|| b.pos.room.clone(), |o| o.target.room.clone());
 
                 (Some(b.pattern) == kind || b.pattern == Pattern::Hauler) && at == room
             };

@@ -136,10 +136,7 @@ fn reach_sum(ground: &Ground, tile: Tile) -> i32 {
     for s in &ground.sources {
         sum += tiles::range(tile, *s);
     }
-    sum + ground
-        .controller
-        .map(|c| tiles::range(tile, c))
-        .unwrap_or(0)
+    sum + ground.controller.map_or(0, |c| tiles::range(tile, c))
 }
 
 fn openness(ground: &Ground) -> Vec<i32> {
@@ -148,11 +145,7 @@ fn openness(ground: &Ground) -> Vec<i32> {
 
     for y in 0..tiles::SIDE {
         for x in 0..tiles::SIDE {
-            let here = if ground.free[tiles::index(x, y)] {
-                1
-            } else {
-                0
-            };
+            let here = i32::from(ground.free[tiles::index(x, y)]);
             sums[((y + 1) * n + x + 1) as usize] =
                 here + sums[(y * n + x + 1) as usize] + sums[((y + 1) * n + x) as usize]
                     - sums[(y * n + x) as usize];

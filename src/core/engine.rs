@@ -160,7 +160,7 @@ pub fn safe_mode_downgrade_line(level: i32) -> i32 {
 
 /// `calcTerminalEnergyCost`, over the linear room distance.
 pub fn send_fee(range: i32, amount: i32) -> i32 {
-    (amount as f64 * (1.0 - (-(range as f64) / 30.0).exp())).ceil() as i32
+    (f64::from(amount) * (1.0 - (-f64::from(range) / 30.0).exp())).ceil() as i32
 }
 
 pub fn mass_attack_power_at(range: i32) -> i32 {
@@ -176,10 +176,10 @@ fn tower_power_at(power: i32, range: i32) -> i32 {
     if range <= TOWER_OPTIMAL_RANGE {
         power
     } else {
-        let full = power as f64;
+        let full = f64::from(power);
         let r = range.min(TOWER_FALLOFF_RANGE);
-        let gone = full * TOWER_FALLOFF * (r - TOWER_OPTIMAL_RANGE) as f64
-            / (TOWER_FALLOFF_RANGE - TOWER_OPTIMAL_RANGE) as f64;
+        let gone = full * TOWER_FALLOFF * f64::from(r - TOWER_OPTIMAL_RANGE)
+            / f64::from(TOWER_FALLOFF_RANGE - TOWER_OPTIMAL_RANGE);
         (full - gone).floor() as i32
     }
 }
@@ -246,14 +246,14 @@ pub fn damage_taken(body: &[BodyPart], boosts: &[Boost], hits: i32, damage: i32)
         return damage;
     }
     let n = body.len();
-    let mut left = damage as f64;
+    let mut left = f64::from(damage);
     let mut reduced = 0.0;
     for (i, (part, boost)) in body.iter().zip(boosts.iter()).enumerate() {
         if left <= 0.0 {
             break;
         }
         let ratio = boost::damage_ratio(*part, *boost);
-        let taken = (part_hits_at(n, hits, i) as f64 / ratio).min(left);
+        let taken = (f64::from(part_hits_at(n, hits, i)) / ratio).min(left);
         left -= taken;
         reduced += taken * (1.0 - ratio);
     }
@@ -289,9 +289,9 @@ pub fn damage_for(body: &[BodyPart], boosts: &[Boost], hits: i32, taken: i32) ->
     for (i, (part, boost)) in body.iter().zip(boosts.iter()).enumerate() {
         let take = part_hits_at(n, hits, i).min(left);
         left -= take;
-        damage += take as f64 / boost::damage_ratio(*part, *boost);
+        damage += f64::from(take) / boost::damage_ratio(*part, *boost);
     }
-    (damage + left as f64 - 1e-9).ceil() as i32
+    (damage + f64::from(left) - 1e-9).ceil() as i32
 }
 
 pub fn controller_level_progress(level: i32) -> i32 {

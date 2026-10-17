@@ -368,9 +368,9 @@ struct Fight {
 /// ticks: Ok the tick it falls, else what is left of them.
 fn spend(price: &Price, dealt: i32, span: f64, layers: &[f64]) -> Result<f64, Vec<f64>> {
     let rates = [
-        dealt as f64,
-        (dealt - price.tough_healing) as f64,
-        (dealt - price.healing) as f64,
+        f64::from(dealt),
+        f64::from(dealt - price.tough_healing),
+        f64::from(dealt - price.healing),
     ];
     let mut left = span;
     let mut spent = 0.0;
@@ -411,7 +411,7 @@ fn focused_against(
         beside + alive.iter().map(|(b, _)| b.deals).sum::<i32>()
     };
 
-    let whole: Vec<(Focused, f64)> = bodies.iter().map(|b| (*b, b.hits as f64)).collect();
+    let whole: Vec<(Focused, f64)> = bodies.iter().map(|b| (*b, f64::from(b.hits))).collect();
     let total = price.damage + bodies.iter().map(|b| b.back).sum::<i32>();
 
     let price = if price.shield + price.tough + price.hits == 0 {
@@ -426,7 +426,7 @@ fn focused_against(
     let worn = |span: f64, alive: &[(Focused, f64)]| -> Vec<(Focused, f64)> {
         alive
             .iter()
-            .map(|(b, left)| (*b, (left - b.back as f64 * span).max(0.0)))
+            .map(|(b, left)| (*b, (left - f64::from(b.back) * span).max(0.0)))
             .collect()
     };
 
@@ -454,8 +454,9 @@ fn focused_against(
 
             let (focus, left) = alive[0];
             let rest = alive[1..].to_vec();
-            let rate = (price.damage + focus.back - alive.iter().map(|(b, _)| b.heals).sum::<i32>())
-                as f64;
+            let rate = f64::from(
+                price.damage + focus.back - alive.iter().map(|(b, _)| b.heals).sum::<i32>(),
+            );
             let span = if rate <= 0.0 {
                 f64::INFINITY
             } else {
@@ -489,7 +490,11 @@ fn focused_against(
             &price,
             towers,
             approach,
-            &[price.shield as f64, price.tough as f64, price.hits as f64],
+            &[
+                f64::from(price.shield),
+                f64::from(price.tough),
+                f64::from(price.hits),
+            ],
         ) {
             Ok(t) => ends(true, Some(t), 0, &whole),
             Err(layers) => {
@@ -499,7 +504,7 @@ fn focused_against(
                     let span = if breaks <= 0 {
                         f64::INFINITY
                     } else {
-                        our_shield as f64 / breaks as f64
+                        f64::from(our_shield) / f64::from(breaks)
                     };
 
                     match spend(&price, dealt(&whole), span, &layers) {
@@ -843,26 +848,26 @@ fn taken_while(price: &Price, damage: i32, taken: i32, strikers: i32) -> i32 {
     if taken == 0 || net <= 0 || strikers >= price.tough + price.hits {
         taken
     } else {
-        let kill =
-            price.shield as f64 * net as f64 / damage as f64 + (price.tough + price.hits) as f64;
+        let kill = f64::from(price.shield) * f64::from(net) / f64::from(damage)
+            + f64::from(price.tough + price.hits);
 
-        (taken as f64 * strikers as f64 / kill).ceil() as i32
+        (f64::from(taken) * f64::from(strikers) / kill).ceil() as i32
     }
 }
 
 fn struck_back(price: &Price, damage: i32, struck: i32, swingers: i32) -> i32 {
-    let hits = (price.shield + price.tough + price.hits) as i64;
-    let net = (damage - price.healing) as i64;
-    let all = net + struck as i64;
+    let hits = i64::from(price.shield + price.tough + price.hits);
+    let net = i64::from(damage - price.healing);
+    let all = net + i64::from(struck);
 
     if struck == 0 || all <= 0 {
         0
-    } else if hits <= swingers as i64 || struck as i64 * hits <= swingers as i64 * all {
+    } else if hits <= i64::from(swingers) || i64::from(struck) * hits <= i64::from(swingers) * all {
         struck
     } else if net <= 0 {
         0
     } else {
-        (hits * net / (hits - swingers as i64) - net) as i32
+        (hits * net / (hits - i64::from(swingers)) - net) as i32
     }
 }
 
@@ -923,7 +928,8 @@ fn broken_by(terrain: Terrain, horizon: i32, price: &Price, ramparts: &[(Pos, i3
 
                 let reaches = |tile: &Pos| {
                     range_to(tile, h).is_some_and(|r| {
-                        r <= engine::MELEE_RANGE || (r - 1) as i64 * ticks as i64 <= horizon as i64
+                        r <= engine::MELEE_RANGE
+                            || i64::from(r - 1) * i64::from(ticks) <= i64::from(horizon)
                     })
                 };
 
@@ -965,10 +971,10 @@ fn arrival_of(terrain: Terrain, fighters: &[Fighter], raid: &[Fighter]) -> i32 {
 fn approach_of(terrain: Terrain, stance: Stance, fighters: &[Fighter], raid: &[Fighter]) -> f64 {
     let closing = |f: &Fighter, h: &Fighter| -> Option<f64> {
         match (&f.pos, h.pos.as_ref().and_then(|at| range_to(at, f))) {
-            (None, _) => Some(CAST_WALK as f64),
+            (None, _) => Some(f64::from(CAST_WALK)),
             (Some(_), None) => None,
             (Some(_), Some(range)) => {
-                let gap = (range - f.reach.max(h.reach)).max(0) as f64;
+                let gap = f64::from((range - f.reach.max(h.reach)).max(0));
 
                 let walks = if stance == Stance::Hold {
                     None
@@ -978,9 +984,9 @@ fn approach_of(terrain: Terrain, stance: Stance, fighters: &[Fighter], raid: &[F
 
                 match (walks, step_ticks(h.gait, terrain.weight)) {
                     (Some(ours), Some(theirs)) => {
-                        Some(gap * (ours * theirs) as f64 / (ours + theirs) as f64)
+                        Some(gap * f64::from(ours * theirs) / f64::from(ours + theirs))
                     }
-                    (Some(ticks), None) | (None, Some(ticks)) => Some(gap * ticks as f64),
+                    (Some(ticks), None) | (None, Some(ticks)) => Some(gap * f64::from(ticks)),
                     (None, None) => None,
                 }
             }
@@ -1159,7 +1165,7 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
             (walking_in, approach),
         );
 
-        let ticks = fight.ticks.map(|t| t.ceil() as i32).unwrap_or(LONGEST);
+        let ticks = fight.ticks.map_or(LONGEST, |t| t.ceil() as i32);
 
         let outcome = if priced.damage == 0 && !kited.is_empty() {
             let least = kited
@@ -1204,7 +1210,7 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
 
     let outcomes = widen(arrival_of(terrain, &fighters, &theirs.bodies), 3);
 
-    if outcomes.iter().any(|outcome| outcome.is_lose()) {
+    if outcomes.iter().any(Outcome::is_lose) {
         Outcome::Lose
     } else {
         outcomes.into_iter().next().unwrap_or(Outcome::Lose)
@@ -1278,7 +1284,7 @@ pub fn pooled_heal(seated: i32, ours: &[Fighter]) -> i32 {
 pub fn tower_strike(towers: &[Pos], at: &Pos) -> i32 {
     towers
         .iter()
-        .map(|p| p.range(at).map(engine::tower_attack_at).unwrap_or(0))
+        .map(|p| p.range(at).map_or(0, engine::tower_attack_at))
         .sum()
 }
 
@@ -1459,13 +1465,7 @@ pub fn cheapest_win(
 
     priced
         .into_iter()
-        .min_by_key(|(set, spent)| {
-            (
-                *spent,
-                set.iter().map(|b| b.len()).sum::<usize>(),
-                set.len(),
-            )
-        })
+        .min_by_key(|(set, spent)| (*spent, set.iter().map(Vec::len).sum::<usize>(), set.len()))
         .map(|(set, _)| set)
 }
 
@@ -1625,7 +1625,7 @@ mod tests {
                 _ => true,
             };
 
-            assert!(holds, "case {}: heal {} from {},{}", case, heal, x, y);
+            assert!(holds, "case {case}: heal {heal} from {x},{y}");
         }
     }
 }

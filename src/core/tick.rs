@@ -363,22 +363,22 @@ pub fn run(
         }
     };
 
-    let (settled, outcome) = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        settle(context, intents.clone())
-    })) {
-        Ok(settled) => (settled, Outcome::Ran),
-        Err(_) => {
-            let rest: Vec<Intent> = intents.iter().filter(|i| !is_fight(i)).cloned().collect();
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| settle(context, rest))) {
-                Ok(settled) => (settled, Outcome::Faulted("settle".to_string())),
-                Err(_) => (
-                    intents
-                        .into_iter()
-                        .filter(|i| !i.is_queue() && !i.is_wish())
-                        .collect(),
-                    Outcome::Faulted("settle".to_string()),
-                ),
-            }
+    let (settled, outcome) = if let Ok(settled) =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            settle(context, intents.clone())
+        })) {
+        (settled, Outcome::Ran)
+    } else {
+        let rest: Vec<Intent> = intents.iter().filter(|i| !is_fight(i)).cloned().collect();
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| settle(context, rest))) {
+            Ok(settled) => (settled, Outcome::Faulted("settle".to_string())),
+            Err(_) => (
+                intents
+                    .into_iter()
+                    .filter(|i| !i.is_queue() && !i.is_wish())
+                    .collect(),
+                Outcome::Faulted("settle".to_string()),
+            ),
         }
     };
 

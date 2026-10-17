@@ -154,13 +154,13 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
     let mut structures: Vec<Structure> = spawn_tiles
         .iter()
         .enumerate()
-        .map(|(i, t)| structure(&format!("p{}", i), Kind::Spawn, Owner::Ours, *t))
+        .map(|(i, t)| structure(&format!("p{i}"), Kind::Spawn, Owner::Ours, *t))
         .collect();
     structures.extend(
         foreign_tiles
             .iter()
             .enumerate()
-            .map(|(i, t)| structure(&format!("w{}", i), Kind::Wall, Owner::Nobody, *t)),
+            .map(|(i, t)| structure(&format!("w{i}"), Kind::Wall, Owner::Nobody, *t)),
     );
 
     let room = Room {
@@ -186,7 +186,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
             .iter()
             .enumerate()
             .map(|(i, t)| Source {
-                id: format!("s{}", i),
+                id: format!("s{i}"),
                 pos: at(*t),
                 energy: 0,
                 energy_capacity: 0,

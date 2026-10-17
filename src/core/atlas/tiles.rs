@@ -99,11 +99,11 @@ pub fn index(x: i32, y: i32) -> Tile {
 }
 
 pub fn x_of(tile: Tile) -> i32 {
-    tile.0 as i32 % SIDE
+    i32::from(tile.0) % SIDE
 }
 
 pub fn y_of(tile: Tile) -> i32 {
-    tile.0 as i32 / SIDE
+    i32::from(tile.0) / SIDE
 }
 
 pub fn in_room(x: i32, y: i32) -> bool {
@@ -291,7 +291,7 @@ pub fn room_coords(name: &str) -> Option<(i32, i32)> {
     let number = |start: usize, stop: usize| -> i32 {
         let mut value = 0;
         for byte in &bytes[start..stop] {
-            value = value * 10 + (byte - b'0') as i32;
+            value = value * 10 + i32::from(byte - b'0');
         }
         value
     };
@@ -336,7 +336,7 @@ pub fn room_name(x: i32, y: i32) -> String {
         if value < 0 {
             format!("{}{}", outward, -value - 1)
         } else {
-            format!("{}{}", inward, value)
+            format!("{inward}{value}")
         }
     };
     format!("{}{}", axis("W", "E", x), axis("N", "S", y))

@@ -99,7 +99,7 @@ pub(crate) mod dice {
         let store = Store { held, capacity };
 
         Body {
-            name: format!("b{}", i),
+            name: format!("b{i}"),
             pos: at(),
             work,
             carry,
@@ -115,7 +115,7 @@ pub(crate) mod dice {
     }
 
     pub fn offer(dice: &mut Dice, i: usize) -> Offer {
-        let task = task(dice, &format!("o{}", i));
+        let task = task(dice, &format!("o{i}"));
         let priority = dice.between(-10, 40);
         let draw = dice.pick(&[Draw::Open, Draw::Spenders, Draw::Buffer]);
 
@@ -175,7 +175,7 @@ pub(crate) mod dice {
         let hits = dice.between(1, hits_max);
 
         Structure {
-            id: format!("{}s{}", room, i),
+            id: format!("{room}s{i}"),
             owner: if owned && kind != Kind::Road && kind != Kind::Container {
                 Owner::Ours
             } else {
@@ -209,7 +209,7 @@ pub(crate) mod dice {
     }
 
     pub fn room_gen(dice: &mut Dice, i: usize) -> (Room, Vec<Spawn>) {
-        let name = format!("r{}", i);
+        let name = format!("r{i}");
         let owned = dice.below(3) < 2;
         let reserved = dice.chance(2);
         let level = dice.between(1, 8);
@@ -218,7 +218,7 @@ pub(crate) mod dice {
         let holder = dice.pick(&["someone", "me"]);
 
         let controller = Controller {
-            id: format!("{}c", name),
+            id: format!("{name}c"),
             pos: cpos,
             owner: if owned { Owner::Ours } else { Owner::Nobody },
             level: if owned { level } else { 0 },
@@ -238,7 +238,7 @@ pub(crate) mod dice {
 
         let sources: Vec<Source> = (0..dice.between(0, 2))
             .map(|k| Source {
-                id: format!("{}src{}", name, k),
+                id: format!("{name}src{k}"),
                 pos: pos(dice, &name),
                 energy: 1000,
                 energy_capacity: 3000,
@@ -254,13 +254,13 @@ pub(crate) mod dice {
         for k in 0..if owned { dice.between(1, 3) } else { 0 } {
             let busy = dice.pick(&[0, 0, 1, 2]);
             spawns.push(Spawn {
-                id: format!("{}p{}", name, k),
-                name: format!("{}sp{}", name, k),
+                id: format!("{name}p{k}"),
+                name: format!("{name}sp{k}"),
                 pos: pos(dice, &name),
                 spawning: match busy {
                     0 => None,
                     1 => Some(oven_of(
-                        &format!("harvester-1-{}sp{}", name, k),
+                        &format!("harvester-1-{name}sp{k}"),
                         &[
                             BodyPart::Work,
                             BodyPart::Work,
@@ -271,7 +271,7 @@ pub(crate) mod dice {
                         ],
                     )),
                     _ => Some(oven_of(
-                        &format!("hauler-1-{}sp{}", name, k),
+                        &format!("hauler-1-{name}sp{k}"),
                         &[BodyPart::Carry, BodyPart::Carry, BodyPart::Move],
                     )),
                 },
@@ -295,7 +295,7 @@ pub(crate) mod dice {
             structures,
             sites: if has_site {
                 vec![Site {
-                    id: format!("{}site", name),
+                    id: format!("{name}site"),
                     kind: Kind::Extension,
                     pos: site_pos.clone(),
                     owner: Owner::Ours,
@@ -307,7 +307,7 @@ pub(crate) mod dice {
             },
             piles: if pile_amount > 0 {
                 vec![Pile {
-                    id: format!("{}pile", name),
+                    id: format!("{name}pile"),
                     pos: site_pos,
                     resource: Resource::Energy,
                     amount: pile_amount,
@@ -342,8 +342,8 @@ pub(crate) mod dice {
         let energy = dice.between(0, carry);
 
         Creep {
-            id: format!("c{}", i),
-            name: format!("{}-{}-x", prefix, i),
+            id: format!("c{i}"),
+            name: format!("{prefix}-{i}-x"),
             owner: Owner::Ours,
             pos: at,
             body: parts

@@ -62,8 +62,8 @@ fn pos_of(v: &JsValue) -> Option<Pos> {
 fn pos_obj(p: &Pos) -> JsValue {
     let o = Object::new();
     set_field(o.as_ref(), "room", &JsValue::from_str(&p.room));
-    set_field(o.as_ref(), "x", &JsValue::from_f64(p.x as f64));
-    set_field(o.as_ref(), "y", &JsValue::from_f64(p.y as f64));
+    set_field(o.as_ref(), "x", &JsValue::from(p.x));
+    set_field(o.as_ref(), "y", &JsValue::from(p.y));
     o.into()
 }
 
@@ -124,8 +124,8 @@ fn group_of(o: &JsValue) -> Option<Group> {
 
 fn group_obj(g: &Group) -> JsValue {
     let o = pos_obj(&g.centre);
-    set_field(&o, "id", &JsValue::from_f64(g.id as f64));
-    set_field(&o, "seen", &JsValue::from_f64(g.last_seen as f64));
+    set_field(&o, "id", &JsValue::from(g.id));
+    set_field(&o, "seen", &JsValue::from(g.last_seen));
     let members = Array::new();
     for m in &g.members {
         members.push(&JsValue::from_str(m));
@@ -184,13 +184,13 @@ fn outcome_obj(outcome: &Outcome) -> JsValue {
     match outcome {
         Outcome::Win(ticks, losses) => {
             set_field(o.as_ref(), "kind", &JsValue::from_str("win"));
-            set_field(o.as_ref(), "ticks", &JsValue::from_f64(*ticks as f64));
-            set_field(o.as_ref(), "dead", &JsValue::from_f64(losses.dead as f64));
-            set_field(o.as_ref(), "hits", &JsValue::from_f64(losses.hits as f64));
+            set_field(o.as_ref(), "ticks", &JsValue::from(*ticks));
+            set_field(o.as_ref(), "dead", &JsValue::from(losses.dead));
+            set_field(o.as_ref(), "hits", &JsValue::from(losses.hits));
         }
         Outcome::Kite(ticks) => {
             set_field(o.as_ref(), "kind", &JsValue::from_str("kite"));
-            set_field(o.as_ref(), "ticks", &JsValue::from_f64(*ticks as f64));
+            set_field(o.as_ref(), "ticks", &JsValue::from(*ticks));
         }
         Outcome::Lose => {
             set_field(o.as_ref(), "kind", &JsValue::from_str("lose"));
@@ -259,8 +259,8 @@ fn engagement_obj(e: &Engagement) -> JsValue {
         set_field(o.as_ref(), "kind", &JsValue::from_str("siege"));
         set_field(o.as_ref(), "target", &JsValue::from_str(target));
     }
-    set_field(o.as_ref(), "id", &JsValue::from_f64(e.id as f64));
-    set_field(o.as_ref(), "group", &JsValue::from_f64(e.group as f64));
+    set_field(o.as_ref(), "id", &JsValue::from(e.id));
+    set_field(o.as_ref(), "group", &JsValue::from(e.group));
     set_field(o.as_ref(), "room", &JsValue::from_str(&e.room));
     let ours = Array::new();
     for name in &e.ours {
@@ -278,17 +278,13 @@ fn engagement_obj(e: &Engagement) -> JsValue {
     }
     set_field(o.as_ref(), "order", order.as_ref());
     set_field(o.as_ref(), "phase", &JsValue::from_str(phase_name(e.phase)));
-    set_field(o.as_ref(), "opened", &JsValue::from_f64(e.opened as f64));
-    set_field(o.as_ref(), "since", &JsValue::from_f64(e.since as f64));
-    set_field(o.as_ref(), "lost", &JsValue::from_f64(e.lost as f64));
-    set_field(o.as_ref(), "budget", &JsValue::from_f64(e.budget as f64));
+    set_field(o.as_ref(), "opened", &JsValue::from(e.opened));
+    set_field(o.as_ref(), "since", &JsValue::from(e.since));
+    set_field(o.as_ref(), "lost", &JsValue::from(e.lost));
+    set_field(o.as_ref(), "budget", &JsValue::from(e.budget));
     set_field(o.as_ref(), "priority", &JsValue::from_f64(e.priority));
     set_field(o.as_ref(), "unanswered", &JsValue::from_bool(e.unanswered));
-    set_field(
-        o.as_ref(),
-        "capacity",
-        &JsValue::from_f64(e.capacity as f64),
-    );
+    set_field(o.as_ref(), "capacity", &JsValue::from(e.capacity));
     match &e.predicted {
         Some(outcome) => set_field(o.as_ref(), "predicted", &outcome_obj(outcome)),
         None => set_field(o.as_ref(), "predicted", &JsValue::NULL),
@@ -319,11 +315,7 @@ fn part_of_letter(letter: char) -> Option<vocabulary::BodyPart> {
 
 fn cast_obj(c: &Cast) -> JsValue {
     let o = Object::new();
-    set_field(
-        o.as_ref(),
-        "engagement",
-        &JsValue::from_f64(c.engagement as f64),
-    );
+    set_field(o.as_ref(), "engagement", &JsValue::from(c.engagement));
     set_field(o.as_ref(), "name", &JsValue::from_str(&c.name));
     set_field(o.as_ref(), "room", &JsValue::from_str(&c.room));
     let body: String = c.body.iter().map(|p| vocabulary::part_letter(*p)).collect();
@@ -438,7 +430,12 @@ pub fn read_declarations() -> Declarations {
             .map(|outposts| outposts.iter().filter_map(outpost_of).collect())
             .unwrap_or_default(),
         allies: array_of(&field(&declared, "allies"))
-            .map(|allies| allies.iter().filter_map(|a| a.as_string()).collect())
+            .map(|allies| {
+                allies
+                    .iter()
+                    .filter_map(wasm_bindgen::JsValue::as_string)
+                    .collect()
+            })
             .unwrap_or_default(),
     }
 }
@@ -469,9 +466,9 @@ pub struct Observed {
 
 pub fn write_observe(o: &Observed) {
     let root = Object::new();
-    set_field(root.as_ref(), "tick", &JsValue::from_f64(o.tick as f64));
+    set_field(root.as_ref(), "tick", &JsValue::from(o.tick));
     set_field(root.as_ref(), "version", &JsValue::from_str(&o.version));
-    set_field(root.as_ref(), "bucket", &JsValue::from_f64(o.bucket as f64));
+    set_field(root.as_ref(), "bucket", &JsValue::from(o.bucket));
     set_field(root.as_ref(), "cpu", &JsValue::from_f64(o.total));
 
     let phases = Array::new();
@@ -487,7 +484,7 @@ pub fn write_observe(o: &Observed) {
     for (name, n) in &o.counts {
         let pair = Array::new();
         pair.push(&JsValue::from_str(name));
-        pair.push(&JsValue::from_f64(*n as f64));
+        pair.push(&JsValue::from(*n));
         counts.push(&pair);
     }
     set_field(root.as_ref(), "counts", counts.as_ref());
@@ -501,7 +498,7 @@ pub fn write_observe(o: &Observed) {
     let faults = Array::new();
     for f in &o.faults {
         let fault = Object::new();
-        set_field(fault.as_ref(), "tick", &JsValue::from_f64(f.tick as f64));
+        set_field(fault.as_ref(), "tick", &JsValue::from(f.tick));
         set_field(fault.as_ref(), "where", &JsValue::from_str(&f.where_));
         set_field(fault.as_ref(), "message", &JsValue::from_str(&f.message));
         faults.push(fault.as_ref());
@@ -513,7 +510,7 @@ pub fn write_observe(o: &Observed) {
         let refusal = Object::new();
         set_field(refusal.as_ref(), "actor", &JsValue::from_str(&r.actor));
         set_field(refusal.as_ref(), "act", &JsValue::from_str(&r.act));
-        set_field(refusal.as_ref(), "code", &JsValue::from_f64(r.code as f64));
+        set_field(refusal.as_ref(), "code", &JsValue::from(r.code));
         refusals.push(refusal.as_ref());
     }
     set_field(root.as_ref(), "refusals", refusals.as_ref());

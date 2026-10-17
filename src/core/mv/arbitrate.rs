@@ -280,7 +280,7 @@ impl<'a> Search<'a> {
         self.on_path[i] = true;
         let wish = &self.order[i];
         let leaving = wish.value(from);
-        let leaving_home = if from == wish.at { 1 } else { 0 };
+        let leaving_home = i32::from(from == wish.at);
         let candidates = self.candidates[i].clone();
 
         let before = self.taken;
@@ -316,7 +316,7 @@ impl<'a> Search<'a> {
     ) {
         let wish = &self.order[i];
         let s = score + wish.value(tile) - leaving;
-        let h = home + (if tile == wish.at { 1 } else { 0 }) - leaving_home;
+        let h = home + i32::from(tile == wish.at) - leaving_home;
         self.path.push((i, tile));
 
         if let Some(occupant) = self.holder[tile] {

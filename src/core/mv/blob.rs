@@ -129,8 +129,7 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
         lag(c) != grid::UNREACHED
             && lag(c) - lag(anchor) > r + 1
             && tiles::seam_range(&c.pos, &tiles::to_pos(&anchor.pos.room, anchor_wish.head))
-                .map(|range| range > r + 1)
-                .unwrap_or(true)
+                .is_none_or(|range| range > r + 1)
     });
 
     let head_tile = if lagging {
@@ -143,8 +142,7 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
     let fits = |creep: &Creep, tile: Tile| -> bool {
         creep.name == anchor.name
             || tiles::seam_range(&tiles::to_pos(&creep.pos.room, tile), &head)
-                .map(|range| range <= r)
-                .unwrap_or(false)
+                .is_some_and(|range| range <= r)
             || lag(creep) >= lag(anchor)
     };
 

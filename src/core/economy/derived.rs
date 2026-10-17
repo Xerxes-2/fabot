@@ -327,7 +327,7 @@ fn swamp(room: &Room, pos: &Pos) -> bool {
 
 fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> Ground {
     let owned_room = room.controller.as_ref().is_some_and(|c| c.owner.is_ours());
-    let level = room.controller.as_ref().map(|c| c.level).unwrap_or(0);
+    let level = room.controller.as_ref().map_or(0, |c| c.level);
     let built = Atlas::buffer(room);
     let is_buffer = |id: &str| built.is_some_and(|b| b.id == id);
     let storage = room
@@ -446,7 +446,7 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
                         energy,
                         free: s.store.free(),
                         fill: if s.store.capacity > 0 {
-                            s.store.used() as f64 / s.store.capacity as f64
+                            f64::from(s.store.used()) / f64::from(s.store.capacity)
                         } else {
                             0.0
                         },
@@ -468,7 +468,8 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
                     pos: s.pos.clone(),
                     hits: s.hits,
                     hits_max: rampart_target(level).min(s.hits_max),
-                    decay: engine::RAMPART_DECAY_AMOUNT as f64 / engine::RAMPART_DECAY_TIME as f64,
+                    decay: f64::from(engine::RAMPART_DECAY_AMOUNT)
+                        / f64::from(engine::RAMPART_DECAY_TIME),
                     rebuild: 0,
                 })
             }
@@ -478,7 +479,8 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
                 let (decay, rebuild) = if s.kind.is_road() {
                     let ratio = if swamp { engine::ROAD_SWAMP_RATIO } else { 1 };
                     (
-                        (engine::ROAD_DECAY_AMOUNT * ratio) as f64 / engine::ROAD_DECAY_TIME as f64,
+                        f64::from(engine::ROAD_DECAY_AMOUNT * ratio)
+                            / f64::from(engine::ROAD_DECAY_TIME),
                         engine::ROAD_BUILD_COST * ratio,
                     )
                 } else {
@@ -488,7 +490,7 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
                         engine::CONTAINER_DECAY_TIME
                     };
                     (
-                        engine::CONTAINER_DECAY_AMOUNT as f64 / period as f64,
+                        f64::from(engine::CONTAINER_DECAY_AMOUNT) / f64::from(period),
                         engine::CONTAINER_BUILD_COST,
                     )
                 };
@@ -530,7 +532,7 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
         kind,
         energy: l.energy,
         free: l.free,
-        fill: l.energy as f64 / (l.energy + l.free).max(1) as f64,
+        fill: f64::from(l.energy) / f64::from((l.energy + l.free).max(1)),
         source_dug: dug,
         owned: false,
     };

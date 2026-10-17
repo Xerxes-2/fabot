@@ -266,8 +266,9 @@ pub fn upgradable_at(level: i32) -> i32 {
 /// A tick of what `n` upgraders of the body are hired at: their drink, as much
 /// as the controller takes, and their cost over a life.
 pub fn upgrader_hire(upgradable: i32, n: i32, body: &[BodyPart]) -> f64 {
-    upgradable.min(n * part_count_in(body, BodyPart::Work) * engine::UPGRADE_DRAIN_PER_WORK) as f64
-        + (n * engine::body_cost(body)) as f64 / engine::CREEP_LIFETIME as f64
+    f64::from(
+        upgradable.min(n * part_count_in(body, BodyPart::Work) * engine::UPGRADE_DRAIN_PER_WORK),
+    ) + f64::from(n * engine::body_cost(body)) / f64::from(engine::CREEP_LIFETIME)
 }
 
 /// For a seat in the casting colony's own room, which it walks once: legs

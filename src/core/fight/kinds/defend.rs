@@ -633,7 +633,7 @@ mod tests {
 
         for _ in 0..DRAWS {
             let spec = rng.spec();
-            let earlier = rng.word() as i32;
+            let earlier = i32::from(rng.word());
             let before = |carry: i32| Dead {
                 carry,
                 ticks_left: 1000,

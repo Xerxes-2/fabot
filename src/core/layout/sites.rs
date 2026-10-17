@@ -394,14 +394,12 @@ mod tests {
             let colony = fx::colony(&mut rng);
             let pick = rng.choose(-1_000, 1_000);
 
-            let (ground, plan) = match fx::plan_of(&colony) {
-                Some(found) => found,
-                None => continue,
+            let Some((ground, plan)) = fx::plan_of(&colony) else {
+                continue;
             };
 
-            let controller = match ground.controller {
-                Some(controller) => controller,
-                None => continue,
+            let Some(controller) = ground.controller else {
+                continue;
             };
 
             let rocks: Vec<Tile> = ground
@@ -424,7 +422,7 @@ mod tests {
                 continue;
             }
 
-            let buffer = { pick as i64 % off_plan.len() as i64 }.unsigned_abs() as usize;
+            let buffer = { i64::from(pick) % off_plan.len() as i64 }.unsigned_abs() as usize;
             let buffer = off_plan[buffer];
 
             let mut room = colony.room.clone();
@@ -461,9 +459,8 @@ mod tests {
         for _ in 0..fx::MAX_TEST {
             let case = fx::census_case(&mut rng);
 
-            let (_, plan) = match fx::plan_of(&case.colony) {
-                Some(found) => found,
-                None => continue,
+            let Some((_, plan)) = fx::plan_of(&case.colony) else {
+                continue;
             };
 
             let pick = |ranks: &[i32]| -> Vec<Item> {

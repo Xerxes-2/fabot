@@ -125,7 +125,7 @@ pub fn tally(what: &str, n: i32) {
             let _ = counter.call2(
                 &wasm_bindgen::JsValue::NULL,
                 &wasm_bindgen::JsValue::from_str(what),
-                &wasm_bindgen::JsValue::from_f64(n as f64),
+                &wasm_bindgen::JsValue::from(n),
             );
         }
     }
@@ -221,12 +221,11 @@ impl Dial {
     fn unlink(&mut self, tile: Tile, dist: &[i32]) {
         let p = self.prev[tile];
         let n = self.next[tile];
-        match p {
-            Some(p) => self.next[p] = n,
-            None => {
-                let b = (dist[tile] % self.ring as i32) as usize;
-                self.head[b] = n;
-            }
+        if let Some(p) = p {
+            self.next[p] = n
+        } else {
+            let b = (dist[tile] % self.ring as i32) as usize;
+            self.head[b] = n;
         }
         if let Some(n) = n {
             self.prev[n] = p;
@@ -306,7 +305,7 @@ pub fn flood(
         }
     }
 
-    for d in dist.iter_mut() {
+    for d in &mut dist {
         if *d == WALL {
             *d = UNREACHED;
         }

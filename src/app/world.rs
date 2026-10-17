@@ -212,15 +212,14 @@ impl Reader<'_> {
 
     fn room(&mut self) -> Room {
         let name = self.s();
-        let terrain = match self.terrain.get(&name) {
-            Some(terrain) => terrain.clone(),
-            None => {
-                let terrain = terrain_of(&name);
-                if !terrain.is_empty() {
-                    self.terrain.insert(name.clone(), terrain.clone());
-                }
-                terrain
+        let terrain = if let Some(terrain) = self.terrain.get(&name) {
+            terrain.clone()
+        } else {
+            let terrain = terrain_of(&name);
+            if !terrain.is_empty() {
+                self.terrain.insert(name.clone(), terrain.clone());
             }
+            terrain
         };
         Room {
             terrain,
@@ -259,8 +258,8 @@ impl Reader<'_> {
                 resource: vocabulary::resource_of_name(&r.s()),
                 amount: r.n(),
             }),
-            remains: self.list(|r| r.remains()),
-            hostiles: self.list(|r| r.creep()),
+            remains: self.list(Reader::remains),
+            hostiles: self.list(Reader::creep),
             name,
         }
     }
@@ -295,13 +294,13 @@ pub fn of_game(terrain: &mut Terrains) -> World {
     };
     let time = r.n();
     let bucket = r.n();
-    let rooms = r.list(|r| r.room());
-    let spawns = r.list(|r| r.spawn());
-    let creeps = r.list(|r| r.creep());
+    let rooms = r.list(Reader::room);
+    let spawns = r.list(Reader::spawn);
+    let creeps = r.list(Reader::creep);
     World {
         time,
         me: r.s(),
-        cpu_limit: game::cpu::limit() as f64,
+        cpu_limit: f64::from(game::cpu::limit()),
         bucket,
         rooms,
         spawns,
@@ -313,31 +312,27 @@ pub fn of_game(terrain: &mut Terrains) -> World {
 /// `Game.map.getRoomTerrain(name).getRawBuffer()`: the map serves rooms the
 /// bot cannot see, and reading it needs no `Room` object.
 fn terrain_of(name: &str) -> Vec<u8> {
-    let game = match Reflect::get(&js_sys::global(), &JsValue::from_str("Game")) {
-        Ok(game) => game,
-        Err(_) => return Vec::new(),
+    let read = || -> Option<Vec<u8>> {
+        let game = Reflect::get(&js_sys::global(), &JsValue::from_str("Game")).ok()?;
+        let map = field(&game, "map");
+        let get_terrain = field(&map, "getRoomTerrain");
+        let arguments = Array::of1(&JsValue::from_str(name));
+        let terrain = Reflect::apply(
+            get_terrain.unchecked_ref::<js_sys::Function>(),
+            &map,
+            &arguments,
+        )
+        .ok()?;
+        let get_raw = field(&terrain, "getRawBuffer");
+        let raw = Reflect::apply(
+            get_raw.unchecked_ref::<js_sys::Function>(),
+            &terrain,
+            &Array::new(),
+        )
+        .ok()?;
+        Some(js_sys::Uint8Array::new(&raw).to_vec())
     };
-    let map = field(&game, "map");
-    let get_terrain = field(&map, "getRoomTerrain");
-    let arguments = Array::new();
-    arguments.push(&JsValue::from_str(name));
-    let terrain = match Reflect::apply(
-        get_terrain.unchecked_ref::<js_sys::Function>(),
-        &map,
-        &arguments,
-    ) {
-        Ok(terrain) => terrain,
-        Err(_) => return Vec::new(),
-    };
-    let get_raw = field(&terrain, "getRawBuffer");
-    match Reflect::apply(
-        get_raw.unchecked_ref::<js_sys::Function>(),
-        &terrain,
-        &Array::new(),
-    ) {
-        Ok(raw) => js_sys::Uint8Array::new(&raw).to_vec(),
-        Err(_) => Vec::new(),
-    }
+    read().unwrap_or_default()
 }
 
 /// `Game.getObjectById` as `Executor` reads it: absent is a refusal, never an error.

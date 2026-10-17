@@ -504,26 +504,25 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                     None
                 };
 
-                match &raising {
-                    Some(act) => acts.push(Intent::Creep(creep.name.clone(), act.clone())),
-                    None => {
-                        let arrived = creep.pos.within(offer.task.range_of(), &offer.target)
-                            && seats
-                                .as_ref()
-                                .is_none_or(|seats| seats.iter().any(|p| p == &creep.pos))
-                            && ready(&offer.task);
+                if let Some(act) = &raising {
+                    acts.push(Intent::Creep(creep.name.clone(), act.clone()))
+                } else {
+                    let arrived = creep.pos.within(offer.task.range_of(), &offer.target)
+                        && seats
+                            .as_ref()
+                            .is_none_or(|seats| seats.iter().any(|p| p == &creep.pos))
+                        && ready(&offer.task);
 
-                        // The API refuses an upgrade from an empty store before
-                        // the draw lands.
-                        let can_act = body.energy > 0
-                            || !(pool::draws_buffer(body, offer) || offer.task.is_upgrade());
+                    // The API refuses an upgrade from an empty store before
+                    // the draw lands.
+                    let can_act = body.energy > 0
+                        || !(pool::draws_buffer(body, offer) || offer.task.is_upgrade());
 
-                        if arrived && can_act {
-                            acts.push(Intent::Creep(
-                                creep.name.clone(),
-                                act_of(&derived, &offer.task),
-                            ));
-                        }
+                    if arrived && can_act {
+                        acts.push(Intent::Creep(
+                            creep.name.clone(),
+                            act_of(&derived, &offer.task),
+                        ));
                     }
                 }
 
@@ -651,9 +650,7 @@ mod tests {
             for (name, id) in &state.assignments {
                 assert!(
                     crate::core::economy::task::of_task_id(id).is_some(),
-                    "{} {}",
-                    name,
-                    id
+                    "{name} {id}"
                 );
             }
 
@@ -666,7 +663,7 @@ mod tests {
             let wished: BTreeSet<String> = intents
                 .iter()
                 .filter(|i| i.is_wish())
-                .map(|i| i.actor())
+                .map(crate::core::intents::Intent::actor)
                 .collect();
 
             let fought: Vec<String> = g

@@ -860,7 +860,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     // A Defend left open holds its room: a newcomer inside it is its target
     // now, with a fresh budget, where its own group is not there (a home's,
     // so a second raid is not left to towers) or was lost from sight.
-    for e in engagements.iter_mut() {
+    for e in &mut engagements {
         if !matches!(e.objective, Objective::Defend) {
             continue;
         }
@@ -916,7 +916,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         })
         .partition(|c| standing.contains(&c.name));
 
-    for e in engagements.iter_mut() {
+    for e in &mut engagements {
         let landed_here: BTreeSet<String> = landed
             .iter()
             .filter(|c| c.engagement == e.id)
@@ -941,7 +941,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     };
 
     // A planned barrier fallen advances the plan, never re-prices it.
-    for e in engagements.iter_mut() {
+    for e in &mut engagements {
         if matches!(e.objective, Objective::Siege(_))
             && let Some(room) = scene.in_sight(&e.room)
         {
@@ -1180,7 +1180,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
             let strike = towers
                 .iter()
-                .map(|t| t.range(&wall.pos).map(engine::tower_attack_at).unwrap_or(0))
+                .map(|t| t.range(&wall.pos).map_or(0, engine::tower_attack_at))
                 .sum();
 
             fronts.insert(

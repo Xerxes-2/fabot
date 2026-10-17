@@ -64,20 +64,20 @@ mod tests {
 
             let colony = fx::colony(&mut rng);
 
-            let enemies: Vec<world::Creep> = (1..=(hostiles % 3) as i32)
+            let enemies: Vec<world::Creep> = (1..=i32::from(hostiles % 3))
                 .map(|i| {
                     fx::creep(
-                        &format!("h{}", i),
+                        &format!("h{i}"),
                         Owner::Theirs("x".to_string()),
                         100,
                         tiles::index(25, i % 40 + 5),
                     )
                 })
                 .collect();
-            let ours: Vec<world::Creep> = (1..=(wounded % 3) as i32)
+            let ours: Vec<world::Creep> = (1..=i32::from(wounded % 3))
                 .map(|i| {
                     fx::creep(
-                        &format!("o{}", i),
+                        &format!("o{i}"),
                         Owner::Ours,
                         50 + i,
                         tiles::index(25, i % 40 + 5),
@@ -85,10 +85,10 @@ mod tests {
                 })
                 .collect();
 
-            let stood: Vec<world::Structure> = (1..=(towers % 4) as i32)
+            let stood: Vec<world::Structure> = (1..=i32::from(towers % 4))
                 .map(|i| {
                     fx::tower(
-                        &format!("t{}", i),
+                        &format!("t{i}"),
                         tiles::index(10 + i, 10),
                         if i == 1 { 5 } else { 500 },
                     )
@@ -104,7 +104,10 @@ mod tests {
             let (colonies, _) = derive::colonies(&world, &BTreeMap::new());
             let acts = run::decide_over(&colonies, 0);
 
-            let ids: Vec<String> = acts.iter().map(|i| i.actor()).collect();
+            let ids: Vec<String> = acts
+                .iter()
+                .map(crate::core::intents::Intent::actor)
+                .collect();
             let mut distinct: Vec<String> = Vec::new();
             for id in &ids {
                 if !distinct.contains(id) {

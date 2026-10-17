@@ -32,11 +32,7 @@ fn live(kind: BodyPart, c: &Creep) -> i32 {
 }
 
 fn hostiles_in<'a>(sight: &Sight<'a>, room: &str) -> &'a [Creep] {
-    sight
-        .hostiles
-        .get(room)
-        .map(|h| h.as_slice())
-        .unwrap_or(&[])
+    sight.hostiles.get(room).map_or(&[], Vec::as_slice)
 }
 
 fn ranked<'a>(sight: &Sight<'a>, order: &[String], creep: &Creep) -> Vec<&'a Creep> {
@@ -88,8 +84,7 @@ pub fn strike(sight: &Sight, order: &[String], creep: &Creep) -> Option<CreepAct
             creep
                 .pos
                 .range(&h.pos)
-                .map(engine::mass_attack_power_at)
-                .unwrap_or(0)
+                .map_or(0, engine::mass_attack_power_at)
         })
         .sum();
 
