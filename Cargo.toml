@@ -26,6 +26,18 @@ required-features = ["tools"]
 name = "exchange"
 required-features = ["tools"]
 
+# The F# port's habits, kept out: npm test denies clippy's warnings.
+[lints.clippy]
+bool_to_int_with_if = "warn"
+cast_lossless = "warn"
+explicit_into_iter_loop = "warn"
+explicit_iter_loop = "warn"
+manual_let_else = "warn"
+map_unwrap_or = "warn"
+redundant_closure_for_method_calls = "warn"
+single_match_else = "warn"
+uninlined_format_args = "warn"
+
 [profile.release]
 opt-level = 3
 lto = true
