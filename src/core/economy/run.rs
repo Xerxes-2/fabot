@@ -110,8 +110,8 @@ pub struct Walked<'a> {
     pub atlas: &'a mut Atlas,
     pub derived: &'a Derived,
     pub homes: &'a [Pos],
-    pub creeps: &'a BTreeMap<String, &'a Creep>,
-    pub movers: &'a BTreeMap<String, Mover>,
+    pub creeps: &'a BTreeMap<&'a str, &'a Creep>,
+    pub movers: &'a BTreeMap<&'a str, Mover>,
     pub offers: &'a [Offer],
     pub by_id: &'a BTreeMap<&'a str, usize>,
     pub assignments: &'a Assignments,
@@ -141,7 +141,7 @@ impl Walks for Walked<'_> {
     }
 
     fn walk(&mut self, fresh: bool, body: &Body, from: &Pos) -> Option<i32> {
-        let creep = *self.creeps.get(&body.name)?;
+        let creep = *self.creeps.get(body.name.as_str())?;
         let id = self.assignments.get(&body.name)?;
         let oi = *self.by_id.get(id.as_str())?;
         let offer = &self.offers[oi];
@@ -153,7 +153,7 @@ impl Walks for Walked<'_> {
                 factor: grid::empty_factor(&kinds),
             }
         } else {
-            *self.movers.get(&body.name)?
+            *self.movers.get(body.name.as_str())?
         };
 
         ticks_to(
@@ -346,21 +346,18 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     let offers = pool::pool(&derived);
 
-    let mut creeps: BTreeMap<String, &Creep> = BTreeMap::new();
-    for creep in &seen {
-        creeps.insert(creep.name.clone(), creep);
-    }
+    let creeps: BTreeMap<&str, &Creep> = seen.iter().map(|c| (c.name.as_str(), *c)).collect();
 
-    let mut movers: BTreeMap<String, Mover> = BTreeMap::new();
-    for creep in &seen {
-        movers.insert(
-            creep.name.clone(),
-            Mover {
+    let movers: BTreeMap<&str, Mover> = seen
+        .iter()
+        .map(|c| {
+            let mover = Mover {
                 footprint: Footprint::One,
-                factor: grid::factor_of(creep),
-            },
-        );
-    }
+                factor: grid::factor_of(c),
+            };
+            (c.name.as_str(), mover)
+        })
+        .collect();
 
     let by_id: BTreeMap<&str, usize> = offers
         .iter()
@@ -376,7 +373,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     let assignments = {
         let mut travel = |body: &Body, offer: &Offer| -> Option<i32> {
-            let mover = *movers.get(&body.name)?;
+            let mover = *movers.get(body.name.as_str())?;
             ticks_to(
                 &mut *context.atlas,
                 &derived,
@@ -439,16 +436,17 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     let stood: BTreeSet<Pos> = seen.iter().map(|c| c.pos.clone()).collect();
 
-    let mut bodies: BTreeMap<String, &Body> = BTreeMap::new();
-    for body in &derived.bodies {
-        bodies.insert(body.name.clone(), body);
-    }
+    let bodies: BTreeMap<&str, &Body> = derived
+        .bodies
+        .iter()
+        .map(|b| (b.name.as_str(), b))
+        .collect();
 
     let mut acts: Vec<Intent> = Vec::new();
     let mut wishes: Vec<(String, Vec<Wish>)> = Vec::new();
 
     for creep in &seen {
-        let mover = movers[&creep.name];
+        let mover = movers[creep.name.as_str()];
 
         let assigned = assignments
             .get(&creep.name)
@@ -457,7 +455,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
         match assigned {
             Some(offer) => {
-                let body = bodies[&creep.name];
+                let body = bodies[creep.name.as_str()];
                 let seats = seats_of(&*context.atlas, &derived, body, offer);
 
                 let buffer = derived
