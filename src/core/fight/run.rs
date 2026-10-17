@@ -361,12 +361,13 @@ impl<'a> Scene<'a> {
                 .iter()
                 .all(|s| s.pos != b.pos || s.walkable || Scene::rival(s))
             {
-                weights[tiles::of_pos(&b.pos)] =
+                weights[tiles::of_pos(&b.pos)] = grid::weight(
                     if world::terrain::is_swamp(&room.terrain, b.pos.x, b.pos.y) {
                         engine::SWAMP_WEIGHT
                     } else {
                         engine::PLAIN_WEIGHT
-                    };
+                    },
+                );
             }
         }
 
@@ -400,7 +401,7 @@ impl<'a> Scene<'a> {
             let sources: Vec<Tile> = tiles::exit_tiles(exit)
                 .iter()
                 .copied()
-                .filter(|t| ground.weights[*t] >= 0)
+                .filter(|t| ground.weights[*t].is_some())
                 .collect();
 
             exchange::breach_plan(

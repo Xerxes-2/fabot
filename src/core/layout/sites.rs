@@ -414,7 +414,7 @@ mod tests {
             let off_plan: Vec<Tile> = tiles::within(engine::UPGRADE_RANGE, controller)
                 .into_iter()
                 .filter(|t| {
-                    ground.weights[*t] >= 0
+                    ground.weights[*t].is_some()
                         && rocks.iter().all(|r| tiles::range(*r, *t) > 1)
                         && plan.items.iter().all(|i| i.tile != *t || i.kind.is_road())
                 })

@@ -1,5 +1,7 @@
-//! Knows nothing of the Atlas: it prices raw weight arrays (-1 where nothing
-//! may stand), so the Atlas keeps its own representation private.
+//! Knows nothing of the Atlas: it prices raw weight arrays, so the Atlas
+//! keeps its own representation private.
+use std::num::NonZeroU8;
+
 use super::tiles::{self, Tile};
 use crate::core::engine;
 use crate::core::vocabulary::{BodyPart, boost};
@@ -127,28 +129,35 @@ pub fn tally(what: &str, n: i32) {
     let _ = (what, n);
 }
 
-pub fn weight_of(footprint: Footprint, weights: &[i32], tile: Tile) -> i32 {
+/// A tile's step weight; None where nothing may stand.
+pub type Weight = Option<NonZeroU8>;
+
+pub fn weight(w: i32) -> Weight {
+    NonZeroU8::new(w as u8)
+}
+
+pub fn value(w: Weight) -> Option<i32> {
+    w.map(|w| i32::from(w.get()))
+}
+
+pub fn weight_of(footprint: Footprint, weights: &[Weight], tile: Tile) -> Weight {
     match footprint {
         Footprint::One => weights[tile],
         Footprint::Quad => {
             let x = tiles::x_of(tile);
             let y = tiles::y_of(tile);
             if x == tiles::SIDE - 1 || y == tiles::SIDE - 1 {
-                -1
+                None
             } else {
                 let i = tile.index();
                 let side = tiles::SIDE as usize;
                 let (a, b, c, d) = (
-                    weights[i],
-                    weights[i + 1],
-                    weights[i + side],
-                    weights[i + side + 1],
+                    weights[i]?,
+                    weights[i + 1]?,
+                    weights[i + side]?,
+                    weights[i + side + 1]?,
                 );
-                if a < 0 || b < 0 || c < 0 || d < 0 {
-                    -1
-                } else {
-                    a.max(b).max(c.max(d))
-                }
+                Some(a.max(b).max(c.max(d)))
             }
         }
     }
@@ -223,7 +232,7 @@ impl Dial {
 
 /// Dial's queue: no step costs more than the table's dearest, so a ring of one
 /// bucket more holds every queued distance apart.
-pub fn flood(footprint: Footprint, weights: &[i32], steps: &[i32], goals: &[Tile]) -> Vec<i32> {
+pub fn flood(footprint: Footprint, weights: &[Weight], steps: &[i32], goals: &[Tile]) -> Vec<i32> {
     let mut dist = vec![UNREACHED; tiles::COUNT];
     // The step onto a tile; -1 where no walk leaves it.
     let mut price = vec![0i32; tiles::COUNT];
@@ -233,31 +242,25 @@ pub fn flood(footprint: Footprint, weights: &[i32], steps: &[i32], goals: &[Tile
     }
     let mut dial = Dial::new((dearest + 1) as usize);
 
-    let step_on = |weight: i32| -> i32 {
-        if (weight as usize) < steps.len() {
-            steps[weight as usize]
-        } else {
-            -1
-        }
-    };
+    let step_on =
+        |weight: NonZeroU8| -> i32 { steps.get(weight.get() as usize).copied().unwrap_or(-1) };
 
     // A blocked tile reads -1 until the end, so no candidate beats it. A
     // non-goal border tile leads nowhere: a body stepping onto it leaves.
     for t in tiles::all() {
-        let w = weight_of(footprint, weights, t);
-        if w < 0 {
-            dist[t] = -1;
-        } else if on_edge(footprint, t) {
-            price[t] = -1;
-        } else {
-            price[t] = step_on(w);
+        match weight_of(footprint, weights, t) {
+            None => dist[t] = -1,
+            Some(_) if on_edge(footprint, t) => price[t] = -1,
+            Some(w) => price[t] = step_on(w),
         }
     }
 
     for &goal in goals {
-        if dist[goal] > 0 {
+        if let Some(w) = weight_of(footprint, weights, goal)
+            && dist[goal] > 0
+        {
             dist[goal] = 0;
-            price[goal] = step_on(weight_of(footprint, weights, goal));
+            price[goal] = step_on(w);
             dial.link(goal, 0);
         }
     }

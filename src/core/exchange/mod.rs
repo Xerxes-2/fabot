@@ -7,7 +7,7 @@ pub use fighter::Fighter;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::engine;
-use crate::core::grid::{FatigueFactor, step_ticks};
+use crate::core::grid::{self, FatigueFactor, Weight, step_ticks};
 use crate::core::lists;
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::BodyPart;
@@ -67,12 +67,12 @@ pub enum Stance {
     Standoff,
 }
 
-/// A rival room as a breach is planned over it: each tile's step weight (-1
-/// where no body walks) and the hits on each barrier tile, its rival ramparts' and walls' together.
+/// A rival room as a breach is planned over it: each tile's step weight and
+/// the hits on each barrier tile, its rival ramparts' and walls' together.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ground {
     pub room: String,
-    pub weights: Vec<i32>,
+    pub weights: Vec<Weight>,
     pub barriers: BTreeMap<Tile, i32>,
 }
 
@@ -1297,12 +1297,7 @@ pub fn breach_plan(
     let struck = |t: Tile| tower_strike(towers, &tiles::to_pos(&ground.room, t));
 
     let cost = |t: Tile| -> Option<i32> {
-        let weight = ground.weights[t];
-        let step = if weight < 0 {
-            None
-        } else {
-            step_ticks(gait, weight)
-        }?;
+        let step = step_ticks(gait, grid::value(ground.weights[t])?)?;
 
         if tiles::on_edge(t) || struck(t) > heal {
             None
@@ -1601,7 +1596,7 @@ mod tests {
 
             let ground = Ground {
                 room: ROOM.to_string(),
-                weights: vec![2; 2500],
+                weights: vec![grid::weight(2); 2500],
                 barriers: hits
                     .iter()
                     .enumerate()

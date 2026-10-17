@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use crate::core::atlas::Atlas;
 use crate::core::engine;
-use crate::core::grid::{self, Footprint, UNREACHED};
+use crate::core::grid::{self, Footprint, UNREACHED, Weight};
 use crate::core::lists;
 use crate::core::tiles::{self, Tile};
 use crate::core::world::Kind;
@@ -181,23 +181,18 @@ struct Posted {
 /// Walks past it sort together.
 const ROAD_SPAN: i32 = 1 << 14;
 
-pub fn down(weights: &[i32], dist: &[i32], t: Tile) -> Option<Tile> {
+pub fn down(weights: &[Weight], dist: &[i32], t: Tile) -> Option<Tile> {
     if dist[t] == 0 {
         None
     } else {
-        tiles::least_around(t, UNREACHED, |n| {
-            let d = dist[n];
-
-            if weights[n] < 0 || d == UNREACHED || (d > 0 && tiles::on_edge(n)) {
-                UNREACHED
-            } else {
-                d + weights[n]
-            }
+        tiles::least_around(t, UNREACHED, |n| match grid::value(weights[n]) {
+            Some(w) if dist[n] != UNREACHED && (dist[n] == 0 || !tiles::on_edge(n)) => dist[n] + w,
+            _ => UNREACHED,
         })
     }
 }
 
-pub fn descend(weights: &[i32], dist: &[i32], start: Tile) -> Vec<Tile> {
+pub fn descend(weights: &[Weight], dist: &[i32], start: Tile) -> Vec<Tile> {
     let mut path: Vec<Tile> = Vec::new();
     let mut here = down(weights, dist, start);
 
@@ -279,31 +274,29 @@ fn fill(
 /// plan. Ways are laid before slots are handed out, so no structure stands on
 /// one.
 fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> (Plan, bool) {
-    let weights: &[i32] = &ground.weights;
+    let weights: &[Weight] = &ground.weights;
     let mut unfit: Vec<Cow<'static, str>> = Vec::new();
 
     let mut on_lat = vec![false; tiles::COUNT];
-    let mut lane = vec![0i32; tiles::COUNT];
+    let mut lane: Vec<Weight> = vec![None; tiles::COUNT];
 
     for t in tiles::all() {
         let on = on_lattice(anchor, t);
         on_lat[t] = on;
-        let w = weights[t];
 
-        lane[t] = if w < 0 || tiles::on_edge(t) {
-            -1
-        } else if on {
-            w
-        } else {
-            w + DETOUR
+        lane[t] = match grid::value(weights[t]) {
+            Some(w) if !tiles::on_edge(t) => grid::weight(if on { w } else { w + DETOUR }),
+            _ => None,
         };
     }
 
-    lane[anchor] = engine::PLAIN_WEIGHT.max(weights[anchor]);
+    lane[anchor] = grid::weight(
+        grid::value(weights[anchor]).map_or(engine::PLAIN_WEIGHT, |w| w.max(engine::PLAIN_WEIGHT)),
+    );
     let walk = grid::flood(Footprint::One, &lane, &steps(), &[anchor]);
 
     let mut clear = vec![false; tiles::COUNT];
-    let lattice = |t: Tile| -> bool { on_lat[t] && lane[t] >= 0 };
+    let lattice = |t: Tile| -> bool { on_lat[t] && lane[t].is_some() };
 
     let mut walked = vec![false; tiles::COUNT];
 
@@ -325,7 +318,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         }
     }
 
-    fn way_out(lane: &[i32], walk: &[i32], clear: &mut [bool], rock: Tile) -> Vec<Tile> {
+    fn way_out(lane: &[Weight], walk: &[i32], clear: &mut [bool], rock: Tile) -> Vec<Tile> {
         let path = descend(lane, walk, rock);
 
         for &t in &path {
@@ -379,7 +372,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
             _ => None,
         };
 
-    let walkable = |t: Tile| weights[t] >= 0;
+    let walkable = |t: Tile| weights[t].is_some();
     let mut held = vec![false; tiles::COUNT];
 
     if let Some((c, buffer, _)) = &controller_seat {
@@ -515,7 +508,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
 
         let mut road = access[*t].or_else(|| {
             tiles::least_around(*t, UNREACHED, |n| {
-                if lane[n] >= 0 && !taken[n] {
+                if lane[n].is_some() && !taken[n] {
                     walk[n]
                 } else {
                     UNREACHED
@@ -777,7 +770,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         .filter(|p| {
             tiles::around(p.rock)
                 .iter()
-                .filter(|n| board.weights[**n] >= 0)
+                .filter(|n| board.weights[**n].is_some())
                 .count()
                 > 1
         })
@@ -886,7 +879,7 @@ pub fn of_ground(ground: &Ground, spawns: &[Tile]) -> Option<Plan> {
 }
 
 struct Board<'a> {
-    weights: &'a [i32],
+    weights: &'a [Weight],
     anchor: Tile,
     walk: Vec<i32>,
     taken: Vec<bool>,
@@ -900,14 +893,14 @@ struct Board<'a> {
 
 impl Board<'_> {
     fn walkable(&self, t: Tile) -> bool {
-        self.weights[t] >= 0
+        self.weights[t].is_some()
     }
 
     fn free(&self, n: Tile) -> bool {
         let x = tiles::x_of(n);
         let y = tiles::y_of(n);
 
-        self.weights[n] >= 0
+        self.weights[n].is_some()
             && !self.taken[n]
             && !self.on_way[n]
             && self.road_level[n] == NONE
@@ -944,7 +937,7 @@ impl Board<'_> {
         t != head
             && tiles::range(t, rock) == 1
             && tiles::range(t, head) == 1
-            && self.weights[t_u] >= 0
+            && self.weights[t_u].is_some()
             && !tiles::on_edge(t)
             && !self.taken[t_u]
             && !self.clear[t_u]
@@ -1109,7 +1102,7 @@ mod tests {
                     if i.kind.is_extractor() {
                         ground.minerals.contains(&i.tile)
                     } else {
-                        ground.weights[i.tile] >= 0
+                        ground.weights[i.tile].is_some()
                     },
                     "on ground no creep crosses: {}",
                     i.tile
@@ -1246,7 +1239,7 @@ mod tests {
             };
 
             let seats = |buffer: Tile| -> Vec<Tile> {
-                Atlas::upgrader_seats(|t: Tile| ground.weights[t] >= 0, controller, buffer)
+                Atlas::upgrader_seats(|t: Tile| ground.weights[t].is_some(), controller, buffer)
                     .into_iter()
                     .filter(|t| *t != buffer)
                     .collect()

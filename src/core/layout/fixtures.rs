@@ -262,7 +262,9 @@ pub fn distinct<T: PartialEq + Copy>(values: &[T]) -> Vec<T> {
 /// The tiles reached on foot from the anchor, every planned structure no creep
 /// crosses standing.
 pub fn reached(ground: &Ground, plan: &Plan) -> Vec<bool> {
-    let mut blocked: Vec<bool> = (0..tiles::COUNT).map(|t| ground.weights[t] < 0).collect();
+    let mut blocked: Vec<bool> = (0..tiles::COUNT)
+        .map(|t| ground.weights[t].is_none())
+        .collect();
 
     for i in &plan.items {
         if !walkable(&i.kind) {

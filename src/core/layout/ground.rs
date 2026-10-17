@@ -1,15 +1,16 @@
 //! Built from the room alone, so a plan drawn on it moves only when the
 //! ground does.
 use crate::core::engine;
+use crate::core::grid::{self, Weight};
 use crate::core::tiles::{self, Tile};
 use crate::core::world::{Room, terrain};
 
 #[derive(Clone, Debug)]
 pub struct Ground {
     pub room: String,
-    /// -1 where no creep crosses. Our own structures are not read: the plan is
-    /// drawn on the ground, never on itself.
-    pub weights: Vec<i32>,
+    /// Our own structures are not read: the plan is drawn on the ground,
+    /// never on itself.
+    pub weights: Vec<Weight>,
     pub free: Vec<bool>,
     pub sources: Vec<Tile>,
     pub minerals: Vec<Tile>,
@@ -48,20 +49,22 @@ pub fn of_room(room: &Room) -> Option<Ground> {
         return None;
     }
 
-    let mut weights = vec![0i32; tiles::COUNT];
-
-    for (i, t) in room.terrain.iter().enumerate().take(tiles::COUNT) {
-        weights[i] = if t & terrain::WALL != 0 {
-            -1
-        } else if t & terrain::SWAMP != 0 {
-            engine::SWAMP_WEIGHT
-        } else {
-            engine::PLAIN_WEIGHT
-        };
-    }
+    let mut weights: Vec<Weight> = room
+        .terrain
+        .iter()
+        .map(|t| {
+            if t & terrain::WALL != 0 {
+                None
+            } else if t & terrain::SWAMP != 0 {
+                grid::weight(engine::SWAMP_WEIGHT)
+            } else {
+                grid::weight(engine::PLAIN_WEIGHT)
+            }
+        })
+        .collect();
 
     for t in obstacles(room) {
-        weights[t] = -1;
+        weights[t] = None;
     }
 
     let mut sources: Vec<Tile> = room.sources.iter().map(|s| tiles::of_pos(&s.pos)).collect();
@@ -76,13 +79,13 @@ pub fn of_room(room: &Room) -> Option<Ground> {
     let controller = room.controller.as_ref().map(|c| tiles::of_pos(&c.pos));
 
     for t in &sources {
-        weights[*t] = -1;
+        weights[*t] = None;
     }
     for t in &minerals {
-        weights[*t] = -1;
+        weights[*t] = None;
     }
     if let Some(c) = controller {
-        weights[c] = -1;
+        weights[c] = None;
     }
 
     let mut free = vec![false; tiles::COUNT];
@@ -91,7 +94,7 @@ pub fn of_room(room: &Room) -> Option<Ground> {
     for i in tiles::all() {
         let x = tiles::x_of(i);
         let y = tiles::y_of(i);
-        free[i] = weights[i] >= 0
+        free[i] = weights[i].is_some()
             && x >= edge
             && y >= edge
             && x < tiles::SIDE - edge
@@ -182,7 +185,7 @@ fn valid(ground: &Ground, anchor: Tile) -> bool {
         && y >= 2
         && x < tiles::SIDE - 2
         && y < tiles::SIDE - 2
-        && ground.weights[anchor] >= 0
+        && ground.weights[anchor].is_some()
         && spawn_slots(anchor).iter().any(|s| ground.free[*s])
 }
 

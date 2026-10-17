@@ -7,7 +7,7 @@ pub mod grid;
 pub mod tiles;
 
 use self::grid::{
-    FatigueFactor, Footprint, UNREACHED, flood, on_edge, step_table, step_ticks, weight_of,
+    FatigueFactor, Footprint, UNREACHED, Weight, flood, on_edge, step_table, step_ticks, weight_of,
 };
 use self::tiles::Tile;
 use super::engine;
@@ -33,14 +33,14 @@ pub struct Target {
 /// yields to nothing we decide, so nothing may stand on its tile this tick.
 #[derive(Clone, Debug)]
 pub struct RoomGrid {
-    pub weights: Rc<Vec<i32>>,
+    pub weights: Rc<Vec<Weight>>,
     pub floods: HashMap<String, Rc<Vec<i32>>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Field {
     pub footprint: Footprint,
-    pub weights: Rc<Vec<i32>>,
+    pub weights: Rc<Vec<Weight>>,
     pub factor: FatigueFactor,
     pub dist: Rc<Vec<i32>>,
 }
@@ -54,16 +54,14 @@ pub struct Atlas {
 
 impl Field {
     fn via(&self, next: Tile) -> i32 {
-        let weight = weight_of(self.footprint, &self.weights, next);
-        if weight < 0 {
+        let Some(weight) = grid::value(weight_of(self.footprint, &self.weights, next)) else {
+            return UNREACHED;
+        };
+        let d = self.dist[next];
+        if d == UNREACHED || (d > 0 && on_edge(self.footprint, next)) {
             UNREACHED
         } else {
-            let d = self.dist[next];
-            if d == UNREACHED || (d > 0 && on_edge(self.footprint, next)) {
-                UNREACHED
-            } else {
-                step_ticks(self.factor, weight).map_or(UNREACHED, |step| d + step)
-            }
+            step_ticks(self.factor, weight).map_or(UNREACHED, |step| d + step)
         }
     }
 
@@ -72,7 +70,7 @@ impl Field {
     }
 
     pub fn ticks(&self, tile: Tile) -> Option<i32> {
-        let d = if weight_of(self.footprint, &self.weights, tile) >= 0 {
+        let d = if weight_of(self.footprint, &self.weights, tile).is_some() {
             self.dist[tile]
         } else {
             self.best(tile).map_or(UNREACHED, |next| self.via(next))
@@ -200,7 +198,7 @@ impl Atlas {
     /// are unbounded; past this the room floods afresh.
     const KEPT_FLOODS: usize = 500;
 
-    fn same(a: &[i32], b: &[i32]) -> bool {
+    fn same(a: &[Weight], b: &[Weight]) -> bool {
         a == b
     }
 
@@ -214,55 +212,55 @@ impl Atlas {
             .iter()
             .filter(|r| r.terrain.len() == tiles::COUNT)
         {
-            let mut weights = vec![0i32; tiles::COUNT];
+            let mut weights: Vec<Weight> = vec![None; tiles::COUNT];
             let terrain = &room.terrain;
 
             for (weight, t) in weights.iter_mut().zip(terrain) {
                 *weight = if t & super::world::terrain::WALL != 0 {
-                    -1
+                    None
                 } else if t & super::world::terrain::SWAMP != 0 {
-                    engine::SWAMP_WEIGHT
+                    grid::weight(engine::SWAMP_WEIGHT)
                 } else {
-                    engine::PLAIN_WEIGHT
+                    grid::weight(engine::PLAIN_WEIGHT)
                 };
             }
 
             for s in &room.structures {
                 if s.kind == Kind::Road {
-                    weights[tiles::of_pos(&s.pos)] = engine::ROAD_WEIGHT;
+                    weights[tiles::of_pos(&s.pos)] = grid::weight(engine::ROAD_WEIGHT);
                 }
             }
 
             for tile in Atlas::work_seats(room) {
-                weights[tile] = grid::SEAT_WEIGHT;
+                weights[tile] = grid::weight(grid::SEAT_WEIGHT);
             }
 
             for s in &room.structures {
                 if !s.walkable {
-                    weights[tiles::of_pos(&s.pos)] = -1;
+                    weights[tiles::of_pos(&s.pos)] = None;
                 }
             }
 
             for site in &room.sites {
                 if site.owner.is_ours() && !site.kind.walkable() {
-                    weights[tiles::of_pos(&site.pos)] = -1;
+                    weights[tiles::of_pos(&site.pos)] = None;
                 }
             }
 
             for source in &room.sources {
-                weights[tiles::of_pos(&source.pos)] = -1;
+                weights[tiles::of_pos(&source.pos)] = None;
             }
 
             for mineral in &room.minerals {
-                weights[tiles::of_pos(&mineral.pos)] = -1;
+                weights[tiles::of_pos(&mineral.pos)] = None;
             }
 
             if let Some(c) = &room.controller {
-                weights[tiles::of_pos(&c.pos)] = -1;
+                weights[tiles::of_pos(&c.pos)] = None;
             }
 
             for creep in &room.hostiles {
-                weights[tiles::of_pos(&creep.pos)] = -1;
+                weights[tiles::of_pos(&creep.pos)] = None;
             }
 
             let weights = Rc::new(weights);
@@ -298,22 +296,22 @@ impl Atlas {
         self.hits
     }
 
-    pub fn weights(&self, room: &str) -> Option<Vec<i32>> {
+    pub fn weights(&self, room: &str) -> Option<Vec<Weight>> {
         self.rooms.get(room).map(|grid| (*grid.weights).clone())
     }
 
     pub fn passable(&self, room: &str, tile: Tile) -> bool {
         self.rooms
             .get(room)
-            .is_some_and(|grid| grid.weights[tile] >= 0)
+            .is_some_and(|grid| grid.weights[tile].is_some())
     }
 
     pub fn sees(&self, room: &str) -> bool {
         self.rooms.contains_key(room)
     }
 
-    fn seat(footprint: Footprint, weights: &[i32], tile: Tile) -> bool {
-        weight_of(footprint, weights, tile) >= 0 && !on_edge(footprint, tile)
+    fn seat(footprint: Footprint, weights: &[Weight], tile: Tile) -> bool {
+        weight_of(footprint, weights, tile).is_some() && !on_edge(footprint, tile)
     }
 
     fn reach(footprint: Footprint, anchor: Tile, tile: Tile) -> i32 {
@@ -329,7 +327,7 @@ impl Atlas {
 
     fn seats_near(
         footprint: Footprint,
-        weights: &[i32],
+        weights: &[Weight],
         range: i32,
         tile: Tile,
         into: &mut Vec<Tile>,
@@ -372,9 +370,9 @@ impl Atlas {
         let near = self.rooms.get(from).map(|g| &g.weights);
         let far = self.rooms.get(onto).map(|g| &g.weights);
         for &tile in tiles::exit_tiles(exit) {
-            let near_walkable = near.map(|weights| weights[tile] >= 0).unwrap_or(true);
+            let near_walkable = near.map(|weights| weights[tile].is_some()).unwrap_or(true);
             let far_walkable = far
-                .map(|weights| tiles::landing(tile).is_some_and(|l| weights[l] >= 0))
+                .map(|weights| tiles::landing(tile).is_some_and(|l| weights[l].is_some()))
                 .unwrap_or(true);
             if near_walkable && far_walkable {
                 return true;
@@ -452,11 +450,11 @@ impl Atlas {
         }
     }
 
-    fn exit_goals(footprint: Footprint, weights: &[i32], exit: i32) -> Vec<Tile> {
+    fn exit_goals(footprint: Footprint, weights: &[Weight], exit: i32) -> Vec<Tile> {
         match footprint {
             Footprint::One => tiles::exit_tiles(exit)
                 .iter()
-                .filter(|tile| weights[**tile] >= 0)
+                .filter(|tile| weights[**tile].is_some())
                 .copied()
                 .collect(),
             Footprint::Quad => {
@@ -469,7 +467,7 @@ impl Atlas {
                         5 => tiles::index(i, inner),
                         _ => tiles::index(0, i),
                     };
-                    if weight_of(Footprint::Quad, weights, anchor) >= 0 {
+                    if weight_of(Footprint::Quad, weights, anchor).is_some() {
                         goals.push(anchor);
                     }
                 }
