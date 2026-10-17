@@ -5,12 +5,7 @@ module Fabot.Core.Move.Arbitrate
 open Fabot.Core
 open Fabot.Core.Grid
 
-/// `Searches` is the count `scripts/counts` reads.
-type Resolution =
-    {
-        Steps: (string * int) list
-        Searches: int
-    }
+type Resolution = { Steps: (string * int) list }
 
 let private covered (footprint: Footprint) (anchor: int) : int[] =
     match footprint with
@@ -199,7 +194,6 @@ let resolve
 
     let searchedAt = Array.create n -1
     let mutable clock = 0
-    let mutable searches = 0
     let mutable changed = true
 
     while changed do
@@ -221,7 +215,6 @@ let resolve
                 searchedAt.[i] <- clock
 
             if stale && not content then
-                searches <- searches + 1
                 stamp <- stamp + 1
                 bestChain.Clear()
                 bestScore <- 0
@@ -254,7 +247,6 @@ let resolve
                         yield order.[i].Creep, Tiles.direction order.[i].At tileOf.[i]
             ]
             |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b))
-        Searches = searches
     }
 
 let arbitrateWith
