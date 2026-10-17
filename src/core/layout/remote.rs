@@ -1,6 +1,6 @@
 //! A declared outpost has no spawn to anchor a plan on, so its container and
 //! road are placed off the haul's own walk home.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::core::HashMap;
 
@@ -8,7 +8,7 @@ use crate::core::atlas::{Atlas, Mover, Target, Tree};
 use crate::core::grid::Footprint;
 use crate::core::intents::{Intent, RoomAct};
 use crate::core::tick::{self, Outpost};
-use crate::core::tiles::{self, Tile};
+use crate::core::tiles::{self, Tile, TileSet};
 use crate::core::world::{Kind, Owner, Pos, Room, World, terrain};
 
 use super::sites::SITES_IN_FLIGHT;
@@ -73,7 +73,7 @@ fn walk(atlas: &mut Atlas, target: &Target, from: &Pos) -> Vec<Pos> {
 }
 
 fn opened(
-    taken: &mut BTreeMap<String, BTreeSet<Tile>>,
+    taken: &mut BTreeMap<String, TileSet>,
     pending: &mut BTreeMap<String, i32>,
     planned: &[Intent],
     room: &Room,
@@ -82,7 +82,7 @@ fn opened(
         return;
     }
 
-    let mut tiles_open: BTreeSet<Tile> = BTreeSet::new();
+    let mut tiles_open = TileSet::default();
 
     for s in &room.structures {
         if !s.kind.is_rampart() {
@@ -112,7 +112,7 @@ fn opened(
 #[allow(clippy::too_many_arguments)]
 fn place(
     rooms: &BTreeMap<String, &Room>,
-    taken: &mut BTreeMap<String, BTreeSet<Tile>>,
+    taken: &mut BTreeMap<String, TileSet>,
     pending: &mut BTreeMap<String, i32>,
     planned: &[Intent],
     budget: &mut i32,
@@ -181,7 +181,7 @@ pub fn sites(
 ) -> Vec<Intent> {
     let mut intents: Vec<Intent> = Vec::new();
     let mut budget = budget;
-    let mut taken: BTreeMap<String, BTreeSet<Tile>> = BTreeMap::new();
+    let mut taken: BTreeMap<String, TileSet> = BTreeMap::new();
     let mut pending: BTreeMap<String, i32> = BTreeMap::new();
     let mut rooms: BTreeMap<String, &Room> = BTreeMap::new();
 
@@ -262,7 +262,7 @@ pub fn sites(
                             for t in tiles::within(1, tiles::of_pos(&s.pos)) {
                                 if t != tiles::of_pos(&s.pos)
                                     && !tiles::on_edge(t)
-                                    && !open_tiles.contains(&t)
+                                    && !open_tiles.contains(t)
                                     && !terrain::is_wall(
                                         &room.terrain,
                                         tiles::x_of(t),

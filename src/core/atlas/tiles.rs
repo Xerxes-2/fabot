@@ -66,6 +66,30 @@ pub fn table<T: Clone>(value: T) -> Table<T> {
         .unwrap_or_else(|_| unreachable!())
 }
 
+/// A room's tiles, a bit each.
+#[derive(Clone, Debug)]
+pub struct TileSet([u64; COUNT.div_ceil(64)]);
+
+impl Default for TileSet {
+    fn default() -> TileSet {
+        TileSet([0; COUNT.div_ceil(64)])
+    }
+}
+
+impl TileSet {
+    /// Whether `tile` was not in the set.
+    pub fn insert(&mut self, tile: Tile) -> bool {
+        let (word, bit) = (tile.index() / 64, 1u64 << (tile.index() % 64));
+        let new = self.0[word] & bit == 0;
+        self.0[word] |= bit;
+        new
+    }
+
+    pub fn contains(&self, tile: Tile) -> bool {
+        self.0[tile.index() / 64] & (1u64 << (tile.index() % 64)) != 0
+    }
+}
+
 pub fn all() -> impl Iterator<Item = Tile> {
     (0..COUNT as u16).map(Tile)
 }
