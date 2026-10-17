@@ -131,7 +131,7 @@ Docs:
 2. `jj describe` with a conventional-commit subject and one `Fixes #<n>` trailer line per issue.
 3. `jj ship [-r REV]` (`scripts/ship.sh`): the gates (`npm test`: format check, line ceilings, `dotnet test`; then the build, `npm run smoke` and `npm run scenario`), then the `claude.session-branch` bookmark (`main` locally, set once with `jj config set --repo claude.session-branch main`) moved to REV and pushed. Its gates are the pre-push run; don't run `npm test` again before it. A pushed change is immutable.
    Before it, `jj log -r 'main..REV'`: every change listed ships.
-4. `npm run deploy` builds, smokes and uploads the bundle to the live server; the first tick after it is a cold reset.
+4. `npm run deploy` builds, smokes and uploads the Rust bundle to the live server; the first tick after it is a cold reset.
 
 Squash TDD slices into one change per issue; push per issue.
 
@@ -164,17 +164,17 @@ A cloud session (claude.ai/code) may push only the branch it was cloned on, so t
 
 ## Live game
 
-**The live server runs v1** until the owner deploys v2 on purpose: `npm run
-deploy` from this tree uploads a bot that does nothing yet. Never deploy
-unasked.
+**The live server runs v2's Rust bundle** (since 2026-10-17): `npm run deploy`
+builds, smokes and uploads `dist/fabot-rs.js`; `npm run deploy:fable` uploads
+the F# bundle instead. Never deploy unasked. Live declarations (outposts,
+allies, reserve) are set with `observe declare`.
 
 `npm run observe -- health` first after a deploy; then `cpu`, `faults`,
 `switches`, `capture`, `wait --ticks N`. Kill switches: `observe switch <name>
 on|off|clear`. The commands ARCHITECTURE.md names beyond these (`engagements`,
 `exchange`, `declare`, `replay`) land with their modules.
 
-v1 lives on the `v1` bookmark (`427ff628`, the code running live). It takes
-maintenance only — a live firefight or a deploy-blocking break — committed on
-top of `v1`, gated by its own `npm test`, pushed with `jj git push -b v1`, and
-deployed from a workspace on `v1`. Nothing ports from v2 to v1. For v2 it is
+v1 lives on the `v1` bookmark (`9677b5e8`, the code that ran live before v2).
+It is a rollback only: deployed from a workspace on `v1`, never changed again.
+Nothing ports from v2 to v1. For v2 it is
 source to port from (`git show v1:<path>`), never a fact about v2.
