@@ -178,13 +178,30 @@ const CONSTRUCTION_COST = {
   observer: 8000, powerSpawn: 100000, extractor: 5000, lab: 50000, terminal: 100000, container: 5000, nuker: 100000, factory: 100000,
 };
 const REPAIR_COST = 0.01;
+// What a colony can use, not what it holds: a structure carries the level that
+// unlocked it, stock saturates at the bot's reserve, a site is not yet anything.
+const UNLOCK = {
+  spawn: 1, extension: 1, container: 1, road: 1, rampart: 1, constructedWall: 1, tower: 3, storage: 4, link: 5,
+  extractor: 6, lab: 6, terminal: 6, factory: 7, observer: 8, powerSpawn: 8, nuker: 8,
+};
+const TOWERS = [0, 0, 0, 1, 1, 2, 2, 3, 6];
+// `reserveTarget` (src/Core/Economy/Quota.fs): every tower firing through a
+// creep's life, twice over — and nothing before storage exists to keep it in.
+const reserveOf = (level) => (level >= 4 ? TOWERS[level] * 10 * 1500 * 2 : 0);
+
+const creditOf = (stock, level) => {
+  const reserve = reserveOf(level);
+  return reserve === 0 ? stock : reserve * Math.tanh(stock / reserve);
+};
 const world = await shard.loadWorld();
 const roadCost = (room, pos) => {
   const t = world.map.getRoomTerrain(room).get(pos.x, pos.y);
   return t & 1 ? 150 * 300 : t & 2 ? 5 * 300 : 300;
 };
-function worthOf(rooms, stock) {
+function worthAndScore(rooms, stock) {
   const worth = { controller: 0, structures: 0, fortification: 0, sites: 0, stock };
+  const score = { controller: 0, structures: 0, fortification: 0, stock: 0 };
+  const level = Math.max(0, ...rooms.map((r) => r["#level"] ?? 0));
   for (const room of rooms) for (const o of room["#objects"]) {
     const mine = o["#user"] === ours;
     const ownerless = o.structureType === "road" || o.structureType === "container";
@@ -197,10 +214,15 @@ function worthOf(rooms, stock) {
     } else if (o.structureType === "rampart" || o.structureType === "constructedWall") {
       if (mine || o.structureType === "constructedWall") worth.fortification += Math.floor(o.hits * REPAIR_COST);
     } else if (o.structureType !== undefined && (mine || ownerless)) {
-      worth.structures += o.structureType === "road" ? roadCost(room.name, o.pos) : CONSTRUCTION_COST[o.structureType] ?? 0;
+      const cost = o.structureType === "road" ? roadCost(room.name, o.pos) : CONSTRUCTION_COST[o.structureType] ?? 0;
+      worth.structures += cost;
+      score.structures += cost * (1 + Math.log(UNLOCK[o.structureType] ?? 1));
     }
   }
-  return worth;
+  score.controller = worth.controller;
+  score.fortification = worth.fortification;
+  score.stock = creditOf(stock, level);
+  return { worth, score };
 }
 
 const born = new Set();
@@ -677,7 +699,9 @@ for (let t = 0; t < ticks; t++) {
     const row = sample(t, time, room);
     row.cpu = cpu;
     row.ledger = ledgerRow();
-    row.worth = worthOf(rooms, ledger.stock);
+    const held = worthAndScore(rooms, ledger.stock);
+    row.worth = held.worth;
+    row.score = held.score;
     row.rooms = roomLines(rooms);
     row.others = {};
     for (const o of opponents) {

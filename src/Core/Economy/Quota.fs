@@ -510,6 +510,12 @@ let plan
         |> Array.choose (fun (room, owner) -> owner |> Option.map (fun ci -> room, ci))
         |> Map.ofArray
 
+    /// A colony that feeds outposts cannot wait for a bank that holds its whole hauler.
+    let served = Array.zeroCreate colonies.Length
+
+    for KeyValue(_, ci) in owners do
+        served.[ci] <- served.[ci] + 1
+
     let others = groundDemands owners leg derived
 
     let all =
@@ -729,10 +735,15 @@ let plan
     for seat in ordered do
         match seat.Colony with
         | Some ci when idle.[ci].Count > 0 && not (seat.Pattern.IsUpgrader && waiting.[ci]) ->
-            if Engine.bodyCost seat.Body <= bank.[ci] then
-                castAt ci seat.Pattern seat.Body false
-            else
-                waiting.[ci] <- true
+            let body =
+                if seat.Pattern.IsHauler && served.[ci] > 1 then
+                    sized seat.Pattern (partsOf seat.Pattern seat.Body) bank.[ci]
+                else
+                    Some seat.Body
+
+            match body with
+            | Some fit when Engine.bodyCost fit <= bank.[ci] -> castAt ci seat.Pattern fit false
+            | _ -> waiting.[ci] <- true
         | _ -> ()
 
     {

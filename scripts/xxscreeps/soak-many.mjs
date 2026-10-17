@@ -10,7 +10,7 @@
 //   --seed   the starts (default 1,2,1+7): an engine seed, or seed+K for a bot that
 //            sits out its first K ticks (soak.mjs --late), a nudge the seed
 //            alone does not give a room with few tie-breaks
-//   --room   these rooms instead of the two extremes of harvest seats: both
+//   --room   these rooms instead of the extremes of harvest seats: both
 //            sources with one seat (a small harvester cannot fill a source)
 //            and both with four or more (bodies can crowd in instead)
 //   --ticks  per run (default 30000; a node's 5000)
@@ -71,7 +71,7 @@ const seeds = (flags["--seed"] ?? "1,2,1+7").split(",").map((spec) => {
 const jobs = whole(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / 2)), "--jobs", 1);
 const tag = flags["--tag"] ?? "many";
 if (!/^[A-Za-z0-9-]+$/.test(tag)) fail("--tag: letters, digits, dashes");
-const rooms = (flags["--room"] ?? "W8N7,W9N8,W3N1,W8N3").split(",");
+const rooms = (flags["--room"] ?? "W9N8,W8N3").split(",");
 
 const bots = (flags["--bot"] ?? join(REPO, "dist/main.js")).split(",").map((spec) => {
   const [name, path] = spec.includes("=") ? spec.split("=") : [basename(spec, ".js"), spec];
@@ -179,6 +179,7 @@ const rowOf = (run) => {
     fortified: k(w?.fortification ?? 0),
     stock: k(w?.stock ?? 0),
     worth: k(w ? w.controller + w.structures + w.sites + w.fortification + w.stock : 0),
+    score: k(last.score ? last.score.controller + last.score.structures + last.score.fortification + last.score.stock : 0),
     faults: faults + refusals,
     // The ledger closes within a percent of what was dug, or the worth is
     // not to be read.
@@ -187,14 +188,14 @@ const rowOf = (run) => {
 };
 
 const cell = (v, w = 9) => String(v ?? "-").padStart(w);
-console.log(["room", "seed", "bundle", "ok", "rcl", "rcl3", "rcl4", "control", "structs", "fortify", "stock", "worth", "faults"].map((h, i) => cell(h, i === 2 ? 12 : 9)).join(""));
+console.log(["room", "seed", "bundle", "ok", "rcl", "rcl3", "rcl4", "control", "structs", "fortify", "stock", "worth", "score", "faults"].map((h, i) => cell(h, i === 2 ? 12 : 9)).join(""));
 for (const room of rooms)
   for (const seed of seeds)
     for (const bot of bots) {
       const run = runs.find((r) => r.room === room && r.seed === seed && r.bot === bot);
       const r = rowOf(run);
       console.log(
-        [room, seed.label, bot.name, r.ok ? "yes" : "NO", r.rcl, r.rcl3, r.rcl4, r.controller, r.structures, r.fortified, r.stock, r.open ? `${r.worth}?` : r.worth, r.faults]
+        [room, seed.label, bot.name, r.ok ? "yes" : "NO", r.rcl, r.rcl3, r.rcl4, r.controller, r.structures, r.fortified, r.stock, r.open ? `${r.worth}?` : r.worth, r.open ? `${r.score}?` : r.score, r.faults]
           .map((v, i) => cell(v, i === 2 ? 12 : 9))
           .join(""),
       );
