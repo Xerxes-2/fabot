@@ -100,10 +100,10 @@ pub fn step_ticks(factor: FatigueFactor, weight: i32) -> Option<i32> {
     Some(if seat { SEAT_SWAMPS * ticks } else { ticks })
 }
 
-/// The flood reads a table, not a closure; -1 where no step is taken.
-pub fn step_table(factor: FatigueFactor) -> Vec<i32> {
+/// The flood reads a table, not a closure.
+pub fn step_table(factor: FatigueFactor) -> Vec<Option<u16>> {
     (0..=SEAT_WEIGHT)
-        .map(|w| step_ticks(factor, w).unwrap_or(-1))
+        .map(|w| step_ticks(factor, w).map(|t| t as u16))
         .collect()
 }
 
@@ -232,25 +232,26 @@ impl Dial {
 
 /// Dial's queue: no step costs more than the table's dearest, so a ring of one
 /// bucket more holds every queued distance apart.
-pub fn flood(footprint: Footprint, weights: &[Weight], steps: &[i32], goals: &[Tile]) -> Vec<i32> {
+pub fn flood(
+    footprint: Footprint,
+    weights: &[Weight],
+    steps: &[Option<u16>],
+    goals: &[Tile],
+) -> Vec<i32> {
     let mut dist = vec![UNREACHED; tiles::COUNT];
-    // The step onto a tile; -1 where no walk leaves it.
-    let mut price = vec![0i32; tiles::COUNT];
-    let mut dearest = 0;
-    for s in steps {
-        dearest = dearest.max(*s);
-    }
-    let mut dial = Dial::new((dearest + 1) as usize);
+    // The step off a tile; None where no walk leaves it.
+    let mut price: Vec<Option<u16>> = vec![None; tiles::COUNT];
+    let dearest = steps.iter().flatten().max().copied().unwrap_or(0);
+    let mut dial = Dial::new(dearest as usize + 1);
 
-    let step_on =
-        |weight: NonZeroU8| -> i32 { steps.get(weight.get() as usize).copied().unwrap_or(-1) };
+    let step_on = |weight: NonZeroU8| steps.get(weight.get() as usize).copied().flatten();
 
     // A blocked tile reads -1 until the end, so no candidate beats it. A
     // non-goal border tile leads nowhere: a body stepping onto it leaves.
     for t in tiles::all() {
         match weight_of(footprint, weights, t) {
             None => dist[t] = -1,
-            Some(_) if on_edge(footprint, t) => price[t] = -1,
+            Some(_) if on_edge(footprint, t) => (),
             Some(w) => price[t] = step_on(w),
         }
     }
@@ -274,10 +275,9 @@ pub fn flood(footprint: Footprint, weights: &[Weight], steps: &[i32], goals: &[T
             continue;
         };
         dial.unlink(tile, &dist);
-        let p = price[tile];
-        if p >= 0 {
+        if let Some(p) = price[tile] {
             dial.relaxed += 1;
-            let candidate = d + p;
+            let candidate = d + i32::from(p);
             let x = tiles::x_of(tile);
             let y = tiles::y_of(tile);
             let mut inner = [tile; 8];

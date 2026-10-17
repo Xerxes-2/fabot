@@ -160,8 +160,10 @@ pub fn rampart_level() -> i32 {
 /// A road leaves the lattice only to go round a wall. A design constant.
 const DETOUR: i32 = 2 * engine::PLAIN_WEIGHT;
 
-fn steps() -> Vec<i32> {
-    (0..=(engine::SWAMP_WEIGHT + DETOUR)).collect()
+fn steps() -> Vec<Option<u16>> {
+    (0..=(engine::SWAMP_WEIGHT + DETOUR) as u16)
+        .map(Some)
+        .collect()
 }
 
 const NONE: i32 = i32::MAX;
