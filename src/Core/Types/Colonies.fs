@@ -638,7 +638,8 @@ module Errand =
         {
             RoomName = "W15S25"
             Target = "6a901a3bb8684d0008337ed2", { Room = "W15S25"; X = 44; Y = 6 }
-            Held = false
+            // Held 2026-10-17: an Invader reset the burn count, and 12th is out of reach.
+            Held = true
         }
 
 /// A [[salvage]] room: declared by name alone, because what is taken down in
