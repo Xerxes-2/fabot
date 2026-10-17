@@ -8,7 +8,7 @@ use crate::core::atlas::Atlas;
 use crate::core::engine;
 use crate::core::grid::{self, Footprint, UNREACHED};
 use crate::core::lists;
-use crate::core::tiles;
+use crate::core::tiles::{self, Tile};
 use crate::core::world::Kind;
 
 use super::ground::{self, Ground, SPAWN_OFFSETS};
@@ -22,7 +22,7 @@ fn wrap(v: i32) -> i32 {
     ((v % PERIOD) + PERIOD) % PERIOD
 }
 
-pub fn on_lattice(anchor: i32, tile: i32) -> bool {
+pub fn on_lattice(anchor: Tile, tile: Tile) -> bool {
     let dx = tiles::x_of(tile) - tiles::x_of(anchor);
     let dy = tiles::y_of(tile) - tiles::y_of(anchor);
     wrap(dx + dy) == 0 || wrap(dx - dy) == 0
@@ -64,30 +64,30 @@ pub fn priority(kind: &Kind) -> i32 {
     }
 }
 
-fn lab_cluster(inputs: &[i32], rank: &[i32], is_open: impl Fn(i32) -> bool) -> Option<Vec<i32>> {
+fn lab_cluster(inputs: &[Tile], rank: &[i32], is_open: impl Fn(Tile) -> bool) -> Option<Vec<Tile>> {
     let reach = engine::LAB_REACTION_RANGE;
     let labs = labs();
-    let mut best: Option<Vec<i32>> = None;
+    let mut best: Option<Vec<Tile>> = None;
     let mut best_cost = i32::MAX;
 
     for a in inputs {
         let a = *a;
         // Every cluster through a later input costs at least its rank.
-        if is_open(a) && rank[a as usize] < best_cost {
+        if is_open(a) && rank[a] < best_cost {
             for direction in [
                 tiles::RIGHT,
                 tiles::BOTTOM_RIGHT,
                 tiles::BOTTOM,
                 tiles::BOTTOM_LEFT,
             ] {
-                let b = tiles::neighbour(a, direction);
-
-                if b >= 0 && is_open(b) {
+                if let Some(b) = tiles::neighbour(a, direction)
+                    && is_open(b)
+                {
                     let x0 = tiles::x_of(a).max(tiles::x_of(b)) - reach;
                     let x1 = tiles::x_of(a).min(tiles::x_of(b)) + reach;
                     let y0 = tiles::y_of(a).max(tiles::y_of(b)) - reach;
                     let y1 = tiles::y_of(a).min(tiles::y_of(b)) + reach;
-                    let mut window: Vec<i32> = Vec::new();
+                    let mut window: Vec<Tile> = Vec::new();
 
                     for y in 0.max(y0)..=(tiles::SIDE - 1).min(y1) {
                         for x in 0.max(x0)..=(tiles::SIDE - 1).min(x1) {
@@ -100,13 +100,12 @@ fn lab_cluster(inputs: &[i32], rank: &[i32], is_open: impl Fn(i32) -> bool) -> O
                     }
 
                     if window.len() as i32 >= labs - 2 {
-                        let sorted = lists::sorted_by_key(|t| rank[*t as usize], &window);
-                        let outputs: Vec<i32> =
+                        let sorted = lists::sorted_by_key(|t| rank[*t], &window);
+                        let outputs: Vec<Tile> =
                             sorted.into_iter().take((labs - 2) as usize).collect();
 
-                        let cost = rank[a as usize]
-                            + rank[b as usize]
-                            + outputs.iter().map(|t| rank[*t as usize]).sum::<i32>();
+                        let cost =
+                            rank[a] + rank[b] + outputs.iter().map(|t| rank[*t]).sum::<i32>();
 
                         if cost < best_cost {
                             best_cost = cost;
@@ -173,33 +172,33 @@ pub fn haul_level() -> i32 {
 }
 
 struct Posted {
-    rock: i32,
-    container: i32,
-    link: Option<i32>,
-    path: Vec<i32>,
+    rock: Tile,
+    container: Tile,
+    link: Option<Tile>,
+    path: Vec<Tile>,
 }
 
-/// So level, walk and tile share one sort key; longer walks sort together.
+/// Walks past it sort together.
 const ROAD_SPAN: i32 = 1 << 14;
 
-pub fn down(weights: &[i32], dist: &[i32], t: i32) -> Option<i32> {
-    if dist[t as usize] == 0 {
+pub fn down(weights: &[i32], dist: &[i32], t: Tile) -> Option<Tile> {
+    if dist[t] == 0 {
         None
     } else {
         tiles::least_around(t, UNREACHED, |n| {
-            let d = dist[n as usize];
+            let d = dist[n];
 
-            if weights[n as usize] < 0 || d == UNREACHED || (d > 0 && tiles::on_edge(n)) {
+            if weights[n] < 0 || d == UNREACHED || (d > 0 && tiles::on_edge(n)) {
                 UNREACHED
             } else {
-                d + weights[n as usize]
+                d + weights[n]
             }
         })
     }
 }
 
-pub fn descend(weights: &[i32], dist: &[i32], start: i32) -> Vec<i32> {
-    let mut path: Vec<i32> = Vec::new();
+pub fn descend(weights: &[i32], dist: &[i32], start: Tile) -> Vec<Tile> {
+    let mut path: Vec<Tile> = Vec::new();
     let mut here = down(weights, dist, start);
 
     while let Some(at) = here
@@ -210,20 +209,20 @@ pub fn descend(weights: &[i32], dist: &[i32], start: i32) -> Vec<i32> {
     }
 
     match path.last() {
-        Some(last) if dist[*last as usize] == 0 => path,
+        Some(last) if dist[*last] == 0 => path,
         _ => Vec::new(),
     }
 }
 
 /// Sharing one of the container's seats, so a body there draws from either.
 pub fn controller_link(
-    walkable: impl Fn(i32) -> bool,
-    linkable: impl Fn(i32) -> bool,
-    standable: impl Fn(i32) -> bool,
-    controller: i32,
-    container: i32,
-) -> Option<i32> {
-    let seated: Vec<(i32, Vec<i32>)> = tiles::within(engine::UPGRADE_RANGE, controller)
+    walkable: impl Fn(Tile) -> bool,
+    linkable: impl Fn(Tile) -> bool,
+    standable: impl Fn(Tile) -> bool,
+    controller: Tile,
+    container: Tile,
+) -> Option<Tile> {
+    let seated: Vec<(Tile, Vec<Tile>)> = tiles::within(engine::UPGRADE_RANGE, controller)
         .into_iter()
         .filter(|t| tiles::range(*t, container) > 1 && linkable(*t))
         .map(|t| (t, Atlas::upgrader_seats(&walkable, controller, t)))
@@ -233,7 +232,7 @@ pub fn controller_link(
         })
         .collect();
 
-    let mut best: Option<(i32, Vec<i32>)> = None;
+    let mut best: Option<(Tile, Vec<Tile>)> = None;
     for (t, seats) in seated {
         let key = (-(seats.len() as i32), tiles::range(t, container), t);
         let better = match &best {
@@ -251,26 +250,26 @@ pub fn controller_link(
     best.map(|(t, _)| t)
 }
 
-fn is_open(t: i32, rank: &[i32], taken: &[bool]) -> bool {
-    rank[t as usize] != NONE && !taken[t as usize]
+fn is_open(t: Tile, rank: &[i32], taken: &[bool]) -> bool {
+    rank[t] != NONE && !taken[t]
 }
 
 fn fill(
     kind: &Kind,
     n: i32,
-    ordered: &[i32],
+    ordered: &[Tile],
     taken: &mut [bool],
     cursor: &mut usize,
-    picked: &mut Vec<(Kind, i32)>,
+    picked: &mut Vec<(Kind, Tile)>,
 ) {
     for _ in 0..n {
-        while *cursor < ordered.len() && taken[ordered[*cursor] as usize] {
+        while *cursor < ordered.len() && taken[ordered[*cursor]] {
             *cursor += 1;
         }
 
         if *cursor < ordered.len() {
             let t = ordered[*cursor];
-            taken[t as usize] = true;
+            taken[t] = true;
             picked.push((kind.clone(), t));
         }
     }
@@ -279,19 +278,19 @@ fn fill(
 /// `spawns` only order the spawn slots, so a spawn on a slot never moves the
 /// plan. Ways are laid before slots are handed out, so no structure stands on
 /// one.
-fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (Plan, bool) {
+fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> (Plan, bool) {
     let weights: &[i32] = &ground.weights;
     let mut unfit: Vec<Cow<'static, str>> = Vec::new();
 
     let mut on_lat = vec![false; tiles::COUNT];
     let mut lane = vec![0i32; tiles::COUNT];
 
-    for t in 0..tiles::COUNT as i32 {
+    for t in tiles::all() {
         let on = on_lattice(anchor, t);
-        on_lat[t as usize] = on;
-        let w = weights[t as usize];
+        on_lat[t] = on;
+        let w = weights[t];
 
-        lane[t as usize] = if w < 0 || tiles::on_edge(t) {
+        lane[t] = if w < 0 || tiles::on_edge(t) {
             -1
         } else if on {
             w
@@ -300,25 +299,25 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
         };
     }
 
-    lane[anchor as usize] = engine::PLAIN_WEIGHT.max(weights[anchor as usize]);
+    lane[anchor] = engine::PLAIN_WEIGHT.max(weights[anchor]);
     let walk = grid::flood(Footprint::One, &lane, &steps(), &[anchor]);
 
     let mut clear = vec![false; tiles::COUNT];
-    let lattice = |t: i32| -> bool { on_lat[t as usize] && lane[t as usize] >= 0 };
+    let lattice = |t: Tile| -> bool { on_lat[t] && lane[t] >= 0 };
 
     let mut walked = vec![false; tiles::COUNT];
 
-    for t in 0..tiles::COUNT as i32 {
-        if lattice(t) && walk[t as usize] != UNREACHED {
+    for t in tiles::all() {
+        if lattice(t) && walk[t] != UNREACHED {
             let mut step = down(&lane, &walk, t);
 
             while let Some(at) = step
-                && !walked[at as usize]
+                && !walked[at]
             {
-                walked[at as usize] = true;
+                walked[at] = true;
 
                 if !lattice(at) {
-                    clear[at as usize] = true;
+                    clear[at] = true;
                 }
 
                 step = down(&lane, &walk, at);
@@ -326,17 +325,17 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
         }
     }
 
-    fn way_out(lane: &[i32], walk: &[i32], clear: &mut [bool], rock: i32) -> Vec<i32> {
+    fn way_out(lane: &[i32], walk: &[i32], clear: &mut [bool], rock: Tile) -> Vec<Tile> {
         let path = descend(lane, walk, rock);
 
-        for t in &path {
-            clear[*t as usize] = true;
+        for &t in &path {
+            clear[t] = true;
         }
 
         path
     }
 
-    let mut source_walks: Vec<(i32, Vec<i32>)> = Vec::new();
+    let mut source_walks: Vec<(Tile, Vec<Tile>)> = Vec::new();
     for s in &ground.sources {
         let path = way_out(&lane, &walk, &mut clear, *s);
         if path.is_empty() {
@@ -346,7 +345,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
         }
     }
 
-    let controller_walk: Vec<i32> = match ground.controller {
+    let controller_walk: Vec<Tile> = match ground.controller {
         Some(c) => {
             let path = way_out(&lane, &walk, &mut clear, c);
             if path.is_empty() {
@@ -359,7 +358,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
         None => Vec::new(),
     };
 
-    let mut mineral_walks: Vec<(i32, Vec<i32>)> = Vec::new();
+    let mut mineral_walks: Vec<(Tile, Vec<Tile>)> = Vec::new();
     for m in &ground.minerals {
         let path = way_out(&lane, &walk, &mut clear, *m);
         if path.is_empty() {
@@ -369,7 +368,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
         }
     }
 
-    let controller_seat: Option<(i32, i32, Vec<i32>)> =
+    let controller_seat: Option<(Tile, Tile, Vec<Tile>)> =
         match (ground.controller, controller_walk.as_slice()) {
             (Some(c), [_, second, rest @ ..])
                 if !on_first && tiles::range(*second, c) <= engine::UPGRADE_RANGE =>
@@ -380,55 +379,58 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
             _ => None,
         };
 
-    let walkable = |t: i32| weights[t as usize] >= 0;
+    let walkable = |t: Tile| weights[t] >= 0;
     let mut held = vec![false; tiles::COUNT];
 
     if let Some((c, buffer, _)) = &controller_seat {
         for n in Atlas::upgrader_seats(walkable, *c, *buffer) {
-            held[n as usize] = true;
+            held[n] = true;
         }
     }
 
-    let mut access: Vec<Option<i32>> = vec![None; tiles::COUNT];
-    let mut slot_list: Vec<i32> = Vec::new();
+    let mut access: Vec<Option<Tile>> = vec![None; tiles::COUNT];
+    let mut slot_list: Vec<(i32, Tile)> = Vec::new();
 
-    for t in 0..tiles::COUNT as i32 {
-        if ground.free[t as usize] && !clear[t as usize] && !on_lat[t as usize] {
-            let road = tiles::least_around(t, UNREACHED, |n| {
-                if lattice(n) {
-                    walk[n as usize]
-                } else {
-                    UNREACHED
-                }
-            });
+    for t in tiles::all() {
+        if ground.free[t] && !clear[t] && !on_lat[t] {
+            let road =
+                tiles::least_around(
+                    t,
+                    UNREACHED,
+                    |n| {
+                        if lattice(n) { walk[n] } else { UNREACHED }
+                    },
+                );
 
             if let Some(road) = road {
-                access[t as usize] = Some(road);
-                slot_list.push(walk[road as usize] * tiles::COUNT as i32 + t);
+                access[t] = Some(road);
+                slot_list.push((walk[road], t));
             }
         }
     }
 
     let mut keys = slot_list;
     keys.sort_unstable();
-    let ordered: Vec<i32> = keys.iter().map(|key| key % tiles::COUNT as i32).collect();
+    let ordered: Vec<Tile> = keys.iter().map(|(_, t)| *t).collect();
 
     let mut rank = vec![NONE; tiles::COUNT];
     for (i, t) in ordered.iter().enumerate() {
-        rank[*t as usize] = i as i32;
+        rank[*t] = i as i32;
     }
 
     let mut taken = vec![false; tiles::COUNT];
-    let mut picked: Vec<(Kind, i32)> = Vec::new();
+    let mut picked: Vec<(Kind, Tile)> = Vec::new();
     let mut cursor = 0usize;
 
     let mut hub_filled = 0usize;
 
     for direction in [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT] {
-        let t = tiles::neighbour(anchor, direction);
-
-        if hub_filled < HUB.len() && t >= 0 && rank[t as usize] != NONE && !taken[t as usize] {
-            taken[t as usize] = true;
+        if let Some(t) = tiles::neighbour(anchor, direction)
+            && hub_filled < HUB.len()
+            && rank[t] != NONE
+            && !taken[t]
+        {
+            taken[t] = true;
             picked.push((HUB[hub_filled].clone(), t));
             hub_filled += 1;
         }
@@ -440,18 +442,18 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
 
     let slots = ground::spawn_slots(anchor);
 
-    let order: Vec<i32> = slots
+    let order: Vec<Tile> = slots
         .iter()
-        .filter(|t| **t >= 0 && spawns.contains(t))
-        .chain(slots.iter().filter(|t| **t >= 0 && !spawns.contains(t)))
+        .filter(|t| spawns.contains(t))
+        .chain(slots.iter().filter(|t| !spawns.contains(t)))
         .copied()
         .collect();
 
     let mut placed_spawns = 0;
 
     for t in order {
-        if placed_spawns < count(&Kind::Spawn) && rank[t as usize] != NONE && !taken[t as usize] {
-            taken[t as usize] = true;
+        if placed_spawns < count(&Kind::Spawn) && rank[t] != NONE && !taken[t] {
+            taken[t] = true;
             picked.push((Kind::Spawn, t));
             placed_spawns += 1;
         }
@@ -467,13 +469,13 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
         fill(&kind, n, &ordered, &mut taken, &mut cursor, &mut picked);
     }
 
-    let nearest: Vec<i32> = ordered
+    let nearest: Vec<Tile> = ordered
         .iter()
         .copied()
         .filter(|t| is_open(*t, &rank, &taken))
         .collect();
 
-    let head: Vec<i32> = nearest
+    let head: Vec<Tile> = nearest
         .iter()
         .take(lab_search() as usize)
         .copied()
@@ -483,7 +485,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
 
     if let Some(cluster) = cluster {
         for t in cluster {
-            taken[t as usize] = true;
+            taken[t] = true;
             picked.push((Kind::Lab, t));
         }
     }
@@ -511,10 +513,10 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
             level,
         });
 
-        let mut road = access[*t as usize].or_else(|| {
+        let mut road = access[*t].or_else(|| {
             tiles::least_around(*t, UNREACHED, |n| {
-                if lane[n as usize] >= 0 && !taken[n as usize] {
-                    walk[n as usize]
+                if lane[n] >= 0 && !taken[n] {
+                    walk[n]
                 } else {
                     UNREACHED
                 }
@@ -522,12 +524,12 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
         });
 
         while let Some(at) = road {
-            road_level[at as usize] = road_level[at as usize].min(level.max(haul_level()));
+            road_level[at] = road_level[at].min(level.max(haul_level()));
             road = down(&lane, &walk, at);
         }
     }
 
-    road_level[anchor as usize] = road_level[anchor as usize].min(haul_level());
+    road_level[anchor] = road_level[anchor].min(haul_level());
 
     let mut board = Board {
         weights,
@@ -548,17 +550,17 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
 
     for (_, path) in &source_walks {
         for t in path {
-            board.on_way[*t as usize] = true;
+            board.on_way[*t] = true;
         }
     }
 
     for t in &controller_walk {
-        board.on_way[*t as usize] = true;
+        board.on_way[*t] = true;
     }
 
     for (_, path) in &mineral_walks {
         for t in path {
-            board.on_way[*t as usize] = true;
+            board.on_way[*t] = true;
         }
     }
 
@@ -574,12 +576,12 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
             .find(|t| board.dead_end(*rock, head, *t));
 
         match found {
-            Some(t) if !board.taken[head as usize] => {
+            Some(t) if !board.taken[head] => {
                 board.plant(&Kind::Container, t, rock_level);
                 board.pave(path, rock_level);
                 let link = board.source_link(t);
                 if let Some(l) = link {
-                    board.taken[l as usize] = true;
+                    board.taken[l] = true;
                 }
 
                 posted.push(Posted {
@@ -590,7 +592,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
                 });
             }
             _ => {
-                if !board.taken[head as usize] {
+                if !board.taken[head] {
                     board.plant(&Kind::Container, head, rock_level);
                 }
 
@@ -607,7 +609,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
     }
 
     if let Some((_, buffer, rest)) = &controller_seat {
-        if !board.taken[*buffer as usize] {
+        if !board.taken[*buffer] {
             board.plant(&Kind::Container, *buffer, rock_level);
         }
 
@@ -619,45 +621,45 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
     for (m, path) in &mineral_walks {
         board.plant(&Kind::Extractor, *m, dig_level);
 
-        if !board.taken[path[0] as usize] {
+        if !board.taken[path[0]] {
             board.plant(&Kind::Container, path[0], dig_level);
         }
 
         board.pave(&path[1..], dig_level);
     }
 
-    let mut links: Vec<i32> = Vec::new();
+    let mut links: Vec<Tile> = Vec::new();
 
     let mut linked = controller_seat.is_none();
 
     if let Some((c, container, _)) = &controller_seat {
         let found = {
-            let walkable = |t: i32| board.walkable(t);
-            let linkable = |t: i32| board.linkable(t);
-            let standable = |t: i32| board.standable(t);
+            let walkable = |t: Tile| board.walkable(t);
+            let linkable = |t: Tile| board.linkable(t);
+            let standable = |t: Tile| board.standable(t);
             controller_link(walkable, linkable, standable, *c, *container)
         };
 
         match found {
             Some(t) => {
-                board.taken[t as usize] = true;
+                board.taken[t] = true;
                 links.push(t);
                 linked = true;
 
-                let seats = Atlas::upgrader_seats(|t: i32| board.walkable(t), *c, t);
+                let seats = Atlas::upgrader_seats(|t: Tile| board.walkable(t), *c, t);
                 for n in seats {
-                    board.held[n as usize] = true;
+                    board.held[n] = true;
                 }
             }
             // A link built late beats none.
             None if on_first => {
-                let candidates: Vec<i32> = tiles::around(*container)
+                let candidates: Vec<Tile> = tiles::around(*container)
                     .iter()
                     .copied()
                     .filter(|t| board.free(*t) && tiles::range(*t, *c) <= engine::UPGRADE_RANGE)
                     .collect();
 
-                let mut best: Option<(i32, i32)> = None;
+                let mut best: Option<(i32, Tile)> = None;
                 for t in candidates {
                     let key = (-board.open_count(t), t);
                     if best.is_none_or(|b| key < b) {
@@ -666,7 +668,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
                 }
 
                 if let Some((_, t)) = best {
-                    board.taken[t as usize] = true;
+                    board.taken[t] = true;
                     links.push(t);
                 }
             }
@@ -681,13 +683,13 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
         let container = posted[i].container;
         let link = posted[i].link.or_else(|| board.source_link(container));
         if let Some(t) = link {
-            board.taken[t as usize] = true;
+            board.taken[t] = true;
             links.push(t);
         }
     }
 
     let hub_links = board.items.iter().filter(|i| i.kind.is_link()).count() as i32;
-    let outer: Vec<i32> = links
+    let outer: Vec<Tile> = links
         .iter()
         .take((count(&Kind::Link) - hub_links).max(0) as usize)
         .copied()
@@ -709,16 +711,11 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
         }
     }
 
-    let mut road_keys: Vec<i32> = Vec::new();
+    let mut road_keys: Vec<(i32, i32, Tile)> = Vec::new();
 
-    for t in 0..tiles::COUNT as i32 {
-        if board.road_level[t as usize] != NONE && !board.taken[t as usize] {
-            road_keys.push(
-                (board.road_level[t as usize] * ROAD_SPAN
-                    + (ROAD_SPAN - 1).min(board.walk[t as usize]))
-                    * tiles::COUNT as i32
-                    + t,
-            );
+    for t in tiles::all() {
+        if board.road_level[t] != NONE && !board.taken[t] {
+            road_keys.push((board.road_level[t], (ROAD_SPAN - 1).min(board.walk[t]), t));
         }
     }
 
@@ -726,18 +723,15 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
 
     let roads: Vec<Item> = road_keys
         .iter()
-        .map(|key| {
-            let t = key % tiles::COUNT as i32;
-            Item {
-                kind: Kind::Road,
-                tile: t,
-                level: board.road_level[t as usize],
-            }
+        .map(|&(_, _, t)| Item {
+            kind: Kind::Road,
+            tile: t,
+            level: board.road_level[t],
         })
         .collect();
 
     // A source's container too: its harvester cannot leave it.
-    let mut covered: Vec<(i32, i32)> = Vec::new();
+    let mut covered: Vec<(Tile, i32)> = Vec::new();
     for i in &board.items {
         if KEEP.contains(&i.kind) {
             covered.push((i.tile, i.level));
@@ -747,7 +741,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
         covered.push((p.container, rock_level));
     }
 
-    let mut distinct: Vec<(i32, i32)> = Vec::new();
+    let mut distinct: Vec<(Tile, i32)> = Vec::new();
     for c in covered {
         if !distinct.iter().any(|d| d.0 == c.0) {
             distinct.push(c);
@@ -778,12 +772,12 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
     // A container whose rock other seats ring goes before the extensions: its
     // harvester digs beside the crews. A rock's only seat waits for the bank,
     // or a small harvester holds it a life.
-    let crowded: Vec<i32> = posted
+    let crowded: Vec<Tile> = posted
         .iter()
         .filter(|p| {
             tiles::around(p.rock)
                 .iter()
-                .filter(|n| board.weights[**n as usize] >= 0)
+                .filter(|n| board.weights[**n] >= 0)
                 .count()
                 > 1
         })
@@ -832,7 +826,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
 
 /// The controller's container a tile further out, leaving the first for an
 /// upgrader to stand on.
-pub fn draw(ground: &Ground, anchor: i32, spawns: &[i32]) -> Plan {
+pub fn draw(ground: &Ground, anchor: Tile, spawns: &[Tile]) -> Plan {
     let (plan, linked) = draw_with(false, ground, anchor, spawns);
     if linked {
         plan
@@ -843,11 +837,11 @@ pub fn draw(ground: &Ground, anchor: i32, spawns: &[i32]) -> Plan {
 
 /// Scored so the spawns a plan places, built where it says, give the plan
 /// again: an anchor before it in the order seats no spawn, standing or not.
-pub fn of_ground(ground: &Ground, spawns: &[i32]) -> Option<Plan> {
+pub fn of_ground(ground: &Ground, spawns: &[Tile]) -> Option<Plan> {
     let candidates = ground::anchors(ground, spawns);
 
     let score = |plan: &Plan| -> i32 {
-        let placed: Vec<i32> = plan
+        let placed: Vec<Tile> = plan
             .items
             .iter()
             .filter(|i| i.kind.is_spawn())
@@ -893,7 +887,7 @@ pub fn of_ground(ground: &Ground, spawns: &[i32]) -> Option<Plan> {
 
 struct Board<'a> {
     weights: &'a [i32],
-    anchor: i32,
+    anchor: Tile,
     walk: Vec<i32>,
     taken: Vec<bool>,
     road_level: Vec<i32>,
@@ -905,30 +899,30 @@ struct Board<'a> {
 }
 
 impl Board<'_> {
-    fn walkable(&self, t: i32) -> bool {
-        self.weights[t as usize] >= 0
+    fn walkable(&self, t: Tile) -> bool {
+        self.weights[t] >= 0
     }
 
-    fn free(&self, n: i32) -> bool {
+    fn free(&self, n: Tile) -> bool {
         let x = tiles::x_of(n);
         let y = tiles::y_of(n);
 
-        self.weights[n as usize] >= 0
-            && !self.taken[n as usize]
-            && !self.on_way[n as usize]
-            && self.road_level[n as usize] == NONE
+        self.weights[n] >= 0
+            && !self.taken[n]
+            && !self.on_way[n]
+            && self.road_level[n] == NONE
             && x >= 2
             && y >= 2
             && x < tiles::SIDE - 2
             && y < tiles::SIDE - 2
     }
 
-    fn linkable(&self, n: i32) -> bool {
-        self.free(n) && !self.held[n as usize]
+    fn linkable(&self, n: Tile) -> bool {
+        self.free(n) && !self.held[n]
     }
 
-    fn link_beside(&self, onto: i32, key: impl Fn(i32) -> i32) -> Option<i32> {
-        let mut best: Option<(i32, i32)> = None;
+    fn link_beside(&self, onto: Tile, key: impl Fn(Tile) -> i32) -> Option<Tile> {
+        let mut best: Option<(i32, Tile)> = None;
         for n in tiles::around(onto) {
             if self.linkable(*n) {
                 let k = key(*n);
@@ -940,12 +934,12 @@ impl Board<'_> {
         best.map(|(_, n)| n)
     }
 
-    fn source_link(&self, container: i32) -> Option<i32> {
+    fn source_link(&self, container: Tile) -> Option<Tile> {
         self.link_beside(container, |t| tiles::range(t, self.anchor))
     }
 
-    fn dead_end(&self, rock: i32, head: i32, t: i32) -> bool {
-        let t_u = t as usize;
+    fn dead_end(&self, rock: Tile, head: Tile, t: Tile) -> bool {
+        let t_u = t;
 
         t != head
             && tiles::range(t, rock) == 1
@@ -958,12 +952,12 @@ impl Board<'_> {
             && self.road_level[t_u] == NONE
             && tiles::around(t)
                 .iter()
-                .any(|n| self.linkable(*n) && !self.clear[*n as usize])
+                .any(|n| self.linkable(*n) && !self.clear[*n])
     }
 
-    fn plant(&mut self, kind: &Kind, t: i32, level: i32) {
-        self.taken[t as usize] = true;
-        self.road_level[t as usize] = NONE;
+    fn plant(&mut self, kind: &Kind, t: Tile, level: i32) {
+        self.taken[t] = true;
+        self.road_level[t] = NONE;
         self.extra.push(Item {
             kind: kind.clone(),
             tile: t,
@@ -971,23 +965,23 @@ impl Board<'_> {
         });
     }
 
-    fn pave(&mut self, path: &[i32], level: i32) {
+    fn pave(&mut self, path: &[Tile], level: i32) {
         for t in path {
-            if !self.taken[*t as usize] {
-                self.road_level[*t as usize] = self.road_level[*t as usize].min(level);
+            if !self.taken[*t] {
+                self.road_level[*t] = self.road_level[*t].min(level);
             }
         }
     }
 
-    fn standable(&self, t: i32) -> bool {
-        !self.taken[t as usize]
+    fn standable(&self, t: Tile) -> bool {
+        !self.taken[t]
             || self
                 .extra
                 .iter()
                 .any(|i| i.tile == t && i.kind.is_container())
     }
 
-    fn open_count(&self, t: i32) -> i32 {
+    fn open_count(&self, t: Tile) -> i32 {
         tiles::around(t)
             .iter()
             .map(|m| if self.walkable(*m) { 1 } else { 0 })
@@ -1094,8 +1088,8 @@ mod tests {
                 .cloned()
                 .collect();
 
-            let tiles: Vec<i32> = others.iter().map(|i| i.tile).collect();
-            let covered: Vec<i32> = ramparts.iter().map(|i| i.tile).collect();
+            let tiles: Vec<Tile> = others.iter().map(|i| i.tile).collect();
+            let covered: Vec<Tile> = ramparts.iter().map(|i| i.tile).collect();
 
             assert_eq!(fx::distinct(&tiles), tiles);
             assert_eq!(fx::distinct(&covered), covered);
@@ -1115,7 +1109,7 @@ mod tests {
                     if i.kind.is_extractor() {
                         ground.minerals.contains(&i.tile)
                     } else {
-                        ground.weights[i.tile as usize] >= 0
+                        ground.weights[i.tile] >= 0
                     },
                     "on ground no creep crosses: {}",
                     i.tile
@@ -1190,17 +1184,13 @@ mod tests {
             };
 
             let seen = fx::reached(&ground, &plan);
-            let beside = |t: i32| {
-                tiles::within(1, t)
-                    .into_iter()
-                    .any(|n| n != t && seen[n as usize])
-            };
+            let beside = |t: Tile| tiles::within(1, t).into_iter().any(|n| n != t && seen[n]);
 
             for i in &plan.items {
                 assert!(
                     i.kind.is_rampart()
                         || if fx::walkable(&i.kind) {
-                            seen[i.tile as usize]
+                            seen[i.tile]
                         } else {
                             beside(i.tile)
                         },
@@ -1227,7 +1217,7 @@ mod tests {
                 None => continue,
             };
 
-            let tiles_of = |kind: &Kind| -> Vec<i32> {
+            let tiles_of = |kind: &Kind| -> Vec<Tile> {
                 plan.items
                     .iter()
                     .filter(|i| i.kind.name() == kind.name())
@@ -1235,15 +1225,15 @@ mod tests {
                     .collect()
             };
 
-            let rocks: Vec<i32> = ground
+            let rocks: Vec<Tile> = ground
                 .sources
                 .iter()
                 .chain(ground.minerals.iter())
                 .copied()
                 .collect();
 
-            let nearest = |kind: &Kind, off: &[i32], reach: i32| -> Option<i32> {
-                let mut found: Vec<i32> = tiles_of(kind)
+            let nearest = |kind: &Kind, off: &[Tile], reach: i32| -> Option<Tile> {
+                let mut found: Vec<Tile> = tiles_of(kind)
                     .into_iter()
                     .filter(|t| {
                         tiles::range(*t, controller) <= engine::UPGRADE_RANGE
@@ -1255,14 +1245,14 @@ mod tests {
                 found.first().copied()
             };
 
-            let seats = |buffer: i32| -> Vec<i32> {
-                Atlas::upgrader_seats(|t: i32| ground.weights[t as usize] >= 0, controller, buffer)
+            let seats = |buffer: Tile| -> Vec<Tile> {
+                Atlas::upgrader_seats(|t: Tile| ground.weights[t] >= 0, controller, buffer)
                     .into_iter()
                     .filter(|t| *t != buffer)
                     .collect()
             };
 
-            let solid: Vec<i32> = plan
+            let solid: Vec<Tile> = plan
                 .items
                 .iter()
                 .filter(|i| !fx::walkable(&i.kind))
@@ -1271,12 +1261,12 @@ mod tests {
 
             let container = nearest(&Kind::Container, &rocks, 1);
 
-            let mut off_link: Vec<i32> = ground.sources.clone();
+            let mut off_link: Vec<Tile> = ground.sources.clone();
             off_link.extend(tiles_of(&Kind::Storage));
             let link = nearest(&Kind::Link, &off_link, 2);
 
-            let on = |buffer: i32, t: i32| seats(buffer).contains(&t);
-            let clear = |l: i32| solid.iter().all(|t| !on(l, *t));
+            let on = |buffer: Tile, t: Tile| seats(buffer).contains(&t);
+            let clear = |l: Tile| solid.iter().all(|t| !on(l, *t));
 
             // A link goes on a seat only on the second draw, whose container
             // takes the walk's first tile, and holds none.
@@ -1307,7 +1297,7 @@ mod tests {
                 None => continue,
             };
 
-            let labs: Vec<i32> = plan
+            let labs: Vec<Tile> = plan
                 .items
                 .iter()
                 .filter(|i| i.kind.is_lab())
@@ -1378,7 +1368,7 @@ mod tests {
                 None => continue,
             };
 
-            let spawns: Vec<i32> = plan
+            let spawns: Vec<Tile> = plan
                 .items
                 .iter()
                 .filter(|i| i.kind.is_spawn())

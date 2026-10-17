@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::core::atlas::Atlas;
 use crate::core::engine;
-use crate::core::tiles;
+use crate::core::tiles::{self, Tile};
 use crate::core::world::{Creep, Kind, Pos, Room, Structure, terrain};
 
 use super::plan::{controller_link, haul_level, sized};
@@ -23,7 +23,7 @@ fn kinds() -> i32 {
 }
 
 /// `(tile, ticks a hauler needs to the source, the tiles a post may stand on)`.
-type Post = (i32, Option<(i32, Vec<i32>)>);
+type Post = (Tile, Option<(Tile, Vec<Tile>)>);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Placement {
@@ -48,7 +48,7 @@ pub struct Census {
     /// None once a link serves the source: one standing off the plan's tile is
     /// kept, never doubled.
     pub posts: Vec<Post>,
-    pub buffer: Option<(i32, i32)>,
+    pub buffer: Option<(Tile, Tile)>,
     /// A solid site there waits on its upgrader as under any creep.
     pub seat: Vec<u8>,
     /// Every owner's, and sites: CONTROLLER_STRUCTURES counts them all. By
@@ -74,11 +74,11 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
     }
 
     for c in ours.iter().chain(room.hostiles.iter()) {
-        occupied[tiles::of_pos(&c.pos) as usize] = 1;
+        occupied[tiles::of_pos(&c.pos)] = 1;
     }
 
     for s in &room.structures {
-        let t = tiles::of_pos(&s.pos) as usize;
+        let t = tiles::of_pos(&s.pos);
 
         if s.kind.is_road() {
             road[t] = 1;
@@ -99,14 +99,14 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
 
     for s in &room.sites {
         let t = tiles::of_pos(&s.pos);
-        site[t as usize] = 1;
+        site[t] = 1;
         held[s.kind.ordinal() as usize] += 1;
 
         if !s.kind.walkable() {
-            walkable[t as usize] = 0;
+            walkable[t] = 0;
         }
 
-        if s.owner.is_ours() && (standable(&s.kind) || occupied[t as usize] == 0) {
+        if s.owner.is_ours() && (standable(&s.kind) || occupied[t] == 0) {
             pending += 1;
         }
     }
@@ -144,47 +144,46 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
         && containers.iter().any(|p| Atlas::is_buffer(room, p))
     {
         for t in tiles::within(engine::UPGRADE_RANGE, tiles::of_pos(&c.pos)) {
-            served[t as usize] = 1;
+            served[t] = 1;
         }
     }
 
     for rock in &rocks {
         if containers.iter().any(|p| p.within(1, rock)) {
             for t in tiles::within(1, tiles::of_pos(rock)) {
-                served[t as usize] = 1;
+                served[t] = 1;
             }
         }
     }
 
     for rock in &rocks {
-        walkable[tiles::of_pos(rock) as usize] = 0;
+        walkable[tiles::of_pos(rock)] = 0;
     }
 
     if let Some(c) = &room.controller {
-        walkable[tiles::of_pos(&c.pos) as usize] = 0;
+        walkable[tiles::of_pos(&c.pos)] = 0;
     }
 
     let mut seat = vec![0u8; tiles::COUNT];
 
-    let buffer: Option<(i32, &Structure)> = match (&room.controller, Atlas::buffer(room)) {
+    let buffer: Option<(Tile, &Structure)> = match (&room.controller, Atlas::buffer(room)) {
         (Some(c), Some(b)) => Some((tiles::of_pos(&c.pos), b)),
         _ => None,
     };
 
     if let Some((c, b)) = buffer {
-        for t in Atlas::upgrader_seats(|t: i32| walkable[t as usize] > 0, c, tiles::of_pos(&b.pos))
-        {
-            seat[t as usize] = 1;
+        for t in Atlas::upgrader_seats(|t: Tile| walkable[t] > 0, c, tiles::of_pos(&b.pos)) {
+            seat[t] = 1;
         }
     }
 
     let links = standing(Kind::Link.ordinal());
 
-    let unheld = |t: i32| -> bool {
-        walkable[t as usize] > 0
-            && solid[t as usize] == 0
-            && road[t as usize] == 0
-            && site[t as usize] == 0
+    let unheld = |t: Tile| -> bool {
+        walkable[t] > 0
+            && solid[t] == 0
+            && road[t] == 0
+            && site[t] == 0
             && tiles::x_of(t).min(tiles::y_of(t)) >= 2
             && tiles::x_of(t).max(tiles::y_of(t)) < tiles::SIDE - 2
     };
@@ -226,14 +225,14 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
 /// Whether a structure on `t` parts the tiles beside it but across `post`,
 /// where a miner works and steps aside for no walker. Beside, not the whole
 /// room: a walk round the room prices dearer than a step through the miner.
-fn closes(census: &Census, post: i32, t: i32) -> bool {
-    let beside: Vec<i32> = tiles::around(t)
+fn closes(census: &Census, post: Tile, t: Tile) -> bool {
+    let beside: Vec<Tile> = tiles::around(t)
         .iter()
         .copied()
-        .filter(|n| *n != post && census.walkable[*n as usize] > 0)
+        .filter(|n| *n != post && census.walkable[*n] > 0)
         .collect();
 
-    let mut reached: Vec<i32> = beside.iter().take(1).copied().collect();
+    let mut reached: Vec<Tile> = beside.iter().take(1).copied().collect();
     let mut i = 0;
 
     while i < reached.len() {
@@ -273,16 +272,16 @@ pub fn place(census: &Census, level: i32, plan: &Plan, budget: i32) -> Vec<Place
     let mut added = vec![0i32; kinds() as usize];
     let added_of = |added: &Vec<i32>, kind: &Kind| -> i32 { added[kind.ordinal() as usize] };
 
-    let mut taken: BTreeSet<i32> = BTreeSet::new();
+    let mut taken: BTreeSet<Tile> = BTreeSet::new();
 
     let mut planned = vec![0u8; tiles::COUNT];
     let mut solid = vec![0u8; tiles::COUNT];
 
     for i in &plan.items {
-        planned[i.tile as usize] = 1;
+        planned[i.tile] = 1;
 
         if !i.kind.walkable() {
-            solid[i.tile as usize] = 1;
+            solid[i.tile] = 1;
         }
     }
 
@@ -291,7 +290,7 @@ pub fn place(census: &Census, level: i32, plan: &Plan, budget: i32) -> Vec<Place
     // plan drew there lead to that unbuilt container, and the tile farthest
     // from the anchor lies behind the miner, off the way in. The last open
     // tile is the miner's way in.
-    let tile_of = |item: &Item| -> Option<i32> {
+    let tile_of = |item: &Item| -> Option<Tile> {
         let post = census
             .posts
             .iter()
@@ -300,23 +299,23 @@ pub fn place(census: &Census, level: i32, plan: &Plan, budget: i32) -> Vec<Place
         match post {
             Some((_, None)) => None,
             None if item.kind.is_link()
-                && census.seat[item.tile as usize] > 0
+                && census.seat[item.tile] > 0
                 && census.buffer.is_some() =>
             {
                 let (c, b) = census.buffer.unwrap();
-                let walkable = |t: i32| census.walkable[t as usize] > 0;
-                let open = |t: i32| {
+                let walkable = |t: Tile| census.walkable[t] > 0;
+                let open = |t: Tile| {
                     walkable(t)
-                        && census.solid[t as usize] == 0
-                        && census.road[t as usize] == 0
-                        && census.site[t as usize] == 0
-                        && planned[t as usize] == 0
+                        && census.solid[t] == 0
+                        && census.road[t] == 0
+                        && census.site[t] == 0
+                        && planned[t] == 0
                 };
 
                 controller_link(
                     walkable,
                     open,
-                    |t: i32| t == item.tile || solid[t as usize] == 0,
+                    |t: Tile| t == item.tile || solid[t] == 0,
                     c,
                     b,
                 )
@@ -324,7 +323,7 @@ pub fn place(census: &Census, level: i32, plan: &Plan, budget: i32) -> Vec<Place
             Some((_, Some((post, beside))))
                 if tiles::range(item.tile, *post) != 1 || closes(census, *post, item.tile) =>
             {
-                let mut candidates: Vec<i32> = beside
+                let mut candidates: Vec<Tile> = beside
                     .iter()
                     .copied()
                     .filter(|t| {
@@ -352,16 +351,16 @@ pub fn place(census: &Census, level: i32, plan: &Plan, budget: i32) -> Vec<Place
         match tile_of(item) {
             Some(t)
                 if (placed.len() as i32) < room
-                    && census.site[t as usize] == 0
+                    && census.site[t] == 0
                     && (if item.kind.is_rampart() {
-                        census.solid[t as usize] > 0 && census.rampart[t as usize] == 0
+                        census.solid[t] > 0 && census.rampart[t] == 0
                     } else {
-                        census.solid[t as usize] == 0
+                        census.solid[t] == 0
                     })
-                    && (standable(&item.kind) || census.occupied[t as usize] == 0)
+                    && (standable(&item.kind) || census.occupied[t] == 0)
                     && !taken.contains(&t)
-                    && (!item.kind.is_container() || census.served[t as usize] == 0)
-                    && (!item.kind.is_road() || census.road[t as usize] == 0)
+                    && (!item.kind.is_container() || census.served[t] == 0)
+                    && (!item.kind.is_road() || census.road[t] == 0)
                     && held_of(census, &item.kind) + added_of(&added, &item.kind)
                         < engine::controller_structures(&item.kind.name(), level) =>
             {
@@ -405,17 +404,17 @@ mod tests {
                 None => continue,
             };
 
-            let rocks: Vec<i32> = ground
+            let rocks: Vec<Tile> = ground
                 .sources
                 .iter()
                 .chain(ground.minerals.iter())
                 .copied()
                 .collect();
 
-            let off_plan: Vec<i32> = tiles::within(engine::UPGRADE_RANGE, controller)
+            let off_plan: Vec<Tile> = tiles::within(engine::UPGRADE_RANGE, controller)
                 .into_iter()
                 .filter(|t| {
-                    ground.weights[*t as usize] >= 0
+                    ground.weights[*t] >= 0
                         && rocks.iter().all(|r| tiles::range(*r, *t) > 1)
                         && plan.items.iter().all(|i| i.tile != *t || i.kind.is_road())
                 })
@@ -514,7 +513,7 @@ mod tests {
                         .count()) as i32
             };
 
-            let tiles_placed: Vec<i32> = placed.iter().map(|p| tiles::index(p.x, p.y)).collect();
+            let tiles_placed: Vec<Tile> = placed.iter().map(|p| tiles::index(p.x, p.y)).collect();
 
             let cap = 0.max(case.budget.min(SITES_IN_FLIGHT - room.sites.len() as i32));
 
@@ -532,7 +531,7 @@ mod tests {
                 }
             };
 
-            let standing = |t: i32| -> Vec<Structure> {
+            let standing = |t: Tile| -> Vec<Structure> {
                 room.structures
                     .iter()
                     .filter(|s| tiles::of_pos(&s.pos) == t)
@@ -552,7 +551,7 @@ mod tests {
                 i.level <= case.level
                     && !room.sites.iter().any(|x| tiles::of_pos(&x.pos) == t)
                     && !tiles_placed.contains(&t)
-                    && !(i.kind.is_container() && counted.served[t as usize] > 0)
+                    && !(i.kind.is_container() && counted.served[t] > 0)
                     && clear(&i.kind, &standing(t))
                     && held(&i.kind) + added
                         < engine::controller_structures(&i.kind.name(), case.level)

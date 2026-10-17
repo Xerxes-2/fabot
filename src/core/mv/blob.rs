@@ -6,7 +6,7 @@ use crate::core::atlas::{Atlas, Field, Mover, Target};
 use crate::core::engine;
 use crate::core::grid::{self, FatigueFactor, Footprint, factor_of, step_ticks};
 use crate::core::mv::{Wish, plan};
-use crate::core::tiles;
+use crate::core::tiles::{self, Tile};
 use crate::core::world::Creep;
 
 /// ⌈(n−1)/2⌉: less, and a file of n deadlocks in a corridor.
@@ -49,7 +49,7 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
         target: &Target,
         hops: i32,
         room: &str,
-        tile: i32,
+        tile: Tile,
     ) -> i32 {
         let field = atlas.field(mover, target, room);
         match field {
@@ -58,13 +58,11 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
                 .map_or(grid::UNREACHED, |step| tiles::SIDE * step),
             None => grid::UNREACHED,
             Some(field) => {
-                let exit = |field: &Field, mut t: i32| -> i32 {
-                    loop {
-                        match field.step(t) {
-                            Some(direction) => t = tiles::neighbour(t, direction),
-                            None => return t,
-                        }
+                let exit = |field: &Field, mut t: Tile| -> Tile {
+                    while let Some(n) = field.step(t).and_then(|d| tiles::neighbour(t, d)) {
+                        t = n;
                     }
+                    t
                 };
                 match field.ticks(tile) {
                     None => grid::UNREACHED,
@@ -142,7 +140,7 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
     };
     let head = tiles::to_pos(&anchor.pos.room, head_tile);
 
-    let fits = |creep: &Creep, tile: i32| -> bool {
+    let fits = |creep: &Creep, tile: Tile| -> bool {
         creep.name == anchor.name
             || tiles::seam_range(&tiles::to_pos(&creep.pos.room, tile), &head)
                 .map(|range| range <= r)
@@ -152,7 +150,7 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
 
     // A step into swamp falls behind: a walker sidesteps no slower than its
     // head, one waiting is shoved at most a plain step back, so one behind passes.
-    let keeps = |atlas: &mut Atlas, slack: i32, creep: &Creep, tile: i32| -> bool {
+    let keeps = |atlas: &mut Atlas, slack: i32, creep: &Creep, tile: Tile| -> bool {
         match atlas.field(mover, target, &creep.pos.room) {
             Some(field) => match field.ticks(tiles::of_pos(&creep.pos)) {
                 Some(here) if here > 0 => {

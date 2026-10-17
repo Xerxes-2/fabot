@@ -1,4 +1,5 @@
 use crate::core::grid::Footprint;
+use crate::core::tiles::Tile;
 
 /// A wish whose `Head` is `At` stays, and `Tail` lists where it may be shoved.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -7,15 +8,15 @@ pub struct Wish {
     /// A `Quad` is held where it stands: formation stepping is not
     /// arbitrated.
     pub footprint: Footprint,
-    pub at: i32,
-    pub head: i32,
+    pub at: Tile,
+    pub head: Tile,
     /// A body it shoves off its head is put there last.
-    pub onward: Option<i32>,
+    pub onward: Option<Tile>,
     /// Best first.
-    pub tail: Vec<i32>,
+    pub tail: Vec<Tile>,
     /// Its work area when it stands inside it, else empty; holds `At` when
     /// not empty.
-    pub working: Vec<i32>,
+    pub working: Vec<Tile>,
     /// What its head is worth over standing still.
     pub weight: i32,
     pub moves: bool,
@@ -32,7 +33,7 @@ impl Wish {
 
     /// A body is pushed off its work only by a chain at least two weights
     /// heavier: one weight heavier scores nothing.
-    pub fn value(&self, tile: i32) -> i32 {
+    pub fn value(&self, tile: Tile) -> i32 {
         let weight = self.weight.max(1);
         let asked = if self.stays() {
             0

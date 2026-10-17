@@ -56,7 +56,7 @@ mod tests {
     use crate::core::layout::derive;
     use crate::core::layout::fixtures as fx;
     use crate::core::layout::run;
-    use crate::core::tiles;
+    use crate::core::tiles::{self};
     use crate::core::world::Owner;
     use std::collections::BTreeMap;
 

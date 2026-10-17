@@ -2,26 +2,24 @@
 //! rotations fall out of it rather than being special cases.
 use crate::core::grid::Footprint;
 use crate::core::mv::Wish;
-use crate::core::tiles;
+use crate::core::tiles::{self, Tile};
 
 pub struct Resolution {
     pub steps: Vec<(String, i32)>,
 }
 
-fn covered(footprint: Footprint, anchor: i32) -> Vec<i32> {
+fn covered(footprint: Footprint, anchor: Tile) -> Vec<Tile> {
     match footprint {
         Footprint::One => vec![anchor],
-        Footprint::Quad => vec![
-            anchor,
-            anchor + 1,
-            anchor + tiles::SIDE,
-            anchor + tiles::SIDE + 1,
-        ],
+        Footprint::Quad => {
+            let (x, y) = (tiles::x_of(anchor), tiles::y_of(anchor));
+            [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)]
+                .into_iter()
+                .filter(|(x, y)| tiles::in_room(*x, *y))
+                .map(|(x, y)| tiles::index(x, y))
+                .collect()
+        }
     }
-}
-
-fn in_room(tile: i32) -> bool {
-    tile >= 0 && (tile as usize) < tiles::COUNT
 }
 
 // A stayer only ever asks back onto its work or its own tile, so movers go
@@ -45,16 +43,16 @@ fn above(s: i32, h: i32, s0: i32, h0: i32) -> bool {
 #[derive(Clone, Debug)]
 pub struct Scratch {
     blocked: Vec<bool>,
-    steps_onto: Vec<i32>,
-    holder: Vec<i32>,
+    steps_onto: Vec<Option<Tile>>,
+    holder: Vec<Option<usize>>,
     changed_at: Vec<i32>,
 }
 
 pub fn scratch() -> Scratch {
     Scratch {
         blocked: vec![false; tiles::COUNT],
-        steps_onto: vec![-1; tiles::COUNT],
-        holder: vec![-1; tiles::COUNT],
+        steps_onto: vec![None; tiles::COUNT],
+        holder: vec![None; tiles::COUNT],
         changed_at: vec![0; tiles::COUNT],
     }
 }
@@ -62,8 +60,8 @@ pub fn scratch() -> Scratch {
 /// `held`: the tiles of bodies outside the wishes (theirs, and ours with none).
 pub fn resolve(
     scratch: &mut Scratch,
-    passable: impl Fn(i32) -> bool,
-    held: &[i32],
+    passable: impl Fn(Tile) -> bool,
+    held: &[Tile],
     wishes: &[Wish],
 ) -> Resolution {
     let blocked = &mut scratch.blocked;
@@ -72,14 +70,12 @@ pub fn resolve(
     let changed_at = &mut scratch.changed_at;
 
     blocked.fill(false);
-    steps_onto.fill(-1);
-    holder.fill(-1);
+    steps_onto.fill(None);
+    holder.fill(None);
     changed_at.fill(0);
 
     for &tile in held {
-        if in_room(tile) {
-            blocked[tile as usize] = true;
-        }
+        blocked[tile] = true;
     }
 
     // A swap a tick or two away beats the way round: with a held body that
@@ -87,13 +83,9 @@ pub fn resolve(
     for wish in wishes {
         if !wish.movable() {
             for tile in covered(wish.footprint, wish.at) {
-                if in_room(tile) {
-                    blocked[tile as usize] = true;
-                }
+                blocked[tile] = true;
             }
-            if in_room(wish.at) {
-                steps_onto[wish.at as usize] = if wish.stays() { -1 } else { wish.head };
-            }
+            steps_onto[wish.at] = (!wish.stays()).then_some(wish.head);
         }
     }
 
@@ -102,15 +94,15 @@ pub fn resolve(
 
     let mut placed: Vec<Wish> = Vec::new();
     for wish in movable {
-        if in_room(wish.at) && !blocked[wish.at as usize] && holder[wish.at as usize] < 0 {
-            holder[wish.at as usize] = placed.len() as i32;
+        if !blocked[wish.at] && holder[wish.at].is_none() {
+            holder[wish.at] = Some(placed.len());
             placed.push(wish.clone());
         }
     }
 
     let order = placed;
     let n = order.len();
-    let mut tile_of: Vec<i32> = order.iter().map(|w| w.at).collect();
+    let mut tile_of: Vec<Tile> = order.iter().map(|w| w.at).collect();
 
     let head_on = |wish: &Wish| -> bool {
         order.iter().any(|other| {
@@ -119,16 +111,15 @@ pub fn resolve(
     };
 
     fn consider(
-        found: &mut Vec<i32>,
+        found: &mut Vec<Tile>,
         blocked: &[bool],
-        passable: &dyn Fn(i32) -> bool,
-        at: i32,
-        tile: i32,
+        passable: &dyn Fn(Tile) -> bool,
+        at: Tile,
+        tile: Tile,
     ) {
         if tile != at
-            && in_room(tile)
             && tiles::range(at, tile) == 1
-            && !blocked[tile as usize]
+            && !blocked[tile]
             && passable(tile)
             && !found.contains(&tile)
         {
@@ -136,12 +127,12 @@ pub fn resolve(
         }
     }
 
-    let candidates: Vec<Vec<i32>> = order
+    let candidates: Vec<Vec<Tile>> = order
         .iter()
         .map(|wish| {
             let at = wish.at;
-            let mut found: Vec<i32> = Vec::new();
-            if !(in_room(wish.head) && steps_onto[wish.head as usize] == at) {
+            let mut found: Vec<Tile> = Vec::new();
+            if steps_onto[wish.head] != Some(at) {
                 consider(&mut found, blocked, &passable, at, wish.head);
                 if found.is_empty() || !head_on(wish) {
                     for tile in &wish.tail {
@@ -194,7 +185,7 @@ pub fn resolve(
             let stale = searched_at[i] < 0
                 || candidates[i]
                     .iter()
-                    .any(|tile| search.changed_at[*tile as usize] > searched_at[i]);
+                    .any(|tile| search.changed_at[*tile] > searched_at[i]);
             let content = wish.value(from) == reachable[i]
                 && (from == wish.at || wish.value(wish.at) < wish.value(from));
 
@@ -208,7 +199,7 @@ pub fn resolve(
                 search.best_score = 0;
                 search.best_home = 0;
                 search.taken = 0;
-                search.holder[from as usize] = -1;
+                search.holder[from] = None;
                 search.explore(i, from, 0, 0, None);
 
                 if !search.best_chain.is_empty() {
@@ -216,17 +207,17 @@ pub fn resolve(
                     let chain = search.best_chain.clone();
                     for &(m, _) in &chain {
                         let t = search.tile_of[m];
-                        search.changed_at[t as usize] = clock;
-                        search.holder[t as usize] = -1;
+                        search.changed_at[t] = clock;
+                        search.holder[t] = None;
                     }
                     for &(m, tile) in &chain {
-                        search.changed_at[tile as usize] = clock;
+                        search.changed_at[tile] = clock;
                         search.tile_of[m] = tile;
-                        search.holder[tile as usize] = m as i32;
+                        search.holder[tile] = Some(m);
                     }
                     changed = true;
                 } else {
-                    search.holder[from as usize] = i as i32;
+                    search.holder[from] = Some(i);
                 }
             }
         }
@@ -250,16 +241,16 @@ pub fn resolve(
 
 struct Search<'a> {
     order: &'a [Wish],
-    candidates: &'a [Vec<i32>],
-    tile_of: Vec<i32>,
-    holder: Vec<i32>,
+    candidates: &'a [Vec<Tile>],
+    tile_of: Vec<Tile>,
+    holder: Vec<Option<usize>>,
     changed_at: Vec<i32>,
     on_path: Vec<bool>,
     label_stamp: Vec<i32>,
     label_score: Vec<i32>,
     label_home: Vec<i32>,
-    path: Vec<(usize, i32)>,
-    best_chain: Vec<(usize, i32)>,
+    path: Vec<(usize, Tile)>,
+    best_chain: Vec<(usize, Tile)>,
     best_score: i32,
     best_home: i32,
     taken: i32,
@@ -284,7 +275,7 @@ impl<'a> Search<'a> {
 
     // A creep reached before is explored again only at a better (score, home):
     // what a chain makes past it depends only on the creeps already on it.
-    fn explore(&mut self, i: usize, from: i32, score: i32, home: i32, onward: Option<i32>) {
+    fn explore(&mut self, i: usize, from: Tile, score: i32, home: i32, onward: Option<Tile>) {
         self.on_path[i] = true;
         let wish = &self.order[i];
         let leaving = wish.value(from);
@@ -315,23 +306,19 @@ impl<'a> Search<'a> {
     fn step(
         &mut self,
         i: usize,
-        tile: i32,
+        tile: Tile,
         score: i32,
         home: i32,
         leaving: i32,
         leaving_home: i32,
-        onward: Option<i32>,
+        onward: Option<Tile>,
     ) {
         let wish = &self.order[i];
         let s = score + wish.value(tile) - leaving;
         let h = home + (if tile == wish.at { 1 } else { 0 }) - leaving_home;
-        let occupant = self.holder[tile as usize];
         self.path.push((i, tile));
 
-        if occupant < 0 {
-            self.finish(s, h);
-        } else {
-            let occupant = occupant as usize;
+        if let Some(occupant) = self.holder[tile] {
             if !self.on_path[occupant]
                 && (self.label_stamp[occupant] != self.stamp
                     || above(s, h, self.label_score[occupant], self.label_home[occupant]))
@@ -341,6 +328,8 @@ impl<'a> Search<'a> {
                 self.label_home[occupant] = h;
                 self.explore(occupant, tile, s, h, onward);
             }
+        } else {
+            self.finish(s, h);
         }
 
         self.path.pop();
@@ -349,16 +338,16 @@ impl<'a> Search<'a> {
 
 pub fn arbitrate_with(
     scratch: &mut Scratch,
-    passable: impl Fn(i32) -> bool,
-    held: &[i32],
+    passable: impl Fn(Tile) -> bool,
+    held: &[Tile],
     wishes: &[Wish],
 ) -> Vec<(String, i32)> {
     resolve(scratch, passable, held, wishes).steps
 }
 
 pub fn arbitrate(
-    passable: impl Fn(i32) -> bool,
-    held: &[i32],
+    passable: impl Fn(Tile) -> bool,
+    held: &[Tile],
     wishes: &[Wish],
 ) -> Vec<(String, i32)> {
     arbitrate_with(&mut scratch(), passable, held, wishes)

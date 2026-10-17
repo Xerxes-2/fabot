@@ -2,7 +2,7 @@
 use crate::core::atlas::{Atlas, Field, Mover, Target};
 use crate::core::grid::{self, FatigueFactor, Footprint};
 use crate::core::mv::Wish;
-use crate::core::tiles;
+use crate::core::tiles::{self, Tile};
 use crate::core::world::Creep;
 
 pub fn can_move(creep: &Creep, factor: FatigueFactor) -> bool {
@@ -14,7 +14,7 @@ pub fn rests_soon(creep: &Creep, factor: FatigueFactor) -> bool {
     factor.moves > 0 && creep.fatigue <= 4 * factor.moves
 }
 
-fn beside(atlas: &Atlas, creep: &Creep) -> Vec<i32> {
+fn beside(atlas: &Atlas, creep: &Creep) -> Vec<Tile> {
     let at = tiles::of_pos(&creep.pos);
     tiles::within(1, at)
         .into_iter()
@@ -25,10 +25,10 @@ fn beside(atlas: &Atlas, creep: &Creep) -> Vec<i32> {
 fn wish(
     creep: &Creep,
     moves: bool,
-    head: i32,
-    onward: Option<i32>,
-    tail: Vec<i32>,
-    working: Vec<i32>,
+    head: Tile,
+    onward: Option<Tile>,
+    tail: Vec<Tile>,
+    working: Vec<Tile>,
     weight: i32,
 ) -> Wish {
     Wish {
@@ -83,12 +83,12 @@ pub fn toward(
         return stay(atlas, creep, mover.factor, weight);
     };
 
-    let ticks = |tile: i32| field.ticks(tile).unwrap_or(grid::UNREACHED);
+    let ticks = |tile: Tile| field.ticks(tile).unwrap_or(grid::UNREACHED);
     let here = ticks(at);
 
     if here == 0 && room == &target.room {
         let near = beside(atlas, creep);
-        let (inside, outside): (Vec<i32>, Vec<i32>) = near
+        let (inside, outside): (Vec<Tile>, Vec<Tile>) = near
             .into_iter()
             .filter(|tile| !tiles::on_edge(*tile))
             .partition(|tile| ticks(*tile) == 0);
@@ -100,7 +100,7 @@ pub fn toward(
     } else if here == 0 {
         // Landed on the band it wants out by: the engine moves a body across
         // only as it steps onto an exit tile.
-        let band: Vec<i32> = beside(atlas, creep)
+        let band: Vec<Tile> = beside(atlas, creep)
             .into_iter()
             .filter(|tile| ticks(*tile) == 0)
             .collect();
@@ -118,12 +118,11 @@ pub fn toward(
             )
         }
     } else {
-        match field.step(at) {
+        match field.step(at).and_then(|d| tiles::neighbour(at, d)) {
             None => stay(atlas, creep, mover.factor, weight),
-            Some(direction) => {
-                let head = tiles::neighbour(at, direction);
-                let onward = field.step(head).map(|d| tiles::neighbour(head, d));
-                let mut tail: Vec<i32> = beside(atlas, creep)
+            Some(head) => {
+                let onward = field.step(head).and_then(|d| tiles::neighbour(head, d));
+                let mut tail: Vec<Tile> = beside(atlas, creep)
                     .into_iter()
                     .filter(|tile| {
                         *tile != head

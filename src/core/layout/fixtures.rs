@@ -5,7 +5,7 @@ use crate::core::layout::ground::{self, Ground};
 use crate::core::layout::plan;
 use crate::core::layout::shape::Item;
 use crate::core::layout::shape::Plan;
-use crate::core::tiles;
+use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::Resource;
 use crate::core::world::{
     Controller, Creep, Kind, Mineral, Owner, Pos, Room, Site, Source, Spawn, Store, Structure,
@@ -53,11 +53,11 @@ impl Rng {
     }
 }
 
-pub fn at(tile: i32) -> Pos {
+pub fn at(tile: Tile) -> Pos {
     tiles::to_pos(ROOM, tile)
 }
 
-pub fn structure(id: &str, kind: Kind, owner: Owner, tile: i32) -> Structure {
+pub fn structure(id: &str, kind: Kind, owner: Owner, tile: Tile) -> Structure {
     let walkable = kind.walkable();
 
     Structure {
@@ -79,10 +79,10 @@ pub fn structure(id: &str, kind: Kind, owner: Owner, tile: i32) -> Structure {
 #[derive(Clone)]
 pub struct Colony {
     pub room: Room,
-    pub spawns: Vec<i32>,
+    pub spawns: Vec<Tile>,
 }
 
-fn slice(picks: &[i32], a: usize, b: usize) -> Vec<i32> {
+fn slice(picks: &[Tile], a: usize, b: usize) -> Vec<Tile> {
     // `picks.[a..b]` clamps at the array's end and is empty when `b < a`.
     if a >= picks.len() || b < a {
         return Vec::new();
@@ -102,8 +102,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
 
         for ty in y..=(y + h).min(tiles::SIDE - 1) {
             for tx in x..=(x + w).min(tiles::SIDE - 1) {
-                terrain[tiles::index(tx, ty) as usize] =
-                    if swamp { terrain::SWAMP } else { terrain::WALL };
+                terrain[tiles::index(tx, ty)] = if swamp { terrain::SWAMP } else { terrain::WALL };
             }
         }
     }
@@ -112,18 +111,18 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
 
     if edge {
         for i in 0..tiles::SIDE {
-            terrain[tiles::index(i, 0) as usize] = terrain::WALL;
-            terrain[tiles::index(0, i) as usize] = terrain::WALL;
+            terrain[tiles::index(i, 0)] = terrain::WALL;
+            terrain[tiles::index(0, i)] = terrain::WALL;
         }
     }
 
-    let mut inner: Vec<i32> = Vec::new();
+    let mut inner: Vec<Tile> = Vec::new();
 
-    for t in 0..tiles::COUNT as i32 {
+    for t in tiles::all() {
         let x = tiles::x_of(t);
         let y = tiles::y_of(t);
 
-        if terrain[t as usize] & terrain::WALL == 0 && x >= 3 && y >= 3 && x <= 46 && y <= 46 {
+        if terrain[t] & terrain::WALL == 0 && x >= 3 && y >= 3 && x <= 46 && y <= 46 {
             inner.push(t);
         }
     }
@@ -250,8 +249,8 @@ pub fn count_of(kind: &Kind, items: &[Item]) -> i32 {
         .count() as i32
 }
 
-pub fn distinct(values: &[i32]) -> Vec<i32> {
-    let mut out: Vec<i32> = Vec::new();
+pub fn distinct<T: PartialEq + Copy>(values: &[T]) -> Vec<T> {
+    let mut out: Vec<T> = Vec::new();
     for v in values {
         if !out.contains(v) {
             out.push(*v);
@@ -267,21 +266,19 @@ pub fn reached(ground: &Ground, plan: &Plan) -> Vec<bool> {
 
     for i in &plan.items {
         if !walkable(&i.kind) {
-            blocked[i.tile as usize] = true;
+            blocked[i.tile] = true;
         }
     }
 
     let mut seen = vec![false; tiles::COUNT];
-    let mut queue: std::collections::VecDeque<i32> = std::collections::VecDeque::new();
-    seen[plan.anchor as usize] = true;
+    let mut queue: std::collections::VecDeque<Tile> = std::collections::VecDeque::new();
+    seen[plan.anchor] = true;
     queue.push_back(plan.anchor);
 
     while let Some(t) = queue.pop_front() {
-        for direction in 1..=8 {
-            let n = tiles::neighbour(t, direction);
-
-            if n >= 0 && !seen[n as usize] && !blocked[n as usize] {
-                seen[n as usize] = true;
+        for &n in tiles::around(t) {
+            if !seen[n] && !blocked[n] {
+                seen[n] = true;
                 queue.push_back(n);
             }
         }
@@ -357,7 +354,7 @@ pub fn world_of(room: Room, spawns: Vec<Spawn>, creeps: Vec<Creep>) -> World {
     }
 }
 
-pub fn spawn_named(id: &str, tile: i32) -> Spawn {
+pub fn spawn_named(id: &str, tile: Tile) -> Spawn {
     Spawn {
         id: id.to_string(),
         name: id.to_string(),
@@ -366,7 +363,7 @@ pub fn spawn_named(id: &str, tile: i32) -> Spawn {
     }
 }
 
-pub fn site(id: &str, kind: Kind, tile: i32) -> Site {
+pub fn site(id: &str, kind: Kind, tile: Tile) -> Site {
     Site {
         id: id.to_string(),
         kind,
@@ -377,7 +374,7 @@ pub fn site(id: &str, kind: Kind, tile: i32) -> Site {
     }
 }
 
-pub fn creep(id: &str, owner: Owner, hits: i32, tile: i32) -> Creep {
+pub fn creep(id: &str, owner: Owner, hits: i32, tile: Tile) -> Creep {
     Creep {
         id: id.to_string(),
         name: id.to_string(),
@@ -396,7 +393,7 @@ pub fn creep(id: &str, owner: Owner, hits: i32, tile: i32) -> Creep {
     }
 }
 
-pub fn tower(id: &str, tile: i32, energy: i32) -> Structure {
+pub fn tower(id: &str, tile: Tile, energy: i32) -> Structure {
     Structure {
         store: Store {
             held: vec![(Resource::Energy, energy)],

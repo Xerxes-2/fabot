@@ -6,7 +6,7 @@ use crate::core::atlas::{Atlas, Mover, Target};
 use crate::core::grid::Footprint;
 use crate::core::intents::{Intent, RoomAct};
 use crate::core::tick::{self, Outpost};
-use crate::core::tiles;
+use crate::core::tiles::{self, Tile};
 use crate::core::world::{Kind, Owner, Pos, Room, World, terrain};
 
 use super::sites::SITES_IN_FLIGHT;
@@ -39,13 +39,14 @@ fn walk(atlas: &mut Atlas, target: &Target, from: &Pos) -> Vec<Pos> {
     let mut field = atlas.field(HAULER, target, &room);
 
     while field.is_some() && path.len() < LONGEST {
-        let step = field.as_ref().and_then(|f| f.step(tile));
+        let step = field
+            .as_ref()
+            .and_then(|f| f.step(tile))
+            .and_then(|direction| tiles::neighbour(tile, direction));
 
         match step {
             None => field = None,
-            Some(direction) => {
-                let next = tiles::neighbour(tile, direction);
-
+            Some(next) => {
                 if tiles::on_edge(next) {
                     match (
                         tiles::room_toward(&room, tiles::exit_of(next)),
@@ -70,7 +71,7 @@ fn walk(atlas: &mut Atlas, target: &Target, from: &Pos) -> Vec<Pos> {
 }
 
 fn opened(
-    taken: &mut BTreeMap<String, BTreeSet<i32>>,
+    taken: &mut BTreeMap<String, BTreeSet<Tile>>,
     pending: &mut BTreeMap<String, i32>,
     planned: &[Intent],
     room: &Room,
@@ -79,7 +80,7 @@ fn opened(
         return;
     }
 
-    let mut tiles_open: BTreeSet<i32> = BTreeSet::new();
+    let mut tiles_open: BTreeSet<Tile> = BTreeSet::new();
 
     for s in &room.structures {
         if !s.kind.is_rampart() {
@@ -109,7 +110,7 @@ fn opened(
 #[allow(clippy::too_many_arguments)]
 fn place(
     rooms: &BTreeMap<String, &Room>,
-    taken: &mut BTreeMap<String, BTreeSet<i32>>,
+    taken: &mut BTreeMap<String, BTreeSet<Tile>>,
     pending: &mut BTreeMap<String, i32>,
     planned: &[Intent],
     budget: &mut i32,
@@ -178,7 +179,7 @@ pub fn sites(
 ) -> Vec<Intent> {
     let mut intents: Vec<Intent> = Vec::new();
     let mut budget = budget;
-    let mut taken: BTreeMap<String, BTreeSet<i32>> = BTreeMap::new();
+    let mut taken: BTreeMap<String, BTreeSet<Tile>> = BTreeMap::new();
     let mut pending: BTreeMap<String, i32> = BTreeMap::new();
     let mut rooms: BTreeMap<String, &Room> = BTreeMap::new();
 
@@ -254,7 +255,7 @@ pub fn sites(
                         Some((_, None)) => (),
                         None => {
                             let open_tiles = taken[&room.name].clone();
-                            let mut seats: Vec<(i32, i32)> = Vec::new();
+                            let mut seats: Vec<(i32, Tile)> = Vec::new();
 
                             for t in tiles::within(1, tiles::of_pos(&s.pos)) {
                                 if t != tiles::of_pos(&s.pos)
@@ -276,7 +277,7 @@ pub fn sites(
                                 }
                             }
 
-                            seats.sort_by_key(|(ticks, t)| *ticks * tiles::COUNT as i32 + *t);
+                            seats.sort_unstable();
 
                             if let Some((_, t)) = seats.first() {
                                 place(

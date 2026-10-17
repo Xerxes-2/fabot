@@ -8,7 +8,7 @@ use crate::core::engine;
 use crate::core::grid::{
     FatigueFactor, Footprint, empty_factor, factor_of, loaded_factor, on_edge, step_ticks,
 };
-use crate::core::tiles;
+use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::{ALL_BODY_PARTS, BodyPart, Boost, Resource};
 use crate::core::world::{
     Creep, Kind, Mineral, Owner, Part, Pos, Room, Source, Store, Structure, World, terrain,
@@ -46,7 +46,7 @@ impl Ground {
     /// built wall.
     fn blocked(&self, x: i32, y: i32) -> bool {
         self.walls.contains(&(x, y))
-            || (self.terrain[tiles::index(x, y) as usize] & terrain::WALL != 0
+            || (self.terrain[tiles::index(x, y)] & terrain::WALL != 0
                 && !self.roads.contains(&(x, y)))
     }
 }
@@ -101,13 +101,13 @@ fn world_of(ground: &Ground) -> World {
 struct Walk {
     ground: Ground,
     mover: Mover,
-    goal: i32,
+    goal: Tile,
     range: i32,
-    start: i32,
+    start: Tile,
 }
 
-fn tile(dice: &mut Dice) -> i32 {
-    dice.below(tiles::COUNT as i32)
+fn tile(dice: &mut Dice) -> Tile {
+    Tile::of_index(dice.below(tiles::COUNT as i32) as usize)
 }
 
 fn coords(dice: &mut Dice) -> Vec<(i32, i32)> {
@@ -177,13 +177,13 @@ fn target_of(room: &str, walk: &Walk) -> Target {
 }
 
 /// Chebyshev range from what a footprint anchored at `anchor` covers to `tile`.
-fn reach(footprint: Footprint, anchor: i32, tile: i32) -> i32 {
+fn reach(footprint: Footprint, anchor: Tile, tile: Tile) -> i32 {
     let span = if footprint.is_quad() { 1 } else { 0 };
     let gap = |a: i32, t: i32| 0.max((a - t).max(t - a - span));
     gap(tiles::x_of(anchor), tiles::x_of(tile)).max(gap(tiles::y_of(anchor), tiles::y_of(tile)))
 }
 
-fn covered(footprint: Footprint, anchor: i32) -> Vec<(i32, i32)> {
+fn covered(footprint: Footprint, anchor: Tile) -> Vec<(i32, i32)> {
     let (x, y) = (tiles::x_of(anchor), tiles::y_of(anchor));
     match footprint {
         Footprint::One => vec![(x, y)],
@@ -193,7 +193,7 @@ fn covered(footprint: Footprint, anchor: i32) -> Vec<(i32, i32)> {
 
 /// The walk followed by `first_step` from the start: each tile and its ticks,
 /// until a goal or no step.
-fn followed(atlas: &mut Atlas, walk: &Walk, target: &Target) -> Vec<(i32, i32)> {
+fn followed(atlas: &mut Atlas, walk: &Walk, target: &Target) -> Vec<(Tile, i32)> {
     let mut out = Vec::new();
     let mut tile = walk.start;
     for seen in 0.. {
@@ -202,8 +202,11 @@ fn followed(atlas: &mut Atlas, walk: &Walk, target: &Target) -> Vec<(i32, i32)> 
             break;
         };
         out.push((tile, ticks));
-        match atlas.first_step(walk.mover, target, &pos) {
-            Some(direction) if seen < 2 * tiles::COUNT => tile = tiles::neighbour(tile, direction),
+        match atlas
+            .first_step(walk.mover, target, &pos)
+            .and_then(|d| tiles::neighbour(tile, d))
+        {
+            Some(next) if seen < 2 * tiles::COUNT => tile = next,
             _ => break,
         }
     }
@@ -212,14 +215,14 @@ fn followed(atlas: &mut Atlas, walk: &Walk, target: &Target) -> Vec<(i32, i32)> 
 
 #[test]
 fn a_tiles_index_round_trips_through_its_column_and_row_in_terrain_order() {
-    for tile in 0..tiles::COUNT as i32 {
+    for tile in tiles::all() {
         assert_eq!(
             tiles::index(tiles::x_of(tile), tiles::y_of(tile)),
             tile,
             "tile {tile}"
         );
     }
-    assert_eq!(tiles::index(3, 1), 50 + 3, "y * 50 + x");
+    assert_eq!(tiles::index(3, 1).index(), 50 + 3, "y * 50 + x");
 }
 
 #[test]
@@ -245,10 +248,9 @@ fn names_read_as_the_engine_spells_them() {
 
 #[test]
 fn a_step_and_the_direction_back_to_it_agree_and_stay_within_range_one() {
-    for tile in 0..tiles::COUNT as i32 {
+    for tile in tiles::all() {
         for direction in 1..=8 {
-            let next = tiles::neighbour(tile, direction);
-            if next >= 0 {
+            if let Some(next) = tiles::neighbour(tile, direction) {
                 assert_eq!(tiles::direction(tile, next), direction, "direction");
                 assert_eq!(tiles::range(tile, next), 1, "adjacent");
             }
@@ -378,12 +380,12 @@ fn each_first_step_lands_where_the_walk_is_shorter_on_open_ground_to_a_seat() {
         let mut atlas = Atlas::of_world(&world_of(&walk.ground));
         let target = target_of(ROOM, &walk);
         let path = followed(&mut atlas, &walk, &target);
-        let open = |tile: i32| {
+        let open = |tile: Tile| {
             covered(walk.mover.footprint, tile)
                 .iter()
                 .all(|&(x, y)| tiles::in_room(x, y) && !walk.ground.blocked(x, y))
         };
-        let seats: Vec<i32> = atlas
+        let seats: Vec<Tile> = atlas
             .seats(
                 walk.mover.footprint,
                 walk.range,
@@ -521,7 +523,7 @@ fn a_route_read_off_a_tree_is_the_route_searched() {
                 for &(wx, wy, exit) in &walled {
                     if wx % 3 == x && wy % 3 == y {
                         for &t in tiles::exit_tiles(1 + 2 * (exit % 4)) {
-                            terrain[t as usize] = terrain::WALL;
+                            terrain[t] = terrain::WALL;
                         }
                     }
                 }

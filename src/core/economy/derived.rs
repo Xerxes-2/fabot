@@ -5,7 +5,7 @@ use crate::core::atlas::Atlas;
 use crate::core::engine;
 use crate::core::grid::Footprint;
 use crate::core::tick::{self, Declarations, Outpost};
-use crate::core::tiles;
+use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::{BodyPart, Resource, part_count_in};
 use crate::core::world::{
     Controller, Creep, Kind, Owner, Part, Pos, Room, Spawn, Store, World, terrain,
@@ -606,7 +606,7 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
         receiver: controller_link.or(hub_link),
         buffer_seats: match (&buffer, &room.controller) {
             (Some(b), Some(c)) if atlas.sees(&room.name) => {
-                let walkable = |t: i32| atlas.passable(&room.name, t) && !tiles::on_edge(t);
+                let walkable = |t: Tile| atlas.passable(&room.name, t) && !tiles::on_edge(t);
                 Atlas::upgrader_seats(walkable, tiles::of_pos(&c.pos), tiles::of_pos(&b.pos))
                     .into_iter()
                     .map(|t| tiles::to_pos(&room.name, t))

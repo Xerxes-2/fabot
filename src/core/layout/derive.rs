@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::core::engine;
-use crate::core::tiles;
+use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::Resource;
 use crate::core::world::{Creep, Room, Structure, World};
 
@@ -20,8 +20,8 @@ pub struct Colony {
     pub ours: Vec<Creep>,
 }
 
-fn spawns_in(world: &World, room: &str) -> Vec<i32> {
-    let mut found: Vec<i32> = world
+fn spawns_in(world: &World, room: &str) -> Vec<Tile> {
+    let mut found: Vec<Tile> = world
         .spawns
         .iter()
         .filter(|s| s.pos.room == room)
@@ -31,7 +31,7 @@ fn spawns_in(world: &World, room: &str) -> Vec<i32> {
     found
 }
 
-fn join(values: &[i32]) -> String {
+fn join(values: &[Tile]) -> String {
     values
         .iter()
         .map(|v| v.to_string())
@@ -41,7 +41,7 @@ fn join(values: &[i32]) -> String {
 
 /// Terrain, sources, minerals and the controller never move, so the key
 /// leaves them out.
-pub fn key_of(room: &Room, spawns: &[i32]) -> String {
+pub fn key_of(room: &Room, spawns: &[Tile]) -> String {
     join(spawns) + "|" + &join(&ground::obstacles(room))
 }
 
@@ -151,7 +151,7 @@ mod tests {
                 "w",
                 Kind::Wall,
                 Owner::Nobody,
-                wall.abs() % tiles::COUNT as i32,
+                Tile::of_index(wall.unsigned_abs() as usize % tiles::COUNT),
             ));
 
             let (moved, _) = colonies(

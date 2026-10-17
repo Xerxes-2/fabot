@@ -13,6 +13,7 @@ use crate::core::intents::{Ask, ControllerAct, CreepAct, Intent, Rank};
 use crate::core::mv::Wish;
 use crate::core::state::State;
 use crate::core::tick::{self, Context, Declarations, Module};
+use crate::core::tiles::Tile;
 use crate::core::vocabulary::{BodyPart, Resource};
 use crate::core::world::{
     self, Creep, Owner, Pos, Room, Sightings, Structure, World, hostiles, sightings,
@@ -360,7 +361,7 @@ impl<'a> Scene<'a> {
                 .iter()
                 .all(|s| s.pos != b.pos || s.walkable || Scene::rival(s))
             {
-                weights[tiles::of_pos(&b.pos) as usize] =
+                weights[tiles::of_pos(&b.pos)] =
                     if world::terrain::is_swamp(&room.terrain, b.pos.x, b.pos.y) {
                         engine::SWAMP_WEIGHT
                     } else {
@@ -369,7 +370,7 @@ impl<'a> Scene<'a> {
             }
         }
 
-        let mut hits_at: BTreeMap<i32, i32> = BTreeMap::new();
+        let mut hits_at: BTreeMap<Tile, i32> = BTreeMap::new();
 
         for b in &barriers {
             *hits_at.entry(tiles::of_pos(&b.pos)).or_insert(0) += b.hits;
@@ -395,11 +396,11 @@ impl<'a> Scene<'a> {
             .map(|s| s.pos.clone())
             .collect();
 
-        let attempt = |seated: i32| -> Option<(Vec<(i32, i32)>, i32)> {
-            let sources: Vec<i32> = tiles::exit_tiles(exit)
+        let attempt = |seated: i32| -> Option<(Vec<(Tile, Tile)>, i32)> {
+            let sources: Vec<Tile> = tiles::exit_tiles(exit)
                 .iter()
                 .copied()
-                .filter(|t| ground.weights[*t as usize] >= 0)
+                .filter(|t| ground.weights[*t] >= 0)
                 .collect();
 
             exchange::breach_plan(
@@ -413,7 +414,7 @@ impl<'a> Scene<'a> {
             )
         };
 
-        let seats_of = |plan: &(Vec<(i32, i32)>, i32)| -> i32 {
+        let seats_of = |plan: &(Vec<(Tile, Tile)>, i32)| -> i32 {
             match plan.0.first() {
                 Some((_, work)) => tactics::seats_at(atlas, &line, &room.name, *work),
                 None => set.len() as i32,
@@ -422,7 +423,7 @@ impl<'a> Scene<'a> {
 
         // Every barrier on a tile, its rampart first: the tile stands
         // in the plan until it is walkable.
-        let ids_at = |tile: i32| -> Vec<String> {
+        let ids_at = |tile: Tile| -> Vec<String> {
             let mut at: Vec<&Structure> = barriers
                 .iter()
                 .copied()

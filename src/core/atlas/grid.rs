@@ -1,6 +1,6 @@
 //! Knows nothing of the Atlas: it prices raw weight arrays (-1 where nothing
 //! may stand), so the Atlas keeps its own representation private.
-use super::tiles;
+use super::tiles::{self, Tile};
 use crate::core::engine;
 use crate::core::vocabulary::{BodyPart, boost};
 use crate::core::world::Creep;
@@ -127,19 +127,23 @@ pub fn tally(what: &str, n: i32) {
     let _ = (what, n);
 }
 
-pub fn weight_of(footprint: Footprint, weights: &[i32], tile: i32) -> i32 {
+pub fn weight_of(footprint: Footprint, weights: &[i32], tile: Tile) -> i32 {
     match footprint {
-        Footprint::One => weights[tile as usize],
+        Footprint::One => weights[tile],
         Footprint::Quad => {
             let x = tiles::x_of(tile);
             let y = tiles::y_of(tile);
             if x == tiles::SIDE - 1 || y == tiles::SIDE - 1 {
                 -1
             } else {
-                let a = weights[tile as usize];
-                let b = weights[(tile + 1) as usize];
-                let c = weights[(tile + tiles::SIDE) as usize];
-                let d = weights[(tile + tiles::SIDE + 1) as usize];
+                let i = tile.index();
+                let side = tiles::SIDE as usize;
+                let (a, b, c, d) = (
+                    weights[i],
+                    weights[i + 1],
+                    weights[i + side],
+                    weights[i + side + 1],
+                );
                 if a < 0 || b < 0 || c < 0 || d < 0 {
                     -1
                 } else {
@@ -151,7 +155,7 @@ pub fn weight_of(footprint: Footprint, weights: &[i32], tile: i32) -> i32 {
 }
 
 /// A step onto the border ring carries the body into the next room.
-pub fn on_edge(footprint: Footprint, tile: i32) -> bool {
+pub fn on_edge(footprint: Footprint, tile: Tile) -> bool {
     match footprint {
         Footprint::One => tiles::on_edge(tile),
         Footprint::Quad => {
@@ -162,24 +166,16 @@ pub fn on_edge(footprint: Footprint, tile: i32) -> bool {
     }
 }
 
-const OFFSETS: [i32; 8] = [
-    -tiles::SIDE,
-    1,
-    tiles::SIDE,
-    -1,
-    -tiles::SIDE - 1,
-    -tiles::SIDE + 1,
-    tiles::SIDE - 1,
-    tiles::SIDE + 1,
-];
+const SIDE: isize = tiles::SIDE as isize;
+const OFFSETS: [isize; 8] = [-SIDE, 1, SIDE, -1, -SIDE - 1, -SIDE + 1, SIDE - 1, SIDE + 1];
 
 /// Dial's queue: no step costs more than the table's dearest, so a ring of one
 /// bucket more holds every queued distance apart.
 struct Dial {
     ring: usize,
-    head: Vec<i32>,
-    next: Vec<i32>,
-    prev: Vec<i32>,
+    head: Vec<Option<Tile>>,
+    next: Vec<Option<Tile>>,
+    prev: Vec<Option<Tile>>,
     queued: i32,
     relaxed: i32,
 }
@@ -188,37 +184,38 @@ impl Dial {
     fn new(ring: usize) -> Dial {
         Dial {
             ring,
-            head: vec![-1; ring],
-            next: vec![0; tiles::COUNT],
-            prev: vec![0; tiles::COUNT],
+            head: vec![None; ring],
+            next: vec![None; tiles::COUNT],
+            prev: vec![None; tiles::COUNT],
             queued: 0,
             relaxed: 0,
         }
     }
 
-    fn link(&mut self, tile: i32, d: i32) {
+    fn link(&mut self, tile: Tile, d: i32) {
         let b = (d % self.ring as i32) as usize;
         let h = self.head[b];
-        self.next[tile as usize] = h;
-        self.prev[tile as usize] = -1;
-        if h >= 0 {
-            self.prev[h as usize] = tile;
+        self.next[tile] = h;
+        self.prev[tile] = None;
+        if let Some(h) = h {
+            self.prev[h] = Some(tile);
         }
-        self.head[b] = tile;
+        self.head[b] = Some(tile);
         self.queued += 1;
     }
 
-    fn unlink(&mut self, tile: i32, dist: &[i32]) {
-        let p = self.prev[tile as usize];
-        let n = self.next[tile as usize];
-        if p >= 0 {
-            self.next[p as usize] = n;
-        } else {
-            let b = (dist[tile as usize] % self.ring as i32) as usize;
-            self.head[b] = n;
+    fn unlink(&mut self, tile: Tile, dist: &[i32]) {
+        let p = self.prev[tile];
+        let n = self.next[tile];
+        match p {
+            Some(p) => self.next[p] = n,
+            None => {
+                let b = (dist[tile] % self.ring as i32) as usize;
+                self.head[b] = n;
+            }
         }
-        if n >= 0 {
-            self.prev[n as usize] = p;
+        if let Some(n) = n {
+            self.prev[n] = p;
         }
         self.queued -= 1;
     }
@@ -226,7 +223,7 @@ impl Dial {
 
 /// Dial's queue: no step costs more than the table's dearest, so a ring of one
 /// bucket more holds every queued distance apart.
-pub fn flood(footprint: Footprint, weights: &[i32], steps: &[i32], goals: &[i32]) -> Vec<i32> {
+pub fn flood(footprint: Footprint, weights: &[i32], steps: &[i32], goals: &[Tile]) -> Vec<i32> {
     let mut dist = vec![UNREACHED; tiles::COUNT];
     // The step onto a tile; -1 where no walk leaves it.
     let mut price = vec![0i32; tiles::COUNT];
@@ -246,11 +243,11 @@ pub fn flood(footprint: Footprint, weights: &[i32], steps: &[i32], goals: &[i32]
 
     // A blocked tile reads -1 until the end, so no candidate beats it. A
     // non-goal border tile leads nowhere: a body stepping onto it leaves.
-    for t in 0..tiles::COUNT {
-        let w = weight_of(footprint, weights, t as i32);
+    for t in tiles::all() {
+        let w = weight_of(footprint, weights, t);
         if w < 0 {
             dist[t] = -1;
-        } else if on_edge(footprint, t as i32) {
+        } else if on_edge(footprint, t) {
             price[t] = -1;
         } else {
             price[t] = step_on(w);
@@ -258,9 +255,9 @@ pub fn flood(footprint: Footprint, weights: &[i32], steps: &[i32], goals: &[i32]
     }
 
     for &goal in goals {
-        if goal >= 0 && goal < tiles::COUNT as i32 && dist[goal as usize] > 0 {
-            dist[goal as usize] = 0;
-            price[goal as usize] = step_on(weight_of(footprint, weights, goal));
+        if dist[goal] > 0 {
+            dist[goal] = 0;
+            price[goal] = step_on(weight_of(footprint, weights, goal));
             dial.link(goal, 0);
         }
     }
@@ -268,31 +265,35 @@ pub fn flood(footprint: Footprint, weights: &[i32], steps: &[i32], goals: &[i32]
     let mut d = 0i32;
     let mut b = 0usize;
     while dial.queued > 0 {
-        let tile = dial.head[b];
-        if tile < 0 {
+        let Some(tile) = dial.head[b] else {
             d += 1;
             b = if b + 1 == dial.ring { 0 } else { b + 1 };
-        } else {
-            dial.unlink(tile, &dist);
-            let p = price[tile as usize];
-            if p >= 0 {
-                dial.relaxed += 1;
-                let candidate = d + p;
-                let x = tiles::x_of(tile);
-                let y = tiles::y_of(tile);
-                let inner = x > 0 && y > 0 && x < tiles::SIDE - 1 && y < tiles::SIDE - 1;
-                let origin = if inner { tile } else { 0 };
-                let ns: &[i32] = if inner { &OFFSETS } else { tiles::around(tile) };
-                for &offset in ns {
-                    let n = origin + offset;
-                    let old = dist[n as usize];
-                    if candidate < old {
-                        if old != UNREACHED {
-                            dial.unlink(n, &dist);
-                        }
-                        dist[n as usize] = candidate;
-                        dial.link(n, candidate);
+            continue;
+        };
+        dial.unlink(tile, &dist);
+        let p = price[tile];
+        if p >= 0 {
+            dial.relaxed += 1;
+            let candidate = d + p;
+            let x = tiles::x_of(tile);
+            let y = tiles::y_of(tile);
+            let mut inner = [tile; 8];
+            let ns: &[Tile] = if x > 0 && y > 0 && x < tiles::SIDE - 1 && y < tiles::SIDE - 1 {
+                for (n, offset) in inner.iter_mut().zip(OFFSETS) {
+                    *n = Tile::of_index(tile.index().wrapping_add_signed(offset));
+                }
+                &inner
+            } else {
+                tiles::around(tile)
+            };
+            for &n in ns {
+                let old = dist[n];
+                if candidate < old {
+                    if old != UNREACHED {
+                        dial.unlink(n, &dist);
                     }
+                    dist[n] = candidate;
+                    dial.link(n, candidate);
                 }
             }
         }

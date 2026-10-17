@@ -9,6 +9,7 @@ pub mod tiles;
 use self::grid::{
     FatigueFactor, Footprint, UNREACHED, flood, on_edge, step_table, step_ticks, weight_of,
 };
+use self::tiles::Tile;
 use super::engine;
 use super::world::{Kind, Owner, Pos, Room, World};
 
@@ -22,7 +23,7 @@ pub struct Mover {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Target {
     pub room: String,
-    pub tiles: Vec<i32>,
+    pub tiles: Vec<Tile>,
     pub range: i32,
     pub avoid: BTreeSet<String>,
     pub max_hops: i32,
@@ -52,12 +53,12 @@ pub struct Atlas {
 }
 
 impl Field {
-    fn via(&self, next: i32) -> i32 {
+    fn via(&self, next: Tile) -> i32 {
         let weight = weight_of(self.footprint, &self.weights, next);
         if weight < 0 {
             UNREACHED
         } else {
-            let d = self.dist[next as usize];
+            let d = self.dist[next];
             if d == UNREACHED || (d > 0 && on_edge(self.footprint, next)) {
                 UNREACHED
             } else {
@@ -66,13 +67,13 @@ impl Field {
         }
     }
 
-    fn best(&self, tile: i32) -> Option<i32> {
+    fn best(&self, tile: Tile) -> Option<Tile> {
         tiles::least_around(tile, UNREACHED, |n| self.via(n))
     }
 
-    pub fn ticks(&self, tile: i32) -> Option<i32> {
+    pub fn ticks(&self, tile: Tile) -> Option<i32> {
         let d = if weight_of(self.footprint, &self.weights, tile) >= 0 {
-            self.dist[tile as usize]
+            self.dist[tile]
         } else {
             self.best(tile).map_or(UNREACHED, |next| self.via(next))
         };
@@ -80,14 +81,14 @@ impl Field {
     }
 
     /// The ticks onward from a neighbour of `next`, through it.
-    pub fn onto(&self, next: i32) -> Option<i32> {
+    pub fn onto(&self, next: Tile) -> Option<i32> {
         match self.via(next) {
             d if d == UNREACHED => None,
             d => Some(d),
         }
     }
 
-    pub fn step(&self, tile: i32) -> Option<i32> {
+    pub fn step(&self, tile: Tile) -> Option<i32> {
         match self.ticks(tile) {
             Some(d) if d > 0 => self.best(tile).map(|next| tiles::direction(tile, next)),
             _ => None,
@@ -135,10 +136,10 @@ impl Atlas {
 
     /// No site is built under a creep, so these are kept clear of solid ones.
     pub fn upgrader_seats(
-        walkable: impl Fn(i32) -> bool,
-        controller: i32,
-        buffer: i32,
-    ) -> Vec<i32> {
+        walkable: impl Fn(Tile) -> bool,
+        controller: Tile,
+        buffer: Tile,
+    ) -> Vec<Tile> {
         tiles::within(1, buffer)
             .into_iter()
             .filter(|t| walkable(*t) && tiles::range(*t, controller) <= engine::UPGRADE_RANGE)
@@ -166,20 +167,15 @@ impl Atlas {
             }
         }
         candidates.retain(|(p, _)| p.within(1, source) && p != source);
-        candidates.sort_by_key(|(p, built)| {
-            (
-                -from_controller(p),
-                built.is_none(),
-                p.y * tiles::SIDE + p.x,
-            )
-        });
+        candidates
+            .sort_by_key(|(p, built)| (-from_controller(p), built.is_none(), tiles::of_pos(p)));
         candidates.into_iter().next()
     }
 
     /// A link buffer's upgrader tiles stay open: held, they priced every walk
     /// past the controller dearer.
-    pub fn work_seats(room: &Room) -> Vec<i32> {
-        let mut seats: Vec<i32> = room
+    pub fn work_seats(room: &Room) -> Vec<Tile> {
+        let mut seats: Vec<Tile> = room
             .sources
             .iter()
             .filter_map(|s| Atlas::post_of(room, &s.pos).map(|(p, _)| tiles::of_pos(&p)))
@@ -221,9 +217,8 @@ impl Atlas {
             let mut weights = vec![0i32; tiles::COUNT];
             let terrain = &room.terrain;
 
-            for i in 0..tiles::COUNT {
-                let t = terrain[i];
-                weights[i] = if t & super::world::terrain::WALL != 0 {
+            for (weight, t) in weights.iter_mut().zip(terrain) {
+                *weight = if t & super::world::terrain::WALL != 0 {
                     -1
                 } else if t & super::world::terrain::SWAMP != 0 {
                     engine::SWAMP_WEIGHT
@@ -234,40 +229,40 @@ impl Atlas {
 
             for s in &room.structures {
                 if s.kind == Kind::Road {
-                    weights[tiles::of_pos(&s.pos) as usize] = engine::ROAD_WEIGHT;
+                    weights[tiles::of_pos(&s.pos)] = engine::ROAD_WEIGHT;
                 }
             }
 
             for tile in Atlas::work_seats(room) {
-                weights[tile as usize] = grid::SEAT_WEIGHT;
+                weights[tile] = grid::SEAT_WEIGHT;
             }
 
             for s in &room.structures {
                 if !s.walkable {
-                    weights[tiles::of_pos(&s.pos) as usize] = -1;
+                    weights[tiles::of_pos(&s.pos)] = -1;
                 }
             }
 
             for site in &room.sites {
                 if site.owner.is_ours() && !site.kind.walkable() {
-                    weights[tiles::of_pos(&site.pos) as usize] = -1;
+                    weights[tiles::of_pos(&site.pos)] = -1;
                 }
             }
 
             for source in &room.sources {
-                weights[tiles::of_pos(&source.pos) as usize] = -1;
+                weights[tiles::of_pos(&source.pos)] = -1;
             }
 
             for mineral in &room.minerals {
-                weights[tiles::of_pos(&mineral.pos) as usize] = -1;
+                weights[tiles::of_pos(&mineral.pos)] = -1;
             }
 
             if let Some(c) = &room.controller {
-                weights[tiles::of_pos(&c.pos) as usize] = -1;
+                weights[tiles::of_pos(&c.pos)] = -1;
             }
 
             for creep in &room.hostiles {
-                weights[tiles::of_pos(&creep.pos) as usize] = -1;
+                weights[tiles::of_pos(&creep.pos)] = -1;
             }
 
             let weights = Rc::new(weights);
@@ -307,22 +302,21 @@ impl Atlas {
         self.rooms.get(room).map(|grid| (*grid.weights).clone())
     }
 
-    pub fn passable(&self, room: &str, tile: i32) -> bool {
-        self.rooms.contains_key(room)
-            && tile >= 0
-            && tile < tiles::COUNT as i32
-            && self.rooms[room].weights[tile as usize] >= 0
+    pub fn passable(&self, room: &str, tile: Tile) -> bool {
+        self.rooms
+            .get(room)
+            .is_some_and(|grid| grid.weights[tile] >= 0)
     }
 
     pub fn sees(&self, room: &str) -> bool {
         self.rooms.contains_key(room)
     }
 
-    fn seat(footprint: Footprint, weights: &[i32], tile: i32) -> bool {
+    fn seat(footprint: Footprint, weights: &[i32], tile: Tile) -> bool {
         weight_of(footprint, weights, tile) >= 0 && !on_edge(footprint, tile)
     }
 
-    fn reach(footprint: Footprint, anchor: i32, tile: i32) -> i32 {
+    fn reach(footprint: Footprint, anchor: Tile, tile: Tile) -> i32 {
         match footprint {
             Footprint::One => tiles::range(anchor, tile),
             Footprint::Quad => {
@@ -337,8 +331,8 @@ impl Atlas {
         footprint: Footprint,
         weights: &[i32],
         range: i32,
-        tile: i32,
-        into: &mut Vec<i32>,
+        tile: Tile,
+        into: &mut Vec<Tile>,
     ) {
         let spread = match footprint {
             Footprint::One => range,
@@ -378,11 +372,9 @@ impl Atlas {
         let near = self.rooms.get(from).map(|g| &g.weights);
         let far = self.rooms.get(onto).map(|g| &g.weights);
         for &tile in tiles::exit_tiles(exit) {
-            let near_walkable = near
-                .map(|weights| weights[tile as usize] >= 0)
-                .unwrap_or(true);
+            let near_walkable = near.map(|weights| weights[tile] >= 0).unwrap_or(true);
             let far_walkable = far
-                .map(|weights| tiles::landing(tile).is_some_and(|l| weights[l as usize] >= 0))
+                .map(|weights| tiles::landing(tile).is_some_and(|l| weights[l] >= 0))
                 .unwrap_or(true);
             if near_walkable && far_walkable {
                 return true;
@@ -460,11 +452,11 @@ impl Atlas {
         }
     }
 
-    fn exit_goals(footprint: Footprint, weights: &[i32], exit: i32) -> Vec<i32> {
+    fn exit_goals(footprint: Footprint, weights: &[i32], exit: i32) -> Vec<Tile> {
         match footprint {
             Footprint::One => tiles::exit_tiles(exit)
                 .iter()
-                .filter(|tile| weights[**tile as usize] >= 0)
+                .filter(|tile| weights[**tile] >= 0)
                 .copied()
                 .collect(),
             Footprint::Quad => {
@@ -497,7 +489,7 @@ impl Atlas {
             return None;
         }
         let footprint = mover.footprint;
-        let (goal_key, goals): (String, Vec<i32>) = if room == target.room {
+        let (goal_key, goals): (String, Vec<Tile>) = if room == target.room {
             let mut sorted = target.tiles.clone();
             if sorted.len() > 1 {
                 sorted.sort_unstable();
@@ -512,7 +504,7 @@ impl Atlas {
                     goal_key.push_str(&sorted[i].to_string());
                     first = false;
                     let tile = sorted[i];
-                    if tile >= 0 && (tile as usize) < tiles::COUNT {
+                    if tile.index() < tiles::COUNT {
                         Atlas::seats_near(footprint, &grid.weights, target.range, tile, &mut goals);
                     }
                 }

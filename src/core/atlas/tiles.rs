@@ -1,5 +1,7 @@
 //! A tile is `y * 50 + x`, the terrain raw buffer's index, so every per-room
 //! array in the Atlas reads the terrain's own order.
+use std::fmt;
+use std::ops::{Index, IndexMut};
 use std::sync::OnceLock;
 
 use crate::core::engine;
@@ -8,32 +10,81 @@ use crate::core::world::Pos;
 pub const SIDE: i32 = engine::ROOM_SIDE;
 pub const COUNT: usize = 2500;
 
-pub fn index(x: i32, y: i32) -> i32 {
-    y * SIDE + x
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Tile(u16);
+
+impl Tile {
+    pub fn of_index(i: usize) -> Tile {
+        Tile(i as u16)
+    }
+
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
 }
 
-pub fn x_of(tile: i32) -> i32 {
-    tile % SIDE
+impl fmt::Display for Tile {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
-pub fn y_of(tile: i32) -> i32 {
-    tile / SIDE
+impl<T> Index<Tile> for [T] {
+    type Output = T;
+    fn index(&self, tile: Tile) -> &T {
+        &self[tile.index()]
+    }
+}
+
+impl<T> IndexMut<Tile> for [T] {
+    fn index_mut(&mut self, tile: Tile) -> &mut T {
+        &mut self[tile.index()]
+    }
+}
+
+impl<T> Index<Tile> for Vec<T> {
+    type Output = T;
+    fn index(&self, tile: Tile) -> &T {
+        &self[tile.index()]
+    }
+}
+
+impl<T> IndexMut<Tile> for Vec<T> {
+    fn index_mut(&mut self, tile: Tile) -> &mut T {
+        &mut self[tile.index()]
+    }
+}
+
+pub fn all() -> impl Iterator<Item = Tile> {
+    (0..COUNT as u16).map(Tile)
+}
+
+pub fn index(x: i32, y: i32) -> Tile {
+    Tile((y * SIDE + x) as u16)
+}
+
+pub fn x_of(tile: Tile) -> i32 {
+    tile.0 as i32 % SIDE
+}
+
+pub fn y_of(tile: Tile) -> i32 {
+    tile.0 as i32 / SIDE
 }
 
 pub fn in_room(x: i32, y: i32) -> bool {
     (0..SIDE).contains(&x) && (0..SIDE).contains(&y)
 }
 
-pub fn of_pos(pos: &Pos) -> i32 {
+pub fn of_pos(pos: &Pos) -> Tile {
     index(pos.x, pos.y)
 }
 
-pub fn to_pos(room: &str, tile: i32) -> Pos {
+pub fn to_pos(room: &str, tile: Tile) -> Pos {
     Pos::new(room, x_of(tile), y_of(tile))
 }
 
 /// The engine's `getRangeTo`.
-pub fn range(a: i32, b: i32) -> i32 {
+pub fn range(a: Tile, b: Tile) -> i32 {
     (x_of(a) - x_of(b)).abs().max((y_of(a) - y_of(b)).abs())
 }
 
@@ -64,38 +115,29 @@ pub fn dy(direction: i32) -> i32 {
     }
 }
 
-pub fn neighbour(tile: i32, direction: i32) -> i32 {
+pub fn neighbour(tile: Tile, direction: i32) -> Option<Tile> {
     let x = x_of(tile) + dx(direction);
     let y = y_of(tile) + dy(direction);
-    if in_room(x, y) { index(x, y) } else { -1 }
+    in_room(x, y).then(|| index(x, y))
 }
 
-fn around_table() -> &'static Vec<Vec<i32>> {
-    static TABLE: OnceLock<Vec<Vec<i32>>> = OnceLock::new();
+fn around_table() -> &'static Vec<Vec<Tile>> {
+    static TABLE: OnceLock<Vec<Vec<Tile>>> = OnceLock::new();
     TABLE.get_or_init(|| {
-        (0..COUNT)
-            .map(|t| {
-                let mut ns = Vec::new();
-                for d in 1..=8 {
-                    let n = neighbour(t as i32, d);
-                    if n >= 0 {
-                        ns.push(n);
-                    }
-                }
-                ns
-            })
+        all()
+            .map(|t| (1..=8).filter_map(|d| neighbour(t, d)).collect())
             .collect()
     })
 }
 
 /// The in-room neighbours, in direction order.
-pub fn around(tile: i32) -> &'static [i32] {
-    &around_table()[tile as usize]
+pub fn around(tile: Tile) -> &'static [Tile] {
+    &around_table()[tile]
 }
 
 /// The neighbour costing least under `bound`, the first in direction order
 /// on a tie.
-pub fn least_around(tile: i32, bound: i32, mut cost: impl FnMut(i32) -> i32) -> Option<i32> {
+pub fn least_around(tile: Tile, bound: i32, mut cost: impl FnMut(Tile) -> i32) -> Option<Tile> {
     let mut best = None;
     let mut least = bound;
     for &n in around(tile) {
@@ -108,7 +150,7 @@ pub fn least_around(tile: i32, bound: i32, mut cost: impl FnMut(i32) -> i32) -> 
     best
 }
 
-pub fn direction(from: i32, onto: i32) -> i32 {
+pub fn direction(from: Tile, onto: Tile) -> i32 {
     let ddx = x_of(onto) - x_of(from);
     let ddy = y_of(onto) - y_of(from);
     match (ddx, ddy) {
@@ -124,7 +166,7 @@ pub fn direction(from: i32, onto: i32) -> i32 {
     }
 }
 
-pub fn within(radius: i32, tile: i32) -> Vec<i32> {
+pub fn within(radius: i32, tile: Tile) -> Vec<Tile> {
     let x = x_of(tile);
     let y = y_of(tile);
     let mut tiles = Vec::new();
@@ -138,7 +180,7 @@ pub fn within(radius: i32, tile: i32) -> Vec<i32> {
 
 const LAST: i32 = SIDE - 1;
 
-pub fn on_edge(tile: i32) -> bool {
+pub fn on_edge(tile: Tile) -> bool {
     let x = x_of(tile);
     let y = y_of(tile);
     x == 0 || y == 0 || x == LAST || y == LAST
@@ -146,7 +188,7 @@ pub fn on_edge(tile: i32) -> bool {
 
 /// The engine's FIND_EXIT_* values; a corner lies on two borders and lands
 /// nowhere.
-pub fn exit_of(tile: i32) -> i32 {
+pub fn exit_of(tile: Tile) -> i32 {
     let x = x_of(tile);
     let y = y_of(tile);
     let on_x = x == 0 || x == LAST;
@@ -164,8 +206,8 @@ pub fn exit_of(tile: i32) -> i32 {
     }
 }
 
-fn exit_bands() -> &'static Vec<Vec<i32>> {
-    static BANDS: OnceLock<Vec<Vec<i32>>> = OnceLock::new();
+fn exit_bands() -> &'static Vec<Vec<Tile>> {
+    static BANDS: OnceLock<Vec<Vec<Tile>>> = OnceLock::new();
     BANDS.get_or_init(|| {
         (0..9)
             .map(|exit| match exit {
@@ -180,7 +222,7 @@ fn exit_bands() -> &'static Vec<Vec<i32>> {
 }
 
 /// Shared: never written.
-pub fn exit_tiles(exit: i32) -> &'static [i32] {
+pub fn exit_tiles(exit: i32) -> &'static [Tile] {
     if (0..9).contains(&exit) {
         &exit_bands()[exit as usize]
     } else {
@@ -188,7 +230,7 @@ pub fn exit_tiles(exit: i32) -> &'static [i32] {
     }
 }
 
-pub fn landing(tile: i32) -> Option<i32> {
+pub fn landing(tile: Tile) -> Option<Tile> {
     let x = x_of(tile);
     let y = y_of(tile);
     match exit_of(tile) {

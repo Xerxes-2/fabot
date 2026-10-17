@@ -7,7 +7,7 @@ use super::Dice;
 use crate::core::atlas::{Atlas, Mover, Target};
 use crate::core::grid::{Footprint, factor_of};
 use crate::core::mv::{Wish, arbitrate::arbitrate, plan};
-use crate::core::tiles;
+use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::{BodyPart, Boost};
 use crate::core::world::{Creep, Owner, Part, Room, Store, World, terrain};
 
@@ -18,10 +18,10 @@ const CASES: u64 = 500;
 /// the same wishes and holds in another order.
 struct Crowd {
     passable: Vec<bool>,
-    held: Vec<i32>,
+    held: Vec<Tile>,
     wishes: Vec<Wish>,
     shuffled: Vec<Wish>,
-    held_shuffled: Vec<i32>,
+    held_shuffled: Vec<Tile>,
 }
 
 /// A creep in a generated room with somewhere to walk: this room's tile or
@@ -38,25 +38,25 @@ fn shuffle<T>(dice: &mut Dice, xs: &mut [T]) {
     }
 }
 
-fn sub_list(dice: &mut Dice, xs: &[i32]) -> Vec<i32> {
+fn sub_list(dice: &mut Dice, xs: &[Tile]) -> Vec<Tile> {
     xs.iter().copied().filter(|_| dice.chance(2)).collect()
 }
 
 /// The box every crowd stands in: eight tiles a side, so bodies jostle.
-fn crowd_box() -> Vec<i32> {
+fn crowd_box() -> Vec<Tile> {
     (20..28)
         .flat_map(|y| (20..28).map(move |x| tiles::index(x, y)))
         .collect()
 }
 
-fn around(tile: i32) -> Vec<i32> {
+fn around(tile: Tile) -> Vec<Tile> {
     tiles::within(1, tile)
         .into_iter()
         .filter(|&t| t != tile)
         .collect()
 }
 
-fn wish(dice: &mut Dice, name: String, at: i32) -> Wish {
+fn wish(dice: &mut Dice, name: String, at: Tile) -> Wish {
     let near = around(at);
     let stays = dice.chance(3);
     let step = dice.pick(&near);
@@ -89,13 +89,10 @@ fn crowd(dice: &mut Dice) -> Crowd {
     let mut passable = vec![true; tiles::COUNT];
     for &tile in &cells {
         if dice.chance(7) {
-            passable[tile as usize] = false;
+            passable[tile] = false;
         }
     }
-    let mut open: Vec<i32> = cells
-        .into_iter()
-        .filter(|&t| passable[t as usize])
-        .collect();
+    let mut open: Vec<Tile> = cells.into_iter().filter(|&t| passable[t]).collect();
     shuffle(dice, &mut open);
     let bodies = dice.between(0, 30.min(open.len() as i32)) as usize;
     let foreign = dice.between(0, 6.min((open.len() - bodies) as i32)) as usize;
@@ -129,8 +126,8 @@ fn errand(dice: &mut Dice) -> Errand {
             _ => terrain::WALL,
         })
         .collect();
-    let at = dice.below(tiles::COUNT as i32);
-    let goal = dice.below(tiles::COUNT as i32);
+    let at = Tile::of_index(dice.below(tiles::COUNT as i32) as usize);
+    let goal = Tile::of_index(dice.below(tiles::COUNT as i32) as usize);
     let range = dice.between(0, 3);
     let away = dice.chance(4);
     let body = (0..dice.between(1, 40))
@@ -175,22 +172,24 @@ fn errands(seed: u64) -> impl Iterator<Item = Errand> {
 }
 
 fn resolve(crowd: &Crowd) -> Vec<(String, i32)> {
-    arbitrate(|t| crowd.passable[t as usize], &crowd.held, &crowd.wishes)
+    arbitrate(|t| crowd.passable[t], &crowd.held, &crowd.wishes)
 }
 
 /// Each wish's index with the tile it ends on.
-fn ends(wishes: &[Wish], moves: &[(String, i32)]) -> Vec<i32> {
+fn ends(wishes: &[Wish], moves: &[(String, i32)]) -> Vec<Tile> {
     let steps: BTreeMap<&str, i32> = moves.iter().map(|(n, d)| (n.as_str(), *d)).collect();
     wishes
         .iter()
         .map(|w| match steps.get(w.creep.as_str()) {
-            Some(&direction) => tiles::neighbour(w.at, direction),
+            Some(&direction) => {
+                tiles::neighbour(w.at, direction).expect("a step stays in the room")
+            }
             None => w.at,
         })
         .collect()
 }
 
-fn placed_in(crowd: &Crowd) -> Vec<i32> {
+fn placed_in(crowd: &Crowd) -> Vec<Tile> {
     ends(&crowd.wishes, &resolve(crowd))
 }
 
@@ -207,7 +206,7 @@ fn head_on(crowd: &Crowd, wish: &Wish) -> bool {
     })
 }
 
-fn listed(wish: &Wish, tile: i32) -> bool {
+fn listed(wish: &Wish, tile: Tile) -> bool {
     tile == wish.head || wish.tail.contains(&tile)
 }
 
@@ -279,7 +278,7 @@ fn no_two_bodies_end_on_one_tile_wished_or_held() {
     for crowd in crowds(21) {
         let mut all = placed_in(&crowd);
         all.extend(&crowd.held);
-        let distinct: BTreeSet<i32> = all.iter().copied().collect();
+        let distinct: BTreeSet<Tile> = all.iter().copied().collect();
         assert_eq!(distinct.len(), all.len());
     }
 }
@@ -292,11 +291,10 @@ fn a_creep_steps_once_onto_a_passable_tile_beside_it_it_listed() {
         assert_eq!(names.len(), moves.len(), "once");
         for (name, direction) in &moves {
             let wish = crowd.wishes.iter().find(|w| &w.creep == name).unwrap();
-            let tile = tiles::neighbour(wish.at, *direction);
             assert!((1..=8).contains(direction));
-            assert!(tile >= 0);
+            let tile = tiles::neighbour(wish.at, *direction).expect("in the room");
             assert_eq!(tiles::range(wish.at, tile), 1);
-            assert!(crowd.passable[tile as usize]);
+            assert!(crowd.passable[tile]);
             assert!(listed(wish, tile));
         }
     }
@@ -356,7 +354,7 @@ fn a_working_body_is_pushed_off_its_work_only_by_a_mover_two_weights_heavier() {
         let Some(mover) = wishes.first() else {
             continue;
         };
-        let moves = arbitrate(|t| crowd.passable[t as usize], &crowd.held, &wishes);
+        let moves = arbitrate(|t| crowd.passable[t], &crowd.held, &wishes);
         for (wish, tile) in wishes.iter().zip(ends(&wishes, &moves)).skip(1) {
             assert!(wish.working.contains(&tile) || mover.weight.max(1) >= wish.weight.max(1) + 2);
         }
@@ -373,9 +371,9 @@ fn a_body_shoved_off_a_step_lands_on_the_shovers_onward_step_only_when_nothing_e
             continue;
         };
         if mover.stays()
-            || !crowd.passable[mover.head as usize]
+            || !crowd.passable[mover.head]
             || onward == mover.at
-            || !crowd.passable[onward as usize]
+            || !crowd.passable[onward]
         {
             continue;
         }
@@ -399,7 +397,7 @@ fn a_body_shoved_off_a_step_lands_on_the_shovers_onward_step_only_when_nothing_e
             },
             pushed,
         ];
-        let moves = arbitrate(|t| crowd.passable[t as usize], &[], &wishes);
+        let moves = arbitrate(|t| crowd.passable[t], &[], &wishes);
         assert_ne!(ends(&wishes, &moves)[1], onward);
     }
 }
@@ -408,7 +406,7 @@ fn a_body_shoved_off_a_step_lands_on_the_shovers_onward_step_only_when_nothing_e
 fn no_creep_could_raise_its_own_value_stepping_alone_onto_a_free_tile_it_listed() {
     for crowd in crowds(28) {
         let placed = placed_in(&crowd);
-        let taken: BTreeSet<i32> = placed.iter().chain(&crowd.held).copied().collect();
+        let taken: BTreeSet<Tile> = placed.iter().chain(&crowd.held).copied().collect();
         for (wish, &tile) in crowd.wishes.iter().zip(&placed) {
             if !wish.moves || met(&crowd, wish) || head_on(&crowd, wish) {
                 continue;
@@ -417,7 +415,7 @@ fn no_creep_could_raise_its_own_value_stepping_alone_onto_a_free_tile_it_listed(
                 assert!(
                     taken.contains(&free)
                         || tiles::range(wish.at, free) != 1
-                        || !crowd.passable[free as usize]
+                        || !crowd.passable[free]
                         || wish.value(free) <= wish.value(tile)
                 );
             }
@@ -430,11 +428,7 @@ fn the_same_crowd_in_any_order_resolves_the_same() {
     for crowd in crowds(29) {
         let first = resolve(&crowd);
         assert_eq!(first, resolve(&crowd));
-        let reordered = arbitrate(
-            |t| crowd.passable[t as usize],
-            &crowd.held_shuffled,
-            &crowd.shuffled,
-        );
+        let reordered = arbitrate(|t| crowd.passable[t], &crowd.held_shuffled, &crowd.shuffled);
         assert_eq!(first, reordered);
     }
 }
@@ -514,7 +508,7 @@ fn a_mover_met_head_on_by_a_held_body_that_steps_onto_its_tile_once_rested_waits
 fn a_mover_met_head_on_through_its_step_ends_on_its_step_or_its_own_tile() {
     for crowd in crowds(35) {
         for (wish, tile) in crowd.wishes.iter().zip(placed_in(&crowd)) {
-            let free = crowd.passable[wish.head as usize]
+            let free = crowd.passable[wish.head]
                 && !crowd.held.contains(&wish.head)
                 && crowd
                     .wishes

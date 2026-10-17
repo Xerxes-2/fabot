@@ -8,6 +8,7 @@ use crate::core::grid::{self, Footprint};
 use crate::core::intents::{CreepAct, Intent};
 use crate::core::mv::{Wish, blob, plan};
 use crate::core::tick;
+use crate::core::tiles::Tile;
 use crate::core::vocabulary::{BodyPart, same_part};
 use crate::core::world::{Creep, Pos};
 use crate::core::{engine, lists, tiles};
@@ -173,7 +174,7 @@ fn struck(kind: BodyPart, h: &Creep, at: &Pos) -> bool {
     reach(kind, h).is_some_and(|r| at.within(r, &h.pos))
 }
 
-fn step_to(creep: &Creep, tile: i32) -> Wish {
+fn step_to(creep: &Creep, tile: Tile) -> Wish {
     Wish {
         creep: creep.name.clone(),
         footprint: Footprint::One,
@@ -202,7 +203,7 @@ pub fn kite(
         .filter(|h| struck(BodyPart::Attack, h, &creep.pos))
         .collect();
 
-    let gap = |tile: i32| -> i32 {
+    let gap = |tile: Tile| -> i32 {
         let at = tiles::to_pos(&room, tile);
 
         swings
@@ -216,13 +217,13 @@ pub fn kite(
         let at = aim(sight, order, centre, creep);
         toward(sight, creep, &at, engine::RANGED_RANGE)
     } else {
-        let steps: Vec<i32> = tiles::around(here)
+        let steps: Vec<Tile> = tiles::around(here)
             .iter()
             .copied()
             .filter(|t| !tiles::on_edge(*t) && sight.atlas.passable(&room, *t))
             .collect();
 
-        let step = lists::sort_by(|t: &i32| (-gap(*t), *t), &steps)
+        let step = lists::sort_by(|t: &Tile| (-gap(*t), *t), &steps)
             .into_iter()
             .next()
             .filter(|t| gap(*t) > gap(here));
@@ -308,17 +309,17 @@ struct Safety<'a> {
 
 impl Safety<'_> {
     /// A body crosses an exit by stepping onto it, not by standing on it.
-    fn crosses(at: (i32, Option<i32>)) -> bool {
+    fn crosses(at: (Tile, Option<Tile>)) -> bool {
         at.1.is_some() && tiles::on_edge(at.0)
     }
 
-    fn safe(&self, at: (i32, Option<i32>)) -> bool {
+    fn safe(&self, at: (Tile, Option<Tile>)) -> bool {
         self.room != self.raid_room
             || Safety::crosses(at)
             || threat(self.raid, &tiles::to_pos(self.room, at.0)) == 0
     }
 
-    fn apart(&self, tile: i32) -> i32 {
+    fn apart(&self, tile: Tile) -> i32 {
         self.members
             .iter()
             .filter(|m| m.name != self.creep.name && live(BodyPart::Heal, m) > 0)
@@ -328,17 +329,17 @@ impl Safety<'_> {
 
     fn search(
         &self,
-        ring: Vec<(i32, Option<i32>)>,
-        seen: BTreeSet<i32>,
+        ring: Vec<(Tile, Option<Tile>)>,
+        seen: BTreeSet<Tile>,
         depth: i32,
-    ) -> Option<i32> {
-        let safe: Vec<(i32, Option<i32>)> =
+    ) -> Option<Tile> {
+        let safe: Vec<(Tile, Option<Tile>)> =
             ring.iter().copied().filter(|at| self.safe(*at)).collect();
 
         match safe.as_slice() {
             [] if depth == 0 || ring.is_empty() => None,
             [] => {
-                let mut next: Vec<(i32, Option<i32>)> = Vec::new();
+                let mut next: Vec<(Tile, Option<Tile>)> = Vec::new();
 
                 for at in ring.iter().copied().filter(|at| !Safety::crosses(*at)) {
                     for n in tiles::around(at.0) {
@@ -348,7 +349,7 @@ impl Safety<'_> {
                     }
                 }
 
-                let mut distinct: Vec<(i32, Option<i32>)> = Vec::new();
+                let mut distinct: Vec<(Tile, Option<Tile>)> = Vec::new();
 
                 for at in next {
                     if !distinct.iter().any(|(t, _)| *t == at.0) {
@@ -365,15 +366,15 @@ impl Safety<'_> {
                 self.search(distinct, seen, depth - 1)
             }
             found => {
-                let mut best: Option<i32> = None;
-                let mut best_key = (i32::MAX, i32::MAX);
+                let mut best: Option<Tile> = None;
+                let mut best_key = None;
 
                 for at in found {
                     let key = (self.apart(at.0), at.0);
 
-                    if key < best_key {
+                    if best_key.is_none_or(|b| key < b) {
                         best = at.1;
-                        best_key = key;
+                        best_key = Some(key);
                     }
                 }
 
@@ -424,7 +425,7 @@ pub fn blob(sight: &mut Sight, centre: &Pos, members: &[&Creep]) -> Vec<Wish> {
 
 /// A medic's seat beside a dismantler: open ground off every tile beside the
 /// rival's line, where a body would be struck from a rampart.
-fn seat(atlas: &Atlas, line: &[Pos], room: &str, t: i32) -> bool {
+fn seat(atlas: &Atlas, line: &[Pos], room: &str, t: Tile) -> bool {
     !tiles::on_edge(t)
         && atlas.passable(room, t)
         && !line
@@ -432,7 +433,7 @@ fn seat(atlas: &Atlas, line: &[Pos], room: &str, t: i32) -> bool {
             .any(|p| p.within(engine::MELEE_RANGE, &tiles::to_pos(room, t)))
 }
 
-pub fn seats_at(atlas: &Atlas, line: &[Pos], room: &str, work: i32) -> i32 {
+pub fn seats_at(atlas: &Atlas, line: &[Pos], room: &str, work: Tile) -> i32 {
     tiles::around(work)
         .iter()
         .filter(|t| seat(atlas, line, room, **t))
@@ -493,7 +494,7 @@ pub fn siege(
                 .iter()
                 .any(|d| d.name != creep.name && !relieved(d))
         {
-            let off: Vec<i32> = tiles::around(here)
+            let off: Vec<Tile> = tiles::around(here)
                 .iter()
                 .copied()
                 .filter(|t| {
@@ -504,7 +505,7 @@ pub fn siege(
                 .collect();
 
             let off = lists::sort_by(
-                |t: &i32| (-(nearest_tower(front, &tiles::to_pos(&room, *t))), *t),
+                |t: &Tile| (-(nearest_tower(front, &tiles::to_pos(&room, *t))), *t),
                 &off,
             )
             .into_iter()
@@ -547,7 +548,7 @@ pub fn siege(
         let wish = match anchor {
             None => toward(sight, creep, &front.breach, engine::RANGED_RANGE),
             Some(d) => {
-                let mut seats: Vec<i32> = tiles::around(tiles::of_pos(&d.pos))
+                let mut seats: Vec<Tile> = tiles::around(tiles::of_pos(&d.pos))
                     .iter()
                     .copied()
                     .filter(|t| seat(&*sight.atlas, &front.line, &d.pos.room, *t))

@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use super::super::shape::{Engagement, Group, Phase};
-use crate::core::tiles;
+use crate::core::tiles::{self};
 use crate::core::vocabulary::BodyPart;
 use crate::core::world::{Controller, Creep, Fallen, Kind, Owner, Pos, Structure};
 use crate::core::{engine, lists};

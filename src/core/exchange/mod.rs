@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::core::engine;
 use crate::core::grid::{FatigueFactor, step_ticks};
 use crate::core::lists;
-use crate::core::tiles;
+use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::BodyPart;
 use crate::core::world::Pos;
 
@@ -73,7 +73,7 @@ pub enum Stance {
 pub struct Ground {
     pub room: String,
     pub weights: Vec<i32>,
-    pub barriers: BTreeMap<i32, i32>,
+    pub barriers: BTreeMap<Tile, i32>,
 }
 
 /// A cast body lands no sooner than half a room's walk; no fight is read past
@@ -1291,13 +1291,13 @@ pub fn breach_plan(
     towers: &[Pos],
     heal: i32,
     rate: i32,
-    sources: &[i32],
-    goals: &[i32],
-) -> Option<(Vec<(i32, i32)>, i32)> {
-    let struck = |t: i32| tower_strike(towers, &tiles::to_pos(&ground.room, t));
+    sources: &[Tile],
+    goals: &[Tile],
+) -> Option<(Vec<(Tile, Tile)>, i32)> {
+    let struck = |t: Tile| tower_strike(towers, &tiles::to_pos(&ground.room, t));
 
-    let cost = |t: i32| -> Option<i32> {
-        let weight = ground.weights[t as usize];
+    let cost = |t: Tile| -> Option<i32> {
+        let weight = ground.weights[t];
         let step = if weight < 0 {
             None
         } else {
@@ -1316,21 +1316,21 @@ pub fn breach_plan(
     };
 
     let mut dist = vec![i32::MAX; tiles::COUNT];
-    let mut prev = vec![-1; tiles::COUNT];
-    let goal: BTreeSet<i32> = goals.iter().copied().collect();
+    let mut prev: Vec<Option<Tile>> = vec![None; tiles::COUNT];
+    let goal: BTreeSet<Tile> = goals.iter().copied().collect();
 
-    for t in sources {
-        dist[*t as usize] = 0;
+    for &t in sources {
+        dist[t] = 0;
     }
 
-    let mut queue: BTreeSet<(i32, i32)> = sources.iter().map(|t| (0, *t)).collect();
+    let mut queue: BTreeSet<(i32, Tile)> = sources.iter().map(|t| (0, *t)).collect();
 
     let found = loop {
         let Some((d, t)) = queue.pop_first() else {
             break None;
         };
 
-        if d > dist[t as usize] {
+        if d > dist[t] {
             continue;
         }
 
@@ -1340,9 +1340,9 @@ pub fn breach_plan(
 
         for &n in tiles::around(t) {
             match cost(n) {
-                Some(c) if d + c < dist[n as usize] => {
-                    dist[n as usize] = d + c;
-                    prev[n as usize] = t;
+                Some(c) if d + c < dist[n] => {
+                    dist[n] = d + c;
+                    prev[n] = Some(t);
                     queue.insert((d + c, n));
                 }
                 _ => {}
@@ -1354,9 +1354,9 @@ pub fn breach_plan(
         let mut walked = Vec::new();
         let mut t = last;
 
-        while prev[t as usize] >= 0 {
+        while let Some(p) = prev[t] {
             walked.push(t);
-            t = prev[t as usize];
+            t = p;
         }
 
         walked.push(t);
@@ -1368,7 +1368,7 @@ pub fn breach_plan(
             .map(|pair| (pair[1], pair[0]))
             .collect();
 
-        (broken, dist[last as usize])
+        (broken, dist[last])
     })
 }
 
@@ -1591,7 +1591,7 @@ mod tests {
     #[test]
     fn a_way_in_found_with_some_heal_is_found_with_more_and_no_slower() {
         let mut rng = Rng::new(0xfeed_4321);
-        let tile = |x: i32, y: i32| y * 50 + x;
+        let tile = tiles::index;
 
         for case in 0..CASES {
             let hits: Vec<i32> = (0..48).map(|_| rng.between(1, 300000)).collect();
@@ -1609,7 +1609,7 @@ mod tests {
                     .collect(),
             };
 
-            let sources: Vec<i32> = (1..=48).map(|y| tile(49, y)).collect();
+            let sources: Vec<Tile> = (1..=48).map(|y| tile(49, y)).collect();
 
             let plan = |heal: i32| {
                 breach_plan(

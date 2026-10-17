@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 /// Ahead of `State` so `State` can hold the standing plan.
+use crate::core::tiles::Tile;
 use crate::core::world::Kind;
 
 /// `Level`: from which the engine allows it (its rank among its kind against
@@ -8,7 +9,7 @@ use crate::core::world::Kind;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
     pub kind: Kind,
-    pub tile: i32,
+    pub tile: Tile,
     pub level: i32,
 }
 
@@ -16,7 +17,7 @@ pub struct Item {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
     pub room: String,
-    pub anchor: i32,
+    pub anchor: Tile,
     pub items: Vec<Item>,
     pub unfit: Vec<Cow<'static, str>>,
 }

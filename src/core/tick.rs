@@ -8,7 +8,7 @@ use super::grid::{self, FatigueFactor, Footprint};
 use super::intents::{Ask, CreepAct, Intent, Rank, SpawnAct};
 use super::mv;
 use super::state::State;
-use super::tiles;
+use super::tiles::{self, Tile};
 use super::vocabulary::BodyPart;
 use super::world::{Pos, Sightings, World};
 
@@ -275,7 +275,7 @@ pub fn arbitrate(context: &Context, wishes: &[(String, mv::Wish)]) -> Vec<Intent
     }
 
     for (room, ws) in groups {
-        let held: Vec<i32> = context
+        let held: Vec<Tile> = context
             .world
             .creeps
             .iter()

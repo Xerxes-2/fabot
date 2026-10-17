@@ -7,7 +7,7 @@
 use std::io::Read;
 
 use fabot::core::layout::{ground, plan, sites};
-use fabot::core::tiles;
+use fabot::core::tiles::{self, Tile};
 use fabot::core::vocabulary::Resource;
 use fabot::core::world::{Controller, Kind, Mineral, Owner, Pos, Room, Source, Store, Structure};
 use serde_json::{Value, json};
@@ -90,7 +90,7 @@ fn main() {
     let plan = plan::of_ground(&ground, &[first_spawn.tile]).unwrap();
 
     let mut built: Vec<Structure> = Vec::new();
-    let build = |built: &mut Vec<Structure>, kind: Kind, tile: i32| {
+    let build = |built: &mut Vec<Structure>, kind: Kind, tile: Tile| {
         let walkable = kind.walkable();
         built.push(Structure {
             id: format!("s{}", built.len()),

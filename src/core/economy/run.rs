@@ -7,7 +7,7 @@ use crate::core::intents::{Ask, CreepAct, Intent, LinkAct, Rank};
 use crate::core::mv::{Wish, plan};
 use crate::core::state::State;
 use crate::core::tick::{self, Context};
-use crate::core::tiles;
+use crate::core::tiles::{self};
 use crate::core::vocabulary::{BodyPart, Resource};
 use crate::core::world::{Creep, Pos};
 
