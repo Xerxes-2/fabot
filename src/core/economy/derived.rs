@@ -1,5 +1,7 @@
 /// Below this file nothing in `Economy` reads `World` (`ARCHITECTURE.md` §1).
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+
+use crate::core::HashMap;
 
 use crate::core::atlas::Atlas;
 use crate::core::engine;

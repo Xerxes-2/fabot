@@ -1,7 +1,9 @@
 /// Knows no Task kinds: what a body may take is `Pool::fits`, what it brings to
 /// a capacity `Pool::share`, where a Task ranks its `Priority` and walk.
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+
+use crate::core::HashMap;
 
 use super::derived::Body;
 use super::pool::{self, Capacity, Offer};
@@ -29,7 +31,7 @@ pub fn match_all(
         best_walk: vec![0; bodies.len()],
         best_load: vec![0; bodies.len()],
         by_id: {
-            let mut by_id = HashMap::new();
+            let mut by_id = HashMap::default();
             for (oi, offer) in pool.iter().enumerate() {
                 by_id.insert(offer.id.clone(), oi);
             }

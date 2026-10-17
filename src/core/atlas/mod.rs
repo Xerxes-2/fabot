@@ -1,6 +1,8 @@
 //! The floods are the one cache (`ARCHITECTURE.md` §1). Built twice from one
 //! `World`, an Atlas answers identically: a kept flood is one on equal weights.
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
+
+use crate::core::HashMap;
 use std::rc::Rc;
 
 pub mod grid;
@@ -188,7 +190,7 @@ impl Atlas {
 
     pub fn empty() -> Atlas {
         Atlas {
-            rooms: HashMap::new(),
+            rooms: HashMap::default(),
             misses: 0,
             hits: 0,
         }
@@ -205,7 +207,7 @@ impl Atlas {
     /// A room whose terrain buffer is not a whole room has no grid: routed by
     /// name, never walked.
     pub fn following(previous: &Atlas, world: &World) -> Atlas {
-        let mut rooms: HashMap<String, RoomGrid> = HashMap::new();
+        let mut rooms: HashMap<String, RoomGrid> = HashMap::default();
 
         for room in world
             .rooms
@@ -271,7 +273,7 @@ impl Atlas {
                 {
                     grid.floods.clone()
                 }
-                _ => HashMap::new(),
+                _ => HashMap::default(),
             };
 
             rooms.insert(room.name.clone(), RoomGrid { weights, floods });
@@ -388,7 +390,7 @@ impl Atlas {
         from: &str,
         onto: &str,
     ) -> HashMap<String, String> {
-        let mut parent: HashMap<String, String> = HashMap::new();
+        let mut parent: HashMap<String, String> = HashMap::default();
         parent.insert(from.to_string(), from.to_string());
         let mut frontier: Vec<String> = vec![from.to_string()];
         let mut hops = 0;

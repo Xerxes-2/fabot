@@ -2,7 +2,7 @@
 //! in one pass and hands over its numbers and its strings whole; this decodes
 //! them in the order it wrote them. A call across the seam costs more than the
 //! field it reads, so the reader makes a handful a tick.
-use std::collections::HashMap;
+use crate::core::HashMap;
 use std::str::Split;
 
 use js_sys::{Array, Int32Array, Reflect};

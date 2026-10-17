@@ -1,6 +1,8 @@
 /// A throw in one module costs that module this tick and nothing else
 /// (`ARCHITECTURE.md` §2). The clock is passed in to keep `decide` deterministic.
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::core::HashMap;
 
 use super::atlas::{Atlas, Mover, Target};
 use super::engine;
@@ -176,7 +178,7 @@ pub struct TickResult {
 }
 
 fn by_room<T: Clone>(pairs: &[(String, T)]) -> Vec<(String, Vec<T>)> {
-    let mut groups: HashMap<String, Vec<T>> = HashMap::new();
+    let mut groups: HashMap<String, Vec<T>> = HashMap::default();
     let mut rooms: Vec<String> = Vec::new();
     for (room, value) in pairs {
         if !groups.contains_key(room) {

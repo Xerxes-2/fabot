@@ -14,5 +14,9 @@ pub mod world;
 
 pub use atlas::{grid, tiles};
 
+/// FxHash: on wasm it beat SipHash, foldhash and rapidhash (bench-live), whose
+/// 128-bit multiply wasm has no instruction for.
+pub type HashMap<K, V> = std::collections::HashMap<K, V, rustc_hash::FxBuildHasher>;
+
 #[cfg(test)]
 pub(crate) mod tests;

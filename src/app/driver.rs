@@ -35,7 +35,7 @@ thread_local! {
         standing: BTreeMap::new(),
         sightings: Sightings::new(),
         atlas: Atlas::empty(),
-        terrain: world::Terrains::new(),
+        terrain: world::Terrains::default(),
     });
 }
 

@@ -1,7 +1,7 @@
 //! The few JsValue reads both the seam's readers want.
 
+use crate::core::HashMap;
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 use js_sys::Reflect;
 use wasm_bindgen::JsValue;
@@ -9,7 +9,7 @@ use wasm_bindgen::JsValue;
 thread_local! {
     /// A property name costs a JS string to read by; the seam reads the same
     /// few hundred thousand a tick, so each literal is built once.
-    static KEYS: RefCell<HashMap<&'static str, JsValue>> = RefCell::new(HashMap::new());
+    static KEYS: RefCell<HashMap<&'static str, JsValue>> = RefCell::new(HashMap::default());
 }
 
 pub fn warm(names: &[&'static str]) {

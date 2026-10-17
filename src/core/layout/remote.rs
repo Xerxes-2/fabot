@@ -1,6 +1,8 @@
 //! A declared outpost has no spawn to anchor a plan on, so its container and
 //! road are placed off the haul's own walk home.
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::core::HashMap;
 
 use crate::core::atlas::{Atlas, Mover, Target};
 use crate::core::grid::Footprint;
@@ -197,7 +199,7 @@ pub fn sites(
     // one `sites` wants the same trees: search each room once. Every target
     // `nearest` prices is at the reach with no avoid, so a tree is its route;
     // an `Atlas` cannot be lent to `nearest` and to its route at once.
-    let mut trees: HashMap<String, HashMap<String, String>> = HashMap::new();
+    let mut trees: HashMap<String, HashMap<String, String>> = HashMap::default();
     for room in &world.rooms {
         trees.insert(room.name.clone(), atlas.tree(tick::REACH_HOPS, &room.name));
     }
