@@ -70,7 +70,7 @@ tick arrives; otherwise its standing output is replayed:
 | Module | Decision | Key |
 |---|---|---|
 | Layout | the plan | census signature |
-| Economy | the match | creeps born/died, task set, a store crossing a line |
+| Economy | the match | none — the match reads each body's store, so it re-matches nearly every tick |
 | Fight | an engagement's plan | an engagement event (§6.2) |
 | Strategy | open/close operations, declarations | intel changed, an engagement closed, a due tick |
 | Move | a path | the next step blocked |
