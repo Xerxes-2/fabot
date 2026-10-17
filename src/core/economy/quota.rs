@@ -749,15 +749,17 @@ pub fn plan(
     all.extend(spent);
 
     let mut standing: BTreeMap<Pattern, i32> = BTreeMap::new();
-    let mut targets: BTreeMap<String, Pos> = BTreeMap::new();
-
-    for offer in pool {
-        targets.insert(offer.id.clone(), offer.target.clone());
-    }
+    let targets: BTreeMap<&str, &Pos> = pool
+        .iter()
+        .map(|offer| (offer.id.as_str(), &offer.target))
+        .collect();
 
     let work_at = |body: &Body| -> Pos {
-        match assignments.get(&body.name).and_then(|id| targets.get(id)) {
-            Some(pos) => pos.clone(),
+        match assignments
+            .get(&body.name)
+            .and_then(|id| targets.get(id.as_str()))
+        {
+            Some(pos) => (*pos).clone(),
             None => body.pos.clone(),
         }
     };
