@@ -95,16 +95,19 @@ if (typeof TextEncoder === "undefined") {
 const __fabotBase64 = "${wasm.toString("base64")}";
 function __fabotWasm() {
   const digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const clean = __fabotBase64.replace(/=+$/, "");
-  const out = new Uint8Array((clean.length * 3) >> 2);
-  let bits = 0, held = 0, at = 0;
-  for (let i = 0; i < clean.length; i++) {
-    held = (held << 6) | digits.indexOf(clean[i]);
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      out[at++] = (held >> bits) & 0xff;
-    }
+  const table = new Uint8Array(128);
+  for (let i = 0; i < 64; i++) table[digits.charCodeAt(i)] = i;
+  const text = __fabotBase64;
+  const pad = text.endsWith("==") ? 2 : text.endsWith("=") ? 1 : 0;
+  const out = new Uint8Array((text.length * 3) / 4 - pad);
+  let at = 0;
+  for (let i = 0; i < text.length; i += 4) {
+    const word =
+      (table[text.charCodeAt(i)] << 18) | (table[text.charCodeAt(i + 1)] << 12) |
+      (table[text.charCodeAt(i + 2)] << 6) | table[text.charCodeAt(i + 3)];
+    out[at++] = word >> 16;
+    if (at < out.length) out[at++] = word >> 8;
+    if (at < out.length) out[at++] = word;
   }
   return out;
 }
