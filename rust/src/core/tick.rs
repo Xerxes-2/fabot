@@ -81,21 +81,22 @@ pub fn nearest(
         factor: grid::loaded_factor(&[BodyPart::Move]),
     };
 
-    let least = |atlas: &mut Atlas, measure: &dyn Fn(&mut Atlas, &Pos) -> Option<i32>| -> Option<usize> {
-        let mut best: Option<usize> = None;
-        let mut best_d = i32::MAX;
-        for (i, home) in homes.iter().enumerate() {
-            if can(i) {
-                if let Some(d) = measure(atlas, home) {
-                    if d < best_d {
-                        best = Some(i);
-                        best_d = d;
+    let least =
+        |atlas: &mut Atlas, measure: &dyn Fn(&mut Atlas, &Pos) -> Option<i32>| -> Option<usize> {
+            let mut best: Option<usize> = None;
+            let mut best_d = i32::MAX;
+            for (i, home) in homes.iter().enumerate() {
+                if can(i) {
+                    if let Some(d) = measure(atlas, home) {
+                        if d < best_d {
+                            best = Some(i);
+                            best_d = d;
+                        }
                     }
                 }
             }
-        }
-        best
-    };
+            best
+        };
 
     least(atlas, &|atlas, home| {
         let t = target_at(home, 1);
@@ -205,7 +206,13 @@ pub fn queue(world: &World, asks: &[(String, Ask)]) -> Vec<Intent> {
         }
     };
 
-    fn serve(idle: &[&super::world::Spawn], capacity: i32, bank: i32, held: bool, asks: &[Ask]) -> Vec<Intent> {
+    fn serve(
+        idle: &[&super::world::Spawn],
+        capacity: i32,
+        bank: i32,
+        held: bool,
+        asks: &[Ask],
+    ) -> Vec<Intent> {
         let mut out = Vec::new();
         let mut bank = bank;
         let mut held = held;
@@ -240,7 +247,13 @@ pub fn queue(world: &World, asks: &[(String, Ask)]) -> Vec<Intent> {
                 .iter()
                 .filter(|s| s.pos.room == room && s.spawning.is_none())
                 .collect();
-            out.extend(serve(&idle, r.energy_capacity, r.energy_available, false, &asks));
+            out.extend(serve(
+                &idle,
+                r.energy_capacity,
+                r.energy_available,
+                false,
+                &asks,
+            ));
         }
     }
     out
@@ -380,7 +393,20 @@ pub fn run(
 }
 
 /// The modules `Main` runs, in this order.
-pub const MODULES: [Module; 0] = [];
+pub const MODULES: [Module; 3] = [
+    Module {
+        name: "fight",
+        run: super::fight::decide,
+    },
+    Module {
+        name: "economy",
+        run: super::economy::decide,
+    },
+    Module {
+        name: "layout",
+        run: super::layout::decide,
+    },
+];
 
 pub fn module_list() -> &'static [Module] {
     &MODULES

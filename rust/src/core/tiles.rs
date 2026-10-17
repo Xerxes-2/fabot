@@ -67,11 +67,7 @@ pub fn dy(direction: i32) -> i32 {
 pub fn neighbour(tile: i32, direction: i32) -> i32 {
     let x = x_of(tile) + dx(direction);
     let y = y_of(tile) + dy(direction);
-    if in_room(x, y) {
-        index(x, y)
-    } else {
-        -1
-    }
+    if in_room(x, y) { index(x, y) } else { -1 }
 }
 
 fn around_table() -> &'static Vec<Vec<i32>> {

@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use js_sys::{Array, Object, Reflect};
-use screeps::{memory, raw_memory};
+use screeps::raw_memory;
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::core::exchange::{Losses, Outcome};
@@ -15,8 +15,6 @@ use crate::core::world::{Pos, World};
 
 /// Read by `npm run observe` and `scripts/capture`.
 pub const OBSERVE_SEGMENT: u8 = 1;
-pub const RECORDER_FIRST: u8 = 10;
-pub const RECORDER_SLOTS: i32 = 5;
 
 fn field(o: &JsValue, name: &str) -> JsValue {
     Reflect::get(o, &JsValue::from_str(name)).unwrap_or(JsValue::UNDEFINED)
@@ -76,20 +74,26 @@ fn pos_obj(p: &Pos) -> JsValue {
     o.into()
 }
 
+/// The engine hands out a new `Memory` object a tick; a held reference would
+/// write the last tick's.
+fn memory() -> JsValue {
+    Reflect::get(&js_sys::global(), &JsValue::from_str("Memory")).unwrap_or(JsValue::UNDEFINED)
+}
+
 fn root() -> JsValue {
-    let memory: &JsValue = memory::ROOT.as_ref();
-    let fabot = field(memory, "fabot");
+    let memory = memory();
+    let fabot = field(&memory, "fabot");
     if is_object(&fabot) {
-        drop_field(memory, "fabot");
+        drop_field(&memory, "fabot");
     }
-    let v2 = field(memory, "v2");
+    let v2 = field(&memory, "v2");
     if is_object(&v2) {
         v2
     } else {
         let fresh = Object::new();
         let switches = Object::new();
         set_field(fresh.as_ref(), "switches", switches.as_ref());
-        set_field(memory, "v2", fresh.as_ref());
+        set_field(&memory, "v2", fresh.as_ref());
         fresh.into()
     }
 }
@@ -107,10 +111,16 @@ fn switches() -> JsValue {
 }
 
 fn group_of(o: &JsValue) -> Option<Group> {
-    match (int_of(&field(o, "id")), int_of(&field(o, "seen")), pos_of(o)) {
+    match (
+        int_of(&field(o, "id")),
+        int_of(&field(o, "seen")),
+        pos_of(o),
+    ) {
         (Some(id), Some(seen), Some(centre)) => Some(Group {
             id,
-            members: list_of(string_of, &field(o, "members")).into_iter().collect(),
+            members: list_of(string_of, &field(o, "members"))
+                .into_iter()
+                .collect(),
             room: centre.room.clone(),
             last_seen: seen,
             centre,
@@ -280,12 +290,12 @@ fn engagement_obj(e: &Engagement) -> JsValue {
     set_field(o.as_ref(), "lost", &JsValue::from_f64(e.lost as f64));
     set_field(o.as_ref(), "budget", &JsValue::from_f64(e.budget as f64));
     set_field(o.as_ref(), "priority", &JsValue::from_f64(e.priority));
+    set_field(o.as_ref(), "unanswered", &JsValue::from_bool(e.unanswered));
     set_field(
         o.as_ref(),
-        "unanswered",
-        &JsValue::from_bool(e.unanswered),
+        "capacity",
+        &JsValue::from_f64(e.capacity as f64),
     );
-    set_field(o.as_ref(), "capacity", &JsValue::from_f64(e.capacity as f64));
     match &e.predicted {
         Some(outcome) => set_field(o.as_ref(), "predicted", &outcome_obj(outcome)),
         None => set_field(o.as_ref(), "predicted", &JsValue::NULL),
@@ -316,7 +326,11 @@ fn part_of_letter(letter: char) -> Option<vocabulary::BodyPart> {
 
 fn cast_obj(c: &Cast) -> JsValue {
     let o = Object::new();
-    set_field(o.as_ref(), "engagement", &JsValue::from_f64(c.engagement as f64));
+    set_field(
+        o.as_ref(),
+        "engagement",
+        &JsValue::from_f64(c.engagement as f64),
+    );
     set_field(o.as_ref(), "name", &JsValue::from_str(&c.name));
     set_field(o.as_ref(), "room", &JsValue::from_str(&c.room));
     let body: String = c.body.iter().map(|p| vocabulary::part_letter(*p)).collect();
@@ -398,18 +412,17 @@ pub fn write_state(state: &State) {
 fn declared_at(room: &str, o: &JsValue) -> Option<Declared> {
     Some(Declared {
         id: string_of(&field(o, "id"))?,
-        pos: Pos::new(
-            room,
-            int_of(&field(o, "x"))?,
-            int_of(&field(o, "y"))?,
-        ),
+        pos: Pos::new(room, int_of(&field(o, "x"))?, int_of(&field(o, "y"))?),
     })
 }
 
 fn outpost_of(o: &JsValue) -> Option<Outpost> {
     let room = string_of(&field(o, "room"))?;
     let sources = array_of(&field(o, "sources"))?;
-    let parsed: Vec<Declared> = sources.iter().filter_map(|s| declared_at(&room, s)).collect();
+    let parsed: Vec<Declared> = sources
+        .iter()
+        .filter_map(|s| declared_at(&room, s))
+        .collect();
     let controller = declared_at(&room, &field(o, "controller"))?;
     if parsed.len() != sources.len() {
         return None;
@@ -519,10 +532,6 @@ pub fn write_observe(o: &Observed) {
 pub fn write_segment(id: u8, text: &str) {
     let segments = raw_memory::segments();
     segments.set(id, text.to_string());
-}
-
-pub fn raw_length() -> i32 {
-    raw_memory::get().length() as i32
 }
 
 /// The recorder's ring: the last five ticks' `World` and Memory size.

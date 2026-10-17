@@ -3,7 +3,7 @@ use js_sys::{Array, Function, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::app::world;
-use crate::core::intents::{CreepAct, ControllerAct, Intent, LinkAct, RoomAct, SpawnAct, TowerAct};
+use crate::core::intents::{ControllerAct, CreepAct, Intent, LinkAct, RoomAct, SpawnAct, TowerAct};
 use crate::core::vocabulary;
 
 #[derive(Clone, Debug)]
@@ -30,7 +30,8 @@ fn args(values: &[JsValue]) -> Array {
 
 fn call(obj: &JsValue, verb: &str, values: &[JsValue]) -> Result<i32, ()> {
     let function = field(obj, verb);
-    let result: Result<JsValue, JsValue> = Reflect::apply(function.unchecked_ref::<Function>(), obj, &args(values));
+    let result: Result<JsValue, JsValue> =
+        Reflect::apply(function.unchecked_ref::<Function>(), obj, &args(values));
     match result {
         Ok(v) => Ok(v.as_f64().map(|n| n as i32).unwrap_or(0)),
         Err(_) => Err(()),
@@ -69,19 +70,27 @@ fn act(intent: &Intent) -> (String, i32) {
                         Err(()) => (verb("threw"), THREW),
                     }
                 }
-                CreepAct::Harvest(id) => on("harvest", id, |t| call(&creep, "harvest", &[t.clone()])),
+                CreepAct::Harvest(id) => {
+                    on("harvest", id, |t| call(&creep, "harvest", &[t.clone()]))
+                }
                 CreepAct::Transfer(id, resource) => on("transfer", id, |t| {
                     call(
                         &creep,
                         "transfer",
-                        &[t.clone(), JsValue::from_str(&vocabulary::resource_name(resource))],
+                        &[
+                            t.clone(),
+                            JsValue::from_str(&vocabulary::resource_name(resource)),
+                        ],
                     )
                 }),
                 CreepAct::Withdraw(id, resource) => on("withdraw", id, |t| {
                     call(
                         &creep,
                         "withdraw",
-                        &[t.clone(), JsValue::from_str(&vocabulary::resource_name(resource))],
+                        &[
+                            t.clone(),
+                            JsValue::from_str(&vocabulary::resource_name(resource)),
+                        ],
                     )
                 }),
                 CreepAct::Pickup(id) => on("pickup", id, |t| call(&creep, "pickup", &[t.clone()])),
@@ -99,19 +108,23 @@ fn act(intent: &Intent) -> (String, i32) {
                 CreepAct::ClaimController(id) => on("claim", id, |t| {
                     call(&creep, "claimController", &[t.clone()])
                 }),
-                CreepAct::AttackCreep(id) => on("attack", id, |t| call(&creep, "attack", &[t.clone()])),
-                CreepAct::RangedAttackCreep(id) => {
-                    on("rangedAttack", id, |t| call(&creep, "rangedAttack", &[t.clone()]))
+                CreepAct::AttackCreep(id) => {
+                    on("attack", id, |t| call(&creep, "attack", &[t.clone()]))
                 }
+                CreepAct::RangedAttackCreep(id) => on("rangedAttack", id, |t| {
+                    call(&creep, "rangedAttack", &[t.clone()])
+                }),
                 CreepAct::RangedMassAttack => match call(&creep, "rangedMassAttack", &[]) {
                     Ok(code) => (verb("rangedMassAttack"), code),
                     Err(()) => (verb("threw"), THREW),
                 },
                 CreepAct::HealCreep(id) => on("heal", id, |t| call(&creep, "heal", &[t.clone()])),
-                CreepAct::RangedHealCreep(id) => {
-                    on("rangedHeal", id, |t| call(&creep, "rangedHeal", &[t.clone()]))
+                CreepAct::RangedHealCreep(id) => on("rangedHeal", id, |t| {
+                    call(&creep, "rangedHeal", &[t.clone()])
+                }),
+                CreepAct::Dismantle(id) => {
+                    on("dismantle", id, |t| call(&creep, "dismantle", &[t.clone()]))
                 }
-                CreepAct::Dismantle(id) => on("dismantle", id, |t| call(&creep, "dismantle", &[t.clone()])),
             }
         }
         Intent::Room(name, RoomAct::CreateSite(x, y, kind)) => {
@@ -131,8 +144,12 @@ fn act(intent: &Intent) -> (String, i32) {
         Intent::Tower(id, act) => match world::object_by_id(id) {
             None => ("tower".to_string(), NOT_FOUND),
             Some(tower) => match act {
-                TowerAct::Attack(target) => on("attack", target, |t| call(&tower, "attack", &[t.clone()])),
-                TowerAct::Heal(target) => on("heal", target, |t| call(&tower, "heal", &[t.clone()])),
+                TowerAct::Attack(target) => {
+                    on("attack", target, |t| call(&tower, "attack", &[t.clone()]))
+                }
+                TowerAct::Heal(target) => {
+                    on("heal", target, |t| call(&tower, "heal", &[t.clone()]))
+                }
             },
         },
         Intent::Controller(id, ControllerAct::ActivateSafeMode) => match world::object_by_id(id) {
@@ -142,10 +159,14 @@ fn act(intent: &Intent) -> (String, i32) {
                 Err(()) => ("threw".to_string(), THREW),
             },
         },
-        Intent::Link(id, LinkAct::TransferEnergy(target, amount)) => match world::object_by_id(id) {
-            None => ("link".to_string(), NOT_FOUND),
-            Some(link) => on("link", target, |t| call(&link, "transferEnergy", &[t.clone(), num(*amount)])),
-        },
+        Intent::Link(id, LinkAct::TransferEnergy(target, amount)) => {
+            match world::object_by_id(id) {
+                None => ("link".to_string(), NOT_FOUND),
+                Some(link) => on("link", target, |t| {
+                    call(&link, "transferEnergy", &[t.clone(), num(*amount)])
+                }),
+            }
+        }
         Intent::Queue(_, _) | Intent::Wish(_, _) => ("unsettled".to_string(), NOT_FOUND),
         Intent::Spawn(id, SpawnAct::SpawnCreep(body, name)) => match world::object_by_id(id) {
             None => ("spawn".to_string(), NOT_FOUND),

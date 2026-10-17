@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use super::engine;
 use super::grid::{
-    flood, on_edge, step_table, step_ticks, weight_of, FatigueFactor, Footprint, UNREACHED,
+    FatigueFactor, Footprint, UNREACHED, flood, on_edge, step_table, step_ticks, weight_of,
 };
 use super::tiles;
 use super::world::{Kind, Owner, Pos, Room, World};
@@ -73,17 +73,9 @@ impl Field {
             self.dist[tile as usize]
         } else {
             let next = self.best(tile);
-            if next < 0 {
-                UNREACHED
-            } else {
-                self.via(next)
-            }
+            if next < 0 { UNREACHED } else { self.via(next) }
         };
-        if d == UNREACHED {
-            None
-        } else {
-            Some(d)
-        }
+        if d == UNREACHED { None } else { Some(d) }
     }
 
     /// The ticks onward from a neighbour of `next`, through it.
@@ -148,7 +140,11 @@ impl Atlas {
     }
 
     /// No site is built under a creep, so these are kept clear of solid ones.
-    pub fn upgrader_seats(walkable: impl Fn(i32) -> bool, controller: i32, buffer: i32) -> Vec<i32> {
+    pub fn upgrader_seats(
+        walkable: impl Fn(i32) -> bool,
+        controller: i32,
+        buffer: i32,
+    ) -> Vec<i32> {
         tiles::within(1, buffer)
             .into_iter()
             .filter(|t| walkable(*t) && tiles::range(*t, controller) <= engine::UPGRADE_RANGE)
@@ -282,19 +278,16 @@ impl Atlas {
 
             let weights = Rc::new(weights);
             let floods = match previous.rooms.get(&room.name) {
-                Some(grid) if grid.floods.len() < Atlas::KEPT_FLOODS && Atlas::same(&grid.weights, &weights) => {
+                Some(grid)
+                    if grid.floods.len() < Atlas::KEPT_FLOODS
+                        && Atlas::same(&grid.weights, &weights) =>
+                {
                     grid.floods.clone()
                 }
                 _ => HashMap::new(),
             };
 
-            rooms.insert(
-                room.name.clone(),
-                RoomGrid {
-                    weights,
-                    floods,
-                },
-            );
+            rooms.insert(room.name.clone(), RoomGrid { weights, floods });
         }
 
         Atlas {
@@ -359,7 +352,8 @@ impl Atlas {
         };
         let near = tiles::within(spread, tile);
         for anchor in near {
-            if Atlas::reach(footprint, anchor, tile) <= range && Atlas::seat(footprint, weights, anchor)
+            if Atlas::reach(footprint, anchor, tile) <= range
+                && Atlas::seat(footprint, weights, anchor)
             {
                 into.push(anchor);
             }
@@ -370,7 +364,13 @@ impl Atlas {
         match self.rooms.get(&target.room) {
             Some(grid) => {
                 let mut found = Vec::new();
-                Atlas::seats_near(footprint, &grid.weights, range, tiles::of_pos(target), &mut found);
+                Atlas::seats_near(
+                    footprint,
+                    &grid.weights,
+                    range,
+                    tiles::of_pos(target),
+                    &mut found,
+                );
                 found
                     .into_iter()
                     .map(|tile| tiles::to_pos(&target.room, tile))
@@ -384,7 +384,9 @@ impl Atlas {
         let near = self.rooms.get(from).map(|g| &g.weights);
         let far = self.rooms.get(onto).map(|g| &g.weights);
         for &tile in tiles::exit_tiles(exit) {
-            let near_walkable = near.map(|weights| weights[tile as usize] >= 0).unwrap_or(true);
+            let near_walkable = near
+                .map(|weights| weights[tile as usize] >= 0)
+                .unwrap_or(true);
             let far_walkable = far
                 .map(|weights| weights[tiles::landing(tile) as usize] >= 0)
                 .unwrap_or(true);
@@ -395,7 +397,13 @@ impl Atlas {
         false
     }
 
-    fn search(&self, avoid: &BTreeSet<String>, max_hops: i32, from: &str, onto: &str) -> HashMap<String, String> {
+    fn search(
+        &self,
+        avoid: &BTreeSet<String>,
+        max_hops: i32,
+        from: &str,
+        onto: &str,
+    ) -> HashMap<String, String> {
         let mut parent: HashMap<String, String> = HashMap::new();
         parent.insert(from.to_string(), from.to_string());
         let mut frontier: Vec<String> = vec![from.to_string()];
@@ -450,7 +458,9 @@ impl Atlas {
         from: &str,
         onto: &str,
     ) -> Option<Vec<String>> {
-        if from != onto && (tiles::room_coords(from).is_none() || tiles::room_coords(onto).is_none()) {
+        if from != onto
+            && (tiles::room_coords(from).is_none() || tiles::room_coords(onto).is_none())
+        {
             None
         } else {
             Atlas::route_in(&self.search(avoid, max_hops, from, onto), from, onto)
@@ -517,18 +527,16 @@ impl Atlas {
             (goal_key, goals)
         } else {
             match onward() {
-                Some(rooms) if rooms.len() >= 2 => {
-                    match tiles::exit_toward(room, &rooms[1]) {
-                        Some(exit) => {
-                            let grid = &self.rooms[room];
-                            (
-                                format!("x{}", exit),
-                                Atlas::exit_goals(footprint, &grid.weights, exit),
-                            )
-                        }
-                        None => return None,
+                Some(rooms) if rooms.len() >= 2 => match tiles::exit_toward(room, &rooms[1]) {
+                    Some(exit) => {
+                        let grid = &self.rooms[room];
+                        (
+                            format!("x{}", exit),
+                            Atlas::exit_goals(footprint, &grid.weights, exit),
+                        )
                     }
-                }
+                    None => return None,
+                },
                 _ => return None,
             }
         };
@@ -536,7 +544,11 @@ impl Atlas {
         let factor = mover.factor;
         let key = format!(
             "{}|{}|{}|{}|{}",
-            if footprint == Footprint::One { "1" } else { "4" },
+            if footprint == Footprint::One {
+                "1"
+            } else {
+                "4"
+            },
             step_ticks(factor, engine::ROAD_WEIGHT),
             step_ticks(factor, engine::PLAIN_WEIGHT),
             step_ticks(factor, engine::SWAMP_WEIGHT),
@@ -571,7 +583,12 @@ impl Atlas {
     }
 
     /// `field` out of another room on a known route to the target's.
-    pub fn field_on_route(&mut self, mover: Mover, target: &Target, rooms: &[String]) -> Option<Field> {
+    pub fn field_on_route(
+        &mut self,
+        mover: Mover,
+        target: &Target,
+        rooms: &[String],
+    ) -> Option<Field> {
         let first = rooms.first()?.clone();
         let rooms = rooms.to_vec();
         self.field_on(mover, target, &first, || Some(rooms))

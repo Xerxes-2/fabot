@@ -2,7 +2,7 @@
 //! may stand), so the Atlas keeps its own representation private.
 use super::engine;
 use super::tiles;
-use super::vocabulary::{boost, BodyPart};
+use super::vocabulary::{BodyPart, boost};
 use super::world::Creep;
 
 pub const UNREACHED: i32 = i32::MAX;
@@ -52,7 +52,8 @@ pub fn factor_of(creep: &Creep) -> FatigueFactor {
     }
     let load = creep.store.used();
     FatigueFactor {
-        weight: weight + carry.min((load + engine::CARRY_PART_CAPACITY - 1) / engine::CARRY_PART_CAPACITY),
+        weight: weight
+            + carry.min((load + engine::CARRY_PART_CAPACITY - 1) / engine::CARRY_PART_CAPACITY),
         moves,
     }
 }
@@ -97,10 +98,7 @@ pub const SEAT_WEIGHT: i32 = SEAT_SWAMPS * engine::SWAMP_WEIGHT;
 /// so the pace class keys a flood.
 pub fn step_ticks(factor: FatigueFactor, weight: i32) -> i32 {
     let seat = weight == SEAT_WEIGHT;
-    let units = step_units(
-        factor,
-        if seat { engine::SWAMP_WEIGHT } else { weight },
-    );
+    let units = step_units(factor, if seat { engine::SWAMP_WEIGHT } else { weight });
     let ticks = if units < 0 { -1 } else { (units + 1) / 2 };
     if seat && ticks > 0 {
         SEAT_SWAMPS * ticks

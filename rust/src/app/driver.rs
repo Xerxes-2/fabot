@@ -12,7 +12,6 @@ use crate::core::layout::shape::Standing;
 use crate::core::tick::{self, Context, Declarations};
 use crate::core::world::Sightings;
 
-
 const FAULTS_KEPT: usize = 20;
 
 struct Heap {
@@ -179,4 +178,3 @@ mod game_cpu {
 mod executor {
     pub use crate::app::executor::*;
 }
-

@@ -499,7 +499,7 @@ pub struct Seen {
 pub type Sightings = BTreeMap<String, BTreeMap<String, Seen>>;
 
 pub mod sightings {
-    use super::{hostiles, Seen, Sightings, World};
+    use super::{Seen, Sightings, World, hostiles};
     use std::collections::BTreeMap;
 
     pub fn step(world: &World, previous: &Sightings) -> Sightings {
@@ -559,9 +559,7 @@ pub mod sightings {
 
     fn none(counts: impl Fn(&Seen) -> bool, sightings: &Sightings, time: i32, room: &str) -> bool {
         match sightings.get(room) {
-            Some(seen) => seen
-                .values()
-                .all(|s| s.gone <= time || !counts(s)),
+            Some(seen) => seen.values().all(|s| s.gone <= time || !counts(s)),
             None => true,
         }
     }

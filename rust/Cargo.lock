@@ -64,8 +64,6 @@ version = "0.1.0"
 dependencies = [
  "js-sys",
  "screeps-game-api",
- "serde",
- "serde_json",
  "wasm-bindgen",
 ]
 

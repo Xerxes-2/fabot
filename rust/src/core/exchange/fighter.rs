@@ -1,7 +1,7 @@
-use crate::core::grid::{step_ticks, FatigueFactor};
-use crate::core::vocabulary::{part_count_in, BodyPart, Boost};
-use crate::core::world::Pos;
 use crate::core::engine;
+use crate::core::grid::{FatigueFactor, step_ticks};
+use crate::core::vocabulary::{BodyPart, Boost, part_count_in};
+use crate::core::world::Pos;
 
 /// A body as the exchange reads it, on either side.
 #[derive(Clone, Debug, PartialEq)]

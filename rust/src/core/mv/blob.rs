@@ -1,11 +1,11 @@
 //! A set that walks as one: one field priced at its slowest body, each member
 //! kept near the median member along the walk.
 use crate::core::atlas::{Atlas, Field, Mover, Target};
-use crate::core::grid::{self, factor_of, step_ticks, FatigueFactor, Footprint};
-use crate::core::mv::{plan, Wish};
+use crate::core::engine;
+use crate::core::grid::{self, FatigueFactor, Footprint, factor_of, step_ticks};
+use crate::core::mv::{Wish, plan};
 use crate::core::tiles;
 use crate::core::world::Creep;
-use crate::core::engine;
 
 /// ⌈(n−1)/2⌉: less, and a file of n deadlocks in a corridor.
 pub fn radius(n: usize) -> i32 {
@@ -41,7 +41,14 @@ fn fatigue_ticks(creep: &Creep) -> Option<i32> {
 pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep]) -> Vec<Wish> {
     let mover = slowest(members);
 
-    fn left(atlas: &mut Atlas, mover: Mover, target: &Target, hops: i32, room: &str, tile: i32) -> i32 {
+    fn left(
+        atlas: &mut Atlas,
+        mover: Mover,
+        target: &Target,
+        hops: i32,
+        room: &str,
+        tile: i32,
+    ) -> i32 {
         let field = atlas.field(mover, target, room);
         match field {
             // No field: one plain crossing, so a member short of it ranks behind one past it.
@@ -66,7 +73,14 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
                         let edge = exit(&field, tile);
                         match tiles::room_toward(room, tiles::exit_of(edge)) {
                             Some(next) => {
-                                let rest = left(atlas, mover, target, hops - 1, &next, tiles::landing(edge));
+                                let rest = left(
+                                    atlas,
+                                    mover,
+                                    target,
+                                    hops - 1,
+                                    &next,
+                                    tiles::landing(edge),
+                                );
                                 if rest == grid::UNREACHED {
                                     grid::UNREACHED
                                 } else {
@@ -84,7 +98,14 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
     let lags: Vec<i32> = members
         .iter()
         .map(|c| {
-            let ticks = left(atlas, mover, target, target.max_hops, &c.pos.room, tiles::of_pos(&c.pos));
+            let ticks = left(
+                atlas,
+                mover,
+                target,
+                target.max_hops,
+                &c.pos.room,
+                tiles::of_pos(&c.pos),
+            );
             match (ticks, fatigue_ticks(c)) {
                 (t, Some(resting)) if t != grid::UNREACHED => t + resting,
                 _ => grid::UNREACHED,
@@ -117,7 +138,11 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
                 .unwrap_or(true)
     });
 
-    let head_tile = if lagging { anchor_wish.at } else { anchor_wish.head };
+    let head_tile = if lagging {
+        anchor_wish.at
+    } else {
+        anchor_wish.head
+    };
     let head = tiles::to_pos(&anchor.pos.room, head_tile);
 
     let fits = |creep: &Creep, tile: i32| -> bool {
@@ -133,7 +158,9 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
     let keeps = |atlas: &mut Atlas, slack: i32, creep: &Creep, tile: i32| -> bool {
         match atlas.field(mover, target, &creep.pos.room) {
             Some(field) => match field.ticks(tiles::of_pos(&creep.pos)) {
-                Some(here) if here > 0 => field.onto(tile).is_some_and(|ticks| ticks <= here + slack),
+                Some(here) if here > 0 => {
+                    field.onto(tile).is_some_and(|ticks| ticks <= here + slack)
+                }
                 _ => true,
             },
             None => true,

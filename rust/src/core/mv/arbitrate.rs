@@ -114,9 +114,7 @@ pub fn resolve(
 
     let head_on = |wish: &Wish| -> bool {
         order.iter().any(|other| {
-            other.head == wish.head
-                && other.onward == Some(wish.at)
-                && other.creep != wish.creep
+            other.head == wish.head && other.onward == Some(wish.at) && other.creep != wish.creep
         })
     };
 
@@ -286,14 +284,7 @@ impl<'a> Search<'a> {
 
     // A creep reached before is explored again only at a better (score, home):
     // what a chain makes past it depends only on the creeps already on it.
-    fn explore(
-        &mut self,
-        i: usize,
-        from: i32,
-        score: i32,
-        home: i32,
-        onward: Option<i32>,
-    ) {
+    fn explore(&mut self, i: usize, from: i32, score: i32, home: i32, onward: Option<i32>) {
         self.on_path[i] = true;
         let wish = &self.order[i];
         let leaving = wish.value(from);
@@ -363,6 +354,10 @@ pub fn arbitrate_with(
     resolve(scratch, passable, held, wishes).steps
 }
 
-pub fn arbitrate(passable: impl Fn(i32) -> bool, held: &[i32], wishes: &[Wish]) -> Vec<(String, i32)> {
+pub fn arbitrate(
+    passable: impl Fn(i32) -> bool,
+    held: &[i32],
+    wishes: &[Wish],
+) -> Vec<(String, i32)> {
     arbitrate_with(&mut scratch(), passable, held, wishes)
 }

@@ -1,4 +1,6 @@
-use super::vocabulary::{boost, part_count_in, same_part, BodyPart, Boost, Compound, Ore, Resource};
+use super::vocabulary::{
+    BodyPart, Boost, Compound, Ore, Resource, boost, part_count_in, same_part,
+};
 
 /// MAX_CREEP_SIZE: a larger body is refused.
 pub const MAX_BODY_PARTS: usize = 50;
@@ -128,14 +130,8 @@ pub fn reaction_time(compound: Compound) -> i32 {
 
 pub fn reagents_of(compound: Compound) -> (Resource, Resource) {
     match compound {
-        Compound::Hydroxide => (
-            Resource::Ore(Ore::Hydrogen),
-            Resource::Ore(Ore::Oxygen),
-        ),
-        Compound::UtriumHydride => (
-            Resource::Ore(Ore::Utrium),
-            Resource::Ore(Ore::Hydrogen),
-        ),
+        Compound::Hydroxide => (Resource::Ore(Ore::Hydrogen), Resource::Ore(Ore::Oxygen)),
+        Compound::UtriumHydride => (Resource::Ore(Ore::Utrium), Resource::Ore(Ore::Hydrogen)),
         Compound::UtriumAcid => (
             Resource::Compound(Compound::Hydroxide),
             Resource::Compound(Compound::UtriumHydride),
@@ -214,7 +210,11 @@ fn part_hits_at(n: usize, hits: i32, i: usize) -> i32 {
 }
 
 /// `calcBodyEffectiveness`. `boosts` is one a part, head first, or empty.
-pub fn power_at<'a>(body: &'a [BodyPart], boosts: &'a [Boost], hits: i32) -> Box<dyn Fn(BodyPart) -> i32 + 'a> {
+pub fn power_at<'a>(
+    body: &'a [BodyPart],
+    boosts: &'a [Boost],
+    hits: i32,
+) -> Box<dyn Fn(BodyPart) -> i32 + 'a> {
     if boosts.is_empty() {
         let live = live_parts(body, hits);
         return Box::new(move |part| part_count_in(&live, part));
@@ -229,7 +229,13 @@ pub fn power_at<'a>(body: &'a [BodyPart], boosts: &'a [Boost], hits: i32) -> Box
     Box::new(move |part| {
         acting
             .iter()
-            .map(|(p, boost)| if same_part(*p, part) { boost::multiple(*p, *boost) } else { 0 })
+            .map(|(p, boost)| {
+                if same_part(*p, part) {
+                    boost::multiple(*p, *boost)
+                } else {
+                    0
+                }
+            })
             .sum()
     })
 }

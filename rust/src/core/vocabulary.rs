@@ -136,15 +136,27 @@ pub mod boost {
     pub fn multiple(part: BodyPart, boost: Boost) -> i32 {
         match (part, boost) {
             (
-                BodyPart::Attack | BodyPart::RangedAttack | BodyPart::Heal | BodyPart::Move | BodyPart::Work,
+                BodyPart::Attack
+                | BodyPart::RangedAttack
+                | BodyPart::Heal
+                | BodyPart::Move
+                | BodyPart::Work,
                 Boost::Tier1,
             ) => 2,
             (
-                BodyPart::Attack | BodyPart::RangedAttack | BodyPart::Heal | BodyPart::Move | BodyPart::Work,
+                BodyPart::Attack
+                | BodyPart::RangedAttack
+                | BodyPart::Heal
+                | BodyPart::Move
+                | BodyPart::Work,
                 Boost::Tier2,
             ) => 3,
             (
-                BodyPart::Attack | BodyPart::RangedAttack | BodyPart::Heal | BodyPart::Move | BodyPart::Work,
+                BodyPart::Attack
+                | BodyPart::RangedAttack
+                | BodyPart::Heal
+                | BodyPart::Move
+                | BodyPart::Work,
                 Boost::Tier3,
             ) => 4,
             _ => 1,
@@ -206,8 +218,11 @@ impl Compound {
     }
 }
 
-pub const ALL_COMPOUNDS: [Compound; 3] =
-    [Compound::Hydroxide, Compound::UtriumHydride, Compound::UtriumAcid];
+pub const ALL_COMPOUNDS: [Compound; 3] = [
+    Compound::Hydroxide,
+    Compound::UtriumHydride,
+    Compound::UtriumAcid,
+];
 
 /// A season's own resource stays `Season`'s and joins here only as `Other`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

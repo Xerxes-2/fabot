@@ -1,9 +1,9 @@
 /// The caller reads the creep's pace once (`Grid.factorOf`) and hands it in.
 use crate::core::atlas::{Atlas, Field, Mover, Target};
 use crate::core::grid::{self, FatigueFactor, Footprint};
+use crate::core::mv::Wish;
 use crate::core::tiles;
 use crate::core::world::Creep;
-use crate::core::mv::Wish;
 
 pub fn can_move(creep: &Creep, factor: FatigueFactor) -> bool {
     creep.fatigue == 0 && factor.moves > 0
@@ -50,7 +50,15 @@ pub fn stay(atlas: &Atlas, creep: &Creep, factor: FatigueFactor, weight: i32) ->
         .into_iter()
         .filter(|tile| !tiles::on_edge(*tile))
         .collect();
-    wish(creep, can_move(creep, factor), at, None, tail, Vec::new(), weight)
+    wish(
+        creep,
+        can_move(creep, factor),
+        at,
+        None,
+        tail,
+        Vec::new(),
+        weight,
+    )
 }
 
 /// The tail is the way round a body the Atlas's walk does not see.
@@ -120,7 +128,8 @@ pub fn toward(
                     .filter(|tile| {
                         *tile != head
                             && (ticks(*tile) < here
-                                || (ticks(*tile) < grid::UNREACHED && tiles::range(*tile, head) == 1))
+                                || (ticks(*tile) < grid::UNREACHED
+                                    && tiles::range(*tile, head) == 1))
                             && (ticks(*tile) == 0 || !tiles::on_edge(*tile))
                     })
                     .collect();

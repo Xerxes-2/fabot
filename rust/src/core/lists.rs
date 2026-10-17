@@ -2,14 +2,14 @@
 /// No `minBy`: Fable's keeps the last of equal keys and .NET's the first.
 use std::cmp::Ordering;
 
-pub fn sorted_by_key<T, K: Clone + Ord>(
-    projection: impl Fn(&T) -> K,
-    list: &[T],
-) -> Vec<T>
+pub fn sorted_by_key<T, K: Clone + Ord>(projection: impl Fn(&T) -> K, list: &[T]) -> Vec<T>
 where
     T: Clone,
 {
-    let mut keyed: Vec<(K, T)> = list.iter().map(|item| (projection(item), item.clone())).collect();
+    let mut keyed: Vec<(K, T)> = list
+        .iter()
+        .map(|item| (projection(item), item.clone()))
+        .collect();
     keyed.sort_by(|(a, _), (b, _)| a.cmp(b));
     keyed.into_iter().map(|(_, item)| item).collect()
 }
@@ -22,7 +22,10 @@ pub fn sorted_by_key_by<T, K>(
 where
     T: Clone,
 {
-    let mut keyed: Vec<(K, T)> = list.iter().map(|item| (projection(item), item.clone())).collect();
+    let mut keyed: Vec<(K, T)> = list
+        .iter()
+        .map(|item| (projection(item), item.clone()))
+        .collect();
     keyed.sort_by(|(a, _), (b, _)| order(a, b));
     keyed.into_iter().map(|(_, item)| item).collect()
 }
