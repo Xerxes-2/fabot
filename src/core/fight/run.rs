@@ -344,7 +344,7 @@ impl<'a> Scene<'a> {
             set.iter().map(|f| f.gait).filter(|g| g.moves > 0).collect();
 
         let gait = lists::sort_by(
-            |g: &grid::FatigueFactor| -grid::step_ticks(*g, engine::PLAIN_WEIGHT),
+            |g: &grid::FatigueFactor| std::cmp::Reverse(grid::step_ticks(*g, engine::PLAIN_WEIGHT)),
             &gaits,
         )
         .into_iter()

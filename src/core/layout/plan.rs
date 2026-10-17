@@ -182,9 +182,9 @@ struct Posted {
 /// So level, walk and tile share one sort key; longer walks sort together.
 const ROAD_SPAN: i32 = 1 << 14;
 
-pub fn down(weights: &[i32], dist: &[i32], t: i32) -> i32 {
+pub fn down(weights: &[i32], dist: &[i32], t: i32) -> Option<i32> {
     if dist[t as usize] == 0 {
-        -1
+        None
     } else {
         tiles::least_around(t, UNREACHED, |n| {
             let d = dist[n as usize];
@@ -202,13 +202,11 @@ pub fn descend(weights: &[i32], dist: &[i32], start: i32) -> Vec<i32> {
     let mut path: Vec<i32> = Vec::new();
     let mut here = down(weights, dist, start);
 
-    while here >= 0 && path.len() < tiles::COUNT {
-        path.push(here);
-        here = if dist[here as usize] == 0 {
-            -1
-        } else {
-            down(weights, dist, here)
-        };
+    while let Some(at) = here
+        && path.len() < tiles::COUNT
+    {
+        path.push(at);
+        here = down(weights, dist, at);
     }
 
     match path.last() {
@@ -314,14 +312,16 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
         if lattice(t) && walk[t as usize] != UNREACHED {
             let mut step = down(&lane, &walk, t);
 
-            while step >= 0 && !walked[step as usize] {
-                walked[step as usize] = true;
+            while let Some(at) = step
+                && !walked[at as usize]
+            {
+                walked[at as usize] = true;
 
-                if !lattice(step) {
-                    clear[step as usize] = true;
+                if !lattice(at) {
+                    clear[at as usize] = true;
                 }
 
-                step = down(&lane, &walk, step);
+                step = down(&lane, &walk, at);
             }
         }
     }
@@ -389,7 +389,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
         }
     }
 
-    let mut access = vec![-1i32; tiles::COUNT];
+    let mut access: Vec<Option<i32>> = vec![None; tiles::COUNT];
     let mut slot_list: Vec<i32> = Vec::new();
 
     for t in 0..tiles::COUNT as i32 {
@@ -402,8 +402,8 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
                 }
             });
 
-            if road >= 0 {
-                access[t as usize] = road;
+            if let Some(road) = road {
+                access[t as usize] = Some(road);
                 slot_list.push(walk[road as usize] * tiles::COUNT as i32 + t);
             }
         }
@@ -511,9 +511,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
             level,
         });
 
-        let mut road = if access[*t as usize] >= 0 {
-            access[*t as usize]
-        } else {
+        let mut road = access[*t as usize].or_else(|| {
             tiles::least_around(*t, UNREACHED, |n| {
                 if lane[n as usize] >= 0 && !taken[n as usize] {
                     walk[n as usize]
@@ -521,11 +519,11 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: i32, spawns: &[i32]) -> (P
                     UNREACHED
                 }
             })
-        };
+        });
 
-        while road >= 0 {
-            road_level[road as usize] = road_level[road as usize].min(level.max(haul_level()));
-            road = down(&lane, &walk, road);
+        while let Some(at) = road {
+            road_level[at as usize] = road_level[at as usize].min(level.max(haul_level()));
+            road = down(&lane, &walk, at);
         }
     }
 

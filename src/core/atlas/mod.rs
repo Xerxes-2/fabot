@@ -61,12 +61,12 @@ impl Field {
             if d == UNREACHED || (d > 0 && on_edge(self.footprint, next)) {
                 UNREACHED
             } else {
-                d + step_ticks(self.factor, weight)
+                step_ticks(self.factor, weight).map_or(UNREACHED, |step| d + step)
             }
         }
     }
 
-    fn best(&self, tile: i32) -> i32 {
+    fn best(&self, tile: i32) -> Option<i32> {
         tiles::least_around(tile, UNREACHED, |n| self.via(n))
     }
 
@@ -74,8 +74,7 @@ impl Field {
         let d = if weight_of(self.footprint, &self.weights, tile) >= 0 {
             self.dist[tile as usize]
         } else {
-            let next = self.best(tile);
-            if next < 0 { UNREACHED } else { self.via(next) }
+            self.best(tile).map_or(UNREACHED, |next| self.via(next))
         };
         if d == UNREACHED { None } else { Some(d) }
     }
@@ -90,14 +89,7 @@ impl Field {
 
     pub fn step(&self, tile: i32) -> Option<i32> {
         match self.ticks(tile) {
-            Some(d) if d > 0 => {
-                let next = self.best(tile);
-                if next < 0 {
-                    None
-                } else {
-                    Some(tiles::direction(tile, next))
-                }
-            }
+            Some(d) if d > 0 => self.best(tile).map(|next| tiles::direction(tile, next)),
             _ => None,
         }
     }
@@ -390,7 +382,7 @@ impl Atlas {
                 .map(|weights| weights[tile as usize] >= 0)
                 .unwrap_or(true);
             let far_walkable = far
-                .map(|weights| weights[tiles::landing(tile) as usize] >= 0)
+                .map(|weights| tiles::landing(tile).is_some_and(|l| weights[l as usize] >= 0))
                 .unwrap_or(true);
             if near_walkable && far_walkable {
                 return true;
@@ -542,7 +534,7 @@ impl Atlas {
 
         let factor = mover.factor;
         let key = format!(
-            "{}|{}|{}|{}|{}",
+            "{}|{:?}|{:?}|{:?}|{}",
             if footprint == Footprint::One {
                 "1"
             } else {

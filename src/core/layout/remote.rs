@@ -47,13 +47,16 @@ fn walk(atlas: &mut Atlas, target: &Target, from: &Pos) -> Vec<Pos> {
                 let next = tiles::neighbour(tile, direction);
 
                 if tiles::on_edge(next) {
-                    match tiles::room_toward(&room, tiles::exit_of(next)) {
-                        Some(onto) => {
+                    match (
+                        tiles::room_toward(&room, tiles::exit_of(next)),
+                        tiles::landing(next),
+                    ) {
+                        (Some(onto), Some(landing)) => {
                             room = onto;
-                            tile = tiles::landing(next);
+                            tile = landing;
                             field = atlas.field(HAULER, target, &room);
                         }
-                        None => field = None,
+                        _ => field = None,
                     }
                 } else {
                     tile = next;

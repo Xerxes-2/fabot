@@ -20,12 +20,11 @@ pub fn match_all(
         travel,
         pool,
         bodies,
-        // -2 unasked, -1 unreachable or outlived (`Pool::outlives`).
-        walks: vec![-2; bodies.len() * pool.len()],
+        walks: vec![Walk::Unasked; bodies.len() * pool.len()],
         held: vec![0; pool.len()],
         holders: vec![0; pool.len()],
-        assigned: vec![-1; bodies.len()],
-        best_offer: vec![-1; bodies.len()],
+        assigned: vec![None; bodies.len()],
+        best_offer: vec![None; bodies.len()],
         best_cost: vec![0; bodies.len()],
         best_walk: vec![0; bodies.len()],
         best_load: vec![0; bodies.len()],
@@ -44,15 +43,23 @@ struct Matcher<'a> {
     travel: &'a mut dyn FnMut(&Body, &Offer) -> Option<i32>,
     pool: &'a [Offer],
     bodies: &'a [Body],
-    walks: Vec<i32>,
+    walks: Vec<Walk>,
     held: Vec<i32>,
     holders: Vec<i32>,
-    assigned: Vec<i32>,
-    best_offer: Vec<i32>,
+    assigned: Vec<Option<usize>>,
+    best_offer: Vec<Option<usize>>,
     best_cost: Vec<i32>,
     best_walk: Vec<i32>,
     best_load: Vec<i32>,
     by_id: HashMap<String, usize>,
+}
+
+/// `Unreached` also when the body dies first (`Pool::outlives`).
+#[derive(Clone, Copy)]
+enum Walk {
+    Unasked,
+    Unreached,
+    Ticks(i32),
 }
 
 fn before(a: (i32, i32, i32), b: (i32, i32, i32)) -> bool {
@@ -60,19 +67,22 @@ fn before(a: (i32, i32, i32), b: (i32, i32, i32)) -> bool {
 }
 
 impl Matcher<'_> {
-    fn walk(&mut self, bi: usize, oi: usize) -> i32 {
+    fn walk(&mut self, bi: usize, oi: usize) -> Option<i32> {
         let at = bi * self.pool.len() + oi;
 
-        if self.walks[at] == -2 {
-            let ticks = (self.travel)(&self.bodies[bi], &self.pool[oi]);
-            let walk = match ticks {
-                Some(t) if pool::outlives(&self.bodies[bi], &self.pool[oi], t) => t.max(0),
-                _ => -1,
+        if let Walk::Unasked = self.walks[at] {
+            self.walks[at] = match (self.travel)(&self.bodies[bi], &self.pool[oi]) {
+                Some(t) if pool::outlives(&self.bodies[bi], &self.pool[oi], t) => {
+                    Walk::Ticks(t.max(0))
+                }
+                _ => Walk::Unreached,
             };
-            self.walks[at] = walk;
         }
 
-        self.walks[at]
+        match self.walks[at] {
+            Walk::Ticks(t) => Some(t),
+            _ => None,
+        }
     }
 
     fn seated(&self, oi: usize) -> bool {
@@ -94,8 +104,8 @@ impl Matcher<'_> {
     fn ahead(&mut self, oi: usize, a: usize, b: usize) -> bool {
         let wa = self.walk(a, oi);
         let wb = self.walk(b, oi);
-        let va = pool::seat_value(&self.bodies[a], &self.pool[oi], wa);
-        let vb = pool::seat_value(&self.bodies[b], &self.pool[oi], wb);
+        let va = wa.map(|w| pool::seat_value(&self.bodies[a], &self.pool[oi], w));
+        let vb = wb.map(|w| pool::seat_value(&self.bodies[b], &self.pool[oi], w));
         let pa = self.posted(a, oi);
         let pb = self.posted(b, oi);
 
@@ -108,7 +118,8 @@ impl Matcher<'_> {
 
     /// So a successor walks out while its predecessor still works.
     fn outlasts(&mut self, holder: usize, bi: usize, oi: usize) -> bool {
-        self.bodies[holder].ticks_to_live > self.walk(bi, oi)
+        let ttl = self.bodies[holder].ticks_to_live;
+        self.walk(bi, oi).is_none_or(|w| ttl > w)
     }
 
     fn admits_over(&mut self, bi: usize, oi: usize, ahead_only: bool) -> bool {
@@ -116,7 +127,7 @@ impl Matcher<'_> {
         let mut sum = 0;
 
         for b in 0..self.bodies.len() {
-            if self.assigned[b] == oi as i32
+            if self.assigned[b] == Some(oi)
                 && b != bi
                 && self.outlasts(b, bi, oi)
                 && (!ahead_only || self.ahead(oi, b, bi))
@@ -145,14 +156,15 @@ impl Matcher<'_> {
     }
 
     fn take(&mut self, bi: usize, oi: usize) {
-        self.assigned[bi] = oi as i32;
+        self.assigned[bi] = Some(oi);
         self.held[oi] += pool::share(&self.bodies[bi], &self.pool[oi]);
         self.holders[oi] += 1;
     }
 
     fn release(&mut self, bi: usize) {
-        let oi = self.assigned[bi] as usize;
-        self.assigned[bi] = -1;
+        let Some(oi) = self.assigned[bi].take() else {
+            return;
+        };
         self.held[oi] -= pool::share(&self.bodies[bi], &self.pool[oi]);
         self.holders[oi] -= 1;
     }
@@ -162,30 +174,29 @@ impl Matcher<'_> {
     }
 
     fn score(&mut self, bi: usize, ranked: &[usize], offers: usize) {
-        self.best_offer[bi] = -1;
+        self.best_offer[bi] = None;
         let mut k = 0;
 
         while k < offers {
             let oi = ranked[k];
             let offer = &self.pool[oi];
 
-            let below =
-                self.best_offer[bi] >= 0 && price::walked(offer.priority, 0) > self.best_cost[bi];
+            let below = self.best_offer[bi].is_some()
+                && price::walked(offer.priority, 0) > self.best_cost[bi];
 
             k = if below { offers } else { k + 1 };
 
             if !below && pool::fits(&self.bodies[bi], offer) && self.open(bi, oi) {
-                let w = self.walk(bi, oi);
                 let holder = self.holders[oi];
 
-                if w >= 0
-                    && (self.best_offer[bi] < 0
+                if let Some(w) = self.walk(bi, oi)
+                    && (self.best_offer[bi].is_none()
                         || before(
                             (price::walked(offer.priority, w), w, holder),
                             (self.best_cost[bi], self.best_walk[bi], self.best_load[bi]),
                         ))
                 {
-                    self.best_offer[bi] = oi as i32;
+                    self.best_offer[bi] = Some(oi);
                     self.best_cost[bi] = price::walked(offer.priority, w);
                     self.best_walk[bi] = w;
                     self.best_load[bi] = holder;
@@ -216,17 +227,15 @@ impl Matcher<'_> {
                 continue;
             };
 
-            if pool::fits(&self.bodies[bi], &self.pool[oi]) {
-                let w = self.walk(bi, oi);
-
-                if w >= 0 {
-                    let key = if self.seated(oi) {
-                        -pool::seat_value(&self.bodies[bi], &self.pool[oi], w)
-                    } else {
-                        pool::share(&self.bodies[bi], &self.pool[oi])
-                    };
-                    kept.push((!self.posted(bi, oi), key, w, bi, oi));
-                }
+            if pool::fits(&self.bodies[bi], &self.pool[oi])
+                && let Some(w) = self.walk(bi, oi)
+            {
+                let key = if self.seated(oi) {
+                    -pool::seat_value(&self.bodies[bi], &self.pool[oi], w)
+                } else {
+                    pool::share(&self.bodies[bi], &self.pool[oi])
+                };
+                kept.push((!self.posted(bi, oi), key, w, bi, oi));
             }
         }
 
@@ -254,7 +263,7 @@ impl Matcher<'_> {
         ranked.sort_by_key(|oi| (self.pool[*oi].priority, *oi));
 
         for bi in 0..self.bodies.len() {
-            if self.assigned[bi] < 0 {
+            if self.assigned[bi].is_none() {
                 self.score(bi, &ranked, offers);
             }
         }
@@ -266,27 +275,26 @@ impl Matcher<'_> {
             let mut pick: Option<usize> = None;
 
             for bi in 0..self.bodies.len() {
-                if self.assigned[bi] < 0
-                    && self.best_offer[bi] >= 0
+                if self.assigned[bi].is_none()
+                    && self.best_offer[bi].is_some()
                     && (pick.is_none() || self.first(bi, pick.unwrap()))
                 {
                     pick = Some(bi);
                 }
             }
 
-            let Some(pick) = pick else {
+            let Some((pick, oi)) = pick.and_then(|p| Some((p, self.best_offer[p]?))) else {
                 go = false;
                 continue;
             };
 
-            let oi = self.best_offer[pick] as usize;
             self.take(pick, oi);
 
             let mut released: Vec<usize> = Vec::new();
 
             if self.seated(oi) {
                 let mut seated_here: Vec<usize> = (0..self.bodies.len())
-                    .filter(|b| self.assigned[*b] == oi as i32)
+                    .filter(|b| self.assigned[*b] == Some(oi))
                     .collect();
 
                 seated_here.sort_by(|a, b| {
@@ -331,8 +339,8 @@ impl Matcher<'_> {
             }
 
             for bi in 0..self.bodies.len() {
-                if self.assigned[bi] < 0
-                    && (self.best_offer[bi] == oi as i32 || !released.is_empty())
+                if self.assigned[bi].is_none()
+                    && (self.best_offer[bi] == Some(oi) || !released.is_empty())
                 {
                     self.score(bi, &ranked, offers);
                 }
@@ -342,11 +350,8 @@ impl Matcher<'_> {
         let mut out = Assignments::new();
 
         for bi in 0..self.bodies.len() {
-            if self.assigned[bi] >= 0 {
-                out.insert(
-                    self.bodies[bi].name.clone(),
-                    self.pool[self.assigned[bi] as usize].id.clone(),
-                );
+            if let Some(oi) = self.assigned[bi] {
+                out.insert(self.bodies[bi].name.clone(), self.pool[oi].id.clone());
             }
         }
 

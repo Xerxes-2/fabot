@@ -106,16 +106,9 @@ pub fn tough_hits(f: &Fighter) -> i32 {
     engine::tough_hits(&f.body, &f.boosts, f.hits)
 }
 
-pub fn pace(weight: i32, gait: FatigueFactor) -> Option<i32> {
-    match step_ticks(gait, weight) {
-        -1 => None,
-        ticks => Some(ticks),
-    }
-}
-
 /// A body with no MOVE steps nowhere of itself: a puller's pace is the puller's.
 pub fn falls_behind(weight: i32, ours: FatigueFactor, theirs: FatigueFactor) -> bool {
-    match (pace(weight, theirs), pace(weight, ours)) {
+    match (step_ticks(theirs, weight), step_ticks(ours, weight)) {
         (None, Some(_)) => true,
         (Some(t), Some(o)) => t > o,
         (_, None) => false,
@@ -124,7 +117,7 @@ pub fn falls_behind(weight: i32, ours: FatigueFactor, theirs: FatigueFactor) -> 
 
 /// Read on plain, as the ground a kite runs on: a swamp tile's pace at a MOVE a part.
 pub fn stationary(f: &Fighter) -> bool {
-    pace(engine::PLAIN_WEIGHT, f.gait).is_some_and(|ticks| ticks >= 5)
+    step_ticks(f.gait, engine::PLAIN_WEIGHT).is_some_and(|ticks| ticks >= 5)
 }
 
 pub fn best_range(f: &Fighter) -> i32 {

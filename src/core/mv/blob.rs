@@ -1,5 +1,7 @@
 //! A set that walks as one: one field priced at its slowest body, each member
 //! kept near the median member along the walk.
+use std::cmp::Reverse;
+
 use crate::core::atlas::{Atlas, Field, Mover, Target};
 use crate::core::engine;
 use crate::core::grid::{self, FatigueFactor, Footprint, factor_of, step_ticks};
@@ -16,11 +18,11 @@ fn slowest(members: &[&Creep]) -> Mover {
     let factors: Vec<FatigueFactor> = members.iter().map(|c| factor_of(c)).collect();
     let mut moving: Vec<FatigueFactor> = factors.iter().copied().filter(|f| f.moves > 0).collect();
     moving.sort_by_key(|f| {
-        (
-            -step_ticks(*f, engine::PLAIN_WEIGHT),
-            -step_ticks(*f, engine::SWAMP_WEIGHT),
-            -step_ticks(*f, engine::ROAD_WEIGHT),
-        )
+        Reverse((
+            step_ticks(*f, engine::PLAIN_WEIGHT),
+            step_ticks(*f, engine::SWAMP_WEIGHT),
+            step_ticks(*f, engine::ROAD_WEIGHT),
+        ))
     });
     Mover {
         footprint: Footprint::One,
@@ -52,9 +54,8 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
         let field = atlas.field(mover, target, room);
         match field {
             // No field: one plain crossing, so a member short of it ranks behind one past it.
-            None if !atlas.sees(room) => {
-                tiles::SIDE * step_ticks(mover.factor, engine::PLAIN_WEIGHT)
-            }
+            None if !atlas.sees(room) => step_ticks(mover.factor, engine::PLAIN_WEIGHT)
+                .map_or(grid::UNREACHED, |step| tiles::SIDE * step),
             None => grid::UNREACHED,
             Some(field) => {
                 let exit = |field: &Field, mut t: i32| -> i32 {
@@ -71,23 +72,19 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
                     Some(_) if hops == 0 => grid::UNREACHED,
                     Some(ticks) => {
                         let edge = exit(&field, tile);
-                        match tiles::room_toward(room, tiles::exit_of(edge)) {
-                            Some(next) => {
-                                let rest = left(
-                                    atlas,
-                                    mover,
-                                    target,
-                                    hops - 1,
-                                    &next,
-                                    tiles::landing(edge),
-                                );
+                        match (
+                            tiles::room_toward(room, tiles::exit_of(edge)),
+                            tiles::landing(edge),
+                        ) {
+                            (Some(next), Some(landing)) => {
+                                let rest = left(atlas, mover, target, hops - 1, &next, landing);
                                 if rest == grid::UNREACHED {
                                     grid::UNREACHED
                                 } else {
                                     ticks + rest
                                 }
                             }
-                            None => grid::UNREACHED,
+                            _ => grid::UNREACHED,
                         }
                     }
                 }
@@ -167,7 +164,7 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
         }
     };
 
-    let step_back = 2 * step_ticks(mover.factor, engine::PLAIN_WEIGHT);
+    let step_back = step_ticks(mover.factor, engine::PLAIN_WEIGHT).map_or(0, |step| 2 * step);
 
     let mut out = Vec::with_capacity(members.len());
     for (creep, wish) in members.iter().zip(walks) {

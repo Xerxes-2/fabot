@@ -138,14 +138,14 @@ fn invader(c: &Creep) -> bool {
 fn reaches(structure: bool, step: i32, raid: &[&Creep], at: &Pos) -> bool {
     raid.iter().any(|h| {
         let range = if live(BodyPart::RangedAttack, h) {
-            engine::RANGED_RANGE
+            Some(engine::RANGED_RANGE)
         } else if live(BodyPart::Attack, h) || structure && live(BodyPart::Work, h) {
-            engine::MELEE_RANGE
+            Some(engine::MELEE_RANGE)
         } else {
-            -1
+            None
         };
 
-        range >= 0 && h.pos.within(range + step, at)
+        range.is_some_and(|range| h.pos.within(range + step, at))
     })
 }
 

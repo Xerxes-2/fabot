@@ -261,10 +261,10 @@ fn an_exits_landing_is_on_the_opposite_exit_and_lands_back() {
     for exit in [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT] {
         let room = tiles::room_toward(ROOM, exit).unwrap();
         for &tile in tiles::exit_tiles(exit) {
-            let landing = tiles::landing(tile);
+            let landing = tiles::landing(tile).unwrap();
             assert_eq!(tiles::exit_of(tile), exit, "on its exit");
             assert_eq!(tiles::exit_of(landing), (exit + 3) % 8 + 1, "opposite");
-            assert_eq!(tiles::landing(landing), tile, "and back");
+            assert_eq!(tiles::landing(landing), Some(tile), "and back");
             assert_eq!(
                 tiles::seam_range(&tiles::to_pos(ROOM, tile), &tiles::to_pos(&room, landing)),
                 Some(0),
@@ -282,13 +282,13 @@ fn an_exits_landing_is_on_the_opposite_exit_and_lands_back() {
 #[test]
 fn a_step_takes_the_fatigue_it_makes_over_twice_the_move_at_least_one_tick() {
     let table = [
-        (1, 1, engine::PLAIN_WEIGHT, 1),
-        (1, 1, engine::SWAMP_WEIGHT, 5),
-        (2, 1, engine::PLAIN_WEIGHT, 2),
-        (2, 1, engine::ROAD_WEIGHT, 1),
-        (49, 1, engine::SWAMP_WEIGHT, 245),
-        (0, 1, engine::SWAMP_WEIGHT, 1),
-        (5, 0, engine::PLAIN_WEIGHT, -1),
+        (1, 1, engine::PLAIN_WEIGHT, Some(1)),
+        (1, 1, engine::SWAMP_WEIGHT, Some(5)),
+        (2, 1, engine::PLAIN_WEIGHT, Some(2)),
+        (2, 1, engine::ROAD_WEIGHT, Some(1)),
+        (49, 1, engine::SWAMP_WEIGHT, Some(245)),
+        (0, 1, engine::SWAMP_WEIGHT, Some(1)),
+        (5, 0, engine::PLAIN_WEIGHT, None),
     ];
     for (weight, moves, ground, ticks) in table {
         assert_eq!(
@@ -312,7 +312,7 @@ fn a_steps_ticks_are_the_ceiling_of_its_fatigue_over_the_moves_pay() {
                 let fatigue = ground * weight;
                 assert_eq!(
                     step_ticks(factor, ground),
-                    1.max((fatigue + 2 * moves - 1) / (2 * moves)),
+                    Some(1.max((fatigue + 2 * moves - 1) / (2 * moves))),
                     "{weight}W {moves}M on {ground}"
                 );
             }

@@ -169,14 +169,14 @@ pub fn step(
         })
         .collect();
 
-    let best: Vec<i32> = (0..prev.len())
+    let best: Vec<Option<usize>> = (0..prev.len())
         .map(|gi| {
-            let mut b = -1;
+            let mut b = None;
             let mut most = 0;
 
             for (ci, row) in overlap.iter().enumerate() {
                 if row[gi] > most {
-                    b = ci as i32;
+                    b = Some(ci);
                     most = row[gi];
                 }
             }
@@ -191,25 +191,24 @@ pub fn step(
     let mut events: Vec<Event> = Vec::new();
 
     for ci in 0..cs.len() {
-        let mut id = -1;
+        let mut kept = None;
 
         for gi in 0..prev.len() {
-            if best[gi] == ci as i32 {
-                if id < 0 {
-                    id = prev[gi].id;
-                } else {
-                    events.push(Event::Merged {
-                        into: id,
+            if best[gi] == Some(ci) {
+                match kept {
+                    None => kept = Some(prev[gi].id),
+                    Some(into) => events.push(Event::Merged {
+                        into,
                         from: prev[gi].id,
-                    });
+                    }),
                 }
             }
         }
 
-        if id < 0 {
-            id = next_id;
+        let id = kept.unwrap_or_else(|| {
             next_id += 1;
-        }
+            next_id - 1
+        });
 
         let mut seen_before = false;
 
@@ -217,7 +216,7 @@ pub fn step(
             if overlap[ci][gi] > 0 {
                 seen_before = true;
 
-                if best[gi] != ci as i32 {
+                if best[gi] != Some(ci) {
                     events.push(Event::Split {
                         from: prev[gi].id,
                         into: id,
@@ -246,11 +245,11 @@ pub fn step(
     for gi in 0..prev.len() {
         let g = &prev[gi];
 
-        if best[gi] >= 0 && g.members.iter().any(|m| !seen.contains(m)) {
+        if best[gi].is_some() && g.members.iter().any(|m| !seen.contains(m)) {
             events.push(Event::Left(g.id));
         }
 
-        if best[gi] < 0 {
+        if best[gi].is_none() {
             if tick - g.last_seen > grace {
                 events.push(Event::Dropped(g.id));
             } else {

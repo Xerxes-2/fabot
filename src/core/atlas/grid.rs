@@ -79,13 +79,9 @@ pub fn loaded_factor(body: &[BodyPart]) -> FatigueFactor {
     }
 }
 
-/// In half-ticks: at least one, since no step is free.
-pub fn step_units(factor: FatigueFactor, weight: i32) -> i32 {
-    if factor.moves == 0 {
-        -1
-    } else {
-        1.max((weight * factor.weight + factor.moves - 1) / factor.moves)
-    }
+/// In half-ticks: at least one, since no step is free. None without MOVE.
+fn step_units(factor: FatigueFactor, weight: i32) -> Option<i32> {
+    (factor.moves > 0).then(|| 1.max((weight * factor.weight + factor.moves - 1) / factor.moves))
 }
 
 /// The detour a walk takes before it waits on a seated body; finite, so the
@@ -96,20 +92,17 @@ pub const SEAT_WEIGHT: i32 = SEAT_SWAMPS * engine::SWAMP_WEIGHT;
 /// Exact per step: a body cannot step again until its fatigue is zero, so a
 /// path's ticks are the sum of its steps'. A seat's price follows from swamp's,
 /// so the pace class keys a flood.
-pub fn step_ticks(factor: FatigueFactor, weight: i32) -> i32 {
+pub fn step_ticks(factor: FatigueFactor, weight: i32) -> Option<i32> {
     let seat = weight == SEAT_WEIGHT;
-    let units = step_units(factor, if seat { engine::SWAMP_WEIGHT } else { weight });
-    let ticks = if units < 0 { -1 } else { (units + 1) / 2 };
-    if seat && ticks > 0 {
-        SEAT_SWAMPS * ticks
-    } else {
-        ticks
-    }
+    let ticks = (step_units(factor, if seat { engine::SWAMP_WEIGHT } else { weight })? + 1) / 2;
+    Some(if seat { SEAT_SWAMPS * ticks } else { ticks })
 }
 
-/// The flood reads a table, not a closure.
+/// The flood reads a table, not a closure; -1 where no step is taken.
 pub fn step_table(factor: FatigueFactor) -> Vec<i32> {
-    (0..=SEAT_WEIGHT).map(|w| step_ticks(factor, w)).collect()
+    (0..=SEAT_WEIGHT)
+        .map(|w| step_ticks(factor, w).unwrap_or(-1))
+        .collect()
 }
 
 /// The bench's counts (`ARCHITECTURE.md` §9.3), read by `scripts/bench.mjs

@@ -120,7 +120,7 @@ fn heal_onto(weight: i32, horizon: i32, healer: &Healer, target: &Foe) -> i32 {
             let closes = if horizon <= 0 || range <= engine::MELEE_RANGE {
                 0
             } else {
-                match fighter::pace(weight, healer.mender.f.gait) {
+                match step_ticks(healer.mender.f.gait, weight) {
                     Some(ticks) => horizon / ticks,
                     None => 0,
                 }
@@ -622,8 +622,8 @@ fn keeps_off(terrain: Terrain, raid: &[Foe], fighter: &Fighter, hostile: &Foe) -
         && (fighter::falls_behind(terrain.weight, fighter.gait, hostile.f.gait)
             || strike > 0
                 && (match (
-                    fighter::pace(terrain.weight, fighter.gait),
-                    fighter::pace(terrain.weight, hostile.f.gait),
+                    step_ticks(fighter.gait, terrain.weight),
+                    step_ticks(hostile.f.gait, terrain.weight),
                 ) {
                     (Some(ours), Some(them)) => presses_for(terrain, raid, fighter, hostile)
                         .is_some_and(|presses| {
@@ -919,7 +919,7 @@ fn broken_by(terrain: Terrain, horizon: i32, price: &Price, ramparts: &[(Pos, i3
             .dismantlers
             .iter()
             .map(|(h, rate)| {
-                let ticks = fighter::pace(terrain.weight, h.gait).unwrap_or(i32::MAX);
+                let ticks = step_ticks(h.gait, terrain.weight).unwrap_or(i32::MAX);
 
                 let reaches = |tile: &Pos| {
                     range_to(tile, h).is_some_and(|r| {
@@ -951,7 +951,7 @@ fn arrival_of(terrain: Terrain, fighters: &[Fighter], raid: &[Fighter]) -> i32 {
                 } else {
                     let nearest = tiles.iter().copied().min().unwrap_or(0);
                     (nearest - f.reach).max(0)
-                        * fighter::pace(terrain.weight, f.gait).unwrap_or(CAST_WALK)
+                        * step_ticks(f.gait, terrain.weight).unwrap_or(CAST_WALK)
                 }
             }
         };
@@ -973,10 +973,10 @@ fn approach_of(terrain: Terrain, stance: Stance, fighters: &[Fighter], raid: &[F
                 let walks = if stance == Stance::Hold {
                     None
                 } else {
-                    fighter::pace(terrain.weight, f.gait)
+                    step_ticks(f.gait, terrain.weight)
                 };
 
-                match (walks, fighter::pace(terrain.weight, h.gait)) {
+                match (walks, step_ticks(h.gait, terrain.weight)) {
                     (Some(ours), Some(theirs)) => {
                         Some(gap * (ours * theirs) as f64 / (ours + theirs) as f64)
                     }
@@ -1299,12 +1299,12 @@ pub fn breach_plan(
     let cost = |t: i32| -> Option<i32> {
         let weight = ground.weights[t as usize];
         let step = if weight < 0 {
-            -1
+            None
         } else {
             step_ticks(gait, weight)
-        };
+        }?;
 
-        if step < 0 || tiles::on_edge(t) || struck(t) > heal {
+        if tiles::on_edge(t) || struck(t) > heal {
             None
         } else {
             match ground.barriers.get(&t) {

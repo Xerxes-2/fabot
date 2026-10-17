@@ -94,14 +94,14 @@ pub fn around(tile: i32) -> &'static [i32] {
 }
 
 /// The neighbour costing least under `bound`, the first in direction order
-/// on a tie; -1 when none does.
-pub fn least_around(tile: i32, bound: i32, mut cost: impl FnMut(i32) -> i32) -> i32 {
-    let mut best = -1;
+/// on a tie.
+pub fn least_around(tile: i32, bound: i32, mut cost: impl FnMut(i32) -> i32) -> Option<i32> {
+    let mut best = None;
     let mut least = bound;
     for &n in around(tile) {
         let c = cost(n);
         if c < least {
-            best = n;
+            best = Some(n);
             least = c;
         }
     }
@@ -188,15 +188,15 @@ pub fn exit_tiles(exit: i32) -> &'static [i32] {
     }
 }
 
-pub fn landing(tile: i32) -> i32 {
+pub fn landing(tile: i32) -> Option<i32> {
     let x = x_of(tile);
     let y = y_of(tile);
     match exit_of(tile) {
-        1 => index(x, LAST),
-        3 => index(0, y),
-        5 => index(x, 0),
-        7 => index(LAST, y),
-        _ => -1,
+        1 => Some(index(x, LAST)),
+        3 => Some(index(0, y)),
+        5 => Some(index(x, 0)),
+        7 => Some(index(LAST, y)),
+        _ => None,
     }
 }
 

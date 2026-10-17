@@ -158,17 +158,19 @@ pub fn pursue(
     close(sight, order, centre, creep)
 }
 
-/// How far `kind` of `h` strikes next tick, a step nearer; -1 for none.
-fn reach(kind: BodyPart, h: &Creep) -> i32 {
-    let parts = live(kind, h);
-
-    if parts == 0 {
-        -1
-    } else if kind == BodyPart::RangedAttack {
-        engine::RANGED_RANGE + live(BodyPart::Move, h).min(1)
+/// How far `kind` of `h` strikes next tick, a step nearer.
+fn reach(kind: BodyPart, h: &Creep) -> Option<i32> {
+    let range = if kind == BodyPart::RangedAttack {
+        engine::RANGED_RANGE
     } else {
-        engine::MELEE_RANGE + live(BodyPart::Move, h).min(1)
-    }
+        engine::MELEE_RANGE
+    };
+
+    (live(kind, h) > 0).then(|| range + live(BodyPart::Move, h).min(1))
+}
+
+fn struck(kind: BodyPart, h: &Creep, at: &Pos) -> bool {
+    reach(kind, h).is_some_and(|r| at.within(r, &h.pos))
 }
 
 fn step_to(creep: &Creep, tile: i32) -> Wish {
@@ -197,7 +199,7 @@ pub fn kite(
 
     let swings: Vec<&Creep> = hostiles_in(sight, &room)
         .iter()
-        .filter(|h| creep.pos.within(reach(BodyPart::Attack, h), &h.pos))
+        .filter(|h| struck(BodyPart::Attack, h, &creep.pos))
         .collect();
 
     let gap = |tile: i32| -> i32 {
@@ -239,13 +241,13 @@ pub fn kite(
 fn threat(raid: &[Creep], at: &Pos) -> i32 {
     raid.iter()
         .map(|h| {
-            let shot = if at.within(reach(BodyPart::RangedAttack, h), &h.pos) {
+            let shot = if struck(BodyPart::RangedAttack, h, at) {
                 engine::RANGED_ATTACK_POWER * live(BodyPart::RangedAttack, h)
             } else {
                 0
             };
 
-            let swing = if at.within(reach(BodyPart::Attack, h), &h.pos) {
+            let swing = if struck(BodyPart::Attack, h, at) {
                 engine::ATTACK_POWER * live(BodyPart::Attack, h)
             } else {
                 0
@@ -275,10 +277,11 @@ fn rescued(raid: &[Creep], members: &[&Creep], creep: &Creep) -> bool {
             .map(|m| engine::HEAL_POWER * live(BodyPart::Heal, m))
             .sum::<i32>();
 
-    let ticks_out = 1 + raid.iter().fold(0, |most, h| {
-        most.max(reach(BodyPart::RangedAttack, h))
-            .max(reach(BodyPart::Attack, h))
-    });
+    let ticks_out = 1 + raid
+        .iter()
+        .flat_map(|h| [reach(BodyPart::RangedAttack, h), reach(BodyPart::Attack, h)])
+        .flatten()
+        .fold(0, i32::max);
 
     focus > 0 && creep.hits < ticks_out * focus && creep.hits_max > ticks_out * focus
 }
@@ -305,11 +308,11 @@ struct Safety<'a> {
 
 impl Safety<'_> {
     /// A body crosses an exit by stepping onto it, not by standing on it.
-    fn crosses(at: (i32, i32)) -> bool {
-        at.1 >= 0 && tiles::on_edge(at.0)
+    fn crosses(at: (i32, Option<i32>)) -> bool {
+        at.1.is_some() && tiles::on_edge(at.0)
     }
 
-    fn safe(&self, at: (i32, i32)) -> bool {
+    fn safe(&self, at: (i32, Option<i32>)) -> bool {
         self.room != self.raid_room
             || Safety::crosses(at)
             || threat(self.raid, &tiles::to_pos(self.room, at.0)) == 0
@@ -323,23 +326,29 @@ impl Safety<'_> {
             .sum()
     }
 
-    fn search(&self, ring: Vec<(i32, i32)>, seen: BTreeSet<i32>, depth: i32) -> Option<i32> {
-        let safe: Vec<(i32, i32)> = ring.iter().copied().filter(|at| self.safe(*at)).collect();
+    fn search(
+        &self,
+        ring: Vec<(i32, Option<i32>)>,
+        seen: BTreeSet<i32>,
+        depth: i32,
+    ) -> Option<i32> {
+        let safe: Vec<(i32, Option<i32>)> =
+            ring.iter().copied().filter(|at| self.safe(*at)).collect();
 
         match safe.as_slice() {
             [] if depth == 0 || ring.is_empty() => None,
             [] => {
-                let mut next: Vec<(i32, i32)> = Vec::new();
+                let mut next: Vec<(i32, Option<i32>)> = Vec::new();
 
                 for at in ring.iter().copied().filter(|at| !Safety::crosses(*at)) {
                     for n in tiles::around(at.0) {
                         if !seen.contains(n) && self.atlas.passable(self.room, *n) {
-                            next.push((*n, if at.1 < 0 { *n } else { at.1 }));
+                            next.push((*n, at.1.or(Some(*n))));
                         }
                     }
                 }
 
-                let mut distinct: Vec<(i32, i32)> = Vec::new();
+                let mut distinct: Vec<(i32, Option<i32>)> = Vec::new();
 
                 for at in next {
                     if !distinct.iter().any(|(t, _)| *t == at.0) {
@@ -363,7 +372,7 @@ impl Safety<'_> {
                     let key = (self.apart(at.0), at.0);
 
                     if key < best_key {
-                        best = Some(at.1);
+                        best = at.1;
                         best_key = key;
                     }
                 }
@@ -391,14 +400,14 @@ pub fn step_back(sight: &mut Sight, raid_room: &str, members: &[&Creep], creep: 
         };
 
         safety.search(
-            vec![(here, -1)],
+            vec![(here, None)],
             BTreeSet::from([here]),
             2 * engine::RANGED_RANGE,
         )
     };
 
     match found {
-        Some(t) if t >= 0 && plan::can_move(creep, mover_of(creep).factor) => step_to(creep, t),
+        Some(t) if plan::can_move(creep, mover_of(creep).factor) => step_to(creep, t),
         _ => hold(sight, creep),
     }
 }
