@@ -173,7 +173,7 @@ pub fn resolve(
         stamp: 0,
     };
 
-    let mut searched_at = vec![-1i32; n];
+    let mut searched_at: Vec<Option<i32>> = vec![None; n];
     let mut clock = 0i32;
     let mut changed = true;
 
@@ -182,15 +182,16 @@ pub fn resolve(
         for i in 0..n {
             let from = search.tile_of[i];
             let wish = &order[i];
-            let stale = searched_at[i] < 0
-                || candidates[i]
+            let stale = searched_at[i].is_none_or(|at| {
+                candidates[i]
                     .iter()
-                    .any(|tile| search.changed_at[*tile] > searched_at[i]);
+                    .any(|tile| search.changed_at[*tile] > at)
+            });
             let content = wish.value(from) == reachable[i]
                 && (from == wish.at || wish.value(wish.at) < wish.value(from));
 
             if stale {
-                searched_at[i] = clock;
+                searched_at[i] = Some(clock);
             }
 
             if stale && !content {
