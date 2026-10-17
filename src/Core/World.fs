@@ -380,6 +380,22 @@ module Hostiles =
             | _ -> None)
         |> Set.ofArray
 
+    /// An ally's creeps are no one's to answer, so no reader sees them.
+    let sparing (allies: Set<string>) (world: World) : World =
+        let ally (c: Creep) =
+            match c.Owner with
+            | Theirs user -> allies.Contains user
+            | _ -> false
+
+        { world with
+            Rooms =
+                world.Rooms
+                |> Array.map (fun r ->
+                    { r with
+                        Hostiles = r.Hostiles |> Array.filter (ally >> not)
+                    })
+        }
+
     /// HEAL and WORK threaten beside a striker (owner's call): alone they are
     /// a rival's healer in transit or its remote harvester, but WORK in a room
     /// whose controller is ours can only be there to dismantle.

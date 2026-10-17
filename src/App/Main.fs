@@ -52,9 +52,11 @@ let private runTick () =
             Layout = standing
         }
 
+    let declarations = Wire.readDeclarations ()
+
     let world =
         timed "world" (fun () ->
-            let world = World.ofGame ()
+            let world = World.ofGame () |> Core.World.Hostiles.sparing declarations.Allies
             sightings <- Core.World.Sightings.step world sightings
             world)
 
@@ -67,7 +69,7 @@ let private runTick () =
             {
                 World = world
                 Atlas = atlas
-                Declarations = Wire.readDeclarations ()
+                Declarations = declarations
                 Sightings = sightings
             }
             state

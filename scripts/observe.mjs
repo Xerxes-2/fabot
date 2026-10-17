@@ -10,13 +10,14 @@
 //   observe.mjs switch <name> on|off|clear
 //                                  off: `false` (the module is skipped); on: `true`
 //                                  (the recorder's opt-in); clear: remove the key
-//   observe.mjs declare [reserve <n>]
+//   observe.mjs declare [reserve <n> | allies <name,…> | outposts <capture.json>]
 //                                  Memory.v2.declarations as stored; with a name, set it
+//                                  (outposts: the capture's, `scripts/capture-world.mjs`)
 //                                  (reserve: creep lifetimes of tower fire the reserve holds)
 //   observe.mjs capture [out.jsonl]
 //                                  the recorder's ring (segments 10..14), oldest first
 //   observe.mjs wait --ticks N     return after N game ticks
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { connect, fail } from "./screeps-api.mjs";
 
@@ -32,9 +33,15 @@ const segment = async (id) => {
 };
 const memory = async (path) => {
   const res = await api.req("GET", "/api/user/memory", { path, shard });
-  if (typeof res.data !== "string") return res.data ?? null;
+  // The server's answer for a path under a key Memory does not hold.
+  if (typeof res.data !== "string" || res.data === "Incorrect memory path") return typeof res.data === "string" ? null : (res.data ?? null);
   return res.data.startsWith("gz:") ? JSON.parse(gunzipSync(Buffer.from(res.data.slice(3), "base64")).toString()) : JSON.parse(res.data);
 };
+// The server runs `Memory.v2.<key> = value`, which throws while Memory holds no v2.
+const putV2 = async (key, value) =>
+  (await memory("v2"))
+    ? api.req("POST", "/api/user/memory", { path: `v2.${key}`, value, shard })
+    : api.req("POST", "/api/user/memory", { path: "v2", value: { [key]: value }, shard });
 const observed = async () => (await segment(OBSERVE)) ?? fail("observe segment empty: the bot has not written one yet");
 const ms = (n) => n.toFixed(2).padStart(7);
 
@@ -71,9 +78,11 @@ switch (cmd) {
       break;
     }
     const n = Number(value);
-    if (name !== "reserve" || value === undefined || !(n >= 0)) fail("usage: observe declare [reserve <n ≥ 0>]");
-    declarations[name] = n;
-    await api.req("POST", "/api/user/memory", { path: "v2.declarations", value: declarations, shard });
+    if (name === "reserve" && n >= 0) declarations.reserve = n;
+    else if (name === "allies" && value !== undefined) declarations.allies = value.split(",").filter(Boolean);
+    else if (name === "outposts" && value !== undefined) declarations.outposts = JSON.parse(readFileSync(value, "utf8")).declarations.outposts;
+    else fail("usage: observe declare [reserve <n ≥ 0> | allies <name,…> | outposts <capture.json>]");
+    await putV2("declarations", declarations);
     console.log(`v2.declarations = ${JSON.stringify(declarations)} (read next tick)`);
     break;
   }
@@ -83,7 +92,7 @@ switch (cmd) {
     const switches = (await memory("v2.switches")) ?? {};
     if (state === "clear") delete switches[name];
     else switches[name] = state === "on";
-    await api.req("POST", "/api/user/memory", { path: "v2.switches", value: switches, shard });
+    await putV2("switches", switches);
     console.log(`v2.switches = ${JSON.stringify(switches)} (read next tick)`);
     break;
   }
@@ -106,5 +115,5 @@ switch (cmd) {
     break;
   }
   default:
-    fail("usage: observe health|cpu|faults|switches|switch <name> on|off|clear|declare [reserve <n>]|capture [out]|wait --ticks N");
+    fail("usage: observe health|cpu|faults|switches|switch <name> on|off|clear|declare [reserve <n>|allies <names>|outposts <capture>]|capture [out]|wait --ticks N");
 }

@@ -324,6 +324,16 @@ let readDeclarations () : Fabot.Core.Tick.Declarations =
             match asArray (field declared "outposts") with
             | null -> []
             | outposts -> outposts |> Array.choose outpostOf |> List.ofArray
+        Allies =
+            match asArray (field declared "allies") with
+            | null -> Set.empty
+            | allies ->
+                allies
+                |> Array.choose (fun a ->
+                    match a with
+                    | :? string as name -> Some name
+                    | _ -> None)
+                |> Set.ofArray
     }
 
 let recording () : bool = (switches ())?recorder = box true

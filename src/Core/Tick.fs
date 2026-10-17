@@ -21,12 +21,14 @@ type Declarations =
         /// The creep lifetimes of tower fire a colony's reserve holds.
         ReserveLifetimes: float
         Outposts: Outpost list
+        Allies: Set<string>
     }
 
 let undeclared =
     {
         ReserveLifetimes = 2.0
         Outposts = []
+        Allies = Set.empty
     }
 
 [<NoEquality; NoComparison>]

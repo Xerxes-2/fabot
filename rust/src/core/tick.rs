@@ -31,12 +31,14 @@ pub struct Declarations {
     /// The creep lifetimes of tower fire a colony's reserve holds.
     pub reserve_lifetimes: f64,
     pub outposts: Vec<Outpost>,
+    pub allies: BTreeSet<String>,
 }
 
 pub fn undeclared() -> Declarations {
     Declarations {
         reserve_lifetimes: 2.0,
         outposts: Vec::new(),
+        allies: BTreeSet::new(),
     }
 }
 

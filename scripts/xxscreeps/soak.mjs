@@ -34,10 +34,11 @@
 //   --from   a world --save wrote (needs --room): the bot is swapped for
 //            --bot, its Memory kept, as a deploy at that tick
 //   --opponents  a JSON file of players seated beside ours, each
-//            { name, bot, room, x?, y?, config?, raid? }: `bot` a bundle or a
+//            { name, bot, room, x?, y?, config?, raid?, ally? }: `bot` a bundle or a
 //            bot directory, `config` written beside it as `opponent.js`, the
 //            spawn on colony.mjs's tile unless x, y; `raid` its bodies stood
-//            on our room's edge (`engine/soak-step.mjs`). With --from they stand
+//            on our room's edge (`engine/soak-step.mjs`), `ally` its name in our
+//            declared allies (not with --world or --from: their Memory declares). With --from they stand
 //            in the world already and only their code is swapped. A bot
 //            directory's `fetch.json` { tarball, integrity, from, main }
 //            names code that is never in this tree: the tarball, fetched once
@@ -317,12 +318,13 @@ writeFileSync(join(world, "opponents.json"), JSON.stringify(opponents.map(({ nam
 if (built) node26([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME, String(node.worn ?? 1)], world);
 if (flags["--ended"]) node26([XXSCREEPS, script("node.mjs"), "ended", colony.room], world);
 else if ((opponents.length && !live) || flags["--unsafe"]) node26([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
-if (node?.outposts) {
-  if (colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);
-  writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: colony.outposts }));
+if (node?.outposts && colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);
+const allies = opponents.filter((o) => o.ally).map((o) => o.name);
+if (node?.outposts || (allies.length && !live && !from)) {
+  writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: node?.outposts ? colony.outposts : [], allies }));
   node26([XXSCREEPS, script("node.mjs"), "declare", colony.room, OUR_NAME, "declarations.json"], world);
-  if (!flags["--invaders"]) waves.push(...colony.outposts.map((o, i) => `${o.room}:4000:${1000 + 1500 * i}`));
 }
+if (node?.outposts && !flags["--invaders"]) waves.push(...colony.outposts.map((o, i) => `${o.room}:4000:${1000 + 1500 * i}`));
 
 // ---- the server, stepped ---------------------------------------------------
 const log = join(out, "server.log");

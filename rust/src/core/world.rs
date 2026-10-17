@@ -487,7 +487,7 @@ pub mod terrain {
 }
 
 pub mod hostiles {
-    use super::{Creep, Room, World};
+    use super::{Creep, Owner, Room, World};
     use std::collections::BTreeSet;
 
     fn strikes(creep: &Creep) -> bool {
@@ -505,6 +505,14 @@ pub mod hostiles {
                 _ => None,
             })
             .collect()
+    }
+
+    /// An ally's creeps are no one's to answer, so no reader sees them.
+    pub fn spare(allies: &BTreeSet<String>, world: &mut World) {
+        for room in &mut world.rooms {
+            room.hostiles
+                .retain(|c| !matches!(&c.owner, Owner::Theirs(user) if allies.contains(user)));
+        }
     }
 
     /// HEAL and WORK threaten beside a striker (owner's call): alone they are

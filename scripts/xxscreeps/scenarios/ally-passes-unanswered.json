@@ -1,0 +1,23 @@
+{
+  "why": "an armed body of a declared ally standing in our home is no hostile: no tower fires on it and no engagement opens, so it stands at the end",
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "node": "N3",
+    "opponents": [
+      {
+        "name": "friend",
+        "bot": "scripts/xxscreeps/engine/pass",
+        "room": "W7N3",
+        "ally": true,
+        "raid": { "first": 100, "bodies": [{ "move": 4, "ranged_attack": 4 }] }
+      }
+    ]
+  },
+  "ticks": 600,
+  "assert": [
+    { "measure": "attackersAtEnd", "to": 500, "min": 1 },
+    { "measure": "engagements", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}
