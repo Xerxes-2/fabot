@@ -1,9 +1,7 @@
 /// Below this file nothing in `Economy` reads `World` (`ARCHITECTURE.md` §1).
 use std::collections::BTreeMap;
 
-use crate::core::HashMap;
-
-use crate::core::atlas::Atlas;
+use crate::core::atlas::{Atlas, Tree};
 use crate::core::engine;
 use crate::core::grid::Footprint;
 use crate::core::tick::{self, Declarations, Outpost};
@@ -205,7 +203,7 @@ pub struct Derived {
     /// Creep lifetimes of tower fire a reserve holds.
     pub reserve_lifetimes: f64,
     /// From each room a spawn or body stands in, `Atlas::tree`'s.
-    pub routes: BTreeMap<String, HashMap<String, String>>,
+    pub routes: BTreeMap<String, Tree>,
 }
 
 fn body_of(name: &str, pos: &Pos, parts: &[Part], store: &Store, life: i32) -> Body {
@@ -659,7 +657,7 @@ fn blind(outpost: &Outpost) -> Room {
     }
 }
 
-fn tree_of(routes: &mut BTreeMap<String, HashMap<String, String>>, atlas: &Atlas, room: &str) {
+fn tree_of(routes: &mut BTreeMap<String, Tree>, atlas: &Atlas, room: &str) {
     if !routes.contains_key(room) {
         routes.insert(room.to_string(), atlas.tree(tick::REACH_HOPS, room));
     }
@@ -777,7 +775,7 @@ pub fn of_world(
         .map(|c| body_of(&c.name, &c.pos, &c.body, &c.store, c.ticks_to_live))
         .collect();
 
-    let mut routes: BTreeMap<String, HashMap<String, String>> = BTreeMap::new();
+    let mut routes: BTreeMap<String, Tree> = BTreeMap::new();
 
     for s in &world.spawns {
         tree_of(&mut routes, atlas, &s.pos.room);

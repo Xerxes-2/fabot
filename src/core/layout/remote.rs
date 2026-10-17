@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::HashMap;
 
-use crate::core::atlas::{Atlas, Mover, Target};
+use crate::core::atlas::{Atlas, Mover, Target, Tree};
 use crate::core::grid::Footprint;
 use crate::core::intents::{Intent, RoomAct};
 use crate::core::tick::{self, Outpost};
@@ -199,14 +199,14 @@ pub fn sites(
     // one `sites` wants the same trees: search each room once. Every target
     // `nearest` prices is at the reach with no avoid, so a tree is its route;
     // an `Atlas` cannot be lent to `nearest` and to its route at once.
-    let mut trees: HashMap<String, HashMap<String, String>> = HashMap::default();
+    let mut trees: HashMap<String, Tree> = HashMap::default();
     for room in &world.rooms {
         trees.insert(room.name.clone(), atlas.tree(tick::REACH_HOPS, &room.name));
     }
 
     let route = |target: &Target, from: &str| -> Option<Vec<String>> {
         match trees.get(from) {
-            Some(tree) => Atlas::route_in(tree, from, &target.room),
+            Some(tree) => tree.route(from, &target.room),
             None if from == target.room => Some(vec![from.to_string()]),
             None => None,
         }

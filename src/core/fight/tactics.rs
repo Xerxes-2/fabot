@@ -3,7 +3,7 @@
 /// Resolver step functions.
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::core::atlas::{self, Atlas, Mover, Target};
+use crate::core::atlas::{Atlas, Mover, Target};
 use crate::core::grid::{self, Footprint};
 use crate::core::intents::{CreepAct, Intent};
 use crate::core::mv::{Wish, blob, plan};
@@ -627,7 +627,7 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> (Option<CreepAct>, Wish) {
             .homes
             .iter()
             .filter_map(|p| {
-                atlas::Atlas::route_in(&tree, &room, &p.room)
+                tree.route(&room, &p.room)
                     .map(|rooms| (rooms.len() as i32, p.clone()))
             })
             .collect();

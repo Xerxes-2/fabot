@@ -38,7 +38,7 @@ fn route_of(atlas: &Atlas, derived: &Derived, target: &Target, from: &str) -> Op
         && target.max_hops == tick::REACH_HOPS
         && let Some(tree) = derived.routes.get(from)
     {
-        return Atlas::route_in(tree, from, &target.room);
+        return tree.route(from, &target.room);
     }
     atlas.route(&target.avoid, target.max_hops, from, &target.room)
 }

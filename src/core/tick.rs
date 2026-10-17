@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::HashMap;
 
-use super::atlas::{Atlas, Mover, Target};
+use super::atlas::{Atlas, Mover, Target, Tree};
 use super::engine;
 use super::grid::{self, FatigueFactor, Footprint};
 use super::intents::{Ask, CreepAct, Intent, Rank, SpawnAct};
@@ -128,7 +128,7 @@ pub fn colonies(world: &World) -> Vec<String> {
 /// The declared outposts a colony's spawn reaches and no hostile seen there
 /// outlives (`ARCHITECTURE.md` §13, M1b): a stood-down room is no ground.
 pub fn worked(context: &Context) -> Vec<Outpost> {
-    let trees: Vec<(String, HashMap<String, String>)> = colonies(context.world)
+    let trees: Vec<(String, Tree)> = colonies(context.world)
         .into_iter()
         .map(|home| {
             let tree = context.atlas.tree(REACH_HOPS, &home);
@@ -144,7 +144,7 @@ pub fn worked(context: &Context) -> Vec<Outpost> {
             super::world::sightings::unarmed(context.sightings, context.world.time, &o.room)
                 && trees
                     .iter()
-                    .any(|(home, tree)| home == &o.room || tree.contains_key(&o.room))
+                    .any(|(home, tree)| home == &o.room || tree.contains(&o.room))
         })
         .cloned()
         .collect()

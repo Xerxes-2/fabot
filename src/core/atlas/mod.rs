@@ -54,6 +54,39 @@ enum Goal {
     Exit(i32),
 }
 
+type Coords = (i32, i32);
+
+/// Each room a search reached, to the room it was reached from.
+#[derive(Clone, Debug, Default)]
+pub struct Tree(HashMap<Coords, Coords>);
+
+impl Tree {
+    pub fn contains(&self, room: &str) -> bool {
+        tiles::room_coords(room).is_some_and(|c| self.0.contains_key(&c))
+    }
+
+    /// `Atlas::route`'s answer, read off the tree searched from `from`.
+    pub fn route(&self, from: &str, onto: &str) -> Option<Vec<String>> {
+        if from == onto {
+            return Some(vec![from.to_string()]);
+        }
+        let start = tiles::room_coords(from)?;
+        let mut at = tiles::room_coords(onto)?;
+        let mut chain = vec![at];
+        while at != start {
+            at = *self.0.get(&at)?;
+            chain.push(at);
+        }
+        Some(
+            chain
+                .into_iter()
+                .rev()
+                .map(|(x, y)| tiles::room_name(x, y))
+                .collect(),
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Field {
     pub footprint: Footprint,
@@ -383,9 +416,9 @@ impl Atlas {
         }
     }
 
-    fn linked(&self, from: &str, onto: &str, exit: i32) -> bool {
-        let near = self.rooms.get(from).map(|g| &g.weights);
-        let far = self.rooms.get(onto).map(|g| &g.weights);
+    fn linked(near: Option<&RoomGrid>, far: Option<&RoomGrid>, exit: i32) -> bool {
+        let near = near.map(|g| &g.weights);
+        let far = far.map(|g| &g.weights);
         for &tile in tiles::exit_tiles(exit) {
             let near_walkable = near.map(|weights| weights[tile].is_some()).unwrap_or(true);
             let far_walkable = far
@@ -398,29 +431,42 @@ impl Atlas {
         false
     }
 
-    fn search(
-        &self,
-        avoid: &BTreeSet<String>,
-        max_hops: i32,
-        from: &str,
-        onto: &str,
-    ) -> HashMap<String, String> {
-        let mut parent: HashMap<String, String> = HashMap::default();
-        parent.insert(from.to_string(), from.to_string());
-        let mut frontier: Vec<String> = vec![from.to_string()];
+    /// Over world coordinates, so a room met is named only on the route out.
+    fn search(&self, avoid: &BTreeSet<String>, max_hops: i32, from: &str, onto: &str) -> Tree {
+        let mut parent: HashMap<Coords, Coords> = HashMap::default();
+        let Some(start) = tiles::room_coords(from) else {
+            return Tree(parent);
+        };
+        let onto = tiles::room_coords(onto);
+        let avoid: Vec<Coords> = avoid.iter().filter_map(|r| tiles::room_coords(r)).collect();
+        let grids: HashMap<Coords, &RoomGrid> = self
+            .rooms
+            .iter()
+            .filter_map(|(name, grid)| Some((tiles::room_coords(name)?, grid)))
+            .collect();
+
+        parent.insert(start, start);
+        let mut frontier = vec![start];
         let mut hops = 0;
 
-        while !frontier.is_empty() && hops < max_hops && !parent.contains_key(onto) {
+        while !frontier.is_empty()
+            && hops < max_hops
+            && !onto.is_some_and(|o| parent.contains_key(&o))
+        {
             let mut next = Vec::new();
-            for room in &frontier {
+            for &room in &frontier {
                 for e in 0..4 {
                     let exit = tiles::TOP + 2 * e;
-                    if let Some(there) = tiles::room_toward(room, exit)
-                        && !parent.contains_key(&there)
-                        && (there == onto || !avoid.contains(&there))
-                        && self.linked(room, &there, exit)
+                    let there = (room.0 + tiles::dx(exit), room.1 + tiles::dy(exit));
+                    if !parent.contains_key(&there)
+                        && (Some(there) == onto || !avoid.contains(&there))
+                        && Atlas::linked(
+                            grids.get(&room).copied(),
+                            grids.get(&there).copied(),
+                            exit,
+                        )
                     {
-                        parent.insert(there.clone(), room.clone());
+                        parent.insert(there, room);
                         next.push(there);
                     }
                 }
@@ -429,25 +475,10 @@ impl Atlas {
             hops += 1;
         }
 
-        parent
+        Tree(parent)
     }
 
-    /// `route`'s answer, read off the `tree` from `from`.
-    pub fn route_in(tree: &HashMap<String, String>, from: &str, onto: &str) -> Option<Vec<String>> {
-        if from == onto {
-            Some(vec![from.to_string()])
-        } else if tree.contains_key(onto) {
-            let mut chain = vec![onto.to_string()];
-            while chain[0] != from {
-                chain.insert(0, tree[&chain[0]].clone());
-            }
-            Some(chain)
-        } else {
-            None
-        }
-    }
-
-    pub fn tree(&self, max_hops: i32, from: &str) -> HashMap<String, String> {
+    pub fn tree(&self, max_hops: i32, from: &str) -> Tree {
         self.search(&BTreeSet::new(), max_hops, from, "")
     }
 
@@ -463,7 +494,7 @@ impl Atlas {
         {
             None
         } else {
-            Atlas::route_in(&self.search(avoid, max_hops, from, onto), from, onto)
+            self.search(avoid, max_hops, from, onto).route(from, onto)
         }
     }
 

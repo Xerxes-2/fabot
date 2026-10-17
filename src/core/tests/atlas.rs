@@ -535,7 +535,7 @@ fn a_route_read_off_a_tree_is_the_route_searched() {
         let from = tiles::room_name(0, 0);
         let onto = tiles::room_name(dice.between(-128, 127) % 3, dice.between(-128, 127) % 3);
         assert_eq!(
-            Atlas::route_in(&atlas.tree(hops, &from), &from, &onto),
+            atlas.tree(hops, &from).route(&from, &onto),
             atlas.route(&BTreeSet::new(), hops, &from, &onto)
         );
     }
