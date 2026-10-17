@@ -10,9 +10,9 @@ ported from, on `fable` (`git show <bookmark>:<path>`); both are rollbacks only.
 ## Prerequisites
 
 With Nix (recommended — same toolchain as CI, pinned by `flake.lock`):
-`nix develop` gives Node.js 24 and the Rust toolchain with `wasm-pack`
-(`.envrc` enables direnv). Without Nix: Node.js >= 24, Rust with the
-`wasm32-unknown-unknown` target, and `wasm-pack`. Then:
+`nix develop` gives Node.js 24, `wasm-pack` and the Rust toolchain
+`rust-toolchain.toml` pins (`.envrc` enables direnv). Without Nix: Node.js >= 24,
+rustup (it reads the same file) and `wasm-pack`. Then:
 
 - `npm install`
 - `cp .env.example .env` and fill in your Screeps token
