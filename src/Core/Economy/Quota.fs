@@ -733,7 +733,7 @@ let plan
 
     let waiting = Array.zeroCreate<bool> colonies.Length
 
-    for seat in ordered do
+    let cast (seat: Seat) =
         match seat.Colony with
         | Some ci when idle.[ci].Count > 0 && not (seat.Pattern.IsUpgrader && waiting.[ci]) ->
             let body =
@@ -743,12 +743,18 @@ let plan
                     Some seat.Body
 
             match body with
-            | Some fit when Engine.bodyCost fit <= bank.[ci] -> castAt ci seat.Pattern fit false
-            | _ -> waiting.[ci] <- true
-        | _ -> ()
+            | Some fit when Engine.bodyCost fit <= bank.[ci] ->
+                castAt ci seat.Pattern fit false
+                { seat with Body = fit }
+            | _ ->
+                waiting.[ci] <- true
+                seat
+        | _ -> seat
+
+    let seated = List.map cast ordered
 
     {
         Wants = wants
-        Seats = ordered
+        Seats = seated
         Casts = List.ofSeq casts
     }
