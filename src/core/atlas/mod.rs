@@ -504,32 +504,17 @@ impl Atlas {
             return None;
         }
         let footprint = mover.footprint;
-        let (goal, goals): (Goal, Vec<Tile>) = if room == target.room {
-            let mut sorted = target.tiles.clone();
-            sorted.sort_unstable();
-            sorted.dedup();
-            let grid = &self.rooms[room];
-            let mut goals = Vec::new();
-            for &tile in &sorted {
-                if tile.index() < tiles::COUNT {
-                    Atlas::seats_near(footprint, &grid.weights, target.range, tile, &mut goals);
-                }
-            }
-            let goal = Goal::Seats {
+        let goal = if room == target.room {
+            let mut targets = target.tiles.clone();
+            targets.sort_unstable();
+            targets.dedup();
+            Goal::Seats {
                 range: target.range,
-                tiles: sorted,
-            };
-            (goal, goals)
+                tiles: targets,
+            }
         } else {
             match onward() {
-                Some(rooms) if rooms.len() >= 2 => {
-                    let exit = tiles::exit_toward(room, &rooms[1])?;
-                    let grid = &self.rooms[room];
-                    (
-                        Goal::Exit(exit),
-                        Atlas::exit_goals(footprint, &grid.weights, exit),
-                    )
-                }
+                Some(rooms) if rooms.len() >= 2 => Goal::Exit(tiles::exit_toward(room, &rooms[1])?),
                 _ => return None,
             }
         };
@@ -554,6 +539,27 @@ impl Atlas {
             }
             None => {
                 self.misses += 1;
+                let goals = match &key.goal {
+                    Goal::Seats {
+                        range,
+                        tiles: targets,
+                    } => {
+                        let mut goals = Vec::new();
+                        for &tile in targets {
+                            if tile.index() < tiles::COUNT {
+                                Atlas::seats_near(
+                                    footprint,
+                                    &grid.weights,
+                                    *range,
+                                    tile,
+                                    &mut goals,
+                                );
+                            }
+                        }
+                        goals
+                    }
+                    Goal::Exit(exit) => Atlas::exit_goals(footprint, &grid.weights, *exit),
+                };
                 let dist = Rc::new(flood(footprint, &grid.weights, &step_table(factor), &goals));
                 grid.floods.insert(key, dist.clone());
                 dist
