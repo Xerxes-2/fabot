@@ -36,21 +36,21 @@ pub struct Placement {
 /// writes a room a tick, where a typed array is zeroed by its allocation.
 #[derive(Clone, Debug)]
 pub struct Census {
-    pub solid: Vec<u8>,
-    pub road: Vec<u8>,
-    pub rampart: Vec<u8>,
-    pub site: Vec<u8>,
-    pub occupied: Vec<u8>,
-    pub walkable: Vec<u8>,
+    pub solid: [u8; tiles::COUNT],
+    pub road: [u8; tiles::COUNT],
+    pub rampart: [u8; tiles::COUNT],
+    pub site: [u8; tiles::COUNT],
+    pub occupied: [u8; tiles::COUNT],
+    pub walkable: [u8; tiles::COUNT],
     /// Tiles whose container's rock, else controller, has one already: one
     /// standing off the plan's tile is kept, never doubled.
-    pub served: Vec<u8>,
+    pub served: [u8; tiles::COUNT],
     /// None once a link serves the source: one standing off the plan's tile is
     /// kept, never doubled.
     pub posts: Vec<Post>,
     pub buffer: Option<(Tile, Tile)>,
     /// A solid site there waits on its upgrader as under any creep.
-    pub seat: Vec<u8>,
+    pub seat: [u8; tiles::COUNT],
     /// Every owner's, and sites: CONTROLLER_STRUCTURES counts them all. By
     /// `Kind.ordinal`.
     pub held: Vec<i32>,
@@ -59,13 +59,13 @@ pub struct Census {
 }
 
 pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
-    let mut solid = vec![0u8; tiles::COUNT];
-    let mut road = vec![0u8; tiles::COUNT];
-    let mut rampart = vec![0u8; tiles::COUNT];
-    let mut site = vec![0u8; tiles::COUNT];
+    let mut solid = [0u8; tiles::COUNT];
+    let mut road = [0u8; tiles::COUNT];
+    let mut rampart = [0u8; tiles::COUNT];
+    let mut site = [0u8; tiles::COUNT];
     let mut held = vec![0i32; kinds() as usize];
-    let mut occupied = vec![0u8; tiles::COUNT];
-    let mut walkable = vec![0u8; tiles::COUNT];
+    let mut occupied = [0u8; tiles::COUNT];
+    let mut walkable = [0u8; tiles::COUNT];
 
     for (t, w) in walkable.iter_mut().enumerate() {
         if room.terrain.get(t).copied().unwrap_or(0) & terrain::WALL == 0 {
@@ -138,7 +138,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
         .chain(room.minerals.iter().map(|m| m.pos.clone()))
         .collect();
 
-    let mut served = vec![0u8; tiles::COUNT];
+    let mut served = [0u8; tiles::COUNT];
 
     if let Some(c) = &room.controller
         && containers.iter().any(|p| Atlas::is_buffer(room, p))
@@ -164,7 +164,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
         walkable[tiles::of_pos(&c.pos)] = 0;
     }
 
-    let mut seat = vec![0u8; tiles::COUNT];
+    let mut seat = [0u8; tiles::COUNT];
 
     let buffer: Option<(Tile, &Structure)> = match (&room.controller, Atlas::buffer(room)) {
         (Some(c), Some(b)) => Some((tiles::of_pos(&c.pos), b)),
