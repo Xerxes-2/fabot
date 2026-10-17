@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use crate::core::HashMap;
 use crate::core::engine;
 use crate::core::vocabulary::{BodyPart, part_count_in};
 use crate::core::world::Pos;
@@ -749,7 +750,7 @@ pub fn plan(
     all.extend(spent);
 
     let mut standing: BTreeMap<Pattern, i32> = BTreeMap::new();
-    let targets: BTreeMap<&str, &Pos> = pool
+    let targets: HashMap<&str, &Pos> = pool
         .iter()
         .map(|offer| (offer.id.as_str(), &offer.target))
         .collect();
