@@ -323,6 +323,12 @@ pub fn room_coords(name: &str) -> Option<(i32, i32)> {
     }
 }
 
+pub fn is_keeper_room((x, y): (i32, i32)) -> bool {
+    let local = |c: i32| (if c < 0 { -c - 1 } else { c }) % 10;
+    let (x, y) = (local(x), local(y));
+    (4..=6).contains(&x) && (4..=6).contains(&y) && (x, y) != (5, 5)
+}
+
 /// Across rooms, where adjacent rooms' edge tiles are one tile.
 pub fn seam_range(a: &Pos, b: &Pos) -> Option<i32> {
     if a.room == b.room {

@@ -135,6 +135,7 @@ const measures = {
   build: (samples, a) => at(samples, a.to ?? Infinity).ledger.build - at(samples, a.from ?? 0).ledger.build,
   // Energy a room's spawns put into bodies (`room`: the room).
   bodiesSpent: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.bodies ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.bodies ?? 0),
+  dug: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.dug ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.dug ?? 0),
   upgrade: (samples, a) => at(samples, a.to ?? Infinity).ledger.upgrade - at(samples, a.from ?? 0).ledger.upgrade,
   // Percent of samples whose buffer stood empty with an upgrader beside it.
   dryBuffer: (samples, a) => {
@@ -206,6 +207,13 @@ const measures = {
   // The least hits a siege's target (a spawn, a core) ever stood at (none seen: Infinity).
   siegeTargetLow: (_, __, dir) => Math.min(Infinity, ...rowsOf(dir).filter((e) => e.kind === "siege" && e.target).map((e) => e.target.low)),
   bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),
+  // Our bodies gone from the colony's rooms with life left: died, or walked
+  // through a room the soak does not follow.
+  bodiesOut: (_, __, dir) => {
+    const lives = readFileSync(join(dir, "bodies.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const end = Math.max(...lives.map((b) => b.last));
+    return new Set(lives.filter((b) => b.ours && b.last < end && b.ttl > 1).map((b) => b.name)).size;
+  },
   // The most energy one engagement cast, of the bodies that stood in it.
   mostCast: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.cast ?? 0)),
   // The most energy a siege cast that stood before its breach (none breached: Infinity).

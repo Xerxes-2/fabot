@@ -244,6 +244,10 @@ impl Atlas {
         }
     }
 
+    /// Past a keeper's pin, its ranged reach and a step each, its and ours, a
+    /// tile is out of its strike.
+    const KEEPER_MARGIN: i32 = engine::KEEPER_PIN + engine::RANGED_RANGE + 2;
+
     /// ~10 kB each. A dropped resource's tile is a new goal, so a room's keys
     /// are unbounded; past this the room floods afresh.
     const KEPT_FLOODS: usize = 500;
@@ -311,6 +315,19 @@ impl Atlas {
 
             for creep in room.hostiles() {
                 weights[tiles::of_pos(&creep.pos)] = None;
+            }
+
+            if room.structures.iter().any(|s| s.kind.is_keeper_lair()) {
+                let lairs = room.structures.iter().filter(|s| s.kind.is_keeper_lair());
+                // A keeper is cast on its lair and pinned only to its rock.
+                let lairs = lairs.map(|s| (&s.pos, Atlas::KEEPER_MARGIN - engine::KEEPER_PIN));
+                let rocks = room.sources.iter().map(|s| &s.pos);
+                let rocks = rocks.chain(room.minerals.iter().map(|m| &m.pos));
+                for (pos, margin) in lairs.chain(rocks.map(|p| (p, Atlas::KEEPER_MARGIN))) {
+                    for tile in tiles::within(margin, tiles::of_pos(pos)) {
+                        weights[tile] = None;
+                    }
+                }
             }
 
             let weights = Rc::new(weights);
@@ -458,7 +475,8 @@ impl Atlas {
                     let exit = tiles::TOP + 2 * e;
                     let there = (room.0 + tiles::dx(exit), room.1 + tiles::dy(exit));
                     if !parent.contains_key(&there)
-                        && (Some(there) == onto || !avoid.contains(&there))
+                        && (Some(there) == onto
+                            || !(avoid.contains(&there) || tiles::is_keeper_room(there)))
                         && Atlas::linked(
                             grids.get(&room).copied(),
                             grids.get(&there).copied(),

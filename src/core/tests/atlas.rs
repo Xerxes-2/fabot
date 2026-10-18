@@ -575,3 +575,36 @@ fn a_route_crosses_shared_borders_around_the_avoided_by_fewest_crossings() {
         }
     }
 }
+
+#[test]
+fn no_route_crosses_a_keeper_room_nor_walks_within_a_keepers_reach() {
+    let mut dice = Dice::new(20);
+    let atlas = Atlas::of_world(&world_of_rooms(Vec::new()));
+    let keeper = |r: &String| tiles::is_keeper_room(tiles::room_coords(r).unwrap());
+    for _ in 0..CASES {
+        let mut room = || tiles::room_name(dice.below(12) - 1, dice.below(12) - 1);
+        let (from, onto) = (room(), room());
+        if let Some(chain) = atlas.route(&BTreeSet::new(), 30, &from, &onto) {
+            assert!(chain[1..chain.len() - 1].iter().all(|r| !keeper(r)));
+        }
+    }
+    for _ in 0..CASES {
+        let mut world = world_of(&ground(&mut dice));
+        let (lair, rock) = (tile(&mut dice), tile(&mut dice));
+        let at = |t: Tile| Pos::new(ROOM, tiles::x_of(t), tiles::y_of(t));
+        world.rooms[0].structures =
+            vec![structure(Kind::KeeperLair, false, at(lair).x, at(lair).y)];
+        world.rooms[0].sources = vec![Source {
+            id: "rock".into(),
+            pos: at(rock),
+            energy: 0,
+            energy_capacity: 0,
+            ticks_to_regeneration: 0,
+        }];
+        let atlas = Atlas::of_world(&world);
+        for t in (0..tiles::COUNT).map(Tile::of_index) {
+            let out = |keeper: Tile, pin: i32| tiles::range(keeper, t) > pin + engine::RANGED_RANGE;
+            assert!(!atlas.passable(ROOM, t) || (out(lair, 0) && out(rock, engine::KEEPER_PIN)));
+        }
+    }
+}
