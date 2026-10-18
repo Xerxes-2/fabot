@@ -5,6 +5,7 @@
 import { RoomProcessor } from "xxscreeps/engine/processor/room.js";
 import { Game } from "xxscreeps/game/index.js";
 import { draw, sequence } from "./random.js";
+import { Room } from "xxscreeps/game/room/index.js";
 
 // Rooms are processed, and each player's intents in a room applied, in the
 // order their runners published them, which timing changes run to run: so a
@@ -41,4 +42,29 @@ RoomProcessor.prototype.finalize = async function (...args) {
   } finally {
     this.shard = shard;
   }
+};
+
+// The official engine carries a body across a border with its fatigue
+// (`processor/intents/creeps/tick.js`), but a step onto the border from
+// inside costs none (`movement.js`); xxscreeps zeroes it on the carry
+// instead, which hides a body stepping along the border bouncing on it.
+const edge = (p) => p.x === 0 || p.y === 0 || p.x === 49 || p.y === 49;
+const steppedOn = new Set();
+const moveObject = Room.prototype["#moveObject"];
+Room.prototype["#moveObject"] = function (object, pos) {
+  if (edge(pos) && !edge(object.pos)) steppedOn.add(object.id);
+  else steppedOn.delete(object.id);
+  return moveObject.call(this, object, pos);
+};
+const carried = new Map();
+const removeObject = Room.prototype["#removeObject"];
+Room.prototype["#removeObject"] = function (object) {
+  if (object.fatigue > 0 && !steppedOn.has(object.id)) carried.set(object.id, object.fatigue);
+  steppedOn.delete(object.id);
+  return removeObject.call(this, object);
+};
+const insertObject = Room.prototype["#insertObject"];
+Room.prototype["#insertObject"] = function (object, ...rest) {
+  if (carried.has(object.id)) (object.fatigue = carried.get(object.id)), carried.delete(object.id);
+  return insertObject.call(this, object, ...rest);
 };
