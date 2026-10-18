@@ -1,0 +1,28 @@
+{
+  "why": "a cheap raider poking both outposts and the home every 500 ticks for 20000 ticks starts no spending spiral: once at §5's reserve (60k, two towers) the home's stock stays there, no level or spawn lost, the fight casts a small share of the harvest",
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "node": "E1",
+    "opponents": [
+      {
+        "name": "harasser",
+        "bot": "scripts/xxscreeps/engine/harass",
+        "room": "W8N4",
+        "config": { "targets": ["W7N3", "W8N2", "W8N3"] },
+        "raid": { "first": 1500, "every": 500, "bodies": [{ "move": 4, "ranged_attack": 2, "heal": 2 }, { "move": 4, "ranged_attack": 2, "heal": 2 }] }
+      }
+    ]
+  },
+  "ticks": 20000,
+  "assert": [
+    { "measure": "levelsLost", "max": 0 },
+    { "measure": "spawnsLost", "max": 0 },
+    { "measure": "leastStored", "from": 3500, "min": 60000 },
+    { "measure": "fightShare", "max": 6 },
+    { "measure": "engagements", "min": 50 },
+    { "measure": "bodiesLost", "max": 10 },
+    { "measure": "poorestOutpost", "min": 140000 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

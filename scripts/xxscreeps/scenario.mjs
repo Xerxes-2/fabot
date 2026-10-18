@@ -136,6 +136,10 @@ const measures = {
   // Energy a room's spawns put into bodies (`room`: the room).
   bodiesSpent: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.bodies ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.bodies ?? 0),
   dug: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.dug ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.dug ?? 0),
+  // The least energy the home's storage and containers held.
+  leastStored: (samples, a) => Math.min(...within(samples, a).map((s) => s.stored)),
+  // Percent of the colony's harvest the engagements cast into bodies.
+  fightShare: (samples, _, dir) => Math.round((100 * rowsOf(dir).reduce((n, e) => n + (e.cast ?? 0), 0)) / Math.max(1, samples.at(-1).ledger.dug)),
   towerSpent: (samples, a) => at(samples, a.to ?? Infinity).ledger.tower - at(samples, a.from ?? 0).ledger.tower,
   upgrade: (samples, a) => at(samples, a.to ?? Infinity).ledger.upgrade - at(samples, a.from ?? 0).ledger.upgrade,
   // Percent of samples whose buffer stood empty with an upgrader beside it.
