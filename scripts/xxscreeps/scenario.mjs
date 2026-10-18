@@ -18,7 +18,7 @@
 // A scenario file: { "why": the invariant, "nightly"?, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "wave"? (soak's --wave), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
 // "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
-// (soak's --world; crafted ones under worlds/), "seed", "invaders"?, "wave"?, "opponents"? (the world's own users) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"? }] };
+// (soak's --world; crafted ones under worlds/), "seed", "invaders"?, "wave"?, "opponents"? (the world's own users) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick.
 // Exits non-zero when a bound fails or a soak does, or loses ticks twice.
@@ -195,6 +195,10 @@ const measures = {
   fightDamageSpread: (_, __, dir) => Math.max(1, ...foughtOf(dir).map((f) => Math.max(...Object.values(f.taken)) / Math.max(1, mean(Object.values(f.taken))))),
   fightLowestHits: (_, __, dir) => Math.min(100, ...foughtOf(dir).flatMap((f) => Object.values(f.low).map((l) => 100 * l))),
   fightWoundedOut: (_, __, dir) => Math.min(100, ...foughtOf(dir).filter((f) => f.wounded).map((f) => (100 * f.out) / f.wounded)),
+  // The most percent of a member's ticks it swung back (soak-step's `swung`),
+  // over the engagements of `kind` (none named: every one); none seen: 0.
+  oscillation: (_, a, dir) =>
+    Math.max(0, ...rowsOf(dir).filter((e) => !a.kind || e.kind === a.kind).flatMap((e) => Object.values(e.swung).map((s) => Math.round((100 * s.swings) / Math.max(1, s.ticks))))),
   // The most ticks a siege took from its open to its breach (one that never breached: Infinity).
   breachTicks: (_, __, dir) => Math.max(...rowsOf(dir).filter((e) => e.kind === "siege").map((e) => (e.breached ?? (e.disengaged || e.closed === null ? Infinity : e.closed)) - e.opened), ...(rowsOf(dir).some((e) => e.kind === "siege") ? [] : [Infinity])),
   // The rival's structures the last siege opened left standing in its room (none opened: Infinity).

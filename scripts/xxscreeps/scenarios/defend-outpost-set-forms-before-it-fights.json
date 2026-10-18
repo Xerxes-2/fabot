@@ -5,6 +5,7 @@
   "assert": [
     { "measure": "predictedWinsLost", "max": 0 },
     { "measure": "raidsKilled", "min": 2 },
+    { "measure": "oscillation", "max": 5 },
     { "measure": "faults", "max": 0 }
   ]
 }

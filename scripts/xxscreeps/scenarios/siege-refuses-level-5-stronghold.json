@@ -9,6 +9,7 @@
     { "measure": "siegeTargetLow", "min": 100000, "max": 100000 },
     { "measure": "mostCast", "max": 0 },
     { "measure": "bodiesLost", "min": 9 },
+    { "measure": "oscillation", "max": 5 },
     { "measure": "faults", "max": 0 }
   ]
 }

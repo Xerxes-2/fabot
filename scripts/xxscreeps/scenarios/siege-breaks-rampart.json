@@ -26,6 +26,10 @@
       "max": 8700
     },
     {
+      "measure": "oscillation",
+      "max": 6
+    },
+    {
       "measure": "faults",
       "max": 0
     }

@@ -4,6 +4,7 @@
   "ticks": 60,
   "assert": [
     { "measure": "blobAnchorRange", "min": 94 },
+    { "measure": "oscillation", "max": 5 },
     { "measure": "faults", "max": 0 }
   ]
 }

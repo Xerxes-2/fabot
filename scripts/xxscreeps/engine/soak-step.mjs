@@ -482,11 +482,12 @@ async function standing(ids) {
   return false;
 }
 async function closed(e, t) {
-  const { members, casts, walk, fight, ...rest } = e;
+  const { members, casts, walk, fight, swing, ...rest } = e;
   const arrivals = Object.values(walk?.arrived ?? {}).sort((a, b) => a - b);
   const blob = walk && { ...walk, last: undefined, arrived: undefined, arrival: arrivals.length ? arrivals[(arrivals.length - 1) >> 1] : null };
   const fought = fight && { ...fight, last: undefined };
-  fs.writeSync(engagementsOut, JSON.stringify({ ...rest, blob, fought, closed: t, outlived: t === null || (await standing(members)) }) + "\n");
+  const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
+  fs.writeSync(engagementsOut, JSON.stringify({ ...rest, blob, fought, swung, closed: t, outlived: t === null || (await standing(members)) }) + "\n");
 }
 // World tiles, where adjacent rooms' edge tiles coincide (x = roomX·49 + x).
 const seam = (a, b) => {
@@ -538,12 +539,28 @@ function fought(rec, phase, bodies, theirs) {
     }
   }
 }
+// ibex's A-B-A oscillation. A swing that struck or healed on both its steps,
+// or stepped over a room's edge (out of the towers' reach), is a dance that
+// pays. Struck is read off the event log: the engine logs no dismantle action.
+function swinging(rec, bodies, t, seen) {
+  const struck = new Set(seen.flatMap((r) => (r["#eventLog"] ?? []).filter((v) => [ATTACK, HEAL].includes(v.event ?? v._$Variant)).map((v) => v.objectId)));
+  for (const o of bodies) {
+    const s = (rec.swing[o.name] ??= { ticks: 0, swings: 0, last: [] });
+    const now = { t, room: o.pos.roomName, tile: `${o.pos.roomName} ${o.pos.x},${o.pos.y}`, struck: struck.has(o.id) };
+    const [a, b] = s.last;
+    if (a?.t === t - 2 && b?.t === t - 1) {
+      s.ticks++;
+      if (a.tile === now.tile && b.tile !== now.tile && b.room === now.room && !(b.struck && now.struck)) s.swings++;
+    }
+    s.last = [b, now];
+  }
+}
 async function engaged(t, time, rooms) {
   const fight = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}").v2?.fight ?? {};
   const now = new Set();
   for (const e of fight.engagements ?? []) {
     now.add(e.id);
-    const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, casts: new Map(), cast: 0 };
+    const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), swing: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, casts: new Map(), cast: 0 };
     open.set(e.id, rec);
     for (const c of (fight.casts ?? []).filter((c) => c.engagement === e.id)) rec.casts.set(c.name, c.body);
     for (const n of e.ours.filter((n) => rec.casts.has(n))) {
@@ -581,6 +598,7 @@ async function engaged(t, time, rooms) {
     const bodies = objects.filter((o) => o.body !== undefined && o["#user"] === ours && e.ours.includes(o.name));
     walking(rec, e.phase, bodies, theirs, t);
     fought(rec, e.phase, bodies, theirs);
+    swinging(rec, bodies, t, seen);
   }
   for (const [id, rec] of open)
     if (!now.has(id)) {
