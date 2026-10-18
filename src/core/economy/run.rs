@@ -385,7 +385,19 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 &body.pos,
             )
         };
-        matcher::match_all(&mut travel, &offers, &derived.bodies, &state.assignments)
+        // Each step moves a body at most a tile, in a tick at least.
+        let floor = |body: &Body, offer: &Offer| {
+            body.pos
+                .range(&offer.target)
+                .map_or(0, |r| r - offer.task.range_of())
+        };
+        matcher::match_all(
+            &mut travel,
+            &floor,
+            &offers,
+            &derived.bodies,
+            &state.assignments,
+        )
     };
 
     let plan = {

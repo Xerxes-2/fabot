@@ -12,14 +12,18 @@ use super::price;
 /// Creep name → `task_id`.
 pub type Assignments = BTreeMap<String, String>;
 
+/// `floor`: ticks no walk of `travel`'s is shorter than, so an offer whose
+/// floor costs more than the best reached is never walked.
 pub fn match_all(
     travel: &mut dyn FnMut(&Body, &Offer) -> Option<i32>,
+    floor: &dyn Fn(&Body, &Offer) -> i32,
     pool: &[Offer],
     bodies: &[Body],
     assignments: &Assignments,
 ) -> Assignments {
     let mut matched = Matcher {
         travel,
+        floor,
         pool,
         bodies,
         walks: vec![Walk::Unasked; bodies.len() * pool.len()],
@@ -41,6 +45,7 @@ pub fn match_all(
 
 struct Matcher<'a> {
     travel: &'a mut dyn FnMut(&Body, &Offer) -> Option<i32>,
+    floor: &'a dyn Fn(&Body, &Offer) -> i32,
     pool: &'a [Offer],
     bodies: &'a [Body],
     walks: Vec<Walk>,
@@ -173,28 +178,45 @@ impl Matcher<'_> {
         self.admits_now(bi, oi) || (self.seated(oi) && self.admits_ahead(bi, oi))
     }
 
-    fn score(&mut self, bi: usize, ranked: &[usize], offers: usize) {
+    /// Cheapest floor first, so the walks past the best are never flooded; a
+    /// tie goes to the offer first in rank and pool order.
+    fn score(&mut self, bi: usize, ranked: &[usize]) {
         self.best_offer[bi] = None;
-        let mut k = 0;
+        let body = &self.bodies[bi];
+        let mut order: Vec<(i32, usize)> = ranked
+            .iter()
+            .enumerate()
+            .map(|(k, &oi)| {
+                let offer = &self.pool[oi];
+                (
+                    price::walked(offer.priority, (self.floor)(body, offer).max(0)),
+                    k,
+                )
+            })
+            .collect();
+        order.sort_unstable();
 
-        while k < offers {
+        for (floor, k) in order {
             let oi = ranked[k];
+            if self.best_offer[bi].is_some() && floor > self.best_cost[bi] {
+                break;
+            }
             let offer = &self.pool[oi];
 
-            let below = self.best_offer[bi].is_some()
-                && price::walked(offer.priority, 0) > self.best_cost[bi];
-
-            k = if below { offers } else { k + 1 };
-
-            if !below && pool::fits(&self.bodies[bi], offer) && self.open(bi, oi) {
+            if pool::fits(&self.bodies[bi], offer) && self.open(bi, oi) {
                 let holder = self.holders[oi];
+                let earlier =
+                    self.best_offer[bi].is_none_or(|b| self.rank_of(oi) < self.rank_of(b));
 
                 if let Some(w) = self.walk(bi, oi)
                     && (self.best_offer[bi].is_none()
                         || before(
                             (price::walked(offer.priority, w), w, holder),
                             (self.best_cost[bi], self.best_walk[bi], self.best_load[bi]),
-                        ))
+                        )
+                        || earlier
+                            && (price::walked(offer.priority, w), w, holder)
+                                == (self.best_cost[bi], self.best_walk[bi], self.best_load[bi]))
                 {
                     self.best_offer[bi] = Some(oi);
                     self.best_cost[bi] = price::walked(offer.priority, w);
@@ -203,6 +225,10 @@ impl Matcher<'_> {
                 }
             }
         }
+    }
+
+    fn rank_of(&self, oi: usize) -> (i32, usize) {
+        (self.pool[oi].priority, oi)
     }
 
     fn first(&self, a: usize, b: usize) -> bool {
@@ -264,7 +290,7 @@ impl Matcher<'_> {
 
         for bi in 0..self.bodies.len() {
             if self.assigned[bi].is_none() {
-                self.score(bi, &ranked, offers);
+                self.score(bi, &ranked);
             }
         }
 
@@ -342,7 +368,7 @@ impl Matcher<'_> {
                 if self.assigned[bi].is_none()
                     && (self.best_offer[bi] == Some(oi) || !released.is_empty())
                 {
-                    self.score(bi, &ranked, offers);
+                    self.score(bi, &ranked);
                 }
             }
         }
@@ -434,7 +460,13 @@ mod tests {
 
     fn matched(scene: &Scene, assignments: &Assignments) -> Assignments {
         let mut travel = |body: &Body, offer: &Offer| scene.travel(body, offer);
-        match_all(&mut travel, &scene.pool, &scene.bodies, assignments)
+        match_all(
+            &mut travel,
+            &|_, _| 0,
+            &scene.pool,
+            &scene.bodies,
+            assignments,
+        )
     }
 
     /// Whether a body lives to take an offer.
@@ -571,7 +603,13 @@ mod tests {
             }
 
             let mut travel = |body: &Body, offer: &Offer| scene.travel(body, offer);
-            let permuted = match_all(&mut travel, &scene.pool, &shuffled, &scene.assignments);
+            let permuted = match_all(
+                &mut travel,
+                &|_, _| 0,
+                &scene.pool,
+                &shuffled,
+                &scene.assignments,
+            );
 
             assert_eq!(permuted, matched(&scene, &scene.assignments));
         }
