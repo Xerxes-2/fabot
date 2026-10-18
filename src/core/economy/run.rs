@@ -35,36 +35,14 @@ fn target_of(offer: &Offer) -> Target {
     }
 }
 
-/// `Atlas::route` without a search from a room `Derived` holds the tree of.
+/// `Atlas::route` without a search, off a tree `Derived` grew from either end.
 fn route_of(atlas: &Atlas, derived: &Derived, target: &Target, from: &str) -> Option<Vec<String>> {
-    if target.avoid.is_empty()
-        && target.max_hops == tick::REACH_HOPS
-        && let Some(tree) = derived.routes.get(from)
-    {
-        return tree.route(from, &target.room);
-    }
-    atlas.route(&target.avoid, target.max_hops, from, &target.room)
-}
-
-/// `Atlas::ticks_to`, whose flood needs the route; `route_of` reads the trees,
-/// so its answer is taken before the Atlas is borrowed mutably.
-fn ticks_to(
-    atlas: &mut Atlas,
-    derived: &Derived,
-    mover: Mover,
-    target: &Target,
-    from: &Pos,
-) -> Option<i32> {
-    if from.room == target.room {
-        atlas.travel_ticks(mover, target, from)
-    } else {
-        let rooms = route_of(atlas, derived, target, &from.room);
-        atlas.ticks_to(
-            move |_: &Target, _: &str| rooms.clone(),
-            mover,
-            target,
-            from,
-        )
+    let tree = (derived.routes.get(&target.room)).or_else(|| derived.routes.get(from));
+    match tree {
+        Some(tree) if target.avoid.is_empty() && target.max_hops == tick::REACH_HOPS => {
+            tree.route(from, &target.room)
+        }
+        _ => atlas.route(&target.avoid, target.max_hops, from, &target.room),
     }
 }
 
@@ -76,7 +54,6 @@ fn distance(atlas: &Atlas, derived: &Derived, a: &Pos, b: &Pos) -> Option<i32> {
     }
 }
 
-/// `Tick::nearest` over the routes it will ask for, read before its floods.
 fn near(
     atlas: &mut Atlas,
     derived: &Derived,
@@ -84,29 +61,26 @@ fn near(
     can: &dyn Fn(usize) -> bool,
     at: &Pos,
 ) -> Option<usize> {
-    // (target room, from room) to the route `Tick::nearest` asks for.
-    type Route = ((String, String), Option<Vec<String>>);
-    let mut routes: Vec<Route> = Vec::new();
+    tick::nearest(atlas, &|room| derived.routes.get(room), homes, can, at)
+}
 
-    for home in homes {
-        routes.push((
-            (home.room.clone(), at.room.clone()),
-            route_of(atlas, derived, &tick::target_at(home, 1), &at.room),
-        ));
-        routes.push((
-            (at.room.clone(), home.room.clone()),
-            route_of(atlas, derived, &tick::target_at(at, 0), &home.room),
-        ));
+fn ticks_to(
+    atlas: &mut Atlas,
+    derived: &Derived,
+    mover: Mover,
+    target: &Target,
+    from: &Pos,
+) -> Option<i32> {
+    match derived.routes.get(&target.room) {
+        Some(tree)
+            if from.room != target.room
+                && target.avoid.is_empty()
+                && target.max_hops == tick::REACH_HOPS =>
+        {
+            atlas.ticks_on(tree, mover, target, from)
+        }
+        _ => atlas.ticks_to(mover, target, from),
     }
-
-    let route = move |target: &Target, from: &str| -> Option<Vec<String>> {
-        routes
-            .iter()
-            .find(|((there, start), _)| there == &target.room && start == from)
-            .and_then(|(_, rooms)| rooms.clone())
-    };
-
-    tick::nearest(atlas, route, homes, can, at)
 }
 
 pub struct Walked<'a> {
@@ -131,7 +105,7 @@ impl Walks for Walked<'_> {
             factor: grid::loaded_factor(body),
         };
         ticks_to(
-            &mut *self.atlas,
+            self.atlas,
             self.derived,
             mover,
             &tick::target_at(onto, range),
@@ -159,13 +133,7 @@ impl Walks for Walked<'_> {
             *self.movers.get(body.name.as_str())?
         };
 
-        ticks_to(
-            &mut *self.atlas,
-            self.derived,
-            mover,
-            &target_of(offer),
-            from,
-        )
+        ticks_to(self.atlas, self.derived, mover, &target_of(offer), from)
     }
 }
 
@@ -418,13 +386,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     let assignments = {
         let mut travel = |body: &Body, offer: &Offer| -> Option<i32> {
             let mover = *movers.get(body.name.as_str())?;
-            ticks_to(
-                &mut *context.atlas,
-                &derived,
-                mover,
-                &target_of(offer),
-                &body.pos,
-            )
+            ticks_to(context.atlas, &derived, mover, &target_of(offer), &body.pos)
         };
         // Each step moves a body at most a tile, in a tick at least.
         let floor = |body: &Body, offer: &Offer| {

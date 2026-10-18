@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::core::atlas::tiles::Tile;
+use crate::core::atlas::{Atlas, Post};
 use crate::core::engine;
 use crate::core::intents::Intent;
 use crate::core::tick::{self, Declarations};
@@ -18,8 +20,8 @@ pub struct Row {
     pub reservation: Option<(String, i32)>,
     /// Whose body seen there carries WORK or CARRY: another's economy.
     pub worker: Option<String>,
-    /// None on a row written before lairs were read: unknown, not none.
-    pub lairs: Option<i32>,
+    /// None on a row written before posts were read: unknown, not none.
+    pub lairs: Option<Vec<Post>>,
 }
 
 pub type Intel = BTreeMap<String, Row>;
@@ -58,12 +60,7 @@ pub fn step(world: &World, intel: &mut Intel) {
                         .any(|p| matches!(p.kind, BodyPart::Work | BodyPart::Carry))
                 })
                 .and_then(|h| user(&world.me, &h.owner)),
-            lairs: Some(
-                room.structures
-                    .iter()
-                    .filter(|s| s.kind.is_keeper_lair())
-                    .count() as i32,
-            ),
+            lairs: Some(Atlas::posts(room)),
         };
         match intel.get_mut(&room.name) {
             Some(held) => *held = row,
@@ -196,7 +193,8 @@ pub fn sight(
 const NONE: &str = "-";
 
 /// One line a room, `room seen owner level reserver lapse worker lairs`, `-`
-/// for none: a segment holds thousands.
+/// for none, `lairs` each lair's tile and its resource's as `lair.resource,…`
+/// (`.` alone for none): a segment holds thousands.
 pub fn to_text(intel: &Intel) -> String {
     let name = |user: &Option<String>| user.clone().unwrap_or_else(|| NONE.to_string());
     let mut out = String::new();
@@ -211,10 +209,41 @@ pub fn to_text(intel: &Intel) -> String {
             name(&r.owner),
             r.level,
             name(&r.worker),
-            r.lairs.map_or(NONE.to_string(), |n| n.to_string())
+            r.lairs
+                .as_ref()
+                .map_or(NONE.to_string(), |posts| posts_text(posts))
         ));
     }
     out
+}
+
+fn posts_text(posts: &[Post]) -> String {
+    let post = |(lair, resource): &Post| format!("{}.{}", lair.index(), resource.index());
+    match posts.iter().map(post).collect::<Vec<_>>().join(",") {
+        none if none.is_empty() => ".".to_string(),
+        posts => posts,
+    }
+}
+
+/// A count, written before posts were, is none only at zero.
+fn posts_of(text: &str) -> Option<Vec<Post>> {
+    let tile = |t: &str| {
+        t.parse::<u16>()
+            .ok()
+            .filter(|i| usize::from(*i) < tiles::COUNT)
+    };
+    let post = |p: &str| {
+        let (lair, resource) = p.split_once('.')?;
+        Some((
+            Tile::of_index(tile(lair)?.into()),
+            Tile::of_index(tile(resource)?.into()),
+        ))
+    };
+    match text {
+        "." | "0" => Some(Vec::new()),
+        posts if posts.contains('.') => posts.split(',').map(post).collect(),
+        _ => None,
+    }
 }
 
 pub fn of_text(text: &str) -> Intel {
@@ -231,7 +260,7 @@ pub fn of_text(text: &str) -> Intel {
                 level: f[3].parse().ok()?,
                 reservation: name(f[4]).zip(f[5].parse().ok()),
                 worker: name(f[6]),
-                lairs: f.get(7).and_then(|n| n.parse().ok()),
+                lairs: f.get(7).and_then(|p| posts_of(p)),
             };
             Some((f[0].to_string(), row))
         })
@@ -257,7 +286,12 @@ mod tests {
                 level: dice.between(0, 8),
                 reservation: user(&mut dice).map(|u| (u, dice.between(0, 9_999_999))),
                 worker: user(&mut dice),
-                lairs: dice.chance(2).then(|| dice.below(5)),
+                lairs: dice.chance(2).then(|| {
+                    let tile = |dice: &mut Dice| Tile::of_index(dice.below(2500) as usize);
+                    (0..dice.below(5))
+                        .map(|_| (tile(&mut dice), tile(&mut dice)))
+                        .collect()
+                }),
             };
             let intel: Intel = [("W1N1".to_string(), row)].into();
             assert_eq!(of_text(&to_text(&intel)), intel);

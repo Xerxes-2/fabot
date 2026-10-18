@@ -74,7 +74,7 @@ pub fn toward(
     let moves = can_move(creep, mover.factor);
 
     let field: Option<Field> = if rests_soon(creep, mover.factor) {
-        atlas.field(mover, target, room)
+        atlas.field(mover, target, &creep.pos)
     } else {
         None
     };

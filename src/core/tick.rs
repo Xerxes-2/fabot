@@ -125,10 +125,10 @@ pub fn target_at(pos: &Pos, range: i32) -> Target {
     }
 }
 
-/// Ticks and crossings are not one unit.
-pub fn nearest(
+/// Ticks and crossings are not one unit. `trees` holds the homes' rooms'.
+pub fn nearest<'t>(
     atlas: &mut Atlas,
-    route: impl Fn(&Target, &str) -> Option<Vec<String>>,
+    trees: &dyn Fn(&str) -> Option<&'t Tree>,
     homes: &[Pos],
     can: impl Fn(usize) -> bool,
     at: &Pos,
@@ -156,11 +156,14 @@ pub fn nearest(
 
     least(atlas, &|atlas, home| {
         let t = target_at(home, 1);
-        atlas.ticks_to(&route, walker, &t, at)
+        match trees(&home.room) {
+            Some(tree) if home.room != at.room => atlas.ticks_on(tree, walker, &t, at),
+            _ => atlas.ticks_to(walker, &t, at),
+        }
     })
     .or_else(|| {
         least(atlas, &|_atlas, home| {
-            route(&target_at(at, 0), &home.room)
+            (trees(&home.room)?.route(&at.room, &home.room))
                 .map(|rooms| Atlas::crossing_ticks() * (rooms.len() as i32 - 1))
         })
     })
@@ -184,7 +187,7 @@ pub fn worked(context: &Context) -> Vec<Outpost> {
     let trees: Vec<(String, Tree)> = colonies(context.world)
         .into_iter()
         .map(|home| {
-            let tree = context.atlas.tree(REACH_HOPS, &home);
+            let tree = context.atlas.tree(&BTreeSet::new(), REACH_HOPS, &home);
             (home, tree)
         })
         .collect();

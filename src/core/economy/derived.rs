@@ -1,6 +1,6 @@
 /// Below this file nothing in `Economy` reads `World` (`ARCHITECTURE.md` §1).
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::atlas::{Atlas, Tree};
 use crate::core::engine;
@@ -800,7 +800,10 @@ fn blind(outpost: &Outpost, intel: &Intel, world: &World, declarations: &Declara
 
 fn tree_of(routes: &mut BTreeMap<String, Tree>, atlas: &Atlas, room: &str) {
     if !routes.contains_key(room) {
-        routes.insert(room.to_string(), atlas.tree(tick::REACH_HOPS, room));
+        routes.insert(
+            room.to_string(),
+            atlas.tree(&BTreeSet::new(), tick::REACH_HOPS, room),
+        );
     }
 }
 
@@ -987,6 +990,10 @@ pub fn of_world(
 
     for s in &world.spawns {
         tree_of(&mut routes, atlas, &s.pos.room);
+    }
+
+    for g in &grounds {
+        tree_of(&mut routes, atlas, &g.room);
     }
 
     for c in creeps {

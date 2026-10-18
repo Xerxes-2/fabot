@@ -774,11 +774,12 @@ for (let t = 0; t < ticks; t++) {
   const rooms = await Promise.all(roomNames.map((name) => shard.loadRoom(name, time)));
   const room = rooms[0];
   account(rooms, time);
-  live([...rooms, ...(await Promise.all(bordering.map((name) => shard.loadRoom(name, time))))], time);
+  const around = [...rooms, ...(await Promise.all(bordering.map((name) => shard.loadRoom(name, time))))];
+  live(around, time);
   await engaged(t, time, rooms);
   detours(rooms);
   stoodLoaded(rooms, time);
-  wasted(rooms);
+  wasted(around);
   for (const o of opponents.filter(({ raid: r }) => r && (t === r.first || (r.every && t > r.first && (t - r.first) % r.every === 0)))) {
     const toward = Object.entries(world.map.describeExits(roomName) ?? {}).filter(([, next]) => next === o.room).map(([dir]) => Number(dir));
     const bodies = o.raid.bodies.map(({ boosts = {}, ...counts }) => PARTS.flatMap((p) => Array(counts[p] ?? 0).fill({ type: p, boost: boosts[p] })));

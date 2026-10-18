@@ -641,8 +641,10 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
         .collect();
 
     let home: Option<Pos> = if here.is_empty() {
-        let tree = sight.atlas.tree(tick::SIEGE_HOPS, &room);
-
+        let onto: Vec<&str> = sight.homes.iter().map(|p| p.room.as_str()).collect();
+        let tree = sight
+            .atlas
+            .tree_to(&BTreeSet::new(), tick::SIEGE_HOPS, &room, &onto);
         let routed: Vec<(i32, Pos)> = sight
             .homes
             .iter()
@@ -879,7 +881,7 @@ pub fn hunt(
     let field = sight.atlas.field(
         mover_of(c),
         &target_at(sight, centre, engine::RANGED_RANGE),
-        &room,
+        &c.pos,
     );
     let approach = |t: Tile| {
         -field

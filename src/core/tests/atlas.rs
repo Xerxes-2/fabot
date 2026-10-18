@@ -469,7 +469,7 @@ fn a_memoised_answer_is_a_fresh_atlass_answer() {
         let mut stale =
             Atlas::of_world(&world_of(if kept { &walk.ground } else { &before.ground }));
         stale.travel_ticks(walk.mover, &target, &start);
-        let mut warm = Atlas::following(&stale, &world, []);
+        let mut warm = Atlas::following(stale, &world, [], []);
         let first = warm.travel_ticks(walk.mover, &target, &start);
         let again = warm.travel_ticks(walk.mover, &target, &start);
         let step = warm.first_step(walk.mover, &target, &start);
@@ -484,30 +484,25 @@ fn a_memoised_answer_is_a_fresh_atlass_answer() {
 }
 
 #[test]
-fn toward_another_room_the_walk_ends_on_an_exit_into_it() {
+fn toward_another_room_the_walk_ends_on_an_exit() {
     for (walk, mut dice) in walks(17) {
         let toward = dice.pick(&[tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]);
         let onto = tiles::room_toward(ROOM, toward).unwrap();
         let mut atlas = Atlas::of_world(&world_of(&walk.ground));
         let target = target_of(&onto, &walk);
-        let route = atlas.route(&BTreeSet::new(), target.max_hops, ROOM, &onto);
-        match (followed(&mut atlas, &walk, &target).last(), route) {
-            (Some(&(tile, 0)), Some(chain)) if chain.len() >= 2 => {
-                let exit = tiles::exit_toward(ROOM, &chain[1]).unwrap();
-                assert!(
-                    covered(walk.mover.footprint, tile)
-                        .iter()
-                        .any(|&(x, y)| tiles::exit_of(tiles::index(x, y)) == exit)
-                );
-            }
-            (Some(&(_, ticks)), _) => assert_eq!(ticks, 0),
-            (None, _) => (),
+        if let Some(&(tile, ticks)) = followed(&mut atlas, &walk, &target).last() {
+            assert_eq!(ticks, 0);
+            let edge = covered(walk.mover.footprint, tile);
+            assert!(
+                edge.iter()
+                    .any(|&(x, y)| tiles::exit_of(tiles::index(x, y)) != 0)
+            );
         }
     }
 }
 
 #[test]
-fn a_route_read_off_a_tree_is_the_route_searched() {
+fn a_route_read_off_its_targets_tree_is_the_route_searched() {
     let mut dice = Dice::new(18);
     for _ in 0..CASES {
         let walled: Vec<(i32, i32, i32)> = (0..dice.below(20))
@@ -538,7 +533,9 @@ fn a_route_read_off_a_tree_is_the_route_searched() {
         let from = tiles::room_name(0, 0);
         let onto = tiles::room_name(dice.between(-128, 127) % 3, dice.between(-128, 127) % 3);
         assert_eq!(
-            atlas.tree(hops, &from).route(&from, &onto),
+            atlas
+                .tree(&BTreeSet::new(), hops, &onto)
+                .route(&from, &onto),
             atlas.route(&BTreeSet::new(), hops, &from, &onto)
         );
     }
@@ -659,5 +656,97 @@ fn every_tile_a_keeper_strikes_is_walled_and_a_room_of_keepers_not_due_walls_non
             assert!(weights[t].is_none() || !alive || tiles::range(at, t) > engine::RANGED_RANGE);
             assert!(alive || spawns || weights[t] == bare[t] || solid);
         }
+    }
+}
+
+/// Three rooms square, each open inside and to the next only where both
+/// open a stretch of their shared border, ringed by closed rooms; a stretch
+/// is walled on one side at times, a dead end only its terrain shows.
+fn walled_rooms(dice: &mut Dice) -> World {
+    let mut rooms = Vec::new();
+    let mut borders: std::collections::BTreeMap<(i32, i32, i32), std::ops::Range<i32>> =
+        Default::default();
+    for x in 0..3 {
+        for y in 0..3 {
+            let mut terrain = vec![0u8; tiles::COUNT];
+            for side in [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT] {
+                let back = (x + tiles::dx(side), y + tiles::dy(side), (side + 3) % 8 + 1);
+                let from = dice.below(40);
+                let open = match borders.get(&back) {
+                    Some(_) if dice.below(4) == 0 => 0..0,
+                    Some(open) => open.clone(),
+                    None if dice.chance(3) => 0..0,
+                    None => from..from + 1 + dice.below(8),
+                };
+                borders.insert((x, y, side), open.clone());
+                for (i, &t) in tiles::exit_tiles(side).iter().enumerate() {
+                    if !open.contains(&(i as i32)) {
+                        terrain[t] = terrain::WALL;
+                    }
+                }
+            }
+            for t in &mut terrain {
+                if *t == 0 && dice.below(5) == 0 {
+                    *t = terrain::SWAMP;
+                }
+            }
+            rooms.push(room_of(&tiles::room_name(x, y), terrain, Vec::new()));
+        }
+    }
+    let mut world = world_of_rooms(rooms);
+    let ring = (-1..=3).flat_map(|x| (-1..=3).map(move |y| (x, y)));
+    world.closed = ring
+        .filter(|&(x, y)| !(0..3).contains(&x) || !(0..3).contains(&y))
+        .map(|(x, y)| tiles::room_name(x, y))
+        .collect();
+    world
+}
+
+#[test]
+fn a_body_walking_first_steps_never_enters_a_room_twice_and_arrives_where_a_route_runs() {
+    let mut dice = Dice::new(22);
+    for _ in 0..CASES {
+        let world = walled_rooms(&mut dice);
+        let mut atlas = Atlas::of_world(&world);
+        let open = |dice: &mut Dice| tiles::index(1 + dice.below(48), 1 + dice.below(48));
+        let room = |dice: &mut Dice| tiles::room_name(dice.below(3), dice.below(3));
+        let mut body = parts(&mut dice, 10);
+        body.push(BodyPart::Move);
+        let mover = Mover {
+            footprint: Footprint::One,
+            factor: loaded_factor(&body),
+        };
+        let (from, onto) = (room(&mut dice), room(&mut dice));
+        let target = Target {
+            room: onto.clone(),
+            tiles: vec![open(&mut dice)],
+            range: dice.below(3),
+            avoid: BTreeSet::new(),
+            max_hops: 8,
+        };
+        let mut at = tiles::to_pos(&from, open(&mut dice));
+        let mut entered = vec![from.clone()];
+        let mut arrived = false;
+        for _ in 0..4 * tiles::COUNT {
+            if at.room == onto && atlas.travel_ticks(mover, &target, &at) == Some(0) {
+                arrived = true;
+                break;
+            }
+            let step = atlas.first_step(mover, &target, &at);
+            let Some(next) = step.and_then(|d| tiles::neighbour(tiles::of_pos(&at), d)) else {
+                break;
+            };
+            let across = tiles::room_toward(&at.room, tiles::exit_of(next));
+            at = match (across, tiles::landing(next)) {
+                (Some(room), Some(landing)) => {
+                    assert!(!entered.contains(&room), "{entered:?} back into {room}");
+                    entered.push(room.clone());
+                    tiles::to_pos(&room, landing)
+                }
+                _ => tiles::to_pos(&at.room, next),
+            };
+        }
+        let routed = atlas.route(&BTreeSet::new(), 8, &from, &onto).is_some();
+        assert_eq!(arrived, routed, "{entered:?} toward {onto}");
     }
 }

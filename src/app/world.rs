@@ -36,7 +36,38 @@ pub struct Maps {
     status: HashMap<String, Option<String>>,
 }
 
+/// The rooms out of sight whose terrain is read in one tick, nearest our
+/// spawns first, out to the furthest a route goes.
+const READS_A_TICK: usize = 10;
+
 impl Maps {
+    pub fn terrains(&self) -> impl Iterator<Item = (&str, &[u8])> {
+        (self.terrain.iter()).map(|(room, t)| (room.as_str(), t.as_slice()))
+    }
+
+    /// Kept when empty too, so a room the map lacks is asked once.
+    fn read_around(&mut self, homes: impl Iterator<Item = (i32, i32)>) {
+        let reach = crate::core::tick::SIEGE_HOPS;
+        let mut unread: Vec<(i32, String)> = Vec::new();
+        for (x, y) in homes {
+            for dx in -reach..=reach {
+                let side = reach - dx.abs();
+                for dy in -side..=side {
+                    let room = tiles::room_name(x + dx, y + dy);
+                    if !self.terrain.contains_key(&room) {
+                        unread.push((dx.abs() + dy.abs(), room));
+                    }
+                }
+            }
+        }
+        unread.sort_unstable();
+        unread.dedup_by(|a, b| a.1 == b.1);
+        for (_, room) in unread.into_iter().take(READS_A_TICK) {
+            let terrain = terrain_of(&room);
+            self.terrain.insert(room, terrain);
+        }
+    }
+
     fn status(&mut self, room: &str) -> Option<String> {
         self.status
             .entry(room.to_string())
@@ -238,7 +269,9 @@ impl Reader<'_> {
 
     fn room(&mut self) -> Room {
         let name = self.s();
-        let terrain = if let Some(terrain) = self.maps.terrain.get(&name) {
+        let terrain = if let Some(terrain) = self.maps.terrain.get(&name)
+            && !terrain.is_empty()
+        {
             terrain.clone()
         } else {
             let terrain = terrain_of(&name);
@@ -348,6 +381,12 @@ pub fn of_game(maps: &mut Maps, declarations: &Declarations) -> (World, Pass) {
         .spawns
         .first()
         .and_then(|s| r.maps.status(&s.pos.room));
+    let homes = world
+        .spawns
+        .iter()
+        .filter_map(|s| tiles::room_coords(&s.pos.room));
+    r.maps
+        .read_around(homes.collect::<BTreeSet<_>>().into_iter());
     let read = world
         .rooms
         .iter()

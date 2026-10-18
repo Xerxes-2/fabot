@@ -6,6 +6,8 @@
 // to a null prototype; 0.2 an accepted intent, once per object and verb,
 // `say` free.
 
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+
 const VERBS = ["move", "say", "harvest", "transfer", "withdraw", "pickup", "build", "repair", "dismantle", "upgradeController", "reserveController",
   "attackController", "claimController", "signController", "claimReactor", "drop", "attack", "heal", "rangedHeal", "rangedAttack", "rangedMassAttack",
   "spawnCreep", "transferEnergy", "setPublic", "destroy", "remove", "observeRoom", "runReaction", "send", "activateSafeMode"];
@@ -135,8 +137,15 @@ Room.prototype.createConstructionSite = function (...args) {
   return 0;
 };
 
+// Out of sight, the terrain `observe capture` cached, read before any clock
+// runs; a room it lacks throws, as one off the map does live.
+const cache = new URL("../captures/terrain/", import.meta.url);
+const cached = new Map(
+  (existsSync(cache) ? readdirSync(cache) : []).map((name) => [name, Uint8Array.from(readFileSync(new URL(name, cache), "utf8").trim(), Number)]),
+);
 function Terrain(name) {
-  const array = tick.rooms.find((r) => r.name === name).terrain;
+  const array = tick.rooms.find((r) => r.name === name)?.terrain ?? cached.get(name);
+  if (array === undefined) throw new Error(`no terrain for ${name}`);
   this.get = (x, y) => array[y * 50 + x];
   this.getRawBuffer = () => new Uint8Array(array);
 }

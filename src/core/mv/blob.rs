@@ -58,7 +58,7 @@ pub fn wishes(
         room: &str,
         tile: Tile,
     ) -> i32 {
-        let field = atlas.field(mover, target, room);
+        let field = atlas.field(mover, target, &tiles::to_pos(room, tile));
         match field {
             // No field: one plain crossing, so a member short of it ranks behind one past it.
             None if !atlas.sees(room) => step_ticks(mover.factor, engine::PLAIN_WEIGHT)
@@ -152,7 +152,7 @@ pub fn wishes(
         .iter()
         .map(|c| match (c.pos.room != target.room, fatigue_ticks(c)) {
             (true, Some(resting)) => atlas
-                .field(mover, target, &c.pos.room)
+                .field(mover, target, &c.pos)
                 .and_then(|field| field.ticks(tiles::of_pos(&c.pos)))
                 .map(|ticks| ticks + resting),
             _ => None,
@@ -187,7 +187,7 @@ pub fn wishes(
     // A step into swamp falls behind: a walker sidesteps no slower than its
     // head, one waiting is shoved at most a plain step back, so one behind passes.
     let keeps = |atlas: &mut Atlas, slack: i32, creep: &Creep, tile: Tile| -> bool {
-        match atlas.field(mover, target, &creep.pos.room) {
+        match atlas.field(mover, target, &creep.pos) {
             Some(field) => match field.ticks(tiles::of_pos(&creep.pos)) {
                 Some(here) if here > 0 => {
                     field.onto(tile).is_some_and(|ticks| ticks <= here + slack)

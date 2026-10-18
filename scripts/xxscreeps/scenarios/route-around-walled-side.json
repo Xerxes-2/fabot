@@ -1,0 +1,10 @@
+{
+  "why": "a body bound past a room walled on its far side, out of sight, takes the detour once that room's terrain is read, never back and forth across its border",
+  "start": { "world": "scripts/xxscreeps/worlds/walled-side.json", "seed": 1, "invaders": "W2N0:3000:600" },
+  "ticks": 1500,
+  "assert": [
+    { "measure": "bounced", "max": 0 },
+    { "measure": "oscillation", "max": 6 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

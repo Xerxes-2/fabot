@@ -7,7 +7,7 @@ use super::kinds::siege::{self, Facts as SiegeFacts};
 use super::kinds::sweep;
 use super::shape::{Cast, Engagement, Group, Objective, Phase, Plan, Tactic};
 use super::{casting, tracker};
-use crate::core::atlas::{Atlas, Mover, Target};
+use crate::core::atlas::{Atlas, Mover, Target, Tree};
 use crate::core::exchange::{self, Fighter, Ground, Losses, Outcome, Side, Stance, fighter};
 use crate::core::grid::{self, Footprint};
 use crate::core::intents::{self, Ask, ControllerAct, CreepAct, Intent, Rank};
@@ -107,6 +107,7 @@ struct Scene<'a> {
     world: &'a World,
     sightings: &'a Sightings,
     avoid: &'a BTreeSet<String>,
+    walks: BTreeMap<(String, i32), Tree>,
     homes: BTreeSet<String>,
     worked: BTreeSet<String>,
     foes: BTreeMap<String, Vec<Creep>>,
@@ -281,15 +282,20 @@ impl<'a> Scene<'a> {
             .collect()
     }
 
-    fn walk_to(&self, atlas: &Atlas, e: &Engagement, from: &str) -> Option<i32> {
-        let hops = match e.objective {
+    fn hops(e: &Engagement) -> i32 {
+        match e.objective {
             Objective::Siege(_) | Objective::Sweep => tick::SIEGE_HOPS,
             Objective::Defend => tick::REACH_HOPS,
-        };
+        }
+    }
 
-        atlas
-            .route(self.avoid, hops, from, &e.room)
-            .map(|rooms| engine::ROOM_SIDE * (rooms.len() as i32 - 1))
+    fn walk_to(&self, atlas: &Atlas, e: &Engagement, from: &str) -> Option<i32> {
+        let hops = Scene::hops(e);
+        let rooms = match self.walks.get(&(e.room.clone(), hops)) {
+            Some(tree) => tree.route(from, &e.room),
+            None => atlas.route(self.avoid, hops, from, &e.room),
+        };
+        rooms.map(|rooms| engine::ROOM_SIDE * (rooms.len() as i32 - 1))
     }
 
     /// A home's Defend is the home's alone.
@@ -543,7 +549,7 @@ impl<'a> Scene<'a> {
                             avoid: BTreeSet::new(),
                             max_hops: tick::SIEGE_HOPS,
                         },
-                        &room.name,
+                        &m.pos,
                     )
                     .and_then(|field| field.ticks(tiles::of_pos(&m.pos)))
                     .is_none()
@@ -1422,10 +1428,20 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         e.ours.extend(landed_here);
     }
 
+    let walks = (engagements.iter())
+        .map(|e| (e.room.clone(), Scene::hops(e)))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|(room, hops)| {
+            let tree = atlas.tree(&declarations.avoid, hops, &room);
+            ((room, hops), tree)
+        })
+        .collect();
     let scene = Scene {
         world,
         sightings,
         avoid: &declarations.avoid,
+        walks,
         homes,
         worked,
         foes,

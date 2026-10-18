@@ -1,6 +1,6 @@
 //! A declared outpost has no spawn to anchor a plan on, so its container and
 //! road are placed off the haul's own walk home.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::HashMap;
 
@@ -38,7 +38,7 @@ fn walk(atlas: &mut Atlas, target: &Target, from: &Pos) -> Vec<Pos> {
     let mut path: Vec<Pos> = Vec::new();
     let mut room = from.room.clone();
     let mut tile = tiles::of_pos(from);
-    let mut field = atlas.field(HAULER, target, &room);
+    let mut field = atlas.field(HAULER, target, from);
 
     while field.is_some() && path.len() < LONGEST {
         let step = field
@@ -57,7 +57,7 @@ fn walk(atlas: &mut Atlas, target: &Target, from: &Pos) -> Vec<Pos> {
                         (Some(onto), Some(landing)) => {
                             room = onto;
                             tile = landing;
-                            field = atlas.field(HAULER, target, &room);
+                            field = atlas.field(HAULER, target, &tiles::to_pos(&room, tile));
                         }
                         _ => field = None,
                     }
@@ -143,9 +143,9 @@ fn place(
     }
 }
 
-fn sink_for(
+fn sink_for<'t>(
     atlas: &mut Atlas,
-    route: &dyn Fn(&Target, &str) -> Option<Vec<String>>,
+    trees: &dyn Fn(&str) -> Option<&'t Tree>,
     homes: &[Pos],
     rooms: &BTreeMap<String, &Room>,
     room: &Room,
@@ -156,7 +156,7 @@ fn sink_for(
         .map(|c| c.pos.clone())
         .or_else(|| room.sources.first().map(|s| s.pos.clone()))?;
 
-    let i = tick::nearest(atlas, route, homes, |_| true, &from)?;
+    let i = tick::nearest(atlas, trees, homes, |_| true, &from)?;
 
     let found = rooms
         .get(&homes[i].room)
@@ -195,22 +195,16 @@ pub fn sites(
         }
     }
 
-    // `Atlas.route` searches the graph per call, and every home and outpost in
-    // one `sites` wants the same trees: search each room once. Every target
-    // `nearest` prices is at the reach with no avoid, so a tree is its route;
-    // an `Atlas` cannot be lent to `nearest` and to its route at once.
-    let mut trees: HashMap<String, Tree> = HashMap::default();
-    for room in &world.rooms {
-        trees.insert(room.name.clone(), atlas.tree(tick::REACH_HOPS, &room.name));
-    }
-
-    let route = |target: &Target, from: &str| -> Option<Vec<String>> {
-        match trees.get(from) {
-            Some(tree) => tree.route(from, &target.room),
-            None if from == target.room => Some(vec![from.to_string()]),
-            None => None,
-        }
-    };
+    // Every outpost in one `sites` is priced to the same homes: grow each
+    // home's tree once.
+    let trees: HashMap<String, Tree> = (colonies.iter())
+        .map(|home| {
+            (
+                home.clone(),
+                atlas.tree(&BTreeSet::new(), tick::REACH_HOPS, home),
+            )
+        })
+        .collect();
 
     let homes: Vec<Pos> = colonies
         .iter()
@@ -233,7 +227,7 @@ pub fn sites(
         opened(&mut taken, &mut pending, planned, room);
 
         if budget > 0 && pending[&room.name] < SITES_IN_FLIGHT {
-            let sink = sink_for(atlas, &route, &homes, &rooms, room);
+            let sink = sink_for(atlas, &|room| trees.get(room), &homes, &rooms, room);
 
             if let Some(sink) = sink {
                 let home = tick::target_at(&sink, 1);
