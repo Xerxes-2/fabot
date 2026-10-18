@@ -81,7 +81,8 @@ fn run_tick() -> Result<(), String> {
     state.layout = standing;
     phases.push(("memory".to_string(), clock() - start));
 
-    let mut declarations: Declarations = wire::read_declarations();
+    let mut declarations: Declarations =
+        wire::read_declarations().besieging(intel.as_ref().unwrap_or(&Intel::new()));
     let start = clock();
     let (world, pass) = world::of_game(&mut maps, &declarations);
     let refused = declarations.refuse(&world.closed);

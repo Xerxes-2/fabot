@@ -253,8 +253,8 @@ for (const r of [...capture.rooms, ...ring]) {
         } else if (o.type === "creep") {
           // An NPC's creep the engine drives (an Invader core's defenders, a
           // Source Keeper) stands; another player's, with no code, would only
-          // stand.
-          if (o.user !== capture.userId && !User.npcUsers[o.user]) {
+          // stand, kept where a crafted world wants it to (`stands`).
+          if (o.user !== capture.userId && !User.npcUsers[o.user] && !o.stands) {
             leave("another player's creep");
             continue;
           }
@@ -266,7 +266,7 @@ for (const r of [...capture.rooms, ...ring]) {
             at(o),
             o.body.map((p) => ({ type: p.type, hits: p.hits, boost: p.boost ?? undefined })),
             o.name,
-            o.user === capture.userId ? ours : o.user,
+            owner(o.user),
           );
           object.hits = o.hits;
           object.fatigue = o.fatigue ?? 0;

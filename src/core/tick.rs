@@ -66,6 +66,15 @@ impl Declarations {
         self.sieges.retain(|room| open(room));
         refused
     }
+
+    /// A declared siege's owner, as intel last saw it, is an enemy (owner's call).
+    pub fn besieging(mut self, intel: &Intel) -> Declarations {
+        let owners: Vec<String> = (self.sieges.iter())
+            .filter_map(|room| intel.get(room)?.owner.clone())
+            .collect();
+        self.enemies.extend(owners);
+        self
+    }
 }
 
 pub fn undeclared() -> Declarations {

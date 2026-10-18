@@ -425,23 +425,32 @@ A tactic (`core/tactics`, which imports no Fight) is a function from (engagement
 tick. Each is under 150 lines and shared by every kind; v2.0 ports the first
 five from v1's step functions, the rest come with their kinds:
 
-| Tactic | Step function (v1 origin) | Strike |
-|---|---|---|
-| Kite | `Resolver.kiteStep` | ranged at best range, mass when ≥2 adjacent |
-| Close | `Resolver.chaseStep` + glue | melee on the plan's target |
-| Hold | stand on rampart / `Atlas` seat | whatever is in reach |
-| Pursue | `Resolver.chaseStep` over seams | as Kite/Close |
-| Retreat | `Resolver.fleeStep` toward home | none; heal |
-| Formation | new: `Move` steps a 2×2 footprint as one body | per slot |
-| Dismantle | v1 `actionIntents` sapper branch | dismantle the plan's target |
-| EdgeDance | new | step in to draw fire, step out to heal |
-| Hunt | new (ibex EV): best of nine tiles, worth less netted damage | most worth in reach |
+| Tactic | Step function (v1 origin) |
+|---|---|
+| Kite | `Resolver.kiteStep` |
+| Close | `Resolver.chaseStep` + glue |
+| Hold | stand on rampart / `Atlas` seat |
+| Pursue | `Resolver.chaseStep` over seams |
+| Retreat | `Resolver.fleeStep` toward home |
+| Formation | new: `Move` steps a 2×2 footprint as one body |
+| Dismantle | v1 `actionIntents` sapper branch: dismantle the plan's target |
+| EdgeDance | new |
+| Hunt | new (ibex EV): best of nine tiles, worth less netted damage; strikes most worth in reach |
 
-Target selection within the other tactics is a static kill order set at open
+A tactic decides the step (a Dismantle its dismantle too). The strike reflex
+runs for every body with ATTACK or RANGED_ATTACK, in every phase, inside or
+outside an engagement: a swing and
+a shot at the first in reach in the kill order, a volley where it outdeals the
+shot and no ally or spared stranger stands in its reach. It strikes by stance
+(§7.2): an enemy's, an Invader's or a keeper's bodies all, a stranger's only
+armed ones, an ally's never. A Hunt's scored shot
+stands in for it. Target selection is a static kill order set at open
 (healers first, then by damage/hits), re-computed only on events.
 
 The heal reflex (ported `Emitter.healReflex`) runs for every body with HEAL,
-inside or outside an engagement.
+inside or outside an engagement. A body's acts pass through the engine's
+pipelines (`intents::performed`) before they are emitted, so none is cancelled
+unseen.
 
 ### 6.5 Casting
 
@@ -479,7 +488,7 @@ Homes, outposts, errands, avoided rooms, allies, enemies and claims are rows
 in `declarations`, written by Strategy and editable by the operator (`observe
 declare`). The world reader turns every owner into its stance once
 (`world::Owner`): a stranger, neither ally nor enemy, is fought where it
-threatens us but never hunted; enemies are declared by hand for now. Candidates are priced once when intel changes or a due tick comes:
+threatens us but never hunted; enemies are declared by hand, and a declared siege's owner, as intel last saw it, is one (owner's call). Candidates are priced once when intel changes or a due tick comes:
 an outpost by sources, distance, threat and the CPU it costs (v1 withdrew an
 outpost for CPU; the budget is explicit here); a claim by the same plus GCL
 room; a room is avoided by what intel saw there. A priced candidate that pays

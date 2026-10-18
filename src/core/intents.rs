@@ -25,6 +25,47 @@ pub enum CreepAct {
     Dismantle(String),
 }
 
+pub const MELEE: u8 = 1;
+pub const RANGED: u8 = 2;
+
+impl CreepAct {
+    /// The engine's pipelines it takes and its rank in them, first highest:
+    /// vanilla's `intents.js` priorities, xxscreeps' intent `type`s.
+    fn pipeline(&self) -> (u8, u8) {
+        match self {
+            CreepAct::HealCreep(_) => (MELEE, 0),
+            CreepAct::RangedHealCreep(_) => (MELEE | RANGED, 1),
+            CreepAct::Dismantle(_) => (MELEE, 2),
+            CreepAct::Repair(_) => (MELEE | RANGED, 3),
+            CreepAct::Build(_) => (MELEE | RANGED, 4),
+            CreepAct::RangedMassAttack => (RANGED, 5),
+            CreepAct::RangedAttackCreep(_) => (RANGED, 6),
+            CreepAct::AttackCreep(_) => (MELEE, 7),
+            CreepAct::Harvest(_) => (MELEE, 8),
+            _ => (0, 0),
+        }
+    }
+
+    pub fn slots(&self) -> u8 {
+        self.pipeline().0
+    }
+}
+
+/// What the engine performs of one body's acts in a tick. Vanilla cancels an
+/// act beside any higher one wanted in its pipeline, performed or not; of two
+/// alike, the last call stands.
+pub fn performed(acts: &[CreepAct]) -> Vec<CreepAct> {
+    let beats = |(i, a): (usize, &CreepAct), (j, b): (usize, &CreepAct)| {
+        let ((sa, ra), (sb, rb)) = (a.pipeline(), b.pipeline());
+        sa & sb != 0 && (rb < ra || rb == ra && j > i)
+    };
+    acts.iter()
+        .enumerate()
+        .filter(|a| !acts.iter().enumerate().any(|b| beats(*a, b)))
+        .map(|(_, a)| a.clone())
+        .collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SpawnAct {
     SpawnCreep(Vec<BodyPart>, String),
@@ -138,5 +179,66 @@ impl Intent {
 
     pub fn is_wish(&self) -> bool {
         matches!(self, Intent::Wish(_, _))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CreepAct, performed};
+
+    #[test]
+    fn the_engine_performs_one_act_per_pipeline_slot_by_its_priority() {
+        let id = || "x".to_string();
+        let (heal, ranged_heal) = (CreepAct::HealCreep(id()), CreepAct::RangedHealCreep(id()));
+        let (attack, shot) = (
+            CreepAct::AttackCreep(id()),
+            CreepAct::RangedAttackCreep(id()),
+        );
+        let (mass, dismantle) = (CreepAct::RangedMassAttack, CreepAct::Dismantle(id()));
+        let table: Vec<(Vec<CreepAct>, Vec<CreepAct>)> = vec![
+            (vec![attack.clone(), heal.clone()], vec![heal.clone()]),
+            (
+                vec![shot.clone(), ranged_heal.clone()],
+                vec![ranged_heal.clone()],
+            ),
+            (
+                vec![mass.clone(), ranged_heal.clone()],
+                vec![ranged_heal.clone()],
+            ),
+            (
+                vec![attack.clone(), ranged_heal.clone()],
+                vec![ranged_heal.clone()],
+            ),
+            (vec![heal.clone(), ranged_heal.clone()], vec![heal.clone()]),
+            (
+                vec![heal.clone(), shot.clone()],
+                vec![heal.clone(), shot.clone()],
+            ),
+            (
+                vec![attack.clone(), shot.clone()],
+                vec![attack.clone(), shot.clone()],
+            ),
+            (
+                vec![attack.clone(), dismantle.clone()],
+                vec![dismantle.clone()],
+            ),
+            (
+                vec![dismantle.clone(), mass.clone()],
+                vec![dismantle.clone(), mass.clone()],
+            ),
+            (vec![shot.clone(), mass.clone()], vec![mass.clone()]),
+            (vec![heal.clone(), ranged_heal, shot], vec![heal.clone()]),
+            (
+                vec![CreepAct::AttackCreep("a".into()), attack.clone()],
+                vec![attack],
+            ),
+            (
+                vec![CreepAct::Move(1), heal.clone(), dismantle],
+                vec![CreepAct::Move(1), heal],
+            ),
+        ];
+        for (wanted, done) in table {
+            assert_eq!(performed(&wanted), done, "{wanted:?}");
+        }
     }
 }

@@ -10,7 +10,7 @@ use super::{casting, tracker};
 use crate::core::atlas::{Atlas, Mover, Target};
 use crate::core::exchange::{self, Fighter, Ground, Losses, Outcome, Side, Stance, fighter};
 use crate::core::grid::{self, Footprint};
-use crate::core::intents::{Ask, ControllerAct, CreepAct, Intent, Rank};
+use crate::core::intents::{self, Ask, ControllerAct, CreepAct, Intent, Rank};
 use crate::core::mv::Wish;
 use crate::core::state::State;
 use crate::core::tactics;
@@ -92,13 +92,12 @@ impl Asked {
 }
 
 /// What a sweep reads of a room once a tick: its escort and marks (prey
-/// first) outside its barriers, the allies a volley spares, what strikes
-/// each tile, what holding it is worth and where the hunt stands.
+/// first) outside its barriers, what strikes each tile, what holding it is
+/// worth and where the hunt stands.
 struct Hunting {
     escort: Vec<Creep>,
     threat: tiles::Table<i32>,
     marks: Vec<tactics::Mark>,
-    spared: Vec<Pos>,
     worth: i32,
     at: Pos,
 }
@@ -125,6 +124,15 @@ struct Scene<'a> {
 type CopiesOf<'a> = Box<dyn Fn(&casting::Body) -> i32 + 'a>;
 
 impl<'a> Scene<'a> {
+    /// The reflex's stance (§7.2): a stranger only where it threatens.
+    fn struck(&self, h: &Creep) -> bool {
+        match h.owner {
+            Owner::Ally(_) => false,
+            Owner::Stranger(_) => self.armed.contains(&h.id),
+            _ => true,
+        }
+    }
+
     fn rival(s: &Structure) -> bool {
         !s.owner.is_ours() && (s.kind.is_rampart() || s.kind.is_wall())
     }
@@ -246,18 +254,6 @@ impl<'a> Scene<'a> {
                 .or(prey.first().map(|c| &c.pos))
                 .cloned()
                 .unwrap_or_else(|| middle(&room.name)),
-            spared: (room
-                .others
-                .iter()
-                .filter(|c| c.owner.is_ally())
-                .map(|c| c.pos.clone()))
-            .chain(
-                room.structures
-                    .iter()
-                    .filter(|s| s.owner.is_ally())
-                    .map(|s| s.pos.clone()),
-            )
-            .collect(),
             escort,
             marks,
         }
@@ -1672,6 +1668,26 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     let mut sight = tactics::Sight {
         atlas,
         hostiles: &scene.foes,
+        struck: scene
+            .foes
+            .values()
+            .flatten()
+            .filter(|h| scene.struck(h))
+            .map(|h| h.id.clone())
+            .collect(),
+        spared: world
+            .rooms
+            .iter()
+            .map(|r| {
+                let creeps = r.others.iter().filter(|c| !scene.struck(c));
+                let allied = r.structures.iter().filter(|s| s.owner.is_ally());
+                let at = creeps.map(|c| c.pos.clone());
+                (
+                    r.name.clone(),
+                    at.chain(allied.map(|s| s.pos.clone())).collect(),
+                )
+            })
+            .collect(),
         ramparts: world
             .rooms
             .iter()
@@ -1809,9 +1825,9 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     let mut traced: Vec<Intent> = Vec::new();
     let mut lookups = 0;
-    let mut act = |c: &Creep| -> (Option<CreepAct>, Wish) {
+    let mut step = |sight: &mut tactics::Sight, c: &Creep| -> (Option<CreepAct>, Wish) {
         let Some(&at) = engaged_in.get(&c.name) else {
-            return tactics::retreat(&mut sight, c);
+            return (None, tactics::retreat(sight, c));
         };
 
         let e = &decided[at];
@@ -1822,7 +1838,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             && let Some(front) = fronts.get(&e.id)
             && !front.posts.is_empty()
         {
-            return tactics::picket(&mut sight, front, &scene.members_of(e), c);
+            return (None, tactics::picket(sight, front, &scene.members_of(e), c));
         }
 
         if e.phase == Phase::Fighting && fronts.contains_key(&e.id) {
@@ -1831,29 +1847,31 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 .into_iter()
                 .filter(|m| !tactics::picket_of(m))
                 .collect();
-            return tactics::siege(&mut sight, &e.plan.order, &fronts[&e.id], &members, c);
+            return tactics::siege(sight, &fronts[&e.id], &members, c);
         }
 
         let centre = centre_of(e);
-        let order = e.plan.order.clone();
+        let order = &e.plan.order;
 
         if e.unanswered {
-            return tactics::rampart(&mut sight, &order, c);
+            return (None, tactics::rampart(sight, c));
         }
 
-        match e.phase {
-            Phase::Forming => tactics::hold_fast(&mut sight, &order, c),
-            Phase::Pursuing => tactics::pursue(&mut sight, &order, &centre, c),
-            Phase::Disengaging => tactics::retreat(&mut sight, c),
+        let wish = match e.phase {
+            Phase::Forming => tactics::hold(sight, c),
+            Phase::Pursuing => tactics::close(sight, order, &centre, c),
+            Phase::Disengaging => tactics::retreat(sight, c),
             Phase::Approaching | Phase::Fighting => {
                 if let Some(wish) = walking.get(&c.name) {
-                    return (tactics::strike(&sight, &order, c), wish.clone());
+                    return (None, wish.clone());
                 }
 
                 // A transit room's hostiles are not the sweep's.
                 if e.objective == Objective::Sweep && c.pos.room != e.room {
-                    let wish = tactics::toward(&mut sight, c, &centre, engine::RANGED_RANGE);
-                    return (tactics::strike(&sight, &order, c), wish);
+                    return (
+                        None,
+                        tactics::toward(sight, c, &centre, engine::RANGED_RANGE),
+                    );
                 }
 
                 if let Some((ground, contact)) = hunts.get(&e.id) {
@@ -1863,9 +1881,9 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                         .filter(|m| m.name != c.name && m.pos.room == c.pos.room)
                         .collect();
                     let (strike, wish, scored) = tactics::hunt(
-                        &mut sight,
+                        sight,
                         &ground.threat,
-                        (&ground.marks, &ground.spared),
+                        &ground.marks,
                         &mates,
                         (&ground.at, *contact),
                         c,
@@ -1887,23 +1905,19 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 };
 
                 if blobbed(&Tactic::Close)
-                    && tactics::exposed(&sight, &centre.room, &scene.members_of(e), c)
+                    && tactics::exposed(sight, &centre.room, &scene.members_of(e), c)
                 {
-                    let members = scene.members_of(e);
-
-                    (
-                        tactics::strike(&sight, &order, c),
-                        tactics::step_back(&mut sight, &centre.room, &members, c),
-                    )
+                    tactics::step_back(sight, &centre.room, &scene.members_of(e), c)
                 } else if (matches!(tactic, Tactic::Kite) || blobbed(&Tactic::Kite)) && !swings(c) {
-                    tactics::kite(&mut sight, &order, &centre, c)
+                    tactics::kite(sight, order, &centre, c)
                 } else if matches!(tactic, Tactic::Hold) {
-                    tactics::rampart(&mut sight, &order, c)
+                    tactics::rampart(sight, c)
                 } else {
-                    tactics::close(&mut sight, &order, &centre, c)
+                    tactics::close(sight, order, &centre, c)
                 }
             }
-        }
+        };
+        (None, wish)
     };
 
     let mut homes_lost: Vec<Home> = Vec::new();
@@ -1993,28 +2007,34 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         })
         .collect();
 
-    let mut swinging: BTreeSet<String> = BTreeSet::new();
-    let mut shooting: BTreeSet<String> = BTreeSet::new();
+    let mut chosen: BTreeMap<String, Vec<CreepAct>> = BTreeMap::new();
 
     for c in &fighters {
-        let (strike, wish) = act(c);
-
-        if let Some(s) = strike {
-            if matches!(s, CreepAct::AttackCreep(_)) {
-                swinging.insert(c.name.clone());
-            } else {
-                shooting.insert(c.name.clone());
-            }
-
-            acts.push(Intent::Creep(c.name.clone(), s));
+        let (own, wish) = step(&mut sight, c);
+        let order = engaged_in
+            .get(&c.name)
+            .map_or(&[][..], |&at| decided[at].plan.order.as_slice());
+        let mut wanted: Vec<CreepAct> = own.into_iter().collect();
+        // A hunt's scored shot stands for the reflex.
+        if wanted.iter().all(|a| a.slots() & intents::RANGED == 0) {
+            wanted.extend(tactics::strike(&sight, order, c));
         }
-
+        chosen.insert(c.name.clone(), wanted);
         acts.push(Intent::Wish(c.pos.room.clone(), wish));
     }
 
     acts.extend(traced);
     acts.push(Intent::Count("threatLookups", lookups));
-    let heals = tactics::heals(&fighters, &world.creeps, &incoming, &swinging, &shooting);
+    let busy = |slot: u8| -> BTreeSet<String> {
+        let taken = chosen
+            .iter()
+            .filter(|(_, a)| a.iter().any(|a| a.slots() & slot != 0));
+        taken.map(|(n, _)| n.clone()).collect()
+    };
+    let (swinging, shooting) = (busy(intents::MELEE), busy(intents::RANGED));
+    for (healer, act) in tactics::heals(&fighters, &world.creeps, &incoming, &swinging, &shooting) {
+        chosen.entry(healer).or_default().push(act);
+    }
 
     let mut out: Vec<Intent> = casts
         .iter()
@@ -2032,7 +2052,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .collect();
 
     out.extend(acts);
-    out.extend(heals);
+    out.extend(chosen.into_iter().flat_map(|(name, wanted)| {
+        let done = intents::performed(&wanted);
+        done.into_iter()
+            .map(move |a| Intent::Creep(name.clone(), a))
+    }));
 
     let mut engagements = decided;
     engagements.sort_by_key(|e| e.id);

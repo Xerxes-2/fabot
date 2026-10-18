@@ -1,11 +1,11 @@
-/// What a fight body does this tick (`ARCHITECTURE.md` §6.4): a strike and a
-/// wish, read off the plan and what stands in its room. From v1's Emitter and
-/// Resolver step functions.
+/// What a fight body does this tick (`ARCHITECTURE.md` §6.4): a step read off
+/// the plan and what stands in its room, and the strike reflex. From v1's
+/// Emitter and Resolver step functions.
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::atlas::{Atlas, Mover, Target};
 use crate::core::grid::{self, Footprint};
-use crate::core::intents::{CreepAct, Intent};
+use crate::core::intents::CreepAct;
 use crate::core::mv::{Wish, blob, plan};
 use crate::core::tick;
 use crate::core::tiles::Tile;
@@ -16,6 +16,9 @@ use crate::core::{engine, tiles};
 pub struct Sight<'a> {
     pub atlas: &'a mut Atlas,
     pub hostiles: &'a BTreeMap<String, Vec<Creep>>,
+    /// The hostiles a stance lets the reflex strike, and what a volley spares.
+    pub struck: BTreeSet<String>,
+    pub spared: BTreeMap<String, Vec<Pos>>,
     pub ramparts: BTreeMap<String, Vec<Pos>>,
     pub homes: Vec<Pos>,
     pub avoid: &'a BTreeSet<String>,
@@ -37,63 +40,51 @@ fn hostiles_in<'a>(sight: &Sight<'a>, room: &str) -> &'a [Creep] {
 }
 
 fn ranked<'a>(sight: &Sight<'a>, order: &[String], creep: &Creep) -> Vec<&'a Creep> {
-    let near = hostiles_in(sight, &creep.pos.room);
+    let near = hostiles_in(sight, &creep.pos.room)
+        .iter()
+        .filter(|h| sight.struck.contains(&h.id));
 
     let mut first: Vec<&Creep> = order
         .iter()
-        .filter_map(|id| near.iter().find(|h| &h.id == id))
+        .filter_map(|id| near.clone().find(|h| &h.id == id))
         .collect();
 
-    let mut rest: Vec<&Creep> = near.iter().filter(|h| !order.contains(&h.id)).collect();
+    let mut rest: Vec<&Creep> = near.filter(|h| !order.contains(&h.id)).collect();
     rest.sort_by(|a, b| a.id.cmp(&b.id));
 
     first.extend(rest);
     first
 }
 
-pub fn strike(sight: &Sight, order: &[String], creep: &Creep) -> Option<CreepAct> {
+/// Every body that strikes, in any phase and engaged or not: a swing and a
+/// shot at the first in the kill order in reach, a volley where it lands more.
+pub fn strike(sight: &Sight, order: &[String], creep: &Creep) -> Vec<CreepAct> {
     let targets = ranked(sight, order, creep);
+    let within = |r: i32| targets.iter().filter(move |h| creep.pos.within(r, &h.pos));
 
-    let melee = if live(BodyPart::Attack, creep) > 0 {
-        targets
-            .iter()
-            .copied()
-            .find(|h| creep.pos.within(engine::MELEE_RANGE, &h.pos))
-    } else {
-        None
+    let melee = within(engine::MELEE_RANGE)
+        .next()
+        .filter(|_| live(BodyPart::Attack, creep) > 0)
+        .map(|h| CreepAct::AttackCreep(h.id.clone()));
+
+    let volley: i32 = within(engine::RANGED_RANGE)
+        .filter_map(|h| creep.pos.range(&h.pos))
+        .map(engine::mass_attack_power_at)
+        .sum();
+    let spares = sight
+        .spared
+        .get(&creep.pos.room)
+        .is_some_and(|s| s.iter().any(|p| creep.pos.within(engine::RANGED_RANGE, p)));
+
+    let ranged = match within(engine::RANGED_RANGE).next() {
+        _ if live(BodyPart::RangedAttack, creep) == 0 => None,
+        Some(_) if volley > engine::RANGED_ATTACK_POWER && !spares => {
+            Some(CreepAct::RangedMassAttack)
+        }
+        head => head.map(|h| CreepAct::RangedAttackCreep(h.id.clone())),
     };
 
-    if let Some(h) = melee {
-        return Some(CreepAct::AttackCreep(h.id.clone()));
-    }
-
-    if live(BodyPart::RangedAttack, creep) == 0 {
-        return None;
-    }
-
-    let in_reach: Vec<&Creep> = targets
-        .iter()
-        .copied()
-        .filter(|h| creep.pos.within(engine::RANGED_RANGE, &h.pos))
-        .collect();
-
-    let head = in_reach.first()?;
-
-    let volley: i32 = in_reach
-        .iter()
-        .map(|h| {
-            creep
-                .pos
-                .range(&h.pos)
-                .map_or(0, engine::mass_attack_power_at)
-        })
-        .sum();
-
-    if volley > engine::RANGED_ATTACK_POWER {
-        Some(CreepAct::RangedMassAttack)
-    } else {
-        Some(CreepAct::RangedAttackCreep(head.id.clone()))
-    }
+    melee.into_iter().chain(ranged).collect()
 }
 
 fn mover_of(creep: &Creep) -> Mover {
@@ -123,7 +114,7 @@ pub fn toward(sight: &mut Sight, creep: &Creep, at: &Pos, range: i32) -> Wish {
     )
 }
 
-fn hold(sight: &Sight, creep: &Creep) -> Wish {
+pub fn hold(sight: &Sight, creep: &Creep) -> Wish {
     plan::stay(&*sight.atlas, creep, mover_of(creep).factor, WEIGHT)
 }
 
@@ -134,26 +125,9 @@ fn aim(sight: &Sight, order: &[String], centre: &Pos, creep: &Creep) -> Pos {
     }
 }
 
-pub fn close(
-    sight: &mut Sight,
-    order: &[String],
-    centre: &Pos,
-    creep: &Creep,
-) -> (Option<CreepAct>, Wish) {
+pub fn close(sight: &mut Sight, order: &[String], centre: &Pos, creep: &Creep) -> Wish {
     let at = aim(sight, order, centre, creep);
-    (
-        strike(sight, order, creep),
-        toward(sight, creep, &at, engine::MELEE_RANGE),
-    )
-}
-
-pub fn pursue(
-    sight: &mut Sight,
-    order: &[String],
-    centre: &Pos,
-    creep: &Creep,
-) -> (Option<CreepAct>, Wish) {
-    close(sight, order, centre, creep)
+    toward(sight, creep, &at, engine::MELEE_RANGE)
 }
 
 /// How far `kind` of `h` strikes next tick, a step nearer.
@@ -187,12 +161,7 @@ fn step_to(creep: &Creep, tile: Tile) -> Wish {
 
 /// v1's kiteStep without its threat maps: off every swing's next reach, else
 /// to a shot's range of the head.
-pub fn kite(
-    sight: &mut Sight,
-    order: &[String],
-    centre: &Pos,
-    creep: &Creep,
-) -> (Option<CreepAct>, Wish) {
+pub fn kite(sight: &mut Sight, order: &[String], centre: &Pos, creep: &Creep) -> Wish {
     let room = creep.pos.room.clone();
 
     let swings: Vec<&Creep> = hostiles_in(sight, &room)
@@ -210,7 +179,7 @@ pub fn kite(
 
     let here = tiles::of_pos(&creep.pos);
 
-    let wish = if swings.is_empty() {
+    if swings.is_empty() {
         let at = aim(sight, order, centre, creep);
         toward(sight, creep, &at, engine::RANGED_RANGE)
     } else {
@@ -230,9 +199,7 @@ pub fn kite(
             Some(t) if plan::can_move(creep, mover_of(creep).factor) => step_to(creep, t),
             _ => hold(sight, creep),
         }
-    };
-
-    (strike(sight, order, creep), wish)
+    }
 }
 
 /// The raid's strikes onto `at` next tick; none outside the raid's room, which
@@ -455,14 +422,8 @@ pub fn picket_of(creep: &Creep) -> bool {
     creep.body.iter().any(|p| p.kind.is_ranged_attack())
 }
 
-/// Seated beside its post, off the rival's line, striking any rival body in
-/// reach: there it harvests.
-pub fn picket(
-    sight: &mut Sight,
-    front: &Front,
-    members: &[&Creep],
-    creep: &Creep,
-) -> (Option<CreepAct>, Wish) {
+/// Seated beside its post, off the rival's line: there the rival harvests.
+pub fn picket(sight: &mut Sight, front: &Front, members: &[&Creep], creep: &Creep) -> Wish {
     // By slot, which a successor keeps, so a landing never reshuffles posts.
     let slot = |c: &Creep| {
         c.name
@@ -483,7 +444,7 @@ pub fn picket(
         before += n;
         here
     }) else {
-        return (None, hold(sight, creep));
+        return hold(sight, creep);
     };
 
     let mut seats: Vec<Tile> = tiles::around(tiles::of_pos(post))
@@ -493,24 +454,11 @@ pub fn picket(
         .collect();
     seats.sort_unstable();
 
-    let wish = match seats.get(seat_at) {
+    match seats.get(seat_at) {
         Some(t) if creep.pos == tiles::to_pos(&post.room, *t) => hold(sight, creep),
         Some(t) => toward(sight, creep, &tiles::to_pos(&post.room, *t), 0),
         None => toward(sight, creep, post, engine::MELEE_RANGE),
-    };
-
-    let target = sight
-        .hostiles
-        .get(&creep.pos.room)
-        .into_iter()
-        .flatten()
-        .filter(|h| h.pos.within(engine::RANGED_RANGE, &creep.pos))
-        .min_by_key(|h| (h.pos.range(&creep.pos), h.id.clone()));
-
-    (
-        target.map(|h| CreepAct::RangedAttackCreep(h.id.clone())),
-        wish,
-    )
+    }
 }
 
 fn nearest_tower(front: &Front, at: &Pos) -> i32 {
@@ -530,7 +478,6 @@ pub fn focus_of<'a>(front: &Front, members: &[&'a Creep]) -> Option<&'a Creep> {
 
 pub fn siege(
     sight: &mut Sight,
-    order: &[String],
     front: &Front,
     members: &[&Creep],
     creep: &Creep,
@@ -632,24 +579,19 @@ pub fn siege(
             }
         };
 
-        (strike(sight, order, creep), wish)
+        (None, wish)
     }
 }
 
-pub fn hold_fast(sight: &mut Sight, order: &[String], creep: &Creep) -> (Option<CreepAct>, Wish) {
-    (strike(sight, order, creep), hold(sight, creep))
-}
-
-/// Onto the nearest of our ramparts, striking what comes; where none stands,
-/// where it stands.
-pub fn rampart(sight: &mut Sight, order: &[String], creep: &Creep) -> (Option<CreepAct>, Wish) {
+/// Onto the nearest of our ramparts; where none stands, where it stands.
+pub fn rampart(sight: &mut Sight, creep: &Creep) -> Wish {
     let ramparts: Vec<Pos> = sight
         .ramparts
         .get(&creep.pos.room)
         .cloned()
         .unwrap_or_default();
 
-    let wish = if ramparts.contains(&creep.pos) {
+    if ramparts.contains(&creep.pos) {
         hold(sight, creep)
     } else {
         let nearest = ramparts
@@ -661,12 +603,10 @@ pub fn rampart(sight: &mut Sight, order: &[String], creep: &Creep) -> (Option<Cr
             Some(p) => toward(sight, creep, &p, 0),
             None => hold(sight, creep),
         }
-    };
-
-    (strike(sight, order, creep), wish)
+    }
 }
 
-pub fn retreat(sight: &mut Sight, creep: &Creep) -> (Option<CreepAct>, Wish) {
+pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
     let room = creep.pos.room.clone();
     let here: Vec<Pos> = sight
         .homes
@@ -697,13 +637,10 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> (Option<CreepAct>, Wish) {
         here.into_iter().min_by_key(|p| (p.x, p.y))
     };
 
-    (
-        None,
-        match home {
-            Some(p) => toward(sight, creep, &p, 2),
-            None => hold(sight, creep),
-        },
-    )
+    match home {
+        Some(p) => toward(sight, creep, &p, 2),
+        None => hold(sight, creep),
+    }
 }
 
 /// v1's heal reflex: a hurt healer heals itself, else the deepest wound beside
@@ -822,7 +759,7 @@ pub fn heals(
     incoming: &BTreeMap<String, i32>,
     swinging: &BTreeSet<String>,
     shooting: &BTreeSet<String>,
-) -> Vec<Intent> {
+) -> Vec<(String, CreepAct)> {
     let mut owed: BTreeMap<String, i32> = patients
         .iter()
         .map(|p| {
@@ -844,7 +781,7 @@ pub fn heals(
             } else {
                 CreepAct::RangedHealCreep(p.id.clone())
             };
-            Intent::Creep(healer, act)
+            (healer, act)
         })
         .collect()
 }
@@ -862,16 +799,17 @@ pub struct Mark {
 /// §6.4's Hunt, after ibex: risk at the margin and a three-tick lethal veto,
 /// so survival is never outvoted; scored only in `contact`, the whole set at
 /// once, as per-body scoring out of it oscillated. A volley never fires
-/// beside an ally (`spared`). Also each tile's score.
+/// beside a body it spares. Also each tile's score.
 pub fn hunt(
     sight: &mut Sight,
     threat: &tiles::Table<i32>,
-    (marks, spared): (&[Mark], &[Pos]),
+    marks: &[Mark],
     mates: &[&Creep],
     (centre, contact): (&Pos, bool),
     c: &Creep,
 ) -> (Option<CreepAct>, Wish, Vec<(Tile, i64)>) {
     let room = c.pos.room.clone();
+    let spared = sight.spared.get(&room).cloned().unwrap_or_default();
     let parts = live(BodyPart::RangedAttack, c);
     let worth_of = |m: &Mark, damage: i32| {
         i64::from(damage.min(m.hits)) * i64::from(m.worth) / i64::from(m.hits.max(1))
