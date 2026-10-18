@@ -49,6 +49,25 @@ pub struct Declarations {
     pub avoid: BTreeSet<String>,
 }
 
+impl Declarations {
+    /// A room the engine never lets a creep into serves nothing; the rooms
+    /// dropped, for the operator.
+    pub fn refuse(&mut self, closed: &BTreeSet<String>) -> Vec<String> {
+        let mut refused: Vec<String> = Vec::new();
+        let mut open = |room: &String| {
+            let open = !closed.contains(room);
+            if !open {
+                refused.push(room.clone());
+            }
+            open
+        };
+        self.outposts.retain(|o| open(&o.room));
+        self.claims.retain(|o| open(&o.room));
+        self.sieges.retain(|room| open(room));
+        refused
+    }
+}
+
 pub fn undeclared() -> Declarations {
     Declarations {
         reserve_lifetimes: 2.0,

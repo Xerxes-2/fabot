@@ -28,8 +28,7 @@ struct Heap {
     sightings: Sightings,
     /// Heap only: after a reset every room floods afresh.
     atlas: Atlas,
-    /// A room's terrain never changes, so it is read once a room a reset.
-    terrain: world::Terrains,
+    maps: world::Maps,
     /// `None` until its segment is read after a reset.
     intel: Option<Intel>,
     intel_asked: bool,
@@ -42,7 +41,7 @@ thread_local! {
         standing: BTreeMap::new(),
         sightings: Sightings::new(),
         atlas: Atlas::empty(),
-        terrain: world::Terrains::default(),
+        maps: world::Maps::default(),
         intel: None,
         intel_asked: false,
     });
@@ -62,7 +61,7 @@ fn run_tick() -> Result<(), String> {
     let clock = || game_cpu::get_used();
     let mut phases: Vec<(String, f64)> = Vec::new();
 
-    let (mut sightings, mut atlas, mut faults, standing, mut terrain, held, asked) =
+    let (mut sightings, mut atlas, mut faults, standing, mut maps, held, asked) =
         HEAP.with(|heap| {
             let mut heap = heap.borrow_mut();
             (
@@ -70,7 +69,7 @@ fn run_tick() -> Result<(), String> {
                 std::mem::replace(&mut heap.atlas, Atlas::empty()),
                 std::mem::take(&mut heap.faults),
                 std::mem::take(&mut heap.standing),
-                std::mem::take(&mut heap.terrain),
+                std::mem::take(&mut heap.maps),
                 heap.intel.take(),
                 std::mem::replace(&mut heap.intel_asked, true),
             )
@@ -82,9 +81,10 @@ fn run_tick() -> Result<(), String> {
     state.layout = standing;
     phases.push(("memory".to_string(), clock() - start));
 
-    let declarations: Declarations = wire::read_declarations();
+    let mut declarations: Declarations = wire::read_declarations();
     let start = clock();
-    let (world, pass) = world::of_game(&mut terrain, &declarations);
+    let (world, pass) = world::of_game(&mut maps, &declarations);
+    let refused = declarations.refuse(&world.closed);
     sightings = crate::core::world::sightings::step(&world, sightings);
     let mut unread = Intel::new();
     let rows = intel.as_mut().unwrap_or(&mut unread);
@@ -145,6 +145,9 @@ fn run_tick() -> Result<(), String> {
     for room in declarations.abandon.iter().filter_map(|r| world.room(r)) {
         counts.push((format!("abandon:{}", room.name), abandon::left(room)));
     }
+    for room in refused {
+        counts.push((format!("closed:{room}"), 1));
+    }
     for intent in &result.intents {
         if let crate::core::intents::Intent::Count(name, n) = intent {
             counts.push((name.to_string(), *n));
@@ -170,7 +173,7 @@ fn run_tick() -> Result<(), String> {
         heap.standing = standing;
         heap.sightings = sightings;
         heap.atlas = atlas;
-        heap.terrain = terrain;
+        heap.maps = maps;
         heap.intel = intel;
     });
 

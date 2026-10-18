@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::engine;
 use super::tick::Declarations;
@@ -501,6 +501,9 @@ pub struct World {
     /// In every room, seen or not: what MAX_CONSTRUCTION_SITES counts.
     pub our_sites: i32,
     pub rooms_allowed: i32,
+    /// Rooms whose `Game.map.getRoomStatus` is not our spawns' room's: the
+    /// engine leaves a creep on the exit tile into one, never carrying it across.
+    pub closed: BTreeSet<String>,
 }
 
 pub mod terrain {

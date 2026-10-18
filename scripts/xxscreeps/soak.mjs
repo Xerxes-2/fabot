@@ -225,7 +225,13 @@ writeFileSync(join(world, "seed.txt"), `${seed}\n`);
 mkdirSync(join(world, "bot"), { recursive: true });
 // `fabotTrace`: the bot logs its tactic trace (`#trace`), never live.
 cpSync(bot, join(world, "bot/fabot.js"));
-if (late === 0 && windows.length === 0) writeFileSync(join(world, "bot/main.js"), `globalThis.fabotTrace = true;\nmodule.exports = require("fabot");\n`);
+// xxscreeps' runtime map reads every room normal, so a world's `closed` rooms
+// (an unopened area) stand in on `Game.map.getRoomStatus`.
+const closed = live?.closed?.length
+  ? `const closed = new Set(${JSON.stringify(live.closed)});\nconst status = Object.getPrototypeOf(Game.map).getRoomStatus;\n` +
+    `Object.getPrototypeOf(Game.map).getRoomStatus = function (room, actually) {\n  return closed.has(room) ? { status: "closed", timestamp: null } : status.call(this, room, actually);\n};\n`
+  : "";
+if (late === 0 && windows.length === 0 && !closed) writeFileSync(join(world, "bot/main.js"), `globalThis.fabotTrace = true;\nmodule.exports = require("fabot");\n`);
 else {
   // The bundle's exports are getters, so the wait and the capture wrap it
   // from outside; the capture runs after the loop, out of the bot's clock.
@@ -233,7 +239,7 @@ else {
   writeFileSync(
     join(world, "bot/main.js"),
     `globalThis.fabotTrace = true;\nconst bot = require("fabot");\nconst capture = require("capture");\nconst windows = ${JSON.stringify(windows)};\nlet first;\n` +
-      `module.exports.loop = () => {\n  first ??= Game.time;\n  const t = Game.time - first;\n` +
+      `module.exports.loop = () => {\n  if (first === undefined) {\n${closed}  }\n  first ??= Game.time;\n  const t = Game.time - first;\n` +
       `  const memory = windows.some(([a, b]) => t >= a && t < b) ? RawMemory.get() : null;\n` +
       `  if (t >= ${late}) bot.loop();\n  if (memory !== null) console.log("#capture " + capture(memory));\n};\n`,
   );

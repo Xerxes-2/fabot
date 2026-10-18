@@ -152,6 +152,7 @@ pub struct Atlas {
     pub rooms: HashMap<String, RoomGrid>,
     /// The rooms intel saw whose lairs the name formula misreads.
     pub lairs: HashMap<Coords, bool>,
+    closed: Vec<Coords>,
     pub misses: i32,
     pub hits: i32,
 }
@@ -343,6 +344,7 @@ impl Atlas {
         Atlas {
             rooms: HashMap::default(),
             lairs: HashMap::default(),
+            closed: Vec::new(),
             misses: 0,
             hits: 0,
         }
@@ -528,6 +530,11 @@ impl Atlas {
         Atlas {
             rooms,
             lairs,
+            closed: world
+                .closed
+                .iter()
+                .filter_map(|r| tiles::room_coords(r))
+                .collect(),
             misses: 0,
             hits: 0,
         }
@@ -733,7 +740,10 @@ impl Atlas {
             let grid = grids.get(&room).copied();
             for exit in Atlas::EXITS {
                 let there = (room.0 + tiles::dx(exit), room.1 + tiles::dy(exit));
-                if exit == entry || (avoid.contains(&there) && Some(there) != onto) {
+                if exit == entry
+                    || self.closed.contains(&there)
+                    || (avoid.contains(&there) && Some(there) != onto)
+                {
                     continue;
                 }
                 let (blind, ticks) = self.crossing(grid, room, entry, exit);

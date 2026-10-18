@@ -260,6 +260,7 @@ fn world_of(errand: &Errand) -> World {
         creeps: vec![errand.creep.clone()],
         our_sites: 0,
         rooms_allowed: 1,
+        closed: Default::default(),
     }
 }
 

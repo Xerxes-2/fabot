@@ -3,6 +3,7 @@
 //! them in the order it wrote them. A call across the seam costs more than the
 //! field it reads, so the reader makes a handful a tick.
 use crate::core::HashMap;
+use std::collections::BTreeSet;
 use std::str::Split;
 
 use js_sys::{Array, Int32Array, Reflect};
@@ -12,6 +13,7 @@ use wasm_bindgen::{JsCast, JsValue};
 
 use super::js::field;
 
+use crate::core::atlas::tiles::{self, BOTTOM, LEFT, RIGHT, TOP};
 use crate::core::engine;
 use crate::core::tick::Declarations;
 use crate::core::vocabulary::{self, BodyPart, Boost};
@@ -27,13 +29,27 @@ fn absent(v: &JsValue) -> bool {
     v.is_undefined() || v.is_null()
 }
 
-pub type Terrains = HashMap<String, Vec<u8>>;
+/// `ARCHITECTURE.md` §4's `terrain` row.
+#[derive(Default)]
+pub struct Maps {
+    terrain: HashMap<String, Vec<u8>>,
+    status: HashMap<String, Option<String>>,
+}
+
+impl Maps {
+    fn status(&mut self, room: &str) -> Option<String> {
+        self.status
+            .entry(room.to_string())
+            .or_insert_with(|| status_of(room))
+            .clone()
+    }
+}
 
 struct Reader<'a> {
     ints: &'a [i32],
     at: usize,
     strs: Split<'a, char>,
-    terrain: &'a mut Terrains,
+    maps: &'a mut Maps,
     me: String,
     declarations: &'a Declarations,
 }
@@ -222,12 +238,12 @@ impl Reader<'_> {
 
     fn room(&mut self) -> Room {
         let name = self.s();
-        let terrain = if let Some(terrain) = self.terrain.get(&name) {
+        let terrain = if let Some(terrain) = self.maps.terrain.get(&name) {
             terrain.clone()
         } else {
             let terrain = terrain_of(&name);
             if !terrain.is_empty() {
-                self.terrain.insert(name.clone(), terrain.clone());
+                self.maps.terrain.insert(name.clone(), terrain.clone());
             }
             terrain
         };
@@ -298,7 +314,7 @@ pub struct Pass {
     pub strs: String,
 }
 
-pub fn of_game(terrain: &mut Terrains, declarations: &Declarations) -> (World, Pass) {
+pub fn of_game(maps: &mut Maps, declarations: &Declarations) -> (World, Pass) {
     let packed = read();
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
@@ -306,7 +322,7 @@ pub fn of_game(terrain: &mut Terrains, declarations: &Declarations) -> (World, P
         ints: &ints,
         at: 0,
         strs: text.split('\0'),
-        terrain,
+        maps,
         me: String::new(),
         declarations,
     };
@@ -316,7 +332,7 @@ pub fn of_game(terrain: &mut Terrains, declarations: &Declarations) -> (World, P
     let rooms = r.list(Reader::room);
     let spawns = r.list(Reader::spawn);
     let creeps = r.list(Reader::creep);
-    let world = World {
+    let mut world = World {
         time,
         me: r.me.clone(),
         cpu_limit: f64::from(game::cpu::limit()),
@@ -326,7 +342,27 @@ pub fn of_game(terrain: &mut Terrains, declarations: &Declarations) -> (World, P
         creeps,
         our_sites: r.n(),
         rooms_allowed: r.n(),
+        closed: BTreeSet::new(),
     };
+    let ours = world
+        .spawns
+        .first()
+        .and_then(|s| r.maps.status(&s.pos.room));
+    let read = world
+        .rooms
+        .iter()
+        .flat_map(|room| {
+            let around = [TOP, RIGHT, BOTTOM, LEFT].map(|e| tiles::room_toward(&room.name, e));
+            around.into_iter().flatten().chain([room.name.clone()])
+        })
+        .chain(declarations.outposts.iter().map(|o| o.room.clone()))
+        .chain(declarations.claims.iter().map(|o| o.room.clone()))
+        .chain(declarations.sieges.iter().cloned())
+        .collect::<BTreeSet<String>>();
+    world.closed = read
+        .into_iter()
+        .filter(|room| ours.is_some() && r.maps.status(room).is_some_and(|s| Some(s) != ours))
+        .collect();
     (world, Pass { ints, strs: text })
 }
 
@@ -354,6 +390,17 @@ fn terrain_of(name: &str) -> Vec<u8> {
         Some(js_sys::Uint8Array::new(&raw).to_vec())
     };
     read().unwrap_or_default()
+}
+
+/// `None` where the map has no `getRoomStatus` (the bench), so no room reads closed.
+fn status_of(name: &str) -> Option<String> {
+    let game = Reflect::get(&js_sys::global(), &JsValue::from_str("Game")).ok()?;
+    let map = field(&game, "map");
+    let get = field(&map, "getRoomStatus")
+        .dyn_into::<js_sys::Function>()
+        .ok()?;
+    let status = get.call1(&map, &JsValue::from_str(name)).ok()?;
+    field(&status, "status").as_string()
 }
 
 /// `Game.getObjectById` as `Executor` reads it: absent is a refusal, never an error.

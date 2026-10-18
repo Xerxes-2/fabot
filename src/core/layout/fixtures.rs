@@ -355,6 +355,7 @@ pub fn world_of(room: Room, spawns: Vec<Spawn>, creeps: Vec<Creep>) -> World {
         creeps,
         our_sites: 0,
         rooms_allowed: 1,
+        closed: Default::default(),
     }
 }
 

@@ -421,6 +421,7 @@ pub(crate) mod dice {
             creeps,
             our_sites: 0,
             rooms_allowed: rooms.len() as i32 + 1,
+            closed: Default::default(),
         };
 
         Generated {

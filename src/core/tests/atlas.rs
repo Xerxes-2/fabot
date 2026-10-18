@@ -80,6 +80,7 @@ fn world_of_rooms(rooms: Vec<Room>) -> World {
         creeps: Vec::new(),
         our_sites: 0,
         rooms_allowed: 1,
+        closed: Default::default(),
     }
 }
 
@@ -573,6 +574,22 @@ fn a_route_crosses_shared_borders_around_the_avoided_by_fewest_crossings() {
                 assert!(!avoid.is_empty() || chain.len() as i32 - 1 == hops);
             }
             None => assert!(!avoid.is_empty()),
+        }
+    }
+}
+
+#[test]
+fn no_route_enters_a_closed_room_nor_ends_in_one() {
+    let mut dice = Dice::new(21);
+    for _ in 0..CASES {
+        let mut room =
+            || tiles::room_name(dice.between(-128, 127) % 4, dice.between(-128, 127) % 4);
+        let (from, onto) = (room(), room());
+        let mut world = world_of_rooms(Vec::new());
+        world.closed = (0..4).map(|_| room()).filter(|r| *r != from).collect();
+        let atlas = Atlas::of_world(&world);
+        if let Some(chain) = atlas.route(&BTreeSet::new(), 12, &from, &onto) {
+            assert!(chain.iter().all(|r| !world.closed.contains(r)));
         }
     }
 }
