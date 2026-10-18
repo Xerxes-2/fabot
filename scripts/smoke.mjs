@@ -5,6 +5,9 @@
 // Usage: node scripts/smoke.mjs [bundle]   (after `npm run build`)
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
+import { getHeapStatistics } from "node:v8";
+import { stand } from "./bench-game.mjs";
+import { unpack } from "./recorder.mjs";
 
 const fail = (msg) => {
   console.error(`smoke: ${msg}`);
@@ -14,7 +17,7 @@ const fail = (msg) => {
 const segments = {};
 let used = 0;
 const at = (x, y) => ({ x, y, roomName: "W1N1" });
-const store = (held, capacity) => ({ ...held, getCapacity: (r) => (r === undefined || r === "energy" ? capacity : null) });
+const store = (held, capacity) => Object.defineProperty({ ...held }, "getCapacity", { value: (r) => (r === undefined || r === "energy" ? capacity : null) });
 const spawn = {
   id: "s1",
   name: "Spawn1",
@@ -113,17 +116,11 @@ if (observe.faults.length !== 0) fail(`faults: ${JSON.stringify(observe.faults)}
 const phases = observe.phases.map(([name]) => name);
 for (const want of ["memory", "world", "atlas", "economy", "execute", "write", "record"])
   if (!phases.includes(want)) fail(`phase ${want} not reported: ${phases}`);
-const recorded = JSON.parse(segments[10 + (103 % 5)] ?? fail("recorder wrote nothing"));
-const w = recorded.world;
-if (!recorded.intel?.startsWith("W1N1 103 ")) fail(`recorder's intel lost the room: ${recorded.intel}`);
-if (w.Creeps.length !== 1) fail("recorder's world lost the creep");
-const [r] = w.Rooms;
-if (typeof r.Terrain !== "string" || r.Terrain.length !== 2500 || r.Terrain.slice(0, 2) !== "10")
-  fail(`terrain not recorded as 2,500 digits: ${String(r.Terrain).slice(0, 40)}`);
-if (r.Sources.length !== 1 || r.Structures.length !== 2 || r.Sites.length !== 1 || r.Piles.length !== 1)
-  fail(`room facts lost: ${JSON.stringify({ s: r.Sources.length, st: r.Structures.length, si: r.Sites.length, p: r.Piles.length })}`);
-const [k] = w.Creeps;
-if (k.Body.length !== 3 || k.Store.Capacity !== 50) fail(`creep facts lost: ${JSON.stringify(k).slice(0, 200)}`);
+const pass = globalThis.__fabotRead().map((each) => (typeof each === "string" ? each : Array.from(each)));
+const [recorded] = unpack([10, 11, 12, 13, 14].map((id) => segments[id]));
+if (recorded?.time !== 103) fail(`recorder wrote no tick 103: ${recorded?.time}`);
+if (!recorded.intel.startsWith("W1N1 103 ")) fail(`recorder's intel lost the room: ${recorded.intel}`);
+if (recorded.memory !== RawMemory.get()) fail("recorder's Memory is not the tick's");
 if (Memory.fabot !== undefined) fail(`v1's Memory was kept: ${JSON.stringify(Memory.fabot)}`);
 const held = Memory.v2.assignments?.a;
 if (typeof held !== "string") fail(`the creep holds no task: ${JSON.stringify(Memory.v2.assignments)}`);
@@ -149,6 +146,11 @@ Game.time = 105;
 main.loop();
 const after = JSON.parse(segments[1]);
 if (after.tick !== 105 || after.faults.length !== 0) fail(`the tick after a trap: ${JSON.stringify(after).slice(0, 200)}`);
+
+// What the recorder kept, stood as the bench's Game, reads as the tick did.
+stand(recorded, [], getHeapStatistics, () => 0);
+const again = globalThis.__fabotRead().map((each) => (typeof each === "string" ? each : Array.from(each)));
+if (JSON.stringify(again) !== JSON.stringify(pass)) fail(`the recorded tick reads otherwise: ${JSON.stringify(again).slice(0, 200)}`);
 
 const version = readFileSync(new URL(bundle, import.meta.url), "utf8").split("\n")[0];
 console.log(`smoke: 4 ticks clean, and one after a trap (${version.match(/"(.*)"/)?.[1] ?? "unnamed"})`);

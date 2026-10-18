@@ -15,10 +15,12 @@
 //                                  (outposts: the capture's, `scripts/capture-world.mjs`)
 //                                  (reserve: creep lifetimes of tower fire the reserve holds)
 //   observe.mjs capture [out.jsonl]
-//                                  the recorder's ring (segments 10..14), oldest first
+//                                  the recorder's ring (segments 10..14) as `npm run bench`'s
+//                                  capture, oldest first; terrain cached in captures/terrain
 //   observe.mjs wait --ticks N     return after N game ticks
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
+import { unpack } from "./recorder.mjs";
 import { connect, fail } from "./screeps-api.mjs";
 
 const OBSERVE = 1;
@@ -27,10 +29,8 @@ const RECORDER = [10, 11, 12, 13, 14];
 const [cmd, ...args] = process.argv.slice(2);
 const { api, shard } = await connect();
 
-const segment = async (id) => {
-  const res = await api.req("GET", "/api/user/memory-segment", { segment: id, shard });
-  return res.data ? JSON.parse(res.data) : null;
-};
+const raw = async (id) => (await api.req("GET", "/api/user/memory-segment", { segment: id, shard })).data || null;
+const segment = async (id) => JSON.parse((await raw(id)) ?? "null");
 const memory = async (path) => {
   const res = await api.req("GET", "/api/user/memory", { path, shard });
   // The server's answer for a path under a key Memory does not hold.
@@ -99,12 +99,20 @@ switch (cmd) {
     break;
   }
   case "capture": {
-    const rows = (await Promise.all(RECORDER.map(segment))).filter(Boolean).sort((a, b) => a.tick - b.tick);
-    if (rows.length === 0) fail("recorder ring empty: observe switch recorder on, then wait a few ticks");
-    const text = rows.map((r) => JSON.stringify(r)).join("\n") + "\n";
+    const ticks = unpack(await Promise.all(RECORDER.map(raw)));
+    if (ticks.length === 0) fail("recorder ring empty: observe switch recorder on, then wait a few ticks");
+    const cache = new URL("../captures/terrain/", import.meta.url);
+    mkdirSync(cache, { recursive: true });
+    for (const room of ticks.flatMap((t) => t.rooms)) {
+      const file = new URL(room.name, cache);
+      if (!existsSync(file))
+        writeFileSync(file, (await api.req("GET", "/api/game/room-terrain", { room: room.name, encoded: 1, shard })).terrain?.[0]?.terrain ?? "");
+      room.terrain = readFileSync(file, "utf8");
+    }
+    const text = ticks.map((t) => JSON.stringify(t)).join("\n") + "\n";
     if (args[0]) writeFileSync(args[0], text);
     else process.stdout.write(text);
-    console.error(`captured ticks ${rows.map((r) => r.tick).join(", ")}`);
+    console.error(`captured ticks ${ticks.map((t) => t.time).join(", ")}`);
     break;
   }
   case "wait": {

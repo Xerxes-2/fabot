@@ -191,7 +191,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `fight.casts` | pending casts by engagement | Fight | Memory | never cast twice |
 | `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims | Strategy | Memory | what the world is for us, as data |
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
-| `recorder` | the last five ticks' `World` and Memory size | Main | segments 10–14 | the capture (§9.1) |
+| `recorder` | the last ticks' read pass (`app/read.js`), Memory and intel rows, deflated; a tick over a segment spans several, so the ring keeps fewer | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
 | `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK or CARRY body stood there; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
@@ -522,8 +522,8 @@ benchmark meets three requirements:
    writes those ticks' input and `npm run bench` replays it (an unchanged
    bundle reads within ±0.4% per module; 600 ticks, 8 rounds, a minute).
    The bench builds `Game` as the official engine does, which xxscreeps does
-   not, so ❓ its calibration waits for live; ❓ the live recorder still writes
-   the `World`, not this capture. `scripts/xxscreeps/ab.mjs` (whole soaks
+   not, so ❓ its calibration waits for live; `observe capture` writes the
+   live recorder's ring as this capture. `scripts/xxscreeps/ab.mjs` (whole soaks
    side by side, ±0.6%) re-checks a claim in the engine.
 
 A speed claim is an interleaved A/B on the representative benchmark with

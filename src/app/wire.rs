@@ -572,9 +572,8 @@ pub fn write_segment(id: u8, text: &str) {
     segments.set(id, text.to_string());
 }
 
-/// The recorder's ring: the last five ticks' `World` and Memory size.
-pub fn record(time: i32, world: &World, rows: &Intel) -> Option<String> {
-    super::record::record(time, world, &intel::to_text(rows))
+pub fn record(world: &World, pass: &super::world::Pass, rows: &Intel) -> Option<String> {
+    super::record::record(world.time, world.cpu_limit, pass, &intel::to_text(rows))
 }
 
 /// The bundle's banner, set by `scripts/rust.mjs` on the global.

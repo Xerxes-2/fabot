@@ -57,6 +57,7 @@ const special = {
   reservation: (o) => (o.reservation ? { username: o.reservation.username, ticksToEnd: o.reservation.ticksToEnd } : undefined),
   spawning: (o) => (o.spawning && typeof o.spawning === "object" ? { name: o.spawning.name, remainingTime: o.spawning.remainingTime } : o.spawning),
   store: (o) => (o.store ? new Store(o) : undefined),
+  creep: (o) => (o.creep ? { ...o.creep, store: new Store(o.creep) } : undefined),
 };
 function getters(proto, keys) {
   for (const k of keys) {

@@ -30,7 +30,7 @@ fn absent(v: &JsValue) -> bool {
 pub type Terrains = HashMap<String, Vec<u8>>;
 
 struct Reader<'a> {
-    ints: Vec<i32>,
+    ints: &'a [i32],
     at: usize,
     strs: Split<'a, char>,
     terrain: &'a mut Terrains,
@@ -290,12 +290,18 @@ impl Reader<'_> {
     }
 }
 
-pub fn of_game(terrain: &mut Terrains, declarations: &Declarations) -> World {
+/// What `read.js` handed over, whole: the recorder's capture of the tick.
+pub struct Pass {
+    pub ints: Vec<i32>,
+    pub strs: String,
+}
+
+pub fn of_game(terrain: &mut Terrains, declarations: &Declarations) -> (World, Pass) {
     let packed = read();
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
     let mut r = Reader {
-        ints,
+        ints: &ints,
         at: 0,
         strs: text.split('\0'),
         terrain,
@@ -308,7 +314,7 @@ pub fn of_game(terrain: &mut Terrains, declarations: &Declarations) -> World {
     let rooms = r.list(Reader::room);
     let spawns = r.list(Reader::spawn);
     let creeps = r.list(Reader::creep);
-    World {
+    let world = World {
         time,
         me: r.me.clone(),
         cpu_limit: f64::from(game::cpu::limit()),
@@ -318,7 +324,8 @@ pub fn of_game(terrain: &mut Terrains, declarations: &Declarations) -> World {
         creeps,
         our_sites: r.n(),
         rooms_allowed: r.n(),
-    }
+    };
+    (world, Pass { ints, strs: text })
 }
 
 /// `Game.map.getRoomTerrain(name).getRawBuffer()`: the map serves rooms the

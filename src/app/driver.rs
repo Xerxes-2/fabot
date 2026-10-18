@@ -83,7 +83,7 @@ fn run_tick() -> Result<(), String> {
 
     let declarations: Declarations = wire::read_declarations();
     let start = clock();
-    let world = world::of_game(&mut terrain, &declarations);
+    let (world, pass) = world::of_game(&mut terrain, &declarations);
     sightings = crate::core::world::sightings::step(&world, sightings);
     let mut unread = Intel::new();
     let rows = intel.as_mut().unwrap_or(&mut unread);
@@ -129,7 +129,7 @@ fn run_tick() -> Result<(), String> {
 
     if wire::recording() {
         let start = clock();
-        if let Some(fault) = wire::record(world.time, &world, intel.as_ref().unwrap_or(&unread)) {
+        if let Some(fault) = wire::record(&world, &pass, intel.as_ref().unwrap_or(&unread)) {
             record_fault(&mut faults, "record", &fault);
         }
         phases.push(("record".to_string(), clock() - start));

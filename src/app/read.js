@@ -1,7 +1,8 @@
 // The world in one pass (`src/app/world.rs` decodes it): every number into
 // one Int32Array, every string into one NUL-joined string, so a tick crosses
 // the wasm–JS seam a handful of times, not once a field. The write order is
-// the decoder's read order; a change to one is a change to both.
+// read order of both decoders, `world.rs` and `__fabotUnread` below; a change
+// to one is a change to all three.
 globalThis.__fabotRead = (() => {
   let ints = new Int32Array(1 << 16);
   let at = 0;
@@ -88,6 +89,112 @@ globalThis.__fabotRead = (() => {
     const left = [...r.find(118), ...r.find(123)];
     list(left, remains);
     list(r.find(103), creep);
+  };
+
+  // A recorded pass back into `scripts/bench-game.mjs`'s capture, terrain,
+  // Memory and intel aside: the same pass reads from it again.
+  globalThis.__fabotUnread = (ints, text) => {
+    const strs = text.split("\0");
+    let i = 0;
+    let k = 0;
+    const n = () => ints[i++];
+    const s = () => strs[k++];
+    const objects = {};
+    const me = s();
+    const object = (id) => (objects[id] ??= { id });
+    const list = (each) => Array.from({ length: n() }, each);
+    const owner = (o) => {
+      const [tag, name] = [n(), s()];
+      if (tag === 1) Object.assign(o, { my: true, owner: { username: me } });
+      if (tag === 2) Object.assign(o, { my: false, owner: { username: name } });
+    };
+    const pos = (o, roomName = s()) => (o.pos = { x: n(), y: n(), roomName });
+    const store = (o) => {
+      const held = Object.fromEntries(list(() => [s(), n()]));
+      o.store = { held, capacity: n() };
+    };
+    const body = () =>
+      list(() => {
+        const [type, hits, boost] = [s(), n(), s()];
+        return boost ? { type, hits, boost } : { type, hits };
+      });
+    const creep = (o) => {
+      o.name = s();
+      owner(o), pos(o);
+      Object.assign(o, { body: body(), hits: n(), hitsMax: n(), ticksToLive: n(), fatigue: n() });
+      store(o);
+      return o.id;
+    };
+    const controller = (o) => {
+      pos(o), owner(o);
+      Object.assign(o, { level: n(), progress: n(), progressTotal: n(), ticksToDowngrade: n() });
+      if (n()) o.reservation = { username: s(), ticksToEnd: n() };
+      Object.assign(o, { safeMode: n(), safeModeAvailable: n(), safeModeCooldown: n(), upgradeBlocked: n() });
+    };
+    const structure = (room) => {
+      const type = s();
+      const o = object(s());
+      o.structureType = type;
+      pos(o, room), owner(o);
+      Object.assign(o, { hits: n(), hitsMax: n() });
+      if (STORED.has(type) || !KNOWN.has(type)) store(o);
+      if (COOLED.has(type)) o.cooldown = n();
+      if (type === "invaderCore") {
+        if (n()) o.effects = [{ effect: 1002, ticksRemaining: n() }];
+        else o.ticksToDeploy = n();
+        o.level = n();
+      }
+      if (type === "rampart") o.isPublic = n() === 1;
+      return o.id;
+    };
+    const room = () => {
+      const r = { name: s(), energyAvailable: n(), energyCapacityAvailable: n() };
+      if (n()) {
+        r.controller = object(s()).id;
+        controller(objects[r.controller]);
+      }
+      const find = (each) => list(() => each(object(s())));
+      r.find = {
+        105: find((o) => (pos(o), Object.assign(o, { energy: n(), energyCapacity: n(), ticksToRegeneration: n() })).id),
+        116: find((o) => (pos(o), Object.assign(o, { mineralType: s(), mineralAmount: n() })).id),
+        107: list(() => structure(r.name)),
+      };
+      r.find[111] = list(() => {
+        const type = s();
+        const o = object(s());
+        pos(o, r.name), owner(o);
+        return Object.assign(o, { structureType: type, progress: n(), progressTotal: n() }).id;
+      });
+      r.find[106] = find((o) => (pos(o), Object.assign(o, { resourceType: s(), amount: n() })).id);
+      r.find[118] = find((o) => {
+        pos(o), store(o);
+        if (n()) (o.creep = { id: s() }), creep(o.creep), (o.deathTime = n());
+        return o.id;
+      });
+      r.find[103] = find(creep);
+      return r;
+    };
+
+    const [time, bucket] = [n(), n()];
+    const rooms = list(room);
+    const creeps = {};
+    const spawns = Object.fromEntries(
+      list(() => {
+        const o = object(s());
+        o.name = s();
+        pos(o);
+        if (n()) {
+          o.spawning = { name: s(), remainingTime: n() };
+          const key = `creep:${o.spawning.name}`;
+          objects[key] = { name: o.spawning.name, pos: o.pos, my: true, owner: { username: me }, spawning: true, body: body() };
+          creeps[o.spawning.name] = key;
+        }
+        return [o.name, o.id];
+      }),
+    );
+    for (const id of list(() => creep(object(s())))) creeps[objects[id].name] = id;
+    const constructionSites = Array.from({ length: n() }, (_, i) => `site:${i}`);
+    return { time, cpu: { bucket }, gcl: { level: n() }, rooms, creeps, spawns, constructionSites, objects };
   };
 
   return () => {
