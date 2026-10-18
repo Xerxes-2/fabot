@@ -6,6 +6,7 @@ import { RoomProcessor } from "xxscreeps/engine/processor/room.js";
 import { Game } from "xxscreeps/game/index.js";
 import { draw, sequence } from "./random.js";
 import { Room } from "xxscreeps/game/room/index.js";
+import { StructureController } from "xxscreeps/mods/classic/controller/controller.js";
 
 // Rooms are processed, and each player's intents in a room applied, in the
 // order their runners published them, which timing changes run to run: so a
@@ -68,3 +69,13 @@ Room.prototype["#insertObject"] = function (object, ...rest) {
   if (carried.has(object.id)) (object.fatigue = carried.get(object.id)), carried.delete(object.id);
   return insertObject.call(this, object, ...rest);
 };
+
+// A tap that runs a controller's timer out downgrades it in the official
+// engine (`controllers/tick.js`); xxscreeps throws on the overdue time.
+const ticksToDowngrade = Object.getOwnPropertyDescriptor(StructureController.prototype, "ticksToDowngrade").get;
+Object.defineProperty(StructureController.prototype, "ticksToDowngrade", {
+  get() {
+    if (this["#downgradeTime"] > 0 && this["#downgradeTime"] <= Game.time) this["#downgradeTime"] = Game.time + 1;
+    return ticksToDowngrade.call(this);
+  },
+});

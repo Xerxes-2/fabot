@@ -490,7 +490,7 @@ impl<'a> Scene<'a> {
             }),
             razed: self
                 .in_sight(&e.room)
-                .is_some_and(|room| room.structures.iter().all(|s| s.id != target)),
+                .is_some_and(|room| !siege::stands(room, target)),
             safe: self.in_sight(&e.room).is_some_and(Scene::safe),
         }
     }
@@ -701,6 +701,10 @@ impl<'a> Scene<'a> {
             return Some(e.clone());
         };
 
+        if let Some(c) = siege::tapped(room, target) {
+            return Some(self.tapped(atlas, asked, e, c));
+        }
+
         let Some(goal) = room.structures.iter().find(|s| s.id == target) else {
             return Some(e.clone());
         };
@@ -845,6 +849,32 @@ impl<'a> Scene<'a> {
                 Some(_) | None => Some(siege::replanned(self.world.time, false, e)),
             }
         }
+    }
+
+    fn tapped(
+        &self,
+        atlas: &Atlas,
+        asked: &mut Asked,
+        e: &Engagement,
+        c: &world::Controller,
+    ) -> Engagement {
+        let body = casting::tapper(self.capacity_of(atlas, e));
+
+        if let Some(body) = body.as_ref().filter(|_| e.phase != Phase::Disengaging) {
+            let held = (self.members_of(e).iter())
+                .any(|m| tactics::claims(m) && m.ticks_to_live > c.upgrade_blocked)
+                || asked.casts.iter().any(|cast| cast.engagement == e.id);
+            let spawn = engine::SPAWN_TICKS_PER_PART * body.len() as i32;
+
+            if !held && siege::tap_due(c, spawn) {
+                self.ask(atlas, e, std::slice::from_ref(body), asked);
+            }
+        }
+
+        let mut next = e.clone();
+        next.plan.tactic = Tactic::Close;
+        next.unanswered = body.is_none();
+        next
     }
 
     fn joining(&self, atlas: &Atlas, e: &Engagement, free: &[String]) -> Vec<String> {
@@ -1421,10 +1451,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
             let near = scene.members_of(e).first().map(|c| c.pos.clone());
 
-            if room.structures.iter().all(|s| s.id != *target)
-                && let Some(next) = siege::next_razed(&room.structures, near.as_ref())
+            if (!siege::stands(room, target) || siege::tapped(room, target).is_some())
+                && let Some(next) = siege::next_target(room, near.as_ref())
+                && next != *target
             {
-                e.objective = Objective::Siege(next.id.clone());
+                e.objective = Objective::Siege(next);
                 retargeted.insert(e.id);
             }
         }
@@ -1555,15 +1586,14 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .filter(|room| !besieging.contains(room.as_str()))
         .filter_map(|room| {
             let room = scene.in_sight(room).filter(|r| !Scene::safe(r))?;
-            siege::next_razed(&room.structures, None)
+            Some((&room.name, siege::next_target(room, None)?))
         })
         .enumerate()
-        .map(|(i, target)| {
+        .map(|(i, (room, target))| {
             let id = first_id + (opened.len() + i) as i32;
-            let siege = Objective::Siege(target.id.clone());
             let tactic = Tactic::Blob(Box::new(Tactic::Close));
             (
-                fresh(id, siege, &target.pos.room, world.time, tactic),
+                fresh(id, Objective::Siege(target), room, world.time, tactic),
                 false,
             )
         })
@@ -1821,6 +1851,16 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         }
     }
 
+    let taps: BTreeMap<i32, &world::Controller> = (decided.iter())
+        .filter(|e| e.phase != Phase::Disengaging)
+        .filter_map(|e| match &e.objective {
+            Objective::Siege(target) => {
+                Some((e.id, siege::tapped(scene.in_sight(&e.room)?, target)?))
+            }
+            _ => None,
+        })
+        .collect();
+
     let hunts: BTreeMap<i32, (&Hunting, bool)> = decided
         .iter()
         .filter(|e| e.objective == Objective::Sweep)
@@ -1844,6 +1884,16 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         };
 
         let e = &decided[at];
+
+        if let Some(controller) = taps.get(&e.id).filter(|_| tactics::claims(c)) {
+            let tap = controller.upgrade_blocked == 0
+                && c.pos.within(engine::MELEE_RANGE, &controller.pos);
+            let act = tap.then(|| CreepAct::Unreserve(controller.id.clone()));
+            return (
+                act,
+                tactics::toward(sight, c, &controller.pos, engine::MELEE_RANGE),
+            );
+        }
 
         // A picket walks with the set and takes its post once the set fights.
         if e.phase == Phase::Fighting

@@ -428,6 +428,10 @@ pub fn picket_of(creep: &Creep) -> bool {
     creep.body.iter().any(|p| p.kind.is_ranged_attack())
 }
 
+pub fn claims(creep: &Creep) -> bool {
+    creep.body.iter().any(|p| p.kind == BodyPart::Claim)
+}
+
 /// Seated beside its post, off the rival's line: there the rival harvests.
 pub fn picket(sight: &mut Sight, front: &Front, members: &[&Creep], creep: &Creep) -> Wish {
     // By slot, which a successor keeps, so a landing never reshuffles posts.

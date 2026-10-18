@@ -1,10 +1,10 @@
-/// `Siege` (`ARCHITECTURE.md` §6.2); `step` closes it with None once nothing is left to raze.
+/// `Siege` (`ARCHITECTURE.md` §6.2); `step` closes it with None once nothing is left to take.
 use std::collections::BTreeSet;
 
 use super::super::shape::{Engagement, Phase};
 use crate::core::engine;
 use crate::core::vocabulary::Resource;
-use crate::core::world::{Kind, Pos, Structure};
+use crate::core::world::{Controller, Kind, Owner, Pos, Room, Structure};
 
 pub struct Facts {
     pub time: i32,
@@ -61,6 +61,34 @@ pub fn next_razed<'a>(structures: &'a [Structure], near: Option<&Pos>) -> Option
             s.id.clone(),
         )
     })
+}
+
+fn declaimed(room: &Room) -> Option<&Controller> {
+    (room.controller.as_ref()).filter(|c| matches!(c.owner, Owner::Enemy(_)))
+}
+
+/// Razed first, then the enemy's controller tapped (v1's declaim).
+pub fn next_target(room: &Room, near: Option<&Pos>) -> Option<String> {
+    let razed = next_razed(&room.structures, near).map(|s| &s.id);
+    razed.or(declaimed(room).map(|c| &c.id)).cloned()
+}
+
+pub fn tapped<'a>(room: &'a Room, target: &str) -> Option<&'a Controller> {
+    declaimed(room).filter(|c| c.id == target)
+}
+
+/// The controller stands among the structures, a target only while tapped.
+pub fn stands(room: &Room, target: &str) -> bool {
+    match &room.controller {
+        Some(c) if c.id == target => tapped(room, target).is_some(),
+        _ => room.structures.iter().any(|s| s.id == target),
+    }
+}
+
+/// Asked as early as a body cast now outlives the block's lapse by a room's
+/// side (v1), so the spawn queue delays its start but not its tap.
+pub fn tap_due(c: &Controller, spawn: i32) -> bool {
+    c.upgrade_blocked <= spawn + engine::CLAIM_LIFETIME - engine::ROOM_SIDE
 }
 
 fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {

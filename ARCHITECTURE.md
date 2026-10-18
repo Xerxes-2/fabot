@@ -369,7 +369,9 @@ The other kinds, for the record's sake:
   fire; `Exchange` prices towers and ramparts) → clear → done. Opened on a
   room in `declarations.sieges`, kept in sight by an observer; its target is
   a `Structure` of the towers and the economy, the one its charged towers
-  strike least first, and it closes once none stands. It stands off a rival's safe mode and
+  strike least first, then an enemy's controller, which the biggest CLAIM
+  body the bank buys taps as each upgrade block lapses (v1's declaim); it
+  closes once neither stands. It stands off a rival's safe mode and
   opens again after it (owner, 2026-10-18: a safe mode is spent, not
   blocked). The breach is derived, not stored:
   `Exchange.breachPlan` finds the cheapest way in (walk plus each barrier's

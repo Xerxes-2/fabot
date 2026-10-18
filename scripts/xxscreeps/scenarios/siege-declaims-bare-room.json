@@ -1,0 +1,13 @@
+{
+  "why": "a declared siege with nothing left to raze taps the enemy's controller as each upgrade block lapses, so its 20,000-tick downgrade runs out inside 3,200",
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-declaims-bare-room.json",
+    "seed": 1,
+    "opponents": [{ "name": "rival", "bot": "scripts/xxscreeps/engine/keep", "room": "W8S1" }]
+  },
+  "ticks": 3200,
+  "assert": [
+    { "measure": "levelsLost", "who": "rival", "min": 1 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

@@ -98,24 +98,25 @@ pub fn core_as_hostile(core: &Structure) -> Creep {
 /// v1's guard on a core: the biggest melee body the bank buys, as a small one
 /// dies of age short of its 100,000 hits; none where ours raze `hits` in a life.
 pub fn razer(capacity: i32, hits: i32, ours: &[Fighter]) -> Vec<Body> {
-    let block = vec![BodyPart::Move, BodyPart::Attack];
-
-    let most = (capacity / engine::body_cost(&block))
-        .min(engine::MAX_BODY_PARTS as i32 / block.len() as i32);
-
     let swing = engine::ATTACK_POWER * ours.iter().map(|f| f.attack).sum::<i32>();
 
-    if most == 0 || swing * engine::CREEP_LIFETIME >= hits {
-        Vec::new()
-    } else {
-        let mut body = Vec::new();
+    biggest(capacity, &[BodyPart::Move, BodyPart::Attack])
+        .filter(|_| swing * engine::CREEP_LIFETIME < hits)
+        .into_iter()
+        .collect()
+}
 
-        for _ in 0..most {
-            body.extend(block.iter().copied());
-        }
+/// Taps land a block apart whatever the body, so only more CLAIM a tap
+/// shortens the declaim (v1).
+pub fn tapper(capacity: i32) -> Option<Body> {
+    biggest(capacity, &[BodyPart::Move, BodyPart::Claim])
+}
 
-        vec![body]
-    }
+fn biggest(capacity: i32, block: &[BodyPart]) -> Option<Body> {
+    let most = (capacity / engine::body_cost(block))
+        .min(engine::MAX_BODY_PARTS as i32 / block.len() as i32);
+
+    (most > 0).then(|| block.repeat(most as usize))
 }
 
 pub fn terrain_at(room: &Room, at: &Pos) -> exchange::Terrain {
