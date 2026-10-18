@@ -292,23 +292,17 @@ fn owned_rooms(world: &World) -> i32 {
     world.rooms.iter().filter(ours).count() as i32
 }
 
-fn reservable(me: &str, c: &Controller) -> bool {
-    c.owner.is_nobody()
-        && match &c.reservation {
-            Some((user, _)) => user == me,
-            None => true,
-        }
+fn reservable(c: &Controller) -> bool {
+    c.owner.is_nobody() && c.reservation.as_ref().is_none_or(|(by, _)| by.is_ours())
 }
 
 pub fn invader_held(c: &Controller) -> bool {
-    c.reservation
-        .as_ref()
-        .is_some_and(|(user, _)| user == engine::INVADER_USER)
+    matches!(c.reservation, Some((Owner::Invader, _)))
 }
 
 /// v1's: a claimer attacks the Invader's hold off before it reserves.
-fn takeable(me: &str, c: &Controller) -> bool {
-    reservable(me, c) || invader_held(c)
+fn takeable(c: &Controller) -> bool {
+    reservable(c) || invader_held(c)
 }
 
 /// What a claimer wins a tick: a held room's yield over a neutral one's, and
@@ -375,7 +369,7 @@ fn swamp(room: &Room, pos: &Pos) -> bool {
     room.terrain.len() == tiles::COUNT && terrain::is_swamp(&room.terrain, pos.x, pos.y)
 }
 
-fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> Ground {
+fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
     let owned_room = room.controller.as_ref().is_some_and(|c| c.owner.is_ours());
     let level = room.controller.as_ref().map_or(0, |c| c.level);
     let built = Atlas::buffer(room);
@@ -666,13 +660,13 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
             .collect(),
         income,
         posted,
-        reservable: room.controller.as_ref().is_some_and(|c| takeable(me, c)),
+        reservable: room.controller.as_ref().is_some_and(takeable),
         our_reservation: match room
             .controller
             .as_ref()
             .and_then(|c| c.reservation.as_ref())
         {
-            Some((user, ticks)) if user == me => *ticks,
+            Some((Owner::Ours, ticks)) => *ticks,
             _ => 0,
         },
         withheld: 0,
@@ -785,7 +779,7 @@ fn blind(outpost: &Outpost) -> Room {
         sites: Vec::new(),
         piles: Vec::new(),
         remains: Vec::new(),
-        hostiles: Vec::new(),
+        others: Vec::new(),
     }
 }
 
@@ -859,28 +853,18 @@ pub fn of_world(
         };
 
         match &room.controller {
-            Some(c) if !c.owner.is_ours() && !reservable(&world.me, c) => {
+            Some(c) if !c.owner.is_ours() && !reservable(c) => {
                 let sources = withheld(c);
                 let mut bare = room.clone().into_owned();
                 bare.sources = Vec::new();
-                let mut ground = ground_of(atlas, &world.me, richest, 0, &bare);
+                let mut ground = ground_of(atlas, richest, 0, &bare);
                 ground.withheld = sources;
                 ground
             }
-            _ if richest >= engine::body_cost(bodies::block_of(Pattern::Claimer)) => ground_of(
-                atlas,
-                &world.me,
-                richest,
-                engine::HELD_OUTPUT_PER_TICK,
-                &room,
-            ),
-            _ => ground_of(
-                atlas,
-                &world.me,
-                richest,
-                engine::NEUTRAL_OUTPUT_PER_TICK,
-                &room,
-            ),
+            _ if richest >= engine::body_cost(bodies::block_of(Pattern::Claimer)) => {
+                ground_of(atlas, richest, engine::HELD_OUTPUT_PER_TICK, &room)
+            }
+            _ => ground_of(atlas, richest, engine::NEUTRAL_OUTPUT_PER_TICK, &room),
         }
     };
 
@@ -889,7 +873,6 @@ pub fn of_world(
         .map(|room| {
             ground_of(
                 atlas,
-                &world.me,
                 room.energy_capacity,
                 engine::HELD_OUTPUT_PER_TICK,
                 room,
@@ -993,7 +976,7 @@ pub fn of_world(
                 Some(room) => room.controller.clone(),
                 None => blind(claim).controller,
             })
-            .filter(|c| reservable(&world.me, c))
+            .filter(reservable)
             .collect(),
         ovens: world
             .spawns

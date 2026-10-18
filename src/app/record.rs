@@ -10,8 +10,8 @@ use wasm_bindgen::JsValue;
 
 use crate::core::vocabulary::{BodyPart, Boost, Compound, Ore, Resource};
 use crate::core::world::{
-    Controller, Creep, Fallen, Kind, Mineral, Oven, Part, Pile, Pos, Remains, Room, Site, Source,
-    Spawn, Store, Structure, World,
+    Controller, Creep, Fallen, Kind, Mineral, Oven, Owner, Part, Pile, Pos, Remains, Room, Site,
+    Source, Spawn, Store, Structure, World,
 };
 
 const SLOTS: i32 = 5;
@@ -71,11 +71,15 @@ fn pos(value: &Pos) -> JsValue {
     ])
 }
 
-fn owner(value: &crate::core::world::Owner) -> JsValue {
+fn owner(value: &Owner) -> JsValue {
     match value {
-        crate::core::world::Owner::Ours => case("Ours"),
-        crate::core::world::Owner::Theirs(username) => tag("Theirs", vec![text(username)]),
-        crate::core::world::Owner::Nobody => case("Nobody"),
+        Owner::Ours => case("Ours"),
+        Owner::Ally(user) => tag("Ally", vec![text(user)]),
+        Owner::Enemy(user) => tag("Enemy", vec![text(user)]),
+        Owner::Stranger(user) => tag("Stranger", vec![text(user)]),
+        Owner::Invader => case("Invader"),
+        Owner::Keeper => case("Keeper"),
+        Owner::Nobody => case("Nobody"),
     }
 }
 
@@ -269,7 +273,7 @@ fn controller(value: &Controller) -> JsValue {
         (
             "Reservation",
             match &value.reservation {
-                Some((username, ticks)) => some(array(vec![text(username), n(*ticks)])),
+                Some((user, ticks)) => some(array(vec![owner(user), n(*ticks)])),
                 None => none(),
             },
         ),
@@ -319,7 +323,7 @@ fn room(value: &Room) -> JsValue {
             "Remains",
             array(value.remains.iter().map(remains).collect()),
         ),
-        ("Hostiles", creeps(&value.hostiles)),
+        ("Others", creeps(&value.others)),
     ])
 }
 

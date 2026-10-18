@@ -1212,11 +1212,7 @@ mod tests {
                 };
 
                 assert!(controllers(&g).iter().any(|c| {
-                    &c.id == id
-                        && match &c.reservation {
-                            Some((user, _)) => user == &g.world.me,
-                            None => true,
-                        }
+                    &c.id == id && c.reservation.as_ref().is_none_or(|(by, _)| by.is_ours())
                 }));
             }
         }

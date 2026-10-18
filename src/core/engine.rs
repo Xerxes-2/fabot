@@ -47,8 +47,9 @@ pub const RANGED_RANGE: i32 = 3;
 pub const UPGRADE_RANGE: i32 = 3;
 /// A Source Keeper rests within this range of its source or mineral and never pursues.
 pub const KEEPER_PIN: i32 = 1;
-/// The username the engine's NPC raiders carry.
+/// The usernames the engine's NPCs carry.
 pub const INVADER_USER: &str = "Invader";
+pub const KEEPER_USER: &str = "Source Keeper";
 pub const ATTACK_POWER: i32 = 30;
 pub const RANGED_ATTACK_POWER: i32 = 10;
 pub const DISMANTLE_POWER: i32 = 50;

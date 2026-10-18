@@ -68,7 +68,7 @@ mod tests {
                 .map(|i| {
                     fx::creep(
                         &format!("h{i}"),
-                        Owner::Theirs("x".to_string()),
+                        Owner::Stranger("x".to_string()),
                         100,
                         tiles::index(25, i % 40 + 5),
                     )
@@ -97,7 +97,7 @@ mod tests {
 
             let mut room = colony.room.clone();
             room.structures = stood;
-            room.hostiles = enemies.clone();
+            room.others = enemies.clone();
 
             let world = fx::world_of(room, Vec::new(), ours.clone());
 

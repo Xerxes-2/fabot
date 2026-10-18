@@ -74,7 +74,7 @@ pub fn fighter_of(c: &Creep) -> Fighter {
     let body: Vec<BodyPart> = c.body.iter().map(|p| p.kind).collect();
     let boosts: Vec<Boost> = c.body.iter().map(|p| p.boost).collect();
     let mut f = fighter::of_parts(&body, &boosts, c.hits, Some(c.pos.clone()));
-    f.invader = matches!(&c.owner, Owner::Theirs(user) if user == engine::INVADER_USER);
+    f.invader = c.owner == Owner::Invader;
     f
 }
 

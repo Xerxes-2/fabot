@@ -203,7 +203,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
         sites: Vec::new(),
         piles: Vec::new(),
         remains: Vec::new(),
-        hostiles: Vec::new(),
+        others: Vec::new(),
     };
 
     Some(Colony {

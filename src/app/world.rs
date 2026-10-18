@@ -13,6 +13,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use super::js::field;
 
 use crate::core::engine;
+use crate::core::tick::Declarations;
 use crate::core::vocabulary::{self, BodyPart, Boost};
 use crate::core::world::*;
 
@@ -33,6 +34,8 @@ struct Reader<'a> {
     at: usize,
     strs: Split<'a, char>,
     terrain: &'a mut Terrains,
+    me: String,
+    declarations: &'a Declarations,
 }
 
 impl Reader<'_> {
@@ -59,9 +62,13 @@ impl Reader<'_> {
         let name = self.s();
         match tag {
             1 => Owner::Ours,
-            2 => Owner::Theirs(name),
+            2 => self.user(name),
             _ => Owner::Nobody,
         }
+    }
+
+    fn user(&self, name: String) -> Owner {
+        Owner::of_user(name, &self.me, self.declarations)
     }
 
     fn pos(&mut self) -> Pos {
@@ -133,7 +140,8 @@ impl Reader<'_> {
             progress_total: self.n(),
             ticks_to_downgrade: self.n(),
             reservation: if self.flag() {
-                Some((self.s(), self.n()))
+                let user = self.s();
+                Some((self.user(user), self.n()))
             } else {
                 None
             },
@@ -259,7 +267,7 @@ impl Reader<'_> {
                 amount: r.n(),
             }),
             remains: self.list(Reader::remains),
-            hostiles: self.list(Reader::creep),
+            others: self.list(Reader::creep),
             name,
         }
     }
@@ -282,7 +290,7 @@ impl Reader<'_> {
     }
 }
 
-pub fn of_game(terrain: &mut Terrains) -> World {
+pub fn of_game(terrain: &mut Terrains, declarations: &Declarations) -> World {
     let packed = read();
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
@@ -291,7 +299,10 @@ pub fn of_game(terrain: &mut Terrains) -> World {
         at: 0,
         strs: text.split('\0'),
         terrain,
+        me: String::new(),
+        declarations,
     };
+    r.me = r.s();
     let time = r.n();
     let bucket = r.n();
     let rooms = r.list(Reader::room);
@@ -299,7 +310,7 @@ pub fn of_game(terrain: &mut Terrains) -> World {
     let creeps = r.list(Reader::creep);
     World {
         time,
-        me: r.s(),
+        me: r.me.clone(),
         cpu_limit: f64::from(game::cpu::limit()),
         bucket,
         rooms,

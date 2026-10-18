@@ -131,10 +131,6 @@ fn live(kind: BodyPart, c: &Creep) -> bool {
     c.body.iter().any(|p| p.kind == kind && p.hits > 0)
 }
 
-fn invader(c: &Creep) -> bool {
-    matches!(&c.owner, Owner::Theirs(user) if user == engine::INVADER_USER)
-}
-
 fn reaches(structure: bool, step: i32, raid: &[&Creep], at: &Pos) -> bool {
     raid.iter().any(|h| {
         let range = if live(BodyPart::RangedAttack, h) {
@@ -167,7 +163,11 @@ fn hand(c: &Creep) -> bool {
 }
 
 fn razed(home: &Home) -> bool {
-    let raid: Vec<&Creep> = home.raid.iter().filter(|h| !invader(h)).collect();
+    let raid: Vec<&Creep> = home
+        .raid
+        .iter()
+        .filter(|h| h.owner != Owner::Invader)
+        .collect();
 
     let covered: BTreeSet<Pos> = home
         .ours
@@ -435,7 +435,7 @@ mod tests {
     }
 
     fn rival(haulers: &[(i32, i32, bool)], fallen: &[Dead]) -> Home {
-        home(Owner::Theirs("rival".to_string()), haulers, fallen)
+        home(Owner::Stranger("rival".to_string()), haulers, fallen)
     }
 
     /// Up to four haulers in a column across the raider's reach: CARRY 1–25 each, a step off it.
@@ -617,11 +617,7 @@ mod tests {
                 .map(|(c, _, _)| slain(c))
                 .collect();
 
-            let home = home(
-                Owner::Theirs(engine::INVADER_USER.to_string()),
-                &haulers(&spec),
-                &fallen,
-            );
+            let home = home(Owner::Invader, &haulers(&spec), &fallen);
 
             assert_eq!(safe_mode(false, &[home]), None);
         }

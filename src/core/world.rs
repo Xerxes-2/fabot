@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use super::engine;
+use super::tick::Declarations;
 use super::vocabulary::{BodyPart, Boost, Resource};
 
 /// Compared by hand: Fable's record compare walks every field, per tile per tick.
@@ -53,17 +54,37 @@ impl Ord for Pos {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Owner {
     Ours,
-    Theirs(String),
+    Ally(String),
+    Enemy(String),
+    /// Neither declared: fought where it threatens, never hunted.
+    Stranger(String),
+    Invader,
+    Keeper,
     Nobody,
 }
 
 impl Owner {
+    pub fn of_user(user: String, me: &str, declarations: &Declarations) -> Owner {
+        match user.as_str() {
+            u if u == me => Owner::Ours,
+            engine::INVADER_USER => Owner::Invader,
+            engine::KEEPER_USER => Owner::Keeper,
+            u if declarations.allies.contains(u) => Owner::Ally(user),
+            u if declarations.enemies.contains(u) => Owner::Enemy(user),
+            _ => Owner::Stranger(user),
+        }
+    }
+
     pub fn is_ours(&self) -> bool {
         *self == Owner::Ours
     }
 
+    pub fn is_ally(&self) -> bool {
+        matches!(self, Owner::Ally(_))
+    }
+
     pub fn is_theirs(&self) -> bool {
-        matches!(self, Owner::Theirs(_))
+        !self.is_ours() && !self.is_nobody()
     }
 
     pub fn is_nobody(&self) -> bool {
@@ -374,8 +395,8 @@ pub struct Controller {
     pub progress_total: i32,
     /// 0 on a controller nobody owns.
     pub ticks_to_downgrade: i32,
-    /// Username and ticks left.
-    pub reservation: Option<(String, i32)>,
+    /// Who holds it and the ticks left.
+    pub reservation: Option<(Owner, i32)>,
     pub safe_mode: i32,
     pub safe_mode_available: i32,
     pub safe_mode_cooldown: i32,
@@ -437,7 +458,14 @@ pub struct Room {
     pub sites: Vec<Site>,
     pub piles: Vec<Pile>,
     pub remains: Vec<Remains>,
-    pub hostiles: Vec<Creep>,
+    /// Every creep not ours, an ally's among them.
+    pub others: Vec<Creep>,
+}
+
+impl Room {
+    pub fn hostiles(&self) -> impl Iterator<Item = &Creep> {
+        self.others.iter().filter(|c| !c.owner.is_ally())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -488,7 +516,7 @@ pub mod terrain {
 }
 
 pub mod hostiles {
-    use super::{Creep, Owner, Room, World};
+    use super::{Creep, Room};
     use std::collections::BTreeSet;
 
     fn strikes(creep: &Creep) -> bool {
@@ -508,13 +536,6 @@ pub mod hostiles {
             .collect()
     }
 
-    pub fn non_ally(allies: &BTreeSet<String>, world: &mut World) {
-        for room in &mut world.rooms {
-            room.hostiles
-                .retain(|c| !matches!(&c.owner, Owner::Theirs(user) if allies.contains(user)));
-        }
-    }
-
     /// HEAL and WORK threaten beside a striker (owner's call): alone they are
     /// a rival's healer in transit or its remote harvester, but WORK in a room
     /// whose controller is ours can only be there to dismantle.
@@ -527,10 +548,6 @@ pub mod hostiles {
                     .iter()
                     .any(|o| o.pos.room == creep.pos.room && strikes(o))
     }
-
-    pub fn world_creeps(world: &World) -> Vec<&Creep> {
-        world.rooms.iter().flat_map(|r| r.hostiles.iter()).collect()
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -542,7 +559,7 @@ pub struct Seen {
 pub type Sightings = BTreeMap<String, BTreeMap<String, Seen>>;
 
 pub mod sightings {
-    use super::{Seen, Sightings, World, hostiles};
+    use super::{Creep, Seen, Sightings, World, hostiles};
     use std::collections::BTreeMap;
 
     pub fn step(world: &World, previous: Sightings) -> Sightings {
@@ -557,8 +574,9 @@ pub mod sightings {
         for room in &world.rooms {
             let mut seen: BTreeMap<String, Seen> = BTreeMap::new();
 
-            for creep in &room.hostiles {
-                if hostiles::armed(&owned, &room.hostiles, creep) {
+            let foes: Vec<Creep> = room.hostiles().cloned().collect();
+            for creep in &foes {
+                if hostiles::armed(&owned, &foes, creep) {
                     seen.insert(
                         creep.id.clone(),
                         Seen {

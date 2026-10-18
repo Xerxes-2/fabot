@@ -309,7 +309,7 @@ impl Atlas {
                 weights[tiles::of_pos(&c.pos)] = None;
             }
 
-            for creep in &room.hostiles {
+            for creep in room.hostiles() {
                 weights[tiles::of_pos(&creep.pos)] = None;
             }
 

@@ -39,6 +39,7 @@ pub struct Declarations {
     /// makes toward.
     pub labs: Option<(String, BTreeMap<Compound, i32>)>,
     pub allies: BTreeSet<String>,
+    pub enemies: BTreeSet<String>,
     /// The rival rooms whose towers and economy are razed.
     pub sieges: Vec<String>,
 }
@@ -50,6 +51,7 @@ pub fn undeclared() -> Declarations {
         claims: Vec::new(),
         labs: None,
         allies: BTreeSet::new(),
+        enemies: BTreeSet::new(),
         sieges: Vec::new(),
     }
 }

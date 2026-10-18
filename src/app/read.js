@@ -98,6 +98,8 @@ globalThis.__fabotRead = (() => {
     const rooms = sorted(game.rooms).map((k) => game.rooms[k]);
     const spawns = sorted(game.spawns).map((k) => game.spawns[k]);
     const creeps = sorted(game.creeps).map((k) => game.creeps[k]);
+    const mine = rooms.find((r) => r.controller && r.controller.my === true);
+    s(spawns.length ? spawns[0].owner?.username : creeps.length ? creeps[0].owner.username : mine?.controller.owner?.username);
     list(rooms, room);
     list(spawns, (sp) => {
       s(sp.id), s(sp.name), pos(sp.pos);
@@ -109,8 +111,6 @@ globalThis.__fabotRead = (() => {
       creeps.filter((c) => !c.spawning),
       creep,
     );
-    const mine = rooms.find((r) => r.controller && r.controller.my === true);
-    s(spawns.length ? spawns[0].owner?.username : creeps.length ? creeps[0].owner.username : mine?.controller.owner?.username);
     n(Object.keys(game.constructionSites).length), n(game.gcl.level);
     return [ints.subarray(0, at), strs.join("\0")];
   };

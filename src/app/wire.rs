@@ -453,23 +453,16 @@ pub fn read_declarations() -> Declarations {
         claims: array_of(&field(&declared, "claims"))
             .map(|claims| claims.iter().filter_map(outpost_of).collect())
             .unwrap_or_default(),
-        allies: array_of(&field(&declared, "allies"))
-            .map(|allies| {
-                allies
-                    .iter()
-                    .filter_map(wasm_bindgen::JsValue::as_string)
-                    .collect()
-            })
-            .unwrap_or_default(),
-        sieges: array_of(&field(&declared, "sieges"))
-            .map(|rooms| {
-                rooms
-                    .iter()
-                    .filter_map(wasm_bindgen::JsValue::as_string)
-                    .collect()
-            })
-            .unwrap_or_default(),
+        allies: names(&declared, "allies"),
+        enemies: names(&declared, "enemies"),
+        sieges: names(&declared, "sieges"),
     }
+}
+
+fn names<T: FromIterator<String> + Default>(declared: &JsValue, key: &str) -> T {
+    array_of(&field(declared, key))
+        .map(|names| names.iter().filter_map(JsValue::as_string).collect())
+        .unwrap_or_default()
 }
 
 pub fn recording() -> bool {

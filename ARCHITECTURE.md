@@ -189,7 +189,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `fight.engagements` | id → Engagement (§6.2), with the tick it opened, never moved | Fight | Memory | the commitment; read every tick; a home's deaths since it opened are its raid's |
 | `fight.groups` | id → Group (§6.1) | Fight | Memory | hostile identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | never cast twice |
-| `declarations` | homes, outposts, errands, avoided rooms, allies, claims | Strategy | Memory | what the world is for us, as data |
+| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims | Strategy | Memory | what the world is for us, as data |
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
 | `recorder` | the last five ticks' `World` and Memory size | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
@@ -205,8 +205,7 @@ Rules:
   module calls `Memory.*` or `RawMemory.*`.
 - No `thread_local!` or `static` outside the driver (`app/driver.rs`) and the
   heap rows above. A cache inside a function's tick scope is fine.
-- No room name, player name or object id in source. v1's `Colonies.fs` carried
-  seventeen outposts and `allies = ["Odiodin"]`; all of it is `declarations`.
+- No room name, player name or object id in source: they are `declarations`.
 
 What v1 had and v2 does not: `danger` (7 parts), stand-down, raid episodes,
 exit watches, head latches, exit holds, healer/raider recall, quarries,
@@ -451,9 +450,11 @@ with a cheap body when a row is older than ❓ `Tuning.IntelStale`.
 
 ### 7.2 Expansion and declarations
 
-Homes, outposts, errands, avoided rooms, allies and claims are rows in
-`declarations`, written by Strategy and editable by the operator (`observe
-declare`). Candidates are priced once when intel changes or a due tick comes:
+Homes, outposts, errands, avoided rooms, allies, enemies and claims are rows
+in `declarations`, written by Strategy and editable by the operator (`observe
+declare`). The world reader turns every owner into its stance once
+(`world::Owner`): a stranger, neither ally nor enemy, is fought where it
+threatens us but never hunted; enemies are declared by hand for now. Candidates are priced once when intel changes or a due tick comes:
 an outpost by sources, distance, threat and the CPU it costs (v1 withdrew an
 outpost for CPU; the budget is explicit here); a claim by the same plus GCL
 room; a room is avoided by what intel saw there. A priced candidate that pays

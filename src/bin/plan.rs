@@ -76,7 +76,7 @@ fn main() {
         sites: Vec::new(),
         piles: Vec::new(),
         remains: Vec::new(),
-        hostiles: Vec::new(),
+        others: Vec::new(),
     };
 
     let ground = ground::of_room(&room).unwrap();

@@ -10,7 +10,7 @@
 //   observe.mjs switch <name> on|off|clear
 //                                  off: `false` (the module is skipped); on: `true`
 //                                  (the recorder's opt-in); clear: remove the key
-//   observe.mjs declare [reserve <n> | allies <name,…> | sieges <room,…> | outposts <capture.json> | claims <capture.json> | labs <room> <compound=n,…>]
+//   observe.mjs declare [reserve <n> | allies <name,…> | enemies <name,…> | sieges <room,…> | outposts <capture.json> | claims <capture.json> | labs <room> <compound=n,…>]
 //                                  Memory.v2.declarations as stored; with a name, set it
 //                                  (outposts: the capture's, `scripts/capture-world.mjs`)
 //                                  (reserve: creep lifetimes of tower fire the reserve holds)
@@ -79,12 +79,11 @@ switch (cmd) {
     }
     const n = Number(value);
     if (name === "reserve" && n >= 0) declarations.reserve = n;
-    else if (name === "allies" && value !== undefined) declarations.allies = value.split(",").filter(Boolean);
-    else if (name === "sieges" && value !== undefined) declarations.sieges = value.split(",").filter(Boolean);
+    else if ((name === "allies" || name === "enemies" || name === "sieges") && value !== undefined) declarations[name] = value.split(",").filter(Boolean);
     else if ((name === "outposts" || name === "claims") && value !== undefined) declarations[name] = JSON.parse(readFileSync(value, "utf8")).declarations[name] ?? [];
     else if (name === "labs" && value !== undefined && more !== undefined)
       declarations.labs = { home: value, targets: Object.fromEntries(more.split(",").map((p) => p.split("=")).map(([c, n]) => [c, Number(n)])) };
-    else fail("usage: observe declare [reserve <n ≥ 0> | allies <name,…> | sieges <room,…> | outposts <capture.json> | claims <capture.json> | labs <room> <compound=n,…>]");
+    else fail("usage: observe declare [reserve <n ≥ 0> | allies <name,…> | enemies <name,…> | sieges <room,…> | outposts <capture.json> | claims <capture.json> | labs <room> <compound=n,…>]");
     await putV2("declarations", declarations);
     console.log(`v2.declarations = ${JSON.stringify(declarations)} (read next tick)`);
     break;
@@ -118,5 +117,5 @@ switch (cmd) {
     break;
   }
   default:
-    fail("usage: observe health|cpu|faults|switches|switch <name> on|off|clear|declare [reserve <n>|allies <names>|sieges <rooms>|outposts <capture>|claims <capture>|labs <room> <compound=n,…>]|capture [out]|wait --ticks N");
+    fail("usage: observe health|cpu|faults|switches|switch <name> on|off|clear|declare [reserve <n>|allies <names>|enemies <names>|sieges <rooms>|outposts <capture>|claims <capture>|labs <room> <compound=n,…>]|capture [out]|wait --ticks N");
 }

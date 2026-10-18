@@ -25,11 +25,11 @@ const HAULER: Mover = Mover {
 const LONGEST: usize = ((tick::REACH_HOPS + 1) * 2 * tiles::SIDE) as usize;
 
 /// The engine refuses a site under anyone else's hold.
-fn ours(me: &str, room: &Room) -> bool {
+fn ours(room: &Room) -> bool {
     room.controller.as_ref().is_none_or(|c| match &c.owner {
         Owner::Ours => true,
-        Owner::Nobody => c.reservation.as_ref().is_none_or(|(user, _)| user == me),
-        Owner::Theirs(_) => false,
+        Owner::Nobody => c.reservation.as_ref().is_none_or(|(by, _)| by.is_ours()),
+        _ => false,
     })
 }
 
@@ -189,7 +189,7 @@ pub fn sites(
 
     for room in &world.rooms {
         if colonies.contains(&room.name)
-            || (outposts.iter().any(|o| o.room == room.name) && ours(&world.me, room))
+            || (outposts.iter().any(|o| o.room == room.name) && ours(room))
         {
             rooms.insert(room.name.clone(), room);
         }

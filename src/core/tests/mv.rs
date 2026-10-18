@@ -254,7 +254,7 @@ fn world_of(errand: &Errand) -> World {
             sites: Vec::new(),
             piles: Vec::new(),
             remains: Vec::new(),
-            hostiles: Vec::new(),
+            others: Vec::new(),
         }],
         spawns: Vec::new(),
         creeps: vec![errand.creep.clone()],

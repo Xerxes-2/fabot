@@ -216,7 +216,7 @@ pub(crate) mod dice {
         let level = dice.between(1, 8);
         let downgrade = dice.between(0, 200_000);
         let cpos = pos(dice, &name);
-        let holder = dice.pick(&["someone", "me"]);
+        let holder = dice.pick_of(&[Owner::Stranger("someone".to_string()), Owner::Ours]);
 
         let controller = Controller {
             id: format!("{name}c"),
@@ -227,7 +227,7 @@ pub(crate) mod dice {
             progress_total: 0,
             ticks_to_downgrade: if owned { downgrade } else { 0 },
             reservation: if !owned && reserved {
-                Some((holder.to_string(), 1200))
+                Some((holder, 1200))
             } else {
                 None
             },
@@ -317,7 +317,7 @@ pub(crate) mod dice {
                 Vec::new()
             },
             remains: Vec::<Remains>::new(),
-            hostiles: Vec::new(),
+            others: Vec::new(),
         };
 
         (room, spawns)

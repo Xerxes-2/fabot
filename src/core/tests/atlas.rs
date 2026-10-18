@@ -64,7 +64,7 @@ fn room_of(name: &str, terrain: Vec<u8>, structures: Vec<Structure>) -> Room {
         sites: Vec::new(),
         piles: Vec::new(),
         remains: Vec::new(),
-        hostiles: Vec::new(),
+        others: Vec::new(),
     }
 }
 

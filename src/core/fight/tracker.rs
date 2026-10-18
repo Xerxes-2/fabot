@@ -279,7 +279,7 @@ mod tests {
         Creep {
             id: id.to_string(),
             name: id.to_string(),
-            owner: Owner::Theirs("rival".to_string()),
+            owner: Owner::Stranger("rival".to_string()),
             pos,
             body: vec![Part {
                 kind: if armed {

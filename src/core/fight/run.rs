@@ -1030,7 +1030,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             cores.insert(c.id.clone());
         }
 
-        let mut all = r.hostiles.clone();
+        let mut all: Vec<Creep> = r.hostiles().cloned().collect();
         all.extend(razed);
         foes.insert(r.name.clone(), all);
     }
@@ -1592,9 +1592,8 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             let opened = raiding
                 .iter()
                 .filter(|e| {
-                    room.hostiles.iter().any(|h| {
-                        !matches!(&h.owner, Owner::Theirs(user) if user == engine::INVADER_USER)
-                            && scene.by_id[&e.group].members.contains(&h.id)
+                    room.hostiles().any(|h| {
+                        h.owner != Owner::Invader && scene.by_id[&e.group].members.contains(&h.id)
                     })
                 })
                 .fold(world.time, |first, e| first.min(e.opened));
@@ -1603,12 +1602,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 controller: controller.clone(),
                 towered: own.iter().any(|s| s.kind.is_tower()),
                 raid: room
-                    .hostiles
-                    .iter()
+                    .hostiles()
                     .filter(|h| raid.contains(&h.id))
                     .cloned()
                     .collect(),
-                hostiles: room.hostiles.clone(),
+                hostiles: room.hostiles().cloned().collect(),
                 ours: own,
                 bodies: world
                     .creeps

@@ -73,7 +73,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
         }
     }
 
-    for c in ours.iter().chain(room.hostiles.iter()) {
+    for c in ours.iter().chain(room.hostiles()) {
         occupied[tiles::of_pos(&c.pos)] = 1;
     }
 

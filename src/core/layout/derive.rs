@@ -101,7 +101,7 @@ pub fn colonies(
             plan,
             census: sites::census_of(room, &ours),
             towers,
-            hostiles: room.hostiles.clone(),
+            hostiles: room.hostiles().cloned().collect(),
             ours,
         });
     }
