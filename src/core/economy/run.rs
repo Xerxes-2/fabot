@@ -347,7 +347,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         &[],
     );
 
-    let offers = pool::pool(&derived);
+    let offers = pool::pool(&derived, &state.assignments);
 
     let creeps: BTreeMap<&str, &Creep> = seen.iter().map(|c| (c.name.as_str(), *c)).collect();
 

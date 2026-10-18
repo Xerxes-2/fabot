@@ -1015,6 +1015,7 @@ mod tests {
     use crate::core::atlas::Atlas;
     use crate::core::economy::derived::StoreKind;
     use crate::core::economy::dice::{self, Dice};
+    use crate::core::economy::matcher::Assignments;
     use crate::core::economy::pool::{self, Capacity};
     use crate::core::economy::task::Task;
     use crate::core::tick;
@@ -1122,7 +1123,7 @@ mod tests {
     }
 
     fn planned(derived: &Derived) -> (Vec<pool::Offer>, Plan) {
-        let offers = pool::pool(derived);
+        let offers = pool::pool(derived, &Assignments::new());
         let assignments = assigned_in(derived, &offers);
         let mut flat = Flat::new(derived);
 
@@ -1148,7 +1149,7 @@ mod tests {
     #[test]
     fn the_pool_offers_each_task_once_with_no_negative_capacity() {
         for g in worlds(102) {
-            let offers = pool::pool(&derive(&g));
+            let offers = pool::pool(&derive(&g), &Assignments::new());
             let ids: Vec<&String> = offers.iter().map(|o| &o.id).collect();
             let distinct: BTreeSet<&String> = ids.iter().copied().collect();
 
@@ -1175,7 +1176,7 @@ mod tests {
     #[test]
     fn no_reservation_or_claim_is_offered_on_another_players_reservation() {
         for g in worlds(103) {
-            for o in pool::pool(&derive(&g)) {
+            for o in pool::pool(&derive(&g), &Assignments::new()) {
                 let (Task::Reserve(id) | Task::Claim(id)) = &o.task else {
                     continue;
                 };
@@ -1195,7 +1196,7 @@ mod tests {
     fn a_storage_draw_is_worth_no_more_than_the_dearest_refill_it_serves() {
         for g in worlds(104) {
             let derived = derive(&g);
-            let offers = pool::pool(&derived);
+            let offers = pool::pool(&derived, &Assignments::new());
 
             let rank_of = |task: &Task| -> Option<i32> {
                 offers
@@ -1447,7 +1448,7 @@ mod tests {
     fn the_supply_floor_casts_only_where_nothing_of_its_kind_or_a_hauler_works_in_the_home() {
         for g in worlds(113) {
             let derived = derive(&g);
-            let offers = pool::pool(&derived);
+            let offers = pool::pool(&derived, &Assignments::new());
             let assignments = assigned_in(&derived, &offers);
             let mut flat = Flat::new(&derived);
             let p = plan(&mut flat, &derived, &offers, &assignments);

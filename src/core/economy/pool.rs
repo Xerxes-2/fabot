@@ -9,6 +9,7 @@ use crate::core::world::{Kind, Pos};
 
 use super::bodies::{self, Pattern};
 use super::derived::{Body, Derived, RepairFact, StoreKind};
+use super::matcher::Assignments;
 use super::price;
 use super::task::{self, Task};
 
@@ -230,7 +231,8 @@ pub fn repair_value(r: &RepairFact) -> f64 {
     }
 }
 
-pub fn pool(derived: &Derived) -> Vec<Offer> {
+/// `held`: last tick's assignments, whose Refills are what is already aboard.
+pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
     let mut offers: Vec<Offer> = Vec::new();
 
     // The storage is offered for every ore a body carries, so no load is
@@ -410,7 +412,37 @@ pub fn pool(derived: &Derived) -> Vec<Offer> {
 
         hungriest = hungriest.max(feed_worth);
 
+        // A loaded body is its sink's next delivery, so a draw past the room
+        // the sinks have left pours back into the store it came from.
+        let sinks: BTreeSet<String> = ground
+            .refills
+            .iter()
+            .map(|r| &r.id)
+            .chain(feed.map(|f| &f.id))
+            .map(|id| task::task_id(&Task::Refill(id.clone(), Resource::Energy)))
+            .collect();
+        let aboard: i32 = derived
+            .bodies
+            .iter()
+            .filter(|b| held.get(&b.name).is_some_and(|id| sinks.contains(id)))
+            .map(|b| b.energy)
+            .sum();
         let room = ring_free + feed.map_or(0, |f| f.free);
+        // What the upgraders drain from the feed while a load walks out to it.
+        let drain = colony.map_or(0, |c| {
+            let work: i32 = derived
+                .bodies
+                .iter()
+                .chain(derived.ovens.iter())
+                .filter(|b| upgrades(b) && b.pos.room == ground.room)
+                .map(|b| b.work * engine::UPGRADE_DRAIN_PER_WORK)
+                .sum();
+            work.min(bodies::upgradable_at(c.controller.level))
+        });
+        let walked = |from: &Pos| {
+            feed.and_then(|f| from.range(&f.pos))
+                .map_or(0, |r| drain * r)
+        };
 
         for s in &ground.stores {
             if s.energy > 0 && !s.kind.is_buffer() {
@@ -423,8 +455,9 @@ pub fn pool(derived: &Derived) -> Vec<Offer> {
                 };
 
                 let (draw, load) = if s.kind.is_storage() {
-                    if room > 0 {
-                        (Draw::Open, s.energy.min(room))
+                    let left = room + walked(&s.pos) - aboard;
+                    if left > 0 {
+                        (Draw::Open, s.energy.min(left))
                     } else {
                         (Draw::Spenders, s.energy)
                     }

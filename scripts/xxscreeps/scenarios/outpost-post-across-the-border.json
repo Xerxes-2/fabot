@@ -11,8 +11,9 @@
       "min": 7
     },
     {
-      "measure": "upgrade",
-      "max": 4000
+      "measure": "bodiesSpent",
+      "room": "W3N1",
+      "min": 1400
     },
     {
       "measure": "faults",
