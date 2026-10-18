@@ -72,7 +72,8 @@ switch (cmd) {
     break;
   case "declare": {
     const [name, value, more] = args;
-    const declarations = (await memory("v2.declarations")) ?? {};
+    const stored = await memory("v2.declarations");
+    const declarations = stored ?? {};
     if (name === undefined) {
       console.log(JSON.stringify(declarations, null, 2));
       break;
@@ -84,7 +85,9 @@ switch (cmd) {
     else if (name === "labs" && value !== undefined && more !== undefined)
       declarations.labs = { home: value, targets: Object.fromEntries(more.split(",").map((p) => p.split("=")).map(([c, n]) => [c, Number(n)])) };
     else fail("usage: observe declare [reserve <n ≥ 0> | allies <name,…> | enemies <name,…> | sieges <room,…> | outposts <capture.json> | claims <capture.json> | labs <room> <compound=n,…>]");
-    await putV2("declarations", declarations);
+    // A memory write is not read back at once: a whole-object write would
+    // revert a key declared just before it.
+    await (stored ? putV2(`declarations.${name}`, declarations[name]) : putV2("declarations", declarations));
     console.log(`v2.declarations = ${JSON.stringify(declarations)} (read next tick)`);
     break;
   }
