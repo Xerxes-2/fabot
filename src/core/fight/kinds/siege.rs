@@ -82,7 +82,9 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
         None
     } else if e.phase == Phase::Disengaging {
         if facts.home { None } else { Some(e.clone()) }
-    } else if e.lost > e.budget || facts.safe {
+    // A body lost re-prices the set, which tops itself up (owner, 2026-10-18:
+    // losses are a siege's to expect); a rival safe mode stands it off.
+    } else if facts.safe {
         Some(enter(Phase::Disengaging, facts.time, e))
     } else if e.phase == Phase::Forming && !facts.asked && !e.ours.is_empty() {
         Some(enter(Phase::Approaching, facts.time, e))

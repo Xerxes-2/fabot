@@ -250,25 +250,36 @@ pub fn siege<T>(
     }
 }
 
-/// The fewest medics added to the fielded set that `priced` breaks the way in
-/// with: a set re-planned onto a harder target is topped up, not recast.
+/// The dismantlers the fielded set lacks of two, then the fewest medics, that
+/// `priced` breaks the way in with: a set re-planned onto a harder target or
+/// short of a body lost is topped up, not recast.
 pub fn reinforce<T>(
     capacity: i32,
     fielded: &[Body],
     mut priced: impl FnMut(&[Body]) -> Option<T>,
 ) -> Option<(Vec<Body>, T)> {
+    let dismantler = most(capacity, &[BodyPart::Work, BodyPart::Move]);
     let medic = most(capacity, &[BodyPart::Move, BodyPart::Heal]);
 
-    if medic.is_empty() {
+    if medic.is_empty() || dismantler.is_empty() {
         return None;
     }
 
-    (1..=AROUND_ONE).find_map(|n| {
-        let added = vec![medic.clone(); n as usize];
-        let mut set = fielded.to_vec();
-        set.extend(added.iter().cloned());
-        priced(&set).map(|plan| (added, plan))
-    })
+    let standing = fielded
+        .iter()
+        .filter(|b| b.contains(&BodyPart::Work))
+        .count();
+    let short = 2usize.saturating_sub(standing);
+
+    (0..=AROUND_ONE as usize)
+        .filter(|n| short + n > 0)
+        .find_map(|n| {
+            let mut added = vec![dismantler.clone(); short];
+            added.extend(vec![medic.clone(); n]);
+            let mut set = fielded.to_vec();
+            set.extend(added.iter().cloned());
+            priced(&set).map(|plan| (added, plan))
+        })
 }
 
 /// The fewest RANGED:HEAL pickets whose pooled heal holds the towers' strike
