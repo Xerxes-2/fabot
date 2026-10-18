@@ -113,7 +113,28 @@ function __fabotWasm() {
 }
 `;
 
-const body = glue.replace(loader, "const wasmBytes = __fabotWasm();");
+// A trap (every Rust panic is one) can leave a RefCell borrowed or the heap
+// mid-write, and the engine calls the same instance next tick. A fresh
+// instance of the compiled module starts clean, as a global reset does; the
+// glue's views of the old memory are dropped with it.
+const loop = "function loop() {\n    wasm.loop();\n}";
+const views = [...glue.matchAll(/^let (cached\w*Memory0) = null;$/gm)].map((m) => m[1]);
+const instance = "let wasmInstance = new WebAssembly.Instance(wasmModule, __wbg_get_imports());\nlet wasm = wasmInstance.exports;";
+if (!glue.includes(loop) || !glue.includes(instance) || views.length === 0)
+  throw new Error("rust.mjs: wasm-bindgen's loop or instance changed; the trap recovery is stale");
+const recovering = `function loop() {
+    try {
+        wasm.loop();
+    } catch (error) {
+        wasmInstance = new WebAssembly.Instance(wasmModule, __wbg_get_imports());
+        wasm = wasmInstance.exports;
+        ${views.map((v) => `${v} = null;`).join("\n        ")}
+        wasm.__wbindgen_start();
+        throw error;
+    }
+}`;
+
+const body = glue.replace(loader, "const wasmBytes = __fabotWasm();").replace(loop, recovering);
 mkdirSync(join(REPO, "dist"), { recursive: true });
 writeFileSync(OUT, prelude + body);
 console.log(`bundled ${OUT} (${(wasm.length / 1024).toFixed(0)} kB wasm, ${(readFileSync(OUT).length / 1024).toFixed(0)} kB)`);

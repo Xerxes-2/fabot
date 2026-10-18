@@ -127,5 +127,26 @@ const held = Memory.v2.assignments?.a;
 if (typeof held !== "string") fail(`the creep holds no task: ${JSON.stringify(Memory.v2.assignments)}`);
 if (observe.refusals.some((r) => r.code === -100)) fail(`an intent threw: ${JSON.stringify(observe.refusals)}`);
 
+// A read too short for its decoder panics, a wasm trap; the tick after runs
+// on a fresh instance.
+const read = globalThis.__fabotRead;
+const error = console.error;
+globalThis.__fabotRead = () => [new Int32Array(0), ""];
+console.error = () => {};
+let trapped = false;
+try {
+  Game.time = 104;
+  main.loop();
+} catch (thrown) {
+  trapped = thrown instanceof WebAssembly.RuntimeError;
+}
+globalThis.__fabotRead = read;
+console.error = error;
+if (!trapped) fail("a short read did not trap");
+Game.time = 105;
+main.loop();
+const after = JSON.parse(segments[1]);
+if (after.tick !== 105 || after.faults.length !== 0) fail(`the tick after a trap: ${JSON.stringify(after).slice(0, 200)}`);
+
 const version = readFileSync(new URL(bundle, import.meta.url), "utf8").split("\n")[0];
-console.log(`smoke: 4 ticks clean (${version.match(/"(.*)"/)?.[1] ?? "unnamed"})`);
+console.log(`smoke: 4 ticks clean, and one after a trap (${version.match(/"(.*)"/)?.[1] ?? "unnamed"})`);
