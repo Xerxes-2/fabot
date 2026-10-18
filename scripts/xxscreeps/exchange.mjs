@@ -174,7 +174,7 @@ async function duel(index, members) {
   writeFileSync(join(world, "package.json"), '{ "private": true }\n');
   writeFileSync(join(world, "seed.txt"), `${seed}\n`);
   writeFileSync(join(world, "samples.json"), JSON.stringify(members));
-  for (const user of ["fabot", "rival"]) node26([XXSCREEPS, "manage", "bot", "add", user, "./duel"], world);
+  for (const user of ["fabot", "rival"]) node26([XXSCREEPS, pathToFileURL(join(world, "seed/manage.js")).href, "bot", "add", user, "./duel"], world);
   node26([XXSCREEPS, pathToFileURL(join(world, "duel-world.mjs")).href, "samples.json", "fabot", "rival"], world);
   const log = join(out, `server-${index}.log`);
   const server = spawn("nix", ["shell", "nixpkgs#nodejs_26", "-c", "node", XXSCREEPS, "start", "--no-backend"], {

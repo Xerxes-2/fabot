@@ -292,12 +292,12 @@ if (node && node.level > 1) {
 console.error(`colony: ${colony.room}${from ? ` from ${from}` : live ? ` from ${flags["--world"]}` : `, spawn at ${colony.x},${colony.y}`}; output ${out}`);
 if (from) node26([XXSCREEPS, "manage", "bot", "update", OUR_NAME, "./bot"], world);
 else if (live) {
-  node26([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot"], world);
+  node26([XXSCREEPS, script("seed/manage.js"), "bot", "add", OUR_NAME, "./bot"], world);
   const flat = (rooms = []) => rooms.map((r) => ({ ...r, terrain: [r.terrain].flat().join("") }));
   writeFileSync(join(world, "capture.json"), JSON.stringify({ ...live, rooms: flat(live.rooms), terrain: flat(live.terrain) }));
   node26([XXSCREEPS, script("live.mjs"), "capture.json"], world);
 }
-else node26([XXSCREEPS, "manage", "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
+else node26([XXSCREEPS, script("seed/manage.js"), "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
 async function fetched(spec, dir) {
   const cache = join(CACHE, "opponents", createHash("sha256").update(spec.integrity).digest("hex").slice(0, 16));
   if (!existsSync(join(cache, ".ok"))) {
@@ -326,7 +326,7 @@ for (const o of opponents) {
     continue;
   }
   const seat = o.x === undefined ? JSON.parse(node26([XXSCREEPS, script("colony.mjs"), o.room], world, true).trim().split("\n").at(-1)) : o;
-  node26([XXSCREEPS, "manage", "bot", "add", o.name, `./bot-${o.name}`, "--spawn", o.room, `${seat.x},${seat.y}`], world);
+  node26([XXSCREEPS, script("seed/manage.js"), "bot", "add", o.name, `./bot-${o.name}`, "--spawn", o.room, `${seat.x},${seat.y}`], world);
 }
 writeFileSync(join(world, "opponents.json"), JSON.stringify(opponents.map(({ name, room, raid }) => ({ name, room, raid }))));
 if (built) node26([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME, String(node.worn ?? 1)], world);
