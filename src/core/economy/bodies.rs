@@ -238,6 +238,9 @@ fn whole_blocks(block: &[BodyPart], most: i32, capacity: i32) -> Vec<BodyPart> {
     body
 }
 
+/// v1's: a deposit's miner digs a container full in a hauler's few trips.
+pub const MINER_WORK: i32 = 20;
+
 pub fn sized(pattern: Pattern, most: i32, capacity: i32) -> Option<Vec<BodyPart>> {
     if capacity < engine::body_cost(block_of(pattern)) {
         None

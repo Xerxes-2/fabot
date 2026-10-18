@@ -54,6 +54,20 @@ pub struct SourceFact {
     pub dug: i32,
 }
 
+/// A deposit our extractor stands on.
+#[derive(Clone, Debug)]
+pub struct MineralFact {
+    pub id: String,
+    pub pos: Pos,
+    pub resource: Resource,
+    pub amount: i32,
+    pub cooldown: i32,
+    pub post: Option<Pos>,
+    pub container: Option<String>,
+    /// What of it the container holds.
+    pub held: i32,
+}
+
 #[derive(Clone, Debug)]
 pub struct RefillFact {
     pub id: String,
@@ -155,6 +169,7 @@ pub struct Ground {
     pub room: String,
     pub controller: Option<Controller>,
     pub sources: Vec<SourceFact>,
+    pub minerals: Vec<MineralFact>,
     pub refills: Vec<RefillFact>,
     pub stores: Vec<StoreFact>,
     pub sites: Vec<SiteFact>,
@@ -383,6 +398,32 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
         });
     }
 
+    let mut minerals: Vec<MineralFact> = Vec::new();
+    for m in &room.minerals {
+        let extractor = room
+            .structures
+            .iter()
+            .find(|s| s.kind.is_extractor() && s.owner.is_ours() && s.pos == m.pos);
+        if let Some(extractor) = extractor {
+            let post = Atlas::post_of(room, &m.pos);
+            let container = post.as_ref().and_then(|(_, id)| id.clone());
+            let held = container
+                .as_ref()
+                .and_then(|id| room.structures.iter().find(|s| &s.id == id))
+                .map_or(0, |c| c.store.amount_of(&m.resource));
+            minerals.push(MineralFact {
+                id: m.id.clone(),
+                pos: m.pos.clone(),
+                resource: m.resource.clone(),
+                amount: m.amount,
+                cooldown: extractor.cooldown,
+                post: post.map(|(p, _)| p),
+                container,
+                held,
+            });
+        }
+    }
+
     let income: i32 = sources.iter().map(|s| s.dug).sum();
     let posted: i32 = sources
         .iter()
@@ -564,6 +605,7 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
         room: room.name.clone(),
         controller: room.controller.clone(),
         sources,
+        minerals,
         refills,
         stores,
         sites: room

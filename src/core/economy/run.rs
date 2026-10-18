@@ -421,13 +421,23 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         })
         .collect();
 
-    // A dug-out source's holders stay seated until it regenerates.
+    // A dug-out source's holders stay seated until it regenerates, and an
+    // extractor's until it cools.
     let dug_out: BTreeSet<String> = derived
         .grounds
         .iter()
-        .flat_map(|g| g.sources.iter())
-        .filter(|s| s.energy == 0)
-        .map(|s| s.id.clone())
+        .flat_map(|g| {
+            g.sources
+                .iter()
+                .filter(|s| s.energy == 0)
+                .map(|s| s.id.clone())
+                .chain(
+                    g.minerals
+                        .iter()
+                        .filter(|m| m.cooldown > 0)
+                        .map(|m| m.id.clone()),
+                )
+        })
         .collect();
 
     let ready = |task: &Task| -> bool {

@@ -741,6 +741,10 @@ for (let t = 0; t < ticks; t++) {
     row.botCpu = fresh ? obs.cpu : null;
     row.roadLoss = roadLoss;
     row.stillLoaded = stillLoaded;
+    // Ore held in our storages and terminals: what the mines brought home.
+    row.ore = rooms.flatMap((r) => [...r["#objects"]])
+      .filter((o) => o["#user"] === ours && o.store && (o.structureType === "storage" || o.structureType === "terminal"))
+      .reduce((n, o) => n + o.store.getUsedCapacity() - energyIn(o), 0);
     row.bounced = bounced;
     row.pouredBack = pouredBack;
     row.faults = seenFaults.size;

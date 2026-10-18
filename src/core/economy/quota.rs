@@ -364,6 +364,45 @@ fn ground_demands(
             }
         }
 
+        // A mineral is worth an energy a unit: with no market, its sink is
+        // the boosts, which nothing yet prices.
+        for m in &ground.minerals {
+            let Some(post) = m.post.as_ref().filter(|_| m.amount > 0) else {
+                continue;
+            };
+            let amount = f64::from(m.amount);
+            let per_tick = |work: i32| {
+                f64::from(work * engine::MINERAL_HARVEST_PER_WORK)
+                    / f64::from(engine::MINERAL_HARVEST_CYCLE)
+            };
+            demands.push(seated(
+                Pattern::Harvester,
+                &m.pos,
+                bodies::MINER_WORK,
+                1,
+                Box::new(move |body| {
+                    Some((per_tick(part_count_in(body, BodyPart::Work)) * life).min(amount))
+                }),
+            ));
+
+            if let (Some(ci), Some(_)) = (owner, &m.container) {
+                let trip = bodies::sized(
+                    Pattern::Hauler,
+                    engine::MAX_BODY_PARTS as i32,
+                    colonies[ci].bank_capacity,
+                )
+                .map_or(0, |body| {
+                    sinks_of(ci)
+                        .iter()
+                        .filter_map(|sink| round_trip(walks, &body, post, sink, 1))
+                        .fold(0, i32::max)
+                });
+                let flow = per_tick(bodies::MINER_WORK);
+                carries[ci] += flow * f64::from(trip);
+                flows[ci] += flow;
+            }
+        }
+
         match &ground.controller {
             Some(c) if ground.reservable && gi >= colonies.len() => {
                 let gain = f64::from(super::derived::reserve_gain(ground) * engine::CLAIM_LIFETIME);

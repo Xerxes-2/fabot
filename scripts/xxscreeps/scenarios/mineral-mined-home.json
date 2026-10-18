@@ -1,0 +1,6 @@
+{
+  "why": "a colony with an extractor on a deposit digs it and hauls the ore home",
+  "start": { "room": "W8N3", "seed": 1, "node": "N5" },
+  "ticks": 8000,
+  "assert": [{ "measure": "ore", "min": 5000 }, { "measure": "refusals", "max": 0 }]
+}

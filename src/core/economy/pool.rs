@@ -113,6 +113,10 @@ pub fn fits(body: &Body, offer: &Offer) -> bool {
         }
         _ if body.pattern.is_harvester() => false,
         Task::Withdraw(_, _) if !offer.draw.is_open() && body.work == 0 => false,
+        // An ore rides alone to the store, never with a worker's energy.
+        Task::Withdraw(_, r) if !r.is_energy() => {
+            body.work == 0 && body.carry > 0 && body.store.held.is_empty()
+        }
         Task::Withdraw(_, _) | Task::Pickup(_, _) => body.carry > 0 && half_empty,
         Task::Refill(_, resource) => {
             body.carry > 0 && carried(body, resource) > 0 && !offer.shut.contains(&body.pos.room)
@@ -282,6 +286,41 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
                 );
                 harvest.post = s.post.clone();
                 offers.push(harvest);
+            }
+        }
+
+        // Dug only from its container's tile, whose holder is the garrison.
+        for m in &ground.minerals {
+            let Some(post) = m.post.as_ref().filter(|_| colony.is_some() && m.amount > 0) else {
+                continue;
+            };
+            let rate = bodies::MINER_WORK * engine::MINERAL_HARVEST_PER_WORK
+                / engine::MINERAL_HARVEST_CYCLE;
+            let mut harvest = offer(
+                Task::Harvest(m.id.clone()),
+                &m.pos,
+                f64::from(rate),
+                Capacity::Seated {
+                    seats: 1,
+                    posts: 1,
+                    work: bodies::MINER_WORK,
+                },
+            );
+            harvest.post = Some(post.clone());
+            offers.push(harvest);
+        }
+
+        for m in &ground.minerals {
+            if let Some(id) = m.container.as_ref().filter(|_| m.held > 0) {
+                let fill = f64::from(m.held) / f64::from(engine::CONTAINER_CAPACITY);
+                let rate = bodies::MINER_WORK * engine::MINERAL_HARVEST_PER_WORK
+                    / engine::MINERAL_HARVEST_CYCLE;
+                offers.push(offer(
+                    Task::Withdraw(id.clone(), m.resource.clone()),
+                    m.post.as_ref().unwrap_or(&m.pos),
+                    price::flow_draw(price::overflow_loss(rate, fill)),
+                    Capacity::Load(m.held),
+                ));
             }
         }
 

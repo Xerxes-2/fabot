@@ -107,6 +107,7 @@ const measures = {
   // Ticks bodies lost beside a road: grounded off it, or stopped for a body on it.
   roadLoss: (samples, a) => at(samples, a.to ?? Infinity).roadLoss - at(samples, a.from ?? 0).roadLoss,
   stillLoaded: (samples, a) => at(samples, a.to ?? Infinity).stillLoaded,
+  ore: (samples, a) => at(samples, a.to ?? Infinity).ore - at(samples, a.from ?? 0).ore,
   bounced: (samples, a) => at(samples, a.to ?? Infinity).bounced - at(samples, a.from ?? 0).bounced,
   pouredBack: (samples, a) => at(samples, a.to ?? Infinity).pouredBack - at(samples, a.from ?? 0).pouredBack,
   // Energy spent on construction.
