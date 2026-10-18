@@ -1,6 +1,7 @@
 //! A set that walks as one: one field priced at its slowest body, each member
 //! kept near the median member along the walk.
 use std::cmp::Reverse;
+use std::collections::BTreeSet;
 
 use crate::core::atlas::{Atlas, Field, Mover, Target};
 use crate::core::engine;
@@ -40,7 +41,13 @@ fn fatigue_ticks(creep: &Creep) -> Option<i32> {
     }
 }
 
-pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep]) -> Vec<Wish> {
+pub fn wishes(
+    atlas: &mut Atlas,
+    target: &Target,
+    weight: i32,
+    members: &[&Creep],
+    fortified: &BTreeSet<String>,
+) -> Vec<Wish> {
     let mover = slowest(members);
 
     fn left(
@@ -139,11 +146,42 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
     };
     let head = tiles::to_pos(&anchor.pos.room, head_tile);
 
+    let step_back = step_ticks(mover.factor, engine::PLAIN_WEIGHT).map_or(0, |step| 2 * step);
+
+    let to_band: Vec<Option<i32>> = members
+        .iter()
+        .map(|c| match (c.pos.room != target.room, fatigue_ticks(c)) {
+            (true, Some(resting)) => atlas
+                .field(mover, target, &c.pos.room)
+                .and_then(|field| field.ticks(tiles::of_pos(&c.pos)))
+                .map(|ticks| ticks + resting),
+            _ => None,
+        })
+        .collect();
+
+    // One landing first under towers fights alone, its seat beside one still
+    // behind: into such a room the set steps onto the band only gathered.
+    let gathered = |creep: &Creep| -> bool {
+        members.iter().zip(&to_band).all(|(m, band)| {
+            lag(m) == grid::UNREACHED
+                || if m.pos.room == creep.pos.room {
+                    band.is_some_and(|ticks| ticks <= step_back)
+                } else {
+                    lag(m) <= lag(creep)
+                }
+        })
+    };
+
     let fits = |creep: &Creep, tile: Tile| -> bool {
-        creep.name == anchor.name
-            || tiles::seam_range(&tiles::to_pos(&creep.pos.room, tile), &head)
-                .is_some_and(|range| range <= r)
+        let at = tiles::to_pos(&creep.pos.room, tile);
+        // Ahead of an anchor that waits, a pass closes no lag: it swaps two in front.
+        (creep.name == anchor.name
             || lag(creep) >= lag(anchor)
+            || (tiles::seam_range(&at, &head).is_some_and(|range| range <= r)
+                && (!lagging || members.iter().all(|m| m.name == creep.name || m.pos != at))))
+            && (!tiles::room_toward(&creep.pos.room, tiles::exit_of(tile))
+                .is_some_and(|next| fortified.contains(&next))
+                || gathered(creep))
     };
 
     // A step into swamp falls behind: a walker sidesteps no slower than its
@@ -160,15 +198,10 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
         }
     };
 
-    let step_back = step_ticks(mover.factor, engine::PLAIN_WEIGHT).map_or(0, |step| 2 * step);
-
     let mut out = Vec::with_capacity(members.len());
     for (creep, wish) in members.iter().zip(walks) {
-        let waits = if creep.name == anchor.name {
-            lagging
-        } else {
-            !(wish.stays() || fits(creep, wish.head))
-        };
+        let waits =
+            (creep.name == anchor.name && lagging) || !(wish.stays() || fits(creep, wish.head));
         if waits {
             let stay = plan::stay(atlas, creep, mover.factor, weight);
             let mut holds = |tile: Tile| fits(creep, tile) && keeps(atlas, step_back, creep, tile);

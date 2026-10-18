@@ -379,12 +379,18 @@ pub fn step_back(sight: &mut Sight, raid_room: &str, members: &[&Creep], creep: 
 }
 
 /// To a shot's range of the group, as one.
-pub fn blob(sight: &mut Sight, centre: &Pos, members: &[&Creep]) -> Vec<Wish> {
+pub fn blob(
+    sight: &mut Sight,
+    centre: &Pos,
+    members: &[&Creep],
+    fortified: &BTreeSet<String>,
+) -> Vec<Wish> {
     blob::wishes(
         sight.atlas,
         &target_at(sight, centre, engine::RANGED_RANGE),
         WEIGHT,
         members,
+        fortified,
     )
 }
 
@@ -527,7 +533,7 @@ pub fn siege(
         } else if at_breach(creep) {
             (
                 Some(CreepAct::Dismantle(front.wall.clone())),
-                hold(sight, creep),
+                toward(sight, creep, &front.breach, engine::MELEE_RANGE),
             )
         } else {
             // The walk sees no bodies: a tile another dismantler holds reads as the way in.

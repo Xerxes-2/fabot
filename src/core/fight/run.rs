@@ -1741,6 +1741,19 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     };
 
     let mut walking: BTreeMap<String, Wish> = BTreeMap::new();
+    // A siege's room is priced under its towers while out of sight.
+    let fortified: BTreeSet<String> = world
+        .rooms
+        .iter()
+        .filter(|r| !scene.charged(r).is_empty())
+        .map(|r| r.name.clone())
+        .chain(
+            decided
+                .iter()
+                .filter(|e| matches!(e.objective, Objective::Siege(_)))
+                .map(|e| e.room.clone()),
+        )
+        .collect();
 
     for e in &decided {
         if e.phase == Phase::Approaching
@@ -1756,7 +1769,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             if !members.is_empty() {
                 let centre = centre_of(e);
 
-                for wish in tactics::blob(&mut sight, &centre, &members) {
+                for wish in tactics::blob(&mut sight, &centre, &members, &fortified) {
                     walking.insert(wish.creep.clone(), wish);
                 }
             }
