@@ -1,15 +1,6 @@
 {
   "why": "a body that stays in a room stands a step inside its border, never carried back across",
-  "start": {
-    "room": "W8N3",
-    "seed": 1,
-    "node": "E1"
-  },
+  "start": { "room": "W8N3", "seed": 1, "node": "E1" },
   "ticks": 4000,
-  "assert": [
-    {
-      "measure": "bounced",
-      "max": 60
-    }
-  ]
+  "assert": [{ "measure": "bounced", "to": 4000, "max": 20 }]
 }
