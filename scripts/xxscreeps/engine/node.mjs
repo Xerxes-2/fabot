@@ -8,10 +8,10 @@
 //     mode kept and one more in stock for each level skipped), every other structure of the list ours at full hits on its
 //     tile (its roads and containers at <worn> of them, default 1), and <stored> energy in the storage
 //     (`<energy>,<resource>:<n>,…` puts each resource there too).
-//   xxscreeps.js file://…/node.mjs declare <room> <username> <declarations.json>
+//   xxscreeps.js file://…/node.mjs declare <room> <username> <declarations.json> [short]
 //     <username>'s Memory as `{ v2: { declarations } }`, what the bot reads
-//     its declarations from (src/app/wire.rs), and the GCL its claims need;
-//     <room> is not read.
+//     its declarations from (src/app/wire.rs), and the GCL its claims need
+//     unless `short`; <room> is not read.
 //   xxscreeps.js file://…/node.mjs unsafe <room>
 //     <room>'s safe mode ended and none left to activate.
 //   xxscreeps.js file://…/node.mjs ended <room>
@@ -110,13 +110,13 @@ if (mode === "ground") {
   await Promise.all([db.save(), shard.save()]);
   console.log(`stood ${list.length} structures at level ${level} in ${roomName}`);
 } else if (mode === "declare") {
-  const [username, path] = rest;
+  const [username, path, short] = rest;
   const declarations = JSON.parse(fs.readFileSync(path, "utf8"));
   const user = await User.findUserByName(db, username);
   await saveMemoryBlob(shard, user, utf16ToBuffer(JSON.stringify({ v2: { declarations } })));
   // A level of GCL a declared claim, at the engine's 1e6 × (level − 1)^2.4.
   const claims = declarations.claims?.length ?? 0;
-  if (claims) await db.data.hSet(User.infoKey(user), "gcl", String(Math.ceil(1e6 * claims ** 2.4)));
+  if (claims && !short) await db.data.hSet(User.infoKey(user), "gcl", String(Math.ceil(1e6 * claims ** 2.4)));
   await Promise.all([db.save(), shard.save()]);
   console.log(`declared ${JSON.stringify(declarations)}`);
 } else if (mode === "unsafe" || mode === "ended") {

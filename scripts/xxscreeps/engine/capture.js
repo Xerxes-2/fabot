@@ -34,6 +34,7 @@ module.exports = (memory) => {
   return JSON.stringify({
     time: Game.time,
     cpu: { limit: Game.cpu.limit, bucket: Game.cpu.bucket },
+    gcl: { level: Game.gcl.level },
     memory,
     rooms,
     creeps: ids(Game.creeps),

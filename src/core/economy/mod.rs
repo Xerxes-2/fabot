@@ -417,6 +417,7 @@ pub(crate) mod dice {
             spawns: rooms.iter().flat_map(|(_, s)| s.clone()).collect(),
             creeps,
             our_sites: 0,
+            rooms_allowed: rooms.len() as i32 + 1,
         };
 
         Generated {

@@ -470,6 +470,7 @@ pub struct World {
     pub creeps: Vec<Creep>,
     /// In every room, seen or not: what MAX_CONSTRUCTION_SITES counts.
     pub our_sites: i32,
+    pub rooms_allowed: i32,
 }
 
 pub mod terrain {

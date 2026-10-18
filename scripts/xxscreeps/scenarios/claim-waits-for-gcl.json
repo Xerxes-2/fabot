@@ -1,0 +1,19 @@
+{
+  "why": "no claimer is cast for a declared claim while every room GCL allows is owned",
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "node": "G2"
+  },
+  "ticks": 3000,
+  "assert": [
+    {
+      "measure": "refusals",
+      "max": 0
+    },
+    {
+      "measure": "faults",
+      "max": 0
+    }
+  ]
+}

@@ -178,6 +178,7 @@ export function stand(captured, list, getHeapStatistics, clock) {
   globalThis.Game = {
     time: tick.time,
     cpu: { ...tick.cpu, getUsed: () => clock() + 0.2 * intents.charged.size, getHeapStatistics },
+    gcl: tick.gcl ?? { level: 0 },
     map: { getRoomTerrain: (name) => new Terrain(name) },
     rooms,
     creeps: named(tick.creeps),

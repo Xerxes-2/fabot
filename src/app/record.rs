@@ -356,6 +356,7 @@ fn world(value: &World) -> JsValue {
         ("Spawns", array(value.spawns.iter().map(spawn).collect())),
         ("Creeps", array(value.creeps.iter().map(creep).collect())),
         ("OurSites", n(value.our_sites)),
+        ("RoomsAllowed", n(value.rooms_allowed)),
     ])
 }
 

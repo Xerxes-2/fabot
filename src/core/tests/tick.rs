@@ -57,6 +57,7 @@ fn run(throws: &[bool], state: State) -> TickResult {
         spawns: Vec::new(),
         creeps: Vec::new(),
         our_sites: 0,
+        rooms_allowed: 1,
     };
     let mut atlas = Atlas::of_world(&world);
     let declarations = tick::undeclared();

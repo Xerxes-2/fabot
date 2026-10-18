@@ -287,6 +287,11 @@ fn body_of(name: &str, pos: &Pos, parts: &[Part], store: &Store, life: i32) -> B
     }
 }
 
+fn owned_rooms(world: &World) -> i32 {
+    let ours = |r: &&Room| r.controller.as_ref().is_some_and(|c| c.owner.is_ours());
+    world.rooms.iter().filter(ours).count() as i32
+}
+
 fn reservable(me: &str, c: &Controller) -> bool {
     c.owner.is_nobody()
         && match &c.reservation {
@@ -983,6 +988,7 @@ pub fn of_world(
         grounds,
         claims: claims
             .iter()
+            .filter(|_| owned_rooms(world) < world.rooms_allowed)
             .filter_map(|claim| match world.room(&claim.room) {
                 Some(room) => room.controller.clone(),
                 None => blind(claim).controller,

@@ -111,7 +111,7 @@ globalThis.__fabotRead = (() => {
     );
     const mine = rooms.find((r) => r.controller && r.controller.my === true);
     s(spawns.length ? spawns[0].owner?.username : creeps.length ? creeps[0].owner.username : mine?.controller.owner?.username);
-    n(Object.keys(game.constructionSites).length);
+    n(Object.keys(game.constructionSites).length), n(game.gcl.level);
     return [ints.subarray(0, at), strs.join("\0")];
   };
 })();

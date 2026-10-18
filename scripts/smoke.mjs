@@ -89,6 +89,7 @@ globalThis.Game = {
   map: { getRoomTerrain: () => ({ getRawBuffer: () => terrain }) },
   spawns: { Spawn1: spawn },
   creeps: { a: creep },
+  gcl: { level: 1 },
   constructionSites: { cs1: found[111][0] },
   getObjectById: (id) => ({ s1: spawn, src1: found[105][0], c1: room.controller, cs1: found[111][0], p1: found[106][0] })[id] ?? null,
 };

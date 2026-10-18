@@ -306,6 +306,7 @@ pub fn of_game(terrain: &mut Terrains) -> World {
         spawns,
         creeps,
         our_sites: r.n(),
+        rooms_allowed: r.n(),
     }
 }
 
