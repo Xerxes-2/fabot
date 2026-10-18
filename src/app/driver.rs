@@ -8,6 +8,7 @@ use crate::app::executor::Refusal;
 use crate::app::wire;
 use crate::app::world;
 use crate::core::atlas::Atlas;
+use crate::core::economy::abandon;
 use crate::core::layout::shape::Standing;
 use crate::core::strategy::intel::{self, Intel};
 use crate::core::tick::{self, Context, Declarations};
@@ -135,10 +136,13 @@ fn run_tick() -> Result<(), String> {
         phases.push(("record".to_string(), clock() - start));
     }
 
-    let counts = vec![
+    let mut counts = vec![
         ("atlasHits".to_string(), atlas.hits()),
         ("atlasMisses".to_string(), atlas.misses()),
     ];
+    for room in declarations.abandon.iter().filter_map(|r| world.room(r)) {
+        counts.push((format!("abandon:{}", room.name), abandon::left(room)));
+    }
     let observed = wire::Observed {
         tick: world.time,
         version: wire::version(),

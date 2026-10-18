@@ -35,7 +35,12 @@ pub fn decide_over(colonies: &[derive::Colony], budget: i32) -> Vec<Intent> {
 
 pub fn decide(ctx: &mut Context, state: &State) -> Result<(Vec<Intent>, State), String> {
     let world = ctx.world;
-    let (colonies, standing) = derive::colonies(world, &state.layout);
+    let (mut colonies, standing) = derive::colonies(world, &state.layout);
+    for c in &mut colonies {
+        if ctx.declarations.abandon.contains(&c.room) {
+            c.plan = None;
+        }
+    }
 
     let budget = engine::MAX_CONSTRUCTION_SITES - world.our_sites;
     let home = decide_over(&colonies, budget);

@@ -219,9 +219,10 @@ pub struct Ground {
     /// Only the declared cluster's home has one.
     pub lab_plan: Option<super::labs::Plan>,
     pub terminal: Option<TerminalFact>,
-    /// The ore this colony sends the cluster's home, and the home.
+    /// What this colony sends, and the colony and its terminal's free room.
     pub shipment: Vec<(Resource, i32)>,
-    pub ship_to: Option<String>,
+    pub ship_to: Option<(String, i32)>,
+    pub abandoned: bool,
 }
 
 /// A resource, not a decider (`ARCHITECTURE.md` §2).
@@ -723,6 +724,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             }),
         shipment: Vec::new(),
         ship_to: None,
+        abandoned: false,
         towers: room
             .structures
             .iter()
@@ -899,7 +901,17 @@ pub fn of_world(
         grounds.push(remote_of(outpost));
     }
 
+    let given_up = |room: &str| declarations.abandon.iter().any(|r| r == room);
+    let free_at = |grounds: &[Ground], room: &str| {
+        grounds
+            .iter()
+            .find(|g| g.room == room)
+            .and_then(|g| g.terminal.as_ref())
+            .map_or(0, |t| t.store.free())
+    };
+
     if let Some((home, targets)) = &declarations.labs
+        && !given_up(home)
         && let Some(g) = grounds.iter_mut().find(|g| &g.room == home)
     {
         let labs: Vec<(String, Pos)> = g
@@ -933,10 +945,11 @@ pub fn of_world(
         };
         g.lab_plan = Some(super::labs::plan_for(targets, &stock, &labs, &held));
         let mut short = super::labs::ore_short(targets, &stock);
+        let home_free = free_at(&grounds, home);
 
         // The colonies in their order, each the ore it holds up to what is left.
         for g in grounds.iter_mut().take(colonies.len()) {
-            if &g.room == home || g.terminal.is_none() {
+            if &g.room == home || g.terminal.is_none() || given_up(&g.room) {
                 continue;
             }
             for (ore, left) in &mut short {
@@ -948,8 +961,20 @@ pub fn of_world(
                 }
             }
             if !g.shipment.is_empty() {
-                g.ship_to = Some(home.clone());
+                g.ship_to = Some((home.clone(), home_free));
             }
+        }
+    }
+
+    for (i, room) in colony_rooms.iter().enumerate() {
+        if given_up(&room.name) {
+            let to = grounds
+                .iter()
+                .take(colonies.len())
+                .filter(|g| g.terminal.is_some() && !given_up(&g.room))
+                .map(|g| (g.room.clone(), free_at(&grounds, &g.room)))
+                .max_by_key(|(_, free)| *free);
+            super::abandon::evacuate(&mut grounds[i], room, to);
         }
     }
 

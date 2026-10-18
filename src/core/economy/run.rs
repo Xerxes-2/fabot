@@ -322,18 +322,32 @@ fn link_sends(sends: &mut Vec<Intent>, ground: &Ground) {
     }
 }
 
-/// One send a tick off cooldown: what the terminal holds of the first ore
-/// still owed, as much as its energy pays for, never under the engine's least.
+/// One send a tick off cooldown: what the terminal holds of the first
+/// resource still owed, as much as its energy pays for and the receiver has
+/// room for, never under the engine's least. Energy sent leaves the fee of
+/// what is still owed.
 fn terminal_send(g: &Ground) -> Option<Intent> {
-    let (t, home) = (g.terminal.as_ref()?, g.ship_to.as_ref()?);
+    let (t, (home, free)) = (g.terminal.as_ref()?, g.ship_to.as_ref()?);
     if t.cooldown > 0 {
         return None;
     }
     let apart = tiles::rooms_apart(&g.room, home);
     let energy = t.store.amount_of(&Resource::Energy);
+    let fees: i32 = g
+        .shipment
+        .iter()
+        .filter(|(r, _)| !r.is_energy())
+        .map(|(_, n)| engine::send_cost(*n, apart))
+        .sum();
+    let kept = if fees > 0 { fees + 100 } else { 0 };
     g.shipment.iter().find_map(|(ore, owed)| {
-        let mut amount = t.store.amount_of(ore).min(*owed);
-        while amount > 0 && engine::send_cost(amount, apart) > energy {
+        let (pays, sent) = if ore.is_energy() {
+            (energy - kept, 1)
+        } else {
+            (energy, 0)
+        };
+        let mut amount = t.store.amount_of(ore).min(*owed).min(*free);
+        while amount > 0 && engine::send_cost(amount, apart) + sent * amount > pays {
             amount = amount * 9 / 10;
         }
         (amount >= engine::TERMINAL_MIN_SEND.min(*owed)).then(|| {

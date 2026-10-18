@@ -459,6 +459,7 @@ pub fn read_declarations() -> Declarations {
         allies: names(&declared, "allies"),
         enemies: names(&declared, "enemies"),
         sieges: names(&declared, "sieges"),
+        abandon: names(&declared, "abandon"),
     }
 }
 

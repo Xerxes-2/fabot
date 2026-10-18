@@ -189,7 +189,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `fight.engagements` | id → Engagement (§6.2), with the tick it opened, never moved | Fight | Memory | the commitment; read every tick; a home's deaths since it opened are its raid's |
 | `fight.groups` | id → Group (§6.1) | Fight | Memory | hostile identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | never cast twice |
-| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims | Strategy | Memory | what the world is for us, as data |
+| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims, colonies to abandon | Strategy | Memory | what the world is for us, as data |
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
 | `recorder` | the last ticks' read pass (`app/read.js`), Memory and intel rows, deflated; a tick over a segment spans several, so the ring keeps fewer | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
@@ -256,6 +256,14 @@ Economy serves declarations it did not make: a `Mine room` from `KeeperDuty`, a
 `Pickup pile` from `PowerBank`, a `Boost compound × n` from a `Siege` (labs), a
 `Claim room` from Strategy (the claimer and pioneers are economy bodies until a
 spawn stands).
+
+A colony declared `abandon` (owner, 2026-10-18: given up once its mineral is
+dug out) digs, builds and upgrades nothing past its downgrade deadline, casts
+only its supply floor, and ships what its storage, terminal and labs hold to
+the colony whose terminal has most room, energy last. The owner destroys its
+structures and unclaims by hand: `destroy()` needs our controller, and an
+owned structure left after the unclaim keeps the room in sight and in the
+world read every tick (`observe health` prints both commands once it is empty).
 
 ## 6. Fight (new)
 

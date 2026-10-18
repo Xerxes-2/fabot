@@ -3,6 +3,7 @@
 //! `decide` is `run.rs`'s: one `Derived` built once from the world, the pool,
 //! the match, the quota, and the intents they imply. `tick::MODULES` registers
 //! it as `"economy"` in `Main`.
+pub mod abandon;
 pub mod bodies;
 pub mod derived;
 pub mod labs;

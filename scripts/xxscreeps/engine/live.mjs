@@ -126,6 +126,8 @@ const stocked = (object, store) => {
       continue;
     }
     const have = object.store.getUsedCapacity(type) ?? 0;
+    // A lab's store adds to the mineral it holds, and an empty one holds none.
+    if (object.structureType === "lab" && have === 0 && amount > 0) object.store[type] = 0;
     if (amount > have) object.store["#add"](type, amount - have);
     else if (amount < have) object.store["#subtract"](type, have - amount);
   }

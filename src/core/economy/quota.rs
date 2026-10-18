@@ -187,7 +187,7 @@ fn owner_of(walks: &mut dyn Walks, derived: &Derived, gi: usize) -> Option<usize
             .or_else(|| ground.sources.first().map(|s| s.pos.clone()));
 
         match at {
-            Some(at) => walks.near(&|_| true, &at),
+            Some(at) => walks.near(&|ci| !derived.grounds[ci].abandoned, &at),
             None => None,
         }
     }
@@ -468,8 +468,11 @@ fn ground_demands(
     demands
 }
 
-fn castable(colonies: &[Colony], d: &Demand, ci: usize) -> bool {
-    engine::body_cost(bodies::block_of(d.pattern)) <= colonies[ci].bank_capacity
+/// A colony given up casts only its floors.
+fn castable(derived: &Derived, d: &Demand, ci: usize) -> bool {
+    let colonies = &derived.colonies;
+    !derived.grounds[ci].abandoned
+        && engine::body_cost(bodies::block_of(d.pattern)) <= colonies[ci].bank_capacity
         && (!d.pattern.is_upgrader() || colonies[ci].room == d.at.room)
 }
 
@@ -497,8 +500,8 @@ fn spend_demands(
         let caster = owners
             .get(&d.at.room)
             .copied()
-            .filter(|ci| castable(colonies, d, *ci))
-            .or_else(|| walks.near(&|ci| castable(colonies, d, ci), &d.at));
+            .filter(|ci| castable(derived, d, *ci))
+            .or_else(|| walks.near(&|ci| castable(derived, d, ci), &d.at));
 
         if let Some(ci) = caster
             && let Some(body) = body_for(&colonies[ci], d)
@@ -520,6 +523,15 @@ fn spend_demands(
     for (ci, colony) in colonies.iter().enumerate() {
         let ground = &derived.grounds[ci];
         let at = &colony.controller.pos;
+
+        // Only the downgrade deadline is upgraded, so the terminal stays
+        // active while it ships.
+        if ground.abandoned {
+            if super::pool::inside_deadline(&colony.controller) {
+                out.push(demand(Pattern::Worker, at, 1, Box::new(|_| None)));
+            }
+            continue;
+        }
         let surplus = income[ci] - upkeep[ci];
         let storage = ground.stores.iter().find(|s| s.owned);
 
@@ -898,11 +910,11 @@ pub fn plan(
     // The supply floor: with nobody to refill it, the bank never fills again.
     // A worker builds and upgrades between loads; a stock is carried by a hauler.
     for ci in 0..colonies.len() {
-        let pattern = if derived.grounds[ci]
-            .stores
-            .iter()
-            .any(|s| s.owned && s.energy > 0)
-        {
+        let ground = &derived.grounds[ci];
+        if ground.abandoned && ground.shipment.is_empty() {
+            continue;
+        }
+        let pattern = if ground.abandoned || ground.stores.iter().any(|s| s.owned && s.energy > 0) {
             Pattern::Hauler
         } else {
             Pattern::Worker
@@ -950,9 +962,9 @@ pub fn plan(
 
     for d in &all {
         let caster = match owners.get(&d.at.room).copied() {
-            Some(ci) if !foundry.idle[ci].is_empty() && castable(colonies, d, ci) => Some(ci),
+            Some(ci) if !foundry.idle[ci].is_empty() && castable(derived, d, ci) => Some(ci),
             _ => walks.near(
-                &|ci| !foundry.idle[ci].is_empty() && castable(colonies, d, ci),
+                &|ci| !foundry.idle[ci].is_empty() && castable(derived, d, ci),
                 &d.at,
             ),
         };

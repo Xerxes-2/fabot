@@ -275,16 +275,16 @@ fn lab_offers(offers: &mut Vec<Offer>, ground: &super::derived::Ground, plan: &s
     }
 }
 
-/// The energy the terminal lacks for the fee of the whole shipment.
-/// The energy the terminal keeps for its shipment's fee: a hundred over, as
-/// v1's feeReserve, since the fee rounds up per send.
+/// The energy the terminal keeps for its shipment's fee, a hundred over as
+/// v1's feeReserve since the fee rounds up per send, and the energy it ships.
 fn fee_reserve(ground: &super::derived::Ground) -> i32 {
     match &ground.ship_to {
-        Some(home) if ground.terminal.is_some() => {
+        Some((home, _)) if ground.terminal.is_some() => {
+            let apart = tiles::rooms_apart(&ground.room, home);
             let fee: i32 = ground
                 .shipment
                 .iter()
-                .map(|(_, n)| engine::send_cost(*n, tiles::rooms_apart(&ground.room, home)))
+                .map(|(r, n)| engine::send_cost(*n, apart) + if r.is_energy() { *n } else { 0 })
                 .sum();
             if fee > 0 { fee + 100 } else { 0 }
         }
@@ -310,12 +310,14 @@ fn shipment_offers(offers: &mut Vec<Offer>, ground: &super::derived::Ground) {
         if need <= 0 {
             continue;
         }
-        offers.push(offer(
-            Task::Refill(t.id.clone(), ore.clone()),
-            &t.pos,
-            value,
-            Capacity::Load(need),
-        ));
+        if !ore.is_energy() {
+            offers.push(offer(
+                Task::Refill(t.id.clone(), ore.clone()),
+                &t.pos,
+                value,
+                Capacity::Load(need),
+            ));
+        }
         for (store, pos, resource, amount) in &ground.ores {
             if store != &t.id && resource == ore {
                 offers.push(offer(
@@ -338,7 +340,7 @@ fn shipment_offers(offers: &mut Vec<Offer>, ground: &super::derived::Ground) {
     }
 }
 
-fn inside_deadline(c: &crate::core::world::Controller) -> bool {
+pub fn inside_deadline(c: &crate::core::world::Controller) -> bool {
     c.level > 0 && c.ticks_to_downgrade < engine::safe_mode_downgrade_line(c.level)
 }
 
@@ -592,7 +594,9 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
                 {
                     upgrade.priority = NURSERY_RANK;
                 }
-                offers.push(upgrade);
+                if !ground.abandoned || inside_deadline(c) {
+                    offers.push(upgrade);
+                }
             }
             Some(c) if ground.reservable && colony.is_none() => {
                 offers.push(offer(
@@ -702,7 +706,7 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
                 offers.push(withdraw);
             }
 
-            if s.owned && s.free > 0 {
+            if s.owned && s.free > 0 && !ground.abandoned {
                 for r in std::iter::once(Resource::Energy).chain(ores.iter().cloned()) {
                     offers.push(offer(
                         Task::Refill(s.id.clone(), r),

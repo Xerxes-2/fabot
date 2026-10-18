@@ -43,6 +43,8 @@ pub struct Declarations {
     pub enemies: BTreeSet<String>,
     /// The rival rooms whose towers and economy are razed.
     pub sieges: Vec<String>,
+    /// Our colonies being emptied before the owner unclaims them by hand.
+    pub abandon: Vec<String>,
 }
 
 pub fn undeclared() -> Declarations {
@@ -54,6 +56,7 @@ pub fn undeclared() -> Declarations {
         allies: BTreeSet::new(),
         enemies: BTreeSet::new(),
         sieges: Vec::new(),
+        abandon: Vec::new(),
     }
 }
 

@@ -365,8 +365,16 @@ function roomLines(rooms) {
   return Object.fromEntries(
     rooms.map((room) => {
       const line = lines[room.name];
-      const now = { creeps: 0, hostiles: 0, roads: 0, containers: 0, cores: 0 };
+      // `held`: what our storage, terminal, labs, factory and power spawn hold; `ores` the non-energy of it.
+      const now = { creeps: 0, hostiles: 0, roads: 0, containers: 0, cores: 0, held: 0, ores: 0 };
       for (const o of room["#objects"]) {
+        if (o["#user"] === ours && o.store && ["storage", "terminal", "lab", "factory", "powerSpawn"].includes(o.structureType)) {
+          // A lab's store answers no total.
+          for (const r of Object.keys(o.store)) {
+            now.held += o.store.getUsedCapacity(r) ?? 0;
+            if (r !== "energy") now.ores += o.store.getUsedCapacity(r) ?? 0;
+          }
+        }
         if (o.body !== undefined) now[o["#user"] === ours ? "creeps" : "hostiles"]++;
         else if (o.structureType === "invaderCore" && o["#lookType"] !== "ruin") now.cores++;
         else if (o["#lookType"] !== "constructionSite" && (o.structureType === "road" || o.structureType === "container")) now[`${o.structureType}s`]++;
