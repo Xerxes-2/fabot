@@ -171,13 +171,11 @@ pub fn wishes(atlas: &mut Atlas, target: &Target, weight: i32, members: &[&Creep
         };
         if waits {
             let stay = plan::stay(atlas, creep, mover.factor, weight);
-            let tail = stay
-                .tail
-                .iter()
-                .copied()
-                .filter(|tile| fits(creep, *tile) && keeps(atlas, step_back, creep, *tile))
-                .collect();
-            out.push(Wish { tail, ..stay });
+            let mut holds = |tile: Tile| fits(creep, tile) && keeps(atlas, step_back, creep, tile);
+            let mut tail: Vec<Tile> = stay.tail.iter().copied().filter(|t| holds(*t)).collect();
+            let regroup = stay.head != stay.at && !holds(stay.head) && !tail.is_empty();
+            let head = if regroup { tail.remove(0) } else { stay.head };
+            out.push(Wish { head, tail, ..stay });
         } else {
             let tail = wish
                 .tail
