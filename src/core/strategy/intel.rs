@@ -18,6 +18,8 @@ pub struct Row {
     pub reservation: Option<(String, i32)>,
     /// Whose body seen there carries WORK or CARRY: another's economy.
     pub worker: Option<String>,
+    /// None on a row written before lairs were read: unknown, not none.
+    pub lairs: Option<i32>,
 }
 
 pub type Intel = BTreeMap<String, Row>;
@@ -56,6 +58,12 @@ pub fn step(world: &World, intel: &mut Intel) {
                         .any(|p| matches!(p.kind, BodyPart::Work | BodyPart::Carry))
                 })
                 .and_then(|h| user(&world.me, &h.owner)),
+            lairs: Some(
+                room.structures
+                    .iter()
+                    .filter(|s| s.kind.is_keeper_lair())
+                    .count() as i32,
+            ),
         };
         match intel.get_mut(&room.name) {
             Some(held) => *held = row,
@@ -187,8 +195,8 @@ pub fn sight(
 
 const NONE: &str = "-";
 
-/// One line a room, `room seen owner level reserver lapse worker`, `-` for
-/// none: a segment holds thousands.
+/// One line a room, `room seen owner level reserver lapse worker lairs`, `-`
+/// for none: a segment holds thousands.
 pub fn to_text(intel: &Intel) -> String {
     let name = |user: &Option<String>| user.clone().unwrap_or_else(|| NONE.to_string());
     let mut out = String::new();
@@ -198,11 +206,12 @@ pub fn to_text(intel: &Intel) -> String {
             None => (NONE, NONE.to_string()),
         };
         out.push_str(&format!(
-            "{room} {} {} {} {reserver} {lapse} {}\n",
+            "{room} {} {} {} {reserver} {lapse} {} {}\n",
             r.seen,
             name(&r.owner),
             r.level,
-            name(&r.worker)
+            name(&r.worker),
+            r.lairs.map_or(NONE.to_string(), |n| n.to_string())
         ));
     }
     out
@@ -213,7 +222,7 @@ pub fn of_text(text: &str) -> Intel {
     text.lines()
         .filter_map(|line| {
             let f: Vec<&str> = line.split(' ').collect();
-            if f.len() != 7 {
+            if !(7..=8).contains(&f.len()) {
                 return None;
             }
             let row = Row {
@@ -222,6 +231,7 @@ pub fn of_text(text: &str) -> Intel {
                 level: f[3].parse().ok()?,
                 reservation: name(f[4]).zip(f[5].parse().ok()),
                 worker: name(f[6]),
+                lairs: f.get(7).and_then(|n| n.parse().ok()),
             };
             Some((f[0].to_string(), row))
         })
@@ -247,6 +257,7 @@ mod tests {
                 level: dice.between(0, 8),
                 reservation: user(&mut dice).map(|u| (u, dice.between(0, 9_999_999))),
                 worker: user(&mut dice),
+                lairs: dice.chance(2).then(|| dice.below(5)),
             };
             let intel: Intel = [("W1N1".to_string(), row)].into();
             assert_eq!(of_text(&to_text(&intel)), intel);

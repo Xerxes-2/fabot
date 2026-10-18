@@ -57,15 +57,18 @@ async function* replay() {
 }
 
 const require = createRequire(import.meta.url);
+// Each bundle installs its own world reader on the global; a tick runs on its own.
 const load = (path) => {
   delete require.cache[path];
-  return require(path);
+  const bot = require(path);
+  return { loop: () => bot.loop(), read: globalThis.__fabotRead };
 };
 
 function runTick(bot, tick) {
   const intents = [];
   let start;
   const game = stand(tick, intents, getHeapStatistics, () => performance.now() - start);
+  globalThis.__fabotRead = bot.read;
   start = performance.now();
   bot.loop();
   const flushed = performance.now();

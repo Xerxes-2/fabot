@@ -28,6 +28,7 @@ fn structure(kind: Kind, walkable: bool, x: i32, y: i32) -> Structure {
         store: Store::empty(),
         cooldown: 0,
         collapse: 0,
+        spawn: None,
         level: 0,
         walkable,
     }
@@ -467,7 +468,7 @@ fn a_memoised_answer_is_a_fresh_atlass_answer() {
         let mut stale =
             Atlas::of_world(&world_of(if kept { &walk.ground } else { &before.ground }));
         stale.travel_ticks(walk.mover, &target, &start);
-        let mut warm = Atlas::following(&stale, &world);
+        let mut warm = Atlas::following(&stale, &world, []);
         let first = warm.travel_ticks(walk.mover, &target, &start);
         let again = warm.travel_ticks(walk.mover, &target, &start);
         let step = warm.first_step(walk.mover, &target, &start);
@@ -577,34 +578,69 @@ fn a_route_crosses_shared_borders_around_the_avoided_by_fewest_crossings() {
 }
 
 #[test]
-fn no_route_crosses_a_keeper_room_nor_walks_within_a_keepers_reach() {
+fn any_open_neighbour_is_one_crossing_away_keeper_room_or_not() {
     let mut dice = Dice::new(20);
     let atlas = Atlas::of_world(&world_of_rooms(Vec::new()));
-    let keeper = |r: &String| tiles::is_keeper_room(tiles::room_coords(r).unwrap());
     for _ in 0..CASES {
-        let mut room = || tiles::room_name(dice.below(12) - 1, dice.below(12) - 1);
-        let (from, onto) = (room(), room());
-        if let Some(chain) = atlas.route(&BTreeSet::new(), 30, &from, &onto) {
-            assert!(chain[1..chain.len() - 1].iter().all(|r| !keeper(r)));
-        }
+        let from = tiles::room_name(dice.below(24) - 12, dice.below(24) - 12);
+        let exit = dice.pick(&[tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]);
+        let onto = tiles::room_toward(&from, exit).unwrap();
+        assert_eq!(
+            atlas.route(&BTreeSet::new(), 1, &from, &onto),
+            Some(vec![from.clone(), onto])
+        );
     }
+}
+
+#[test]
+fn every_tile_a_keeper_strikes_is_walled_and_a_room_of_keepers_not_due_walls_none() {
+    let mut dice = Dice::new(21);
     for _ in 0..CASES {
-        let mut world = world_of(&ground(&mut dice));
-        let (lair, rock) = (tile(&mut dice), tile(&mut dice));
-        let at = |t: Tile| Pos::new(ROOM, tiles::x_of(t), tiles::y_of(t));
-        world.rooms[0].structures =
-            vec![structure(Kind::KeeperLair, false, at(lair).x, at(lair).y)];
-        world.rooms[0].sources = vec![Source {
+        let ground = ground(&mut dice);
+        let mut world = world_of(&ground);
+        let (lair, rock, at) = (tile(&mut dice), tile(&mut dice), tile(&mut dice));
+        let pos = |t: Tile| tiles::to_pos(ROOM, t);
+        let room = &mut world.rooms[0];
+        let mut lair_of = structure(Kind::KeeperLair, false, pos(lair).x, pos(lair).y);
+        lair_of.spawn = Some(dice.between(-1, 2 * Atlas::crossing_ticks())).filter(|t| *t >= 0);
+        let spawns = lair_of.spawn.is_some_and(|t| t <= Atlas::crossing_ticks());
+        room.structures.push(lair_of);
+        room.sources.push(Source {
             id: "rock".into(),
-            pos: at(rock),
+            pos: pos(rock),
             energy: 0,
             energy_capacity: 0,
             ticks_to_regeneration: 0,
-        }];
-        let atlas = Atlas::of_world(&world);
-        for t in (0..tiles::COUNT).map(Tile::of_index) {
-            let out = |keeper: Tile, pin: i32| tiles::range(keeper, t) > pin + engine::RANGED_RANGE;
-            assert!(!atlas.passable(ROOM, t) || (out(lair, 0) && out(rock, engine::KEEPER_PIN)));
+        });
+        let alive = dice.chance(2);
+        if alive {
+            room.others.push(Creep {
+                id: "k".into(),
+                name: "k".into(),
+                owner: Owner::Keeper,
+                pos: pos(at),
+                body: engine::keeper_body()
+                    .into_iter()
+                    .map(|kind| Part {
+                        kind,
+                        hits: engine::PART_HITS,
+                        boost: Boost::Unboosted,
+                    })
+                    .collect(),
+                hits: 5000,
+                hits_max: 5000,
+                ticks_to_live: 1,
+                fatigue: 0,
+                store: Store::empty(),
+            });
+        }
+        let bare = Atlas::of_world(&world_of(&ground)).weights(ROOM).unwrap();
+        let weights = Atlas::of_world(&world).weights(ROOM).unwrap();
+        for t in tiles::all() {
+            let solid = t == lair || t == rock;
+            assert!(weights[t].is_none() || (bare[t] == weights[t] && !solid));
+            assert!(weights[t].is_none() || !alive || tiles::range(at, t) > engine::RANGED_RANGE);
+            assert!(alive || spawns || weights[t] == bare[t] || solid);
         }
     }
 }

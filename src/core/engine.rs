@@ -45,8 +45,14 @@ pub const MELEE_RANGE: i32 = 1;
 pub const RANGED_RANGE: i32 = 3;
 /// The reach of upgradeController, build and repair.
 pub const UPGRADE_RANGE: i32 = 3;
-/// A Source Keeper rests within this range of its source or mineral and never pursues.
-pub const KEEPER_PIN: i32 = 1;
+/// A keeper guards the first source, else mineral, this near its lair.
+pub const KEEPER_GUARD_RANGE: i32 = 5;
+
+pub fn keeper_body() -> Vec<BodyPart> {
+    let mut body = [[BodyPart::Tough; 17].as_slice(), &[BodyPart::Move; 13]].concat();
+    body.extend([BodyPart::Attack, BodyPart::RangedAttack].repeat(10));
+    body
+}
 /// The usernames the engine's NPCs carry.
 pub const INVADER_USER: &str = "Invader";
 pub const KEEPER_USER: &str = "Source Keeper";

@@ -191,6 +191,7 @@ pub(crate) mod dice {
             store: store(vec![(Resource::Energy, energy)], capacity),
             cooldown: 0,
             collapse: 0,
+            spawn: None,
             level: 0,
             walkable: kind.walkable(),
         }

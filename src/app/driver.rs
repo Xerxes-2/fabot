@@ -92,7 +92,8 @@ fn run_tick() -> Result<(), String> {
     phases.push(("world".to_string(), clock() - start));
 
     let start = clock();
-    atlas = Atlas::following(&atlas, &world);
+    let seen = (rows.iter()).filter_map(|(room, row)| Some((room.as_str(), row.lairs? > 0)));
+    atlas = Atlas::following(&atlas, &world, seen);
     phases.push(("atlas".to_string(), clock() - start));
 
     let mut context = Context {

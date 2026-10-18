@@ -16,8 +16,8 @@
 // less the residual it reports. `decay.jsonl`: each energy pile that
 // decayed, once it is gone or the run ends, with its tile's role and the
 // tombstone or ruin it fell out of. `bodies.jsonl`: each body, ours or not,
-// once it is gone from the colony's rooms or the run ends: its parts, the ticks it
-// was first and last seen, its ticks to live then, and its ticks by room and
+// once it is gone from the colony's rooms and their neighbours or the run ends: its parts, the ticks it
+// was first and last seen, its ticks to live then, the damage struck on it, and its ticks by room and
 // by action.
 // The colony's rooms are <room> (several homes: each sample's `homes` holds
 // one sample a home, the first's at its top) and the outposts its Memory declares
@@ -197,6 +197,9 @@ const creditOf = (stock, level) => {
   return reserve === 0 ? stock : reserve * Math.tanh(stock / reserve);
 };
 const world = await shard.loadWorld();
+const bordering = [...new Set(roomNames.flatMap((r) => Object.values(world.map.describeExits(r) ?? {})))].filter(
+  (r) => !roomNames.includes(r) && world.map.describeExits(r) !== null,
+);
 const roadCost = (room, pos) => {
   const t = world.map.getRoomTerrain(room).get(pos.x, pos.y);
   return t & 1 ? 150 * 300 : t & 2 ? 5 * 300 : 300;
@@ -313,19 +316,6 @@ function account(rooms, time) {
         graves.set(`${room.name} ${o.pos.x},${o.pos.y}`, { time, who });
       }
       const cost = o.body?.reduce((sum, p) => sum + (PART_COST[p.type] ?? 0), 0);
-      if (o.body !== undefined) {
-        const key = `${o["#user"]} ${o.name}`;
-        const life = lives.get(key) ?? { name: o.name, ours: o["#user"] === ours, body: o.body.map((p) => p.type[0]).join(""), cost, first: time, rooms: {}, acts: {} };
-        lives.set(key, life);
-        // Ticks it stood on the tile it stood on the tick before.
-        const at = `${room.name} ${o.pos.x},${o.pos.y}`;
-        if (life.at === at && life.last === time - 1) life.still = (life.still ?? 0) + 1;
-        life.at = at;
-        life.last = time;
-        life.ttl = o["#ageTime"] - time;
-        life.rooms[room.name] = (life.rooms[room.name] ?? 0) + 1;
-        for (const a of (o["#actionLog"] ?? []).filter((a) => a.time === time)) life.acts[a.type] = (life.acts[a.type] ?? 0) + 1;
-      }
       if (o.body !== undefined && o["#user"] !== ours) {
         hostile = true;
         continue;
@@ -349,11 +339,6 @@ function account(rooms, time) {
     if (bank < 300) regenNext += spawns.filter((sp) => energyIn(sp) < 300).length;
   }
   lastPiles = piles;
-  for (const [key, life] of lives)
-    if (life.last !== time) {
-      fs.writeSync(livesOut, JSON.stringify(life) + "\n");
-      lives.delete(key);
-    }
   for (const [id, log] of pileLog)
     if (!piles.has(id)) {
       if (log.decayed > 0) pileOut(log);
@@ -361,6 +346,35 @@ function account(rooms, time) {
     }
   if (ledger.stock0 === null) ledger.stock0 = stock;
   ledger.stock = stock;
+}
+
+function live(rooms, time) {
+  for (const room of rooms) {
+    const struck = new Map();
+    for (const e of room["#eventLog"] ?? [])
+      if ((e.event ?? e._$Variant) === ATTACK) struck.set(e.targetId, (struck.get(e.targetId) ?? 0) + e.damage);
+    for (const o of room["#objects"]) {
+      if (o.body === undefined) continue;
+      const key = `${o["#user"]} ${o.name}`;
+      const cost = o.body.reduce((sum, p) => sum + (PART_COST[p.type] ?? 0), 0);
+      const life = lives.get(key) ?? { name: o.name, ours: o["#user"] === ours, body: o.body.map((p) => p.type[0]).join(""), cost, first: time, rooms: {}, acts: {} };
+      lives.set(key, life);
+      // Ticks it stood on the tile it stood on the tick before.
+      const at = `${room.name} ${o.pos.x},${o.pos.y}`;
+      if (life.at === at && life.last === time - 1) life.still = (life.still ?? 0) + 1;
+      life.at = at;
+      life.last = time;
+      life.ttl = o["#ageTime"] - time;
+      life.rooms[room.name] = (life.rooms[room.name] ?? 0) + 1;
+      for (const a of (o["#actionLog"] ?? []).filter((a) => a.time === time)) life.acts[a.type] = (life.acts[a.type] ?? 0) + 1;
+      if (struck.has(o.id)) life.struck = (life.struck ?? 0) + struck.get(o.id);
+    }
+  }
+  for (const [key, life] of lives)
+    if (life.last !== time) {
+      fs.writeSync(livesOut, JSON.stringify(life) + "\n");
+      lives.delete(key);
+    }
 }
 
 function roomLines(rooms) {
@@ -760,6 +774,7 @@ for (let t = 0; t < ticks; t++) {
   const rooms = await Promise.all(roomNames.map((name) => shard.loadRoom(name, time)));
   const room = rooms[0];
   account(rooms, time);
+  live([...rooms, ...(await Promise.all(bordering.map((name) => shard.loadRoom(name, time))))], time);
   await engaged(t, time, rooms);
   detours(rooms);
   stoodLoaded(rooms, time);

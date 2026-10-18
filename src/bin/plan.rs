@@ -102,6 +102,7 @@ fn main() {
             store: Store::empty(),
             cooldown: 0,
             collapse: 0,
+            spawn: None,
             level: 0,
             walkable,
         })

@@ -69,6 +69,7 @@ globalThis.__fabotRead = (() => {
     s(type), s(st.id), n(st.pos.x), n(st.pos.y), owner(st), n(st.hits), n(st.hitsMax);
     if (STORED.has(type) || !KNOWN.has(type)) store(st.store);
     if (COOLED.has(type)) n(st.cooldown);
+    if (type === "keeperLair") n(st.ticksToSpawn ?? -1);
     if (type === "invaderCore") collapse(st), n(st.level);
     if (type === "rampart") n(st.isPublic === true);
   };
@@ -139,6 +140,7 @@ globalThis.__fabotRead = (() => {
       Object.assign(o, { hits: n(), hitsMax: n() });
       if (STORED.has(type) || !KNOWN.has(type)) store(o);
       if (COOLED.has(type)) o.cooldown = n();
+      if (type === "keeperLair" && (o.ticksToSpawn = n()) < 0) delete o.ticksToSpawn;
       if (type === "invaderCore") {
         if (n()) o.effects = [{ effect: 1002, ticksRemaining: n() }];
         else o.ticksToDeploy = n();

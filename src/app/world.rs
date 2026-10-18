@@ -165,6 +165,7 @@ impl Reader<'_> {
             Store::empty()
         };
         let cooldown = if kind.has_cooldown() { self.n() } else { 0 };
+        let spawn = kind.is_keeper_lair().then(|| self.n()).filter(|t| *t >= 0);
         let (collapse, level) = if kind.is_invader_core() {
             let running = self.flag();
             let ticks = self.n();
@@ -194,6 +195,7 @@ impl Reader<'_> {
             cooldown,
             collapse,
             level,
+            spawn,
             walkable,
         }
     }

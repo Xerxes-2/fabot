@@ -346,6 +346,8 @@ pub struct Structure {
     pub collapse: i32,
     /// An Invader core's level, 0 for an expansion core; 0 for any other structure.
     pub level: i32,
+    /// A keeper lair's ticks to its next keeper; None while one lives.
+    pub spawn: Option<i32>,
     pub walkable: bool,
 }
 

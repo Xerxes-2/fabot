@@ -74,12 +74,12 @@ const engagementsOf = (dir) =>
   rowsOf(dir)
     .filter((e) => e.predicted)
     .map((e) => ({ p: e.predicted, a: engagement(e) }));
-const scoutsOf = (dir) =>
+const livesOf = (dir) =>
   readFileSync(join(dir, "bodies.jsonl"), "utf8")
     .split("\n")
     .filter(Boolean)
-    .map((l) => JSON.parse(l))
-    .filter((b) => b.ours && b.name.startsWith("scout-"));
+    .map((l) => JSON.parse(l));
+const scoutsOf = (dir) => livesOf(dir).filter((b) => b.ours && b.name.startsWith("scout-"));
 const walksOf = (dir) => rowsOf(dir).flatMap((e) => (e.blob ? [e.blob] : []));
 const foughtOf = (dir) => rowsOf(dir).flatMap((e) => (e.fought ? [e.fought] : []));
 const mean = (xs) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
@@ -212,13 +212,14 @@ const measures = {
   sweepDenied: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.denied ?? 0), 0),
   sweepNet: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.killed ?? 0) + (e.denied ?? 0) - e.cast, 0),
   bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),
-  // Our bodies gone from the colony's rooms with life left: died, or walked
+  // Our bodies gone from the colony's rooms and their neighbours with life left: died, or walked
   // through a room the soak does not follow.
   bodiesOut: (_, __, dir) => {
-    const lives = readFileSync(join(dir, "bodies.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const lives = livesOf(dir);
     const end = Math.max(...lives.map((b) => b.last));
     return new Set(lives.filter((b) => b.ours && b.last < end && b.ttl > 1).map((b) => b.name)).size;
   },
+  bodiesStruck: (_, __, dir) => livesOf(dir).reduce((n, b) => n + (b.ours ? (b.struck ?? 0) : 0), 0),
   // The most energy one engagement cast, of the bodies that stood in it.
   mostCast: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.cast ?? 0)),
   // The most energy a siege cast that stood before its breach (none breached: Infinity).

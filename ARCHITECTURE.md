@@ -143,7 +143,7 @@ cold tick never spends more than ❓ 60% of the limit.
 | `Bindings` | the Screeps API surface | — | — | port verbatim |
 | `Engine` | server constants and formulas | — | — | port verbatim |
 | `World` | this tick's facts, one record | Game | — | port, trim |
-| `Atlas` | geometry in two layers: the **room graph** (which rooms a route crosses, highway cost, rooms to avoid, hops) and the **tile grid** per room (terrain, floods, seats, work areas, first steps). Every tile query takes a **footprint** (1×1 today, 2×2 for a formation) | World, `intel.rooms` for avoided rooms | flood table, kept across ticks per room while its weights hold | port, add the graph layer, widen the query |
+| `Atlas` | geometry in two layers: the **room graph** (which rooms a route crosses, each priced at its crossing's ticks round every tile a keeper strikes, a keeper room out of sight at two crossings and taken only past every other; rooms to avoid) and the **tile grid** per room (terrain, floods, seats, work areas, first steps). Every tile query takes a **footprint** (1×1 today, 2×2 for a formation) | World, `intel.rooms` for avoided and keeper rooms | flood table, kept across ticks per room while its weights hold; the rooms whose lairs intel reads otherwise than their names, rebuilt each tick | port, add the graph layer, widen the query |
 | `Economy` | task pool, planner, matcher, quota, spawns, labs, terminals, market | World, Atlas, declarations, `State.Economy` | tasks, casts, `State.Economy` | port, trim (§5) |
 | `Layout` | construction and tower plans | World, Atlas, declarations (outposts' containers and roads) | sites, tower intents | port |
 | `Exchange` | who wins: pure fight arithmetic | bodies, terrain | — | port from `Facts.fs:2883–4056, 1038–1582`, `Fighter.fs`, `Arrival.fs`; narrow the input |
@@ -194,7 +194,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
 | `recorder` | the last ticks' read pass (`app/read.js`), Memory and intel rows, deflated; a tick over a segment spans several, so the ring keeps fewer | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
-| `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK or CARRY body stood there; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
+| `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK or CARRY body stood there, its keeper lairs; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
 | `observe.*` | health, faults, per-module CPU, counters | Main, then Observe | segment 1 | operator; calibrates the benchmark |
 | `scouts`, `preyed` | the declared rooms a scout serves; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
@@ -470,8 +470,8 @@ than `STALE` (a creep life, the owner's) in range. Every declared room no
 observer covers is a `Scout room` declaration: a living 1-MOVE scout patrols
 them stalest first and never idles; a new one is cast only for a row past
 `STALE` (a room never seen is served as nobody's, its bodies' sight its first row).
-❓ After the sweep: rows grow towers, sources and keeper lairs with their
-first reader, and whether the room graph's avoided set comes from them.
+❓ After the sweep: rows grow towers and sources with their first reader,
+and whether the room graph's avoided set comes from them.
 
 ### 7.2 Expansion and declarations
 

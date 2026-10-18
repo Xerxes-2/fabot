@@ -1,6 +1,7 @@
 //! The floods are the one cache (`ARCHITECTURE.md` §1). Built twice from one
 //! `World`, an Atlas answers identically: a kept flood is one on equal weights.
-use std::collections::BTreeSet;
+use std::cmp::Reverse;
+use std::collections::{BTreeSet, BinaryHeap};
 
 use crate::core::HashMap;
 use std::rc::Rc;
@@ -11,8 +12,10 @@ pub mod tiles;
 use self::grid::{
     FatigueFactor, Footprint, UNREACHED, Weight, flood, on_edge, step_table, step_ticks, weight_of,
 };
-use self::tiles::{Table, Tile};
+use self::tiles::{Table, Tile, TileSet};
 use super::engine;
+use super::exchange::fighter::{self, Fighter};
+use super::vocabulary::BodyPart;
 use super::world::{Kind, Owner, Pos, Room, World};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +40,9 @@ pub struct Target {
 pub struct RoomGrid {
     pub weights: Rc<Table<Weight>>,
     pub floods: HashMap<FloodKey, Rc<Table<i32>>>,
+    /// The open tiles a keeper strikes, walled; with any, the room graph
+    /// prices the room's crossing.
+    pub struck: Option<Rc<TileSet>>,
 }
 
 /// What a flood is a function of besides the room's weights: the mover's
@@ -52,6 +58,51 @@ pub struct FloodKey {
 enum Goal {
     Seats { range: i32, tiles: Vec<Tile> },
     Exit(i32),
+}
+
+impl FloodKey {
+    fn of(mover: Mover, goal: Goal) -> FloodKey {
+        let grounds = [
+            engine::ROAD_WEIGHT,
+            engine::PLAIN_WEIGHT,
+            engine::SWAMP_WEIGHT,
+        ];
+        FloodKey {
+            footprint: mover.footprint,
+            steps: grounds.map(|w| step_ticks(mover.factor, w)),
+            goal,
+        }
+    }
+}
+
+impl RoomGrid {
+    /// The flood toward `goal`, and whether it was kept.
+    fn flood(&mut self, mover: Mover, goal: Goal) -> (Rc<Table<i32>>, bool) {
+        let key = FloodKey::of(mover, goal);
+        if let Some(dist) = self.floods.get(&key) {
+            return (dist.clone(), true);
+        }
+        let footprint = mover.footprint;
+        let goals = match &key.goal {
+            Goal::Seats {
+                range,
+                tiles: targets,
+            } => {
+                let mut goals = Vec::new();
+                for &tile in targets {
+                    if tile.index() < tiles::COUNT {
+                        Atlas::seats_near(footprint, &self.weights, *range, tile, &mut goals);
+                    }
+                }
+                goals
+            }
+            Goal::Exit(exit) => Atlas::exit_goals(footprint, &self.weights, *exit),
+        };
+        let steps = step_table(mover.factor);
+        let dist = Rc::new(flood(footprint, &self.weights, &steps, &goals));
+        self.floods.insert(key, dist.clone());
+        (dist, false)
+    }
 }
 
 type Coords = (i32, i32);
@@ -93,11 +144,14 @@ pub struct Field {
     pub weights: Rc<Table<Weight>>,
     pub factor: FatigueFactor,
     pub dist: Rc<Table<i32>>,
+    pub struck: Option<Rc<TileSet>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Atlas {
     pub rooms: HashMap<String, RoomGrid>,
+    /// The rooms intel saw whose lairs the name formula misreads.
+    pub lairs: HashMap<Coords, bool>,
     pub misses: i32,
     pub hits: i32,
 }
@@ -119,7 +173,15 @@ impl Field {
         tiles::least_around(tile, UNREACHED, |n| self.via(n))
     }
 
+    fn is_struck(&self, tile: Tile) -> bool {
+        self.struck.as_ref().is_some_and(|s| s.contains(tile))
+    }
+
+    /// None on a struck tile, so no walk but its own way out takes one.
     pub fn ticks(&self, tile: Tile) -> Option<i32> {
+        if self.is_struck(tile) {
+            return None;
+        }
         let d = if weight_of(self.footprint, &self.weights, tile).is_some() {
             self.dist[tile]
         } else {
@@ -136,7 +198,48 @@ impl Field {
         }
     }
 
+    /// Out of a strike a body stands in, the shortest way across struck
+    /// tiles, never deeper, onto the open tile nearest the goal.
+    fn escape(&self, from: Tile) -> Option<i32> {
+        let struck = self.struck.as_ref().filter(|_| self.footprint.is_one())?;
+        let mut seen = TileSet::default();
+        seen.insert(from);
+        let mut met = vec![(from, 0)];
+        let mut frontier = vec![0];
+        while !frontier.is_empty() {
+            let mut out: Option<(i32, Tile, usize)> = None;
+            let mut next = Vec::new();
+            for &i in &frontier {
+                for &n in tiles::around(met[i].0) {
+                    let d = self.dist[n];
+                    let open = self.weights[n].is_some() && d != UNREACHED;
+                    if !seen.insert(n) || !(open || struck.contains(n)) {
+                        continue;
+                    }
+                    if !open {
+                        met.push((n, i));
+                        next.push(met.len() - 1);
+                    } else if out.is_none_or(|(od, ot, _)| (d, n) < (od, ot)) {
+                        out = Some((d, n, i));
+                    }
+                }
+            }
+            if let Some((_, mut step, mut i)) = out {
+                while i != 0 {
+                    step = met[i].0;
+                    i = met[i].1;
+                }
+                return Some(tiles::direction(from, step));
+            }
+            frontier = next;
+        }
+        None
+    }
+
     pub fn step(&self, tile: Tile) -> Option<i32> {
+        if self.is_struck(tile) {
+            return self.escape(tile);
+        }
         match self.ticks(tile) {
             Some(d) if d > 0 => self.best(tile).map(|next| tiles::direction(tile, next)),
             _ => None,
@@ -239,14 +342,78 @@ impl Atlas {
     pub fn empty() -> Atlas {
         Atlas {
             rooms: HashMap::default(),
+            lairs: HashMap::default(),
             misses: 0,
             hits: 0,
         }
     }
 
-    /// Past a keeper's pin, its ranged reach and a step each, its and ours, a
-    /// tile is out of its strike.
-    const KEEPER_MARGIN: i32 = engine::KEEPER_PIN + engine::RANGED_RANGE + 2;
+    /// A keeper's walk from `from` to its post: the tile beside the resource
+    /// it guards that a walk reaches first. One standing nowhere near a
+    /// resource stays.
+    fn walk_of(room: &Room, from: Tile) -> Vec<Tile> {
+        let near = |p: &Pos| tiles::range(from, tiles::of_pos(p));
+        let sources = room.sources.iter().map(|s| (false, &s.pos));
+        let Some((_, resource)) = sources
+            .chain(room.minerals.iter().map(|m| (true, &m.pos)))
+            .filter(|(_, p)| near(p) <= engine::KEEPER_GUARD_RANGE)
+            .min_by_key(|(mineral, p)| (*mineral, near(p)))
+        else {
+            return vec![from];
+        };
+        let resource = tiles::of_pos(resource);
+        let open = |t: Tile| room.terrain[t] & super::world::terrain::WALL == 0;
+        let mut seen = TileSet::default();
+        seen.insert(from);
+        let mut met = vec![(from, 0)];
+        let mut at = 0;
+        while let Some(&(t, _)) = met.get(at) {
+            if tiles::range(t, resource) == 1 {
+                let mut walk = vec![t];
+                while at != 0 {
+                    at = met[at].1;
+                    walk.push(met[at].0);
+                }
+                return walk;
+            }
+            for &n in tiles::around(t) {
+                if open(n)
+                    && tiles::range(n, from) <= 2 * engine::KEEPER_GUARD_RANGE
+                    && seen.insert(n)
+                {
+                    met.push((n, at));
+                }
+            }
+            at += 1;
+        }
+        vec![from]
+    }
+
+    /// The tiles the keepers strike from anywhere on the walk to their posts:
+    /// a living one's, and a dead one's successor's from its lair once it
+    /// spawns before a crossing ends.
+    fn struck(room: &Room) -> Vec<Tile> {
+        let living = room.others.iter().filter(|c| c.owner == Owner::Keeper);
+        let mut strikers: Vec<(Tile, Fighter)> = living
+            .map(|c| {
+                let body: Vec<BodyPart> = c.body.iter().map(|p| p.kind).collect();
+                let boosts: Vec<_> = c.body.iter().map(|p| p.boost).collect();
+                let f = fighter::of_parts(&body, &boosts, c.hits, None);
+                (tiles::of_pos(&c.pos), f)
+            })
+            .collect();
+        for lair in room.structures.iter().filter(|s| s.kind.is_keeper_lair()) {
+            if lair.spawn.is_some_and(|t| t <= Atlas::crossing_ticks()) {
+                let f = fighter::cast(&engine::keeper_body());
+                strikers.push((tiles::of_pos(&lair.pos), f));
+            }
+        }
+        let walks = strikers.iter().flat_map(|(from, f)| {
+            let walk = Atlas::walk_of(room, *from);
+            walk.into_iter().flat_map(|w| tiles::within(f.reach, w))
+        });
+        walks.collect()
+    }
 
     /// ~10 kB each. A dropped resource's tile is a new goal, so a room's keys
     /// are unbounded; past this the room floods afresh.
@@ -257,8 +424,12 @@ impl Atlas {
     }
 
     /// A room whose terrain buffer is not a whole room has no grid: routed by
-    /// name, never walked.
-    pub fn following(previous: &Atlas, world: &World) -> Atlas {
+    /// name, never walked. `seen` is intel's: each room and whether it holds a lair.
+    pub fn following<'a>(
+        previous: &Atlas,
+        world: &World,
+        seen: impl IntoIterator<Item = (&'a str, bool)>,
+    ) -> Atlas {
         let mut rooms: HashMap<String, RoomGrid> = HashMap::default();
 
         for room in world
@@ -317,16 +488,11 @@ impl Atlas {
                 weights[tiles::of_pos(&creep.pos)] = None;
             }
 
-            if room.structures.iter().any(|s| s.kind.is_keeper_lair()) {
-                let lairs = room.structures.iter().filter(|s| s.kind.is_keeper_lair());
-                // A keeper is cast on its lair and pinned only to its rock.
-                let lairs = lairs.map(|s| (&s.pos, Atlas::KEEPER_MARGIN - engine::KEEPER_PIN));
-                let rocks = room.sources.iter().map(|s| &s.pos);
-                let rocks = rocks.chain(room.minerals.iter().map(|m| &m.pos));
-                for (pos, margin) in lairs.chain(rocks.map(|p| (p, Atlas::KEEPER_MARGIN))) {
-                    for tile in tiles::within(margin, tiles::of_pos(pos)) {
-                        weights[tile] = None;
-                    }
+            let mut struck = TileSet::default();
+            let mut any = false;
+            for t in Atlas::struck(room) {
+                if weights[t].take().is_some() {
+                    any |= struck.insert(t);
                 }
             }
 
@@ -341,18 +507,34 @@ impl Atlas {
                 _ => HashMap::default(),
             };
 
-            rooms.insert(room.name.clone(), RoomGrid { weights, floods });
+            let mut grid = RoomGrid {
+                weights,
+                floods,
+                struck: any.then(|| Rc::new(struck)),
+            };
+            if grid.struck.is_some() {
+                for exit in Atlas::EXITS {
+                    grid.flood(Atlas::PACE, Goal::Exit(exit));
+                }
+            }
+            rooms.insert(room.name.clone(), grid);
         }
 
+        let lairs = seen
+            .into_iter()
+            .filter_map(|(name, lairs)| Some((tiles::room_coords(name)?, lairs)))
+            .filter(|(c, lairs)| *lairs != tiles::is_keeper_room(*c))
+            .collect();
         Atlas {
             rooms,
+            lairs,
             misses: 0,
             hits: 0,
         }
     }
 
     pub fn of_world(world: &World) -> Atlas {
-        Atlas::following(&Atlas::empty(), world)
+        Atlas::following(&Atlas::empty(), world, [])
     }
 
     pub fn misses(&self) -> i32 {
@@ -396,6 +578,12 @@ impl Atlas {
         self.rooms
             .get(room)
             .is_some_and(|grid| grid.weights[tile].is_some())
+    }
+
+    /// Walled for a walk in, open for a body standing in it to walk out.
+    pub fn is_struck(&self, room: &str, tile: Tile) -> bool {
+        let grid = self.rooms.get(room).and_then(|g| g.struck.as_ref());
+        grid.is_some_and(|s| s.contains(tile))
     }
 
     pub fn sees(&self, room: &str) -> bool {
@@ -472,7 +660,43 @@ impl Atlas {
         false
     }
 
+    /// A body that steps every tick off swamp: the pace a room's crossing is
+    /// priced at.
+    const PACE: Mover = Mover {
+        footprint: Footprint::One,
+        factor: FatigueFactor {
+            weight: 1,
+            moves: 1,
+        },
+    };
+
+    const EXITS: [i32; 4] = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT];
+
+    /// Whether `room` is a keeper room crossed blind, and the ticks across it
+    /// from its `entry` side out its `exit`, never under a crossing's: priced
+    /// round the tiles a keeper strikes, two crossings out of sight with
+    /// lairs, as cartographers price it.
+    fn crossing(&self, grid: Option<&RoomGrid>, room: Coords, entry: i32, exit: i32) -> (i32, i32) {
+        let flood = grid
+            .filter(|g| g.struck.is_some())
+            .and_then(|g| g.floods.get(&FloodKey::of(Atlas::PACE, Goal::Exit(exit))));
+        let lairs = || (self.lairs.get(&room).copied()).unwrap_or(tiles::is_keeper_room(room));
+        let ticks = Atlas::crossing_ticks();
+        match flood {
+            _ if entry == 0 => (0, ticks),
+            Some(dist) => {
+                let entered = tiles::exit_tiles(entry).iter().map(|t| dist[*t]);
+                (0, entered.min().map_or(UNREACHED, |d| d.max(ticks)))
+            }
+            None if grid.is_none() && lairs() => (1, 2 * ticks),
+            None => (0, ticks),
+        }
+    }
+
     /// Over world coordinates, so a room met is named only on the route out.
+    /// Fewest blind keeper rooms first, since a guard may stand on the tile a
+    /// blind entry lands on, then cheapest; `max_hops` crossings its budget;
+    /// equal costs in the order met, so on plain rooms it is the hop search.
     fn search(&self, avoid: &BTreeSet<String>, max_hops: i32, from: &str, onto: &str) -> Tree {
         let mut parent: HashMap<Coords, Coords> = HashMap::default();
         let Some(start) = tiles::room_coords(from) else {
@@ -485,36 +709,45 @@ impl Atlas {
             .iter()
             .filter_map(|(name, grid)| Some((tiles::room_coords(name)?, grid)))
             .collect();
+        let budget = max_hops * Atlas::crossing_ticks();
 
+        let mut cost: HashMap<Coords, (i32, i32)> = HashMap::default();
+        let mut queue = BinaryHeap::new();
+        let mut met = 0;
         parent.insert(start, start);
-        let mut frontier = vec![start];
-        let mut hops = 0;
+        cost.insert(start, (0, 0));
+        queue.push(Reverse(((0, 0), met, start)));
 
-        while !frontier.is_empty()
-            && hops < max_hops
-            && !onto.is_some_and(|o| parent.contains_key(&o))
-        {
-            let mut next = Vec::new();
-            for &room in &frontier {
-                for e in 0..4 {
-                    let exit = tiles::TOP + 2 * e;
-                    let there = (room.0 + tiles::dx(exit), room.1 + tiles::dy(exit));
-                    if !parent.contains_key(&there)
-                        && (Some(there) == onto
-                            || !(avoid.contains(&there) || tiles::is_keeper_room(there)))
-                        && Atlas::linked(
-                            grids.get(&room).copied(),
-                            grids.get(&there).copied(),
-                            exit,
-                        )
-                    {
-                        parent.insert(there, room);
-                        next.push(there);
-                    }
+        while let Some(Reverse((spent, _, room))) = queue.pop() {
+            if Some(room) == onto {
+                break;
+            }
+            if spent > cost[&room] {
+                continue;
+            }
+            let back = parent[&room];
+            let entry = Atlas::EXITS
+                .into_iter()
+                .find(|e| (room.0 + tiles::dx(*e), room.1 + tiles::dy(*e)) == back)
+                .unwrap_or(0);
+            let grid = grids.get(&room).copied();
+            for exit in Atlas::EXITS {
+                let there = (room.0 + tiles::dx(exit), room.1 + tiles::dy(exit));
+                if exit == entry || (avoid.contains(&there) && Some(there) != onto) {
+                    continue;
+                }
+                let (blind, ticks) = self.crossing(grid, room, entry, exit);
+                let total = (spent.0 + blind, spent.1.saturating_add(ticks));
+                if total.1 <= budget
+                    && cost.get(&there).is_none_or(|c| total < *c)
+                    && Atlas::linked(grid, grids.get(&there).copied(), exit)
+                {
+                    met += 1;
+                    cost.insert(there, total);
+                    parent.insert(there, room);
+                    queue.push(Reverse((total, met, there)));
                 }
             }
-            frontier = next;
-            hops += 1;
         }
 
         Tree(parent)
@@ -592,49 +825,20 @@ impl Atlas {
             }
         };
 
-        let factor = mover.factor;
-        let key = FloodKey {
-            footprint,
-            steps: [
-                engine::ROAD_WEIGHT,
-                engine::PLAIN_WEIGHT,
-                engine::SWAMP_WEIGHT,
-            ]
-            .map(|w| step_ticks(factor, w)),
-            goal,
-        };
-
         let grid = self.rooms.get_mut(room).unwrap();
-        let dist = if let Some(dist) = grid.floods.get(&key) {
+        let (dist, kept) = grid.flood(mover, goal);
+        if kept {
             self.hits += 1;
-            dist.clone()
         } else {
             self.misses += 1;
-            let goals = match &key.goal {
-                Goal::Seats {
-                    range,
-                    tiles: targets,
-                } => {
-                    let mut goals = Vec::new();
-                    for &tile in targets {
-                        if tile.index() < tiles::COUNT {
-                            Atlas::seats_near(footprint, &grid.weights, *range, tile, &mut goals);
-                        }
-                    }
-                    goals
-                }
-                Goal::Exit(exit) => Atlas::exit_goals(footprint, &grid.weights, *exit),
-            };
-            let dist = Rc::new(flood(footprint, &grid.weights, &step_table(factor), &goals));
-            grid.floods.insert(key, dist.clone());
-            dist
-        };
+        }
 
         Some(Field {
             footprint,
             weights: grid.weights.clone(),
-            factor,
+            factor: mover.factor,
             dist,
+            struck: grid.struck.clone(),
         })
     }
 

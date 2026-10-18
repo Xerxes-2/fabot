@@ -319,7 +319,7 @@ pub fn arbitrate(context: &Context, wishes: &[(String, mv::Wish)]) -> Vec<Intent
             .collect();
         let steps = mv::arbitrate::arbitrate_with(
             &mut scratch,
-            |tile| context.atlas.passable(&room, tile),
+            |tile| context.atlas.passable(&room, tile) || context.atlas.is_struck(&room, tile),
             &held,
             &ws,
         );

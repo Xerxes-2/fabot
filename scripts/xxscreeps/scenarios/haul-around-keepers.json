@@ -11,6 +11,10 @@
       "max": 0
     },
     {
+      "measure": "bodiesStruck",
+      "max": 0
+    },
+    {
       "measure": "dug",
       "room": "W6S7",
       "min": 1
