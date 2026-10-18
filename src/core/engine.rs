@@ -31,6 +31,11 @@ pub const STORAGE_CAPACITY: i32 = 1_000_000;
 pub const TERMINAL_CAPACITY: i32 = 300_000;
 pub const TERMINAL_COOLDOWN: i32 = 10;
 pub const TERMINAL_MIN_SEND: i32 = 100;
+
+/// The energy a terminal spends sending `amount` across `distance` rooms.
+pub fn send_cost(amount: i32, distance: i32) -> i32 {
+    (f64::from(amount) * (1.0 - (-f64::from(distance) / 30.0).exp())).ceil() as i32
+}
 pub const LAB_MINERAL_CAPACITY: i32 = 3000;
 pub const LAB_REACTION_AMOUNT: i32 = 5;
 pub const LAB_REACTION_RANGE: i32 = 2;

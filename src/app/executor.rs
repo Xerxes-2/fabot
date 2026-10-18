@@ -5,7 +5,7 @@ use wasm_bindgen::{JsCast, JsValue};
 
 use crate::app::world;
 use crate::core::intents::{
-    ControllerAct, CreepAct, Intent, LabAct, LinkAct, RoomAct, SpawnAct, TowerAct,
+    ControllerAct, CreepAct, Intent, LabAct, LinkAct, RoomAct, SpawnAct, TerminalAct, TowerAct,
 };
 use crate::core::vocabulary;
 
@@ -185,6 +185,18 @@ fn act(intent: &Intent) -> (String, i32) {
             },
             _ => ("runReaction".to_string(), NOT_FOUND),
         },
+        Intent::Terminal(id, TerminalAct::Send(resource, amount, room)) => {
+            match world::object_by_id(id) {
+                None => ("send".to_string(), NOT_FOUND),
+                Some(t) => {
+                    let name = JsValue::from_str(&vocabulary::resource_name(resource));
+                    match call(&t, "send", &[name, num(*amount), JsValue::from_str(room)]) {
+                        Ok(code) => ("send".to_string(), code),
+                        Err(()) => ("threw".to_string(), THREW),
+                    }
+                }
+            }
+        }
         Intent::Queue(_, _) | Intent::Wish(_, _) => ("unsettled".to_string(), NOT_FOUND),
         Intent::Spawn(id, SpawnAct::SpawnCreep(body, name)) => match world::object_by_id(id) {
             None => ("spawn".to_string(), NOT_FOUND),

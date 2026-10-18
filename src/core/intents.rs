@@ -46,6 +46,12 @@ pub enum LabAct {
     RunReaction(String, String),
 }
 
+/// `send`: resource, amount, the room it lands in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TerminalAct {
+    Send(Resource, i32, String),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ControllerAct {
     ActivateSafeMode,
@@ -94,6 +100,7 @@ pub enum Intent {
     Controller(String, ControllerAct),
     Link(String, LinkAct),
     Lab(String, LabAct),
+    Terminal(String, TerminalAct),
     /// Tick serves these from the room's queue; none reaches `Executor`.
     Queue(String, Ask),
     /// Tick arbitrates every module's wishes in a room as one.
@@ -110,6 +117,7 @@ impl Intent {
             Intent::Controller(id, _) => id.clone(),
             Intent::Link(id, _) => id.clone(),
             Intent::Lab(id, _) => id.clone(),
+            Intent::Terminal(id, _) => id.clone(),
             Intent::Queue(room, _) => room.clone(),
             Intent::Wish(_, wish) => wish.creep.clone(),
         }

@@ -41,6 +41,52 @@ pub fn next_reaction(
     })
 }
 
+/// The ore the cluster lacks to bring every target up: each shortfall broken
+/// down through its recipe, a compound or ore already in `stock` spent before
+/// the ore under it is counted. What the other colonies ship, and no more.
+pub fn ore_short(
+    targets: &BTreeMap<Compound, i32>,
+    stock: &dyn Fn(&Resource) -> i32,
+) -> BTreeMap<Resource, i32> {
+    fn need(
+        resource: &Resource,
+        amount: i32,
+        left: &mut BTreeMap<Resource, i32>,
+        short: &mut BTreeMap<Resource, i32>,
+        stock: &dyn Fn(&Resource) -> i32,
+    ) {
+        let have = left
+            .entry(resource.clone())
+            .or_insert_with(|| stock(resource));
+        let spent = (*have).min(amount);
+        *have -= spent;
+        let rest = amount - spent;
+        match resource {
+            _ if rest <= 0 => (),
+            Resource::Compound(c) => {
+                let (first, second) = engine::reagents_of(*c);
+                need(&first, rest, left, short, stock);
+                need(&second, rest, left, short, stock);
+            }
+            Resource::Ore(_) => *short.entry(resource.clone()).or_insert(0) += rest,
+            _ => (),
+        }
+    }
+
+    let mut left = BTreeMap::new();
+    let mut short = BTreeMap::new();
+    for (compound, target) in targets {
+        need(
+            &Resource::Compound(*compound),
+            *target,
+            &mut left,
+            &mut short,
+            stock,
+        );
+    }
+    short
+}
+
 /// The two reagent labs, and every lab within reach of both as an output.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Roles {
@@ -219,6 +265,20 @@ mod tests {
         );
         more.push((Resource::Compound(Compound::UtriumAcid), 3000));
         assert_eq!(next_reaction(&targets, &stocked(&more)), None);
+    }
+
+    #[test]
+    fn the_ore_short_is_the_target_less_what_stands_through_its_recipe() {
+        let targets = BTreeMap::from([(Compound::UtriumAcid, 3000)]);
+        let stock = [
+            (Resource::Compound(Compound::Hydroxide), 1000),
+            (Resource::Ore(Ore::Hydrogen), 2000),
+        ];
+        let short = ore_short(&targets, &stocked(&stock));
+        // OH: 2000 to make, of H and O; UH: 3000, of U and H; H: 5000 less 2000.
+        assert_eq!(short.get(&Resource::Ore(Ore::Hydrogen)), Some(&3000));
+        assert_eq!(short.get(&Resource::Ore(Ore::Oxygen)), Some(&2000));
+        assert_eq!(short.get(&Resource::Ore(Ore::Utrium)), Some(&3000));
     }
 
     #[test]

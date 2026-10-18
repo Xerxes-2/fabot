@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use crate::core::engine;
+use crate::core::tiles;
 use crate::core::vocabulary::Resource;
 use crate::core::world::{Kind, Pos};
 
@@ -260,6 +261,68 @@ fn lab_offers(offers: &mut Vec<Offer>, ground: &super::derived::Ground, plan: &s
     }
 }
 
+/// The energy the terminal lacks for the fee of the whole shipment.
+pub fn fee_short(ground: &super::derived::Ground) -> i32 {
+    match (&ground.terminal, &ground.ship_to) {
+        (Some(t), Some(home)) => {
+            let fee: i32 = ground
+                .shipment
+                .iter()
+                .map(|(_, n)| engine::send_cost(*n, rooms_apart(&ground.room, home)))
+                .sum();
+            0.max(fee - t.store.amount_of(&Resource::Energy))
+        }
+        _ => 0,
+    }
+}
+
+pub fn rooms_apart(a: &str, b: &str) -> i32 {
+    match (tiles::room_coords(a), tiles::room_coords(b)) {
+        (Some(a), Some(b)) => (a.0 - b.0).abs().max((a.1 - b.1).abs()),
+        _ => 0,
+    }
+}
+
+/// A shipment's ore carried from the storage into the terminal, and the fee's
+/// energy beside it, so the terminal sends it whole.
+fn shipment_offers(offers: &mut Vec<Offer>, ground: &super::derived::Ground) {
+    let Some(t) = &ground.terminal else {
+        return;
+    };
+    let value = price::value_of_rank(price::SURPLUS_RANK);
+    for (ore, n) in &ground.shipment {
+        let need = (n - t.store.amount_of(ore)).min(t.store.free());
+        if need <= 0 {
+            continue;
+        }
+        offers.push(offer(
+            Task::Refill(t.id.clone(), ore.clone()),
+            &t.pos,
+            value,
+            Capacity::Load(need),
+        ));
+        for (store, pos, resource, amount) in &ground.ores {
+            if store != &t.id && resource == ore {
+                offers.push(offer(
+                    Task::Withdraw(store.clone(), ore.clone()),
+                    pos,
+                    value,
+                    Capacity::Load((*amount).min(need)),
+                ));
+            }
+        }
+    }
+    let fee = fee_short(ground);
+    if fee > 0 {
+        offers.push(offer(
+            Task::Refill(t.id.clone(), Resource::Energy),
+            &t.pos,
+            value,
+            Capacity::Load(fee.min(t.store.free())),
+        ));
+    }
+}
+
 fn inside_deadline(c: &crate::core::world::Controller) -> bool {
     c.level > 0 && c.ticks_to_downgrade < engine::safe_mode_downgrade_line(c.level)
 }
@@ -405,6 +468,7 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
         if let Some(plan) = &ground.lab_plan {
             lab_offers(&mut offers, ground, plan);
         }
+        shipment_offers(&mut offers, ground);
 
         let mut hungriest = 0.0f64;
 
@@ -557,7 +621,7 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
             .filter(|b| held.get(&b.name).is_some_and(|id| sinks.contains(id)))
             .map(|b| b.energy)
             .sum();
-        let room = ring_free + feed.map_or(0, |f| f.free);
+        let room = ring_free + feed.map_or(0, |f| f.free) + fee_short(ground);
         // What the upgraders drain from the feed while a load walks out to it.
         let drain = colony.map_or(0, |c| {
             let work: i32 = derived
@@ -574,8 +638,13 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
                 .map_or(0, |r| drain * r)
         };
 
+        // A terminal with a shipment keeps its energy for the fee.
+        let sending = |id: &str| {
+            ground.ship_to.is_some() && ground.terminal.as_ref().is_some_and(|t| t.id == id)
+        };
+
         for s in &ground.stores {
-            if s.energy > 0 && !s.kind.is_buffer() {
+            if s.energy > 0 && !s.kind.is_buffer() && !sending(&s.id) {
                 let value = if s.kind.is_remains() {
                     price::flow_draw(price::transient_loss(s.energy))
                 } else if s.kind == StoreKind::Container && s.source_dug > 0 {

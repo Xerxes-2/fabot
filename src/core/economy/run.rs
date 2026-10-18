@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::HashMap;
 use crate::core::atlas::{Atlas, Mover, Target};
+use crate::core::engine;
 use crate::core::grid::{self, Footprint};
-use crate::core::intents::{Ask, CreepAct, Intent, LabAct, LinkAct, Rank};
+use crate::core::intents::{Ask, CreepAct, Intent, LabAct, LinkAct, Rank, TerminalAct};
 use crate::core::mv::{Wish, plan};
 use crate::core::state::State;
 use crate::core::tick::{self, Context};
@@ -319,6 +320,29 @@ fn link_sends(sends: &mut Vec<Intent>, ground: &Ground) {
     }
 }
 
+/// One send a tick off cooldown: what the terminal holds of the first ore
+/// still owed, as much as its energy pays for, never under the engine's least.
+fn terminal_send(g: &Ground) -> Option<Intent> {
+    let (t, home) = (g.terminal.as_ref()?, g.ship_to.as_ref()?);
+    if t.cooldown > 0 {
+        return None;
+    }
+    let apart = pool::rooms_apart(&g.room, home);
+    let energy = t.store.amount_of(&Resource::Energy);
+    g.shipment.iter().find_map(|(ore, owed)| {
+        let mut amount = t.store.amount_of(ore).min(*owed);
+        while amount > 0 && engine::send_cost(amount, apart) > energy {
+            amount = amount * 9 / 10;
+        }
+        (amount >= engine::TERMINAL_MIN_SEND.min(*owed)).then(|| {
+            Intent::Terminal(
+                t.id.clone(),
+                TerminalAct::Send(ore.clone(), amount, home.clone()),
+            )
+        })
+    })
+}
+
 fn wish_in(groups: &mut Vec<(String, Vec<Wish>)>, room: &str, wish: Wish) {
     match groups.iter_mut().find(|(each, _)| each == room) {
         Some((_, list)) => list.push(wish),
@@ -622,6 +646,9 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     let mut sends: Vec<Intent> = Vec::new();
     for g in &derived.grounds {
         link_sends(&mut sends, g);
+        if let Some(send) = terminal_send(g) {
+            sends.push(send);
+        }
         if let Some(plan) = &g.lab_plan {
             let lab = |id: &str| g.labs.iter().find(|l| l.id == id);
             let held = |id: &str| lab(id).and_then(|l| l.held.clone());

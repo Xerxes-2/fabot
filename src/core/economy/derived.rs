@@ -55,6 +55,14 @@ pub struct SourceFact {
 }
 
 #[derive(Clone, Debug)]
+pub struct TerminalFact {
+    pub id: String,
+    pub pos: Pos,
+    pub store: Store,
+    pub cooldown: i32,
+}
+
+#[derive(Clone, Debug)]
 pub struct LabFact {
     pub id: String,
     pub pos: Pos,
@@ -209,6 +217,10 @@ pub struct Ground {
     pub ores: Vec<(String, Pos, Resource, i32)>,
     /// Only the declared cluster's home has one.
     pub lab_plan: Option<super::labs::Plan>,
+    pub terminal: Option<TerminalFact>,
+    /// The ore this colony sends the cluster's home, and the home.
+    pub shipment: Vec<(Resource, i32)>,
+    pub ship_to: Option<String>,
 }
 
 /// A resource, not a decider (`ARCHITECTURE.md` §2).
@@ -698,6 +710,18 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
             })
             .collect(),
         lab_plan: None,
+        terminal: room
+            .structures
+            .iter()
+            .find(|s| s.kind.is_terminal() && s.owner.is_ours())
+            .map(|s| TerminalFact {
+                id: s.id.clone(),
+                pos: s.pos.clone(),
+                store: s.store.clone(),
+                cooldown: s.cooldown,
+            }),
+        shipment: Vec::new(),
+        ship_to: None,
         towers: room
             .structures
             .iter()
@@ -900,6 +924,25 @@ pub fn of_world(
                     .sum::<i32>()
         };
         g.lab_plan = Some(super::labs::plan_for(targets, &stock, &labs, &held));
+        let mut short = super::labs::ore_short(targets, &stock);
+
+        // The colonies in their order, each the ore it holds up to what is left.
+        for g in grounds.iter_mut().take(colonies.len()) {
+            if &g.room == home || g.terminal.is_none() {
+                continue;
+            }
+            for (ore, left) in &mut short {
+                let held: i32 = g.ores.iter().filter(|o| &o.2 == ore).map(|o| o.3).sum();
+                let sent = held.min(*left);
+                if sent > 0 {
+                    g.shipment.push((ore.clone(), sent));
+                    *left -= sent;
+                }
+            }
+            if !g.shipment.is_empty() {
+                g.ship_to = Some(home.clone());
+            }
+        }
     }
 
     let bodies: Vec<Body> = creeps
