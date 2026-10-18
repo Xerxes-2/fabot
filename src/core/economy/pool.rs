@@ -425,7 +425,11 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
 
         // Dug only from its container's tile, whose holder is the garrison.
         for m in &ground.minerals {
-            let Some(post) = m.post.as_ref().filter(|_| colony.is_some() && m.amount > 0) else {
+            let Some(post) = m
+                .post
+                .as_ref()
+                .filter(|_| colony.is_some() && m.container.is_some() && m.amount > 0)
+            else {
                 continue;
             };
             let rate = bodies::MINER_WORK * engine::MINERAL_HARVEST_PER_WORK

@@ -367,7 +367,11 @@ fn ground_demands(
         // A mineral is worth an energy a unit: with no market, its sink is
         // the boosts, which nothing yet prices.
         for m in &ground.minerals {
-            let Some(post) = m.post.as_ref().filter(|_| m.amount > 0) else {
+            let Some(post) = m
+                .post
+                .as_ref()
+                .filter(|_| m.container.is_some() && m.amount > 0)
+            else {
                 continue;
             };
             let amount = f64::from(m.amount);

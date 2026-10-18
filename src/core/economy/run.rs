@@ -13,6 +13,7 @@ use crate::core::tiles::{self};
 use crate::core::vocabulary::{BodyPart, Resource};
 use crate::core::world::{Creep, Pos};
 
+use super::bodies;
 use super::derived::{self, Body, Derived, Ground, LinkFact};
 use super::matcher::{self, Assignments};
 use super::pool::{self, Offer};
@@ -458,7 +459,8 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .collect();
 
     // A dug-out source's holders stay seated until it regenerates, and an
-    // extractor's until it cools.
+    // extractor's until it cools or its container has room for a pull (v1's
+    // heldByFullContainer): a pull past it drops ore nothing picks up.
     let dug_out: BTreeSet<String> = derived
         .grounds
         .iter()
@@ -470,7 +472,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 .chain(
                     g.minerals
                         .iter()
-                        .filter(|m| m.cooldown > 0)
+                        .filter(|m| {
+                            m.cooldown > 0
+                                || engine::CONTAINER_CAPACITY - m.held
+                                    < bodies::MINER_WORK * engine::MINERAL_HARVEST_PER_WORK
+                        })
                         .map(|m| m.id.clone()),
                 )
         })

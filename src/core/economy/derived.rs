@@ -969,6 +969,10 @@ pub fn of_world(
                 g.sources
                     .iter()
                     .filter_map(|s| s.post.clone().map(|p| (s.id.clone(), p)))
+                    .chain(g.minerals.iter().filter_map(|m| {
+                        m.container.as_ref()?;
+                        m.post.clone().map(|p| (m.id.clone(), p))
+                    }))
             })
             .collect(),
         grounds,
