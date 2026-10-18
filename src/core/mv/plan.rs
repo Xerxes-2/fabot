@@ -44,21 +44,21 @@ fn wish(
     }
 }
 
+/// The engine carries a body that ends its tick on the border across, so a
+/// body staying in the room stays a step inside it.
 pub fn stay(atlas: &Atlas, creep: &Creep, factor: FatigueFactor, weight: i32) -> Wish {
     let at = tiles::of_pos(&creep.pos);
-    let tail = beside(atlas, creep)
+    let mut tail: Vec<Tile> = beside(atlas, creep)
         .into_iter()
         .filter(|tile| !tiles::on_edge(*tile))
         .collect();
-    wish(
-        creep,
-        can_move(creep, factor),
-        at,
-        None,
-        tail,
-        Vec::new(),
-        weight,
-    )
+    let moves = can_move(creep, factor);
+    let head = if moves && tiles::on_edge(at) && !tail.is_empty() {
+        tail.remove(0)
+    } else {
+        at
+    };
+    wish(creep, moves, head, None, tail, Vec::new(), weight)
 }
 
 /// The tail is the way round a body the Atlas's walk does not see.

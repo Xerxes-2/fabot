@@ -442,10 +442,10 @@ fn a_planned_walk_lists_passable_tiles_beside_it_its_tail_nearer_the_target_on_t
         for &tile in std::iter::once(&wish.head).chain(&wish.tail) {
             assert!(tile == at || (tiles::range(at, tile) == 1 && atlas.passable(ROOM, tile)));
         }
-        if wish.stays() {
+        let far = atlas.travel_ticks(mover, &errand.target, &tiles::to_pos(ROOM, at));
+        if wish.stays() || tiles::on_edge(at) && far.is_none() {
             continue;
         }
-        let far = atlas.travel_ticks(mover, &errand.target, &tiles::to_pos(ROOM, at));
         for &tile in &wish.tail {
             let near = atlas.travel_ticks(mover, &errand.target, &tiles::to_pos(ROOM, tile));
             match (near, far) {

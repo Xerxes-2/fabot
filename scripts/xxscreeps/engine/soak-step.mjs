@@ -614,6 +614,28 @@ function stoodLoaded(rooms, time) {
     }
 }
 
+// Crossings a body of ours made back across the border the tick after it
+// landed, and the energy it put back into the store it had drawn it from the
+// tick before.
+let bounced = 0;
+let pouredBack = 0;
+const lastTwo = new Map();
+function wasted(rooms) {
+  const objects = rooms.flatMap((r) => [...r["#objects"]]);
+  const stores = objects.filter((o) => o.structureType === "storage" || o.structureType === "terminal");
+  const edge = (p) => p.x === 0 || p.y === 0 || p.x === 49 || p.y === 49;
+  for (const o of objects)
+    if (o.body !== undefined && o["#user"] === ours) {
+      const beside = stores.find((s) => s.pos.roomName === o.pos.roomName && near(s.pos, o.pos, 1));
+      const now = { room: o.pos.roomName, edge: edge(o.pos), energy: energyIn(o), store: beside?.id, stored: beside ? energyIn(beside) : 0 };
+      const [a, b] = lastTwo.get(o.name) ?? [];
+      if (a && b && a.edge && b.edge && now.edge && a.room === now.room && b.room !== now.room) bounced++;
+      if (a && b && now.store && a.store === now.store && b.store === now.store && b.energy > a.energy && now.energy < b.energy && now.stored > b.stored)
+        pouredBack += Math.min(b.energy - a.energy, b.energy - now.energy);
+      lastTwo.set(o.name, [b, now]);
+    }
+}
+
 // Keep asking for the pause until the first tick is through (`step.mjs`).
 const spam = setInterval(() => svc.publish({ type: "pause" }), 20);
 await svc.publish({ type: "pause" });
@@ -676,6 +698,7 @@ for (let t = 0; t < ticks; t++) {
   await engaged(t, time, rooms);
   detours(rooms);
   stoodLoaded(rooms, time);
+  wasted(rooms);
   for (const o of opponents.filter(({ raid: r }) => r && (t === r.first || (r.every && t > r.first && (t - r.first) % r.every === 0)))) {
     const toward = Object.entries(world.map.describeExits(roomName) ?? {}).filter(([, next]) => next === o.room).map(([dir]) => Number(dir));
     const bodies = o.raid.bodies.map(({ boosts = {}, ...counts }) => PARTS.flatMap((p) => Array(counts[p] ?? 0).fill({ type: p, boost: boosts[p] })));
@@ -718,6 +741,8 @@ for (let t = 0; t < ticks; t++) {
     row.botCpu = fresh ? obs.cpu : null;
     row.roadLoss = roadLoss;
     row.stillLoaded = stillLoaded;
+    row.bounced = bounced;
+    row.pouredBack = pouredBack;
     row.faults = seenFaults.size;
     row.lost = lost.size;
     row.ms = Date.now() - started;
