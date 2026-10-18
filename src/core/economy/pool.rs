@@ -333,16 +333,22 @@ fn inside_deadline(c: &crate::core::world::Controller) -> bool {
 /// 2026-10-18: the tower charged first, the colony feeding itself second).
 /// At the deadline's rank, so any body in reach takes it, and past the first
 /// spawn only while another colony on its feet has bodies to send: a lone
-/// room's bank goes to its first bodies (soak:many, RCL3 at t20090 against
-/// t8727; a towerless crafted world lost its fight to the tower).
+/// room's bank goes to its first bodies.
 const NURSERY_RANK: i32 = price::DEADLINE_RANK;
 const NURSERY_LEVEL: i32 = 3;
 
-fn fed(derived: &Derived, room: &str) -> bool {
+fn nursed(derived: &Derived, room: &str) -> bool {
+    let level = |c: &super::derived::Colony| c.controller.level;
     derived
         .colonies
         .iter()
-        .any(|c| c.room != room && c.controller.level >= NURSERY_LEVEL)
+        .find(|c| c.room == room)
+        .map_or(0, level)
+        <= NURSERY_LEVEL
+        && derived
+            .colonies
+            .iter()
+            .any(|c| c.room != room && level(c) >= NURSERY_LEVEL)
 }
 
 /// Every site alike, their order Layout's plan order, but a room's first
@@ -351,7 +357,7 @@ pub fn site_rank(derived: &Derived, site: &super::derived::SiteFact) -> i32 {
     let first_spawn =
         site.kind == Kind::Spawn && derived.colonies.iter().all(|c| c.room != site.pos.room);
     let first_tower = site.kind.is_tower()
-        && fed(derived, &site.pos.room)
+        && nursed(derived, &site.pos.room)
         && derived
             .grounds
             .iter()
@@ -506,7 +512,7 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
             );
             if r.kind.is_tower()
                 && ground.fire < engine::TOWER_CAPACITY
-                && fed(derived, &ground.room)
+                && nursed(derived, &ground.room)
             {
                 refill.priority = NURSERY_RANK;
             }
@@ -521,12 +527,15 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
         };
 
         for s in &ground.sites {
+            let rank = site_rank(derived, s);
             let mut build = offer(
                 Task::Build(s.id.clone()),
                 &s.pos,
-                price::value_of_rank(site_rank(derived, s)),
+                price::value_of_rank(rank),
                 Capacity::Load(s.left),
             );
+            // Past the priced ranks' clamp, as the nursery's other offers.
+            build.priority = rank;
             build.draw = draw;
             offers.push(build);
         }
@@ -563,7 +572,9 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
 
                 if inside_deadline(c) {
                     upgrade.priority = price::DEADLINE_RANK;
-                } else if colony.is_some() && c.level < NURSERY_LEVEL && fed(derived, &ground.room)
+                } else if colony.is_some()
+                    && c.level < NURSERY_LEVEL
+                    && nursed(derived, &ground.room)
                 {
                     upgrade.priority = NURSERY_RANK;
                 }
