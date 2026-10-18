@@ -1,6 +1,27 @@
 {
-  "why": "a declared claim is claimed and worked from home until its first spawn stands",
-  "start": { "room": "W8N3", "seed": 1, "node": "E2" },
-  "ticks": 5000,
-  "assert": [{ "measure": "claimSpawned", "max": 4000 }, { "measure": "refusals", "max": 0 }, { "measure": "faults", "max": 0 }]
+  "why": "a declared claim is claimed, worked from home until its first spawn stands, and grown to RCL3",
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "node": "E2"
+  },
+  "ticks": 8000,
+  "assert": [
+    {
+      "measure": "claimSpawned",
+      "max": 4000
+    },
+    {
+      "measure": "claimLevel",
+      "min": 3
+    },
+    {
+      "measure": "refusals",
+      "max": 0
+    },
+    {
+      "measure": "faults",
+      "max": 0
+    }
+  ]
 }

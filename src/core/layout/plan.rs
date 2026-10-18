@@ -45,8 +45,9 @@ pub fn level_of(kind: &Kind, rank: i32) -> i32 {
 pub fn priority(kind: &Kind) -> i32 {
     match kind {
         Kind::Spawn => 0,
-        Kind::Extension => 1,
-        Kind::Tower => 2,
+        // The tower charged first (owner, 2026-10-18).
+        Kind::Tower => 1,
+        Kind::Extension => 2,
         Kind::Rampart => 3,
         Kind::Storage => 4,
         Kind::Container => 5,

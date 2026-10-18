@@ -216,13 +216,36 @@ fn inside_deadline(c: &crate::core::world::Controller) -> bool {
     c.level > 0 && c.ticks_to_downgrade < engine::safe_mode_downgrade_line(c.level)
 }
 
+/// A room short of its own feet: its first spawn, then its upgrade to the
+/// level a tower stands at, the tower, and a tower's worth of fire (owner,
+/// 2026-10-18: the tower charged first, the colony feeding itself second).
+/// At the deadline's rank, so any body in reach takes it, and past the first
+/// spawn only while another colony on its feet has bodies to send: a lone
+/// room's bank goes to its first bodies (soak:many, RCL3 at t20090 against
+/// t8727; a towerless crafted world lost its fight to the tower).
+const NURSERY_RANK: i32 = price::DEADLINE_RANK;
+const NURSERY_LEVEL: i32 = 3;
+
+fn fed(derived: &Derived, room: &str) -> bool {
+    derived
+        .colonies
+        .iter()
+        .any(|c| c.room != room && c.controller.level >= NURSERY_LEVEL)
+}
+
 /// Every site alike, their order Layout's plan order, but a room's first
-/// spawn: until it stands, the room casts nothing of its own.
+/// spawn and first tower.
 pub fn site_rank(derived: &Derived, site: &super::derived::SiteFact) -> i32 {
     let first_spawn =
         site.kind == Kind::Spawn && derived.colonies.iter().all(|c| c.room != site.pos.room);
-    if first_spawn {
-        price::SURPLUS_RANK - price::BAND_RANKS
+    let first_tower = site.kind.is_tower()
+        && fed(derived, &site.pos.room)
+        && derived
+            .grounds
+            .iter()
+            .any(|g| g.room == site.pos.room && g.towers == 0);
+    if first_spawn || first_tower {
+        NURSERY_RANK
     } else {
         price::SURPLUS_RANK
     }
@@ -360,6 +383,12 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
                 value,
                 Capacity::Load(r.free),
             );
+            if r.kind.is_tower()
+                && ground.fire < engine::TOWER_CAPACITY
+                && fed(derived, &ground.room)
+            {
+                refill.priority = NURSERY_RANK;
+            }
             refill.shut = shut_to(ring_free);
             offers.push(refill);
         }
@@ -413,6 +442,9 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
 
                 if inside_deadline(c) {
                     upgrade.priority = price::DEADLINE_RANK;
+                } else if colony.is_some() && c.level < NURSERY_LEVEL && fed(derived, &ground.room)
+                {
+                    upgrade.priority = NURSERY_RANK;
                 }
                 offers.push(upgrade);
             }

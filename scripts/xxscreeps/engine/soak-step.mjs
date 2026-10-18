@@ -746,11 +746,12 @@ for (let t = 0; t < ticks; t++) {
     row.ore = rooms.flatMap((r) => [...r["#objects"]])
       .filter((o) => o["#user"] === ours && o.store && (o.structureType === "storage" || o.structureType === "terminal"))
       .reduce((n, o) => n + o.store.getUsedCapacity() - energyIn(o), 0);
-    // A declared claim's level and spawns: 0 until it is ours.
+    // A declared claim's level, spawns and the energy its towers hold: 0 until it is ours.
     row.claimed = Object.fromEntries(claimed.map((name) => {
       const r = rooms[roomNames.indexOf(name)];
       const mine = r["#user"] === ours;
-      return [name, { level: mine ? r["#level"] : 0, spawns: mine ? [...r["#objects"]].filter((o) => o.structureType === "spawn" && o["#lookType"] !== "constructionSite").length : 0 }];
+      const towers = mine ? [...r["#objects"]].filter((o) => o.structureType === "tower" && o["#user"] === ours && o.store) : [];
+      return [name, { fire: towers.reduce((n, o) => n + energyIn(o), 0), level: mine ? r["#level"] : 0, spawns: mine ? [...r["#objects"]].filter((o) => o.structureType === "spawn" && o["#lookType"] !== "constructionSite").length : 0 }];
     }));
     row.bounced = bounced;
     row.pouredBack = pouredBack;

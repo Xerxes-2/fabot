@@ -191,6 +191,9 @@ pub struct Ground {
     pub links: Vec<LinkFact>,
     pub receiver: Option<LinkFact>,
     pub buffer_seats: Vec<Pos>,
+    pub towers: i32,
+    /// The energy our towers hold.
+    pub fire: i32,
 }
 
 /// A resource, not a decider (`ARCHITECTURE.md` §2).
@@ -651,6 +654,17 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
         feed: feed.or(buffer.clone()),
         links,
         receiver: controller_link.or(hub_link),
+        towers: room
+            .structures
+            .iter()
+            .filter(|s| s.kind.is_tower() && s.owner.is_ours())
+            .count() as i32,
+        fire: room
+            .structures
+            .iter()
+            .filter(|s| s.kind.is_tower() && s.owner.is_ours())
+            .map(|s| s.store.amount_of(&Resource::Energy))
+            .sum(),
         buffer_seats: match (&buffer, &room.controller) {
             (Some(b), Some(c)) if atlas.sees(&room.name) => {
                 let walkable = |t: Tile| atlas.passable(&room.name, t) && !tiles::on_edge(t);
