@@ -530,9 +530,24 @@ pub fn siege(
                 hold(sight, creep),
             )
         } else {
+            // The walk sees no bodies: a tile another dismantler holds reads as the way in.
+            let tiles: Vec<Tile> = tiles::around(tiles::of_pos(&front.breach))
+                .iter()
+                .copied()
+                .filter(|t| {
+                    let at = tiles::to_pos(&front.breach.room, *t);
+                    !tiles::on_edge(*t)
+                        && sight.atlas.passable(&at.room, *t)
+                        && dismantlers.iter().all(|d| d.pos != at)
+                })
+                .collect();
+            let target = Target {
+                tiles,
+                ..target_at(sight, &front.breach, 0)
+            };
             (
                 None,
-                toward(sight, creep, &front.breach, engine::MELEE_RANGE),
+                plan::toward(sight.atlas, creep, mover_of(creep), &target, WEIGHT),
             )
         }
     } else {

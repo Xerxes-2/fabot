@@ -15,7 +15,7 @@
   "ticks": 30000,
   "assert": [
     { "measure": "razeLeft", "max": 0 },
-    { "measure": "oscillation", "max": 80 },
+    { "measure": "oscillation", "max": 18 },
     { "measure": "faults", "max": 0 }
   ]
 }
