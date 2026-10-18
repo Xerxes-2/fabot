@@ -33,6 +33,8 @@ pub struct Declarations {
     /// The creep lifetimes of tower fire a colony's reserve holds.
     pub reserve_lifetimes: f64,
     pub outposts: Vec<Outpost>,
+    /// Declared as an outpost is, so a claimer walks to one unseen.
+    pub claims: Vec<Outpost>,
     pub allies: BTreeSet<String>,
 }
 
@@ -40,6 +42,7 @@ pub fn undeclared() -> Declarations {
     Declarations {
         reserve_lifetimes: 2.0,
         outposts: Vec::new(),
+        claims: Vec::new(),
         allies: BTreeSet::new(),
     }
 }
@@ -136,10 +139,19 @@ pub fn worked(context: &Context) -> Vec<Outpost> {
         })
         .collect();
 
+    // A claim taken is worked as an outpost until its first spawn stands.
+    let raised = context.declarations.claims.iter().filter(|c| {
+        context.world.room(&c.room).is_some_and(|r| {
+            r.controller.as_ref().is_some_and(|k| k.owner.is_ours())
+                && !context.world.spawns.iter().any(|s| s.pos.room == c.room)
+        })
+    });
+
     context
         .declarations
         .outposts
         .iter()
+        .chain(raised)
         .filter(|o| {
             super::world::sightings::unarmed(context.sightings, context.world.time, &o.room)
                 && trees

@@ -3,7 +3,7 @@
 // username, the tick, our Memory, and the outposts named here as v2 declares
 // them (`Memory.v2.declarations`). Read-only: every call is a GET.
 //
-// Usage: node --env-file-if-exists=.env scripts/capture-world.mjs <rooms> [--out <file>] [--outposts r1,r2,…] [--terrain <rooms>]
+// Usage: node --env-file-if-exists=.env scripts/capture-world.mjs <rooms> [--out <file>] [--outposts r1,r2,…] [--claims r1,…] [--terrain <rooms>]
 //   <rooms>     room names and rectangles, comma-separated: W1N1:W3N3 is
 //               every room with a corner at each name
 //   --out       the capture (default captures/capture.json), its terrain
@@ -11,6 +11,7 @@
 //               holds our Memory and the server's names and ids
 //   --outposts  rooms (among <rooms>) declared as outposts, each with its
 //               controller and sources as captured
+//   --claims    rooms (among <rooms>) declared as claims, in the same shape
 //   --terrain   rooms (as <rooms>) whose terrain alone is taken: a bot reads
 //               the terrain of rooms it never enters, which the engine throws
 //               on for a room it has none of
@@ -20,11 +21,12 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, fail } from "./screeps-api.mjs";
 
-const usage = "usage: capture-world.mjs <rooms> [--out <file>] [--outposts r1,r2,…] [--terrain <rooms>]";
+const usage = "usage: capture-world.mjs <rooms> [--out <file>] [--outposts r1,r2,…] [--claims r1,…] [--terrain <rooms>]";
 const args = process.argv.slice(2);
 const valueOf = (flag) => (args.includes(flag) ? (args[args.indexOf(flag) + 1] ?? "") : "");
 const outposts = valueOf("--outposts").split(",").filter(Boolean);
-const [roomsArg, ...extra] = args.filter((a, i) => !a.startsWith("--") && !["--out", "--outposts", "--terrain"].includes(args[i - 1]));
+const claims = valueOf("--claims").split(",").filter(Boolean);
+const [roomsArg, ...extra] = args.filter((a, i) => !a.startsWith("--") && !["--out", "--outposts", "--claims", "--terrain"].includes(args[i - 1]));
 if (!roomsArg || extra.length) fail(usage);
 
 const parse = (name) => {
@@ -49,7 +51,7 @@ const roomsOf = (list) => [
 ];
 const rooms = roomsOf(roomsArg);
 const terrainOnly = roomsOf(valueOf("--terrain")).filter((n) => !rooms.includes(n));
-for (const o of outposts) if (!rooms.includes(o)) fail(`--outposts: ${o} is not among the rooms captured`);
+for (const o of [...outposts, ...claims]) if (!rooms.includes(o)) fail(`--outposts, --claims: ${o} is not among the rooms captured`);
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = resolve(valueOf("--out") || join(REPO, "captures/capture.json"));
@@ -98,13 +100,12 @@ const memory = (await get("/api/user/memory", {})).data ?? {};
 const { time: after } = await get("/api/game/time", {});
 
 const declared = (o) => ({ id: o._id, x: o.x, y: o.y });
-const declarations = {
-  outposts: outposts.map((name) => {
-    const objects = captured.find((r) => r.name === name)?.objects ?? [];
-    const controller = objects.find((o) => o.type === "controller");
-    if (!controller) fail(`--outposts: ${name} has no controller`);
-    return { room: name, controller: declared(controller), sources: objects.filter((o) => o.type === "source").map(declared) };
-  }),
+const declaredRoom = (name) => {
+  const objects = captured.find((r) => r.name === name)?.objects ?? [];
+  const controller = objects.find((o) => o.type === "controller");
+  if (!controller) fail(`--outposts, --claims: ${name} has no controller`);
+  return { room: name, controller: declared(controller), sources: objects.filter((o) => o.type === "source").map(declared) };
 };
+const declarations = { outposts: outposts.map(declaredRoom), claims: claims.map(declaredRoom) };
 writeFileSync(out, JSON.stringify({ url, shard, time, username: me.username, userId: me._id, gcl: me.gcl, users, declarations, memory, rooms: captured, terrain: ring }));
 console.error(`${captured.length} rooms and ${ring.length} rooms' terrain over ticks ${time}-${after} into ${out}`);

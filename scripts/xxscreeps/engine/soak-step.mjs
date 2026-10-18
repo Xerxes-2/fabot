@@ -59,7 +59,8 @@ const shard = await Shard.connect(db, "shard0");
 const ours = await User.findUserByName(db, username);
 const svc = getServiceChannel(shard);
 const memory = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}");
-const roomNames = [...homes, ...(memory.v2?.declarations?.outposts ?? []).map((o) => o.room)];
+const claimed = (memory.v2?.declarations?.claims ?? []).map((o) => o.room);
+const roomNames = [...homes, ...(memory.v2?.declarations?.outposts ?? []).map((o) => o.room), ...claimed];
 const waves = wavesArg
   .split(",")
   .filter(Boolean)
@@ -745,6 +746,12 @@ for (let t = 0; t < ticks; t++) {
     row.ore = rooms.flatMap((r) => [...r["#objects"]])
       .filter((o) => o["#user"] === ours && o.store && (o.structureType === "storage" || o.structureType === "terminal"))
       .reduce((n, o) => n + o.store.getUsedCapacity() - energyIn(o), 0);
+    // A declared claim's level and spawns: 0 until it is ours.
+    row.claimed = Object.fromEntries(claimed.map((name) => {
+      const r = rooms[roomNames.indexOf(name)];
+      const mine = r["#user"] === ours;
+      return [name, { level: mine ? r["#level"] : 0, spawns: mine ? [...r["#objects"]].filter((o) => o.structureType === "spawn" && o["#lookType"] !== "constructionSite").length : 0 }];
+    }));
     row.bounced = bounced;
     row.pouredBack = pouredBack;
     row.faults = seenFaults.size;

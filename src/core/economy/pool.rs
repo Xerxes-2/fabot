@@ -216,9 +216,16 @@ fn inside_deadline(c: &crate::core::world::Controller) -> bool {
     c.level > 0 && c.ticks_to_downgrade < engine::safe_mode_downgrade_line(c.level)
 }
 
-/// Every site alike: their order is Layout's plan order.
-pub fn site_rank(_derived: &Derived, _site: &super::derived::SiteFact) -> i32 {
-    price::SURPLUS_RANK
+/// Every site alike, their order Layout's plan order, but a room's first
+/// spawn: until it stands, the room casts nothing of its own.
+pub fn site_rank(derived: &Derived, site: &super::derived::SiteFact) -> i32 {
+    let first_spawn =
+        site.kind == Kind::Spawn && derived.colonies.iter().all(|c| c.room != site.pos.room);
+    if first_spawn {
+        price::SURPLUS_RANK - price::BAND_RANKS
+    } else {
+        price::SURPLUS_RANK
+    }
 }
 
 /// A rampart under `rampart_safe` is priced as the flow, so a fresh one is not

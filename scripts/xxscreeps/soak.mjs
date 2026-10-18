@@ -19,7 +19,8 @@
 //            builds by the node's level, the first spawn on its planned
 //            tile, and the node's stock in storage; E1 is N4 with the two
 //            neighbours `colony.mjs` picks declared as outposts
-//            (Memory.v2.declarations.outposts) and an Invader wave in each
+//            (Memory.v2.declarations.outposts) and an Invader wave in each;
+//            E2 is N5 with the first of them declared a claim (`claims`)
 //   --invaders  room:every[:first][,…]: an Invader wave (`engine/waves`) in
 //            room at t = first, first + every, … (first defaults to every);
 //            E1's default: its outposts every 4000, from 1000 and 2500
@@ -70,7 +71,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|E1] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended] [--keep]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|E1|E2] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended] [--keep]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -117,6 +118,7 @@ const NODES = {
   T4: { level: 5, stored: 50000, without: ["link", "rampart"], moved: true },
   E1: { level: 5, stored: 50000, without: ["link", "rampart"], outposts: true },
   N5: { level: 6, stored: 100000, without: ["rampart"] },
+  E2: { level: 6, stored: 100000, without: ["rampart"], claims: true },
   // An RCL7 node as another bot left it: its roads and containers worn to
   // half, its links and ramparts sites to build.
   T7: { level: 7, stored: 100000, without: ["link", "rampart", "factory"], worn: 0.5 },
@@ -317,10 +319,11 @@ writeFileSync(join(world, "opponents.json"), JSON.stringify(opponents.map(({ nam
 if (built) node26([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME, String(node.worn ?? 1)], world);
 if (flags["--ended"]) node26([XXSCREEPS, script("node.mjs"), "ended", colony.room], world);
 else if ((opponents.length && !live) || flags["--unsafe"]) node26([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
-if (node?.outposts && colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);
+if ((node?.outposts || node?.claims) && colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);
 const allies = opponents.filter((o) => o.ally).map((o) => o.name);
-if (node?.outposts || (allies.length && !live && !from)) {
-  writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: node?.outposts ? colony.outposts : [], allies }));
+if (node?.outposts || node?.claims || (allies.length && !live && !from)) {
+  const claims = node?.claims ? colony.outposts.slice(0, 1) : [];
+  writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: node?.outposts ? colony.outposts : [], claims, allies }));
   node26([XXSCREEPS, script("node.mjs"), "declare", colony.room, OUR_NAME, "declarations.json"], world);
 }
 if (node?.outposts && !flags["--invaders"]) waves.push(...colony.outposts.map((o, i) => `${o.room}:4000:${1000 + 1500 * i}`));

@@ -344,7 +344,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         context.atlas,
         context.declarations,
         &worked,
-        &[],
+        &context.declarations.claims,
     );
 
     let offers = pool::pool(&derived, &state.assignments);

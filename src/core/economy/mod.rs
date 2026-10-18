@@ -366,7 +366,7 @@ pub(crate) mod dice {
     pub struct Generated {
         pub world: World,
         pub worked: Vec<Outpost>,
-        pub claims: Vec<String>,
+        pub claims: Vec<Outpost>,
     }
 
     pub fn world(dice: &mut Dice) -> Generated {
@@ -428,7 +428,7 @@ pub(crate) mod dice {
             claims: if split {
                 Vec::new()
             } else {
-                unowned.iter().map(|(r, _)| r.name.clone()).collect()
+                unowned.iter().map(declared).collect()
             },
         }
     }

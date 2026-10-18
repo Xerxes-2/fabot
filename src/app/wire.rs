@@ -429,6 +429,9 @@ pub fn read_declarations() -> Declarations {
         outposts: array_of(&field(&declared, "outposts"))
             .map(|outposts| outposts.iter().filter_map(outpost_of).collect())
             .unwrap_or_default(),
+        claims: array_of(&field(&declared, "claims"))
+            .map(|claims| claims.iter().filter_map(outpost_of).collect())
+            .unwrap_or_default(),
         allies: array_of(&field(&declared, "allies"))
             .map(|allies| {
                 allies

@@ -140,6 +140,7 @@ pub struct LinkFact {
 #[derive(Clone, Debug)]
 pub struct SiteFact {
     pub id: String,
+    pub kind: Kind,
     pub pos: Pos,
     pub left: i32,
 }
@@ -614,6 +615,7 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
             .filter(|s| s.owner.is_ours())
             .map(|s| SiteFact {
                 id: s.id.clone(),
+                kind: s.kind.clone(),
                 pos: s.pos.clone(),
                 left: 0.max(s.progress_total - s.progress),
             })
@@ -716,7 +718,7 @@ pub fn of_world(
     atlas: &Atlas,
     declarations: &Declarations,
     worked: &[Outpost],
-    claims: &[String],
+    claims: &[Outpost],
 ) -> Derived {
     let mut colonies: Vec<Colony> = Vec::new();
     let mut colony_rooms: Vec<&Room> = Vec::new();
@@ -772,7 +774,7 @@ pub fn of_world(
         };
 
         match &room.controller {
-            Some(c) if !reservable(&world.me, c) => {
+            Some(c) if !c.owner.is_ours() && !reservable(&world.me, c) => {
                 let sources = withheld(c);
                 let mut bare = room.clone().into_owned();
                 bare.sources = Vec::new();
@@ -841,11 +843,12 @@ pub fn of_world(
             })
             .collect(),
         grounds,
-        claims: world
-            .rooms
+        claims: claims
             .iter()
-            .filter(|room| claims.iter().any(|name| name == &room.name))
-            .filter_map(|room| room.controller.clone())
+            .filter_map(|claim| match world.room(&claim.room) {
+                Some(room) => room.controller.clone(),
+                None => blind(claim).controller,
+            })
             .filter(|c| reservable(&world.me, c))
             .collect(),
         ovens: world
