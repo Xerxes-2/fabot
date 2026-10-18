@@ -15,6 +15,7 @@ const fail = (msg) => {
 };
 
 const segments = {};
+const active = [];
 let used = 0;
 const at = (x, y) => ({ x, y, roomName: "W1N1" });
 const store = (held, capacity) => Object.defineProperty({ ...held }, "getCapacity", { value: (r) => (r === undefined || r === "energy" ? capacity : null) });
@@ -84,7 +85,7 @@ terrain[0] = 1;
 terrain[51] = 2;
 
 globalThis.Memory = { fabot: { v1: "left alone" } };
-globalThis.RawMemory = { segments, get: () => JSON.stringify(globalThis.Memory), setActiveSegments: () => {} };
+globalThis.RawMemory = { segments, get: () => JSON.stringify(globalThis.Memory), setActiveSegments: (ids) => active.push(ids) };
 globalThis.Game = {
   time: 100,
   cpu: { limit: 20, bucket: 10000, getUsed: () => (used += 0.25) },
@@ -142,10 +143,17 @@ try {
 globalThis.__fabotRead = read;
 console.error = error;
 if (!trapped) fail("a short read did not trap");
+// A cold heap replaces the active list even when intel is loaded, and reads it the tick after.
+segments[2] += "W9N9 50 - 0 - - - -\n";
+active.length = 0;
 Game.time = 105;
 main.loop();
 const after = JSON.parse(segments[1]);
 if (after.tick !== 105 || after.faults.length !== 0) fail(`the tick after a trap: ${JSON.stringify(after).slice(0, 200)}`);
+if (JSON.stringify(active) !== "[[2]]") fail(`a cold heap set the active segments to ${JSON.stringify(active)}`);
+Game.time = 106;
+main.loop();
+if (!segments[2].includes("W9N9 50 ")) fail(`intel was not read after a reset: ${segments[2]}`);
 
 // What the recorder kept, stood as the bench's Game, reads as the tick did.
 stand(recorded, [], getHeapStatistics, () => 0);
@@ -153,4 +161,4 @@ const again = globalThis.__fabotRead().map((each) => (typeof each === "string" ?
 if (JSON.stringify(again) !== JSON.stringify(pass)) fail(`the recorded tick reads otherwise: ${JSON.stringify(again).slice(0, 200)}`);
 
 const version = readFileSync(new URL(bundle, import.meta.url), "utf8").split("\n")[0];
-console.log(`smoke: 4 ticks clean, and one after a trap (${version.match(/"(.*)"/)?.[1] ?? "unnamed"})`);
+console.log(`smoke: 4 ticks clean, and two after a trap (${version.match(/"(.*)"/)?.[1] ?? "unnamed"})`);

@@ -571,17 +571,15 @@ pub fn write_observe(o: &Observed) {
     write_segment(OBSERVE_SEGMENT, &text);
 }
 
-/// A segment is read the tick after it is asked for; one asked for and still
-/// absent was never written.
+/// The engine keeps the active list across uploads and counts every loaded
+/// segment against the ten saved per tick, so a cold heap replaces it.
 pub fn read_intel(asked: bool) -> Option<Intel> {
-    match raw_memory::segments().get(INTEL_SEGMENT) {
-        Some(text) => Some(intel::of_text(&text)),
-        None if asked => Some(Intel::new()),
-        None => {
-            raw_memory::set_active_segments(&[INTEL_SEGMENT]);
-            None
-        }
+    if !asked {
+        raw_memory::set_active_segments(&[INTEL_SEGMENT]);
+        return None;
     }
+    let text = raw_memory::segments().get(INTEL_SEGMENT);
+    Some(text.map_or_else(Intel::new, |text| intel::of_text(&text)))
 }
 
 pub fn write_intel(rows: &Intel) {
