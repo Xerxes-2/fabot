@@ -315,6 +315,10 @@ function account(rooms, time) {
         const key = `${o["#user"]} ${o.name}`;
         const life = lives.get(key) ?? { name: o.name, ours: o["#user"] === ours, body: o.body.map((p) => p.type[0]).join(""), cost, first: time, rooms: {}, acts: {} };
         lives.set(key, life);
+        // Ticks it stood on the tile it stood on the tick before.
+        const at = `${room.name} ${o.pos.x},${o.pos.y}`;
+        if (life.at === at && life.last === time - 1) life.still = (life.still ?? 0) + 1;
+        life.at = at;
         life.last = time;
         life.ttl = o["#ageTime"] - time;
         life.rooms[room.name] = (life.rooms[room.name] ?? 0) + 1;

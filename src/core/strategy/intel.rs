@@ -75,20 +75,27 @@ fn declared(declarations: &Declarations) -> impl Iterator<Item = &String> {
         .chain(&declarations.sieges)
 }
 
-/// Sieges first, then the stalest rows, each to its nearest free observer; a
-/// declared room left stale is scouted (`ARCHITECTURE.md` §7.1).
+/// A declared room a scout serves, stalest first; `cast` while its row is
+/// past `STALE`: a living scout patrols, a new one is cast only for a stale row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Scout {
+    pub room: String,
+    pub cast: bool,
+}
+
+/// Sieges first, then the stalest rows, each to its nearest free observer;
+/// every declared room no observer covers is scouted (`ARCHITECTURE.md` §7.1).
 pub fn sight(
     world: &World,
     declarations: &Declarations,
     intel: &Intel,
-) -> (Vec<Intent>, Vec<String>) {
+) -> (Vec<Intent>, Vec<Scout>) {
     let mut free: Vec<_> = world
         .rooms
         .iter()
         .flat_map(|r| r.structures.iter())
         .filter(|s| s.kind.is_observer() && s.owner.is_ours())
         .collect();
-    // A room never seen is served as nobody's, and the bodies it is served by see it.
     let mut stale: Vec<(i32, &String)> = intel
         .iter()
         .filter(|(_, r)| world.time - r.seen > STALE)
@@ -112,20 +119,32 @@ pub fn sight(
         .iter()
         .filter_map(&mut observe)
         .collect();
-    let mut scouts = Vec::new();
-    for (_, room) in stale {
-        if observed
+    let covered = |observed: &[Intent], room: &String| {
+        observed
             .iter()
             .any(|i| matches!(i, Intent::Observe(_, r) if r == room))
+    };
+    for (_, room) in stale {
+        if !covered(&observed, room)
+            && let Some(intent) = observe(room)
         {
-            continue;
-        }
-        match observe(room) {
-            Some(intent) => observed.push(intent),
-            None if declared(declarations).any(|d| d == room) => scouts.push(room.clone()),
-            None => (),
+            observed.push(intent);
         }
     }
+
+    let seen = |room: &String| intel.get(room).map(|r| r.seen);
+    let mut rooms: Vec<&String> = declared(declarations)
+        .filter(|room| !covered(&observed, room))
+        .collect();
+    rooms.sort_by_key(|room| (seen(room), *room));
+    rooms.dedup();
+    let scouts = rooms
+        .into_iter()
+        .map(|room| Scout {
+            room: room.clone(),
+            cast: seen(room).is_some_and(|at| world.time - at > STALE),
+        })
+        .collect();
     (observed, scouts)
 }
 

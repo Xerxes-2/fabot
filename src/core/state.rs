@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::fight::shape::{Cast, Engagement, Group};
 use super::layout::shape::Standing;
+use super::strategy::intel::Scout;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct State {
@@ -15,7 +16,7 @@ pub struct State {
     pub engagements: Vec<Engagement>,
     pub casts: Vec<Cast>,
     /// Strategy's `Scout room` declarations, rebuilt each tick before Economy reads them.
-    pub scouts: Vec<String>,
+    pub scouts: Vec<Scout>,
 }
 
 impl State {

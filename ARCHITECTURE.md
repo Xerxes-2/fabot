@@ -446,9 +446,10 @@ and opens engagements. It runs on its key (§1), not every tick.
 every visible room. Economy reads a declared claim or outpost out of sight as
 its row last saw it, so a room another holds casts no claimer. Strategy owns
 the observers: each declared siege every tick, then the stalest rows older
-than `STALE` (a creep life, the owner's) in range. A declared room stale and out of every
-observer's reach is a `Scout room` declaration, served by a 1-MOVE body; one
-never seen is served as nobody's, and its first row is its own bodies' sight.
+than `STALE` (a creep life, the owner's) in range. Every declared room no
+observer covers is a `Scout room` declaration: a living 1-MOVE scout patrols
+them stalest first and never idles; a new one is cast only for a row past
+`STALE` (a room never seen is served as nobody's, its bodies' sight its first row).
 ❓ After the sweep: rows grow towers, sources and keeper lairs with their
 first reader, and whether the room graph's avoided set comes from them.
 

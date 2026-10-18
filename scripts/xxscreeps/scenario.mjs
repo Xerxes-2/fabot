@@ -74,6 +74,12 @@ const engagementsOf = (dir) =>
   rowsOf(dir)
     .filter((e) => e.predicted)
     .map((e) => ({ p: e.predicted, a: engagement(e) }));
+const scoutsOf = (dir) =>
+  readFileSync(join(dir, "bodies.jsonl"), "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => JSON.parse(l))
+    .filter((b) => b.ours && b.name.startsWith("scout-"));
 const walksOf = (dir) => rowsOf(dir).flatMap((e) => (e.blob ? [e.blob] : []));
 const foughtOf = (dir) => rowsOf(dir).flatMap((e) => (e.fought ? [e.fought] : []));
 const mean = (xs) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
@@ -110,6 +116,11 @@ const measures = {
   // The lowest level a declared claim stands at, and the first tick every one has a spawn.
   claimLevel: (samples, a) => Math.min(...Object.values(at(samples, a.to ?? Infinity).claimed ?? {}).map((c) => c.level)),
   claimCharged: (samples) => samples.find((s) => Object.values(s.claimed ?? {}).every((c) => c.fire >= 1000) && Object.keys(s.claimed ?? {}).length)?.t ?? Infinity,
+  // Scouts cast, the most ticks one stood still (a scout never idles), and
+  // the ticks scouts stood in `room`.
+  scoutsCast: (_, __, dir) => new Set(scoutsOf(dir).map((b) => b.name)).size,
+  scoutStill: (_, __, dir) => Math.max(0, ...scoutsOf(dir).map((b) => b.still ?? 0)),
+  scoutTicksIn: (_, a, dir) => scoutsOf(dir).reduce((n, b) => n + (b.rooms[a.room] ?? 0), 0),
   claimersCast: (samples, a) => new Set(within(samples, a).flatMap((s) => s.bodies.filter((b) => b.startsWith("claimer-")).map((b) => b.split("@")[0]))).size,
   claimSpawned: (samples) => samples.find((s) => Object.values(s.claimed ?? {}).every((c) => c.spawns > 0) && Object.keys(s.claimed ?? {}).length)?.t ?? Infinity,
   // The most of a compound (`resource`) stood at once.

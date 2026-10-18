@@ -1,0 +1,22 @@
+{
+  "why": "one living scout patrols two declared claims rivals hold, never standing still, one cast a scout's life",
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "node": "C2",
+    "opponents": [
+      { "name": "rival", "bot": "scripts/xxscreeps/engine/keep", "room": "W7N3" },
+      { "name": "other", "bot": "scripts/xxscreeps/engine/keep", "room": "W8N2" }
+    ]
+  },
+  "ticks": 6000,
+  "assert": [
+    { "measure": "claimersCast", "max": 2 },
+    { "measure": "scoutsCast", "max": 4 },
+    { "measure": "scoutStill", "max": 100 },
+    { "measure": "scoutTicksIn", "room": "W7N3", "min": 20 },
+    { "measure": "scoutTicksIn", "room": "W8N2", "min": 20 },
+    { "measure": "refusals", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

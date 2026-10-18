@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use crate::core::atlas::{Atlas, Tree};
 use crate::core::engine;
 use crate::core::grid::Footprint;
-use crate::core::strategy::intel::Intel;
+use crate::core::strategy::intel::{Intel, Scout};
 use crate::core::tick::{self, Declarations, Outpost};
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::{BodyPart, Resource, part_count_in};
@@ -241,7 +241,8 @@ pub struct Derived {
     pub colonies: Vec<Colony>,
     pub grounds: Vec<Ground>,
     pub claims: Vec<Controller>,
-    pub scouts: Vec<Pos>,
+    /// Each room's centre, stalest first, and whether a scout is cast for it.
+    pub scouts: Vec<(Pos, bool)>,
     pub bodies: Vec<Body>,
     /// Counted against the quota as if they stood, so no seat is cast twice.
     pub ovens: Vec<Body>,
@@ -810,7 +811,7 @@ pub fn of_world(
     declarations: &Declarations,
     worked: &[Outpost],
     intel: &Intel,
-    scouts: &[String],
+    scouts: &[Scout],
 ) -> Derived {
     let mut colonies: Vec<Colony> = Vec::new();
     let mut colony_rooms: Vec<&Room> = Vec::new();
@@ -985,7 +986,7 @@ pub fn of_world(
         grounds,
         scouts: scouts
             .iter()
-            .map(|room| Pos::new(room.as_str(), 25, 25))
+            .map(|s| (Pos::new(s.room.as_str(), 25, 25), s.cast))
             .collect(),
         claims: declarations
             .claims

@@ -139,7 +139,7 @@ pub fn fits(body: &Body, offer: &Offer) -> bool {
             body.work > 0 && body.carry > 0 && (body.energy > 0 || offer.draw.is_buffer())
         }
         Task::Reserve(_) | Task::Claim(_) => body.claim > 0,
-        Task::Scout(_) => body.pattern.is_scout(),
+        Task::Scout(_) => body.pattern.is_scout() && !offer.shut.contains(&body.pos.room),
     }
 }
 
@@ -746,13 +746,16 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
         ));
     }
 
-    for at in &derived.scouts {
-        offers.push(offer(
-            Task::Scout(at.room.clone()),
-            at,
-            price::value_of_rank(price::BOTTOM_RANK),
-            Capacity::Bodies(1),
-        ));
+    // A scout never idles: it walks on from the room it stands in while another
+    // waits, and takes the stalest first.
+    let others = derived.scouts.len() > 1;
+    for (rank, (at, _)) in derived.scouts.iter().enumerate() {
+        let mut scout = offer(Task::Scout(at.room.clone()), at, 0.0, Capacity::Bodies(1));
+        scout.priority = price::BOTTOM_RANK + rank as i32;
+        if others {
+            scout.shut.insert(at.room.clone());
+        }
+        offers.push(scout);
     }
 
     offers
