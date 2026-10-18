@@ -1,42 +1,128 @@
 //! Repair is economy work and not here.
 use crate::core::engine;
 use crate::core::intents::{Intent, TowerAct};
+use crate::core::vocabulary::BodyPart;
 use crate::core::world::{self, Creep, Pos, Structure};
 
-fn dealt(from: &Pos, creep: &Creep) -> i32 {
-    let range = from.range(&creep.pos).unwrap_or(0);
-    let body = world::body_kinds(creep);
-    let boosts = world::body_boosts(creep);
-    engine::damage_taken(&body, &boosts, creep.hits, engine::tower_attack_at(range))
+fn power(creep: &Creep, part: BodyPart) -> i32 {
+    engine::power_at(
+        &world::body_kinds(creep),
+        &world::body_boosts(creep),
+        creep.hits,
+    )(part)
 }
 
-/// `towers` each hold the energy for one act.
-pub fn fire(towers: &[Structure], hostiles: &[Creep], ours: &[Creep]) -> Vec<Intent> {
-    let wounded = ours
-        .iter()
-        .filter(|c| c.hits < c.hits_max)
-        .min_by_key(|c| (c.hits - c.hits_max, &c.name));
+fn range(a: &Creep, b: &Creep) -> i32 {
+    a.pos.range(&b.pos).unwrap_or(i32::MAX)
+}
 
+/// The worst case: every healer in reach pre-heals this one target.
+fn heal_on(target: &Creep, hostiles: &[Creep]) -> i32 {
+    hostiles
+        .iter()
+        .map(|h| match range(h, target) {
+            r if r <= engine::MELEE_RANGE => engine::HEAL_POWER * power(h, BodyPart::Heal),
+            r if r <= engine::RANGED_RANGE => engine::RANGED_HEAL_POWER * power(h, BodyPart::Heal),
+            _ => 0,
+        })
+        .sum()
+}
+
+fn ours_on(target: &Creep, ours: &[Creep]) -> i32 {
+    ours.iter()
+        .map(|c| {
+            let ranged = engine::RANGED_ATTACK_POWER * power(c, BodyPart::RangedAttack);
+            match range(c, target) {
+                r if r <= engine::MELEE_RANGE => {
+                    engine::ATTACK_POWER * power(c, BodyPart::Attack) + ranged
+                }
+                r if r <= engine::RANGED_RANGE => ranged,
+                _ => 0,
+            }
+        })
+        .sum()
+}
+
+fn strikes(hostile: &Creep, struck: &[Pos]) -> bool {
+    let melee = power(hostile, BodyPart::Attack) + power(hostile, BodyPart::Work) > 0;
+    let ranged = power(hostile, BodyPart::RangedAttack) > 0;
+    struck.iter().any(|p| match hostile.pos.range(p) {
+        Some(r) if r <= engine::MELEE_RANGE => melee || ranged,
+        Some(r) if r <= engine::RANGED_RANGE => ranged,
+        _ => false,
+    })
+}
+
+fn taken(target: &Creep, damage: i32) -> i32 {
+    engine::damage_taken(
+        &world::body_kinds(target),
+        &world::body_boosts(target),
+        target.hits,
+        damage,
+    )
+}
+
+/// `towers` each hold the energy for one act. An out-healed body is left so a
+/// heal tank drains nothing, but not a striker nor one our creeps fight, which
+/// Exchange priced with the towers firing: `heal_on` assumes every healer
+/// pre-heals, and one that heals after the shot loses its TOUGH to sustained fire.
+pub fn fire(
+    towers: &[Structure],
+    hostiles: &[Creep],
+    ours: &[Creep],
+    struck: &[Pos],
+) -> Vec<Intent> {
+    let mut targets: Vec<(&Creep, bool, i32, i32, i32)> = hostiles
+        .iter()
+        .map(|h| {
+            let heal = heal_on(h, hostiles);
+            let need = engine::damage_for(
+                &world::body_kinds(h),
+                &world::body_boosts(h),
+                h.hits,
+                h.hits + heal,
+            );
+            let dealt = ours_on(h, ours);
+            (h, dealt > 0 || strikes(h, struck), heal, dealt, need)
+        })
+        .collect();
+    targets.sort_by_key(|(h, urgent, _, dealt, need)| (!urgent, need - dealt, h.id.clone()));
+
+    let mut free: Vec<&Structure> = towers.iter().collect();
     let mut acts: Vec<Intent> = Vec::new();
 
-    for tower in towers {
-        if !hostiles.is_empty() {
-            let target = hostiles
-                .iter()
-                .min_by_key(|h| (-dealt(&tower.pos, h), h.hits, &h.id));
-
-            if let Some(target) = target {
-                acts.push(Intent::Tower(
-                    tower.id.clone(),
-                    TowerAct::Attack(target.id.clone()),
-                ));
+    for (target, urgent, heal, dealt, need) in targets {
+        let at = |t: &Structure| t.pos.range(&target.pos).map_or(0, engine::tower_attack_at);
+        free.sort_by_key(|t| (-at(t), t.id.clone()));
+        let every: i32 = free.iter().map(|t| at(t)).sum();
+        if dealt >= need || !urgent && taken(target, dealt + every) <= heal {
+            continue;
+        }
+        let mut landed = dealt;
+        let mut committed = 0;
+        for tower in &free {
+            if landed >= need {
+                break;
             }
-        } else if let Some(creep) = &wounded {
+            landed += at(tower);
+            committed += 1;
             acts.push(Intent::Tower(
                 tower.id.clone(),
-                TowerAct::Heal(creep.id.clone()),
+                TowerAct::Attack(target.id.clone()),
             ));
         }
+        free.drain(..committed);
+    }
+
+    if let Some(wounded) = ours
+        .iter()
+        .filter(|c| c.hits < c.hits_max)
+        .min_by_key(|c| (c.hits - c.hits_max, &c.name))
+    {
+        acts.extend(
+            free.iter()
+                .map(|t| Intent::Tower(t.id.clone(), TowerAct::Heal(wounded.id.clone()))),
+        );
     }
 
     acts
@@ -54,7 +140,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
-    fn a_tower_acts_once_on_a_hostile_in_its_room_while_one_stands_else_heals() {
+    fn a_tower_acts_once_shooting_a_hostile_in_its_room_or_healing_ours() {
         let mut rng = fx::Rng::new(13);
 
         for _ in 0..fx::MAX_TEST {
@@ -125,7 +211,6 @@ mod tests {
                     }
                     Intent::Tower(id, TowerAct::Heal(target)) => {
                         assert_ne!(id, "t1");
-                        assert!(enemies.is_empty());
                         assert!(ours.iter().any(|c| &c.id == target));
                     }
                     other => panic!("{} is no tower act", other.actor()),

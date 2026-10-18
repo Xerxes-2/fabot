@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::core::engine;
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::Resource;
-use crate::core::world::{Creep, Room, Structure, World};
+use crate::core::world::{Creep, Pos, Room, Structure, World};
 
 use super::ground;
 use super::plan;
@@ -17,6 +17,8 @@ pub struct Colony {
     pub census: Census,
     pub towers: Vec<Structure>,
     pub hostiles: Vec<Creep>,
+    /// Not a road or a container: anything walking by stands beside one.
+    pub struck: Vec<Pos>,
     pub ours: Vec<Creep>,
 }
 
@@ -102,6 +104,14 @@ pub fn colonies(
             census: sites::census_of(room, &ours),
             towers,
             hostiles: room.hostiles().cloned().collect(),
+            struck: room
+                .structures
+                .iter()
+                .filter(|s| s.owner.is_ours() && !s.kind.is_road() && !s.kind.is_container())
+                .map(|s| &s.pos)
+                .chain(ours.iter().map(|c| &c.pos))
+                .cloned()
+                .collect(),
             ours,
         });
     }

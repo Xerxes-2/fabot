@@ -792,9 +792,13 @@ impl<'a> Scene<'a> {
             return e.clone();
         }
 
+        // A home's towers leave a body they cannot out-heal, armed or not, to its Defend.
         let raid: Vec<Creep> = self.foes[&room.name]
             .iter()
-            .filter(|h| self.armed.contains(&h.id))
+            .filter(|h| {
+                self.armed.contains(&h.id)
+                    || self.homes.contains(&room.name) && g.members.contains(&h.id)
+            })
             .cloned()
             .collect();
 
@@ -848,9 +852,10 @@ impl<'a> Scene<'a> {
         let terrain = casting::terrain_at(room, &g.centre);
 
         // A home is a post the raid comes to where our ramparts stand on it;
-        // with none, a Hold stands still while the raid stands off.
+        // with none, or no striker to come, a Hold stands still while the raid stands off.
         let stance = if self.homes.contains(&e.room)
             && g.room == e.room
+            && theirs.bodies.iter().any(fighter::strikes)
             && room
                 .structures
                 .iter()

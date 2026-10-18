@@ -27,7 +27,12 @@ pub fn decide_over(colonies: &[derive::Colony], budget: i32) -> Vec<Intent> {
             }
         }
 
-        intents.extend(towers::fire(&colony.towers, &colony.hostiles, &colony.ours));
+        intents.extend(towers::fire(
+            &colony.towers,
+            &colony.hostiles,
+            &colony.ours,
+            &colony.struck,
+        ));
     }
 
     intents
