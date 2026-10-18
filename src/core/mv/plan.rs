@@ -98,25 +98,9 @@ pub fn toward(
         working.extend(inside);
         wish(creep, moves, at, None, tail, working, weight)
     } else if here == 0 {
-        // On the band it wants out by: ending the tick on the border carries
-        // it across, so with no other band tile it stands where it is.
-        let band: Vec<Tile> = beside(atlas, creep)
-            .into_iter()
-            .filter(|tile| ticks(*tile) == 0)
-            .collect();
-        if band.is_empty() {
-            wish(creep, moves, at, None, Vec::new(), vec![at], weight)
-        } else {
-            wish(
-                creep,
-                moves,
-                band[0],
-                None,
-                band[1..].to_vec(),
-                Vec::new(),
-                weight,
-            )
-        }
+        // The engine carries a body ending its tick on the border across with
+        // its fatigue: a step along the band lands it too tired to step off.
+        wish(creep, moves, at, None, Vec::new(), vec![at], weight)
     } else {
         match field.step(at).and_then(|d| tiles::neighbour(at, d)) {
             None => stay(atlas, creep, mover.factor, weight),
