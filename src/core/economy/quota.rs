@@ -234,20 +234,7 @@ fn haul_flows(ground: &Ground, s: &SourceFact, post: &Pos, carried: f64) -> Vec<
 fn link_drain(derived: &Derived, ground: &Ground) -> f64 {
     match (&ground.receiver, &ground.controller) {
         (Some(r), Some(c)) if r.role.is_controller() => {
-            let work: i32 = derived
-                .bodies
-                .iter()
-                .chain(derived.ovens.iter())
-                .map(|b| {
-                    if super::pool::upgrades(b) && b.pos.room == ground.room {
-                        b.work
-                    } else {
-                        0
-                    }
-                })
-                .sum();
-
-            f64::from((work * engine::UPGRADE_DRAIN_PER_WORK).min(bodies::upgradable_at(c.level)))
+            f64::from(super::pool::upgrade_drain(derived, &ground.room, c.level))
         }
         (Some(_), _) => f64::INFINITY,
         (None, _) => 0.0,

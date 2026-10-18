@@ -149,7 +149,6 @@ pub fn worked(context: &Context) -> Vec<Outpost> {
         })
         .collect();
 
-    // A claim taken is worked as an outpost until its first spawn stands.
     let raised = context.declarations.claims.iter().filter(|c| {
         context.world.room(&c.room).is_some_and(|r| {
             r.controller.as_ref().is_some_and(|k| k.owner.is_ours())

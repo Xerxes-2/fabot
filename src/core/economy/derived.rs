@@ -209,7 +209,6 @@ pub struct Ground {
     pub receiver: Option<LinkFact>,
     pub buffer_seats: Vec<Pos>,
     pub towers: i32,
-    /// The energy our towers hold.
     pub fire: i32,
     pub labs: Vec<LabFact>,
     /// What our storage and terminal hold besides energy: (store, its tile,
@@ -920,6 +919,13 @@ pub fn of_world(
                 + g.labs
                     .iter()
                     .filter_map(|l| l.held.as_ref().filter(|h| &h.0 == r).map(|h| h.1))
+                    .sum::<i32>()
+                // A load between a store and a lab is still the home's.
+                + world
+                    .creeps
+                    .iter()
+                    .filter(|c| &c.pos.room == home)
+                    .map(|c| c.store.amount_of(r))
                     .sum::<i32>()
         };
         g.lab_plan = Some(super::labs::plan_for(targets, &stock, &labs, &held));

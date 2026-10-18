@@ -119,7 +119,7 @@ const measures = {
   // Energy spent on construction.
   build: (samples, a) => at(samples, a.to ?? Infinity).ledger.build - at(samples, a.from ?? 0).ledger.build,
   // Energy a room's spawns put into bodies (`room`: the room).
-  bodiesSpent: (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room].bodies - (at(samples, a.from ?? 0).rooms[a.room]?.bodies ?? 0),
+  bodiesSpent: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.bodies ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.bodies ?? 0),
   upgrade: (samples, a) => at(samples, a.to ?? Infinity).ledger.upgrade - at(samples, a.from ?? 0).ledger.upgrade,
   // Percent of samples whose buffer stood empty with an upgrader beside it.
   dryBuffer: (samples, a) => {

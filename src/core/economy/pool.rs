@@ -75,6 +75,19 @@ pub fn garrisons(body: &Body, offer: &Offer) -> bool {
     }
 }
 
+/// What a room's bodies able to upgrade drain from its feed a tick, at most
+/// the level's allowance: the stock's walk and the controller link price it.
+pub fn upgrade_drain(derived: &Derived, room: &str, level: i32) -> i32 {
+    let work: i32 = derived
+        .bodies
+        .iter()
+        .chain(derived.ovens.iter())
+        .filter(|b| upgrades(b) && b.pos.room == room)
+        .map(|b| b.work * engine::UPGRADE_DRAIN_PER_WORK)
+        .sum();
+    work.min(bodies::upgradable_at(level))
+}
+
 pub fn upgrades(body: &Body) -> bool {
     !body.pattern.is_harvester() && body.work > 0 && body.carry > 0
 }
@@ -640,14 +653,7 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
         let room = ring_free + feed.map_or(0, |f| f.free) + fee_short(ground);
         // What the upgraders drain from the feed while a load walks out to it.
         let drain = colony.map_or(0, |c| {
-            let work: i32 = derived
-                .bodies
-                .iter()
-                .chain(derived.ovens.iter())
-                .filter(|b| upgrades(b) && b.pos.room == ground.room)
-                .map(|b| b.work * engine::UPGRADE_DRAIN_PER_WORK)
-                .sum();
-            work.min(bodies::upgradable_at(c.controller.level))
+            upgrade_drain(derived, &ground.room, c.controller.level)
         });
         let walked = |from: &Pos| {
             feed.and_then(|f| from.range(&f.pos))

@@ -98,14 +98,14 @@ pub fn toward(
         working.extend(inside);
         wish(creep, moves, at, None, tail, working, weight)
     } else if here == 0 {
-        // Landed on the band it wants out by: the engine moves a body across
-        // only as it steps onto an exit tile.
+        // On the band it wants out by: ending the tick on the border carries
+        // it across, so with no other band tile it stands where it is.
         let band: Vec<Tile> = beside(atlas, creep)
             .into_iter()
             .filter(|tile| ticks(*tile) == 0)
             .collect();
         if band.is_empty() {
-            stay(atlas, creep, mover.factor, weight)
+            wish(creep, moves, at, None, Vec::new(), vec![at], weight)
         } else {
             wish(
                 creep,
