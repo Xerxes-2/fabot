@@ -1,0 +1,3 @@
+# The bot builds for wasm32-unknown-unknown (rust-toolchain.toml); check that target.
+[language-server.rust-analyzer.config.cargo]
+target = "wasm32-unknown-unknown"
