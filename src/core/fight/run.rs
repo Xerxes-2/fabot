@@ -405,7 +405,7 @@ impl<'a> Scene<'a> {
             under_fire: e.ours.iter().any(|n| {
                 self.ours
                     .get(n.as_str())
-                    .is_some_and(|c| c.pos.room == e.room)
+                    .is_some_and(|c| c.pos.room == e.room && !tactics::picket_of(c))
             }),
             razed: self
                 .in_sight(&e.room)
@@ -423,24 +423,27 @@ impl<'a> Scene<'a> {
             .collect()
     }
 
+    /// One body a slot: a successor and the body it succeeds are one.
     fn fielded_bodies(&self, e: &Engagement) -> Vec<casting::Body> {
-        let mut bodies: Vec<Vec<BodyPart>> = e
+        let mut bodies: BTreeMap<String, casting::Body> = e
             .ours
             .iter()
             .filter_map(|n| self.ours.get(n.as_str()))
-            .map(|c| c.body.iter().map(|p| p.kind).collect())
+            .map(|c| (slot_of(&c.name), c.body.iter().map(|p| p.kind).collect()))
             .collect();
 
         bodies.extend(
             self.waiting
                 .iter()
                 .filter(|c| c.engagement == e.id)
-                .map(|c| c.body.clone()),
+                .map(|c| (slot_of(&c.name), c.body.clone())),
         );
 
         // A picket holds its post, not the breach.
-        bodies.retain(|b: &casting::Body| !b.iter().any(|p| p.is_ranged_attack()));
         bodies
+            .into_values()
+            .filter(|b| !b.iter().any(|p| p.is_ranged_attack()))
+            .collect()
     }
 
     fn unreached(&self, atlas: &mut Atlas, room: &Room, b: &Structure, in_room: &[&Creep]) -> bool {
@@ -593,8 +596,8 @@ impl<'a> Scene<'a> {
         ))
     }
 
-    /// Priced at the first sight of its room, where an offensive kind no set
-    /// the bank buys staffs closes (§6.2); after, only on an event.
+    /// Priced at the first sight of its room and as the bank grows while no
+    /// set it buys staffs it; after, only on an event.
     fn besieged(
         &self,
         atlas: &mut Atlas,
@@ -746,14 +749,21 @@ impl<'a> Scene<'a> {
                     Some(next)
                 }
                 // Topped up, not recast: the set fights on as its medics walk in.
-                Some((added, (order, outcome))) => {
+                Some((added, (order, outcome)))
+                    if order.first().is_none_or(|first| {
+                        self.barrier_at(room)
+                            .get(first.as_str())
+                            .is_some_and(|b| !self.unreached(atlas, room, b, &in_room))
+                    }) =>
+                {
                     self.ask(atlas, e, &added, asked);
                     let mut next = siege::replanned(self.world.time, true, e);
                     next.plan.order = order;
                     next.predicted = Some(outcome);
                     Some(next)
                 }
-                None => Some(siege::replanned(self.world.time, false, e)),
+                // A top-up whose first barrier the set cannot reach is none.
+                Some(_) | None => Some(siege::replanned(self.world.time, false, e)),
             }
         }
     }
@@ -1465,9 +1475,24 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                         .filter(|s| Scene::rival(s))
                         .map(|s| s.pos.clone())
                         .collect(),
+                    posts: if scene.members_of(e).iter().any(|c| tactics::picket_of(c)) {
+                        Scene::exposed(&*sight.atlas, room)
+                            .into_iter()
+                            .map(|post| {
+                                let n = casting::pickets(
+                                    e.capacity,
+                                    exchange::tower_strike(&towers, &post),
+                                )
+                                .len();
+                                (post, n)
+                            })
+                            .filter(|(_, n)| *n > 0)
+                            .collect()
+                    } else {
+                        Vec::new()
+                    },
                     towers,
                     strike,
-                    posts: Scene::exposed(&*sight.atlas, room),
                 },
             );
         }
@@ -1480,7 +1505,8 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
         let e = &decided[at];
 
-        if matches!(e.phase, Phase::Approaching | Phase::Fighting)
+        // A picket walks with the set and takes its post once the set fights.
+        if e.phase == Phase::Fighting
             && tactics::picket_of(c)
             && let Some(front) = fronts.get(&e.id)
             && !front.posts.is_empty()
@@ -1489,7 +1515,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         }
 
         if e.phase == Phase::Fighting && fronts.contains_key(&e.id) {
-            let members = scene.members_of(e);
+            let members: Vec<&Creep> = scene
+                .members_of(e)
+                .into_iter()
+                .filter(|m| !tactics::picket_of(m))
+                .collect();
             return tactics::siege(&mut sight, &e.plan.order, &fronts[&e.id], &members, c);
         }
 

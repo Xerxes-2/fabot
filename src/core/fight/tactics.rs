@@ -445,8 +445,9 @@ pub struct Front {
     pub towers: Vec<Pos>,
     /// What the towers deal a body working the breach.
     pub strike: i32,
-    /// The rival's sources outside its ramparts, where pickets stand.
-    pub posts: Vec<Pos>,
+    /// The rival's sources outside its ramparts, where pickets stand, and
+    /// how many each holds against the towers.
+    pub posts: Vec<(Pos, usize)>,
 }
 
 pub fn picket_of(creep: &Creep) -> bool {
@@ -461,14 +462,26 @@ pub fn picket(
     members: &[&Creep],
     creep: &Creep,
 ) -> (Option<CreepAct>, Wish) {
+    // By slot, which a successor keeps, so a landing never reshuffles posts.
+    let slot = |c: &Creep| {
+        c.name
+            .rsplit('-')
+            .next()
+            .and_then(|s| s.parse::<i32>().ok())
+    };
     let mut pickets: Vec<&Creep> = members.iter().copied().filter(|c| picket_of(c)).collect();
-    pickets.sort_by(|a, b| a.name.cmp(&b.name));
+    pickets.sort_by_key(|c| (slot(c), c.name.clone()));
 
     let at = pickets
         .iter()
         .position(|c| c.name == creep.name)
         .unwrap_or(0);
-    let Some(post) = front.posts.get(at % front.posts.len().max(1)) else {
+    let mut before = 0;
+    let Some((post, seat_at)) = front.posts.iter().find_map(|(post, n)| {
+        let here = (at >= before && at < before + n).then(|| (post, at - before));
+        before += n;
+        here
+    }) else {
         return (None, hold(sight, creep));
     };
 
@@ -479,7 +492,7 @@ pub fn picket(
         .collect();
     seats.sort_unstable();
 
-    let wish = match seats.get(at / front.posts.len().max(1)) {
+    let wish = match seats.get(seat_at) {
         Some(t) if creep.pos == tiles::to_pos(&post.room, *t) => hold(sight, creep),
         Some(t) => toward(sight, creep, &tiles::to_pos(&post.room, *t), 0),
         None => toward(sight, creep, post, engine::MELEE_RANGE),

@@ -322,7 +322,7 @@ Common to every kind:
   engagements whose groups merge are merged (the older survives).
 - An engagement Strategy cannot staff (§7.3) is **starved**, not forming
   forever: `Defend` falls back to towers and ramparts and is marked
-  `unanswered`; an offensive kind closes. A home's unanswered `Defend` also
+  `unanswered`; a `Siege` stays open `unanswered` until the bank grows. A home's unanswered `Defend` also
   spends the shard's one safe mode where no tower stands, or its raid reaches
   a hit spawn, tower, storage or terminal or half the home's spawns or
   extensions, or strikes haulers or has killed them since a player's raid
