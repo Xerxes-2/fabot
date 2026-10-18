@@ -11,7 +11,7 @@ use super::intents::{Ask, CreepAct, Intent, Rank, SpawnAct};
 use super::mv;
 use super::state::State;
 use super::tiles::{self, Tile};
-use super::vocabulary::BodyPart;
+use super::vocabulary::{BodyPart, Compound};
 use super::world::{Pos, Sightings, World};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,6 +35,9 @@ pub struct Declarations {
     pub outposts: Vec<Outpost>,
     /// Declared as an outpost is, so a claimer walks to one unseen.
     pub claims: Vec<Outpost>,
+    /// The one colony whose labs react, and the stock of each compound it
+    /// makes toward.
+    pub labs: Option<(String, BTreeMap<Compound, i32>)>,
     pub allies: BTreeSet<String>,
 }
 
@@ -43,6 +46,7 @@ pub fn undeclared() -> Declarations {
         reserve_lifetimes: 2.0,
         outposts: Vec::new(),
         claims: Vec::new(),
+        labs: None,
         allies: BTreeSet::new(),
     }
 }

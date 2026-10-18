@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::core::HashMap;
 use crate::core::atlas::{Atlas, Mover, Target};
 use crate::core::grid::{self, Footprint};
-use crate::core::intents::{Ask, CreepAct, Intent, LinkAct, Rank};
+use crate::core::intents::{Ask, CreepAct, Intent, LabAct, LinkAct, Rank};
 use crate::core::mv::{Wish, plan};
 use crate::core::state::State;
 use crate::core::tick::{self, Context};
@@ -622,6 +622,14 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     let mut sends: Vec<Intent> = Vec::new();
     for g in &derived.grounds {
         link_sends(&mut sends, g);
+        if let Some(plan) = &g.lab_plan {
+            let lab = |id: &str| g.labs.iter().find(|l| l.id == id);
+            let held = |id: &str| lab(id).and_then(|l| l.held.clone());
+            let cooldown = |id: &str| lab(id).map_or(0, |l| l.cooldown);
+            for (output, a, b) in super::labs::ready_runs(plan, &held, &cooldown) {
+                sends.push(Intent::Lab(output, LabAct::RunReaction(a, b)));
+            }
+        }
     }
 
     let mut taken: BTreeSet<String> = BTreeSet::new();

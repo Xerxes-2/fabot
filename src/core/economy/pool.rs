@@ -212,6 +212,54 @@ fn offer(task: Task, target: &Pos, value: f64, capacity: Capacity) -> Offer {
     }
 }
 
+/// A lab's fill drawn from the stores that hold its reagent, no more than the
+/// fills have room for, and its drain carried off to the storage like any ore.
+fn lab_offers(offers: &mut Vec<Offer>, ground: &super::derived::Ground, plan: &super::labs::Plan) {
+    let value = price::value_of_rank(price::SURPLUS_RANK);
+    let at = |id: &str| ground.labs.iter().find(|l| l.id == id);
+
+    for (lab, reagent, room) in &plan.fills {
+        if let Some(l) = at(lab) {
+            offers.push(offer(
+                Task::Refill(lab.clone(), reagent.clone()),
+                &l.pos,
+                value,
+                Capacity::Load(*room),
+            ));
+        }
+    }
+
+    let mut wanted: Vec<(&Resource, i32)> = Vec::new();
+    for (_, reagent, room) in &plan.fills {
+        match wanted.iter_mut().find(|(r, _)| *r == reagent) {
+            Some((_, n)) => *n += room,
+            None => wanted.push((reagent, *room)),
+        }
+    }
+    for (store, pos, resource, amount) in &ground.ores {
+        if let Some((_, room)) = wanted.iter().find(|(r, _)| *r == resource) {
+            offers.push(offer(
+                Task::Withdraw(store.clone(), resource.clone()),
+                pos,
+                value,
+                Capacity::Load((*amount).min(*room)),
+            ));
+        }
+    }
+
+    for (lab, mineral) in &plan.drains {
+        if let Some(l) = at(lab) {
+            let held = l.held.as_ref().map_or(0, |h| h.1);
+            offers.push(offer(
+                Task::Withdraw(lab.clone(), mineral.clone()),
+                &l.pos,
+                value,
+                Capacity::Load(held),
+            ));
+        }
+    }
+}
+
 fn inside_deadline(c: &crate::core::world::Controller) -> bool {
     c.level > 0 && c.ticks_to_downgrade < engine::safe_mode_downgrade_line(c.level)
 }
@@ -352,6 +400,10 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
                     Capacity::Load(m.held),
                 ));
             }
+        }
+
+        if let Some(plan) = &ground.lab_plan {
+            lab_offers(&mut offers, ground, plan);
         }
 
         let mut hungriest = 0.0f64;

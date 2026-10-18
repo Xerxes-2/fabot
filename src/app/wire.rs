@@ -11,7 +11,7 @@ use crate::core::exchange::{Losses, Outcome};
 use crate::core::fight::shape::{Cast, Engagement, Group, Objective, Phase, Plan, Tactic};
 use crate::core::state::State;
 use crate::core::tick::{Declarations, Declared, Outpost, undeclared};
-use crate::core::vocabulary;
+use crate::core::vocabulary::{self, Compound, Resource};
 use crate::core::world::{Pos, World};
 
 /// Read by `npm run observe` and `scripts/capture`.
@@ -419,6 +419,26 @@ fn outpost_of(o: &JsValue) -> Option<Outpost> {
     })
 }
 
+/// `{ home, targets: { compound: stock } }`; a compound we have no recipe for
+/// is dropped.
+fn labs_of(o: &JsValue) -> Option<(String, BTreeMap<Compound, i32>)> {
+    let home = string_of(&field(o, "home"))?;
+    let targets = field(o, "targets");
+    let names = Reflect::own_keys(&targets).ok()?;
+    let parsed = names
+        .iter()
+        .filter_map(|name| {
+            let name = name.as_string()?;
+            let stock = field(&targets, &name).as_f64()? as i32;
+            match vocabulary::resource_of_name(&name) {
+                Resource::Compound(c) if stock > 0 => Some((c, stock)),
+                _ => None,
+            }
+        })
+        .collect();
+    Some((home, parsed))
+}
+
 pub fn read_declarations() -> Declarations {
     let declared = field(&root(), "declarations");
     Declarations {
@@ -429,6 +449,7 @@ pub fn read_declarations() -> Declarations {
         outposts: array_of(&field(&declared, "outposts"))
             .map(|outposts| outposts.iter().filter_map(outpost_of).collect())
             .unwrap_or_default(),
+        labs: labs_of(&field(&declared, "labs")),
         claims: array_of(&field(&declared, "claims"))
             .map(|claims| claims.iter().filter_map(outpost_of).collect())
             .unwrap_or_default(),

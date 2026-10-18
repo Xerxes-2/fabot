@@ -5,6 +5,7 @@
 //! it as `"economy"` in `Main`.
 pub mod bodies;
 pub mod derived;
+pub mod labs;
 pub mod matcher;
 pub mod pool;
 pub mod price;

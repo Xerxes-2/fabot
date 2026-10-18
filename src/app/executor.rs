@@ -4,7 +4,9 @@ use js_sys::{Array, Function, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::app::world;
-use crate::core::intents::{ControllerAct, CreepAct, Intent, LinkAct, RoomAct, SpawnAct, TowerAct};
+use crate::core::intents::{
+    ControllerAct, CreepAct, Intent, LabAct, LinkAct, RoomAct, SpawnAct, TowerAct,
+};
 use crate::core::vocabulary;
 
 #[derive(Clone, Debug)]
@@ -172,6 +174,17 @@ fn act(intent: &Intent) -> (String, i32) {
                 }),
             }
         }
+        Intent::Lab(id, LabAct::RunReaction(a, b)) => match (
+            world::object_by_id(id),
+            world::object_by_id(a),
+            world::object_by_id(b),
+        ) {
+            (Some(lab), Some(a), Some(b)) => match call(&lab, "runReaction", &[a, b]) {
+                Ok(code) => ("runReaction".to_string(), code),
+                Err(()) => ("threw".to_string(), THREW),
+            },
+            _ => ("runReaction".to_string(), NOT_FOUND),
+        },
         Intent::Queue(_, _) | Intent::Wish(_, _) => ("unsettled".to_string(), NOT_FOUND),
         Intent::Spawn(id, SpawnAct::SpawnCreep(body, name)) => match world::object_by_id(id) {
             None => ("spawn".to_string(), NOT_FOUND),

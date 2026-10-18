@@ -40,6 +40,12 @@ pub enum LinkAct {
     TransferEnergy(String, i32),
 }
 
+/// The output lab runs it off the two reagent labs, first reagent first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LabAct {
+    RunReaction(String, String),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ControllerAct {
     ActivateSafeMode,
@@ -87,6 +93,7 @@ pub enum Intent {
     Tower(String, TowerAct),
     Controller(String, ControllerAct),
     Link(String, LinkAct),
+    Lab(String, LabAct),
     /// Tick serves these from the room's queue; none reaches `Executor`.
     Queue(String, Ask),
     /// Tick arbitrates every module's wishes in a room as one.
@@ -102,6 +109,7 @@ impl Intent {
             Intent::Tower(id, _) => id.clone(),
             Intent::Controller(id, _) => id.clone(),
             Intent::Link(id, _) => id.clone(),
+            Intent::Lab(id, _) => id.clone(),
             Intent::Queue(room, _) => room.clone(),
             Intent::Wish(_, wish) => wish.creep.clone(),
         }

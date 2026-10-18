@@ -54,6 +54,15 @@ pub struct SourceFact {
     pub dug: i32,
 }
 
+#[derive(Clone, Debug)]
+pub struct LabFact {
+    pub id: String,
+    pub pos: Pos,
+    /// Its one mineral and how much of it.
+    pub held: Option<(Resource, i32)>,
+    pub cooldown: i32,
+}
+
 /// A deposit our extractor stands on.
 #[derive(Clone, Debug)]
 pub struct MineralFact {
@@ -194,6 +203,12 @@ pub struct Ground {
     pub towers: i32,
     /// The energy our towers hold.
     pub fire: i32,
+    pub labs: Vec<LabFact>,
+    /// What our storage and terminal hold besides energy: (store, its tile,
+    /// resource, amount).
+    pub ores: Vec<(String, Pos, Resource, i32)>,
+    /// Only the declared cluster's home has one.
+    pub lab_plan: Option<super::labs::Plan>,
 }
 
 /// A resource, not a decider (`ARCHITECTURE.md` §2).
@@ -654,6 +669,35 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
         feed: feed.or(buffer.clone()),
         links,
         receiver: controller_link.or(hub_link),
+        labs: room
+            .structures
+            .iter()
+            .filter(|s| s.kind.is_lab() && s.owner.is_ours())
+            .map(|s| LabFact {
+                id: s.id.clone(),
+                pos: s.pos.clone(),
+                held: s
+                    .store
+                    .held
+                    .iter()
+                    .find(|(r, n)| !r.is_energy() && *n > 0)
+                    .cloned(),
+                cooldown: s.cooldown,
+            })
+            .collect(),
+        ores: room
+            .structures
+            .iter()
+            .filter(|s| (s.kind.is_storage() || s.kind.is_terminal()) && s.owner.is_ours())
+            .flat_map(|s| {
+                s.store
+                    .held
+                    .iter()
+                    .filter(|(r, n)| crate::core::vocabulary::is_mineral(r) && *n > 0)
+                    .map(|(r, n)| (s.id.clone(), s.pos.clone(), r.clone(), *n))
+            })
+            .collect(),
+        lab_plan: None,
         towers: room
             .structures
             .iter()
@@ -828,6 +872,34 @@ pub fn of_world(
 
     for outpost in worked.iter().filter(|o| !is_colony(&o.room)) {
         grounds.push(remote_of(outpost));
+    }
+
+    if let Some((home, targets)) = &declarations.labs
+        && let Some(g) = grounds.iter_mut().find(|g| &g.room == home)
+    {
+        let labs: Vec<(String, Pos)> = g
+            .labs
+            .iter()
+            .map(|l| (l.id.clone(), l.pos.clone()))
+            .collect();
+        let held = |id: &str| {
+            g.labs
+                .iter()
+                .find(|l| l.id == id)
+                .and_then(|l| l.held.clone())
+        };
+        let stock = |r: &Resource| -> i32 {
+            g.ores
+                .iter()
+                .filter(|o| &o.2 == r)
+                .map(|o| o.3)
+                .sum::<i32>()
+                + g.labs
+                    .iter()
+                    .filter_map(|l| l.held.as_ref().filter(|h| &h.0 == r).map(|h| h.1))
+                    .sum::<i32>()
+        };
+        g.lab_plan = Some(super::labs::plan_for(targets, &stock, &labs, &held));
     }
 
     let bodies: Vec<Body> = creeps

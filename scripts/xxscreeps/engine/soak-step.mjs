@@ -753,6 +753,11 @@ for (let t = 0; t < ticks; t++) {
       const towers = mine ? [...r["#objects"]].filter((o) => o.structureType === "tower" && o["#user"] === ours && o.store) : [];
       return [name, { fire: towers.reduce((n, o) => n + energyIn(o), 0), level: mine ? r["#level"] : 0, spawns: mine ? [...r["#objects"]].filter((o) => o.structureType === "spawn" && o["#lookType"] !== "constructionSite").length : 0 }];
     }));
+    // Each compound our storages, terminals and labs hold.
+    row.made = {};
+    for (const o of rooms.flatMap((r) => [...r["#objects"]]))
+      if (o["#user"] === ours && o.store && ["storage", "terminal", "lab"].includes(o.structureType))
+        for (const r of ["OH", "UH", "UH2O"]) row.made[r] = (row.made[r] ?? 0) + (o.store.getUsedCapacity(r) ?? 0);
     row.bounced = bounced;
     row.pouredBack = pouredBack;
     row.faults = seenFaults.size;

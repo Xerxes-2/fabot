@@ -6,7 +6,8 @@
 //     after `manage bot add --spawn` stood the first spawn: the controller
 //     at <level> (progress 0, its downgrade timer full, the claim's safe
 //     mode kept and one more in stock for each level skipped), every other structure of the list ours at full hits on its
-//     tile (its roads and containers at <worn> of them, default 1), and <stored> energy in the storage.
+//     tile (its roads and containers at <worn> of them, default 1), and <stored> energy in the storage
+//     (`<energy>,<resource>:<n>,…` puts each resource there too).
 //   xxscreeps.js file://…/node.mjs declare <room> <username> <declarations.json>
 //     <username>'s Memory as `{ v2: { declarations } }`, what the bot reads
 //     its declarations from (src/app/wire.rs), and the GCL its claims need;
@@ -89,7 +90,11 @@ if (mode === "ground") {
         if (!create[s.kind]) throw new Error(`no ${s.kind} in a node`);
         const object = create[s.kind](new RoomPosition(s.x, s.y, roomName), nextId);
         object.id = (++nextId).toString(16).padStart(24, "0");
-        if (s.kind === "storage") object.store["#add"]("energy", Number(storedArg));
+        if (s.kind === "storage")
+          for (const [i, part] of storedArg.split(",").entries()) {
+            const [resource, amount] = i === 0 ? ["energy", part] : part.split(":");
+            object.store["#add"](resource, Number(amount));
+          }
         if (s.kind === "road" || s.kind === "container") object.hits = Math.ceil(object.hits * Number(wornArg));
         room["#insertObject"](object);
       }
