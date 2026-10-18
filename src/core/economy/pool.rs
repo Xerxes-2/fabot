@@ -268,17 +268,10 @@ pub fn fee_short(ground: &super::derived::Ground) -> i32 {
             let fee: i32 = ground
                 .shipment
                 .iter()
-                .map(|(_, n)| engine::send_cost(*n, rooms_apart(&ground.room, home)))
+                .map(|(_, n)| engine::send_cost(*n, tiles::rooms_apart(&ground.room, home)))
                 .sum();
             0.max(fee - t.store.amount_of(&Resource::Energy))
         }
-        _ => 0,
-    }
-}
-
-pub fn rooms_apart(a: &str, b: &str) -> i32 {
-    match (tiles::room_coords(a), tiles::room_coords(b)) {
-        (Some(a), Some(b)) => (a.0 - b.0).abs().max((a.1 - b.1).abs()),
         _ => 0,
     }
 }

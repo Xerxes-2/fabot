@@ -327,7 +327,7 @@ fn terminal_send(g: &Ground) -> Option<Intent> {
     if t.cooldown > 0 {
         return None;
     }
-    let apart = pool::rooms_apart(&g.room, home);
+    let apart = tiles::rooms_apart(&g.room, home);
     let energy = t.store.amount_of(&Resource::Energy);
     g.shipment.iter().find_map(|(ore, owed)| {
         let mut amount = t.store.amount_of(ore).min(*owed);

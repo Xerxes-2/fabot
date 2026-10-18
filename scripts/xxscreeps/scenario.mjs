@@ -181,7 +181,9 @@ const measures = {
   fightLowestHits: (_, __, dir) => Math.min(100, ...foughtOf(dir).flatMap((f) => Object.values(f.low).map((l) => 100 * l))),
   fightWoundedOut: (_, __, dir) => Math.min(100, ...foughtOf(dir).filter((f) => f.wounded).map((f) => (100 * f.out) / f.wounded)),
   // The most ticks a siege took from its open to its breach (one that never breached: Infinity).
-  breachTicks: (_, __, dir) => Math.max(...rowsOf(dir).filter((e) => e.kind === "siege").map((e) => (e.closed === null || e.disengaged ? Infinity : e.closed - e.opened)), ...(rowsOf(dir).some((e) => e.kind === "siege") ? [] : [Infinity])),
+  breachTicks: (_, __, dir) => Math.max(...rowsOf(dir).filter((e) => e.kind === "siege").map((e) => (e.breached ?? (e.disengaged || e.closed === null ? Infinity : e.closed)) - e.opened), ...(rowsOf(dir).some((e) => e.kind === "siege") ? [] : [Infinity])),
+  // The rival's structures the last siege opened left standing in its room (none opened: Infinity).
+  razeLeft: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "siege").sort((a, b) => a.opened - b.opened).at(-1)?.left ?? Infinity,
   // The least hits a siege's target (a spawn, a core) ever stood at (none seen: Infinity).
   siegeTargetLow: (_, __, dir) => Math.min(Infinity, ...rowsOf(dir).filter((e) => e.kind === "siege" && e.target).map((e) => e.target.low)),
   bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),

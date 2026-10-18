@@ -39,6 +39,8 @@ pub struct Declarations {
     /// makes toward.
     pub labs: Option<(String, BTreeMap<Compound, i32>)>,
     pub allies: BTreeSet<String>,
+    /// The rival rooms whose towers and economy are razed.
+    pub sieges: Vec<String>,
 }
 
 pub fn undeclared() -> Declarations {
@@ -48,6 +50,7 @@ pub fn undeclared() -> Declarations {
         claims: Vec::new(),
         labs: None,
         allies: BTreeSet::new(),
+        sieges: Vec::new(),
     }
 }
 
@@ -68,6 +71,9 @@ pub fn fights(name: &str) -> bool {
 
 /// The route search needs a bound; nothing is worked further than this.
 pub const REACH_HOPS: i32 = 3;
+
+/// A declared siege's room stands further off than any room worked.
+pub const SIEGE_HOPS: i32 = 10;
 
 pub fn target_at(pos: &Pos, range: i32) -> Target {
     Target {

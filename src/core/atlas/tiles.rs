@@ -277,6 +277,13 @@ pub fn landing(tile: Tile) -> Option<Tile> {
     }
 }
 
+pub fn rooms_apart(a: &str, b: &str) -> i32 {
+    match (room_coords(a), room_coords(b)) {
+        (Some(a), Some(b)) => (a.0 - b.0).abs().max((a.1 - b.1).abs()),
+        _ => 0,
+    }
+}
+
 pub fn room_coords(name: &str) -> Option<(i32, i32)> {
     let bytes = name.as_bytes();
     let digit = |i: usize| i < bytes.len() && bytes[i].is_ascii_digit();

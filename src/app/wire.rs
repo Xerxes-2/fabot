@@ -461,6 +461,14 @@ pub fn read_declarations() -> Declarations {
                     .collect()
             })
             .unwrap_or_default(),
+        sieges: array_of(&field(&declared, "sieges"))
+            .map(|rooms| {
+                rooms
+                    .iter()
+                    .filter_map(wasm_bindgen::JsValue::as_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 

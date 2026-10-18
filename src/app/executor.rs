@@ -197,6 +197,13 @@ fn act(intent: &Intent) -> (String, i32) {
                 }
             }
         }
+        Intent::Observe(id, room) => match world::object_by_id(id) {
+            None => ("observeRoom".to_string(), NOT_FOUND),
+            Some(observer) => match call(&observer, "observeRoom", &[JsValue::from_str(room)]) {
+                Ok(code) => ("observeRoom".to_string(), code),
+                Err(()) => ("threw".to_string(), THREW),
+            },
+        },
         Intent::Queue(_, _) | Intent::Wish(_, _) => ("unsettled".to_string(), NOT_FOUND),
         Intent::Spawn(id, SpawnAct::SpawnCreep(body, name)) => match world::object_by_id(id) {
             None => ("spawn".to_string(), NOT_FOUND),

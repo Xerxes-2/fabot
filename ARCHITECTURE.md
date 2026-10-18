@@ -358,8 +358,12 @@ The other kinds, for the record's sake:
   economy bodies on a `Build spawn` declaration; closes when the spawn stands.
   Groups in the room are its targets.
 - `Siege`: muster → travel (formation) → breach (dismantle/attack under tower
-  fire; `Exchange` prices towers and ramparts) → clear → done. Its target is
-  a `Structure` (spawn, then towers); the breach is derived, not stored:
+  fire; `Exchange` prices towers and ramparts) → clear → done. Opened on a
+  room in `declarations.sieges`, kept in sight by an observer; its target is
+  a `Structure`, the towers, then the spawns, then the rest of the economy,
+  and it closes once none stands. It stands off a rival's safe mode and
+  opens again after it (owner, 2026-10-18: a safe mode is spent, not
+  blocked). The breach is derived, not stored:
   `Exchange.breachPlan` finds the cheapest way in (walk plus each barrier's
   hits over the set's dismantle rate less the repair, no tile where the towers
   outstrike the set's heal), at open and on events, and the plan's order is

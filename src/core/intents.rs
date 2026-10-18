@@ -101,6 +101,8 @@ pub enum Intent {
     Link(String, LinkAct),
     Lab(String, LabAct),
     Terminal(String, TerminalAct),
+    /// An observer and the room it brings in sight next tick.
+    Observe(String, String),
     /// Tick serves these from the room's queue; none reaches `Executor`.
     Queue(String, Ask),
     /// Tick arbitrates every module's wishes in a room as one.
@@ -118,6 +120,7 @@ impl Intent {
             Intent::Link(id, _) => id.clone(),
             Intent::Lab(id, _) => id.clone(),
             Intent::Terminal(id, _) => id.clone(),
+            Intent::Observe(id, _) => id.clone(),
             Intent::Queue(room, _) => room.clone(),
             Intent::Wish(_, wish) => wish.creep.clone(),
         }

@@ -1,0 +1,20 @@
+{
+  "why": "a declared siege whose rival spends a safe mode once an extension is struck stands off while it runs and razes the rest after",
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
+    "seed": 1,
+    "opponents": [
+      {
+        "name": "rival",
+        "bot": "scripts/xxscreeps/engine/keep",
+        "room": "W8S1",
+        "config": { "safeMode": "extension" }
+      }
+    ]
+  },
+  "ticks": 30000,
+  "assert": [
+    { "measure": "razeLeft", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

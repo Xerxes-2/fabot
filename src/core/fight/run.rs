@@ -109,6 +109,12 @@ impl<'a> Scene<'a> {
         !s.owner.is_ours() && (s.kind.is_rampart() || s.kind.is_wall())
     }
 
+    fn safe(room: &Room) -> bool {
+        room.controller
+            .as_ref()
+            .is_some_and(|c| !c.owner.is_ours() && c.safe_mode > 0)
+    }
+
     fn in_sight(&self, room: &str) -> Option<&'a Room> {
         self.world.rooms.iter().find(|r| r.name == room)
     }
@@ -121,12 +127,14 @@ impl<'a> Scene<'a> {
             .collect()
     }
 
-    fn next_barrier(&self, e: &Engagement) -> Option<&'a Structure> {
+    fn next_struck(&self, e: &Engagement) -> Option<&'a Structure> {
         let room = self.in_sight(&e.room)?;
-        let barriers = self.barrier_at(room);
-        let first = e.plan.order.first()?;
 
-        barriers.get(first.as_str()).copied()
+        match (e.plan.order.first(), &e.objective) {
+            (Some(first), _) => self.barrier_at(room).get(first.as_str()).copied(),
+            (None, Objective::Siege(target)) => room.structures.iter().find(|s| s.id == *target),
+            (None, Objective::Defend) => None,
+        }
     }
 
     fn towers_in(&self, room: &'a Room) -> Vec<&'a Structure> {
@@ -143,9 +151,14 @@ impl<'a> Scene<'a> {
             .collect()
     }
 
-    fn walk_to(&self, atlas: &Atlas, room: &str, from: &str) -> Option<i32> {
+    fn walk_to(&self, atlas: &Atlas, e: &Engagement, from: &str) -> Option<i32> {
+        let hops = match e.objective {
+            Objective::Siege(_) => tick::SIEGE_HOPS,
+            Objective::Defend => tick::REACH_HOPS,
+        };
+
         atlas
-            .route(&BTreeSet::new(), tick::REACH_HOPS, from, room)
+            .route(&BTreeSet::new(), hops, from, &e.room)
             .map(|rooms| engine::ROOM_SIDE * (rooms.len() as i32 - 1))
     }
 
@@ -161,7 +174,7 @@ impl<'a> Scene<'a> {
                     && if self.homes.contains(&e.room) {
                         r.name == e.room
                     } else {
-                        self.walk_to(atlas, &e.room, &r.name).is_some()
+                        self.walk_to(atlas, e, &r.name).is_some()
                     }
             })
             .collect()
@@ -178,14 +191,31 @@ impl<'a> Scene<'a> {
     }
 
     fn ask(&self, atlas: &Atlas, e: &Engagement, set: &[casting::Body], asked: &mut Asked) {
+        let slots: Vec<(String, casting::Body)> = set
+            .iter()
+            .enumerate()
+            .map(|(i, body)| (i.to_string(), body.clone()))
+            .collect();
+
+        self.ask_slots(atlas, e, &slots, asked);
+    }
+
+    /// A body's slot in its set is its name's last part, kept by its successors.
+    fn ask_slots(
+        &self,
+        atlas: &Atlas,
+        e: &Engagement,
+        set: &[(String, casting::Body)],
+        asked: &mut Asked,
+    ) {
         let colonies = self.colonies_of(atlas, e);
 
-        for (i, body) in set.iter().enumerate() {
+        for (slot, body) in set {
             let colony = casting::colony_for(
                 &colonies,
                 &self.world.spawns,
                 &asked.queued,
-                |from| self.walk_to(atlas, &e.room, from),
+                |from| self.walk_to(atlas, e, from),
                 body,
             );
 
@@ -193,12 +223,59 @@ impl<'a> Scene<'a> {
                 asked.queue(&colony, body);
                 asked.casts.push(Cast {
                     engagement: e.id,
-                    name: format!("{}{}-{}-{}", tick::FIGHT_PREFIX, self.world.time, e.id, i),
+                    name: format!(
+                        "{}{}-{}-{}",
+                        tick::FIGHT_PREFIX,
+                        self.world.time,
+                        e.id,
+                        slot
+                    ),
                     room: colony,
                     body: body.clone(),
                 });
             }
         }
+    }
+
+    /// A body that dies before a successor asked now could stand is
+    /// succeeded in its slot (§6.2's rotation).
+    fn succeed(&self, atlas: &Atlas, e: &Engagement, asked: &mut Asked) {
+        let Some(walk) = self
+            .colonies_of(atlas, e)
+            .iter()
+            .filter_map(|r| self.walk_to(atlas, e, &r.name))
+            .min()
+        else {
+            return;
+        };
+
+        let slot = |name: &str| name.rsplit('-').next().unwrap_or_default().to_string();
+        let members = self.members_of(e);
+
+        let lasts =
+            |c: &Creep| c.ticks_to_live > engine::SPAWN_TICKS_PER_PART * c.body.len() as i32 + walk;
+
+        let held: BTreeSet<String> = members
+            .iter()
+            .filter(|c| lasts(c))
+            .map(|c| slot(&c.name))
+            .chain(
+                asked
+                    .casts
+                    .iter()
+                    .filter(|c| c.engagement == e.id)
+                    .map(|c| slot(&c.name)),
+            )
+            .collect();
+
+        let due: BTreeMap<String, casting::Body> = members
+            .iter()
+            .filter(|c| !held.contains(&slot(&c.name)))
+            .map(|c| (slot(&c.name), c.body.iter().map(|p| p.kind).collect()))
+            .collect();
+
+        let due: Vec<(String, casting::Body)> = due.into_iter().collect();
+        self.ask_slots(atlas, e, &due, asked);
     }
 
     fn facts_of(
@@ -269,10 +346,10 @@ impl<'a> Scene<'a> {
                     .get(n.as_str())
                     .is_some_and(|c| c.pos.room == e.room)
             }),
-            open: self.in_sight(&e.room).is_some_and(|room| {
-                !e.unanswered && e.plan.order.is_empty()
-                    || room.structures.iter().all(|s| s.id != target)
-            }),
+            razed: self
+                .in_sight(&e.room)
+                .is_some_and(|room| room.structures.iter().all(|s| s.id != target)),
+            safe: self.in_sight(&e.room).is_some_and(Scene::safe),
         }
     }
 
@@ -310,7 +387,7 @@ impl<'a> Scene<'a> {
                             tiles: vec![tiles::of_pos(&b.pos)],
                             range: engine::MELEE_RANGE,
                             avoid: BTreeSet::new(),
-                            max_hops: tick::REACH_HOPS,
+                            max_hops: tick::SIEGE_HOPS,
                         },
                         &room.name,
                     )
@@ -331,7 +408,7 @@ impl<'a> Scene<'a> {
         let line: Vec<Pos> = barriers.iter().map(|b| b.pos.clone()).collect();
 
         let entry = atlas
-            .route(&BTreeSet::new(), tick::REACH_HOPS, colony, &room.name)
+            .route(&BTreeSet::new(), tick::SIEGE_HOPS, colony, &room.name)
             .and_then(|rooms| {
                 [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
                     .into_iter()
@@ -455,6 +532,7 @@ impl<'a> Scene<'a> {
         e: &Engagement,
         target: &str,
         left: bool,
+        grew: bool,
     ) -> Option<Engagement> {
         let mut names: Vec<String> = self
             .colonies_of(atlas, e)
@@ -464,13 +542,18 @@ impl<'a> Scene<'a> {
         names.sort();
 
         let colony = names.into_iter().next()?;
-        let room = self.in_sight(&e.room)?;
+
+        let Some(room) = self.in_sight(&e.room) else {
+            return Some(e.clone());
+        };
 
         let Some(goal) = room.structures.iter().find(|s| s.id == target) else {
             return Some(e.clone());
         };
 
-        if e.unanswered {
+        if e.unanswered && !grew {
+            Some(e.clone())
+        } else if e.unanswered {
             let capacity = self.capacity_of(atlas, e);
 
             let planned = casting::siege(capacity, |set: &[casting::Body]| {
@@ -479,9 +562,8 @@ impl<'a> Scene<'a> {
                 self.breach_in(atlas, room, goal, &colony, &fighters)
             });
 
-            // A way in with nothing to break is no siege: closed before it casts.
             match planned {
-                Some((set, (order, outcome))) if !order.is_empty() => {
+                Some((set, (order, outcome))) => {
                     self.ask(atlas, e, &set, asked);
 
                     Some(Engagement {
@@ -496,11 +578,19 @@ impl<'a> Scene<'a> {
                         ..e.clone()
                     })
                 }
-                _ => None,
+                // Unstaffed, it waits on the bank to grow.
+                None => Some(Engagement {
+                    capacity,
+                    ..e.clone()
+                }),
             }
         } else if e.phase == Phase::Disengaging {
             Some(e.clone())
         } else {
+            if e.phase != Phase::Forming {
+                self.succeed(atlas, e, asked);
+            }
+
             let set = self.fielded(e);
 
             let in_room: Vec<&Creep> = self
@@ -527,7 +617,7 @@ impl<'a> Scene<'a> {
             let event = left
                 || self.landed.iter().any(|c| c.engagement == e.id)
                 || late
-                || match self.next_barrier(e) {
+                || match self.next_struck(e) {
                     Some(b) => {
                         struck(b) > exchange::pooled_heal(set.len() as i32, &set)
                             || self.unreached(atlas, room, b, &in_room)
@@ -609,7 +699,7 @@ impl<'a> Scene<'a> {
             .filter(|n| {
                 self.ours
                     .get(n.as_str())
-                    .is_some_and(|c| self.walk_to(atlas, &e.room, &c.pos.room).is_some())
+                    .is_some_and(|c| self.walk_to(atlas, e, &c.pos.room).is_some())
             })
             .cloned()
             .collect();
@@ -781,6 +871,30 @@ fn changed(e: &Engagement, events: &[tracker::Event], by_id: &BTreeMap<i32, Grou
     })
 }
 
+/// Each declared siege kept in sight by the nearest observer free to reach it.
+fn observed(world: &World, rooms: &[String]) -> Vec<Intent> {
+    let mut free: Vec<&Structure> = world
+        .rooms
+        .iter()
+        .flat_map(|r| r.structures.iter())
+        .filter(|s| s.kind.is_observer() && s.owner.is_ours())
+        .collect();
+
+    rooms
+        .iter()
+        .filter_map(|room| {
+            let (at, observer) = free
+                .iter()
+                .enumerate()
+                .filter(|(_, o)| tiles::rooms_apart(&o.pos.room, room) <= engine::OBSERVER_RANGE)
+                .min_by_key(|(_, o)| (tiles::rooms_apart(&o.pos.room, room), o.id.clone()))?;
+            let id = observer.id.clone();
+            free.remove(at);
+            Some(Intent::Observe(id, room.clone()))
+        })
+        .collect()
+}
+
 pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, State), String> {
     let world = context.world;
     let declarations = context.declarations;
@@ -940,13 +1054,25 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         waiting,
     };
 
-    // A planned barrier fallen advances the plan, never re-prices it.
+    // A planned barrier fallen advances the plan, never re-prices it; a
+    // target fallen re-plans toward the next razed.
+    let mut retargeted: BTreeSet<i32> = BTreeSet::new();
+
     for e in &mut engagements {
-        if matches!(e.objective, Objective::Siege(_))
+        if let Objective::Siege(target) = &e.objective
             && let Some(room) = scene.in_sight(&e.room)
         {
             let barriers = scene.barrier_at(room);
             e.plan.order.retain(|id| barriers.contains_key(id.as_str()));
+
+            let near = scene.members_of(e).first().map(|c| c.pos.clone());
+
+            if room.structures.iter().all(|s| s.id != *target)
+                && let Some(next) = siege::next_razed(&room.structures, near.as_ref())
+            {
+                e.objective = Objective::Siege(next.id.clone());
+                retargeted.insert(e.id);
+            }
         }
     }
 
@@ -960,7 +1086,10 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 }
             }?;
 
-            Some((next.clone(), next.ours.len() < e.ours.len()))
+            Some((
+                next.clone(),
+                next.ours.len() < e.ours.len() || retargeted.contains(&e.id),
+            ))
         })
         .collect();
 
@@ -1017,6 +1146,48 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     })
     .collect();
 
+    let besieging: BTreeSet<&str> = stepped
+        .iter()
+        .filter(|(e, _)| matches!(e.objective, Objective::Siege(_)))
+        .map(|(e, _)| e.room.as_str())
+        .collect();
+
+    let declared: Vec<(Engagement, bool)> = declarations
+        .sieges
+        .iter()
+        .filter(|room| !besieging.contains(room.as_str()))
+        .filter_map(|room| {
+            let room = scene.in_sight(room).filter(|r| !Scene::safe(r))?;
+            siege::next_razed(&room.structures, None)
+        })
+        .enumerate()
+        .map(|(i, target)| {
+            (
+                Engagement {
+                    id: first_id + (opened.len() + i) as i32,
+                    objective: Objective::Siege(target.id.clone()),
+                    group: 0,
+                    room: target.pos.room.clone(),
+                    ours: BTreeSet::new(),
+                    plan: Plan {
+                        tactic: Tactic::Blob(Box::new(Tactic::Close)),
+                        order: Vec::new(),
+                    },
+                    phase: Phase::Forming,
+                    opened: world.time,
+                    since: world.time,
+                    lost: 0,
+                    budget: 0,
+                    priority: 0.0,
+                    unanswered: true,
+                    capacity: 0,
+                    predicted: None,
+                },
+                false,
+            )
+        })
+        .collect();
+
     let committed: BTreeSet<String> = stepped
         .iter()
         .fold(BTreeSet::new(), |all: BTreeSet<String>, (e, _)| {
@@ -1043,6 +1214,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     let mut ranked: Vec<(Engagement, bool)> = stepped;
     ranked.extend(opened);
+    ranked.extend(declared);
     ranked.sort_by(|(a, _), (b, _)| {
         b.priority
             .partial_cmp(&a.priority)
@@ -1057,7 +1229,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
         match &e.objective {
             Objective::Siege(target) => {
-                if let Some(next) = scene.besieged(atlas, &mut asked, &e, target, left) {
+                if let Some(next) = scene.besieged(atlas, &mut asked, &e, target, left, grew) {
                     decided.push(next);
                 }
             }
@@ -1134,7 +1306,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         match (
             &e.objective,
             scene.by_id.get(&e.group),
-            scene.next_barrier(e),
+            scene.next_struck(e),
         ) {
             (Objective::Siege(_), _, Some(b)) => b.pos.clone(),
             (Objective::Defend, Some(g), _) => g.centre.clone(),
@@ -1169,7 +1341,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     for e in &decided {
         if let (Objective::Siege(_), Some(room), Some(wall)) =
-            (&e.objective, scene.in_sight(&e.room), scene.next_barrier(e))
+            (&e.objective, scene.in_sight(&e.room), scene.next_struck(e))
         {
             let towers: Vec<Pos> = scene
                 .towers_in(room)
@@ -1323,7 +1495,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             .is_some_and(|c| c.owner.is_ours() && c.safe_mode > 0)
     });
 
-    let mut acts: Vec<Intent> = Vec::new();
+    let mut acts: Vec<Intent> = observed(world, &declarations.sieges);
 
     if let Some(id) = defend::safe_mode(running, &homes_lost) {
         acts.push(Intent::Controller(id, ControllerAct::ActivateSafeMode));

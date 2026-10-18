@@ -457,6 +457,9 @@ function sample(t, time, room) {
 // of the bodies it asked that stood in it; `core`: an Invader core was in its group.
 const LETTER_COST = Object.fromEntries(Object.entries(PART_COST).map(([t, c]) => [t === "claim" ? "K" : t[0].toUpperCase(), c]));
 const open = new Map();
+// What a siege razes (`fight/kinds/siege.rs` rank_of): the rival's left in its room.
+const RAZED = new Set(["tower", "spawn", "extension", "storage", "terminal", "link", "lab", "extractor", "factory", "powerSpawn", "nuker", "observer"]);
+const razeLeft = (objects, room) => objects.filter((o) => o.pos.roomName === room && RAZED.has(o.structureType) && o["#user"] && o["#user"] !== ours).length;
 const engagementsOut = fs.openSync(join(out, "engagements.jsonl"), "w");
 const allRooms = await shard.data.sMembers("rooms");
 async function standing(ids) {
@@ -544,9 +547,11 @@ async function engaged(t, time, rooms) {
     if (e.phase !== "forming") rec.mustered ??= t;
     if (e.phase === "fighting") rec.fighting ??= t;
     if (e.order?.length && !e.unanswered) rec.order ??= e.order;
+    if (rec.kind === "siege" && rec.order && !e.order?.length && !e.unanswered) rec.breached ??= t;
     // A siege's room is the rival's, which no sample follows.
     const seen = roomNames.includes(e.room) ? rooms : [...rooms, await shard.loadRoom(e.room, time)];
     const objects = seen.flatMap((r) => [...r["#objects"]]);
+    if (rec.kind === "siege") rec.left = razeLeft(objects, e.room);
     // The least hits a siege's target (a spawn, a core) has stood at: not a
     // group member, so nothing else reads it.
     if (e.target !== undefined) {
@@ -565,6 +570,7 @@ async function engaged(t, time, rooms) {
   for (const [id, rec] of open)
     if (!now.has(id)) {
       open.delete(id);
+      if (rec.kind === "siege") rec.left = razeLeft([...(await shard.loadRoom(rec.room, time))["#objects"]], rec.room);
       await closed(rec, t);
     }
 }

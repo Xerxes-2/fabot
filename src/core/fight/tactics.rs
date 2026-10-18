@@ -108,7 +108,7 @@ fn target_at(at: &Pos, range: i32) -> Target {
         tiles: vec![tiles::of_pos(at)],
         range,
         avoid: BTreeSet::new(),
-        max_hops: tick::REACH_HOPS,
+        max_hops: tick::SIEGE_HOPS,
     }
 }
 
@@ -610,7 +610,7 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> (Option<CreepAct>, Wish) {
         .collect();
 
     let home: Option<Pos> = if here.is_empty() {
-        let tree = sight.atlas.tree(tick::REACH_HOPS, &room);
+        let tree = sight.atlas.tree(tick::SIEGE_HOPS, &room);
 
         let routed: Vec<(i32, Pos)> = sight
             .homes

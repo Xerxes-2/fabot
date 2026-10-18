@@ -1,7 +1,12 @@
 // A scripted rival holding its room, one of §10.2's fixed opponents
 // (ARCHITECTURE.md): its towers strike the nearest enemy, and one repairer
 // keeps them, the spawn and the extensions full from storage and mends the
-// weakest rampart.
+// weakest rampart. `opponent.js` { safeMode: "extension" } activates safe
+// mode once one of its extensions is struck, as a live rival did.
+let config = {};
+try {
+  config = require("opponent");
+} catch {}
 const BLOCK = [WORK, CARRY, MOVE];
 
 function repairer(creep, room) {
@@ -26,6 +31,11 @@ module.exports.loop = function () {
   for (const room of Object.values(Game.rooms)) {
     if (!room.controller?.my) continue;
     const foes = room.find(FIND_HOSTILE_CREEPS);
+    // One dismantled whole in a tick is seen only as one fewer.
+    const extensions = room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_EXTENSION });
+    const struck = extensions.some((s) => s.hits < s.hitsMax) || extensions.length < (Memory.extensions?.[room.name] ?? 0);
+    Memory.extensions = { ...Memory.extensions, [room.name]: extensions.length };
+    if (config.safeMode === "extension" && struck) room.controller.activateSafeMode();
     for (const tower of room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_TOWER })) {
       const foe = tower.pos.findClosestByRange(foes);
       if (foe) tower.attack(foe);
