@@ -101,6 +101,7 @@ fn run_tick() -> Result<(), String> {
         declarations: &declarations,
         sightings: &sightings,
         intel: rows,
+        trace: wire::tracing(),
     };
 
     let mut result = tick::run(clock, tick::module_list(), &mut context, state);
@@ -142,6 +143,11 @@ fn run_tick() -> Result<(), String> {
     ];
     for room in declarations.abandon.iter().filter_map(|r| world.room(r)) {
         counts.push((format!("abandon:{}", room.name), abandon::left(room)));
+    }
+    for intent in &result.intents {
+        if let crate::core::intents::Intent::Count(name, n) = intent {
+            counts.push((name.to_string(), *n));
+        }
     }
     let observed = wire::Observed {
         tick: world.time,

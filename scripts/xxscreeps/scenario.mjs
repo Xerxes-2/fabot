@@ -18,7 +18,7 @@
 // A scenario file: { "why": the invariant, "nightly"?, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "wave"? (soak's --wave), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
 // "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
-// (soak's --world; crafted ones under worlds/), "seed", "invaders"?, "wave"?, "opponents"? (the world's own users) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"? }] };
+// (soak's --world; crafted ones under worlds/), "seed", "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick.
 // Exits non-zero when a bound fails or a soak does, or loses ticks twice.
@@ -207,6 +207,10 @@ const measures = {
   razeLeft: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "siege").sort((a, b) => a.opened - b.opened).at(-1)?.left ?? Infinity,
   // The least hits a siege's target (a spawn, a core) ever stood at (none seen: Infinity).
   siegeTargetLow: (_, __, dir) => Math.min(Infinity, ...rowsOf(dir).filter((e) => e.kind === "siege" && e.target).map((e) => e.target.low)),
+  // Over the sweeps, the rival's bodies killed and harvest denied (soak-step's `killed`, `denied`), and those less what they cast.
+  sweepKilled: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.killed ?? 0), 0),
+  sweepDenied: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.denied ?? 0), 0),
+  sweepNet: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.killed ?? 0) + (e.denied ?? 0) - e.cast, 0),
   bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),
   // Our bodies gone from the colony's rooms with life left: died, or walked
   // through a room the soak does not follow.
@@ -257,6 +261,7 @@ const measures = {
   // The most floods one tick ran (a miss is one flood), and the percent of
   // `fieldOn` lookups that missed: §1's "counting hits and misses".
   floodsMost: (_, a, dir) => withCounts(dir, a, (rows) => Math.max(0, ...rows.map((c) => c.atlasMisses ?? 0))),
+  threatLookupsMost: (_, a, dir) => withCounts(dir, a, (rows) => Math.max(0, ...rows.map((c) => c.threatLookups ?? 0))),
   atlasMissRate: (_, a, dir) =>
     withCounts(dir, a, (rows) => {
       const hits = rows.reduce((n, c) => n + (c.atlasHits ?? 0), 0);
@@ -269,13 +274,13 @@ for (const { name, start } of scenarios)
   if ((start.at === undefined) !== (start.bundle === undefined) || (start.at !== undefined && (start.node || !/^[0-9a-f]{8,40}$/.test(start.bundle))))
     fail(`${name}: a start "at" a tick names its "bundle" by commit id, and no node`);
 for (const { name, start } of scenarios)
-  if (start.world && Object.keys(start).some((k) => !["world", "seed", "invaders", "wave", "opponents"].includes(k))) fail(`${name}: a "world" start takes a "seed", "invaders", "wave", "opponents" and nothing else`);
+  if (start.world && Object.keys(start).some((k) => !["world", "seed", "invaders", "wave", "opponents", "declarations"].includes(k))) fail(`${name}: a "world" start takes a "seed", "invaders", "wave", "opponents", "declarations" and nothing else`);
 
 // A world holds its opponents' seats; their config is the scenario's.
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
 const seats = (opponents = []) => opponents.map(({ config, ...seat }) => seat);
-const recipe = ({ world, room, seed, late = 0, node, invaders, wave, core, unsafe, ended }, opponents) =>
-  `${world ? basename(world, ".json") : room}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${wave ? `-w${wave.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${tag(opponents)}`;
+const recipe = ({ world, room, seed, late = 0, node, invaders, wave, core, unsafe, ended, declarations }, opponents) =>
+  `${world ? basename(world, ".json") : room}${declarations ? `-d${createHash("sha256").update(JSON.stringify(declarations)).digest("hex").slice(0, 8)}` : ""}-s${seed}${late ? `l${late}` : ""}${node ? `-${node}` : ""}${invaders ? `-i${invaders.replace(/[:,]/g, "_")}` : ""}${wave ? `-w${wave.replace(/[:,]/g, "_")}` : ""}${core ? `-c${core.replace(/[:,]/g, "_")}` : ""}${unsafe ? "-u" : ""}${ended ? "-e" : ""}${tag(opponents)}`;
 // A cached world is replayed only by the opponents' code that played it, and
 // the engine mods and world scripts it was stood and played under.
 const codeOf = (...paths) =>
@@ -330,6 +335,11 @@ const opponentsOf = (name, opponents) => {
   return ["--opponents", file];
 };
 const play = async ({ name, start, ticks }) => {
+  if (start.world && start.declarations) {
+    const world = join(REPO, "soak-runs", `world-${name}.json`);
+    writeFileSync(world, JSON.stringify({ ...JSON.parse(readFileSync(resolve(REPO, start.world), "utf8")), declarations: start.declarations }));
+    start = { ...start, world };
+  }
   if (start.world)
     return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.invaders ? ["--invaders", start.invaders] : []), ...(start.wave ? ["--wave", start.wave] : []), ...opponentsOf(name, start.opponents)]);
   const recipe = ["--room", start.room, "--seed", String(start.seed), "--late", String(start.late ?? 0)];

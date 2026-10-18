@@ -1469,6 +1469,36 @@ pub fn cheapest_win(
         .map(|(set, _)| set)
 }
 
+/// What a body standing on each tile takes next tick: the charged towers'
+/// falloff and each striker's reach, one more where it can step. Built once a
+/// room and tick, shared by every body there.
+pub fn damage_map(room: &str, towers: &[Pos], foes: &[Fighter]) -> Table<i32> {
+    let mut map = tiles::table(0);
+    for t in tiles::all() {
+        let at = tiles::to_pos(room, t);
+        let struck = |range: i32, damage: fn(&Fighter) -> i32| {
+            foes.iter()
+                .filter(|f| {
+                    f.pos
+                        .as_ref()
+                        .is_some_and(|p| p.within(range + i32::from(f.gait.moves > 0), &at))
+                })
+                .map(damage)
+                .sum::<i32>()
+        };
+        map[t] = towers
+            .iter()
+            .filter_map(|p| p.range(&at))
+            .map(engine::tower_attack_at)
+            .sum::<i32>()
+            + struck(engine::MELEE_RANGE, |f| engine::ATTACK_POWER * f.attack)
+            + struck(engine::RANGED_RANGE, |f| {
+                engine::RANGED_ATTACK_POWER * f.ranged
+            });
+    }
+    map
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -222,6 +222,7 @@ fn engagement_of(o: &JsValue) -> Option<Engagement> {
     let since = int_of(&field(o, "since")).unwrap_or(0);
     let objective = match (string_of(&field(o, "kind")), string_of(&field(o, "target"))) {
         (Some(kind), Some(target)) if kind == "siege" => Objective::Siege(target),
+        (Some(kind), _) if kind == "sweep" => Objective::Sweep,
         _ => Objective::Defend,
     };
     Some(Engagement {
@@ -257,9 +258,13 @@ fn engagement_of(o: &JsValue) -> Option<Engagement> {
 
 fn engagement_obj(e: &Engagement) -> JsValue {
     let o = Object::new();
-    if let Objective::Siege(target) = &e.objective {
-        set_field(o.as_ref(), "kind", &JsValue::from_str("siege"));
-        set_field(o.as_ref(), "target", &JsValue::from_str(target));
+    match &e.objective {
+        Objective::Siege(target) => {
+            set_field(o.as_ref(), "kind", &JsValue::from_str("siege"));
+            set_field(o.as_ref(), "target", &JsValue::from_str(target));
+        }
+        Objective::Sweep => set_field(o.as_ref(), "kind", &JsValue::from_str("sweep")),
+        Objective::Defend => {}
     }
     set_field(o.as_ref(), "id", &JsValue::from(e.id));
     set_field(o.as_ref(), "group", &JsValue::from(e.group));
@@ -355,6 +360,7 @@ pub fn read_state() -> State {
         engagements: list_of(engagement_of, &field(&fight, "engagements")),
         casts: list_of(cast_of, &field(&fight, "casts")),
         scouts: Vec::new(),
+        preyed: Vec::new(),
     }
 }
 
@@ -460,6 +466,7 @@ pub fn read_declarations() -> Declarations {
         enemies: names(&declared, "enemies"),
         sieges: names(&declared, "sieges"),
         abandon: names(&declared, "abandon"),
+        avoid: names(&declared, "avoid"),
     }
 }
 
@@ -467,6 +474,19 @@ fn names<T: FromIterator<String> + Default>(declared: &JsValue, key: &str) -> T 
     array_of(&field(declared, key))
         .map(|names| names.iter().filter_map(JsValue::as_string).collect())
         .unwrap_or_default()
+}
+
+/// Only the xxscreeps harness's wrapper sets `fabotTrace`: live, nothing is
+/// traced.
+pub fn tracing() -> bool {
+    field(&js_sys::global(), "fabotTrace").as_bool() == Some(true)
+}
+
+pub fn trace(line: &str) {
+    let console = field(&js_sys::global(), "console");
+    if let Some(log) = field(&console, "log").dyn_ref::<js_sys::Function>() {
+        let _ = log.call1(&console, &JsValue::from_str(&format!("#trace {line}")));
+    }
 }
 
 pub fn recording() -> bool {

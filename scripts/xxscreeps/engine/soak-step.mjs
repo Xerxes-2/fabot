@@ -7,7 +7,7 @@
 // `samples.jsonl` (one sample a line), `faults.jsonl` (each fault once),
 // `refusals.json` (counts by act and code), `lost.json` (the ticks lost),
 // `levels.json` (the tick each controller level was first seen),
-// `observe.json` (the last segment read), `cpu.jsonl` (tick, engine-reported
+// `observe.json` (the last segment read), `trace.jsonl` (the bot's `#trace` lines), `cpu.jsonl` (tick, engine-reported
 // CPU, the bot's own phases and counts) and `console.log`. Each sample carries the
 // room's energy ledger, cumulative from the first tick (`ledger`): dug,
 // spawn regeneration, spent on bodies, building, upgrading, repairing and
@@ -87,6 +87,7 @@ let cpu = null;
 const consoleLog = fs.openSync(join(out, "console.log"), "w");
 let consoleTick = null;
 let captureLog;
+let traceLog;
 (await getConsoleChannel(shard, ours).subscribe()).listen((message) => {
   let lines;
   try {
@@ -96,6 +97,7 @@ let captureLog;
   }
   for (const line of lines)
     if (line.startsWith("#capture ")) fs.writeSync((captureLog ??= fs.openSync(join(out, "capture.jsonl"), "w")), line.slice(9) + "\n");
+    else if (line.startsWith("#trace ")) fs.writeSync((traceLog ??= fs.openSync(join(out, "trace.jsonl"), "w")), JSON.stringify({ t: consoleTick, ...JSON.parse(line.slice(7)) }) + "\n");
     else {
       if (/^ERR Script (timed out|was disposed)/.test(line)) lost.add(consoleTick);
       fs.writeSync(consoleLog, `[${consoleTick ?? "?"}] ${line}\n`);
@@ -473,6 +475,19 @@ const open = new Map();
 const RAZED = new Set(["tower", "spawn", "extension", "storage", "terminal", "link", "lab", "extractor", "factory", "powerSpawn", "nuker", "observer"]);
 const razeLeft = (objects, room) => objects.filter((o) => o.pos.roomName === room && RAZED.has(o.structureType) && o["#user"] && o["#user"] !== ours).length;
 const engagementsOut = fs.openSync(join(out, "engagements.jsonl"), "w");
+// A sweep's `killed`: each rival body struck dead in its room (a tombstone
+// with life left, once), at its body's share of that life.
+const struck = new Set();
+const killedIn = (objects, room) =>
+  objects
+    .filter((o) => o["#lookType"] === "tombstone" && o.pos.roomName === room && !struck.has(o.id))
+    .filter((o) => ![ours, kInvaderUserId].includes(o["#creep"].user) && o["#creep"].ticksToLive > 1)
+    .reduce((n, o) => {
+      struck.add(o.id);
+      const body = o["#creep"].body;
+      const life = body.includes("claim") ? 600 : 1500;
+      return n + Math.floor((body.reduce((sum, p) => sum + PART_COST[p], 0) * Math.min(life, o["#creep"].ticksToLive)) / life);
+    }, 0);
 const allRooms = await shard.data.sMembers("rooms");
 async function standing(ids) {
   for (const name of allRooms) {
@@ -482,7 +497,7 @@ async function standing(ids) {
   return false;
 }
 async function closed(e, t) {
-  const { members, casts, walk, fight, swing, ...rest } = e;
+  const { members, casts, walk, fight, swing, sources, ...rest } = e;
   const arrivals = Object.values(walk?.arrived ?? {}).sort((a, b) => a - b);
   const blob = walk && { ...walk, last: undefined, arrived: undefined, arrival: arrivals.length ? arrivals[(arrivals.length - 1) >> 1] : null };
   const fought = fight && { ...fight, last: undefined };
@@ -584,6 +599,16 @@ async function engaged(t, time, rooms) {
     const seen = roomNames.includes(e.room) ? rooms : [...rooms, await shard.loadRoom(e.room, time)];
     const objects = seen.flatMap((r) => [...r["#objects"]]);
     if (rec.kind === "siege") rec.left = razeLeft(objects, e.room);
+    if (rec.kind === "sweep") {
+      rec.killed = (rec.killed ?? 0) + killedIn(objects, e.room);
+      // `denied`: while a body of it stands in its room, each source's yield a tick less what was dug.
+      const held = objects.some((o) => o["#user"] === ours && e.ours.includes(o.name) && o.pos.roomName === e.room);
+      for (const s of objects.filter((o) => o["#lookType"] === "source" && o.pos.roomName === e.room)) {
+        const was = rec.sources?.get(s.id) ?? s.energy;
+        (rec.sources ??= new Map()).set(s.id, s.energy);
+        if (held) rec.denied = (rec.denied ?? 0) + Math.round(s.energyCapacity / 300 - Math.max(0, was - s.energy));
+      }
+    }
     // The least hits a siege's target (a spawn, a core) has stood at: not a
     // group member, so nothing else reads it.
     if (e.target !== undefined) {

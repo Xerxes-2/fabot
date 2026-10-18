@@ -18,6 +18,7 @@ pub struct Sight<'a> {
     pub hostiles: &'a BTreeMap<String, Vec<Creep>>,
     pub ramparts: BTreeMap<String, Vec<Pos>>,
     pub homes: Vec<Pos>,
+    pub avoid: &'a BTreeSet<String>,
 }
 
 /// Above every economy wish in the room's one arbitration: a fight step is
@@ -102,22 +103,22 @@ fn mover_of(creep: &Creep) -> Mover {
     }
 }
 
-fn target_at(at: &Pos, range: i32) -> Target {
+fn target_at(sight: &Sight, at: &Pos, range: i32) -> Target {
     Target {
         room: at.room.clone(),
         tiles: vec![tiles::of_pos(at)],
         range,
-        avoid: BTreeSet::new(),
+        avoid: sight.avoid.clone(),
         max_hops: tick::SIEGE_HOPS,
     }
 }
 
-fn toward(sight: &mut Sight, creep: &Creep, at: &Pos, range: i32) -> Wish {
+pub fn toward(sight: &mut Sight, creep: &Creep, at: &Pos, range: i32) -> Wish {
     plan::toward(
         sight.atlas,
         creep,
         mover_of(creep),
-        &target_at(at, range),
+        &target_at(sight, at, range),
         WEIGHT,
     )
 }
@@ -414,7 +415,7 @@ pub fn step_back(sight: &mut Sight, raid_room: &str, members: &[&Creep], creep: 
 pub fn blob(sight: &mut Sight, centre: &Pos, members: &[&Creep]) -> Vec<Wish> {
     blob::wishes(
         sight.atlas,
-        &target_at(centre, engine::RANGED_RANGE),
+        &target_at(sight, centre, engine::RANGED_RANGE),
         WEIGHT,
         members,
     )
@@ -710,6 +711,111 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> (Option<CreepAct>, Wish) {
 /// closes. The engine keeps one of a swing and a heal, and one of a shot and a
 /// ranged heal: a swinging body does not heal, a shooting one heals beside it.
 /// A heal lands in the tick's sum with the strikes, so what is `incoming` is owed.
+/// `heals`' allotment, which a Hunt also plans by: each healer in name order
+/// heals the body in its reach, itself among them, nearest death after what
+/// strikes it, then owed most, beside before at range (three where it does
+/// not shoot), and that heal comes off what it is owed. Each healer's patient, and whether it stands beside.
+pub fn allot<'p>(
+    healers: &[&Creep],
+    patients: &[&'p Creep],
+    owed: &mut BTreeMap<String, i32>,
+    shooting: &dyn Fn(&str) -> bool,
+) -> Vec<(String, &'p Creep, bool)> {
+    let mut healers = healers.to_vec();
+    healers.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut out = Vec::new();
+    for healer in healers {
+        let parts = live(BodyPart::Heal, healer);
+        let near = if shooting(&healer.name) {
+            engine::MELEE_RANGE
+        } else {
+            engine::RANGED_RANGE
+        };
+        let patient = patients
+            .iter()
+            .copied()
+            .filter(|p| owed.get(&p.name).copied().unwrap_or(0) > 0)
+            .filter_map(|p| {
+                healer
+                    .pos
+                    .range(&p.pos)
+                    .filter(|r| *r <= near)
+                    .map(|r| (p, r))
+            })
+            .min_by_key(|(p, r)| {
+                let left = p.hits_max - owed[&p.name];
+                (
+                    *r > engine::MELEE_RANGE,
+                    left,
+                    -owed[&p.name],
+                    p.name.clone(),
+                )
+            });
+        if let (true, Some((p, r))) = (parts > 0, patient) {
+            let beside = r <= engine::MELEE_RANGE;
+            let power = if beside {
+                engine::HEAL_POWER
+            } else {
+                engine::RANGED_HEAL_POWER
+            };
+            *owed.entry(p.name.clone()).or_insert(0) -= parts * power;
+            out.push((healer.name.clone(), p, beside));
+        }
+    }
+    out
+}
+
+/// Each tile a body may step to and the damage netted there past the heal
+/// `allot` lands on it, its mates and it owed what strikes where they stand.
+pub fn nets(
+    atlas: &Atlas,
+    threat: &tiles::Table<i32>,
+    mates: &[&Creep],
+    c: &Creep,
+) -> Vec<(Tile, i32)> {
+    let here = tiles::of_pos(&c.pos);
+    let healers: Vec<&Creep> = mates.iter().copied().chain([c]).collect();
+    std::iter::once(here)
+        .chain(
+            tiles::around(here)
+                .iter()
+                .copied()
+                .filter(|t| atlas.passable(&c.pos.room, *t)),
+        )
+        .map(|t| {
+            let moved = Creep {
+                pos: tiles::to_pos(&c.pos.room, t),
+                ..c.clone()
+            };
+            let patients: Vec<&Creep> = mates.iter().copied().chain([&moved]).collect();
+            let mut owed: BTreeMap<String, i32> = patients
+                .iter()
+                .map(|p| {
+                    (
+                        p.name.clone(),
+                        p.hits_max - p.hits + threat[tiles::of_pos(&p.pos)],
+                    )
+                })
+                .collect();
+            let heal: i32 = allot(&healers, &patients, &mut owed, &|_| true)
+                .iter()
+                .filter(|(_, p, _)| p.name == c.name)
+                .filter_map(|(h, _, _)| healers.iter().find(|m| m.name == *h))
+                .map(|h| engine::HEAL_POWER * live(BodyPart::Heal, h))
+                .sum();
+            (t, threat[t] - heal)
+        })
+        .collect()
+}
+
+/// No tile a body may step to is one it would stand three ticks on: an event
+/// for its engagement, which a tactic cannot answer.
+pub fn cornered(atlas: &Atlas, threat: &tiles::Table<i32>, mates: &[&Creep], c: &Creep) -> bool {
+    nets(atlas, threat, mates, c)
+        .iter()
+        .all(|(t, net)| tiles::on_edge(*t) || net * 3 >= c.hits)
+}
+
 pub fn heals(
     healers: &[&Creep],
     patients: &[Creep],
@@ -720,75 +826,127 @@ pub fn heals(
     let mut owed: BTreeMap<String, i32> = patients
         .iter()
         .map(|p| {
-            (
-                p.name.clone(),
-                p.hits_max - p.hits + incoming.get(&p.name).copied().unwrap_or(0),
-            )
+            let more = incoming.get(&p.name).copied().unwrap_or(0);
+            (p.name.clone(), p.hits_max - p.hits + more)
         })
         .collect();
-
-    let mut acts: Vec<Intent> = Vec::new();
-
-    let mut healers = healers.to_vec();
-    healers.sort_by(|a, b| a.name.cmp(&b.name));
-    for healer in healers {
-        let parts = live(BodyPart::Heal, healer);
-
-        if parts > 0 && !swinging.contains(&healer.name) {
-            let patient: Option<(&Creep, i32)> = if owed.get(&healer.name).copied().unwrap_or(0) > 0
-            {
-                Some((healer, 0))
+    let healers: Vec<&Creep> = healers
+        .iter()
+        .copied()
+        .filter(|h| !swinging.contains(&h.name))
+        .collect();
+    let patients: Vec<&Creep> = patients.iter().collect();
+    allot(&healers, &patients, &mut owed, &|n| shooting.contains(n))
+        .into_iter()
+        .map(|(healer, p, beside)| {
+            let act = if beside {
+                CreepAct::HealCreep(p.id.clone())
             } else {
-                let near = if shooting.contains(&healer.name) {
-                    engine::MELEE_RANGE
-                } else {
-                    engine::RANGED_RANGE
-                };
-
-                let hurt: Vec<(&Creep, i32)> = patients
-                    .iter()
-                    .filter_map(|p| match healer.pos.range(&p.pos) {
-                        Some(r) if r <= near && owed.get(&p.name).copied().unwrap_or(0) > 0 => {
-                            Some((p, r))
-                        }
-                        _ => None,
-                    })
-                    .collect();
-
-                hurt.into_iter().min_by_key(|(p, r)| {
-                    (
-                        *r > engine::MELEE_RANGE,
-                        -owed.get(&p.name).copied().unwrap_or(0),
-                        p.name.clone(),
-                    )
-                })
+                CreepAct::RangedHealCreep(p.id.clone())
             };
+            Intent::Creep(healer, act)
+        })
+        .collect()
+}
 
-            match patient {
-                Some((p, r)) if r <= engine::MELEE_RANGE => {
-                    if let Some(o) = owed.get_mut(&p.name) {
-                        *o -= parts * engine::HEAL_POWER;
-                    }
+/// A target's worth a hit, and whether a mass volley strikes it (one with an
+/// owner: the engine's RMA passes over a container).
+pub struct Mark {
+    pub id: String,
+    pub pos: Pos,
+    pub worth: i32,
+    pub hits: i32,
+    pub massed: bool,
+}
 
-                    acts.push(Intent::Creep(
-                        healer.name.clone(),
-                        CreepAct::HealCreep(p.id.clone()),
-                    ));
-                }
-                Some((p, _)) => {
-                    if let Some(o) = owed.get_mut(&p.name) {
-                        *o -= parts * engine::RANGED_HEAL_POWER;
-                    }
-
-                    acts.push(Intent::Creep(
-                        healer.name.clone(),
-                        CreepAct::RangedHealCreep(p.id.clone()),
-                    ));
-                }
-                None => (),
-            }
+/// §6.4's Hunt, after ibex: risk at the margin and a three-tick lethal veto,
+/// so survival is never outvoted; scored only in `contact`, the whole set at
+/// once, as per-body scoring out of it oscillated. A volley never fires
+/// beside an ally (`spared`). Also each tile's score.
+pub fn hunt(
+    sight: &mut Sight,
+    threat: &tiles::Table<i32>,
+    (marks, spared): (&[Mark], &[Pos]),
+    mates: &[&Creep],
+    (centre, contact): (&Pos, bool),
+    c: &Creep,
+) -> (Option<CreepAct>, Wish, Vec<(Tile, i64)>) {
+    let room = c.pos.room.clone();
+    let parts = live(BodyPart::RangedAttack, c);
+    let worth_of = |m: &Mark, damage: i32| {
+        i64::from(damage.min(m.hits)) * i64::from(m.worth) / i64::from(m.hits.max(1))
+    };
+    let landed = |at: &Pos| -> (i64, Option<CreepAct>) {
+        let reach = |m: &Mark| at.range(&m.pos).filter(|r| *r <= engine::RANGED_RANGE);
+        let single = marks
+            .iter()
+            .filter(|m| reach(m).is_some())
+            .map(|m| {
+                (
+                    worth_of(m, engine::RANGED_ATTACK_POWER * parts),
+                    m.id.clone(),
+                )
+            })
+            .max();
+        let mass: i64 = if spared.iter().any(|p| at.within(engine::RANGED_RANGE, p)) {
+            0
+        } else {
+            marks
+                .iter()
+                .filter(|m| m.massed)
+                .filter_map(|m| {
+                    reach(m).map(|r| worth_of(m, parts * engine::mass_attack_power_at(r)))
+                })
+                .sum()
+        };
+        match single {
+            Some((w, id)) if w >= mass => (w, Some(CreepAct::RangedAttackCreep(id))),
+            _ if mass > 0 => (mass, Some(CreepAct::RangedMassAttack)),
+            _ => (0, None),
         }
+    };
+    let strike = landed(&c.pos).1;
+    if !contact {
+        let on = toward(sight, c, centre, engine::RANGED_RANGE);
+        return (strike, on, Vec::new());
     }
-
-    acts
+    let cost = i64::from(engine::body_cost(
+        &c.body.iter().map(|p| p.kind).collect::<Vec<_>>(),
+    ));
+    let field = sight.atlas.field(
+        mover_of(c),
+        &target_at(sight, centre, engine::RANGED_RANGE),
+        &room,
+    );
+    let approach = |t: Tile| {
+        -field
+            .as_ref()
+            .and_then(|f| f.ticks(t))
+            .unwrap_or(i32::MAX / 2)
+    };
+    let nets = nets(&*sight.atlas, threat, mates, c);
+    let open: Vec<Tile> = nets.iter().map(|(t, _)| *t).collect();
+    let net = |t: Tile| {
+        nets.iter()
+            .find(|(o, _)| *o == t)
+            .map_or(i32::MAX, |(_, n)| *n)
+    };
+    let scored: Vec<(Tile, i64)> = open
+        .iter()
+        .filter(|t| !tiles::on_edge(**t) && net(**t) * 3 < c.hits)
+        .map(|t| {
+            let risk =
+                i64::from(net(*t).max(0)) * cost / i64::from(threat[*t].max(c.hits / 3).max(1));
+            (*t, landed(&tiles::to_pos(&room, *t)).0 - risk)
+        })
+        .collect();
+    // Every tile lethal: the least deadly, an exit among them, until the
+    // engagement, told so (`cornered`), re-prices.
+    let best = scored
+        .iter()
+        .max_by_key(|(t, score)| (*score, approach(*t), std::cmp::Reverse(*t)))
+        .map(|(t, _)| *t)
+        .or_else(|| open.iter().copied().min_by_key(|t| (net(*t), *t)));
+    let wish = best.map_or_else(|| hold(sight, c), |t| step_to(c, t));
+    (strike, wish, scored)
 }

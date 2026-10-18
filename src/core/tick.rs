@@ -45,6 +45,8 @@ pub struct Declarations {
     pub sieges: Vec<String>,
     /// Our colonies being emptied before the owner unclaims them by hand.
     pub abandon: Vec<String>,
+    /// Rooms no fight body walks through on its way: a rival's towers.
+    pub avoid: BTreeSet<String>,
 }
 
 pub fn undeclared() -> Declarations {
@@ -57,6 +59,7 @@ pub fn undeclared() -> Declarations {
         enemies: BTreeSet::new(),
         sieges: Vec::new(),
         abandon: Vec::new(),
+        avoid: BTreeSet::new(),
     }
 }
 
@@ -66,6 +69,8 @@ pub struct Context<'a> {
     pub declarations: &'a Declarations,
     pub sightings: &'a Sightings,
     pub intel: &'a Intel,
+    /// The harness's trace is wanted (`Intent::Trace`); never live.
+    pub trace: bool,
 }
 
 /// A body cast under this name is Fight's for its life, so no creep is in

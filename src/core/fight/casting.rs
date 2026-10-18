@@ -282,31 +282,42 @@ pub fn reinforce<T>(
         })
 }
 
-/// The fewest RANGED:HEAL pickets whose pooled heal holds the towers' strike
-/// at a rival source outside its ramparts (owner, 2026-10-18: its harvesters
-/// are struck rather than its seats filled).
-pub fn pickets(capacity: i32, strike: i32) -> Vec<Body> {
-    let picket = most(
-        capacity,
-        &[
-            BodyPart::RangedAttack,
-            BodyPart::Heal,
-            BodyPart::Move,
-            BodyPart::Move,
-        ],
-    );
+/// The fewest bodies whose HEAL holds `strike`, each with the RANGED its share
+/// of `worth` buys: the kills pay for the cast (v1's `castBodiesPaid`). A
+/// siege's pickets and a sweep's set.
+pub fn squad(capacity: i32, strike: i32, worth: i32) -> Vec<Body> {
+    // The towers' strike falls on one body; it and one body beside it heal it.
+    let heal = ((strike + 2 * engine::HEAL_POWER - 1) / (2 * engine::HEAL_POWER)) as usize;
+    let n = if heal > 0 { 2 } else { 1 };
+    // Parts are struck off head first: the shots go first, then the legs
+    // the set walks out on, the heal last, whole while either stands.
+    let body = |ranged: usize| -> Body {
+        let mut b = vec![BodyPart::RangedAttack; ranged];
+        b.extend(vec![BodyPart::Move; heal + ranged]);
+        b.extend(vec![BodyPart::Heal; heal]);
+        b
+    };
+    let fits = |b: &Body| b.len() <= engine::MAX_BODY_PARTS && engine::body_cost(b) <= capacity;
+    let paid = (worth / n as i32 / engine::body_cost(&[BodyPart::RangedAttack, BodyPart::Move]))
+        .max(1) as usize;
+    (1..=paid)
+        .take_while(|r| fits(&body(*r)))
+        .last()
+        .map_or_else(Vec::new, |r| vec![body(r); n])
+}
 
-    if picket.is_empty() {
-        return Vec::new();
-    }
-
-    (1..=AROUND_ONE)
-        .map(|n| vec![picket.clone(); n as usize])
-        .find(|set| {
-            let fighters: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
-            exchange::pooled_heal(set.len() as i32, &fighters) >= strike
+/// Whether `set` holds `strike` falling on any one body: that body's heal and
+/// the most another lends it from beside.
+pub fn holds(set: &[Fighter], strike: i32) -> bool {
+    strike == 0
+        || (0..set.len()).all(|i| {
+            let lent = (0..set.len())
+                .filter(|j| *j != i)
+                .map(|j| set[j].heal)
+                .max()
+                .unwrap_or(0);
+            engine::HEAL_POWER * (set[i].heal + lent) >= strike
         })
-        .unwrap_or_default()
 }
 
 pub fn kill_order(hostiles: &[Creep]) -> Vec<String> {

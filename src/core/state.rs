@@ -17,6 +17,8 @@ pub struct State {
     pub casts: Vec<Cast>,
     /// Strategy's `Scout room` declarations, rebuilt each tick before Economy reads them.
     pub scouts: Vec<Scout>,
+    /// Strategy's sweep candidates this tick, the stalest seen first.
+    pub preyed: Vec<String>,
 }
 
 impl State {
@@ -29,6 +31,7 @@ impl State {
             engagements: Vec::new(),
             casts: Vec::new(),
             scouts: Vec::new(),
+            preyed: Vec::new(),
         }
     }
 }

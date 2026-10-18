@@ -1,0 +1,53 @@
+{
+  "why": "a declared sweep kills a rival's remote miners, haulers and reservers for more energy than it casts",
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
+    "seed": 1,
+    "declarations": {
+      "outposts": [],
+      "claims": [],
+      "enemies": [
+        "rival"
+      ],
+      "avoid": [
+        "W8S1"
+      ]
+    },
+    "opponents": [
+      {
+        "name": "rival",
+        "bot": "scripts/xxscreeps/engine/remote",
+        "room": "W8S1",
+        "config": {
+          "remotes": [
+            "W7S1",
+            "W7S2",
+            "W8S2"
+          ]
+        }
+      }
+    ]
+  },
+  "ticks": 4000,
+  "assert": [
+    {
+      "measure": "sweepKilled",
+      "min": 5000
+    },
+    {
+      "measure": "bodiesLost",
+      "max": 0
+    },
+    {
+      "measure": "sweepNet",
+      "min": 0
+    },
+    {
+      "measure": "threatLookupsMost"
+    },
+    {
+      "measure": "faults",
+      "max": 0
+    }
+  ]
+}

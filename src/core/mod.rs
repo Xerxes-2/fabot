@@ -8,6 +8,7 @@ pub mod layout;
 pub mod mv;
 pub mod state;
 pub mod strategy;
+pub mod tactics;
 pub mod tick;
 pub mod vocabulary;
 pub mod world;

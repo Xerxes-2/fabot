@@ -47,10 +47,12 @@ pub enum Objective {
     /// Into its room to the rival structure `target`; the plan's order is the
     /// barriers on the way, first broken first.
     Siege(String),
+    /// A rival's remote, `room`, its economy bodies hunted.
+    Sweep,
 }
 
 /// A Defend's target is `Group`, and `room` the room held or worked it
-/// threatened; a Siege's is in its objective, and `group` none (0).
+/// threatened; a Siege's and a Sweep's `group` is none (0).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Engagement {
     pub id: i32,

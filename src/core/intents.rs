@@ -107,6 +107,10 @@ pub enum Intent {
     Queue(String, Ask),
     /// Tick arbitrates every module's wishes in a room as one.
     Wish(String, Wish),
+    /// A body's scored tiles, for the harness's trace; nothing reaches the game.
+    Trace(String, Vec<(crate::core::world::Pos, i64)>),
+    /// Summed into the observe segment's counts (§9.3).
+    Count(&'static str, i32),
 }
 
 impl Intent {
@@ -123,6 +127,8 @@ impl Intent {
             Intent::Observe(id, _) => id.clone(),
             Intent::Queue(room, _) => room.clone(),
             Intent::Wish(_, wish) => wish.creep.clone(),
+            Intent::Trace(creep, _) => creep.clone(),
+            Intent::Count(name, _) => name.to_string(),
         }
     }
 

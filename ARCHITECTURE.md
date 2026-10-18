@@ -147,7 +147,8 @@ cold tick never spends more than ❓ 60% of the limit.
 | `Economy` | task pool, planner, matcher, quota, spawns, labs, terminals, market | World, Atlas, declarations, `State.Economy` | tasks, casts, `State.Economy` | port, trim (§5) |
 | `Layout` | construction and tower plans | World, Atlas, declarations (outposts' containers and roads) | sites, tower intents | port |
 | `Exchange` | who wins: pure fight arithmetic | bodies, terrain | — | port from `Facts.fs:2883–4056, 1038–1582`, `Fighter.fs`, `Arrival.fs`; narrow the input |
-| `Fight` | tracker, engagements (one kind per file), tactics, casting | World, Atlas, Exchange, `State.Fight` | fight intents, casts, declarations, `State.Fight` | **new** (§6) |
+| `Fight` | tracker, engagements (one kind per file), casting | World, Atlas, Exchange, `State.Fight` | fight intents, casts, declarations, `State.Fight` | **new** (§6) |
+| `Tactics` | what one fight body does this tick (§6.4): strikes, steps, the Hunt score, heals; it imports no Fight | Atlas, Move, the `Sight` and plan Fight hands down | creep intents, wishes | **new**, split from Fight |
 | `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Exchange, `State.Intel`, `Season` | declarations, opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
 | `Season` | this season's rules: what scores, its structures, its NPCs, its map quirks | World | declarations to Strategy, season intents | **new**, disposable (§8) |
 | `Move` | per-room movement arbitration, run by `Tick` over every module's wishes, and the step functions (chase, kite, flee, formation) | Intents, Atlas | move intents | port `Resolver.fs`, drop fight precedence |
@@ -196,6 +197,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK or CARRY body stood there; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
 | `observe.*` | health, faults, per-module CPU, counters | Main, then Observe | segment 1 | operator; calibrates the benchmark |
+| `scouts`, `preyed` | the declared rooms a scout serves; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
 | `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) and whether it is armed; a room in sight holds only what stands there now. A level-0 core is unarmed: it keeps its core engagement open but stands nothing down | World | heap | vision grace; when a stood-down outpost is clear |
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
 | `terrain` | room → its raw terrain buffer, kept from the first tick it is seen | World | heap | terrain never changes, and reading it is calls across the seam (§9.2) |
@@ -296,7 +298,7 @@ val step : grace: int -> held: int -> owned: Set<string> -> prev: Group list
 
 ```fsharp
 type Target = Group of int | Room of string | Structure of string | Lairs of string
-type Kind = Defend | Claim | Siege | Drain | KeeperDuty | PowerBank | Stronghold
+type Kind = Defend | Claim | Siege | Sweep | Drain | KeeperDuty | PowerBank | Stronghold
 type Engagement =
     { Id: int; Kind: Kind; Target: Target
       Ours: Set<string>; Asked: Cast list      // committed bodies, and the ones still in an oven
@@ -354,11 +356,10 @@ Common to every kind:
   would, it stops asking for bodies, its standing bodies hold on our
   ramparts and the towers carry on; it is `unanswered` and closes only when
   the group is gone.
-- v2.0's record (`fight/shape.rs`) holds what `Defend` reads: the target is a
-  group id, the asks live in `fight.casts`; `Kind` and `Declares` join with
-  the second kind; `Predicted` is the outcome priced each time it is answered
-  after standing unanswered. The plan chases while
-  the group stands in another room we hold or work.
+- v2.0's record (`fight/shape.rs`): the asks live in `fight.casts`, `Kind` is
+  `Objective`; `Predicted` is the outcome priced each time it is answered
+  after standing unanswered. The plan chases while the group stands in
+  another room we hold or work.
 
 The other kinds, for the record's sake:
 - `Claim`: Strategy picked a room (§7.2); a claimer walks, claims; pioneers are
@@ -375,6 +376,17 @@ The other kinds, for the record's sake:
   hits over the set's dismantle rate less the repair, no tile where the towers
   outstrike the set's heal), at open and on events, and the plan's order is
   its barriers. A stored breach goes stale the moment the rival builds.
+- `Sweep` (v1's sweep): one at a time, on the room in sight an enemy owns,
+  reserves or works (`intel`) whose worth, its prey (an enemy's unarmed
+  WORK, CARRY or CLAIM bodies outside its barriers, each its cost by its
+  life left and its load) and the harvest its exposed sources yield over a
+  hunter's life (owner: denial is worth as much as kills), pays most a tick
+  of the walk. Its set beats the escort and out-heals the charged towers
+  there within that worth; with none, it opens unanswered at the bank it was
+  priced at. The engagement is the commitment (v1 stored the room): it holds
+  until its room is worth nothing while another candidate a set beats is
+  worth a cast, a safe mode stands it off, or an event re-prices an escort
+  that beats it. No prey is remembered out of sight.
 - `Drain`: approach → drain (edge dance, heal) → rotate → …; closes when the
   towers are empty or the deadline passes.
 - `KeeperDuty`: a perpetual cycle over lairs by respawn time; declares the room
@@ -409,7 +421,7 @@ val cheapestWin : stance: Stance -> ours: Side -> affordable: Body list -> their
 
 ### 6.4 Tactics — what a committed body does
 
-A tactic is a function from (engagement, body, world) to that body's intent this
+A tactic (`core/tactics`, which imports no Fight) is a function from (engagement, body, world) to that body's intent this
 tick. Each is under 150 lines and shared by every kind; v2.0 ports the first
 five from v1's step functions, the rest come with their kinds:
 
@@ -423,10 +435,10 @@ five from v1's step functions, the rest come with their kinds:
 | Formation | new: `Move` steps a 2×2 footprint as one body | per slot |
 | Dismantle | v1 `actionIntents` sapper branch | dismantle the plan's target |
 | EdgeDance | new | step in to draw fire, step out to heal |
+| Hunt | new (ibex EV): best of nine tiles, worth less netted damage | most worth in reach |
 
-Target selection within a tactic is a static kill order set at open (healers
-first, then by damage/hits), re-computed only on events. No head latch is
-needed because the order does not move between events.
+Target selection within the other tactics is a static kill order set at open
+(healers first, then by damage/hits), re-computed only on events.
 
 The heal reflex (ported `Emitter.healReflex`) runs for every body with HEAL,
 inside or outside an engagement.
@@ -558,7 +570,7 @@ to a measurement on the benchmark above, in either direction:
 ### 9.3 Counts are a gate
 
 The bot reports the per-tick counts it has in the observe segment: floods run
-and Atlas cache hits/misses today, `Exchange.outcome` calls, `Derived` lazies
+and Atlas cache hits/misses today, the tiles a Hunt scores, `Exchange.outcome` calls, `Derived` lazies
 forced, intel rows read and Memory bytes as they land. Because `decide` is
 deterministic the numbers are exact, so `scripts/ceilings.json` holds ceilings
 for them beside the line ceilings — never raised; lowered when a change earns
@@ -785,7 +797,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 | `Decide/Labs, Layout` | `Economy`, `Layout` | Layout ✅ in the tick after `economy`: a standing plan per room, sites in plan order as the level allows, towers on hostiles. Labs ⏳ |
 | `Types/Colonies.fs` declarations, `allies` | `declarations` data | not ported as code; the current rooms seed the first `declarations`. ✅ `declarations.allies` (player names): an ally's creeps leave `Hostiles` as the world is read, so nothing answers them |
 | `Decide/Facts.fs:2883–4056, 1038–1582, 2153–2196`, `Fighter.fs`, `Arrival.fs` | `Exchange` | ✅ `core/exchange/`; `npm run exchange` is §10.1's generated set |
-| `Decide/Emitter.fs` strike/heal/glue | `Fight.Tactics` | ✅ the strike (swing, shot, volley where it outdeals the shot) and the heal reflex; glue not ported (a melee body closes to its target each tick) |
+| `Decide/Emitter.fs` strike/heal/glue | `core/tactics` | ✅ the strike (swing, shot, volley where it outdeals the shot) and the heal reflex; glue not ported (a melee body closes to its target each tick) |
 | `Decide/Caster.fs` | `Fight.Casting` | ✅ a body to the spawn that lands it soonest, a home's Defend the home's, v1's guard, ranger and defender blocks; the lending floors and trespass prices dropped |
 | `Decide/Operations.fs`, `Types/Operation.fs` | — | shape only: `OpRecord`'s fields inform `Engagement`, its bidding informs `Strategy`. No code ports; re-read when `Siege` is due |
 | `Core/LightTick.fs` | — | not ported; per-module keys (§1) |

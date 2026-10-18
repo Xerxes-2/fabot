@@ -223,15 +223,16 @@ writeFileSync(join(world, ".screepsrc.yaml"), screepsrc);
 writeFileSync(join(world, "package.json"), '{ "private": true }\n');
 writeFileSync(join(world, "seed.txt"), `${seed}\n`);
 mkdirSync(join(world, "bot"), { recursive: true });
-if (late === 0 && windows.length === 0) cpSync(bot, join(world, "bot/main.js"));
+// `fabotTrace`: the bot logs its tactic trace (`#trace`), never live.
+cpSync(bot, join(world, "bot/fabot.js"));
+if (late === 0 && windows.length === 0) writeFileSync(join(world, "bot/main.js"), `globalThis.fabotTrace = true;\nmodule.exports = require("fabot");\n`);
 else {
   // The bundle's exports are getters, so the wait and the capture wrap it
   // from outside; the capture runs after the loop, out of the bot's clock.
-  cpSync(bot, join(world, "bot/fabot.js"));
   cpSync(join(HERE, "engine/capture.js"), join(world, "bot/capture.js"));
   writeFileSync(
     join(world, "bot/main.js"),
-    `const bot = require("fabot");\nconst capture = require("capture");\nconst windows = ${JSON.stringify(windows)};\nlet first;\n` +
+    `globalThis.fabotTrace = true;\nconst bot = require("fabot");\nconst capture = require("capture");\nconst windows = ${JSON.stringify(windows)};\nlet first;\n` +
       `module.exports.loop = () => {\n  first ??= Game.time;\n  const t = Game.time - first;\n` +
       `  const memory = windows.some(([a, b]) => t >= a && t < b) ? RawMemory.get() : null;\n` +
       `  if (t >= ${late}) bot.loop();\n  if (memory !== null) console.log("#capture " + capture(memory));\n};\n`,

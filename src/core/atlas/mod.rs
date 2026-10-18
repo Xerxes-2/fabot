@@ -367,6 +367,31 @@ impl Atlas {
         self.rooms.get(room).map(|grid| (*grid.weights).clone())
     }
 
+    /// The tiles a walk from the room's exits reaches without breaking a
+    /// barrier.
+    pub fn from_exits(&self, room: &str) -> BTreeSet<Tile> {
+        let mut reached: BTreeSet<Tile> = BTreeSet::new();
+        let Some(grid) = self.rooms.get(room) else {
+            return reached;
+        };
+        let open = |t: &Tile| grid.weights[*t].is_some();
+        let mut frontier: Vec<Tile> = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
+            .iter()
+            .flat_map(|exit| tiles::exit_tiles(*exit).iter().copied())
+            .filter(open)
+            .collect();
+        while let Some(t) = frontier.pop() {
+            if reached.insert(t) {
+                frontier.extend(
+                    tiles::around(t)
+                        .iter()
+                        .filter(|n| open(n) && !reached.contains(n)),
+                );
+            }
+        }
+        reached
+    }
+
     pub fn passable(&self, room: &str, tile: Tile) -> bool {
         self.rooms
             .get(room)

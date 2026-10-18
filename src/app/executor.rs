@@ -205,6 +205,16 @@ fn act(intent: &Intent) -> (String, i32) {
             },
         },
         Intent::Queue(_, _) | Intent::Wish(_, _) => ("unsettled".to_string(), NOT_FOUND),
+        Intent::Trace(creep, scored) => {
+            let tiles: Vec<String> = scored
+                .iter()
+                .map(|(p, score)| format!("[\"{}\",{},{},{score}]", p.room, p.x, p.y))
+                .collect();
+            let line = format!(r#"{{"creep":"{creep}","tiles":[{}]}}"#, tiles.join(","));
+            crate::app::wire::trace(&line);
+            ("trace".to_string(), 0)
+        }
+        Intent::Count(_, _) => ("count".to_string(), 0),
         Intent::Spawn(id, SpawnAct::SpawnCreep(body, name)) => match world::object_by_id(id) {
             None => ("spawn".to_string(), NOT_FOUND),
             Some(spawn) => {

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::core::engine;
 use crate::core::intents::Intent;
-use crate::core::tick::Declarations;
+use crate::core::tick::{self, Declarations};
 use crate::core::tiles;
 use crate::core::vocabulary::BodyPart;
 use crate::core::world::{Owner, World};
@@ -83,12 +83,32 @@ pub struct Scout {
     pub cast: bool,
 }
 
-/// Sieges first, then the stalest rows, each to its nearest free observer;
-/// every declared room no observer covers is scouted (`ARCHITECTURE.md` §7.1).
+pub fn preyed(intel: &Intel, declarations: &Declarations, time: i32) -> Vec<String> {
+    let enemy = |user: &Option<String>| {
+        user.as_ref()
+            .is_some_and(|u| declarations.enemies.contains(u))
+    };
+    let mut rooms: Vec<(i32, &String)> = intel
+        .iter()
+        .filter(|(_, r)| {
+            enemy(&r.owner)
+                || enemy(&r.worker)
+                || r.reservation
+                    .as_ref()
+                    .is_some_and(|(u, lapse)| *lapse > time && declarations.enemies.contains(u))
+        })
+        .map(|(room, r)| (r.seen, room))
+        .collect();
+    rooms.sort();
+    rooms.into_iter().map(|(_, room)| room.clone()).collect()
+}
+
+/// Every declared room no observer covers is scouted (`ARCHITECTURE.md` §7.1).
 pub fn sight(
     world: &World,
     declarations: &Declarations,
     intel: &Intel,
+    preyed: &[String],
 ) -> (Vec<Intent>, Vec<Scout>) {
     let mut free: Vec<_> = world
         .rooms
@@ -114,9 +134,13 @@ pub fn sight(
         Some(Intent::Observe(id, room.clone()))
     };
 
-    let mut observed: Vec<Intent> = declarations
-        .sieges
-        .iter()
+    // A sweep's choice needs a look while no fight body hunts a candidate,
+    // one a tick none was seen in, so one observer starves nothing.
+    let looked = (preyed.iter()).any(|r| intel.get(r).is_some_and(|row| row.seen >= world.time));
+    let hunting =
+        (world.creeps.iter()).any(|c| tick::fights(&c.name) && preyed.contains(&c.pos.room));
+    let mut observed: Vec<Intent> = (declarations.sieges.iter())
+        .chain(preyed.first().filter(|_| !hunting && !looked))
         .filter_map(&mut observe)
         .collect();
     let covered = |observed: &[Intent], room: &String| {
@@ -131,6 +155,19 @@ pub fn sight(
             observed.push(intent);
         }
     }
+    // Never seen, beside a room seen: an unseen world has no row to go stale.
+    let mut frontier: Vec<String> = intel
+        .keys()
+        .filter_map(|room| tiles::room_coords(room))
+        .flat_map(|(x, y)| [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)])
+        .map(|(x, y)| tiles::room_name(x, y))
+        .filter(|room| !intel.contains_key(room))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let n = frontier.len().max(1);
+    frontier.rotate_left(world.time as usize % n);
+    observed.extend(frontier.iter().filter_map(&mut observe));
 
     let seen = |room: &String| intel.get(room).map(|r| r.seen);
     let mut rooms: Vec<&String> = declared(declarations)
