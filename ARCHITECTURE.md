@@ -180,7 +180,7 @@ from the other two (§1, cold start).
 Everything v2 keeps in Memory is under `Memory.v2`; v1's keys are dropped on
 the first tick that sees them, so the `fabot` blob a takeover finds is parsed
 once rather than every tick after (a rollback to v1 finds it gone and builds it
-fresh). Segment ids: 1 observe, 10–14 the
+fresh). Segment ids: 1 observe, 2 intel, 10–14 the
 recorder's ring; the rest are assigned here as their stores land.
 
 | Store | Shape | Owner | Lives in | Why |
@@ -193,7 +193,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
 | `recorder` | the last five ticks' `World` and Memory size | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
-| `intel.rooms` | room → last seen, owner, structures summary, defence estimate, sources, controller | Strategy | segment | hundreds of rooms; read on a due tick |
+| `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK or CARRY body stood there; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
 | `observe.*` | health, faults, per-module CPU, counters | Main, then Observe | segment 1 | operator; calibrates the benchmark |
 | `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) and whether it is armed; a room in sight holds only what stands there now. A level-0 core is unarmed: it keeps its core engagement open but stands nothing down | World | heap | vision grace; when a stood-down outpost is clear |
@@ -442,11 +442,15 @@ and opens engagements. It runs on its key (§1), not every tick.
 
 ### 7.1 Intel
 
-`intel.rooms` (segment): every room seen, with owner, structures, towers,
-sources, controller, keeper lairs, last seen. Written from `World` each tick a
-room is visible; read by Strategy on its due tick and by `Atlas` for the room
-graph's avoided set. Scouting is a declaration (`Scout room`) Economy serves
-with a cheap body when a row is older than ❓ `Tuning.IntelStale`.
+`intel.rooms` (§4) is written from `World` each tick, before any module, for
+every visible room. Economy reads a declared claim or outpost out of sight as
+its row last saw it, so a room another holds casts no claimer. Strategy owns
+the observers: each declared siege every tick, then the stalest rows older
+than `STALE` (a creep life, the owner's) in range. A declared room stale and out of every
+observer's reach is a `Scout room` declaration, served by a 1-MOVE body; one
+never seen is served as nobody's, and its first row is its own bodies' sight.
+❓ After the sweep: rows grow towers, sources and keeper lairs with their
+first reader, and whether the room graph's avoided set comes from them.
 
 ### 7.2 Expansion and declarations
 

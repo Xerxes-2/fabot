@@ -9,10 +9,13 @@ use crate::app::wire;
 use crate::app::world;
 use crate::core::atlas::Atlas;
 use crate::core::layout::shape::Standing;
+use crate::core::strategy::intel::{self, Intel};
 use crate::core::tick::{self, Context, Declarations};
 use crate::core::world::Sightings;
 
 const FAULTS_KEPT: usize = 20;
+/// A reset loses at most this many ticks of sight.
+const INTEL_WRITTEN_EVERY: i32 = 100;
 
 struct Heap {
     /// A module named here is skipped and its last output not replayed.
@@ -26,6 +29,9 @@ struct Heap {
     atlas: Atlas,
     /// A room's terrain never changes, so it is read once a room a reset.
     terrain: world::Terrains,
+    /// `None` until its segment is read after a reset.
+    intel: Option<Intel>,
+    intel_asked: bool,
 }
 
 thread_local! {
@@ -36,6 +42,8 @@ thread_local! {
         sightings: Sightings::new(),
         atlas: Atlas::empty(),
         terrain: world::Terrains::default(),
+        intel: None,
+        intel_asked: false,
     });
 }
 
@@ -53,16 +61,20 @@ fn run_tick() -> Result<(), String> {
     let clock = || game_cpu::get_used();
     let mut phases: Vec<(String, f64)> = Vec::new();
 
-    let (mut sightings, mut atlas, mut faults, standing, mut terrain) = HEAP.with(|heap| {
-        let mut heap = heap.borrow_mut();
-        (
-            std::mem::take(&mut heap.sightings),
-            std::mem::replace(&mut heap.atlas, Atlas::empty()),
-            std::mem::take(&mut heap.faults),
-            std::mem::take(&mut heap.standing),
-            std::mem::take(&mut heap.terrain),
-        )
-    });
+    let (mut sightings, mut atlas, mut faults, standing, mut terrain, held, asked) =
+        HEAP.with(|heap| {
+            let mut heap = heap.borrow_mut();
+            (
+                std::mem::take(&mut heap.sightings),
+                std::mem::replace(&mut heap.atlas, Atlas::empty()),
+                std::mem::take(&mut heap.faults),
+                std::mem::take(&mut heap.standing),
+                std::mem::take(&mut heap.terrain),
+                heap.intel.take(),
+                std::mem::replace(&mut heap.intel_asked, true),
+            )
+        });
+    let mut intel = held.or_else(|| wire::read_intel(asked));
 
     let start = clock();
     let mut state = wire::read_state();
@@ -73,6 +85,9 @@ fn run_tick() -> Result<(), String> {
     let start = clock();
     let world = world::of_game(&mut terrain, &declarations);
     sightings = crate::core::world::sightings::step(&world, sightings);
+    let mut unread = Intel::new();
+    let rows = intel.as_mut().unwrap_or(&mut unread);
+    intel::step(&world, rows);
     phases.push(("world".to_string(), clock() - start));
 
     let start = clock();
@@ -84,6 +99,7 @@ fn run_tick() -> Result<(), String> {
         atlas: &mut atlas,
         declarations: &declarations,
         sightings: &sightings,
+        intel: rows,
     };
 
     let mut result = tick::run(clock, tick::module_list(), &mut context, state);
@@ -101,6 +117,11 @@ fn run_tick() -> Result<(), String> {
 
     let start = clock();
     wire::write_state(&result.state);
+    if let Some(rows) = &intel
+        && world.time % INTEL_WRITTEN_EVERY == 0
+    {
+        wire::write_intel(rows);
+    }
     let write_cpu = clock() - start;
 
     phases.push(("execute".to_string(), execute_cpu));
@@ -108,7 +129,7 @@ fn run_tick() -> Result<(), String> {
 
     if wire::recording() {
         let start = clock();
-        if let Some(fault) = wire::record(world.time, &world) {
+        if let Some(fault) = wire::record(world.time, &world, intel.as_ref().unwrap_or(&unread)) {
             record_fault(&mut faults, "record", &fault);
         }
         phases.push(("record".to_string(), clock() - start));
@@ -139,6 +160,7 @@ fn run_tick() -> Result<(), String> {
         heap.sightings = sightings;
         heap.atlas = atlas;
         heap.terrain = terrain;
+        heap.intel = intel;
     });
 
     Ok(())

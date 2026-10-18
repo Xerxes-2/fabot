@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use crate::core::atlas::{Atlas, Tree};
 use crate::core::engine;
 use crate::core::grid::Footprint;
+use crate::core::strategy::intel::Intel;
 use crate::core::tick::{self, Declarations, Outpost};
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::{BodyPart, Resource, part_count_in};
@@ -36,6 +37,7 @@ pub fn key_parts_in(pattern: Pattern, body: &Body) -> i32 {
     match bodies::key_part_of(pattern) {
         BodyPart::Carry => body.carry,
         BodyPart::Claim => body.claim,
+        BodyPart::Move => body.moves,
         _ => body.work,
     }
 }
@@ -239,6 +241,7 @@ pub struct Derived {
     pub colonies: Vec<Colony>,
     pub grounds: Vec<Ground>,
     pub claims: Vec<Controller>,
+    pub scouts: Vec<Pos>,
     pub bodies: Vec<Body>,
     /// Counted against the quota as if they stood, so no seat is cast twice.
     pub ovens: Vec<Body>,
@@ -743,19 +746,28 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
     }
 }
 
-fn blind(outpost: &Outpost) -> Room {
+/// A room out of sight stands as it was last seen, or as nobody's.
+fn blind(outpost: &Outpost, intel: &Intel, world: &World, declarations: &Declarations) -> Room {
+    let time = world.time;
+    let row = intel.get(&outpost.room);
+    let owner = |user: &String| Owner::of_user(user.clone(), &world.me, declarations);
     Room {
         name: outpost.room.clone(),
         terrain: Vec::new(),
         controller: Some(Controller {
             id: outpost.controller.id.clone(),
             pos: outpost.controller.pos.clone(),
-            owner: Owner::Nobody,
-            level: 0,
+            owner: row
+                .and_then(|r| r.owner.as_ref())
+                .map_or(Owner::Nobody, owner),
+            level: row.map_or(0, |r| r.level),
             progress: 0,
             progress_total: 0,
             ticks_to_downgrade: 0,
-            reservation: None,
+            reservation: row
+                .and_then(|r| r.reservation.as_ref())
+                .filter(|(_, lapse)| *lapse > time)
+                .map(|(user, lapse)| (owner(user), lapse - time)),
             safe_mode: 0,
             safe_mode_available: 0,
             safe_mode_cooldown: 0,
@@ -797,7 +809,8 @@ pub fn of_world(
     atlas: &Atlas,
     declarations: &Declarations,
     worked: &[Outpost],
-    claims: &[Outpost],
+    intel: &Intel,
+    scouts: &[String],
 ) -> Derived {
     let mut colonies: Vec<Colony> = Vec::new();
     let mut colony_rooms: Vec<&Room> = Vec::new();
@@ -840,9 +853,10 @@ pub fn of_world(
     // At the rate the reserver holds, not this tick's: a body lives longer
     // than a lapse lasts. The engine refuses a harvest on another's hold.
     let remote_of = |outpost: &Outpost| -> Ground {
-        let room: Cow<Room> = world
-            .room(&outpost.room)
-            .map_or_else(|| Cow::Owned(blind(outpost)), Cow::Borrowed);
+        let room: Cow<Room> = world.room(&outpost.room).map_or_else(
+            || Cow::Owned(blind(outpost, intel, world, declarations)),
+            Cow::Borrowed,
+        );
 
         let withheld = |c: &Controller| {
             if invader_held(c) {
@@ -969,12 +983,17 @@ pub fn of_world(
             })
             .collect(),
         grounds,
-        claims: claims
+        scouts: scouts
+            .iter()
+            .map(|room| Pos::new(room.as_str(), 25, 25))
+            .collect(),
+        claims: declarations
+            .claims
             .iter()
             .filter(|_| owned_rooms(world) < world.rooms_allowed)
             .filter_map(|claim| match world.room(&claim.room) {
                 Some(room) => room.controller.clone(),
-                None => blind(claim).controller,
+                None => blind(claim, intel, world, declarations).controller,
             })
             .filter(reservable)
             .collect(),

@@ -163,7 +163,8 @@ export function stand(captured, list, getHeapStatistics, clock) {
   }
   const named = (ids) => Object.fromEntries(Object.entries(ids).map(([name, key]) => [name, objects[key]]));
   const rooms = Object.fromEntries(tick.rooms.map((r) => [r.name, new Room(r, objects)]));
-  const segments = {};
+  // The intel rows as the capture's tick read them, for a window's cold start.
+  const segments = tick.intel === undefined ? {} : { 2: tick.intel };
   let parsed;
   Object.defineProperty(globalThis, "Memory", {
     configurable: true,
@@ -174,7 +175,7 @@ export function stand(captured, list, getHeapStatistics, clock) {
       return parsed;
     },
   });
-  globalThis.RawMemory = { segments, get: () => tick.memory };
+  globalThis.RawMemory = { segments, get: () => tick.memory, setActiveSegments: () => {} };
   globalThis.Game = {
     time: tick.time,
     cpu: { ...tick.cpu, getUsed: () => clock() + 0.2 * intents.charged.size, getHeapStatistics },

@@ -67,6 +67,7 @@ fn run(throws: &[bool], state: State) -> TickResult {
         atlas: &mut atlas,
         declarations: &declarations,
         sightings: &sightings,
+        intel: &BTreeMap::new(),
     };
     let modules: Vec<Module> = throws
         .iter()

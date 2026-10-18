@@ -369,7 +369,9 @@ fn length(value: &str) -> usize {
     value.chars().map(char::len_utf16).sum()
 }
 
-pub fn record(time: i32, world: &World) -> Option<String> {
+/// `intel`: the rows as the segment holds them, so a replay reads a room out
+/// of sight as the live tick did.
+pub fn record(time: i32, world: &World, intel: &str) -> Option<String> {
     let memory = raw_memory::get();
     let memory_bytes = memory.as_string().map_or(0, |each| length(&each));
 
@@ -377,6 +379,7 @@ pub fn record(time: i32, world: &World) -> Option<String> {
         ("tick", n(time)),
         ("memoryBytes", n(memory_bytes as i32)),
         ("world", self::world(world)),
+        ("intel", text(intel)),
     ]);
     let text = js_sys::JSON::stringify(&recorded)
         .ok()

@@ -81,7 +81,7 @@ terrain[0] = 1;
 terrain[51] = 2;
 
 globalThis.Memory = { fabot: { v1: "left alone" } };
-globalThis.RawMemory = { segments, get: () => JSON.stringify(globalThis.Memory) };
+globalThis.RawMemory = { segments, get: () => JSON.stringify(globalThis.Memory), setActiveSegments: () => {} };
 globalThis.Game = {
   time: 100,
   cpu: { limit: 20, bucket: 10000, getUsed: () => (used += 0.25) },
@@ -115,6 +115,7 @@ for (const want of ["memory", "world", "atlas", "economy", "execute", "write", "
   if (!phases.includes(want)) fail(`phase ${want} not reported: ${phases}`);
 const recorded = JSON.parse(segments[10 + (103 % 5)] ?? fail("recorder wrote nothing"));
 const w = recorded.world;
+if (!recorded.intel?.startsWith("W1N1 103 ")) fail(`recorder's intel lost the room: ${recorded.intel}`);
 if (w.Creeps.length !== 1) fail("recorder's world lost the creep");
 const [r] = w.Rooms;
 if (typeof r.Terrain !== "string" || r.Terrain.length !== 2500 || r.Terrain.slice(0, 2) !== "10")

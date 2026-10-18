@@ -1,0 +1,21 @@
+{
+  "why": "a declared claim a rival was last seen holding casts no claimer while it is out of sight",
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "node": "E2",
+    "opponents": [
+      {
+        "name": "rival",
+        "bot": "scripts/xxscreeps/engine/keep",
+        "room": "W7N3"
+      }
+    ]
+  },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "claimersCast", "max": 1 },
+    { "measure": "refusals", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

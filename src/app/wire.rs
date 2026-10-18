@@ -10,12 +10,14 @@ use super::js::{field, int_of};
 use crate::core::exchange::{Losses, Outcome};
 use crate::core::fight::shape::{Cast, Engagement, Group, Objective, Phase, Plan, Tactic};
 use crate::core::state::State;
+use crate::core::strategy::intel::{self, Intel};
 use crate::core::tick::{Declarations, Declared, Outpost, undeclared};
 use crate::core::vocabulary::{self, Compound, Resource};
 use crate::core::world::{Pos, World};
 
 /// Read by `npm run observe` and `scripts/capture`.
 pub const OBSERVE_SEGMENT: u8 = 1;
+const INTEL_SEGMENT: u8 = 2;
 
 fn set_field(o: &JsValue, name: &str, value: &JsValue) {
     let _ = Reflect::set(o, &JsValue::from_str(name), value);
@@ -352,6 +354,7 @@ pub fn read_state() -> State {
         groups: list_of(group_of, &field(&fight, "groups")),
         engagements: list_of(engagement_of, &field(&fight, "engagements")),
         casts: list_of(cast_of, &field(&fight, "casts")),
+        scouts: Vec::new(),
     }
 }
 
@@ -547,14 +550,31 @@ pub fn write_observe(o: &Observed) {
     write_segment(OBSERVE_SEGMENT, &text);
 }
 
+/// A segment is read the tick after it is asked for; one asked for and still
+/// absent was never written.
+pub fn read_intel(asked: bool) -> Option<Intel> {
+    match raw_memory::segments().get(INTEL_SEGMENT) {
+        Some(text) => Some(intel::of_text(&text)),
+        None if asked => Some(Intel::new()),
+        None => {
+            raw_memory::set_active_segments(&[INTEL_SEGMENT]);
+            None
+        }
+    }
+}
+
+pub fn write_intel(rows: &Intel) {
+    write_segment(INTEL_SEGMENT, &intel::to_text(rows));
+}
+
 pub fn write_segment(id: u8, text: &str) {
     let segments = raw_memory::segments();
     segments.set(id, text.to_string());
 }
 
 /// The recorder's ring: the last five ticks' `World` and Memory size.
-pub fn record(time: i32, world: &World) -> Option<String> {
-    super::record::record(time, world)
+pub fn record(time: i32, world: &World, rows: &Intel) -> Option<String> {
+    super::record::record(time, world, &intel::to_text(rows))
 }
 
 /// The bundle's banner, set by `scripts/rust.mjs` on the global.

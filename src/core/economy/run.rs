@@ -239,7 +239,7 @@ fn seat_of(stood: &BTreeSet<Pos>, creep: &Creep, offer: &Offer, seats: Option<&[
     }
 }
 
-fn act_of(derived: &Derived, task: &Task) -> CreepAct {
+fn act_of(derived: &Derived, task: &Task) -> Option<CreepAct> {
     let held = |id: &str| {
         derived.grounds.iter().any(|g| {
             g.controller
@@ -248,7 +248,7 @@ fn act_of(derived: &Derived, task: &Task) -> CreepAct {
         })
     };
 
-    match task {
+    Some(match task {
         Task::Harvest(id) => CreepAct::Harvest(id.clone()),
         Task::Withdraw(id, r) => CreepAct::Withdraw(id.clone(), r.clone()),
         Task::Pickup(id, _) => CreepAct::Pickup(id.clone()),
@@ -259,7 +259,8 @@ fn act_of(derived: &Derived, task: &Task) -> CreepAct {
         Task::Reserve(id) if held(id) => CreepAct::Unreserve(id.clone()),
         Task::Reserve(id) => CreepAct::Reserve(id.clone()),
         Task::Claim(id) => CreepAct::ClaimController(id.clone()),
-    }
+        Task::Scout(_) => return None,
+    })
 }
 
 /// Every body with room and no other resource aboard picks up dropped energy
@@ -369,7 +370,8 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         context.atlas,
         context.declarations,
         &worked,
-        &context.declarations.claims,
+        context.intel,
+        &state.scouts,
     );
 
     let offers = pool::pool(&derived, &state.assignments);
@@ -570,11 +572,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                     let can_act = body.energy > 0
                         || !(pool::draws_buffer(body, offer) || offer.task.is_upgrade());
 
-                    if arrived && can_act {
-                        acts.push(Intent::Creep(
-                            creep.name.clone(),
-                            act_of(&derived, &offer.task),
-                        ));
+                    if arrived
+                        && can_act
+                        && let Some(act) = act_of(&derived, &offer.task)
+                    {
+                        acts.push(Intent::Creep(creep.name.clone(), act));
                     }
                 }
 
@@ -706,6 +708,7 @@ mod tests {
                 atlas: &mut atlas,
                 declarations: &declarations,
                 sightings: &sightings,
+                intel: &BTreeMap::new(),
             };
 
             let (intents, state) = decide(&mut context, &State::empty()).expect("a world decides");

@@ -13,6 +13,8 @@ pub enum Task {
     Upgrade(String),
     Reserve(String),
     Claim(String),
+    /// A room, by name: what it holds is not seen until a body stands in it.
+    Scout(String),
 }
 
 /// Injective because an object id and a resource name hold no `:`.
@@ -27,6 +29,7 @@ pub fn task_id(task: &Task) -> String {
         Task::Upgrade(id) => format!("u:{id}"),
         Task::Reserve(id) => format!("v:{id}"),
         Task::Claim(id) => format!("c:{id}"),
+        Task::Scout(room) => format!("s:{room}"),
     }
 }
 
@@ -49,12 +52,17 @@ pub fn of_task_id(id: &str) -> Option<Task> {
         ["u", target] => Some(Task::Upgrade(target.to_string())),
         ["v", target] => Some(Task::Reserve(target.to_string())),
         ["c", target] => Some(Task::Claim(target.to_string())),
+        ["s", room] => Some(Task::Scout(room.to_string())),
         _ => None,
     }
 }
 
 /// `range_of` of a build, a repair or an upgrade: `upgradeController`'s reach.
 pub const RANGE_UPGRADE: i32 = 3;
+
+/// From the room's centre, every tile but its edges: a body in sight of the
+/// room has arrived, whatever its terrain.
+const RANGE_SCOUT: i32 = 23;
 
 impl Task {
     pub fn is_intake(&self) -> bool {
@@ -85,6 +93,7 @@ impl Task {
             | Task::Refill(_, _)
             | Task::Reserve(_)
             | Task::Claim(_) => 1,
+            Task::Scout(_) => RANGE_SCOUT,
         }
     }
 }

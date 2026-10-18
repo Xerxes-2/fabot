@@ -14,6 +14,8 @@ pub struct State {
     pub groups: Vec<Group>,
     pub engagements: Vec<Engagement>,
     pub casts: Vec<Cast>,
+    /// Strategy's `Scout room` declarations, rebuilt each tick before Economy reads them.
+    pub scouts: Vec<String>,
 }
 
 impl State {
@@ -25,6 +27,7 @@ impl State {
             groups: Vec::new(),
             engagements: Vec::new(),
             casts: Vec::new(),
+            scouts: Vec::new(),
         }
     }
 }

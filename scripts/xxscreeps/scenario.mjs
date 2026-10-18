@@ -110,6 +110,7 @@ const measures = {
   // The lowest level a declared claim stands at, and the first tick every one has a spawn.
   claimLevel: (samples, a) => Math.min(...Object.values(at(samples, a.to ?? Infinity).claimed ?? {}).map((c) => c.level)),
   claimCharged: (samples) => samples.find((s) => Object.values(s.claimed ?? {}).every((c) => c.fire >= 1000) && Object.keys(s.claimed ?? {}).length)?.t ?? Infinity,
+  claimersCast: (samples, a) => new Set(within(samples, a).flatMap((s) => s.bodies.filter((b) => b.startsWith("claimer-")).map((b) => b.split("@")[0]))).size,
   claimSpawned: (samples) => samples.find((s) => Object.values(s.claimed ?? {}).every((c) => c.spawns > 0) && Object.keys(s.claimed ?? {}).length)?.t ?? Infinity,
   // The most of a compound (`resource`) stood at once.
   made: (samples, a) => Math.max(0, ...samples.map((s) => s.made?.[a.resource] ?? 0)),

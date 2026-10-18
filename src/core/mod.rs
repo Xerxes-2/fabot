@@ -7,6 +7,7 @@ pub mod intents;
 pub mod layout;
 pub mod mv;
 pub mod state;
+pub mod strategy;
 pub mod tick;
 pub mod vocabulary;
 pub mod world;

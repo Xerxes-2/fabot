@@ -10,6 +10,7 @@ pub enum Pattern {
     Hauler,
     Upgrader,
     Claimer,
+    Scout,
 }
 
 impl Pattern {
@@ -25,15 +26,19 @@ impl Pattern {
     pub fn is_claimer(self) -> bool {
         self == Pattern::Claimer
     }
+    pub fn is_scout(self) -> bool {
+        self == Pattern::Scout
+    }
 }
 
 /// In the order a quota reports them.
-pub const ALL_PATTERNS: [Pattern; 5] = [
+pub const ALL_PATTERNS: [Pattern; 6] = [
     Pattern::Worker,
     Pattern::Harvester,
     Pattern::Hauler,
     Pattern::Upgrader,
     Pattern::Claimer,
+    Pattern::Scout,
 ];
 
 pub fn name_of(pattern: Pattern) -> &'static str {
@@ -43,6 +48,7 @@ pub fn name_of(pattern: Pattern) -> &'static str {
         Pattern::Hauler => "hauler",
         Pattern::Upgrader => "upgrader",
         Pattern::Claimer => "claimer",
+        Pattern::Scout => "scout",
     }
 }
 
@@ -63,6 +69,7 @@ pub fn block_of(pattern: Pattern) -> &'static [BodyPart] {
         Pattern::Hauler => &HAULER,
         Pattern::Upgrader => &UPGRADER,
         Pattern::Claimer => &CLAIMER,
+        Pattern::Scout => &[BodyPart::Move],
     }
 }
 
@@ -71,6 +78,7 @@ pub fn key_part_of(pattern: Pattern) -> BodyPart {
         Pattern::Worker | Pattern::Harvester | Pattern::Upgrader => BodyPart::Work,
         Pattern::Hauler => BodyPart::Carry,
         Pattern::Claimer => BodyPart::Claim,
+        Pattern::Scout => BodyPart::Move,
     }
 }
 
@@ -98,6 +106,8 @@ pub fn standing(work: i32, carry: i32) -> bool {
 pub fn pattern_of_parts(work: i32, carry: i32, movement: i32, claim: i32) -> Pattern {
     if claim > 0 {
         Pattern::Claimer
+    } else if work + carry == 0 {
+        Pattern::Scout
     } else if work > 0 && (carry == 0 || work > movement) {
         Pattern::Harvester
     } else if work == 0 && carry > 0 {
@@ -252,6 +262,7 @@ pub fn sized(pattern: Pattern, most: i32, capacity: i32) -> Option<Vec<BodyPart>
             Pattern::Hauler => whole_blocks(block_of(pattern), (most + 1) / 2, capacity),
             Pattern::Upgrader => upgrader_body(most, capacity),
             Pattern::Claimer => whole_blocks(block_of(pattern), most, capacity),
+            Pattern::Scout => block_of(pattern).to_vec(),
         };
         Some(with_move_last(body))
     }

@@ -461,6 +461,10 @@ fn ground_demands(
         demands.push(demand(Pattern::Claimer, &c.pos, 1, Box::new(|_| None)));
     }
 
+    for at in &derived.scouts {
+        demands.push(demand(Pattern::Scout, at, 1, Box::new(|_| None)));
+    }
+
     demands
 }
 
@@ -1077,9 +1081,13 @@ mod tests {
             &g.world,
             &all,
             &atlas,
-            &tick::undeclared(),
+            &tick::Declarations {
+                claims: g.claims.clone(),
+                ..tick::undeclared()
+            },
             &g.worked,
-            &g.claims,
+            &std::collections::BTreeMap::new(),
+            &[],
         )
     }
 

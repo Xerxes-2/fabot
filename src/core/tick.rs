@@ -10,6 +10,7 @@ use super::grid::{self, FatigueFactor, Footprint};
 use super::intents::{Ask, CreepAct, Intent, Rank, SpawnAct};
 use super::mv;
 use super::state::State;
+use super::strategy::intel::Intel;
 use super::tiles::{self, Tile};
 use super::vocabulary::{BodyPart, Compound};
 use super::world::{Pos, Sightings, World};
@@ -61,6 +62,7 @@ pub struct Context<'a> {
     pub atlas: &'a mut Atlas,
     pub declarations: &'a Declarations,
     pub sightings: &'a Sightings,
+    pub intel: &'a Intel,
 }
 
 /// A body cast under this name is Fight's for its life, so no creep is in
@@ -419,7 +421,11 @@ pub fn run(
 }
 
 /// The modules `Main` runs, in this order.
-pub const MODULES: [Module; 3] = [
+pub const MODULES: [Module; 4] = [
+    Module {
+        name: "strategy",
+        run: super::strategy::decide,
+    },
     Module {
         name: "fight",
         run: super::fight::decide,

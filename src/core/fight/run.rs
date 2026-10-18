@@ -985,30 +985,6 @@ fn changed(e: &Engagement, events: &[tracker::Event], by_id: &BTreeMap<i32, Grou
     })
 }
 
-/// Each declared siege kept in sight by the nearest observer free to reach it.
-fn observed(world: &World, rooms: &[String]) -> Vec<Intent> {
-    let mut free: Vec<&Structure> = world
-        .rooms
-        .iter()
-        .flat_map(|r| r.structures.iter())
-        .filter(|s| s.kind.is_observer() && s.owner.is_ours())
-        .collect();
-
-    rooms
-        .iter()
-        .filter_map(|room| {
-            let (at, observer) = free
-                .iter()
-                .enumerate()
-                .filter(|(_, o)| tiles::rooms_apart(&o.pos.room, room) <= engine::OBSERVER_RANGE)
-                .min_by_key(|(_, o)| (tiles::rooms_apart(&o.pos.room, room), o.id.clone()))?;
-            let id = observer.id.clone();
-            free.remove(at);
-            Some(Intent::Observe(id, room.clone()))
-        })
-        .collect()
-}
-
 pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, State), String> {
     let world = context.world;
     let declarations = context.declarations;
@@ -1631,7 +1607,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             .is_some_and(|c| c.owner.is_ours() && c.safe_mode > 0)
     });
 
-    let mut acts: Vec<Intent> = observed(world, &declarations.sieges);
+    let mut acts: Vec<Intent> = Vec::new();
 
     if let Some(id) = defend::safe_mode(running, &homes_lost) {
         acts.push(Intent::Controller(id, ControllerAct::ActivateSafeMode));

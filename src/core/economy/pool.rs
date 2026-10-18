@@ -139,6 +139,7 @@ pub fn fits(body: &Body, offer: &Offer) -> bool {
             body.work > 0 && body.carry > 0 && (body.energy > 0 || offer.draw.is_buffer())
         }
         Task::Reserve(_) | Task::Claim(_) => body.claim > 0,
+        Task::Scout(_) => body.pattern.is_scout(),
     }
 }
 
@@ -741,6 +742,15 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
             Task::Claim(c.id.clone()),
             &c.pos,
             price::HELD_RATE,
+            Capacity::Bodies(1),
+        ));
+    }
+
+    for at in &derived.scouts {
+        offers.push(offer(
+            Task::Scout(at.room.clone()),
+            at,
+            price::value_of_rank(price::BOTTOM_RANK),
             Capacity::Bodies(1),
         ));
     }

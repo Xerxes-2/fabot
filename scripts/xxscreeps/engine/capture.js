@@ -36,6 +36,7 @@ module.exports = (memory) => {
     cpu: { limit: Game.cpu.limit, bucket: Game.cpu.bucket },
     gcl: { level: Game.gcl.level },
     memory,
+    intel: RawMemory.segments[2],
     rooms,
     creeps: ids(Game.creeps),
     spawns: ids(Game.spawns),
