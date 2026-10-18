@@ -360,8 +360,8 @@ The other kinds, for the record's sake:
 - `Siege`: muster → travel (formation) → breach (dismantle/attack under tower
   fire; `Exchange` prices towers and ramparts) → clear → done. Opened on a
   room in `declarations.sieges`, kept in sight by an observer; its target is
-  a `Structure`, the towers, then the spawns, then the rest of the economy,
-  and it closes once none stands. It stands off a rival's safe mode and
+  a `Structure` of the towers and the economy, the one its charged towers
+  strike least first, and it closes once none stands. It stands off a rival's safe mode and
   opens again after it (owner, 2026-10-18: a safe mode is spent, not
   blocked). The breach is derived, not stored:
   `Exchange.breachPlan` finds the cheapest way in (walk plus each barrier's

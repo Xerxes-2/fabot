@@ -20,6 +20,11 @@ use crate::core::world::{
 };
 use crate::core::{engine, tiles};
 
+/// A body's slot in its set, its name's last part, kept by its successors.
+fn slot_of(name: &str) -> String {
+    name.rsplit('-').next().unwrap_or_default().to_string()
+}
+
 /// A merge keeps the older group's id; two engagements on one group are one,
 /// the older surviving with both's bodies, losses and budget. Also each
 /// merged id's survivor.
@@ -137,6 +142,50 @@ impl<'a> Scene<'a> {
         }
     }
 
+    /// The sources a walk from the room's exits reaches beside without
+    /// breaking a barrier.
+    fn exposed(atlas: &Atlas, room: &Room) -> Vec<Pos> {
+        let Some(weights) = atlas.weights(&room.name) else {
+            return Vec::new();
+        };
+
+        let mut reached: BTreeSet<Tile> = BTreeSet::new();
+        let mut frontier: Vec<Tile> = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
+            .iter()
+            .flat_map(|exit| tiles::exit_tiles(*exit).iter().copied())
+            .filter(|t| weights[*t].is_some())
+            .collect();
+
+        while let Some(t) = frontier.pop() {
+            if reached.insert(t) {
+                frontier.extend(
+                    tiles::around(t)
+                        .iter()
+                        .copied()
+                        .filter(|n| weights[*n].is_some() && !reached.contains(n)),
+                );
+            }
+        }
+
+        room.sources
+            .iter()
+            .filter(|s| {
+                tiles::around(tiles::of_pos(&s.pos))
+                    .iter()
+                    .any(|t| reached.contains(t))
+            })
+            .map(|s| s.pos.clone())
+            .collect()
+    }
+
+    fn charged(&self, room: &'a Room) -> Vec<Pos> {
+        self.towers_in(room)
+            .into_iter()
+            .filter(|s| s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST)
+            .map(|s| s.pos.clone())
+            .collect()
+    }
+
     fn towers_in(&self, room: &'a Room) -> Vec<&'a Structure> {
         room.structures
             .iter()
@@ -190,17 +239,29 @@ impl<'a> Scene<'a> {
         self.homes.contains(&e.room) && e.lost > e.budget
     }
 
+    /// Each body in a slot no member nor cast of the engagement holds.
     fn ask(&self, atlas: &Atlas, e: &Engagement, set: &[casting::Body], asked: &mut Asked) {
-        let slots: Vec<(String, casting::Body)> = set
+        let held: BTreeSet<String> = e
+            .ours
             .iter()
-            .enumerate()
-            .map(|(i, body)| (i.to_string(), body.clone()))
+            .chain(
+                asked
+                    .casts
+                    .iter()
+                    .filter(|c| c.engagement == e.id)
+                    .map(|c| &c.name),
+            )
+            .map(|n| slot_of(n))
             .collect();
+
+        let free = (0..)
+            .map(|i: i32| i.to_string())
+            .filter(|i| !held.contains(i));
+        let slots: Vec<(String, casting::Body)> = free.zip(set.iter().cloned()).collect();
 
         self.ask_slots(atlas, e, &slots, asked);
     }
 
-    /// A body's slot in its set is its name's last part, kept by its successors.
     fn ask_slots(
         &self,
         atlas: &Atlas,
@@ -249,7 +310,7 @@ impl<'a> Scene<'a> {
             return;
         };
 
-        let slot = |name: &str| name.rsplit('-').next().unwrap_or_default().to_string();
+        let slot = slot_of;
         let members = self.members_of(e);
 
         let lasts =
@@ -356,6 +417,13 @@ impl<'a> Scene<'a> {
     /// Whole, as cast: a part struck off is healed back, and only a body lost
     /// re-prices the set.
     fn fielded(&self, e: &Engagement) -> Vec<Fighter> {
+        self.fielded_bodies(e)
+            .iter()
+            .map(|b| fighter::cast(b))
+            .collect()
+    }
+
+    fn fielded_bodies(&self, e: &Engagement) -> Vec<casting::Body> {
         let mut bodies: Vec<Vec<BodyPart>> = e
             .ours
             .iter()
@@ -370,7 +438,9 @@ impl<'a> Scene<'a> {
                 .map(|c| c.body.clone()),
         );
 
-        bodies.iter().map(|b| fighter::cast(b)).collect()
+        // A picket holds its post, not the breach.
+        bodies.retain(|b: &casting::Body| !b.iter().any(|p| p.is_ranged_attack()));
+        bodies
     }
 
     fn unreached(&self, atlas: &mut Atlas, room: &Room, b: &Structure, in_room: &[&Creep]) -> bool {
@@ -564,6 +634,16 @@ impl<'a> Scene<'a> {
 
             match planned {
                 Some((set, (order, outcome))) => {
+                    let charged = self.charged(room);
+                    let mut set = set;
+
+                    for post in Scene::exposed(atlas, room) {
+                        set.extend(casting::pickets(
+                            capacity,
+                            exchange::tower_strike(&charged, &post),
+                        ));
+                    }
+
                     self.ask(atlas, e, &set, asked);
 
                     Some(Engagement {
@@ -587,6 +667,7 @@ impl<'a> Scene<'a> {
         } else if e.phase == Phase::Disengaging {
             Some(e.clone())
         } else {
+            // A forming set waits on every ask: a successor asked then would hold it.
             if e.phase != Phase::Forming {
                 self.succeed(atlas, e, asked);
             }
@@ -629,8 +710,23 @@ impl<'a> Scene<'a> {
                 return Some(e.clone());
             }
 
-            match self.breach_in(atlas, room, goal, &colony, &set) {
-                Some((order, outcome)) => {
+            let planned = self
+                .breach_in(atlas, room, goal, &colony, &set)
+                .map(|plan| (Vec::new(), plan))
+                .or_else(|| {
+                    casting::reinforce(
+                        e.capacity,
+                        &self.fielded_bodies(e),
+                        |set: &[casting::Body]| {
+                            let fighters: Vec<Fighter> =
+                                set.iter().map(|b| fighter::cast(b)).collect();
+                            self.breach_in(atlas, room, goal, &colony, &fighters)
+                        },
+                    )
+                });
+
+            match planned {
+                Some((added, (order, outcome))) if added.is_empty() => {
                     // Once: a new plan whose first barrier the set still cannot
                     // reach is no plan, or the event would fire every tick.
                     let reached = match order.first() {
@@ -646,6 +742,14 @@ impl<'a> Scene<'a> {
                         tactic: e.plan.tactic.clone(),
                         order,
                     };
+                    next.predicted = Some(outcome);
+                    Some(next)
+                }
+                // Topped up, not recast: the set fights on as its medics walk in.
+                Some((added, (order, outcome))) => {
+                    self.ask(atlas, e, &added, asked);
+                    let mut next = siege::replanned(self.world.time, true, e);
+                    next.plan.order = order;
                     next.predicted = Some(outcome);
                     Some(next)
                 }
@@ -1343,12 +1447,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         if let (Objective::Siege(_), Some(room), Some(wall)) =
             (&e.objective, scene.in_sight(&e.room), scene.next_struck(e))
         {
-            let towers: Vec<Pos> = scene
-                .towers_in(room)
-                .into_iter()
-                .filter(|s| s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST)
-                .map(|s| s.pos.clone())
-                .collect();
+            let towers = scene.charged(room);
 
             let strike = towers
                 .iter()
@@ -1368,6 +1467,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                         .collect(),
                     towers,
                     strike,
+                    posts: Scene::exposed(&*sight.atlas, room),
                 },
             );
         }
@@ -1379,6 +1479,14 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         };
 
         let e = &decided[at];
+
+        if matches!(e.phase, Phase::Approaching | Phase::Fighting)
+            && tactics::picket_of(c)
+            && let Some(front) = fronts.get(&e.id)
+            && !front.posts.is_empty()
+        {
+            return tactics::picket(&mut sight, front, &scene.members_of(e), c);
+        }
 
         if e.phase == Phase::Fighting && fronts.contains_key(&e.id) {
             let members = scene.members_of(e);

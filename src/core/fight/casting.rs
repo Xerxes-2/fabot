@@ -213,26 +213,26 @@ pub fn price(
 /// No more medics heal one body from beside it than the tiles around it.
 const AROUND_ONE: i32 = 8;
 
+fn most(capacity: i32, block: &[BodyPart]) -> Body {
+    let n = (capacity / engine::body_cost(block))
+        .min(engine::MAX_BODY_PARTS as i32 / block.len() as i32);
+    let mut body = Vec::new();
+
+    for _ in 0..n.max(0) {
+        body.extend(block.iter().copied());
+    }
+
+    body
+}
+
 /// Two dismantlers of the most WORK the bank buys, then the fewest MOVE:HEAL
 /// medics `priced` breaks the way in with.
 pub fn siege<T>(
     capacity: i32,
     mut priced: impl FnMut(&[Body]) -> Option<T>,
 ) -> Option<(Vec<Body>, T)> {
-    let most = |block: &Body| -> Body {
-        let n = (capacity / engine::body_cost(block))
-            .min(engine::MAX_BODY_PARTS as i32 / block.len() as i32);
-        let mut body = Vec::new();
-
-        for _ in 0..n.max(0) {
-            body.extend(block.iter().copied());
-        }
-
-        body
-    };
-
-    let dismantler = most(&vec![BodyPart::Work, BodyPart::Move]);
-    let medic = most(&vec![BodyPart::Move, BodyPart::Heal]);
+    let dismantler = most(capacity, &[BodyPart::Work, BodyPart::Move]);
+    let medic = most(capacity, &[BodyPart::Move, BodyPart::Heal]);
 
     if dismantler.is_empty() {
         None
@@ -248,6 +248,54 @@ pub fn siege<T>(
 
         None
     }
+}
+
+/// The fewest medics added to the fielded set that `priced` breaks the way in
+/// with: a set re-planned onto a harder target is topped up, not recast.
+pub fn reinforce<T>(
+    capacity: i32,
+    fielded: &[Body],
+    mut priced: impl FnMut(&[Body]) -> Option<T>,
+) -> Option<(Vec<Body>, T)> {
+    let medic = most(capacity, &[BodyPart::Move, BodyPart::Heal]);
+
+    if medic.is_empty() {
+        return None;
+    }
+
+    (1..=AROUND_ONE).find_map(|n| {
+        let added = vec![medic.clone(); n as usize];
+        let mut set = fielded.to_vec();
+        set.extend(added.iter().cloned());
+        priced(&set).map(|plan| (added, plan))
+    })
+}
+
+/// The fewest RANGED:HEAL pickets whose pooled heal holds the towers' strike
+/// at a rival source outside its ramparts (owner, 2026-10-18: its harvesters
+/// are struck rather than its seats filled).
+pub fn pickets(capacity: i32, strike: i32) -> Vec<Body> {
+    let picket = most(
+        capacity,
+        &[
+            BodyPart::RangedAttack,
+            BodyPart::Heal,
+            BodyPart::Move,
+            BodyPart::Move,
+        ],
+    );
+
+    if picket.is_empty() {
+        return Vec::new();
+    }
+
+    (1..=AROUND_ONE)
+        .map(|n| vec![picket.clone(); n as usize])
+        .find(|set| {
+            let fighters: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
+            exchange::pooled_heal(set.len() as i32, &fighters) >= strike
+        })
+        .unwrap_or_default()
 }
 
 pub fn kill_order(hostiles: &[Creep]) -> Vec<String> {

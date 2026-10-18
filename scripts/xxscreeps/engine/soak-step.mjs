@@ -547,7 +547,10 @@ async function engaged(t, time, rooms) {
     if (e.phase !== "forming") rec.mustered ??= t;
     if (e.phase === "fighting") rec.fighting ??= t;
     if (e.order?.length && !e.unanswered) rec.order ??= e.order;
-    if (rec.kind === "siege" && rec.order && !e.order?.length && !e.unanswered) rec.breached ??= t;
+    if (rec.kind === "siege" && rec.order && !e.order?.length && !e.unanswered) {
+      rec.breached ??= t;
+      rec.breachCast ??= rec.cast;
+    }
     // A siege's room is the rival's, which no sample follows.
     const seen = roomNames.includes(e.room) ? rooms : [...rooms, await shard.loadRoom(e.room, time)];
     const objects = seen.flatMap((r) => [...r["#objects"]]);

@@ -2,6 +2,8 @@
 use std::collections::BTreeSet;
 
 use super::super::shape::{Engagement, Phase};
+use crate::core::engine;
+use crate::core::vocabulary::Resource;
 use crate::core::world::{Kind, Pos, Structure};
 
 pub struct Facts {
@@ -17,39 +19,48 @@ pub struct Facts {
     pub safe: bool,
 }
 
-/// The towers and the whole economy (owner, 2026-10-18), what strikes us first.
-fn rank_of(kind: &Kind) -> Option<i32> {
-    match kind {
-        Kind::Tower => Some(0),
-        Kind::Spawn => Some(1),
-        Kind::Extension
-        | Kind::Storage
-        | Kind::Terminal
-        | Kind::Link
-        | Kind::Lab
-        | Kind::Extractor
-        | Kind::Factory
-        | Kind::PowerSpawn
-        | Kind::Nuker
-        | Kind::Observer => Some(2),
-        _ => None,
-    }
+/// The towers and the whole economy (owner, 2026-10-18).
+fn razed(kind: &Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Tower
+            | Kind::Spawn
+            | Kind::Extension
+            | Kind::Storage
+            | Kind::Terminal
+            | Kind::Link
+            | Kind::Lab
+            | Kind::Extractor
+            | Kind::Factory
+            | Kind::PowerSpawn
+            | Kind::Nuker
+            | Kind::Observer
+    )
 }
 
-/// The rival's structure razed next, the nearest of its rank to `near`.
+/// The rival's structure razed next: the one its charged towers strike
+/// least, so the set the bank buys is the cheapest (owner: a tower is razed
+/// whenever that is cheap); then the nearest `near`.
 pub fn next_razed<'a>(structures: &'a [Structure], near: Option<&Pos>) -> Option<&'a Structure> {
-    structures
-        .iter()
-        .filter(|s| s.owner.is_theirs())
-        .filter_map(|s| rank_of(&s.kind).map(|rank| (rank, s)))
-        .min_by_key(|(rank, s)| {
-            (
-                *rank,
-                near.and_then(|p| p.range(&s.pos)).unwrap_or(0),
-                s.id.clone(),
-            )
-        })
-        .map(|(_, s)| s)
+    let theirs = || structures.iter().filter(|s| s.owner.is_theirs());
+    let struck = |at: &Pos| -> i32 {
+        theirs()
+            .filter(|t| {
+                t.kind.is_tower()
+                    && t.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
+            })
+            .filter_map(|t| t.pos.range(at))
+            .map(engine::tower_attack_at)
+            .sum()
+    };
+
+    theirs().filter(|s| razed(&s.kind)).min_by_key(|s| {
+        (
+            struck(&s.pos),
+            near.and_then(|p| p.range(&s.pos)).unwrap_or(0),
+            s.id.clone(),
+        )
+    })
 }
 
 fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {

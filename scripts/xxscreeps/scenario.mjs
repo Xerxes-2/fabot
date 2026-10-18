@@ -189,6 +189,8 @@ const measures = {
   bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),
   // The most energy one engagement cast, of the bodies that stood in it.
   mostCast: (_, __, dir) => Math.max(0, ...rowsOf(dir).map((e) => e.cast ?? 0)),
+  // The most energy a siege cast that stood before its breach (none breached: Infinity).
+  breachCast: (_, __, dir) => Math.max(...rowsOf(dir).filter((e) => e.kind === "siege").map((e) => e.breachCast ?? Infinity)),
   faults: (_, __, dir) => readFileSync(join(dir, "faults.jsonl"), "utf8").split("\n").filter(Boolean).length,
   // The most levels the room stood below the highest it held before (`who`:
   // an opponent's room, else ours); a room lost stands at level 0.

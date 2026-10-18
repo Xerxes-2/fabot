@@ -445,6 +445,58 @@ pub struct Front {
     pub towers: Vec<Pos>,
     /// What the towers deal a body working the breach.
     pub strike: i32,
+    /// The rival's sources outside its ramparts, where pickets stand.
+    pub posts: Vec<Pos>,
+}
+
+pub fn picket_of(creep: &Creep) -> bool {
+    creep.body.iter().any(|p| p.kind.is_ranged_attack())
+}
+
+/// Seated beside its post, off the rival's line, striking any rival body in
+/// reach: there it harvests.
+pub fn picket(
+    sight: &mut Sight,
+    front: &Front,
+    members: &[&Creep],
+    creep: &Creep,
+) -> (Option<CreepAct>, Wish) {
+    let mut pickets: Vec<&Creep> = members.iter().copied().filter(|c| picket_of(c)).collect();
+    pickets.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let at = pickets
+        .iter()
+        .position(|c| c.name == creep.name)
+        .unwrap_or(0);
+    let Some(post) = front.posts.get(at % front.posts.len().max(1)) else {
+        return (None, hold(sight, creep));
+    };
+
+    let mut seats: Vec<Tile> = tiles::around(tiles::of_pos(post))
+        .iter()
+        .copied()
+        .filter(|t| seat(&*sight.atlas, &front.line, &post.room, *t))
+        .collect();
+    seats.sort_unstable();
+
+    let wish = match seats.get(at / front.posts.len().max(1)) {
+        Some(t) if creep.pos == tiles::to_pos(&post.room, *t) => hold(sight, creep),
+        Some(t) => toward(sight, creep, &tiles::to_pos(&post.room, *t), 0),
+        None => toward(sight, creep, post, engine::MELEE_RANGE),
+    };
+
+    let target = sight
+        .hostiles
+        .get(&creep.pos.room)
+        .into_iter()
+        .flatten()
+        .filter(|h| h.pos.within(engine::RANGED_RANGE, &creep.pos))
+        .min_by_key(|h| (h.pos.range(&creep.pos), h.id.clone()));
+
+    (
+        target.map(|h| CreepAct::RangedAttackCreep(h.id.clone())),
+        wish,
+    )
 }
 
 fn nearest_tower(front: &Front, at: &Pos) -> i32 {
