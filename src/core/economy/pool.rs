@@ -262,18 +262,26 @@ fn lab_offers(offers: &mut Vec<Offer>, ground: &super::derived::Ground, plan: &s
 }
 
 /// The energy the terminal lacks for the fee of the whole shipment.
-pub fn fee_short(ground: &super::derived::Ground) -> i32 {
-    match (&ground.terminal, &ground.ship_to) {
-        (Some(t), Some(home)) => {
+/// The energy the terminal keeps for its shipment's fee: a hundred over, as
+/// v1's feeReserve, since the fee rounds up per send.
+fn fee_reserve(ground: &super::derived::Ground) -> i32 {
+    match &ground.ship_to {
+        Some(home) if ground.terminal.is_some() => {
             let fee: i32 = ground
                 .shipment
                 .iter()
                 .map(|(_, n)| engine::send_cost(*n, tiles::rooms_apart(&ground.room, home)))
                 .sum();
-            0.max(fee - t.store.amount_of(&Resource::Energy))
+            if fee > 0 { fee + 100 } else { 0 }
         }
         _ => 0,
     }
+}
+
+pub fn fee_short(ground: &super::derived::Ground) -> i32 {
+    ground.terminal.as_ref().map_or(0, |t| {
+        0.max(fee_reserve(ground) - t.store.amount_of(&Resource::Energy))
+    })
 }
 
 /// A shipment's ore carried from the storage into the terminal, and the fee's
@@ -635,13 +643,18 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
                 .map_or(0, |r| drain * r)
         };
 
-        // A terminal with a shipment keeps its energy for the fee.
-        let sending = |id: &str| {
-            ground.ship_to.is_some() && ground.terminal.as_ref().is_some_and(|t| t.id == id)
+        let reserve = fee_reserve(ground);
+        let kept = |id: &str| {
+            if ground.terminal.as_ref().is_some_and(|t| t.id == id) {
+                reserve
+            } else {
+                0
+            }
         };
 
         for s in &ground.stores {
-            if s.energy > 0 && !s.kind.is_buffer() && !sending(&s.id) {
+            let spare = s.energy - kept(&s.id);
+            if spare > 0 && !s.kind.is_buffer() {
                 let value = if s.kind.is_remains() {
                     price::flow_draw(price::transient_loss(s.energy))
                 } else if s.kind == StoreKind::Container && s.source_dug > 0 {
@@ -653,12 +666,12 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
                 let (draw, load) = if s.kind.is_storage() {
                     let left = room + walked(&s.pos) - aboard;
                     if left > 0 {
-                        (Draw::Open, s.energy.min(left))
+                        (Draw::Open, spare.min(left))
                     } else {
-                        (Draw::Spenders, s.energy)
+                        (Draw::Spenders, spare)
                     }
                 } else {
-                    (Draw::Open, s.energy)
+                    (Draw::Open, spare)
                 };
 
                 let mut withdraw = offer(

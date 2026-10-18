@@ -501,7 +501,6 @@ fn ground_of(atlas: &Atlas, me: &str, capacity: i32, rate: i32, room: &Room) -> 
                     0
                 };
 
-                // A terminal is never filled: nothing sends from it.
                 let kind = if s.kind.is_storage() || s.kind.is_terminal() {
                     StoreKind::Storage
                 } else if owned_room && is_buffer(&s.id) {
