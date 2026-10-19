@@ -21,6 +21,12 @@ branch=$(jj config get claude.session-branch 2>/dev/null || true)
   { echo "ship: $rev differs from @, whose files the gates run on: jj new $rev first" >&2; exit 1; }
 [ -n "$(jj log --no-graph -r "$rev" -T 'description')" ] ||
   { echo "ship: $rev has no description" >&2; exit 1; }
+key=Reviewed value=code-review
+unreviewed=$(jj log --no-graph -r "$branch..$rev" -T \
+  "if(!self.trailers().any(|t| t.key() == \"$key\" && t.value() == \"$value\"),
+     change_id.short() ++ \" \" ++ description.first_line() ++ \"\\n\")")
+[ -z "$unreviewed" ] ||
+  { printf 'ship: no "%s: %s" trailer (AGENTS.md § Shipping an issue):\n%s\n' "$key" "$value" "$unreviewed" >&2; exit 1; }
 
 npm test
 npm run build
