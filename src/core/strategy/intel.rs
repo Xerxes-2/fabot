@@ -76,11 +76,12 @@ fn declared(declarations: &Declarations) -> impl Iterator<Item = &String> {
         .chain(&declarations.sieges)
 }
 
-/// A declared room a scout serves, stalest first; `cast` while its row is
-/// past `STALE`: a living scout patrols, a new one is cast only for a stale row.
+/// A declared room a scout serves; `cast` while its row is past `STALE`: a
+/// living scout patrols, a new one is cast only for a stale row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Scout {
     pub room: String,
+    pub age: i32,
     pub cast: bool,
 }
 
@@ -180,6 +181,7 @@ pub fn sight(
         .into_iter()
         .map(|room| Scout {
             room: room.clone(),
+            age: world.time - seen(room).unwrap_or(0),
             cast: seen(room).is_some_and(|at| world.time - at > STALE),
         })
         .collect();

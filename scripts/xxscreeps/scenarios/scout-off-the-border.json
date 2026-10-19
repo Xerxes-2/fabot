@@ -1,0 +1,12 @@
+{
+  "why": "one living scout and two declared rooms side by side: it re-chooses only once off the exit band, so it never bounces on their border",
+  "start": { "world": "scripts/xxscreeps/worlds/scout-adjacent-claims.json", "seed": 1 },
+  "ticks": 1400,
+  "assert": [
+    { "measure": "bounced", "max": 20 },
+    { "measure": "stalest", "room": "W2S1", "max": 200 },
+    { "measure": "stalest", "room": "W2S2", "max": 200 },
+    { "measure": "scoutStill", "max": 10 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

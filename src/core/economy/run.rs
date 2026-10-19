@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::HashMap;
-use crate::core::atlas::{Atlas, Mover, Target};
+use crate::core::atlas::{self, Atlas, Mover, Target};
 use crate::core::engine;
 use crate::core::grid::{self, Footprint};
 use crate::core::intents::{Ask, CreepAct, Intent, LabAct, LinkAct, Rank, TerminalAct};
@@ -19,7 +19,7 @@ use super::matcher::{self, Assignments};
 use super::pool::{self, Offer};
 use super::price;
 use super::quota::{self, Walks};
-use super::task::Task;
+use super::task::{self, Task};
 
 fn weight_of(priority: i32) -> i32 {
     (price::BOTTOM_RANK - priority + 1).max(1)
@@ -52,6 +52,43 @@ fn distance(atlas: &Atlas, derived: &Derived, a: &Pos, b: &Pos) -> Option<i32> {
         None => route_of(atlas, derived, &tick::target_at(b, 0), &a.room)
             .map(|rooms| Atlas::crossing_ticks() * (rooms.len() as i32 - 1)),
     }
+}
+
+/// Re-chosen only on arrival off the exit band, so a walk is never turned
+/// mid-way nor on a border; a scout whose open rooms lie past `REACH_HOPS`
+/// shares a held one rather than idle.
+fn scouting(atlas: &Atlas, derived: &Derived, held: &Assignments) -> Assignments {
+    let mut scouts: Vec<&Body> = (derived.bodies.iter())
+        .filter(|b| b.pattern.is_scout())
+        .collect();
+    scouts.sort_by(|a, b| a.name.cmp(&b.name));
+    let kept = |b: &Body| match held.get(&b.name).and_then(|id| task::of_task_id(id)) {
+        Some(Task::Scout(room)) => (derived.scouts.iter())
+            .find(|(at, _, _)| at.room == room)
+            .filter(|(at, _, _)| !b.pos.within(Task::Scout(room.clone()).range_of(), at))
+            .map(|_| room),
+        _ => None,
+    };
+    let mut out: Assignments = (scouts.iter())
+        .filter_map(|b| Some((b.name.clone(), kept(b)?)))
+        .collect();
+    for b in scouts {
+        let walks = |open: &dyn Fn(&str) -> bool| {
+            let rooms = (derived.scouts.iter()).filter(|(at, _, _)| open(&at.room));
+            atlas::onward(rooms.filter_map(|(at, age, _)| {
+                Some((&at.room, *age, distance(atlas, derived, &b.pos, at)?))
+            }))
+        };
+        if !out.contains_key(&b.name)
+            && let Some(room) =
+                walks(&|room| !out.values().any(|r| r == room)).or_else(|| walks(&|_| true))
+        {
+            out.insert(b.name.clone(), room);
+        }
+    }
+    out.into_iter()
+        .map(|(name, room)| (name, task::task_id(&Task::Scout(room))))
+        .collect()
 }
 
 fn near(
@@ -383,6 +420,8 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .map(|c| c.spawns[0].pos.clone())
         .collect();
 
+    let mut hired = state.assignments.clone();
+    hired.extend(scouting(&*context.atlas, &derived, &state.assignments));
     let assignments = {
         let mut travel = |body: &Body, offer: &Offer| -> Option<i32> {
             let mover = *movers.get(body.name.as_str())?;
@@ -394,13 +433,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 .range(&offer.target)
                 .map_or(0, |r| r - offer.task.range_of())
         };
-        matcher::match_all(
-            &mut travel,
-            &floor,
-            &offers,
-            &derived.bodies,
-            &state.assignments,
-        )
+        matcher::match_all(&mut travel, &floor, &offers, &derived.bodies, &hired)
     };
 
     let plan = {

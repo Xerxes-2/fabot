@@ -121,6 +121,14 @@ const measures = {
   scoutsCast: (_, __, dir) => new Set(scoutsOf(dir).map((b) => b.name)).size,
   scoutStill: (_, __, dir) => Math.max(0, ...scoutsOf(dir).map((b) => b.still ?? 0)),
   scoutTicksIn: (_, a, dir) => scoutsOf(dir).reduce((n, b) => n + (b.rooms[a.room] ?? 0), 0),
+  // The most ticks `room` went without one of our bodies in it.
+  stalest: (_, a, dir) => {
+    const lives = livesOf(dir).filter((b) => b.ours);
+    const stays = lives.flatMap((b) => (b.entered ?? []).map(([r, t], i, e) => [r, t, e[i + 1]?.[1] ?? b.last + 1]).filter(([r]) => r === a.room));
+    let [seen, worst] = [Math.min(...lives.map((b) => b.first)), 0];
+    for (const [, t, until] of stays.sort((x, y) => x[1] - y[1])) [worst, seen] = [Math.max(worst, t - seen), Math.max(seen, until)];
+    return Math.max(worst, Math.max(...lives.map((b) => b.last)) - seen);
+  },
   claimersCast: (samples, a) => new Set(within(samples, a).flatMap((s) => s.bodies.filter((b) => b.startsWith("claimer-")).map((b) => b.split("@")[0]))).size,
   claimSpawned: (samples) => samples.find((s) => Object.values(s.claimed ?? {}).every((c) => c.spawns > 0) && Object.keys(s.claimed ?? {}).length)?.t ?? Infinity,
   // The most of a compound (`resource`) stood at once.

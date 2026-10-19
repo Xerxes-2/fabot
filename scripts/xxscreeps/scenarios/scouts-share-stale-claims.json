@@ -1,0 +1,16 @@
+{
+  "why": "two living scouts and five declared rooms out of sight: each walks on to the room whose age pays most a tick of its walk, one room a scout, never home and never still (ranked stalest first, one bounced on a border and left a room unseen 965 ticks, and one stood at home 140)",
+  "start": { "world": "scripts/xxscreeps/worlds/scouts-stale-claims.json", "seed": 1 },
+  "ticks": 1400,
+  "assert": [
+    { "measure": "stalest", "room": "W2S1", "max": 600 },
+    { "measure": "stalest", "room": "W4S1", "max": 600 },
+    { "measure": "stalest", "room": "W5S2", "max": 600 },
+    { "measure": "stalest", "room": "W7S1", "max": 600 },
+    { "measure": "stalest", "room": "W7S2", "max": 600 },
+    { "measure": "scoutTicksIn", "room": "W1S1", "max": 60 },
+    { "measure": "scoutStill", "max": 10 },
+    { "measure": "scoutsCast", "max": 2 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

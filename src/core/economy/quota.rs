@@ -461,7 +461,7 @@ fn ground_demands(
         demands.push(demand(Pattern::Claimer, &c.pos, 1, Box::new(|_| None)));
     }
 
-    for (at, _) in derived.scouts.iter().filter(|(_, cast)| *cast) {
+    for (at, _, _) in derived.scouts.iter().filter(|(_, _, cast)| *cast) {
         demands.push(demand(Pattern::Scout, at, 1, Box::new(|_| None)));
     }
 

@@ -242,8 +242,8 @@ pub struct Derived {
     pub colonies: Vec<Colony>,
     pub grounds: Vec<Ground>,
     pub claims: Vec<Controller>,
-    /// Each room's centre, stalest first, and whether a scout is cast for it.
-    pub scouts: Vec<(Pos, bool)>,
+    /// Each room's centre, its age and whether a scout is cast for it.
+    pub scouts: Vec<(Pos, i32, bool)>,
     pub bodies: Vec<Body>,
     /// Counted against the quota as if they stood, so no seat is cast twice.
     pub ovens: Vec<Body>,
@@ -1018,7 +1018,7 @@ pub fn of_world(
         grounds,
         scouts: scouts
             .iter()
-            .map(|s| (Pos::new(s.room.as_str(), 25, 25), s.cast))
+            .map(|s| (Pos::new(s.room.as_str(), 25, 25), s.age, s.cast))
             .collect(),
         claims: declarations
             .claims

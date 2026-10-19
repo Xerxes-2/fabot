@@ -197,7 +197,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK body stood there, its keeper lairs and the resource each guards; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
 | `observe.*` | health, faults, per-module CPU, counters | Main, then Observe | segment 1 | operator; calibrates the benchmark |
-| `scouts`, `preyed` | the declared rooms a scout serves; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
+| `scouts`, `preyed` | the declared rooms a scout serves, with their rows' age; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
 | `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) and whether it is armed; a room in sight holds only what stands there now. A level-0 core is unarmed: it keeps its core engagement open but stands nothing down | World | heap | vision grace; when a stood-down outpost is clear |
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
 | `terrain` | room → its raw terrain buffer, read the first tick it is seen and, a few a tick nearest our spawns first, for every room out to `SIEGE_HOPS`; room → its `getRoomStatus`, for each room in sight, beside one or declared | World | heap | terrain never changes, a status only when a novice or respawn area ends (a reset reads it afresh), and reading either is calls across the seam (§9.2); a room whose status is not our spawns' is never routed into or served, since the engine leaves a creep on the exit tile into it |
@@ -484,8 +484,9 @@ every visible room. Economy reads a declared claim or outpost out of sight as
 its row last saw it, so a room another holds casts no claimer. Strategy owns
 the observers: each declared siege every tick, then the stalest rows older
 than `STALE` (a creep life, the owner's) in range. Every declared room no
-observer covers is a `Scout room` declaration: a living 1-MOVE scout patrols
-them stalest first and never idles; a new one is cast only for a row past
+observer covers is a `Scout room` declaration: a living 1-MOVE scout never
+idles; as it stands in its room, Economy sends it on by `atlas::onward` (the
+row's age over the walk), one room a scout; a new one is cast only for a row past
 `STALE` (a room never seen is served as nobody's, its bodies' sight its first row).
 ❓ After the sweep: rows grow towers and sources with their first reader,
 and whether the room graph's avoided set comes from them.

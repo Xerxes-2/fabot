@@ -17,8 +17,8 @@
 // decayed, once it is gone or the run ends, with its tile's role and the
 // tombstone or ruin it fell out of. `bodies.jsonl`: each body, ours or not,
 // once it is gone from the colony's rooms and their neighbours or the run ends: its parts, the ticks it
-// was first and last seen, its ticks to live then, the damage struck on it, and its ticks by room and
-// by action.
+// was first and last seen, its ticks to live then, the damage struck on it, its ticks by room and
+// by action, and each room it entered with the tick.
 // The colony's rooms are <room> (several homes: each sample's `homes` holds
 // one sample a home, the first's at its top) and the outposts its Memory declares
 // (`v2.declarations.outposts`, read at the start): the ledger and the worth
@@ -362,6 +362,7 @@ function live(rooms, time) {
       // Ticks it stood on the tile it stood on the tick before.
       const at = `${room.name} ${o.pos.x},${o.pos.y}`;
       if (life.at === at && life.last === time - 1) life.still = (life.still ?? 0) + 1;
+      if (!life.at?.startsWith(`${room.name} `)) (life.entered ??= []).push([room.name, time]);
       life.at = at;
       life.last = time;
       life.ttl = o["#ageTime"] - time;
