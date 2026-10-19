@@ -9,7 +9,8 @@
       {
         "name": "rival",
         "bot": "scripts/xxscreeps/engine/keep",
-        "room": "W2N1"
+        "room": "W2N1",
+        "config": { "focus": "soft" }
       }
     ]
   },

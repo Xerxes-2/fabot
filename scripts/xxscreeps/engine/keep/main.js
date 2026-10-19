@@ -2,7 +2,8 @@
 // (ARCHITECTURE.md): its towers strike the nearest enemy, and one repairer
 // keeps them, the spawn and the extensions full from storage and mends the
 // weakest rampart. `opponent.js` { safeMode: "extension" } activates safe
-// mode once one of its extensions is struck, as a live rival did.
+// mode once one of its extensions is struck, as a live rival did; { focus:
+// "soft" } focuses its towers as a live player's do, on a lone body.
 let config = {};
 try {
   config = require("opponent");
@@ -27,6 +28,12 @@ function repairer(creep, room) {
   if (weakest && creep.repair(weakest) === ERR_NOT_IN_RANGE) creep.moveTo(weakest, { range: 3, maxRooms: 1 });
 }
 
+function softest(tower, foes) {
+  const heal = (f) => foes.filter((o) => o.pos.inRangeTo(f, 3)).reduce((n, o) => n + o.getActiveBodyparts(HEAL), 0);
+  const rank = (f) => [heal(f), f.hits, tower.pos.getRangeTo(f)];
+  return foes.map((f) => [rank(f), f]).sort(([a], [b]) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2])[0]?.[1];
+}
+
 module.exports.loop = function () {
   for (const room of Object.values(Game.rooms)) {
     if (!room.controller?.my) continue;
@@ -37,7 +44,7 @@ module.exports.loop = function () {
     Memory.extensions = { ...Memory.extensions, [room.name]: extensions.length };
     if (config.safeMode === "extension" && struck) room.controller.activateSafeMode();
     for (const tower of room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_TOWER })) {
-      const foe = tower.pos.findClosestByRange(foes);
+      const foe = config.focus === "soft" ? softest(tower, foes) : tower.pos.findClosestByRange(foes);
       if (foe) tower.attack(foe);
     }
     const mine = room.find(FIND_MY_CREEPS);
