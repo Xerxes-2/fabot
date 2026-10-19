@@ -532,9 +532,7 @@ fn spend_demands(
             }
             continue;
         }
-        let surplus = income[ci] - upkeep[ci];
         let storage = ground.stores.iter().find(|s| s.owned);
-
         let (reserve, stock) = match storage {
             Some(_) => (
                 reserve_target(derived.reserve_lifetimes, colony.controller.level),
@@ -546,8 +544,11 @@ fn spend_demands(
             ),
             None => (0, 0),
         };
-
-        let save = (f64::from(reserve - stock) / life).min(surplus).max(0.0);
+        let spendable = if stock < reserve {
+            0.0
+        } else {
+            income[ci] - upkeep[ci]
+        };
 
         let upgradable = bodies::upgradable_at(colony.controller.level);
 
@@ -571,10 +572,7 @@ fn spend_demands(
 
                 // The sites are paid from the stock: a level's plan keeps its
                 // window of sites standing, so a charge on income idles the seat.
-                let on_income = ((surplus - save) * life / life_cost)
-                    .max(0.0)
-                    .floor()
-                    .min(seats);
+                let on_income = (spendable * life / life_cost).max(0.0).floor().min(seats);
 
                 let on_stock = (f64::from(stock - reserve - owed[ci]) / life_cost)
                     .max(0.0)
@@ -590,7 +588,7 @@ fn spend_demands(
             None => (0, 0, 0.0),
         };
 
-        let rest = surplus - save - upgraders_drain;
+        let rest = spendable - upgraders_drain;
 
         // A worker drains the controller while its load lasts, then walks to
         // its energy and back, to each dig as often as it yields.

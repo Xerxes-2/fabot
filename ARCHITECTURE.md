@@ -237,8 +237,8 @@ target is every tower the level allows firing for a number of creep
 lifetimes (towers × TOWER_ENERGY_COST × CREEP_LIFE_TIME × n). n is a
 declaration the operator sets live (`observe declare reserve n`), 2 by
 default (30k at RCL4, 180k at RCL8): the season fights daily, and v1,
-spending all its surplus, held under 100k at RCL8. Below the target the gap is saved over a lifetime; above it the excess
-hires upgraders in proportion. Open-source bots keep 75k–150k at RCL7–8 and
+spending all its surplus, held under 100k at RCL8. Below the target no body past the floor is hired on income (its surplus is an estimate a soak
+put at twice what banks); above it the surplus and the excess hire upgraders. Open-source bots keep 75k–150k at RCL7–8 and
 pay walls from a higher threshold.
 
 Port with these cuts:
