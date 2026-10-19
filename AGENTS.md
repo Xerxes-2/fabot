@@ -109,6 +109,11 @@ Docs:
   creep's action in one scenario is rejected in review.
 - `npm test` (unit) stays under a minute. Scenarios and soak run on `jj ship`
   for the modules a change touches, and nightly in full.
+- After a large fight change the owner watches its siege, sweep and defend
+  scenarios in their client, lazycreep (`npm run scenario -- <name> --watch`).
+  A result is reported as the scenario's name, its measured numbers and that
+  command, never as a bare pass. A fault the owner sees there becomes a
+  measure and a scenario that fails on the old code.
 
 ## Performance
 
