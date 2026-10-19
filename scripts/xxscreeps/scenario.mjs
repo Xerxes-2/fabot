@@ -101,6 +101,7 @@ const withCounts = (dir, a, f) => {
 const at = (samples, t) => samples.find((s) => s.t >= t) ?? samples.at(-1);
 const sideOf = (a) => (s) => (a.who ? s.others[a.who] : s);
 const within = (samples, a) => samples.filter((s) => s.t >= (a.from ?? 0) && s.t < (a.to ?? Infinity));
+const builtIn = (s, a) => (a.room ? (s.rooms[a.room]?.build ?? 0) : s.ledger.build);
 const measures = {
   // Energy lost to pile decay.
   decayed: (samples, a) => at(samples, a.to ?? Infinity).ledger.decayed - at(samples, a.from ?? 0).ledger.decayed,
@@ -139,8 +140,8 @@ const measures = {
   ore: (samples, a) => at(samples, a.to ?? Infinity).ore - at(samples, a.from ?? 0).ore,
   bounced: (samples, a) => at(samples, a.to ?? Infinity).bounced - at(samples, a.from ?? 0).bounced,
   pouredBack: (samples, a) => at(samples, a.to ?? Infinity).pouredBack - at(samples, a.from ?? 0).pouredBack,
-  // Energy spent on construction.
-  build: (samples, a) => at(samples, a.to ?? Infinity).ledger.build - at(samples, a.from ?? 0).ledger.build,
+  // Energy spent on construction (`room`: in that room alone).
+  build: (samples, a) => builtIn(at(samples, a.to ?? Infinity), a) - builtIn(at(samples, a.from ?? 0), a),
   // Energy a room's spawns put into bodies (`room`: the room).
   bodiesSpent: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.bodies ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.bodies ?? 0),
   // Energy our bodies carried out of a home across its border.

@@ -175,6 +175,12 @@ pub fn reserve_target(lifetimes: f64, level: i32) -> i32 {
     ) * lifetimes) as i32
 }
 
+/// Without a storage a remote's haul has no sink but the spawn ring.
+fn banks_remote(derived: &Derived, ci: usize) -> bool {
+    let ground = &derived.grounds[ci];
+    !ground.abandoned && ground.stores.iter().any(|s| s.owned)
+}
+
 fn owner_of(walks: &mut dyn Walks, derived: &Derived, gi: usize) -> Option<usize> {
     if gi < derived.colonies.len() {
         Some(gi)
@@ -187,7 +193,7 @@ fn owner_of(walks: &mut dyn Walks, derived: &Derived, gi: usize) -> Option<usize
             .or_else(|| ground.sources.first().map(|s| s.pos.clone()));
 
         match at {
-            Some(at) => walks.near(&|ci| !derived.grounds[ci].abandoned, &at),
+            Some(at) => walks.near(&|ci| banks_remote(derived, ci), &at),
             None => None,
         }
     }
@@ -686,13 +692,15 @@ fn spend_demands(
     out
 }
 
-/// The upgraders last: they spend what every other seat leaves. A tie keeps
-/// the demands' order (`sort_by` is stable).
-fn cast_order(seat: &Seat) -> (i32, f64) {
+/// The upgraders last: they spend what every other seat leaves. Another
+/// colony's seat ranks with the caster's own workers, so a young colony's
+/// spawn grows it before it hauls a neighbour's remotes. A tie keeps the
+/// demands' order (`sort_by` is stable).
+fn cast_order(seat: &Seat, own: bool) -> (i32, f64) {
     match (seat.ret, seat.pattern) {
         (None, _) => (0, 0.0),
         (Some(_), Pattern::Upgrader) => (3, 0.0),
-        (Some(r), Pattern::Worker) => (2, -r),
+        (Some(r), p) if p == Pattern::Worker || !own => (2, -r),
         (Some(r), _) => (1, -r),
     }
 }
@@ -817,6 +825,13 @@ pub fn plan(
             let mut pick: Option<usize> = None;
             let mut least = i32::MAX;
             let at = work_at(body);
+            // The nearest seat by distance can be a young colony's that a
+            // neighbour's remote crew never reaches; a dig or claim seat is
+            // its object's already.
+            let serves = owners.get(&at.room).filter(|ci| {
+                colonies[**ci].room != at.room
+                    && matches!(pattern, Pattern::Worker | Pattern::Hauler)
+            });
 
             for (i, d) in all.iter().enumerate() {
                 // One cast for another room's seat upgrades whichever
@@ -825,6 +840,7 @@ pub fn plan(
                     && d.left.get() > 0
                     && d.seats_left.get() > 0
                     && (!d.pattern.is_upgrader() || d.at.room == at.room)
+                    && serves.is_none_or(|ci| owners.get(&d.at.room) == Some(ci))
                 {
                     let ticks = walks.distance(&at, &d.at).unwrap_or(i32::MAX);
 
@@ -1007,8 +1023,9 @@ pub fn plan(
     }
 
     seats.sort_by(|a, b| {
-        let (ka, va) = cast_order(a);
-        let (kb, vb) = cast_order(b);
+        let own = |seat: &Seat| seat.colony == owners.get(&seat.at.room).copied();
+        let (ka, va) = cast_order(a, own(a));
+        let (kb, vb) = cast_order(b, own(b));
         ka.cmp(&kb)
             .then(va.partial_cmp(&vb).unwrap_or(Ordering::Equal))
     });

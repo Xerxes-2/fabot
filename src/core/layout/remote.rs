@@ -156,18 +156,17 @@ fn sink_for<'t>(
         .map(|c| c.pos.clone())
         .or_else(|| room.sources.first().map(|s| s.pos.clone()))?;
 
-    let i = tick::nearest(atlas, trees, homes, |_| true, &from)?;
+    let storage = |i: usize| {
+        let home = rooms.get(&homes[i].room)?;
+        let s = home
+            .structures
+            .iter()
+            .find(|s| s.kind.is_storage() && s.owner.is_ours())?;
+        Some(s.pos.clone())
+    };
 
-    let found = rooms
-        .get(&homes[i].room)
-        .and_then(|home| {
-            home.structures
-                .iter()
-                .find(|s| s.kind.is_storage() && s.owner.is_ours())
-        })
-        .map(|s| s.pos.clone());
-
-    Some(found.unwrap_or_else(|| homes[i].clone()))
+    let i = tick::nearest(atlas, trees, homes, |i| storage(i).is_some(), &from)?;
+    storage(i)
 }
 
 /// v1's seat: the shortest walk out toward home. The owner's rule: the walk
