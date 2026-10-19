@@ -168,10 +168,9 @@ A cloud session (claude.ai/code) may push only the branch it was cloned on, so t
 smokes and uploads `dist/main.js`. Never deploy unasked. Live declarations (outposts,
 allies, reserve) are set with `observe declare`.
 
-`npm run observe -- health` first after a deploy; then `cpu`, `faults`,
-`switches`, `capture`, `wait --ticks N`. Kill switches: `observe switch <name>
-on|off|clear`. The commands ARCHITECTURE.md names beyond these (`engagements`,
-`exchange`, `declare`, `replay`) land with their modules.
+`npm run observe -- health` first after a deploy; `npm run observe` with no
+args lists the rest (engagements, rooms, creeps, regions, replay, kill
+switches). `observe exchange` lands with its module.
 
 v1 lives on the `v1` bookmark (`9677b5e8`, the code that ran live before v2),
 and v2's F#/Fable tree on `fable` (the last commit that held it). Both are

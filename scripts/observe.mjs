@@ -2,31 +2,43 @@
 // the recorder's ring (ARCHITECTURE.md §4, §9.1, §11). Server and .env config
 // are screeps-api.mjs's.
 //
-// Usage:
-//   observe.mjs health             tick, version, bucket, CPU, faults, refusals, modules off
-//   observe.mjs cpu                CPU by phase and module, this tick
-//   observe.mjs faults             the fault ring, newest first
-//   observe.mjs switches           Memory.v2.switches as stored
-//   observe.mjs switch <name> on|off|clear
-//                                  off: `false` (the module is skipped); on: `true`
-//                                  (the recorder's opt-in); clear: remove the key
-//   observe.mjs declare [reserve <n> | allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | labs <room> <compound=n,…>]
-//                                  Memory.v2.declarations as stored; with a name, set it
-//                                  (outposts: the capture's, `scripts/capture-world.mjs`)
-//                                  (reserve: creep lifetimes of tower fire the reserve holds)
-//   observe.mjs capture [out.jsonl]
-//                                  the recorder's ring (segments 10..14) as `npm run bench`'s
-//                                  capture, oldest first; terrain cached in captures/terrain
-//   observe.mjs wait --ticks N     return after N game ticks
+// Usage: run with no args.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
-import { unpack } from "./recorder.mjs";
+import { RECORDER, unpack } from "./recorder.mjs";
 import { connect, fail } from "./screeps-api.mjs";
+import { replay, views } from "./observe-views.mjs";
 
 const OBSERVE = 1;
-const RECORDER = [10, 11, 12, 13, 14];
+const USAGE = `usage: npm run observe -- <command>
+  health             tick, version, bucket, CPU, faults, refusals, modules off
+  cpu                CPU by phase and module, this tick
+  faults             the fault ring, newest first
+  switches           Memory.v2.switches as stored
+  switch <name> on|off|clear
+                     off: \`false\` (the module is skipped); on: \`true\` (the recorder's opt-in); clear: remove the key
+  declare [reserve <n> | allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | labs <room> <compound=n,…>]
+                     Memory.v2.declarations as stored; with a name, set it
+                     (outposts: the capture's, \`scripts/capture-world.mjs\`; reserve: creep lifetimes of tower fire the reserve holds)
+  capture [out.jsonl]
+                     the recorder's ring as \`npm run bench\`'s capture, oldest first; terrain cached in captures/terrain
+  wait --ticks N     return after N game ticks
+  engagements        each open engagement: members, plan order, target, prediction; pending casts
+  room <room>        controller, structures, creeps, tombstones, sites, as the server holds them
+  creep <name>       one of our creeps and its assignment
+  regions <room>     walkable regions past rival ramparts: exits per side, owned structures beside
+  replay <capture.jsonl> [--trace <creep>]
+                     dist/main.js run on the captured ticks, offline: intents, refusals, tile scores`;
+const LIVE = ["health", "cpu", "faults", "switches", "switch", "declare", "capture", "wait", "engagements", "room", "creep", "regions"];
 
 const [cmd, ...args] = process.argv.slice(2);
+if (cmd === "replay") {
+  const traced = args.includes("--trace") ? args[args.indexOf("--trace") + 1] : undefined;
+  if (!args[0] || (args.includes("--trace") && !traced)) fail("usage: observe replay <capture.jsonl> [--trace <creep>]");
+  replay(args[0], traced);
+  process.exit(0);
+}
+if (!LIVE.includes(cmd)) fail(USAGE);
 const { api, shard } = await connect();
 
 const raw = async (id) => (await api.req("GET", "/api/user/memory-segment", { segment: id, shard })).data || null;
@@ -44,6 +56,7 @@ const putV2 = async (key, value) =>
     : api.req("POST", "/api/user/memory", { path: "v2", value: { [key]: value }, shard });
 const observed = async () => (await segment(OBSERVE)) ?? fail("observe segment empty: the bot has not written one yet");
 const ms = (n) => n.toFixed(2).padStart(7);
+const view = views({ api, shard, memory, raw });
 
 switch (cmd) {
   case "health": {
@@ -135,6 +148,13 @@ switch (cmd) {
     console.log(`tick ${until} reached`);
     break;
   }
-  default:
-    fail("usage: observe health|cpu|faults|switches|switch <name> on|off|clear|declare [reserve <n>|allies <names>|enemies <names>|sieges <rooms>|avoid <rooms>|abandon <rooms>|outposts <capture>|claims <capture>|labs <room> <compound=n,…>]|capture [out]|wait --ticks N");
+  case "engagements":
+    await view.engagements();
+    break;
+  case "room":
+  case "creep":
+  case "regions":
+    if (!args[0]) fail(`usage: observe ${cmd} <${cmd === "creep" ? "name" : "room"}>`);
+    await view[cmd](args[0]);
+    break;
 }

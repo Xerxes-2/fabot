@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { getHeapStatistics } from "node:v8";
 import { stand } from "./bench-game.mjs";
-import { unpack } from "./recorder.mjs";
+import { RECORDER, unpack } from "./recorder.mjs";
 
 const fail = (msg) => {
   console.error(`smoke: ${msg}`);
@@ -118,7 +118,7 @@ const phases = observe.phases.map(([name]) => name);
 for (const want of ["memory", "world", "atlas", "economy", "execute", "write", "record"])
   if (!phases.includes(want)) fail(`phase ${want} not reported: ${phases}`);
 const pass = globalThis.__fabotRead().map((each) => (typeof each === "string" ? each : Array.from(each)));
-const [recorded] = unpack([10, 11, 12, 13, 14].map((id) => segments[id]));
+const [recorded] = unpack(RECORDER.map((id) => segments[id]));
 if (recorded?.time !== 103) fail(`recorder wrote no tick 103: ${recorded?.time}`);
 if (!recorded.intel.startsWith("W1N1 103 ")) fail(`recorder's intel lost the room: ${recorded.intel}`);
 if (recorded.memory !== RawMemory.get()) fail("recorder's Memory is not the tick's");

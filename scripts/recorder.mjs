@@ -6,6 +6,8 @@ import { inflateRawSync } from "node:zlib";
 
 createRequire(import.meta.url)("../src/app/read.js");
 
+export const RECORDER = [10, 11, 12, 13, 14];
+
 export function unpack(segments) {
   const ticks = {};
   for (const text of segments.filter(Boolean)) {

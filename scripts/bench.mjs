@@ -17,11 +17,10 @@
 //   node --cpu-prof --max-old-space-size=256 scripts/bench.mjs --a A.js …   one bundle's profile
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { getHeapStatistics } from "node:v8";
-import { stand } from "./bench-game.mjs";
+import { load, stand } from "./bench-game.mjs";
 
 const usage = "usage: npm run bench -- --a A.js [--b B.js] [--rounds R] [--cold K | --counts] capture.jsonl…";
 const fail = (m) => {
@@ -55,14 +54,6 @@ async function* replay() {
       yield [tick, i];
     }
 }
-
-const require = createRequire(import.meta.url);
-// Each bundle installs its own world reader on the global; a tick runs on its own.
-const load = (path) => {
-  delete require.cache[path];
-  const bot = require(path);
-  return { loop: () => bot.loop(), read: globalThis.__fabotRead };
-};
 
 function runTick(bot, tick) {
   const intents = [];

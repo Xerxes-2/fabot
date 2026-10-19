@@ -7,6 +7,7 @@
 // `say` free.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 
 const VERBS = ["move", "say", "harvest", "transfer", "withdraw", "pickup", "build", "repair", "dismantle", "upgradeController", "reserveController",
   "attackController", "claimController", "signController", "claimReactor", "drop", "attack", "heal", "rangedHeal", "rangedAttack", "rangedMassAttack",
@@ -149,6 +150,14 @@ function Terrain(name) {
   this.get = (x, y) => array[y * 50 + x];
   this.getRawBuffer = () => new Uint8Array(array);
 }
+
+const require = createRequire(import.meta.url);
+// Each bundle installs its own world reader on the global; a tick runs on its own.
+export const load = (path) => {
+  delete require.cache[path];
+  const bot = require(path);
+  return { loop: () => bot.loop(), read: globalThis.__fabotRead };
+};
 
 // Stands `captured` as globalThis's Game, Memory and RawMemory, the intents
 // it accepts pushed onto `list`. The clock is the caller's.
