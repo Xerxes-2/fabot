@@ -181,22 +181,25 @@ fn banks_remote(derived: &Derived, ci: usize) -> bool {
     !ground.abandoned && ground.stores.iter().any(|s| s.owned)
 }
 
-fn owner_of(walks: &mut dyn Walks, derived: &Derived, gi: usize) -> Option<usize> {
-    if gi < derived.colonies.len() {
-        Some(gi)
-    } else {
-        let ground = &derived.grounds[gi];
-        let at = ground
-            .controller
-            .as_ref()
-            .map(|c| c.pos.clone())
-            .or_else(|| ground.sources.first().map(|s| s.pos.clone()));
+pub type Near<'a> = dyn FnMut(&dyn Fn(usize) -> bool, &Pos) -> Option<usize> + 'a;
 
-        match at {
-            Some(at) => walks.near(&|ci| banks_remote(derived, ci), &at),
-            None => None,
+pub fn owners(near: &mut Near, derived: &Derived) -> BTreeMap<String, usize> {
+    let mut owners = BTreeMap::new();
+    for (gi, ground) in derived.grounds.iter().enumerate() {
+        let at = || {
+            let controller = ground.controller.as_ref().map(|c| &c.pos);
+            controller.or_else(|| ground.sources.first().map(|s| &s.pos))
+        };
+        let owner = if gi < derived.colonies.len() {
+            Some(gi)
+        } else {
+            at().and_then(|at| near(&|ci| banks_remote(derived, ci), at))
+        };
+        if let Some(ci) = owner {
+            owners.insert(ground.room.clone(), ci);
         }
     }
+    owners
 }
 
 /// The backlog is spread over a creep's life, so a hauler cast now clears it
@@ -771,17 +774,11 @@ impl Foundry<'_> {
 pub fn plan(
     walks: &mut dyn Walks,
     derived: &Derived,
+    owners: &BTreeMap<String, usize>,
     pool: &[super::pool::Offer],
     assignments: &BTreeMap<String, String>,
 ) -> Plan {
     let colonies = &derived.colonies;
-
-    let owners: BTreeMap<String, usize> = derived
-        .grounds
-        .iter()
-        .enumerate()
-        .filter_map(|(gi, g)| owner_of(walks, derived, gi).map(|ci| (g.room.clone(), ci)))
-        .collect();
 
     // A colony that feeds outposts cannot wait for a bank that holds its whole
     // hauler. A lone room can, and regresses when it casts to the bank instead.
@@ -791,9 +788,9 @@ pub fn plan(
         served[*ci] += 1;
     }
 
-    let others = ground_demands(&owners, walks, derived);
+    let others = ground_demands(owners, walks, derived);
 
-    let spent = spend_demands(&owners, walks, derived, &others);
+    let spent = spend_demands(owners, walks, derived, &others);
 
     let mut all = others;
     all.extend(spent);
@@ -815,7 +812,7 @@ pub fn plan(
     };
 
     for body in derived.bodies.iter().chain(derived.ovens.iter()) {
-        if !expiring_now(walks, derived, &owners, body) {
+        if !expiring_now(walks, derived, owners, body) {
             let pattern = body.pattern;
             let parts = key_parts_in(pattern, body);
 
@@ -1191,13 +1188,14 @@ mod tests {
     }
 
     fn planned(derived: &Derived) -> (Vec<pool::Offer>, Plan) {
-        let offers = pool::pool(derived, &Assignments::new());
-        let assignments = assigned_in(derived, &offers);
         let mut flat = Flat::new(derived);
+        let owners = owners(&mut |c, at| flat.near(c, at), derived);
+        let offers = pool::pool(derived, &owners, &Assignments::new());
+        let assignments = assigned_in(derived, &offers);
 
         (
             offers.clone(),
-            plan(&mut flat, derived, &offers, &assignments),
+            plan(&mut flat, derived, &owners, &offers, &assignments),
         )
     }
 
@@ -1217,7 +1215,7 @@ mod tests {
     #[test]
     fn the_pool_offers_each_task_once_with_no_negative_capacity() {
         for g in worlds(102) {
-            let offers = pool::pool(&derive(&g), &Assignments::new());
+            let offers = pool::pool(&derive(&g), &BTreeMap::new(), &Assignments::new());
             let ids: Vec<&String> = offers.iter().map(|o| &o.id).collect();
             let distinct: BTreeSet<&String> = ids.iter().copied().collect();
 
@@ -1244,7 +1242,7 @@ mod tests {
     #[test]
     fn no_reservation_or_claim_is_offered_on_another_players_reservation() {
         for g in worlds(103) {
-            for o in pool::pool(&derive(&g), &Assignments::new()) {
+            for o in pool::pool(&derive(&g), &BTreeMap::new(), &Assignments::new()) {
                 let (Task::Reserve(id) | Task::Claim(id)) = &o.task else {
                     continue;
                 };
@@ -1260,7 +1258,7 @@ mod tests {
     fn a_storage_draw_is_worth_no_more_than_the_dearest_refill_it_serves() {
         for g in worlds(104) {
             let derived = derive(&g);
-            let offers = pool::pool(&derived, &Assignments::new());
+            let offers = pool::pool(&derived, &BTreeMap::new(), &Assignments::new());
 
             let rank_of = |task: &Task| -> Option<i32> {
                 offers
@@ -1512,10 +1510,11 @@ mod tests {
     fn the_supply_floor_casts_only_where_nothing_of_its_kind_or_a_hauler_works_in_the_home() {
         for g in worlds(113) {
             let derived = derive(&g);
-            let offers = pool::pool(&derived, &Assignments::new());
-            let assignments = assigned_in(&derived, &offers);
             let mut flat = Flat::new(&derived);
-            let p = plan(&mut flat, &derived, &offers, &assignments);
+            let owners = owners(&mut |c, at| flat.near(c, at), &derived);
+            let offers = pool::pool(&derived, &owners, &Assignments::new());
+            let assignments = assigned_in(&derived, &offers);
+            let p = plan(&mut flat, &derived, &owners, &offers, &assignments);
 
             let serves = |room: &str, kind: Option<Pattern>, b: &Body| -> bool {
                 let at = assignments

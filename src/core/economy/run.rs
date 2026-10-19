@@ -393,8 +393,6 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         &state.scouts,
     );
 
-    let offers = pool::pool(&derived, &state.assignments);
-
     let creeps: BTreeMap<&str, &Creep> = seen.iter().map(|c| (c.name.as_str(), *c)).collect();
 
     let movers: BTreeMap<&str, Mover> = seen
@@ -408,16 +406,21 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         })
         .collect();
 
-    let by_id: HashMap<&str, usize> = offers
-        .iter()
-        .enumerate()
-        .map(|(i, offer)| (offer.id.as_str(), i))
-        .collect();
-
     let homes: Vec<Pos> = derived
         .colonies
         .iter()
         .map(|c| c.spawns[0].pos.clone())
+        .collect();
+    let owners = quota::owners(
+        &mut |can, at| near(&mut *context.atlas, &derived, &homes, can, at),
+        &derived,
+    );
+    let offers = pool::pool(&derived, &owners, &state.assignments);
+
+    let by_id: HashMap<&str, usize> = offers
+        .iter()
+        .enumerate()
+        .map(|(i, offer)| (offer.id.as_str(), i))
         .collect();
 
     let mut hired = state.assignments.clone();
@@ -447,7 +450,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             by_id: &by_id,
             assignments: &assignments,
         };
-        quota::plan(&mut walked, &derived, &offers, &assignments)
+        quota::plan(&mut walked, &derived, &owners, &offers, &assignments)
     };
 
     let mut intents: Vec<Intent> = plan

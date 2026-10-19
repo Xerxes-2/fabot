@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 /// One pool for every colony: a body takes the work it fits and reaches,
 /// whoever cast it (`ARCHITECTURE.md` §5).
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::engine;
 use crate::core::tiles;
@@ -60,7 +60,7 @@ pub struct Offer {
     /// The tile a seated offer's garrison digs from.
     pub post: Option<Pos>,
     /// Rooms a body may not take it from: another colony's, whose own stock
-    /// fills it, or that keeps what it holds for its own growth.
+    /// fills it, or that keeps its bodies for its own growth.
     pub shut: BTreeSet<String>,
 }
 
@@ -109,6 +109,9 @@ pub fn draws_buffer(body: &Body, offer: &Offer) -> bool {
 pub fn fits(body: &Body, offer: &Offer) -> bool {
     let half_empty = body.free > 0 && body.free * 2 >= body.store.capacity;
 
+    if offer.shut.contains(&body.pos.room) {
+        return false;
+    }
     match &offer.task {
         // An upgrader is cast by, and counts for, the room it stands in, so it
         // waits out a dry buffer there rather than walk to another's controller.
@@ -132,9 +135,7 @@ pub fn fits(body: &Body, offer: &Offer) -> bool {
             body.work == 0 && body.carry > 0 && body.store.held.is_empty()
         }
         Task::Withdraw(_, _) | Task::Pickup(_, _) => body.carry > 0 && half_empty,
-        Task::Refill(_, resource) => {
-            body.carry > 0 && carried(body, resource) > 0 && !offer.shut.contains(&body.pos.room)
-        }
+        Task::Refill(_, resource) => body.carry > 0 && carried(body, resource) > 0,
         Task::Build(_) | Task::Repair(_) => {
             body.work > 0 && body.carry > 0 && (body.energy > 0 || offer.draw.is_buffer())
         }
@@ -406,7 +407,7 @@ pub fn repair_value(r: &RepairFact) -> f64 {
 }
 
 /// `held`: last tick's assignments, whose Refills are what is already aboard.
-pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
+pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignments) -> Vec<Offer> {
     let mut offers: Vec<Offer> = Vec::new();
 
     // The storage is offered for every ore a body carries, so no load is
@@ -445,6 +446,14 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
                 super::quota::reserve_target(derived.reserve_lifetimes, c.controller.level);
             !g.stores.iter().any(|s| s.owned && s.energy >= reserve)
         })
+        .map(|(c, _)| c.room.clone())
+        .collect();
+    // Without a storage a colony grows only by its own workers' hands.
+    let storageless: BTreeSet<String> = derived
+        .colonies
+        .iter()
+        .zip(&derived.grounds)
+        .filter(|(_, g)| !g.stores.iter().any(|s| s.owned))
         .map(|(c, _)| c.room.clone())
         .collect();
 
@@ -778,10 +787,14 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
     }
 
     for o in &mut offers {
-        if matches!(o.task, Task::Refill(..)) {
-            o.shut
-                .extend(lean.iter().filter(|r| **r != o.target.room).cloned());
-        }
+        let shut_by = match o.task {
+            Task::Refill(..) => &lean,
+            Task::Build(_) | Task::Repair(_) => &storageless,
+            _ => continue,
+        };
+        let own =
+            (owners.get(&o.target.room)).map_or(&o.target.room, |ci| &derived.colonies[*ci].room);
+        o.shut.extend(shut_by.iter().filter(|r| *r != own).cloned());
     }
 
     offers
