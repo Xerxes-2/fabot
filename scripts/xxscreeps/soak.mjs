@@ -59,6 +59,9 @@
 //   --ended   our room's starting safe mode ended, its stock kept to activate,
 //            opponents or not
 //   --keep   leave the run's world in the cache's worlds/ (default removed)
+//   --watch  the server's backend up on 127.0.0.1:--port (default 21025) for
+//            a client to follow, each tick held to --tick-ms (default 500),
+//            the world left up after the last until Ctrl-C; prints the login
 //
 // Needs `npm run build` (dist/main.js) and `npm run xx -- setup` (the engine
 // and its template world, under $FABOT_XXSCREEPS_HOME). Writes
@@ -67,13 +70,13 @@
 // cpu.jsonl, bodies.jsonl, console.log and server.log; prints the samples as a table and a
 // summary.
 import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended] [--keep]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended] [--keep] [--watch [--tick-ms N] [--port N]]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -88,16 +91,17 @@ const XXSCREEPS = join(ENGINE, "node_modules/xxscreeps/xxscreeps.js");
 
 // ---- arguments -------------------------------------------------------------
 const flags = {};
+const WATCH_VALUES = ["--tick-ms", "--port"];
 const rest = process.argv.slice(2);
 const listOnly = rest[0] === "--list";
 if (listOnly) rest.shift();
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (a === "--unsafe" || a === "--ended" || a === "--keep") {
+  if (a === "--unsafe" || a === "--ended" || a === "--keep" || a === "--watch") {
     flags[a] = true;
     continue;
   }
-  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from", "--invaders", "--wave", "--core", "--opponents", "--world"].includes(a)) fail(usage);
+  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from", "--invaders", "--wave", "--core", "--opponents", "--world", ...WATCH_VALUES].includes(a)) fail(usage);
   const value = rest[++i];
   if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
   flags[a] = value;
@@ -135,6 +139,10 @@ const ticks = whole("--ticks", node ? 5000 : 3000, 1);
 const every = whole("--every", 100, 1);
 const seed = whole("--seed", 1, 0);
 const late = whole("--late", 0, 0);
+const watch = flags["--watch"] && { ms: whole("--tick-ms", 500, 1), port: whole("--port", 21025, 1), password: randomBytes(9).toString("base64url") };
+if (!watch && WATCH_VALUES.some((f) => flags[f])) fail(`${WATCH_VALUES.join(" and ")} need --watch\n${usage}`);
+// The engine saves the world only on the shutdown a watched run never sends.
+if (watch && flags["--save"]) fail(`--watch takes no --save\n${usage}`);
 const windows = (flags["--capture"] ?? "").split(",").filter(Boolean).map((w) => w.split("-").map(Number));
 if (windows.some((w) => w.length !== 2 || !w.every(Number.isInteger))) fail(`--capture: ticks a-b[,c-d]\n${usage}`);
 if (flags["--room"] !== undefined && !/^[WE]\d+[NS]\d+$/.test(flags["--room"])) fail(`--room: "${flags["--room"]}" is not a room name`);
@@ -189,6 +197,7 @@ const screepsrc = [
   ...(cores.length ? ["  - ./core/index.js"] : []),
   ...(live ? ["  - xxscreeps/mods/modern/observer", "  - xxscreeps/mods/modern/powerspawn"] : []),
   "  - ./waves/index.js",
+  ...(watch ? ["  - xxscreeps/mods/backend/password"] : []),
   "game:",
   "  tickSpeed: 60000",
   "  respawnTimeout: 0",
@@ -197,6 +206,7 @@ const screepsrc = [
   "  intentAbandonTimeout: 120000",
   "runner:",
   "  concurrency: 1",
+  ...(watch ? ["backend:", `  bind: 127.0.0.1:${watch.port}`] : []),
   "",
 ].join("\n");
 
@@ -210,6 +220,26 @@ const runName = (flags["--run"] ?? "default").replace(/[^A-Za-z0-9-]/g, "");
 const worldName = `${runName.slice(0, 15)}-${createHash("sha256").update(REPO).update(runName).digest("hex").slice(0, 8)}`;
 const world = join(ENGINE, "worlds", `soak-${worldName}`);
 rmSync(world, { recursive: true, force: true });
+// Node runs no exit handler on a signal, and the detached server and stepper
+// never see the terminal's Ctrl-C: a signal ends the run through `exit`.
+const children = [];
+let samplesSoFar;
+const interrupt = () => process.exit(130);
+let onSignal = interrupt;
+for (const s of ["SIGINT", "SIGTERM"]) process.on(s, () => onSignal());
+const stop = () => {
+  for (const c of children.filter((c) => c.exitCode === null && c.signalCode === null))
+    try {
+      process.kill(-c.pid, "SIGKILL");
+    } catch {}
+};
+process.on("exit", (code) => {
+  stop();
+  // The world is derived from the template on every run, and its sockets and DB
+  // are worth gigabytes over a session; --keep leaves it to be read back.
+  if (!flags["--keep"]) rmSync(world, { recursive: true, force: true });
+  if (code === 130 && samplesSoFar) console.error(`interrupted; the samples so far: ${samplesSoFar}`);
+});
 // A copied socket is a dead server's; only files and directories come over.
 const filesOnly = (src) => lstatSync(src).isFile() || lstatSync(src).isDirectory();
 cpSync(template, world, { recursive: true, filter: filesOnly });
@@ -248,7 +278,6 @@ else {
 if (listOnly) {
   // The rooms a soak can stand in, for `soak-many.mjs`; nothing is run.
   console.log(node26([XXSCREEPS, script("colony.mjs"), "--list"], world, true).trim().split("\n").at(-1));
-  rmSync(world, { recursive: true, force: true });
   process.exit(0);
 }
 const homes = (live?.rooms ?? [])
@@ -341,41 +370,61 @@ if (node?.outposts || node?.claims || node?.labs || (allies.length && !live && !
   node26([XXSCREEPS, script("node.mjs"), "declare", colony.room, OUR_NAME, "declarations.json", ...(node?.short ? ["short"] : [])], world);
 }
 if (node?.outposts && !flags["--invaders"]) waves.push(...colony.outposts.map((o, i) => `${o.room}:4000:${1000 + 1500 * i}`));
+if (watch) node26([XXSCREEPS, "manage", "user", "password", OUR_NAME, "--", watch.password], world);
 
 // ---- the server, stepped ---------------------------------------------------
 const log = join(out, "server.log");
-const server = spawn("nix", ["shell", "nixpkgs#nodejs_26", "-c", "node", XXSCREEPS, "start", "--no-backend"], {
+const server = spawn("nix", ["shell", "nixpkgs#nodejs_26", "-c", "node", XXSCREEPS, "start", ...(watch ? [] : ["--no-backend"])], {
   cwd: world,
   detached: true,
   stdio: ["ignore", openSync(log, "w"), openSync(log, "a")],
 });
+children.push(server);
 let exited = false;
 server.on("exit", () => (exited = true));
-const stop = () => {
-  if (!exited) {
-    try {
-      process.kill(-server.pid, "SIGKILL");
-    } catch {}
-  }
-};
-process.on("exit", stop);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sockets = [".db", ".db.pubsub", ".shard0.db", ".shard0.pubsub", ".shard0.scratch"].map((s) => join(world, "screeps", s));
 for (let i = 0; !sockets.every(existsSync); i++) {
   if (exited || i > 1200) fail(`the server did not come up; see ${log}`);
   await sleep(100);
 }
-const stepped = JSON.parse(node26([XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out, waves.join(","), "opponents.json", cores.join(","), wave], world, true).trim().split("\n").at(-1));
-for (let i = 0; !exited && i < 150; i++) await sleep(100);
+if (watch) {
+  const api = `http://127.0.0.1:${watch.port}`;
+  for (let i = 0; !(await fetch(`${api}/api/version`).then((r) => r.ok, () => false)); i++) {
+    if (exited || i > 600) fail(`the backend did not come up on ${api}; see ${log}`);
+    await sleep(100);
+  }
+  const outposts = live?.declarations?.outposts ?? (node?.outposts || node?.claims ? colony.outposts : []);
+  const rooms = [...new Set([colony.room, ...outposts.map((o) => o.room), ...opponents.map((o) => o.room)])].join(",");
+  console.error(
+    `\nwatch: ${api} (socket ws://127.0.0.1:${watch.port}/socket/websocket, not sharded)\n  user ${OUR_NAME}  password ${watch.password}\n  token guest (read-only; a signed-in one expires in 120 s)\n  rooms ${rooms}\n  a tick every ${watch.ms} ms\n`,
+  );
+}
+// Spawned, not run synchronously, so a signal is handled while it steps.
+const stepper = spawn(
+  "nix",
+  ["shell", "nixpkgs#nodejs_26", "-c", "node", XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out, waves.join(","), "opponents.json", cores.join(","), wave, String(watch ? watch.ms : 0)],
+  { cwd: world, detached: true, stdio: ["ignore", "pipe", "inherit"] },
+);
+children.push(stepper);
+samplesSoFar = join(out, "samples.jsonl");
+let steps = "";
+stepper.stdout.on("data", (d) => (steps += d));
+const code = await new Promise((r) => stepper.on("exit", r));
+if (code !== 0) fail(`soak-step.mjs failed (exit ${code}); see ${log}`);
+const stepped = JSON.parse(steps.trim().split("\n").at(-1));
+if (watch) {
+  console.error("watch: the last tick is stepped; the world stays up until Ctrl-C");
+  await new Promise((r) => (onSignal = r));
+  onSignal = interrupt;
+}
+for (let i = 0; !exited && !watch && i < 150; i++) await sleep(100);
 if (flags["--save"]) {
   if (!exited) fail(`the server did not save on shutdown; no world in ${flags["--save"]}`);
   rmSync(flags["--save"], { recursive: true, force: true });
   cpSync(join(world, "screeps"), resolve(flags["--save"]), { recursive: true, filter: filesOnly });
 }
 stop();
-// The world is derived from the template on every run, and its sockets and DB
-// are worth gigabytes over a session; --keep leaves it to be read back.
-if (!flags["--keep"]) rmSync(world, { recursive: true, force: true });
 
 // ---- the report ------------------------------------------------------------
 const lines = (f) => readFileSync(join(out, f), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));

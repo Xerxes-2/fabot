@@ -1,6 +1,6 @@
 // Online, the server up: pause the engine, step it one tick at a time and
 // watch one colony. Runs under xxscreeps' own loader, cwd the world:
-//   xxscreeps.js file://…/soak-step.mjs <ticks> <every> <room[,room…]> <username> <out dir> [<waves> [<opponents.json> [<cores>]]]
+//   xxscreeps.js file://…/soak-step.mjs <ticks> <every> <room[,room…]> <username> <out dir> [<waves> [<opponents.json> [<cores> [<wave> [<watch ms>]]]]]
 // Every tick: our CPU (the runner's usage channel), our console, and the
 // observe segment our bot writes (segment 1: faults, refusals). Every
 // <every> ticks, and on the last: one sample of the room. Writes to <out dir>
@@ -36,6 +36,7 @@
 // part: compound } }] } stands the opponent's bodies on the edge of `room`
 // (default <room>) toward its room (`waves/`) at t = first, first + every, …
 // <cores>: room:tick,… — a level-0 Invader core (`core/`) stood in room at t = tick.
+// <watch ms>: soak's --watch, each step held to it and the server left up after the last; 0 (default) off.
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { Database, Shard } from "xxscreeps/engine/db/index.js";
@@ -47,12 +48,13 @@ import { getProcessorChannel, pushIntentsForRoomNextTick } from "xxscreeps/engin
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
 
-const [ticksArg, everyArg, roomArg, username, out, wavesArg = "", opponentsPath, coresArg = "", waveArg = "melee,healer,ranged"] = process.argv.slice(2);
+const [ticksArg, everyArg, roomArg, username, out, wavesArg = "", opponentsPath, coresArg = "", waveArg = "melee,healer,ranged", watchArg = "0"] = process.argv.slice(2);
 const homes = roomArg.split(",");
 const roomName = homes[0];
 const ticks = Number(ticksArg);
 const every = Number(everyArg);
 const observeSegment = 1;
+const watchMs = Number(watchArg);
 
 const db = await Database.connect();
 const shard = await Shard.connect(db, "shard0");
@@ -789,10 +791,13 @@ let lastObs = null;
 const started = Date.now();
 // Steps that needed a second pausedTick: reported, never silent.
 const slowTicks = [];
+let stepAt = Date.now();
 for (let t = 0; t < ticks; t++) {
   consoleTick = time;
   if (t > 0) {
     cpu = null; // a tick the runner skips reports no usage
+    if (watchMs) await new Promise((r) => setTimeout(r, stepAt + watchMs - Date.now()));
+    stepAt = Date.now();
     // The engine waits up to its intent-abandon timeout (120 s, set by
     // soak.mjs) for our bot's intents, so a tick may legitimately take that
     // long; wait past it, then ask once more before giving up.
@@ -912,7 +917,7 @@ abandoned();
 fs.writeFileSync(join(out, "lost.json"), JSON.stringify([...lost].sort((a, b) => a - b)) + "\n");
 console.log(JSON.stringify({ ticks, ms: Date.now() - started }));
 
-await svc.publish({ type: "shutdown" });
+if (!watchMs) await svc.publish({ type: "shutdown" });
 await shard[Symbol.asyncDispose]();
 await db[Symbol.asyncDispose]();
 process.exit(0);

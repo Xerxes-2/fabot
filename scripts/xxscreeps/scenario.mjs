@@ -9,6 +9,7 @@
 // would, Memory kept.
 //
 // Usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly]
+//        npm run scenario -- <name> --watch [--tick-ms N] [--port N]
 //   name    the scenarios to run (default all but the nightly ones), by file name
 //   --modules  also the scenarios naming any of these modules (directories under src/core)
 //   --list  print the selection and run nothing
@@ -16,6 +17,7 @@
 //           the network or a long first run, kept out of `jj ship`
 //   --bot   the bundle (default dist/main.js)
 //   --jobs  soaks at once (default half the cores)
+//   --watch the one scenario's soak watched (soak's --watch), in this terminal
 //
 // A scenario file: { "why": the invariant, "modules": the src/core modules it tests, "nightly"?, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "wave"? (soak's --wave), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
@@ -46,11 +48,16 @@ const fail = (m) => {
 
 const names = [];
 const flags = {};
+// Soak's watch flags, passed on as given; soak.mjs checks them.
+const watch = [];
+const WATCH_VALUES = ["--tick-ms", "--port"];
 const rest = process.argv.slice(2);
 for (let i = 0; i < rest.length; i++)
   if (rest[i] === "--bot" || rest[i] === "--jobs" || rest[i] === "--modules") flags[rest[i]] = rest[++i] ?? fail(`${rest[i - 1]} takes a value`);
   else if (rest[i] === "--nightly" || rest[i] === "--list") flags[rest[i]] = true;
-  else if (rest[i].startsWith("--")) fail("usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly]");
+  else if (rest[i] === "--watch") watch.push(rest[i]);
+  else if (WATCH_VALUES.includes(rest[i])) watch.push(rest[i], rest[++i]);
+  else if (rest[i].startsWith("--")) fail("usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] | <name> --watch [--tick-ms N] [--port N]");
   else names.push(rest[i]);
 
 const CORE = join(REPO, "src/core");
@@ -70,6 +77,9 @@ if (flags["--list"]) {
   console.log(`${scenarios.length} of ${library.length} scenarios`);
   process.exit(0);
 }
+if (watch.length && names.length !== 1) fail("--watch runs exactly one scenario: npm run scenario -- <name> --watch");
+// The Ctrl-C that ends a watched soak reaches this process too; its asserts still print.
+if (watch.length) process.on("SIGINT", () => {});
 const bot = resolve(flags["--bot"] ?? join(REPO, "dist/main.js"));
 if (!existsSync(bot)) fail(`no bundle at ${bot}: npm run build first`);
 const jobs = Number(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / 2)));
@@ -374,9 +384,10 @@ const bundleAt = (commit) => {
 };
 for (const { start } of runs.values()) if (start.bundle) bundleAt(start.bundle);
 const started = Date.now();
-const soak = (args) =>
+// A soak that saves a world for a later start is a prelude, never the one watched.
+const soak = (args, watched = watch.length > 0 && !args.includes("--save")) =>
   new Promise((done) => {
-    const child = spawn("node", [join(HERE, "soak.mjs"), ...args], { stdio: "ignore", env: { ...process.env, FABOT_PLAN_BUILT: "1" } });
+    const child = spawn("node", [join(HERE, "soak.mjs"), ...args, ...(watched ? watch : [])], { stdio: watched ? "inherit" : "ignore", env: { ...process.env, FABOT_PLAN_BUILT: "1" } });
     child.on("exit", (code) => done(code));
   });
 // `bot`: a path from the repo, or "@bot", the bundle under test.
