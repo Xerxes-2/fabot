@@ -1,0 +1,14 @@
+{
+  "why": "a sweep's swinging bodies, joined free beside a dismantler and a medic, close on the enemy's unarmed worker and reserver five and more tiles off the source and strike them, rather than stand at the source where no swing reaches",
+  "start": {
+    "world": "scripts/xxscreeps/worlds/sweep-melee-closes.json",
+    "seed": 1,
+    "opponents": [{ "name": "rival", "bot": "scripts/xxscreeps/engine/pass", "room": "W2N1" }]
+  },
+  "ticks": 150,
+  "assert": [
+    { "measure": "struckOn", "name": "worker", "min": 1 },
+    { "measure": "struckOn", "name": "reserver", "min": 1 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

@@ -866,24 +866,37 @@ pub fn hunt(
                 .sum()
         };
         match single {
-            Some((w, id)) if w >= mass => (w, Some(CreepAct::RangedAttackCreep(id))),
+            Some((w, id)) if parts > 0 && w >= mass => (w, Some(CreepAct::RangedAttackCreep(id))),
             _ if mass > 0 => (mass, Some(CreepAct::RangedMassAttack)),
             _ => (0, None),
         }
     };
+    let swung = |at: &Pos| -> i64 {
+        let swing = engine::ATTACK_POWER * live(BodyPart::Attack, c);
+        let beside = marks
+            .iter()
+            .filter(|m| at.within(engine::MELEE_RANGE, &m.pos));
+        beside.map(|m| worth_of(m, swing)).max().unwrap_or(0)
+    };
     let strike = landed(&c.pos).1;
+    // A swing lands from no shot's range: each body closes to its own reach.
+    let reach = if parts > 0 {
+        engine::RANGED_RANGE
+    } else {
+        engine::MELEE_RANGE
+    };
+    let mut goal = target_at(sight, centre, reach);
+    if !marks.is_empty() {
+        goal.tiles = marks.iter().map(|m| tiles::of_pos(&m.pos)).collect();
+    }
     if !contact {
-        let on = toward(sight, c, centre, engine::RANGED_RANGE);
+        let on = plan::toward(sight.atlas, c, mover_of(c), &goal, WEIGHT);
         return (strike, on, Vec::new());
     }
     let cost = i64::from(engine::body_cost(
         &c.body.iter().map(|p| p.kind).collect::<Vec<_>>(),
     ));
-    let field = sight.atlas.field(
-        mover_of(c),
-        &target_at(sight, centre, engine::RANGED_RANGE),
-        &c.pos,
-    );
+    let field = sight.atlas.field(mover_of(c), &goal, &c.pos);
     let approach = |t: Tile| {
         -field
             .as_ref()
@@ -903,7 +916,8 @@ pub fn hunt(
         .map(|t| {
             let risk =
                 i64::from(net(*t).max(0)) * cost / i64::from(threat[*t].max(c.hits / 3).max(1));
-            (*t, landed(&tiles::to_pos(&room, *t)).0 - risk)
+            let at = tiles::to_pos(&room, *t);
+            (*t, landed(&at).0 + swung(&at) - risk)
         })
         .collect();
     // Every tile lethal: the least deadly, an exit among them, until the
