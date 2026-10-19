@@ -1,5 +1,6 @@
 {
-  "why": "a declared siege whose rival spends a safe mode once an extension is struck stands off while it runs and razes the rest after",
+  "nightly": true,
+  "why": "a declared siege whose rival spends a safe mode once an extension is struck stands off while it runs and razes the rest after. Nightly: the rival's safe mode alone holds it off 20,000 ticks",
   "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-room.json",

@@ -14,7 +14,7 @@
 //   --modules  also the scenarios naming any of these modules (directories under src/core)
 //   --list  print the selection and run nothing
 //   --nightly  all of them, with those marked "nightly": a start that needs
-//           the network or a long first run, kept out of `jj ship`
+//           the network or a long run, kept out of `jj ship`
 //   --bot   the bundle (default dist/main.js)
 //   --jobs  soaks at once (default half the cores)
 //   --watch the one scenario's soak watched (soak's --watch), in this terminal
