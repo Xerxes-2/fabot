@@ -1288,44 +1288,61 @@ pub fn tower_strike(towers: &[Pos], at: &Pos) -> i32 {
         .sum()
 }
 
-/// The cheapest way from `sources` onto a goal: each step's walk at `gait`,
-/// and the ticks to break a barrier stepped onto at `rate`. A tile the towers
-/// strike past `heal` is never stepped on. Its barriers in order, each with the
-/// tile it is broken from, and the ticks.
+/// The simple rule; a fire priced in ticks replaces it.
+pub fn crowded(set: &[Fighter], abreast: i32, seated: i32, struck: i32) -> Option<i32> {
+    let n = set.len() as i32;
+    let abreast = abreast.clamp(1, n.max(1));
+    (struck <= pooled_heal(seated, set)).then_some((n + abreast - 1) / abreast - 1)
+}
+
+/// A source is a tile, the walk onto it and how many its stretch lands
+/// abreast. A landing and a barrier's work tile hold only the medics seated
+/// there; the barriers come back in order, each with its work tile.
+#[allow(clippy::too_many_arguments)]
 pub fn breach_plan(
     ground: &Ground,
     gait: FatigueFactor,
     towers: &[Pos],
-    heal: i32,
+    set: &[Fighter],
+    seated: i32,
+    seats: impl Fn(Tile) -> i32,
     rate: i32,
-    sources: &[Tile],
+    sources: &[(Tile, i32, i32)],
     goals: &[Tile],
 ) -> Option<(Vec<(Tile, Tile)>, i32)> {
     let struck = |t: Tile| tower_strike(towers, &tiles::to_pos(&ground.room, t));
+    let n = set.len() as i32;
+    let abreast: BTreeMap<Tile, i32> = sources.iter().map(|(t, _, w)| (*t, *w)).collect();
+    let goal: BTreeSet<Tile> = goals.iter().copied().collect();
 
-    let cost = |t: Tile| -> Option<i32> {
-        let step = step_ticks(gait, grid::value(ground.weights[t])?)?;
+    let cost = |from: Tile, to: Tile| -> Option<i32> {
+        if tiles::on_edge(to) {
+            return None;
+        }
+        let step = step_ticks(gait, grid::value(ground.weights[to])?)?;
+        let queued = match abreast.get(&from).filter(|_| tiles::on_edge(from)) {
+            Some(w) => crowded(set, *w, seats(to), struck(to))?,
+            None => crowded(set, n, seated, struck(to))?,
+        };
 
-        if tiles::on_edge(t) || struck(t) > heal {
-            None
-        } else {
-            match ground.barriers.get(&t) {
-                Some(hits) if rate > 0 => Some(step + (hits + rate - 1) / rate),
-                Some(_) => None,
-                None => Some(step),
+        match ground.barriers.get(&to) {
+            Some(hits) if rate > 0 => {
+                crowded(set, n, seats(from), struck(from))?;
+                Some(step + queued + (hits + rate - 1) / rate)
             }
+            Some(_) => None,
+            None => Some(step + queued),
         }
     };
 
     let mut dist = [i32::MAX; tiles::COUNT];
     let mut prev: [Option<Tile>; tiles::COUNT] = [None; tiles::COUNT];
-    let goal: BTreeSet<Tile> = goals.iter().copied().collect();
 
-    for &t in sources {
-        dist[t] = 0;
+    for &(t, walk, _) in sources {
+        dist[t] = dist[t].min(walk);
     }
 
-    let mut queue: BTreeSet<(i32, Tile)> = sources.iter().map(|t| (0, *t)).collect();
+    let mut queue: BTreeSet<(i32, Tile)> = sources.iter().map(|(t, _, _)| (dist[*t], *t)).collect();
 
     let found = loop {
         let Some((d, t)) = queue.pop_first() else {
@@ -1341,7 +1358,7 @@ pub fn breach_plan(
         }
 
         for &n in tiles::around(t) {
-            match cost(n) {
+            match cost(t, n) {
                 Some(c) if d + c < dist[n] => {
                     dist[n] = d + c;
                     prev[n] = Some(t);
@@ -1370,7 +1387,7 @@ pub fn breach_plan(
             .map(|pair| (pair[1], pair[0]))
             .collect();
 
-        (broken, dist[last])
+        (broken, dist[last] - dist[walked[0]])
     })
 }
 
@@ -1618,9 +1635,8 @@ mod tests {
 
         for case in 0..CASES {
             let hits: Vec<i32> = (0..48).map(|_| rng.between(1, 300000)).collect();
-            let heal = rng.between(0, 600);
-            let x = rng.between(1, 48);
-            let y = rng.between(1, 48);
+            let heal = rng.between(0, 50) as usize;
+            let (x, y, wide) = (rng.between(1, 48), rng.between(1, 48), rng.between(1, 8));
 
             let ground = Ground {
                 room: ROOM.to_string(),
@@ -1632,9 +1648,13 @@ mod tests {
                     .collect(),
             };
 
-            let sources: Vec<Tile> = (1..=48).map(|y| tile(49, y)).collect();
+            let sources: Vec<(Tile, i32, i32)> = (1..=48).map(|y| (tile(49, y), 0, wide)).collect();
 
-            let plan = |heal: i32| {
+            let plan = |heal: usize| {
+                let set = [
+                    fighter::cast(&[BodyPart::Work]),
+                    fighter::cast(&vec![BodyPart::Heal; heal]),
+                ];
                 breach_plan(
                     &ground,
                     FatigueFactor {
@@ -1642,14 +1662,16 @@ mod tests {
                         moves: 1,
                     },
                     &[Pos::new(ROOM, x, y)],
-                    heal,
+                    &set,
+                    2,
+                    |t| tiles::x_of(t) % 3,
                     1000,
                     &sources,
                     &[tile(5, 25)],
                 )
             };
 
-            let holds = match (plan(heal), plan(heal + 100)) {
+            let holds = match (plan(heal), plan(heal + 8)) {
                 (Some((_, ticks)), Some((_, fewer))) => fewer <= ticks,
                 (Some(_), None) => false,
                 _ => true,

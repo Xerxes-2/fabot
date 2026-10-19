@@ -183,9 +183,6 @@ fn stretches(near: Option<&RoomGrid>, far: Option<&RoomGrid>, side: i32) -> Vec<
     runs
 }
 
-/// About a walk round half a room (the owner's price).
-const WALLED_IN: i32 = 2 * tiles::SIDE;
-
 fn opposite(side: i32) -> i32 {
     (side + 3) % 8 + 1
 }
@@ -235,10 +232,6 @@ pub fn search(
             .copied()
             .unwrap_or(tiles::is_keeper_room(c)),
     };
-    // Walled off from its seats by structures, the target's room is still
-    // entered, dearer than by an open border, for a siege to breach.
-    let fortified = grid_of(start).is_some_and(|g| g.fortified);
-
     let seats =
         target.and_then(|t| Some(atlas.flood_in(grid_of(start)?, mover, Atlas::seats_of(t))));
     let on = |d: &Table<i32>, t: Tile| d[Atlas::anchor(mover.footprint, t)];
@@ -271,12 +264,7 @@ pub fn search(
                 }
                 let blind = node.blind + i32::from(blind(there));
                 let entry = |t: &Tile| match (&node.dist, node.next) {
-                    (Some(dist), next) => {
-                        match tiles::landing(*t).map_or(UNREACHED, |l| on(dist, l)) {
-                            UNREACHED if next.is_none() && fortified => WALLED_IN,
-                            d => d,
-                        }
-                    }
+                    (Some(dist), _) => tiles::landing(*t).map_or(UNREACHED, |l| on(dist, l)),
                     (None, None) => 0,
                     (None, Some(_)) => Atlas::crossing_ticks(),
                 };

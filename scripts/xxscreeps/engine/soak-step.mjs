@@ -492,6 +492,42 @@ const open = new Map();
 // What a siege razes (`fight/kinds/siege.rs` rank_of): the rival's left in its room.
 const RAZED = new Set(["tower", "spawn", "extension", "storage", "terminal", "link", "lab", "extractor", "factory", "powerSpawn", "nuker", "observer"]);
 const razeLeft = (objects, room) => objects.filter((o) => o.pos.roomName === room && RAZED.has(o.structureType) && o["#user"] && o["#user"] !== ours).length;
+// Whether a walk from `from` that breaks no barrier reaches beside `at`.
+function holds(room, inRoom, from, at) {
+  const terrain = world.map.getRoomTerrain(room);
+  const walls = inRoom.filter((o) => o["#lookType"] === "structure" && !["road", "container"].includes(o.structureType) && !(o.structureType === "rampart" && o["#user"] === ours));
+  const blocked = new Set(walls.map((o) => o.pos.x * 50 + o.pos.y));
+  const seen = new Set([from.x * 50 + from.y]);
+  const queue = [{ x: from.x, y: from.y }];
+  while (queue.length) {
+    const p = queue.pop();
+    if (Math.max(Math.abs(p.x - at.x), Math.abs(p.y - at.y)) <= 1) return true;
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dy = -1; dy <= 1; dy++) {
+        const [x, y] = [p.x + dx, p.y + dy];
+        if (x < 0 || y < 0 || x > 49 || y > 49 || seen.has(x * 50 + y) || terrain.get(x, y) & 1 || blocked.has(x * 50 + y)) continue;
+        seen.add(x * 50 + y);
+        queue.push({ x, y });
+      }
+  }
+  return false;
+}
+// A siege's first target, the tick it fell (`razed`), the ramparts its room
+// lost before, and each body's entry: "target" when the region it landed in
+// holds the target, else "walled".
+function breaching(rec, e, objects, t) {
+  const inRoom = objects.filter((o) => o.pos.roomName === e.room);
+  const ramparts = inRoom.filter((o) => o.structureType === "rampart" && o["#lookType"] === "structure").length;
+  rec.first ??= e.target;
+  rec.ramparts ??= ramparts;
+  const target = inRoom.find((o) => o.id === rec.first);
+  if (target) rec.firstAt = { x: target.pos.x, y: target.pos.y };
+  else if (rec.firstAt) rec.razed ??= t;
+  if (rec.razed === undefined) rec.rampartsLost = rec.ramparts - ramparts;
+  const bodies = inRoom.filter((o) => o.body !== undefined && o["#user"] === ours && e.ours.includes(o.name));
+  for (const b of bodies.filter(() => rec.firstAt && rec.razed === undefined))
+    (rec.entries ??= {})[b.name] ??= holds(e.room, inRoom, b.pos, rec.firstAt) ? "target" : "walled";
+}
 const engagementsOut = fs.openSync(join(out, "engagements.jsonl"), "w");
 // A sweep's `killed`: each rival body struck dead in its room (a tombstone
 // with life left, once), at its body's share of that life.
@@ -624,7 +660,10 @@ async function engaged(t, time, rooms) {
     // A siege's room is the rival's, which no sample follows.
     const seen = roomNames.includes(e.room) ? rooms : [...rooms, await shard.loadRoom(e.room, time)];
     const objects = seen.flatMap((r) => [...r["#objects"]]);
-    if (rec.kind === "siege") rec.left = razeLeft(objects, e.room);
+    if (rec.kind === "siege") {
+      rec.left = razeLeft(objects, e.room);
+      breaching(rec, e, objects, t);
+    }
     if (rec.kind === "sweep") {
       rec.killed = (rec.killed ?? 0) + killedIn(objects, e.room);
       // `denied`: while a body of it stands in its room, each source's yield a tick less what was dug.

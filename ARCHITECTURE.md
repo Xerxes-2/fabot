@@ -378,10 +378,11 @@ The other kinds, for the record's sake:
   closes once neither stands. It stands off a rival's safe mode and
   opens again after it (owner, 2026-10-18: a safe mode is spent, not
   blocked). The breach is derived, not stored:
-  `Exchange.breachPlan` finds the cheapest way in (walk plus each barrier's
+  `Exchange.breachPlan` finds the cheapest way in by any exit (the colony's
+  walk onto its stretch and the queue through its width, plus each barrier's
   hits over the set's dismantle rate less the repair, no tile where the towers
-  outstrike the set's heal), at open and on events, and the plan's order is
-  its barriers. A stored breach goes stale the moment the rival builds.
+  outstrike the heal the medics seated there pool), at open and on events,
+  and the plan's order is its barriers; the set walks onto its first. A stored breach goes stale the moment the rival builds.
 - `Sweep` (v1's sweep): one at a time, on the room in sight an enemy owns,
   reserves or works (`intel`) whose worth, its prey (an enemy's unarmed
   WORK, CARRY or CLAIM bodies outside its barriers, each its cost by its

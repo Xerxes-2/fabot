@@ -56,8 +56,6 @@ pub struct RoomGrid {
     seen: bool,
     /// A keeper room out of sight whose lairs no intel places: crossed last.
     blind: bool,
-    /// Walled or ramparted by another: a target in it is breached into.
-    fortified: bool,
 }
 
 /// What a flood is a function of besides the room's weights: the mover's
@@ -534,9 +532,6 @@ impl Atlas {
 
             let struck = Atlas::walled(&mut weights, Atlas::struck(room));
             let weights = Rc::new(weights);
-            let fortified = room.structures.iter().any(|s| {
-                !s.walkable && !s.owner.is_ours() && (s.kind.is_wall() || s.kind.is_rampart())
-            });
             let grid = RoomGrid {
                 floods: Atlas::kept(previous.rooms.remove(&c), &weights),
                 weights,
@@ -544,7 +539,6 @@ impl Atlas {
                 standing,
                 seen: true,
                 blind: false,
-                fortified,
             };
             rooms.insert(c, grid);
         }
@@ -582,7 +576,6 @@ impl Atlas {
                     let struck = Atlas::walled(&mut weights, Atlas::strikes(terrain, &strikers));
                     let weights = Rc::new(weights);
                     RoomGrid {
-                        fortified: last.as_ref().is_some_and(|g| g.fortified),
                         floods: Atlas::kept(last, &weights),
                         standing: weights.clone(),
                         weights,
@@ -816,7 +809,7 @@ impl Atlas {
 
     /// Out of another room than the target's, the flood toward the exit the
     /// room graph leaves `at`'s region by.
-    pub fn field(&mut self, mover: Mover, target: &Target, at: &Pos) -> Option<Field> {
+    pub fn field(&self, mover: Mover, target: &Target, at: &Pos) -> Option<Field> {
         let grid = self.grid(&at.room).filter(|_| mover.factor.moves > 0)?;
         let tile = tiles::of_pos(at);
         if at.room == target.room {
@@ -841,7 +834,7 @@ impl Atlas {
         }
     }
 
-    pub fn travel_ticks(&mut self, mover: Mover, target: &Target, from: &Pos) -> Option<i32> {
+    pub fn travel_ticks(&self, mover: Mover, target: &Target, from: &Pos) -> Option<i32> {
         self.field(mover, target, from)
             .and_then(|field| field.ticks(tiles::of_pos(from)))
     }
@@ -894,12 +887,12 @@ impl Atlas {
         (ticks < UNREACHED).then_some(ticks)
     }
 
-    pub fn ticks_to(&mut self, mover: Mover, target: &Target, from: &Pos) -> Option<i32> {
+    pub fn ticks_to(&self, mover: Mover, target: &Target, from: &Pos) -> Option<i32> {
         let field = self.field(mover, target, from)?;
         Some(field.ticks(tiles::of_pos(from))? + field.onward)
     }
 
-    pub fn first_step(&mut self, mover: Mover, target: &Target, from: &Pos) -> Option<i32> {
+    pub fn first_step(&self, mover: Mover, target: &Target, from: &Pos) -> Option<i32> {
         self.field(mover, target, from)
             .and_then(|field| field.step(tiles::of_pos(from)))
     }

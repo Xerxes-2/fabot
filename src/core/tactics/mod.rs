@@ -382,12 +382,13 @@ pub fn step_back(sight: &mut Sight, raid_room: &str, members: &[&Creep], creep: 
 pub fn blob(
     sight: &mut Sight,
     centre: &Pos,
+    range: i32,
     members: &[&Creep],
     fortified: &BTreeSet<String>,
 ) -> Vec<Wish> {
     blob::wishes(
         sight.atlas,
-        &target_at(sight, centre, engine::RANGED_RANGE),
+        &target_at(sight, centre, range),
         WEIGHT,
         members,
         fortified,

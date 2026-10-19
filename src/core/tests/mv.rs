@@ -439,7 +439,7 @@ fn the_same_crowd_in_any_order_resolves_the_same() {
 fn a_planned_walk_lists_passable_tiles_beside_it_its_tail_nearer_the_target_on_the_band_out_or_beside_its_head()
  {
     for errand in errands(30) {
-        let (mut atlas, mover, wish) = planned(&errand);
+        let (atlas, mover, wish) = planned(&errand);
         let at = wish.at;
         for &tile in std::iter::once(&wish.head).chain(&wish.tail) {
             assert!(tile == at || (tiles::range(at, tile) == 1 && atlas.passable(ROOM, tile)));
@@ -463,7 +463,7 @@ fn a_planned_walk_lists_passable_tiles_beside_it_its_tail_nearer_the_target_on_t
 #[test]
 fn a_planned_wish_steps_onto_the_border_ring_only_where_its_walk_leaves_the_room() {
     for errand in errands(31) {
-        let (mut atlas, mover, wish) = planned(&errand);
+        let (atlas, mover, wish) = planned(&errand);
         for &tile in std::iter::once(&wish.head).chain(&wish.tail) {
             assert!(
                 tile == wish.at

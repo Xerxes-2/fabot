@@ -564,21 +564,10 @@ impl<'a> Scene<'a> {
         target: &Structure,
         colony: &str,
         set: &[Fighter],
+        standing: &[&Creep],
     ) -> Option<(Vec<String>, Outcome)> {
         let barriers: Vec<&Structure> = self.barrier_at(room).values().copied().collect();
         let line: Vec<Pos> = barriers.iter().map(|b| b.pos.clone()).collect();
-
-        let entry = atlas
-            .route(&BTreeSet::new(), tick::SIEGE_HOPS, colony, &room.name)
-            .and_then(|rooms| {
-                [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
-                    .into_iter()
-                    .find(|exit| {
-                        rooms.len() >= 2
-                            && tiles::room_toward(&room.name, *exit).as_deref()
-                                == Some(rooms[rooms.len() - 2].as_str())
-                    })
-            });
 
         let gaits: Vec<grid::FatigueFactor> =
             set.iter().map(|f| f.gait).filter(|g| g.moves > 0).collect();
@@ -589,7 +578,6 @@ impl<'a> Scene<'a> {
             .min_by_key(|g| std::cmp::Reverse(grid::step_ticks(*g, engine::PLAIN_WEIGHT)));
 
         let mut weights = atlas.weights(&room.name)?;
-        let exit = entry?;
         let gait = gait?;
 
         for b in &barriers {
@@ -634,18 +622,55 @@ impl<'a> Scene<'a> {
             .map(|s| s.pos.clone())
             .collect();
 
-        let attempt = |seated: i32| -> Option<(Vec<(Tile, Tile)>, i32)> {
-            let sources: Vec<Tile> = tiles::exit_tiles(exit)
+        let mover = Mover {
+            footprint: Footprint::One,
+            factor: gait,
+        };
+        let open = |t: &Tile| ground.weights[*t].is_some();
+        // The atlas walks no body out of the room it stands in: a set inside
+        // is planned from where it stands.
+        let standing: Vec<&&Creep> = standing.iter().filter(|c| !tactics::picket_of(c)).collect();
+        let sources: Vec<(Tile, i32, i32)> = if standing.is_empty() {
+            let from = (self.world.spawns.iter())
+                .find(|s| s.pos.room == colony)
+                .map_or_else(|| middle(colony), |s| s.pos.clone());
+            [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
+                .into_iter()
+                .flat_map(|exit| tiles::exit_tiles(exit).split(|t| !open(t)))
+                .filter(|stretch| !stretch.is_empty())
+                .filter_map(|stretch| {
+                    let onto = Target {
+                        room: room.name.clone(),
+                        tiles: stretch.to_vec(),
+                        range: engine::MELEE_RANGE,
+                        avoid: BTreeSet::new(),
+                        max_hops: tick::SIEGE_HOPS,
+                    };
+                    let walk = atlas.ticks_to(mover, &onto, &from)?;
+                    Some(
+                        stretch
+                            .iter()
+                            .map(move |t| (*t, walk, stretch.len() as i32)),
+                    )
+                })
+                .flatten()
+                .collect()
+        } else {
+            let n = set.len() as i32;
+            standing
                 .iter()
-                .copied()
-                .filter(|t| ground.weights[*t].is_some())
-                .collect();
+                .map(|c| (tiles::of_pos(&c.pos), 0, n))
+                .collect()
+        };
 
+        let attempt = |seated: i32| {
             exchange::breach_plan(
                 &ground,
                 gait,
                 &towers,
-                exchange::pooled_heal(seated, set),
+                set,
+                seated,
+                |t| tactics::seats_at(atlas, &line, &room.name, t),
                 rate,
                 &sources,
                 tiles::around(tiles::of_pos(&target.pos)),
@@ -724,7 +749,7 @@ impl<'a> Scene<'a> {
             let planned = casting::siege(capacity, |set: &[casting::Body]| {
                 let fighters: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
 
-                self.breach_in(atlas, room, goal, &colony, &fighters)
+                self.breach_in(atlas, room, goal, &colony, &fighters, &[])
             });
 
             match planned {
@@ -804,7 +829,7 @@ impl<'a> Scene<'a> {
             }
 
             let planned = self
-                .breach_in(atlas, room, goal, &colony, &set)
+                .breach_in(atlas, room, goal, &colony, &set, &in_room)
                 .map(|plan| (Vec::new(), plan))
                 .or_else(|| {
                     casting::reinforce(
@@ -813,7 +838,7 @@ impl<'a> Scene<'a> {
                         |set: &[casting::Body]| {
                             let fighters: Vec<Fighter> =
                                 set.iter().map(|b| fighter::cast(b)).collect();
-                            self.breach_in(atlas, room, goal, &colony, &fighters)
+                            self.breach_in(atlas, room, goal, &colony, &fighters, &in_room)
                         },
                     )
                 });
@@ -1858,16 +1883,19 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     let swings = |c: &Creep| c.body.iter().any(|p| p.kind.is_attack());
 
-    // A group lost from sight is sought in its room, which brings it back in sight.
-    let centre_of = |e: &Engagement| -> Pos {
+    // A group lost from sight is sought in its room, which brings it back in
+    // sight; a siege's room out of sight is entered anywhere, as its middle
+    // may lie behind its walls.
+    let centre_of = |e: &Engagement| -> (Pos, i32) {
         match (
             &e.objective,
             scene.by_id.get(&e.group),
             scene.next_struck(e),
         ) {
-            (Objective::Siege(_), _, Some(b)) => b.pos.clone(),
-            (Objective::Defend, Some(g), _) => g.centre.clone(),
-            _ => middle(&e.room),
+            (Objective::Siege(_), _, Some(b)) => (b.pos.clone(), engine::RANGED_RANGE),
+            (Objective::Defend, Some(g), _) => (g.centre.clone(), engine::RANGED_RANGE),
+            (Objective::Siege(_), _, None) => (middle(&e.room), engine::ROOM_SIDE / 2),
+            _ => (middle(&e.room), engine::RANGED_RANGE),
         }
     };
 
@@ -1898,9 +1926,9 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 .collect();
 
             if !members.is_empty() {
-                let centre = centre_of(e);
+                let (centre, range) = centre_of(e);
 
-                for wish in tactics::blob(&mut sight, &centre, &members, &fortified) {
+                for wish in tactics::blob(&mut sight, &centre, range, &members, &fortified) {
                     walking.insert(wish.creep.clone(), wish);
                 }
             }
@@ -2014,7 +2042,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             return tactics::siege(sight, &fronts[&e.id], &members, c);
         }
 
-        let centre = centre_of(e);
+        let (centre, _) = centre_of(e);
         let order = &e.plan.order;
 
         if e.unanswered {

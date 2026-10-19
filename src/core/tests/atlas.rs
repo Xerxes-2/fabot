@@ -367,7 +367,7 @@ fn a_loaded_body_weighs_at_least_its_empty_self_and_a_creep_reads_as_its_parts()
 #[test]
 fn a_walk_takes_at_least_a_tick_a_tile_of_range_it_must_close() {
     for (walk, _) in walks(11) {
-        let mut atlas = Atlas::of_world(&world_of(&walk.ground));
+        let atlas = Atlas::of_world(&world_of(&walk.ground));
         let target = target_of(ROOM, &walk);
         if let Some(ticks) =
             atlas.travel_ticks(walk.mover, &target, &tiles::to_pos(ROOM, walk.start))
@@ -466,14 +466,13 @@ fn a_memoised_answer_is_a_fresh_atlass_answer() {
         let world = world_of(&walk.ground);
         let target = target_of(ROOM, &walk);
         let start = tiles::to_pos(ROOM, walk.start);
-        let mut stale =
-            Atlas::of_world(&world_of(if kept { &walk.ground } else { &before.ground }));
+        let stale = Atlas::of_world(&world_of(if kept { &walk.ground } else { &before.ground }));
         stale.travel_ticks(walk.mover, &target, &start);
-        let mut warm = Atlas::following(stale, &world, [], []);
+        let warm = Atlas::following(stale, &world, [], []);
         let first = warm.travel_ticks(walk.mover, &target, &start);
         let again = warm.travel_ticks(walk.mover, &target, &start);
         let step = warm.first_step(walk.mover, &target, &start);
-        let mut fresh = Atlas::of_world(&world);
+        let fresh = Atlas::of_world(&world);
         assert_eq!(first, again);
         assert_eq!(first, fresh.travel_ticks(walk.mover, &target, &start));
         assert_eq!(step, fresh.first_step(walk.mover, &target, &start));
@@ -707,7 +706,7 @@ fn a_body_walking_first_steps_never_enters_a_room_twice_and_arrives_where_a_rout
     let mut dice = Dice::new(22);
     for _ in 0..CASES {
         let world = walled_rooms(&mut dice);
-        let mut atlas = Atlas::of_world(&world);
+        let atlas = Atlas::of_world(&world);
         let open = |dice: &mut Dice| tiles::index(1 + dice.below(48), 1 + dice.below(48));
         let room = |dice: &mut Dice| tiles::room_name(dice.below(3), dice.below(3));
         let mut body = parts(&mut dice, 10);

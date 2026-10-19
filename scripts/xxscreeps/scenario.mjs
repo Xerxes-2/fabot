@@ -223,6 +223,15 @@ const measures = {
   breachTicks: (_, __, dir) => Math.max(...rowsOf(dir).filter((e) => e.kind === "siege").map((e) => (e.breached ?? (e.disengaged || e.closed === null ? Infinity : e.closed)) - e.opened), ...(rowsOf(dir).some((e) => e.kind === "siege") ? [] : [Infinity])),
   // The rival's structures the last siege opened left standing in its room (none opened: Infinity).
   razeLeft: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "siege").sort((a, b) => a.opened - b.opened).at(-1)?.left ?? Infinity,
+  // Over the first siege: the ticks from its open until its first target fell
+  // (never: Infinity), the ramparts its room lost before, and its bodies that
+  // landed in a region the target is walled off from.
+  siegeFirstRaze: (_, __, dir) => {
+    const e = rowsOf(dir).find((e) => e.kind === "siege");
+    return e?.razed === undefined ? Infinity : e.razed - e.opened;
+  },
+  siegeRampartsLost: (_, __, dir) => rowsOf(dir).find((e) => e.kind === "siege")?.rampartsLost ?? Infinity,
+  siegeWalledEntries: (_, __, dir) => Object.values(rowsOf(dir).find((e) => e.kind === "siege")?.entries ?? {}).filter((s) => s === "walled").length,
   // The least hits a siege's target (a spawn, a core) ever stood at (none seen: Infinity).
   siegeTargetLow: (_, __, dir) => Math.min(Infinity, ...rowsOf(dir).filter((e) => e.kind === "siege" && e.target).map((e) => e.target.low)),
   // Over the sweeps, the rival's bodies killed and harvest denied (soak-step's `killed`, `denied`), and those less what they cast.
