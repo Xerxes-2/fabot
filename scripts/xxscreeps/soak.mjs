@@ -396,8 +396,17 @@ if (watch) {
   }
   const outposts = live?.declarations?.outposts ?? (node?.outposts || node?.claims ? colony.outposts : []);
   const rooms = [...new Set([colony.room, ...outposts.map((o) => o.room), ...opponents.map((o) => o.room)])].join(",");
+  const socket = `${api.replace("http", "ws")}/socket/websocket`;
   console.error(
-    `\nwatch: ${api} (socket ws://127.0.0.1:${watch.port}/socket/websocket, not sharded)\n  user ${OUR_NAME}  password ${watch.password}\n  token guest (read-only; a signed-in one expires in 120 s)\n  rooms ${rooms}\n  a tick every ${watch.ms} ms\n`,
+    [
+      `\nwatch: ${api}, a tick every ${watch.ms} ms; user ${OUR_NAME} password ${watch.password}`,
+      "  client, in another shell (MSC_PORT=… if 8080 is taken):",
+      `    MSC_API_UPSTREAM=${api} nix run github:Xerxes-2/lazycreep#gateway`,
+      "  then http://localhost:8080 → 设置 → 添加自定义 Server:",
+      `    名称 fabot-watch · API 根路径 /api · WebSocket 地址 ${socket} · 分 Shard 不勾`,
+      "  then 设置 → Auth token: guest",
+      `  rooms (#!/<server id>/room/shard0/<room>): ${rooms}\n`,
+    ].join("\n"),
   );
 }
 // Spawned, not run synchronously, so a signal is handled while it steps.
