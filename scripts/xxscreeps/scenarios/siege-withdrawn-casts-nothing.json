@@ -5,6 +5,7 @@
     "world": "scripts/xxscreeps/worlds/siege-breach.json",
     "seed": 1,
     "declarations": {},
+    "withdrawn": ["W2N1"],
     "opponents": [
       {
         "name": "rival",

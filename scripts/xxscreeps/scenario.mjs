@@ -22,7 +22,7 @@
 // A scenario file: { "why": the invariant, "modules": the src/core modules it tests, "nightly"?, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "wave"? (soak's --wave), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
 // "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
-// (soak's --world; crafted ones under worlds/), "seed", "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"?, "name"? }] };
+// (soak's --world; crafted ones under worlds/), "seed", "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "withdrawn"? (rooms whose open siege the owner has just withdrawn) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"?, "name"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick.
 // Exits non-zero when a bound fails or a soak does, or loses ticks twice.
@@ -72,6 +72,14 @@ const OPEN_SOURCE = ["scripts/xxscreeps/engine/hivemind", "scripts/xxscreeps/eng
 const FIGHT_KINDS = ["siege", "sweep", "defend"];
 for (const kind of FIGHT_KINDS)
   if (!library.some((s) => s.name.startsWith(`${kind}-`) && s.start.opponents?.some((o) => OPEN_SOURCE.includes(o.bot)))) fail(`no ${kind}-* scenario seats an open-source bot (${OPEN_SOURCE.join(", ")})`);
+// A siege opens only on a declared room, so a crafted world holding one open
+// on another is a state no run reaches, unless the owner withdrew it (`withdrawn`).
+for (const { name, start } of library.filter((s) => s.start.world)) {
+  const world = JSON.parse(readFileSync(resolve(REPO, start.world), "utf8"));
+  const declared = [...(start.declarations ?? world.declarations ?? {}).sieges ?? [], ...(start.withdrawn ?? [])];
+  for (const e of world.memory?.v2?.fight?.engagements ?? [])
+    if (e.kind === "siege" && !declared.includes(e.room)) fail(`${name}: ${start.world} holds a siege open on ${e.room}, which its declarations do not name`);
+}
 for (const n of names) if (!library.some((s) => s.name === n)) fail(`no scenario ${n}; the library: ${library.map((s) => s.name).join(", ")}`);
 const touched = flags["--modules"]?.split(",").filter(Boolean) ?? [];
 for (const m of touched) if (!modules.includes(m)) fail(`no module ${m}; the modules: ${modules.join(", ")}`);
@@ -346,7 +354,7 @@ for (const { name, start } of scenarios)
   if ((start.at === undefined) !== (start.bundle === undefined) || (start.at !== undefined && (start.node || !/^[0-9a-f]{8,40}$/.test(start.bundle))))
     fail(`${name}: a start "at" a tick names its "bundle" by commit id, and no node`);
 for (const { name, start } of scenarios)
-  if (start.world && Object.keys(start).some((k) => !["world", "seed", "invaders", "wave", "opponents", "declarations"].includes(k))) fail(`${name}: a "world" start takes a "seed", "invaders", "wave", "opponents", "declarations" and nothing else`);
+  if (start.world && Object.keys(start).some((k) => !["world", "seed", "invaders", "wave", "opponents", "declarations", "withdrawn"].includes(k))) fail(`${name}: a "world" start takes a "seed", "invaders", "wave", "opponents", "declarations", "withdrawn" and nothing else`);
 
 // A world holds its opponents' seats; their config is the scenario's.
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
