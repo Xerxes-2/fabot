@@ -554,7 +554,7 @@ async function standing(ids) {
   return false;
 }
 async function closed(e, t) {
-  const { members, casts, walk, fight, swing, sources, ...rest } = e;
+  const { members, casts, walk, fight, swing, sources, mourned, ...rest } = e;
   const arrivals = Object.values(walk?.arrived ?? {}).sort((a, b) => a - b);
   const blob = walk && { ...walk, last: undefined, arrived: undefined, arrival: arrivals.length ? arrivals[(arrivals.length - 1) >> 1] : null };
   const fought = fight && { ...fight, last: undefined };
@@ -629,9 +629,21 @@ function swinging(rec, bodies, t, seen) {
 }
 // `dead`: its own count, or our bodies' tombstones with life left in the rooms
 // it targeted, which catch a death that closed it before it counted one.
+const gravesOf = (rec, objects) => objects.filter((o) => o["#lookType"] === "tombstone" && o["#creep"].user === ours && o["#creep"].ticksToLive > 1 && rec.ours.has(o["#creep"].name));
 function fell(rec, objects) {
-  for (const o of objects.filter((o) => o["#lookType"] === "tombstone" && o["#creep"].user === ours && o["#creep"].ticksToLive > 1 && rec.ours.has(o["#creep"].name))) rec.fell.add(o.id);
+  for (const o of gravesOf(rec, objects)) rec.fell.add(o.id);
   rec.dead = Math.max(rec.dead, rec.fell.size);
+}
+// `alone`: its bodies that died in its room with no set-mate standing, or
+// falling that tick, within 3: a reinforcement picked off on its own.
+function lone(rec, room, objects, bodies) {
+  const graves = gravesOf(rec, objects).filter((o) => o.pos.roomName === room);
+  rec.mourned ??= new Set();
+  for (const g of graves.filter((g) => !rec.mourned.has(g.id))) {
+    rec.mourned.add(g.id);
+    const mates = [...bodies, ...graves.filter((o) => o !== g && o.deathTime === g.deathTime)];
+    if (!mates.some((o) => o.pos.roomName === room && near(o.pos, g.pos, 3))) rec.alone = (rec.alone ?? 0) + 1;
+  }
 }
 async function engaged(t, time, rooms) {
   const fight = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}").v2?.fight ?? {};
@@ -690,6 +702,7 @@ async function engaged(t, time, rooms) {
     if (rec.contact === null && (close || theirs.some((h) => h.hits < h.hitsMax))) rec.contact = t;
     const bodies = objects.filter((o) => o.body !== undefined && o["#user"] === ours && e.ours.includes(o.name));
     walking(rec, e.phase, bodies, theirs, t);
+    lone(rec, e.room, objects, bodies);
     fought(rec, e.phase, bodies, theirs);
     swinging(rec, bodies, t, seen);
   }

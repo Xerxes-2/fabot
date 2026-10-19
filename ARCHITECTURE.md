@@ -716,9 +716,14 @@ everything v1 used its self-written arena for, and more:
   Invader waves). TooAngel (AGPL, so fetched at run time by its pinned
   tarball and integrity, never vendored: `engine/tooangel/fetch.json`)
   plays from next door in a world cached at tick 11000, its RCL3, and sends
-  its melee squad at our home every 1500 ticks (`tooangel-attack-held`, its
+  its melee squad at our home every 1500 ticks (`defend-holds-tooangel-attack`, its
   Math.random seeded). Its first run needs the registry, so it is "nightly":
-  `npm run scenario -- --nightly` runs it, `jj ship` does not.
+  `npm run scenario -- --nightly` runs it, `jj ship` does not. Hivemind,
+  fetched the same way, holds the declared-room world against a siege and
+  a sweep (nightly too); the library fails to load while a fight kind
+  (`siege-`, `sweep-`, `defend-`) meets no open-source bot. ❓ Both fail:
+  reinforcements walk into Hivemind's towers alone, and three keep sieges
+  hold their bounds only while its towers strike the nearest foe.
   ❓ self-play with an attacking v2.
 - **Exchange calibration** (§10.1), generated: `npm run exchange`.
 
@@ -808,7 +813,7 @@ empty:
 | M1 economy | the rest of v1's economy mechanisms | the seat-extreme soak beats v1's bundle in both classes, on a second seed |
 | M1b outposts | declared outposts: reservation, remote harvest and haul, before M2 because RCL6+ structures spend more than a home's two sources give. No fighting before M3: an armed hostile or a stronghold core seen in an outpost stands it down until every one seen there has run out its life or the room is seen without one (`sightings`; the owner's choice over porting a guard early, and over a claimer probing a blind room); M3's `Defend` walks its set there once it stands, which brings the room back in sight | node E1 (with timed Invader waves): each outpost nets positive after its bodies and its stand-downs |
 | M2 structures | node builder (N1–N4) ✅, links ✅ (the controller's and the longest-way source's first: +5–17k worth over 20k ticks on N4; hub-first broke even, as v1's arithmetic said), node N5 ✅; labs, factory, the RCL8 set wait for a sink (owner's call: one room mines one ore, a reaction needs two, offline has no market, and v1 mined only for fight boosts) | links: the node beats the economy without them; the rest: judged with their sink, M3's boosts or several colonies |
-| M3 defence | `Exchange` ✅, `Defend` ✅ (scenario `defend-kills-home-raid`), the first tactics ✅, casting ✅, the opponents harness ✅ (`two-v2-neighbours`), scripted raids and TooAngel held ✅ (`defend-holds-*`, `tooangel-attack-held`) | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
+| M3 defence | `Exchange` ✅, `Defend` ✅ (scenario `defend-kills-home-raid`), the first tactics ✅, casting ✅, the opponents harness ✅ (`two-v2-neighbours`), scripted raids and TooAngel held ✅ (`defend-holds-*`) | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
 | M4 live | v2 replaces v1 | ❓ the owner decides from progress |
 | M5 reach | `Strategy` over many colonies, the offensive kinds | the end in §0 |
 

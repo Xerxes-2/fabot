@@ -1,0 +1,17 @@
+{
+  "nightly": true,
+  "why": "a declared siege razes a room Hivemind holds as a player does and loses no body, none of them a reinforcement picked off alone. Nightly: Hivemind is fetched from the registry. It fails on the main it was made on, as a live siege lost its reinforcements walking alone into the towers",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
+    "seed": 1,
+    "opponents": [{ "name": "rival", "bot": "scripts/xxscreeps/engine/hivemind", "room": "W8S1" }]
+  },
+  "ticks": 6000,
+  "assert": [
+    { "measure": "razeLeft", "max": 0 },
+    { "measure": "bodiesLost", "max": 0 },
+    { "measure": "diedAlone", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

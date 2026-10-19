@@ -67,6 +67,11 @@ const library = readdirSync(LIBRARY)
   .map((f) => ({ name: basename(f, ".json"), ...JSON.parse(readFileSync(join(LIBRARY, f), "utf8")) }));
 for (const s of library)
   if (!s.modules?.length || s.modules.some((m) => !modules.includes(m))) fail(`${s.name}: "modules" must name some of ${modules.join(", ")}`);
+// A scripted rival shares our blind spots: each fight kind meets an open-source bot at least once.
+const OPEN_SOURCE = ["scripts/xxscreeps/engine/hivemind", "scripts/xxscreeps/engine/tooangel"];
+const FIGHT_KINDS = ["siege", "sweep", "defend"];
+for (const kind of FIGHT_KINDS)
+  if (!library.some((s) => s.name.startsWith(`${kind}-`) && s.start.opponents?.some((o) => OPEN_SOURCE.includes(o.bot)))) fail(`no ${kind}-* scenario seats an open-source bot (${OPEN_SOURCE.join(", ")})`);
 for (const n of names) if (!library.some((s) => s.name === n)) fail(`no scenario ${n}; the library: ${library.map((s) => s.name).join(", ")}`);
 const touched = flags["--modules"]?.split(",").filter(Boolean) ?? [];
 for (const m of touched) if (!modules.includes(m)) fail(`no module ${m}; the modules: ${modules.join(", ")}`);
@@ -267,6 +272,8 @@ const measures = {
   sweepDenied: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.denied ?? 0), 0),
   sweepNet: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.killed ?? 0) + (e.denied ?? 0) - e.cast, 0),
   bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),
+  // Of those, the ones that died in their engagement's room with no set-mate within 3 (soak-step's `alone`).
+  diedAlone: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.alone ?? 0), 0),
   // Our bodies gone from the colony's rooms and their neighbours with life left: died, or walked
   // through a room the soak does not follow.
   bodiesOut: (_, __, dir) => {

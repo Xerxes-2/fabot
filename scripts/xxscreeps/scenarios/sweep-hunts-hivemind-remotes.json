@@ -1,0 +1,18 @@
+{
+  "nightly": true,
+  "why": "a sweep of Hivemind's economy, which it defends as a player does, kills and denies more than it casts and loses no body. Nightly: Hivemind is fetched from the registry. It fails on the main it was made on, as a live siege lost its reinforcements walking alone into the towers",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
+    "seed": 1,
+    "declarations": { "outposts": [], "claims": [], "enemies": ["rival"], "avoid": ["W8S1"] },
+    "opponents": [{ "name": "rival", "bot": "scripts/xxscreeps/engine/hivemind", "room": "W8S1" }]
+  },
+  "ticks": 6000,
+  "assert": [
+    { "measure": "sweepNet", "min": 0 },
+    { "measure": "bodiesLost", "max": 0 },
+    { "measure": "diedAlone", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}
