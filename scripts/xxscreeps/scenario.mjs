@@ -374,6 +374,7 @@ const codeOf = (...paths) =>
     .slice(0, 8);
 const harness = codeOf(...["seed", "waves", "core", "colony.mjs", "node.mjs", "live.mjs"].map((f) => join(HERE, "engine", f)));
 const worldOf = (start) => `${recipe(start, seats(start.opponents).map((s) => ({ ...s, code: codeOf(s.bot === "@bot" ? bot : s.bot) })))}-t${start.at}-${start.bundle}-h${harness}`;
+const worldDir = (start) => join(REPO, "soak-runs/worlds", worldOf(start));
 const keyOf = (start) => `scenario-${basename(bot, ".js")}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}`;
 const runs = new Map();
 for (const s of scenarios) {
@@ -443,7 +444,7 @@ const play = async ({ name, start, ticks }) => {
       ...(start.ended ? ["--ended"] : []),
       ...opponentsOf(name, start.opponents),
     ]);
-  const world = join(REPO, "soak-runs/worlds", worldOf(start));
+  const world = worldDir(start);
   if (!existsSync(world)) {
     const began = Date.now();
     const code = await soak([...recipe, "--ticks", String(start.at), "--run", `world-${worldOf(start)}`, "--bot", bundleAt(start.bundle), "--save", world, ...opponentsOf(`world-${name}`, start.opponents && seats(start.opponents))]);
@@ -455,8 +456,10 @@ const play = async ({ name, start, ticks }) => {
   }
   return soak(["--room", start.room, "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, "--from", world, ...opponentsOf(name, start.opponents)]);
 };
+// A long soak started last is the whole run's tail; ticks, with a world still to play, stand in for its cost.
+const cost = ({ start, ticks }) => ticks + (start.at && !existsSync(worldDir(start)) ? start.at : 0);
 const playAll = (list, jobs) => {
-  const queue = [...list];
+  const queue = [...list].sort((a, b) => cost(b) - cost(a));
   return Promise.all(
     Array.from({ length: jobs }, async () => {
       for (let run; (run = queue.shift()); ) {
