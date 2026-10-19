@@ -821,7 +821,8 @@ pub fn plan(
 
             *standing.entry(pattern).or_insert(0) += parts;
 
-            // The nearest open demand of the pattern; an unreachable one last.
+            // The nearest open demand of the pattern: a body out of a seat's
+            // reach never fills it, or a far colony's surplus sits in it.
             let mut pick: Option<usize> = None;
             let mut least = i32::MAX;
             let at = work_at(body);
@@ -842,7 +843,9 @@ pub fn plan(
                     && (!d.pattern.is_upgrader() || d.at.room == at.room)
                     && serves.is_none_or(|ci| owners.get(&d.at.room) == Some(ci))
                 {
-                    let ticks = walks.distance(&at, &d.at).unwrap_or(i32::MAX);
+                    let Some(ticks) = walks.distance(&at, &d.at) else {
+                        continue;
+                    };
 
                     if pick.is_none() || ticks < least {
                         pick = Some(i);
