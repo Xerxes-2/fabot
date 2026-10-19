@@ -394,9 +394,14 @@ The other kinds, for the record's sake:
   life in the enemy's field): to the candidate a set beats that pays most a
   tick of the set's own walk, else to the room whose staleness pays most a
   tick of it (`atlas::onward`, one rule for any body with work; a room just
-  seen is worth nothing, an owned one is priced only in sight). It closes once its bodies are gone, a safe mode stands it off, or
-  an event re-prices an escort that beats it. No prey is remembered out of
-  sight.
+  seen is worth nothing, an owned one is priced only in sight, and one where
+  the tracker still holds an armed group, in its Lost grace, is not stale:
+  owner, 2026-10-19, so a set does not walk straight back to the escort it
+  left). A living set moves on only to a
+  candidate it beats as it stands, as a move asks no cast. An escort or towers
+  that beat it, priced on its arrival or an event, move it on the same way.
+  It closes once its bodies are gone, a safe mode stands it off, or no room is
+  left to move on to. No prey is remembered out of sight.
 - `Drain`: approach → drain (edge dance, heal) → rotate → …; closes when the
   towers are empty or the deadline passes.
 - `KeeperDuty`: a perpetual cycle over lairs by respawn time; declares the room

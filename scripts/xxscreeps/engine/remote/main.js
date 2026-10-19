@@ -2,6 +2,7 @@
 // (ARCHITECTURE.md): `opponent.js` { remotes: [room, …] }, its home among them
 // to mine its own source, roles?: the remote roles it keeps (default all),
 // shift?: ticks each remote is worked alone, in turn (default all at once).
+// A body it did not spawn (a soak's raid) guards the room it stands in.
 // Each remote keeps a miner, a hauler carrying its pile home and a reserver,
 // respawned as each dies, every remote's miner first. At home its towers
 // strike the nearest enemy, a filler, kept whatever roles say, keeps the spawn
@@ -44,6 +45,15 @@ function reserver(c) {
   else if (c.reserveController(controller) === ERR_NOT_IN_RANGE) c.moveTo(controller);
 }
 
+function guard(c) {
+  const foe = c.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
+  const hurt = c.pos.findInRange(FIND_MY_CREEPS, 1).sort((a, b) => a.hits / a.hitsMax - b.hits / b.hitsMax)[0];
+  if (hurt.hits < hurt.hitsMax) c.heal(hurt);
+  if (!foe) return;
+  c.rangedAttack(foe);
+  c.moveTo(foe, { maxRooms: 1, range: 1 });
+}
+
 function filler(c, room) {
   if (c.store.getUsedCapacity(RESOURCE_ENERGY) === 0) {
     if (c.withdraw(room.storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) c.moveTo(room.storage, { maxRooms: 1 });
@@ -65,7 +75,7 @@ module.exports.loop = function () {
     if (foe) tower.attack(foe);
   }
   const creeps = Object.values(Game.creeps);
-  for (const c of creeps) ({ filler, miner, hauler, reserver })[c.memory.role](c, home);
+  for (const c of creeps) ({ filler, miner, hauler, reserver }[c.memory.role] ?? guard)(c, home);
   const spawn = home.find(FIND_MY_SPAWNS).find((s) => !s.spawning);
   const worked = config.shift ? [remotes[Math.floor(Game.time / config.shift) % remotes.length]] : remotes;
   for (const role of roles)

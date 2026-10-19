@@ -975,21 +975,39 @@ impl<'a> Scene<'a> {
             .collect()
     }
 
+    fn armed_seen(&self, g: &Group) -> bool {
+        let seen = self.sightings.get(&g.room);
+        (g.members.iter()).any(|m| seen.and_then(|s| s.get(m)).is_some_and(|s| s.armed))
+    }
+
     fn walk_of(&self, atlas: &Atlas, e: &Engagement, room: &str) -> Option<i32> {
         let from = self.members_of(e).first()?.pos.room.clone();
         let onto = fresh(0, Objective::Sweep, room, 0, Tactic::Kite);
         self.walk_to(atlas, &onto, &from)
     }
 
+    /// A move asks no cast.
     fn elsewhere(
         &self,
         atlas: &Atlas,
         e: &Engagement,
         candidates: &[(String, i32, i32, bool)],
+        grounds: &BTreeMap<String, Hunting>,
     ) -> Option<String> {
-        let won = candidates.iter().filter(|c| c.3 && c.0 != e.room);
+        let ours: Vec<Fighter> = (self.members_of(e).into_iter())
+            .map(casting::fighter_of)
+            .collect();
+        let beats = |room: &String| match (self.in_sight(room), grounds.get(room)) {
+            (Some(r), Some(g)) => {
+                (self.hunt(g, r, ours.clone(), 0)).is_some_and(|(set, _)| set.is_empty())
+            }
+            _ => false,
+        };
+        let won = candidates
+            .iter()
+            .filter(|c| c.0 != e.room && if ours.is_empty() { c.3 } else { beats(&c.0) });
         atlas::onward(won.filter_map(|(room, worth, walk, _)| {
-            let walk = if e.ours.is_empty() {
+            let walk = if ours.is_empty() {
                 Some(*walk)
             } else {
                 self.walk_of(atlas, e, room)
@@ -999,7 +1017,9 @@ impl<'a> Scene<'a> {
     }
 
     /// An unseen room is worth its staleness; one owned is priced only in
-    /// sight, under its towers.
+    /// sight, under its towers, and one where the tracker still holds an armed
+    /// group is not stale (owner), so a set never walks straight back to the
+    /// escort it left.
     fn patrol(
         &self,
         atlas: &Atlas,
@@ -1009,21 +1029,21 @@ impl<'a> Scene<'a> {
     ) -> Option<String> {
         let open = preyed
             .iter()
-            .filter(|r| **r != e.room && !self.avoid.contains(*r));
+            .filter(|r| **r != e.room && !self.avoid.contains(*r))
+            .filter(|r| (self.by_id.values()).all(|g| g.room != **r || !self.armed_seen(g)));
         atlas::onward(open.filter_map(|r| match age(r)? {
             (_, true) => None,
             (age, false) => Some((r, age, self.walk_of(atlas, e, r)?)),
         }))
     }
 
-    /// Priced at open and on an event in its room: an escort or towers no
-    /// set the room pays for beats close it, or leave it unanswered, priced
-    /// again as the bank grows, while it holds nothing.
+    /// Priced at open, on arrival and on an event in its room, and again as
+    /// the bank grows while it holds nothing.
     fn swept(
         &self,
         atlas: &Atlas,
         asked: &mut Asked,
-        e: &Engagement,
+        (e, onward): (&Engagement, impl FnOnce() -> Option<String>),
         (free, grounds): (&mut Vec<String>, &BTreeMap<String, Hunting>),
     ) -> Option<Engagement> {
         let (Some(room), Some(ground)) = (self.in_sight(&e.room), grounds.get(&e.room)) else {
@@ -1048,11 +1068,15 @@ impl<'a> Scene<'a> {
 
         let capacity = self.capacity_of(atlas, e);
         let Some((set, outcome)) = self.hunt(ground, room, fielding.clone(), capacity) else {
-            return fielding.is_empty().then(|| Engagement {
-                unanswered: true,
-                capacity,
-                ..e.clone()
-            });
+            if fielding.is_empty() {
+                return Some(Engagement {
+                    unanswered: true,
+                    capacity,
+                    ..e.clone()
+                });
+            }
+            let onward = onward().filter(|_| !e.ours.is_empty());
+            return onward.map(|r| sweep::onto(&r, self.world.time, e));
         };
         free.retain(|n| !joining.contains(n));
         self.ask(atlas, e, &set, asked);
@@ -1581,7 +1605,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                             .get(&e.room)
                             .map(|g| g.worth > 0 || !g.escort.is_empty()),
                         safe: scene.in_sight(&e.room).is_some_and(Scene::safe),
-                        elsewhere: scene.elsewhere(atlas, e, &candidates),
+                        elsewhere: scene.elsewhere(atlas, e, &candidates, &grounds),
                         patrol: (grounds.get(&e.room))
                             .filter(|g| g.worth == 0 && g.escort.is_empty())
                             .and_then(|_| scene.patrol(atlas, e, &state.preyed, age)),
@@ -1727,14 +1751,18 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 }
             }
             Objective::Sweep
-                if e.since == world.time && e.phase == Phase::Forming
+                if e.since == world.time && matches!(e.phase, Phase::Forming | Phase::Fighting)
                     || grew
                     || left
                     || scene.landed.iter().any(|c| c.engagement == e.id)
                     || cornered.contains(&e.id)
                     || changed(&e, &events, &scene.by_id) =>
             {
-                decided.extend(scene.swept(atlas, &mut asked, &e, (&mut free, &grounds)));
+                let onward = || {
+                    (scene.elsewhere(atlas, &e, &candidates, &grounds))
+                        .or_else(|| scene.patrol(atlas, &e, &state.preyed, age))
+                };
+                decided.extend(scene.swept(atlas, &mut asked, (&e, onward), (&mut free, &grounds)));
             }
             Objective::Defend
                 if left

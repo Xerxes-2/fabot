@@ -32,9 +32,9 @@
 // at t = first, first + every, …
 // <opponents.json>: [{ name, room, raid? }], the players seated beside ours;
 // each sample's `others` holds each one's room as it stands: level, spawns,
-// creeps. A raid { first, every?, bodies: [{ part: count, boosts?: { part:
-// compound } }] } stands the opponent's bodies on <room>'s edge toward its
-// room (`waves/`) at t = first, first + every, …
+// creeps. A raid { first, every?, room?, bodies: [{ part: count, boosts?: {
+// part: compound } }] } stands the opponent's bodies on the edge of `room`
+// (default <room>) toward its room (`waves/`) at t = first, first + every, …
 // <cores>: room:tick,… — a level-0 Invader core (`core/`) stood in room at t = tick.
 import * as fs from "node:fs";
 import { join } from "node:path";
@@ -585,12 +585,18 @@ function swinging(rec, bodies, t, seen) {
     s.last = [b, now];
   }
 }
+// `dead`: its own count, or our bodies' tombstones with life left in the rooms
+// it targeted, which catch a death that closed it before it counted one.
+function fell(rec, objects) {
+  for (const o of objects.filter((o) => o["#lookType"] === "tombstone" && o["#creep"].user === ours && o["#creep"].ticksToLive > 1 && rec.ours.has(o["#creep"].name))) rec.fell.add(o.id);
+  rec.dead = Math.max(rec.dead, rec.fell.size);
+}
 async function engaged(t, time, rooms) {
   const fight = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}").v2?.fight ?? {};
   const now = new Set();
   for (const e of fight.engagements ?? []) {
     now.add(e.id);
-    const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), swing: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, casts: new Map(), cast: 0 };
+    const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), fell: new Set(), swing: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, casts: new Map(), cast: 0 };
     open.set(e.id, rec);
     for (const c of (fight.casts ?? []).filter((c) => c.engagement === e.id)) rec.casts.set(c.name, c.body);
     for (const n of e.ours.filter((n) => rec.casts.has(n))) {
@@ -599,7 +605,9 @@ async function engaged(t, time, rooms) {
     }
     for (const m of (fight.groups ?? []).find((g) => g.id === e.group)?.members ?? []) rec.members.add(m);
     rec.predicted = e.predicted;
-    rec.dead = e.lost;
+    rec.dead = Math.max(e.lost, rec.fell.size);
+    rec.rooms.add(e.room);
+    for (const n of e.ours) rec.ours.add(n);
     rec.answered ||= !e.unanswered;
     rec.gaveUp ||= rec.answered && e.unanswered;
     rec.disengaged ||= e.phase === "disengaging";
@@ -644,6 +652,7 @@ async function engaged(t, time, rooms) {
     if (!now.has(id)) {
       open.delete(id);
       if (rec.kind === "siege") rec.left = razeLeft([...(await shard.loadRoom(rec.room, time))["#objects"]], rec.room);
+      for (const r of rec.rooms) fell(rec, [...(await shard.loadRoom(r, time))["#objects"]]);
       await closed(rec, t);
     }
 }
@@ -783,10 +792,11 @@ for (let t = 0; t < ticks; t++) {
   stoodLoaded(rooms, time);
   wasted(around);
   for (const o of opponents.filter(({ raid: r }) => r && (t === r.first || (r.every && t > r.first && (t - r.first) % r.every === 0)))) {
-    const toward = Object.entries(world.map.describeExits(roomName) ?? {}).filter(([, next]) => next === o.room).map(([dir]) => Number(dir));
+    const into = o.raid.room ?? roomName;
+    const toward = Object.entries(world.map.describeExits(into) ?? {}).filter(([, next]) => next === o.room).map(([dir]) => Number(dir));
     const bodies = o.raid.bodies.map(({ boosts = {}, ...counts }) => PARTS.flatMap((p) => Array(counts[p] ?? 0).fill({ type: p, boost: boosts[p] })));
-    await pushIntentsForRoomNextTick(shard, roomName, o.id, { local: { soakRaid: [[o.id, bodies, toward.length ? toward : [1, 3, 5, 7]]] }, internal: true });
-    process.stderr.write(`t${t} raid of ${o.name} in ${roomName} from sides ${toward.join(",")}\n`);
+    await pushIntentsForRoomNextTick(shard, into, o.id, { local: { soakRaid: [[o.id, bodies, toward.length ? toward : [1, 3, 5, 7]]] }, internal: true });
+    process.stderr.write(`t${t} raid of ${o.name} in ${into} from sides ${toward.join(",")}\n`);
   }
   for (const wave of waves.filter((w) => t >= w.first && (t - w.first) % w.every === 0)) {
     const exits = Object.entries(world.map.describeExits(wave.room) ?? {});

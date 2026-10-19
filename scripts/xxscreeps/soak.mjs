@@ -40,7 +40,7 @@
 //            { name, bot, room, x?, y?, config?, raid?, ally? }: `bot` a bundle or a
 //            bot directory, `config` written beside it as `opponent.js`, the
 //            spawn on colony.mjs's tile unless x, y; `raid` its bodies stood
-//            on our room's edge (`engine/soak-step.mjs`), `ally` its name in our
+//            on our room's edge, or its `room`'s (`engine/soak-step.mjs`), `ally` its name in our
 //            declared allies (not with --world or --from: their Memory declares). With --from they stand
 //            in the world already and only their code is swapped. A bot
 //            directory's `fetch.json` { tarball, integrity, from, main }

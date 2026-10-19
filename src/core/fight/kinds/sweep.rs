@@ -78,8 +78,15 @@ fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
     }
 }
 
-/// A living set never walks home (owner); an escort that beats it closes it
-/// in `swept`.
+/// Never home (owner).
+pub fn onto(room: &str, time: i32, e: &Engagement) -> Engagement {
+    Engagement {
+        room: room.to_string(),
+        unanswered: false,
+        ..enter(Phase::Approaching, time, e)
+    }
+}
+
 pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
     let alive: BTreeSet<String> = e.ours.intersection(&facts.standing).cloned().collect();
     let mut next = e.clone();
@@ -88,18 +95,14 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
     let e = &next;
 
     let hollow = e.ours.is_empty() && !facts.asked;
-    let onto = (facts.elsewhere.as_ref())
+    let onward = (facts.elsewhere.as_ref())
         .filter(|_| e.unanswered || facts.worth == Some(false))
         .or(facts.patrol.as_ref())
         .filter(|_| !e.ours.is_empty());
 
     match facts.worth {
         _ if facts.safe => None,
-        _ if let Some(room) = onto => Some(Engagement {
-            room: room.clone(),
-            unanswered: false,
-            ..enter(Phase::Approaching, facts.time, e)
-        }),
+        _ if let Some(room) = onward => Some(onto(room, facts.time, e)),
         _ if e.unanswered && facts.elsewhere.is_some() => None,
         Some(false) if facts.elsewhere.is_some() || hollow => None,
         None if hollow && !e.unanswered => None,

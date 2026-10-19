@@ -1,0 +1,33 @@
+{
+  "why": "a boosted escort no set beats comes into the rival's remote a sweep works: its set leaves that room for his others and kills there, never walking home before it ages out",
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
+    "seed": 1,
+    "declarations": { "outposts": [], "claims": [], "enemies": ["rival"], "avoid": ["W8S1"] },
+    "opponents": [
+      {
+        "name": "rival",
+        "bot": "scripts/xxscreeps/engine/remote",
+        "room": "W8S1",
+        "config": { "remotes": ["W7S1", "W8S2", "W7S2"] },
+        "raid": {
+          "room": "W7S1",
+          "first": 2200,
+          "bodies": [
+            { "ranged_attack": 15, "heal": 10, "move": 25, "boosts": { "ranged_attack": "XKHO2", "heal": "XLHO2" } },
+            { "ranged_attack": 15, "heal": 10, "move": 25, "boosts": { "ranged_attack": "XKHO2", "heal": "XLHO2" } },
+            { "ranged_attack": 15, "heal": 10, "move": 25, "boosts": { "ranged_attack": "XKHO2", "heal": "XLHO2" } }
+          ]
+        }
+      }
+    ]
+  },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "sweepKilled", "min": 5000 },
+    { "measure": "fightTicksBack", "max": 0 },
+    { "measure": "bodiesLost", "max": 0 },
+    { "measure": "threatLookupsMost" },
+    { "measure": "faults", "max": 0 }
+  ]
+}
