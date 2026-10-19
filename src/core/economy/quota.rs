@@ -654,11 +654,7 @@ fn spend_demands(
 
         let body_work = cast.as_ref().map_or(1, |b| parts_of(Pattern::Worker, b));
 
-        let floor_bodies = if !ground.sites.is_empty() || !ground.repairs.is_empty() {
-            2
-        } else {
-            1
-        };
+        let floor_bodies = worker_floor(ground);
 
         // A crew digs a source whose container does not stand, and builds it.
         // Not knowing a source's seats is no crew.
@@ -695,16 +691,36 @@ fn spend_demands(
     out
 }
 
+fn worker_floor(ground: &Ground) -> i32 {
+    if !ground.sites.is_empty() || !ground.repairs.is_empty() {
+        2
+    } else {
+        1
+    }
+}
+
 /// The upgraders last: they spend what every other seat leaves. Another
-/// colony's seat ranks with the caster's own workers, so a young colony's
-/// spawn grows it before it hauls a neighbour's remotes. A tie keeps the
-/// demands' order (`sort_by` is stable).
-fn cast_order(seat: &Seat, own: bool) -> (i32, f64) {
-    match (seat.ret, seat.pattern) {
+/// colony's seat ranks with the caster's workers past its floor, so a young
+/// colony's spawn grows it before it hauls or reserves a neighbour's remotes.
+/// A tie keeps the demands' order (`sort_by` is stable).
+fn cast_order(
+    derived: &Derived,
+    owners: &BTreeMap<String, usize>,
+    d: &Demand,
+    caster: Option<usize>,
+    ret: Option<f64>,
+    filled: i32,
+) -> (i32, f64) {
+    let own = caster.is_some() && owners.get(&d.at.room) == caster.as_ref();
+    let floor = caster.is_some_and(|ci| {
+        derived.colonies[ci].room == d.at.room && filled < worker_floor(&derived.grounds[ci])
+    });
+    match (ret, d.pattern) {
         (None, _) => (0, 0.0),
-        (Some(_), Pattern::Upgrader) => (3, 0.0),
-        (Some(r), p) if p == Pattern::Worker || !own => (2, -r),
-        (Some(r), _) => (1, -r),
+        (Some(_), Pattern::Upgrader) => (4, 0.0),
+        (Some(r), p) if own && p != Pattern::Worker => (1, -r),
+        (Some(r), _) if own && floor => (2, -r),
+        (Some(r), _) => (3, -r),
     }
 }
 
@@ -972,7 +988,7 @@ pub fn plan(
         f64::from(derived.grounds[ci].income) / colonies[ci].spawns.len() as f64
     };
 
-    let mut seats: Vec<Seat> = Vec::new();
+    let mut seats: Vec<((i32, f64), Seat)> = Vec::new();
 
     for d in &all {
         let caster = match owners.get(&d.at.room).copied() {
@@ -1005,14 +1021,18 @@ pub fn plan(
                         None => 0.0,
                     });
 
-                    seats.push(Seat {
-                        pattern: d.pattern,
-                        at: d.at.clone(),
-                        parts: left,
-                        colony: caster,
-                        body: body.clone(),
-                        ret,
-                    });
+                    let order = cast_order(derived, owners, d, caster, ret, d.seats - seats_left);
+                    seats.push((
+                        order,
+                        Seat {
+                            pattern: d.pattern,
+                            at: d.at.clone(),
+                            parts: left,
+                            colony: caster,
+                            body: body.clone(),
+                            ret,
+                        },
+                    ));
 
                     left -= parts_of(d.pattern, body);
                     seats_left -= 1;
@@ -1022,19 +1042,16 @@ pub fn plan(
         }
     }
 
-    seats.sort_by(|a, b| {
-        let own = |seat: &Seat| seat.colony == owners.get(&seat.at.room).copied();
-        let (ka, va) = cast_order(a, own(a));
-        let (kb, vb) = cast_order(b, own(b));
-        ka.cmp(&kb)
-            .then(va.partial_cmp(&vb).unwrap_or(Ordering::Equal))
+    seats.sort_by(|((ka, va), _), ((kb, vb), _)| {
+        ka.cmp(kb)
+            .then(va.partial_cmp(vb).unwrap_or(Ordering::Equal))
     });
 
     let mut waiting = vec![false; colonies.len()];
 
     let mut seated: Vec<Seat> = Vec::with_capacity(seats.len());
 
-    for mut seat in seats {
+    for (_, mut seat) in seats {
         if let Some(ci) = seat.colony
             && !foundry.idle[ci].is_empty()
             && !(seat.pattern.is_upgrader() && waiting[ci])
