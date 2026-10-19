@@ -257,7 +257,7 @@ const pileOut = (p) => fs.writeSync(decayOut, JSON.stringify(p) + "\n");
 let regenNext = 0;
 
 // One tick of the ledger, off the colony's rooms as the tick left them.
-const lines = Object.fromEntries(roomNames.map((r) => [r, { dug: 0, decayed: 0, build: 0, upgrade: 0, repair: 0, bodies: 0, reserved: 0, hostile: 0, waves: 0, carriedOut: 0 }]));
+const lines = Object.fromEntries(roomNames.map((r) => [r, { dug: 0, decayed: 0, build: 0, upgrade: 0, repair: 0, bodies: 0, reserved: 0, hostile: 0, waves: 0, carriedOut: 0, leastDowngrade: Infinity }]));
 function account(rooms, time) {
   ledger.regen += regenNext;
   regenNext = 0;
@@ -291,6 +291,7 @@ function account(rooms, time) {
       else if ((kind === ATTACK || kind === HEAL) && towers.has(e.objectId)) ledger.tower += 10;
     }
     if (room["#user"] === ours && room.controller?.["#user"] !== ours && room.controller?.["#reservationEndTime"] > time) line.reserved++;
+    if (room.controller?.["#user"] === ours) line.leastDowngrade = Math.min(line.leastDowngrade, room.controller["#downgradeTime"] - time);
     let bank = 0;
     let hostile = false;
     const spawns = [];

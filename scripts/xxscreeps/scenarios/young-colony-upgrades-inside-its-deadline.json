@@ -1,10 +1,10 @@
 {
-  "why": "a controller inside its downgrade deadline is upgraded before any task a body already holds: a young colony's workers out on a neighbour's refills come back to it",
+  "why": "a controller inside its downgrade deadline is upgraded before any task a body already holds: a young colony's workers out on a neighbour's refill come back to it at once",
   "modules": ["atlas", "economy", "mv"],
-  "start": { "world": "scripts/xxscreeps/worlds/young-among-colonies.json", "seed": 1 },
-  "ticks": 1300,
+  "start": { "world": "scripts/xxscreeps/worlds/deadline-held-refills.json", "seed": 1 },
+  "ticks": 200,
   "assert": [
-    { "measure": "upgrade", "room": "W2S5", "from": 1200, "to": 1300, "min": 700 },
+    { "measure": "leastDowngrade", "room": "W1N1", "min": 3980 },
     { "measure": "faults", "max": 0 }
   ]
 }
