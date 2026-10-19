@@ -377,8 +377,9 @@ const worldOf = (start) => `${recipe(start, seats(start.opponents).map((s) => ({
 const keyOf = (start) => `scenario-${basename(bot, ".js")}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}`;
 const runs = new Map();
 for (const s of scenarios) {
-  const run = runs.get(keyOf(s.start)) ?? { name: keyOf(s.start), start: s.start, ticks: 0 };
+  const run = runs.get(keyOf(s.start)) ?? { name: keyOf(s.start), label: `${recipe(s.start, s.start.opponents)}${s.start.at ? `-t${s.start.at}` : ""}`, start: s.start, ticks: 0, scenarios: [], secs: 0 };
   run.ticks = Math.max(run.ticks, s.ticks);
+  run.scenarios.push(s.name);
   runs.set(run.name, run);
 }
 
@@ -444,7 +445,9 @@ const play = async ({ name, start, ticks }) => {
     ]);
   const world = join(REPO, "soak-runs/worlds", worldOf(start));
   if (!existsSync(world)) {
+    const began = Date.now();
     const code = await soak([...recipe, "--ticks", String(start.at), "--run", `world-${worldOf(start)}`, "--bot", bundleAt(start.bundle), "--save", world, ...opponentsOf(`world-${name}`, start.opponents && seats(start.opponents))]);
+    console.error(`world ${worldOf(start)} played in ${((Date.now() - began) / 1000).toFixed(0)} s, counted in its first soak`);
     if (code !== 0) {
       rmSync(world, { recursive: true, force: true });
       return code;
@@ -456,7 +459,13 @@ const playAll = (list, jobs) => {
   const queue = [...list];
   return Promise.all(
     Array.from({ length: jobs }, async () => {
-      for (let run; (run = queue.shift()); ) run.code = await play(run);
+      for (let run; (run = queue.shift()); ) {
+        const began = Date.now();
+        run.code = await play(run);
+        const secs = (Date.now() - began) / 1000;
+        run.secs += secs;
+        console.error(`soak ${run.label} ${secs.toFixed(0)} s (scenarios: ${run.scenarios.join(", ")})`);
+      }
     }),
   );
 };
@@ -497,5 +506,7 @@ for (const s of scenarios) {
   const rows = s.assert.some((a) => a.measure === "predictedWinsLost") ? engagementsOf(dir) : [];
   if (rows.length) for (const line of [`${rows.length} engagements`, ...report(rows)]) console.log(`  ${s.name}: ${line}`);
 }
+const slowest = [...runs.values()].sort((a, b) => b.secs - a.secs).slice(0, 5);
+console.log(`slowest: ${slowest.map((r) => `${r.label} ${r.secs.toFixed(0)} s (${r.scenarios.join(", ")})`).join("; ")}`);
 console.log(`${failed ? `${failed} failed` : "all passed"} in ${((Date.now() - started) / 1000).toFixed(0)} s`);
 process.exit(failed ? 1 : 0);
