@@ -135,6 +135,8 @@ const measures = {
   build: (samples, a) => at(samples, a.to ?? Infinity).ledger.build - at(samples, a.from ?? 0).ledger.build,
   // Energy a room's spawns put into bodies (`room`: the room).
   bodiesSpent: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.bodies ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.bodies ?? 0),
+  // Energy our bodies carried out of a home across its border.
+  carriedOut: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.carriedOut ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.carriedOut ?? 0),
   dug: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.dug ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.dug ?? 0),
   // The least energy the home's storage and containers held.
   leastStored: (samples, a) => Math.min(...within(samples, a).map((s) => s.stored)),

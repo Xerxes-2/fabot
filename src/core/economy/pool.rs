@@ -60,7 +60,7 @@ pub struct Offer {
     /// The tile a seated offer's garrison digs from.
     pub post: Option<Pos>,
     /// Rooms a body may not take it from: another colony's, whose own stock
-    /// fills it.
+    /// fills it, or that keeps what it holds for its own growth.
     pub shut: BTreeSet<String>,
 }
 
@@ -435,6 +435,18 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
     };
 
     let colony_rooms: BTreeSet<String> = derived.colonies.iter().map(|c| c.room.clone()).collect();
+    // A load in the room of a colony short of its reserve is its own growth.
+    let lean: BTreeSet<String> = derived
+        .colonies
+        .iter()
+        .zip(&derived.grounds)
+        .filter(|(c, g)| {
+            let reserve =
+                super::quota::reserve_target(derived.reserve_lifetimes, c.controller.level);
+            !g.stores.iter().any(|s| s.owned && s.energy >= reserve)
+        })
+        .map(|(c, _)| c.room.clone())
+        .collect();
 
     for (i, ground) in derived.grounds.iter().enumerate() {
         let colony = derived.colonies.get(i);
@@ -766,6 +778,13 @@ pub fn pool(derived: &Derived, held: &Assignments) -> Vec<Offer> {
             scout.shut.insert(at.room.clone());
         }
         offers.push(scout);
+    }
+
+    for o in &mut offers {
+        if matches!(o.task, Task::Refill(..)) {
+            o.shut
+                .extend(lean.iter().filter(|r| **r != o.target.room).cloned());
+        }
     }
 
     offers

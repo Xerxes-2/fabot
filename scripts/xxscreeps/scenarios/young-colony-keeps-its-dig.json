@@ -1,0 +1,11 @@
+{
+  "why": "a young colony's own dig feeds its own growth: a stocked neighbour's haulers never carry it off to their bank",
+  "start": { "world": "scripts/xxscreeps/worlds/young-beside-big.json", "seed": 1 },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "carriedOut", "room": "W1N1", "max": 2000 },
+    { "measure": "upgrade", "to": 2750, "min": 40000 },
+    { "measure": "refusals", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

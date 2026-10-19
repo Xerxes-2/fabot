@@ -255,7 +255,7 @@ const pileOut = (p) => fs.writeSync(decayOut, JSON.stringify(p) + "\n");
 let regenNext = 0;
 
 // One tick of the ledger, off the colony's rooms as the tick left them.
-const lines = Object.fromEntries(roomNames.map((r) => [r, { dug: 0, decayed: 0, build: 0, repair: 0, bodies: 0, reserved: 0, hostile: 0, waves: 0 }]));
+const lines = Object.fromEntries(roomNames.map((r) => [r, { dug: 0, decayed: 0, build: 0, repair: 0, bodies: 0, reserved: 0, hostile: 0, waves: 0, carriedOut: 0 }]));
 function account(rooms, time) {
   ledger.regen += regenNext;
   regenNext = 0;
@@ -709,6 +709,7 @@ function wasted(rooms) {
       const now = { room: o.pos.roomName, edge: edge(o.pos), energy: energyIn(o), store: beside?.id, stored: beside ? energyIn(beside) : 0 };
       const [a, b] = lastTwo.get(o.name) ?? [];
       if (a && b && a.edge && b.edge && now.edge && a.room === now.room && b.room !== now.room) bounced++;
+      if (b && b.room !== now.room && homes.includes(b.room)) lines[b.room].carriedOut += now.energy;
       if (a && b && now.store && a.store === now.store && b.store === now.store && b.energy > a.energy && now.energy < b.energy && now.stored > b.stored)
         pouredBack += Math.min(b.energy - a.energy, b.energy - now.energy);
       lastTwo.set(o.name, [b, now]);
