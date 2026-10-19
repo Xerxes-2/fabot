@@ -30,7 +30,7 @@ const spawn = {
   hitsMax: 5000,
   store: store({ energy: 300 }, 300),
   spawning: null,
-  spawnCreep: () => 0,
+  spawnCreep: (body, name) => (((Memory.creeps ??= {})[name] = {}), 0),
 };
 const road = { id: "r1", structureType: "road", pos: at(26, 25), hits: 5000, hitsMax: 5000 };
 const creep = {
@@ -84,7 +84,7 @@ const terrain = new Uint8Array(2500);
 terrain[0] = 1;
 terrain[51] = 2;
 
-globalThis.Memory = { fabot: { v1: "left alone" } };
+globalThis.Memory = { fabot: { v1: "left alone" }, creeps: { dead: {} } };
 globalThis.RawMemory = { segments, get: () => JSON.stringify(globalThis.Memory), setActiveSegments: (ids) => active.push(ids) };
 globalThis.Game = {
   time: 100,
@@ -123,6 +123,7 @@ if (recorded?.time !== 103) fail(`recorder wrote no tick 103: ${recorded?.time}`
 if (!recorded.intel.startsWith("W1N1 103 ")) fail(`recorder's intel lost the room: ${recorded.intel}`);
 if (recorded.memory !== RawMemory.get()) fail("recorder's Memory is not the tick's");
 if (Memory.fabot !== undefined) fail(`v1's Memory was kept: ${JSON.stringify(Memory.fabot)}`);
+if (Memory.creeps !== undefined) fail(`a dead creep's Memory was kept: ${JSON.stringify(Memory.creeps)}`);
 const held = Memory.v2.assignments?.a;
 if (typeof held !== "string") fail(`the creep holds no task: ${JSON.stringify(Memory.v2.assignments)}`);
 if (observe.refusals.some((r) => r.code === -100)) fail(`an intent threw: ${JSON.stringify(observe.refusals)}`);

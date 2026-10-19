@@ -1,4 +1,4 @@
-//! `Memory.v2` is ours; v1's keys are dropped on the first tick that sees them,
+//! `Memory.v2` is ours; v1's keys and the engine's `creeps` are dropped each tick,
 //! since their parse is what every tick's first touch of `Memory` pays.
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -77,9 +77,8 @@ fn memory() -> JsValue {
 
 fn root() -> JsValue {
     let memory = memory();
-    let fabot = field(&memory, "fabot");
-    if is_object(&fabot) {
-        drop_field(&memory, "fabot");
+    for theirs in ["fabot", "creeps"] {
+        drop_field(&memory, theirs);
     }
     let v2 = field(&memory, "v2");
     if is_object(&v2) {
