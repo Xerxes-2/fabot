@@ -1,0 +1,27 @@
+{
+  "subagents": {
+    "agentOverrides": {
+      "worker": {
+        "model": "deepseek/deepseek-flash"
+      },
+      "scout": {
+        "model": "deepseek/deepseek-flash"
+      },
+      "reviewer": {
+        "model": "deepseek/deepseek-flash"
+      },
+      "researcher": {
+        "model": "deepseek/deepseek-flash"
+      },
+      "oracle": {
+        "model": "deepseek/deepseek-flash"
+      },
+      "evidence-auditor": {
+        "model": "deepseek/deepseek-flash"
+      },
+      "delegate": {
+        "model": "deepseek/deepseek-flash"
+      }
+    }
+  }
+}

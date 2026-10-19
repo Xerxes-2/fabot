@@ -1,8 +1,9 @@
 /**
  * The WorktreeCreate and SubagentStop hooks Claude Code ran around an isolated subagent, which
  * pi has no event for; pi-claude-hooks covers the rest of .claude/settings.json. The jj rules
- * stay in .claude/hooks/*.sh, which this feeds. Pi's Agent tool cannot carry `isolation`, so a
- * spawn asks with `worktree_path: "auto"`.
+ * stay in .claude/hooks/*.sh, which this feeds. pi-subagents' `subagent` tool isolates in a git
+ * worktree of its own, which bypasses jj, so a spawn asks for a jj workspace with `cwd: "auto"`
+ * and `worktree: true` is refused.
  */
 
 import { spawn } from "node:child_process";
@@ -11,14 +12,23 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { isToolCallEventType, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const AGENT = "Agent";
+const SUBAGENT = "subagent";
 const AUTO = "auto";
 const MARKER = "/.claude/worktrees/";
 const AGENT_DIR = "agent-";
 const CREATE = "worktree-create.sh";
 const STOP = "subagent-stop.sh";
+/** pi-subagents' completion of a background run, carrying its `runId`. */
+const ASYNC_COMPLETE = "subagent:async-complete";
 
-type AgentInput = { worktree_path?: string; run_in_background?: boolean };
+type SubagentInput = {
+  cwd?: string;
+  worktree?: boolean;
+  action?: string;
+  options?: { isolation?: string };
+};
+
+type SubagentDetails = { asyncId?: string; runId?: string; results?: { detached?: boolean }[] };
 
 /** The repo holding `from`, whether that is a directory in it or a workspace under it. */
 function repoRoot(from: string): string | null {
@@ -49,6 +59,11 @@ function hook(root: string, script: string, payload: unknown): Promise<string> {
 }
 
 export default function (pi: ExtensionAPI) {
+  /** The workspaces this session made, by toolCallId, until their spawn returns. */
+  const made = new Map<string, string>();
+  /** A background run's workspace, by runId, until the run completes. */
+  const running = new Map<string, string>();
+
   /** subagent-stop.sh, not worktree-remove.sh: a workspace still holding the agent's work stays. */
   const stop = async (workspace: string): Promise<void> => {
     const name = path.basename(workspace);
@@ -59,15 +74,21 @@ export default function (pi: ExtensionAPI) {
   };
 
   pi.on("tool_call", async (event, ctx) => {
-    if (!isToolCallEventType<typeof AGENT, AgentInput>(AGENT, event)) return;
-    if (event.input.worktree_path !== AUTO) return;
+    if (!isToolCallEventType<typeof SUBAGENT, SubagentInput>(SUBAGENT, event)) return;
+    const input = event.input;
     const root = repoRoot(ctx.cwd);
-    if (!root) return { block: true, reason: `worktree_path "${AUTO}" outside a repo with .claude/hooks/${CREATE}` };
+    if (root && (input.worktree === true || input.options?.isolation === "worktree")) {
+      return { block: true, reason: `a git worktree bypasses jj here: pass cwd "${AUTO}" for a jj workspace` };
+    }
+    if (input.cwd !== AUTO) return;
+    if (input.action) return { block: true, reason: `cwd "${AUTO}" makes a workspace for a launch, not for action "${input.action}"` };
+    if (!root) return { block: true, reason: `cwd "${AUTO}" outside a repo with .claude/hooks/${CREATE}` };
     try {
-      event.input.worktree_path = await hook(root, CREATE, {
+      input.cwd = await hook(root, CREATE, {
         name: AGENT_DIR + randomUUID().slice(0, 8),
         session_id: ctx.sessionManager.getSessionId(),
       });
+      made.set(event.toolCallId, input.cwd);
     } catch (error) {
       // A spawn that got no workspace would edit the main tree instead of its own.
       return { block: true, reason: `worktree-create failed: ${error instanceof Error ? error.message : String(error)}` };
@@ -75,20 +96,33 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_result", async (event) => {
-    if (event.toolName !== AGENT) return;
-    // A foreground spawn's result is the agent's stop. A background one's came back at the
-    // spawn, so its workspace waits for the session ending below.
-    if (event.input.run_in_background === true) return;
-    const status = (event.details as { status?: unknown } | undefined)?.status;
-    if (status === "running" || status === "queued") return;
-    const workspace = event.input.worktree_path;
-    if (typeof workspace === "string") await stop(workspace);
+    if (event.toolName !== SUBAGENT) return;
+    const workspace = made.get(event.toolCallId);
+    if (workspace === undefined) return;
+    made.delete(event.toolCallId);
+    const details = event.details as SubagentDetails | undefined;
+    // A background run returned at its launch; its stop is the completion event below. A
+    // foreground child detached mid-run has no single completion: the session's sweep takes it.
+    if (details?.asyncId) {
+      running.set(details.asyncId, workspace);
+      return;
+    }
+    if (details?.results?.some((result) => result.detached)) return;
+    await stop(workspace);
+  });
+
+  pi.events.on(ASYNC_COMPLETE, (data) => {
+    const runId = (data as { runId?: unknown } | undefined)?.runId;
+    if (typeof runId !== "string") return;
+    const workspace = running.get(runId);
+    if (workspace === undefined) return;
+    running.delete(runId);
+    stop(workspace).catch((error) => console.error(`${STOP} failed for ${workspace}:`, error));
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
     if (!ctx.cwd.includes(MARKER)) return;
-    // The workspace's own session ending: a background agent stopped or cleared, or a settled
-    // one the parent disposed at the end of its own session.
+    // The workspace's own session ending: a pi started inside one, done with it.
     await stop(ctx.cwd);
   });
 }
