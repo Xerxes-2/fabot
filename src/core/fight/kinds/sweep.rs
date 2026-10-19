@@ -15,8 +15,10 @@ pub struct Facts {
     /// Whether its room is worth holding; None out of sight.
     pub worth: Option<bool>,
     pub safe: bool,
-    /// Another candidate a set beats is worth a cast.
-    pub elsewhere: bool,
+    /// The candidate a set beats that pays most a tick of its walk.
+    pub elsewhere: Option<String>,
+    /// The stalest room out of sight, read only once its room is worth nothing.
+    pub patrol: Option<String>,
 }
 
 pub fn prey(room: &Room) -> Vec<&Creep> {
@@ -68,18 +70,6 @@ pub fn yield_of(s: &Source, held: i32) -> i32 {
     s.energy_capacity * held.max(0) / engine::SOURCE_REGEN_TIME
 }
 
-/// Where holding pays most a tick of the walk.
-pub fn choice<'a>(candidates: impl Iterator<Item = (&'a String, i32, i32)>) -> Option<String> {
-    candidates
-        .max_by_key(|(room, worth, walk)| {
-            (
-                i64::from(*worth) * 1000 / i64::from(walk + engine::ROOM_SIDE),
-                std::cmp::Reverse(*room),
-            )
-        })
-        .map(|(room, _, _)| room.clone())
-}
-
 fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
     Engagement {
         phase,
@@ -88,8 +78,8 @@ fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
     }
 }
 
-/// Its own room's worth and a safe mode close it here; an escort that
-/// beats it closes it in `swept`.
+/// A living set never walks home (owner); an escort that beats it closes it
+/// in `swept`.
 pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
     let alive: BTreeSet<String> = e.ours.intersection(&facts.standing).cloned().collect();
     let mut next = e.clone();
@@ -98,10 +88,20 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
     let e = &next;
 
     let hollow = e.ours.is_empty() && !facts.asked;
+    let onto = (facts.elsewhere.as_ref())
+        .filter(|_| e.unanswered || facts.worth == Some(false))
+        .or(facts.patrol.as_ref())
+        .filter(|_| !e.ours.is_empty());
 
     match facts.worth {
-        _ if facts.safe || e.unanswered && facts.elsewhere => None,
-        Some(false) if facts.elsewhere || hollow => None,
+        _ if facts.safe => None,
+        _ if let Some(room) = onto => Some(Engagement {
+            room: room.clone(),
+            unanswered: false,
+            ..enter(Phase::Approaching, facts.time, e)
+        }),
+        _ if e.unanswered && facts.elsewhere.is_some() => None,
+        Some(false) if facts.elsewhere.is_some() || hollow => None,
         None if hollow && !e.unanswered => None,
         _ if e.phase == Phase::Forming && !facts.asked && !e.ours.is_empty() => {
             Some(enter(Phase::Approaching, facts.time, e))

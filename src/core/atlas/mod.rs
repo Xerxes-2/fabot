@@ -905,6 +905,18 @@ impl Atlas {
     }
 }
 
+/// Where a body with work goes next (owner: wherever there is work, never
+/// home): the most worth a tick of the walk, the nearest on a tie.
+pub fn onward<'a>(candidates: impl Iterator<Item = (&'a String, i32, i32)>) -> Option<String> {
+    candidates
+        .filter(|(_, worth, _)| *worth > 0)
+        .max_by_key(|(room, worth, walk)| {
+            let rate = i64::from(*worth) * 1000 / i64::from(walk + engine::ROOM_SIDE);
+            (rate, std::cmp::Reverse(*walk), std::cmp::Reverse(*room))
+        })
+        .map(|(room, _, _)| room.clone())
+}
+
 pub fn owner_is_ours(owner: &Owner) -> bool {
     owner.is_ours()
 }

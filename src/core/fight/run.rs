@@ -7,7 +7,7 @@ use super::kinds::siege::{self, Facts as SiegeFacts};
 use super::kinds::sweep;
 use super::shape::{Cast, Engagement, Group, Objective, Phase, Plan, Tactic};
 use super::{casting, tracker};
-use crate::core::atlas::{Atlas, Mover, Target, Tree};
+use crate::core::atlas::{self, Atlas, Mover, Target, Tree};
 use crate::core::exchange::{self, Fighter, Ground, Losses, Outcome, Side, Stance, fighter};
 use crate::core::grid::{self, Footprint};
 use crate::core::intents::{self, Ask, ControllerAct, CreepAct, Intent, Rank};
@@ -975,6 +975,47 @@ impl<'a> Scene<'a> {
             .collect()
     }
 
+    fn walk_of(&self, atlas: &Atlas, e: &Engagement, room: &str) -> Option<i32> {
+        let from = self.members_of(e).first()?.pos.room.clone();
+        let onto = fresh(0, Objective::Sweep, room, 0, Tactic::Kite);
+        self.walk_to(atlas, &onto, &from)
+    }
+
+    fn elsewhere(
+        &self,
+        atlas: &Atlas,
+        e: &Engagement,
+        candidates: &[(String, i32, i32, bool)],
+    ) -> Option<String> {
+        let won = candidates.iter().filter(|c| c.3 && c.0 != e.room);
+        atlas::onward(won.filter_map(|(room, worth, walk, _)| {
+            let walk = if e.ours.is_empty() {
+                Some(*walk)
+            } else {
+                self.walk_of(atlas, e, room)
+            };
+            Some((room, *worth, walk?))
+        }))
+    }
+
+    /// An unseen room is worth its staleness; one owned is priced only in
+    /// sight, under its towers.
+    fn patrol(
+        &self,
+        atlas: &Atlas,
+        e: &Engagement,
+        preyed: &[String],
+        age: impl Fn(&str) -> Option<(i32, bool)>,
+    ) -> Option<String> {
+        let open = preyed
+            .iter()
+            .filter(|r| **r != e.room && !self.avoid.contains(*r));
+        atlas::onward(open.filter_map(|r| match age(r)? {
+            (_, true) => None,
+            (age, false) => Some((r, age, self.walk_of(atlas, e, r)?)),
+        }))
+    }
+
     /// Priced at open and on an event in its room: an escort or towers no
     /// set the room pays for beats close it, or leave it unanswered, priced
     /// again as the bank grows, while it holds nothing.
@@ -1288,6 +1329,12 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     let declarations = context.declarations;
     let context_trace = context.trace;
     let sightings = context.sightings;
+    let intel = context.intel;
+    let age = |room: &str| {
+        intel
+            .get(room)
+            .map(|row| (world.time - row.seen, row.level > 0))
+    };
     let atlas: &mut Atlas = &mut *context.atlas;
 
     let mut foes: BTreeMap<String, Vec<Creep>> = BTreeMap::new();
@@ -1530,9 +1577,14 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                         aging_out: aging_out.clone(),
                         asked: scene.waiting.iter().any(|c| c.engagement == e.id),
                         arrived: scene.members_of(e).iter().all(|c| c.pos.room == e.room),
-                        worth: grounds.get(&e.room).map(|g| g.worth > 0),
+                        worth: grounds
+                            .get(&e.room)
+                            .map(|g| g.worth > 0 || !g.escort.is_empty()),
                         safe: scene.in_sight(&e.room).is_some_and(Scene::safe),
-                        elsewhere: candidates.iter().any(|(r, _, _, won)| *won && *r != e.room),
+                        elsewhere: scene.elsewhere(atlas, e, &candidates),
+                        patrol: (grounds.get(&e.room))
+                            .filter(|g| g.worth == 0 && g.escort.is_empty())
+                            .and_then(|_| scene.patrol(atlas, e, &state.preyed, age)),
                     },
                     e,
                 ),
@@ -1617,8 +1669,8 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     let sweeping = stepped.iter().any(|(e, _)| e.objective == Objective::Sweep);
     let won = || candidates.iter().filter(|c| c.3);
-    let swept = sweep::choice(won().map(|(r, w, k, _)| (r, *w, *k)))
-        .or_else(|| sweep::choice(candidates.iter().map(|(r, w, k, _)| (r, *w, *k))))
+    let swept = atlas::onward(won().map(|(r, w, k, _)| (r, *w, *k)))
+        .or_else(|| atlas::onward(candidates.iter().map(|(r, w, k, _)| (r, *w, *k))))
         .filter(|_| !sweeping)
         .map(|room| {
             let id = first_id + (opened.len() + declared.len()) as i32;

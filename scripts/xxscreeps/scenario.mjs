@@ -227,6 +227,13 @@ const measures = {
     const end = Math.max(...lives.map((b) => b.last));
     return new Set(lives.filter((b) => b.ours && b.last < end && b.ttl > 1).map((b) => b.name)).size;
   },
+  // Ticks our fight bodies stood in the rooms the soak follows once back from beyond them.
+  fightTicksBack: (_, __, dir) => {
+    const lives = livesOf(dir).filter((b) => b.ours && b.name.startsWith("fight-"));
+    const first = new Map(lives.map((b) => [b.name, Infinity]));
+    for (const b of lives) first.set(b.name, Math.min(first.get(b.name), b.first));
+    return lives.filter((b) => b.first > first.get(b.name)).reduce((n, b) => n + Object.values(b.rooms).reduce((m, k) => m + k, 0), 0);
+  },
   bodiesStruck: (_, __, dir) => livesOf(dir).reduce((n, b) => n + (b.ours ? (b.struck ?? 0) : 0), 0),
   // The damage struck on the body called `name`.
   struckOn: (_, a, dir) => livesOf(dir).reduce((n, b) => n + (b.name === a.name ? (b.struck ?? 0) : 0), 0),

@@ -1,6 +1,7 @@
 // A scripted rival working remotes, one of §10.2's fixed opponents
 // (ARCHITECTURE.md): `opponent.js` { remotes: [room, …] }, its home among them
-// to mine its own source, roles?: the remote roles it keeps (default all).
+// to mine its own source, roles?: the remote roles it keeps (default all),
+// shift?: ticks each remote is worked alone, in turn (default all at once).
 // Each remote keeps a miner, a hauler carrying its pile home and a reserver,
 // respawned as each dies, every remote's miner first. At home its towers
 // strike the nearest enemy, a filler, kept whatever roles say, keeps the spawn
@@ -66,8 +67,9 @@ module.exports.loop = function () {
   const creeps = Object.values(Game.creeps);
   for (const c of creeps) ({ filler, miner, hauler, reserver })[c.memory.role](c, home);
   const spawn = home.find(FIND_MY_SPAWNS).find((s) => !s.spawning);
+  const worked = config.shift ? [remotes[Math.floor(Game.time / config.shift) % remotes.length]] : remotes;
   for (const role of roles)
-    for (const remote of role === "filler" ? [home.name] : remotes.filter((r) => role !== "reserver" || r !== home.name))
+    for (const remote of role === "filler" ? [home.name] : worked.filter((r) => role !== "reserver" || r !== home.name))
       if (spawn && !creeps.some((c) => c.memory.remote === remote && c.memory.role === role))
         return spawn.spawnCreep(BODIES[role], `${role}-${remote}-${Game.time}`, { memory: { role, remote } });
 };

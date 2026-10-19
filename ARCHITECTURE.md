@@ -147,7 +147,7 @@ cold tick never spends more than ❓ 60% of the limit.
 | `Economy` | task pool, planner, matcher, quota, spawns, labs, terminals, market | World, Atlas, declarations, `State.Economy` | tasks, casts, `State.Economy` | port, trim (§5) |
 | `Layout` | construction and tower plans | World, Atlas, declarations (outposts' containers and roads) | sites, tower intents | port |
 | `Exchange` | who wins: pure fight arithmetic | bodies, terrain | — | port from `Facts.fs:2883–4056, 1038–1582`, `Fighter.fs`, `Arrival.fs`; narrow the input |
-| `Fight` | tracker, engagements (one kind per file), casting | World, Atlas, Exchange, `State.Fight` | fight intents, casts, declarations, `State.Fight` | **new** (§6) |
+| `Fight` | tracker, engagements (one kind per file), casting | World, Atlas, Exchange, `State.Fight`, `intel.rooms` (a patrol's staleness) | fight intents, casts, declarations, `State.Fight` | **new** (§6) |
 | `Tactics` | what one fight body does this tick (§6.4): strikes, steps, the Hunt score, heals; it imports no Fight | Atlas, Move, the `Sight` and plan Fight hands down | creep intents, wishes | **new**, split from Fight |
 | `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Exchange, `State.Intel`, `Season` | declarations, opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
 | `Season` | this season's rules: what scores, its structures, its NPCs, its map quirks | World | declarations to Strategy, season intents | **new**, disposable (§8) |
@@ -387,10 +387,14 @@ The other kinds, for the record's sake:
   hunter's life (owner: denial is worth as much as kills), pays most a tick
   of the walk. Its set beats the escort and out-heals the charged towers
   there within that worth; with none, it opens unanswered at the bank it was
-  priced at. The engagement is the commitment (v1 stored the room): it holds
-  until its room is worth nothing while another candidate a set beats is
-  worth a cast, a safe mode stands it off, or an event re-prices an escort
-  that beats it. No prey is remembered out of sight.
+  priced at. The engagement is the commitment (v1 stored the room). A room
+  worth nothing moves its living set on, never home (owner: a set spends its
+  life in the enemy's field): to the candidate a set beats that pays most a
+  tick of the set's own walk, else to the room whose staleness pays most a
+  tick of it (`atlas::onward`, one rule for any body with work; a room just
+  seen is worth nothing, an owned one is priced only in sight). It closes once its bodies are gone, a safe mode stands it off, or
+  an event re-prices an escort that beats it. No prey is remembered out of
+  sight.
 - `Drain`: approach → drain (edge dance, heal) → rotate → …; closes when the
   towers are empty or the deadline passes.
 - `KeeperDuty`: a perpetual cycle over lairs by respawn time; declares the room
