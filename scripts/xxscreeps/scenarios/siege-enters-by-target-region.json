@@ -18,6 +18,7 @@
     { "measure": "siegeWalledEntries", "max": 0 },
     { "measure": "siegeRampartsLost", "max": 0 },
     { "measure": "siegeFirstRaze", "max": 1400 },
+    { "measure": "bodiesLost", "max": 1 },
     { "measure": "faults", "max": 0 }
   ]
 }

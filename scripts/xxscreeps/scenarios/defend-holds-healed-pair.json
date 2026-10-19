@@ -22,6 +22,7 @@
     { "measure": "homeHostileTicks", "from": 1500, "max": 300 },
     { "measure": "predictedWinsLost", "max": 0 },
     { "measure": "oscillation", "max": 5 },
+    { "measure": "bodiesLost", "max": 0 },
     { "measure": "faults", "max": 0 }
   ]
 }
