@@ -101,6 +101,7 @@ const withCounts = (dir, a, f) => {
 const at = (samples, t) => samples.find((s) => s.t >= t) ?? samples.at(-1);
 const sideOf = (a) => (s) => (a.who ? s.others[a.who] : s);
 const within = (samples, a) => samples.filter((s) => s.t >= (a.from ?? 0) && s.t < (a.to ?? Infinity));
+const upgradedIn = (s, a) => (a.room ? (s.rooms[a.room]?.upgrade ?? 0) : s.ledger.upgrade);
 const builtIn = (s, a) => (a.room ? (s.rooms[a.room]?.build ?? 0) : s.ledger.build);
 const measures = {
   // Energy lost to pile decay.
@@ -152,7 +153,7 @@ const measures = {
   // Percent of the colony's harvest the engagements cast into bodies.
   fightShare: (samples, _, dir) => Math.round((100 * rowsOf(dir).reduce((n, e) => n + (e.cast ?? 0), 0)) / Math.max(1, samples.at(-1).ledger.dug)),
   towerSpent: (samples, a) => at(samples, a.to ?? Infinity).ledger.tower - at(samples, a.from ?? 0).ledger.tower,
-  upgrade: (samples, a) => at(samples, a.to ?? Infinity).ledger.upgrade - at(samples, a.from ?? 0).ledger.upgrade,
+  upgrade: (samples, a) => upgradedIn(at(samples, a.to ?? Infinity), a) - upgradedIn(at(samples, a.from ?? 0), a),
   // Percent of samples whose buffer stood empty with an upgrader beside it.
   dryBuffer: (samples, a) => {
     const seen = within(samples, a);

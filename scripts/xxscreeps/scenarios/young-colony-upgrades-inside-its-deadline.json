@@ -1,0 +1,9 @@
+{
+  "why": "a controller inside its downgrade deadline is upgraded before any task a body already holds: a young colony's workers out on a neighbour's refills come back to it",
+  "start": { "world": "scripts/xxscreeps/worlds/young-among-colonies.json", "seed": 1 },
+  "ticks": 1300,
+  "assert": [
+    { "measure": "upgrade", "room": "W2S5", "from": 1200, "to": 1300, "min": 700 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

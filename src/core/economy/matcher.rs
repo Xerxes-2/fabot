@@ -227,6 +227,15 @@ impl Matcher<'_> {
         }
     }
 
+    fn outranked(&mut self, bi: usize, oi: usize, deadlines: &[usize]) -> bool {
+        deadlines.iter().any(|&d| {
+            self.pool[d].priority < self.pool[oi].priority
+                && pool::fits(&self.bodies[bi], &self.pool[d])
+                && self.walk(bi, d).is_some()
+                && self.open(bi, d)
+        })
+    }
+
     fn rank_of(&self, oi: usize) -> (i32, usize) {
         (self.pool[oi].priority, oi)
     }
@@ -277,8 +286,13 @@ impl Matcher<'_> {
             }
         });
 
+        // A controller inside its deadline is worked before any held task.
+        let deadlines: Vec<usize> = (0..offers)
+            .filter(|oi| self.pool[*oi].priority <= price::DEADLINE_RANK)
+            .collect();
+
         for (_, _, _, bi, oi) in kept.clone() {
-            if self.admits_now(bi, oi) {
+            if self.admits_now(bi, oi) && !self.outranked(bi, oi, &deadlines) {
                 self.take(bi, oi);
             }
         }
@@ -634,6 +648,12 @@ mod tests {
                     && offer.capacity == Capacity::Unbounded
                     && pool::fits(b, offer)
                     && reaches(&scene, b, offer)
+                    && !scene.pool.iter().any(|d| {
+                        d.priority <= price::DEADLINE_RANK
+                            && d.priority < offer.priority
+                            && pool::fits(b, d)
+                            && reaches(&scene, b, d)
+                    })
                 {
                     assert_eq!(out.get(&b.name), Some(id));
                 }
