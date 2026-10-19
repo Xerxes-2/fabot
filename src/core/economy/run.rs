@@ -281,10 +281,11 @@ fn pickups(derived: &Derived, taken: &BTreeSet<String>) -> Vec<Intent> {
             && !taken.contains(&b.name)
             && b.store.held.iter().all(|(r, _)| r.is_energy())
         {
-            let pile = derived.grounds.iter().find_map(|g| {
+            let pile = derived.grounds.iter().enumerate().find_map(|(gi, g)| {
+                let colony = (gi < derived.colonies.len()).then_some(gi);
                 g.piles
                     .iter()
-                    .find(|p| p.resource.is_energy() && b.pos.within(1, &p.pos))
+                    .find(|p| p.resource.is_energy() && b.pos.within(1, &p.pos) && b.serves(colony))
             });
 
             if let Some(p) = pile {

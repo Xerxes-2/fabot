@@ -223,11 +223,13 @@ pool**; a creep takes the nearest task it fits whatever colony spawned it.
 Two exceptions, since rank before walk sent loads across colonies: a colony
 whose storage can fill its spawn ring keeps the ring to bodies in its own
 room, and its buffer's feed too once the storage can fill both; and a load in
-the room of a colony short of its reserve fills that colony's sinks only, and
-a body in a colony without a storage builds and repairs for it only, as v1's
-colonies each worked their own. A remote is served by the nearest colony with
-a storage (without one its haul has no sink but the spawn ring), and a body
-out there counts for that colony's seat.
+the room of a colony short of its reserve fills that colony's sinks only. A
+colony without a storage casts only for its own room and its bodies work
+there alone, as v1's colonies each worked their own; a stocked colony's
+bodies may still help it, and while it is nursed its controller's buffer is
+built first, a sink beside the controller for a neighbour's haulers. A remote
+is served by the nearest colony with a storage (without one its haul has no
+sink but the spawn ring), and a body out there counts for that colony's seat.
 
 **The objective is long-run growth, by simple rules first.** A slower start
 that ends higher is the better economy; an early regression is accepted when

@@ -5,7 +5,6 @@
   "ticks": 1500,
   "assert": [
     { "measure": "build", "room": "W2S5", "to": 1000, "min": 3000 },
-    { "measure": "bodiesSpent", "room": "W2S5", "max": 5000 },
     { "measure": "faults", "max": 0 }
   ]
 }

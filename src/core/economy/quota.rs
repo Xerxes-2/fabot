@@ -178,7 +178,7 @@ pub fn reserve_target(lifetimes: f64, level: i32) -> i32 {
 /// Without a storage a remote's haul has no sink but the spawn ring.
 fn banks_remote(derived: &Derived, ci: usize) -> bool {
     let ground = &derived.grounds[ci];
-    !ground.abandoned && ground.stores.iter().any(|s| s.owned)
+    !ground.abandoned && ground.has_storage()
 }
 
 pub type Near<'a> = dyn FnMut(&dyn Fn(usize) -> bool, &Pos) -> Option<usize> + 'a;
@@ -477,10 +477,13 @@ fn ground_demands(
     demands
 }
 
-/// A colony given up casts only its floors.
+/// A colony given up casts only its floors; one without a storage only for
+/// its own room, the one room its bodies serve (`Body::serves`).
 fn castable(derived: &Derived, d: &Demand, ci: usize) -> bool {
     let colonies = &derived.colonies;
-    !derived.grounds[ci].abandoned
+    let ground = &derived.grounds[ci];
+    !ground.abandoned
+        && (ground.has_storage() || d.at.room == colonies[ci].room)
         && engine::body_cost(bodies::block_of(d.pattern)) <= colonies[ci].bank_capacity
         && (!d.pattern.is_upgrader() || colonies[ci].room == d.at.room)
 }

@@ -114,6 +114,7 @@ pub(crate) mod dice {
             store,
             ticks_to_live: life,
             pattern: bodies::pattern_of_parts(work, carry, moves, claim),
+            bound: None,
         }
     }
 
@@ -146,6 +147,7 @@ pub(crate) mod dice {
             draw,
             post: None,
             shut: BTreeSet::new(),
+            colony: None,
         }
     }
 

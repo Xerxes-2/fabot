@@ -31,6 +31,16 @@ pub struct Body {
     pub free: i32,
     pub ticks_to_live: i32,
     pub pattern: Pattern,
+    /// The storage-less colony it was cast by.
+    pub bound: Option<usize>,
+}
+
+impl Body {
+    /// A storage-less colony's body serves that colony alone; any other body
+    /// serves whatever colony's work it reaches (`ARCHITECTURE.md` §5).
+    pub fn serves(&self, colony: Option<usize>) -> bool {
+        self.bound.is_none_or(|ci| Some(ci) == colony)
+    }
 }
 
 pub fn key_parts_in(pattern: Pattern, body: &Body) -> i32 {
@@ -206,6 +216,9 @@ pub struct Ground {
     pub withheld: i32,
     pub upgrade_seats: Option<i32>,
     pub buffer: Option<StoreFact>,
+    /// The buffer's tile, built (a link or container) or still a container
+    /// site, so the site ranks first in a nursed room.
+    pub buffer_tile: Option<Pos>,
     pub feed: Option<StoreFact>,
     pub links: Vec<LinkFact>,
     pub receiver: Option<LinkFact>,
@@ -223,6 +236,12 @@ pub struct Ground {
     pub shipment: Vec<(Resource, i32)>,
     pub ship_to: Option<(String, i32)>,
     pub abandoned: bool,
+}
+
+impl Ground {
+    pub fn has_storage(&self) -> bool {
+        self.stores.iter().any(|s| s.owned)
+    }
 }
 
 /// A resource, not a decider (`ARCHITECTURE.md` §2).
@@ -257,6 +276,15 @@ pub struct Derived {
     pub routes: BTreeMap<String, Tree>,
 }
 
+/// The storage-less colony a creep's name says cast it.
+fn bound_colony(colonies: &[Colony], grounds: &[Ground], name: &str) -> Option<usize> {
+    let spawn = bodies::spawn_of_name(name)?;
+    let ci = colonies
+        .iter()
+        .position(|c| c.spawns.iter().any(|s| s.name == spawn))?;
+    (!grounds[ci].has_storage()).then_some(ci)
+}
+
 fn body_of(name: &str, pos: &Pos, parts: &[Part], store: &Store, life: i32) -> Body {
     let mut work = 0;
     let mut carry = 0;
@@ -289,6 +317,7 @@ fn body_of(name: &str, pos: &Pos, parts: &[Part], store: &Store, life: i32) -> B
         ticks_to_live: life,
         pattern: bodies::pattern_of_name(name)
             .unwrap_or_else(|| bodies::pattern_of_parts(work, carry, moves, claim)),
+        bound: None,
     }
 }
 
@@ -679,6 +708,12 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             Some(c) => seats_at(atlas, engine::UPGRADE_RANGE, &c.pos),
             None => Some(0),
         },
+        buffer_tile: built.map(|b| b.pos.clone()).or_else(|| {
+            room.sites
+                .iter()
+                .find(|s| s.kind.is_container() && Atlas::is_buffer(room, &s.pos))
+                .map(|s| s.pos.clone())
+        }),
         buffer: buffer.clone(),
         feed: feed.or(buffer.clone()),
         links,
@@ -983,7 +1018,10 @@ pub fn of_world(
 
     let bodies: Vec<Body> = creeps
         .iter()
-        .map(|c| body_of(&c.name, &c.pos, &c.body, &c.store, c.ticks_to_live))
+        .map(|c| Body {
+            bound: bound_colony(&colonies, &grounds, &c.name),
+            ..body_of(&c.name, &c.pos, &c.body, &c.store, c.ticks_to_live)
+        })
         .collect();
 
     let mut routes: BTreeMap<String, Tree> = BTreeMap::new();

@@ -62,6 +62,9 @@ pub struct Offer {
     /// Rooms a body may not take it from: another colony's, whose own stock
     /// fills it, or that keeps its bodies for its own growth.
     pub shut: BTreeSet<String>,
+    /// The colony whose room it is in: a storage-less colony's body works
+    /// none but its own.
+    pub colony: Option<usize>,
 }
 
 fn carried(body: &Body, resource: &Resource) -> i32 {
@@ -109,7 +112,7 @@ pub fn draws_buffer(body: &Body, offer: &Offer) -> bool {
 pub fn fits(body: &Body, offer: &Offer) -> bool {
     let half_empty = body.free > 0 && body.free * 2 >= body.store.capacity;
 
-    if offer.shut.contains(&body.pos.room) {
+    if offer.shut.contains(&body.pos.room) || !body.serves(offer.colony) {
         return false;
     }
     match &offer.task {
@@ -225,6 +228,7 @@ fn offer(task: Task, target: &Pos, value: f64, capacity: Capacity) -> Offer {
         draw: Draw::Open,
         post: None,
         shut: BTreeSet::new(),
+        colony: None,
     }
 }
 
@@ -375,7 +379,9 @@ fn nursed(derived: &Derived, room: &str) -> bool {
 }
 
 /// Every site alike, their order Layout's plan order, but a room's first
-/// spawn and first tower.
+/// spawn, its first tower, and a nursed room's buffer: without it its
+/// upgraders walk to a rock for the energy a stocked neighbour would pour in
+/// beside the controller (`nursed`, `derived::Ground::buffer_tile`).
 pub fn site_rank(derived: &Derived, site: &super::derived::SiteFact) -> i32 {
     let first_spawn =
         site.kind == Kind::Spawn && derived.colonies.iter().all(|c| c.room != site.pos.room);
@@ -385,7 +391,13 @@ pub fn site_rank(derived: &Derived, site: &super::derived::SiteFact) -> i32 {
             .grounds
             .iter()
             .any(|g| g.room == site.pos.room && g.towers == 0);
-    if first_spawn || first_tower {
+    let buffer = site.kind.is_container()
+        && nursed(derived, &site.pos.room)
+        && derived
+            .grounds
+            .iter()
+            .any(|g| g.buffer_tile.as_ref() == Some(&site.pos));
+    if first_spawn || first_tower || buffer {
         NURSERY_RANK
     } else {
         price::SURPLUS_RANK
@@ -446,14 +458,6 @@ pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignme
                 super::quota::reserve_target(derived.reserve_lifetimes, c.controller.level);
             !g.stores.iter().any(|s| s.owned && s.energy >= reserve)
         })
-        .map(|(c, _)| c.room.clone())
-        .collect();
-    // Without a storage a colony grows only by its own workers' hands.
-    let storageless: BTreeSet<String> = derived
-        .colonies
-        .iter()
-        .zip(&derived.grounds)
-        .filter(|(_, g)| !g.stores.iter().any(|s| s.owned))
         .map(|(c, _)| c.room.clone())
         .collect();
 
@@ -787,14 +791,14 @@ pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignme
     }
 
     for o in &mut offers {
-        let shut_by = match o.task {
-            Task::Refill(..) => &lean,
-            Task::Build(_) | Task::Repair(_) => &storageless,
-            _ => continue,
-        };
+        o.colony = owners.get(&o.target.room).copied();
+
+        if !matches!(o.task, Task::Refill(..)) {
+            continue;
+        }
         let own =
             (owners.get(&o.target.room)).map_or(&o.target.room, |ci| &derived.colonies[*ci].room);
-        o.shut.extend(shut_by.iter().filter(|r| *r != own).cloned());
+        o.shut.extend(lean.iter().filter(|r| *r != own).cloned());
     }
 
     offers
@@ -822,6 +826,7 @@ mod tests {
             draw: Draw::Open,
             post: None,
             shut: BTreeSet::new(),
+            colony: None,
         }
     }
 

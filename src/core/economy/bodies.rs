@@ -87,6 +87,13 @@ pub fn cast_name(pattern: Pattern, time: i32, spawn: &str) -> String {
     format!("{}-{}-{}", name_of(pattern), time, spawn)
 }
 
+/// The spawn a cast name names, `None` where the name is not one of ours.
+pub fn spawn_of_name(name: &str) -> Option<&str> {
+    pattern_of_name(name)?;
+    let rest = &name[name.find('-')? + 1..];
+    Some(&rest[rest.find('-')? + 1..])
+}
+
 /// Read off the name, not the parts: damage strips parts head-first, so no
 /// reading of the standing parts holds the pattern for the body's life.
 pub fn pattern_of_name(name: &str) -> Option<Pattern> {
