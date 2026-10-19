@@ -1,5 +1,6 @@
 {
   "why": "a keeper room is crossed where its keepers' strike leaves a way: the outpost W5S5 is two crossings from W7S5 only through the keeper room W6S5, whose west and east exits lie out of every keeper's reach, so the outpost is worked through it and no body is lost",
+  "modules": ["atlas", "economy", "mv", "strategy"],
   "start": {
     "world": "scripts/xxscreeps/worlds/haul-through-keepers.json",
     "seed": 1

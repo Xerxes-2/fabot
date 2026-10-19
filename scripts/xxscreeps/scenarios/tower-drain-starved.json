@@ -1,5 +1,6 @@
 {
   "why": "two healers that out-heal every tower at our edge draw no tower shot, while the home is held",
+  "modules": ["atlas", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
   "start": {
     "room": "W8N3",
     "seed": 1,

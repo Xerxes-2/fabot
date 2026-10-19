@@ -1,5 +1,6 @@
 {
   "why": "a boosted escort no set beats comes into the rival's remote a sweep works: its set leaves that room for his others and kills there, never walking home before it ages out",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
     "seed": 1,

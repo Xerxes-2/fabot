@@ -1,5 +1,6 @@
 {
   "why": "a level-0 Invader core in a worked outpost is razed and the outpost worked again",
+  "modules": ["atlas", "economy", "exchange", "fight", "mv", "tactics"],
   "start": { "room": "W8N3", "seed": 1, "node": "E1", "core": "W7N3:3500" },
   "ticks": 9000,
   "assert": [

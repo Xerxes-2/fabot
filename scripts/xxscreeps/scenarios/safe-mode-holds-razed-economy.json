@@ -1,5 +1,6 @@
 {
   "why": "a player's raid no cast answers, killing the refillers of a home with a tower, spends the safe mode before the economy is razed",
+  "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "tactics"],
   "start": {
     "room": "W8N3",
     "seed": 1,

@@ -1,5 +1,6 @@
 {
   "why": "two living scouts and five declared rooms out of sight: each walks on to the room whose age pays most a tick of its walk, one room a scout, never home and never still (ranked stalest first, one bounced on a border and left a room unseen 965 ticks, and one stood at home 140)",
+  "modules": ["atlas", "economy", "mv", "strategy"],
   "start": { "world": "scripts/xxscreeps/worlds/scouts-stale-claims.json", "seed": 1 },
   "ticks": 1400,
   "assert": [

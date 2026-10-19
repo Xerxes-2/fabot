@@ -1,5 +1,6 @@
 {
   "why": "the stock is drawn only for the room its sinks have left past what is already aboard for them",
+  "modules": ["atlas", "economy", "mv"],
   "start": {
     "room": "W8N3",
     "seed": 1,

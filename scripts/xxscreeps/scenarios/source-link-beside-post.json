@@ -1,5 +1,6 @@
 {
   "why": "a source's link stands beside the container its miner works from, wherever that container stands, so the miner fills it and it sends",
+  "modules": ["atlas", "economy", "layout", "mv"],
   "start": { "room": "W8N3", "seed": 1, "node": "T4" },
   "ticks": 3000,
   "assert": [

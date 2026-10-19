@@ -1,5 +1,6 @@
 {
   "why": "a colony keeps upgrading while sites stand: its buffer is built with its level's extensions and the sites do not displace its upgraders",
+  "modules": ["atlas", "economy", "layout", "mv"],
   "start": { "world": "scripts/xxscreeps/worlds/swamp-road.json", "seed": 1 },
   "ticks": 5000,
   "assert": [{ "measure": "upgrade", "min": 5000 }]

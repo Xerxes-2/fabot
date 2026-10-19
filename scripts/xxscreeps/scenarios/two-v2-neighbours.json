@@ -1,5 +1,6 @@
 {
   "why": "two of our bots side by side each keep their economy: neither loses a level, a spawn or its creeps",
+  "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
   "start": { "room": "W8N3", "seed": 1, "opponents": [{ "name": "rival", "bot": "@bot", "room": "W7N3" }] },
   "ticks": 3000,
   "assert": [

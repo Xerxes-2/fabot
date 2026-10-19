@@ -1,6 +1,7 @@
 {
   "nightly": true,
   "why": "TooAngel's melee squads, sent at our home from its own next door, are held: no level or spawn lost, its attackers gone",
+  "modules": ["atlas", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
   "start": {
     "room": "W8N3",
     "seed": 1,

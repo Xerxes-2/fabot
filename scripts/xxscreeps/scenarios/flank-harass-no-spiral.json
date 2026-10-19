@@ -1,5 +1,6 @@
 {
   "why": "a cheap raider poking both outposts and the home every 500 ticks for 20000 ticks starts no spending spiral: once at §5's reserve (60k, two towers) the home's stock stays there, no level or spawn lost, the fight casts a small share of the harvest",
+  "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "tactics"],
   "start": {
     "room": "W8N3",
     "seed": 1,

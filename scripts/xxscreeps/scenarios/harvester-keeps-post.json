@@ -1,5 +1,6 @@
 {
   "why": "a harvester digs one post for its life",
+  "modules": ["atlas", "economy", "layout", "mv"],
   "start": { "room": "W3N1", "seed": 1 },
   "ticks": 14000,
   "assert": [{ "measure": "harvestersOnTwoPosts", "max": 3 }]

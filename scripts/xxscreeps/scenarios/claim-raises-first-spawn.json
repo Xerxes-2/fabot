@@ -1,5 +1,6 @@
 {
   "why": "a declared claim is claimed, worked from home until its first spawn stands, and grown to RCL3",
+  "modules": ["atlas", "economy", "layout", "mv", "strategy"],
   "start": {
     "room": "W8N3",
     "seed": 1,

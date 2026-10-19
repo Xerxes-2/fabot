@@ -1,5 +1,6 @@
 {
   "why": "an upgrader waiting on a far buffer prices its feed and the stock's draw for it, so the stock is hauled to it",
+  "modules": ["atlas", "economy", "mv"],
   "start": { "world": "scripts/xxscreeps/worlds/stocked-far-buffer.json", "seed": 1 },
   "ticks": 5000,
   "assert": [{ "measure": "upgrade", "min": 50000 }]

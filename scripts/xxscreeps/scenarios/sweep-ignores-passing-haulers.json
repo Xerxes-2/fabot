@@ -1,5 +1,6 @@
 {
   "why": "an enemy's hauler crossing a room beside ours that he neither digs nor reserves marks no economy of his: no sweep opens there",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
     "seed": 1,

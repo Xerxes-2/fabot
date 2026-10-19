@@ -1,5 +1,6 @@
 {
   "why": "one living scout patrols two declared claims rivals hold, never standing still, one cast a scout's life",
+  "modules": ["atlas", "economy", "mv", "strategy"],
   "start": {
     "room": "W8N3",
     "seed": 1,

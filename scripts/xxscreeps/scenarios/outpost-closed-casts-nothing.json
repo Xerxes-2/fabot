@@ -1,5 +1,6 @@
 {
   "why": "a declared outpost whose room status is not the colony's (an unopened area) casts no body: the engine leaves a creep on the exit tile into it, so a reserver sent there paces the border until it dies",
+  "modules": ["atlas", "economy", "mv"],
   "start": {
     "world": "scripts/xxscreeps/worlds/closed-outpost.json",
     "seed": 1

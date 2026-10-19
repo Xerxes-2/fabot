@@ -31,7 +31,32 @@ unreviewed=$(jj log --no-graph -r "$branch..$rev" -T \
 npm test
 npm run build
 npm run smoke
-npm run scenario
+
+# Code outside src/core/<module>/ (src/app, core's top-level files, the engine
+# scripts, the build) reaches every module's run, so it runs the whole library.
+changed=$(jj diff --name-only --from "$branch" --to "$rev")
+modules=() scenarios=() full=
+while read -r f; do
+  case "$f" in
+    *.md | src/core/tests/*) ;;
+    src/core/*/*) m=${f#src/core/}; m=${m%%/*}; [ ! -d "src/core/$m" ] || modules+=("$m") ;;
+    scripts/xxscreeps/scenarios/*.json) [ ! -e "$f" ] || { s=${f##*/}; scenarios+=("${s%.json}"); } ;;
+    *) full=${full:-$f} ;;
+  esac
+done <<<"$changed"
+if [ -n "$full" ]; then
+  echo "ship: $full is outside src/core/<module>/: the whole library"
+  npm run scenario
+elif [ ${#modules[@]} -gt 0 ] || [ ${#scenarios[@]} -gt 0 ]; then
+  touched=$(printf '%s\n' "${modules[@]}" | sort -u | paste -sd,)
+  picked=("${scenarios[@]}")
+  [ -z "$touched" ] || picked+=(--modules "$touched")
+  echo "ship: the scenarios of the modules touched (${touched:-none}) and edited (${scenarios[*]:-none})"
+  node scripts/xxscreeps/scenario.mjs "${picked[@]}" --list
+  npm run scenario -- "${picked[@]}"
+else
+  echo "ship: no code changed: no scenarios"
+fi
 
 jj bookmark set "$branch" -r "$rev"
 

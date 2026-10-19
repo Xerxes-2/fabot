@@ -1,5 +1,6 @@
 {
   "why": "a declared outpost nets positive after its bodies and its stand-downs on the Invader waves, and its waves are killed",
+  "modules": ["atlas", "economy", "exchange", "fight", "mv", "tactics"],
   "start": { "room": "W8N3", "seed": 1, "node": "E1" },
   "ticks": 12000,
   "assert": [

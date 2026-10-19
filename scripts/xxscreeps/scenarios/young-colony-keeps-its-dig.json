@@ -1,5 +1,6 @@
 {
   "why": "a young colony's own dig feeds its own growth: a stocked neighbour's haulers never carry it off to their bank",
+  "modules": ["atlas", "economy", "mv"],
   "start": { "world": "scripts/xxscreeps/worlds/young-beside-big.json", "seed": 1 },
   "ticks": 4000,
   "assert": [

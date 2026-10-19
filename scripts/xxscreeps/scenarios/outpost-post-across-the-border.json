@@ -1,5 +1,6 @@
 {
   "why": "the home pick decides an outpost's post: the miner on the post is nearer the colony next door's spawn than its own colony's, so the owner's own colony books it a 297-tick walk home and counts it gone before a successor could walk out, casting a second miner for the post, while the per-tile walk picks the colony next door (15 ticks), keeps the miner it has, and casts nothing. The second body costs 800 energy and 30 spawn ticks: 120 ticks in, the outpost's colony stands at 9 bodies against 5 and 1,600 energy short on upgrading",
+  "modules": ["atlas", "economy", "mv"],
   "start": {
     "world": "scripts/xxscreeps/worlds/outpost-post-across-the-border.json",
     "seed": 1

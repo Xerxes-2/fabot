@@ -1,5 +1,6 @@
 {
   "why": "a siege whose target stands beside the tower, where the towers outstrike any set the bank buys on every way in, closes unstaffed and casts nothing",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-tower-at-target.json",
     "seed": 1,

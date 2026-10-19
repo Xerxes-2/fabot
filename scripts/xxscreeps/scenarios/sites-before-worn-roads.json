@@ -1,5 +1,6 @@
 {
   "why": "a structure that outlives a creep's life waits behind the sites, so a colony taken over with its roads worn builds its links and ramparts and loses no road or container meanwhile",
+  "modules": ["atlas", "economy", "layout", "mv"],
   "start": { "room": "W8N3", "seed": 1, "late": 7, "node": "T7" },
   "ticks": 3000,
   "assert": [

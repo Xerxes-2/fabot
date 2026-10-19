@@ -1,5 +1,6 @@
 {
   "why": "one living scout and two declared rooms side by side: it re-chooses only once off the exit band, so it never bounces on their border",
+  "modules": ["atlas", "economy", "mv", "strategy"],
   "start": { "world": "scripts/xxscreeps/worlds/scout-adjacent-claims.json", "seed": 1 },
   "ticks": 1400,
   "assert": [

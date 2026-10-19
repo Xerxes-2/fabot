@@ -1,5 +1,6 @@
 {
   "why": "a level-0 Invader core that holds an outpost's controller before we reserve it is razed by an engagement that stays open while the room is out of sight, its hold attacked off, and no body is sent to harvest under it",
+  "modules": ["atlas", "economy", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": { "room": "W8N3", "seed": 1, "node": "E1", "core": "W8N2:100" },
   "ticks": 12000,
   "assert": [

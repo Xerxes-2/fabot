@@ -1,5 +1,6 @@
 {
   "why": "a young colony's worker seat is filled only by a body that can reach it: a far colony's surplus worker at home never sits in it",
+  "modules": ["atlas", "economy", "mv"],
   "start": { "world": "scripts/xxscreeps/worlds/young-among-colonies.json", "seed": 1 },
   "ticks": 750,
   "assert": [

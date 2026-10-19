@@ -1,5 +1,6 @@
 {
   "why": "a blob's leader stands on the outpost's border as the raid opens, its mates one and two rows below across it: waiting, it steps in beside them, not up its walk away from them. Seeds 1-4: main 88, the fix 94; the tick short of 100 is the muster's own spread",
+  "modules": ["atlas", "exchange", "fight", "mv", "tactics"],
   "start": { "world": "scripts/xxscreeps/worlds/blob-border-wait.json", "seed": 1 },
   "ticks": 60,
   "assert": [

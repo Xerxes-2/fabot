@@ -1,5 +1,6 @@
 {
   "why": "a colony declared abandoned ships everything its storage, terminal and labs hold to another colony's terminal, the terminal's own energy last",
+  "modules": ["atlas", "economy", "mv"],
   "start": { "world": "scripts/xxscreeps/worlds/abandon-two-colonies.json", "seed": 1 },
   "ticks": 3000,
   "assert": [

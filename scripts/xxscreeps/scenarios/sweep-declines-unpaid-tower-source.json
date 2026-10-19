@@ -1,5 +1,6 @@
 {
   "why": "a sweep declines an enemy home's exposed source under two towers when its kills in sight and the harvest a held seat denies do not pay for the squad that out-heals them: no cast unpaid, no body lost",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
     "seed": 1,

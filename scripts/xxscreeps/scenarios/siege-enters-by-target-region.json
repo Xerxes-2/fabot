@@ -1,5 +1,6 @@
 {
   "why": "a siege set enters its rival's room by the exit whose region holds its target when the walk round costs less than breaking in, and no rampart falls before the target: the NW extractor, reached from the north exit after two rooms' walk round, or from the east through a 1.1M rampart. Breaking in, every body landed walled off and the target fell at 2085; walking round, at 1331. The bound adds 69",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-north.json",
     "seed": 1,

@@ -1,5 +1,6 @@
 {
   "why": "an armed body of a declared ally standing in our home is no hostile: no tower fires on it and no engagement opens, so it stands at the end",
+  "modules": ["exchange", "fight", "layout", "strategy", "tactics"],
   "start": {
     "room": "W8N3",
     "seed": 1,

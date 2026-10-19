@@ -1,5 +1,6 @@
 {
   "why": "no claimer is cast for a declared claim while every room GCL allows is owned",
+  "modules": ["atlas", "economy", "mv", "strategy"],
   "start": {
     "room": "W8N3",
     "seed": 1,

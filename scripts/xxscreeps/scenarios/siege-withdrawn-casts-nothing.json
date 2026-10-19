@@ -1,5 +1,6 @@
 {
   "why": "a siege left open after the owner withdrew its declaration stands off and casts nothing: on the live server a withdrawn siege kept topping up its set into the rival's towers",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-breach.json",
     "seed": 1,

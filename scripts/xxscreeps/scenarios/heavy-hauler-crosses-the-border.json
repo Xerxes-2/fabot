@@ -1,5 +1,6 @@
 {
   "why": "a body on the band it leaves by is carried across rested, never stepping along the band into a landing too tired to step off",
+  "modules": ["atlas", "economy", "mv"],
   "start": { "world": "scripts/xxscreeps/worlds/heavy-border.json", "seed": 1 },
   "ticks": 150,
   "assert": [

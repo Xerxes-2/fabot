@@ -1,5 +1,6 @@
 {
   "why": "an Invader raid no cast answers in a home with no tower spends the safe mode before it kills the economy",
+  "modules": ["atlas", "economy", "exchange", "fight", "mv", "tactics"],
   "start": { "room": "W8N3", "seed": 1, "node": "N1", "invaders": "W8N3:20000:1000", "ended": true },
   "ticks": 1900,
   "assert": [

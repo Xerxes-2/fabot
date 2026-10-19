@@ -1,5 +1,6 @@
 {
   "why": "a sweep's swinging bodies, joined free beside a dismantler and a medic, close on the enemy's unarmed worker and reserver five and more tiles off the source and strike them, rather than stand at the source where no swing reaches",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/sweep-melee-closes.json",
     "seed": 1,

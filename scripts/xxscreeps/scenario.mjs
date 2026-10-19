@@ -8,14 +8,16 @@
 // soak-runs/worlds/, and the bundle under test runs on from it as a deploy
 // would, Memory kept.
 //
-// Usage: npm run scenario -- [name...] [--bot main.js] [--jobs J] [--nightly]
+// Usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly]
 //   name    the scenarios to run (default all but the nightly ones), by file name
+//   --modules  also the scenarios naming any of these modules (directories under src/core)
+//   --list  print the selection and run nothing
 //   --nightly  all of them, with those marked "nightly": a start that needs
 //           the network or a long first run, kept out of `jj ship`
 //   --bot   the bundle (default dist/main.js)
 //   --jobs  soaks at once (default half the cores)
 //
-// A scenario file: { "why": the invariant, "nightly"?, "start": { "room", "seed",
+// A scenario file: { "why": the invariant, "modules": the src/core modules it tests, "nightly"?, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "wave"? (soak's --wave), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
 // "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
 // (soak's --world; crafted ones under worlds/), "seed", "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"?, "name"? }] };
@@ -46,19 +48,31 @@ const names = [];
 const flags = {};
 const rest = process.argv.slice(2);
 for (let i = 0; i < rest.length; i++)
-  if (rest[i] === "--bot" || rest[i] === "--jobs") flags[rest[i]] = rest[++i];
-  else if (rest[i] === "--nightly") flags[rest[i]] = true;
-  else if (rest[i].startsWith("--")) fail("usage: npm run scenario -- [name...] [--bot main.js] [--jobs J] [--nightly]");
+  if (rest[i] === "--bot" || rest[i] === "--jobs" || rest[i] === "--modules") flags[rest[i]] = rest[++i] ?? fail(`${rest[i - 1]} takes a value`);
+  else if (rest[i] === "--nightly" || rest[i] === "--list") flags[rest[i]] = true;
+  else if (rest[i].startsWith("--")) fail("usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly]");
   else names.push(rest[i]);
+
+const CORE = join(REPO, "src/core");
+const modules = readdirSync(CORE).filter((m) => m !== "tests" && statSync(join(CORE, m)).isDirectory());
+const library = readdirSync(LIBRARY)
+  .filter((f) => f.endsWith(".json"))
+  .map((f) => ({ name: basename(f, ".json"), ...JSON.parse(readFileSync(join(LIBRARY, f), "utf8")) }));
+for (const s of library)
+  if (!s.modules?.length || s.modules.some((m) => !modules.includes(m))) fail(`${s.name}: "modules" must name some of ${modules.join(", ")}`);
+for (const n of names) if (!library.some((s) => s.name === n)) fail(`no scenario ${n}; the library: ${library.map((s) => s.name).join(", ")}`);
+const touched = flags["--modules"]?.split(",").filter(Boolean) ?? [];
+for (const m of touched) if (!modules.includes(m)) fail(`no module ${m}; the modules: ${modules.join(", ")}`);
+const meets = (s) => (touched.length ? s.modules.some((m) => touched.includes(m)) : !names.length);
+const scenarios = library.filter((s) => names.includes(s.name) || (meets(s) && (flags["--nightly"] || !s.nightly)));
+if (flags["--list"]) {
+  for (const s of scenarios) console.log(`${s.name}  ${s.modules.join(",")}`);
+  console.log(`${scenarios.length} of ${library.length} scenarios`);
+  process.exit(0);
+}
 const bot = resolve(flags["--bot"] ?? join(REPO, "dist/main.js"));
 if (!existsSync(bot)) fail(`no bundle at ${bot}: npm run build first`);
 const jobs = Number(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / 2)));
-
-const all = readdirSync(LIBRARY).filter((f) => f.endsWith(".json")).map((f) => basename(f, ".json"));
-for (const n of names) if (!all.includes(n)) fail(`no scenario ${n}; the library: ${all.join(", ")}`);
-const scenarios = (names.length ? names : all)
-  .map((name) => ({ name, ...JSON.parse(readFileSync(join(LIBRARY, `${name}.json`), "utf8")) }))
-  .filter((s) => names.length || flags["--nightly"] || !s.nightly);
 
 sweep(join(REPO, "soak-runs"));
 

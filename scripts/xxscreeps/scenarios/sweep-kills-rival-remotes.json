@@ -1,5 +1,6 @@
 {
   "why": "a declared sweep kills a rival's remote miners, haulers and reservers for more energy than it casts",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
     "seed": 1,

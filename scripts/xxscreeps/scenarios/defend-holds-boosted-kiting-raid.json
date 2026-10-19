@@ -1,5 +1,6 @@
 {
   "why": "a kiting raid with boosted TOUGH and HEAL, out of a melee Hold's reach and past the tower's kill, on a home at RCL4 is held: no level or spawn lost, the raiders gone",
+  "modules": ["atlas", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
   "start": {
     "room": "W8N3",
     "seed": 1,

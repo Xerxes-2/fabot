@@ -1,5 +1,6 @@
 {
   "why": "a source whose seats ring it gets its container before the extensions",
+  "modules": ["atlas", "layout"],
   "start": { "room": "W3N1", "seed": 1 },
   "ticks": 14000,
   "assert": [{ "measure": "firstSourceContainer", "max": 2200 }]

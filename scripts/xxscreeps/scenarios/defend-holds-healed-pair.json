@@ -1,5 +1,6 @@
 {
   "why": "a boosted melee body with its boosted healer on a home at RCL4 is held: no level or spawn lost, the pair gone",
+  "modules": ["atlas", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
   "start": {
     "room": "W8N3",
     "seed": 1,

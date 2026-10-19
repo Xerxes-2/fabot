@@ -1,5 +1,6 @@
 {
   "why": "a controller inside its downgrade deadline is upgraded before any task a body already holds: a young colony's workers out on a neighbour's refills come back to it",
+  "modules": ["atlas", "economy", "mv"],
   "start": { "world": "scripts/xxscreeps/worlds/young-among-colonies.json", "seed": 1 },
   "ticks": 1300,
   "assert": [

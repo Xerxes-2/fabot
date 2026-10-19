@@ -1,5 +1,6 @@
 {
   "why": "a level-5 Invader Core stronghold is out of our blob's reach: no set Casting.siege can ask gets to a wall beside the core. Six towers all within range 5 of the core give 3,600 damage a tick on every tile around it, over the most heal Casting.siege can seat (aroundOne 8 medics x 7 HEAL x 12 = 672), so Exchange.breachPlan finds no way in and the ask closes unstaffed. Committed anyway (two 15-pair WORK;MOVE dismantlers, eight 7-pair MOVE;HEAL medics), it is repriced and turned around at the first tick, losing 9 of its 10 bodies by tick 10 with the core at all 100,000 hits. Seeds 1-3 measured dead 9, closed 10, target low 100,000.",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/stronghold-bunker5.json",
     "seed": 1

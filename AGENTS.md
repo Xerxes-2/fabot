@@ -129,7 +129,7 @@ Docs:
 1. `/code-review` has run on the diff and its findings are resolved. Every
    added comment line passes the paraphrase test, or a finding deletes it.
 2. `jj describe` with a conventional-commit subject, one `Fixes #<n>` trailer line per issue and `Reviewed: code-review` (ship.sh refuses a change without it).
-3. `jj ship [-r REV]` (`scripts/ship.sh`): the gates (`npm test`: `cargo fmt --check`, line ceilings, clippy, `cargo test`; then the build, `npm run smoke` and `npm run scenario`), then the `claude.session-branch` bookmark (`main` locally, set once with `jj config set --repo claude.session-branch main`) moved to REV and pushed. Its gates are the pre-push run; don't run `npm test` again before it. A pushed change is immutable.
+3. `jj ship [-r REV]` (`scripts/ship.sh`): the gates (`npm test`: `cargo fmt --check`, line ceilings, clippy, `cargo test`; then the build, `npm run smoke` and `npm run scenario` over the scenarios whose `modules` the change touches, every one when it touches code outside `src/core/<module>/`), then the `claude.session-branch` bookmark (`main` locally, set once with `jj config set --repo claude.session-branch main`) moved to REV and pushed. Its gates are the pre-push run; don't run `npm test` again before it. A pushed change is immutable.
    Before it, `jj log -r 'main..REV'`: every change listed ships.
 4. `npm run deploy` builds, smokes and uploads the bundle to the live server; the first tick after it is a cold reset.
 

@@ -1,5 +1,6 @@
 {
   "why": "a declared siege with nothing left to raze taps the enemy's controller as each upgrade block lapses, so its 20,000-tick downgrade runs out inside 3,200",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declaims-bare-room.json",
     "seed": 1,

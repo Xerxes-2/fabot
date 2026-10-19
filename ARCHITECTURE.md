@@ -644,7 +644,7 @@ everything v1 used its self-written arena for, and more:
   soak of a pinned commit left at tick T, cached once, so a late-game bound
   costs its last N ticks; the bundle under test runs on from it as a deploy
   would), its ticks and bounds on what the soak measured, scenarios on one
-  start sharing one soak; while it is small, `jj ship` runs all of it.
+  start sharing one soak; `jj ship` runs those of the modules a change touches.
 - **Soak.** The real sector's terrain and rooms, from one spawn for thousands
   of ticks: income curve, expansion cadence, losses to NPC waves, CPU curve.
   A change to the economy is read off this curve, not off a unit test. It is
