@@ -476,6 +476,7 @@ impl<'a> Scene<'a> {
         &self,
         e: &Engagement,
         target: &str,
+        declared: bool,
         standing: &BTreeSet<String>,
         aging_out: &BTreeSet<String>,
     ) -> SiegeFacts {
@@ -497,7 +498,7 @@ impl<'a> Scene<'a> {
             razed: self
                 .in_sight(&e.room)
                 .is_some_and(|room| !siege::stands(room, target)),
-            safe: self.in_sight(&e.room).is_some_and(Scene::safe),
+            stood_off: !declared || self.in_sight(&e.room).is_some_and(Scene::safe),
         }
     }
 
@@ -1592,7 +1593,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             let next = match &e.objective {
                 Objective::Defend => defend::step(&scene.facts_of(e, &standing, &aging_out), e),
                 Objective::Siege(target) => {
-                    siege::step(&scene.siege_facts(e, target, &standing, &aging_out), e)
+                    let declared = declarations.sieges.contains(&e.room);
+                    siege::step(
+                        &scene.siege_facts(e, target, declared, &standing, &aging_out),
+                        e,
+                    )
                 }
                 Objective::Sweep => sweep::step(
                     &sweep::Facts {

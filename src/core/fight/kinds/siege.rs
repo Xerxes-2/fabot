@@ -15,8 +15,8 @@ pub struct Facts {
     /// One of ours stands in the rival's room, all of it in its towers' reach.
     pub under_fire: bool,
     pub razed: bool,
-    /// The rival's safe mode runs in its room.
-    pub safe: bool,
+    /// The rival's safe mode runs in its room, or the owner withdrew the siege.
+    pub stood_off: bool,
 }
 
 /// The towers and the whole economy (owner, 2026-10-18).
@@ -111,8 +111,8 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
     } else if e.phase == Phase::Disengaging {
         if facts.home { None } else { Some(e.clone()) }
     // A body lost re-prices the set, which tops itself up (owner, 2026-10-18:
-    // losses are a siege's to expect); a rival safe mode stands it off.
-    } else if facts.safe {
+    // losses are a siege's to expect).
+    } else if facts.stood_off {
         Some(enter(Phase::Disengaging, facts.time, e))
     } else if e.phase == Phase::Forming && !facts.asked && !e.ours.is_empty() {
         Some(enter(Phase::Approaching, facts.time, e))
