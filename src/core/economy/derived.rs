@@ -977,7 +977,7 @@ pub fn of_world(
                 .filter(|g| g.terminal.is_some() && !given_up(&g.room))
                 .map(|g| (g.room.clone(), free_at(&grounds, &g.room)))
                 .max_by_key(|(_, free)| *free);
-            super::abandon::evacuate(&mut grounds[i], room, to);
+            super::abandon::evacuate(&mut grounds[i], room, &world.creeps, to);
         }
     }
 

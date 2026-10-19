@@ -5,7 +5,7 @@
 use crate::core::engine;
 use crate::core::tiles;
 use crate::core::vocabulary::Resource;
-use crate::core::world::{Kind, Room, Structure};
+use crate::core::world::{Creep, Kind, Room, Structure};
 
 use super::derived::Ground;
 
@@ -28,7 +28,7 @@ pub fn left(room: &Room) -> i32 {
 
 /// `to` is the receiving colony and its terminal's free room. Energy ships
 /// last: the terminal's own pays every send's fee.
-pub fn evacuate(g: &mut Ground, room: &Room, to: Option<(String, i32)>) {
+pub fn evacuate(g: &mut Ground, room: &Room, creeps: &[Creep], to: Option<(String, i32)>) {
     g.abandoned = true;
     g.sources.clear();
     g.minerals.clear();
@@ -40,11 +40,11 @@ pub fn evacuate(g: &mut Ground, room: &Room, to: Option<(String, i32)>) {
     g.buffer = None;
     g.feed = None;
     g.receiver = None;
-    let terminal = g.terminal.as_ref().map(|t| t.id.clone());
-    g.stores
-        .retain(|s| !s.kind.is_buffer() && Some(&s.id) != terminal.as_ref());
-
-    // The storage's energy is the stores' draw already.
+    // The storage's energy rides the shipment's draw alone, so no sink
+    // elsewhere outbids the terminal for it.
+    g.stores.retain(|s| {
+        !s.kind.is_buffer() && !room.structures.iter().any(|t| t.id == s.id && shipped(t))
+    });
     g.ores = room
         .structures
         .iter()
@@ -53,18 +53,18 @@ pub fn evacuate(g: &mut Ground, room: &Room, to: Option<(String, i32)>) {
             s.store
                 .held
                 .iter()
-                .filter(|(r, n)| *n > 0 && !(r.is_energy() && s.kind.is_storage()))
+                .filter(|(_, n)| *n > 0)
                 .map(|(r, n)| (s.id.clone(), s.pos.clone(), r.clone(), *n))
         })
         .collect();
 
     let mut owed: Vec<(Resource, i32)> = Vec::new();
-    let stored = g
-        .stores
+    // An ore aboard is still owed, or its carrier finds no terminal to fill.
+    let aboard = creeps
         .iter()
-        .filter(|s| s.kind.is_storage())
-        .map(|s| (Resource::Energy, s.energy));
-    for (r, n) in g.ores.iter().map(|o| (o.2.clone(), o.3)).chain(stored) {
+        .filter(|c| c.owner.is_ours() && c.pos.room == room.name)
+        .flat_map(|c| c.store.held.iter().filter(|(r, _)| !r.is_energy()).cloned());
+    for (r, n) in g.ores.iter().map(|o| (o.2.clone(), o.3)).chain(aboard) {
         match owed.iter_mut().find(|(each, _)| *each == r) {
             Some((_, total)) => *total += n,
             None => owed.push((r, n)),
@@ -75,7 +75,7 @@ pub fn evacuate(g: &mut Ground, room: &Room, to: Option<(String, i32)>) {
         .as_ref()
         .map_or(0, |(home, _)| tiles::rooms_apart(&g.room, home));
     let least = engine::TERMINAL_MIN_SEND + engine::send_cost(engine::TERMINAL_MIN_SEND, apart);
-    owed.retain(|(r, n)| *n > 0 && (!r.is_energy() || *n >= least));
+    owed.retain(|(r, n)| to.is_some() && *n > 0 && (!r.is_energy() || *n >= least));
     owed.sort_by_key(|(r, _)| r.is_energy());
     g.shipment = owed;
     g.ship_to = to.filter(|_| !g.shipment.is_empty());

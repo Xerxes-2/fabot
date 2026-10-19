@@ -304,7 +304,13 @@ fn shipment_offers(offers: &mut Vec<Offer>, ground: &super::derived::Ground) {
     let Some(t) = &ground.terminal else {
         return;
     };
-    let value = price::value_of_rank(price::SURPLUS_RANK);
+    // An evacuation at the stock draw's ceiling, so the walk decides and the
+    // room's own haulers ship it rather than carry it to another's sinks.
+    let value = if ground.abandoned {
+        price::HELD_RATE
+    } else {
+        price::value_of_rank(price::SURPLUS_RANK)
+    };
     for (ore, n) in &ground.shipment {
         let need = (n - t.store.amount_of(ore)).min(t.store.free());
         if need <= 0 {
