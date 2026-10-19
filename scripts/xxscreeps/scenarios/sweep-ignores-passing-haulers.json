@@ -1,0 +1,51 @@
+{
+  "why": "an enemy's hauler crossing a room beside ours that he neither digs nor reserves marks no economy of his: no sweep opens there",
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
+    "seed": 1,
+    "declarations": {
+      "outposts": [],
+      "claims": [],
+      "enemies": [
+        "rival"
+      ],
+      "avoid": [
+        "W8S1"
+      ]
+    },
+    "opponents": [
+      {
+        "name": "rival",
+        "bot": "scripts/xxscreeps/engine/remote",
+        "room": "W8S1",
+        "config": {
+          "remotes": [
+            "W2S1"
+          ],
+          "roles": [
+            "hauler"
+          ]
+        }
+      }
+    ]
+  },
+  "ticks": 3000,
+  "assert": [
+    {
+      "measure": "engagementsOpened",
+      "kind": "sweep",
+      "room": "W3S1",
+      "max": 0
+    },
+    {
+      "measure": "engagementsOpened",
+      "kind": "sweep",
+      "room": "W2S1",
+      "max": 0
+    },
+    {
+      "measure": "faults",
+      "max": 0
+    }
+  ]
+}

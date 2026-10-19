@@ -194,7 +194,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
 | `recorder` | the last ticks' read pass (`app/read.js`), Memory and intel rows, deflated; a tick over a segment spans several, so the ring keeps fewer | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
-| `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK or CARRY body stood there, its keeper lairs and the resource each guards; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
+| `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK body stood there, its keeper lairs and the resource each guards; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
 | `observe.*` | health, faults, per-module CPU, counters | Main, then Observe | segment 1 | operator; calibrates the benchmark |
 | `scouts`, `preyed` | the declared rooms a scout serves; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |

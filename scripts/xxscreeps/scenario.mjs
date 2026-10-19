@@ -183,6 +183,8 @@ const measures = {
   predictedWinsLost: (_, __, dir) => bugs(engagementsOf(dir)).length,
   // Engagements opened: an attack the bot never answered tests nothing.
   engagements: (_, __, dir) => engagementsOf(dir).length,
+  // Priced or not: a sweep that finds nothing opens unanswered.
+  engagementsOpened: (_, a, dir) => rowsOf(dir).filter((e) => (!a.kind || e.kind === a.kind) && (!a.room || e.room === a.room)).length,
   // Acts the engine refused, every kind (the soak's refusals.json).
   refusals: (_, __, dir) => Object.values(JSON.parse(readFileSync(join(dir, "refusals.json"), "utf8"))).reduce((n, c) => n + c, 0),
   // Raids an answered engagement saw die without disengaging.

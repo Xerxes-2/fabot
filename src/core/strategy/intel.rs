@@ -18,7 +18,7 @@ pub struct Row {
     pub level: i32,
     /// The reserver and the tick its hold lapses, so it ends unseen.
     pub reservation: Option<(String, i32)>,
-    /// Whose body seen there carries WORK or CARRY: another's economy.
+    /// Whose economy the room is; a hauler only passes, so WORK alone marks it.
     pub worker: Option<String>,
     /// None on a row written before posts were read: unknown, not none.
     pub lairs: Option<Vec<Post>>,
@@ -54,11 +54,7 @@ pub fn step(world: &World, intel: &mut Intel) {
             // An ally's body is never hunted, so it never hides an enemy's.
             worker: room
                 .hostiles()
-                .find(|h| {
-                    h.body
-                        .iter()
-                        .any(|p| matches!(p.kind, BodyPart::Work | BodyPart::Carry))
-                })
+                .find(|h| h.body.iter().any(|p| p.kind == BodyPart::Work))
                 .and_then(|h| user(&world.me, &h.owner)),
             lairs: Some(Atlas::posts(room)),
         };
