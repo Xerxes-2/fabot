@@ -38,10 +38,24 @@ fn razed(kind: &Kind) -> bool {
     )
 }
 
+/// What razing `s` takes from the rival (owner, 2026-10-19): a fixed order a
+/// price of his loss replaces.
+fn taken(s: &Structure, sources: &[Pos]) -> i32 {
+    match s.kind {
+        Kind::Link if sources.iter().any(|p| p.within(2, &s.pos)) => 4,
+        Kind::Spawn | Kind::Extension | Kind::Tower => 3,
+        Kind::Storage | Kind::Terminal | Kind::Link => 2,
+        Kind::Extractor => 0,
+        _ => 1,
+    }
+}
+
 /// The rival's structure razed next: the one its charged towers strike
 /// least, so the set the bank buys is the cheapest (owner: a tower is razed
 /// whenever that is cheap); then the nearest `near`.
-pub fn next_razed<'a>(structures: &'a [Structure], near: Option<&Pos>) -> Option<&'a Structure> {
+fn next_razed<'a>(room: &'a Room, near: Option<&Pos>) -> Option<&'a Structure> {
+    let structures = &room.structures;
+    let sources: Vec<Pos> = room.sources.iter().map(|s| s.pos.clone()).collect();
     let theirs = || structures.iter().filter(|s| s.owner.is_theirs());
     let struck = |at: &Pos| -> i32 {
         theirs()
@@ -57,6 +71,7 @@ pub fn next_razed<'a>(structures: &'a [Structure], near: Option<&Pos>) -> Option
     theirs().filter(|s| razed(&s.kind)).min_by_key(|s| {
         (
             struck(&s.pos),
+            std::cmp::Reverse(taken(s, &sources)),
             near.and_then(|p| p.range(&s.pos)).unwrap_or(0),
             s.id.clone(),
         )
@@ -69,7 +84,7 @@ fn declaimed(room: &Room) -> Option<&Controller> {
 
 /// Razed first, then the enemy's controller tapped (v1's declaim).
 pub fn next_target(room: &Room, near: Option<&Pos>) -> Option<String> {
-    let razed = next_razed(&room.structures, near).map(|s| &s.id);
+    let razed = next_razed(room, near).map(|s| &s.id);
     razed.or(declaimed(room).map(|c| &c.id)).cloned()
 }
 

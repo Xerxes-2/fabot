@@ -231,6 +231,8 @@ const measures = {
     return e?.razed === undefined ? Infinity : e.razed - e.opened;
   },
   siegeRampartsLost: (_, __, dir) => rowsOf(dir).find((e) => e.kind === "siege")?.rampartsLost ?? Infinity,
+  // 1 when the first siege's first target is of `kind`, else 0.
+  siegeFirstTarget: (_, a, dir) => Number(rowsOf(dir).find((e) => e.kind === "siege")?.firstKind === a.kind),
   siegeWalledEntries: (_, __, dir) => Object.values(rowsOf(dir).find((e) => e.kind === "siege")?.entries ?? {}).filter((s) => s === "walled").length,
   // The least hits a siege's target (a spawn, a core) ever stood at (none seen: Infinity).
   siegeTargetLow: (_, __, dir) => Math.min(Infinity, ...rowsOf(dir).filter((e) => e.kind === "siege" && e.target).map((e) => e.target.low)),

@@ -373,7 +373,8 @@ The other kinds, for the record's sake:
   fire; `Exchange` prices towers and ramparts) → clear → done. Opened on a
   room in `declarations.sieges`, kept in sight by an observer; its target is
   a `Structure` of the towers and the economy, the one its charged towers
-  strike least first, then an enemy's controller, which the biggest CLAIM
+  strike least first and of those the one whose raze costs the rival most
+  (owner, 2026-10-19), then an enemy's controller, which the biggest CLAIM
   body the bank buys taps as each upgrade block lapses (v1's declaim); it
   closes once neither stands. It stands off a rival's safe mode and
   opens again after it (owner, 2026-10-18: a safe mode is spent, not

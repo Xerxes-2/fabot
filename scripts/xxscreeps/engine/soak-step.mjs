@@ -512,7 +512,7 @@ function holds(room, inRoom, from, at) {
   }
   return false;
 }
-// A siege's first target, the tick it fell (`razed`), the ramparts its room
+// A siege's first target and its kind, the tick it fell (`razed`), the ramparts its room
 // lost before, and each body's entry: "target" when the region it landed in
 // holds the target, else "walled".
 function breaching(rec, e, objects, t) {
@@ -521,7 +521,7 @@ function breaching(rec, e, objects, t) {
   rec.first ??= e.target;
   rec.ramparts ??= ramparts;
   const target = inRoom.find((o) => o.id === rec.first);
-  if (target) rec.firstAt = { x: target.pos.x, y: target.pos.y };
+  if (target) [rec.firstAt, rec.firstKind] = [{ x: target.pos.x, y: target.pos.y }, target.structureType];
   else if (rec.firstAt) rec.razed ??= t;
   if (rec.razed === undefined) rec.rampartsLost = rec.ramparts - ramparts;
   const bodies = inRoom.filter((o) => o.body !== undefined && o["#user"] === ours && e.ours.includes(o.name));
