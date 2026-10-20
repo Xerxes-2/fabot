@@ -1,0 +1,26 @@
+{
+  "why": "a declared siege on the live rival room six rooms from our RCL7 colony razes it whole: it opens on the tick a body of ours stands there (the colony is RCL7 and has no observer, and the economy casts no scout past its reach, so the world seats one scout there as the stand-in for the sight our live sweep had, a 1-MOVE body alive its 1,500 ticks), musters six bodies by 501, enters from the north where his ramparts stand off nothing (his lines are at the map's edge and along x=32, none on a structure's tile), and razes first the link carrying his source's energy in at 994, losing no rampart and no body: 69,400 cast while his 2 towers spend their 1,980 energy by 1,100, and our colony's storage falls 114,355 to 85,362. Seeds 1-3 alike: the seed breaks ties and none arose. The bound adds 72",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-rcl6-room-open.json",
+    "seed": 1,
+    "opponents": [
+      {
+        "name": "trepidimous",
+        "bot": "scripts/xxscreeps/engine/rival",
+        "room": "W22S28",
+        "config": { "role": "keep" }
+      }
+    ]
+  },
+  "ticks": 4500,
+  "assert": [
+    { "measure": "engagementsOpened", "kind": "siege", "min": 1 },
+    { "measure": "razeLeft", "max": 0 },
+    { "measure": "siegeFirstRaze", "max": 1066 },
+    { "measure": "siegeFirstTarget", "kind": "link", "min": 1 },
+    { "measure": "siegeRampartsLost", "max": 0 },
+    { "measure": "bodiesLost", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

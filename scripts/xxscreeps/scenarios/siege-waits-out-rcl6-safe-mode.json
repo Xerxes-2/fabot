@@ -1,0 +1,22 @@
+{
+  "why": "a declared siege on the live rival room, whose safe mode has 12,000 ticks left, the 11,417 it has live rounded up so the run stands inside it, casts nothing and loses nothing while it runs: the room is out of every observer we have (our colonies are RCL7) and past the reach the economy casts a scout to, so the world seats one scout in the room as the stand-in for the sight our live sweep had (a 1-MOVE body alive its 1,500 ticks). It is seen from the open, and a rival's safe mode refuses the room, so what a siege on it casts is nothing. 0 cast over 4,500 ticks, seeds 1-3 alike",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-rcl6-room-safe.json",
+    "seed": 1,
+    "opponents": [
+      {
+        "name": "trepidimous",
+        "bot": "scripts/xxscreeps/engine/rival",
+        "room": "W22S28",
+        "config": { "role": "keep" }
+      }
+    ]
+  },
+  "ticks": 4500,
+  "assert": [
+    { "measure": "mostCast", "max": 0 },
+    { "measure": "bodiesLost", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

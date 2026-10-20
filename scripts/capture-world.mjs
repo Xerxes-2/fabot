@@ -1,7 +1,7 @@
 // Read a block of the live world for `npm run soak -- --world` to stand in
 // xxscreeps: each room's terrain and objects as the API serves them, our
-// username, the tick, our Memory, and the outposts named here as v2 declares
-// them (`Memory.v2.declarations`). Read-only: every call is a GET.
+// username, the tick, our Memory and intel rows, and the outposts named here as
+// v2 declares them (`Memory.v2.declarations`). Read-only: every call is a GET.
 //
 // Usage: node --env-file-if-exists=.env scripts/capture-world.mjs <rooms> [--out <file>] [--outposts r1,r2,…] [--claims r1,…] [--terrain <rooms>]
 //   <rooms>     room names and rectangles, comma-separated: W1N1:W3N3 is
@@ -97,6 +97,13 @@ for (const room of captured) {
   for (const [id, u] of Object.entries(objects.users ?? {})) users[id] = u.username;
 }
 const memory = (await get("/api/user/memory", {})).data ?? {};
+// The intel rows are a segment (`ARCHITECTURE.md` §4), so a world stood from
+// this capture reads the rooms we know out of sight when its heap is cold.
+const segments = {};
+for (const id of [2]) {
+  const text = (await get("/api/user/memory-segment", { segment: id })).data;
+  if (text) segments[id] = text;
+}
 const { time: after } = await get("/api/game/time", {});
 
 const declared = (o) => ({ id: o._id, x: o.x, y: o.y });
@@ -107,5 +114,5 @@ const declaredRoom = (name) => {
   return { room: name, controller: declared(controller), sources: objects.filter((o) => o.type === "source").map(declared) };
 };
 const declarations = { outposts: outposts.map(declaredRoom), claims: claims.map(declaredRoom) };
-writeFileSync(out, JSON.stringify({ url, shard, time, username: me.username, userId: me._id, gcl: me.gcl, users, declarations, memory, rooms: captured, terrain: ring }));
+writeFileSync(out, JSON.stringify({ url, shard, time, username: me.username, userId: me._id, gcl: me.gcl, users, declarations, memory, segments, rooms: captured, terrain: ring }));
 console.error(`${captured.length} rooms and ${ring.length} rooms' terrain over ticks ${time}-${after} into ${out}`);

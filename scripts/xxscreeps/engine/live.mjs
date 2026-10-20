@@ -20,7 +20,7 @@ import { createRoomObject } from "xxscreeps/game/object.js";
 import { RoomPosition } from "xxscreeps/game/position.js";
 import { flushUsers } from "xxscreeps/game/room/room.js";
 import { updateUserRoomRelationships } from "xxscreeps/engine/processor/model.js";
-import { saveMemoryBlob } from "xxscreeps/mods/meta/memory/model.js";
+import { saveMemoryBlob, saveMemorySegmentBlob } from "xxscreeps/mods/meta/memory/model.js";
 import { utf16ToBuffer } from "xxscreeps/utility/string.js";
 import { generateRoom } from "xxscreeps/scripts/room-gen.js";
 import * as Creep from "xxscreeps/mods/classic/creep/creep.js";
@@ -303,6 +303,9 @@ for (const r of [...capture.rooms, ...ring]) {
 
 const memory = { ...capture.memory, v2: { ...capture.memory?.v2, declarations: capture.declarations } };
 await saveMemoryBlob(shard, ours, utf16ToBuffer(JSON.stringify(memory)));
+// The intel rows a capture took, so a world knows the rooms it knew out of
+// sight: a declared room's row is what casts the scout that later sees it.
+for (const [id, text] of Object.entries(capture.segments ?? {})) await saveMemorySegmentBlob(shard, ours, Number(id), utf16ToBuffer(text));
 await Promise.all([db.save(), shard.save()]);
 for (const [why, n] of left) warnings.push(`${why} ×${n}: left out`);
 fs.writeFileSync("world.json", JSON.stringify({ time, rooms: names, warnings }, null, 2));
