@@ -518,16 +518,23 @@ pub fn boost_of_name(name: &str) -> Option<Compound> {
     }
 }
 
-/// The lab a body asking for `compound` is boosted from: the one in its room
-/// holding the most of it, ties to the lower id.
+/// The lab a body asking for `compound` is boosted from: one with room for it
+/// holding the most of it, ties to the lower id; a lab holding another mineral
+/// only when none has room, its drain making room.
 pub fn booster<'a>(
     world: &'a World,
     room: &str,
     compound: Compound,
 ) -> Option<&'a super::world::Structure> {
     let held = |s: &super::world::Structure| s.store.amount_of(&Resource::Compound(compound));
+    let most = |a: &&'a super::world::Structure, b: &&'a super::world::Structure| {
+        held(a).cmp(&held(b)).then_with(|| b.id.cmp(&a.id))
+    };
 
-    (labs_in(world, room)).max_by(|a, b| held(a).cmp(&held(b)).then_with(|| b.id.cmp(&a.id)))
+    (labs_in(world, room))
+        .filter(|l| holds_room_for(l, compound))
+        .max_by(most)
+        .or_else(|| labs_in(world, room).max_by(most))
 }
 
 fn labs_in<'a>(world: &'a World, room: &str) -> impl Iterator<Item = &'a super::world::Structure> {
@@ -564,6 +571,14 @@ pub fn home_holds(world: &World, room: &str, compound: Compound) -> (i32, i32) {
     })
 }
 
+/// Whether the lab holds the compound or nothing: a lab holds one mineral, so
+/// another one in it leaves the compound nowhere to land.
+fn holds_room_for(lab: &super::world::Structure, compound: Compound) -> bool {
+    let wanted = Resource::Compound(compound);
+    (lab.store.held.iter())
+        .all(|(r, n)| *n <= 0 || r == &wanted || !super::vocabulary::is_mineral(r))
+}
+
 /// Whether the lab can boost a part now: a boost spends one of each a part.
 fn can_boost(lab: &super::world::Structure, compound: Compound) -> bool {
     lab.store.amount_of(&Resource::Compound(compound)) >= engine::BOOST_MINERAL_PER_PART
@@ -586,47 +601,80 @@ fn boost_need(creep: &super::world::Creep, compound: Compound) -> (i32, i32) {
     )
 }
 
+/// What a body cast with a compound still asks of the lab it walks to: the
+/// lab, the compound, and the mineral and energy its unboosted parts need.
+pub struct Waiting<'a> {
+    pub lab: &'a super::world::Structure,
+    pub compound: Compound,
+    pub mineral: i32,
+    pub energy: i32,
+}
+
+/// The lab a body waits at this tick, and what its parts still ask of it: one
+/// that has room for the compound, while the home holds what the parts ask and
+/// can carry it there. Read afresh every tick, so a colony that cannot serve the
+/// body costs it the compound and never its raid.
+pub fn waiting<'a>(
+    world: &'a World,
+    home: &str,
+    creep: &super::world::Creep,
+) -> Option<Waiting<'a>> {
+    let compound = boost_of_name(&creep.name)?;
+    let (mineral, energy) = boost_need(creep, compound);
+    let (held, fuel) = home_holds(world, home, compound);
+
+    if mineral == 0 || held < mineral || fuel < energy {
+        return None;
+    }
+    let lab = booster(world, home, compound)?;
+    // A colony with nothing left to carry the load fights the body unboosted
+    // rather than stand it at a lab nothing will fill.
+    let carried = can_boost(lab, compound)
+        || (world.creeps.iter()).any(|c| {
+            c.owner.is_ours()
+                && c.pos.room == home
+                && c.name != creep.name
+                && boost_of_name(&c.name).is_none()
+                && c.store.free() > 0
+        });
+    if !holds_room_for(lab, compound) || !carried {
+        return None;
+    }
+
+    Some(Waiting {
+        lab,
+        compound,
+        mineral,
+        energy,
+    })
+}
+
 /// A body whose cast asked for a compound and whose parts do not carry it yet
 /// is held at the lab and boosted there: its module's acts and wish are
-/// dropped for the walk, or the boost itself when it stands beside it. It is
-/// held only while the home holds what its parts ask of the compound and the
-/// energy to spend, so a stock that ran out costs the body its compound and
-/// never its raid.
+/// dropped for the walk, or the boost itself when it stands beside it.
 fn boost_stop(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
     let Some((home, _)) = &context.declarations.labs else {
         return intents;
     };
     let home = home.clone();
-    let mut waiting: Vec<(String, Pos, String, Compound)> = Vec::new();
+    let mut stalls: Vec<(String, Pos, String, Compound)> = Vec::new();
 
     for creep in (context.world.creeps.iter()).filter(|c| c.owner.is_ours() && c.pos.room == home) {
-        let Some(compound) = boost_of_name(&creep.name) else {
-            continue;
-        };
-        let (mineral, energy) = boost_need(creep, compound);
-        let (held, fuel) = home_holds(context.world, &home, compound);
-
-        if mineral == 0 || held < mineral || fuel < energy {
-            continue;
-        }
-        if let Some(lab) = booster(context.world, &home, compound) {
-            waiting.push((
+        if let Some(w) = waiting(context.world, &home, creep) {
+            stalls.push((
                 creep.name.clone(),
-                lab.pos.clone(),
-                lab.id.clone(),
-                compound,
+                w.lab.pos.clone(),
+                w.lab.id.clone(),
+                w.compound,
             ));
         }
     }
 
-    if waiting.is_empty() {
+    if stalls.is_empty() {
         return intents;
     }
 
-    let stalling: BTreeSet<&str> = waiting
-        .iter()
-        .map(|(name, _, _, _)| name.as_str())
-        .collect();
+    let stalling: BTreeSet<&str> = stalls.iter().map(|(name, _, _, _)| name.as_str()).collect();
     let mut out: Vec<Intent> = (intents.into_iter())
         .filter(|i| {
             let actor = i.actor();
@@ -636,14 +684,14 @@ fn boost_stop(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
 
     let mut boostable: BTreeSet<&str> = BTreeSet::new();
     for lab in labs_in(context.world, &home) {
-        for compound in waiting.iter().map(|(_, _, _, c)| c) {
+        for compound in stalls.iter().map(|(_, _, _, c)| c) {
             if can_boost(lab, *compound) {
                 boostable.insert(lab.id.as_str());
             }
         }
     }
 
-    for (name, at, lab, _) in &waiting {
+    for (name, at, lab, _) in &stalls {
         let Some(creep) = context.world.creeps.iter().find(|c| &c.name == name) else {
             continue;
         };

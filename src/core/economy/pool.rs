@@ -280,6 +280,40 @@ fn lab_offers(offers: &mut Vec<Offer>, ground: &super::derived::Ground, plan: &s
     }
 }
 
+/// A waiting cast's lab: the compound its parts still ask and the energy to
+/// spend with it, carried from the home's stores as a reagent is.
+fn boost_offers(offers: &mut Vec<Offer>, ground: &super::derived::Ground) {
+    let Some(b) = &ground.boost_lab else {
+        return;
+    };
+    // A body standing at the lab is a body not fighting: the load ranks above
+    // the surplus hauling the stock else waits on.
+    let value = price::value_of_rank(price::BAND_RANKS);
+
+    for (resource, need) in [(&b.compound, b.mineral), (&Resource::Energy, b.energy)] {
+        if need > 0 {
+            offers.push(offer(
+                Task::Refill(b.id.clone(), resource.clone()),
+                &b.pos,
+                value,
+                Capacity::Load(need),
+            ));
+        }
+    }
+
+    for (store, pos, resource, amount) in &ground.ores {
+        if resource != &b.compound {
+            continue;
+        }
+        offers.push(offer(
+            Task::Withdraw(store.clone(), resource.clone()),
+            pos,
+            price::HELD_RATE,
+            Capacity::Load(b.mineral.min(*amount)),
+        ));
+    }
+}
+
 /// The energy the terminal keeps for its shipment's fee, a hundred over as
 /// v1's feeReserve since the fee rounds up per send, and the energy it ships.
 fn fee_reserve(ground: &super::derived::Ground) -> i32 {
@@ -526,6 +560,7 @@ pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignme
         if let Some(plan) = &ground.lab_plan {
             lab_offers(&mut offers, ground, plan);
         }
+        boost_offers(&mut offers, ground);
         shipment_offers(&mut offers, ground);
 
         let mut hungriest = 0.0f64;

@@ -231,6 +231,9 @@ pub struct Ground {
     pub ores: Vec<(String, Pos, Resource, i32)>,
     /// Only the declared cluster's home has one.
     pub lab_plan: Option<super::labs::Plan>,
+    /// The lab a cast waiting at home is boosted from, and what its parts
+    /// still ask of the compound and the energy to spend with it.
+    pub boost_lab: Option<BoostLab>,
     pub terminal: Option<TerminalFact>,
     /// What this colony sends, and the colony and its terminal's free room.
     pub shipment: Vec<(Resource, i32)>,
@@ -242,6 +245,16 @@ impl Ground {
     pub fn has_storage(&self) -> bool {
         self.stores.iter().any(|s| s.owned)
     }
+}
+
+/// The lab a waiting body walks to, and what the colony's stores owe it.
+#[derive(Clone, Debug)]
+pub struct BoostLab {
+    pub id: String,
+    pub pos: Pos,
+    pub compound: Resource,
+    pub mineral: i32,
+    pub energy: i32,
 }
 
 /// A resource, not a decider (`ARCHITECTURE.md` §2).
@@ -747,6 +760,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             })
             .collect(),
         lab_plan: None,
+        boost_lab: None,
         terminal: room
             .structures
             .iter()
@@ -954,14 +968,16 @@ pub fn of_world(
     {
         // The lab a body waiting at home is boosted from is the cast's and not
         // a reaction's: its compound is kept while the body still lacks it.
-        let kept: BTreeSet<String> = (world.creeps.iter())
+        let kept: BTreeMap<String, Resource> = (world.creeps.iter())
             .filter(|c| &c.pos.room == home)
-            .filter_map(|c| tick::boost_of_name(&c.name))
-            .filter_map(|compound| tick::booster(world, home, compound))
-            .map(|lab| lab.id.clone())
+            .filter_map(|c| {
+                let compound = tick::boost_of_name(&c.name)?;
+                let lab = tick::booster(world, home, compound)?;
+                Some((lab.id.clone(), Resource::Compound(compound)))
+            })
             .collect();
         let labs: Vec<(String, Pos)> = (g.labs.iter())
-            .filter(|l| !kept.contains(&l.id))
+            .filter(|l| !kept.contains_key(&l.id))
             .map(|l| (l.id.clone(), l.pos.clone()))
             .collect();
         let held = |id: &str| {
@@ -988,7 +1004,54 @@ pub fn of_world(
                     .map(|c| c.store.amount_of(r))
                     .sum::<i32>()
         };
-        g.lab_plan = Some(super::labs::plan_for(targets, &stock, &labs, &held));
+        let mut plan = super::labs::plan_for(targets, &stock, &labs, &held);
+        let lab_at = |id: &str| {
+            (world.rooms.iter())
+                .filter(|r| &r.name == home)
+                .flat_map(|r| r.structures.iter())
+                .find(|s| s.id == id)
+        };
+        // A lab holds one mineral: whatever else a body's booster holds is
+        // drained, or the compound it waits on has nowhere to land. The
+        // booster's own drain, so a cluster too small to run a reaction
+        // still empties it.
+        for (id, compound) in &kept {
+            let Some(lab) = lab_at(id) else {
+                continue;
+            };
+            for (r, n) in &lab.store.held {
+                if *n > 0 && r != compound && crate::core::vocabulary::is_mineral(r) {
+                    plan.drains.push((id.clone(), r.clone()));
+                }
+            }
+        }
+        g.lab_plan = Some(plan);
+        // The lab a waiting cast is boosted from is stocked from the home's
+        // stores: the reaction refuses it as a lab of its own.
+        let mut waited: BTreeMap<&str, (Resource, i32, i32)> = BTreeMap::new();
+        for creep in (world.creeps.iter()).filter(|c| &c.pos.room == home) {
+            let Some(w) = tick::waiting(world, home, creep) else {
+                continue;
+            };
+            let at =
+                waited
+                    .entry(w.lab.id.as_str())
+                    .or_insert((Resource::Compound(w.compound), 0, 0));
+            at.1 += w.mineral;
+            at.2 += w.energy;
+        }
+        g.boost_lab = waited
+            .into_iter()
+            .find_map(|(id, (compound, mineral, energy))| {
+                let lab = lab_at(id)?;
+                Some(BoostLab {
+                    id: id.to_string(),
+                    pos: lab.pos.clone(),
+                    compound: compound.clone(),
+                    mineral: mineral - lab.store.amount_of(&compound),
+                    energy: energy - lab.store.amount_of(&Resource::Energy),
+                })
+            });
         let mut short = super::labs::ore_short(targets, &stock);
         let home_free = free_at(&grounds, home);
 

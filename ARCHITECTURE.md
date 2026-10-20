@@ -266,6 +266,14 @@ Economy serves declarations it did not make: a `Mine room` from `KeeperDuty`, a
 `Claim room` from Strategy (the claimer and pioneers are economy bodies until a
 spawn stands).
 
+The cluster the operator declares (`declarations.labs`: a home and the stock it
+keeps of each compound) reacts toward those targets: `labs::plan_for` picks the
+reaction, its reagent pair and its outputs from the labs' tiles alone and names
+every fill and drain, re-derived each tick from the stocks so no plan is a
+state. A lab a cast waits at is out of the plan (§6.5) and what that cast's
+parts still ask is `Ground::boost_lab`: the compound and the energy, drawn from
+the home's stores by the pool as any other load.
+
 A colony declared `abandon` (owner, 2026-10-18: given up once its mineral is
 dug out) digs, builds and upgrades nothing past its downgrade deadline, casts
 only its supply floor, and ships what its storage, terminal and labs hold to
@@ -503,6 +511,15 @@ out of our rooms with carries a HEAL (owner), bar a siege's dismantlers, which
 its medics cover: it heals the damage it is shot for instead of losing that
 MOVE to it a walk at a time. A home's Defend is priced without one, beside its
 towers.
+
+A body the declared cluster's stock covers is cast with its compound in its
+name (`fight-<tick>-<engagement>-<slot>-<compound>`): the name is the request,
+so no Memory row is added for it. `Tick` settles the body at the home's lab
+before its work, and the economy fills that lab from the home's stores. The
+hold is a fact of the tick, never a timer: it stands only while the parts still
+lack the compound, the home holds it with the energy to spend, and a body in
+the room can carry it there — a colony that cannot serve the body leaves it to
+fight unboosted.
 
 ## 7. Strategy (new)
 
@@ -845,7 +862,7 @@ empty:
 |---|---|---|
 | M1 economy | the rest of v1's economy mechanisms | the seat-extreme soak beats v1's bundle in both classes, on a second seed |
 | M1b outposts | declared outposts: reservation, remote harvest and haul, before M2 because RCL6+ structures spend more than a home's two sources give. No fighting before M3: a player's armed hostile in an outpost stands it down while it can reach the room's work — its sources and containers — and no longer; an Invader's raid, whose only aim is that work, stands it down on sight; a stronghold core stands it down outright; and one last seen in a room gone blind stands it down for its life (`sightings`; the owner's choice over porting a guard early, and over a claimer probing a blind room; the split by owner is the owner's too, 2026-10-20, as in v1's ADR 0043: an Invader's raid is read to its life, a player's to where it stands); M3's `Defend` walks its set there once it stands, which brings the room back in sight | node E1 (with timed Invader waves): each outpost nets positive after its bodies and its stand-downs |
-| M2 structures | node builder (N1–N4) ✅, links ✅ (the controller's and the longest-way source's first: +5–17k worth over 20k ticks on N4; hub-first broke even, as v1's arithmetic said), node N5 ✅; labs, factory, the RCL8 set wait for a sink (owner's call: one room mines one ore, a reaction needs two, offline has no market, and v1 mined only for fight boosts) | links: the node beats the economy without them; the rest: judged with their sink, M3's boosts or several colonies |
+| M2 structures | node builder (N1–N4) ✅, links ✅ (the controller's and the longest-way source's first: +5–17k worth over 20k ticks on N4; hub-first broke even, as v1's arithmetic said), node N5 ✅; labs ✅ (the declared cluster reacts toward its targets, and the boost a cast asks for in its name is its sink, §6.5); factory and the RCL8 set wait for a sink (owner's call: one room mines one ore, a reaction needs two, offline has no market) | links: the node beats the economy without them; the rest: judged with their sink, M3's boosts or several colonies |
 | M3 defence | `Exchange` ✅, `Defend` ✅ (scenario `defend-kills-home-raid`), the first tactics ✅, casting ✅, the opponents harness ✅ (`two-v2-neighbours`), scripted raids and TooAngel held ✅ (`defend-holds-*`) | self-play and the fixed opponents held; the prediction error within bound (§10.1) |
 | M4 live | v2 replaces v1 | ❓ the owner decides from progress |
 | M5 reach | `Strategy` over many colonies, the offensive kinds | the end in §0 |
@@ -860,7 +877,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 | `Core/Atlas.fs`, `Grid.fs`, `Geometry.fs` | `core/atlas/` | ✅ tile index `y*50+x` (the terrain buffer's), the flood, footprint on every query, a minimal room graph, the flood table. Known gaps: a route is chosen without the footprint (a Quad can be routed through a one-tile gap); boosted CARRY is priced unboosted. `TileSet` waits for its first reader |
 | `Decide/Resolver.fs` | `core/mv/` | ✅ arbitration (two-tier eviction, best chain, displacer's onward last) and `Plan` wishes; re-derived each tick from `Atlas.firstStep` (§1's "path" key is not stored). Fight steps ✅ in `fight/tactics.rs` (kite, close and pursue, retreat), without v1's threat maps; formation stepping comes with `Siege` |
 | `Decide/Pool, Matcher, Planner, Quota, Spawns, Price, Bodies` | `core/economy/` | ✅ one world pool, matcher, quota and casts, wired as the `economy` module (`economy/run.rs`): match, cast, act in range, wish toward the target; assignments in `Memory.v2.assignments`. The RCL2–4 chain: a harvester on each source's post, haulers from built containers, the controller's buffer and its upgraders, the surplus split between upgraders and workers after the reserve (§5, `declarations.reserve`). Declared outposts (`declarations.outposts`) are worked while no armed one in the room reaches their work, and while no armed one last seen in a blind room outlives the tick. Known gaps: claims are not yet declared; cross-room travel prices each room between at a room's side |
-| `Decide/Labs, Layout` | `Economy`, `Layout` | Layout ✅ in the tick after `economy`: a standing plan per room, sites in plan order as the level allows, towers on hostiles. Labs ⏳ |
+| `Decide/Labs, Layout` | `Economy`, `Layout` | Layout ✅ in the tick after `economy`: a standing plan per room, sites in plan order as the level allows, towers on hostiles. Labs ✅: the cluster's reaction plan per tick and the boost a cast asks for (§5, §6.5) |
 | `Types/Colonies.fs` declarations, `allies` | `declarations` data | not ported as code; the current rooms seed the first `declarations`. ✅ `declarations.allies` (player names): an ally's creeps leave `Hostiles` as the world is read, so nothing answers them |
 | `Decide/Facts.fs:2883–4056, 1038–1582, 2153–2196`, `Fighter.fs`, `Arrival.fs` | `Exchange` | ✅ `core/exchange/`; `npm run exchange` is §10.1's generated set |
 | `Decide/Emitter.fs` strike/heal/glue | `core/tactics` | ✅ the strike (swing, shot, volley where it outdeals the shot) and the heal reflex; glue ported into Hunt (a body beside a mark that may step wishes onto its tile; `Tick` sends that move unarbitrated) |

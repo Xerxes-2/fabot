@@ -227,7 +227,9 @@ pub fn price(
     let set: Vec<Body> = if wins(stance, ours, theirs, terrain) {
         Vec::new()
     } else {
-        exchange::cheapest_win(stance, ours, bodies, copies_of, tick_worth, theirs, terrain, boost)?
+        exchange::cheapest_win(
+            stance, ours, bodies, copies_of, tick_worth, theirs, terrain, boost,
+        )?
     };
 
     let mut landed = ours.clone();
