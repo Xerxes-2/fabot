@@ -8,9 +8,9 @@
     "opponents": [
       {
         "name": "rival",
-        "bot": "scripts/xxscreeps/engine/keep",
+        "bot": "scripts/xxscreeps/engine/rival",
         "room": "W8S1",
-        "config": { "safeMode": "extension" }
+        "config": { "role": "keep", "safeMode": "extension" }
       }
     ]
   },

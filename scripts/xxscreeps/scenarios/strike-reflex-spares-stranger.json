@@ -5,8 +5,8 @@
     "world": "scripts/xxscreeps/worlds/strike-reflex.json",
     "seed": 1,
     "opponents": [
-      { "name": "rival", "bot": "scripts/xxscreeps/engine/pass", "room": "W2N1" },
-      { "name": "passer", "bot": "scripts/xxscreeps/engine/pass", "room": "W2N1" }
+      { "name": "rival", "bot": "scripts/xxscreeps/engine/rival", "room": "W2N1", "config": { "role": "pass" } },
+      { "name": "passer", "bot": "scripts/xxscreeps/engine/rival", "room": "W2N1", "config": { "role": "pass" } }
     ]
   },
   "ticks": 40,

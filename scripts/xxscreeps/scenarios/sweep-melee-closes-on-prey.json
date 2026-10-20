@@ -4,7 +4,7 @@
   "start": {
     "world": "scripts/xxscreeps/worlds/sweep-melee-closes.json",
     "seed": 1,
-    "opponents": [{ "name": "rival", "bot": "scripts/xxscreeps/engine/pass", "room": "W2N1" }]
+    "opponents": [{ "name": "rival", "bot": "scripts/xxscreeps/engine/rival", "room": "W2N1", "config": { "role": "pass" } }]
   },
   "ticks": 150,
   "assert": [

@@ -99,7 +99,7 @@ Docs:
 - An offence scenario (siege, sweep, drain: anything that attacks a rival)
   seats a real bot as the rival, Hivemind or TooAngel (`start.opponents`):
   what an offence pays is proven against a bot that spawns, works and fights
-  back. A scripted rival (`engine/keep`, `engine/remote`, `engine/drain`, …)
+  back. A scripted rival (`engine/rival`'s roles)
   checks only that the plan runs as planned (raze order, positioning, gate
   tile), and its `why` says why a real bot does not fit.
 - An `Exchange` change is verified by the prediction error on the generated

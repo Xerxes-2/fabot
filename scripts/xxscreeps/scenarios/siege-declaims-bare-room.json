@@ -4,7 +4,7 @@
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declaims-bare-room.json",
     "seed": 1,
-    "opponents": [{ "name": "rival", "bot": "scripts/xxscreeps/engine/keep", "room": "W8S1", "config": { "focus": "soft" } }]
+    "opponents": [{ "name": "rival", "bot": "scripts/xxscreeps/engine/rival", "room": "W8S1", "config": { "role": "keep", "focus": "soft" } }]
   },
   "ticks": 3200,
   "assert": [

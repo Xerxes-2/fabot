@@ -8,8 +8,9 @@
     "opponents": [
       {
         "name": "raider",
-        "bot": "scripts/xxscreeps/engine/raid",
+        "bot": "scripts/xxscreeps/engine/rival",
         "room": "W7N3",
+        "config": { "role": "raid" },
         "raid": { "first": 1500, "bodies": [{ "tough": 2, "move": 9, "ranged_attack": 4, "heal": 3, "boosts": { "tough": "XGHO2", "heal": "XLHO2" } }, { "tough": 2, "move": 9, "ranged_attack": 4, "heal": 3, "boosts": { "tough": "XGHO2", "heal": "XLHO2" } }] }
       }
     ]

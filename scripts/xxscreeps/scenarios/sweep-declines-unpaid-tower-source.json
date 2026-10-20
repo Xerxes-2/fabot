@@ -17,9 +17,10 @@
     "opponents": [
       {
         "name": "rival",
-        "bot": "scripts/xxscreeps/engine/remote",
+        "bot": "scripts/xxscreeps/engine/rival",
         "room": "W8S1",
         "config": {
+          "role": "remote",
           "remotes": [
             "W8S1"
           ]

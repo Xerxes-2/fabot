@@ -8,9 +8,9 @@
     "opponents": [
       {
         "name": "harasser",
-        "bot": "scripts/xxscreeps/engine/harass",
+        "bot": "scripts/xxscreeps/engine/rival",
         "room": "W8N4",
-        "config": { "targets": ["W7N3", "W8N2", "W8N3"] },
+        "config": { "role": "harass", "targets": ["W7N3", "W8N2", "W8N3"] },
         "raid": { "first": 1500, "every": 500, "bodies": [{ "move": 4, "ranged_attack": 2, "heal": 2 }, { "move": 4, "ranged_attack": 2, "heal": 2 }] }
       }
     ]

@@ -8,8 +8,9 @@
     "opponents": [
       {
         "name": "friend",
-        "bot": "scripts/xxscreeps/engine/pass",
+        "bot": "scripts/xxscreeps/engine/rival",
         "room": "W7N3",
+        "config": { "role": "pass" },
         "ally": true,
         "raid": { "first": 100, "bodies": [{ "move": 4, "ranged_attack": 4 }] }
       }

@@ -730,9 +730,11 @@ everything v1 used its self-written arena for, and more:
   this is the only offline test offence has. ✅ A scenario seats opponents
   beside ours (`start.opponents`: a bundle or a bot directory, each in its
   own room; ours without the engine's safe mode); `two-v2-neighbours` seats
-  a second v2, a smoke test until v2 has an offensive kind. A scripted raid
-  (`engine/raid/`, ours: a gun kites, a swing closes, a healer keeps to the
-  hurt) has its bodies and boosts stood on our room's edge at its tick
+  a second v2, a smoke test until v2 has an offensive kind. The scripted
+  rivals are one library, `engine/rival/`: `opponent.js`'s { role } picks a
+  behaviour list — keep, remote, raid, drain, harass, pass — over its own
+  keys, and the roles share one tower aim, one walk and one room economy. A
+  raid's bodies and boosts are stood on our room's edge at its tick
   (`opponents[].raid`). Held is: no level or spawn lost and the raid gone
   by the window's end (`defend-holds-*`, N3: a kiting raid,
   a healed pair,

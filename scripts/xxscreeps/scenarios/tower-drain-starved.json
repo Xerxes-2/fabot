@@ -8,9 +8,9 @@
     "opponents": [
       {
         "name": "drainer",
-        "bot": "scripts/xxscreeps/engine/drain",
+        "bot": "scripts/xxscreeps/engine/rival",
         "room": "W7N3",
-        "config": { "target": "W8N3" },
+        "config": { "role": "drain", "target": "W8N3" },
         "raid": { "first": 1500, "bodies": [{ "move": 25, "heal": 25 }, { "move": 25, "heal": 25 }] }
       }
     ]
