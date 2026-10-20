@@ -470,7 +470,7 @@ five from v1's step functions, the rest come with their kinds:
 | Formation | new: `Move` steps a 2×2 footprint as one body |
 | Dismantle | v1 `actionIntents` sapper branch: dismantle the plan's target |
 | EdgeDance | new |
-| Hunt | new (ibex EV): best of nine tiles, worth less netted damage, the worth read over where each mark may stand next tick (one still last tick stays, one that stepped steps on, by `fight.groups`; none under its rampart or over the edge; one that crossed the border last tick back on its tile), or onto a mark beside it that may step (v1's glue); strikes most worth in reach |
+| Hunt | new (ibex EV): best of nine tiles, worth less netted damage, the worth read over where each mark may stand next tick (one still last tick stays, one that stepped steps on, by `fight.groups`; none under its rampart or over the edge), or onto a mark beside it that may step (v1's glue); strikes most worth in reach; an unarmed mark on the gate, read off its last tick rather than a trajectory, is worth a strike that lands now, never a goal or a step (v1's `catchOdds`) |
 
 A tactic decides the step (a Dismantle its dismantle too). The strike reflex
 runs for every body with ATTACK or RANGED_ATTACK, in every phase, inside or

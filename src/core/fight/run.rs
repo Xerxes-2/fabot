@@ -303,42 +303,27 @@ impl<'a> Scene<'a> {
                     .collect(),
             }
         };
-        let mut marks: Vec<tactics::Mark> = prey
-            .iter()
-            .copied()
-            .chain(&escort)
-            .map(|c| tactics::Mark {
+        // A body on the gate, standing there or back on it, is carried across
+        // as we come: v1's `catchOdds`, a strike before it leaves, no walk.
+        let dances = |c: &Creep| {
+            tiles::on_edge(tiles::of_pos(&c.pos))
+                && before(&c.id)
+                    .is_none_or(|p| p.room == c.pos.room && tiles::on_edge(tiles::of_pos(p)))
+        };
+        let mut marks: Vec<tactics::Mark> = (prey.iter().copied())
+            .map(|c| (c, true))
+            .chain(escort.iter().map(|c| (c, false)))
+            .map(|(c, unarmed)| tactics::Mark {
                 id: c.id.clone(),
                 pos: c.pos.clone(),
                 worth: sweep::worth(c),
                 hits: c.hits,
                 massed: true,
                 shielded: shields.contains(&tiles::of_pos(&c.pos)),
+                fleeting: unarmed && dances(c),
                 next: flight(c),
             })
             .collect();
-        // One that stepped over the border last tick, which the engine carries
-        // back onto the tile it left by: worth nothing until it stands here.
-        let seen: BTreeSet<&String> = self.foes[&room.name].iter().map(|h| &h.id).collect();
-        marks.extend(
-            (was.iter())
-                .filter(|g| g.last_seen == self.world.time - 1 && g.members.len() == 1)
-                .filter(|g| g.centre.room == room.name && tiles::on_edge(tiles::of_pos(&g.centre)))
-                .filter(|g| {
-                    g.members
-                        .iter()
-                        .all(|m| !seen.contains(m) && !self.armed.contains(m))
-                })
-                .map(|g| tactics::Mark {
-                    id: g.id.to_string(),
-                    pos: g.centre.clone(),
-                    worth: 0,
-                    hits: 1,
-                    massed: false,
-                    shielded: false,
-                    next: vec![Some(g.centre.clone())],
-                }),
-        );
         marks.extend(
             room.structures
                 .iter()
@@ -351,6 +336,7 @@ impl<'a> Scene<'a> {
                     hits: s.hits,
                     massed: !s.kind.is_container(),
                     shielded: shields.contains(&tiles::of_pos(&s.pos)),
+                    fleeting: false,
                     next: vec![shot(tiles::of_pos(&s.pos))],
                 }),
         );

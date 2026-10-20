@@ -30,7 +30,10 @@ function keep(config) {
 // remote: a room working { remotes: [room, …] }, its home among them to mine its
 // own source; { roles } the roles it keeps (default all), { shift } the ticks
 // each remote is worked alone in turn (default all at once), { flee } the range
-// a remote body runs from an armed one (default never).
+// a remote body runs from an armed one (default never), { bounce } the range at
+// which it leaves the remote by the exit toward home, steps one tile in there to
+// shed that step's fatigue, waits it out and walks back: a live body's few ticks,
+// where an idle one on the gate is carried back in two.
 const BODIES = {
   filler: [CARRY, CARRY, CARRY, CARRY, MOVE, MOVE],
   miner: [WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE],
@@ -60,6 +63,31 @@ function hauler(c, home) {
   if (pile && c.pickup(pile) === ERR_NOT_IN_RANGE) c.moveTo(pile);
 }
 
+const onEdge = (p) => p.x === 0 || p.x === 49 || p.y === 0 || p.y === 49;
+const OPPOSITE = { 1: 5, 2: 6, 3: 7, 4: 8, 5: 1, 6: 2, 7: 3, 8: 4 };
+const exitTo = (room, next) => {
+  const exits = Game.map.describeExits(room) ?? {};
+  return Object.keys(exits).find((dir) => exits[dir] === next);
+};
+
+// bounce: the engine carries a body ending its tick on the gate across, so
+// staying out takes a step inside and the fatigue that step costs.
+function bounce(config, c, home) {
+  const remote = c.memory.remote;
+  if (!remote || c.memory.role === "filler") return false; // a filler's remote is home
+  const inRemote = c.room.name === remote;
+  if (inRemote) c.memory.away = c.pos.findInRange(FIND_HOSTILE_CREEPS, config.bounce).some(armed);
+  if (!c.memory.away) return false;
+  const out = exitTo(c.room.name, inRemote ? home.name : remote);
+  if (out === undefined) return false;
+  if (c.fatigue > 0) return true;
+  if (inRemote && !onEdge(c.pos)) c.moveTo(new RoomPosition(25, 25, home.name));
+  else if (inRemote) return true; // on the gate: the engine carries it across
+  else if (onEdge(c.pos)) c.move(OPPOSITE[out]);
+  else c.moveTo(new RoomPosition(25, 25, remote));
+  return true;
+}
+
 // A body the rival did not spawn (a soak's raid) guards the room it stands in.
 function guard(c) {
   const foe = c.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
@@ -82,6 +110,7 @@ function remote(config) {
   }
   const creeps = Object.values(Game.creeps);
   for (const c of creeps) {
+    if (config.bounce && bounce(config, c, home)) continue;
     const near = config.flee && c.memory.remote ? c.pos.findInRange(FIND_HOSTILE_CREEPS, config.flee).filter(armed) : [];
     if (near.length) flee(c, near, config.flee + 1);
     else ({ filler, miner, hauler, reserver }[c.memory.role] ?? guard)(c, home);
@@ -143,7 +172,6 @@ function raid() {
 
 // drain: { target }, bodies one tile inside its edge healing each other, home
 // under half hits and back once healed.
-const onEdge = (p) => p.x === 0 || p.x === 49 || p.y === 0 || p.y === 49;
 const inward = (p) => (p.x === 0 ? RIGHT : p.x === 49 ? LEFT : p.y === 0 ? BOTTOM : TOP);
 const toward = (creep, room) => creep.moveTo(new RoomPosition(25, 25, room), { reusePath: 0 });
 

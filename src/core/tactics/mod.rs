@@ -889,6 +889,8 @@ pub struct Mark {
     pub hits: i32,
     pub massed: bool,
     pub shielded: bool,
+    /// It leaves the room in a step: a strike that lands now, never a step.
+    pub fleeting: bool,
     /// Each tile it may stand on next tick, its own first; None where no
     /// shot lands.
     pub next: Vec<Option<Pos>>,
@@ -963,8 +965,12 @@ pub fn hunt(
         engine::MELEE_RANGE
     };
     let mut goal = target_at(sight, centre, reach);
-    if !marks.is_empty() {
-        goal.tiles = marks.iter().map(|m| tiles::of_pos(&m.pos)).collect();
+    let targets: Vec<Tile> = (marks.iter())
+        .filter(|m| m.worth > 0 && !m.fleeting)
+        .map(|m| tiles::of_pos(&m.pos))
+        .collect();
+    if !targets.is_empty() {
+        goal.tiles = targets;
     }
     if !contact {
         let on = plan::toward(sight.atlas, c, mover_of(c), &goal, WEIGHT);

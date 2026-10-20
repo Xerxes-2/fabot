@@ -1,0 +1,35 @@
+{
+  "why": "a rival's remote body carried over the border as our set comes is worth a strike while it is in reach, never a walk to the gate: our set works the room for the prey it can catch and is not drawn back each tick the bouncer returns; the bounce is the scripted rival's, a fixed range and a step in, where a real bot's crossings keep its own economy's time and no seed",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
+    "seed": 1,
+    "declarations": {
+      "outposts": [],
+      "claims": [],
+      "enemies": ["rival"],
+      "avoid": ["W8S1"]
+    },
+    "opponents": [
+      {
+        "name": "rival",
+        "bot": "scripts/xxscreeps/engine/rival",
+        "room": "W8S1",
+        "config": {
+          "role": "remote",
+          "remotes": ["W7S1"],
+          "bounce": 5
+        }
+      }
+    ]
+  },
+  "ticks": 3000,
+  "assert": [
+    { "measure": "sweepKilled", "min": 4000 },
+    { "measure": "oscillation", "kind": "sweep", "max": 5 },
+    { "measure": "sweepNet", "min": 0 },
+    { "measure": "bodiesLost", "max": 0 },
+    { "measure": "threatLookupsMost" },
+    { "measure": "faults", "max": 0 }
+  ]
+}
