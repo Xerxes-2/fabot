@@ -136,6 +136,11 @@ const NODES = {
   B5: { level: 6, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart", "tower"], labs: { UH2O: 3000 }, labStock: "energy:2000,UH2O:900" },
   // B5's lab with no compound: the cast is not held waiting for one.
   S5: { level: 6, stored: "100000,H:6000,O:6000", without: ["rampart", "tower"], labs: { UH2O: 3000 }, labStock: "energy:2000" },
+  // B5 with the compound in the storage and its labs empty: a hauler fills the
+  // lab the waiting body walks to, as the minerals rest in the terminal first.
+  W5: { level: 6, stored: "100000,H:6000,O:6000,U:6000,UH2O:900", without: ["rampart", "tower"], labs: { UH2O: 3000 } },
+  // W5 at RCL7, six labs to spare one: the cluster reacts in the others.
+  W7: { level: 7, stored: "100000,H:6000,O:6000,U:6000,UH2O:900", without: ["rampart", "tower", "link", "factory"], labs: { UH2O: 3000 } },
   // An RCL7 node as another bot left it: its roads and containers worn to
   // half, its links and ramparts sites to build.
   T7: { level: 7, stored: 100000, without: ["link", "rampart", "factory"], worn: 0.5 },

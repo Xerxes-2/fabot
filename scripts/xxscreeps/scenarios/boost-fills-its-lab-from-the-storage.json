@@ -1,0 +1,12 @@
+{
+  "why": "a colony holding a compound in its storage fills the lab a waiting cast walks to: the body is boosted there before it fights, and the storage's stock is what it spends",
+  "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
+  "start": { "room": "W8N3", "seed": 1, "node": "W7", "invaders": "W8N3:1000:2000" },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "boosted", "min": 1 },
+    { "measure": "homeHostileTicks", "from": 3000, "max": 700 },
+    { "measure": "predictedWinsLost", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}
