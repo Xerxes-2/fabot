@@ -1,0 +1,28 @@
+{
+  "why": "a harasser that leaves the room whenever an armed body of ours arrives and walks back in when it is gone never meets a fight: the outpost's work goes on while the harasser is out of reach of it, so the room keeps its output, its bodies take the raid's damage and live, and no chase buys the room a body per return",
+  "modules": ["atlas", "economy", "exchange", "fight", "mv", "strategy", "tactics"],
+  "start": {
+    "room": "W8N3",
+    "seed": 1,
+    "node": "E1",
+    "invaders": "W7N3:4000:90000",
+    "opponents": [
+      {
+        "name": "harasser",
+        "bot": "scripts/xxscreeps/engine/rival",
+        "room": "W7N2",
+        "config": { "role": "harass", "targets": ["W8N2"], "retreat": 60 },
+        "raid": { "first": 1400, "room": "W8N2", "bodies": [{ "move": 3, "ranged_attack": 1, "heal": 1 }] }
+      }
+    ]
+  },
+  "ticks": 2600,
+  "assert": [
+    { "measure": "dug", "room": "W8N2", "from": 1400, "to": 1700, "min": 4500 },
+    { "measure": "unarmedStruck", "max": 400 },
+    { "measure": "mostCast", "max": 1400 },
+    { "measure": "predictedWinsLost", "max": 0 },
+    { "measure": "bodiesLost", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

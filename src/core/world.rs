@@ -531,6 +531,7 @@ pub mod terrain {
 
 pub mod hostiles {
     use super::{Creep, Room};
+    use crate::core::engine;
     use std::collections::BTreeSet;
 
     fn strikes(creep: &Creep) -> bool {
@@ -538,6 +539,18 @@ pub mod hostiles {
             .body
             .iter()
             .any(|p| p.kind.is_attack() || p.kind.is_ranged_attack())
+    }
+
+    /// The tiles a body can strike before our next decision: its longest
+    /// weapon's range plus the two ticks v1's `ReachHorizon` let it close in.
+    pub fn reach(creep: &Creep) -> i32 {
+        let range = if creep.body.iter().any(|p| p.kind.is_ranged_attack()) {
+            engine::RANGED_RANGE
+        } else {
+            engine::MELEE_RANGE
+        };
+
+        range + 2
     }
 
     pub fn owned(rooms: &[Room]) -> BTreeSet<String> {

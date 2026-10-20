@@ -14,7 +14,7 @@ use super::strategy::intel::Intel;
 use super::tactics::{self, Tactic};
 use super::tiles::{self, Tile};
 use super::vocabulary::{BodyPart, Compound};
-use super::world::{Pos, Sightings, World};
+use super::world::{Creep, Owner, Pos, Sightings, World};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Declared {
@@ -276,9 +276,46 @@ pub fn colonies(world: &World) -> Vec<String> {
         .collect()
 }
 
-/// The declared outposts a colony's spawn reaches and no hostile seen there
-/// outlives (`ARCHITECTURE.md` §13, M1b): a stood-down room is no ground.
+/// Whether an outpost's work is open (`ARCHITECTURE.md` §13, M1b): a foe
+/// stands down the work it can reach and no more.
+fn open(context: &Context, owned: &BTreeSet<String>, room: &str) -> bool {
+    let Some(seen) = context.world.room(room) else {
+        return super::world::sightings::unarmed(context.sightings, context.world.time, room);
+    };
+
+    let core = seen
+        .structures
+        .iter()
+        .any(|s| s.kind.is_invader_core() && s.level > 0);
+    let foes: Vec<Creep> = seen.hostiles().cloned().collect();
+    let work: Vec<&Pos> = seen
+        .sources
+        .iter()
+        .map(|s| &s.pos)
+        .chain(
+            seen.structures
+                .iter()
+                .filter(|s| s.kind.is_container())
+                .map(|s| &s.pos),
+        )
+        .collect();
+
+    !core
+        && !foes.iter().any(|c| {
+            // An Invader's raid only ever walks to the work, so it stands the
+            // room down on sight; a player's only the work it can strike.
+            c.owner == Owner::Invader
+                || (super::world::hostiles::armed(owned, &foes, c)
+                    && work
+                        .iter()
+                        .any(|at| c.pos.within(super::world::hostiles::reach(c), at)))
+        })
+}
+
+/// The declared outposts a colony's spawn reaches and whose work no foe stands
+/// down (`ARCHITECTURE.md` §13, M1b): a stood-down room is no ground.
 pub fn worked(context: &Context) -> Vec<Outpost> {
+    let owned = super::world::hostiles::owned(&context.world.rooms);
     let trees: Vec<(String, Tree)> = colonies(context.world)
         .into_iter()
         .map(|home| {
@@ -300,7 +337,7 @@ pub fn worked(context: &Context) -> Vec<Outpost> {
         .iter()
         .chain(raised)
         .filter(|o| {
-            super::world::sightings::unarmed(context.sightings, context.world.time, &o.room)
+            open(context, &owned, &o.room)
                 && trees
                     .iter()
                     .any(|(home, tree)| home == &o.room || tree.contains(&o.room))
