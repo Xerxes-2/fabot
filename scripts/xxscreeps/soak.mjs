@@ -44,10 +44,12 @@
 //            declared allies (not with --world or --from: their Memory declares). With --from they stand
 //            in the world already and only their code is swapped. A bot
 //            directory's `fetch.json` { tarball, integrity, from, main }
-//            names code that is never in this tree: the tarball, fetched once
-//            into the cache and checked against its integrity, gives its
-//            `from` directory's files beside the directory's own, its
-//            main.js as `main`.
+//            names code that is never in this tree: the tarball, fetched into
+//            the cache and checked against its integrity, gives its `from`
+//            directory's files beside the directory's own, its main.js as
+//            `main`. Only --fetch reaches the registry; without it a rival
+//            whose tarball is not cached exits 4, which `scenario.mjs` reads
+//            as a skip.
 //   --world  a live capture (`scripts/capture-world.mjs`), or a crafted world
 //            of its shape (`worlds/`, terrain as 50 rows), as the world, at its
 //            tick (`engine/live.mjs`): our user the capture's, every home of
@@ -76,7 +78,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended] [--keep] [--watch [--tick-ms N] [--port N]]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -97,7 +99,7 @@ const listOnly = rest[0] === "--list";
 if (listOnly) rest.shift();
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (a === "--unsafe" || a === "--ended" || a === "--keep" || a === "--watch") {
+  if (a === "--unsafe" || a === "--ended" || a === "--keep" || a === "--fetch" || a === "--watch") {
     flags[a] = true;
     continue;
   }
@@ -168,6 +170,17 @@ for (const o of opponents)
 if (live && (from || node || late || flags["--room"] || cores.length || flags["--unsafe"] || flags["--ended"]))
   fail(`--world takes no --from, --node, --late, --room, --core, --unsafe or --ended\n${usage}`);
 if (live && opponents.some((o) => !Object.values(live.users).includes(o.name))) fail("--world: an opponent is one of the world's users, its rooms the world's");
+const specOf = (bot) => (lstatSync(bot).isDirectory() && existsSync(join(bot, "fetch.json")) ? JSON.parse(readFileSync(join(bot, "fetch.json"), "utf8")) : null);
+const cacheOf = (spec) => join(CACHE, "opponents", createHash("sha256").update(spec.integrity).digest("hex").slice(0, 16));
+// Exit 4: an opponent's code is not cached, and this run did not ask for the
+// network (`scenario.mjs` skips the scenario).
+for (const o of opponents) {
+  const spec = specOf(o.bot);
+  if (spec && !(await cached(spec))) {
+    console.error(`${o.name}: ${spec.tarball} is not cached under ${CACHE}/opponents; fetch it with --fetch`);
+    process.exit(4);
+  }
+}
 // A world's schema is its mods' (`xx.mjs` templateOf).
 const template = live ? `${TEMPLATE}-modern` : cores.length ? `${TEMPLATE}-stronghold` : TEMPLATE;
 if (!existsSync(join(template, "screeps/shard0/data.json"))) fail(`no template world at ${template}: npm run xx -- setup first`);
@@ -327,27 +340,32 @@ else if (live) {
   node26([XXSCREEPS, script("live.mjs"), "capture.json"], world);
 }
 else node26([XXSCREEPS, script("seed/manage.js"), "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
-async function fetched(spec, dir) {
-  const cache = join(CACHE, "opponents", createHash("sha256").update(spec.integrity).digest("hex").slice(0, 16));
-  if (!existsSync(join(cache, ".ok"))) {
-    const res = await fetch(spec.tarball);
-    if (!res.ok) fail(`${spec.tarball}: ${res.status}`);
-    const body = Buffer.from(await res.arrayBuffer());
-    const cut = spec.integrity.indexOf("-");
-    if (createHash(spec.integrity.slice(0, cut)).update(body).digest("base64") !== spec.integrity.slice(cut + 1)) fail(`${spec.tarball}: not the integrity fetch.json names`);
-    rmSync(cache, { recursive: true, force: true });
-    mkdirSync(cache, { recursive: true });
-    writeFileSync(join(cache, "package.tgz"), body);
-    if (spawnSync("tar", ["-xzf", "package.tgz"], { cwd: cache, stdio: "inherit" }).status !== 0) fail(`${spec.tarball}: tar failed`);
-    writeFileSync(join(cache, ".ok"), "");
-  }
-  for (const f of readdirSync(join(cache, spec.from)).filter((f) => f.endsWith(".js"))) cpSync(join(cache, spec.from, f), join(dir, f === "main.js" ? `${spec.main}.js` : f));
+async function cached(spec) {
+  const cache = cacheOf(spec);
+  if (existsSync(join(cache, ".ok"))) return true;
+  if (!flags["--fetch"]) return false;
+  const res = await fetch(spec.tarball);
+  if (!res.ok) fail(`${spec.tarball}: ${res.status}`);
+  const body = Buffer.from(await res.arrayBuffer());
+  const cut = spec.integrity.indexOf("-");
+  if (createHash(spec.integrity.slice(0, cut)).update(body).digest("base64") !== spec.integrity.slice(cut + 1)) fail(`${spec.tarball}: not the integrity fetch.json names`);
+  rmSync(cache, { recursive: true, force: true });
+  mkdirSync(cache, { recursive: true });
+  writeFileSync(join(cache, "package.tgz"), body);
+  if (spawnSync("tar", ["-xzf", "package.tgz"], { cwd: cache, stdio: "inherit" }).status !== 0) fail(`${spec.tarball}: tar failed`);
+  writeFileSync(join(cache, ".ok"), "");
+  return true;
 }
+const copied = (spec, dir) => {
+  const from = join(cacheOf(spec), spec.from);
+  for (const f of readdirSync(from).filter((f) => f.endsWith(".js"))) cpSync(join(from, f), join(dir, f === "main.js" ? `${spec.main}.js` : f));
+};
 for (const o of opponents) {
   const dir = join(world, `bot-${o.name}`);
   if (lstatSync(o.bot).isDirectory()) {
     cpSync(o.bot, dir, { recursive: true, filter: (f) => basename(f) !== "fetch.json" });
-    if (existsSync(join(o.bot, "fetch.json"))) await fetched(JSON.parse(readFileSync(join(o.bot, "fetch.json"), "utf8")), dir);
+    const spec = specOf(o.bot);
+    if (spec) copied(spec, dir);
   } else cpSync(o.bot, join(dir, "main.js"));
   if (o.config) writeFileSync(join(dir, "opponent.js"), `module.exports = ${JSON.stringify(o.config)};\n`);
   if (from || live) {

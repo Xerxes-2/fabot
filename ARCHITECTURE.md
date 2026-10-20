@@ -715,18 +715,21 @@ everything v1 used its self-written arena for, and more:
   (`opponents[].raid`). Held is: no level or spawn lost and the raid gone
   by the window's end (`defend-holds-*`, N3: a kiting raid,
   a healed pair,
-  Invader waves). TooAngel (AGPL, so fetched at run time by its pinned
+  Invader waves). TooAngel (AGPL, so fetched by its pinned
   tarball and integrity, never vendored: `engine/tooangel/fetch.json`)
   plays from next door in a world cached at tick 11000, its RCL3, and sends
   its melee squad at our home every 1500 ticks (`defend-holds-tooangel-attack`, its
-  Math.random seeded). Its first run needs the registry, so it is "nightly":
-  `npm run scenario -- --nightly` runs it, `jj ship` does not. Hivemind,
+  Math.random seeded). A run fetches only with `--fetch`; without the tarball
+  in the cache that scenario is skipped, never failed, and `jj ship` never
+  reaches the registry. Hivemind,
   fetched the same way, holds the declared-room world against a siege and
-  a sweep (nightly too); the library fails to load while a fight kind
-  (`siege-`, `sweep-`, `defend-`) meets no open-source bot. ❓ Both fail:
-  reinforcements walk into Hivemind's towers alone, and three keep sieges
-  hold their bounds only while its towers strike the nearest foe.
-  ❓ self-play with an attacking v2.
+  a sweep, both the offence target and so nightly: `--nightly` runs them,
+  and they join the daily library once they pass. `siege-outlasts-safe-mode`,
+  30,000 ticks, is nightly for its length alone. The library fails to
+  load while a fight kind (`siege-`, `sweep-`, `defend-`) meets no
+  open-source bot. ❓ Both fail: reinforcements walk into Hivemind's towers
+  alone, and three keep sieges hold their bounds only while its towers
+  strike the nearest foe. ❓ self-play with an attacking v2.
 - **Exchange calibration** (§10.1), generated: `npm run exchange`.
 
 Coverage, read off xxscreeps 0.2.1's mods and changelog (2026-10-10): invader

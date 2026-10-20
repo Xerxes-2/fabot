@@ -1,6 +1,6 @@
 {
   "nightly": true,
-  "why": "a sweep of Hivemind's economy, which it defends as a player does, kills and denies more than it casts and loses no body. Nightly: Hivemind is fetched from the registry. It fails on the main it was made on, as a live siege lost its reinforcements walking alone into the towers",
+  "why": "a sweep of Hivemind's economy, which it defends as a player does, kills and denies more than it casts and loses no body. Nightly: the offence target, and it moves to the daily library once it passes",
   "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-room.json",

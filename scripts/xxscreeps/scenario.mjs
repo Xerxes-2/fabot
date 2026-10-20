@@ -8,13 +8,15 @@
 // soak-runs/worlds/, and the bundle under test runs on from it as a deploy
 // would, Memory kept.
 //
-// Usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly]
+// Usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch]
 //        npm run scenario -- <name> --watch [--tick-ms N] [--port N]
 //   name    the scenarios to run (default all but the nightly ones), by file name
 //   --modules  also the scenarios naming any of these modules (directories under src/core)
 //   --list  print the selection and run nothing
-//   --nightly  all of them, with those marked "nightly": a start that needs
-//           the network or a long run, kept out of `jj ship`
+//   --nightly  all of them, with those marked "nightly": the offence target,
+//           kept out of `jj ship`
+//   --fetch  fetch the tarball a rival's `fetch.json` names; without it a
+//           scenario whose rival is not cached is SKIPped, never failed
 //   --bot   the bundle (default dist/main.js)
 //   --jobs  soaks at once (default half the cores)
 //   --watch the one scenario's soak watched (soak's --watch), in this terminal
@@ -54,10 +56,10 @@ const WATCH_VALUES = ["--tick-ms", "--port"];
 const rest = process.argv.slice(2);
 for (let i = 0; i < rest.length; i++)
   if (rest[i] === "--bot" || rest[i] === "--jobs" || rest[i] === "--modules") flags[rest[i]] = rest[++i] ?? fail(`${rest[i - 1]} takes a value`);
-  else if (rest[i] === "--nightly" || rest[i] === "--list") flags[rest[i]] = true;
+  else if (rest[i] === "--list" || rest[i] === "--nightly" || rest[i] === "--fetch") flags[rest[i]] = true;
   else if (rest[i] === "--watch") watch.push(rest[i]);
   else if (WATCH_VALUES.includes(rest[i])) watch.push(rest[i], rest[++i]);
-  else if (rest[i].startsWith("--")) fail("usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] | <name> --watch [--tick-ms N] [--port N]");
+  else if (rest[i].startsWith("--")) fail("usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch] | <name> --watch [--tick-ms N] [--port N]");
   else names.push(rest[i]);
 
 const CORE = join(REPO, "src/core");
@@ -412,7 +414,7 @@ const started = Date.now();
 // A soak that saves a world for a later start is a prelude, never the one watched.
 const soak = (args, watched = watch.length > 0 && !args.includes("--save")) =>
   new Promise((done) => {
-    const child = spawn("node", [join(HERE, "soak.mjs"), ...args, ...(watched ? watch : [])], { stdio: watched ? "inherit" : "ignore", env: { ...process.env, FABOT_PLAN_BUILT: "1" } });
+    const child = spawn("node", [join(HERE, "soak.mjs"), ...args, ...(flags["--fetch"] ? ["--fetch"] : []), ...(watched ? watch : [])], { stdio: watched ? "inherit" : "ignore", env: { ...process.env, FABOT_PLAN_BUILT: "1" } });
     child.on("exit", (code) => done(code));
   });
 // `bot`: a path from the repo, or "@bot", the bundle under test.
@@ -487,9 +489,18 @@ if (invalid.length) {
 }
 
 let failed = 0;
+// A soak that skipped (soak.mjs's exit 4) measured nothing: a rival's tarball is
+// not in the cache, and the run may not reach the registry.
+const SKIPPED = 4;
+let skipped = 0;
 for (const s of scenarios) {
   const run = runs.get(keyOf(s.start));
   const dir = join(REPO, "soak-runs", run.name);
+  if (run.code === SKIPPED) {
+    skipped++;
+    console.log(`SKIP ${s.name}: its rival's tarball is not cached (soak exit ${SKIPPED}); \`npm run scenario -- --fetch\` fetches it`);
+    continue;
+  }
   if (run.code === LOST) {
     failed++;
     console.log(`INVALID ${s.name}: ticks lost on both tries (a script timeout or abandoned intents); see ${dir}/lost.json`);
@@ -515,5 +526,5 @@ for (const s of scenarios) {
 }
 const slowest = [...runs.values()].sort((a, b) => b.secs - a.secs).slice(0, 5);
 console.log(`slowest: ${slowest.map((r) => `${r.label} ${r.secs.toFixed(0)} s (${r.scenarios.join(", ")})`).join("; ")}`);
-console.log(`${failed ? `${failed} failed` : "all passed"} in ${((Date.now() - started) / 1000).toFixed(0)} s`);
+console.log(`${failed ? `${failed} failed` : "all passed"}${skipped ? `, ${skipped} skipped` : ""} in ${((Date.now() - started) / 1000).toFixed(0)} s`);
 process.exit(failed ? 1 : 0);
