@@ -316,6 +316,11 @@ const measures = {
       const cast = b.body.length;
       return moves(b.body) > moves(b.body.slice(Math.max(0, cast - Math.ceil(b.hits / 100))));
     }).length,
+  // The damage struck on our bodies that swing nothing, a harvester or a hauler: what a
+  // raid that never meets a fight costs the room's work.
+  unarmedStruck: (_, __, dir) => livesOf(dir).reduce((n, b) => n + (b.ours && !/[ar]/.test(b.body ?? "") ? (b.struck ?? 0) : 0), 0),
+  // Ticks an enemy stood in `room`.
+  hostileTicks: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.hostile ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.hostile ?? 0),
   // The damage struck on the body called `name`.
   struckOn: (_, a, dir) => livesOf(dir).reduce((n, b) => n + (b.name === a.name ? (b.struck ?? 0) : 0), 0),
   // The most energy one engagement cast, of the bodies that stood in it.

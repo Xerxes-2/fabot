@@ -169,14 +169,29 @@ function drain(config) {
 // harass: { targets }, each body poking them in turn, shooting the nearest
 // unarmed body, backing off any armed one within 5, going home to heal under 60%
 // hits and on to the next room once healed or idle. The last target is the room
-// they walk round, crossing it only on the way to another.
+// they walk round, crossing it only on the way to another. { retreat }: a body
+// that meets an armed one in its target room walks home and comes back `retreat`
+// ticks later, as a live harasser does when it cannot win; without it the body
+// stands and backs off.
 const IDLE = 50;
+// A body that ends a tick on an exit tile is carried into the room beyond it
+// (`processor.js`), so a role that parks one there never stands where it waits.
+function park(creep) {
+  if (!onEdge(creep.pos)) return;
+  const path = PathFinder.search(creep.pos, { pos: new RoomPosition(25, 25, creep.room.name), range: 20 }, { maxOps: 500 }).path;
+  if (path.length > 0) creep.move(creep.pos.getDirectionTo(path[0]));
+}
+// `Room.findExitTo` answers a code, not tiles: the room's own side toward `next`.
+const EXIT = { 1: FIND_EXIT_TOP, 3: FIND_EXIT_RIGHT, 5: FIND_EXIT_BOTTOM, 7: FIND_EXIT_LEFT };
+
+function wayOut(creep, next) {
+  const exits = Game.map.describeExits(creep.room.name) ?? {};
+  const dir = Object.keys(exits).find((d) => exits[d] === next);
+  return creep.pos.findClosestByRange(creep.room.find(EXIT[dir] ?? FIND_EXIT));
+}
 
 function go(creep, room, around) {
-  if (creep.room.name === around && room !== around) {
-    const exit = creep.pos.findClosestByRange(creep.room.findExitTo(Object.values(Game.spawns)[0].room.name));
-    return exit && creep.moveTo(exit, { reusePath: 0 });
-  }
+  if (creep.room.name === around && room !== around) return creep.moveTo(wayOut(creep, room), { reusePath: 0 });
   const roomCallback = (r) => (r === around && room !== around ? false : new PathFinder.CostMatrix());
   const path = PathFinder.search(creep.pos, { pos: new RoomPosition(25, 25, room), range: 20 }, { roomCallback, maxOps: 8000 }).path;
   if (path.length > 0) creep.move(creep.pos.getDirectionTo(path[0]));
@@ -197,12 +212,22 @@ function harass(config) {
       if (creep.hits < creep.hitsMax * 0.6) mem.healing = true;
       if (mem.healing) {
         if (creep.hits === creep.hitsMax) [mem.healing, mem.next, mem.idle] = [false, mem.next + 1, 0];
-        else return creep.room.name === home ? undefined : go(creep, home, around);
+        else if (creep.room.name !== home) return go(creep, home, around);
+        else return config.retreat ? park(creep) : undefined;
       }
       const target = targets[mem.next % targets.length];
       const foes = creep.room.find(FIND_HOSTILE_CREEPS);
+      if (config.retreat && mem.away) {
+        if (creep.room.name === target) return go(creep, home, around);
+        if (Game.time < mem.away) return park(creep);
+        mem.away = 0;
+      }
       const prey = creep.pos.findClosestByRange(foes.filter((f) => !armed(f)));
       if (prey && creep.pos.inRangeTo(prey, 3)) creep.rangedAttack(prey);
+      if (config.retreat && creep.room.name === target && foes.some(armed)) {
+        mem.away = Game.time + config.retreat;
+        return go(creep, home, around);
+      }
       if (creep.room.name !== target) return go(creep, target, around);
       const threats = foes.filter((f) => armed(f) && creep.pos.inRangeTo(f, 5));
       if (threats.length > 0) return flee(creep, threats, 5);
