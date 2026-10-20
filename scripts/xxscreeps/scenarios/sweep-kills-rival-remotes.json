@@ -1,5 +1,5 @@
 {
-  "why": "a declared sweep kills a rival's remote miners, haulers and reservers for more energy than it casts",
+  "why": "a declared sweep kills a rival's remote miners, haulers and reservers for more energy than it casts. A HEAL on every body it sends costs it a RANGED at the part cap, so the prey kept in reach falls from 97, 95, 97 to 92, 91, 92 over seeds 1-3; the prey here never shoots back, so that bound priced firepower alone and the owner set it to 91, the lowest of those",
   "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
@@ -36,7 +36,7 @@
       "measure": "sweepKilled",
       "min": 5000
     },
-    { "measure": "sweepKept", "min": 95 },
+    { "measure": "sweepKept", "min": 91 },
     {
       "measure": "bodiesLost",
       "max": 0

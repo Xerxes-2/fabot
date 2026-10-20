@@ -1057,7 +1057,7 @@ impl<'a> Scene<'a> {
             &casting::side_in(room, ours.clone()),
             &theirs,
             casting::terrain_at(room, at),
-            capacity,
+            &casting::walking(capacity),
             |body| worth / engine::body_cost(body),
             0,
         )?;
@@ -1074,7 +1074,7 @@ impl<'a> Scene<'a> {
             all.extend(set.iter().map(|b| fighter::cast(b)));
             casting::holds(&all, strike)
         };
-        if !holds(&set) || ours.is_empty() && set.is_empty() {
+        if !holds(&set) {
             set.extend(casting::squad(capacity, strike, worth));
         }
 
@@ -1389,12 +1389,18 @@ impl<'a> Scene<'a> {
         let mut ours_now: Vec<Fighter> = bodies.clone();
         ours_now.extend(asked_fighters.iter().cloned());
 
+        let blocks = if self.homes.contains(&room.name) {
+            casting::affordable(capacity)
+        } else {
+            casting::walking(capacity)
+        };
+
         match casting::price(
             stance,
             &casting::side_in(room, ours_now),
             &theirs,
             terrain,
-            capacity,
+            &blocks,
             copies_of,
             tick_worth,
         ) {

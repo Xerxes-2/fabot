@@ -69,6 +69,32 @@ pub fn affordable(capacity: i32) -> Vec<Body> {
     out
 }
 
+/// The bodies a set that walks into a rival room is priced from: every one
+/// carries a HEAL (owner), so shot up it heals the damage instead of losing
+/// its MOVE to it and crawling. A home's Defend keeps `affordable`'s bare
+/// DEFENDER: it stands beside its towers.
+pub fn walking(capacity: i32) -> Vec<Body> {
+    let mut out: Vec<Body> = affordable(capacity)
+        .into_iter()
+        .filter(|b| b.contains(&BodyPart::Heal))
+        .collect();
+
+    // `affordable`'s smallest HEAL is a RANGER at 700: the pair keeps a bank
+    // under that answering.
+    out.extend(biggest(capacity, &[BodyPart::Move, BodyPart::Attack]));
+    out
+}
+
+/// The body a set walks out with: one that heals what it is shot for, or its
+/// MOVE parts die to it one walk at a time (owner).
+fn with_heal(mut body: Body) -> Body {
+    if !body.contains(&BodyPart::Heal) {
+        body.extend([BodyPart::Heal, BodyPart::Move]);
+    }
+
+    engine::with_move_last(body)
+}
+
 pub fn fighter_of(c: &Creep) -> Fighter {
     let body: Vec<BodyPart> = c.body.iter().map(|p| p.kind).collect();
     let boosts: Vec<Boost> = c.body.iter().map(|p| p.boost).collect();
@@ -94,8 +120,8 @@ pub fn core_as_hostile(core: &Structure) -> Creep {
     }
 }
 
-/// v1's guard on a core: the biggest melee body the bank buys, as a small one
-/// dies of age short of its 100,000 hits; none where ours raze `hits` in a life.
+/// v1's guard on a core: a small one dies of age short of its 100,000 hits;
+/// none where ours raze `hits` in a life.
 pub fn razer(capacity: i32, hits: i32, ours: &[Fighter]) -> Vec<Body> {
     let swing = engine::ATTACK_POWER * ours.iter().map(|f| f.attack).sum::<i32>();
 
@@ -106,16 +132,21 @@ pub fn razer(capacity: i32, hits: i32, ours: &[Fighter]) -> Vec<Body> {
 }
 
 /// Taps land a block apart whatever the body, so only more CLAIM a tap
-/// shortens the declaim (v1).
+/// shortens the declaim (v1). The HEAL a body out of our rooms takes costs it
+/// a block, so none below 950.
 pub fn tapper(capacity: i32) -> Option<Body> {
     biggest(capacity, &[BodyPart::Move, BodyPart::Claim])
 }
 
+/// The most of `block` the bank buys, with the HEAL and MOVE a body that walks
+/// out of our rooms takes (owner): sized here, so it fits the colony the body
+/// is cast from.
 fn biggest(capacity: i32, block: &[BodyPart]) -> Option<Body> {
-    let most = (capacity / engine::body_cost(block))
-        .min(engine::MAX_BODY_PARTS as i32 / block.len() as i32);
+    let legs = [BodyPart::Heal, BodyPart::Move];
+    let most = ((capacity - engine::body_cost(&legs)) / engine::body_cost(block))
+        .min((engine::MAX_BODY_PARTS as i32 - legs.len() as i32) / block.len() as i32);
 
-    (most > 0).then(|| engine::with_move_last(block.repeat(most as usize)))
+    (most > 0).then(|| with_heal(block.repeat(most as usize)))
 }
 
 pub fn terrain_at(room: &Room, at: &Pos) -> exchange::Terrain {
@@ -172,22 +203,14 @@ pub fn price(
     ours: &exchange::Side,
     theirs: &exchange::Side,
     terrain: exchange::Terrain,
-    capacity: i32,
+    bodies: &[Body],
     copies_of: impl Fn(&Body) -> i32,
     tick_worth: i32,
 ) -> Option<(Vec<Body>, exchange::Outcome, exchange::Side)> {
     let set: Vec<Body> = if wins(stance, ours, theirs, terrain) {
         Vec::new()
     } else {
-        exchange::cheapest_win(
-            stance,
-            ours,
-            &affordable(capacity),
-            copies_of,
-            tick_worth,
-            theirs,
-            terrain,
-        )?
+        exchange::cheapest_win(stance, ours, bodies, copies_of, tick_worth, theirs, terrain)?
     };
 
     let mut landed = ours.clone();
@@ -240,7 +263,7 @@ pub fn siege<T>(
     if dismantler.is_empty() {
         None
     } else {
-        for n in 0..=AROUND_ONE {
+        for n in 1..=AROUND_ONE {
             let mut set = vec![dismantler.clone(), dismantler.clone()];
             set.extend((0..n).map(|_| medic.clone()));
 
@@ -274,15 +297,13 @@ pub fn reinforce<T>(
         .count();
     let short = 2usize.saturating_sub(standing);
 
-    (0..=AROUND_ONE as usize)
-        .filter(|n| short + n > 0)
-        .find_map(|n| {
-            let mut added = vec![dismantler.clone(); short];
-            added.extend(vec![medic.clone(); n]);
-            let mut set = fielded.to_vec();
-            set.extend(added.iter().cloned());
-            priced(&set).map(|plan| (added, plan))
-        })
+    (1..=AROUND_ONE as usize).find_map(|n| {
+        let mut added = vec![dismantler.clone(); short];
+        added.extend(vec![medic.clone(); n]);
+        let mut set = fielded.to_vec();
+        set.extend(added.iter().cloned());
+        priced(&set).map(|plan| (added, plan))
+    })
 }
 
 /// The fewest bodies whose HEAL holds `strike`, each with the RANGED its share
@@ -290,8 +311,10 @@ pub fn reinforce<T>(
 /// siege's pickets and a sweep's set.
 pub fn squad(capacity: i32, strike: i32, worth: i32) -> Vec<Body> {
     // The towers' strike falls on one body; it and one body beside it heal it.
-    let heal = ((strike + 2 * engine::HEAL_POWER - 1) / (2 * engine::HEAL_POWER)) as usize;
-    let n = if heal > 0 { 2 } else { 1 };
+    // A body under no strike still takes one (owner): shot up, it heals the
+    // damage instead of losing its MOVE to it and crawling.
+    let heal = (((strike + 2 * engine::HEAL_POWER - 1) / (2 * engine::HEAL_POWER)) as usize).max(1);
+    let n = if strike > 0 { 2 } else { 1 };
     let body = |ranged: usize| -> Body {
         let mut b = vec![BodyPart::RangedAttack; ranged];
         b.extend(vec![BodyPart::Move; heal + ranged]);
@@ -310,15 +333,17 @@ pub fn squad(capacity: i32, strike: i32, worth: i32) -> Vec<Body> {
 /// Whether `set` holds `strike` falling on any one body: that body's heal and
 /// the most another lends it from beside.
 pub fn holds(set: &[Fighter], strike: i32) -> bool {
-    strike == 0
-        || (0..set.len()).all(|i| {
-            let lent = (0..set.len())
-                .filter(|j| *j != i)
-                .map(|j| set[j].heal)
-                .max()
-                .unwrap_or(0);
-            engine::HEAL_POWER * (set[i].heal + lent) >= strike
-        })
+    let lent = |i: usize| {
+        (0..set.len())
+            .filter(|j| *j != i)
+            .map(|j| set[j].heal)
+            .max()
+            .unwrap_or(0)
+    };
+
+    !set.is_empty()
+        && (strike == 0
+            || (0..set.len()).all(|i| engine::HEAL_POWER * (set[i].heal + lent(i)) >= strike))
 }
 
 pub fn kill_order(hostiles: &[Creep]) -> Vec<String> {

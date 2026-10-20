@@ -215,6 +215,8 @@ pub fn live_parts(body: &[BodyPart], hits: i32) -> Vec<BodyPart> {
     body[skip..].to_vec()
 }
 
+/// The engine puts hits on parts from the head and only a live MOVE moves:
+/// one MOVE last walks while any part lives.
 pub fn with_move_last(mut body: Vec<BodyPart>) -> Vec<BodyPart> {
     match body.iter().rposition(|p| *p == BodyPart::Move) {
         Some(at) if at < body.len() - 1 => {

@@ -498,7 +498,11 @@ Caster logic that picks which colony spawns (hops, queue) ports from v1's
 `Caster.fs` mostly as is. `fight.casts` remembers what was asked so a body in
 an oven is not asked again. One room may hold three spawns; the queue is per
 room. Every fight body is cast with one MOVE at the tail (v1's
-`withMoveLast`), so it walks while any part lives.
+`withMoveLast`), so it walks while any part lives, and every body a set walks
+out of our rooms with carries a HEAL (owner), bar a siege's dismantlers, which
+its medics cover: it heals the damage it is shot for instead of losing that
+MOVE to it a walk at a time. A home's Defend is priced without one, beside its
+towers.
 
 ## 7. Strategy (new)
 

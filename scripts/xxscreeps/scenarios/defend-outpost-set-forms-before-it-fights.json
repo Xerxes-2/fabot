@@ -4,6 +4,8 @@
   "start": { "room": "W8N3", "seed": 2, "node": "E1" },
   "ticks": 3000,
   "assert": [
+    { "measure": "fightHeals" },
+    { "measure": "legsLost", "max": 0 },
     { "measure": "predictedWinsLost", "max": 0 },
     { "measure": "raidsKilled", "min": 2 },
     { "measure": "oscillation", "max": 5 },

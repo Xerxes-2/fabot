@@ -120,6 +120,8 @@ const livesOf = (dir) =>
     .split("\n")
     .filter(Boolean)
     .map((l) => JSON.parse(l));
+const fightLives = (dir) => livesOf(dir).filter((b) => b.ours && b.name.startsWith("fight-") && b.hits !== undefined);
+const moves = (body) => [...body].filter((p) => p === "m").length;
 const scoutsOf = (dir) => livesOf(dir).filter((b) => b.ours && b.name.startsWith("scout-"));
 const walksOf = (dir) => rowsOf(dir).flatMap((e) => (e.blob ? [e.blob] : []));
 const foughtOf = (dir) => rowsOf(dir).flatMap((e) => (e.fought ? [e.fought] : []));
@@ -305,6 +307,15 @@ const measures = {
     return lives.filter((b) => b.first > first.get(b.name)).reduce((n, b) => n + Object.values(b.rooms).reduce((m, k) => m + k, 0), 0);
   },
   bodiesStruck: (_, __, dir) => livesOf(dir).reduce((n, b) => n + (b.ours ? (b.struck ?? 0) : 0), 0),
+  // Ticks a fight body healed: its own damage or a mate's.
+  fightHeals: (_, __, dir) => fightLives(dir).reduce((n, b) => n + (b.acts.heal ?? 0) + (b.acts.rangedHeal ?? 0), 0),
+  // The fight bodies last seen with fewer MOVE parts live than they were cast
+  // with: a part shot off is gone, and only a live MOVE gives power.
+  legsLost: (_, __, dir) =>
+    fightLives(dir).filter((b) => {
+      const cast = b.body.length;
+      return moves(b.body) > moves(b.body.slice(Math.max(0, cast - Math.ceil(b.hits / 100))));
+    }).length,
   // The damage struck on the body called `name`.
   struckOn: (_, a, dir) => livesOf(dir).reduce((n, b) => n + (b.name === a.name ? (b.struck ?? 0) : 0), 0),
   // The most energy one engagement cast, of the bodies that stood in it.

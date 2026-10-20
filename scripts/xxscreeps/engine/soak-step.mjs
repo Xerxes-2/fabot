@@ -372,6 +372,7 @@ function live(rooms, time) {
       life.at = at;
       life.last = time;
       life.ttl = o["#ageTime"] - time;
+      life.hits = o.hits;
       life.rooms[room.name] = (life.rooms[room.name] ?? 0) + 1;
       for (const a of (o["#actionLog"] ?? []).filter((a) => a.time === time)) life.acts[a.type] = (life.acts[a.type] ?? 0) + 1;
       if (struck.has(o.id)) life.struck = (life.struck ?? 0) + struck.get(o.id);

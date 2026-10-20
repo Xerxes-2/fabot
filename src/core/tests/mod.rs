@@ -2,6 +2,7 @@
 //! draw every suite samples from.
 mod atlas;
 mod engine;
+mod fight;
 mod mv;
 mod tick;
 
