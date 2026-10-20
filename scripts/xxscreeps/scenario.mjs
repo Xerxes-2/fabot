@@ -281,6 +281,10 @@ const measures = {
   sweepKilled: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.killed ?? 0), 0),
   sweepDenied: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.denied ?? 0), 0),
   sweepNet: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.killed ?? 0) + (e.denied ?? 0) - e.cast, 0),
+  sweepKept: (_, __, dir) => {
+    const rows = rowsOf(dir).filter((e) => e.kind === "sweep");
+    return Math.round((100 * rows.reduce((n, e) => n + (e.kept ?? 0), 0)) / Math.max(1, rows.reduce((n, e) => n + (e.held ?? 0), 0)));
+  },
   bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),
   // Of those, the ones that died in their engagement's room with no set-mate within 3 (soak-step's `alone`).
   diedAlone: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.alone ?? 0), 0),

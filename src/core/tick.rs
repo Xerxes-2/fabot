@@ -341,13 +341,27 @@ pub fn arbitrate(context: &Context, wishes: &[(String, mv::Wish)]) -> Vec<Intent
     }
 
     for (room, ws) in groups {
-        let held: Vec<Tile> = context
+        // A wish onto a hostile's tile follows it: the engine moves the body
+        // there only once the hostile steps off, so it holds its tile.
+        let theirs: BTreeSet<Tile> = (context.world.room(&room).into_iter())
+            .flat_map(|r| r.hostiles().map(|c| tiles::of_pos(&c.pos)))
+            .collect();
+        let (glued, ws): (Vec<mv::Wish>, Vec<mv::Wish>) =
+            (ws.into_iter()).partition(|w| w.head != w.at && theirs.contains(&w.head));
+        out.extend(glued.iter().map(|w| {
+            Intent::Creep(
+                w.creep.clone(),
+                CreepAct::Move(tiles::direction(w.at, w.head)),
+            )
+        }));
+        let mut held: Vec<Tile> = context
             .world
             .creeps
             .iter()
             .filter(|c| c.pos.room == room && !wished.contains(&c.name))
             .map(|c| tiles::of_pos(&c.pos))
             .collect();
+        held.extend(glued.iter().map(|w| w.at));
         let steps = mv::arbitrate::arbitrate_with(
             &mut scratch,
             |tile| context.atlas.passable(&room, tile) || context.atlas.is_struck(&room, tile),

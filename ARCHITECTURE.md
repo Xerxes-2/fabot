@@ -455,7 +455,7 @@ five from v1's step functions, the rest come with their kinds:
 | Formation | new: `Move` steps a 2×2 footprint as one body |
 | Dismantle | v1 `actionIntents` sapper branch: dismantle the plan's target |
 | EdgeDance | new |
-| Hunt | new (ibex EV): best of nine tiles, worth less netted damage; strikes most worth in reach |
+| Hunt | new (ibex EV): best of nine tiles, worth less netted damage, the worth read over where each mark may stand next tick (one still last tick stays, one that stepped steps on, by `fight.groups`; none under its rampart or over the edge; one that crossed the border last tick back on its tile), or onto a mark beside it that may step (v1's glue); strikes most worth in reach |
 
 A tactic decides the step (a Dismantle its dismantle too). The strike reflex
 runs for every body with ATTACK or RANGED_ATTACK, in every phase, inside or
@@ -832,7 +832,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 | `Decide/Labs, Layout` | `Economy`, `Layout` | Layout ✅ in the tick after `economy`: a standing plan per room, sites in plan order as the level allows, towers on hostiles. Labs ⏳ |
 | `Types/Colonies.fs` declarations, `allies` | `declarations` data | not ported as code; the current rooms seed the first `declarations`. ✅ `declarations.allies` (player names): an ally's creeps leave `Hostiles` as the world is read, so nothing answers them |
 | `Decide/Facts.fs:2883–4056, 1038–1582, 2153–2196`, `Fighter.fs`, `Arrival.fs` | `Exchange` | ✅ `core/exchange/`; `npm run exchange` is §10.1's generated set |
-| `Decide/Emitter.fs` strike/heal/glue | `core/tactics` | ✅ the strike (swing, shot, volley where it outdeals the shot) and the heal reflex; glue not ported (a melee body closes to its target each tick) |
+| `Decide/Emitter.fs` strike/heal/glue | `core/tactics` | ✅ the strike (swing, shot, volley where it outdeals the shot) and the heal reflex; glue ported into Hunt (a body beside a mark that may step wishes onto its tile; `Tick` sends that move unarbitrated) |
 | `Decide/Caster.fs` | `Fight.Casting` | ✅ a body to the spawn that lands it soonest, a home's Defend the home's, v1's guard, ranger and defender blocks; the lending floors and trespass prices dropped |
 | `Decide/Operations.fs`, `Types/Operation.fs` | — | shape only: `OpRecord`'s fields inform `Engagement`, its bidding informs `Strategy`. No code ports; re-read when `Siege` is due |
 | `Core/LightTick.fs` | — | not ported; per-module keys (§1) |

@@ -822,6 +822,10 @@ pub struct Mark {
     pub worth: i32,
     pub hits: i32,
     pub massed: bool,
+    pub shielded: bool,
+    /// Each tile it may stand on next tick, its own first; None where no
+    /// shot lands.
+    pub next: Vec<Option<Pos>>,
 }
 
 /// §6.4's Hunt, after ibex: risk at the margin and a three-tick lethal veto,
@@ -842,27 +846,33 @@ pub fn hunt(
     let worth_of = |m: &Mark, damage: i32| {
         i64::from(damage.min(m.hits)) * i64::from(m.worth) / i64::from(m.hits.max(1))
     };
-    let landed = |at: &Pos| -> (i64, Option<CreepAct>) {
-        let reach = |m: &Mark| at.range(&m.pos).filter(|r| *r <= engine::RANGED_RANGE);
-        let single = marks
-            .iter()
-            .filter(|m| reach(m).is_some())
-            .map(|m| {
-                (
-                    worth_of(m, engine::RANGED_ATTACK_POWER * parts),
-                    m.id.clone(),
-                )
-            })
+    // A hit's worth from `at`, now or over the tiles a mark may stand on next
+    // tick: the step taken now is the next tick's reach, and a shot is
+    // resolved before the mark steps (v1's glue).
+    let share = |m: &Mark, at: &Pos, next: bool, hit: &dyn Fn(i32) -> i32| -> i64 {
+        let now = [(!m.shielded).then(|| m.pos.clone())];
+        let tiles = if next { &m.next[..] } else { &now[..] };
+        let n = tiles.len().max(1) as i64;
+        let hits = tiles.iter().flatten().filter_map(|p| at.range(p));
+        hits.map(|r| worth_of(m, hit(r))).sum::<i64>() / n
+    };
+    let shot = |r: i32| {
+        if r <= engine::RANGED_RANGE {
+            engine::RANGED_ATTACK_POWER * parts
+        } else {
+            0
+        }
+    };
+    let landed = |at: &Pos, next: bool| -> (i64, Option<CreepAct>) {
+        let single = (marks.iter())
+            .map(|m| (share(m, at, next, &shot), m.id.clone()))
+            .filter(|(w, _)| *w > 0)
             .max();
         let mass: i64 = if spared.iter().any(|p| at.within(engine::RANGED_RANGE, p)) {
             0
         } else {
-            marks
-                .iter()
-                .filter(|m| m.massed)
-                .filter_map(|m| {
-                    reach(m).map(|r| worth_of(m, parts * engine::mass_attack_power_at(r)))
-                })
+            (marks.iter().filter(|m| m.massed))
+                .map(|m| share(m, at, next, &|r| parts * engine::mass_attack_power_at(r)))
                 .sum()
         };
         match single {
@@ -871,14 +881,15 @@ pub fn hunt(
             _ => (0, None),
         }
     };
+    let swing = engine::ATTACK_POWER * live(BodyPart::Attack, c);
     let swung = |at: &Pos| -> i64 {
-        let swing = engine::ATTACK_POWER * live(BodyPart::Attack, c);
-        let beside = marks
-            .iter()
-            .filter(|m| at.within(engine::MELEE_RANGE, &m.pos));
-        beside.map(|m| worth_of(m, swing)).max().unwrap_or(0)
+        let hit = |r: i32| if r <= engine::MELEE_RANGE { swing } else { 0 };
+        (marks.iter())
+            .map(|m| share(m, at, true, &hit))
+            .max()
+            .unwrap_or(0)
     };
-    let strike = landed(&c.pos).1;
+    let strike = landed(&c.pos, false).1;
     // A swing lands from no shot's range: each body closes to its own reach.
     let reach = if parts > 0 {
         engine::RANGED_RANGE
@@ -910,14 +921,18 @@ pub fn hunt(
             .find(|(o, _)| *o == t)
             .map_or(i32::MAX, |(_, n)| *n)
     };
-    let scored: Vec<(Tile, i64)> = open
-        .iter()
-        .filter(|t| !tiles::on_edge(**t) && net(**t) * 3 < c.hits)
-        .map(|t| {
-            let risk =
-                i64::from(net(*t).max(0)) * cost / i64::from(threat[*t].max(c.hits / 3).max(1));
-            let at = tiles::to_pos(&room, *t);
-            (*t, landed(&at).0 + swung(&at) - risk)
+    // Onto a mark beside it that may step: it follows the mark if it steps
+    // and stays beside it if not.
+    let glue = (marks.iter())
+        .filter(|m| !m.shielded && m.next.len() > 1 && c.pos.range(&m.pos) == Some(1))
+        .map(|m| (tiles::of_pos(&m.pos), threat[tiles::of_pos(&m.pos)]));
+    let scored: Vec<(Tile, i64)> = (nets.iter().copied())
+        .chain(glue)
+        .filter(|(t, net)| !tiles::on_edge(*t) && net * 3 < c.hits)
+        .map(|(t, net)| {
+            let risk = i64::from(net.max(0)) * cost / i64::from(threat[t].max(c.hits / 3).max(1));
+            let at = tiles::to_pos(&room, t);
+            (t, landed(&at, true).0 + swung(&at) - risk)
         })
         .collect();
     // Every tile lethal: the least deadly, an exit among them, until the

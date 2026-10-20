@@ -1,7 +1,8 @@
 // A scripted rival working remotes, one of §10.2's fixed opponents
 // (ARCHITECTURE.md): `opponent.js` { remotes: [room, …] }, its home among them
 // to mine its own source, roles?: the remote roles it keeps (default all),
-// shift?: ticks each remote is worked alone, in turn (default all at once).
+// shift?: ticks each remote is worked alone, in turn (default all at once),
+// flee?: the range at which a remote body runs from an armed one (default never).
 // A body it did not spawn (a soak's raid) guards the room it stands in.
 // Each remote keeps a miner, a hauler carrying its pile home and a reserver,
 // respawned as each dies, every remote's miner first. At home its towers
@@ -19,6 +20,7 @@ const BODIES = {
   hauler: [...Array(10).fill(CARRY), ...Array(5).fill(MOVE)],
   reserver: [CLAIM, CLAIM, MOVE, MOVE],
 };
+const armed = (c) => c.getActiveBodyparts(ATTACK) + c.getActiveBodyparts(RANGED_ATTACK) > 0;
 const to = (c, room) => c.moveTo(new RoomPosition(25, 25, room), { range: 20 });
 
 function miner(c) {
@@ -75,7 +77,13 @@ module.exports.loop = function () {
     if (foe) tower.attack(foe);
   }
   const creeps = Object.values(Game.creeps);
-  for (const c of creeps) ({ filler, miner, hauler, reserver }[c.memory.role] ?? guard)(c, home);
+  for (const c of creeps) {
+    const near = config.flee && c.memory.remote ? c.pos.findInRange(FIND_HOSTILE_CREEPS, config.flee).filter(armed) : [];
+    if (near.length) {
+      const path = PathFinder.search(c.pos, near.map((f) => ({ pos: f.pos, range: config.flee + 1 })), { flee: true }).path;
+      if (path.length) c.move(c.pos.getDirectionTo(path[0]));
+    } else ({ filler, miner, hauler, reserver }[c.memory.role] ?? guard)(c, home);
+  }
   const spawn = home.find(FIND_MY_SPAWNS).find((s) => !s.spawning);
   const worked = config.shift ? [remotes[Math.floor(Game.time / config.shift) % remotes.length]] : remotes;
   for (const role of roles)

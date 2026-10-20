@@ -554,7 +554,7 @@ async function standing(ids) {
   return false;
 }
 async function closed(e, t) {
-  const { members, casts, walk, fight, swing, sources, mourned, ...rest } = e;
+  const { members, casts, walk, fight, swing, sources, mourned, inReach, ...rest } = e;
   const arrivals = Object.values(walk?.arrived ?? {}).sort((a, b) => a - b);
   const blob = walk && { ...walk, last: undefined, arrived: undefined, arrival: arrivals.length ? arrivals[(arrivals.length - 1) >> 1] : null };
   const fought = fight && { ...fight, last: undefined };
@@ -626,6 +626,22 @@ function swinging(rec, bodies, t, seen) {
     }
     s.last = [b, now];
   }
+}
+// A sweep's `held`/`kept`: each pair of an armed body of it and a rival's
+// unarmed one in its reach a tick, both standing in the room the next, and
+// those still in its reach then (the hunt's step is the next tick's shot).
+function keeping(rec, room, objects, bodies) {
+  const prey = objects.filter((o) => o.body !== undefined && o.pos.roomName === room && ![ours, kInvaderUserId].includes(o["#user"]) && o.body.every((p) => !["attack", "ranged_attack"].includes(p.type)));
+  const reach = (b) => (b.body.some((p) => p.type === "ranged_attack" && p.hits > 0) ? 3 : b.body.some((p) => p.type === "attack" && p.hits > 0) ? 1 : -1);
+  const here = bodies.filter((b) => b.pos.roomName === room);
+  const pairs = here.flatMap((b) => prey.filter((p) => near(b.pos, p.pos, reach(b))).map((p) => `${b.name} ${p.id}`));
+  for (const k of rec.inReach ?? []) {
+    const [name, id] = k.split(" ");
+    if (!here.some((b) => b.name === name) || !prey.some((p) => p.id === id)) continue;
+    rec.held = (rec.held ?? 0) + 1;
+    if (pairs.includes(k)) rec.kept = (rec.kept ?? 0) + 1;
+  }
+  rec.inReach = pairs;
 }
 // `dead`: its own count, or our bodies' tombstones with life left in the rooms
 // it targeted, which catch a death that closed it before it counted one.
@@ -705,6 +721,7 @@ async function engaged(t, time, rooms) {
     lone(rec, e.room, objects, bodies);
     fought(rec, e.phase, bodies, theirs);
     swinging(rec, bodies, t, seen);
+    if (rec.kind === "sweep") keeping(rec, e.room, objects, bodies);
   }
   for (const [id, rec] of open)
     if (!now.has(id)) {

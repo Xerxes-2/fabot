@@ -1,0 +1,56 @@
+{
+  "why": "a declared sweep kills a rival's remote bodies that run from it at sight, keeping each in reach once it is, rather than trailing it a tile behind",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
+    "seed": 1,
+    "declarations": {
+      "outposts": [],
+      "claims": [],
+      "enemies": [
+        "rival"
+      ],
+      "avoid": [
+        "W8S1"
+      ]
+    },
+    "opponents": [
+      {
+        "name": "rival",
+        "bot": "scripts/xxscreeps/engine/remote",
+        "room": "W8S1",
+        "config": {
+          "remotes": [
+            "W7S1",
+            "W7S2",
+            "W8S2"
+          ],
+          "flee": 5
+        }
+      }
+    ]
+  },
+  "ticks": 4000,
+  "assert": [
+    {
+      "measure": "sweepKilled",
+      "min": 5000
+    },
+    { "measure": "sweepKept", "min": 50 },
+    {
+      "measure": "bodiesLost",
+      "max": 0
+    },
+    {
+      "measure": "sweepNet",
+      "min": 0
+    },
+    {
+      "measure": "threatLookupsMost"
+    },
+    {
+      "measure": "faults",
+      "max": 0
+    }
+  ]
+}

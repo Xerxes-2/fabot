@@ -35,6 +35,7 @@
       "measure": "sweepKilled",
       "min": 5000
     },
+    { "measure": "sweepKept", "min": 95 },
     {
       "measure": "bodiesLost",
       "max": 0

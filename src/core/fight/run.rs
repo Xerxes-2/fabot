@@ -194,7 +194,8 @@ impl<'a> Scene<'a> {
             .collect()
     }
 
-    fn ground(&self, atlas: &Atlas, room: &Room) -> Hunting {
+    /// `was`: last tick's groups (§6.1), the only record of where a body stood.
+    fn ground(&self, atlas: &Atlas, room: &Room, was: &[Group]) -> Hunting {
         let reached = atlas.from_exits(&room.name);
         // Denied only once a body stands there: its life less the most a body
         // spawns in and its walk.
@@ -222,6 +223,53 @@ impl<'a> Scene<'a> {
             .cloned()
             .collect();
         let foes: Vec<Fighter> = escort.iter().map(casting::fighter_of).collect();
+        let weights = atlas.weights(&room.name);
+        let shields: BTreeSet<Tile> = (room.structures.iter())
+            .filter(|s| s.kind.is_rampart() && !s.owner.is_ours())
+            .map(|s| tiles::of_pos(&s.pos))
+            .collect();
+        let solid: BTreeSet<Tile> = (room.structures.iter())
+            .filter(|s| !s.walkable && !s.kind.is_rampart())
+            .map(|s| tiles::of_pos(&s.pos))
+            .collect();
+        // A shot on a body under its owner's rampart lands on the rampart.
+        let shot = |t: Tile| -> Option<Pos> {
+            (!shields.contains(&t)).then(|| tiles::to_pos(&room.name, t))
+        };
+        let before = |id: &String| {
+            (was.iter())
+                .find(|g| {
+                    g.last_seen == self.world.time - 1 && g.members == BTreeSet::from([id.clone()])
+                })
+                .map(|g| &g.centre)
+        };
+        // A body working its tile stays on it, and a fleeing one keeps its
+        // heading: weighing every tile it could step to drew a hunter onto
+        // the working body beside it rather than the one walking off.
+        let flight = |c: &Creep| -> Vec<Option<Pos>> {
+            let here = tiles::of_pos(&c.pos);
+            let open = |t: &Tile| {
+                let stands = weights.as_ref().is_some_and(|w| w[*t].is_some());
+                stands || shields.contains(t) && !solid.contains(t)
+            };
+            let around = tiles::around(here).iter().copied().filter(|t| open(t));
+            // The engine carries a body that ends its step on the edge across.
+            let step = |t: Tile| shot(t).filter(|_| !tiles::on_edge(t));
+            let left = before(&c.id)
+                .filter(|p| p.room == c.pos.room)
+                .map(tiles::of_pos);
+            let onward: Vec<Tile> = (around.clone())
+                .filter(|t| left.is_some_and(|l| tiles::range(*t, l) == 2))
+                .collect();
+            match left {
+                _ if c.fatigue > 0 => vec![shot(here)],
+                Some(l) if l == here => vec![shot(here)],
+                Some(_) if !onward.is_empty() => onward.into_iter().map(step).collect(),
+                _ => std::iter::once(shot(here))
+                    .chain(around.map(step))
+                    .collect(),
+            }
+        };
         let mut marks: Vec<tactics::Mark> = prey
             .iter()
             .copied()
@@ -232,8 +280,32 @@ impl<'a> Scene<'a> {
                 worth: sweep::worth(c),
                 hits: c.hits,
                 massed: true,
+                shielded: shields.contains(&tiles::of_pos(&c.pos)),
+                next: flight(c),
             })
             .collect();
+        // One that stepped over the border last tick, which the engine carries
+        // back onto the tile it left by: worth nothing until it stands here.
+        let seen: BTreeSet<&String> = self.foes[&room.name].iter().map(|h| &h.id).collect();
+        marks.extend(
+            (was.iter())
+                .filter(|g| g.last_seen == self.world.time - 1 && g.members.len() == 1)
+                .filter(|g| g.centre.room == room.name && tiles::on_edge(tiles::of_pos(&g.centre)))
+                .filter(|g| {
+                    g.members
+                        .iter()
+                        .all(|m| !seen.contains(m) && !self.armed.contains(m))
+                })
+                .map(|g| tactics::Mark {
+                    id: g.id.to_string(),
+                    pos: g.centre.clone(),
+                    worth: 0,
+                    hits: 1,
+                    massed: false,
+                    shielded: false,
+                    next: vec![Some(g.centre.clone())],
+                }),
+        );
         marks.extend(
             room.structures
                 .iter()
@@ -245,6 +317,8 @@ impl<'a> Scene<'a> {
                     worth: s.hits,
                     hits: s.hits,
                     massed: !s.kind.is_container(),
+                    shielded: shields.contains(&tiles::of_pos(&s.pos)),
+                    next: vec![shot(tiles::of_pos(&s.pos))],
                 }),
         );
         Hunting {
@@ -1591,7 +1665,12 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     let grounds: BTreeMap<String, Hunting> = (state.preyed.iter())
         .filter(|room| stirred.contains(*room))
         .chain(sweeps().map(|e| &e.room))
-        .filter_map(|room| Some((room.clone(), scene.ground(atlas, scene.in_sight(room)?))))
+        .filter_map(|room| {
+            Some((
+                room.clone(),
+                scene.ground(atlas, scene.in_sight(room)?, &state.groups),
+            ))
+        })
         .collect();
     let cornered: BTreeSet<i32> = sweeps()
         .filter(|e| {
