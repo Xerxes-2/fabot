@@ -30,8 +30,8 @@
 // Exits non-zero when a bound fails or a soak does, or loses ticks twice.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { availableParallelism, tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bugs, engagement, report } from "./prediction.mjs";
@@ -404,20 +404,26 @@ for (const s of scenarios) {
 // Built once here: parallel builds of one project collide.
 if ([...runs.values()].some((r) => r.start.node) && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
   fail("the plan tool did not build");
-// Built outside the repo: inside it, jj would name the build after this workspace.
+// Built in `.scratch/`, on disk (`/tmp` is RAM), with a `jj` that fails: the
+// real one would name the build after the workspace above it, not "unknown".
 const bundleAt = (commit) => {
   const out = join(REPO, "soak-runs/bundles", `${commit}.js`);
   if (existsSync(out)) return out;
   console.error(`building ${commit}`);
-  const src = mkdtempSync(join(tmpdir(), "fabot-"));
-  const sh = (cmd) => spawnSync("sh", ["-c", cmd], { cwd: src, stdio: ["ignore", "ignore", "inherit"] }).status === 0 || fail(`${commit}: ${cmd} failed`);
-  sh(`git -C '${REPO}' archive ${commit} | tar -x`);
-  symlinkSync(join(REPO, "node_modules"), join(src, "node_modules"));
-  // A commit from before the port builds the F# bundle, with its own tools.
-  sh(existsSync(join(src, "src/App")) ? "dotnet tool restore && npm run build --silent" : "npm run build --silent");
-  mkdirSync(dirname(out), { recursive: true });
-  cpSync(join(src, "dist/main.js"), out);
+  mkdirSync(join(REPO, ".scratch"), { recursive: true });
+  const src = mkdtempSync(join(REPO, ".scratch", "bundle-"));
+  mkdirSync(join(src, ".bin"));
+  writeFileSync(join(src, ".bin", "jj"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const env = { ...process.env, PATH: `${join(src, ".bin")}:${process.env.PATH}` };
+  // A failed step answers its command, and the tree is removed before `fail` exits.
+  const sh = (cmd) => (spawnSync("sh", ["-c", cmd], { cwd: src, env, stdio: ["ignore", "ignore", "inherit"] }).status === 0 ? null : cmd);
+  const broke =
+    sh(`git -C '${REPO}' archive ${commit} | tar -x && ln -s '${join(REPO, "node_modules")}' node_modules`) ??
+    // A commit from before the port builds the F# bundle, with its own tools.
+    sh(existsSync(join(src, "src/App")) ? "dotnet tool restore && npm run build --silent" : "npm run build --silent") ??
+    sh(`mkdir -p '${dirname(out)}' && cp dist/main.js '${out}'`);
   rmSync(src, { recursive: true, force: true });
+  if (broke) fail(`${commit}: ${broke} failed`);
   return out;
 };
 for (const { start } of runs.values()) if (start.bundle) bundleAt(start.bundle);

@@ -10,4 +10,5 @@ pkg/
 .claude/worktrees/
 .claude/*.local.*
 soak-runs/
+.scratch/
 captures/
