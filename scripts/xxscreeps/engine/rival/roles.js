@@ -1,12 +1,14 @@
 // A rival's behaviour lists, one per `opponent.js` role (§10.2).
-const { aim, filler, flee, repairer, step } = require("shared");
+const { aim, filler, flee, outhealed, repairer, softest, step } = require("shared");
 
 const active = (c, part) => c.getActiveBodyparts(part) > 0;
 const armed = (c) => active(c, ATTACK) || active(c, RANGED_ATTACK);
 const hurt = (c) => c.hits < c.hitsMax;
 
 // keep: a room-holder; { focus } names its towers' aim, { safeMode: "extension" }
-// spends safe mode once an extension is struck.
+// spends safe mode once an extension is struck and "always" on its first tick,
+// { fire } their volley: "outheal" holds it unless it beats the heal the foe's
+// own side gives it, "never" holds every one.
 function keep(config) {
   for (const room of Object.values(Game.rooms)) {
     if (!room.controller?.my) continue;
@@ -15,10 +17,17 @@ function keep(config) {
     const extensions = room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_EXTENSION });
     const struck = extensions.some((s) => s.hits < s.hitsMax) || extensions.length < (Memory.extensions?.[room.name] ?? 0);
     Memory.extensions = { ...Memory.extensions, [room.name]: extensions.length };
-    if (config.safeMode === "extension" && struck) room.controller.activateSafeMode();
-    for (const tower of room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_TOWER })) {
-      const foe = aim(tower, foes, config.focus);
-      if (foe) tower.attack(foe);
+    if (config.safeMode === "always" || (config.safeMode === "extension" && struck)) room.controller.activateSafeMode();
+    const towers = room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_TOWER });
+    const charged = towers.filter((t) => t.store.getUsedCapacity(RESOURCE_ENERGY) >= 10);
+    if (config.fire === "outheal") {
+      const foe = charged.length && (config.focus === "soft" ? softest(charged[0], foes) : charged[0].pos.findClosestByRange(foes));
+      if (foe && !outhealed(charged, foe, foes)) for (const tower of charged) tower.attack(foe);
+    } else if (config.fire !== "never") {
+      for (const tower of towers) {
+        const foe = aim(tower, foes, config.focus);
+        if (foe) tower.attack(foe);
+      }
     }
     const mine = room.find(FIND_MY_CREEPS);
     for (const creep of mine) repairer(creep, room);

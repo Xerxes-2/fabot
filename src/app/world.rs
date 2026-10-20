@@ -22,7 +22,7 @@ use crate::core::world::*;
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_name = __fabotRead)]
-    fn read() -> Array;
+    fn read(drain: JsValue) -> Array;
 }
 
 fn absent(v: &JsValue) -> bool {
@@ -347,8 +347,8 @@ pub struct Pass {
     pub strs: String,
 }
 
-pub fn of_game(maps: &mut Maps, declarations: &Declarations) -> (World, Pass) {
-    let packed = read();
+pub fn of_game(maps: &mut Maps, declarations: &Declarations, drain: Option<&str>) -> (World, Pass) {
+    let packed = read(drain.map_or(JsValue::UNDEFINED, JsValue::from_str));
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
     let mut r = Reader {
@@ -363,6 +363,7 @@ pub fn of_game(maps: &mut Maps, declarations: &Declarations) -> (World, Pass) {
     let time = r.n();
     let bucket = r.n();
     let rooms = r.list(Reader::room);
+    let attacks = r.list(|r| (r.s(), r.s()));
     let spawns = r.list(Reader::spawn);
     let creeps = r.list(Reader::creep);
     let mut world = World {
@@ -376,6 +377,7 @@ pub fn of_game(maps: &mut Maps, declarations: &Declarations) -> (World, Pass) {
         our_sites: r.n(),
         rooms_allowed: r.n(),
         closed: BTreeSet::new(),
+        attacks,
     };
     let ours = world
         .spawns

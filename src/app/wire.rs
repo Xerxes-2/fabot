@@ -140,6 +140,7 @@ fn phase_name(phase: Phase) -> &'static str {
     match phase {
         Phase::Forming => "forming",
         Phase::Approaching => "approaching",
+        Phase::Draining => "draining",
         Phase::Fighting => "fighting",
         Phase::Pursuing => "pursuing",
         Phase::Disengaging => "disengaging",
@@ -150,6 +151,7 @@ fn phase_of(name: &str) -> Option<Phase> {
     Some(match name {
         "forming" => Phase::Forming,
         "approaching" => Phase::Approaching,
+        "draining" => Phase::Draining,
         "fighting" => Phase::Fighting,
         "pursuing" => Phase::Pursuing,
         "disengaging" => Phase::Disengaging,
@@ -234,6 +236,7 @@ fn engagement_of(o: &JsValue) -> Option<Engagement> {
         budget: int_of(&field(o, "budget")).unwrap_or(0),
         priority: field(o, "priority").as_f64().unwrap_or(0.0),
         unanswered: field(o, "unanswered").as_bool() == Some(true),
+        ignored: int_of(&field(o, "ignored")).unwrap_or(0),
         capacity: int_of(&field(o, "capacity")).unwrap_or(0),
         predicted: {
             let predicted = field(o, "predicted");
@@ -281,6 +284,7 @@ fn engagement_obj(e: &Engagement) -> JsValue {
     set_field(o.as_ref(), "budget", &JsValue::from(e.budget));
     set_field(o.as_ref(), "priority", &JsValue::from_f64(e.priority));
     set_field(o.as_ref(), "unanswered", &JsValue::from_bool(e.unanswered));
+    set_field(o.as_ref(), "ignored", &JsValue::from(e.ignored));
     set_field(o.as_ref(), "capacity", &JsValue::from(e.capacity));
     match &e.predicted {
         Some(outcome) => set_field(o.as_ref(), "predicted", &outcome_obj(outcome)),

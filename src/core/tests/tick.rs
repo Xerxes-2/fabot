@@ -56,6 +56,7 @@ fn run(throws: &[bool], state: State) -> TickResult {
         rooms: Vec::new(),
         spawns: Vec::new(),
         creeps: Vec::new(),
+        attacks: Vec::new(),
         our_sites: 0,
         rooms_allowed: 1,
         closed: Default::default(),

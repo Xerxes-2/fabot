@@ -444,6 +444,21 @@ impl<'a> Scene<'a> {
         self.ask_slots(atlas, e, &slots, asked);
     }
 
+    /// How many of the drain's bodies the set already holds, standing or in
+    /// an oven: a pair's shape is no other body's.
+    fn paired(&self, e: &Engagement, asked: &Asked, set: &[casting::Body]) -> usize {
+        let of = |body: &[BodyPart]| set.iter().any(|s| s.as_slice() == body);
+
+        (self.members_of(e))
+            .iter()
+            .filter(|c| of(&c.body.iter().map(|p| p.kind).collect::<Vec<_>>()))
+            .count()
+            + (asked.casts)
+                .iter()
+                .filter(|c| c.engagement == e.id && of(&c.body))
+                .count()
+    }
+
     fn ask_slots(
         &self,
         atlas: &Atlas,
@@ -583,11 +598,14 @@ impl<'a> Scene<'a> {
     fn siege_facts(
         &self,
         e: &Engagement,
-        target: &str,
         declared: bool,
         standing: &BTreeSet<String>,
         aging_out: &BTreeSet<String>,
+        gate: Option<&tactics::Gate>,
     ) -> SiegeFacts {
+        let room = self.in_sight(&e.room);
+        let towers = room.map_or_else(Vec::new, |r| self.charged(r));
+
         SiegeFacts {
             time: self.world.time,
             standing: standing.clone(),
@@ -603,11 +621,155 @@ impl<'a> Scene<'a> {
                     .get(n.as_str())
                     .is_some_and(|c| c.pos.room == e.room && !tactics::picket_of(c))
             }),
-            razed: self
-                .in_sight(&e.room)
-                .is_some_and(|room| !siege::stands(room, target)),
-            stood_off: !declared || self.in_sight(&e.room).is_some_and(Scene::safe),
+            charged: !towers.is_empty(),
+            drain: gate.is_some(),
+            priced: self.drainable(e, &towers),
+            worked: self.pair_worked(e),
+            bounced: gate.is_some_and(|g| self.bounced(e, g)),
+            drawn: self.drawn(e),
+            gave_up: siege::gave_up(e),
+            razed: room.is_some_and(|room| match &e.objective {
+                Objective::Siege(target) => !siege::stands(room, target),
+                _ => false,
+            }),
+            safe: room.is_some_and(Scene::safe),
+            withdrawn: !declared,
         }
+    }
+
+    /// A bouncer carried back from his room this tick: it stands on the tile
+    /// across from his, where the volley that answered the trip is in the log.
+    fn bounced(&self, e: &Engagement, gate: &tactics::Gate) -> bool {
+        let back = tiles::to_pos(&gate.from, gate.bounce);
+
+        (self.members_of(e))
+            .iter()
+            .any(|c| c.pos == back && !c.body.iter().any(|p| p.kind == BodyPart::Heal))
+    }
+
+    /// One of his towers struck one of ours in his room on the trip just
+    /// ended: what his room's event log is read for, and the only answer a
+    /// drain counts.
+    fn drawn(&self, e: &Engagement) -> bool {
+        if self.world.attacks.is_empty() {
+            return false;
+        }
+
+        let towers: BTreeSet<&String> = (self.in_sight(&e.room))
+            .into_iter()
+            .flat_map(|r| self.towers_in(r))
+            .map(|t| &t.id)
+            .collect();
+
+        (self.world.attacks.iter())
+            .any(|(by, at)| towers.contains(by) && (self.world.creeps).iter().any(|c| &c.id == at))
+    }
+
+    /// The heal the set seats on one body beside it: what his towers' strike
+    /// is weighed against at the breach.
+    fn seated(&self, e: &Engagement) -> i32 {
+        let set = self.fielded(e);
+
+        exchange::pooled_heal(set.len() as i32, &set)
+    }
+
+    /// His towers out-strike the heal the set seats at the breach, so the gate
+    /// is worth working.
+    fn outstruck(&self, e: &Engagement, towers: &[Pos]) -> bool {
+        (self.next_struck(e))
+            .is_some_and(|b| exchange::tower_strike(towers, &b.pos) > self.seated(e))
+    }
+
+    /// The gate is worth working: the medics the pairs the bank buys seat hold
+    /// his towers' volley on the tile the bouncer stands on. The volley is read
+    /// at the gate, and the heal seated there is theirs, not the set's.
+    fn drain_pays(&self, e: &Engagement, towers: &[Pos], gate: &tactics::Gate) -> bool {
+        let at = tiles::landing(gate.bounce).unwrap_or(gate.bounce);
+        let volley = exchange::tower_strike(towers, &tiles::to_pos(&e.room, at));
+
+        volley <= casting::pair_heal(casting::pairs(e.capacity))
+    }
+
+    /// His towers leave a border tile of his room that the heal the pairs the
+    /// bank buys seat holds: the cheapest a gate can draw at.
+    fn drainable(&self, e: &Engagement, towers: &[Pos]) -> bool {
+        if towers.is_empty() {
+            return false;
+        }
+        let least = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
+            .iter()
+            .flat_map(|side| tiles::exit_tiles(*side))
+            .map(|t| exchange::tower_strike(towers, &tiles::to_pos(&e.room, *t)))
+            .min()
+            .unwrap_or(i32::MAX);
+
+        least <= casting::pair_heal(casting::pairs(e.capacity))
+    }
+
+    /// A pair of the drain stands or is in an oven, or one has tripped: a drain
+    /// with none of those holds nothing.
+    fn pair_worked(&self, e: &Engagement) -> bool {
+        let set = casting::drains(e.capacity);
+        let of = |body: &[BodyPart]| set.iter().any(|s| s.as_slice() == body);
+
+        e.ignored > 0
+            || (self.members_of(e)).iter().any(|c| {
+                let body: Vec<BodyPart> = c.body.iter().map(|p| p.kind).collect();
+                of(&body)
+            })
+            || (self.waiting)
+                .iter()
+                .any(|c| c.engagement == e.id && of(&c.body))
+    }
+
+    /// The edge a drain bounces through: the room the set walks in from and
+    /// his border tile there his towers reach, the nearest of them. None: no
+    /// door.
+    fn gate(&self, atlas: &Atlas, e: &Engagement, towers: &[Pos]) -> Option<tactics::Gate> {
+        let colony = self.colonies_of(atlas, e).first()?.name.clone();
+        let hops = Scene::hops(e);
+        let rooms = match self.walks.get(&(e.room.clone(), hops)) {
+            Some(tree) => tree.route(&colony, &e.room),
+            None => atlas.route(self.avoid, hops, &colony, &e.room),
+        }?;
+        let from = rooms.get(rooms.len().checked_sub(2)?)?.clone();
+        let side = tiles::exit_toward(&e.room, &from)?;
+        let nearest = |at: &Pos| {
+            (towers.iter()).fold(engine::ROOM_SIDE, |least, t| {
+                least.min(t.range(at).unwrap_or(least))
+            })
+        };
+
+        let tiles: Vec<Tile> = (tiles::exit_tiles(side).iter())
+            .copied()
+            .filter(|t| atlas.passable(&e.room, *t))
+            .filter(|t| tiles::landing(*t).is_some_and(|l| atlas.passable(&from, l)))
+            .collect();
+
+        // A trip his towers cannot answer draws nothing, so a tile one of them
+        // reaches is the gate before a quieter one is.
+        let reached = |at: &Pos| {
+            towers
+                .iter()
+                .any(|t| t.within(engine::TOWER_FALLOFF_RANGE, at))
+        };
+        let tile = tiles.into_iter().min_by_key(|t| {
+            let at = tiles::to_pos(&e.room, *t);
+            (!reached(&at), nearest(&at), *t)
+        })?;
+        let bounce = tiles::landing(tile)?;
+        let rest = (tiles::around(bounce).iter())
+            .filter(|t| !tiles::on_edge(**t))
+            .filter(|t| atlas.passable(&from, **t))
+            .min_by_key(|t| tiles::range(**t, bounce))
+            .copied()?;
+
+        Some(tactics::Gate {
+            room: e.room.clone(),
+            from,
+            bounce,
+            rest,
+        })
     }
 
     /// Whole, as cast: a part struck off is healed back, and only a body lost
@@ -899,6 +1061,21 @@ impl<'a> Scene<'a> {
                 }),
             }
         } else if e.phase == Phase::Disengaging {
+            Some(e.clone())
+        } else if e.phase == Phase::Draining {
+            // The dance's own bodies, on top of the breach set: a bouncer and
+            // a medic a pair of the bank, and a lost one of the two is asked.
+            if !siege::gave_up(e) {
+                let pairs = casting::pairs(e.capacity) as usize;
+                let missing: Vec<casting::Body> = (casting::pair().iter())
+                    .flat_map(|body| {
+                        let have = self.paired(e, asked, std::slice::from_ref(body));
+                        std::iter::repeat_n(body.clone(), pairs.saturating_sub(have))
+                    })
+                    .collect();
+                self.ask(atlas, e, &missing, asked);
+            }
+
             Some(e.clone())
         } else {
             // A forming set waits on every ask: a successor asked then would hold it.
@@ -1618,6 +1795,7 @@ fn fresh(id: i32, objective: Objective, room: &str, time: i32, tactic: Tactic) -
         budget: 0,
         priority: 0.0,
         unanswered: true,
+        ignored: 0,
         capacity: 0,
         predicted: None,
     }
@@ -1878,17 +2056,40 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .collect();
     let candidates = scene.candidates(atlas, &grounds, &stirred);
 
+    // The edge each siege would drain at: his border tile his towers reach,
+    // nearest them, and the room across it our medics wait in. The gate is the
+    // pair's: a tile his volley leaves the pairs the bank buys healing over.
+    // A room with no such tile is not drained: the set breaches by its plan,
+    // or stands off a safe mode as it did before the drain (§6.2).
+    let gates: BTreeMap<i32, tactics::Gate> = (engagements.iter())
+        .filter(|e| matches!(e.objective, Objective::Siege(_)))
+        .filter_map(|e| {
+            let room = scene.in_sight(&e.room)?;
+            let towers = scene.charged(room);
+            let drains = !towers.is_empty()
+                && matches!(e.phase, Phase::Approaching | Phase::Draining)
+                && (Scene::safe(room) || scene.outstruck(e, &towers));
+            if !drains {
+                return None;
+            }
+            let gate = scene.gate(&*atlas, e, &towers)?;
+            scene.drain_pays(e, &towers, &gate).then_some((e.id, gate))
+        })
+        .collect();
+    let given_up: BTreeSet<i32> = (engagements.iter())
+        .filter(|e| matches!(e.objective, Objective::Siege(_)) && siege::gave_up(e))
+        .map(|e| e.id)
+        .collect();
+
     let stepped: Vec<(Engagement, bool)> = engagements
         .iter()
         .filter_map(|e| {
             let next = match &e.objective {
                 Objective::Defend => defend::step(&scene.facts_of(e, &standing, &aging_out), e),
-                Objective::Siege(target) => {
+                Objective::Siege(_) => {
                     let declared = declarations.sieges.contains(&e.room);
-                    siege::step(
-                        &scene.siege_facts(e, target, declared, &standing, &aging_out),
-                        e,
-                    )
+                    let f = scene.siege_facts(e, declared, &standing, &aging_out, gates.get(&e.id));
+                    siege::step(&f, e)
                 }
                 Objective::Sweep => sweep::step(
                     &sweep::Facts {
@@ -1972,9 +2173,32 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .sieges
         .iter()
         .filter(|room| !besieging.contains(room.as_str()))
+        // A safe mode refuses the breach but not the edge: his towers are
+        // drawn there while it runs, and the siege opens on a drain only where
+        // the pairs it casts out-heal his volley on the gate.
         .filter_map(|room| {
-            let room = scene.in_sight(room).filter(|r| !Scene::safe(r))?;
-            Some((&room.name, siege::next_target(room, None)?))
+            let room = scene.in_sight(room)?;
+            let target = siege::next_target(room, None)?;
+            let towers = scene.charged(room);
+            if !Scene::safe(room) {
+                return Some((&room.name, target));
+            }
+            if towers.is_empty() {
+                return None;
+            }
+            let mut watch = fresh(
+                first_id,
+                Objective::Siege(target.clone()),
+                &room.name,
+                world.time,
+                Tactic::BlobClose,
+            );
+            watch.capacity = scene.capacity_of(&*atlas, &watch);
+            // A safe mode's room opens on the drain that prices: the least his
+            // towers strike a border tile is what a gate can draw at.
+            scene
+                .drainable(&watch, &towers)
+                .then_some((&room.name, target))
         })
         .enumerate()
         .map(|(i, (room, target))| {
@@ -2158,6 +2382,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             scene.by_id.get(&e.group),
             scene.next_struck(e),
         ) {
+            // His towers are spent at the edge before the set breaches: it
+            // waits in the room beside his, off the tiles a pair works.
+            (Objective::Siege(_), _, _) if gates.contains_key(&e.id) => {
+                (middle(&gates[&e.id].from), engine::ROOM_SIDE / 2)
+            }
             (Objective::Siege(_), _, Some(b)) => (b.pos.clone(), engine::RANGED_RANGE),
             (Objective::Defend, Some(g), _) => (g.centre.clone(), engine::RANGED_RANGE),
             (Objective::Siege(_), _, None) => (middle(&e.room), engine::ROOM_SIDE / 2),
@@ -2316,6 +2545,16 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         }
 
         let wish = match e.phase {
+            // The towers' room is the only one a drain presses into.
+            // A drain that gave up stands off in the room beside his, casting
+            // nothing more (§6.2).
+            Phase::Draining => match gates.get(&e.id) {
+                Some(gate) if given_up.contains(&e.id) => {
+                    tactics::toward(sight, c, &middle(&gate.from), engine::ROOM_SIDE / 2)
+                }
+                Some(gate) => tactics::drain(sight, gate, c),
+                None => tactics::hold(sight, c),
+            },
             Phase::Forming => tactics::hold(sight, c),
             Phase::Pursuing => tactics::close(sight, order, &centre, c),
             Phase::Disengaging => tactics::retreat(sight, c),

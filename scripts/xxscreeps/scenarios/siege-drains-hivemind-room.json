@@ -1,0 +1,16 @@
+{
+  "nightly": true,
+  "why": "a declared siege meets Hivemind in the room it holds, whose towers do not out-strike the heal the set seats at the breach: no pair works his edge and our play there is main's (4,580-9,030 spent, 3-4 bodies lost, seeds 1-3). Nightly: Hivemind is fetched, not in this tree",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
+    "seed": 1,
+    "opponents": [{ "name": "rival", "bot": "scripts/xxscreeps/engine/hivemind", "room": "W8S1" }]
+  },
+  "ticks": 6000,
+  "assert": [
+    { "measure": "towerSpent", "who": "rival", "min": 3000 },
+    { "measure": "bodiesLost", "max": 4 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

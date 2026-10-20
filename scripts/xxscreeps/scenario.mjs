@@ -199,7 +199,13 @@ const measures = {
   leastStored: (samples, a) => Math.min(...within(samples, a).map((s) => s.stored)),
   // Percent of the colony's harvest the engagements cast into bodies.
   fightShare: (samples, _, dir) => Math.round((100 * rowsOf(dir).reduce((n, e) => n + (e.cast ?? 0), 0)) / Math.max(1, samples.at(-1).ledger.dug)),
-  towerSpent: (samples, a) => at(samples, a.to ?? Infinity).ledger.tower - at(samples, a.from ?? 0).ledger.tower,
+  // Energy a side's towers spent: ours, or `who`'s an opponent's.
+  towerSpent: (samples, a) => {
+    const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
+    return a.who ? (last.others[a.who]?.spent ?? 0) - (first.others[a.who]?.spent ?? 0) : last.ledger.tower - first.ledger.tower;
+  },
+  // The energy `who`'s towers hold at the window's end.
+  towerLeft: (samples, a) => at(samples, a.to ?? Infinity).others[a.who]?.fire ?? Infinity,
   upgrade: (samples, a) => upgradedIn(at(samples, a.to ?? Infinity), a) - upgradedIn(at(samples, a.from ?? 0), a),
   // Percent of samples whose buffer stood empty with an upgrader beside it.
   dryBuffer: (samples, a) => {
@@ -280,6 +286,9 @@ const measures = {
   siegeRampartsLost: (_, __, dir) => rowsOf(dir).find((e) => e.kind === "siege")?.rampartsLost ?? Infinity,
   // 1 when the first siege's first target is of `kind`, else 0.
   siegeFirstTarget: (_, a, dir) => Number(rowsOf(dir).find((e) => e.kind === "siege")?.firstKind === a.kind),
+  // Its bodies that landed in a region the target is walled off from, but not a
+  // body that left the room the tick after landing on a border tile: those are a
+  // drain pair's excursions (soak-step's `entered`).
   siegeWalledEntries: (_, __, dir) => Object.values(rowsOf(dir).find((e) => e.kind === "siege")?.entries ?? {}).filter((s) => s === "walled").length,
   // The least hits a siege's target (a spawn, a core) ever stood at (none seen: Infinity).
   siegeTargetLow: (_, __, dir) => Math.min(Infinity, ...rowsOf(dir).filter((e) => e.kind === "siege" && e.target).map((e) => e.target.low)),
@@ -292,6 +301,8 @@ const measures = {
     return Math.round((100 * rows.reduce((n, e) => n + (e.kept ?? 0), 0)) / Math.max(1, rows.reduce((n, e) => n + (e.held ?? 0), 0)));
   },
   bodiesLost: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.dead ?? 0), 0),
+  // The energy every engagement cast into its bodies.
+  cast: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.cast ?? 0), 0),
   // Of those, the ones that died in their engagement's room with no set-mate within 3 (soak-step's `alone`).
   diedAlone: (_, __, dir) => rowsOf(dir).reduce((n, e) => n + (e.alone ?? 0), 0),
   // Our bodies gone from the colony's rooms and their neighbours with life left: died, or walked

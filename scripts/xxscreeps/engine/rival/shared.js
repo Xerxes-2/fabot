@@ -7,6 +7,19 @@ const walk = (creep, goals, options) => {
 const step = (creep, goals, flee) => walk(creep, goals, { flee, maxRooms: 1 });
 const flee = (creep, from, range) => walk(creep, from.map((f) => ({ pos: f.pos, range })), { flee: true });
 
+// `engine::tower_attack_at`: 600 to range 5, 450 gone from range 20 out.
+const towerDamage = (range) => (range <= 5 ? 600 : Math.floor(600 - 30 * (Math.min(range, 20) - 5)));
+
+// { fire: "outheal" }: the towers' damage on one foe summed against the heal its
+// own side gives it, as a live rival held its volley.
+function outhealed(towers, foe, foes) {
+  const damage = towers.reduce((n, t) => n + towerDamage(t.pos.getRangeTo(foe)), 0);
+  const heal = foes
+    .filter((f) => f.id === foe.id || f.pos.inRangeTo(foe, 3))
+    .reduce((n, f) => n + f.getActiveBodyparts(HEAL) * (f.pos.isNearTo(foe) ? 12 : 4), 0);
+  return heal >= damage;
+}
+
 // { focus: "soft" } takes the foe the heal its side gives it within 3 is weakest
 // on, as a live player's towers focus.
 function softest(tower, foes) {
@@ -41,4 +54,4 @@ function filler(creep, room) {
   if (!topUp(creep, room, 0) && creep.transfer(room.storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) creep.moveTo(room.storage, { maxRooms: 1 });
 }
 
-module.exports = { aim, filler, flee, repairer, step };
+module.exports = { aim, filler, flee, outhealed, repairer, softest, step };

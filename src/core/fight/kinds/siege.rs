@@ -1,6 +1,7 @@
 /// `Siege` (`ARCHITECTURE.md` §6.2); `step` closes it with None once nothing is left to take.
 use std::collections::BTreeSet;
 
+use super::super::casting;
 use super::super::shape::{Engagement, Phase};
 use crate::core::engine;
 use crate::core::tactics::Tactic;
@@ -9,17 +10,37 @@ use crate::core::world::{Controller, Kind, Owner, Pos, Room, Structure};
 
 pub const CANDIDATES: &[Tactic] = &[Tactic::BlobClose];
 
+/// Bouncer trips his towers may leave untouched before the drain gives up.
+pub const IGNORED: i32 = 6;
+
+/// The drain gave up: the engagement holds the edge, casting nothing more.
+pub fn gave_up(e: &Engagement) -> bool {
+    e.ignored >= IGNORED || casting::drains(e.capacity).is_empty()
+}
+
 pub struct Facts {
     pub time: i32,
     pub standing: BTreeSet<String>,
     pub aging_out: BTreeSet<String>,
     pub asked: bool,
     pub home: bool,
-    /// One of ours stands in the rival's room, all of it in its towers' reach.
+    /// One of ours, no picket, stands in his room: what opens the breach.
     pub under_fire: bool,
+    pub charged: bool,
+    /// A gate stands a drain works: his towers not out-striking the heal the set seats.
+    pub drain: bool,
+    /// His towers leave a border tile the pairs cover: the most a drain can pay.
+    pub priced: bool,
+    /// A pair stands or has tripped: a drain that never cast one holds nothing.
+    pub worked: bool,
+    /// A bouncer is back from his room this tick, and whether a tower answered.
+    pub bounced: bool,
+    pub drawn: bool,
+    pub gave_up: bool,
     pub razed: bool,
     /// The rival's safe mode runs in its room, or the owner withdrew the siege.
-    pub stood_off: bool,
+    pub safe: bool,
+    pub withdrawn: bool,
 }
 
 /// The towers and the whole economy (owner, 2026-10-18).
@@ -85,7 +106,6 @@ fn declaimed(room: &Room) -> Option<&Controller> {
     (room.controller.as_ref()).filter(|c| matches!(c.owner, Owner::Enemy(_)))
 }
 
-/// Razed first, then the enemy's controller tapped (v1's declaim).
 pub fn next_target(room: &Room, near: Option<&Pos>) -> Option<String> {
     let razed = next_razed(room, near).map(|s| &s.id);
     razed.or(declaimed(room).map(|c| &c.id)).cloned()
@@ -113,6 +133,11 @@ fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
     Engagement {
         phase,
         since: time,
+        ignored: if phase == Phase::Draining {
+            0
+        } else {
+            e.ignored
+        },
         ..e.clone()
     }
 }
@@ -122,20 +147,47 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
     let mut next = e.clone();
     next.lost = e.lost + e.ours.len() as i32 - alive.len() as i32;
     next.ours = alive.difference(&facts.aging_out).cloned().collect();
+    next.ignored = match (facts.bounced, facts.drawn) {
+        (true, true) => 0,
+        (true, false) if facts.charged => (e.ignored + 1).min(IGNORED),
+        _ => e.ignored,
+    };
     let e = &next;
+
+    // A drain holds the set while a pair works it — his room priced, or a gate
+    // at its edge — and never once it fights; a safe mode it cannot work stands off.
+    let holds = facts.drain
+        || (facts.priced
+            && !matches!(
+                e.phase,
+                Phase::Fighting | Phase::Pursuing | Phase::Disengaging
+            )
+            && (facts.worked || !facts.gave_up));
+    let draining = holds
+        && e.phase != Phase::Forming
+        && (facts.drain || (e.phase == Phase::Draining && facts.charged && facts.worked));
+    let breached = if facts.safe {
+        Phase::Disengaging
+    } else {
+        Phase::Fighting
+    };
 
     if facts.razed {
         None
     } else if e.phase == Phase::Disengaging {
         if facts.home { None } else { Some(e.clone()) }
-    // A body lost re-prices the set, which tops itself up (owner, 2026-10-18:
-    // losses are a siege's to expect).
-    } else if facts.stood_off {
+    } else if facts.withdrawn || (facts.safe && !holds) {
         Some(enter(Phase::Disengaging, facts.time, e))
     } else if e.phase == Phase::Forming && !facts.asked && !e.ours.is_empty() {
         Some(enter(Phase::Approaching, facts.time, e))
-    } else if e.phase == Phase::Approaching && facts.under_fire {
-        Some(enter(Phase::Fighting, facts.time, e))
+    } else if draining {
+        Some(if e.phase == Phase::Draining {
+            e.clone()
+        } else {
+            enter(Phase::Draining, facts.time, e)
+        })
+    } else if e.phase == Phase::Draining || (e.phase == Phase::Approaching && facts.under_fire) {
+        Some(enter(breached, facts.time, e))
     } else {
         Some(e.clone())
     }

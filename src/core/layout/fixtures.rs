@@ -353,6 +353,7 @@ pub fn world_of(room: Room, spawns: Vec<Spawn>, creeps: Vec<Creep>) -> World {
         rooms: vec![room],
         spawns,
         creeps,
+        attacks: Vec::new(),
         our_sites: 0,
         rooms_allowed: 1,
         closed: Default::default(),

@@ -179,6 +179,8 @@ globalThis.__fabotRead = (() => {
 
     const [time, bucket] = [n(), n()];
     const rooms = list(room);
+    // A drain's event log is read for a live drain only: consumed, not stood.
+    list(() => [s(), s()]);
     const creeps = {};
     const spawns = Object.fromEntries(
       list(() => {
@@ -199,7 +201,7 @@ globalThis.__fabotRead = (() => {
     return { time, cpu: { bucket }, gcl: { level: n() }, rooms, creeps, spawns, constructionSites, objects };
   };
 
-  return () => {
+  return (drain) => {
     at = 0;
     strs = [];
     const game = Game;
@@ -210,6 +212,11 @@ globalThis.__fabotRead = (() => {
     const mine = rooms.find((r) => r.controller && r.controller.my === true);
     s(spawns.length ? spawns[0].owner?.username : creeps.length ? creeps[0].owner.username : mine?.controller.owner?.username);
     list(rooms, room);
+    // The one room a drain stands in is the one whose log is read: his towers'
+    // shots there, and who each struck.
+    const logged = drain === undefined ? undefined : game.rooms[drain];
+    const shots = logged === undefined ? [] : logged.getEventLog().filter((e) => (e.event ?? e._$Variant) === EVENT_ATTACK);
+    list(shots, (e) => (s(e.objectId), s(e.data?.targetId)));
     list(spawns, (sp) => {
       s(sp.id), s(sp.name), pos(sp.pos);
       if (absent(sp.spawning)) return n(0);

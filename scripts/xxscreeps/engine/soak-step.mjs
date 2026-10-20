@@ -493,6 +493,17 @@ function sample(t, time, room) {
 // of the bodies it asked that stood in it; `core`: an Invader core was in its group.
 const LETTER_COST = Object.fromEntries(Object.entries(PART_COST).map(([t, c]) => [t === "claim" ? "K" : t[0].toUpperCase(), c]));
 const open = new Map();
+// Energy the towers a rival holds spent, by user id: 10 a shot (ARCHITECTURE.md
+// §10.2's adversaries, where a drain is priced against what it draws).
+const burned = new Map();
+function burnt(rooms) {
+  for (const room of rooms) {
+    const towers = new Map([...room["#objects"]].filter((o) => o.structureType === "tower" && o["#user"] && o["#user"] !== ours).map((o) => [o.id, o["#user"]]));
+    for (const e of room["#eventLog"] ?? [])
+      if ([ATTACK, HEAL, REPAIR].includes(e.event ?? e._$Variant) && towers.has(e.objectId))
+        burned.set(towers.get(e.objectId), (burned.get(towers.get(e.objectId)) ?? 0) + 10);
+  }
+}
 // What a siege razes (`fight/kinds/siege.rs` rank_of): the rival's left in its room.
 const RAZED = new Set(["tower", "spawn", "extension", "storage", "terminal", "link", "lab", "extractor", "factory", "powerSpawn", "nuker", "observer"]);
 const razeLeft = (objects, room) => objects.filter((o) => o.pos.roomName === room && RAZED.has(o.structureType) && o["#user"] && o["#user"] !== ours).length;
@@ -516,9 +527,23 @@ function holds(room, inRoom, from, at) {
   }
   return false;
 }
-// A siege's first target and its kind, the tick it fell (`razed`), the ramparts its room
-// lost before, and each body's entry: "target" when the region it landed in
-// holds the target, else "walled".
+// Each body's entry into a siege's room, by the region it landed in: "target"
+// when it holds the target, else "walled" — but a body that landed in another
+// region on a border tile and left the room the next tick is a bouncer's
+// excursion, not an entry (the drain, ARCHITECTURE.md §6.2), so its "edge"
+// waits one tick for whether it stays or walks further.
+const onEdge = (p) => p.x === 0 || p.x === 49 || p.y === 0 || p.y === 49;
+function entered(rec, e, inRoom, bodies) {
+  const entries = (rec.entries ??= {});
+  for (const name of Object.keys(entries).filter((n) => entries[n] === "edge")) {
+    if (bodies.some((b) => b.name === name)) entries[name] = "walled";
+    else delete entries[name];
+  }
+  for (const b of bodies.filter(() => rec.firstAt && rec.razed === undefined))
+    entries[b.name] ??= holds(e.room, inRoom, b.pos, rec.firstAt) ? "target" : onEdge(b.pos) ? "edge" : "walled";
+}
+// A siege's first target and its kind and the tick it fell (`razed`), and the
+// ramparts its room lost before.
 function breaching(rec, e, objects, t) {
   const inRoom = objects.filter((o) => o.pos.roomName === e.room);
   const ramparts = inRoom.filter((o) => o.structureType === "rampart" && o["#lookType"] === "structure").length;
@@ -528,9 +553,7 @@ function breaching(rec, e, objects, t) {
   if (target) [rec.firstAt, rec.firstKind] = [{ x: target.pos.x, y: target.pos.y }, target.structureType];
   else if (rec.firstAt) rec.razed ??= t;
   if (rec.razed === undefined) rec.rampartsLost = rec.ramparts - ramparts;
-  const bodies = inRoom.filter((o) => o.body !== undefined && o["#user"] === ours && e.ours.includes(o.name));
-  for (const b of bodies.filter(() => rec.firstAt && rec.razed === undefined))
-    (rec.entries ??= {})[b.name] ??= holds(e.room, inRoom, b.pos, rec.firstAt) ? "target" : "walled";
+  entered(rec, e, inRoom, inRoom.filter((o) => o.body !== undefined && o["#user"] === ours && e.ours.includes(o.name)));
 }
 const engagementsOut = fs.openSync(join(out, "engagements.jsonl"), "w");
 // A sweep's `killed`: each rival body struck dead in its room (a tombstone
@@ -665,6 +688,7 @@ function lone(rec, room, objects, bodies) {
 async function engaged(t, time, rooms) {
   const fight = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}").v2?.fight ?? {};
   const now = new Set();
+  const watched = new Map();
   for (const e of fight.engagements ?? []) {
     now.add(e.id);
     const rec = open.get(e.id) ?? { id: e.id, kind: e.kind ?? "defend", room: e.room, opened: t, members: new Set(), ours: new Set(), rooms: new Set(), fell: new Set(), swing: {}, answered: false, gaveUp: false, disengaged: false, contact: null, seen: null, casts: new Map(), cast: 0 };
@@ -690,7 +714,9 @@ async function engaged(t, time, rooms) {
       rec.breachCast ??= rec.cast;
     }
     // A siege's room is the rival's, which no sample follows.
-    const seen = roomNames.includes(e.room) ? rooms : [...rooms, await shard.loadRoom(e.room, time)];
+    const rival = roomNames.includes(e.room) ? null : await shard.loadRoom(e.room, time);
+    if (rival) watched.set(e.room, rival);
+    const seen = rival ? [...rooms, rival] : rooms;
     const objects = seen.flatMap((r) => [...r["#objects"]]);
     if (rec.kind === "siege") {
       rec.left = razeLeft(objects, e.room);
@@ -731,6 +757,7 @@ async function engaged(t, time, rooms) {
       for (const r of rec.rooms) fell(rec, [...(await shard.loadRoom(r, time))["#objects"]]);
       await closed(rec, t);
     }
+  burnt(watched.values());
 }
 
 // Ticks our bodies lost beside a road: grounded past a step onto a tile off
@@ -788,11 +815,10 @@ const lastTwo = new Map();
 function wasted(rooms) {
   const objects = rooms.flatMap((r) => [...r["#objects"]]);
   const stores = objects.filter((o) => o.structureType === "storage" || o.structureType === "terminal");
-  const edge = (p) => p.x === 0 || p.y === 0 || p.x === 49 || p.y === 49;
   for (const o of objects)
     if (o.body !== undefined && o["#user"] === ours) {
       const beside = stores.find((s) => s.pos.roomName === o.pos.roomName && near(s.pos, o.pos, 1));
-      const now = { room: o.pos.roomName, edge: edge(o.pos), energy: energyIn(o), store: beside?.id, stored: beside ? energyIn(beside) : 0 };
+      const now = { room: o.pos.roomName, edge: onEdge(o.pos), energy: energyIn(o), store: beside?.id, stored: beside ? energyIn(beside) : 0 };
       const [a, b] = lastTwo.get(o.name) ?? [];
       if (a && b && a.edge && b.edge && now.edge && a.room === now.room && b.room !== now.room) bounced++;
       if (b && b.room !== now.room && homes.includes(b.room)) lines[b.room].carriedOut += now.energy;
@@ -907,6 +933,9 @@ for (let t = 0; t < ticks; t++) {
         spawns: objects.filter((x) => x.structureType === "spawn").length,
         creeps: objects.filter((x) => x.body !== undefined).length,
         ramparts: objects.filter((x) => x.structureType === "rampart").length,
+        // Its towers' energy, and every shot they have spent.
+        fire: objects.filter((x) => x.structureType === "tower").reduce((n, t) => n + energyIn(t), 0),
+        spent: burned.get(o.id) ?? 0,
       };
     }
     if (homes.length > 1) row.homes = Object.fromEntries(homes.map((h, i) => [h, (({ bodies, foes, ...s }) => s)(sample(t, time, rooms[i]))]));

@@ -84,7 +84,10 @@ fn run_tick() -> Result<(), String> {
     let mut declarations: Declarations =
         wire::read_declarations().besieging(intel.as_ref().unwrap_or(&Intel::new()));
     let start = clock();
-    let (world, pass) = world::of_game(&mut maps, &declarations);
+    let drain = (state.engagements.iter())
+        .find(|e| e.phase == crate::core::fight::shape::Phase::Draining)
+        .map(|e| e.room.clone());
+    let (world, pass) = world::of_game(&mut maps, &declarations, drain.as_deref());
     let refused = declarations.refuse(&world.closed);
     sightings = crate::core::world::sightings::step(&world, sightings);
     let mut unread = Intel::new();

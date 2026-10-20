@@ -17,6 +17,9 @@ pub struct Group {
 pub enum Phase {
     Forming,
     Approaching,
+    /// His towers are spent at his border before the set breaches: a bouncer
+    /// steps onto it and back across to the medics, a volley a trip.
+    Draining,
     Fighting,
     Pursuing,
     Disengaging,
@@ -61,6 +64,9 @@ pub struct Engagement {
     pub priority: f64,
     /// Starved: towers and ramparts answer it alone.
     pub unanswered: bool,
+    /// Bouncer trips onto his border his towers left untouched, since the last
+    /// one they struck: a drain counts them and gives up (§6.2).
+    pub ignored: i32,
     /// The bank it was last priced against; a larger one is an event.
     pub capacity: i32,
     /// What `Exchange` said each time it was answered after standing

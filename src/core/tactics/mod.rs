@@ -553,6 +553,50 @@ pub fn focus_of<'a>(front: &Front, members: &[&'a Creep]) -> Option<&'a Creep> {
         .min_by_key(|m| (nearest_tower(front, &m.pos), &m.name))
 }
 
+/// The edge a drain bounces through (`ARCHITECTURE.md` §6.2): `bounce`'s
+/// mirror is his.
+pub struct Gate {
+    pub room: String,
+    pub from: String,
+    pub bounce: Tile,
+    pub rest: Tile,
+}
+pub fn drain(sight: &mut Sight, gate: &Gate, creep: &Creep) -> Wish {
+    let at = tiles::of_pos(&creep.pos);
+    let there = |t: Tile| tiles::to_pos(&gate.from, t);
+    let strikes = live(BodyPart::Attack, creep) > 0 || live(BodyPart::RangedAttack, creep) > 0;
+
+    // The set waits beside his room, off the pair's tiles: the entry is the plan's.
+    if strikes || live(BodyPart::Work, creep) > 0 {
+        let wait = there(tiles::index(engine::ROOM_SIDE / 2, engine::ROOM_SIDE / 2));
+        return toward(sight, creep, &wait, engine::ROOM_SIDE / 2);
+    }
+
+    if live(BodyPart::Heal, creep) > 0 {
+        return match seat_of(&*sight.atlas, gate) {
+            Some(seat) if at == seat && creep.pos.room == gate.from => step_to(creep, at),
+            Some(seat) => toward(sight, creep, &there(seat), 0),
+            None => step_to(creep, at),
+        };
+    }
+
+    if creep.pos.room == gate.room {
+        return step_to(creep, at);
+    }
+    if creep.hits < engine::TOWER_POWER_ATTACK / 2 || at != gate.rest {
+        return toward(sight, creep, &there(gate.rest), 0);
+    }
+    step_to(creep, gate.bounce)
+}
+
+fn seat_of(atlas: &Atlas, gate: &Gate) -> Option<Tile> {
+    (tiles::around(gate.rest).iter())
+        .filter(|t| !tiles::on_edge(**t) && tiles::range(**t, gate.bounce) <= 1)
+        .filter(|t| atlas.passable(&gate.from, **t))
+        .min()
+        .copied()
+}
+
 pub fn siege(
     sight: &mut Sight,
     front: &Front,

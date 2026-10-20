@@ -325,6 +325,47 @@ pub fn reinforce<T>(
     })
 }
 
+/// A drain's pair (`ARCHITECTURE.md` §6.2): TOUGH×20 MOVE×20, 1,200 energy of
+/// 4,000 hits spent on a step a tick, and HEAL×13 MOVE×13, 3,900 energy of 2,600
+/// that heals the volley back. Three pairs at most: a tower fires at one body a
+/// tick (owner, 2026-10-21: a pair walks at full speed on plain).
+const BOUNCER_TOUGH: usize = 20;
+const MEDIC_HEAL: i32 = 13;
+
+pub fn pair() -> [Body; 2] {
+    let bouncer = [
+        vec![BodyPart::Tough; BOUNCER_TOUGH],
+        vec![BodyPart::Move; BOUNCER_TOUGH],
+    ]
+    .concat();
+    let medic = [
+        vec![BodyPart::Heal; MEDIC_HEAL as usize],
+        vec![BodyPart::Move; MEDIC_HEAL as usize],
+    ]
+    .concat();
+    [bouncer, medic]
+}
+
+fn pair_price() -> i32 {
+    pair().iter().map(|b| engine::body_cost(b)).sum()
+}
+
+/// The pairs the bank buys, three at most.
+pub fn pairs(capacity: i32) -> i32 {
+    (capacity / pair_price()).clamp(0, 3)
+}
+
+/// The heal the pairs' medics seat on the bouncer they work with a tick: what
+/// his towers' volley on the gate has to fall under to be worth drawing.
+pub fn pair_heal(pairs: i32) -> i32 {
+    pairs * MEDIC_HEAL * engine::HEAL_POWER
+}
+
+pub fn drains(capacity: i32) -> Vec<Body> {
+    let pair = pair();
+    (0..pairs(capacity)).flat_map(|_| pair.clone()).collect()
+}
+
 /// The fewest bodies whose HEAL holds `strike`, each with the RANGED its share
 /// of `worth` buys: the kills pay for the cast (v1's `castBodiesPaid`). A
 /// siege's pickets and a sweep's set.
@@ -415,4 +456,38 @@ pub fn colony_for(
     let mut ranked = ranked;
     ranked.sort();
     ranked.into_iter().next().map(|(_, room)| room)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::atlas::grid;
+
+    /// A pair is 5,100 of the bank and three pairs are the most a drain casts,
+    /// a pair's medic seating 156 of heal a tick.
+    #[test]
+    fn a_drain_casts_a_pair_per_5100_and_three_at_most() {
+        let price = pair_price();
+        assert_eq!(price, 5_100);
+        assert!(drains(price - 1).is_empty());
+        assert_eq!(drains(price).len(), 2, "the bouncer then its medic");
+        assert_eq!(drains(3 * price).len(), 6);
+        assert_eq!(drains(4 * price).len(), 6, "three pairs");
+        assert_eq!(pairs(price), 1);
+        assert_eq!(pair_heal(pairs(price)), 156);
+        assert_eq!(pair_heal(pairs(2 * price)), 312);
+    }
+
+    /// The owner's rule: a pair walks a plain tile a tick (a swamp in five).
+    #[test]
+    fn a_drain_body_steps_a_plain_tile_a_tick() {
+        for body in pair() {
+            let factor = grid::empty_factor(&body);
+            assert_eq!(grid::step_ticks(factor, engine::PLAIN_WEIGHT), Some(1));
+            assert_eq!(
+                grid::step_ticks(factor, engine::SWAMP_WEIGHT),
+                Some(engine::SWAMP_WEIGHT / engine::PLAIN_WEIGHT)
+            );
+        }
+    }
 }

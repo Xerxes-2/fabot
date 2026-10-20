@@ -313,13 +313,14 @@ val step : grace: int -> held: int -> owned: Set<string> -> prev: Group list
 
 ```fsharp
 type Target = Group of int | Room of string | Structure of string | Lairs of string
-type Kind = Defend | Claim | Siege | Sweep | Drain | KeeperDuty | PowerBank | Stronghold
+type Kind = Defend | Claim | Siege | Sweep | KeeperDuty | PowerBank | Stronghold
 type Engagement =
     { Id: int; Kind: Kind; Target: Target
       Ours: Set<string>; Asked: Cast list      // committed bodies, and the ones still in an oven
       Plan: Plan                                // tactic, the offers behind it, kill order, formation — set at open (§6.3)
       Predicted: Outcome                        // what Exchange said at open; checked at close (§10.1)
       Phase: string; Since: int                 // the kind's own phase names
+      Ignored: int                              // bouncer trips his towers left untouched (§6.2)
       Budget: Budget                            // losses, energy, deadline — before we disengage
       Priority: float                           // Strategy's, for force allocation (§7.3)
       Declares: Declaration list }              // economy work this engagement has opened
@@ -387,9 +388,13 @@ The other kinds, for the record's sake:
   strike least first and of those the one whose raze costs the rival most
   (owner, 2026-10-19), then an enemy's controller, which the biggest CLAIM
   body the bank buys taps as each upgrade block lapses (v1's declaim); it
-  closes once neither stands. It stands off a rival's safe mode and
-  opens again after it (owner, 2026-10-18: a safe mode is spent, not
-  blocked). The breach is derived, not stored:
+  closes once neither stands. A safe mode refuses its breach but not its edge,
+  so the siege opens on one whose towers still hold energy and drains them
+  while it runs, where the pairs its bank buys out-heal the volley they draw;
+  a safe mode with no such gate stands the set off as it did before the drain
+  (owner, 2026-10-18: a safe mode is spent, not blocked); the end of its drain
+  sends the set in on the breach plan, not on `under_fire`. The breach is
+  derived, not stored:
   `Exchange.breachPlan` finds the cheapest way in by any exit (the colony's
   walk onto its stretch and the queue through its width, plus each barrier's
   hits over the set's dismantle rate less the repair, no tile where the towers
@@ -415,8 +420,25 @@ The other kinds, for the record's sake:
   that beat it, priced on its arrival or an event, move it on the same way.
   It closes once its bodies are gone, a safe mode stands it off, or no room is
   left to move on to. No prey is remembered out of sight.
-- `Drain`: approach → drain (edge dance, heal) → rotate → …; closes when the
-  towers are empty or the deadline passes.
+- `Drain`: the phase a `Siege` is in while his charged towers out-strike the
+  heal the set seats on the body at its breach. A pair per 5,100 of the bank
+  (three at most, full speed on plain) works the gate: his border tile the
+  pairs' heal holds the volley on, a tile one of his towers reaches and the
+  nearest of those. A body without HEAL steps onto it, takes the volley no
+  medic can land across the border, and steps back beside it where a HEAL body
+  seats; the rest of the set waits in the room next door, never on the tiles
+  the pair works, as the entry is the breach plan's to walk round to. It ends
+  when his towers are spent or no longer out-strike that heal, and the set
+  advances per the breach plan. A drain his towers leave `Ignored` trips
+  unanswered — the room's event log without an `EVENT_ATTACK` from a tower onto
+  one of ours, reset by one he answered (owner, 2026-10-20: a give-up the drain
+  carries, not a profile of the rival) — is given up: the siege holds the edge
+  while a pair of its own stands or has tripped, casting nothing more, its
+  bodies standing off until they die of age, until his towers answer or the
+  safe mode or the declaration ends it. It is not closed, so the room is opened
+  on afresh only once the siege is (owner, 2026-10-21). A drain no pair of the
+  bank's can work — a gate it cannot heal, or a bank under a pair — is none:
+  the set breaches or stands off by the breach's own rules.
 - `KeeperDuty`: a perpetual cycle over lairs by respawn time; declares the room
   minable while it holds; rotates on TTL.
 - `PowerBank`: break (attack + heal against hit-back) → declare a Pickup at the
@@ -477,7 +499,7 @@ five from v1's step functions, the rest come with their kinds:
 | Retreat | `Resolver.fleeStep` toward home |
 | Formation | new: `Move` steps a 2×2 footprint as one body |
 | Dismantle | v1 `actionIntents` sapper branch: dismantle the plan's target |
-| EdgeDance | new |
+| Drain | new: the pair bounces through the gate (§6.2) |
 | Hunt | new (ibex EV): best of nine tiles, worth less netted damage, the worth read over where each mark may stand next tick (one still last tick stays, one that stepped steps on, by `fight.groups`; none under its rampart or over the edge), or onto a mark beside it that may step (v1's glue); strikes most worth in reach; an unarmed mark on the gate, read off its last tick rather than a trajectory, is worth a strike that lands now, never a goal or a step (v1's `catchOdds`) |
 
 A tactic decides the step (a Dismantle its dismantle too). The strike reflex
