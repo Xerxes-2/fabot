@@ -215,6 +215,17 @@ pub fn live_parts(body: &[BodyPart], hits: i32) -> Vec<BodyPart> {
     body[skip..].to_vec()
 }
 
+pub fn with_move_last(mut body: Vec<BodyPart>) -> Vec<BodyPart> {
+    match body.iter().rposition(|p| *p == BodyPart::Move) {
+        Some(at) if at < body.len() - 1 => {
+            let part = body.remove(at);
+            body.push(part);
+            body
+        }
+        _ => body,
+    }
+}
+
 fn part_hits_at(n: usize, hits: i32, i: usize) -> i32 {
     let n = n as i32;
     let i = i as i32;

@@ -62,7 +62,7 @@ pub fn affordable(capacity: i32) -> Vec<Body> {
                 body.extend(block.iter().copied());
             }
 
-            out.push(body);
+            out.push(engine::with_move_last(body));
         }
     }
 
@@ -115,7 +115,7 @@ fn biggest(capacity: i32, block: &[BodyPart]) -> Option<Body> {
     let most = (capacity / engine::body_cost(block))
         .min(engine::MAX_BODY_PARTS as i32 / block.len() as i32);
 
-    (most > 0).then(|| block.repeat(most as usize))
+    (most > 0).then(|| engine::with_move_last(block.repeat(most as usize)))
 }
 
 pub fn terrain_at(room: &Room, at: &Pos) -> exchange::Terrain {
@@ -225,7 +225,7 @@ fn most(capacity: i32, block: &[BodyPart]) -> Body {
         body.extend(block.iter().copied());
     }
 
-    body
+    engine::with_move_last(body)
 }
 
 /// Two dismantlers of the most WORK the bank buys, then the fewest MOVE:HEAL
@@ -292,13 +292,11 @@ pub fn squad(capacity: i32, strike: i32, worth: i32) -> Vec<Body> {
     // The towers' strike falls on one body; it and one body beside it heal it.
     let heal = ((strike + 2 * engine::HEAL_POWER - 1) / (2 * engine::HEAL_POWER)) as usize;
     let n = if heal > 0 { 2 } else { 1 };
-    // Parts are struck off head first: the shots go first, then the legs
-    // the set walks out on, the heal last, whole while either stands.
     let body = |ranged: usize| -> Body {
         let mut b = vec![BodyPart::RangedAttack; ranged];
         b.extend(vec![BodyPart::Move; heal + ranged]);
         b.extend(vec![BodyPart::Heal; heal]);
-        b
+        engine::with_move_last(b)
     };
     let fits = |b: &Body| b.len() <= engine::MAX_BODY_PARTS && engine::body_cost(b) <= capacity;
     let paid = (worth / n as i32 / engine::body_cost(&[BodyPart::RangedAttack, BodyPart::Move]))

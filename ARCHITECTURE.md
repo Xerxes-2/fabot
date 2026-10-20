@@ -497,7 +497,8 @@ other's asks. The
 Caster logic that picks which colony spawns (hops, queue) ports from v1's
 `Caster.fs` mostly as is. `fight.casts` remembers what was asked so a body in
 an oven is not asked again. One room may hold three spawns; the queue is per
-room.
+room. Every fight body is cast with one MOVE at the tail (v1's
+`withMoveLast`), so it walks while any part lives.
 
 ## 7. Strategy (new)
 

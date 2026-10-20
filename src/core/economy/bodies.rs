@@ -126,19 +126,6 @@ pub fn pattern_of_parts(work: i32, carry: i32, movement: i32, claim: i32) -> Pat
     }
 }
 
-/// The engine destroys parts from the head and charges fatigue on dead parts,
-/// so a body with a MOVE last walks while any part lives.
-pub fn with_move_last(mut body: Vec<BodyPart>) -> Vec<BodyPart> {
-    match body.iter().rposition(|p| *p == BodyPart::Move) {
-        Some(at) if at < body.len() - 1 => {
-            let part = body.remove(at);
-            body.push(part);
-            body
-        }
-        _ => body,
-    }
-}
-
 fn replicate(n: i32, part: BodyPart) -> Vec<BodyPart> {
     vec![part; n.max(0) as usize]
 }
@@ -271,7 +258,7 @@ pub fn sized(pattern: Pattern, most: i32, capacity: i32) -> Option<Vec<BodyPart>
             Pattern::Claimer => whole_blocks(block_of(pattern), most, capacity),
             Pattern::Scout => block_of(pattern).to_vec(),
         };
-        Some(with_move_last(body))
+        Some(engine::with_move_last(body))
     }
 }
 
@@ -302,7 +289,7 @@ pub fn home_harvester(most: i32, capacity: i32) -> Option<Vec<BodyPart>> {
         let legs = (part_count_in(&body, BodyPart::Work) + 1) / 2 - 1;
         let spare = (capacity - engine::body_cost(&body)) / engine::part_cost(BodyPart::Move);
         body.extend(replicate(legs.min(spare), BodyPart::Move));
-        Some(with_move_last(body))
+        Some(engine::with_move_last(body))
     }
 }
 
