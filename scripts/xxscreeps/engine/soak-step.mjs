@@ -917,6 +917,10 @@ for (let t = 0; t < ticks; t++) {
     row.ore = rooms.flatMap((r) => [...r["#objects"]])
       .filter((o) => o["#user"] === ours && o.store && (o.structureType === "storage" || o.structureType === "terminal"))
       .reduce((n, o) => n + o.store.getUsedCapacity() - energyIn(o), 0);
+    // Our bodies' parts carrying a boost, at most once each: what a lab's stock bought.
+    row.boosted = rooms.flatMap((r) => [...r["#objects"]])
+      .filter((o) => o.body !== undefined && o["#user"] === ours)
+      .reduce((n, o) => n + o.body.filter((p) => p.boost !== undefined).length, 0);
     // A declared claim's level, spawns and the energy its towers hold: 0 until it is ours.
     row.claimed = Object.fromEntries(claimed.map((name) => {
       const r = rooms[roomNames.indexOf(name)];

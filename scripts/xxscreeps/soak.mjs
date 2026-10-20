@@ -131,6 +131,11 @@ const NODES = {
   G2: { level: 6, stored: 100000, without: ["rampart"], claims: 1, short: true },
   // N5 with the ore for the UH line stocked and its labs declared the cluster.
   L5: { level: 6, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart"], labs: { UH2O: 3000 } },
+  // L5 without its tower, its first lab holding what a body is boosted with:
+  // the raid must be answered by a cast, and the lab can boost one at once.
+  B5: { level: 6, stored: "100000,H:6000,O:6000,U:6000", without: ["rampart", "tower"], labs: { UH2O: 3000 }, labStock: "energy:2000,UH2O:900" },
+  // B5's lab with no compound: the cast is not held waiting for one.
+  S5: { level: 6, stored: "100000,H:6000,O:6000", without: ["rampart", "tower"], labs: { UH2O: 3000 }, labStock: "energy:2000" },
   // An RCL7 node as another bot left it: its roads and containers worn to
   // half, its links and ramparts sites to build.
   T7: { level: 7, stored: 100000, without: ["link", "rampart", "factory"], worn: 0.5 },
@@ -376,7 +381,7 @@ for (const o of opponents) {
   node26([XXSCREEPS, script("seed/manage.js"), "bot", "add", o.name, `./bot-${o.name}`, "--spawn", o.room, `${seat.x},${seat.y}`], world);
 }
 writeFileSync(join(world, "opponents.json"), JSON.stringify(opponents.map(({ name, room, raid }) => ({ name, room, raid }))));
-if (built) node26([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME, String(node.worn ?? 1)], world);
+if (built) node26([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME, String(node.worn ?? 1), node.labStock ?? ""], world);
 if (flags["--ended"]) node26([XXSCREEPS, script("node.mjs"), "ended", colony.room], world);
 else if ((opponents.length && !live) || flags["--unsafe"]) node26([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
 if ((node?.outposts || node?.claims) && colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);

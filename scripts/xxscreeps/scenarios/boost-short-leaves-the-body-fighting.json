@@ -1,0 +1,12 @@
+{
+  "why": "a colony whose labs hold no compound boosts nothing and still fights: the raid dies inside the window, so no body waited on a lab that could not boost it",
+  "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
+  "start": { "room": "W8N3", "seed": 1, "node": "S5", "invaders": "W8N3:1000:2000" },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "boosted", "max": 0 },
+    { "measure": "homeHostileTicks", "from": 3000, "max": 700 },
+    { "measure": "predictedWinsLost", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

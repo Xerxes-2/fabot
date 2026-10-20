@@ -2,12 +2,13 @@
 // under xxscreeps' own loader, cwd the world directory:
 //   xxscreeps.js file://…/node.mjs ground <room>
 //     prints the room's ground as `src/bin/plan.rs` reads it
-//   xxscreeps.js file://…/node.mjs stand <room> <structures.json> <level> <stored> <username> [<worn>]
+//   xxscreeps.js file://…/node.mjs stand <room> <structures.json> <level> <stored> <username> [<worn>] [<lab>]
 //     after `manage bot add --spawn` stood the first spawn: the controller
 //     at <level> (progress 0, its downgrade timer full, the claim's safe
 //     mode kept and one more in stock for each level skipped), every other structure of the list ours at full hits on its
 //     tile (its roads and containers at <worn> of them, default 1), and <stored> energy in the storage
-//     (`<energy>,<resource>:<n>,…` puts each resource there too).
+//     (`<energy>,<resource>:<n>,…` puts each resource there too); <lab> the
+//     first lab's store (`<resource>:<n>,…`).
 //   xxscreeps.js file://…/node.mjs declare <room> <username> <declarations.json> [short]
 //     <username>'s Memory as `{ v2: { declarations } }`, what the bot reads
 //     its declarations from (src/app/wire.rs), and the GCL its claims need
@@ -61,7 +62,7 @@ if (mode === "ground") {
     }),
   );
 } else if (mode === "stand") {
-  const [listPath, levelArg, storedArg, username, wornArg = "1"] = rest;
+  const [listPath, levelArg, storedArg, username, wornArg = "1", labStock = ""] = rest;
   const level = Number(levelArg);
   const ours = await User.findUserByName(db, username);
   const list = JSON.parse(fs.readFileSync(listPath, "utf8"));
@@ -86,6 +87,7 @@ if (mode === "ground") {
         throw new Error(`${roomName}: the plan's first spawn is not the one standing`);
       // Ids in list order, so the engine's tie-breaks by object order repeat.
       let nextId = 0;
+      let stocked = false;
       for (const s of list.filter((s) => s !== first)) {
         if (!create[s.kind]) throw new Error(`no ${s.kind} in a node`);
         const object = create[s.kind](new RoomPosition(s.x, s.y, roomName), nextId);
@@ -95,6 +97,21 @@ if (mode === "ground") {
             const [resource, amount] = i === 0 ? ["energy", part] : part.split(":");
             object.store["#add"](resource, Number(amount));
           }
+        // The first lab holds the compound a body is boosted with.
+        else if (s.kind === "lab" && labStock && !stocked) {
+          stocked = true;
+          const minerals = [];
+          for (const part of labStock.split(",")) {
+            const [resource, amount] = part.split(":");
+            if (resource === "energy") object.store["#energy"] = Number(amount);
+            else minerals.push([resource, Number(amount)]);
+          }
+          const [type, amount] = minerals.at(-1) ?? [];
+          if (type !== undefined) {
+            object.store["#mineralType"] = type;
+            object.store["#mineralAmount"] = amount;
+          }
+        }
         if (s.kind === "road" || s.kind === "container") object.hits = Math.ceil(object.hits * Number(wornArg));
         room["#insertObject"](object);
       }

@@ -178,6 +178,8 @@ const measures = {
   claimSpawned: (samples) => samples.find((s) => Object.values(s.claimed ?? {}).every((c) => c.spawns > 0) && Object.keys(s.claimed ?? {}).length)?.t ?? Infinity,
   // The most of a compound (`resource`) stood at once.
   made: (samples, a) => Math.max(0, ...samples.map((s) => s.made?.[a.resource] ?? 0)),
+  // Our bodies' boosted parts at once, the most over the run.
+  boosted: (samples) => Math.max(0, ...samples.map((s) => s.boosted ?? 0)),
   // What `room`'s storage, terminal, labs, factory and power spawn hold at the window's end, and the non-energy of it.
   heldAtEnd: (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.held ?? Infinity,
   oresAtEnd: (samples, a) => at(samples, a.to ?? Infinity).rooms[a.room]?.ores ?? 0,

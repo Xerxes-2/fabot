@@ -1,0 +1,12 @@
+{
+  "why": "a fight body cast from a colony whose lab holds a compound is boosted there before it walks to its raid: the Invader raid on a towerless home meets it with its ATTACK parts boosted",
+  "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "strategy", "tactics"],
+  "start": { "room": "W8N3", "seed": 1, "node": "B5", "invaders": "W8N3:1000:2000" },
+  "ticks": 4000,
+  "assert": [
+    { "measure": "boosted", "min": 1 },
+    { "measure": "homeHostileTicks", "from": 3000, "max": 700 },
+    { "measure": "predictedWinsLost", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}
