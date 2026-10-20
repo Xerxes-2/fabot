@@ -108,6 +108,9 @@ pub enum Boost {
 pub mod boost {
     use super::{BodyPart, Boost};
 
+    /// The T2 UH-line compound, the strongest our labs make: `^UH2O` on ATTACK.
+    pub const UTRIUM_ACID: &str = "UH2O";
+
     pub fn of_compound(part: BodyPart, compound: &str) -> Boost {
         match (part, compound) {
             (BodyPart::Attack, "UH")
@@ -116,7 +119,7 @@ pub mod boost {
             | (BodyPart::Tough, "GO")
             | (BodyPart::Move, "ZO")
             | (BodyPart::Work, "ZH") => Boost::Tier1,
-            (BodyPart::Attack, "UH2O")
+            (BodyPart::Attack, UTRIUM_ACID)
             | (BodyPart::RangedAttack, "KHO2")
             | (BodyPart::Heal, "LHO2")
             | (BodyPart::Tough, "GHO2")

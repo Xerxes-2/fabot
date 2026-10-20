@@ -952,9 +952,16 @@ pub fn of_world(
         && !given_up(home)
         && let Some(g) = grounds.iter_mut().find(|g| &g.room == home)
     {
-        let labs: Vec<(String, Pos)> = g
-            .labs
-            .iter()
+        // The lab a body waiting at home is boosted from is the cast's and not
+        // a reaction's: its compound is kept while the body still lacks it.
+        let kept: BTreeSet<String> = (world.creeps.iter())
+            .filter(|c| &c.pos.room == home)
+            .filter_map(|c| tick::boost_of_name(&c.name))
+            .filter_map(|compound| tick::booster(world, home, compound))
+            .map(|lab| lab.id.clone())
+            .collect();
+        let labs: Vec<(String, Pos)> = (g.labs.iter())
+            .filter(|l| !kept.contains(&l.id))
             .map(|l| (l.id.clone(), l.pos.clone()))
             .collect();
         let held = |id: &str| {

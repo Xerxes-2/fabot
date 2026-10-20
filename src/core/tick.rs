@@ -7,13 +7,13 @@ use crate::core::HashMap;
 use super::atlas::{Atlas, Mover, Target, Tree};
 use super::engine;
 use super::grid::{self, FatigueFactor, Footprint};
-use super::intents::{Ask, CreepAct, Intent, Rank, SpawnAct};
+use super::intents::{Ask, CreepAct, Intent, LabAct, Rank, SpawnAct};
 use super::mv;
 use super::state::State;
 use super::strategy::intel::Intel;
 use super::tactics::{self, Tactic};
 use super::tiles::{self, Tile};
-use super::vocabulary::{BodyPart, Compound};
+use super::vocabulary::{BodyPart, Boost, Compound, Resource};
 use super::world::{Creep, Owner, Pos, Sightings, World};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -509,7 +509,166 @@ pub fn arbitrate(context: &Context, wishes: &[(String, mv::Wish)]) -> Vec<Intent
     out
 }
 
-fn settle(context: &Context, intents: Vec<Intent>) -> Vec<Intent> {
+/// The compound a cast name asks for, read off its last token: a body cast
+/// with a compound walks to the lab before it takes its work.
+pub fn boost_of_name(name: &str) -> Option<Compound> {
+    match super::vocabulary::resource_of_name(name.rsplit('-').next()?) {
+        Resource::Compound(compound) => Some(compound),
+        _ => None,
+    }
+}
+
+/// The lab a body asking for `compound` is boosted from: the one in its room
+/// holding the most of it, ties to the lower id.
+pub fn booster<'a>(
+    world: &'a World,
+    room: &str,
+    compound: Compound,
+) -> Option<&'a super::world::Structure> {
+    let held = |s: &super::world::Structure| s.store.amount_of(&Resource::Compound(compound));
+
+    (labs_in(world, room)).max_by(|a, b| held(a).cmp(&held(b)).then_with(|| b.id.cmp(&a.id)))
+}
+
+fn labs_in<'a>(world: &'a World, room: &str) -> impl Iterator<Item = &'a super::world::Structure> {
+    (world.rooms.iter())
+        .filter(move |r| r.name == room)
+        .flat_map(|r| r.structures.iter())
+        .filter(|s| s.kind == super::world::Kind::Lab && s.owner.is_ours())
+}
+
+/// What the home holds of a compound and of energy, over the stores a haul
+/// fills: its labs, terminal, storage and the loads on its bodies.
+pub fn home_holds(world: &World, room: &str, compound: Compound) -> (i32, i32) {
+    let held = |s: &super::world::Store| {
+        (
+            s.amount_of(&Resource::Compound(compound)),
+            s.amount_of(&Resource::Energy),
+        )
+    };
+    let stores = (world.rooms.iter())
+        .filter(|r| r.name == room)
+        .flat_map(|r| r.structures.iter())
+        .filter(|s| {
+            s.owner.is_ours() && (s.kind.is_lab() || s.kind.is_terminal() || s.kind.is_storage())
+        })
+        .map(|s| held(&s.store))
+        .chain(
+            (world.creeps.iter())
+                .filter(move |c| c.pos.room == room)
+                .map(|c| held(&c.store)),
+        );
+
+    stores.fold((0, 0), |(compound_, energy), (m, e)| {
+        (compound_ + m, energy + e)
+    })
+}
+
+/// Whether the lab can boost a part now: a boost spends one of each a part.
+fn can_boost(lab: &super::world::Structure, compound: Compound) -> bool {
+    lab.store.amount_of(&Resource::Compound(compound)) >= engine::BOOST_MINERAL_PER_PART
+        && lab.store.amount_of(&Resource::Energy) >= engine::BOOST_ENERGY_PER_PART
+}
+
+/// The mineral and energy a body's unboosted parts ask of `compound`.
+fn boost_need(creep: &super::world::Creep, compound: Compound) -> (i32, i32) {
+    let name = super::vocabulary::resource_name(&Resource::Compound(compound));
+    let parts = (creep.body.iter())
+        .filter(|p| {
+            p.boost == Boost::Unboosted
+                && super::vocabulary::boost::of_compound(p.kind, &name) != Boost::Unboosted
+        })
+        .count() as i32;
+
+    (
+        parts * engine::BOOST_MINERAL_PER_PART,
+        parts * engine::BOOST_ENERGY_PER_PART,
+    )
+}
+
+/// A body whose cast asked for a compound and whose parts do not carry it yet
+/// is held at the lab and boosted there: its module's acts and wish are
+/// dropped for the walk, or the boost itself when it stands beside it. It is
+/// held only while the home holds what its parts ask of the compound and the
+/// energy to spend, so a stock that ran out costs the body its compound and
+/// never its raid.
+fn boost_stop(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
+    let Some((home, _)) = &context.declarations.labs else {
+        return intents;
+    };
+    let home = home.clone();
+    let mut waiting: Vec<(String, Pos, String, Compound)> = Vec::new();
+
+    for creep in (context.world.creeps.iter()).filter(|c| c.owner.is_ours() && c.pos.room == home) {
+        let Some(compound) = boost_of_name(&creep.name) else {
+            continue;
+        };
+        let (mineral, energy) = boost_need(creep, compound);
+        let (held, fuel) = home_holds(context.world, &home, compound);
+
+        if mineral == 0 || held < mineral || fuel < energy {
+            continue;
+        }
+        if let Some(lab) = booster(context.world, &home, compound) {
+            waiting.push((
+                creep.name.clone(),
+                lab.pos.clone(),
+                lab.id.clone(),
+                compound,
+            ));
+        }
+    }
+
+    if waiting.is_empty() {
+        return intents;
+    }
+
+    let stalling: BTreeSet<&str> = waiting
+        .iter()
+        .map(|(name, _, _, _)| name.as_str())
+        .collect();
+    let mut out: Vec<Intent> = (intents.into_iter())
+        .filter(|i| {
+            let actor = i.actor();
+            i.is_queue() || !stalling.contains(actor.as_str())
+        })
+        .collect();
+
+    let mut boostable: BTreeSet<&str> = BTreeSet::new();
+    for lab in labs_in(context.world, &home) {
+        for compound in waiting.iter().map(|(_, _, _, c)| c) {
+            if can_boost(lab, *compound) {
+                boostable.insert(lab.id.as_str());
+            }
+        }
+    }
+
+    for (name, at, lab, _) in &waiting {
+        let Some(creep) = context.world.creeps.iter().find(|c| &c.name == name) else {
+            continue;
+        };
+        if creep.pos.within(1, at) && boostable.contains(lab.as_str()) {
+            out.push(Intent::Lab(
+                lab.clone(),
+                LabAct::BoostCreep(creep.id.clone()),
+            ));
+            continue;
+        }
+        let mover = Mover {
+            footprint: Footprint::One,
+            factor: grid::loaded_factor(&super::world::body_kinds(creep)),
+        };
+        out.push(Intent::Wish(
+            creep.pos.room.clone(),
+            mv::plan::toward(context.atlas, creep, mover, &target_at(at, 1), 1),
+        ));
+    }
+
+    out
+}
+
+fn settle(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
+    let intents = boost_stop(context, intents);
     let mut asks = Vec::new();
     let mut wishes = Vec::new();
     for i in &intents {

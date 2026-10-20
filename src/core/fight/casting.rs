@@ -5,8 +5,9 @@ use std::collections::BTreeMap;
 
 use crate::core::engine;
 use crate::core::exchange::{self, Fighter, fighter};
-use crate::core::vocabulary::{BodyPart, Boost, Resource};
-use crate::core::world::{Creep, Kind, Owner, Pos, Room, Spawn, Store, Structure, terrain};
+use crate::core::tick::{self, Declarations};
+use crate::core::vocabulary::{self, BodyPart, Boost, Compound, Resource};
+use crate::core::world::{Creep, Kind, Owner, Pos, Room, Spawn, Store, Structure, World, terrain};
 
 pub type Body = Vec<BodyPart>;
 
@@ -186,6 +187,19 @@ pub fn side_in(room: &Room, bodies: Vec<Fighter>) -> exchange::Side {
     }
 }
 
+/// The compound a body cast from the declared lab cluster carries, and the
+/// parts the cluster's colony holds for it; None while no cluster is declared
+/// or it holds under a part's worth. A body the stock does not all cover is
+/// cast unboosted rather than held.
+pub fn cluster_boost(world: &World, declarations: &Declarations) -> Option<(&'static str, i32)> {
+    let (home, _) = declarations.labs.as_ref()?;
+    let (compound, energy) = tick::home_holds(world, home, Compound::UtriumAcid);
+    let parts =
+        (compound / engine::BOOST_MINERAL_PER_PART).min(energy / engine::BOOST_ENERGY_PER_PART);
+
+    (parts > 0).then_some((vocabulary::boost::UTRIUM_ACID, parts))
+}
+
 pub fn wins(
     stance: exchange::Stance,
     ours: &exchange::Side,
@@ -197,7 +211,9 @@ pub fn wins(
 
 /// The bodies to ask beside `ours`, the outcome they land and the side they
 /// land as; None: no body the spawns buy wins. Which tactic fights them is the
-/// kind's to price (§6.3).
+/// kind's to price (§6.3); `boost` is the compound the cluster's labs cover
+/// (see `cluster_boost`), which a body's parts carry when the stock buys them.
+#[allow(clippy::too_many_arguments)]
 pub fn price(
     stance: exchange::Stance,
     ours: &exchange::Side,
@@ -206,17 +222,18 @@ pub fn price(
     bodies: &[Body],
     copies_of: impl Fn(&Body) -> i32,
     tick_worth: i32,
+    boost: Option<(&str, i32)>,
 ) -> Option<(Vec<Body>, exchange::Outcome, exchange::Side)> {
     let set: Vec<Body> = if wins(stance, ours, theirs, terrain) {
         Vec::new()
     } else {
-        exchange::cheapest_win(stance, ours, bodies, copies_of, tick_worth, theirs, terrain)?
+        exchange::cheapest_win(stance, ours, bodies, copies_of, tick_worth, theirs, terrain, boost)?
     };
 
     let mut landed = ours.clone();
     landed
         .bodies
-        .extend(set.iter().map(|body| fighter::cast(body)));
+        .extend(set.iter().map(|body| fighter::cast_boosted(body, boost)));
 
     let outcome = exchange::outcome(stance, &landed, theirs, terrain);
 

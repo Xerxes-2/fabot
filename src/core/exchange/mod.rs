@@ -1396,6 +1396,7 @@ pub fn breach_plan(
 /// fewest is bisected, then grown while one more saves what it costs.
 ///
 /// The bodies to cast, not one: `n` whole copies of the cheapest.
+#[allow(clippy::too_many_arguments)]
 pub fn cheapest_win(
     stance: Stance,
     ours: &Side,
@@ -1404,6 +1405,7 @@ pub fn cheapest_win(
     tick_worth: i32,
     theirs: &Side,
     terrain: Terrain,
+    boost: Option<(&str, i32)>,
 ) -> Option<Vec<Body>> {
     let cost = |body: &Body, n: i32| -> Option<i32> {
         let side = Side {
@@ -1411,7 +1413,10 @@ pub fn cheapest_win(
                 .bodies
                 .iter()
                 .cloned()
-                .chain(std::iter::repeat_n(fighter::cast(body), n.max(0) as usize))
+                .chain(std::iter::repeat_n(
+                    fighter::cast_boosted(body, boost),
+                    n.max(0) as usize,
+                ))
                 .collect(),
             ..ours.clone()
         };

@@ -85,6 +85,8 @@ pub enum LinkAct {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LabAct {
     RunReaction(String, String),
+    /// The lab spends its compound and energy on the parts of the body with this id.
+    BoostCreep(String),
 }
 
 /// `send`: resource, amount, the room it lands in.

@@ -1,6 +1,6 @@
 use crate::core::engine;
 use crate::core::grid::{FatigueFactor, step_ticks};
-use crate::core::vocabulary::{BodyPart, Boost, part_count_in};
+use crate::core::vocabulary::{BodyPart, Boost, boost, part_count_in};
 use crate::core::world::Pos;
 
 /// A body as the exchange reads it, on either side.
@@ -57,6 +57,28 @@ pub fn of_parts(body: &[BodyPart], boosts: &[Boost], hits: i32, pos: Option<Pos>
 
 pub fn cast(body: &[BodyPart]) -> Fighter {
     of_parts(body, &[], engine::PART_HITS * body.len() as i32, None)
+}
+
+/// A not-yet-cast body carrying `boost`'s compound on every part it takes.
+pub fn cast_boosted(body: &[BodyPart], boost: Option<(&str, i32)>) -> Fighter {
+    let boosts: Vec<Boost> = match boosted_by(body, boost) {
+        Some(compound) => body
+            .iter()
+            .map(|p| boost::of_compound(*p, compound))
+            .collect(),
+        None => Vec::new(),
+    };
+    of_parts(body, &boosts, engine::PART_HITS * body.len() as i32, None)
+}
+
+/// The compound `boost` gives `body`, when its stock covers every part the
+/// compound would take: `boost` is the compound and the parts it covers.
+pub fn boosted_by<'a>(body: &[BodyPart], boost: Option<(&'a str, i32)>) -> Option<&'a str> {
+    let (compound, covered) = boost?;
+    let parts = (body.iter())
+        .filter(|p| boost::of_compound(**p, compound) != Boost::Unboosted)
+        .count() as i32;
+    (parts > 0 && parts <= covered).then_some(compound)
 }
 
 /// Unlike `Hostiles.armed`, a healer or a dismantler beside a striker does not count: it deals no damage.

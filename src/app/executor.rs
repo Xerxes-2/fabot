@@ -185,6 +185,15 @@ fn act(intent: &Intent) -> (String, i32) {
             },
             _ => ("runReaction".to_string(), NOT_FOUND),
         },
+        Intent::Lab(id, LabAct::BoostCreep(creep)) => {
+            match (world::object_by_id(id), world::object_by_id(creep)) {
+                (Some(lab), Some(creep)) => match call(&lab, "boostCreep", &[creep]) {
+                    Ok(code) => ("boostCreep".to_string(), code),
+                    Err(()) => ("threw".to_string(), THREW),
+                },
+                _ => ("boostCreep".to_string(), NOT_FOUND),
+            }
+        }
         Intent::Terminal(id, TerminalAct::Send(resource, amount, room)) => {
             match world::object_by_id(id) {
                 None => ("send".to_string(), NOT_FOUND),

@@ -121,6 +121,8 @@ struct Scene<'a> {
     /// The cast bodies standing, and the ones still in an oven.
     landed: Vec<Cast>,
     waiting: Vec<Cast>,
+    /// The compound the declared lab cluster covers, and the parts it buys.
+    boost: Option<(&'static str, i32)>,
 }
 
 /// `Casting.price`'s say in how many copies of a block to ask for.
@@ -450,6 +452,7 @@ impl<'a> Scene<'a> {
         asked: &mut Asked,
     ) {
         let colonies = self.colonies_of(atlas, e);
+        let boost = self.boost;
 
         for (slot, body) in set {
             let colony = casting::colony_for(
@@ -462,15 +465,27 @@ impl<'a> Scene<'a> {
 
             if let Some(colony) = colony {
                 asked.queue(&colony, body);
+                let compound = fighter::boosted_by(body, boost);
+
                 asked.casts.push(Cast {
                     engagement: e.id,
-                    name: format!(
-                        "{}{}-{}-{}",
-                        tick::FIGHT_PREFIX,
-                        self.world.time,
-                        e.id,
-                        slot
-                    ),
+                    name: match compound {
+                        Some(compound) => format!(
+                            "{}{}-{}-{}-{}",
+                            tick::FIGHT_PREFIX,
+                            self.world.time,
+                            e.id,
+                            slot,
+                            compound
+                        ),
+                        None => format!(
+                            "{}{}-{}-{}",
+                            tick::FIGHT_PREFIX,
+                            self.world.time,
+                            e.id,
+                            slot
+                        ),
+                    },
                     room: colony,
                     body: body.clone(),
                 });
@@ -1046,6 +1061,7 @@ impl<'a> Scene<'a> {
             &casting::walking(capacity),
             |body| worth / engine::body_cost(body),
             0,
+            self.boost,
         )?;
 
         let seen = ours
@@ -1389,6 +1405,7 @@ impl<'a> Scene<'a> {
             &blocks,
             copies_of,
             tick_worth,
+            self.boost,
         ) {
             Some((set, outcome, landed)) => {
                 let mut priced_bodies: Vec<Fighter> = bodies.clone();
@@ -1792,6 +1809,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         armed,
         landed,
         waiting,
+        boost: casting::cluster_boost(world, declarations),
     };
 
     // A planned barrier fallen advances the plan, never re-prices it; a
