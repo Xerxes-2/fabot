@@ -96,6 +96,12 @@ Docs:
 - A behaviour fix is verified by an xxscreeps scenario that reproduces the
   incident passing, and the scenario library not regressing
   (`ARCHITECTURE.md` §10.2). Add the scenario to the library.
+- An offence scenario (siege, sweep, drain: anything that attacks a rival)
+  seats a real bot as the rival, Hivemind or TooAngel (`start.opponents`):
+  what an offence pays is proven against a bot that spawns, works and fights
+  back. A scripted rival (`engine/keep`, `engine/remote`, `engine/drain`, …)
+  checks only that the plan runs as planned (raze order, positioning, gate
+  tile), and its `why` says why a real bot does not fit.
 - An `Exchange` change is verified by the prediction error on the generated
   set not rising (§10.1).
 - An economy change is read off the soak's curves over the long horizon
