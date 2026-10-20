@@ -1,0 +1,28 @@
+{
+  "why": "a tactic the operator forbids for a rival and room is not fought: the declared siege opens, prices no candidate it may use, and casts nothing, where the same world without the rule razes its first structure by tick 950",
+  "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
+  "start": {
+    "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
+    "seed": 1,
+    "declarations": {
+      "outposts": [],
+      "claims": [],
+      "sieges": ["W8S1"],
+      "tactics": [{ "rival": "rival", "room": "W8S1", "forbid": ["blob"] }]
+    },
+    "opponents": [
+      {
+        "name": "rival",
+        "bot": "scripts/xxscreeps/engine/keep",
+        "room": "W8S1"
+      }
+    ]
+  },
+  "ticks": 1200,
+  "assert": [
+    { "measure": "engagementsOpened", "kind": "siege", "min": 1 },
+    { "measure": "mostCast", "max": 0 },
+    { "measure": "bodiesLost", "max": 0 },
+    { "measure": "faults", "max": 0 }
+  ]
+}

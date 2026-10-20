@@ -3,8 +3,11 @@ use std::collections::BTreeSet;
 
 use super::super::shape::{Engagement, Phase};
 use crate::core::engine;
+use crate::core::tactics::Tactic;
 use crate::core::vocabulary::BodyPart;
 use crate::core::world::{Creep, Owner, Pos, Room, Source};
+
+pub const CANDIDATES: &[Tactic] = &[Tactic::BlobKite, Tactic::Kite];
 
 pub struct Facts {
     pub time: i32,
@@ -65,7 +68,6 @@ pub fn room_worth(room: &Room, prey: &[&Creep], exposed: &[Pos], held: i32) -> i
     prey.iter().map(|c| worth(c)).sum::<i32>() + denied
 }
 
-/// Over the ticks a seat is `held`: a body's life less its spawn and walk.
 pub fn yield_of(s: &Source, held: i32) -> i32 {
     s.energy_capacity * held.max(0) / engine::SOURCE_REGEN_TIME
 }

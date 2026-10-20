@@ -17,13 +17,13 @@ const USAGE = `usage: npm run observe -- <command>
   switches           Memory.v2.switches as stored
   switch <name> on|off|clear
                      off: \`false\` (the module is skipped); on: \`true\` (the recorder's opt-in); clear: remove the key
-  declare [reserve <n> | allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | labs <room> <compound=n,…>]
+  declare [reserve <n> | allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json> | labs <room> <compound=n,…>]
                      Memory.v2.declarations as stored; with a name, set it
                      (outposts: the capture's, \`scripts/capture-world.mjs\`; reserve: creep lifetimes of tower fire the reserve holds)
   capture [out.jsonl]
                      the recorder's ring as \`npm run bench\`'s capture, oldest first; terrain cached in captures/terrain
   wait --ticks N     return after N game ticks
-  engagements        each open engagement: members, plan order, target, prediction; pending casts
+  engagements        each open engagement: members, plan order, offers, target, prediction; pending casts
   room <room>        controller, structures, creeps, tombstones, sites, as the server holds them
   creep <name>       one of our creeps and its assignment
   regions <room>     walkable regions past rival ramparts: exits per side, owned structures beside
@@ -66,6 +66,7 @@ switch (cmd) {
     console.log(`off: ${o.off.length ? o.off.join(", ") : "none"}`);
     console.log(`faults: ${o.faults.length} in ring${o.faults[0] ? `, newest t${o.faults[0].tick} ${o.faults[0].where}: ${o.faults[0].message}` : ""}`);
     console.log(`refusals this tick: ${o.refusals.length}`);
+    for (const [key] of o.counts.filter(([k]) => k.startsWith("refused:"))) console.log(`refused ${key.slice("refused:".length)}`);
     // Destroyed before the unclaim: `destroy()` needs our controller, and an
     // owned structure left standing keeps the room in sight, read every tick.
     for (const [key, left] of o.counts.filter(([k]) => k.startsWith("abandon:"))) {
@@ -103,9 +104,14 @@ switch (cmd) {
     if (name === "reserve" && n >= 0) declarations.reserve = n;
     else if (["allies", "enemies", "sieges", "avoid", "abandon"].includes(name) && value !== undefined) declarations[name] = value.split(",").filter(Boolean);
     else if ((name === "outposts" || name === "claims") && value !== undefined) declarations[name] = JSON.parse(readFileSync(value, "utf8")).declarations[name] ?? [];
-    else if (name === "labs" && value !== undefined && more !== undefined)
+    else if (name === "tactics" && value !== undefined) {
+      const file = JSON.parse(readFileSync(value, "utf8"));
+      const rules = file.declarations?.tactics ?? file.tactics ?? file;
+      if (!Array.isArray(rules)) fail("declare tactics: the file holds a list of { \"rival\"?, \"room\"?, \"pin\"?, \"forbid\"? }");
+      declarations.tactics = rules;
+    } else if (name === "labs" && value !== undefined && more !== undefined)
       declarations.labs = { home: value, targets: Object.fromEntries(more.split(",").map((p) => p.split("=")).map(([c, n]) => [c, Number(n)])) };
-    else fail("usage: observe declare [reserve <n ≥ 0> | allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | labs <room> <compound=n,…>]");
+    else fail("usage: observe declare [reserve <n ≥ 0> | allies <name,…> | enemies <name,…> | sieges <room,…> | avoid <room,…> | abandon <room,…> | outposts <capture.json> | claims <capture.json> | tactics <rules.json> | labs <room> <compound=n,…>]");
     // A memory write is not read back at once: a whole-object write would
     // revert a key declared just before it.
     await (stored ? putV2(`declarations.${name}`, declarations[name]) : putV2("declarations", declarations));

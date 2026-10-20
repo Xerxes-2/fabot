@@ -4,6 +4,10 @@ import { load, stand } from "./bench-game.mjs";
 import { RECORDER, unpack } from "./recorder.mjs";
 import { fail } from "./screeps-api.mjs";
 
+// Segment 1 is the observe row (§4): what the operator reads, the tick it was
+// written for.
+const OBSERVE = 1;
+
 const SIZE = 50;
 const xy = (i) => [i % SIZE, Math.floor(i / SIZE)];
 const tile = (x, y) => y * SIZE + x;
@@ -54,6 +58,7 @@ export function views({ api, shard, memory, raw }) {
 
   return {
     async engagements() {
+      const priced = new Map((JSON.parse((await raw(OBSERVE)) ?? "null")?.offers ?? []).map(([id, offers]) => [id, offers]));
       const fight = (await memory("v2.fight")) ?? {};
       const engagements = fight.engagements ?? [];
       if (engagements.length === 0) console.log("no open engagements");
@@ -63,6 +68,8 @@ export function views({ api, shard, memory, raw }) {
       for (const e of engagements) {
         const p = e.predicted;
         console.log(`#${e.id} ${e.kind ?? "defend"} ${e.room} ${e.phase} ${e.tactic} · lost ${e.lost} · opened ${now - e.opened} ago, phase ${now - e.since} ago · predicted ${p ? `${p.kind} ${p.ticks}t dead ${p.dead} hits ${p.hits}` : "none"}`);
+        const offers = (priced.get(e.id) ?? []).map(([t, v, c]) => `${t === e.tactic ? "*" : ""}${t} ${v - c} (${v}-${c})`);
+        if (offers.length) console.log(`  offers ${offers.join(" · ")}`);
         if (e.target) console.log(`  target ${await described(e.room, e.target)}`);
         for (const [i, id] of e.order.entries()) console.log(`  order ${i + 1} ${await described(e.room, id)}`);
         for (const n of e.ours) {

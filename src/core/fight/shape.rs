@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use crate::core::tactics::{Offer, Tactic};
 use crate::core::vocabulary::BodyPart;
 use crate::core::world::Pos;
 
@@ -21,24 +22,14 @@ pub enum Phase {
     Disengaging,
 }
 
-/// How the plan fights while it approaches and fights; a phase's own tactic
-/// (pursue, retreat) is the phase's.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Tactic {
-    Kite,
-    Close,
-    /// On our ramparts: a home is a post the raid comes to.
-    Hold,
-    /// A ranged set that approaches as one, then fights by `fights`.
-    Blob(Box<Tactic>),
-}
-
 /// Set when a side is priced, never between: `order` is the hostiles' ids,
-/// first struck first.
+/// first struck first; `offers` what the price found, the chosen one among
+/// them, kept in this tick's heap only (§4) for the observe row to print.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Plan {
     pub tactic: Tactic,
     pub order: Vec<String>,
+    pub offers: Vec<Offer>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

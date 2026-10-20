@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::kinds::defend::{self, Facts as DefendFacts, Home};
 use super::kinds::siege::{self, Facts as SiegeFacts};
 use super::kinds::sweep;
-use super::shape::{Cast, Engagement, Group, Objective, Phase, Plan, Tactic};
+use super::shape::{Cast, Engagement, Group, Objective, Phase, Plan};
 use super::{casting, tracker};
 use crate::core::atlas::{self, Atlas, Mover, Target, Tree};
 use crate::core::exchange::{self, Fighter, Ground, Losses, Outcome, Side, Stance, fighter};
@@ -13,8 +13,8 @@ use crate::core::grid::{self, Footprint};
 use crate::core::intents::{self, Ask, ControllerAct, CreepAct, Intent, Rank};
 use crate::core::mv::Wish;
 use crate::core::state::State;
-use crate::core::tactics;
-use crate::core::tick::{self, Context, Declarations, Module};
+use crate::core::tactics::{self, Offer, Tactic};
+use crate::core::tick::{self, Context, Declarations, Module, TacticRule};
 use crate::core::tiles::Tile;
 use crate::core::vocabulary::{BodyPart, Resource};
 use crate::core::world::{
@@ -107,6 +107,8 @@ struct Scene<'a> {
     world: &'a World,
     sightings: &'a Sightings,
     avoid: &'a BTreeSet<String>,
+    /// The operator's tactic rules (§6.3), filtered per engagement.
+    rules: &'a [TacticRule],
     walks: BTreeMap<(String, i32), Tree>,
     homes: BTreeSet<String>,
     worked: BTreeSet<String>,
@@ -146,6 +148,37 @@ impl<'a> Scene<'a> {
 
     fn in_sight(&self, room: &str) -> Option<&'a Room> {
         self.world.rooms.iter().find(|r| r.name == room)
+    }
+
+    /// The usernames whose room this is and who stands in it: what a rule's
+    /// `rival` names (§6.3).
+    fn rivals_of(&self, room: &str) -> BTreeSet<&'a str> {
+        let Some(seen) = self.in_sight(room) else {
+            return BTreeSet::new();
+        };
+
+        let owners = seen
+            .structures
+            .iter()
+            .map(|s| &s.owner)
+            .chain(seen.controller.as_ref().map(|c| &c.owner))
+            .chain(seen.hostiles().map(|h| &h.owner));
+
+        owners.filter_map(Owner::user).collect()
+    }
+
+    /// A kind's candidates as the operator's rules leave them, and the pin it
+    /// names (§6.3).
+    fn ruled(&self, e: &Engagement, candidates: &[Tactic]) -> (Vec<Tactic>, Option<Tactic>) {
+        let ruling = tick::ruling(self.rules, &e.room, &self.rivals_of(&e.room));
+
+        let left = candidates
+            .iter()
+            .copied()
+            .filter(|t| !ruling.forbid.contains(t))
+            .collect();
+
+        (left, ruling.pin)
     }
 
     fn barrier_at(&self, room: &'a Room) -> BTreeMap<&'a str, &'a Structure> {
@@ -824,24 +857,32 @@ impl<'a> Scene<'a> {
                 let fighters: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
 
                 self.breach_in(atlas, room, goal, &colony, &fighters, &[])
+            })
+            .and_then(|(set, (order, outcome))| {
+                let charged = self.charged(room);
+                let mut set = set;
+
+                for post in Scene::exposed(atlas, room) {
+                    let strike = exchange::tower_strike(&charged, &post);
+                    set.extend(casting::squad(capacity, strike, Scene::denied(room, &post)));
+                }
+
+                let (candidates, pin) = self.ruled(e, siege::CANDIDATES);
+                let offers = siege_offers(&candidates, room, &set, outcome);
+                let tactic = tactics::select(&offers, pin)?.tactic;
+
+                Some((set, order, outcome, offers, tactic))
             });
 
             match planned {
-                Some((set, (order, outcome))) => {
-                    let charged = self.charged(room);
-                    let mut set = set;
-
-                    for post in Scene::exposed(atlas, room) {
-                        let strike = exchange::tower_strike(&charged, &post);
-                        set.extend(casting::squad(capacity, strike, Scene::denied(room, &post)));
-                    }
-
+                Some((set, order, outcome, offers, tactic)) => {
                     self.ask(atlas, e, &set, asked);
 
                     Some(Engagement {
                         plan: Plan {
-                            tactic: Tactic::Blob(Box::new(Tactic::Close)),
+                            tactic,
                             order,
+                            offers,
                         },
                         budget: e.lost,
                         unanswered: false,
@@ -850,7 +891,7 @@ impl<'a> Scene<'a> {
                         ..e.clone()
                     })
                 }
-                // Unstaffed, it waits on the bank to grow.
+                // Unstaffed, or no candidate the rules leave it: it waits on the bank to grow.
                 None => Some(Engagement {
                     capacity,
                     ..e.clone()
@@ -930,10 +971,7 @@ impl<'a> Scene<'a> {
                     };
 
                     let mut next = siege::replanned(self.world.time, reached, e);
-                    next.plan = Plan {
-                        tactic: e.plan.tactic.clone(),
-                        order,
-                    };
+                    next.plan.order = order;
                     next.predicted = Some(outcome);
                     Some(next)
                 }
@@ -979,6 +1017,8 @@ impl<'a> Scene<'a> {
 
         let mut next = e.clone();
         next.plan.tactic = Tactic::Close;
+        // The tap is no candidate's, so the price's offers no longer explain it.
+        next.plan.offers.clear();
         next.unanswered = body.is_none();
         next
     }
@@ -1178,20 +1218,28 @@ impl<'a> Scene<'a> {
             let onward = onward().filter(|_| !e.ours.is_empty());
             return onward.map(|r| sweep::onto(&r, self.world.time, e));
         };
+
+        let escort = &ground.escort;
+        // A set walks in as one; in its room each body's step is its own.
+        let together = e.ours.len() + joining.len() + set.len() > 1;
+        let worth = ground.worth + escort.iter().map(sweep::worth).sum::<i32>();
+        let (candidates, pin) = self.ruled(e, sweep::CANDIDATES);
+        let offers = sweep_offers(&candidates, together, worth, &set);
+
+        let Some(tactic) = tactics::select(&offers, pin).map(|o| o.tactic) else {
+            let onward = onward().filter(|_| !e.ours.is_empty());
+            return onward.map(|r| sweep::onto(&r, self.world.time, e));
+        };
+
         free.retain(|n| !joining.contains(n));
         self.ask(atlas, e, &set, asked);
 
-        let escort = &ground.escort;
         let mut next = e.clone();
         next.ours.extend(joining);
-        // A set walks in as one; in its room each body's step is its own.
         next.plan = Plan {
-            tactic: if next.ours.len() + set.len() > 1 {
-                Tactic::Blob(Box::new(Tactic::Kite))
-            } else {
-                Tactic::Kite
-            },
+            tactic,
             order: casting::kill_order(escort),
+            offers,
         };
         next.unanswered = false;
         next.capacity = capacity;
@@ -1350,9 +1398,7 @@ impl<'a> Scene<'a> {
             copies_of,
             tick_worth,
         ) {
-            Some((set, outcome, tactic)) => {
-                free.retain(|n| !joining.contains(n));
-
+            Some((set, outcome, landed)) => {
                 let mut priced_bodies: Vec<Fighter> = bodies.clone();
                 priced_bodies.extend(asked_fighters.iter().cloned());
                 priced_bodies.extend(set.iter().map(|b| fighter::cast(b)));
@@ -1360,13 +1406,44 @@ impl<'a> Scene<'a> {
                 let mut set = set;
                 set.extend(casting::razer(capacity, core_hits, &priced_bodies));
 
-                self.ask(atlas, e, &set, asked);
+                let price = Priced {
+                    raid: theirs
+                        .bodies
+                        .iter()
+                        .map(|f| engine::body_cost(&f.body))
+                        .sum(),
+                    ranged: landed.bodies.len() > 1 && landed.bodies.iter().all(|f| f.attack == 0),
+                    holds: exchange::stance_against(stance, &landed, &theirs, terrain)
+                        == Stance::Hold,
+                    won: outcome.is_win(),
+                    losses: match outcome {
+                        Outcome::Win(_, losses) => losses,
+                        _ => Losses { dead: 0, hits: 0 },
+                    },
+                    ticks: match outcome {
+                        Outcome::Win(ticks, _) | Outcome::Kite(ticks) => ticks,
+                        Outcome::Lose => 0,
+                    },
+                    set,
+                    tick_worth,
+                };
+
+                let (candidates, pin) = self.ruled(e, defend::CANDIDATES);
+                let offers = price.offers(&candidates);
+
+                let Some(tactic) = tactics::select(&offers, pin).map(|o| o.tactic) else {
+                    return defend::give_up(self.homes.contains(&e.room), self.world.time, e);
+                };
+
+                free.retain(|n| !joining.contains(n));
+                self.ask(atlas, e, &price.set, asked);
 
                 let mut next = e.clone();
                 next.ours.extend(joining.iter().cloned());
                 next.plan = Plan {
                     tactic,
                     order: casting::kill_order(&raid),
+                    offers,
                 };
                 next.budget = e.lost
                     + match outcome {
@@ -1407,6 +1484,104 @@ impl<'a> Scene<'a> {
     }
 }
 
+/// What a `Defend`'s price found, for its candidates to read (§6.3).
+struct Priced {
+    /// What the rival spent on the bodies the engagement fights.
+    raid: i32,
+    /// The set swings nothing, so it fights as one body.
+    ranged: bool,
+    /// A home's ramparts are a post the raid comes to.
+    holds: bool,
+    won: bool,
+    losses: Losses,
+    ticks: i32,
+    set: Vec<casting::Body>,
+    tick_worth: i32,
+}
+
+impl Priced {
+    fn offers(&self, candidates: &[Tactic]) -> Vec<Offer> {
+        candidates.iter().filter_map(|t| self.offer(*t)).collect()
+    }
+
+    /// One arm a candidate: what it wins against what it spends, and nothing
+    /// where it cannot fight from here.
+    fn offer(&self, tactic: Tactic) -> Option<Offer> {
+        let (value, ticks) = match tactic {
+            // A post spends no ticks of the room: the raid comes to it.
+            Tactic::Hold if self.holds => (self.raid, 0),
+            Tactic::Close if self.won && !self.ranged => (self.raid, self.ticks),
+            Tactic::Kite if !self.won && !self.ranged => (0, self.ticks),
+            Tactic::BlobClose if self.won && self.ranged => (self.raid, self.ticks),
+            Tactic::BlobKite if !self.won && self.ranged => (0, self.ticks),
+            _ => return None,
+        };
+
+        let cost = casting::spent(&self.set, self.losses, ticks, self.tick_worth);
+
+        Some(offer(tactic, &self.set, value, cost))
+    }
+}
+
+/// The bodies a candidate fields are the tie-break's input (§6.3).
+fn offer(tactic: Tactic, set: &[casting::Body], value: i32, cost: i32) -> Offer {
+    Offer {
+        tactic,
+        bodies: set.len() as i32,
+        value,
+        cost,
+    }
+}
+
+/// What a `Sweep`'s set wins — the harvest it denies and the prey it kills —
+/// against what it casts (§6.3).
+fn sweep_offers(
+    candidates: &[Tactic],
+    together: bool,
+    worth: i32,
+    set: &[casting::Body],
+) -> Vec<Offer> {
+    let cost = casting::spent(set, Losses { dead: 0, hits: 0 }, 0, 0);
+
+    candidates
+        .iter()
+        .filter_map(|&tactic| match (tactic, together) {
+            (Tactic::BlobKite, true) | (Tactic::Kite, false) => {
+                Some(offer(tactic, set, worth, cost))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// What a `Siege`'s set wins — the room's harvest its razing denies — against
+/// what breaking in spends (§6.3).
+fn siege_offers(
+    candidates: &[Tactic],
+    room: &Room,
+    set: &[casting::Body],
+    outcome: Outcome,
+) -> Vec<Offer> {
+    let value = room
+        .sources
+        .iter()
+        .map(|s| sweep::yield_of(s, engine::CREEP_LIFETIME))
+        .sum();
+
+    let (ticks, losses) = match outcome {
+        Outcome::Win(ticks, losses) => (ticks, losses),
+        Outcome::Kite(ticks) => (ticks, Losses { dead: 0, hits: 0 }),
+        Outcome::Lose => (0, Losses { dead: 0, hits: 0 }),
+    };
+
+    let cost = casting::spent(set, losses, ticks, 0);
+
+    candidates
+        .iter()
+        .map(|&tactic| offer(tactic, set, value, cost))
+        .collect()
+}
+
 fn middle(room: &str) -> Pos {
     Pos::new(
         room.to_string(),
@@ -1425,6 +1600,7 @@ fn fresh(id: i32, objective: Objective, room: &str, time: i32, tactic: Tactic) -
         plan: Plan {
             tactic,
             order: Vec::new(),
+            offers: Vec::new(),
         },
         phase: Phase::Forming,
         opened: time,
@@ -1612,6 +1788,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         world,
         sightings,
         avoid: &declarations.avoid,
+        rules: &declarations.tactics,
         walks,
         homes,
         worked,
@@ -1792,7 +1969,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .enumerate()
         .map(|(i, (room, target))| {
             let id = first_id + (opened.len() + i) as i32;
-            let tactic = Tactic::Blob(Box::new(Tactic::Close));
+            let tactic = Tactic::BlobClose;
             (
                 fresh(id, Objective::Siege(target), room, world.time, tactic),
                 false,
@@ -1995,7 +2172,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     for e in &decided {
         if e.phase == Phase::Approaching
-            && matches!(e.plan.tactic, Tactic::Blob(_))
+            && matches!(e.plan.tactic, Tactic::BlobKite | Tactic::BlobClose)
             && !e.unanswered
         {
             let members: Vec<&Creep> = scene
@@ -2171,15 +2348,12 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 }
 
                 let tactic = &e.plan.tactic;
-                let blobbed = |inner: &Tactic| -> bool {
-                    matches!(tactic, Tactic::Blob(boxed) if **boxed == *inner)
-                };
 
-                if blobbed(&Tactic::Close)
+                if matches!(tactic, Tactic::BlobClose)
                     && tactics::exposed(sight, &centre.room, &scene.members_of(e), c)
                 {
                     tactics::step_back(sight, &centre.room, &scene.members_of(e), c)
-                } else if (matches!(tactic, Tactic::Kite) || blobbed(&Tactic::Kite)) && !swings(c) {
+                } else if matches!(tactic, Tactic::Kite | Tactic::BlobKite) && !swings(c) {
                     tactics::kite(sight, order, &centre, c)
                 } else if matches!(tactic, Tactic::Hold) {
                     tactics::rampart(sight, c)

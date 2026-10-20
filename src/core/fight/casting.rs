@@ -3,7 +3,6 @@
 /// to the home's.
 use std::collections::BTreeMap;
 
-use super::shape::Tactic;
 use crate::core::engine;
 use crate::core::exchange::{self, Fighter, fighter};
 use crate::core::vocabulary::{BodyPart, Boost, Resource};
@@ -165,8 +164,9 @@ pub fn wins(
     !exchange::outcome(stance, ours, theirs, terrain).is_lose()
 }
 
-/// The bodies to ask beside `ours`, the outcome they land and the tactic it
-/// is won by; None: no body the spawns buy wins.
+/// The bodies to ask beside `ours`, the outcome they land and the side they
+/// land as; None: no body the spawns buy wins. Which tactic fights them is the
+/// kind's to price (§6.3).
 pub fn price(
     stance: exchange::Stance,
     ours: &exchange::Side,
@@ -175,7 +175,7 @@ pub fn price(
     capacity: i32,
     copies_of: impl Fn(&Body) -> i32,
     tick_worth: i32,
-) -> Option<(Vec<Body>, exchange::Outcome, Tactic)> {
+) -> Option<(Vec<Body>, exchange::Outcome, exchange::Side)> {
     let set: Vec<Body> = if wins(stance, ours, theirs, terrain) {
         Vec::new()
     } else {
@@ -195,20 +195,22 @@ pub fn price(
         .bodies
         .extend(set.iter().map(|body| fighter::cast(body)));
 
-    let tactic = |won: Tactic| -> Tactic {
-        if exchange::stance_against(stance, &landed, theirs, terrain) == exchange::Stance::Hold {
-            Tactic::Hold
-        } else if landed.bodies.len() > 1 && landed.bodies.iter().all(|f| f.attack == 0) {
-            Tactic::Blob(Box::new(won))
-        } else {
-            won
-        }
-    };
+    let outcome = exchange::outcome(stance, &landed, theirs, terrain);
 
-    match exchange::outcome(stance, &landed, theirs, terrain) {
-        won @ exchange::Outcome::Win(_, _) => Some((set, won, tactic(Tactic::Close))),
-        other => Some((set, other, tactic(Tactic::Kite))),
-    }
+    Some((set, outcome, landed))
+}
+
+/// The energy a set spends over `ticks`: its cast, the share of that cast the
+/// hits strike off, and the room's worth a tick it stands there.
+pub fn spent(set: &[Body], losses: exchange::Losses, ticks: i32, tick_worth: i32) -> i32 {
+    let cast: i32 = set.iter().map(|body| engine::body_cost(body)).sum();
+    let whole = set
+        .iter()
+        .map(|body| engine::PART_HITS * body.len() as i32)
+        .sum::<i32>()
+        .max(1);
+
+    cast + cast * losses.hits.min(whole) / whole + tick_worth * ticks
 }
 
 /// No more medics heal one body from beside it than the tiles around it.

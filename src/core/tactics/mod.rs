@@ -1,6 +1,6 @@
 /// What a fight body does this tick (`ARCHITECTURE.md` §6.4): a step read off
 /// the plan and what stands in its room, and the strike reflex. From v1's
-/// Emitter and Resolver step functions.
+/// Emitter and Resolver step functions. Also which tactic a kind picks (§6.3).
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::atlas::{Atlas, Mover, Target};
@@ -12,6 +12,72 @@ use crate::core::tiles::Tile;
 use crate::core::vocabulary::{BodyPart, same_part};
 use crate::core::world::{Creep, Pos};
 use crate::core::{engine, tiles};
+
+/// A phase's own tactic (pursue, retreat) is the phase's; this is what a kind
+/// commits to, a price per candidate (§6.3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Tactic {
+    Kite,
+    Close,
+    /// On our ramparts: a home is a post the raid comes to.
+    Hold,
+    /// A blob is a set that walks in as one, then fights by the tactic it names.
+    BlobKite,
+    BlobClose,
+}
+
+pub fn name(tactic: Tactic) -> &'static str {
+    match tactic {
+        Tactic::Kite => "kite",
+        Tactic::Close => "close",
+        Tactic::Hold => "hold",
+        Tactic::BlobKite => "blob-kite",
+        Tactic::BlobClose => "blob",
+    }
+}
+
+pub fn by_name(name: &str) -> Option<Tactic> {
+    [
+        Tactic::Kite,
+        Tactic::Close,
+        Tactic::Hold,
+        Tactic::BlobKite,
+        Tactic::BlobClose,
+    ]
+    .into_iter()
+    .find(|tactic| self::name(*tactic) == name)
+}
+
+/// One candidate as its kind's price finds it (§6.3): the bodies it fields and
+/// what it wins against what it spends, both in energy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Offer {
+    pub tactic: Tactic,
+    pub bodies: i32,
+    pub value: i32,
+    pub cost: i32,
+}
+
+impl Offer {
+    pub fn net(&self) -> i32 {
+        self.value - self.cost
+    }
+}
+
+/// The offer that pays most; ties to the fewest bodies, then to the kind's
+/// declared candidate order.
+pub fn best(offers: &[Offer]) -> Option<&Offer> {
+    let ranked = |o: &Offer| (o.net(), std::cmp::Reverse(o.bodies));
+    offers
+        .iter()
+        .reduce(|b, o| if ranked(o) > ranked(b) { o } else { b })
+}
+
+/// A pinned tactic wins where it is still offered, else the best pays.
+pub fn select(offers: &[Offer], pin: Option<Tactic>) -> Option<&Offer> {
+    pin.and_then(|pinned| offers.iter().find(|o| o.tactic == pinned))
+        .or_else(|| best(offers))
+}
 
 pub struct Sight<'a> {
     pub atlas: &'a mut Atlas,
@@ -944,4 +1010,71 @@ pub fn hunt(
         .or_else(|| open.iter().copied().min_by_key(|t| (net(*t), *t)));
     let wish = best.map_or_else(|| hold(sight, c), |t| step_to(c, t));
     (strike, wish, scored)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn offer(tactic: Tactic, bodies: i32, value: i32, cost: i32) -> Offer {
+        Offer {
+            tactic,
+            bodies,
+            value,
+            cost,
+        }
+    }
+
+    #[test]
+    fn the_best_offer_pays_most_then_fields_fewest_then_keeps_the_kinds_order() {
+        let rich = [
+            offer(Tactic::Close, 3, 900, 400),
+            offer(Tactic::Kite, 3, 200, 100),
+        ];
+        assert_eq!(best(&rich).map(|o| o.tactic), Some(Tactic::Close));
+
+        let few = [
+            offer(Tactic::Close, 4, 500, 200),
+            offer(Tactic::Kite, 2, 500, 200),
+        ];
+        assert_eq!(best(&few).map(|o| o.tactic), Some(Tactic::Kite));
+
+        let first = [
+            offer(Tactic::Hold, 2, 500, 200),
+            offer(Tactic::Close, 2, 500, 200),
+        ];
+        assert_eq!(best(&first).map(|o| o.tactic), Some(Tactic::Hold));
+        assert_eq!(best(&[]), None);
+    }
+
+    #[test]
+    fn every_tactic_names_itself_and_only_itself() {
+        for tactic in [
+            Tactic::Kite,
+            Tactic::Close,
+            Tactic::Hold,
+            Tactic::BlobKite,
+            Tactic::BlobClose,
+        ] {
+            assert_eq!(by_name(name(tactic)), Some(tactic));
+        }
+        assert_eq!(by_name("bounce"), None);
+    }
+
+    #[test]
+    fn a_pin_wins_where_it_is_offered_and_falls_through_where_it_cannot_fight() {
+        let offers = [
+            offer(Tactic::Close, 3, 900, 400),
+            offer(Tactic::Kite, 3, 200, 100),
+        ];
+        assert_eq!(
+            select(&offers, Some(Tactic::Kite)).map(|o| o.tactic),
+            Some(Tactic::Kite)
+        );
+        assert_eq!(
+            select(&offers, Some(Tactic::Hold)).map(|o| o.tactic),
+            Some(Tactic::Close)
+        );
+        assert_eq!(select(&[], Some(Tactic::Kite)), None);
+    }
 }

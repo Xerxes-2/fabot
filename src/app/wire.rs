@@ -8,10 +8,11 @@ use wasm_bindgen::{JsCast, JsValue};
 
 use super::js::{field, int_of};
 use crate::core::exchange::{Losses, Outcome};
-use crate::core::fight::shape::{Cast, Engagement, Group, Objective, Phase, Plan, Tactic};
+use crate::core::fight::shape::{Cast, Engagement, Group, Objective, Phase, Plan};
 use crate::core::state::State;
 use crate::core::strategy::intel::{self, Intel};
-use crate::core::tick::{Declarations, Declared, Outpost, undeclared};
+use crate::core::tactics::{self, Offer, Tactic};
+use crate::core::tick::{Declarations, Declared, Outpost, TacticRule, undeclared};
 use crate::core::vocabulary::{self, Compound, Resource};
 use crate::core::world::{Pos, World};
 
@@ -156,27 +157,15 @@ fn phase_of(name: &str) -> Option<Phase> {
     })
 }
 
-fn tactic_name(tactic: &Tactic) -> &'static str {
-    match tactic {
-        Tactic::Kite => "kite",
-        Tactic::Close => "close",
-        Tactic::Hold => "hold",
-        Tactic::Blob(fights) => match **fights {
-            Tactic::Kite => "blob-kite",
-            _ => "blob",
-        },
+/// An offer as `npm run observe -- engagements` reads it: `[name, value, cost,
+/// bodies]`, the numbers the operator compares.
+fn offer_obj(o: &Offer) -> JsValue {
+    let row = Array::new();
+    row.push(&JsValue::from_str(tactics::name(o.tactic)));
+    for n in [o.value, o.cost, o.bodies] {
+        row.push(&JsValue::from(n));
     }
-}
-
-fn tactic_of(name: &str) -> Option<Tactic> {
-    Some(match name {
-        "kite" => Tactic::Kite,
-        "close" => Tactic::Close,
-        "hold" => Tactic::Hold,
-        "blob" => Tactic::Blob(Box::new(Tactic::Close)),
-        "blob-kite" => Tactic::Blob(Box::new(Tactic::Kite)),
-        _ => return None,
-    })
+    row.into()
 }
 
 /// As `npm run exchange` writes a prediction.
@@ -231,9 +220,11 @@ fn engagement_of(o: &JsValue) -> Option<Engagement> {
         room: string_of(&field(o, "room"))?,
         ours: list_of(string_of, &field(o, "ours")).into_iter().collect(),
         plan: Plan {
-            tactic: tactic_of(&string_of(&field(o, "tactic")).unwrap_or_default())
+            tactic: tactics::by_name(&string_of(&field(o, "tactic")).unwrap_or_default())
                 .unwrap_or(Tactic::Close),
             order: list_of(string_of, &field(o, "order")),
+            // The price's, this tick's: never stored (§4).
+            offers: Vec::new(),
         },
         phase,
         // Saved before it was kept: its phase's start is the latest it can have opened.
@@ -276,7 +267,7 @@ fn engagement_obj(e: &Engagement) -> JsValue {
     set_field(
         o.as_ref(),
         "tactic",
-        &JsValue::from_str(tactic_name(&e.plan.tactic)),
+        &JsValue::from_str(tactics::name(e.plan.tactic)),
     );
     let order = Array::new();
     for id in &e.plan.order {
@@ -466,7 +457,19 @@ pub fn read_declarations() -> Declarations {
         sieges: names(&declared, "sieges"),
         abandon: names(&declared, "abandon"),
         avoid: names(&declared, "avoid"),
+        tactics: array_of(&field(&declared, "tactics"))
+            .map(|rules| rules.iter().filter_map(rule_of).collect())
+            .unwrap_or_default(),
     }
+}
+
+fn rule_of(o: &JsValue) -> Option<TacticRule> {
+    Some(TacticRule {
+        rival: string_of(&field(o, "rival")),
+        room: string_of(&field(o, "room")),
+        pin: string_of(&field(o, "pin")),
+        forbid: names(o, "forbid"),
+    })
 }
 
 fn names<T: FromIterator<String> + Default>(declared: &JsValue, key: &str) -> T {
@@ -510,6 +513,8 @@ pub struct Observed {
     pub off: Vec<String>,
     pub faults: Vec<Fault>,
     pub refusals: Vec<crate::app::executor::Refusal>,
+    /// Each engagement priced this tick, its candidates' offers beside it (§6.3).
+    pub offers: Vec<(i32, Vec<Offer>)>,
 }
 
 pub fn write_observe(o: &Observed) {
@@ -542,6 +547,19 @@ pub fn write_observe(o: &Observed) {
         off.push(&JsValue::from_str(name));
     }
     set_field(root.as_ref(), "off", off.as_ref());
+
+    let offers = Array::new();
+    for (id, list) in &o.offers {
+        let row = Array::new();
+        row.push(&JsValue::from(*id));
+        let each = Array::new();
+        for offer in list {
+            each.push(&offer_obj(offer));
+        }
+        row.push(&each);
+        offers.push(&row);
+    }
+    set_field(root.as_ref(), "offers", offers.as_ref());
 
     let faults = Array::new();
     for f in &o.faults {

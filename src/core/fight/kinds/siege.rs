@@ -3,8 +3,11 @@ use std::collections::BTreeSet;
 
 use super::super::shape::{Engagement, Phase};
 use crate::core::engine;
+use crate::core::tactics::Tactic;
 use crate::core::vocabulary::Resource;
 use crate::core::world::{Controller, Kind, Owner, Pos, Room, Structure};
+
+pub const CANDIDATES: &[Tactic] = &[Tactic::BlobClose];
 
 pub struct Facts {
     pub time: i32,

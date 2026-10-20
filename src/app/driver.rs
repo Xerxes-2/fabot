@@ -146,8 +146,11 @@ fn run_tick() -> Result<(), String> {
     for room in declarations.abandon.iter().filter_map(|r| world.room(r)) {
         counts.push((format!("abandon:{}", room.name), abandon::left(room)));
     }
-    for room in refused {
+    for room in &refused.rooms {
         counts.push((format!("closed:{room}"), 1));
+    }
+    for rule in &refused.rules {
+        counts.push((format!("refused:{rule}"), 1));
     }
     for intent in &result.intents {
         if let crate::core::intents::Intent::Count(name, n) = intent {
@@ -164,6 +167,13 @@ fn run_tick() -> Result<(), String> {
         off: result.state.off.iter().cloned().collect(),
         faults: faults.clone(),
         refusals,
+        offers: result
+            .state
+            .engagements
+            .iter()
+            .filter(|e| !e.plan.offers.is_empty())
+            .map(|e| (e.id, e.plan.offers.clone()))
+            .collect(),
     };
     wire::write_observe(&observed);
     let standing = std::mem::take(&mut result.state.layout);
@@ -194,6 +204,7 @@ fn faulted_by(faults: &mut Vec<wire::Fault>, error: &str) {
         off: Vec::new(),
         faults: faults.clone(),
         refusals: Vec::new(),
+        offers: Vec::new(),
     };
     wire::write_observe(&observed);
 }
@@ -252,6 +263,7 @@ pub fn tick() {
                 "my",
                 "name",
                 "off",
+                "offers",
                 "opened",
                 "order",
                 "ours",
@@ -275,6 +287,7 @@ pub fn tick() {
                 "structureType",
                 "switches",
                 "tactic",
+                "tactics",
                 "target",
                 "tick",
                 "ticks",

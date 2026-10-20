@@ -4,9 +4,19 @@ use std::collections::BTreeSet;
 
 use super::super::shape::{Engagement, Group, Phase};
 use crate::core::engine;
+use crate::core::tactics::Tactic;
 use crate::core::tiles::{self};
 use crate::core::vocabulary::BodyPart;
 use crate::core::world::{Controller, Creep, Fallen, Kind, Owner, Pos, Structure};
+
+/// What a `Defend` may fight as, in the order its ties fall to (§6.3).
+pub const CANDIDATES: &[Tactic] = &[
+    Tactic::Hold,
+    Tactic::Close,
+    Tactic::Kite,
+    Tactic::BlobKite,
+    Tactic::BlobClose,
+];
 
 pub struct Facts {
     pub time: i32,
@@ -32,15 +42,18 @@ fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
 }
 
 /// A home's Defend never disengages: it stops asking, holds and is unanswered.
+/// Neither arm is priced, so the offers behind the last price go with it.
 pub fn give_up(held: bool, time: i32, e: &Engagement) -> Engagement {
-    if held {
+    let mut next = if held {
         Engagement {
             unanswered: true,
             ..e.clone()
         }
     } else {
         enter(Phase::Disengaging, time, e)
-    }
+    };
+    next.plan.offers.clear();
+    next
 }
 
 pub fn stands_alone(time: i32, e: &Engagement) -> Engagement {
@@ -272,8 +285,7 @@ pub fn safe_mode(running: bool, homes: &[Home]) -> Option<String> {
 pub const HOME_PRIORITY: f64 = 2.0;
 pub const OUTPOST_PRIORITY: f64 = 1.0;
 
-/// Strategy's stand-in (§7.3): the groups a Defend answers, a home's before an
-/// outpost's. A group in a room an engagement targets is that engagement's.
+/// Strategy's stand-in (§7.3): a home's raid is answered before an outpost's, and a group in a targeted room is that engagement's.
 pub fn opens(
     homes: &BTreeSet<String>,
     worked: &BTreeSet<String>,

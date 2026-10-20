@@ -90,6 +90,15 @@ impl Owner {
     pub fn is_nobody(&self) -> bool {
         *self == Owner::Nobody
     }
+
+    /// The username behind the stance; none for an Invader, a keeper or an
+    /// empty seat.
+    pub fn user(&self) -> Option<&str> {
+        match self {
+            Owner::Ally(user) | Owner::Enemy(user) | Owner::Stranger(user) => Some(user),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

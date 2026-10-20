@@ -147,8 +147,8 @@ cold tick never spends more than ❓ 60% of the limit.
 | `Economy` | task pool, planner, matcher, quota, spawns, labs, terminals, market | World, Atlas, declarations, `State.Economy` | tasks, casts, `State.Economy` | port, trim (§5) |
 | `Layout` | construction and tower plans | World, Atlas, declarations (outposts' containers and roads) | sites, tower intents | port |
 | `Exchange` | who wins: pure fight arithmetic | bodies, terrain | — | port from `Facts.fs:2883–4056, 1038–1582`, `Fighter.fs`, `Arrival.fs`; narrow the input |
-| `Fight` | tracker, engagements (one kind per file), casting | World, Atlas, Exchange, `State.Fight`, `intel.rooms` (a patrol's staleness) | fight intents, casts, declarations, `State.Fight` | **new** (§6) |
-| `Tactics` | what one fight body does this tick (§6.4): strikes, steps, the Hunt score, heals; it imports no Fight | Atlas, Move, the `Sight` and plan Fight hands down | creep intents, wishes | **new**, split from Fight |
+| `Fight` | tracker, engagements (one kind per file), casting | World, Atlas, Exchange, declarations (the operator's tactic rules, §6.3), `State.Fight`, `intel.rooms` (a patrol's staleness) | fight intents, casts, declarations, `State.Fight` | **new** (§6) |
+| `Tactics` | what one fight body does this tick (§6.4): strikes, steps, the Hunt score, heals, and which tactic a kind picks (§6.3); it imports no Fight | Atlas, Move, the `Sight` and plan Fight hands down | creep intents, wishes | **new**, split from Fight |
 | `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Exchange, `State.Intel`, `Season` | declarations, opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
 | `Season` | this season's rules: what scores, its structures, its NPCs, its map quirks | World | declarations to Strategy, season intents | **new**, disposable (§8) |
 | `Move` | per-room movement arbitration, run by `Tick` over every module's wishes, and the step functions (chase, kite, flee, formation) | Intents, Atlas | move intents | port `Resolver.fs`, drop fight precedence |
@@ -187,16 +187,16 @@ recorder's ring; the rest are assigned here as their stores land.
 | Store | Shape | Owner | Lives in | Why |
 |---|---|---|---|---|
 | `assignments` | creep → task id | Economy | Memory | sticky matching |
-| `fight.engagements` | id → Engagement (§6.2), with the tick it opened, never moved | Fight | Memory | the commitment; read every tick; a home's deaths since it opened are its raid's |
+| `fight.engagements` | id → Engagement (§6.2), with the tick it opened, never moved | Fight | Memory | the commitment; read every tick; not the offers (§6.3); a home's deaths since it opened are its raid's |
 | `fight.groups` | id → Group (§6.1) | Fight | Memory | hostile identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | never cast twice |
-| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims, colonies to abandon | Strategy | Memory | what the world is for us, as data |
+| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims, colonies to abandon, the operator's tactic rules | Strategy | Memory | what the world is for us, as data |
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
 | `recorder` | the last ticks' read pass (`app/read.js`), Memory and intel rows, deflated; a tick over a segment spans several, so the ring keeps fewer | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
 | `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK body stood there, its keeper lairs and the resource each guards; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
-| `observe.*` | health, faults, per-module CPU, counters | Main, then Observe | segment 1 | operator; calibrates the benchmark |
+| `observe.*` | health, faults, per-module CPU, counters, this tick's tactic offers (§6.3) | Main, then Observe | segment 1 | operator; calibrates the benchmark |
 | `scouts`, `preyed` | the declared rooms a scout serves, with their rows' age; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
 | `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) and whether it is armed; a room in sight holds only what stands there now. A level-0 core is unarmed: it keeps its core engagement open but stands nothing down | World | heap | vision grace; when a stood-down outpost is clear |
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
@@ -309,7 +309,7 @@ type Kind = Defend | Claim | Siege | Sweep | Drain | KeeperDuty | PowerBank | St
 type Engagement =
     { Id: int; Kind: Kind; Target: Target
       Ours: Set<string>; Asked: Cast list      // committed bodies, and the ones still in an oven
-      Plan: Plan                                // tactic, kill order, formation — set at open (§6.3)
+      Plan: Plan                                // tactic, the offers behind it, kill order, formation — set at open (§6.3)
       Predicted: Outcome                        // what Exchange said at open; checked at close (§10.1)
       Phase: string; Since: int                 // the kind's own phase names
       Budget: Budget                            // losses, energy, deadline — before we disengage
@@ -431,13 +431,28 @@ val cheapestWin : stance: Stance -> ours: Side -> affordable: Body list -> their
 
 - `cheapestWin` adds to the bodies already standing (`ours`) before it casts.
 - `cheapestWin` is called once at open and once per event that changes a side.
-  It chooses the body set; the engagement's `Plan` records the tactic the
-  outcome implies, and `Predicted` records the outcome for §10.1.
+  It chooses the body set; `Predicted` records the outcome for §10.1, and the
+  kind chooses the tactic the set fights by (§6.3).
 - Under `Hold` the raid comes to our post; one that strikes from past the reach
   of any striker of ours and outlasts our towers picks its range instead, so it is
   priced as a `Standoff`, and unanswered where that does not win (owner's call).
 - Nothing in `Fight` re-prices per tick. A tactic that needs a number every
   tick reads it off the `Plan` or asks `Atlas`.
+- A kind's tactic is **chosen from its candidates**, never derived from the
+  outcome: each kind declares theirs beside its phase machine (`fight/kinds/`),
+  the price offers each what it wins against what it spends in energy
+  (`casting::spent`: the cast, the hits it takes, the room's worth a tick —
+  against kills, denied harvest, what razing denies), and `tactics::select`
+  picks: the candidates less the ones a rule forbids, a pin where it is still
+  offered, else the greatest value less cost, ties to the fewest bodies then the
+  declared order. The price orders each kind's candidates; where a kind has one
+  viable candidate today (Siege, Sweep), the offer is a record of that price,
+  not a comparison, and `Dismantle`, `Bounce` and a sweep's `Close` join with
+  their stages. The tick that prices carries the offers behind its choice on
+  the `Plan` its heap holds, which `observe engagements` prints from segment 1
+  (§4); no tick's Memory does. A `Defend` candidate is offered only where it can fight
+  at all: a set that can close does, one that cannot kites, a post is held
+  where the raid must come to it, and a set that swings nothing fights as one.
 
 ### 6.4 Tactics — what a committed body does
 
@@ -505,9 +520,12 @@ and whether the room graph's avoided set comes from them.
 
 ### 7.2 Expansion and declarations
 
-Homes, outposts, errands, avoided rooms, allies, enemies and claims are rows
-in `declarations`, written by Strategy and editable by the operator (`observe
-declare`). The world reader turns every owner into its stance once
+Homes, outposts, errands, avoided rooms, allies, enemies, claims and the
+operator's tactic rules are rows in `declarations`, written by Strategy (the
+rules by the operator alone) and editable by the operator (`observe declare`;
+`observe declare tactics <file.json>` takes a list of `{ rival?, room?, pin?,
+forbid? }`, refused where a name is no tactic's or a pin is what a rule that
+joins it forbids). The world reader turns every owner into its stance once
 (`world::Owner`): a stranger, neither ally nor enemy, is fought where it
 threatens us but never hunted; enemies are declared by hand, and a declared siege's owner, as intel last saw it, is one (owner's call). Candidates are priced once when intel changes or a due tick comes:
 an outpost by sources, distance, threat and the CPU it costs (v1 withdrew an
@@ -648,6 +666,9 @@ everything v1 used its self-written arena for, and more:
   costs its last N ticks; the bundle under test runs on from it as a deploy
   would), its ticks and bounds on what the soak measured, scenarios on one
   start sharing one soak; `jj ship` runs those of the modules a change touches.
+  The operator's rules are a scenario like any other:
+  `tactics-forbid-stands-the-siege-down` is a declared siege whose tactic a
+  rule forbids, which prices nothing it may fight and casts nothing.
 - **Soak.** The real sector's terrain and rooms, from one spawn for thousands
   of ticks: income curve, expansion cadence, losses to NPC waves, CPU curve.
   A change to the economy is read off this curve, not off a unit test. It is
