@@ -124,8 +124,11 @@ fn ranked<'a>(sight: &Sight<'a>, order: &[String], creep: &Creep) -> Vec<&'a Cre
 
 /// Every body that strikes, in any phase and engaged or not: a swing and a
 /// shot at the first in the kill order in reach, a volley where it lands more.
-pub fn strike(sight: &Sight, order: &[String], creep: &Creep) -> Vec<CreepAct> {
-    let targets = ranked(sight, order, creep);
+pub fn strike(sight: &Sight, order: &[String], creep: &Creep, armed: bool) -> Vec<CreepAct> {
+    let targets: Vec<&Creep> = ranked(sight, order, creep)
+        .into_iter()
+        .filter(|h| !armed || live(BodyPart::Attack, h) > 0 || live(BodyPart::RangedAttack, h) > 0)
+        .collect();
     let within = |r: i32| targets.iter().filter(move |h| creep.pos.within(r, &h.pos));
 
     let melee = within(engine::MELEE_RANGE)
@@ -185,10 +188,9 @@ pub fn hold(sight: &Sight, creep: &Creep) -> Wish {
 }
 
 fn aim(sight: &Sight, order: &[String], centre: &Pos, creep: &Creep) -> Pos {
-    match ranked(sight, order, creep).into_iter().next() {
-        Some(h) => h.pos.clone(),
-        None => centre.clone(),
-    }
+    ranked(sight, order, creep)
+        .first()
+        .map_or_else(|| centre.clone(), |h| h.pos.clone())
 }
 
 pub fn close(sight: &mut Sight, order: &[String], centre: &Pos, creep: &Creep) -> Wish {
@@ -226,8 +228,14 @@ fn step_to(creep: &Creep, tile: Tile) -> Wish {
 }
 
 /// v1's kiteStep without its threat maps: off every swing's next reach, else
-/// to a shot's range of the head.
-pub fn kite(sight: &mut Sight, order: &[String], centre: &Pos, creep: &Creep) -> Wish {
+/// to a shot's range of `at`, or of the mark the kill order puts first.
+pub fn kite(
+    sight: &mut Sight,
+    at: Option<&Pos>,
+    order: &[String],
+    centre: &Pos,
+    creep: &Creep,
+) -> Wish {
     let room = creep.pos.room.clone();
 
     let swings: Vec<&Creep> = hostiles_in(sight, &room)
@@ -246,18 +254,15 @@ pub fn kite(sight: &mut Sight, order: &[String], centre: &Pos, creep: &Creep) ->
     let here = tiles::of_pos(&creep.pos);
 
     if swings.is_empty() {
-        let at = aim(sight, order, centre, creep);
+        let at = at
+            .cloned()
+            .unwrap_or_else(|| aim(sight, order, centre, creep));
         toward(sight, creep, &at, engine::RANGED_RANGE)
     } else {
-        let steps: Vec<Tile> = tiles::around(here)
+        let step = (tiles::around(here))
             .iter()
             .copied()
             .filter(|t| !tiles::on_edge(*t) && sight.atlas.passable(&room, *t))
-            .collect();
-
-        let step = steps
-            .iter()
-            .copied()
             .min_by_key(|t| (-gap(*t), *t))
             .filter(|t| gap(*t) > gap(here));
 
@@ -339,14 +344,9 @@ struct Safety<'a> {
 }
 
 impl Safety<'_> {
-    /// A body crosses an exit by stepping onto it, not by standing on it.
-    fn crosses(at: (Tile, Option<Tile>)) -> bool {
-        at.1.is_some() && tiles::on_edge(at.0)
-    }
-
     fn safe(&self, at: (Tile, Option<Tile>)) -> bool {
         self.room != self.raid_room
-            || Safety::crosses(at)
+            || at.1.is_some() && tiles::on_edge(at.0)
             || threat(self.raid, &tiles::to_pos(self.room, at.0)) == 0
     }
 
@@ -372,7 +372,8 @@ impl Safety<'_> {
             [] => {
                 let mut next: Vec<(Tile, Option<Tile>)> = Vec::new();
 
-                for at in ring.iter().copied().filter(|at| !Safety::crosses(*at)) {
+                let open = |at: &(Tile, Option<Tile>)| at.1.is_none() || !tiles::on_edge(at.0);
+                for at in ring.iter().copied().filter(open) {
                     for n in tiles::around(at.0) {
                         if !seen.contains(n) && self.atlas.passable(self.room, *n) {
                             next.push((*n, at.1.or(Some(*n))));
@@ -786,10 +787,8 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
 /// closes. The engine keeps one of a swing and a heal, and one of a shot and a
 /// ranged heal: a swinging body does not heal, a shooting one heals beside it.
 /// A heal lands in the tick's sum with the strikes, so what is `incoming` is owed.
-/// `heals`' allotment, which a Hunt also plans by: each healer in name order
-/// heals the body in its reach, itself among them, nearest death after what
-/// strikes it, then owed most, beside before at range (three where it does
-/// not shoot), and that heal comes off what it is owed. Each healer's patient, and whether it stands beside.
+/// Each healer heals the patient in its reach nearest death after what strikes
+/// it, then owed most, and that heal comes off what it is owed.
 pub fn allot<'p>(
     healers: &[&Creep],
     patients: &[&'p Creep],

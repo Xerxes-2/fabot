@@ -1,14 +1,21 @@
 /// `Siege` (`ARCHITECTURE.md` §6.2); `step` closes it with None once nothing is left to take.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::casting;
 use super::super::shape::{Engagement, Phase};
+use super::sweep;
+use crate::core::atlas::Atlas;
+use crate::core::atlas::tiles::{self, Tile};
 use crate::core::engine;
-use crate::core::tactics::Tactic;
+use crate::core::exchange::{self, Losses, Outcome};
+use crate::core::tactics::{self, Offer, Tactic};
 use crate::core::vocabulary::Resource;
 use crate::core::world::{Controller, Kind, Owner, Pos, Room, Structure};
 
 pub const CANDIDATES: &[Tactic] = &[Tactic::BlobClose];
+
+/// A set shot in through a way no barrier stands on: it dismantles nothing.
+pub const RAID: &[Tactic] = &[Tactic::BlobKite];
 
 /// Bouncer trips his towers may leave untouched before the drain gives up.
 pub const IGNORED: i32 = 6;
@@ -44,7 +51,7 @@ pub struct Facts {
 }
 
 /// The towers and the whole economy (owner, 2026-10-18).
-fn razed(kind: &Kind) -> bool {
+pub fn razed(kind: &Kind) -> bool {
     matches!(
         kind,
         Kind::Tower
@@ -64,7 +71,7 @@ fn razed(kind: &Kind) -> bool {
 
 /// What razing `s` takes from the rival (owner, 2026-10-19): a fixed order a
 /// price of his loss replaces.
-fn taken(s: &Structure, sources: &[Pos]) -> i32 {
+pub fn taken(s: &Structure, sources: &[Pos]) -> i32 {
     match s.kind {
         Kind::Link if sources.iter().any(|p| p.within(2, &s.pos)) => 4,
         Kind::Spawn | Kind::Extension | Kind::Tower => 3,
@@ -76,8 +83,8 @@ fn taken(s: &Structure, sources: &[Pos]) -> i32 {
 
 /// The rival's structure razed next: the one its charged towers strike
 /// least, so the set the bank buys is the cheapest (owner: a tower is razed
-/// whenever that is cheap); then the nearest `near`.
-fn next_razed<'a>(room: &'a Room, near: Option<&Pos>) -> Option<&'a Structure> {
+/// whenever that is cheap); then the dearest to him, then the nearest `walk`.
+pub fn next_razed(room: &Room, walk: impl Fn(&Structure) -> i32) -> Option<&Structure> {
     let structures = &room.structures;
     let sources: Vec<Pos> = room.sources.iter().map(|s| s.pos.clone()).collect();
     let theirs = || structures.iter().filter(|s| s.owner.is_theirs());
@@ -96,7 +103,7 @@ fn next_razed<'a>(room: &'a Room, near: Option<&Pos>) -> Option<&'a Structure> {
         (
             struck(&s.pos),
             std::cmp::Reverse(taken(s, &sources)),
-            near.and_then(|p| p.range(&s.pos)).unwrap_or(0),
+            walk(s),
             s.id.clone(),
         )
     })
@@ -107,7 +114,8 @@ fn declaimed(room: &Room) -> Option<&Controller> {
 }
 
 pub fn next_target(room: &Room, near: Option<&Pos>) -> Option<String> {
-    let razed = next_razed(room, near).map(|s| &s.id);
+    let razed =
+        next_razed(room, |s| near.and_then(|p| p.range(&s.pos)).unwrap_or(0)).map(|s| &s.id);
     razed.or(declaimed(room).map(|c| &c.id)).cloned()
 }
 
@@ -200,4 +208,138 @@ pub fn replanned(time: i32, held: bool, e: &Engagement) -> Engagement {
         Phase::Fighting => enter(Phase::Fighting, time, e),
         _ => e.clone(),
     }
+}
+
+pub fn barrier_at(room: &Room) -> BTreeMap<&str, &Structure> {
+    room.structures
+        .iter()
+        .filter(|s| !s.owner.is_ours() && (s.kind.is_rampart() || s.kind.is_wall()))
+        .map(|s| (s.id.as_str(), s))
+        .collect()
+}
+
+/// Whether a walk from the room's exits reaches beside `at`.
+pub fn beside(reached: &BTreeSet<Tile>, at: &Pos) -> bool {
+    tiles::around(tiles::of_pos(at))
+        .iter()
+        .any(|t| reached.contains(t))
+}
+
+/// A picket's worth, as a sweep's: the harvest its post denies.
+pub fn denied(room: &Room, post: &Pos) -> i32 {
+    room.sources
+        .iter()
+        .filter(|s| s.pos == *post)
+        .map(|s| sweep::yield_of(s, engine::CREEP_LIFETIME))
+        .sum()
+}
+
+pub fn exposed(atlas: &Atlas, room: &Room) -> Vec<Pos> {
+    exposed_in(&atlas.from_exits(&room.name), room)
+}
+
+pub fn exposed_in(reached: &BTreeSet<Tile>, room: &Room) -> Vec<Pos> {
+    room.sources
+        .iter()
+        .filter(|s| beside(reached, &s.pos))
+        .map(|s| s.pos.clone())
+        .collect()
+}
+
+pub fn drain_pays(room: &str, capacity: i32, towers: &[Pos], gate: &tactics::Gate) -> bool {
+    let at = tiles::landing(gate.bounce).unwrap_or(gate.bounce);
+    let volley = exchange::tower_strike(towers, &tiles::to_pos(room, at));
+
+    volley <= casting::pair_heal(casting::pairs(capacity))
+}
+
+/// His towers leave a border tile the pairs' heal holds: the cheapest gate.
+pub fn drainable(room: &str, capacity: i32, towers: &[Pos]) -> bool {
+    if towers.is_empty() {
+        return false;
+    }
+    let least = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
+        .iter()
+        .flat_map(|side| tiles::exit_tiles(*side))
+        .map(|t| exchange::tower_strike(towers, &tiles::to_pos(room, *t)))
+        .min()
+        .unwrap_or(i32::MAX);
+
+    least <= casting::pair_heal(casting::pairs(capacity))
+}
+
+/// The edge a drain bounces through: his border tile his towers reach, the
+/// nearest of them.
+pub fn gate<'a>(
+    atlas: &Atlas,
+    room: &'a str,
+    from: &'a str,
+    towers: &[Pos],
+) -> Option<tactics::Gate> {
+    let side = tiles::exit_toward(room, from)?;
+    let nearest = |at: &Pos| {
+        (towers.iter()).fold(engine::ROOM_SIDE, |least, t| {
+            least.min(t.range(at).unwrap_or(least))
+        })
+    };
+    let tiles: Vec<Tile> = (tiles::exit_tiles(side).iter())
+        .copied()
+        .filter(|t| atlas.passable(room, *t))
+        .filter(|t| tiles::landing(*t).is_some_and(|l| atlas.passable(from, l)))
+        .collect();
+
+    // A trip his towers cannot answer draws nothing, so a tile one of them
+    // reaches is the gate before a quieter one is.
+    let reached = |at: &Pos| {
+        towers
+            .iter()
+            .any(|t| t.within(engine::TOWER_FALLOFF_RANGE, at))
+    };
+    let tile = tiles.into_iter().min_by_key(|t| {
+        let at = tiles::to_pos(room, *t);
+        (!reached(&at), nearest(&at), *t)
+    })?;
+    let bounce = tiles::landing(tile)?;
+    let rest = (tiles::around(bounce).iter())
+        .filter(|t| !tiles::on_edge(**t))
+        .filter(|t| atlas.passable(from, **t))
+        .min_by_key(|t| tiles::range(**t, bounce))
+        .copied()?;
+
+    Some(tactics::Gate {
+        room: room.to_string(),
+        from: from.to_string(),
+        bounce,
+        rest,
+    })
+}
+
+/// What a `Siege`'s set wins against what breaking in spends (§6.3).
+pub fn offers(
+    candidates: &[Tactic],
+    room: &Room,
+    set: &[casting::Body],
+    outcome: Outcome,
+) -> Vec<Offer> {
+    let value = room
+        .sources
+        .iter()
+        .map(|s| sweep::yield_of(s, engine::CREEP_LIFETIME))
+        .sum();
+    let (ticks, losses) = match outcome {
+        Outcome::Win(ticks, losses) => (ticks, losses),
+        Outcome::Kite(ticks) => (ticks, Losses { dead: 0, hits: 0 }),
+        Outcome::Lose => (0, Losses { dead: 0, hits: 0 }),
+    };
+    let cost = casting::spent(set, losses, ticks, 0);
+
+    candidates
+        .iter()
+        .map(|&tactic| Offer {
+            tactic,
+            bodies: set.len() as i32,
+            value,
+            cost,
+        })
+        .collect()
 }

@@ -1288,6 +1288,28 @@ pub fn tower_strike(towers: &[Pos], at: &Pos) -> i32 {
         .sum()
 }
 
+/// What his armed bodies deal a body at `at` next tick: a swing beside it, a
+/// shot within three (owner, 2026-10-21).
+pub fn guard_strike(guards: &[(Pos, i32, i32)], at: &Pos) -> i32 {
+    guards
+        .iter()
+        .map(|(p, swing, shot)| {
+            let beside = if p.within(engine::MELEE_RANGE, at) {
+                *swing
+            } else {
+                0
+            };
+            let within = if p.within(engine::RANGED_RANGE, at) {
+                *shot
+            } else {
+                0
+            };
+
+            beside + within
+        })
+        .sum()
+}
+
 /// The simple rule; a fire priced in ticks replaces it.
 pub fn crowded(set: &[Fighter], abreast: i32, seated: i32, struck: i32) -> Option<i32> {
     let n = set.len() as i32;
@@ -1303,6 +1325,7 @@ pub fn breach_plan(
     ground: &Ground,
     gait: FatigueFactor,
     towers: &[Pos],
+    guards: &[(Pos, i32, i32)],
     set: &[Fighter],
     seated: i32,
     seats: impl Fn(Tile) -> i32,
@@ -1310,7 +1333,11 @@ pub fn breach_plan(
     sources: &[(Tile, i32, i32)],
     goals: &[Tile],
 ) -> Option<(Vec<(Tile, Tile)>, i32)> {
-    let struck = |t: Tile| tower_strike(towers, &tiles::to_pos(&ground.room, t));
+    let struck = |t: Tile| {
+        let at = tiles::to_pos(&ground.room, t);
+
+        tower_strike(towers, &at) + guard_strike(guards, &at)
+    };
     let n = set.len() as i32;
     let abreast: BTreeMap<Tile, i32> = sources.iter().map(|(t, _, w)| (*t, *w)).collect();
     let goal: BTreeSet<Tile> = goals.iter().copied().collect();
@@ -1667,6 +1694,7 @@ mod tests {
                         moves: 1,
                     },
                     &[Pos::new(ROOM, x, y)],
+                    &[],
                     &set,
                     2,
                     |t| tiles::x_of(t) % 3,

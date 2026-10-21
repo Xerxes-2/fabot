@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::kinds::defend::{self, Facts as DefendFacts, Home};
+use super::kinds::raid;
 use super::kinds::siege::{self, Facts as SiegeFacts};
 use super::kinds::sweep;
 use super::shape::{Cast, Engagement, Group, Objective, Phase, Plan};
@@ -183,50 +184,14 @@ impl<'a> Scene<'a> {
         (left, ruling.pin)
     }
 
-    fn barrier_at(&self, room: &'a Room) -> BTreeMap<&'a str, &'a Structure> {
-        room.structures
-            .iter()
-            .filter(|s| Scene::rival(s))
-            .map(|s| (s.id.as_str(), s))
-            .collect()
-    }
-
     fn next_struck(&self, e: &Engagement) -> Option<&'a Structure> {
         let room = self.in_sight(&e.room)?;
 
         match (e.plan.order.first(), &e.objective) {
-            (Some(first), _) => self.barrier_at(room).get(first.as_str()).copied(),
+            (Some(first), _) => siege::barrier_at(room).get(first.as_str()).copied(),
             (None, Objective::Siege(target)) => room.structures.iter().find(|s| s.id == *target),
             (None, Objective::Defend | Objective::Sweep) => None,
         }
-    }
-
-    fn beside(reached: &BTreeSet<Tile>, at: &Pos) -> bool {
-        tiles::around(tiles::of_pos(at))
-            .iter()
-            .any(|t| reached.contains(t))
-    }
-
-    /// A siege picket's worth, as a sweep's: the harvest its post denies.
-    fn denied(room: &Room, post: &Pos) -> i32 {
-        room.sources
-            .iter()
-            .filter(|s| s.pos == *post)
-            .map(|s| sweep::yield_of(s, engine::CREEP_LIFETIME))
-            .sum()
-    }
-
-    fn exposed(atlas: &Atlas, room: &Room) -> Vec<Pos> {
-        Scene::exposed_in(&atlas.from_exits(&room.name), room)
-    }
-
-    /// The sources a walk from the room's exits reaches beside.
-    fn exposed_in(reached: &BTreeSet<Tile>, room: &Room) -> Vec<Pos> {
-        room.sources
-            .iter()
-            .filter(|s| Scene::beside(reached, &s.pos))
-            .map(|s| s.pos.clone())
-            .collect()
     }
 
     /// `was`: last tick's groups (§6.1), the only record of where a body stood.
@@ -244,9 +209,9 @@ impl<'a> Scene<'a> {
         let prey: Vec<&Creep> = all
             .iter()
             .copied()
-            .filter(|c| Scene::beside(&reached, &c.pos))
+            .filter(|c| siege::beside(&reached, &c.pos))
             .collect();
-        let exposed = Scene::exposed_in(&reached, room);
+        let exposed = siege::exposed_in(&reached, room);
         let escort: Vec<Creep> = self.foes[&room.name]
             .iter()
             .filter(|h| {
@@ -330,7 +295,7 @@ impl<'a> Scene<'a> {
             room.structures
                 .iter()
                 .filter(|s| s.kind.is_container() || s.kind.is_link() && !s.owner.is_ours())
-                .filter(|s| Scene::beside(&reached, &s.pos))
+                .filter(|s| siege::beside(&reached, &s.pos))
                 .map(|s| tactics::Mark {
                     id: s.id.clone(),
                     pos: s.pos.clone(),
@@ -382,6 +347,18 @@ impl<'a> Scene<'a> {
             Objective::Siege(_) | Objective::Sweep => tick::SIEGE_HOPS,
             Objective::Defend => tick::REACH_HOPS,
         }
+    }
+
+    /// The room a set walks in from: the one before his on its colony's route.
+    fn enter_room(&self, atlas: &Atlas, e: &Engagement) -> Option<String> {
+        let colony = self.colonies_of(atlas, e).first()?.name.clone();
+        let hops = Scene::hops(e);
+        let rooms = match self.walks.get(&(e.room.clone(), hops)) {
+            Some(tree) => tree.route(&colony, &e.room),
+            None => atlas.route(self.avoid, hops, &colony, &e.room),
+        }?;
+
+        rooms.get(rooms.len().checked_sub(2)?)?.clone().into()
     }
 
     fn walk_to(&self, atlas: &Atlas, e: &Engagement, from: &str) -> Option<i32> {
@@ -619,17 +596,20 @@ impl<'a> Scene<'a> {
             under_fire: e.ours.iter().any(|n| {
                 self.ours
                     .get(n.as_str())
-                    .is_some_and(|c| c.pos.room == e.room && !tactics::picket_of(c))
+                    .is_some_and(|c| c.pos.room == e.room && !picket(e, c))
             }),
             charged: !towers.is_empty(),
             drain: gate.is_some(),
-            priced: self.drainable(e, &towers),
+            priced: siege::drainable(&e.room, e.capacity, &towers),
             worked: self.pair_worked(e),
             bounced: gate.is_some_and(|g| self.bounced(e, g)),
             drawn: self.drawn(e),
             gave_up: siege::gave_up(e),
             razed: room.is_some_and(|room| match &e.objective {
-                Objective::Siege(target) => !siege::stands(room, target),
+                Objective::Siege(target) => {
+                    !siege::stands(room, target)
+                        && (!raid::raids(e) || raid::mark(room, &self.members_of(e)).is_none())
+                }
                 _ => false,
             }),
             safe: room.is_some_and(Scene::safe),
@@ -680,32 +660,6 @@ impl<'a> Scene<'a> {
             .is_some_and(|b| exchange::tower_strike(towers, &b.pos) > self.seated(e))
     }
 
-    /// The gate is worth working: the medics the pairs the bank buys seat hold
-    /// his towers' volley on the tile the bouncer stands on. The volley is read
-    /// at the gate, and the heal seated there is theirs, not the set's.
-    fn drain_pays(&self, e: &Engagement, towers: &[Pos], gate: &tactics::Gate) -> bool {
-        let at = tiles::landing(gate.bounce).unwrap_or(gate.bounce);
-        let volley = exchange::tower_strike(towers, &tiles::to_pos(&e.room, at));
-
-        volley <= casting::pair_heal(casting::pairs(e.capacity))
-    }
-
-    /// His towers leave a border tile of his room that the heal the pairs the
-    /// bank buys seat holds: the cheapest a gate can draw at.
-    fn drainable(&self, e: &Engagement, towers: &[Pos]) -> bool {
-        if towers.is_empty() {
-            return false;
-        }
-        let least = [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
-            .iter()
-            .flat_map(|side| tiles::exit_tiles(*side))
-            .map(|t| exchange::tower_strike(towers, &tiles::to_pos(&e.room, *t)))
-            .min()
-            .unwrap_or(i32::MAX);
-
-        least <= casting::pair_heal(casting::pairs(e.capacity))
-    }
-
     /// A pair of the drain stands or is in an oven, or one has tripped: a drain
     /// with none of those holds nothing.
     fn pair_worked(&self, e: &Engagement) -> bool {
@@ -720,56 +674,6 @@ impl<'a> Scene<'a> {
             || (self.waiting)
                 .iter()
                 .any(|c| c.engagement == e.id && of(&c.body))
-    }
-
-    /// The edge a drain bounces through: the room the set walks in from and
-    /// his border tile there his towers reach, the nearest of them. None: no
-    /// door.
-    fn gate(&self, atlas: &Atlas, e: &Engagement, towers: &[Pos]) -> Option<tactics::Gate> {
-        let colony = self.colonies_of(atlas, e).first()?.name.clone();
-        let hops = Scene::hops(e);
-        let rooms = match self.walks.get(&(e.room.clone(), hops)) {
-            Some(tree) => tree.route(&colony, &e.room),
-            None => atlas.route(self.avoid, hops, &colony, &e.room),
-        }?;
-        let from = rooms.get(rooms.len().checked_sub(2)?)?.clone();
-        let side = tiles::exit_toward(&e.room, &from)?;
-        let nearest = |at: &Pos| {
-            (towers.iter()).fold(engine::ROOM_SIDE, |least, t| {
-                least.min(t.range(at).unwrap_or(least))
-            })
-        };
-
-        let tiles: Vec<Tile> = (tiles::exit_tiles(side).iter())
-            .copied()
-            .filter(|t| atlas.passable(&e.room, *t))
-            .filter(|t| tiles::landing(*t).is_some_and(|l| atlas.passable(&from, l)))
-            .collect();
-
-        // A trip his towers cannot answer draws nothing, so a tile one of them
-        // reaches is the gate before a quieter one is.
-        let reached = |at: &Pos| {
-            towers
-                .iter()
-                .any(|t| t.within(engine::TOWER_FALLOFF_RANGE, at))
-        };
-        let tile = tiles.into_iter().min_by_key(|t| {
-            let at = tiles::to_pos(&e.room, *t);
-            (!reached(&at), nearest(&at), *t)
-        })?;
-        let bounce = tiles::landing(tile)?;
-        let rest = (tiles::around(bounce).iter())
-            .filter(|t| !tiles::on_edge(**t))
-            .filter(|t| atlas.passable(&from, **t))
-            .min_by_key(|t| tiles::range(**t, bounce))
-            .copied()?;
-
-        Some(tactics::Gate {
-            room: e.room.clone(),
-            from,
-            bounce,
-            rest,
-        })
     }
 
     /// Whole, as cast: a part struck off is healed back, and only a body lost
@@ -800,7 +704,7 @@ impl<'a> Scene<'a> {
         // A picket holds its post, not the breach.
         bodies
             .into_values()
-            .filter(|b| !b.iter().any(|p| p.is_ranged_attack()))
+            .filter(|b| raid::raids(e) || !b.iter().any(|p| p.is_ranged_attack()))
             .collect()
     }
 
@@ -836,7 +740,7 @@ impl<'a> Scene<'a> {
         set: &[Fighter],
         standing: &[&Creep],
     ) -> Option<(Vec<String>, Outcome)> {
-        let barriers: Vec<&Structure> = self.barrier_at(room).values().copied().collect();
+        let barriers: Vec<&Structure> = siege::barrier_at(room).values().copied().collect();
         let line: Vec<Pos> = barriers.iter().map(|b| b.pos.clone()).collect();
 
         let gaits: Vec<grid::FatigueFactor> =
@@ -899,7 +803,6 @@ impl<'a> Scene<'a> {
         let open = |t: &Tile| ground.weights[*t].is_some();
         // The atlas walks no body out of the room it stands in: a set inside
         // is planned from where it stands.
-        let standing: Vec<&&Creep> = standing.iter().filter(|c| !tactics::picket_of(c)).collect();
         let sources: Vec<(Tile, i32, i32)> = if standing.is_empty() {
             let from = (self.world.spawns.iter())
                 .find(|s| s.pos.room == colony)
@@ -938,6 +841,7 @@ impl<'a> Scene<'a> {
                 &ground,
                 gait,
                 &towers,
+                &[],
                 set,
                 seated,
                 |t| tactics::seats_at(atlas, &line, &room.name, t),
@@ -998,6 +902,9 @@ impl<'a> Scene<'a> {
         names.sort();
 
         let colony = names.into_iter().next()?;
+        let from = (self.world.spawns.iter())
+            .find(|s| s.pos.room == colony)
+            .map_or_else(|| middle(&colony), |s| s.pos.clone());
 
         let Some(room) = self.in_sight(&e.room) else {
             return Some(e.clone());
@@ -1016,22 +923,56 @@ impl<'a> Scene<'a> {
         } else if e.unanswered {
             let capacity = self.capacity_of(atlas, e);
 
-            let planned = casting::siege(capacity, |set: &[casting::Body]| {
+            let priced = |set: &[casting::Body]| {
                 let fighters: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
 
                 self.breach_in(atlas, room, goal, &colony, &fighters, &[])
-            })
-            .and_then(|(set, (order, outcome))| {
+            };
+            // Shot in where no barrier stands in the way, which a ranged set's
+            // plan never breaks: it dismantles nothing. What the dismantlers'
+            // own plan has to break, they break, and a room whose way in to his
+            // towers still stands behind a rampart keeps them (owner, 2026-10-21).
+            let siege = casting::siege(capacity, &priced);
+            let open = siege
+                .as_ref()
+                .is_some_and(|(_, (order, _))| order.is_empty());
+            let towers = self.towers_in(room);
+            let breached = towers
+                .iter()
+                .all(|t| raid::breached(room, |tile| atlas.passable(&room.name, tile), &t.pos));
+            // A raid razes; the room his safe mode holds is drained instead,
+            // as nothing a set shoots at there can fall (§6.2).
+            let raid = (open && breached && !Scene::safe(room))
+                .then(|| {
+                    let hard =
+                        raid::hardest(room).map_or_else(|| goal.pos.clone(), |s| s.pos.clone());
+                    let priced = |set: &[casting::Body]| {
+                        let ours: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
+
+                        raid::plan(atlas, room, &hard, &from, &ours, &[])
+                    };
+
+                    raid::reinforce(capacity, &[], priced)
+                })
+                .flatten();
+            let planned = raid.clone().or(siege).and_then(|(set, (order, outcome))| {
                 let charged = self.charged(room);
                 let mut set = set;
 
-                for post in Scene::exposed(atlas, room) {
-                    let strike = exchange::tower_strike(&charged, &post);
-                    set.extend(casting::squad(capacity, strike, Scene::denied(room, &post)));
+                if raid.is_none() {
+                    for post in siege::exposed(atlas, room) {
+                        let strike = exchange::tower_strike(&charged, &post);
+                        set.extend(casting::squad(capacity, strike, siege::denied(room, &post)));
+                    }
                 }
 
-                let (candidates, pin) = self.ruled(e, siege::CANDIDATES);
-                let offers = siege_offers(&candidates, room, &set, outcome);
+                let declared = if raid.is_some() {
+                    siege::RAID
+                } else {
+                    siege::CANDIDATES
+                };
+                let (candidates, pin) = self.ruled(e, declared);
+                let offers = siege::offers(&candidates, room, &set, outcome);
                 let tactic = tactics::select(&offers, pin)?.tactic;
 
                 Some((set, order, outcome, offers, tactic))
@@ -1090,6 +1031,7 @@ impl<'a> Scene<'a> {
                 .into_iter()
                 .filter(|m| m.pos.room == room.name)
                 .collect();
+            let breaking: Vec<&Creep> = in_room.iter().copied().filter(|m| !picket(e, m)).collect();
 
             let towers: Vec<Pos> = self
                 .towers_in(room)
@@ -1111,7 +1053,14 @@ impl<'a> Scene<'a> {
                 || late
                 || match self.next_struck(e) {
                     Some(b) => {
-                        struck(b) > exchange::pooled_heal(set.len() as i32, &set)
+                        let guards = if set.iter().all(|f| f.work == 0) {
+                            raid::guards(room)
+                        } else {
+                            Vec::new()
+                        };
+
+                        struck(b) + exchange::guard_strike(&guards, &b.pos)
+                            > exchange::pooled_heal(set.len() as i32, &set)
                             || self.unreached(atlas, room, b, &in_room)
                     }
                     None => false,
@@ -1122,18 +1071,33 @@ impl<'a> Scene<'a> {
             }
 
             let planned = self
-                .breach_in(atlas, room, goal, &colony, &set, &in_room)
+                .breach_in(atlas, room, goal, &colony, &set, &breaking)
                 .map(|plan| (Vec::new(), plan))
                 .or_else(|| {
-                    casting::reinforce(
-                        e.capacity,
-                        &self.fielded_bodies(e),
-                        |set: &[casting::Body]| {
-                            let fighters: Vec<Fighter> =
-                                set.iter().map(|b| fighter::cast(b)).collect();
-                            self.breach_in(atlas, room, goal, &colony, &fighters, &in_room)
-                        },
-                    )
+                    let fielded = self.fielded_bodies(e);
+                    // A set is topped up as itself: guns with guns, a breach with
+                    // the dismantlers and medics it walks in with. A raid is
+                    // topped up to the set its price buys, or it does not enter
+                    // (owner, 2026-10-21).
+                    if raid::raids(e) {
+                        let hard =
+                            raid::hardest(room).map_or_else(|| goal.pos.clone(), |s| s.pos.clone());
+                        let priced = |set: &[casting::Body]| {
+                            let ours: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
+
+                            raid::plan(atlas, room, &hard, &from, &ours, &breaking)
+                        };
+
+                        return raid::reinforce(e.capacity, &fielded, priced);
+                    }
+
+                    let priced = |set: &[casting::Body]| {
+                        let fighters: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
+
+                        self.breach_in(atlas, room, goal, &colony, &fighters, &breaking)
+                    };
+
+                    casting::reinforce(e.capacity, &fielded, &priced)
                 });
 
             match planned {
@@ -1141,8 +1105,7 @@ impl<'a> Scene<'a> {
                     // Once: a new plan whose first barrier the set still cannot
                     // reach is no plan, or the event would fire every tick.
                     let reached = match order.first() {
-                        Some(first) => self
-                            .barrier_at(room)
+                        Some(first) => siege::barrier_at(room)
                             .get(first.as_str())
                             .is_some_and(|b| !self.unreached(atlas, room, b, &in_room)),
                         None => true,
@@ -1156,7 +1119,7 @@ impl<'a> Scene<'a> {
                 // Topped up, not recast: the set fights on as its medics walk in.
                 Some((added, (order, outcome)))
                     if order.first().is_none_or(|first| {
-                        self.barrier_at(room)
+                        siege::barrier_at(room)
                             .get(first.as_str())
                             .is_some_and(|b| !self.unreached(atlas, room, b, &in_room))
                     }) =>
@@ -1193,11 +1156,16 @@ impl<'a> Scene<'a> {
             }
         }
 
+        // A raid keeps its own step: a structure or a site he raises while it
+        // taps is still its work, and its set answered with or without a tapper.
+        let raid = raid::raids(e);
         let mut next = e.clone();
-        next.plan.tactic = Tactic::Close;
+        if !raid {
+            next.plan.tactic = Tactic::Close;
+        }
         // The tap is no candidate's, so the price's offers no longer explain it.
         next.plan.offers.clear();
-        next.unanswered = body.is_none();
+        next.unanswered = body.is_none() && !raid;
         next
     }
 
@@ -1740,32 +1708,9 @@ fn sweep_offers(
         .collect()
 }
 
-/// What a `Siege`'s set wins — the room's harvest its razing denies — against
-/// what breaking in spends (§6.3).
-fn siege_offers(
-    candidates: &[Tactic],
-    room: &Room,
-    set: &[casting::Body],
-    outcome: Outcome,
-) -> Vec<Offer> {
-    let value = room
-        .sources
-        .iter()
-        .map(|s| sweep::yield_of(s, engine::CREEP_LIFETIME))
-        .sum();
-
-    let (ticks, losses) = match outcome {
-        Outcome::Win(ticks, losses) => (ticks, losses),
-        Outcome::Kite(ticks) => (ticks, Losses { dead: 0, hits: 0 }),
-        Outcome::Lose => (0, Losses { dead: 0, hits: 0 }),
-    };
-
-    let cost = casting::spent(set, losses, ticks, 0);
-
-    candidates
-        .iter()
-        .map(|&tactic| offer(tactic, set, value, cost))
-        .collect()
+/// A raid's guns are its set, not pickets.
+fn picket(e: &Engagement, c: &Creep) -> bool {
+    !raid::raids(e) && tactics::picket_of(c)
 }
 
 fn middle(room: &str) -> Pos {
@@ -1998,13 +1943,19 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         if let Objective::Siege(target) = &e.objective
             && let Some(room) = scene.in_sight(&e.room)
         {
-            let barriers = scene.barrier_at(room);
+            let barriers = siege::barrier_at(room);
             e.plan.order.retain(|id| barriers.contains_key(id.as_str()));
 
             let near = scene.members_of(e).first().map(|c| c.pos.clone());
 
+            let next = if raid::raids(e) {
+                raid::target(room, &scene.members_of(e))
+            } else {
+                siege::next_target(room, near.as_ref())
+            };
+
             if (!siege::stands(room, target) || siege::tapped(room, target).is_some())
-                && let Some(next) = siege::next_target(room, near.as_ref())
+                && let Some(next) = next
                 && next != *target
             {
                 e.objective = Objective::Siege(next);
@@ -2062,7 +2013,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     // A room with no such tile is not drained: the set breaches by its plan,
     // or stands off a safe mode as it did before the drain (§6.2).
     let gates: BTreeMap<i32, tactics::Gate> = (engagements.iter())
-        .filter(|e| matches!(e.objective, Objective::Siege(_)))
+        .filter(|e| matches!(e.objective, Objective::Siege(_)) && !raid::raids(e))
         .filter_map(|e| {
             let room = scene.in_sight(&e.room)?;
             let towers = scene.charged(room);
@@ -2072,8 +2023,8 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             if !drains {
                 return None;
             }
-            let gate = scene.gate(&*atlas, e, &towers)?;
-            scene.drain_pays(e, &towers, &gate).then_some((e.id, gate))
+            let gate = siege::gate(&*atlas, &e.room, &scene.enter_room(&*atlas, e)?, &towers)?;
+            siege::drain_pays(&e.room, e.capacity, &towers, &gate).then_some((e.id, gate))
         })
         .collect();
     let given_up: BTreeSet<i32> = (engagements.iter())
@@ -2196,9 +2147,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             watch.capacity = scene.capacity_of(&*atlas, &watch);
             // A safe mode's room opens on the drain that prices: the least his
             // towers strike a border tile is what a gate can draw at.
-            scene
-                .drainable(&watch, &towers)
-                .then_some((&room.name, target))
+            siege::drainable(&room.name, watch.capacity, &towers).then_some((&room.name, target))
         })
         .enumerate()
         .map(|(i, (room, target))| {
@@ -2410,14 +2359,16 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .collect();
 
     for e in &decided {
-        if e.phase == Phase::Approaching
-            && matches!(e.plan.tactic, Tactic::BlobKite | Tactic::BlobClose)
+        // A set that walks in as one holds its formation into the fight.
+        let formation = matches!(e.plan.tactic, Tactic::BlobClose | Tactic::BlobKite)
             && !e.unanswered
-        {
+            && e.phase == Phase::Approaching;
+
+        if formation {
             let members: Vec<&Creep> = scene
                 .members_of(e)
                 .into_iter()
-                .filter(|c| !swings(c))
+                .filter(|c| raid::raids(e) || !swings(c))
                 .collect();
 
             if !members.is_empty() {
@@ -2455,11 +2406,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                         .map(|s| s.pos.clone())
                         .collect(),
                     posts: if scene.members_of(e).iter().any(|c| tactics::picket_of(c)) {
-                        Scene::exposed(&*sight.atlas, room)
+                        siege::exposed(&*sight.atlas, room)
                             .into_iter()
                             .map(|post| {
                                 let strike = exchange::tower_strike(&towers, &post);
-                                let worth = Scene::denied(room, &post);
+                                let worth = siege::denied(room, &post);
                                 let n = casting::squad(e.capacity, strike, worth).len();
                                 (post, n)
                             })
@@ -2521,14 +2472,14 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
         // A picket walks with the set and takes its post once the set fights.
         if e.phase == Phase::Fighting
-            && tactics::picket_of(c)
+            && picket(e, c)
             && let Some(front) = fronts.get(&e.id)
             && !front.posts.is_empty()
         {
             return (None, tactics::picket(sight, front, &scene.members_of(e), c));
         }
 
-        if e.phase == Phase::Fighting && fronts.contains_key(&e.id) {
+        if e.phase == Phase::Fighting && fronts.contains_key(&e.id) && !raid::raids(e) {
             let members: Vec<&Creep> = scene
                 .members_of(e)
                 .into_iter()
@@ -2561,6 +2512,18 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             Phase::Approaching | Phase::Fighting => {
                 if let Some(wish) = walking.get(&c.name) {
                     return (None, wish.clone());
+                }
+
+                if raid::raids(e) {
+                    let (room, _) = centre_of(e);
+
+                    return (
+                        None,
+                        match scene.in_sight(&e.room).filter(|r| r.name == c.pos.room) {
+                            Some(in_sight) => raid::dance(sight, in_sight, &scene.members_of(e), c),
+                            None => tactics::toward(sight, c, &room, engine::RANGED_RANGE),
+                        },
+                    );
                 }
 
                 // A transit room's hostiles are not the sweep's.
@@ -2603,7 +2566,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 {
                     tactics::step_back(sight, &centre.room, &scene.members_of(e), c)
                 } else if matches!(tactic, Tactic::Kite | Tactic::BlobKite) && !swings(c) {
-                    tactics::kite(sight, order, &centre, c)
+                    if raid::raids(e) {
+                        tactics::kite(sight, Some(&centre), order, &centre, c)
+                    } else {
+                        tactics::kite(sight, None, order, &centre, c)
+                    }
                 } else if matches!(tactic, Tactic::Hold) {
                     tactics::rampart(sight, c)
                 } else {
@@ -2710,8 +2677,20 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             .map_or(&[][..], |&at| decided[at].plan.order.as_slice());
         let mut wanted: Vec<CreepAct> = own.into_iter().collect();
         // A hunt's scored shot stands for the reflex.
+        let raid = engaged_in
+            .get(&c.name)
+            .map(|&at| &decided[at])
+            .filter(|e| raid::raids(e));
         if wanted.iter().all(|a| a.slots() & intents::RANGED == 0) {
-            wanted.extend(tactics::strike(&sight, order, c));
+            let razed = raid
+                .and_then(|e| scene.in_sight(&e.room))
+                .filter(|r| r.name == c.pos.room)
+                .and_then(|room| raid::volley(&sight, room, c));
+
+            match (raid.is_some(), razed) {
+                (true, Some(act)) => wanted.push(act),
+                (armed, _) => wanted.extend(tactics::strike(&sight, order, c, armed)),
+            }
         }
         chosen.insert(c.name.clone(), wanted);
         acts.push(Intent::Wish(c.pos.room.clone(), wish));

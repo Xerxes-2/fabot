@@ -258,7 +258,7 @@ pub fn spent(set: &[Body], losses: exchange::Losses, ticks: i32, tick_worth: i32
 /// No more medics heal one body from beside it than the tiles around it.
 const AROUND_ONE: i32 = 8;
 
-fn most(capacity: i32, block: &[BodyPart]) -> Body {
+pub fn most(capacity: i32, block: &[BodyPart]) -> Body {
     let n = (capacity / engine::body_cost(block))
         .min(engine::MAX_BODY_PARTS as i32 / block.len() as i32);
     let mut body = Vec::new();
