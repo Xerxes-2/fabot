@@ -3,9 +3,8 @@
 // are screeps-api.mjs's.
 //
 // Usage: run with no args.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
-import { RECORDER, unpack } from "./recorder.mjs";
 import { connect, fail } from "./screeps-api.mjs";
 import { replay, views } from "./observe-views.mjs";
 
@@ -22,6 +21,11 @@ const USAGE = `usage: npm run observe -- <command>
                      (outposts: the capture's, \`scripts/capture-world.mjs\`; reserve: creep lifetimes of tower fire the reserve holds)
   capture [out.jsonl]
                      the recorder's ring as \`npm run bench\`'s capture, oldest first; terrain cached in captures/terrain
+  tap --out <file> [--from <tick> --to <tick>]
+                     the ring recorded inside a window — an open engagement's, or from..to —
+                     every tick the hour's 360 segment reads pay for, the rest gaps
+  battle <room> <from> <to>
+                     the room's history: every body's blood, each tower's shots, the razes, his garrison
   wait --ticks N     return after N game ticks
   engagements        each open engagement: members, plan order, offers, target, prediction; pending casts
   room <room>        controller, structures, creeps, tombstones, sites, as the server holds them
@@ -29,7 +33,7 @@ const USAGE = `usage: npm run observe -- <command>
   regions <room>     walkable regions past rival ramparts: exits per side, owned structures beside
   replay <capture.jsonl> [--trace <creep>]
                      dist/main.js run on the captured ticks, offline: intents, refusals, tile scores`;
-const LIVE = ["health", "cpu", "faults", "switches", "switch", "declare", "capture", "wait", "engagements", "room", "creep", "regions"];
+const LIVE = ["health", "cpu", "faults", "switches", "switch", "declare", "capture", "tap", "battle", "wait", "engagements", "room", "creep", "regions"];
 
 const [cmd, ...args] = process.argv.slice(2);
 if (cmd === "replay") {
@@ -39,7 +43,7 @@ if (cmd === "replay") {
   process.exit(0);
 }
 if (!LIVE.includes(cmd)) fail(USAGE);
-const { api, shard } = await connect();
+const { api, shard, url, token } = await connect();
 
 const raw = async (id) => (await api.req("GET", "/api/user/memory-segment", { segment: id, shard })).data || null;
 const segment = async (id) => JSON.parse((await raw(id)) ?? "null");
@@ -56,7 +60,7 @@ const putV2 = async (key, value) =>
     : api.req("POST", "/api/user/memory", { path: "v2", value: { [key]: value }, shard });
 const observed = async () => (await segment(OBSERVE)) ?? fail("observe segment empty: the bot has not written one yet");
 const ms = (n) => n.toFixed(2).padStart(7);
-const view = views({ api, shard, memory, raw });
+const view = views({ api, shard, url, token, memory, raw });
 
 switch (cmd) {
   case "health": {
@@ -128,21 +132,23 @@ switch (cmd) {
     console.log(`v2.switches = ${JSON.stringify(switches)} (read next tick)`);
     break;
   }
-  case "capture": {
-    const ticks = unpack(await Promise.all(RECORDER.map(raw)));
-    if (ticks.length === 0) fail("recorder ring empty: observe switch recorder on, then wait a few ticks");
-    const cache = new URL("../captures/terrain/", import.meta.url);
-    mkdirSync(cache, { recursive: true });
-    for (const room of ticks.flatMap((t) => t.rooms)) {
-      const file = new URL(room.name, cache);
-      if (!existsSync(file))
-        writeFileSync(file, (await api.req("GET", "/api/game/room-terrain", { room: room.name, encoded: 1, shard })).terrain?.[0]?.terrain ?? "");
-      room.terrain = readFileSync(file, "utf8");
-    }
-    const text = ticks.map((t) => JSON.stringify(t)).join("\n") + "\n";
-    if (args[0]) writeFileSync(args[0], text);
-    else process.stdout.write(text);
-    console.error(`captured ticks ${ticks.map((t) => t.time).join(", ")}`);
+  case "capture":
+    await view.capture(args[0]);
+    break;
+  case "tap": {
+    const flag = (name) => (args.includes(name) ? Number(args[args.indexOf(name) + 1]) : undefined);
+    const out = args.includes("--out") ? args[args.indexOf("--out") + 1] : undefined;
+    const from = flag("--from");
+    const to = flag("--to");
+    const window = from !== undefined && Number.isInteger(from) && Number.isInteger(to) && from < to ? { from, to } : null;
+    if (!out || ((from !== undefined || to !== undefined) && window === null)) fail("usage: observe tap --out <file> [--from <tick> --to <tick>]");
+    await view.tap(out, window);
+    break;
+  }
+  case "battle": {
+    const [room, from, to] = args;
+    if (!room || !Number.isInteger(Number(from)) || !Number.isInteger(Number(to))) fail("usage: observe battle <room> <from> <to>");
+    await view.battle(room, Number(from), Number(to));
     break;
   }
   case "wait": {

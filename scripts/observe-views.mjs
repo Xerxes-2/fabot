@@ -1,12 +1,21 @@
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { getHeapStatistics } from "node:v8";
 import { load, stand } from "./bench-game.mjs";
 import { RECORDER, unpack } from "./recorder.mjs";
-import { fail } from "./screeps-api.mjs";
+import { bodies, defenders, formation, history, razes, strikes, towers } from "./room-history.mjs";
+import { fail, segmentReads } from "./screeps-api.mjs";
+import { segmentBudget, tapWindow } from "./tap.mjs";
 
 // Segment 1 is the observe row (§4): what the operator reads, the tick it was
 // written for.
 const OBSERVE = 1;
+// The recorder's ring (`src/app/record.rs`): a tick's parts in slots
+// `(tick * parts + part) % RING`.
+const FIRST = RECORDER[0];
+// A tick's `parts` parts in slots `(tick * parts + part) % RING`, so the ring
+// holds the last `RING / parts` ticks — five while a tick is one slot.
+const RING = RECORDER.length;
+const slot = (tick, parts, part) => FIRST + ((tick * parts + part) % RING);
 
 const SIZE = 50;
 const xy = (i) => [i % SIZE, Math.floor(i / SIZE)];
@@ -28,9 +37,23 @@ const hits = (o) => (o.hits === undefined ? "" : ` ${short(o.hits)}/${short(o.hi
 const at = (o) => `${o.x},${o.y}`;
 const spans = (ns) => ns.reduce((out, n) => (out.at(-1)?.[1] === n - 1 ? (out.at(-1)[1] = n) : out.push([n, n]), out), []).map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`)).join(",");
 
-export function views({ api, shard, memory, raw }) {
+export function views({ api, shard, url, token, memory, raw }) {
   const time = async () => (await api.req("GET", "/api/game/time", { shard })).time;
   const me = async () => (me.id ??= (await api.req("GET", "/api/auth/me", {}))._id);
+  // Terrain never changes: a room's one file, the encoded row the server sent.
+  const TERRAIN = new URL("../captures/terrain/", import.meta.url);
+  const terrains = async (ticks) => {
+    mkdirSync(TERRAIN, { recursive: true });
+    for (const room of ticks.flatMap((t) => t.rooms)) {
+      const file = new URL(room.name, TERRAIN);
+      if (!existsSync(file))
+        writeFileSync(file, (await api.req("GET", "/api/game/room-terrain", { room: room.name, encoded: 1, shard })).terrain?.[0]?.terrain ?? "");
+      room.terrain = readFileSync(file, "utf8");
+    }
+    return ticks;
+  };
+  // The ring as capture ticks, with the terrain `replay` stands a tick up from.
+  const ring = async () => terrains(unpack(await Promise.all(RECORDER.map(raw))));
   const rooms = new Map();
   const roomOf = async (name) => {
     if (!rooms.has(name)) {
@@ -56,7 +79,165 @@ export function views({ api, shard, memory, raw }) {
     return found;
   };
 
+  // `--from/--to` as given: the ticks a tap keeps are exactly the window's.
+  const chosen = ({ from, to }) => (now) => (now < from ? null : { from, to });
+  // An open engagement's ticks (Memory's `v2.fight`), asked every RING ticks —
+  // the ring's depth while a tick is one slot — so a fight is noticed while its
+  // first ticks are still in the ring; `to` at the tick it closes.
+  const engaged = () => {
+    let polled = null;
+    let from = null;
+    let to = null;
+    return async (now) => {
+      if (to === null && (polled === null || now - polled >= RING)) {
+        polled = now;
+        if (((await memory("v2.fight"))?.engagements ?? []).length > 0) from ??= now;
+        else if (from !== null) to = now;
+      }
+      return from === null ? null : { from, to };
+    };
+  };
+
   return {
+    async capture(out) {
+      const ticks = await ring();
+      if (ticks.length === 0) fail("recorder ring empty: observe switch recorder on, then wait a few ticks");
+      const text = ticks.map((t) => JSON.stringify(t)).join("\n") + "\n";
+      if (out) writeFileSync(out, text);
+      else process.stdout.write(text);
+      console.error(`captured ticks ${ticks.map((t) => t.time).join(", ")}`);
+    },
+
+    /// The recorder's ring read over a window — `--from/--to`'s ticks, else the
+    /// ones an open engagement spans — each tick appended once, the memory and
+    /// intents a room history never holds kept for that fight's replay. Only as
+    /// many ticks as the hour's segment reads pay for: the rest are gaps.
+    async tap(out, window) {
+      const budget = segmentBudget({
+        state: segmentReads(api),
+        file: new URL("../captures/segment-reads.json", import.meta.url),
+      });
+      // The size the last tick had: a guess for the next, which its own head
+      // settles.
+      let parts = null;
+      const held = async () => {
+        const texts = await Promise.all([...Array(RING).keys()].map((i) => raw(FIRST + i)));
+        const heads = texts.filter(Boolean).map((t) => t.split(" "));
+        parts = Number(heads.sort((a, b) => Number(b[0]) - Number(a[0]))[0]?.[2]) || parts;
+        return { ticks: await terrains(unpack(texts)), reads: RING };
+      };
+      const one = async (tick) => {
+        let reads = 0;
+        let head = "";
+        // A tick that outgrew a slot is written where its own size names: the
+        // slot that answers says which, for a read or two.
+        for (let cost = parts; cost && !head; ) {
+          const text = String((await raw(slot(tick, cost, 0))) ?? "");
+          reads++;
+          const [time, part, size] = text.split(" ");
+          if (Number(time) === tick && Number(part) === 0) head = text;
+          else cost = Number(size) !== cost ? Number(size) : null;
+        }
+        if (!head) {
+          parts = null;
+          return { ticks: [], reads };
+        }
+        const size = Number(head.split(" ")[2]);
+        const texts = [head];
+        while (texts.length < size) {
+          texts.push(String((await raw(slot(tick, size, texts.length))) ?? ""));
+          reads++;
+        }
+        const ticks = texts.every(Boolean) ? await terrains(unpack(texts).filter((x) => x.time === tick)) : [];
+        parts = ticks.length ? size : null;
+        return { ticks, reads };
+      };
+      await tapWindow({
+        out,
+        range: window === null ? engaged() : chosen(window),
+        ring: { depth: RING, parts: () => parts, time, held, one },
+        budget,
+      });
+    },
+
+    /// A fight read off the room's history, tick by tick: the numbers a review
+    /// of it argues over. What we knew is only in the recorder's `tap`.
+    async battle(room, from, to) {
+      if (from >= to) fail("observe battle: <from> must be before <to>");
+      const now = await time();
+      const h = await history({ url, token, shard, room, from, to, now }).catch((e) => fail(e.message));
+      const mine = await me();
+      const args = { ticks: h.ticks, ours: mine, sources: h.sources };
+      console.log(`${room} ${from}–${to} · ${h.ticks.length - 1} ticks · history as of ${now}`);
+
+      const B = bodies(args);
+      const team = [...B.values()].filter((b) => b.u === mine).sort((a, b) => a.in - b.in || (a.name < b.name ? -1 : 1));
+      const by = (max) => (b) => Object.entries(b.medic).filter(([d]) => d <= max).reduce((n, [, c]) => n + c, 0);
+      console.log("\n## bodies");
+      for (const b of team) {
+        const blows = Object.entries(b.by).sort((a, c) => c[1] - a[1]).map(([n, v]) => `${n} ${v}`);
+        console.log(`${b.name} ${b.body} ${b.in}–${b.out}${b.died ? " died" : ""} · ${b.ticks} ticks · took ${b.damage} — ` +
+          [`tower ${b.tower}`, ...blows].join(" · ") + ` · healed ${b.heal} (net ${b.heal - b.damage}) · ` +
+          `medic ≤1 ${by(1)(b)} · ≤3 ${by(3)(b)} · >3 ${b.ticks - by(3)(b)}`);
+      }
+      console.log("\n## deaths");
+      for (const b of team.filter((b) => b.died)) {
+        const took = b.last.reduce((n, x) => n + x.took, 0);
+        const tower = b.last.reduce((n, x) => n + x.tower, 0);
+        const healed = b.last.reduce((n, x) => n + x.healed, 0);
+        const foes = b.last.filter((x) => x.foe).reduce((all, x) => ({ ...all, [x.foe]: (all[x.foe] ?? 0) + (x.took - x.tower) }), {});
+        console.log(`${b.name} died ${b.died} · last ${b.last.length} ticks took ${took} (tower ${tower}${Object.entries(foes).map(([n, v]) => `, ${n} ${v}`).join("")}) ` +
+          `healed ${healed} · nearest medic ${b.last.at(-1)?.medic ?? "none"} at death · per tick ${b.last.map((x) => x.took).join(" ")}`);
+      }
+
+      console.log("\n## towers");
+      for (const t of towers(args).values()) {
+        // The longest stretch it fired from one level is where its bank stalled.
+        let still = null;
+        for (let i = 1; i < t.curve.length; i++) {
+          const [from, e] = t.curve[i - 1];
+          const [to] = t.curve[i];
+          if (!still || to - from > still.to - still.from) still = { e, from, to };
+        }
+        console.log(`tower ${t.id.slice(-4)} ${t.x},${t.y} · ${t.shots} shots · first ${t.first} · ` +
+          (still ? `sat at ${still.e} for ${still.to - still.from} ticks (${still.from}–${still.to}) · ` : "") + `dry ${t.dry ?? "never"}`);
+        console.log(`  targets ${Object.entries(t.targets).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${n} ×${c}`).join(" · ")}`);
+      }
+
+      console.log("\n## formation");
+      const F = formation(args);
+      for (const b of F.bodies.values())
+        console.log(`${b.name} · ${b.ticks} ticks as a dismantler · a medic ≤1 ${b.one} · 2–3 ${b.reach} · beyond 3 ${b.far}`);
+      console.log(`we stood ${F.spread.apart} of ${F.spread.ticks} ticks with two of us more than 6 apart, most ${F.spread.most}`);
+
+      console.log("\n## walls vs bodies");
+      const S = strikes(args);
+      console.log(`his ramparts: ${S.ramparts.total} hits off him — ${S.ramparts.stripe} at close range (${S.full}/${2 * S.full} a strike), ` +
+        `${S.ramparts.mass} at range 2–3, ${S.ramparts.other} other · ${S.ramparts.decay} of it his own decay`);
+      console.log(`his bodies: ${S.bodies.armed} on the armed ones · ${S.bodies.working} on his workers`);
+
+      console.log("\n## razes");
+      const R = razes(args);
+      console.log(`next_razed replayed on the history: ${R.hits}/${R.played} times its pick is the structure that fell next`);
+      for (const x of R.falls)
+        console.log(`${x.t} ${x.type} ${x.x},${x.y} by ${x.who[0] ?? `? (nearest ${x.near})`} · ${x.walk ?? "–"} walked from the last · ${x.idle} ticks` +
+          (x.ok ? "" : ` · MISS (it picks ${x.pick?.type} ${x.pick?.x},${x.pick?.y})`));
+      if (R.last) console.log(`last raze ${R.last.t} · ${R.still} of ${R.tail} ticks after it with every one of us standing`);
+
+      console.log("\n## his garrison");
+      const D = defenders(args);
+      for (const d of [...D.values()].sort((a, b) => a.in - b.in)) {
+        const near = d.nearest.slice().sort((a, b) => a - b);
+        const tiles = Object.entries(d.tiles).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t, n]) => `${t} ×${n}`);
+        const closest = Object.entries(d.closest).sort((a, b) => b[1] - a[1])[0];
+        console.log(`${d.name} ${d.body} · ${d.ticks} ticks · ${tiles.join(" · ")} · closest of ours ${near[0]} ` +
+          `(p10 ${near[Math.floor(near.length * 0.1)]}, median ${near[Math.floor(near.length / 2)]})` +
+          (closest ? `, ${closest[0]} most often (${closest[1]})` : "") + ` · ${d.swings.length} swing${d.swings.length === 1 ? "" : "s"}` +
+          `${d.swings.length ? ` (${d.swings.slice(0, 3).map((s) => `${s.t}→${s.x},${s.y}`).join(" ")})` : ""} · ` +
+          `took ${B.get(d.name)?.damage ?? 0} · ${d.out < to ? `gone ${d.out} at ${d.hits}/${d.hitsMax}` : "still there"}`);
+      }
+    },
+
     async engagements() {
       const priced = new Map((JSON.parse((await raw(OBSERVE)) ?? "null")?.offers ?? []).map(([id, offers]) => [id, offers]));
       const fight = (await memory("v2.fight")) ?? {};
