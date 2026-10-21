@@ -466,6 +466,13 @@ val cheapestWin : stance: Stance -> ours: Side -> affordable: Body list -> their
 - Under `Hold` the raid comes to our post; one that strikes from past the reach
   of any striker of ours and outlasts our towers picks its range instead, so it is
   priced as a `Standoff`, and unanswered where that does not win (owner's call).
+- What a fight weighs (a threat to answer, a structure to raze, a seat to
+  stand on) is priced by its consequence in energy a tick: what it razes,
+  kills, heals or denies. It is never ranked by body parts or kind. A rule
+  keyed on a feature leaves a gap between the feature and the cost, and a rival
+  who finds it owns it: Trepidimous's defenders guarded our rangers and let the
+  dismantlers raze his home. A wrong choice is a term the price lacks, and is
+  fixed there, not with a special case.
 - Nothing in `Fight` re-prices per tick. A tactic that needs a number every
   tick reads it off the `Plan` or asks `Atlas`.
 - A kind's tactic is **chosen from its candidates**, never derived from the
