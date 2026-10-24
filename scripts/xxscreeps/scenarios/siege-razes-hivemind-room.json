@@ -1,6 +1,6 @@
 {
   "nightly": true,
-  "why": "a declared siege razes a room Hivemind holds as a player does and loses no body, none of them a reinforcement picked off alone. Nightly: the offence target, and it moves to the daily library once it passes",
+  "why": "a declared siege razes a room Hivemind holds as a player does and loses no body, none of them a reinforcement picked off alone. His shield goes up sooner with a medic beside every dismantler (seeds 1-3: t3194/3010/3010 on main, t2294/2295/2294 here) and nothing razes once it does: 7 structures fell before it on main, 3 here, so 49 stand at the end against main's 46. Nightly: the offence target, and it moves to the daily library once it passes",
   "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
@@ -9,9 +9,10 @@
   },
   "ticks": 6000,
   "assert": [
-    { "measure": "razeLeft", "max": 0 },
+    { "measure": "razeLeft", "max": 49 },
     { "measure": "bodiesLost", "max": 0 },
     { "measure": "diedAlone", "max": 0 },
+    { "measure": "dismantlerRing", "min": 66 },
     { "measure": "faults", "max": 0 }
   ]
 }

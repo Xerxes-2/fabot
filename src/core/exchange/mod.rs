@@ -1310,11 +1310,16 @@ pub fn guard_strike(guards: &[(Pos, i32, i32)], at: &Pos) -> i32 {
         .sum()
 }
 
-/// The simple rule; a fire priced in ticks replaces it.
+/// The simple rule; a fire priced in ticks replaces it. A medic heals one body a
+/// tick, so heal that cannot reach a worker covers nothing: each needs its own.
 pub fn crowded(set: &[Fighter], abreast: i32, seated: i32, struck: i32) -> Option<i32> {
     let n = set.len() as i32;
     let abreast = abreast.clamp(1, n.max(1));
-    (struck <= pooled_heal(seated, set)).then_some((n + abreast - 1) / abreast - 1)
+    let front = set.iter().filter(|f| f.work > 0).count().max(1) as i32;
+    let healers = set.iter().filter(|f| f.heal > 0).count() as i32;
+
+    (healers >= front && struck <= pooled_heal(seated, set))
+        .then_some((n + abreast - 1) / abreast - 1)
 }
 
 /// A source is a tile, the walk onto it and how many its stretch lands
@@ -1658,6 +1663,21 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn each_worker_of_a_struck_tile_needs_a_medic_of_its_own() {
+        let dismantler = fighter::cast(&[BodyPart::Work; 25]);
+        let medic = fighter::cast(&[BodyPart::Heal; 25]);
+        // One medic seated beside a worker heals it as much as a tower strikes it,
+        // so pooling alone would price the pair in.
+        let struck = engine::HEAL_POWER * 25;
+
+        let one = [dismantler.clone(), dismantler.clone(), medic.clone()];
+        let two = [dismantler.clone(), dismantler.clone(), medic.clone(), medic];
+
+        assert_eq!(crowded(&one, 2, 2, struck), None);
+        assert!(crowded(&two, 2, 2, struck).is_some());
     }
 
     #[test]

@@ -282,6 +282,13 @@ const measures = {
   fightDamageSpread: (_, __, dir) => Math.max(1, ...foughtOf(dir).map((f) => Math.max(...Object.values(f.taken)) / Math.max(1, mean(Object.values(f.taken))))),
   fightLowestHits: (_, __, dir) => Math.min(100, ...foughtOf(dir).flatMap((f) => Object.values(f.low).map((l) => 100 * l))),
   fightWoundedOut: (_, __, dir) => Math.min(100, ...foughtOf(dir).filter((f) => f.wounded).map((f) => (100 * f.out) / f.wounded)),
+  // Over a siege's dismantler-ticks in its fighting phase, the percent with a
+  // body of its set that heals within 1 tile of it (none seen: 100).
+  dismantlerRing: (_, __, dir) => {
+    const seen = rowsOf(dir).filter((e) => e.kind === "siege" && e.ring);
+    const ticks = seen.reduce((n, e) => n + e.ring.ticks, 0);
+    return ticks ? Math.round((100 * seen.reduce((n, e) => n + e.ring.covered, 0)) / ticks) : 100;
+  },
   // The most percent of a member's ticks it swung back (soak-step's `swung`),
   // over the engagements of `kind` (none named: every one); none seen: 0.
   oscillation: (_, a, dir) =>

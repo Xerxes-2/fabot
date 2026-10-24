@@ -621,6 +621,16 @@ function walking(rec, phase, bodies, theirs, t) {
 }
 function fought(rec, phase, bodies, theirs) {
   if (phase === "fighting" && bodies.length >= 2) rec.fight ??= { taken: {}, low: {}, last: {}, wounded: 0, out: 0 };
+  // `ring`: a siege's dismantler-ticks with a body of its set that heals within 1.
+  if (rec.kind === "siege" && phase === "fighting") {
+    const heals = (o) => o.body.some((p) => p.type === "heal" && p.hits > 0);
+    const medics = bodies.filter(heals);
+    for (const w of bodies.filter((o) => o.body.some((p) => p.type === "work" && p.hits > 0))) {
+      rec.ring ??= { ticks: 0, covered: 0 };
+      rec.ring.ticks++;
+      if (medics.some((m) => m !== w && seam(m.pos, w.pos) <= 1)) rec.ring.covered++;
+    }
+  }
   const f = rec.fight;
   if (!f) return;
   const live = (h, type) => h.body.some((p) => p.type === type && p.hits > 0);
