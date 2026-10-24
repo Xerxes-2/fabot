@@ -81,14 +81,16 @@ fn merged(
 
 struct Asked {
     queued: BTreeMap<String, i32>,
+    /// The energy each room's queued bodies will draw of its bank.
+    asked: BTreeMap<String, i32>,
     casts: Vec<Cast>,
 }
 
 impl Asked {
     fn queue(&mut self, room: &str, body: &[BodyPart]) {
-        let added = engine::SPAWN_TICKS_PER_PART * body.len() as i32;
-        let at = self.queued.entry(room.to_string()).or_insert(0);
-        *at += added;
+        let ticks = engine::SPAWN_TICKS_PER_PART * body.len() as i32;
+        *self.queued.entry(room.to_string()).or_insert(0) += ticks;
+        *self.asked.entry(room.to_string()).or_insert(0) += engine::body_cost(body);
     }
 }
 
@@ -451,6 +453,7 @@ impl<'a> Scene<'a> {
                 &colonies,
                 &self.world.spawns,
                 &asked.queued,
+                &asked.asked,
                 |from| self.walk_to(atlas, e, from),
                 body,
             );
@@ -2190,6 +2193,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     let mut asked = Asked {
         queued: BTreeMap::new(),
+        asked: BTreeMap::new(),
         casts: scene.waiting.clone(),
     };
 

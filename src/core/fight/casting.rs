@@ -428,29 +428,41 @@ pub fn kill_order(hostiles: &[Creep]) -> Vec<String> {
     ranked.into_iter().map(|(id, _)| id).collect()
 }
 
-/// The colony that lands a body soonest of those whose bank buys it: its
-/// queue, then the walk (v1's Caster). None: no colony pays for it.
+/// The colony that lands a body soonest of those whose bank buys it: its spawns'
+/// queue, spread over them (v1's Caster), the refill a bank short of the body
+/// waits for, then the walk. None: no colony pays for it.
 pub fn colony_for(
     colonies: &[&Room],
     spawns: &[Spawn],
     queued: &BTreeMap<String, i32>,
+    asked: &BTreeMap<String, i32>,
     walk: impl Fn(&str) -> Option<i32>,
     body: &[BodyPart],
 ) -> Option<String> {
-    let queue = |room: &str| -> i64 {
-        let idle = spawns
-            .iter()
-            .filter(|s| s.pos.room == room)
-            .map(|s| s.spawning.as_ref().map_or(0, |o| o.remaining))
-            .fold(i32::MAX, i32::min);
+    let cost = engine::body_cost(body);
+    let spawn_ticks = engine::SPAWN_TICKS_PER_PART * body.len() as i32;
 
-        i64::from(idle) + i64::from(queued.get(room).copied().unwrap_or(0))
+    let wait = |room: &Room| -> i64 {
+        let of: Vec<&Spawn> = spawns.iter().filter(|s| s.pos.room == room.name).collect();
+        let count = (of.len() as i64).max(1);
+        let busy: i64 = of
+            .iter()
+            .map(|s| i64::from(s.spawning.as_ref().map_or(0, |o| o.remaining)))
+            .sum();
+        // The economy refills a ring at the pace its spawns spend it, so a body
+        // past what the bank holds waits a spawn time for each of itself the
+        // refill owes.
+        let spends = i64::from(asked.get(&room.name).copied().unwrap_or(0)) + i64::from(cost);
+        let short = (spends - i64::from(room.energy_available)).max(0);
+
+        (busy + i64::from(queued.get(&room.name).copied().unwrap_or(0))) / count
+            + i64::from(spawn_ticks) * short / i64::from(cost)
     };
 
     let ranked: Vec<(i64, String)> = colonies
         .iter()
-        .filter(|r| r.energy_capacity >= engine::body_cost(body))
-        .filter_map(|r| walk(&r.name).map(|w| (i64::from(w) + queue(&r.name), r.name.clone())))
+        .filter(|r| r.energy_capacity >= cost)
+        .filter_map(|r| walk(&r.name).map(|w| (i64::from(w) + wait(r), r.name.clone())))
         .collect();
 
     let mut ranked = ranked;
@@ -489,5 +501,78 @@ mod tests {
                 Some(engine::SWAMP_WEIGHT / engine::PLAIN_WEIGHT)
             );
         }
+    }
+
+    fn colony(name: &str, bank: i32) -> Room {
+        Room {
+            name: name.to_string(),
+            terrain: Vec::new(),
+            controller: None,
+            energy_available: bank,
+            energy_capacity: 12_900,
+            sources: Vec::new(),
+            minerals: Vec::new(),
+            structures: Vec::new(),
+            sites: Vec::new(),
+            piles: Vec::new(),
+            remains: Vec::new(),
+            others: Vec::new(),
+        }
+    }
+
+    fn spawns_in(room: &str, count: i32) -> Vec<Spawn> {
+        (1..=count)
+            .map(|x| Spawn {
+                id: format!("{room}-{x}"),
+                name: String::new(),
+                pos: Pos {
+                    room: room.to_string(),
+                    x,
+                    y: 25,
+                },
+                spawning: None,
+            })
+            .collect()
+    }
+
+    /// v1's Caster with the link v2 dropped: a colony's queue is spread over its
+    /// spawns, and a body past what its bank holds waits for the refill, so the
+    /// nearest colony is not the one that lands it soonest.
+    #[test]
+    fn a_body_is_cast_to_the_colony_that_lands_it_soonest_not_the_nearest() {
+        let body: Body = vec![BodyPart::Move; 20];
+        let (near, far) = (colony("W1N1", 12_000), colony("W3N1", 12_000));
+        let spawns = [spawns_in("W1N1", 3), spawns_in("W3N1", 1)].concat();
+        let queued = BTreeMap::from([("W1N1".to_string(), 600)]);
+        let walk = |from: &str| Some(if from == "W1N1" { 200 } else { 450 });
+
+        assert_eq!(
+            colony_for(
+                &[&near, &far],
+                &spawns,
+                &queued,
+                &BTreeMap::new(),
+                walk,
+                &body
+            ),
+            Some("W1N1".to_string()),
+            "a 600-tick queue over three spawns beats a walk 250 longer"
+        );
+
+        let broke = colony("W1N1", 0);
+        let walk = |from: &str| Some(if from == "W1N1" { 200 } else { 250 });
+
+        assert_eq!(
+            colony_for(
+                &[&broke, &far],
+                &spawns,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                walk,
+                &body
+            ),
+            Some("W3N1".to_string()),
+            "a bank with nothing for the body waits for the refill"
+        );
     }
 }

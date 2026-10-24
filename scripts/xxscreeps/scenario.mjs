@@ -121,6 +121,20 @@ const livesOf = (dir) =>
     .filter(Boolean)
     .map((l) => JSON.parse(l));
 const fightLives = (dir) => livesOf(dir).filter((b) => b.ours && b.name.startsWith("fight-") && b.hits !== undefined);
+// The first siege's set: the bodies of its ask, the one tick it cast the most
+// of them in (its name's first token the tick it was cast, the second its
+// engagement) — not a reinforcement, nor a cast left over from an earlier use
+// of the id (`bodies.jsonl`).
+const siegeSet = (dir) => {
+  const first = rowsOf(dir).filter((e) => e.kind === "siege").sort((a, b) => a.opened - b.opened)[0];
+  if (!first) return [];
+  const of = livesOf(dir).filter((b) => b.ours && b.name.split("-")[2] === String(first.id));
+  const castOf = (b) => Number(b.name.split("-")[1]);
+  const most = new Map();
+  for (const b of of) most.set(castOf(b), (most.get(castOf(b)) ?? 0) + 1);
+  const ask = [...most].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0];
+  return of.filter((b) => castOf(b) === ask);
+};
 const moves = (body) => [...body].filter((p) => p === "m").length;
 const scoutsOf = (dir) => livesOf(dir).filter((b) => b.ours && b.name.startsWith("scout-"));
 const walksOf = (dir) => rowsOf(dir).flatMap((e) => (e.blob ? [e.blob] : []));
@@ -292,6 +306,20 @@ const measures = {
   siegeWalledEntries: (_, __, dir) => Object.values(rowsOf(dir).find((e) => e.kind === "siege")?.entries ?? {}).filter((s) => s === "walled").length,
   // The least hits a siege's target (a spawn, a core) ever stood at (none seen: Infinity).
   siegeTargetLow: (_, __, dir) => Math.min(Infinity, ...rowsOf(dir).filter((e) => e.kind === "siege" && e.target).map((e) => e.target.low)),
+  // Over the first siege's set, the ticks between its first and last body's
+  // spawn starting (none: Infinity).
+  siegeSpawnSpread: (_, __, dir) => {
+    const firsts = siegeSet(dir).map((b) => b.first);
+    return firsts.length ? Math.max(...firsts) - Math.min(...firsts) : Infinity;
+  },
+  // The oldest body of that set's life when the last of it stands: a spawn runs
+  // `SPAWN_TICKS_PER_PART` a part (none: -Infinity).
+  siegeOldestLife: (_, __, dir) => {
+    const set = siegeSet(dir);
+    if (!set.length) return -Infinity;
+    const stands = Math.max(...set.map((b) => b.first + 3 * b.body.length));
+    return 1500 - (stands - Math.min(...set.map((b) => b.first)));
+  },
   // Over the sweeps, the rival's bodies killed and harvest denied (soak-step's `killed`, `denied`), and those less what they cast.
   sweepKilled: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.killed ?? 0), 0),
   sweepDenied: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.denied ?? 0), 0),

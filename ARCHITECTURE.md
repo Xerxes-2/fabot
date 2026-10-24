@@ -530,13 +530,15 @@ An engagement that needs bodies emits `Cast` asks with the engagement id and
 Strategy's priority. The spawn queue is `Tick`'s: per room, the economy's
 floor asks first and never displaced, then the fight's, then the economy's,
 which a fight ask still waiting on the bank holds; neither module reads the
-other's asks. The
-Caster logic that picks which colony spawns (hops, queue) ports from v1's
-`Caster.fs` mostly as is. `fight.casts` remembers what was asked so a body in
-an oven is not asked again. One room may hold three spawns; the queue is per
-room. Every fight body is cast with one MOVE at the tail (v1's
-`withMoveLast`), so it walks while any part lives, and every body a set walks
-out of our rooms with carries a HEAL (owner), bar a siege's dismantlers, which
+other's asks. The Caster logic that picks which colony spawns ports from v1's
+`Caster.fs` mostly as is: the hops, and the queue spread over the colony's
+spawns. Beside them v2 prices a ring short of the body: the ticks its economy
+takes to refill it, one spawn time for each body the bank is short of.
+`fight.casts` remembers what was asked so a body in an oven is not asked
+again. One room may hold three spawns; the queue is per room. Every fight body
+is cast with one MOVE at the tail (v1's `withMoveLast`), so it walks while any
+part lives, and every body a set walks out of our rooms with carries a HEAL
+(owner), bar a siege's dismantlers, which
 its medics cover: it heals the damage it is shot for instead of losing that
 MOVE to it a walk at a time. A home's Defend is priced without one, beside its
 towers.
