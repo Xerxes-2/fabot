@@ -7,8 +7,8 @@ use super::tick::Declarations;
 use super::vocabulary::{BodyPart, Boost, Resource};
 
 /// A room by its world coordinates: W0 is x = -1, N0 is y = -1.
-/// Ordered as its name is, so maps keyed by room iterate as they did by name.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+/// Ordered west to east, then north to south: not as its name is.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RoomName {
     pub x: i16,
     pub y: i16,
@@ -76,36 +76,7 @@ impl RoomName {
         (i32::from(self.x), i32::from(self.y))
     }
 
-    /// The name as base-15 symbols, end-padded: the end below a digit below
-    /// E, N, S, W, as their bytes order, so keys order as names do.
-    fn order(self) -> u64 {
-        if self == RoomName::SIM {
-            return u64::MAX;
-        }
-        let mut key: u64 = 0;
-        let mut symbols = 0;
-        for (outward, inward, value) in [(14, 11, self.x), (12, 13, self.y)] {
-            let (side, value) = if value < 0 {
-                (outward, -i32::from(value) - 1)
-            } else {
-                (inward, i32::from(value))
-            };
-            key = key * 15 + side;
-            symbols += 1;
-            let mut place = 1;
-            while place * 10 <= value {
-                place *= 10;
-            }
-            while place > 0 {
-                key = key * 15 + (value / place % 10) as u64 + 1;
-                symbols += 1;
-                place /= 10;
-            }
-        }
-        key * 15u64.pow(12 - symbols)
-    }
-
-    /// The name's bytes, NUL-padded: compared bytewise, they order as the names do.
+    /// Spelt on the stack: `Display` writes a name with no `String` between.
     fn bytes(self) -> [u8; 12] {
         let mut out = [0u8; 12];
         if self == RoomName::SIM {
@@ -148,22 +119,6 @@ impl std::fmt::Display for RoomName {
 impl std::fmt::Debug for RoomName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "\"{self}\"")
-    }
-}
-
-impl PartialOrd for RoomName {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for RoomName {
-    fn cmp(&self, other: &Self) -> Ordering {
-        if self == other {
-            Ordering::Equal
-        } else {
-            self.order().cmp(&other.order())
-        }
     }
 }
 

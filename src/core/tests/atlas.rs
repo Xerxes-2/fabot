@@ -754,23 +754,3 @@ fn a_body_walking_first_steps_never_enters_a_room_twice_and_arrives_where_a_rout
         assert_eq!(arrived, routed, "{entered:?} toward {onto}");
     }
 }
-
-#[test]
-fn rooms_order_as_their_names_do() {
-    let mut dice = Dice::new(23);
-    let room = |dice: &mut Dice| {
-        let axis = |dice: &mut Dice| match dice.below(3) {
-            0 => dice.between(-12, 11),
-            1 => dice.between(-130, 129),
-            _ => dice.between(-12000, 11999),
-        };
-        RoomName::new(axis(dice), axis(dice))
-    };
-    for _ in 0..20_000 {
-        let (a, b) = (room(&mut dice), room(&mut dice));
-        assert_eq!(a.cmp(&b), a.to_string().cmp(&b.to_string()), "{a} {b}");
-    }
-    let sim = RoomName::named("sim");
-    assert_eq!(sim.to_string(), "sim");
-    assert!(sim > RoomName::named("W1N1"), "lowercase after uppercase");
-}
