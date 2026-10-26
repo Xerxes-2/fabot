@@ -203,7 +203,20 @@ patchRuntimeCache(dirname(XXSCREEPS));
 
 // ---- the engine, on Node 26 through nix (as xx.mjs) ------------------------
 const NODE = nodeBin();
+// A command whose output is not read waits in `queued` and runs in one batch.mjs
+// process with the others, before the next command that is read, or the server.
+const queued = [];
 function node26(args, cwd, capture = false) {
+  if (!capture) return void queued.push(args.slice(1));
+  flush();
+  return spawn26(args, cwd, capture);
+}
+function flush() {
+  if (!queued.length) return;
+  writeFileSync(join(world, "batch.json"), JSON.stringify(queued.splice(0)));
+  spawn26([XXSCREEPS, script("batch.mjs"), "batch.json"], world);
+}
+function spawn26(args, cwd, capture = false) {
   const at = Date.now();
   const res = spawnSync(NODE, args, {
     cwd,
@@ -281,7 +294,7 @@ if (from) {
   rmSync(join(world, "screeps"), { recursive: true });
   cpSync(from, join(world, "screeps"), { recursive: true });
 }
-for (const f of ["seed", "waves", "core", "colony.mjs", "node.mjs", "live.mjs", "soak-step.mjs"]) cpSync(join(HERE, "engine", f), join(world, f), { recursive: true });
+for (const f of ["seed", "waves", "core", "colony.mjs", "node.mjs", "live.mjs", "batch.mjs", "soak-step.mjs"]) cpSync(join(HERE, "engine", f), join(world, f), { recursive: true });
 writeFileSync(join(world, ".screepsrc.yaml"), screepsrc);
 // Mods resolve from the cwd only where a package.json stands.
 writeFileSync(join(world, "package.json"), '{ "private": true }\n');
@@ -412,6 +425,7 @@ if (node?.outposts && !flags["--invaders"]) waves.push(...colony.outposts.map((o
 if (watch) node26([XXSCREEPS, "manage", "user", "password", OUR_NAME, "--", watch.password], world);
 
 // ---- the server, stepped ---------------------------------------------------
+flush();
 const log = join(out, "server.log");
 marks.setup = Date.now() - began;
 const server = spawn(NODE, [XXSCREEPS, "start", ...(watch ? [] : ["--no-backend"])], {

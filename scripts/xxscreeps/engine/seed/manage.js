@@ -5,4 +5,5 @@ import { draw, sequence } from "./random.js";
 
 const s = sequence(process.argv.slice(2).join(" "));
 Math.random = () => draw(s);
-await import("xxscreeps/scripts/manage.js");
+// The query is batch.mjs's: a second command in its process runs manage again.
+await import(import.meta.resolve("xxscreeps/scripts/manage.js") + new URL(import.meta.url).search);
