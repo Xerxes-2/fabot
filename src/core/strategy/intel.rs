@@ -92,6 +92,7 @@ pub fn preyed(intel: &Intel, declarations: &Declarations, time: i32) -> Vec<Room
     };
     let mut rooms: Vec<(i32, &RoomName)> = intel
         .iter()
+        .filter(|(room, _)| !declarations.avoid.contains(*room))
         .filter(|(_, r)| {
             enemy(&r.owner)
                 || enemy(&r.worker)

@@ -1220,7 +1220,8 @@ impl<'a> Scene<'a> {
 
     /// Each room an enemy works a sweep may commit to, its worth, the nearest
     /// colony's walk and whether a set beats it, priced only on a tick a
-    /// group there was new, changed or came back into sight (`stirred`).
+    /// group there was new, changed or came back into sight (`stirred`). An
+    /// avoided room is none, as it is no patrol's.
     fn candidates(
         &self,
         atlas: &Atlas,
@@ -1229,7 +1230,9 @@ impl<'a> Scene<'a> {
     ) -> Vec<(RoomName, i32, i32, bool)> {
         grounds
             .iter()
-            .filter(|(name, g)| stirred.contains(*name) && g.worth > 0)
+            .filter(|(name, g)| {
+                stirred.contains(*name) && g.worth > 0 && !self.avoid.contains(*name)
+            })
             .filter_map(|(name, g)| {
                 let room = self.in_sight(*name).filter(|r| {
                     r.controller
