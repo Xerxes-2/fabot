@@ -27,6 +27,7 @@ import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFi
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { patchRuntimeCache } from "./runtime-cache.mjs";
 import { describe, diff, readTrace } from "./trace.mjs";
 
 const usage = `usage: xx.mjs setup
@@ -148,6 +149,7 @@ function setup(variant = "") {
     must(nix(build, "npm", ["rebuild", "isolated-vm", "ivm-inspect", "--foreground-scripts"], { cwd: ENGINE }), "npm rebuild");
     must(node26(probe, ENGINE), "loading isolated-vm");
   }
+  patchRuntimeCache(dirname(XXSCREEPS));
   const template = templateOf(variant);
   if (!existsSync(join(template, "screeps/shard0/data.json"))) {
     console.error(`importing a world into ${template}`);

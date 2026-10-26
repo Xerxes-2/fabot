@@ -15,8 +15,9 @@
 //            and both with four or more (bodies can crowd in instead)
 //   --ticks  per run (default 30000; a node's 5000)
 //   --node   start every run at this node (soak.mjs --node)
-//   --jobs   runs at once (default half the cores: each holds a server and
-//            our sandbox, about one core)
+//   --jobs   runs at once (default a quarter of the hardware threads: a soak
+//            keeps server, processor, runner and stepper threads busy, and
+//            more jobs only slow each other)
 //   --tag    output names: soak-runs/<tag>-<bundle>-s<seed>-<room>/ (default many)
 //   --fresh  run even where the cache holds this bundle, room, seed and ticks
 //
@@ -28,6 +29,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { availableParallelism } from "node:os";
+import { node26Env } from "./node26.mjs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sweep } from "./prune.mjs";
@@ -68,7 +70,7 @@ const seeds = (flags["--seed"] ?? "1,2,1+7").split(",").map((spec) => {
   const [seed, late = "0"] = spec.split("+");
   return { seed: whole(seed, "--seed", 0), late: whole(late, "--seed", 0), label: spec };
 });
-const jobs = whole(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / 2)), "--jobs", 1);
+const jobs = whole(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / 4)), "--jobs", 1);
 const tag = flags["--tag"] ?? "many";
 if (!/^[A-Za-z0-9-]+$/.test(tag)) fail("--tag: letters, digits, dashes");
 const rooms = (flags["--room"] ?? "W9N8,W8N3").split(",");
@@ -125,7 +127,7 @@ console.error(
 function soak(run) {
   return new Promise((done) => {
     const args = ["--room", run.room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : [])];
-    const child = spawn("node", [SOAK, ...args], { stdio: ["ignore", "ignore", "ignore"], env: { ...process.env, FABOT_PLAN_BUILT: "1" } });
+    const child = spawn("node", [SOAK, ...args], { stdio: ["ignore", "ignore", "ignore"], env: node26Env({ ...process.env, FABOT_PLAN_BUILT: "1" }) });
     child.on("exit", (code) => done(code));
   });
 }

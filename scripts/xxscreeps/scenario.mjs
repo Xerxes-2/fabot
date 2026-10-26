@@ -18,7 +18,7 @@
 //   --fetch  fetch the tarball a rival's `fetch.json` names; without it a
 //           scenario whose rival is not cached is SKIPped, never failed
 //   --bot   the bundle (default dist/main.js)
-//   --jobs  soaks at once (default half the cores)
+//   --jobs  soaks at once (default a quarter of the hardware threads, as soak:many)
 //   --watch the one scenario's soak watched (soak's --watch), in this terminal
 //
 // A scenario file: { "why": the invariant, "modules": the src/core modules it tests, "nightly"?, "start": { "room", "seed",
@@ -32,6 +32,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
+import { node26Env } from "./node26.mjs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bugs, engagement, report } from "./prediction.mjs";
@@ -99,7 +100,7 @@ if (watch.length && names.length !== 1) fail("--watch runs exactly one scenario:
 if (watch.length) process.on("SIGINT", () => {});
 const bot = resolve(flags["--bot"] ?? join(REPO, "dist/main.js"));
 if (!existsSync(bot)) fail(`no bundle at ${bot}: npm run build first`);
-const jobs = Number(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / 2)));
+const jobs = Number(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / 4)));
 
 sweep(join(REPO, "soak-runs"));
 
@@ -484,7 +485,7 @@ const started = Date.now();
 // A soak that saves a world for a later start is a prelude, never the one watched.
 const soak = (args, watched = watch.length > 0 && !args.includes("--save")) =>
   new Promise((done) => {
-    const child = spawn("node", [join(HERE, "soak.mjs"), ...args, ...(flags["--fetch"] ? ["--fetch"] : []), ...(watched ? watch : [])], { stdio: watched ? "inherit" : "ignore", env: { ...process.env, FABOT_PLAN_BUILT: "1" } });
+    const child = spawn("node", [join(HERE, "soak.mjs"), ...args, ...(flags["--fetch"] ? ["--fetch"] : []), ...(watched ? watch : [])], { stdio: watched ? "inherit" : "ignore", env: node26Env({ ...process.env, FABOT_PLAN_BUILT: "1" }) });
     child.on("exit", (code) => done(code));
   });
 // `bot`: a path from the repo, or "@bot", the bundle under test.
@@ -495,6 +496,7 @@ const opponentsOf = (name, opponents) => {
   writeFileSync(file, JSON.stringify(opponents.map((o) => ({ ...o, bot: o.bot === "@bot" ? bot : resolve(REPO, o.bot) }))));
   return ["--opponents", file];
 };
+const preludes = [];
 const play = async ({ name, start, ticks }) => {
   if (start.world && start.declarations) {
     const world = join(REPO, "soak-runs", `world-${name}.json`);
@@ -523,6 +525,7 @@ const play = async ({ name, start, ticks }) => {
   const world = worldDir(start);
   if (!existsSync(world)) {
     const began = Date.now();
+    preludes.push({ label: `world ${worldOf(start)}`, dir: `world-${worldOf(start)}` });
     const code = await soak([...recipe, "--ticks", String(start.at), "--run", `world-${worldOf(start)}`, "--bot", bundleAt(start.bundle), "--save", world, ...opponentsOf(`world-${name}`, start.opponents && seats(start.opponents))]);
     console.error(`world ${worldOf(start)} played in ${((Date.now() - began) / 1000).toFixed(0)} s, counted in its first soak`);
     if (code !== 0) {
@@ -596,5 +599,19 @@ for (const s of scenarios) {
 }
 const slowest = [...runs.values()].sort((a, b) => b.secs - a.secs).slice(0, 5);
 console.log(`slowest: ${slowest.map((r) => `${r.label} ${r.secs.toFixed(0)} s (${r.scenarios.join(", ")})`).join("; ")}`);
+// Where the soaks' wall time went (each soak's timing.json), summed and the slowest ten.
+const timed = [...[...runs.values()].map((r) => ({ label: r.label, dir: r.name })), ...preludes]
+  .map((r) => ({ ...r, file: join(REPO, "soak-runs", r.dir, "timing.json") }))
+  .filter((r) => existsSync(r.file))
+  .map((r) => ({ label: r.label, ...JSON.parse(readFileSync(r.file, "utf8")) }));
+if (timed.length) {
+  const PHASES = ["wall", "setup", "node26", "boot", "stepperBoot", "step", "botCpu", "shutdown"];
+  const sum = Object.fromEntries(["ticks", "node26Calls", ...PHASES].map((k) => [k, timed.reduce((a, t) => a + (t[k] ?? 0), 0)]));
+  const s = (ms) => `${(ms / 1000).toFixed(0)} s`;
+  console.log(`timing over ${timed.length} soaks, ${sum.ticks} ticks: ${PHASES.map((k) => `${k} ${s(sum[k])}`).join(", ")}; ${sum.node26Calls} node26 calls; step ${(sum.step / sum.ticks).toFixed(1)} ms/tick of which bot ${(sum.botCpu / sum.ticks).toFixed(1)}`);
+  for (const t of timed.sort((a, b) => b.wall - a.wall).slice(0, 10))
+    console.log(`  ${t.label} ${t.ticks} ticks: ${PHASES.map((k) => `${k} ${(t[k] / 1000).toFixed(1)}`).join(" ")} (${(t.step / t.ticks).toFixed(1)} ms/tick)`);
+  writeFileSync(join(REPO, "soak-runs", "scenario-timing.json"), JSON.stringify(timed, null, 1) + "\n");
+}
 console.log(`${failed ? `${failed} failed` : "all passed"}${skipped ? `, ${skipped} skipped` : ""} in ${((Date.now() - started) / 1000).toFixed(0)} s`);
 process.exit(failed ? 1 : 0);

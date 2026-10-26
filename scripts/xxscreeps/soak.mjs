@@ -77,7 +77,12 @@ import { cpSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFi
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { node26 as nodeBin, node26Env } from "./node26.mjs";
+import { patchRuntimeCache } from "./runtime-cache.mjs";
 
+// Where the run's wall time went, written to timing.json (`scenario.mjs` sums them).
+const began = Date.now();
+const marks = { node26: 0, node26Calls: 0 };
 const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
 const fail = (message) => {
   console.error(message);
@@ -194,15 +199,21 @@ for (const o of opponents) {
 // A world's schema is its mods' (`xx.mjs` templateOf).
 const template = live ? `${TEMPLATE}-modern` : cores.length ? `${TEMPLATE}-stronghold` : TEMPLATE;
 if (!existsSync(join(template, "screeps/shard0/data.json"))) fail(`no template world at ${template}: npm run xx -- setup first`);
+patchRuntimeCache(dirname(XXSCREEPS));
 
 // ---- the engine, on Node 26 through nix (as xx.mjs) ------------------------
+const NODE = nodeBin();
 function node26(args, cwd, capture = false) {
-  const res = spawnSync("nix", ["shell", "nixpkgs#nodejs_26", "-c", "node", ...args], {
+  const at = Date.now();
+  const res = spawnSync(NODE, args, {
     cwd,
+    env: node26Env(),
     stdio: capture ? ["ignore", "pipe", "inherit"] : "inherit",
     encoding: "utf8",
   });
-  if (res.error) fail(`nix: ${res.error.message}`);
+  marks.node26 += Date.now() - at;
+  marks.node26Calls++;
+  if (res.error) fail(`node26: ${res.error.message}`);
   if (res.status !== 0) fail(`node ${args.slice(1).join(" ")} failed (exit ${res.status})`);
   return res.stdout;
 }
@@ -402,8 +413,10 @@ if (watch) node26([XXSCREEPS, "manage", "user", "password", OUR_NAME, "--", watc
 
 // ---- the server, stepped ---------------------------------------------------
 const log = join(out, "server.log");
-const server = spawn("nix", ["shell", "nixpkgs#nodejs_26", "-c", "node", XXSCREEPS, "start", ...(watch ? [] : ["--no-backend"])], {
+marks.setup = Date.now() - began;
+const server = spawn(NODE, [XXSCREEPS, "start", ...(watch ? [] : ["--no-backend"])], {
   cwd: world,
+  env: node26Env(),
   detached: true,
   stdio: ["ignore", openSync(log, "w"), openSync(log, "a")],
 });
@@ -437,11 +450,13 @@ if (watch) {
     ].join("\n"),
   );
 }
+marks.boot = Date.now() - began - marks.setup;
+const stepperAt = Date.now();
 // Spawned, not run synchronously, so a signal is handled while it steps.
 const stepper = spawn(
-  "nix",
-  ["shell", "nixpkgs#nodejs_26", "-c", "node", XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out, waves.join(","), "opponents.json", cores.join(","), wave, String(watch ? watch.ms : 0)],
-  { cwd: world, detached: true, stdio: ["ignore", "pipe", "inherit"] },
+  NODE,
+  [XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out, waves.join(","), "opponents.json", cores.join(","), wave, String(watch ? watch.ms : 0)],
+  { cwd: world, env: node26Env(), detached: true, stdio: ["ignore", "pipe", "inherit"] },
 );
 children.push(stepper);
 samplesSoFar = join(out, "samples.jsonl");
@@ -450,6 +465,7 @@ stepper.stdout.on("data", (d) => (steps += d));
 const code = await new Promise((r) => stepper.on("exit", r));
 if (code !== 0) fail(`soak-step.mjs failed (exit ${code}); see ${log}`);
 const stepped = JSON.parse(steps.trim().split("\n").at(-1));
+const stepperEnd = Date.now();
 if (watch) {
   console.error("watch: the last tick is stepped; the world stays up until Ctrl-C");
   await new Promise((r) => (onSignal = r));
@@ -462,6 +478,22 @@ if (flags["--save"]) {
   cpSync(join(world, "screeps"), resolve(flags["--save"]), { recursive: true, filter: filesOnly });
 }
 stop();
+{
+  const cpu = (existsSync(join(out, "cpu.jsonl")) ? readFileSync(join(out, "cpu.jsonl"), "utf8") : "").split("\n").filter(Boolean).reduce((a, l) => a + (JSON.parse(l).cpu ?? 0), 0);
+  const timing = {
+    ticks: stepped.ticks,
+    wall: Date.now() - began,
+    setup: marks.setup,
+    node26: marks.node26,
+    node26Calls: marks.node26Calls,
+    boot: marks.boot,
+    stepperBoot: stepperEnd - stepperAt - stepped.ms,
+    step: stepped.ms,
+    botCpu: Math.round(cpu),
+    shutdown: Date.now() - stepperEnd,
+  };
+  writeFileSync(join(out, "timing.json"), JSON.stringify(timing) + "\n");
+}
 
 // ---- the report ------------------------------------------------------------
 const lines = (f) => readFileSync(join(out, f), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
