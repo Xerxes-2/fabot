@@ -5,7 +5,7 @@ use super::super::casting;
 use super::super::shape::{Engagement, Phase};
 use super::sweep;
 use crate::core::atlas::Atlas;
-use crate::core::atlas::tiles::{self, Tile};
+use crate::core::atlas::tiles::{self, Tile, TileSet};
 use crate::core::engine;
 use crate::core::exchange::{self, Losses, Outcome};
 use crate::core::tactics::{self, Offer, Tactic};
@@ -219,10 +219,10 @@ pub fn barrier_at(room: &Room) -> BTreeMap<&str, &Structure> {
 }
 
 /// Whether a walk from the room's exits reaches beside `at`.
-pub fn beside(reached: &BTreeSet<Tile>, at: &Pos) -> bool {
+pub fn beside(reached: &TileSet, at: &Pos) -> bool {
     tiles::around(tiles::of_pos(at))
         .iter()
-        .any(|t| reached.contains(t))
+        .any(|t| reached.contains(*t))
 }
 
 /// A picket's worth, as a sweep's: the harvest its post denies.
@@ -238,7 +238,7 @@ pub fn exposed(atlas: &Atlas, room: &Room) -> Vec<Pos> {
     exposed_in(&atlas.from_exits(&room.name), room)
 }
 
-pub fn exposed_in(reached: &BTreeSet<Tile>, room: &Room) -> Vec<Pos> {
+pub fn exposed_in(reached: &TileSet, room: &Room) -> Vec<Pos> {
     room.sources
         .iter()
         .filter(|s| beside(reached, &s.pos))

@@ -627,8 +627,8 @@ impl Atlas {
 
     /// The tiles a walk from the room's exits reaches without breaking a
     /// barrier.
-    pub fn from_exits(&self, room: &str) -> BTreeSet<Tile> {
-        let mut reached: BTreeSet<Tile> = BTreeSet::new();
+    pub fn from_exits(&self, room: &str) -> TileSet {
+        let mut reached = TileSet::default();
         let Some(grid) = self.grid(room) else {
             return reached;
         };
@@ -643,7 +643,7 @@ impl Atlas {
                 frontier.extend(
                     tiles::around(t)
                         .iter()
-                        .filter(|n| open(n) && !reached.contains(n)),
+                        .filter(|n| open(n) && !reached.contains(**n)),
                 );
             }
         }
