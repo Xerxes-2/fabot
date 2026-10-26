@@ -277,6 +277,22 @@ pub fn landing(tile: Tile) -> Option<Tile> {
     }
 }
 
+/// `exit_tiles(exit)` each with its `landing`, in the same order.
+pub fn exit_landings(exit: i32) -> &'static [(Tile, Tile)] {
+    static LANDINGS: OnceLock<Vec<Vec<(Tile, Tile)>>> = OnceLock::new();
+    let all = LANDINGS.get_or_init(|| {
+        (0..9)
+            .map(|e| {
+                exit_tiles(e)
+                    .iter()
+                    .filter_map(|&t| Some((t, landing(t)?)))
+                    .collect()
+            })
+            .collect()
+    });
+    all.get(exit as usize).map_or(&[], Vec::as_slice)
+}
+
 pub fn rooms_apart(a: &str, b: &str) -> i32 {
     match (room_coords(a), room_coords(b)) {
         (Some(a), Some(b)) => (a.0 - b.0).abs().max((a.1 - b.1).abs()),

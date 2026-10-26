@@ -148,6 +148,28 @@ impl Tree {
                 .collect(),
         )
     }
+
+    /// The borders `route` crosses, without naming its rooms.
+    pub fn crossings(&self, from: &str, onto: &str) -> Option<i32> {
+        if from == onto {
+            return Some(0);
+        }
+        let (a, b) = (tiles::room_coords(from)?, tiles::room_coords(onto)?);
+        let start = if Some(b) == self.root {
+            a
+        } else if Some(a) == self.root {
+            b
+        } else {
+            return None;
+        };
+        let mut way = self.ways(start).first()?;
+        let mut crossed = 1;
+        while Some(way.next) != self.root {
+            crossed += 1;
+            way = self.ways(way.next).get(way.onward)?;
+        }
+        Some(crossed)
+    }
 }
 
 /// A body on a tile no walk stands on (a post) walks off it; one in a
@@ -162,25 +184,16 @@ fn holds(mover: Mover, dist: &Table<i32>, grid: &RoomGrid, at: Tile) -> bool {
     }
 }
 
-/// The stretches of `near`'s `side` both rooms open, as `near`'s tiles; a
-/// room with no grid is open.
-fn stretches(near: Option<&RoomGrid>, far: Option<&RoomGrid>, side: i32) -> Vec<&'static [Tile]> {
+/// The stretches of `near`'s `side` both rooms open, as `near`'s tiles each
+/// with its landing in `far`; a room with no grid is open.
+fn stretches<'a>(
+    near: Option<&'a RoomGrid>,
+    far: Option<&'a RoomGrid>,
+    side: i32,
+) -> impl Iterator<Item = &'static [(Tile, Tile)]> + 'a {
     let open = |grid: Option<&RoomGrid>, t: Tile| grid.is_none_or(|g| g.weights[t].is_some());
-    let band = tiles::exit_tiles(side);
-    let mut runs = Vec::new();
-    let mut from = 0;
-    for (i, &t) in band.iter().enumerate() {
-        if !(open(near, t) && tiles::landing(t).is_some_and(|l| open(far, l))) {
-            if from < i {
-                runs.push(&band[from..i]);
-            }
-            from = i + 1;
-        }
-    }
-    if from < band.len() {
-        runs.push(&band[from..]);
-    }
-    runs
+    let shut = move |&(t, l): &(Tile, Tile)| !(open(near, t) && open(far, l));
+    (tiles::exit_landings(side).split(shut)).filter(|run| !run.is_empty())
 }
 
 fn opposite(side: i32) -> i32 {
@@ -263,24 +276,27 @@ pub fn search(
                     continue;
                 }
                 let blind = node.blind + i32::from(blind(there));
-                let entry = |t: &Tile| match (&node.dist, node.next) {
-                    (Some(dist), _) => tiles::landing(*t).map_or(UNREACHED, |l| on(dist, l)),
+                let entry = |&(_, l): &(Tile, Tile)| match (&node.dist, node.next) {
+                    (Some(dist), _) => on(dist, l),
                     (None, None) => 0,
                     (None, Some(_)) => Atlas::crossing_ticks(),
                 };
-                let into: Vec<(&[Tile], i32)> = (stretches(grid_of(there), near, opposite(side)))
-                    .into_iter()
-                    .filter_map(|s| {
-                        Some((s, s.iter().map(entry).min().filter(|d| *d != UNREACHED)?))
-                    })
-                    .collect();
-                let Some(ticks) = into.iter().map(|(_, d)| *d).min() else {
+                let mut exit: Exit = Vec::new();
+                let mut ticks = UNREACHED;
+                for s in stretches(grid_of(there), near, opposite(side)) {
+                    let d = s.iter().map(entry).min().unwrap_or(UNREACHED);
+                    if d != UNREACHED {
+                        exit.push((s[0].0, s[s.len() - 1].0));
+                        ticks = ticks.min(d);
+                    }
+                }
+                if exit.is_empty() {
                     continue;
-                };
+                }
                 queue.push(Reverse((blind, node.value + ticks, reached.len())));
                 reached.push(Reached {
                     room: there,
-                    exit: into.iter().map(|(s, _)| (s[0], s[s.len() - 1])).collect(),
+                    exit,
                     value: node.value + ticks,
                     hops: node.hops + 1,
                     blind,
@@ -291,17 +307,12 @@ pub fn search(
         let Some(Reverse((_, _, r))) = queue.pop() else {
             break;
         };
-        let r = &reached[r];
-        let tiles_of = |exit: &Exit| -> Vec<Tile> {
-            exit.iter()
-                .flat_map(|(a, b)| Atlas::stretch(*a, *b).iter().copied())
-                .collect()
-        };
-        let exit_tiles = tiles_of(&r.exit);
+        let r = &mut reached[r];
+        let exit_tiles = r.exit.iter().flat_map(|(a, b)| Atlas::stretch(*a, *b));
         let regions = ways.rooms.get(&r.room).map_or(&[][..], |v| v.as_slice());
         let held = regions.iter().any(|&n| {
             (ways.nodes[n].dist.as_ref())
-                .is_none_or(|d| exit_tiles.iter().any(|t| on(d, *t) != UNREACHED))
+                .is_none_or(|d| exit_tiles.clone().any(|t| on(d, *t) != UNREACHED))
         });
         if held {
             continue;
@@ -311,7 +322,7 @@ pub fn search(
         settled = Some(ways.nodes.len());
         ways.nodes.push(Node {
             room: r.room,
-            exit: r.exit.clone(),
+            exit: std::mem::take(&mut r.exit),
             value: r.value,
             hops: r.hops,
             blind: r.blind,
@@ -343,8 +354,9 @@ fn resolved(atlas: &Atlas, mover: Mover, ways: &Ways, (room, at): Stop) -> bool 
     }
     Atlas::EXITS.iter().all(|side| {
         let far = atlas.rooms.get(&neighbour(room, *side));
-        stretches(Some(grid), far, *side)
-            .iter()
-            .all(|s| s.iter().any(|t| dists.iter().any(|d| d[*t] != UNREACHED)))
+        stretches(Some(grid), far, *side).all(|s| {
+            s.iter()
+                .any(|(t, _)| dists.iter().any(|d| d[*t] != UNREACHED))
+        })
     })
 }

@@ -98,6 +98,10 @@ World ──▶ Derived ──▶ decisions ──▶ Intents
 - Decision functions in `Fight`, `Economy`, `Strategy` take `Derived` (and
   `Atlas`), not `World`. What a function reads is its signature; a `World`
   parameter below the deriving stage is a review flag.
+- Tiles of one room are a `TileSet` (a bit a tile) and a value per tile a
+  `Table<T>` (indexed `y*50+x`), never a `BTreeSet<Tile>`/`BTreeMap<Tile, _>`:
+  a room is 2,500 tiles, the bitmap needs no allocation and walks in the same
+  order. `from_exits` as a `BTreeSet` alone was a third of fight's tick.
 - **One cache exists**: `Atlas`'s flood table of goal-seeded reverse
   floods, keyed by (room, goal tiles and range — or the exit toward the next
   room —, footprint, pace class: the body's step ticks on road, plain and
@@ -905,7 +909,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 | `App/Bindings.fs` | `screeps-game-api`, `app/js.rs` | ✅ plus `cpu.limit` and segment writes |
 | `App/World.fs`, `Main.fs` shell | `app/world.rs`, `wire.rs`, `driver.rs`, `core/tick.rs` | ✅ `World`: terrain, controllers, sources, minerals, structures, sites, piles, remains, hostiles, our creeps with bodies and stores; per-module CPU, fault isolation, switches, recorder, observe segment |
 | `Types/Rules.fs` `Engine`, `Types/Vocabulary.fs`, `Types/Lists.fs` | `core/engine.rs`, `vocabulary.rs`, `lists.rs` | ✅ `Engine` less policy (`guardCap`) and season (`reactorCapacity`), plus part costs, regen time and level progress; `Vocabulary` less `Task` (Economy's) and with season resources as `Resource.Other` |
-| `Core/Atlas.fs`, `Grid.fs`, `Geometry.fs` | `core/atlas/` | ✅ tile index `y*50+x` (the terrain buffer's), the flood, footprint on every query, a minimal room graph, the flood table. Known gaps: a route is chosen without the footprint (a Quad can be routed through a one-tile gap); boosted CARRY is priced unboosted. `TileSet` waits for its first reader |
+| `Core/Atlas.fs`, `Grid.fs`, `Geometry.fs` | `core/atlas/` | ✅ tile index `y*50+x` (the terrain buffer's), the flood, footprint on every query, a minimal room graph, the flood table. Known gaps: a route is chosen without the footprint (a Quad can be routed through a one-tile gap); boosted CARRY is priced unboosted. |
 | `Decide/Resolver.fs` | `core/mv/` | ✅ arbitration (two-tier eviction, best chain, displacer's onward last) and `Plan` wishes; re-derived each tick from `Atlas.firstStep` (§1's "path" key is not stored). Fight steps ✅ in `fight/tactics.rs` (kite, close and pursue, retreat), without v1's threat maps; formation stepping comes with `Siege` |
 | `Decide/Pool, Matcher, Planner, Quota, Spawns, Price, Bodies` | `core/economy/` | ✅ one world pool, matcher, quota and casts, wired as the `economy` module (`economy/run.rs`): match, cast, act in range, wish toward the target; assignments in `Memory.v2.assignments`. The RCL2–4 chain: a harvester on each source's post, haulers from built containers, the controller's buffer and its upgraders, the surplus split between upgraders and workers after the reserve (§5, `declarations.reserve`). Declared outposts (`declarations.outposts`) are worked while no armed one in the room reaches their work, and while no armed one last seen in a blind room outlives the tick. Known gaps: claims are not yet declared; cross-room travel prices each room between at a room's side |
 | `Decide/Labs, Layout` | `Economy`, `Layout` | Layout ✅ in the tick after `economy`: a standing plan per room, sites in plan order as the level allows, towers on hostiles. Labs ✅: the cluster's reaction plan per tick and the boost a cast asks for (§5, §6.5) |

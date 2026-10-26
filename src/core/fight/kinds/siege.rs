@@ -88,23 +88,24 @@ pub fn next_razed(room: &Room, walk: impl Fn(&Structure) -> i32) -> Option<&Stru
     let structures = &room.structures;
     let sources: Vec<Pos> = room.sources.iter().map(|s| s.pos.clone()).collect();
     let theirs = || structures.iter().filter(|s| s.owner.is_theirs());
+    let charged: Vec<&Pos> = theirs()
+        .filter(|t| {
+            t.kind.is_tower() && t.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
+        })
+        .map(|t| &t.pos)
+        .collect();
     let struck = |at: &Pos| -> i32 {
-        theirs()
-            .filter(|t| {
-                t.kind.is_tower()
-                    && t.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
-            })
-            .filter_map(|t| t.pos.range(at))
+        (charged.iter().filter_map(|t| t.range(at)))
             .map(engine::tower_attack_at)
             .sum()
     };
 
-    theirs().filter(|s| razed(&s.kind)).min_by_key(|s| {
+    theirs().filter(|s| razed(&s.kind)).min_by_key(|&s| {
         (
             struck(&s.pos),
             std::cmp::Reverse(taken(s, &sources)),
             walk(s),
-            s.id.clone(),
+            s.id.as_str(),
         )
     })
 }

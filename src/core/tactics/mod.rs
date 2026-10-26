@@ -760,10 +760,7 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
         let routed: Vec<(i32, Pos)> = sight
             .homes
             .iter()
-            .filter_map(|p| {
-                tree.route(&room, &p.room)
-                    .map(|rooms| (rooms.len() as i32, p.clone()))
-            })
+            .filter_map(|p| tree.crossings(&room, &p.room).map(|n| (n, p.clone())))
             .collect();
 
         routed

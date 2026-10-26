@@ -258,8 +258,8 @@ pub fn nearest<'t>(
     })
     .or_else(|| {
         least(atlas, &|_atlas, home| {
-            (trees(&home.room)?.route(&at.room, &home.room))
-                .map(|rooms| Atlas::crossing_ticks() * (rooms.len() as i32 - 1))
+            (trees(&home.room)?.crossings(&at.room, &home.room))
+                .map(|n| Atlas::crossing_ticks() * n)
         })
     })
 }

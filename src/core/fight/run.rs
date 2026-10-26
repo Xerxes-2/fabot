@@ -365,11 +365,11 @@ impl<'a> Scene<'a> {
 
     fn walk_to(&self, atlas: &Atlas, e: &Engagement, from: &str) -> Option<i32> {
         let hops = Scene::hops(e);
-        let rooms = match self.walks.get(&(e.room.clone(), hops)) {
-            Some(tree) => tree.route(from, &e.room),
-            None => atlas.route(self.avoid, hops, from, &e.room),
+        let crossed = match self.walks.get(&(e.room.clone(), hops)) {
+            Some(tree) => tree.crossings(from, &e.room),
+            None => (atlas.route(self.avoid, hops, from, &e.room)).map(|r| r.len() as i32 - 1),
         };
-        rooms.map(|rooms| engine::ROOM_SIDE * (rooms.len() as i32 - 1))
+        crossed.map(|n| engine::ROOM_SIDE * n)
     }
 
     /// A home's Defend is the home's alone.

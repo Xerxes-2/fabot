@@ -19,18 +19,29 @@ pub enum Task {
 
 /// Injective because an object id and a resource name hold no `:`.
 pub fn task_id(task: &Task) -> String {
-    match task {
-        Task::Harvest(id) => format!("h:{id}"),
-        Task::Withdraw(id, r) => format!("w:{}:{}", id, resource_name(r)),
-        Task::Pickup(id, r) => format!("p:{}:{}", id, resource_name(r)),
-        Task::Refill(id, r) => format!("f:{}:{}", id, resource_name(r)),
-        Task::Build(id) => format!("b:{id}"),
-        Task::Repair(id) => format!("r:{id}"),
-        Task::Upgrade(id) => format!("u:{id}"),
-        Task::Reserve(id) => format!("v:{id}"),
-        Task::Claim(id) => format!("c:{id}"),
-        Task::Scout(room) => format!("s:{room}"),
+    let (tag, id, r) = match task {
+        Task::Harvest(id) => ("h:", id, None),
+        Task::Withdraw(id, r) => ("w:", id, Some(r)),
+        Task::Pickup(id, r) => ("p:", id, Some(r)),
+        Task::Refill(id, r) => ("f:", id, Some(r)),
+        Task::Build(id) => ("b:", id, None),
+        Task::Repair(id) => ("r:", id, None),
+        Task::Upgrade(id) => ("u:", id, None),
+        Task::Reserve(id) => ("v:", id, None),
+        Task::Claim(id) => ("c:", id, None),
+        Task::Scout(room) => ("s:", room, None),
+    };
+    // Pushed, not `format!`: an id a tick per offer, and the formatter costs.
+    let r = r.map(resource_name);
+    let mut out =
+        String::with_capacity(tag.len() + id.len() + r.as_ref().map_or(0, |r| r.len() + 1));
+    out.push_str(tag);
+    out.push_str(id);
+    if let Some(r) = r {
+        out.push(':');
+        out.push_str(&r);
     }
+    out
 }
 
 pub fn of_task_id(id: &str) -> Option<Task> {

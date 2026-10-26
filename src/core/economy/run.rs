@@ -35,23 +35,19 @@ fn target_of(offer: &Offer) -> Target {
     }
 }
 
-/// `Atlas::route` without a search, off a tree `Derived` grew from either end.
-fn route_of(atlas: &Atlas, derived: &Derived, target: &Target, from: &str) -> Option<Vec<String>> {
-    let tree = (derived.routes.get(&target.room)).or_else(|| derived.routes.get(from));
-    match tree {
-        Some(tree) if target.avoid.is_empty() && target.max_hops == tick::REACH_HOPS => {
-            tree.route(from, &target.room)
-        }
-        _ => atlas.route(&target.avoid, target.max_hops, from, &target.room),
-    }
-}
-
+/// The ticks from `a` to `b`: in one room its range, else its crossings off
+/// a tree `Derived` grew from either end, a search only without one.
 fn distance(atlas: &Atlas, derived: &Derived, a: &Pos, b: &Pos) -> Option<i32> {
-    match a.range(b) {
-        Some(r) => Some(r),
-        None => route_of(atlas, derived, &tick::target_at(b, 0), &a.room)
-            .map(|rooms| Atlas::crossing_ticks() * (rooms.len() as i32 - 1)),
+    if let Some(r) = a.range(b) {
+        return Some(r);
     }
+    let tree = (derived.routes.get(&b.room)).or_else(|| derived.routes.get(&a.room));
+    let crossed = match tree {
+        Some(tree) => tree.crossings(&a.room, &b.room),
+        None => (atlas.route(&BTreeSet::new(), tick::REACH_HOPS, &a.room, &b.room))
+            .map(|r| r.len() as i32 - 1),
+    };
+    crossed.map(|n| Atlas::crossing_ticks() * n)
 }
 
 /// Re-chosen only on arrival off the exit band, so a walk is never turned

@@ -532,12 +532,12 @@ fn a_route_read_off_its_targets_tree_is_the_route_searched() {
         let hops = 1 + dice.below(4);
         let from = tiles::room_name(0, 0);
         let onto = tiles::room_name(dice.between(-128, 127) % 3, dice.between(-128, 127) % 3);
-        assert_eq!(
-            atlas
-                .tree(&BTreeSet::new(), hops, &onto)
-                .route(&from, &onto),
-            atlas.route(&BTreeSet::new(), hops, &from, &onto)
-        );
+        let tree = atlas.tree(&BTreeSet::new(), hops, &onto);
+        let routed = atlas.route(&BTreeSet::new(), hops, &from, &onto);
+        assert_eq!(tree.route(&from, &onto), routed);
+        let crossed = routed.map(|r| r.len() as i32 - 1);
+        assert_eq!(tree.crossings(&from, &onto), crossed);
+        assert_eq!(tree.crossings(&onto, &from), crossed);
     }
 }
 
