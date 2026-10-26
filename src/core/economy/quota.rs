@@ -8,7 +8,7 @@ use std::rc::Rc;
 use crate::core::HashMap;
 use crate::core::engine;
 use crate::core::vocabulary::{BodyPart, part_count_in};
-use crate::core::world::Pos;
+use crate::core::world::{Pos, RoomName};
 
 use super::bodies::{self, Pattern};
 use super::derived::{Body, Colony, Derived, Ground, SourceFact, key_parts_in};
@@ -33,7 +33,7 @@ pub struct Want {
 
 #[derive(Clone, Debug)]
 pub struct Cast {
-    pub colony: String,
+    pub colony: RoomName,
     pub spawn: String,
     pub body: Vec<BodyPart>,
     pub name: String,
@@ -120,7 +120,7 @@ struct Demand {
 fn seated(pattern: Pattern, at: &Pos, wanted: i32, seats: i32, value: Value) -> Demand {
     Demand {
         pattern,
-        at: at.clone(),
+        at: *at,
         wanted: wanted.max(0),
         seats: seats.max(0),
         spill: 0.0,
@@ -143,7 +143,7 @@ fn body_for(colony: &Colony, d: &Demand) -> Option<Vec<BodyPart>> {
 }
 
 fn home_of(colony: &Colony) -> Pos {
-    colony.spawns[0].pos.clone()
+    colony.spawns[0].pos
 }
 
 /// The walk there loaded and back empty: an empty Carry weighs nothing, so
@@ -183,7 +183,7 @@ fn banks_remote(derived: &Derived, ci: usize) -> bool {
 
 pub type Near<'a> = dyn FnMut(&dyn Fn(usize) -> bool, &Pos) -> Option<usize> + 'a;
 
-pub fn owners(near: &mut Near, derived: &Derived) -> BTreeMap<String, usize> {
+pub fn owners(near: &mut Near, derived: &Derived) -> BTreeMap<RoomName, usize> {
     let mut owners = BTreeMap::new();
     for (gi, ground) in derived.grounds.iter().enumerate() {
         let at = || {
@@ -196,7 +196,7 @@ pub fn owners(near: &mut Near, derived: &Derived) -> BTreeMap<String, usize> {
             at().and_then(|at| near(&|ci| banks_remote(derived, ci), at))
         };
         if let Some(ci) = owner {
-            owners.insert(ground.room.clone(), ci);
+            owners.insert(ground.room, ci);
         }
     }
     owners
@@ -231,9 +231,9 @@ fn haul_flows(ground: &Ground, s: &SourceFact, post: &Pos, carried: f64) -> Vec<
 
             match &ground.receiver {
                 Some(r) if r.role.is_hub() && carried > 0.0 => {
-                    vec![(post.clone(), left), (r.pos.clone(), carried)]
+                    vec![(*post, left), (r.pos, carried)]
                 }
-                _ => vec![(post.clone(), left)],
+                _ => vec![(*post, left)],
             }
         }
     }
@@ -243,7 +243,7 @@ fn haul_flows(ground: &Ground, s: &SourceFact, post: &Pos, carried: f64) -> Vec<
 fn link_drain(derived: &Derived, ground: &Ground) -> f64 {
     match (&ground.receiver, &ground.controller) {
         (Some(r), Some(c)) if r.role.is_controller() => {
-            f64::from(super::pool::upgrade_drain(derived, &ground.room, c.level))
+            f64::from(super::pool::upgrade_drain(derived, ground.room, c.level))
         }
         (Some(_), _) => f64::INFINITY,
         (None, _) => 0.0,
@@ -253,7 +253,7 @@ fn link_drain(derived: &Derived, ground: &Ground) -> f64 {
 /// A haul trip is to the dearest sink, not the nearest: a ring fills in a
 /// trip, and the flow that goes on all day is to the far sink.
 fn ground_demands(
-    owners: &BTreeMap<String, usize>,
+    owners: &BTreeMap<RoomName, usize>,
     walks: &mut dyn Walks,
     derived: &Derived,
 ) -> Vec<Demand> {
@@ -269,14 +269,8 @@ fn ground_demands(
     let sinks_of = |ci: usize| -> Vec<Pos> {
         let ground = &derived.grounds[ci];
         let mut sinks = vec![home_of(&colonies[ci])];
-        sinks.extend(ground.feed.iter().map(|f| f.pos.clone()));
-        sinks.extend(
-            ground
-                .stores
-                .iter()
-                .filter(|st| st.owned)
-                .map(|st| st.pos.clone()),
-        );
+        sinks.extend(ground.feed.iter().map(|f| f.pos));
+        sinks.extend(ground.stores.iter().filter(|st| st.owned).map(|st| st.pos));
         sinks
     };
 
@@ -489,7 +483,7 @@ fn castable(derived: &Derived, d: &Demand, ci: usize) -> bool {
 }
 
 fn spend_demands(
-    owners: &BTreeMap<String, usize>,
+    owners: &BTreeMap<RoomName, usize>,
     walks: &mut dyn Walks,
     derived: &Derived,
     others: &[Demand],
@@ -607,12 +601,12 @@ fn spend_demands(
         let range = super::task::RANGE_UPGRADE;
 
         let fetches: Vec<(Pos, i32)> = match (&ground.buffer, storage) {
-            (Some(buffer), _) => vec![(buffer.pos.clone(), 1)],
-            (None, Some(storage)) => vec![(storage.pos.clone(), 1)],
+            (Some(buffer), _) => vec![(buffer.pos, 1)],
+            (None, Some(storage)) => vec![(storage.pos, 1)],
             (None, None) => ground
                 .sources
                 .iter()
-                .map(|s| (s.post.clone().unwrap_or_else(|| s.pos.clone()), s.dug))
+                .map(|s| (s.post.unwrap_or(s.pos), s.dug))
                 .collect(),
         };
 
@@ -708,7 +702,7 @@ fn worker_floor(ground: &Ground) -> i32 {
 /// A tie keeps the demands' order (`sort_by` is stable).
 fn cast_order(
     derived: &Derived,
-    owners: &BTreeMap<String, usize>,
+    owners: &BTreeMap<RoomName, usize>,
     d: &Demand,
     caster: Option<usize>,
     ret: Option<f64>,
@@ -732,7 +726,7 @@ fn cast_order(
 fn expiring_now(
     walks: &mut dyn Walks,
     derived: &Derived,
-    owners: &BTreeMap<String, usize>,
+    owners: &BTreeMap<RoomName, usize>,
     body: &Body,
 ) -> bool {
     let spawn_time = lead(body, 0);
@@ -779,7 +773,7 @@ impl Foundry<'_> {
         self.bank[ci] -= engine::body_cost(&body);
 
         self.casts.push(Cast {
-            colony: self.colonies[ci].room.clone(),
+            colony: self.colonies[ci].room,
             spawn: spawn.id.clone(),
             name: bodies::cast_name(pattern, self.time, &spawn.name),
             body,
@@ -793,7 +787,7 @@ impl Foundry<'_> {
 pub fn plan(
     walks: &mut dyn Walks,
     derived: &Derived,
-    owners: &BTreeMap<String, usize>,
+    owners: &BTreeMap<RoomName, usize>,
     pool: &[super::pool::Offer],
     assignments: &BTreeMap<String, String>,
 ) -> Plan {
@@ -825,8 +819,8 @@ pub fn plan(
             .get(&body.name)
             .and_then(|id| targets.get(id.as_str()))
         {
-            Some(pos) => (*pos).clone(),
-            None => body.pos.clone(),
+            Some(pos) => *(*pos),
+            None => body.pos,
         }
     };
 
@@ -955,7 +949,7 @@ pub fn plan(
 
         let serves = |pattern: Pattern, body: &Body| -> bool {
             (body.pattern == pattern || body.pattern.is_hauler())
-                && [work_at(body).room, body.pos.room.clone()]
+                && [work_at(body).room, body.pos.room]
                     .iter()
                     .any(|room| owners.get(room) == Some(&ci))
         };
@@ -1029,7 +1023,7 @@ pub fn plan(
                         order,
                         Seat {
                             pattern: d.pattern,
-                            at: d.at.clone(),
+                            at: d.at,
                             parts: left,
                             colony: caster,
                             body: body.clone(),
@@ -1146,11 +1140,7 @@ mod tests {
     impl Flat {
         fn new(derived: &Derived) -> Flat {
             Flat {
-                homes: derived
-                    .colonies
-                    .iter()
-                    .map(|c| c.spawns[0].pos.clone())
-                    .collect(),
+                homes: derived.colonies.iter().map(|c| c.spawns[0].pos).collect(),
             }
         }
 
@@ -1536,11 +1526,11 @@ mod tests {
             let assignments = assigned_in(&derived, &offers);
             let p = plan(&mut flat, &derived, &owners, &offers, &assignments);
 
-            let serves = |room: &str, kind: Option<Pattern>, b: &Body| -> bool {
+            let serves = |room: RoomName, kind: Option<Pattern>, b: &Body| -> bool {
                 let at = assignments
                     .get(&b.name)
                     .and_then(|id| offers.iter().find(|o| &o.id == id))
-                    .map_or_else(|| b.pos.room.clone(), |o| o.target.room.clone());
+                    .map_or_else(|| b.pos.room, |o| o.target.room);
 
                 (Some(b.pattern) == kind || b.pattern == Pattern::Hauler) && at == room
             };
@@ -1551,7 +1541,7 @@ mod tests {
                 assert!(
                     !c.floor
                         || kind == Some(Pattern::Harvester)
-                        || !derived.bodies.iter().any(|b| serves(&c.colony, kind, b)),
+                        || !derived.bodies.iter().any(|b| serves(c.colony, kind, b)),
                     "{}",
                     c.name
                 );

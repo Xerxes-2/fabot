@@ -10,7 +10,7 @@ use fabot::core::layout::{ground, plan, sites};
 use fabot::core::tiles::{self, Tile};
 use fabot::core::vocabulary::Resource;
 use fabot::core::world::{
-    Controller, Kind, Mineral, Owner, Pos, Room, Source, Store, Structure, terrain,
+    Controller, Kind, Mineral, Owner, Pos, Room, RoomName, Source, Store, Structure, terrain,
 };
 use serde_json::{Value, json};
 
@@ -18,11 +18,11 @@ fn main() {
     let mut text = String::new();
     std::io::stdin().read_to_string(&mut text).unwrap();
     let input: Value = serde_json::from_str(&text).unwrap();
-    let name = input["room"].as_str().unwrap().to_string();
+    let name = RoomName::named(input["room"].as_str().unwrap());
     let level = input["level"].as_i64().unwrap() as i32;
     let pos = |e: &Value| {
         Pos::new(
-            name.as_str(),
+            name,
             e[0].as_i64().unwrap() as i32,
             e[1].as_i64().unwrap() as i32,
         )
@@ -30,7 +30,7 @@ fn main() {
     let each = |key: &str| -> Vec<Pos> { input[key].as_array().unwrap().iter().map(pos).collect() };
 
     let room = Room {
-        name: name.clone(),
+        name,
         terrain: terrain::of(
             input["terrain"]
                 .as_str()
@@ -99,7 +99,7 @@ fn main() {
         built.push(Structure {
             id: format!("s{}", built.len()),
             kind,
-            pos: tiles::to_pos(&name, tile),
+            pos: tiles::to_pos(name, tile),
             owner: Owner::Ours,
             hits: 1,
             hits_max: 1,

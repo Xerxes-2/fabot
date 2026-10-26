@@ -24,8 +24,8 @@ pub(crate) mod dice {
     use crate::core::tick::{Declared, Outpost};
     use crate::core::vocabulary::{BodyPart, Boost, Compound, Ore, Resource, part_count_in};
     use crate::core::world::{
-        Controller, Creep, Kind, Mineral, Owner, Part, Pile, Pos, Remains, Room, Site, Source,
-        Spawn, Store, Structure, World,
+        Controller, Creep, Kind, Mineral, Owner, Part, Pile, Pos, Remains, Room, RoomName, Site,
+        Source, Spawn, Store, Structure, World,
     };
 
     use super::bodies;
@@ -54,7 +54,7 @@ pub(crate) mod dice {
 
     /// The scenes' tile: every body and every offer stand on it.
     pub fn at() -> Pos {
-        Pos::new("r", 25, 25)
+        Pos::new(RoomName::named("W9N9"), 25, 25)
     }
 
     pub fn task(dice: &mut Dice, target: &str) -> Task {
@@ -68,7 +68,7 @@ pub(crate) mod dice {
             5 => Task::Repair(target.to_string()),
             6 => Task::Upgrade(target.to_string()),
             7 => Task::Reserve(target.to_string()),
-            8 => Task::Scout(target.to_string()),
+            8 => Task::Scout(at().room),
             _ => Task::Claim(target.to_string()),
         }
     }
@@ -155,11 +155,11 @@ pub(crate) mod dice {
         Store { held, capacity }
     }
 
-    pub fn pos(dice: &mut Dice, room: &str) -> Pos {
+    pub fn pos(dice: &mut Dice, room: RoomName) -> Pos {
         Pos::new(room, dice.between(1, 48), dice.between(1, 48))
     }
 
-    pub fn structure(dice: &mut Dice, room: &str, owned: bool, i: usize) -> Structure {
+    pub fn structure(dice: &mut Dice, room: RoomName, owned: bool, i: usize) -> Structure {
         let kind = if owned {
             dice.pick_of(&[
                 Kind::Extension,
@@ -215,12 +215,12 @@ pub(crate) mod dice {
     }
 
     pub fn room_gen(dice: &mut Dice, i: usize) -> (Room, Vec<Spawn>) {
-        let name = format!("r{i}");
+        let name = RoomName::new(i as i32, 0);
         let owned = dice.below(3) < 2;
         let reserved = dice.chance(2);
         let level = dice.between(1, 8);
         let downgrade = dice.between(0, 200_000);
-        let cpos = pos(dice, &name);
+        let cpos = pos(dice, name);
         let holder = dice.pick_of(&[Owner::Stranger("someone".to_string()), Owner::Ours]);
 
         let controller = Controller {
@@ -245,7 +245,7 @@ pub(crate) mod dice {
         let sources: Vec<Source> = (0..dice.between(0, 2))
             .map(|k| Source {
                 id: format!("{name}src{k}"),
-                pos: pos(dice, &name),
+                pos: pos(dice, name),
                 energy: 1000,
                 energy_capacity: 3000,
                 ticks_to_regeneration: 0,
@@ -253,7 +253,7 @@ pub(crate) mod dice {
             .collect();
 
         let structures: Vec<Structure> = (0..dice.between(0, 8))
-            .map(|k| structure(dice, &name, owned, k as usize))
+            .map(|k| structure(dice, name, owned, k as usize))
             .collect();
 
         let mut spawns: Vec<Spawn> = Vec::new();
@@ -262,7 +262,7 @@ pub(crate) mod dice {
             spawns.push(Spawn {
                 id: format!("{name}p{k}"),
                 name: format!("{name}sp{k}"),
-                pos: pos(dice, &name),
+                pos: pos(dice, name),
                 spawning: match busy {
                     0 => None,
                     1 => Some(oven_of(
@@ -286,12 +286,12 @@ pub(crate) mod dice {
 
         let bank_capacity = dice.pick(&[300, 550, 800, 1300, 5600]);
         let bank = dice.between(0, bank_capacity);
-        let site_pos = pos(dice, &name);
+        let site_pos = pos(dice, name);
         let has_site = dice.chance(2);
         let pile_amount = dice.between(0, 3000);
 
         let room = Room {
-            name: name.clone(),
+            name,
             terrain: crate::core::world::terrain::of(vec![0; 2500]),
             controller: Some(controller),
             energy_available: if owned { bank } else { 0 },
@@ -303,7 +303,7 @@ pub(crate) mod dice {
                 vec![Site {
                     id: format!("{name}site"),
                     kind: Kind::Extension,
-                    pos: site_pos.clone(),
+                    pos: site_pos,
                     owner: Owner::Ours,
                     progress: 100,
                     progress_total: 3000,
@@ -328,9 +328,9 @@ pub(crate) mod dice {
         (room, spawns)
     }
 
-    pub fn creep_gen(dice: &mut Dice, rooms: &[String], i: usize) -> Creep {
+    pub fn creep_gen(dice: &mut Dice, rooms: &[RoomName], i: usize) -> Creep {
         let room = dice.pick_of(rooms);
-        let at = pos(dice, &room);
+        let at = pos(dice, room);
         let prefix = dice.pick(&["worker", "harvester", "hauler", "claimer", "x"]);
         let n = dice.between(1, 12);
         let parts: Vec<BodyPart> = (0..n)
@@ -378,7 +378,7 @@ pub(crate) mod dice {
     pub fn world(dice: &mut Dice) -> Generated {
         let nr = dice.between(1, 4);
         let rooms: Vec<(Room, Vec<Spawn>)> = (0..nr).map(|i| room_gen(dice, i as usize)).collect();
-        let names: Vec<String> = rooms.iter().map(|(r, _)| r.name.clone()).collect();
+        let names: Vec<RoomName> = rooms.iter().map(|(r, _)| r.name).collect();
 
         let creeps: Vec<Creep> = (0..dice.between(0, 12))
             .map(|i| creep_gen(dice, &names, i as usize))
@@ -398,17 +398,17 @@ pub(crate) mod dice {
             .collect();
 
         let declared = |(r, c): &(&Room, &Controller)| Outpost {
-            room: r.name.clone(),
+            room: r.name,
             controller: Declared {
                 id: c.id.clone(),
-                pos: c.pos.clone(),
+                pos: c.pos,
             },
             sources: r
                 .sources
                 .iter()
                 .map(|s| Declared {
                     id: s.id.clone(),
-                    pos: s.pos.clone(),
+                    pos: s.pos,
                 })
                 .collect(),
         };

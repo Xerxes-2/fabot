@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::fight::shape::{Cast, Engagement, Group};
 use super::layout::shape::Standing;
 use super::strategy::intel::Scout;
+use super::world::RoomName;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct State {
@@ -11,14 +12,14 @@ pub struct State {
     pub off: BTreeSet<String>,
     pub assignments: BTreeMap<String, String>,
     /// Heap only, never in Memory: empty after a reset, so the first tick redraws.
-    pub layout: BTreeMap<String, Standing>,
+    pub layout: BTreeMap<RoomName, Standing>,
     pub groups: Vec<Group>,
     pub engagements: Vec<Engagement>,
     pub casts: Vec<Cast>,
     /// Strategy's `Scout room` declarations, rebuilt each tick before Economy reads them.
     pub scouts: Vec<Scout>,
     /// Strategy's sweep candidates this tick, the stalest seen first.
-    pub preyed: Vec<String>,
+    pub preyed: Vec<RoomName>,
 }
 
 impl State {

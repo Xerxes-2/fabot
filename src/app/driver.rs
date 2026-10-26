@@ -12,7 +12,7 @@ use crate::core::economy::abandon;
 use crate::core::layout::shape::Standing;
 use crate::core::strategy::intel::{self, Intel};
 use crate::core::tick::{self, Context, Declarations};
-use crate::core::world::Sightings;
+use crate::core::world::{RoomName, Sightings};
 
 const FAULTS_KEPT: usize = 20;
 /// A reset loses at most this many ticks of sight.
@@ -22,7 +22,7 @@ struct Heap {
     /// A module named here is skipped and its last output not replayed.
     faults: Vec<wire::Fault>,
     /// Heap only, so empty after a reset, when each module re-derives it.
-    standing: BTreeMap<String, Standing>,
+    standing: BTreeMap<RoomName, Standing>,
     /// Heap only: after a reset every outpost reads clear, and the first body
     /// back in one that is not sees what stands there and stands it down again.
     sightings: Sightings,
@@ -86,8 +86,8 @@ fn run_tick() -> Result<(), String> {
     let start = clock();
     let drain = (state.engagements.iter())
         .find(|e| e.phase == crate::core::fight::shape::Phase::Draining)
-        .map(|e| e.room.clone());
-    let (world, pass) = world::of_game(&mut maps, &declarations, drain.as_deref());
+        .map(|e| e.room);
+    let (world, pass) = world::of_game(&mut maps, &declarations, drain);
     let refused = declarations.refuse(&world.closed);
     sightings = crate::core::world::sightings::step(&world, sightings);
     let mut unread = Intel::new();
@@ -96,7 +96,7 @@ fn run_tick() -> Result<(), String> {
     phases.push(("world".to_string(), clock() - start));
 
     let start = clock();
-    let seen = (rows.iter()).map(|(room, row)| (room.as_str(), row.lairs.as_deref()));
+    let seen = (rows.iter()).map(|(room, row)| (*room, row.lairs.as_deref()));
     atlas = Atlas::following(atlas, &world, seen, maps.terrains());
     phases.push(("atlas".to_string(), clock() - start));
 
@@ -146,7 +146,7 @@ fn run_tick() -> Result<(), String> {
         ("atlasHits".to_string(), atlas.hits()),
         ("atlasMisses".to_string(), atlas.misses()),
     ];
-    for room in declarations.abandon.iter().filter_map(|r| world.room(r)) {
+    for room in declarations.abandon.iter().filter_map(|r| world.room(*r)) {
         counts.push((format!("abandon:{}", room.name), abandon::left(room)));
     }
     for room in &refused.rooms {

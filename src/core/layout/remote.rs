@@ -9,7 +9,7 @@ use crate::core::grid::Footprint;
 use crate::core::intents::{Intent, RoomAct};
 use crate::core::tick::{self, Outpost};
 use crate::core::tiles::{self, Tile, TileSet};
-use crate::core::world::{Kind, Owner, Pos, Room, World, terrain};
+use crate::core::world::{Kind, Owner, Pos, Room, RoomName, World, terrain};
 
 use super::sites::SITES_IN_FLIGHT;
 
@@ -36,7 +36,7 @@ fn ours(room: &Room) -> bool {
 /// The engine builds nothing on the border.
 fn walk(atlas: &mut Atlas, target: &Target, from: &Pos) -> Vec<Pos> {
     let mut path: Vec<Pos> = Vec::new();
-    let mut room = from.room.clone();
+    let mut room = from.room;
     let mut tile = tiles::of_pos(from);
     let mut field = atlas.field(HAULER, target, from);
 
@@ -51,19 +51,19 @@ fn walk(atlas: &mut Atlas, target: &Target, from: &Pos) -> Vec<Pos> {
             Some(next) => {
                 if tiles::on_edge(next) {
                     match (
-                        tiles::room_toward(&room, tiles::exit_of(next)),
+                        tiles::room_toward(room, tiles::exit_of(next)),
                         tiles::landing(next),
                     ) {
                         (Some(onto), Some(landing)) => {
                             room = onto;
                             tile = landing;
-                            field = atlas.field(HAULER, target, &tiles::to_pos(&room, tile));
+                            field = atlas.field(HAULER, target, &tiles::to_pos(room, tile));
                         }
                         _ => field = None,
                     }
                 } else {
                     tile = next;
-                    path.push(tiles::to_pos(&room, tile));
+                    path.push(tiles::to_pos(room, tile));
                 }
             }
         }
@@ -73,8 +73,8 @@ fn walk(atlas: &mut Atlas, target: &Target, from: &Pos) -> Vec<Pos> {
 }
 
 fn opened(
-    taken: &mut BTreeMap<String, TileSet>,
-    pending: &mut BTreeMap<String, i32>,
+    taken: &mut BTreeMap<RoomName, TileSet>,
+    pending: &mut BTreeMap<RoomName, i32>,
     planned: &[Intent],
     room: &Room,
 ) {
@@ -105,15 +105,15 @@ fn opened(
         }
     }
 
-    taken.insert(room.name.clone(), tiles_open);
-    pending.insert(room.name.clone(), n);
+    taken.insert(room.name, tiles_open);
+    pending.insert(room.name, n);
 }
 
 #[allow(clippy::too_many_arguments)]
 fn place(
-    rooms: &BTreeMap<String, &Room>,
-    taken: &mut BTreeMap<String, TileSet>,
-    pending: &mut BTreeMap<String, i32>,
+    rooms: &BTreeMap<RoomName, &Room>,
+    taken: &mut BTreeMap<RoomName, TileSet>,
+    pending: &mut BTreeMap<RoomName, i32>,
     planned: &[Intent],
     budget: &mut i32,
     intents: &mut Vec<Intent>,
@@ -134,10 +134,10 @@ fn place(
     let now = pending[&room.name];
 
     if now < SITES_IN_FLIGHT && taken.get_mut(&room.name).unwrap().insert(tile) {
-        pending.insert(room.name.clone(), now + 1);
+        pending.insert(room.name, now + 1);
         *budget -= 1;
         intents.push(Intent::Room(
-            room.name.clone(),
+            room.name,
             RoomAct::CreateSite(pos.x, pos.y, kind.clone()),
         ));
     }
@@ -145,16 +145,16 @@ fn place(
 
 fn sink_for<'t>(
     atlas: &mut Atlas,
-    trees: &dyn Fn(&str) -> Option<&'t Tree>,
+    trees: &dyn Fn(RoomName) -> Option<&'t Tree>,
     homes: &[Pos],
-    rooms: &BTreeMap<String, &Room>,
+    rooms: &BTreeMap<RoomName, &Room>,
     room: &Room,
 ) -> Option<Pos> {
     let from = room
         .controller
         .as_ref()
-        .map(|c| c.pos.clone())
-        .or_else(|| room.sources.first().map(|s| s.pos.clone()))?;
+        .map(|c| c.pos)
+        .or_else(|| room.sources.first().map(|s| s.pos))?;
 
     let storage = |i: usize| {
         let home = rooms.get(&homes[i].room)?;
@@ -162,7 +162,7 @@ fn sink_for<'t>(
             .structures
             .iter()
             .find(|s| s.kind.is_storage() && s.owner.is_ours())?;
-        Some(s.pos.clone())
+        Some(s.pos)
     };
 
     let i = tick::nearest(atlas, trees, homes, |i| storage(i).is_some(), &from)?;
@@ -180,9 +180,9 @@ pub fn sites(
 ) -> Vec<Intent> {
     let mut intents: Vec<Intent> = Vec::new();
     let mut budget = budget;
-    let mut taken: BTreeMap<String, TileSet> = BTreeMap::new();
-    let mut pending: BTreeMap<String, i32> = BTreeMap::new();
-    let mut rooms: BTreeMap<String, &Room> = BTreeMap::new();
+    let mut taken: BTreeMap<RoomName, TileSet> = BTreeMap::new();
+    let mut pending: BTreeMap<RoomName, i32> = BTreeMap::new();
+    let mut rooms: BTreeMap<RoomName, &Room> = BTreeMap::new();
 
     let colonies = tick::colonies(world);
 
@@ -190,19 +190,14 @@ pub fn sites(
         if colonies.contains(&room.name)
             || (outposts.iter().any(|o| o.room == room.name) && ours(room))
         {
-            rooms.insert(room.name.clone(), room);
+            rooms.insert(room.name, room);
         }
     }
 
     // Every outpost in one `sites` is priced to the same homes: grow each
     // home's tree once.
-    let trees: HashMap<String, Tree> = (colonies.iter())
-        .map(|home| {
-            (
-                home.clone(),
-                atlas.tree(&BTreeSet::new(), tick::REACH_HOPS, home),
-            )
-        })
+    let trees: HashMap<RoomName, Tree> = (colonies.iter())
+        .map(|home| (*home, atlas.tree(&BTreeSet::new(), tick::REACH_HOPS, *home)))
         .collect();
 
     let homes: Vec<Pos> = colonies
@@ -212,7 +207,7 @@ pub fn sites(
                 .spawns
                 .iter()
                 .find(|s| &s.pos.room == c)
-                .map(|s| s.pos.clone())
+                .map(|s| s.pos)
         })
         .collect();
 
@@ -226,7 +221,7 @@ pub fn sites(
         opened(&mut taken, &mut pending, planned, room);
 
         if budget > 0 && pending[&room.name] < SITES_IN_FLIGHT {
-            let sink = sink_for(atlas, &|room| trees.get(room), &homes, &rooms, room);
+            let sink = sink_for(atlas, &|room| trees.get(&room), &homes, &rooms, room);
 
             if let Some(sink) = sink {
                 let home = tick::target_at(&sink, 1);
@@ -265,7 +260,7 @@ pub fn sites(
                                         atlas,
                                         HAULER,
                                         &home,
-                                        &tiles::to_pos(&room.name, t),
+                                        &tiles::to_pos(room.name, t),
                                     )
                                 {
                                     seats.push((ticks, t));
@@ -282,7 +277,7 @@ pub fn sites(
                                     planned,
                                     &mut budget,
                                     &mut intents,
-                                    &tiles::to_pos(&room.name, *t),
+                                    &tiles::to_pos(room.name, *t),
                                     &Kind::Container,
                                 );
                             }

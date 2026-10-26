@@ -7,7 +7,9 @@ use crate::core::engine;
 use crate::core::exchange::{self, Fighter, fighter};
 use crate::core::tick::{self, Declarations};
 use crate::core::vocabulary::{self, BodyPart, Boost, Compound, Resource};
-use crate::core::world::{Creep, Kind, Owner, Pos, Room, Spawn, Store, Structure, World, terrain};
+use crate::core::world::{
+    Creep, Kind, Owner, Pos, Room, RoomName, Spawn, Store, Structure, World, terrain,
+};
 
 pub type Body = Vec<BodyPart>;
 
@@ -99,7 +101,7 @@ fn with_heal(mut body: Body) -> Body {
 pub fn fighter_of(c: &Creep) -> Fighter {
     let body: Vec<BodyPart> = c.body.iter().map(|p| p.kind).collect();
     let boosts: Vec<Boost> = c.body.iter().map(|p| p.boost).collect();
-    let mut f = fighter::of_parts(&body, &boosts, c.hits, Some(c.pos.clone()));
+    let mut f = fighter::of_parts(&body, &boosts, c.hits, Some(c.pos));
     f.invader = c.owner == Owner::Invader;
     f
 }
@@ -111,7 +113,7 @@ pub fn core_as_hostile(core: &Structure) -> Creep {
         id: core.id.clone(),
         name: core.id.clone(),
         owner: core.owner.clone(),
-        pos: core.pos.clone(),
+        pos: core.pos,
         body: Vec::new(),
         hits: core.hits,
         hits_max: core.hits_max,
@@ -175,12 +177,12 @@ pub fn side_in(room: &Room, bodies: Vec<Fighter>) -> exchange::Side {
         bodies,
         ramparts: ours(Kind::Rampart)
             .into_iter()
-            .map(|s| (s.pos.clone(), s.hits))
+            .map(|s| (s.pos, s.hits))
             .collect::<BTreeMap<_, _>>(),
         towers: ours(Kind::Tower)
             .into_iter()
             .map(|s| exchange::Tower {
-                pos: s.pos.clone(),
+                pos: s.pos,
                 energy: s.store.amount_of(&Resource::Energy),
             })
             .collect(),
@@ -193,7 +195,7 @@ pub fn side_in(room: &Room, bodies: Vec<Fighter>) -> exchange::Side {
 /// cast unboosted rather than held.
 pub fn cluster_boost(world: &World, declarations: &Declarations) -> Option<(&'static str, i32)> {
     let (home, _) = declarations.labs.as_ref()?;
-    let (compound, energy) = tick::home_holds(world, home, Compound::UtriumAcid);
+    let (compound, energy) = tick::home_holds(world, *home, Compound::UtriumAcid);
     let parts =
         (compound / engine::BOOST_MINERAL_PER_PART).min(energy / engine::BOOST_ENERGY_PER_PART);
 
@@ -434,11 +436,11 @@ pub fn kill_order(hostiles: &[Creep]) -> Vec<String> {
 pub fn colony_for(
     colonies: &[&Room],
     spawns: &[Spawn],
-    queued: &BTreeMap<String, i32>,
-    asked: &BTreeMap<String, i32>,
-    walk: impl Fn(&str) -> Option<i32>,
+    queued: &BTreeMap<RoomName, i32>,
+    asked: &BTreeMap<RoomName, i32>,
+    walk: impl Fn(RoomName) -> Option<i32>,
     body: &[BodyPart],
-) -> Option<String> {
+) -> Option<RoomName> {
     let cost = engine::body_cost(body);
     let spawn_ticks = engine::SPAWN_TICKS_PER_PART * body.len() as i32;
 
@@ -459,10 +461,10 @@ pub fn colony_for(
             + i64::from(spawn_ticks) * short / i64::from(cost)
     };
 
-    let ranked: Vec<(i64, String)> = colonies
+    let ranked: Vec<(i64, RoomName)> = colonies
         .iter()
         .filter(|r| r.energy_capacity >= cost)
-        .filter_map(|r| walk(&r.name).map(|w| (i64::from(w) + wait(r), r.name.clone())))
+        .filter_map(|r| walk(r.name).map(|w| (i64::from(w) + wait(r), r.name)))
         .collect();
 
     let mut ranked = ranked;
@@ -505,7 +507,7 @@ mod tests {
 
     fn colony(name: &str, bank: i32) -> Room {
         Room {
-            name: name.to_string(),
+            name: RoomName::named(name),
             terrain: None,
             controller: None,
             energy_available: bank,
@@ -520,16 +522,12 @@ mod tests {
         }
     }
 
-    fn spawns_in(room: &str, count: i32) -> Vec<Spawn> {
+    fn spawns_in(room: RoomName, count: i32) -> Vec<Spawn> {
         (1..=count)
             .map(|x| Spawn {
                 id: format!("{room}-{x}"),
                 name: String::new(),
-                pos: Pos {
-                    room: room.to_string(),
-                    x,
-                    y: 25,
-                },
+                pos: Pos { room, x, y: 25 },
                 spawning: None,
             })
             .collect()
@@ -542,9 +540,19 @@ mod tests {
     fn a_body_is_cast_to_the_colony_that_lands_it_soonest_not_the_nearest() {
         let body: Body = vec![BodyPart::Move; 20];
         let (near, far) = (colony("W1N1", 12_000), colony("W3N1", 12_000));
-        let spawns = [spawns_in("W1N1", 3), spawns_in("W3N1", 1)].concat();
-        let queued = BTreeMap::from([("W1N1".to_string(), 600)]);
-        let walk = |from: &str| Some(if from == "W1N1" { 200 } else { 450 });
+        let spawns = [
+            spawns_in(RoomName::named("W1N1"), 3),
+            spawns_in(RoomName::named("W3N1"), 1),
+        ]
+        .concat();
+        let queued = BTreeMap::from([(RoomName::named("W1N1"), 600)]);
+        let walk = |from: RoomName| {
+            Some(if from == RoomName::named("W1N1") {
+                200
+            } else {
+                450
+            })
+        };
 
         assert_eq!(
             colony_for(
@@ -555,12 +563,18 @@ mod tests {
                 walk,
                 &body
             ),
-            Some("W1N1".to_string()),
+            Some(RoomName::named("W1N1")),
             "a 600-tick queue over three spawns beats a walk 250 longer"
         );
 
         let broke = colony("W1N1", 0);
-        let walk = |from: &str| Some(if from == "W1N1" { 200 } else { 250 });
+        let walk = |from: RoomName| {
+            Some(if from == RoomName::named("W1N1") {
+                200
+            } else {
+                250
+            })
+        };
 
         assert_eq!(
             colony_for(
@@ -571,7 +585,7 @@ mod tests {
                 walk,
                 &body
             ),
-            Some("W3N1".to_string()),
+            Some(RoomName::named("W3N1")),
             "a bank with nothing for the body waits for the refill"
         );
     }

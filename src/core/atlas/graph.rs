@@ -10,6 +10,7 @@ use super::grid::{UNREACHED, weight_of};
 use super::tiles::{self, Table, Tile};
 use super::{Atlas, Coords, Goal, Mover, RoomGrid, Target};
 use crate::core::HashMap;
+use crate::core::world::RoomName;
 
 /// Each stretch's first and last tile on its band.
 pub type Exit = Vec<(Tile, Tile)>;
@@ -92,10 +93,10 @@ impl Ways {
         &self,
         atlas: &Atlas,
         mover: Mover,
-        room: &str,
+        room: RoomName,
         at: Tile,
     ) -> Option<(Rc<Table<i32>>, i32)> {
-        let c = tiles::room_coords(room)?;
+        let c = room.coords();
         let grid = atlas.rooms.get(&c)?;
         let held = |n: &&Node| n.dist.as_ref().is_some_and(|d| holds(mover, d, grid, at));
         let node = self
@@ -113,15 +114,16 @@ impl Tree {
         self.next.get(&room).map_or(&[], |w| w.as_slice())
     }
 
-    pub fn contains(&self, room: &str) -> bool {
-        tiles::room_coords(room).is_some_and(|c| Some(c) == self.root || !self.ways(c).is_empty())
+    pub fn contains(&self, room: RoomName) -> bool {
+        let c = room.coords();
+        Some(c) == self.root || !self.ways(c).is_empty()
     }
 
     /// The rooms from `from` onto `onto`, either of them the root: a tree
     /// grown from `from` is walked back from `onto`.
-    pub fn route(&self, from: &str, onto: &str) -> Option<Vec<String>> {
+    pub fn route(&self, from: RoomName, onto: RoomName) -> Option<Vec<RoomName>> {
         if from == onto {
-            return Some(vec![from.to_string()]);
+            return Some(vec![from]);
         }
         let chain = |at: Coords| -> Option<Vec<Coords>> {
             let mut chain = vec![at];
@@ -133,7 +135,7 @@ impl Tree {
             chain.push(way.next);
             Some(chain)
         };
-        let (a, b) = (tiles::room_coords(from)?, tiles::room_coords(onto)?);
+        let (a, b) = (from.coords(), onto.coords());
         let rooms = if Some(b) == self.root {
             chain(a)?
         } else if Some(a) == self.root {
@@ -144,17 +146,17 @@ impl Tree {
         Some(
             rooms
                 .into_iter()
-                .map(|(x, y)| tiles::room_name(x, y))
+                .map(|(x, y)| RoomName::new(x, y))
                 .collect(),
         )
     }
 
     /// The borders `route` crosses, without naming its rooms.
-    pub fn crossings(&self, from: &str, onto: &str) -> Option<i32> {
+    pub fn crossings(&self, from: RoomName, onto: RoomName) -> Option<i32> {
         if from == onto {
             return Some(0);
         }
-        let (a, b) = (tiles::room_coords(from)?, tiles::room_coords(onto)?);
+        let (a, b) = (from.coords(), onto.coords());
         let start = if Some(b) == self.root {
             a
         } else if Some(a) == self.root {
@@ -214,16 +216,16 @@ pub type Stop = (Coords, Option<Tile>);
 pub fn search(
     atlas: &Atlas,
     mover: Mover,
-    root: &str,
+    root: RoomName,
     target: Option<&Target>,
-    avoid: &BTreeSet<String>,
+    avoid: &BTreeSet<RoomName>,
     max_hops: i32,
     stops: &[Stop],
 ) -> Ways {
     let mut ways = Ways {
         nodes: Vec::new(),
         rooms: HashMap::default(),
-        root: tiles::room_coords(root),
+        root: Some(root.coords()),
     };
     let Some(start) = ways.root.filter(|r| !atlas.closed.contains(r)) else {
         return ways;
@@ -235,7 +237,7 @@ pub fn search(
         return ways;
     }
     let ends: Vec<Coords> = stops.iter().map(|(c, _)| *c).collect();
-    let avoid: Vec<Coords> = avoid.iter().filter_map(|r| tiles::room_coords(r)).collect();
+    let avoid: Vec<Coords> = avoid.iter().map(|r| r.coords()).collect();
     let grid_of = |c: Coords| atlas.rooms.get(&c);
     let blind = |c: Coords| match grid_of(c) {
         Some(grid) => grid.blind,

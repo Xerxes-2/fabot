@@ -10,7 +10,7 @@ use crate::core::engine;
 use crate::core::exchange::{self, Losses, Outcome};
 use crate::core::tactics::{self, Offer, Tactic};
 use crate::core::vocabulary::Resource;
-use crate::core::world::{Controller, Kind, Owner, Pos, Room, Structure};
+use crate::core::world::{Controller, Kind, Owner, Pos, Room, RoomName, Structure};
 
 pub const CANDIDATES: &[Tactic] = &[Tactic::BlobClose];
 
@@ -86,7 +86,7 @@ pub fn taken(s: &Structure, sources: &[Pos]) -> i32 {
 /// whenever that is cheap); then the dearest to him, then the nearest `walk`.
 pub fn next_razed(room: &Room, walk: impl Fn(&Structure) -> i32) -> Option<&Structure> {
     let structures = &room.structures;
-    let sources: Vec<Pos> = room.sources.iter().map(|s| s.pos.clone()).collect();
+    let sources: Vec<Pos> = room.sources.iter().map(|s| s.pos).collect();
     let theirs = || structures.iter().filter(|s| s.owner.is_theirs());
     let charged: Vec<&Pos> = theirs()
         .filter(|t| {
@@ -236,18 +236,18 @@ pub fn denied(room: &Room, post: &Pos) -> i32 {
 }
 
 pub fn exposed(atlas: &Atlas, room: &Room) -> Vec<Pos> {
-    exposed_in(&atlas.from_exits(&room.name), room)
+    exposed_in(&atlas.from_exits(room.name), room)
 }
 
 pub fn exposed_in(reached: &TileSet, room: &Room) -> Vec<Pos> {
     room.sources
         .iter()
         .filter(|s| beside(reached, &s.pos))
-        .map(|s| s.pos.clone())
+        .map(|s| s.pos)
         .collect()
 }
 
-pub fn drain_pays(room: &str, capacity: i32, towers: &[Pos], gate: &tactics::Gate) -> bool {
+pub fn drain_pays(room: RoomName, capacity: i32, towers: &[Pos], gate: &tactics::Gate) -> bool {
     let at = tiles::landing(gate.bounce).unwrap_or(gate.bounce);
     let volley = exchange::tower_strike(towers, &tiles::to_pos(room, at));
 
@@ -255,7 +255,7 @@ pub fn drain_pays(room: &str, capacity: i32, towers: &[Pos], gate: &tactics::Gat
 }
 
 /// His towers leave a border tile the pairs' heal holds: the cheapest gate.
-pub fn drainable(room: &str, capacity: i32, towers: &[Pos]) -> bool {
+pub fn drainable(room: RoomName, capacity: i32, towers: &[Pos]) -> bool {
     if towers.is_empty() {
         return false;
     }
@@ -271,10 +271,10 @@ pub fn drainable(room: &str, capacity: i32, towers: &[Pos]) -> bool {
 
 /// The edge a drain bounces through: his border tile his towers reach, the
 /// nearest of them.
-pub fn gate<'a>(
+pub fn gate(
     atlas: &Atlas,
-    room: &'a str,
-    from: &'a str,
+    room: RoomName,
+    from: RoomName,
     towers: &[Pos],
 ) -> Option<tactics::Gate> {
     let side = tiles::exit_toward(room, from)?;
@@ -308,8 +308,8 @@ pub fn gate<'a>(
         .copied()?;
 
     Some(tactics::Gate {
-        room: room.to_string(),
-        from: from.to_string(),
+        room,
+        from,
         bounce,
         rest,
     })

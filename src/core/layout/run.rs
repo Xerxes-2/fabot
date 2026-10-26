@@ -21,7 +21,7 @@ pub fn decide_over(colonies: &[derive::Colony], budget: i32) -> Vec<Intent> {
             for p in sites::place(&colony.census, colony.level, plan, budget) {
                 budget -= 1;
                 intents.push(Intent::Room(
-                    colony.room.clone(),
+                    colony.room,
                     RoomAct::CreateSite(p.x, p.y, p.kind),
                 ));
             }

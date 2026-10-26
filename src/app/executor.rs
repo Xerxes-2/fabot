@@ -1,5 +1,5 @@
 //! `Executor` turns each intent into one API call (`ARCHITECTURE.md` §1).
-use crate::app::js::field;
+use crate::app::js::{self, field};
 use js_sys::{Array, Function, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
 
@@ -136,7 +136,7 @@ fn act(intent: &Intent) -> (String, i32) {
         }
         Intent::Room(name, RoomAct::CreateSite(x, y, kind)) => {
             let verb = format!("site:{}", kind.name());
-            match world::room_by_name(name) {
+            match world::room_by_name(*name) {
                 None => (verb, NOT_FOUND),
                 Some(room) => match call(
                     &room,
@@ -199,7 +199,7 @@ fn act(intent: &Intent) -> (String, i32) {
                 None => ("send".to_string(), NOT_FOUND),
                 Some(t) => {
                     let name = JsValue::from_str(&vocabulary::resource_name(resource));
-                    match call(&t, "send", &[name, num(*amount), JsValue::from_str(room)]) {
+                    match call(&t, "send", &[name, num(*amount), js::room(*room)]) {
                         Ok(code) => ("send".to_string(), code),
                         Err(()) => ("threw".to_string(), THREW),
                     }
@@ -208,7 +208,7 @@ fn act(intent: &Intent) -> (String, i32) {
         }
         Intent::Observe(id, room) => match world::object_by_id(id) {
             None => ("observeRoom".to_string(), NOT_FOUND),
-            Some(observer) => match call(&observer, "observeRoom", &[JsValue::from_str(room)]) {
+            Some(observer) => match call(&observer, "observeRoom", &[js::room(*room)]) {
                 Ok(code) => ("observeRoom".to_string(), code),
                 Err(()) => ("threw".to_string(), THREW),
             },

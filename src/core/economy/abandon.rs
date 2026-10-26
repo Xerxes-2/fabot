@@ -5,7 +5,7 @@
 use crate::core::engine;
 use crate::core::tiles;
 use crate::core::vocabulary::Resource;
-use crate::core::world::{Creep, Kind, Room, Structure};
+use crate::core::world::{Creep, Kind, Room, RoomName, Structure};
 
 use super::derived::Ground;
 
@@ -28,7 +28,7 @@ pub fn left(room: &Room) -> i32 {
 
 /// `to` is the receiving colony and its terminal's free room. Energy ships
 /// last: the terminal's own pays every send's fee.
-pub fn evacuate(g: &mut Ground, room: &Room, creeps: &[Creep], to: Option<(String, i32)>) {
+pub fn evacuate(g: &mut Ground, room: &Room, creeps: &[Creep], to: Option<(RoomName, i32)>) {
     g.abandoned = true;
     g.sources.clear();
     g.minerals.clear();
@@ -54,7 +54,7 @@ pub fn evacuate(g: &mut Ground, room: &Room, creeps: &[Creep], to: Option<(Strin
                 .held
                 .iter()
                 .filter(|(_, n)| *n > 0)
-                .map(|(r, n)| (s.id.clone(), s.pos.clone(), r.clone(), *n))
+                .map(|(r, n)| (s.id.clone(), s.pos, r.clone(), *n))
         })
         .collect();
 
@@ -73,7 +73,7 @@ pub fn evacuate(g: &mut Ground, room: &Room, creeps: &[Creep], to: Option<(Strin
     // Energy under the least send and its fee never leaves: what stays.
     let apart = to
         .as_ref()
-        .map_or(0, |(home, _)| tiles::rooms_apart(&g.room, home));
+        .map_or(0, |(home, _)| tiles::rooms_apart(g.room, *home));
     let least = engine::TERMINAL_MIN_SEND + engine::send_cost(engine::TERMINAL_MIN_SEND, apart);
     owed.retain(|(r, n)| to.is_some() && *n > 0 && (!r.is_energy() || *n >= least));
     owed.sort_by_key(|(r, _)| r.is_energy());

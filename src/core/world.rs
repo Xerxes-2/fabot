@@ -6,21 +6,178 @@ use super::engine;
 use super::tick::Declarations;
 use super::vocabulary::{BodyPart, Boost, Resource};
 
+/// A room by its world coordinates: W0 is x = -1, N0 is y = -1.
+/// Ordered as its name is, so maps keyed by room iterate as they did by name.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RoomName {
+    pub x: i16,
+    pub y: i16,
+}
+
+impl RoomName {
+    pub const fn new(x: i32, y: i32) -> RoomName {
+        RoomName {
+            x: x as i16,
+            y: y as i16,
+        }
+    }
+
+    /// The simulator's one room, off the grid, its name kept to write back.
+    pub const SIM: RoomName = RoomName {
+        x: i16::MIN,
+        y: i16::MIN,
+    };
+
+    /// `None` outside the `W3N1` grammar but for `sim`.
+    pub const fn parse(name: &str) -> Option<RoomName> {
+        let b = name.as_bytes();
+        if let [b's', b'i', b'm'] = b {
+            return Some(RoomName::SIM);
+        }
+        match RoomName::axis(b, 0, b'W', b'E') {
+            Some((x, at)) => match RoomName::axis(b, at, b'N', b'S') {
+                Some((y, end)) if end == b.len() => Some(RoomName::new(x, y)),
+                _ => None,
+            },
+            None => None,
+        }
+    }
+
+    const fn axis(b: &[u8], at: usize, outward: u8, inward: u8) -> Option<(i32, usize)> {
+        if at >= b.len() || (b[at] != outward && b[at] != inward) {
+            return None;
+        }
+        let mut end = at + 1;
+        let mut value: i32 = 0;
+        while end < b.len() && b[end].is_ascii_digit() && end - at <= 4 {
+            value = value * 10 + (b[end] - b'0') as i32;
+            end += 1;
+        }
+        if end == at + 1 {
+            return None;
+        }
+        Some((if b[at] == outward { -value - 1 } else { value }, end))
+    }
+
+    /// `parse`, for names written in code: a fixture's or a plan's.
+    pub const fn named(name: &str) -> RoomName {
+        match RoomName::parse(name) {
+            Some(room) => room,
+            None => panic!("no room name"),
+        }
+    }
+
+    /// `sim` has no neighbours: its sentinel's would be far off the map.
+    pub fn on_grid(self) -> Option<(i32, i32)> {
+        (self != RoomName::SIM).then(|| self.coords())
+    }
+
+    pub fn coords(self) -> (i32, i32) {
+        (i32::from(self.x), i32::from(self.y))
+    }
+
+    /// The name as base-15 symbols, end-padded: the end below a digit below
+    /// E, N, S, W, as their bytes order, so keys order as names do.
+    fn order(self) -> u64 {
+        if self == RoomName::SIM {
+            return u64::MAX;
+        }
+        let mut key: u64 = 0;
+        let mut symbols = 0;
+        for (outward, inward, value) in [(14, 11, self.x), (12, 13, self.y)] {
+            let (side, value) = if value < 0 {
+                (outward, -i32::from(value) - 1)
+            } else {
+                (inward, i32::from(value))
+            };
+            key = key * 15 + side;
+            symbols += 1;
+            let mut place = 1;
+            while place * 10 <= value {
+                place *= 10;
+            }
+            while place > 0 {
+                key = key * 15 + (value / place % 10) as u64 + 1;
+                symbols += 1;
+                place /= 10;
+            }
+        }
+        key * 15u64.pow(12 - symbols)
+    }
+
+    /// The name's bytes, NUL-padded: compared bytewise, they order as the names do.
+    fn bytes(self) -> [u8; 12] {
+        let mut out = [0u8; 12];
+        if self == RoomName::SIM {
+            out[..3].copy_from_slice(b"sim");
+            return out;
+        }
+        let mut at = 0;
+        for (outward, inward, value) in [(b'W', b'E', self.x), (b'N', b'S', self.y)] {
+            let (side, value) = if value < 0 {
+                (outward, -i32::from(value) - 1)
+            } else {
+                (inward, i32::from(value))
+            };
+            out[at] = side;
+            at += 1;
+            let start = at;
+            let mut rest = value;
+            loop {
+                out[at] = b'0' + (rest % 10) as u8;
+                at += 1;
+                rest /= 10;
+                if rest == 0 {
+                    break;
+                }
+            }
+            out[start..at].reverse();
+        }
+        out
+    }
+}
+
+impl std::fmt::Display for RoomName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let bytes = self.bytes();
+        let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+        f.write_str(std::str::from_utf8(&bytes[..len]).unwrap_or_default())
+    }
+}
+
+impl std::fmt::Debug for RoomName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\"{self}\"")
+    }
+}
+
+impl PartialOrd for RoomName {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for RoomName {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self == other {
+            Ordering::Equal
+        } else {
+            self.order().cmp(&other.order())
+        }
+    }
+}
+
 /// Compared by hand: Fable's record compare walks every field, per tile per tick.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Pos {
-    pub room: String,
+    pub room: RoomName,
     pub x: i32,
     pub y: i32,
 }
 
 impl Pos {
-    pub fn new(room: impl Into<String>, x: i32, y: i32) -> Pos {
-        Pos {
-            room: room.into(),
-            x,
-            y,
-        }
+    pub fn new(room: RoomName, x: i32, y: i32) -> Pos {
+        Pos { room, x, y }
     }
 
     pub fn index(&self) -> i32 {
@@ -454,7 +611,7 @@ pub struct Remains {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Room {
-    pub name: String,
+    pub name: RoomName,
     /// `Game.map.getRoomTerrain(name).getRawBuffer()`, `None` where unread.
     pub terrain: Option<terrain::Terrain>,
     pub controller: Option<Controller>,
@@ -512,7 +669,7 @@ pub struct World {
     pub rooms_allowed: i32,
     /// Rooms whose `Game.map.getRoomStatus` is not our spawns' room's: the
     /// engine leaves a creep on the exit tile into one, never carrying it across.
-    pub closed: BTreeSet<String>,
+    pub closed: BTreeSet<RoomName>,
     /// One of his towers striking one of ours this tick, `(attacker, target)`
     /// ids: his room's event log, read only for the room a drain stands in.
     pub attacks: Vec<(String, String)>,
@@ -549,7 +706,7 @@ pub mod terrain {
 }
 
 pub mod hostiles {
-    use super::{Creep, Room};
+    use super::{Creep, Room, RoomName};
     use crate::core::engine;
     use std::collections::BTreeSet;
 
@@ -572,11 +729,11 @@ pub mod hostiles {
         range + 2
     }
 
-    pub fn owned(rooms: &[Room]) -> BTreeSet<String> {
+    pub fn owned(rooms: &[Room]) -> BTreeSet<RoomName> {
         rooms
             .iter()
             .filter_map(|r| match &r.controller {
-                Some(c) if c.owner.is_ours() => Some(r.name.clone()),
+                Some(c) if c.owner.is_ours() => Some(r.name),
                 _ => None,
             })
             .collect()
@@ -585,7 +742,7 @@ pub mod hostiles {
     /// HEAL and WORK threaten beside a striker (owner's call): alone they are
     /// a rival's healer in transit or its remote harvester, but WORK in a room
     /// whose controller is ours can only be there to dismantle.
-    pub fn armed(owned: &BTreeSet<String>, hostiles: &[Creep], creep: &Creep) -> bool {
+    pub fn armed(owned: &BTreeSet<RoomName>, hostiles: &[Creep], creep: &Creep) -> bool {
         let works = creep.body.iter().any(|p| p.kind.is_work());
         strikes(creep)
             || works && owned.contains(&creep.pos.room)
@@ -602,10 +759,10 @@ pub struct Seen {
     pub armed: bool,
 }
 
-pub type Sightings = BTreeMap<String, BTreeMap<String, Seen>>;
+pub type Sightings = BTreeMap<RoomName, BTreeMap<String, Seen>>;
 
 pub mod sightings {
-    use super::{Creep, Seen, Sightings, World, hostiles};
+    use super::{Creep, RoomName, Seen, Sightings, World, hostiles};
     use std::collections::BTreeMap;
 
     pub fn step(world: &World, previous: Sightings) -> Sightings {
@@ -648,25 +805,30 @@ pub mod sightings {
             if seen.is_empty() {
                 next.remove(&room.name);
             } else {
-                next.insert(room.name.clone(), seen);
+                next.insert(room.name, seen);
             }
         }
 
         next
     }
 
-    fn none(counts: impl Fn(&Seen) -> bool, sightings: &Sightings, time: i32, room: &str) -> bool {
-        match sightings.get(room) {
+    fn none(
+        counts: impl Fn(&Seen) -> bool,
+        sightings: &Sightings,
+        time: i32,
+        room: RoomName,
+    ) -> bool {
+        match sightings.get(&room) {
             Some(seen) => seen.values().all(|s| s.gone <= time || !counts(s)),
             None => true,
         }
     }
 
-    pub fn clear(sightings: &Sightings, time: i32, room: &str) -> bool {
+    pub fn clear(sightings: &Sightings, time: i32, room: RoomName) -> bool {
         none(|_| true, sightings, time, room)
     }
 
-    pub fn unarmed(sightings: &Sightings, time: i32, room: &str) -> bool {
+    pub fn unarmed(sightings: &Sightings, time: i32, room: RoomName) -> bool {
         none(|s| s.armed, sightings, time, room)
     }
 }
@@ -678,7 +840,7 @@ impl Creep {
 }
 
 impl World {
-    pub fn room(&self, name: &str) -> Option<&Room> {
+    pub fn room(&self, name: RoomName) -> Option<&Room> {
         self.rooms.iter().find(|r| r.name == name)
     }
 }

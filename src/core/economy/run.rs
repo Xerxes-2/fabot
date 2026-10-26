@@ -11,7 +11,7 @@ use crate::core::state::State;
 use crate::core::tick::{self, Context};
 use crate::core::tiles::{self};
 use crate::core::vocabulary::{BodyPart, Resource};
-use crate::core::world::{Creep, Pos};
+use crate::core::world::{Creep, Pos, RoomName};
 
 use super::bodies;
 use super::derived::{self, Body, Derived, Ground, LinkFact};
@@ -27,7 +27,7 @@ fn weight_of(priority: i32) -> i32 {
 
 fn target_of(offer: &Offer) -> Target {
     Target {
-        room: offer.target.room.clone(),
+        room: offer.target.room,
         tiles: vec![tiles::of_pos(&offer.target)],
         range: offer.task.range_of(),
         avoid: BTreeSet::new(),
@@ -43,8 +43,8 @@ fn distance(atlas: &Atlas, derived: &Derived, a: &Pos, b: &Pos) -> Option<i32> {
     }
     let tree = (derived.routes.get(&b.room)).or_else(|| derived.routes.get(&a.room));
     let crossed = match tree {
-        Some(tree) => tree.crossings(&a.room, &b.room),
-        None => (atlas.route(&BTreeSet::new(), tick::REACH_HOPS, &a.room, &b.room))
+        Some(tree) => tree.crossings(a.room, b.room),
+        None => (atlas.route(&BTreeSet::new(), tick::REACH_HOPS, a.room, b.room))
             .map(|r| r.len() as i32 - 1),
     };
     crossed.map(|n| Atlas::crossing_ticks() * n)
@@ -61,23 +61,23 @@ fn scouting(atlas: &Atlas, derived: &Derived, held: &Assignments) -> Assignments
     let kept = |b: &Body| match held.get(&b.name).and_then(|id| task::of_task_id(id)) {
         Some(Task::Scout(room)) => (derived.scouts.iter())
             .find(|(at, _, _)| at.room == room)
-            .filter(|(at, _, _)| !b.pos.within(Task::Scout(room.clone()).range_of(), at))
+            .filter(|(at, _, _)| !b.pos.within(Task::Scout(room).range_of(), at))
             .map(|_| room),
         _ => None,
     };
-    let mut out: Assignments = (scouts.iter())
+    let mut out: BTreeMap<String, RoomName> = (scouts.iter())
         .filter_map(|b| Some((b.name.clone(), kept(b)?)))
         .collect();
     for b in scouts {
-        let walks = |open: &dyn Fn(&str) -> bool| {
-            let rooms = (derived.scouts.iter()).filter(|(at, _, _)| open(&at.room));
+        let walks = |open: &dyn Fn(RoomName) -> bool| {
+            let rooms = (derived.scouts.iter()).filter(|(at, _, _)| open(at.room));
             atlas::onward(rooms.filter_map(|(at, age, _)| {
-                Some((&at.room, *age, distance(atlas, derived, &b.pos, at)?))
+                Some((at.room, *age, distance(atlas, derived, &b.pos, at)?))
             }))
         };
         if !out.contains_key(&b.name)
             && let Some(room) =
-                walks(&|room| !out.values().any(|r| r == room)).or_else(|| walks(&|_| true))
+                walks(&|room| !out.values().any(|r| *r == room)).or_else(|| walks(&|_| true))
         {
             out.insert(b.name.clone(), room);
         }
@@ -94,7 +94,7 @@ fn near(
     can: &dyn Fn(usize) -> bool,
     at: &Pos,
 ) -> Option<usize> {
-    tick::nearest(atlas, &|room| derived.routes.get(room), homes, can, at)
+    tick::nearest(atlas, &|room| derived.routes.get(&room), homes, can, at)
 }
 
 fn ticks_to(
@@ -179,7 +179,7 @@ fn seats_of(atlas: &Atlas, derived: &Derived, body: &Body, offer: &Offer) -> Opt
 
             match (seats.is_empty(), derived.posts.get(id)) {
                 (true, _) => None,
-                (false, Some(post)) if pool::garrisons(body, offer) => Some(vec![post.clone()]),
+                (false, Some(post)) if pool::garrisons(body, offer) => Some(vec![*post]),
                 (false, Some(post)) => Some(seats.into_iter().filter(|p| p != post).collect()),
                 (false, None) => Some(seats),
             }
@@ -230,7 +230,7 @@ fn seat_of(stood: &BTreeSet<Pos>, creep: &Creep, offer: &Offer, seats: Option<&[
 
     match tiles {
         Some(tiles) if !tiles.is_empty() => Target {
-            room: offer.target.room.clone(),
+            room: offer.target.room,
             tiles: tiles.iter().map(tiles::of_pos).collect(),
             range: 0,
             avoid: BTreeSet::new(),
@@ -333,7 +333,7 @@ fn terminal_send(g: &Ground) -> Option<Intent> {
     if t.cooldown > 0 {
         return None;
     }
-    let apart = tiles::rooms_apart(&g.room, home);
+    let apart = tiles::rooms_apart(g.room, *home);
     let energy = t.store.amount_of(&Resource::Energy);
     let fees: i32 = g
         .shipment
@@ -352,19 +352,15 @@ fn terminal_send(g: &Ground) -> Option<Intent> {
         while amount > 0 && engine::send_cost(amount, apart) + sent * amount > pays {
             amount = amount * 9 / 10;
         }
-        (amount >= engine::TERMINAL_MIN_SEND.min(*owed)).then(|| {
-            Intent::Terminal(
-                t.id.clone(),
-                TerminalAct::Send(ore.clone(), amount, home.clone()),
-            )
-        })
+        (amount >= engine::TERMINAL_MIN_SEND.min(*owed))
+            .then(|| Intent::Terminal(t.id.clone(), TerminalAct::Send(ore.clone(), amount, *home)))
     })
 }
 
-fn wish_in(groups: &mut Vec<(String, Vec<Wish>)>, room: &str, wish: Wish) {
-    match groups.iter_mut().find(|(each, _)| each == room) {
+fn wish_in(groups: &mut Vec<(RoomName, Vec<Wish>)>, room: RoomName, wish: Wish) {
+    match groups.iter_mut().find(|(each, _)| *each == room) {
         Some((_, list)) => list.push(wish),
-        None => groups.push((room.to_string(), vec![wish])),
+        None => groups.push((room, vec![wish])),
     }
 }
 
@@ -403,11 +399,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         })
         .collect();
 
-    let homes: Vec<Pos> = derived
-        .colonies
-        .iter()
-        .map(|c| c.spawns[0].pos.clone())
-        .collect();
+    let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
     let owners = quota::owners(
         &mut |can, at| near(&mut *context.atlas, &derived, &homes, can, at),
         &derived,
@@ -455,7 +447,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .iter()
         .map(|cast| {
             Intent::Queue(
-                cast.colony.clone(),
+                cast.colony,
                 Ask {
                     body: cast.body.clone(),
                     name: cast.name.clone(),
@@ -500,7 +492,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         }
     };
 
-    let stood: BTreeSet<Pos> = seen.iter().map(|c| c.pos.clone()).collect();
+    let stood: BTreeSet<Pos> = seen.iter().map(|c| c.pos).collect();
 
     let bodies: BTreeMap<&str, &Body> = derived
         .bodies
@@ -509,7 +501,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .collect();
 
     let mut acts: Vec<Intent> = Vec::new();
-    let mut wishes: Vec<(String, Vec<Wish>)> = Vec::new();
+    let mut wishes: Vec<(RoomName, Vec<Wish>)> = Vec::new();
 
     for creep in &seen {
         let mover = movers[creep.name.as_str()];
@@ -610,7 +602,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 let target = seat_of(&stood, creep, offer, seats.as_deref());
                 wish_in(
                     &mut wishes,
-                    &creep.pos.room,
+                    creep.pos.room,
                     plan::toward(
                         context.atlas,
                         creep,
@@ -624,7 +616,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 && derived.colonies.iter().all(|c| c.room != creep.pos.room) =>
             {
                 // Home, where it can be matched.
-                let mut home = derived.colonies[0].spawns[0].pos.clone();
+                let mut home = derived.colonies[0].spawns[0].pos;
                 let mut best =
                     distance(&*context.atlas, &derived, &creep.pos, &home).unwrap_or(i32::MAX);
 
@@ -635,19 +627,19 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                     // `Array.minBy`: the last of equal keys.
                     if d <= best {
                         best = d;
-                        home = at.clone();
+                        home = *at;
                     }
                 }
 
                 wish_in(
                     &mut wishes,
-                    &creep.pos.room,
+                    creep.pos.room,
                     plan::toward(context.atlas, creep, mover, &tick::target_at(&home, 1), 1),
                 );
             }
             None => wish_in(
                 &mut wishes,
-                &creep.pos.room,
+                creep.pos.room,
                 plan::stay(&*context.atlas, creep, mover.factor, 1),
             ),
         }
@@ -656,7 +648,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     let mut moves: Vec<Intent> = Vec::new();
     for (room, list) in wishes {
         for wish in list {
-            moves.push(Intent::Wish(room.clone(), wish));
+            moves.push(Intent::Wish(room, wish));
         }
     }
 

@@ -8,11 +8,11 @@ use crate::core::layout::shape::Plan;
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::Resource;
 use crate::core::world::{
-    Controller, Creep, Kind, Mineral, Owner, Pos, Room, Site, Source, Spawn, Store, Structure,
-    World, terrain,
+    Controller, Creep, Kind, Mineral, Owner, Pos, Room, RoomName, Site, Source, Spawn, Store,
+    Structure, World, terrain,
 };
 
-pub const ROOM: &str = "W1N1";
+pub const ROOM: RoomName = RoomName::named("W1N1");
 
 /// `FsCheckConfig.maxTest`: the samples each property runs over.
 pub const MAX_TEST: usize = 150;
@@ -165,7 +165,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
     );
 
     let room = Room {
-        name: ROOM.to_string(),
+        name: ROOM,
         terrain: terrain::of(terrain),
         controller: Some(Controller {
             id: "c".to_string(),

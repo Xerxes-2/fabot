@@ -27,7 +27,7 @@ pub fn charged(room: &Room) -> Vec<Pos> {
     (room.structures.iter())
         .filter(|s| s.kind.is_tower() && !s.owner.is_ours())
         .filter(|s| s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST)
-        .map(|s| s.pos.clone())
+        .map(|s| s.pos)
         .collect()
 }
 
@@ -37,7 +37,7 @@ pub fn guards(room: &Room) -> Vec<(Pos, i32, i32)> {
         .map(|h| {
             let f = casting::fighter_of(h);
 
-            (h.pos.clone(), f.attack, f.ranged)
+            (h.pos, f.attack, f.ranged)
         })
         .filter(|(_, swing, shot)| *swing > 0 || *shot > 0)
         .collect()
@@ -118,18 +118,18 @@ pub fn target(room: &Room, members: &[&Creep]) -> Option<String> {
 /// site, whose `move` onto the tile stomps it.
 pub fn mark(room: &Room, members: &[&Creep]) -> Option<(Pos, i32)> {
     if let Some(s) = next(room, members) {
-        return Some((s.pos.clone(), engine::RANGED_RANGE));
+        return Some((s.pos, engine::RANGED_RANGE));
     }
     let site = (room.sites.iter())
         .filter(|s| s.owner.is_theirs())
         .min_by_key(|s| (near(members, &s.pos), s.id.clone()));
 
     if let Some(site) = site {
-        return Some((site.pos.clone(), 0));
+        return Some((site.pos, 0));
     }
     room.controller
         .as_ref()
-        .map(|k| (k.pos.clone(), engine::RANGED_RANGE))
+        .map(|k| (k.pos, engine::RANGED_RANGE))
 }
 
 fn near(members: &[&Creep], at: &Pos) -> i32 {
@@ -166,13 +166,13 @@ pub fn plan(
     set: &[Fighter],
     standing: &[&Creep],
 ) -> Option<(Vec<String>, Outcome)> {
-    let weights = atlas.weights(&room.name)?;
+    let weights = atlas.weights(room.name)?;
     let gait = (set.iter())
         .map(|f| f.gait)
         .filter(|g| g.moves > 0)
         .min_by_key(|g| std::cmp::Reverse(grid::step_ticks(*g, engine::PLAIN_WEIGHT)))?;
     let ground = Ground {
-        room: room.name.clone(),
+        room: room.name,
         weights,
         barriers: BTreeMap::new(),
     };
@@ -188,7 +188,7 @@ pub fn plan(
             .filter(|stretch| !stretch.is_empty())
             .filter_map(|stretch| {
                 let onto = Target {
-                    room: room.name.clone(),
+                    room: room.name,
                     tiles: stretch.to_vec(),
                     range: engine::MELEE_RANGE,
                     avoid: BTreeSet::new(),
@@ -212,7 +212,7 @@ pub fn plan(
             .collect()
     };
 
-    let ring = |t: Tile| tactics::seats_at(atlas, &[], &room.name, t);
+    let ring = |t: Tile| tactics::seats_at(atlas, &[], room.name, t);
     let plan = exchange::breach_plan(
         &ground,
         gait,
@@ -290,7 +290,7 @@ pub fn dance(sight: &mut Sight, room: &Room, members: &[&Creep], c: &Creep) -> W
             .sum()
     };
     let net = |tile: Tile| -> i32 {
-        let at = tiles::to_pos(&room.name, tile);
+        let at = tiles::to_pos(room.name, tile);
         let strike = exchange::tower_strike(&towers, &at) + exchange::guard_strike(&guards, &at);
 
         strike - heal_at(&at)
@@ -313,7 +313,7 @@ pub fn dance(sight: &mut Sight, room: &Room, members: &[&Creep], c: &Creep) -> W
 
     let here = tiles::of_pos(&c.pos);
     let near = |tile: Tile| {
-        tiles::to_pos(&room.name, tile)
+        tiles::to_pos(room.name, tile)
             .range(&target)
             .unwrap_or(engine::ROOM_SIDE)
     };
@@ -330,16 +330,16 @@ pub fn dance(sight: &mut Sight, room: &Room, members: &[&Creep], c: &Creep) -> W
             (tiles::around(here))
                 .iter()
                 .copied()
-                .filter(|t| !tiles::on_edge(*t) && sight.atlas.passable(&room.name, *t)),
+                .filter(|t| !tiles::on_edge(*t) && sight.atlas.passable(room.name, *t)),
         )
         .min_by_key(|t| {
-            let at = tiles::to_pos(&room.name, *t);
+            let at = tiles::to_pos(room.name, *t);
 
             (heal_at(&at) == 0, net(*t), mate(*t), near(*t))
         });
 
     match step {
-        Some(t) if t != here => tactics::toward(sight, c, &tiles::to_pos(&room.name, t), 0),
+        Some(t) if t != here => tactics::toward(sight, c, &tiles::to_pos(room.name, t), 0),
         _ => tactics::hold(sight, c),
     }
 }
@@ -353,7 +353,7 @@ pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
         .iter()
         .filter(|p| p.hits > 0 && p.kind.is_ranged_attack())
         .count() as i32;
-    let sources: Vec<Pos> = room.sources.iter().map(|s| s.pos.clone()).collect();
+    let sources: Vec<Pos> = room.sources.iter().map(|s| s.pos).collect();
     let theirs = || room.structures.iter().filter(|s| s.owner.is_theirs());
     let cover = |s: &Structure| theirs().find(|r| r.kind == Kind::Rampart && r.pos == s.pos);
     let reach = |at: &Pos| c.pos.range(at).filter(|r| *r <= engine::RANGED_RANGE);

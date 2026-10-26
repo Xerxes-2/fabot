@@ -10,7 +10,7 @@ use crate::core::engine;
 use crate::core::grid::{self, FatigueFactor, Weight, step_ticks};
 use crate::core::tiles::{self, Table, Tile};
 use crate::core::vocabulary::BodyPart;
-use crate::core::world::Pos;
+use crate::core::world::{Pos, RoomName};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tower {
@@ -70,7 +70,7 @@ pub enum Stance {
 /// the hits on each barrier tile, its rival ramparts' and walls' together.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ground {
-    pub room: String,
+    pub room: RoomName,
     pub weights: Table<Weight>,
     pub barriers: BTreeMap<Tile, i32>,
 }
@@ -899,7 +899,7 @@ fn on_ramparts(
             match fighter
                 .pos
                 .as_ref()
-                .and_then(|at| ours.ramparts.get(at).map(|hits| (at.clone(), *hits)))
+                .and_then(|at| ours.ramparts.get(at).map(|hits| (*at, *hits)))
             {
                 Some((tile, hits)) if stays_on(terrain, stance, raid, fighter, &tile) => {
                     held.insert(0, (tile, hits));
@@ -1339,7 +1339,7 @@ pub fn breach_plan(
     goals: &[Tile],
 ) -> Option<(Vec<(Tile, Tile)>, i32)> {
     let struck = |t: Tile| {
-        let at = tiles::to_pos(&ground.room, t);
+        let at = tiles::to_pos(ground.room, t);
 
         tower_strike(towers, &at) + guard_strike(guards, &at)
     };
@@ -1526,7 +1526,7 @@ pub fn cheapest_win(
 /// What a body standing on each tile takes next tick: the charged towers'
 /// falloff and each striker's reach, one more where it can step. Built once a
 /// room and tick, shared by every body there.
-pub fn damage_map(room: &str, towers: &[Pos], foes: &[Fighter]) -> Table<i32> {
+pub fn damage_map(room: RoomName, towers: &[Pos], foes: &[Fighter]) -> Table<i32> {
     let mut map = tiles::table(0);
     for t in tiles::all() {
         let at = tiles::to_pos(room, t);
@@ -1558,7 +1558,7 @@ mod tests {
     use super::*;
     use crate::core::vocabulary::Boost;
 
-    const ROOM: &str = "W1N1";
+    const ROOM: RoomName = RoomName::named("W1N1");
 
     /// `maxTest = 1000` of the F# generated cases, from a fixed seed.
     const CASES: usize = 1000;
@@ -1691,7 +1691,7 @@ mod tests {
             let (x, y, wide) = (rng.between(1, 48), rng.between(1, 48), rng.between(1, 8));
 
             let ground = Ground {
-                room: ROOM.to_string(),
+                room: ROOM,
                 weights: tiles::table(grid::weight(2)),
                 barriers: hits
                     .iter()

@@ -815,7 +815,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
 
     (
         Plan {
-            room: ground.room.clone(),
+            room: ground.room,
             anchor,
             items,
             unfit,

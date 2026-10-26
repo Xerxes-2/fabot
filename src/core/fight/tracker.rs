@@ -2,8 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::shape::Group;
-use crate::core::tiles;
-use crate::core::world::{Creep, Pos, hostiles};
+use crate::core::world::{Creep, Pos, RoomName, hostiles};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -32,24 +31,17 @@ pub const LOST_GROUP_TICKS: i32 = 30;
 
 /// A seam's two tiles are one apart.
 pub fn world_of(pos: &Pos) -> (i32, i32) {
-    match tiles::room_coords(&pos.room) {
-        Some((rx, ry)) => (rx * 50 + pos.x, ry * 50 + pos.y),
-        None => (pos.x, pos.y),
-    }
+    let (rx, ry) = pos.room.coords();
+    (rx * 50 + pos.x, ry * 50 + pos.y)
 }
 
 pub fn linked(a: &Pos, b: &Pos) -> bool {
     if a.room == b.room {
         a.within(REACH, b)
     } else {
-        match (tiles::room_coords(&a.room), tiles::room_coords(&b.room)) {
-            (Some(_), Some(_)) => {
-                let (ax, ay) = world_of(a);
-                let (bx, by) = world_of(b);
-                (ax - bx).abs() <= 1 && (ay - by).abs() <= 1
-            }
-            _ => false,
-        }
+        let (ax, ay) = world_of(a);
+        let (bx, by) = world_of(b);
+        (ax - bx).abs() <= 1 && (ay - by).abs() <= 1
     }
 }
 
@@ -65,7 +57,7 @@ fn find(root: &mut [usize], mut i: usize) -> usize {
     }
 }
 
-fn clusters<'a>(owned: &BTreeSet<String>, hostiles: &'a [Creep]) -> Vec<Vec<&'a Creep>> {
+fn clusters<'a>(owned: &BTreeSet<RoomName>, hostiles: &'a [Creep]) -> Vec<Vec<&'a Creep>> {
     let mut sorted: Vec<&Creep> = hostiles.iter().collect();
     sorted.sort_by(|a, b| a.id.cmp(&b.id));
     let n = sorted.len();
@@ -117,7 +109,7 @@ fn centre(members: &[&Creep]) -> Pos {
         sy += y;
     }
 
-    let mut best = members[0].pos.clone();
+    let mut best = members[0].pos;
     let mut best_d = i32::MAX;
 
     for m in members {
@@ -125,7 +117,7 @@ fn centre(members: &[&Creep]) -> Pos {
         let d = (n * x - sx).abs().max((n * y - sy).abs());
 
         if d < best_d {
-            best = m.pos.clone();
+            best = m.pos;
             best_d = d;
         }
     }
@@ -138,7 +130,7 @@ fn centre(members: &[&Creep]) -> Pos {
 pub fn step(
     grace: i32,
     held: i32,
-    owned: &BTreeSet<String>,
+    owned: &BTreeSet<RoomName>,
     prev: &[Group],
     hostiles: &[Creep],
     tick: i32,
@@ -234,7 +226,7 @@ pub fn step(
         groups.push(Group {
             id,
             members: cs[ci].iter().map(|m| m.id.clone()).collect(),
-            room: c.room.clone(),
+            room: c.room,
             last_seen: tick,
             centre: c,
         });
@@ -298,7 +290,7 @@ mod tests {
         }
     }
 
-    fn at(room: &str, x: i32, y: i32) -> Pos {
+    fn at(room: RoomName, x: i32, y: i32) -> Pos {
         Pos::new(room, x, y)
     }
 
@@ -343,11 +335,11 @@ mod tests {
 
     /// Two rooms sharing a seam, and tiles crowded near it so clusters touch.
     fn arrival(rng: &mut Rng, id: &str) -> Creep {
-        let room = rng.pick(&["W1N1".to_string(), "W2N1".to_string()]);
+        let room = rng.pick(&[RoomName::named("W1N1"), RoomName::named("W2N1")]);
         let x = rng.pick(&[0, 1, 3, 6, 9, 43, 46, 48, 49]);
         let y = rng.between(0, 12);
         let armed = rng.chance(4, 1);
-        creep(id, at(&room, x, y), armed)
+        creep(id, at(room, x, y), armed)
     }
 
     /// A tick later: most step a few tiles, some vanish, absent ids may arrive.
@@ -420,8 +412,8 @@ mod tests {
             let east = rng.between(0, 2);
             let y = rng.between(1, 47);
             let dy = rng.between(-1, 1);
-            let a = at("W2N1", west, y);
-            let b = at("W1N1", east, y + dy);
+            let a = at(RoomName::named("W2N1"), west, y);
+            let b = at(RoomName::named("W1N1"), east, y + dy);
             assert_eq!(linked(&a, &b), (49 - west) + east < 1);
         }
     }

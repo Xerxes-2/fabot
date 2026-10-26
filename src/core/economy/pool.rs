@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::core::engine;
 use crate::core::tiles;
 use crate::core::vocabulary::Resource;
-use crate::core::world::{Kind, Pos};
+use crate::core::world::{Kind, Pos, RoomName};
 
 use super::bodies::{self, Pattern};
 use super::derived::{Body, Derived, RepairFact, StoreKind};
@@ -61,7 +61,7 @@ pub struct Offer {
     pub post: Option<Pos>,
     /// Rooms a body may not take it from: another colony's, whose own stock
     /// fills it, or that keeps its bodies for its own growth.
-    pub shut: BTreeSet<String>,
+    pub shut: BTreeSet<RoomName>,
     /// The colony whose room it is in: a storage-less colony's body works
     /// none but its own.
     pub colony: Option<usize>,
@@ -80,7 +80,7 @@ pub fn garrisons(body: &Body, offer: &Offer) -> bool {
 
 /// What a room's bodies able to upgrade drain from its feed a tick, at most
 /// the level's allowance: the stock's walk and the controller link price it.
-pub fn upgrade_drain(derived: &Derived, room: &str, level: i32) -> i32 {
+pub fn upgrade_drain(derived: &Derived, room: RoomName, level: i32) -> i32 {
     let work: i32 = derived
         .bodies
         .iter()
@@ -222,7 +222,7 @@ fn offer(task: Task, target: &Pos, value: f64, capacity: Capacity) -> Offer {
     Offer {
         id: task::task_id(&task),
         task,
-        target: target.clone(),
+        target: *target,
         priority: price::economy_rank(value),
         capacity,
         draw: Draw::Open,
@@ -319,7 +319,7 @@ fn boost_offers(offers: &mut Vec<Offer>, ground: &super::derived::Ground) {
 fn fee_reserve(ground: &super::derived::Ground) -> i32 {
     match &ground.ship_to {
         Some((home, _)) if ground.terminal.is_some() => {
-            let apart = tiles::rooms_apart(&ground.room, home);
+            let apart = tiles::rooms_apart(ground.room, *home);
             let fee: i32 = ground
                 .shipment
                 .iter()
@@ -398,7 +398,7 @@ pub fn inside_deadline(c: &crate::core::world::Controller) -> bool {
 const NURSERY_RANK: i32 = price::DEADLINE_RANK;
 const NURSERY_LEVEL: i32 = 3;
 
-fn nursed(derived: &Derived, room: &str) -> bool {
+fn nursed(derived: &Derived, room: RoomName) -> bool {
     let level = |c: &super::derived::Colony| c.controller.level;
     derived
         .colonies
@@ -420,13 +420,13 @@ pub fn site_rank(derived: &Derived, site: &super::derived::SiteFact) -> i32 {
     let first_spawn =
         site.kind == Kind::Spawn && derived.colonies.iter().all(|c| c.room != site.pos.room);
     let first_tower = site.kind.is_tower()
-        && nursed(derived, &site.pos.room)
+        && nursed(derived, site.pos.room)
         && derived
             .grounds
             .iter()
             .any(|g| g.room == site.pos.room && g.towers == 0);
     let buffer = site.kind.is_container()
-        && nursed(derived, &site.pos.room)
+        && nursed(derived, site.pos.room)
         && derived
             .grounds
             .iter()
@@ -453,7 +453,11 @@ pub fn repair_value(r: &RepairFact) -> f64 {
 }
 
 /// `held`: last tick's assignments, whose Refills are what is already aboard.
-pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignments) -> Vec<Offer> {
+pub fn pool(
+    derived: &Derived,
+    owners: &BTreeMap<RoomName, usize>,
+    held: &Assignments,
+) -> Vec<Offer> {
     let mut offers: Vec<Offer> = Vec::new();
 
     // The storage is offered for every ore a body carries, so no load is
@@ -481,9 +485,9 @@ pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignme
         f64::from(income) / n.max(1) as f64
     };
 
-    let colony_rooms: BTreeSet<String> = derived.colonies.iter().map(|c| c.room.clone()).collect();
+    let colony_rooms: BTreeSet<RoomName> = derived.colonies.iter().map(|c| c.room).collect();
     // A load in the room of a colony short of its reserve is its own growth.
-    let lean: BTreeSet<String> = derived
+    let lean: BTreeSet<RoomName> = derived
         .colonies
         .iter()
         .zip(&derived.grounds)
@@ -492,7 +496,7 @@ pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignme
                 super::quota::reserve_target(derived.reserve_lifetimes, c.controller.level);
             !g.stores.iter().any(|s| s.owned && s.energy >= reserve)
         })
-        .map(|(c, _)| c.room.clone())
+        .map(|(c, _)| c.room)
         .collect();
 
     for (i, ground) in derived.grounds.iter().enumerate() {
@@ -513,7 +517,7 @@ pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignme
                         work: (s.rate + engine::HARVEST_PER_WORK - 1) / engine::HARVEST_PER_WORK,
                     },
                 );
-                harvest.post = s.post.clone();
+                harvest.post = s.post;
                 offers.push(harvest);
             }
         }
@@ -539,7 +543,7 @@ pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignme
                     work: bodies::MINER_WORK,
                 },
             );
-            harvest.post = Some(post.clone());
+            harvest.post = Some(*post);
             offers.push(harvest);
         }
 
@@ -567,7 +571,7 @@ pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignme
 
         let ring_free: i32 = ground.refills.iter().map(|r| r.free).sum();
 
-        let shut_to = |free: i32| -> BTreeSet<String> {
+        let shut_to = |free: i32| -> BTreeSet<RoomName> {
             if colony.is_some() && ground.stores.iter().any(|s| s.owned && s.energy >= free) {
                 let mut shut = colony_rooms.clone();
                 shut.remove(&ground.room);
@@ -594,7 +598,7 @@ pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignme
             );
             if r.kind.is_tower()
                 && ground.fire < engine::TOWER_CAPACITY
-                && nursed(derived, &ground.room)
+                && nursed(derived, ground.room)
             {
                 refill.priority = NURSERY_RANK;
             }
@@ -656,7 +660,7 @@ pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignme
                     upgrade.priority = price::DEADLINE_RANK;
                 } else if colony.is_some()
                     && c.level < NURSERY_LEVEL
-                    && nursed(derived, &ground.room)
+                    && nursed(derived, ground.room)
                 {
                     upgrade.priority = NURSERY_RANK;
                 }
@@ -724,7 +728,7 @@ pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignme
         let room = ring_free + feed.map_or(0, |f| f.free) + fee_short(ground);
         // What the upgraders drain from the feed while a load walks out to it.
         let drain = colony.map_or(0, |c| {
-            upgrade_drain(derived, &ground.room, c.controller.level)
+            upgrade_drain(derived, ground.room, c.controller.level)
         });
         let walked = |from: &Pos| {
             feed.and_then(|f| from.range(&f.pos))
@@ -817,12 +821,7 @@ pub fn pool(derived: &Derived, owners: &BTreeMap<String, usize>, held: &Assignme
     }
 
     for (at, _, _) in &derived.scouts {
-        offers.push(offer(
-            Task::Scout(at.room.clone()),
-            at,
-            0.0,
-            Capacity::Unbounded,
-        ));
+        offers.push(offer(Task::Scout(at.room), at, 0.0, Capacity::Unbounded));
     }
 
     for o in &mut offers {

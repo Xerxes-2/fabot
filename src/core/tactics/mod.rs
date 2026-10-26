@@ -10,7 +10,7 @@ use crate::core::mv::{Wish, blob, plan};
 use crate::core::tick;
 use crate::core::tiles::Tile;
 use crate::core::vocabulary::{BodyPart, same_part};
-use crate::core::world::{Creep, Pos};
+use crate::core::world::{Creep, Pos, RoomName};
 use crate::core::{engine, tiles};
 
 /// A phase's own tactic (pursue, retreat) is the phase's; this is what a kind
@@ -81,13 +81,13 @@ pub fn select(offers: &[Offer], pin: Option<Tactic>) -> Option<&Offer> {
 
 pub struct Sight<'a> {
     pub atlas: &'a mut Atlas,
-    pub hostiles: &'a BTreeMap<String, Vec<Creep>>,
+    pub hostiles: &'a BTreeMap<RoomName, Vec<Creep>>,
     /// The hostiles a stance lets the reflex strike, and what a volley spares.
     pub struck: BTreeSet<String>,
-    pub spared: BTreeMap<String, Vec<Pos>>,
-    pub ramparts: BTreeMap<String, Vec<Pos>>,
+    pub spared: BTreeMap<RoomName, Vec<Pos>>,
+    pub ramparts: BTreeMap<RoomName, Vec<Pos>>,
     pub homes: Vec<Pos>,
-    pub avoid: &'a BTreeSet<String>,
+    pub avoid: &'a BTreeSet<RoomName>,
 }
 
 /// Above every economy wish in the room's one arbitration: a fight step is
@@ -101,12 +101,12 @@ fn live(kind: BodyPart, c: &Creep) -> i32 {
         .count() as i32
 }
 
-fn hostiles_in<'a>(sight: &Sight<'a>, room: &str) -> &'a [Creep] {
-    sight.hostiles.get(room).map_or(&[], Vec::as_slice)
+fn hostiles_in<'a>(sight: &Sight<'a>, room: RoomName) -> &'a [Creep] {
+    sight.hostiles.get(&room).map_or(&[], Vec::as_slice)
 }
 
 fn ranked<'a>(sight: &Sight<'a>, order: &[String], creep: &Creep) -> Vec<&'a Creep> {
-    let near = hostiles_in(sight, &creep.pos.room)
+    let near = hostiles_in(sight, creep.pos.room)
         .iter()
         .filter(|h| sight.struck.contains(&h.id));
 
@@ -165,7 +165,7 @@ fn mover_of(creep: &Creep) -> Mover {
 
 fn target_at(sight: &Sight, at: &Pos, range: i32) -> Target {
     Target {
-        room: at.room.clone(),
+        room: at.room,
         tiles: vec![tiles::of_pos(at)],
         range,
         avoid: sight.avoid.clone(),
@@ -190,7 +190,7 @@ pub fn hold(sight: &Sight, creep: &Creep) -> Wish {
 fn aim(sight: &Sight, order: &[String], centre: &Pos, creep: &Creep) -> Pos {
     ranked(sight, order, creep)
         .first()
-        .map_or_else(|| centre.clone(), |h| h.pos.clone())
+        .map_or_else(|| *centre, |h| h.pos)
 }
 
 pub fn close(sight: &mut Sight, order: &[String], centre: &Pos, creep: &Creep) -> Wish {
@@ -236,15 +236,15 @@ pub fn kite(
     centre: &Pos,
     creep: &Creep,
 ) -> Wish {
-    let room = creep.pos.room.clone();
+    let room = creep.pos.room;
 
-    let swings: Vec<&Creep> = hostiles_in(sight, &room)
+    let swings: Vec<&Creep> = hostiles_in(sight, room)
         .iter()
         .filter(|h| struck(BodyPart::Attack, h, &creep.pos))
         .collect();
 
     let gap = |tile: Tile| -> i32 {
-        let at = tiles::to_pos(&room, tile);
+        let at = tiles::to_pos(room, tile);
 
         swings
             .iter()
@@ -262,7 +262,7 @@ pub fn kite(
         let step = (tiles::around(here))
             .iter()
             .copied()
-            .filter(|t| !tiles::on_edge(*t) && sight.atlas.passable(&room, *t))
+            .filter(|t| !tiles::on_edge(*t) && sight.atlas.passable(room, *t))
             .min_by_key(|t| (-gap(*t), *t))
             .filter(|t| gap(*t) > gap(here));
 
@@ -324,7 +324,7 @@ fn rescued(raid: &[Creep], members: &[&Creep], creep: &Creep) -> bool {
 }
 
 /// Only while a mate fights on: the gate never empties the line.
-pub fn exposed(sight: &Sight, raid_room: &str, members: &[&Creep], creep: &Creep) -> bool {
+pub fn exposed(sight: &Sight, raid_room: RoomName, members: &[&Creep], creep: &Creep) -> bool {
     let raid = hostiles_in(sight, raid_room);
 
     rescued(raid, members, creep)
@@ -336,8 +336,8 @@ pub fn exposed(sight: &Sight, raid_room: &str, members: &[&Creep], creep: &Creep
 /// The tiles out of the raid's next reach, by ring, and the one beside the most mates.
 struct Safety<'a> {
     atlas: &'a Atlas,
-    room: &'a str,
-    raid_room: &'a str,
+    room: RoomName,
+    raid_room: RoomName,
     raid: &'a [Creep],
     members: &'a [&'a Creep],
     creep: &'a Creep,
@@ -418,14 +418,19 @@ impl Safety<'_> {
 
 /// To the nearest tile out of the raid's next reach (an exit hands the body to
 /// the next room), beside the most mates that heal it.
-pub fn step_back(sight: &mut Sight, raid_room: &str, members: &[&Creep], creep: &Creep) -> Wish {
-    let room = creep.pos.room.clone();
+pub fn step_back(
+    sight: &mut Sight,
+    raid_room: RoomName,
+    members: &[&Creep],
+    creep: &Creep,
+) -> Wish {
+    let room = creep.pos.room;
     let here = tiles::of_pos(&creep.pos);
 
     let found = {
         let safety = Safety {
             atlas: &*sight.atlas,
-            room: &room,
+            room,
             raid_room,
             raid: hostiles_in(sight, raid_room),
             members,
@@ -451,7 +456,7 @@ pub fn blob(
     centre: &Pos,
     range: i32,
     members: &[&Creep],
-    fortified: &BTreeSet<String>,
+    fortified: &BTreeSet<RoomName>,
 ) -> Vec<Wish> {
     blob::wishes(
         sight.atlas,
@@ -464,7 +469,7 @@ pub fn blob(
 
 /// A medic's seat beside a dismantler: open ground off every tile beside the
 /// rival's line, where a body would be struck from a rampart.
-fn seat(atlas: &Atlas, line: &[Pos], room: &str, t: Tile) -> bool {
+fn seat(atlas: &Atlas, line: &[Pos], room: RoomName, t: Tile) -> bool {
     !tiles::on_edge(t)
         && atlas.passable(room, t)
         && !line
@@ -472,7 +477,7 @@ fn seat(atlas: &Atlas, line: &[Pos], room: &str, t: Tile) -> bool {
             .any(|p| p.within(engine::MELEE_RANGE, &tiles::to_pos(room, t)))
 }
 
-pub fn seats_at(atlas: &Atlas, line: &[Pos], room: &str, work: Tile) -> i32 {
+pub fn seats_at(atlas: &Atlas, line: &[Pos], room: RoomName, work: Tile) -> i32 {
     tiles::around(work)
         .iter()
         .filter(|t| seat(atlas, line, room, **t))
@@ -528,13 +533,13 @@ pub fn picket(sight: &mut Sight, front: &Front, members: &[&Creep], creep: &Cree
     let mut seats: Vec<Tile> = tiles::around(tiles::of_pos(post))
         .iter()
         .copied()
-        .filter(|t| seat(&*sight.atlas, &front.line, &post.room, *t))
+        .filter(|t| seat(&*sight.atlas, &front.line, post.room, *t))
         .collect();
     seats.sort_unstable();
 
     match seats.get(seat_at) {
-        Some(t) if creep.pos == tiles::to_pos(&post.room, *t) => hold(sight, creep),
-        Some(t) => toward(sight, creep, &tiles::to_pos(&post.room, *t), 0),
+        Some(t) if creep.pos == tiles::to_pos(post.room, *t) => hold(sight, creep),
+        Some(t) => toward(sight, creep, &tiles::to_pos(post.room, *t), 0),
         None => toward(sight, creep, post, engine::MELEE_RANGE),
     }
 }
@@ -557,14 +562,14 @@ pub fn focus_of<'a>(front: &Front, members: &[&'a Creep]) -> Option<&'a Creep> {
 /// The edge a drain bounces through (`ARCHITECTURE.md` §6.2): `bounce`'s
 /// mirror is his.
 pub struct Gate {
-    pub room: String,
-    pub from: String,
+    pub room: RoomName,
+    pub from: RoomName,
     pub bounce: Tile,
     pub rest: Tile,
 }
 pub fn drain(sight: &mut Sight, gate: &Gate, creep: &Creep) -> Wish {
     let at = tiles::of_pos(&creep.pos);
-    let there = |t: Tile| tiles::to_pos(&gate.from, t);
+    let there = |t: Tile| tiles::to_pos(gate.from, t);
     let strikes = live(BodyPart::Attack, creep) > 0 || live(BodyPart::RangedAttack, creep) > 0;
 
     // The set waits beside his room, off the pair's tiles: the entry is the plan's.
@@ -593,7 +598,7 @@ pub fn drain(sight: &mut Sight, gate: &Gate, creep: &Creep) -> Wish {
 fn seat_of(atlas: &Atlas, gate: &Gate) -> Option<Tile> {
     (tiles::around(gate.rest).iter())
         .filter(|t| !tiles::on_edge(**t) && tiles::range(**t, gate.bounce) <= 1)
-        .filter(|t| atlas.passable(&gate.from, **t))
+        .filter(|t| atlas.passable(gate.from, **t))
         .min()
         .copied()
 }
@@ -604,7 +609,7 @@ pub fn siege(
     members: &[&Creep],
     creep: &Creep,
 ) -> (Option<CreepAct>, Wish) {
-    let room = creep.pos.room.clone();
+    let room = creep.pos.room;
     let here = tiles::of_pos(&creep.pos);
 
     let dismantles = |c: &Creep| c.body.iter().any(|p| p.kind.is_work());
@@ -629,15 +634,15 @@ pub fn siege(
                 .copied()
                 .filter(|t| {
                     !tiles::on_edge(*t)
-                        && sight.atlas.passable(&room, *t)
-                        && !tiles::to_pos(&room, *t).within(engine::MELEE_RANGE, &front.breach)
+                        && sight.atlas.passable(room, *t)
+                        && !tiles::to_pos(room, *t).within(engine::MELEE_RANGE, &front.breach)
                 })
                 .collect();
 
             let off = off
                 .iter()
                 .copied()
-                .min_by_key(|t| (-(nearest_tower(front, &tiles::to_pos(&room, *t))), *t));
+                .min_by_key(|t| (-(nearest_tower(front, &tiles::to_pos(room, *t))), *t));
 
             (
                 None,
@@ -657,9 +662,9 @@ pub fn siege(
                 .iter()
                 .copied()
                 .filter(|t| {
-                    let at = tiles::to_pos(&front.breach.room, *t);
+                    let at = tiles::to_pos(front.breach.room, *t);
                     !tiles::on_edge(*t)
-                        && sight.atlas.passable(&at.room, *t)
+                        && sight.atlas.passable(at.room, *t)
                         && dismantlers.iter().all(|d| d.pos != at)
                 })
                 .collect();
@@ -692,7 +697,7 @@ pub fn siege(
                 let mut seats: Vec<Tile> = tiles::around(tiles::of_pos(&d.pos))
                     .iter()
                     .copied()
-                    .filter(|t| seat(&*sight.atlas, &front.line, &d.pos.room, *t))
+                    .filter(|t| seat(&*sight.atlas, &front.line, d.pos.room, *t))
                     .collect();
                 seats.sort_unstable();
 
@@ -710,7 +715,7 @@ pub fn siege(
 
                 match sit {
                     Some(t) if d.pos.room == room && t == here => hold(sight, creep),
-                    Some(t) => toward(sight, creep, &tiles::to_pos(&d.pos.room, t), 0),
+                    Some(t) => toward(sight, creep, &tiles::to_pos(d.pos.room, t), 0),
                     None => toward(sight, creep, &d.pos, engine::MELEE_RANGE),
                 }
             }
@@ -744,7 +749,7 @@ pub fn rampart(sight: &mut Sight, creep: &Creep) -> Wish {
 }
 
 pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
-    let room = creep.pos.room.clone();
+    let room = creep.pos.room;
     let here: Vec<Pos> = sight
         .homes
         .iter()
@@ -753,14 +758,14 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
         .collect();
 
     let home: Option<Pos> = if here.is_empty() {
-        let onto: Vec<&str> = sight.homes.iter().map(|p| p.room.as_str()).collect();
+        let onto: Vec<RoomName> = sight.homes.iter().map(|p| p.room).collect();
         let tree = sight
             .atlas
-            .tree_to(&BTreeSet::new(), tick::SIEGE_HOPS, &room, &onto);
+            .tree_to(&BTreeSet::new(), tick::SIEGE_HOPS, room, &onto);
         let routed: Vec<(i32, Pos)> = sight
             .homes
             .iter()
-            .filter_map(|p| tree.crossings(&room, &p.room).map(|n| (n, p.clone())))
+            .filter_map(|p| tree.crossings(room, p.room).map(|n| (n, *p)))
             .collect();
 
         routed
@@ -851,11 +856,11 @@ pub fn nets(
             tiles::around(here)
                 .iter()
                 .copied()
-                .filter(|t| atlas.passable(&c.pos.room, *t)),
+                .filter(|t| atlas.passable(c.pos.room, *t)),
         )
         .map(|t| {
             let moved = Creep {
-                pos: tiles::to_pos(&c.pos.room, t),
+                pos: tiles::to_pos(c.pos.room, t),
                 ..c.clone()
             };
             let patients: Vec<&Creep> = mates.iter().copied().chain([&moved]).collect();
@@ -948,7 +953,7 @@ pub fn hunt(
     (centre, contact): (&Pos, bool),
     c: &Creep,
 ) -> (Option<CreepAct>, Wish, Vec<(Tile, i64)>) {
-    let room = c.pos.room.clone();
+    let room = c.pos.room;
     let spared = sight.spared.get(&room).cloned().unwrap_or_default();
     let parts = live(BodyPart::RangedAttack, c);
     let worth_of = |m: &Mark, damage: i32| {
@@ -958,7 +963,7 @@ pub fn hunt(
     // tick: the step taken now is the next tick's reach, and a shot is
     // resolved before the mark steps (v1's glue).
     let share = |m: &Mark, at: &Pos, next: bool, hit: &dyn Fn(i32) -> i32| -> i64 {
-        let now = [(!m.shielded).then(|| m.pos.clone())];
+        let now = [(!m.shielded).then_some(m.pos)];
         let tiles = if next { &m.next[..] } else { &now[..] };
         let n = tiles.len().max(1) as i64;
         let hits = tiles.iter().flatten().filter_map(|p| at.range(p));
@@ -1043,7 +1048,7 @@ pub fn hunt(
         .filter(|(t, net)| !tiles::on_edge(*t) && net * 3 < c.hits)
         .map(|(t, net)| {
             let risk = i64::from(net.max(0)) * cost / i64::from(threat[t].max(c.hits / 3).max(1));
-            let at = tiles::to_pos(&room, t);
+            let at = tiles::to_pos(room, t);
             (t, landed(&at, true).0 + swung(&at) - risk)
         })
         .collect();

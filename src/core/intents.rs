@@ -1,6 +1,6 @@
 use super::mv::Wish;
 use super::vocabulary::{BodyPart, Resource};
-use super::world::Kind;
+use super::world::{Kind, RoomName};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CreepAct {
@@ -92,7 +92,7 @@ pub enum LabAct {
 /// `send`: resource, amount, the room it lands in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TerminalAct {
-    Send(Resource, i32, String),
+    Send(Resource, i32, RoomName),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -138,18 +138,18 @@ pub struct Ask {
 pub enum Intent {
     Creep(String, CreepAct),
     Spawn(String, SpawnAct),
-    Room(String, RoomAct),
+    Room(RoomName, RoomAct),
     Tower(String, TowerAct),
     Controller(String, ControllerAct),
     Link(String, LinkAct),
     Lab(String, LabAct),
     Terminal(String, TerminalAct),
     /// An observer and the room it brings in sight next tick.
-    Observe(String, String),
+    Observe(String, RoomName),
     /// Tick serves these from the room's queue; none reaches `Executor`.
-    Queue(String, Ask),
+    Queue(RoomName, Ask),
     /// Tick arbitrates every module's wishes in a room as one.
-    Wish(String, Wish),
+    Wish(RoomName, Wish),
     /// A body's scored tiles, for the harness's trace; nothing reaches the game.
     Trace(String, Vec<(crate::core::world::Pos, i64)>),
     /// Summed into the observe segment's counts (§9.3).
@@ -161,14 +161,14 @@ impl Intent {
         match self {
             Intent::Creep(name, _) => name.clone(),
             Intent::Spawn(id, _) => id.clone(),
-            Intent::Room(name, _) => name.clone(),
+            Intent::Room(name, _) => name.to_string(),
             Intent::Tower(id, _) => id.clone(),
             Intent::Controller(id, _) => id.clone(),
             Intent::Link(id, _) => id.clone(),
             Intent::Lab(id, _) => id.clone(),
             Intent::Terminal(id, _) => id.clone(),
             Intent::Observe(id, _) => id.clone(),
-            Intent::Queue(room, _) => room.clone(),
+            Intent::Queue(room, _) => room.to_string(),
             Intent::Wish(_, wish) => wish.creep.clone(),
             Intent::Trace(creep, _) => creep.clone(),
             Intent::Count(name, _) => name.to_string(),

@@ -14,7 +14,7 @@ use super::strategy::intel::Intel;
 use super::tactics::{self, Tactic};
 use super::tiles::{self, Tile};
 use super::vocabulary::{BodyPart, Boost, Compound, Resource};
-use super::world::{Creep, Owner, Pos, Sightings, World};
+use super::world::{Creep, Owner, Pos, RoomName, Sightings, World};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Declared {
@@ -25,7 +25,7 @@ pub struct Declared {
 /// What is known of a room before it is seen.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Outpost {
-    pub room: String,
+    pub room: RoomName,
     pub controller: Declared,
     pub sources: Vec<Declared>,
 }
@@ -33,7 +33,7 @@ pub struct Outpost {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TacticRule {
     pub rival: Option<String>,
-    pub room: Option<String>,
+    pub room: Option<RoomName>,
     pub pin: Option<String>,
     pub forbid: Vec<String>,
 }
@@ -46,10 +46,9 @@ pub struct Ruling {
     pub pin: Option<Tactic>,
 }
 
-pub fn ruling(rules: &[TacticRule], room: &str, rivals: &BTreeSet<&str>) -> Ruling {
+pub fn ruling(rules: &[TacticRule], room: RoomName, rivals: &BTreeSet<&str>) -> Ruling {
     let applies = |r: &TacticRule| {
-        r.room.as_deref().is_none_or(|x| x == room)
-            && r.rival.as_deref().is_none_or(|x| rivals.contains(&x))
+        r.room.is_none_or(|x| x == room) && r.rival.as_deref().is_none_or(|x| rivals.contains(&x))
     };
 
     let mut out = Ruling::default();
@@ -70,12 +69,10 @@ pub fn ruling(rules: &[TacticRule], room: &str, rivals: &BTreeSet<&str>) -> Ruli
 /// operator (§7.2).
 fn checked(rules: Vec<TacticRule>) -> (Vec<TacticRule>, Vec<String>) {
     let joins = |a: &TacticRule, b: &TacticRule| {
-        [(&a.rival, &b.rival), (&a.room, &b.room)]
-            .iter()
-            .all(|(x, y)| match (x, y) {
-                (Some(x), Some(y)) => x == y,
-                _ => true,
-            })
+        fn same<T: PartialEq>(x: Option<T>, y: Option<T>) -> bool {
+            x.zip(y).is_none_or(|(x, y)| x == y)
+        }
+        same(a.rival.as_ref(), b.rival.as_ref()) && same(a.room, b.room)
     };
 
     let mut kept = Vec::new();
@@ -117,15 +114,15 @@ pub struct Declarations {
     pub claims: Vec<Outpost>,
     /// The one colony whose labs react, and the stock of each compound it
     /// makes toward.
-    pub labs: Option<(String, BTreeMap<Compound, i32>)>,
+    pub labs: Option<(RoomName, BTreeMap<Compound, i32>)>,
     pub allies: BTreeSet<String>,
     pub enemies: BTreeSet<String>,
     /// The rival rooms whose towers and economy are razed.
-    pub sieges: Vec<String>,
+    pub sieges: Vec<RoomName>,
     /// Our colonies being emptied before the owner unclaims them by hand.
-    pub abandon: Vec<String>,
+    pub abandon: Vec<RoomName>,
     /// Rooms no fight body walks through on its way: a rival's towers.
-    pub avoid: BTreeSet<String>,
+    pub avoid: BTreeSet<RoomName>,
     /// The operator's tactic rules, per rival and room (§6.3).
     pub tactics: Vec<TacticRule>,
 }
@@ -134,19 +131,19 @@ pub struct Declarations {
 /// of, and the tactic rules no name answers to.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Refused {
-    pub rooms: Vec<String>,
+    pub rooms: Vec<RoomName>,
     pub rules: Vec<String>,
 }
 
 impl Declarations {
     /// A room the engine never lets a creep into serves nothing, and a tactic
     /// rule no name answers to never applies; both dropped, for the operator.
-    pub fn refuse(&mut self, closed: &BTreeSet<String>) -> Refused {
+    pub fn refuse(&mut self, closed: &BTreeSet<RoomName>) -> Refused {
         let mut refused = Refused::default();
-        let mut open = |room: &String| {
+        let mut open = |room: &RoomName| {
             let open = !closed.contains(room);
             if !open {
-                refused.rooms.push(room.clone());
+                refused.rooms.push(*room);
             }
             open
         };
@@ -212,7 +209,7 @@ pub const SIEGE_HOPS: i32 = 10;
 
 pub fn target_at(pos: &Pos, range: i32) -> Target {
     Target {
-        room: pos.room.clone(),
+        room: pos.room,
         tiles: vec![tiles::of_pos(pos)],
         range,
         avoid: BTreeSet::new(),
@@ -223,7 +220,7 @@ pub fn target_at(pos: &Pos, range: i32) -> Target {
 /// Ticks and crossings are not one unit. `trees` holds the homes' rooms'.
 pub fn nearest<'t>(
     atlas: &mut Atlas,
-    trees: &dyn Fn(&str) -> Option<&'t Tree>,
+    trees: &dyn Fn(RoomName) -> Option<&'t Tree>,
     homes: &[Pos],
     can: impl Fn(usize) -> bool,
     at: &Pos,
@@ -251,20 +248,19 @@ pub fn nearest<'t>(
 
     least(atlas, &|atlas, home| {
         let t = target_at(home, 1);
-        match trees(&home.room) {
+        match trees(home.room) {
             Some(tree) if home.room != at.room => atlas.ticks_on(tree, walker, &t, at),
             _ => atlas.ticks_to(walker, &t, at),
         }
     })
     .or_else(|| {
         least(atlas, &|_atlas, home| {
-            (trees(&home.room)?.crossings(&at.room, &home.room))
-                .map(|n| Atlas::crossing_ticks() * n)
+            (trees(home.room)?.crossings(at.room, home.room)).map(|n| Atlas::crossing_ticks() * n)
         })
     })
 }
 
-pub fn colonies(world: &World) -> Vec<String> {
+pub fn colonies(world: &World) -> Vec<RoomName> {
     world
         .rooms
         .iter()
@@ -272,13 +268,13 @@ pub fn colonies(world: &World) -> Vec<String> {
             r.controller.as_ref().is_some_and(|c| c.owner.is_ours())
                 && world.spawns.iter().any(|s| s.pos.room == r.name)
         })
-        .map(|r| r.name.clone())
+        .map(|r| r.name)
         .collect()
 }
 
 /// Whether an outpost's work is open (`ARCHITECTURE.md` §13, M1b): a foe
 /// stands down the work it can reach and no more.
-fn open(context: &Context, owned: &BTreeSet<String>, room: &str) -> bool {
+fn open(context: &Context, owned: &BTreeSet<RoomName>, room: RoomName) -> bool {
     let Some(seen) = context.world.room(room) else {
         return super::world::sightings::unarmed(context.sightings, context.world.time, room);
     };
@@ -316,16 +312,16 @@ fn open(context: &Context, owned: &BTreeSet<String>, room: &str) -> bool {
 /// down (`ARCHITECTURE.md` §13, M1b): a stood-down room is no ground.
 pub fn worked(context: &Context) -> Vec<Outpost> {
     let owned = super::world::hostiles::owned(&context.world.rooms);
-    let trees: Vec<(String, Tree)> = colonies(context.world)
+    let trees: Vec<(RoomName, Tree)> = colonies(context.world)
         .into_iter()
         .map(|home| {
-            let tree = context.atlas.tree(&BTreeSet::new(), REACH_HOPS, &home);
+            let tree = context.atlas.tree(&BTreeSet::new(), REACH_HOPS, home);
             (home, tree)
         })
         .collect();
 
     let raised = context.declarations.claims.iter().filter(|c| {
-        context.world.room(&c.room).is_some_and(|r| {
+        context.world.room(c.room).is_some_and(|r| {
             r.controller.as_ref().is_some_and(|k| k.owner.is_ours())
                 && !context.world.spawns.iter().any(|s| s.pos.room == c.room)
         })
@@ -337,10 +333,10 @@ pub fn worked(context: &Context) -> Vec<Outpost> {
         .iter()
         .chain(raised)
         .filter(|o| {
-            open(context, &owned, &o.room)
+            open(context, &owned, o.room)
                 && trees
                     .iter()
-                    .any(|(home, tree)| home == &o.room || tree.contains(&o.room))
+                    .any(|(home, tree)| home == &o.room || tree.contains(o.room))
         })
         .cloned()
         .collect()
@@ -373,13 +369,13 @@ pub struct TickResult {
     pub reports: Vec<Report>,
 }
 
-fn by_room<T: Clone>(pairs: &[(String, T)]) -> Vec<(String, Vec<T>)> {
-    let mut groups: HashMap<String, Vec<T>> = HashMap::default();
-    let mut rooms: Vec<String> = Vec::new();
+fn by_room<T: Clone>(pairs: &[(RoomName, T)]) -> Vec<(RoomName, Vec<T>)> {
+    let mut groups: HashMap<RoomName, Vec<T>> = HashMap::default();
+    let mut rooms: Vec<RoomName> = Vec::new();
     for (room, value) in pairs {
         if !groups.contains_key(room) {
-            groups.insert(room.clone(), Vec::new());
-            rooms.push(room.clone());
+            groups.insert(*room, Vec::new());
+            rooms.push(*room);
         }
         groups.get_mut(room).unwrap().push(value.clone());
     }
@@ -396,7 +392,7 @@ fn by_room<T: Clone>(pairs: &[(String, T)]) -> Vec<(String, Vec<T>)> {
 /// economy's, on its idle spawns while the bank pays; a fight ask the bank
 /// cannot pay yet holds the economy's behind it, one its capacity never pays
 /// holds nothing.
-pub fn queue(world: &World, asks: &[(String, Ask)]) -> Vec<Intent> {
+pub fn queue(world: &World, asks: &[(RoomName, Ask)]) -> Vec<Intent> {
     let rank = |a: &Ask| -> i32 {
         match a.rank {
             Rank::Floor => 0,
@@ -440,7 +436,7 @@ pub fn queue(world: &World, asks: &[(String, Ask)]) -> Vec<Intent> {
     let mut out = Vec::new();
     for (room, mut asks) in by_room(asks) {
         asks.sort_by_key(rank);
-        if let Some(r) = world.room(&room) {
+        if let Some(r) = world.room(room) {
             let idle: Vec<&super::world::Spawn> = world
                 .spawns
                 .iter()
@@ -460,7 +456,7 @@ pub fn queue(world: &World, asks: &[(String, Ask)]) -> Vec<Intent> {
 
 /// One arbitration per room over every module's wishes (§3's `Move`); a creep
 /// of ours that wishes nothing holds its tile.
-pub fn arbitrate(context: &Context, wishes: &[(String, mv::Wish)]) -> Vec<Intent> {
+pub fn arbitrate(context: &Context, wishes: &[(RoomName, mv::Wish)]) -> Vec<Intent> {
     let mut wished: BTreeSet<String> = BTreeSet::new();
     let groups = by_room(wishes);
     let mut scratch = mv::arbitrate::scratch();
@@ -475,7 +471,7 @@ pub fn arbitrate(context: &Context, wishes: &[(String, mv::Wish)]) -> Vec<Intent
     for (room, ws) in groups {
         // A wish onto a hostile's tile follows it: the engine moves the body
         // there only once the hostile steps off, so it holds its tile.
-        let theirs: BTreeSet<Tile> = (context.world.room(&room).into_iter())
+        let theirs: BTreeSet<Tile> = (context.world.room(room).into_iter())
             .flat_map(|r| r.hostiles().map(|c| tiles::of_pos(&c.pos)))
             .collect();
         let (glued, ws): (Vec<mv::Wish>, Vec<mv::Wish>) =
@@ -496,7 +492,7 @@ pub fn arbitrate(context: &Context, wishes: &[(String, mv::Wish)]) -> Vec<Intent
         held.extend(glued.iter().map(|w| w.at));
         let steps = mv::arbitrate::arbitrate_with(
             &mut scratch,
-            |tile| context.atlas.passable(&room, tile) || context.atlas.is_struck(&room, tile),
+            |tile| context.atlas.passable(room, tile) || context.atlas.is_struck(room, tile),
             &held,
             &ws,
         );
@@ -523,7 +519,7 @@ pub fn boost_of_name(name: &str) -> Option<Compound> {
 /// only when none has room, its drain making room.
 pub fn booster<'a>(
     world: &'a World,
-    room: &str,
+    room: RoomName,
     compound: Compound,
 ) -> Option<&'a super::world::Structure> {
     let held = |s: &super::world::Structure| s.store.amount_of(&Resource::Compound(compound));
@@ -537,7 +533,7 @@ pub fn booster<'a>(
         .or_else(|| labs_in(world, room).max_by(most))
 }
 
-fn labs_in<'a>(world: &'a World, room: &str) -> impl Iterator<Item = &'a super::world::Structure> {
+fn labs_in(world: &World, room: RoomName) -> impl Iterator<Item = &super::world::Structure> {
     (world.rooms.iter())
         .filter(move |r| r.name == room)
         .flat_map(|r| r.structures.iter())
@@ -546,7 +542,7 @@ fn labs_in<'a>(world: &'a World, room: &str) -> impl Iterator<Item = &'a super::
 
 /// What the home holds of a compound and of energy, over the stores a haul
 /// fills: its labs, terminal, storage and the loads on its bodies.
-pub fn home_holds(world: &World, room: &str, compound: Compound) -> (i32, i32) {
+pub fn home_holds(world: &World, room: RoomName, compound: Compound) -> (i32, i32) {
     let held = |s: &super::world::Store| {
         (
             s.amount_of(&Resource::Compound(compound)),
@@ -616,7 +612,7 @@ pub struct Waiting<'a> {
 /// body costs it the compound and never its raid.
 pub fn waiting<'a>(
     world: &'a World,
-    home: &str,
+    home: RoomName,
     creep: &super::world::Creep,
 ) -> Option<Waiting<'a>> {
     let compound = boost_of_name(&creep.name)?;
@@ -656,17 +652,12 @@ fn boost_stop(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
     let Some((home, _)) = &context.declarations.labs else {
         return intents;
     };
-    let home = home.clone();
+    let home = *home;
     let mut stalls: Vec<(String, Pos, String, Compound)> = Vec::new();
 
     for creep in (context.world.creeps.iter()).filter(|c| c.owner.is_ours() && c.pos.room == home) {
-        if let Some(w) = waiting(context.world, &home, creep) {
-            stalls.push((
-                creep.name.clone(),
-                w.lab.pos.clone(),
-                w.lab.id.clone(),
-                w.compound,
-            ));
+        if let Some(w) = waiting(context.world, home, creep) {
+            stalls.push((creep.name.clone(), w.lab.pos, w.lab.id.clone(), w.compound));
         }
     }
 
@@ -683,7 +674,7 @@ fn boost_stop(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
         .collect();
 
     let mut boostable: BTreeSet<&str> = BTreeSet::new();
-    for lab in labs_in(context.world, &home) {
+    for lab in labs_in(context.world, home) {
         for compound in stalls.iter().map(|(_, _, _, c)| c) {
             if can_boost(lab, *compound) {
                 boostable.insert(lab.id.as_str());
@@ -707,7 +698,7 @@ fn boost_stop(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
             factor: grid::loaded_factor(&super::world::body_kinds(creep)),
         };
         out.push(Intent::Wish(
-            creep.pos.room.clone(),
+            creep.pos.room,
             mv::plan::toward(context.atlas, creep, mover, &target_at(at, 1), 1),
         ));
     }
@@ -721,8 +712,8 @@ fn settle(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
     let mut wishes = Vec::new();
     for i in &intents {
         match i {
-            Intent::Queue(room, ask) => asks.push((room.clone(), ask.clone())),
-            Intent::Wish(room, wish) => wishes.push((room.clone(), wish.clone())),
+            Intent::Queue(room, ask) => asks.push((*room, ask.clone())),
+            Intent::Wish(room, wish) => wishes.push((*room, wish.clone())),
             _ => (),
         }
     }
@@ -852,7 +843,7 @@ pub fn factor_loaded(body: &[BodyPart]) -> FatigueFactor {
     grid::loaded_factor(body)
 }
 
-pub fn pairs_by_room<T: Clone>(pairs: &[(String, T)]) -> Vec<(String, Vec<T>)> {
+pub fn pairs_by_room<T: Clone>(pairs: &[(RoomName, T)]) -> Vec<(RoomName, Vec<T>)> {
     by_room(pairs)
 }
 
@@ -870,7 +861,7 @@ mod tests {
     ) -> TacticRule {
         TacticRule {
             rival: rival.map(str::to_string),
-            room: room.map(str::to_string),
+            room: room.map(RoomName::named),
             pin: pin.map(str::to_string),
             forbid: forbid.iter().map(ToString::to_string).collect(),
         }
@@ -885,16 +876,16 @@ mod tests {
         ];
         let rivals: BTreeSet<&str> = ["rival"].into_iter().collect();
 
-        let here = ruling(&rules, "W1N1", &rivals);
+        let here = ruling(&rules, RoomName::named("W1N1"), &rivals);
         assert_eq!(here.pin, Some(Tactic::Hold));
         assert!(here.forbid.contains(&Tactic::BlobClose));
 
-        let elsewhere = ruling(&rules, "W2N2", &rivals);
+        let elsewhere = ruling(&rules, RoomName::named("W2N2"), &rivals);
         assert_eq!(elsewhere.pin, Some(Tactic::Kite));
         assert!(elsewhere.forbid.is_empty());
 
         let stranger: BTreeSet<&str> = ["other"].into_iter().collect();
-        assert_eq!(ruling(&rules, "W1N1", &stranger).pin, None);
+        assert_eq!(ruling(&rules, RoomName::named("W1N1"), &stranger).pin, None);
     }
 
     #[test]

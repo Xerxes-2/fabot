@@ -8,7 +8,7 @@ use std::io::Read;
 
 use fabot::core::exchange::{self, Losses, Outcome, Side, Stance, Terrain, Tower, fighter};
 use fabot::core::vocabulary::{boost, part_of_name};
-use fabot::core::world::Pos;
+use fabot::core::world::{Pos, RoomName};
 use serde_json::{Value, json};
 
 fn int(e: &Value, key: &str) -> i32 {
@@ -20,7 +20,7 @@ fn each<'a>(e: &'a Value, key: &str) -> &'a Vec<Value> {
 }
 
 fn predict(sample: &Value) -> Value {
-    let room = sample["room"].as_str().unwrap();
+    let room = RoomName::named(sample["room"].as_str().unwrap());
     let pos = |e: &Value| Pos::new(room, int(e, "x"), int(e, "y"));
     let side = |e: &Value| Side {
         bodies: each(e, "bodies")

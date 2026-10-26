@@ -8,7 +8,7 @@ use crate::core::engine;
 use crate::core::grid::{self, FatigueFactor, Footprint, factor_of, step_ticks};
 use crate::core::mv::{Wish, plan};
 use crate::core::tiles::{self, Tile};
-use crate::core::world::Creep;
+use crate::core::world::{Creep, RoomName};
 
 /// ⌈(n−1)/2⌉: less, and a file of n deadlocks in a corridor.
 pub fn radius(n: usize) -> i32 {
@@ -46,7 +46,7 @@ pub fn wishes(
     target: &Target,
     weight: i32,
     members: &[&Creep],
-    fortified: &BTreeSet<String>,
+    fortified: &BTreeSet<RoomName>,
 ) -> Vec<Wish> {
     let mover = slowest(members);
 
@@ -55,7 +55,7 @@ pub fn wishes(
         mover: Mover,
         target: &Target,
         hops: i32,
-        room: &str,
+        room: RoomName,
         tile: Tile,
     ) -> i32 {
         let field = atlas.field(mover, target, &tiles::to_pos(room, tile));
@@ -82,7 +82,7 @@ pub fn wishes(
                             tiles::landing(edge),
                         ) {
                             (Some(next), Some(landing)) => {
-                                let rest = left(atlas, mover, target, hops - 1, &next, landing);
+                                let rest = left(atlas, mover, target, hops - 1, next, landing);
                                 if rest == grid::UNREACHED {
                                     grid::UNREACHED
                                 } else {
@@ -105,7 +105,7 @@ pub fn wishes(
                 mover,
                 target,
                 target.max_hops,
-                &c.pos.room,
+                c.pos.room,
                 tiles::of_pos(&c.pos),
             );
             match (ticks, fatigue_ticks(c)) {
@@ -135,7 +135,7 @@ pub fn wishes(
     let lagging = members.iter().any(|c| {
         lag(c) != grid::UNREACHED
             && lag(c) - lag(anchor) > r + 1
-            && tiles::seam_range(&c.pos, &tiles::to_pos(&anchor.pos.room, anchor_wish.head))
+            && tiles::seam_range(&c.pos, &tiles::to_pos(anchor.pos.room, anchor_wish.head))
                 .is_none_or(|range| range > r + 1)
     });
 
@@ -144,7 +144,7 @@ pub fn wishes(
     } else {
         anchor_wish.head
     };
-    let head = tiles::to_pos(&anchor.pos.room, head_tile);
+    let head = tiles::to_pos(anchor.pos.room, head_tile);
 
     let step_back = step_ticks(mover.factor, engine::PLAIN_WEIGHT).map_or(0, |step| 2 * step);
 
@@ -173,13 +173,13 @@ pub fn wishes(
     };
 
     let fits = |creep: &Creep, tile: Tile| -> bool {
-        let at = tiles::to_pos(&creep.pos.room, tile);
+        let at = tiles::to_pos(creep.pos.room, tile);
         // Ahead of an anchor that waits, a pass closes no lag: it swaps two in front.
         (creep.name == anchor.name
             || lag(creep) >= lag(anchor)
             || (tiles::seam_range(&at, &head).is_some_and(|range| range <= r)
                 && (!lagging || members.iter().all(|m| m.name == creep.name || m.pos != at))))
-            && (!tiles::room_toward(&creep.pos.room, tiles::exit_of(tile))
+            && (!tiles::room_toward(creep.pos.room, tiles::exit_of(tile))
                 .is_some_and(|next| fortified.contains(&next))
                 || gathered(creep))
     };

@@ -5,7 +5,7 @@ use std::ops::{Index, IndexMut};
 use std::sync::OnceLock;
 
 use crate::core::engine;
-use crate::core::world::Pos;
+use crate::core::world::{Pos, RoomName};
 
 pub const SIDE: i32 = engine::ROOM_SIDE;
 pub const COUNT: usize = 2500;
@@ -114,7 +114,7 @@ pub fn of_pos(pos: &Pos) -> Tile {
     index(pos.x, pos.y)
 }
 
-pub fn to_pos(room: &str, tile: Tile) -> Pos {
+pub fn to_pos(room: RoomName, tile: Tile) -> Pos {
     Pos::new(room, x_of(tile), y_of(tile))
 }
 
@@ -293,49 +293,10 @@ pub fn exit_landings(exit: i32) -> &'static [(Tile, Tile)] {
     all.get(exit as usize).map_or(&[], Vec::as_slice)
 }
 
-pub fn rooms_apart(a: &str, b: &str) -> i32 {
-    match (room_coords(a), room_coords(b)) {
+pub fn rooms_apart(a: RoomName, b: RoomName) -> i32 {
+    match (a.on_grid(), b.on_grid()) {
         (Some(a), Some(b)) => (a.0 - b.0).abs().max((a.1 - b.1).abs()),
         _ => 0,
-    }
-}
-
-pub fn room_coords(name: &str) -> Option<(i32, i32)> {
-    let bytes = name.as_bytes();
-    let digit = |i: usize| i < bytes.len() && bytes[i].is_ascii_digit();
-    let mut x_end = 1usize;
-    while digit(x_end) {
-        x_end += 1;
-    }
-    let mut y_end = x_end + 1;
-    while digit(y_end) {
-        y_end += 1;
-    }
-    let number = |start: usize, stop: usize| -> i32 {
-        let mut value = 0;
-        for byte in &bytes[start..stop] {
-            value = value * 10 + i32::from(byte - b'0');
-        }
-        value
-    };
-    let axis = |letter: u8, outward: u8, inward: u8, value: i32| -> Option<i32> {
-        if letter == outward {
-            Some(-value - 1)
-        } else if letter == inward {
-            Some(value)
-        } else {
-            None
-        }
-    };
-    if name.len() < 4 || x_end == 1 || y_end == x_end + 1 || y_end != name.len() {
-        return None;
-    }
-    match (
-        axis(bytes[0], b'W', b'E', number(1, x_end)),
-        axis(bytes[x_end], b'N', b'S', number(x_end + 1, y_end)),
-    ) {
-        (Some(x), Some(y)) => Some((x, y)),
-        _ => None,
     }
 }
 
@@ -350,60 +311,29 @@ pub fn seam_range(a: &Pos, b: &Pos) -> Option<i32> {
     if a.room == b.room {
         a.range(b)
     } else {
-        match (room_coords(&a.room), room_coords(&b.room)) {
-            (Some((ax, ay)), Some((bx, by))) => Some(
-                (((ax - bx) * (SIDE - 1) + a.x - b.x).abs())
-                    .max(((ay - by) * (SIDE - 1) + a.y - b.y).abs()),
-            ),
-            _ => None,
-        }
+        let ((ax, ay), (bx, by)) = (a.room.on_grid()?, b.room.on_grid()?);
+        Some(
+            (((ax - bx) * (SIDE - 1) + a.x - b.x).abs())
+                .max(((ay - by) * (SIDE - 1) + a.y - b.y).abs()),
+        )
     }
 }
 
-pub fn room_name(x: i32, y: i32) -> String {
-    let mut name = String::with_capacity(8);
-    write_room_name(&mut name, x, y);
-    name
-}
-
-/// `room_name` into a buffer the caller reuses.
-pub fn write_room_name(name: &mut String, x: i32, y: i32) {
-    name.clear();
-    for (outward, inward, value) in [('W', 'E', x), ('N', 'S', y)] {
-        let (side, value) = if value < 0 {
-            (outward, -value - 1)
-        } else {
-            (inward, value)
-        };
-        name.push(side);
-        let digits = name.len();
-        let mut rest = value;
-        loop {
-            name.insert(digits, char::from(b'0' + (rest % 10) as u8));
-            rest /= 10;
-            if rest == 0 {
-                break;
-            }
-        }
-    }
-}
-
-pub fn room_toward(name: &str, exit: i32) -> Option<String> {
+pub fn room_toward(name: RoomName, exit: i32) -> Option<RoomName> {
+    let (x, y) = name.on_grid()?;
     match exit {
-        1 | 3 | 5 | 7 => room_coords(name).map(|(x, y)| room_name(x + dx(exit), y + dy(exit))),
+        1 | 3 | 5 | 7 => Some(RoomName::new(x + dx(exit), y + dy(exit))),
         _ => None,
     }
 }
 
-pub fn exit_toward(from: &str, onto: &str) -> Option<i32> {
-    match (room_coords(from), room_coords(onto)) {
-        (Some((fx, fy)), Some((tx, ty))) => match (tx - fx, ty - fy) {
-            (0, -1) => Some(TOP),
-            (1, 0) => Some(RIGHT),
-            (0, 1) => Some(BOTTOM),
-            (-1, 0) => Some(LEFT),
-            _ => None,
-        },
+pub fn exit_toward(from: RoomName, onto: RoomName) -> Option<i32> {
+    let ((fx, fy), (tx, ty)) = (from.on_grid()?, onto.on_grid()?);
+    match (tx - fx, ty - fy) {
+        (0, -1) => Some(TOP),
+        (1, 0) => Some(RIGHT),
+        (0, 1) => Some(BOTTOM),
+        (-1, 0) => Some(LEFT),
         _ => None,
     }
 }

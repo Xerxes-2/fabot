@@ -18,7 +18,7 @@ fn beside(atlas: &Atlas, creep: &Creep) -> Vec<Tile> {
     let at = tiles::of_pos(&creep.pos);
     tiles::within(1, at)
         .into_iter()
-        .filter(|tile| *tile != at && atlas.passable(&creep.pos.room, *tile))
+        .filter(|tile| *tile != at && atlas.passable(creep.pos.room, *tile))
         .collect()
 }
 

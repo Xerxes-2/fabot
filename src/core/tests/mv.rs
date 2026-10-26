@@ -9,9 +9,9 @@ use crate::core::grid::{Footprint, factor_of};
 use crate::core::mv::{Wish, arbitrate::arbitrate, plan};
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::{BodyPart, Boost};
-use crate::core::world::{Creep, Owner, Part, Room, Store, World, terrain};
+use crate::core::world::{Creep, Owner, Part, Room, RoomName, Store, World, terrain};
 
-const ROOM: &str = "W1N1";
+const ROOM: RoomName = RoomName::named("W1N1");
 const CASES: u64 = 500;
 
 /// A room's ground, the tiles bodies outside the wishes hold, the wishes, and
@@ -157,7 +157,7 @@ fn errand(dice: &mut Dice) -> Errand {
             store: Store::empty(),
         },
         target: Target {
-            room: if away { "W2N1" } else { ROOM }.to_string(),
+            room: if away { RoomName::named("W2N1") } else { ROOM },
             tiles: vec![goal],
             range,
             avoid: BTreeSet::new(),
@@ -243,7 +243,7 @@ fn world_of(errand: &Errand) -> World {
         cpu_limit: 20.0,
         bucket: 10_000,
         rooms: vec![Room {
-            name: ROOM.to_string(),
+            name: ROOM,
             terrain: terrain::of(errand.terrain.clone()),
             controller: None,
             energy_available: 0,

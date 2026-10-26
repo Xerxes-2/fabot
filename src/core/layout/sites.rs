@@ -116,13 +116,13 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
 
         for s in &room.structures {
             if s.kind.ordinal() == ordinal {
-                found.push(s.pos.clone());
+                found.push(s.pos);
             }
         }
 
         for s in &room.sites {
             if s.kind.ordinal() == ordinal {
-                found.push(s.pos.clone());
+                found.push(s.pos);
             }
         }
 
@@ -134,8 +134,8 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
     let rocks: Vec<Pos> = room
         .sources
         .iter()
-        .map(|s| s.pos.clone())
-        .chain(room.minerals.iter().map(|m| m.pos.clone()))
+        .map(|s| s.pos)
+        .chain(room.minerals.iter().map(|m| m.pos))
         .collect();
 
     let mut served = [0u8; tiles::COUNT];

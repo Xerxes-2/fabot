@@ -242,6 +242,7 @@ pub fn ready_runs(
 mod tests {
     use super::*;
     use crate::core::vocabulary::Ore;
+    use crate::core::world::RoomName;
 
     fn stocked(pairs: &[(Resource, i32)]) -> impl Fn(&Resource) -> i32 + '_ {
         move |r| pairs.iter().find(|(p, _)| p == r).map_or(0, |(_, n)| *n)
@@ -283,7 +284,7 @@ mod tests {
 
     #[test]
     fn the_reagent_pair_is_the_one_most_labs_reach() {
-        let at = |x, y| Pos::new("W1N1", x, y);
+        let at = |x, y| Pos::new(RoomName::named("W1N1"), x, y);
         let labs: Vec<(String, Pos)> = [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (10, 10)]
             .iter()
             .enumerate()

@@ -19,7 +19,7 @@ use crate::core::tick::{self, Context, Declarations, Module, TacticRule};
 use crate::core::tiles::Tile;
 use crate::core::vocabulary::{BodyPart, Resource};
 use crate::core::world::{
-    self, Creep, Owner, Pos, Room, Sightings, Structure, World, hostiles, sightings,
+    self, Creep, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles, sightings,
 };
 use crate::core::{engine, tiles};
 
@@ -80,17 +80,17 @@ fn merged(
 }
 
 struct Asked {
-    queued: BTreeMap<String, i32>,
+    queued: BTreeMap<RoomName, i32>,
     /// The energy each room's queued bodies will draw of its bank.
-    asked: BTreeMap<String, i32>,
+    asked: BTreeMap<RoomName, i32>,
     casts: Vec<Cast>,
 }
 
 impl Asked {
-    fn queue(&mut self, room: &str, body: &[BodyPart]) {
+    fn queue(&mut self, room: RoomName, body: &[BodyPart]) {
         let ticks = engine::SPAWN_TICKS_PER_PART * body.len() as i32;
-        *self.queued.entry(room.to_string()).or_insert(0) += ticks;
-        *self.asked.entry(room.to_string()).or_insert(0) += engine::body_cost(body);
+        *self.queued.entry(room).or_insert(0) += ticks;
+        *self.asked.entry(room).or_insert(0) += engine::body_cost(body);
     }
 }
 
@@ -109,13 +109,13 @@ struct Hunting {
 struct Scene<'a> {
     world: &'a World,
     sightings: &'a Sightings,
-    avoid: &'a BTreeSet<String>,
+    avoid: &'a BTreeSet<RoomName>,
     /// The operator's tactic rules (§6.3), filtered per engagement.
     rules: &'a [TacticRule],
-    walks: BTreeMap<(String, i32), Tree>,
-    homes: BTreeSet<String>,
-    worked: BTreeSet<String>,
-    foes: BTreeMap<String, Vec<Creep>>,
+    walks: BTreeMap<(RoomName, i32), Tree>,
+    homes: BTreeSet<RoomName>,
+    worked: BTreeSet<RoomName>,
+    foes: BTreeMap<RoomName, Vec<Creep>>,
     cores: BTreeSet<String>,
     by_id: BTreeMap<i32, Group>,
     hostile_at: BTreeMap<String, Pos>,
@@ -151,13 +151,13 @@ impl<'a> Scene<'a> {
             .is_some_and(|c| !c.owner.is_ours() && c.safe_mode > 0)
     }
 
-    fn in_sight(&self, room: &str) -> Option<&'a Room> {
+    fn in_sight(&self, room: RoomName) -> Option<&'a Room> {
         self.world.rooms.iter().find(|r| r.name == room)
     }
 
     /// The usernames whose room this is and who stands in it: what a rule's
     /// `rival` names (§6.3).
-    fn rivals_of(&self, room: &str) -> BTreeSet<&'a str> {
+    fn rivals_of(&self, room: RoomName) -> BTreeSet<&'a str> {
         let Some(seen) = self.in_sight(room) else {
             return BTreeSet::new();
         };
@@ -175,7 +175,7 @@ impl<'a> Scene<'a> {
     /// A kind's candidates as the operator's rules leave them, and the pin it
     /// names (§6.3).
     fn ruled(&self, e: &Engagement, candidates: &[Tactic]) -> (Vec<Tactic>, Option<Tactic>) {
-        let ruling = tick::ruling(self.rules, &e.room, &self.rivals_of(&e.room));
+        let ruling = tick::ruling(self.rules, e.room, &self.rivals_of(e.room));
 
         let left = candidates
             .iter()
@@ -187,7 +187,7 @@ impl<'a> Scene<'a> {
     }
 
     fn next_struck(&self, e: &Engagement) -> Option<&'a Structure> {
-        let room = self.in_sight(&e.room)?;
+        let room = self.in_sight(e.room)?;
 
         match (e.plan.order.first(), &e.objective) {
             (Some(first), _) => siege::barrier_at(room).get(first.as_str()).copied(),
@@ -198,12 +198,12 @@ impl<'a> Scene<'a> {
 
     /// `was`: last tick's groups (§6.1), the only record of where a body stood.
     fn ground(&self, atlas: &Atlas, room: &Room, was: &[Group]) -> Hunting {
-        let reached = atlas.from_exits(&room.name);
+        let reached = atlas.from_exits(room.name);
         // Denied only once a body stands there: its life less the most a body
         // spawns in and its walk.
-        let e = fresh(0, Objective::Sweep, &room.name, 0, Tactic::Kite);
+        let e = fresh(0, Objective::Sweep, room.name, 0, Tactic::Kite);
         let walk = (self.colonies_of(atlas, &e).iter())
-            .filter_map(|r| self.walk_to(atlas, &e, &r.name))
+            .filter_map(|r| self.walk_to(atlas, &e, r.name))
             .min();
         let spawn = engine::SPAWN_TICKS_PER_PART * engine::MAX_BODY_PARTS as i32;
         let held = walk.map_or(0, |w| engine::CREEP_LIFETIME - spawn - w);
@@ -225,7 +225,7 @@ impl<'a> Scene<'a> {
             .cloned()
             .collect();
         let foes: Vec<Fighter> = escort.iter().map(casting::fighter_of).collect();
-        let weights = atlas.weights(&room.name);
+        let weights = atlas.weights(room.name);
         let shields: BTreeSet<Tile> = (room.structures.iter())
             .filter(|s| s.kind.is_rampart() && !s.owner.is_ours())
             .map(|s| tiles::of_pos(&s.pos))
@@ -236,7 +236,7 @@ impl<'a> Scene<'a> {
             .collect();
         // A shot on a body under its owner's rampart lands on the rampart.
         let shot = |t: Tile| -> Option<Pos> {
-            (!shields.contains(&t)).then(|| tiles::to_pos(&room.name, t))
+            (!shields.contains(&t)).then(|| tiles::to_pos(room.name, t))
         };
         let before = |id: &String| {
             (was.iter())
@@ -284,7 +284,7 @@ impl<'a> Scene<'a> {
             .chain(escort.iter().map(|c| (c, false)))
             .map(|(c, unarmed)| tactics::Mark {
                 id: c.id.clone(),
-                pos: c.pos.clone(),
+                pos: c.pos,
                 worth: sweep::worth(c),
                 hits: c.hits,
                 massed: true,
@@ -300,7 +300,7 @@ impl<'a> Scene<'a> {
                 .filter(|s| siege::beside(&reached, &s.pos))
                 .map(|s| tactics::Mark {
                     id: s.id.clone(),
-                    pos: s.pos.clone(),
+                    pos: s.pos,
                     worth: s.hits,
                     hits: s.hits,
                     massed: !s.kind.is_container(),
@@ -310,13 +310,13 @@ impl<'a> Scene<'a> {
                 }),
         );
         Hunting {
-            threat: exchange::damage_map(&room.name, &self.charged(room), &foes),
+            threat: exchange::damage_map(room.name, &self.charged(room), &foes),
             worth: sweep::room_worth(room, &prey, &exposed, held),
             at: exposed
                 .first()
                 .or(prey.first().map(|c| &c.pos))
                 .cloned()
-                .unwrap_or_else(|| middle(&room.name)),
+                .unwrap_or_else(|| middle(room.name)),
             escort,
             marks,
         }
@@ -326,7 +326,7 @@ impl<'a> Scene<'a> {
         self.towers_in(room)
             .into_iter()
             .filter(|s| s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST)
-            .map(|s| s.pos.clone())
+            .map(|s| s.pos)
             .collect()
     }
 
@@ -352,22 +352,22 @@ impl<'a> Scene<'a> {
     }
 
     /// The room a set walks in from: the one before his on its colony's route.
-    fn enter_room(&self, atlas: &Atlas, e: &Engagement) -> Option<String> {
-        let colony = self.colonies_of(atlas, e).first()?.name.clone();
+    fn enter_room(&self, atlas: &Atlas, e: &Engagement) -> Option<RoomName> {
+        let colony = self.colonies_of(atlas, e).first()?.name;
         let hops = Scene::hops(e);
-        let rooms = match self.walks.get(&(e.room.clone(), hops)) {
-            Some(tree) => tree.route(&colony, &e.room),
-            None => atlas.route(self.avoid, hops, &colony, &e.room),
+        let rooms = match self.walks.get(&(e.room, hops)) {
+            Some(tree) => tree.route(colony, e.room),
+            None => atlas.route(self.avoid, hops, colony, e.room),
         }?;
 
-        rooms.get(rooms.len().checked_sub(2)?)?.clone().into()
+        (*rooms.get(rooms.len().checked_sub(2)?)?).into()
     }
 
-    fn walk_to(&self, atlas: &Atlas, e: &Engagement, from: &str) -> Option<i32> {
+    fn walk_to(&self, atlas: &Atlas, e: &Engagement, from: RoomName) -> Option<i32> {
         let hops = Scene::hops(e);
-        let crossed = match self.walks.get(&(e.room.clone(), hops)) {
-            Some(tree) => tree.crossings(from, &e.room),
-            None => (atlas.route(self.avoid, hops, from, &e.room)).map(|r| r.len() as i32 - 1),
+        let crossed = match self.walks.get(&(e.room, hops)) {
+            Some(tree) => tree.crossings(from, e.room),
+            None => (atlas.route(self.avoid, hops, from, e.room)).map(|r| r.len() as i32 - 1),
         };
         crossed.map(|n| engine::ROOM_SIDE * n)
     }
@@ -384,7 +384,7 @@ impl<'a> Scene<'a> {
                     && if self.homes.contains(&e.room) {
                         r.name == e.room
                     } else {
-                        self.walk_to(atlas, e, &r.name).is_some()
+                        self.walk_to(atlas, e, r.name).is_some()
                     }
             })
             .collect()
@@ -459,7 +459,7 @@ impl<'a> Scene<'a> {
             );
 
             if let Some(colony) = colony {
-                asked.queue(&colony, body);
+                asked.queue(colony, body);
                 let compound = fighter::boosted_by(body, boost);
 
                 asked.casts.push(Cast {
@@ -494,7 +494,7 @@ impl<'a> Scene<'a> {
         let Some(walk) = self
             .colonies_of(atlas, e)
             .iter()
-            .filter_map(|r| self.walk_to(atlas, e, &r.name))
+            .filter_map(|r| self.walk_to(atlas, e, r.name))
             .min()
         else {
             return;
@@ -569,9 +569,9 @@ impl<'a> Scene<'a> {
             threatens,
             // A core in sight stands in a group of its own, so a room in sight
             // holds open only the engagement on that group.
-            clear: sightings::clear(self.sightings, self.world.time, &e.room)
+            clear: sightings::clear(self.sightings, self.world.time, e.room)
                 || self.foes.contains_key(&e.room)
-                    && sightings::unarmed(self.sightings, self.world.time, &e.room),
+                    && sightings::unarmed(self.sightings, self.world.time, e.room),
         }
     }
 
@@ -583,7 +583,7 @@ impl<'a> Scene<'a> {
         aging_out: &BTreeSet<String>,
         gate: Option<&tactics::Gate>,
     ) -> SiegeFacts {
-        let room = self.in_sight(&e.room);
+        let room = self.in_sight(e.room);
         let towers = room.map_or_else(Vec::new, |r| self.charged(r));
 
         SiegeFacts {
@@ -603,7 +603,7 @@ impl<'a> Scene<'a> {
             }),
             charged: !towers.is_empty(),
             drain: gate.is_some(),
-            priced: siege::drainable(&e.room, e.capacity, &towers),
+            priced: siege::drainable(e.room, e.capacity, &towers),
             worked: self.pair_worked(e),
             bounced: gate.is_some_and(|g| self.bounced(e, g)),
             drawn: self.drawn(e),
@@ -623,7 +623,7 @@ impl<'a> Scene<'a> {
     /// A bouncer carried back from his room this tick: it stands on the tile
     /// across from his, where the volley that answered the trip is in the log.
     fn bounced(&self, e: &Engagement, gate: &tactics::Gate) -> bool {
-        let back = tiles::to_pos(&gate.from, gate.bounce);
+        let back = tiles::to_pos(gate.from, gate.bounce);
 
         (self.members_of(e))
             .iter()
@@ -638,7 +638,7 @@ impl<'a> Scene<'a> {
             return false;
         }
 
-        let towers: BTreeSet<&String> = (self.in_sight(&e.room))
+        let towers: BTreeSet<&String> = (self.in_sight(e.room))
             .into_iter()
             .flat_map(|r| self.towers_in(r))
             .map(|t| &t.id)
@@ -721,7 +721,7 @@ impl<'a> Scene<'a> {
                             factor: grid::factor_of(m),
                         },
                         &Target {
-                            room: room.name.clone(),
+                            room: room.name,
                             tiles: vec![tiles::of_pos(&b.pos)],
                             range: engine::MELEE_RANGE,
                             avoid: BTreeSet::new(),
@@ -739,12 +739,12 @@ impl<'a> Scene<'a> {
         atlas: &Atlas,
         room: &Room,
         target: &Structure,
-        colony: &str,
+        colony: RoomName,
         set: &[Fighter],
         standing: &[&Creep],
     ) -> Option<(Vec<String>, Outcome)> {
         let barriers: Vec<&Structure> = siege::barrier_at(room).values().copied().collect();
-        let line: Vec<Pos> = barriers.iter().map(|b| b.pos.clone()).collect();
+        let line: Vec<Pos> = barriers.iter().map(|b| b.pos).collect();
 
         let gaits: Vec<grid::FatigueFactor> =
             set.iter().map(|f| f.gait).filter(|g| g.moves > 0).collect();
@@ -754,7 +754,7 @@ impl<'a> Scene<'a> {
             .copied()
             .min_by_key(|g| std::cmp::Reverse(grid::step_ticks(*g, engine::PLAIN_WEIGHT)));
 
-        let mut weights = atlas.weights(&room.name)?;
+        let mut weights = atlas.weights(room.name)?;
         let gait = gait?;
 
         for b in &barriers {
@@ -780,7 +780,7 @@ impl<'a> Scene<'a> {
         }
 
         let ground = Ground {
-            room: room.name.clone(),
+            room: room.name,
             weights,
             barriers: hits_at,
         };
@@ -793,11 +793,7 @@ impl<'a> Scene<'a> {
 
         let rate = engine::DISMANTLE_POWER * set.iter().map(|f| f.work).sum::<i32>() - repair;
 
-        let towers: Vec<Pos> = self
-            .towers_in(room)
-            .into_iter()
-            .map(|s| s.pos.clone())
-            .collect();
+        let towers: Vec<Pos> = self.towers_in(room).into_iter().map(|s| s.pos).collect();
 
         let mover = Mover {
             footprint: Footprint::One,
@@ -809,14 +805,14 @@ impl<'a> Scene<'a> {
         let sources: Vec<(Tile, i32, i32)> = if standing.is_empty() {
             let from = (self.world.spawns.iter())
                 .find(|s| s.pos.room == colony)
-                .map_or_else(|| middle(colony), |s| s.pos.clone());
+                .map_or_else(|| middle(colony), |s| s.pos);
             [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]
                 .into_iter()
                 .flat_map(|exit| tiles::exit_tiles(exit).split(|t| !open(t)))
                 .filter(|stretch| !stretch.is_empty())
                 .filter_map(|stretch| {
                     let onto = Target {
-                        room: room.name.clone(),
+                        room: room.name,
                         tiles: stretch.to_vec(),
                         range: engine::MELEE_RANGE,
                         avoid: BTreeSet::new(),
@@ -847,7 +843,7 @@ impl<'a> Scene<'a> {
                 &[],
                 set,
                 seated,
-                |t| tactics::seats_at(atlas, &line, &room.name, t),
+                |t| tactics::seats_at(atlas, &line, room.name, t),
                 rate,
                 &sources,
                 tiles::around(tiles::of_pos(&target.pos)),
@@ -856,7 +852,7 @@ impl<'a> Scene<'a> {
 
         let seats_of = |plan: &(Vec<(Tile, Tile)>, i32)| -> i32 {
             match plan.0.first() {
-                Some((_, work)) => tactics::seats_at(atlas, &line, &room.name, *work),
+                Some((_, work)) => tactics::seats_at(atlas, &line, room.name, *work),
                 None => set.len() as i32,
             }
         };
@@ -897,19 +893,15 @@ impl<'a> Scene<'a> {
         left: bool,
         grew: bool,
     ) -> Option<Engagement> {
-        let mut names: Vec<String> = self
-            .colonies_of(atlas, e)
-            .iter()
-            .map(|r| r.name.clone())
-            .collect();
+        let mut names: Vec<RoomName> = self.colonies_of(atlas, e).iter().map(|r| r.name).collect();
         names.sort();
 
         let colony = names.into_iter().next()?;
         let from = (self.world.spawns.iter())
             .find(|s| s.pos.room == colony)
-            .map_or_else(|| middle(&colony), |s| s.pos.clone());
+            .map_or_else(|| middle(colony), |s| s.pos);
 
-        let Some(room) = self.in_sight(&e.room) else {
+        let Some(room) = self.in_sight(e.room) else {
             return Some(e.clone());
         };
 
@@ -929,7 +921,7 @@ impl<'a> Scene<'a> {
             let priced = |set: &[casting::Body]| {
                 let fighters: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
 
-                self.breach_in(atlas, room, goal, &colony, &fighters, &[])
+                self.breach_in(atlas, room, goal, colony, &fighters, &[])
             };
             // Shot in where no barrier stands in the way, which a ranged set's
             // plan never breaks: it dismantles nothing. What the dismantlers'
@@ -942,13 +934,12 @@ impl<'a> Scene<'a> {
             let towers = self.towers_in(room);
             let breached = towers
                 .iter()
-                .all(|t| raid::breached(room, |tile| atlas.passable(&room.name, tile), &t.pos));
+                .all(|t| raid::breached(room, |tile| atlas.passable(room.name, tile), &t.pos));
             // A raid razes; the room his safe mode holds is drained instead,
             // as nothing a set shoots at there can fall (§6.2).
             let raid = (open && breached && !Scene::safe(room))
                 .then(|| {
-                    let hard =
-                        raid::hardest(room).map_or_else(|| goal.pos.clone(), |s| s.pos.clone());
+                    let hard = raid::hardest(room).map_or_else(|| goal.pos, |s| s.pos);
                     let priced = |set: &[casting::Body]| {
                         let ours: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
 
@@ -1036,11 +1027,7 @@ impl<'a> Scene<'a> {
                 .collect();
             let breaking: Vec<&Creep> = in_room.iter().copied().filter(|m| !picket(e, m)).collect();
 
-            let towers: Vec<Pos> = self
-                .towers_in(room)
-                .into_iter()
-                .map(|s| s.pos.clone())
-                .collect();
+            let towers: Vec<Pos> = self.towers_in(room).into_iter().map(|s| s.pos).collect();
 
             let struck = |b: &Structure| exchange::tower_strike(&towers, &b.pos);
 
@@ -1074,7 +1061,7 @@ impl<'a> Scene<'a> {
             }
 
             let planned = self
-                .breach_in(atlas, room, goal, &colony, &set, &breaking)
+                .breach_in(atlas, room, goal, colony, &set, &breaking)
                 .map(|plan| (Vec::new(), plan))
                 .or_else(|| {
                     let fielded = self.fielded_bodies(e);
@@ -1083,8 +1070,7 @@ impl<'a> Scene<'a> {
                     // topped up to the set its price buys, or it does not enter
                     // (owner, 2026-10-21).
                     if raid::raids(e) {
-                        let hard =
-                            raid::hardest(room).map_or_else(|| goal.pos.clone(), |s| s.pos.clone());
+                        let hard = raid::hardest(room).map_or_else(|| goal.pos, |s| s.pos);
                         let priced = |set: &[casting::Body]| {
                             let ours: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
 
@@ -1097,7 +1083,7 @@ impl<'a> Scene<'a> {
                     let priced = |set: &[casting::Body]| {
                         let fighters: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
 
-                        self.breach_in(atlas, room, goal, &colony, &fighters, &breaking)
+                        self.breach_in(atlas, room, goal, colony, &fighters, &breaking)
                     };
 
                     casting::reinforce(e.capacity, &fielded, &priced)
@@ -1177,7 +1163,7 @@ impl<'a> Scene<'a> {
             .filter(|n| {
                 self.ours
                     .get(n.as_str())
-                    .is_some_and(|c| self.walk_to(atlas, e, &c.pos.room).is_some())
+                    .is_some_and(|c| self.walk_to(atlas, e, c.pos.room).is_some())
             })
             .cloned()
             .collect()
@@ -1238,29 +1224,29 @@ impl<'a> Scene<'a> {
     fn candidates(
         &self,
         atlas: &Atlas,
-        grounds: &BTreeMap<String, Hunting>,
-        stirred: &BTreeSet<String>,
-    ) -> Vec<(String, i32, i32, bool)> {
+        grounds: &BTreeMap<RoomName, Hunting>,
+        stirred: &BTreeSet<RoomName>,
+    ) -> Vec<(RoomName, i32, i32, bool)> {
         grounds
             .iter()
             .filter(|(name, g)| stirred.contains(*name) && g.worth > 0)
             .filter_map(|(name, g)| {
-                let room = self.in_sight(name).filter(|r| {
+                let room = self.in_sight(*name).filter(|r| {
                     r.controller
                         .as_ref()
                         .is_none_or(|c| !c.owner.is_ours() && !c.owner.is_ally())
                         && !self.homes.contains(&r.name)
                         && !Scene::safe(r)
                 })?;
-                let e = fresh(0, Objective::Sweep, name, 0, Tactic::Kite);
+                let e = fresh(0, Objective::Sweep, *name, 0, Tactic::Kite);
                 let walk = self
                     .colonies_of(atlas, &e)
                     .iter()
-                    .filter_map(|r| self.walk_to(atlas, &e, &r.name))
+                    .filter_map(|r| self.walk_to(atlas, &e, r.name))
                     .min()?;
                 let capacity = self.capacity_of(atlas, &e);
                 let won = self.hunt(g, room, Vec::new(), capacity).is_some();
-                Some((name.clone(), g.worth, walk, won))
+                Some((*name, g.worth, walk, won))
             })
             .collect()
     }
@@ -1270,10 +1256,10 @@ impl<'a> Scene<'a> {
         (g.members.iter()).any(|m| seen.and_then(|s| s.get(m)).is_some_and(|s| s.armed))
     }
 
-    fn walk_of(&self, atlas: &Atlas, e: &Engagement, room: &str) -> Option<i32> {
-        let from = self.members_of(e).first()?.pos.room.clone();
+    fn walk_of(&self, atlas: &Atlas, e: &Engagement, room: RoomName) -> Option<i32> {
+        let from = self.members_of(e).first()?.pos.room;
         let onto = fresh(0, Objective::Sweep, room, 0, Tactic::Kite);
-        self.walk_to(atlas, &onto, &from)
+        self.walk_to(atlas, &onto, from)
     }
 
     /// A move asks no cast.
@@ -1281,13 +1267,13 @@ impl<'a> Scene<'a> {
         &self,
         atlas: &Atlas,
         e: &Engagement,
-        candidates: &[(String, i32, i32, bool)],
-        grounds: &BTreeMap<String, Hunting>,
-    ) -> Option<String> {
+        candidates: &[(RoomName, i32, i32, bool)],
+        grounds: &BTreeMap<RoomName, Hunting>,
+    ) -> Option<RoomName> {
         let ours: Vec<Fighter> = (self.members_of(e).into_iter())
             .map(casting::fighter_of)
             .collect();
-        let beats = |room: &String| match (self.in_sight(room), grounds.get(room)) {
+        let beats = |room: RoomName| match (self.in_sight(room), grounds.get(&room)) {
             (Some(r), Some(g)) => {
                 (self.hunt(g, r, ours.clone(), 0)).is_some_and(|(set, _)| set.is_empty())
             }
@@ -1295,14 +1281,14 @@ impl<'a> Scene<'a> {
         };
         let won = candidates
             .iter()
-            .filter(|c| c.0 != e.room && if ours.is_empty() { c.3 } else { beats(&c.0) });
+            .filter(|c| c.0 != e.room && if ours.is_empty() { c.3 } else { beats(c.0) });
         atlas::onward(won.filter_map(|(room, worth, walk, _)| {
             let walk = if ours.is_empty() {
                 Some(*walk)
             } else {
-                self.walk_of(atlas, e, room)
+                self.walk_of(atlas, e, *room)
             };
-            Some((room, *worth, walk?))
+            Some((*room, *worth, walk?))
         }))
     }
 
@@ -1314,16 +1300,16 @@ impl<'a> Scene<'a> {
         &self,
         atlas: &Atlas,
         e: &Engagement,
-        preyed: &[String],
-        age: impl Fn(&str) -> Option<(i32, bool)>,
-    ) -> Option<String> {
+        preyed: &[RoomName],
+        age: impl Fn(RoomName) -> Option<(i32, bool)>,
+    ) -> Option<RoomName> {
         let open = preyed
             .iter()
             .filter(|r| **r != e.room && !self.avoid.contains(*r))
             .filter(|r| (self.by_id.values()).all(|g| g.room != **r || !self.armed_seen(g)));
-        atlas::onward(open.filter_map(|r| match age(r)? {
+        atlas::onward(open.filter_map(|r| match age(*r)? {
             (_, true) => None,
-            (age, false) => Some((r, age, self.walk_of(atlas, e, r)?)),
+            (age, false) => Some((*r, age, self.walk_of(atlas, e, *r)?)),
         }))
     }
 
@@ -1333,10 +1319,10 @@ impl<'a> Scene<'a> {
         &self,
         atlas: &Atlas,
         asked: &mut Asked,
-        (e, onward): (&Engagement, impl FnOnce() -> Option<String>),
-        (free, grounds): (&mut Vec<String>, &BTreeMap<String, Hunting>),
+        (e, onward): (&Engagement, impl FnOnce() -> Option<RoomName>),
+        (free, grounds): (&mut Vec<String>, &BTreeMap<RoomName, Hunting>),
     ) -> Option<Engagement> {
-        let (Some(room), Some(ground)) = (self.in_sight(&e.room), grounds.get(&e.room)) else {
+        let (Some(room), Some(ground)) = (self.in_sight(e.room), grounds.get(&e.room)) else {
             return Some(e.clone());
         };
 
@@ -1366,7 +1352,7 @@ impl<'a> Scene<'a> {
                 });
             }
             let onward = onward().filter(|_| !e.ours.is_empty());
-            return onward.map(|r| sweep::onto(&r, self.world.time, e));
+            return onward.map(|r| sweep::onto(r, self.world.time, e));
         };
 
         let escort = &ground.escort;
@@ -1378,7 +1364,7 @@ impl<'a> Scene<'a> {
 
         let Some(tactic) = tactics::select(&offers, pin).map(|o| o.tactic) else {
             let onward = onward().filter(|_| !e.ours.is_empty());
-            return onward.map(|r| sweep::onto(&r, self.world.time, e));
+            return onward.map(|r| sweep::onto(r, self.world.time, e));
         };
 
         free.retain(|n| !joining.contains(n));
@@ -1417,7 +1403,7 @@ impl<'a> Scene<'a> {
             return e.clone();
         };
 
-        let Some(room) = self.in_sight(&g.room) else {
+        let Some(room) = self.in_sight(g.room) else {
             return e.clone();
         };
 
@@ -1716,20 +1702,16 @@ fn picket(e: &Engagement, c: &Creep) -> bool {
     !raid::raids(e) && tactics::picket_of(c)
 }
 
-fn middle(room: &str) -> Pos {
-    Pos::new(
-        room.to_string(),
-        engine::ROOM_SIDE / 2,
-        engine::ROOM_SIDE / 2,
-    )
+fn middle(room: RoomName) -> Pos {
+    Pos::new(room, engine::ROOM_SIDE / 2, engine::ROOM_SIDE / 2)
 }
 
-fn fresh(id: i32, objective: Objective, room: &str, time: i32, tactic: Tactic) -> Engagement {
+fn fresh(id: i32, objective: Objective, room: RoomName, time: i32, tactic: Tactic) -> Engagement {
     Engagement {
         id,
         objective,
         group: 0,
-        room: room.to_string(),
+        room,
         ours: BTreeSet::new(),
         plan: Plan {
             tactic,
@@ -1765,14 +1747,14 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     let context_trace = context.trace;
     let sightings = context.sightings;
     let intel = context.intel;
-    let age = |room: &str| {
+    let age = |room: RoomName| {
         intel
-            .get(room)
+            .get(&room)
             .map(|row| (world.time - row.seen, row.level > 0))
     };
     let atlas: &mut Atlas = &mut *context.atlas;
 
-    let mut foes: BTreeMap<String, Vec<Creep>> = BTreeMap::new();
+    let mut foes: BTreeMap<RoomName, Vec<Creep>> = BTreeMap::new();
     let mut cores: BTreeSet<String> = BTreeSet::new();
 
     for r in &world.rooms {
@@ -1789,7 +1771,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
         let mut all: Vec<Creep> = r.hostiles().cloned().collect();
         all.extend(razed);
-        foes.insert(r.name.clone(), all);
+        foes.insert(r.name, all);
     }
 
     let hostiles: Vec<Creep> = world
@@ -1813,18 +1795,12 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         world.time,
     );
 
-    let homes: BTreeSet<String> = tick::colonies(world).into_iter().collect();
-    let worked: BTreeSet<String> = declarations
-        .outposts
-        .iter()
-        .map(|o| o.room.clone())
-        .collect();
+    let homes: BTreeSet<RoomName> = tick::colonies(world).into_iter().collect();
+    let worked: BTreeSet<RoomName> = declarations.outposts.iter().map(|o| o.room).collect();
 
     let by_id: BTreeMap<i32, Group> = groups.iter().map(|g| (g.id, g.clone())).collect();
-    let hostile_at: BTreeMap<String, Pos> = hostiles
-        .iter()
-        .map(|h| (h.id.clone(), h.pos.clone()))
-        .collect();
+    let hostile_at: BTreeMap<String, Pos> =
+        hostiles.iter().map(|h| (h.id.clone(), h.pos)).collect();
     let ours: BTreeMap<&str, &Creep> = world.creeps.iter().map(|c| (c.name.as_str(), c)).collect();
     let standing: BTreeSet<String> = world.creeps.iter().map(|c| c.name.clone()).collect();
     let aging_out: BTreeSet<String> = world
@@ -1911,11 +1887,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     }
 
     let walks = (engagements.iter())
-        .map(|e| (e.room.clone(), Scene::hops(e)))
+        .map(|e| (e.room, Scene::hops(e)))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .map(|(room, hops)| {
-            let tree = atlas.tree(&declarations.avoid, hops, &room);
+            let tree = atlas.tree(&declarations.avoid, hops, room);
             ((room, hops), tree)
         })
         .collect();
@@ -1944,12 +1920,12 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     for e in &mut engagements {
         if let Objective::Siege(target) = &e.objective
-            && let Some(room) = scene.in_sight(&e.room)
+            && let Some(room) = scene.in_sight(e.room)
         {
             let barriers = siege::barrier_at(room);
             e.plan.order.retain(|id| barriers.contains_key(id.as_str()));
 
-            let near = scene.members_of(e).first().map(|c| c.pos.clone());
+            let near = scene.members_of(e).first().map(|c| c.pos);
 
             let next = if raid::raids(e) {
                 raid::target(room, &scene.members_of(e))
@@ -1967,27 +1943,27 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         }
     }
 
-    let stirred: BTreeSet<String> = groups
+    let stirred: BTreeSet<RoomName> = groups
         .iter()
         .filter(|g| g.last_seen == world.time)
         .filter(|g| {
             let was = state.groups.iter().find(|p| p.id == g.id);
             was.is_none_or(|p| p.last_seen < world.time - 1 || p.members != g.members)
         })
-        .map(|g| g.room.clone())
+        .map(|g| g.room)
         .collect();
     let sweeps = || {
         engagements
             .iter()
             .filter(|e| e.objective == Objective::Sweep)
     };
-    let grounds: BTreeMap<String, Hunting> = (state.preyed.iter())
+    let grounds: BTreeMap<RoomName, Hunting> = (state.preyed.iter())
         .filter(|room| stirred.contains(*room))
         .chain(sweeps().map(|e| &e.room))
         .filter_map(|room| {
             Some((
-                room.clone(),
-                scene.ground(atlas, scene.in_sight(room)?, &state.groups),
+                *room,
+                scene.ground(atlas, scene.in_sight(*room)?, &state.groups),
             ))
         })
         .collect();
@@ -2018,7 +1994,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     let gates: BTreeMap<i32, tactics::Gate> = (engagements.iter())
         .filter(|e| matches!(e.objective, Objective::Siege(_)) && !raid::raids(e))
         .filter_map(|e| {
-            let room = scene.in_sight(&e.room)?;
+            let room = scene.in_sight(e.room)?;
             let towers = scene.charged(room);
             let drains = !towers.is_empty()
                 && matches!(e.phase, Phase::Approaching | Phase::Draining)
@@ -2026,8 +2002,8 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             if !drains {
                 return None;
             }
-            let gate = siege::gate(&*atlas, &e.room, &scene.enter_room(&*atlas, e)?, &towers)?;
-            siege::drain_pays(&e.room, e.capacity, &towers, &gate).then_some((e.id, gate))
+            let gate = siege::gate(&*atlas, e.room, scene.enter_room(&*atlas, e)?, &towers)?;
+            siege::drain_pays(e.room, e.capacity, &towers, &gate).then_some((e.id, gate))
         })
         .collect();
     let given_up: BTreeSet<i32> = (engagements.iter())
@@ -2055,7 +2031,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                         worth: grounds
                             .get(&e.room)
                             .map(|g| g.worth > 0 || !g.escort.is_empty()),
-                        safe: scene.in_sight(&e.room).is_some_and(Scene::safe),
+                        safe: scene.in_sight(e.room).is_some_and(Scene::safe),
                         elsewhere: scene.elsewhere(atlas, e, &candidates, &grounds),
                         patrol: (grounds.get(&e.room))
                             .filter(|g| g.worth == 0 && g.escort.is_empty())
@@ -2072,13 +2048,13 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         })
         .collect();
 
-    let targeted: BTreeSet<String> = stepped
+    let targeted: BTreeSet<RoomName> = stepped
         .iter()
         .flat_map(|(e, _)| {
-            let mut rooms = vec![e.room.clone()];
+            let mut rooms = vec![e.room];
 
             if let Some(g) = scene.by_id.get(&e.group) {
-                rooms.push(g.room.clone());
+                rooms.push(g.room);
             }
 
             rooms
@@ -2102,7 +2078,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         let e = fresh(
             first_id + i as i32,
             Objective::Defend,
-            &g.room,
+            g.room,
             world.time,
             Tactic::Close,
         );
@@ -2117,21 +2093,21 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     })
     .collect();
 
-    let besieging: BTreeSet<&str> = stepped
+    let besieging: BTreeSet<RoomName> = stepped
         .iter()
         .filter(|(e, _)| matches!(e.objective, Objective::Siege(_)))
-        .map(|(e, _)| e.room.as_str())
+        .map(|(e, _)| e.room)
         .collect();
 
     let declared: Vec<(Engagement, bool)> = declarations
         .sieges
         .iter()
-        .filter(|room| !besieging.contains(room.as_str()))
+        .filter(|room| !besieging.contains(*room))
         // A safe mode refuses the breach but not the edge: his towers are
         // drawn there while it runs, and the siege opens on a drain only where
         // the pairs it casts out-heal his volley on the gate.
         .filter_map(|room| {
-            let room = scene.in_sight(room)?;
+            let room = scene.in_sight(*room)?;
             let target = siege::next_target(room, None)?;
             let towers = scene.charged(room);
             if !Scene::safe(room) {
@@ -2143,21 +2119,21 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             let mut watch = fresh(
                 first_id,
                 Objective::Siege(target.clone()),
-                &room.name,
+                room.name,
                 world.time,
                 Tactic::BlobClose,
             );
             watch.capacity = scene.capacity_of(&*atlas, &watch);
             // A safe mode's room opens on the drain that prices: the least his
             // towers strike a border tile is what a gate can draw at.
-            siege::drainable(&room.name, watch.capacity, &towers).then_some((&room.name, target))
+            siege::drainable(room.name, watch.capacity, &towers).then_some((&room.name, target))
         })
         .enumerate()
         .map(|(i, (room, target))| {
             let id = first_id + (opened.len() + i) as i32;
             let tactic = Tactic::BlobClose;
             (
-                fresh(id, Objective::Siege(target), room, world.time, tactic),
+                fresh(id, Objective::Siege(target), *room, world.time, tactic),
                 false,
             )
         })
@@ -2165,13 +2141,13 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     let sweeping = stepped.iter().any(|(e, _)| e.objective == Objective::Sweep);
     let won = || candidates.iter().filter(|c| c.3);
-    let swept = atlas::onward(won().map(|(r, w, k, _)| (r, *w, *k)))
-        .or_else(|| atlas::onward(candidates.iter().map(|(r, w, k, _)| (r, *w, *k))))
+    let swept = atlas::onward(won().map(|(r, w, k, _)| (*r, *w, *k)))
+        .or_else(|| atlas::onward(candidates.iter().map(|(r, w, k, _)| (*r, *w, *k))))
         .filter(|_| !sweeping)
         .map(|room| {
             let id = first_id + (opened.len() + declared.len()) as i32;
             (
-                fresh(id, Objective::Sweep, &room, world.time, Tactic::Kite),
+                fresh(id, Objective::Sweep, room, world.time, Tactic::Kite),
                 false,
             )
         });
@@ -2198,7 +2174,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     };
 
     for c in &scene.waiting {
-        asked.queue(&c.room, &c.body);
+        asked.queue(c.room, &c.body);
     }
 
     let mut ranked: Vec<(Engagement, bool)> = stepped;
@@ -2280,11 +2256,8 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             .map(|r| {
                 let creeps = r.others.iter().filter(|c| !scene.struck(c));
                 let allied = r.structures.iter().filter(|s| s.owner.is_ally());
-                let at = creeps.map(|c| c.pos.clone());
-                (
-                    r.name.clone(),
-                    at.chain(allied.map(|s| s.pos.clone())).collect(),
-                )
+                let at = creeps.map(|c| c.pos);
+                (r.name, at.chain(allied.map(|s| s.pos)).collect())
             })
             .collect(),
         ramparts: world
@@ -2292,11 +2265,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             .iter()
             .map(|r| {
                 (
-                    r.name.clone(),
+                    r.name,
                     r.structures
                         .iter()
                         .filter(|s| s.kind.is_rampart() && s.owner.is_ours())
-                        .map(|s| s.pos.clone())
+                        .map(|s| s.pos)
                         .collect(),
                 )
             })
@@ -2305,7 +2278,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             .spawns
             .iter()
             .filter(|s| scene.homes.contains(&s.pos.room))
-            .map(|s| s.pos.clone())
+            .map(|s| s.pos)
             .collect(),
         avoid: &declarations.avoid,
     };
@@ -2338,27 +2311,27 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             // His towers are spent at the edge before the set breaches: it
             // waits in the room beside his, off the tiles a pair works.
             (Objective::Siege(_), _, _) if gates.contains_key(&e.id) => {
-                (middle(&gates[&e.id].from), engine::ROOM_SIDE / 2)
+                (middle(gates[&e.id].from), engine::ROOM_SIDE / 2)
             }
-            (Objective::Siege(_), _, Some(b)) => (b.pos.clone(), engine::RANGED_RANGE),
-            (Objective::Defend, Some(g), _) => (g.centre.clone(), engine::RANGED_RANGE),
-            (Objective::Siege(_), _, None) => (middle(&e.room), engine::ROOM_SIDE / 2),
-            _ => (middle(&e.room), engine::RANGED_RANGE),
+            (Objective::Siege(_), _, Some(b)) => (b.pos, engine::RANGED_RANGE),
+            (Objective::Defend, Some(g), _) => (g.centre, engine::RANGED_RANGE),
+            (Objective::Siege(_), _, None) => (middle(e.room), engine::ROOM_SIDE / 2),
+            _ => (middle(e.room), engine::RANGED_RANGE),
         }
     };
 
     let mut walking: BTreeMap<String, Wish> = BTreeMap::new();
     // A siege's room is priced under its towers while out of sight.
-    let fortified: BTreeSet<String> = world
+    let fortified: BTreeSet<RoomName> = world
         .rooms
         .iter()
         .filter(|r| !scene.charged(r).is_empty())
-        .map(|r| r.name.clone())
+        .map(|r| r.name)
         .chain(
             decided
                 .iter()
                 .filter(|e| matches!(e.objective, Objective::Siege(_)))
-                .map(|e| e.room.clone()),
+                .map(|e| e.room),
         )
         .collect();
 
@@ -2389,7 +2362,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     for e in &decided {
         if let (Objective::Siege(_), Some(room), Some(wall)) =
-            (&e.objective, scene.in_sight(&e.room), scene.next_struck(e))
+            (&e.objective, scene.in_sight(e.room), scene.next_struck(e))
         {
             let towers = scene.charged(room);
 
@@ -2401,13 +2374,13 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             fronts.insert(
                 e.id,
                 tactics::Front {
-                    breach: wall.pos.clone(),
+                    breach: wall.pos,
                     wall: wall.id.clone(),
                     line: room
                         .structures
                         .iter()
                         .filter(|s| Scene::rival(s))
-                        .map(|s| s.pos.clone())
+                        .map(|s| s.pos)
                         .collect(),
                     posts: if scene.members_of(e).iter().any(|c| tactics::picket_of(c)) {
                         siege::exposed(&*sight.atlas, room)
@@ -2434,7 +2407,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .filter(|e| e.phase != Phase::Disengaging)
         .filter_map(|e| match &e.objective {
             Objective::Siege(target) => {
-                Some((e.id, siege::tapped(scene.in_sight(&e.room)?, target)?))
+                Some((e.id, siege::tapped(scene.in_sight(e.room)?, target)?))
             }
             _ => None,
         })
@@ -2505,7 +2478,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             // nothing more (§6.2).
             Phase::Draining => match gates.get(&e.id) {
                 Some(gate) if given_up.contains(&e.id) => {
-                    tactics::toward(sight, c, &middle(&gate.from), engine::ROOM_SIDE / 2)
+                    tactics::toward(sight, c, &middle(gate.from), engine::ROOM_SIDE / 2)
                 }
                 Some(gate) => tactics::drain(sight, gate, c),
                 None => tactics::hold(sight, c),
@@ -2523,7 +2496,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
                     return (
                         None,
-                        match scene.in_sight(&e.room).filter(|r| r.name == c.pos.room) {
+                        match scene.in_sight(e.room).filter(|r| r.name == c.pos.room) {
                             Some(in_sight) => raid::dance(sight, in_sight, &scene.members_of(e), c),
                             None => tactics::toward(sight, c, &room, engine::RANGED_RANGE),
                         },
@@ -2553,7 +2526,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                         c,
                     );
                     lookups += scored.len() as i32;
-                    let at = |(t, s): &(Tile, i64)| (tiles::to_pos(&c.pos.room, *t), *s);
+                    let at = |(t, s): &(Tile, i64)| (tiles::to_pos(c.pos.room, *t), *s);
                     if context_trace && !scored.is_empty() {
                         traced.push(Intent::Trace(
                             c.name.clone(),
@@ -2566,9 +2539,9 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                 let tactic = &e.plan.tactic;
 
                 if matches!(tactic, Tactic::BlobClose)
-                    && tactics::exposed(sight, &centre.room, &scene.members_of(e), c)
+                    && tactics::exposed(sight, centre.room, &scene.members_of(e), c)
                 {
-                    tactics::step_back(sight, &centre.room, &scene.members_of(e), c)
+                    tactics::step_back(sight, centre.room, &scene.members_of(e), c)
                 } else if matches!(tactic, Tactic::Kite | Tactic::BlobKite) && !swings(c) {
                     if raid::raids(e) {
                         tactics::kite(sight, Some(&centre), order, &centre, c)
@@ -2588,7 +2561,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     let mut homes_lost: Vec<Home> = Vec::new();
 
     for name in &scene.homes {
-        let Some(room) = scene.in_sight(name) else {
+        let Some(room) = scene.in_sight(*name) else {
             continue;
         };
 
@@ -2687,7 +2660,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             .filter(|e| raid::raids(e));
         if wanted.iter().all(|a| a.slots() & intents::RANGED == 0) {
             let razed = raid
-                .and_then(|e| scene.in_sight(&e.room))
+                .and_then(|e| scene.in_sight(e.room))
                 .filter(|r| r.name == c.pos.room)
                 .and_then(|room| raid::volley(&sight, room, c));
 
@@ -2697,7 +2670,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             }
         }
         chosen.insert(c.name.clone(), wanted);
-        acts.push(Intent::Wish(c.pos.room.clone(), wish));
+        acts.push(Intent::Wish(c.pos.room, wish));
     }
 
     acts.extend(traced);
@@ -2718,7 +2691,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .filter(|c| !ovens.contains(&c.name))
         .map(|c| {
             Intent::Queue(
-                c.room.clone(),
+                c.room,
                 Ask {
                     body: c.body.clone(),
                     name: c.name.clone(),

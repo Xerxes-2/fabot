@@ -11,12 +11,13 @@ use screeps::{ResourceType, game};
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 
-use super::js::field;
+use super::js::{self, field};
 
 use crate::core::atlas::tiles::{self, BOTTOM, LEFT, RIGHT, TOP};
 use crate::core::engine;
 use crate::core::tick::Declarations;
 use crate::core::vocabulary::{self, BodyPart, Boost};
+use crate::core::world::RoomName;
 use crate::core::world::*;
 
 #[wasm_bindgen]
@@ -32,8 +33,8 @@ fn absent(v: &JsValue) -> bool {
 /// `ARCHITECTURE.md` §4's `terrain` row.
 #[derive(Default)]
 pub struct Maps {
-    terrain: HashMap<String, Option<terrain::Terrain>>,
-    status: HashMap<String, Option<String>>,
+    terrain: HashMap<RoomName, Option<terrain::Terrain>>,
+    status: HashMap<RoomName, Option<String>>,
 }
 
 /// The rooms out of sight whose terrain is read in one tick, nearest our
@@ -41,22 +42,21 @@ pub struct Maps {
 const READS_A_TICK: usize = 10;
 
 impl Maps {
-    pub fn terrains(&self) -> impl Iterator<Item = (&str, &[u8; tiles::COUNT])> {
-        (self.terrain.iter()).filter_map(|(room, t)| Some((room.as_str(), &**t.as_ref()?)))
+    pub fn terrains(&self) -> impl Iterator<Item = (RoomName, &[u8; tiles::COUNT])> {
+        (self.terrain.iter()).filter_map(|(room, t)| Some((*room, &**t.as_ref()?)))
     }
 
     /// Kept when empty too, so a room the map lacks is asked once.
     fn read_around(&mut self, homes: impl Iterator<Item = (i32, i32)>) {
         let reach = crate::core::tick::SIEGE_HOPS;
-        let mut unread: Vec<(i32, String)> = Vec::new();
-        let mut room = String::new();
+        let mut unread: Vec<(i32, RoomName)> = Vec::new();
         for (x, y) in homes {
             for dx in -reach..=reach {
                 let side = reach - dx.abs();
                 for dy in -side..=side {
-                    tiles::write_room_name(&mut room, x + dx, y + dy);
-                    if !self.terrain.contains_key(room.as_str()) {
-                        unread.push((dx.abs() + dy.abs(), room.clone()));
+                    let room = RoomName::new(x + dx, y + dy);
+                    if !self.terrain.contains_key(&room) {
+                        unread.push((dx.abs() + dy.abs(), room));
                     }
                 }
             }
@@ -64,14 +64,14 @@ impl Maps {
         unread.sort_unstable();
         unread.dedup_by(|a, b| a.1 == b.1);
         for (_, room) in unread.into_iter().take(READS_A_TICK) {
-            let terrain = terrain_of(&room);
+            let terrain = terrain_of(room);
             self.terrain.insert(room, terrain);
         }
     }
 
-    fn status(&mut self, room: &str) -> Option<String> {
+    fn status(&mut self, room: RoomName) -> Option<String> {
         self.status
-            .entry(room.to_string())
+            .entry(room)
             .or_insert_with(|| status_of(room))
             .clone()
     }
@@ -100,6 +100,13 @@ impl<'a> Reader<'a> {
         self.str().to_string()
     }
 
+    /// The engine names every room in the grammar, or `sim`.
+    /// The engine names every room in the grammar; a name outside it reads
+    /// as `sim`'s, the one room the grid has no square for, not a panic.
+    fn room_name(&mut self) -> RoomName {
+        RoomName::parse(self.str()).unwrap_or(RoomName::SIM)
+    }
+
     /// A string only parsed: no copy.
     fn str(&mut self) -> &'a str {
         self.strs.next().unwrap_or_default()
@@ -125,13 +132,13 @@ impl<'a> Reader<'a> {
     }
 
     fn pos(&mut self) -> Pos {
-        let room = self.s();
+        let room = self.room_name();
         let x = self.n();
         let y = self.n();
         Pos::new(room, x, y)
     }
 
-    fn pos_in(&mut self, room: &str) -> Pos {
+    fn pos_in(&mut self, room: RoomName) -> Pos {
         let x = self.n();
         let y = self.n();
         Pos::new(room, x, y)
@@ -205,7 +212,7 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn structure(&mut self, room: &str) -> Structure {
+    fn structure(&mut self, room: RoomName) -> Structure {
         let kind = Kind::of_name(self.str());
         let id = self.s();
         let pos = self.pos_in(room);
@@ -274,13 +281,13 @@ impl<'a> Reader<'a> {
     }
 
     fn room(&mut self) -> Room {
-        let name = self.s();
+        let name = self.room_name();
         let terrain = if let Some(Some(terrain)) = self.maps.terrain.get(&name) {
             Some(terrain.clone())
         } else {
-            let terrain = terrain_of(&name);
+            let terrain = terrain_of(name);
             if terrain.is_some() {
-                self.maps.terrain.insert(name.clone(), terrain.clone());
+                self.maps.terrain.insert(name, terrain.clone());
             }
             terrain
         };
@@ -306,11 +313,11 @@ impl<'a> Reader<'a> {
                 resource: vocabulary::resource_of_name(r.str()),
                 amount: r.n(),
             }),
-            structures: self.list(|r| r.structure(&name)),
+            structures: self.list(|r| r.structure(name)),
             sites: self.list(|r| Site {
                 kind: Kind::of_name(r.str()),
                 id: r.s(),
-                pos: r.pos_in(&name),
+                pos: r.pos_in(name),
                 owner: r.owner(),
                 progress: r.n(),
                 progress_total: r.n(),
@@ -351,8 +358,12 @@ pub struct Pass {
     pub strs: String,
 }
 
-pub fn of_game(maps: &mut Maps, declarations: &Declarations, drain: Option<&str>) -> (World, Pass) {
-    let packed = read(drain.map_or(JsValue::UNDEFINED, JsValue::from_str));
+pub fn of_game(
+    maps: &mut Maps,
+    declarations: &Declarations,
+    drain: Option<RoomName>,
+) -> (World, Pass) {
+    let packed = read(drain.map_or(JsValue::UNDEFINED, js::room));
     let ints = packed.get(0).unchecked_into::<Int32Array>().to_vec();
     let text = packed.get(1).as_string().unwrap_or_default();
     let mut r = Reader {
@@ -383,42 +394,40 @@ pub fn of_game(maps: &mut Maps, declarations: &Declarations, drain: Option<&str>
         closed: BTreeSet::new(),
         attacks,
     };
-    let ours = world
-        .spawns
-        .first()
-        .and_then(|s| r.maps.status(&s.pos.room));
+    let ours = world.spawns.first().and_then(|s| r.maps.status(s.pos.room));
     let homes = world
         .spawns
         .iter()
-        .filter_map(|s| tiles::room_coords(&s.pos.room));
+        .filter(|s| s.pos.room != RoomName::SIM)
+        .map(|s| s.pos.room.coords());
     r.maps
         .read_around(homes.collect::<BTreeSet<_>>().into_iter());
     let read = world
         .rooms
         .iter()
         .flat_map(|room| {
-            let around = [TOP, RIGHT, BOTTOM, LEFT].map(|e| tiles::room_toward(&room.name, e));
-            around.into_iter().flatten().chain([room.name.clone()])
+            let around = [TOP, RIGHT, BOTTOM, LEFT].map(|e| tiles::room_toward(room.name, e));
+            around.into_iter().flatten().chain([room.name])
         })
-        .chain(declarations.outposts.iter().map(|o| o.room.clone()))
-        .chain(declarations.claims.iter().map(|o| o.room.clone()))
-        .chain(declarations.sieges.iter().cloned())
-        .collect::<BTreeSet<String>>();
+        .chain(declarations.outposts.iter().map(|o| o.room))
+        .chain(declarations.claims.iter().map(|o| o.room))
+        .chain(declarations.sieges.iter().copied())
+        .collect::<BTreeSet<RoomName>>();
     world.closed = read
         .into_iter()
-        .filter(|room| ours.is_some() && r.maps.status(room).is_some_and(|s| Some(s) != ours))
+        .filter(|room| ours.is_some() && r.maps.status(*room).is_some_and(|s| Some(s) != ours))
         .collect();
     (world, Pass { ints, strs: text })
 }
 
 /// `Game.map.getRoomTerrain(name).getRawBuffer()`: the map serves rooms the
 /// bot cannot see, and reading it needs no `Room` object.
-fn terrain_of(name: &str) -> Option<terrain::Terrain> {
+fn terrain_of(name: RoomName) -> Option<terrain::Terrain> {
     let read = || -> Option<Vec<u8>> {
         let game = Reflect::get(&js_sys::global(), &JsValue::from_str("Game")).ok()?;
         let map = field(&game, "map");
         let get_terrain = field(&map, "getRoomTerrain");
-        let arguments = Array::of1(&JsValue::from_str(name));
+        let arguments = Array::of1(&js::room(name));
         let terrain = Reflect::apply(
             get_terrain.unchecked_ref::<js_sys::Function>(),
             &map,
@@ -438,13 +447,13 @@ fn terrain_of(name: &str) -> Option<terrain::Terrain> {
 }
 
 /// `None` where the map has no `getRoomStatus` (the bench), so no room reads closed.
-fn status_of(name: &str) -> Option<String> {
+fn status_of(name: RoomName) -> Option<String> {
     let game = Reflect::get(&js_sys::global(), &JsValue::from_str("Game")).ok()?;
     let map = field(&game, "map");
     let get = field(&map, "getRoomStatus")
         .dyn_into::<js_sys::Function>()
         .ok()?;
-    let status = get.call1(&map, &JsValue::from_str(name)).ok()?;
+    let status = get.call1(&map, &js::room(name)).ok()?;
     field(&status, "status").as_string()
 }
 
@@ -466,9 +475,9 @@ pub fn creep_by_name(name: &str) -> Option<JsValue> {
     if absent(&creep) { None } else { Some(creep) }
 }
 
-pub fn room_by_name(name: &str) -> Option<JsValue> {
+pub fn room_by_name(name: RoomName) -> Option<JsValue> {
     let game = Reflect::get(&js_sys::global(), &JsValue::from_str("Game")).ok()?;
     let rooms = field(&game, "rooms");
-    let room = field(&rooms, name);
+    let room = Reflect::get(&rooms, &js::room(name)).unwrap_or(JsValue::UNDEFINED);
     if absent(&room) { None } else { Some(room) }
 }

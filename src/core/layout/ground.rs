@@ -3,11 +3,11 @@
 use crate::core::engine;
 use crate::core::grid::{self, Weight};
 use crate::core::tiles::{self, Table, Tile};
-use crate::core::world::{Room, terrain};
+use crate::core::world::{Room, RoomName, terrain};
 
 #[derive(Clone, Debug)]
 pub struct Ground {
-    pub room: String,
+    pub room: RoomName,
     /// Our own structures are not read: the plan is drawn on the ground,
     /// never on itself.
     pub weights: Table<Weight>,
@@ -109,7 +109,7 @@ pub fn of_room(room: &Room) -> Option<Ground> {
     }
 
     Some(Ground {
-        room: room.name.clone(),
+        room: room.name,
         weights,
         free,
         sources,

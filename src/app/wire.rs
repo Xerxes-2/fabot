@@ -6,7 +6,7 @@ use js_sys::{Array, Object, Reflect};
 use screeps::raw_memory;
 use wasm_bindgen::{JsCast, JsValue};
 
-use super::js::{field, int_of};
+use super::js::{self, field, int_of};
 use crate::core::exchange::{Losses, Outcome};
 use crate::core::fight::shape::{Cast, Engagement, Group, Objective, Phase, Plan};
 use crate::core::state::State;
@@ -14,7 +14,7 @@ use crate::core::strategy::intel::{self, Intel};
 use crate::core::tactics::{self, Offer, Tactic};
 use crate::core::tick::{Declarations, Declared, Outpost, TacticRule, undeclared};
 use crate::core::vocabulary::{self, Compound, Resource};
-use crate::core::world::{Pos, World};
+use crate::core::world::{Pos, RoomName, World};
 
 /// Read by `npm run observe` and `scripts/capture`.
 pub const OBSERVE_SEGMENT: u8 = 1;
@@ -37,6 +37,11 @@ fn string_of(v: &JsValue) -> Option<String> {
     v.as_string()
 }
 
+/// A name outside the world's grammar is no room, dropped as a missing one is.
+fn room_of(v: &JsValue) -> Option<RoomName> {
+    RoomName::parse(&v.as_string()?)
+}
+
 fn array_of(v: &JsValue) -> Option<Vec<JsValue>> {
     if !Array::is_array(v) {
         return None;
@@ -53,7 +58,7 @@ fn list_of<T>(parse: impl Fn(&JsValue) -> Option<T>, v: &JsValue) -> Vec<T> {
 
 fn pos_of(v: &JsValue) -> Option<Pos> {
     match (
-        string_of(&field(v, "room")),
+        room_of(&field(v, "room")),
         int_of(&field(v, "x")),
         int_of(&field(v, "y")),
     ) {
@@ -64,7 +69,7 @@ fn pos_of(v: &JsValue) -> Option<Pos> {
 
 fn pos_obj(p: &Pos) -> JsValue {
     let o = Object::new();
-    set_field(o.as_ref(), "room", &JsValue::from_str(&p.room));
+    set_field(o.as_ref(), "room", &js::room(p.room));
     set_field(o.as_ref(), "x", &JsValue::from(p.x));
     set_field(o.as_ref(), "y", &JsValue::from(p.y));
     o.into()
@@ -116,7 +121,7 @@ fn group_of(o: &JsValue) -> Option<Group> {
             members: list_of(string_of, &field(o, "members"))
                 .into_iter()
                 .collect(),
-            room: centre.room.clone(),
+            room: centre.room,
             last_seen: seen,
             centre,
         }),
@@ -219,7 +224,7 @@ fn engagement_of(o: &JsValue) -> Option<Engagement> {
         id: int_of(&field(o, "id"))?,
         objective,
         group: int_of(&field(o, "group"))?,
-        room: string_of(&field(o, "room"))?,
+        room: room_of(&field(o, "room"))?,
         ours: list_of(string_of, &field(o, "ours")).into_iter().collect(),
         plan: Plan {
             tactic: tactics::by_name(&string_of(&field(o, "tactic")).unwrap_or_default())
@@ -261,7 +266,7 @@ fn engagement_obj(e: &Engagement) -> JsValue {
     }
     set_field(o.as_ref(), "id", &JsValue::from(e.id));
     set_field(o.as_ref(), "group", &JsValue::from(e.group));
-    set_field(o.as_ref(), "room", &JsValue::from_str(&e.room));
+    set_field(o.as_ref(), "room", &js::room(e.room));
     let ours = Array::new();
     for name in &e.ours {
         ours.push(&JsValue::from_str(name));
@@ -302,7 +307,7 @@ fn cast_of(o: &JsValue) -> Option<Cast> {
     Some(Cast {
         engagement: int_of(&field(o, "engagement"))?,
         name: string_of(&field(o, "name"))?,
-        room: string_of(&field(o, "room"))?,
+        room: room_of(&field(o, "room"))?,
         body: parts,
     })
 }
@@ -318,7 +323,7 @@ fn cast_obj(c: &Cast) -> JsValue {
     let o = Object::new();
     set_field(o.as_ref(), "engagement", &JsValue::from(c.engagement));
     set_field(o.as_ref(), "name", &JsValue::from_str(&c.name));
-    set_field(o.as_ref(), "room", &JsValue::from_str(&c.room));
+    set_field(o.as_ref(), "room", &js::room(c.room));
     let body: String = c.body.iter().map(|p| vocabulary::part_letter(*p)).collect();
     set_field(o.as_ref(), "body", &JsValue::from_str(&body));
     o.into()
@@ -397,7 +402,7 @@ pub fn write_state(state: &State) {
     set_field(&root, "fight", fight.as_ref());
 }
 
-fn declared_at(room: &str, o: &JsValue) -> Option<Declared> {
+fn declared_at(room: RoomName, o: &JsValue) -> Option<Declared> {
     Some(Declared {
         id: string_of(&field(o, "id"))?,
         pos: Pos::new(room, int_of(&field(o, "x"))?, int_of(&field(o, "y"))?),
@@ -405,13 +410,13 @@ fn declared_at(room: &str, o: &JsValue) -> Option<Declared> {
 }
 
 fn outpost_of(o: &JsValue) -> Option<Outpost> {
-    let room = string_of(&field(o, "room"))?;
+    let room = room_of(&field(o, "room"))?;
     let sources = array_of(&field(o, "sources"))?;
     let parsed: Vec<Declared> = sources
         .iter()
-        .filter_map(|s| declared_at(&room, s))
+        .filter_map(|s| declared_at(room, s))
         .collect();
-    let controller = declared_at(&room, &field(o, "controller"))?;
+    let controller = declared_at(room, &field(o, "controller"))?;
     if parsed.len() != sources.len() {
         return None;
     }
@@ -424,8 +429,8 @@ fn outpost_of(o: &JsValue) -> Option<Outpost> {
 
 /// `{ home, targets: { compound: stock } }`; a compound we have no recipe for
 /// is dropped.
-fn labs_of(o: &JsValue) -> Option<(String, BTreeMap<Compound, i32>)> {
-    let home = string_of(&field(o, "home"))?;
+fn labs_of(o: &JsValue) -> Option<(RoomName, BTreeMap<Compound, i32>)> {
+    let home = room_of(&field(o, "home"))?;
     let targets = field(o, "targets");
     let names = Reflect::own_keys(&targets).ok()?;
     let parsed = names
@@ -458,27 +463,46 @@ pub fn read_declarations() -> Declarations {
             .unwrap_or_default(),
         allies: names(&declared, "allies"),
         enemies: names(&declared, "enemies"),
-        sieges: names(&declared, "sieges"),
-        abandon: names(&declared, "abandon"),
-        avoid: names(&declared, "avoid"),
+        sieges: rooms(&declared, "sieges"),
+        abandon: rooms(&declared, "abandon"),
+        avoid: rooms(&declared, "avoid"),
         tactics: array_of(&field(&declared, "tactics"))
             .map(|rules| rules.iter().filter_map(rule_of).collect())
             .unwrap_or_default(),
     }
 }
 
+/// A rule naming a room outside the grammar is dropped, not widened to every
+/// room as a rule naming none is.
 fn rule_of(o: &JsValue) -> Option<TacticRule> {
+    let room = match string_of(&field(o, "room")) {
+        Some(name) => Some(RoomName::parse(&name)?),
+        None => None,
+    };
     Some(TacticRule {
         rival: string_of(&field(o, "rival")),
-        room: string_of(&field(o, "room")),
+        room,
         pin: string_of(&field(o, "pin")),
         forbid: names(o, "forbid"),
     })
 }
 
+fn rooms<T: FromIterator<RoomName> + Default>(declared: &JsValue, key: &str) -> T {
+    listed(declared, key, room_of)
+}
+
 fn names<T: FromIterator<String> + Default>(declared: &JsValue, key: &str) -> T {
+    listed(declared, key, JsValue::as_string)
+}
+
+/// What reads from `declared[key]`'s entries; no list is an empty one.
+fn listed<I, T: FromIterator<I> + Default>(
+    declared: &JsValue,
+    key: &str,
+    read: impl Fn(&JsValue) -> Option<I>,
+) -> T {
     array_of(&field(declared, key))
-        .map(|names| names.iter().filter_map(JsValue::as_string).collect())
+        .map(|entries| entries.iter().filter_map(read).collect())
         .unwrap_or_default()
 }
 

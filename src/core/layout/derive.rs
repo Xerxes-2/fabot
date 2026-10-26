@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::core::engine;
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::Resource;
-use crate::core::world::{Creep, Pos, Room, Structure, World};
+use crate::core::world::{Creep, Pos, Room, RoomName, Structure, World};
 
 use super::ground;
 use super::plan;
@@ -11,7 +11,7 @@ use super::shape::Standing;
 use super::sites::{self, Census};
 
 pub struct Colony {
-    pub room: String,
+    pub room: RoomName,
     pub level: i32,
     pub plan: Option<super::shape::Plan>,
     pub census: Census,
@@ -22,7 +22,7 @@ pub struct Colony {
     pub ours: Vec<Creep>,
 }
 
-fn spawns_in(world: &World, room: &str) -> Vec<Tile> {
+fn spawns_in(world: &World, room: RoomName) -> Vec<Tile> {
     let mut found: Vec<Tile> = world
         .spawns
         .iter()
@@ -49,13 +49,13 @@ pub fn key_of(room: &Room, spawns: &[Tile]) -> String {
 
 pub fn colonies(
     world: &World,
-    standing: &BTreeMap<String, Standing>,
-) -> (Vec<Colony>, BTreeMap<String, Standing>) {
-    let mut next: BTreeMap<String, Standing> = BTreeMap::new();
+    standing: &BTreeMap<RoomName, Standing>,
+) -> (Vec<Colony>, BTreeMap<RoomName, Standing>) {
+    let mut next: BTreeMap<RoomName, Standing> = BTreeMap::new();
     let mut found: Vec<Colony> = Vec::new();
 
     let mut rooms: Vec<&Room> = world.rooms.iter().collect();
-    rooms.sort_by_key(|r| r.name.clone());
+    rooms.sort_by_key(|r| r.name);
 
     for room in rooms {
         let level = match &room.controller {
@@ -63,7 +63,7 @@ pub fn colonies(
             _ => continue,
         };
 
-        let spawns = spawns_in(world, &room.name);
+        let spawns = spawns_in(world, room.name);
         let key = key_of(room, &spawns);
 
         let kept = match standing.get(&room.name) {
@@ -75,7 +75,7 @@ pub fn colonies(
         };
 
         let plan = kept.plan.clone();
-        next.insert(room.name.clone(), kept);
+        next.insert(room.name, kept);
 
         let ours: Vec<Creep> = world
             .creeps
@@ -98,7 +98,7 @@ pub fn colonies(
         towers.sort_by_key(|t| t.id.clone());
 
         found.push(Colony {
-            room: room.name.clone(),
+            room: room.name,
             level,
             plan,
             census: sites::census_of(room, &ours),

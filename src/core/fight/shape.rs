@@ -2,13 +2,13 @@ use std::collections::BTreeSet;
 
 use crate::core::tactics::{Offer, Tactic};
 use crate::core::vocabulary::BodyPart;
-use crate::core::world::Pos;
+use crate::core::world::{Pos, RoomName};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Group {
     pub id: i32,
     pub members: BTreeSet<String>,
-    pub room: String,
+    pub room: RoomName,
     pub last_seen: i32,
     pub centre: Pos,
 }
@@ -52,7 +52,7 @@ pub struct Engagement {
     pub id: i32,
     pub objective: Objective,
     pub group: i32,
-    pub room: String,
+    pub room: RoomName,
     pub ours: BTreeSet<String>,
     pub plan: Plan,
     pub phase: Phase,
@@ -80,6 +80,6 @@ pub struct Engagement {
 pub struct Cast {
     pub engagement: i32,
     pub name: String,
-    pub room: String,
+    pub room: RoomName,
     pub body: Vec<BodyPart>,
 }

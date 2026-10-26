@@ -7,7 +7,7 @@ use crate::core::engine;
 use crate::core::tactics::Tactic;
 use crate::core::tiles::{self};
 use crate::core::vocabulary::BodyPart;
-use crate::core::world::{Controller, Creep, Fallen, Kind, Owner, Pos, Structure};
+use crate::core::world::{Controller, Creep, Fallen, Kind, Owner, Pos, RoomName, Structure};
 
 /// What a `Defend` may fight as, in the order its ties fall to (§6.3).
 pub const CANDIDATES: &[Tactic] = &[
@@ -186,7 +186,7 @@ fn razed(home: &Home) -> bool {
         .ours
         .iter()
         .filter(|s| s.kind.is_rampart())
-        .map(|s| s.pos.clone())
+        .map(|s| s.pos)
         .collect();
 
     let share = |kind: Kind| -> (i32, i32) {
@@ -287,11 +287,11 @@ pub const OUTPOST_PRIORITY: f64 = 1.0;
 
 /// Strategy's stand-in (§7.3): a home's raid is answered before an outpost's, and a group in a targeted room is that engagement's.
 pub fn opens(
-    homes: &BTreeSet<String>,
-    worked: &BTreeSet<String>,
+    homes: &BTreeSet<RoomName>,
+    worked: &BTreeSet<RoomName>,
     armed: impl Fn(&str) -> bool,
     time: i32,
-    targeted: &BTreeSet<String>,
+    targeted: &BTreeSet<RoomName>,
     groups: &[Group],
 ) -> Vec<(Group, f64)> {
     let ranked: Vec<(Group, f64)> = groups
@@ -330,7 +330,7 @@ pub fn opens(
         }
 
         opened.push((g.clone(), priority));
-        targeted.insert(g.room.clone());
+        targeted.insert(g.room);
     }
 
     opened
@@ -343,7 +343,7 @@ mod tests {
     use crate::core::world::{Part, Store};
 
     fn at(x: i32, y: i32) -> Pos {
-        Pos::new("W1N1", x, y)
+        Pos::new(RoomName::named("W1N1"), x, y)
     }
 
     fn creep(owner: Owner, kinds: &[BodyPart], pos: Pos, hurt: bool) -> Creep {

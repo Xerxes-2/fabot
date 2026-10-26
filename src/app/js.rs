@@ -6,6 +6,8 @@ use std::cell::RefCell;
 use js_sys::Reflect;
 use wasm_bindgen::JsValue;
 
+use crate::core::world::RoomName;
+
 thread_local! {
     /// A property name costs a JS string to read by; the seam reads the same
     /// few hundred thousand a tick, so each literal is built once.
@@ -33,4 +35,9 @@ pub fn field(v: &JsValue, name: &str) -> JsValue {
 
 pub fn int_of(v: &JsValue) -> Option<i32> {
     v.as_f64().map(|n| n as i32)
+}
+
+/// A room as the engine names it.
+pub fn room(r: RoomName) -> JsValue {
+    JsValue::from_str(&r.to_string())
 }

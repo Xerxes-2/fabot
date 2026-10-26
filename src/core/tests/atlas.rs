@@ -11,10 +11,11 @@ use crate::core::grid::{
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::{ALL_BODY_PARTS, BodyPart, Boost, Resource};
 use crate::core::world::{
-    Creep, Kind, Mineral, Owner, Part, Pos, Room, Source, Store, Structure, World, terrain,
+    Creep, Kind, Mineral, Owner, Part, Pos, Room, RoomName, Source, Store, Structure, World,
+    terrain,
 };
 
-const ROOM: &str = "W1N1";
+const ROOM: RoomName = RoomName::named("W1N1");
 const CASES: u64 = 100;
 
 fn structure(kind: Kind, walkable: bool, x: i32, y: i32) -> Structure {
@@ -52,9 +53,9 @@ impl Ground {
     }
 }
 
-fn room_of(name: &str, terrain: Vec<u8>, structures: Vec<Structure>) -> Room {
+fn room_of(name: RoomName, terrain: Vec<u8>, structures: Vec<Structure>) -> Room {
     Room {
-        name: name.to_string(),
+        name,
         terrain: terrain::of(terrain),
         controller: None,
         energy_available: 0,
@@ -170,9 +171,9 @@ fn walks(seed: u64) -> impl Iterator<Item = (Walk, Dice)> {
     (0..CASES).map(move |i| (walk(&mut dice), Dice::new(seed * 1_000 + i)))
 }
 
-fn target_of(room: &str, walk: &Walk) -> Target {
+fn target_of(room: RoomName, walk: &Walk) -> Target {
     Target {
-        room: room.to_string(),
+        room,
         tiles: vec![walk.goal],
         range: walk.range,
         avoid: BTreeSet::new(),
@@ -233,10 +234,11 @@ fn a_tiles_index_round_trips_through_its_column_and_row_in_terrain_order() {
 fn a_room_name_round_trips_through_world_coordinates() {
     for x in -299..300 {
         for y in (-299..300).step_by(7) {
+            let name = RoomName::new(x, y).to_string();
             assert_eq!(
-                tiles::room_coords(&tiles::room_name(x, y)),
+                RoomName::parse(&name).map(RoomName::coords),
                 Some((x, y)),
-                "{x},{y}"
+                "{name}"
             );
         }
     }
@@ -244,10 +246,13 @@ fn a_room_name_round_trips_through_world_coordinates() {
 
 #[test]
 fn names_read_as_the_engine_spells_them() {
-    assert_eq!(tiles::room_coords("W12S28"), Some((-13, 28)));
-    assert_eq!(tiles::room_coords("E0N0"), Some((0, -1)));
-    assert_eq!(tiles::room_coords("sim"), None, "outside the grammar");
-    assert_eq!(tiles::room_coords("W1"), None, "half a name");
+    assert_eq!(RoomName::parse("W12S28"), Some(RoomName::new(-13, 28)));
+    assert_eq!(RoomName::parse("E0N0"), Some(RoomName::new(0, -1)));
+    assert_eq!(RoomName::parse("W1"), None, "half a name");
+    let sim = RoomName::parse("sim").expect("the simulator's room");
+    assert_eq!(sim.to_string(), "sim");
+    assert_eq!(sim.on_grid(), None, "off the grid");
+    assert_eq!(tiles::room_toward(sim, tiles::TOP), None, "no neighbours");
 }
 
 #[test]
@@ -272,13 +277,13 @@ fn an_exits_landing_is_on_the_opposite_exit_and_lands_back() {
             assert_eq!(tiles::exit_of(landing), (exit + 3) % 8 + 1, "opposite");
             assert_eq!(tiles::landing(landing), Some(tile), "and back");
             assert_eq!(
-                tiles::seam_range(&tiles::to_pos(ROOM, tile), &tiles::to_pos(&room, landing)),
+                tiles::seam_range(&tiles::to_pos(ROOM, tile), &tiles::to_pos(room, landing)),
                 Some(0),
                 "one tile across the seam"
             );
         }
         assert_eq!(
-            tiles::exit_toward(ROOM, &room),
+            tiles::exit_toward(ROOM, room),
             Some(exit),
             "the room across"
         );
@@ -436,14 +441,14 @@ fn no_seat_is_a_sources_a_minerals_or_a_controllers_tile() {
         let mut world = world_of(&walk.ground);
         world.rooms[0].sources = vec![Source {
             id: "src".into(),
-            pos: at.clone(),
+            pos: at,
             energy: 0,
             energy_capacity: 0,
             ticks_to_regeneration: 0,
         }];
         world.rooms[0].minerals = vec![Mineral {
             id: "min".into(),
-            pos: across.clone(),
+            pos: across,
             resource: Resource::Energy,
             amount: 0,
         }];
@@ -489,7 +494,7 @@ fn toward_another_room_the_walk_ends_on_an_exit() {
         let toward = dice.pick(&[tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]);
         let onto = tiles::room_toward(ROOM, toward).unwrap();
         let mut atlas = Atlas::of_world(&world_of(&walk.ground));
-        let target = target_of(&onto, &walk);
+        let target = target_of(onto, &walk);
         if let Some(&(tile, ticks)) = followed(&mut atlas, &walk, &target).last() {
             assert_eq!(ticks, 0);
             let edge = covered(walk.mover.footprint, tile);
@@ -525,19 +530,19 @@ fn a_route_read_off_its_targets_tree_is_the_route_searched() {
                         }
                     }
                 }
-                rooms.push(room_of(&tiles::room_name(x, y), terrain, Vec::new()));
+                rooms.push(room_of(RoomName::new(x, y), terrain, Vec::new()));
             }
         }
         let atlas = Atlas::of_world(&world_of_rooms(rooms));
         let hops = 1 + dice.below(4);
-        let from = tiles::room_name(0, 0);
-        let onto = tiles::room_name(dice.between(-128, 127) % 3, dice.between(-128, 127) % 3);
-        let tree = atlas.tree(&BTreeSet::new(), hops, &onto);
-        let routed = atlas.route(&BTreeSet::new(), hops, &from, &onto);
-        assert_eq!(tree.route(&from, &onto), routed);
+        let from = RoomName::new(0, 0);
+        let onto = RoomName::new(dice.between(-128, 127) % 3, dice.between(-128, 127) % 3);
+        let tree = atlas.tree(&BTreeSet::new(), hops, onto);
+        let routed = atlas.route(&BTreeSet::new(), hops, from, onto);
+        assert_eq!(tree.route(from, onto), routed);
         let crossed = routed.map(|r| r.len() as i32 - 1);
-        assert_eq!(tree.crossings(&from, &onto), crossed);
-        assert_eq!(tree.crossings(&onto, &from), crossed);
+        assert_eq!(tree.crossings(from, onto), crossed);
+        assert_eq!(tree.crossings(onto, from), crossed);
     }
 }
 
@@ -547,20 +552,20 @@ fn a_route_crosses_shared_borders_around_the_avoided_by_fewest_crossings() {
     let atlas = Atlas::of_world(&world_of_rooms(Vec::new()));
     for _ in 0..CASES {
         let (dx, dy) = (dice.between(-128, 127) % 4, dice.between(-128, 127) % 4);
-        let onto = tiles::room_name(dx, dy);
-        let from = tiles::room_name(0, 0);
-        let avoid: BTreeSet<String> = (0..dice.below(6))
-            .map(|_| tiles::room_name(dice.between(-128, 127) % 4, dice.between(-128, 127) % 4))
+        let onto = RoomName::new(dx, dy);
+        let from = RoomName::new(0, 0);
+        let avoid: BTreeSet<RoomName> = (0..dice.below(6))
+            .map(|_| RoomName::new(dice.between(-128, 127) % 4, dice.between(-128, 127) % 4))
             .collect();
         let hops = dx.abs() + dy.abs();
-        match atlas.route(&avoid, 12, &from, &onto) {
+        match atlas.route(&avoid, 12, from, onto) {
             Some(chain) => {
                 assert_eq!(chain[0], from);
                 assert_eq!(chain[chain.len() - 1], onto);
                 assert!(
                     chain
                         .windows(2)
-                        .all(|p| tiles::exit_toward(&p[0], &p[1]).is_some())
+                        .all(|p| tiles::exit_toward(p[0], p[1]).is_some())
                 );
                 assert!(
                     chain
@@ -579,13 +584,12 @@ fn a_route_crosses_shared_borders_around_the_avoided_by_fewest_crossings() {
 fn no_route_enters_a_closed_room_nor_ends_in_one() {
     let mut dice = Dice::new(21);
     for _ in 0..CASES {
-        let mut room =
-            || tiles::room_name(dice.between(-128, 127) % 4, dice.between(-128, 127) % 4);
+        let mut room = || RoomName::new(dice.between(-128, 127) % 4, dice.between(-128, 127) % 4);
         let (from, onto) = (room(), room());
         let mut world = world_of_rooms(Vec::new());
         world.closed = (0..4).map(|_| room()).filter(|r| *r != from).collect();
         let atlas = Atlas::of_world(&world);
-        if let Some(chain) = atlas.route(&BTreeSet::new(), 12, &from, &onto) {
+        if let Some(chain) = atlas.route(&BTreeSet::new(), 12, from, onto) {
             assert!(chain.iter().all(|r| !world.closed.contains(r)));
         }
     }
@@ -596,12 +600,12 @@ fn any_open_neighbour_is_one_crossing_away_keeper_room_or_not() {
     let mut dice = Dice::new(20);
     let atlas = Atlas::of_world(&world_of_rooms(Vec::new()));
     for _ in 0..CASES {
-        let from = tiles::room_name(dice.below(24) - 12, dice.below(24) - 12);
+        let from = RoomName::new(dice.below(24) - 12, dice.below(24) - 12);
         let exit = dice.pick(&[tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]);
-        let onto = tiles::room_toward(&from, exit).unwrap();
+        let onto = tiles::room_toward(from, exit).unwrap();
         assert_eq!(
-            atlas.route(&BTreeSet::new(), 1, &from, &onto),
-            Some(vec![from.clone(), onto])
+            atlas.route(&BTreeSet::new(), 1, from, onto),
+            Some(vec![from, onto])
         );
     }
 }
@@ -690,14 +694,14 @@ fn walled_rooms(dice: &mut Dice) -> World {
                     *t = terrain::SWAMP;
                 }
             }
-            rooms.push(room_of(&tiles::room_name(x, y), terrain, Vec::new()));
+            rooms.push(room_of(RoomName::new(x, y), terrain, Vec::new()));
         }
     }
     let mut world = world_of_rooms(rooms);
     let ring = (-1..=3).flat_map(|x| (-1..=3).map(move |y| (x, y)));
     world.closed = ring
         .filter(|&(x, y)| !(0..3).contains(&x) || !(0..3).contains(&y))
-        .map(|(x, y)| tiles::room_name(x, y))
+        .map(|(x, y)| RoomName::new(x, y))
         .collect();
     world
 }
@@ -709,7 +713,7 @@ fn a_body_walking_first_steps_never_enters_a_room_twice_and_arrives_where_a_rout
         let world = walled_rooms(&mut dice);
         let atlas = Atlas::of_world(&world);
         let open = |dice: &mut Dice| tiles::index(1 + dice.below(48), 1 + dice.below(48));
-        let room = |dice: &mut Dice| tiles::room_name(dice.below(3), dice.below(3));
+        let room = |dice: &mut Dice| RoomName::new(dice.below(3), dice.below(3));
         let mut body = parts(&mut dice, 10);
         body.push(BodyPart::Move);
         let mover = Mover {
@@ -718,14 +722,14 @@ fn a_body_walking_first_steps_never_enters_a_room_twice_and_arrives_where_a_rout
         };
         let (from, onto) = (room(&mut dice), room(&mut dice));
         let target = Target {
-            room: onto.clone(),
+            room: onto,
             tiles: vec![open(&mut dice)],
             range: dice.below(3),
             avoid: BTreeSet::new(),
             max_hops: 8,
         };
-        let mut at = tiles::to_pos(&from, open(&mut dice));
-        let mut entered = vec![from.clone()];
+        let mut at = tiles::to_pos(from, open(&mut dice));
+        let mut entered = vec![from];
         let mut arrived = false;
         for _ in 0..4 * tiles::COUNT {
             if at.room == onto && atlas.travel_ticks(mover, &target, &at) == Some(0) {
@@ -736,17 +740,37 @@ fn a_body_walking_first_steps_never_enters_a_room_twice_and_arrives_where_a_rout
             let Some(next) = step.and_then(|d| tiles::neighbour(tiles::of_pos(&at), d)) else {
                 break;
             };
-            let across = tiles::room_toward(&at.room, tiles::exit_of(next));
+            let across = tiles::room_toward(at.room, tiles::exit_of(next));
             at = match (across, tiles::landing(next)) {
                 (Some(room), Some(landing)) => {
                     assert!(!entered.contains(&room), "{entered:?} back into {room}");
-                    entered.push(room.clone());
-                    tiles::to_pos(&room, landing)
+                    entered.push(room);
+                    tiles::to_pos(room, landing)
                 }
-                _ => tiles::to_pos(&at.room, next),
+                _ => tiles::to_pos(at.room, next),
             };
         }
-        let routed = atlas.route(&BTreeSet::new(), 8, &from, &onto).is_some();
+        let routed = atlas.route(&BTreeSet::new(), 8, from, onto).is_some();
         assert_eq!(arrived, routed, "{entered:?} toward {onto}");
     }
+}
+
+#[test]
+fn rooms_order_as_their_names_do() {
+    let mut dice = Dice::new(23);
+    let room = |dice: &mut Dice| {
+        let axis = |dice: &mut Dice| match dice.below(3) {
+            0 => dice.between(-12, 11),
+            1 => dice.between(-130, 129),
+            _ => dice.between(-12000, 11999),
+        };
+        RoomName::new(axis(dice), axis(dice))
+    };
+    for _ in 0..20_000 {
+        let (a, b) = (room(&mut dice), room(&mut dice));
+        assert_eq!(a.cmp(&b), a.to_string().cmp(&b.to_string()), "{a} {b}");
+    }
+    let sim = RoomName::named("sim");
+    assert_eq!(sim.to_string(), "sim");
+    assert!(sim > RoomName::named("W1N1"), "lowercase after uppercase");
 }

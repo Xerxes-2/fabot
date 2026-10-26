@@ -5,7 +5,7 @@ use super::super::shape::{Engagement, Phase};
 use crate::core::engine;
 use crate::core::tactics::Tactic;
 use crate::core::vocabulary::BodyPart;
-use crate::core::world::{Creep, Owner, Pos, Room, Source};
+use crate::core::world::{Creep, Owner, Pos, Room, RoomName, Source};
 
 pub const CANDIDATES: &[Tactic] = &[Tactic::BlobKite, Tactic::Kite];
 
@@ -19,9 +19,9 @@ pub struct Facts {
     pub worth: Option<bool>,
     pub safe: bool,
     /// The candidate a set beats that pays most a tick of its walk.
-    pub elsewhere: Option<String>,
+    pub elsewhere: Option<RoomName>,
     /// The stalest room out of sight, read only once its room is worth nothing.
-    pub patrol: Option<String>,
+    pub patrol: Option<RoomName>,
 }
 
 pub fn prey(room: &Room) -> Vec<&Creep> {
@@ -81,9 +81,9 @@ fn enter(phase: Phase, time: i32, e: &Engagement) -> Engagement {
 }
 
 /// Never home (owner).
-pub fn onto(room: &str, time: i32, e: &Engagement) -> Engagement {
+pub fn onto(room: RoomName, time: i32, e: &Engagement) -> Engagement {
     Engagement {
-        room: room.to_string(),
+        room,
         unanswered: false,
         ..enter(Phase::Approaching, time, e)
     }
@@ -104,7 +104,7 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
 
     match facts.worth {
         _ if facts.safe => None,
-        _ if let Some(room) = onward => Some(onto(room, facts.time, e)),
+        _ if let Some(room) = onward => Some(onto(*room, facts.time, e)),
         _ if e.unanswered && facts.elsewhere.is_some() => None,
         Some(false) if facts.elsewhere.is_some() || hollow => None,
         None if hollow && !e.unanswered => None,

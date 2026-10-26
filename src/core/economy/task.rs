@@ -1,6 +1,7 @@
 /// What a body is hired to do; compared only through `task_id`, which
 /// `assignments` keys on.
 use crate::core::vocabulary::{Resource, resource_name, resource_of_name};
+use crate::core::world::RoomName;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Task {
@@ -14,12 +15,13 @@ pub enum Task {
     Reserve(String),
     Claim(String),
     /// A room, by name: what it holds is not seen until a body stands in it.
-    Scout(String),
+    Scout(RoomName),
 }
 
 /// Injective because an object id and a resource name hold no `:`.
 pub fn task_id(task: &Task) -> String {
-    let (tag, id, r) = match task {
+    let scout: String;
+    let (tag, id, r): (&str, &str, _) = match task {
         Task::Harvest(id) => ("h:", id, None),
         Task::Withdraw(id, r) => ("w:", id, Some(r)),
         Task::Pickup(id, r) => ("p:", id, Some(r)),
@@ -29,7 +31,10 @@ pub fn task_id(task: &Task) -> String {
         Task::Upgrade(id) => ("u:", id, None),
         Task::Reserve(id) => ("v:", id, None),
         Task::Claim(id) => ("c:", id, None),
-        Task::Scout(room) => ("s:", room, None),
+        Task::Scout(room) => {
+            scout = room.to_string();
+            ("s:", &scout, None)
+        }
     };
     // Pushed, not `format!`: an id a tick per offer, and the formatter costs.
     let r = r.map(resource_name);
@@ -63,7 +68,7 @@ pub fn of_task_id(id: &str) -> Option<Task> {
         ["u", target] => Some(Task::Upgrade(target.to_string())),
         ["v", target] => Some(Task::Reserve(target.to_string())),
         ["c", target] => Some(Task::Claim(target.to_string())),
-        ["s", room] => Some(Task::Scout(room.to_string())),
+        ["s", room] => Some(Task::Scout(RoomName::parse(room)?)),
         _ => None,
     }
 }

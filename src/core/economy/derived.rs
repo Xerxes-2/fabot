@@ -10,7 +10,7 @@ use crate::core::tick::{self, Declarations, Outpost};
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::{BodyPart, Resource, part_count_in};
 use crate::core::world::{
-    Controller, Creep, Kind, Owner, Part, Pos, Room, Spawn, Store, World, terrain,
+    Controller, Creep, Kind, Owner, Part, Pos, Room, RoomName, Spawn, Store, World, terrain,
 };
 
 use super::bodies::{self, Pattern};
@@ -196,7 +196,7 @@ pub struct PileFact {
 /// A room the economy works: a colony's own, or one declared to it.
 #[derive(Clone, Debug)]
 pub struct Ground {
-    pub room: String,
+    pub room: RoomName,
     pub controller: Option<Controller>,
     pub sources: Vec<SourceFact>,
     pub minerals: Vec<MineralFact>,
@@ -237,7 +237,7 @@ pub struct Ground {
     pub terminal: Option<TerminalFact>,
     /// What this colony sends, and the colony and its terminal's free room.
     pub shipment: Vec<(Resource, i32)>,
-    pub ship_to: Option<(String, i32)>,
+    pub ship_to: Option<(RoomName, i32)>,
     pub abandoned: bool,
 }
 
@@ -260,7 +260,7 @@ pub struct BoostLab {
 /// A resource, not a decider (`ARCHITECTURE.md` §2).
 #[derive(Clone, Debug)]
 pub struct Colony {
-    pub room: String,
+    pub room: RoomName,
     pub controller: Controller,
     pub spawns: Vec<Spawn>,
     pub bank: i32,
@@ -286,7 +286,7 @@ pub struct Derived {
     /// Creep lifetimes of tower fire a reserve holds.
     pub reserve_lifetimes: f64,
     /// From each room a spawn or body stands in, `Atlas::tree`'s.
-    pub routes: BTreeMap<String, Tree>,
+    pub routes: BTreeMap<RoomName, Tree>,
 }
 
 /// The storage-less colony a creep's name says cast it.
@@ -318,7 +318,7 @@ fn body_of(name: &str, pos: &Pos, parts: &[Part], store: &Store, life: i32) -> B
 
     Body {
         name: name.to_string(),
-        pos: pos.clone(),
+        pos: *pos,
         work,
         carry,
         moves,
@@ -442,7 +442,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
         if let Some(role) = role {
             links.push(LinkFact {
                 id: s.id.clone(),
-                pos: s.pos.clone(),
+                pos: s.pos,
                 role,
                 energy: s.store.amount_of(&Resource::Energy),
                 free: s.store.free(),
@@ -460,9 +460,9 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
         let seats = seats_at(atlas, 1, &s.pos);
         sources.push(SourceFact {
             id: s.id.clone(),
-            pos: s.pos.clone(),
+            pos: s.pos,
             rate,
-            post: post.as_ref().map(|(p, _)| p.clone()),
+            post: post.as_ref().map(|(p, _)| *p),
             container: post.as_ref().and_then(|(_, id)| id.clone()),
             link: links
                 .iter()
@@ -489,7 +489,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
                 .map_or(0, |c| c.store.amount_of(&m.resource));
             minerals.push(MineralFact {
                 id: m.id.clone(),
-                pos: m.pos.clone(),
+                pos: m.pos,
                 resource: m.resource.clone(),
                 amount: m.amount,
                 cooldown: extractor.cooldown,
@@ -530,7 +530,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             {
                 refills.push(RefillFact {
                     id: s.id.clone(),
-                    pos: s.pos.clone(),
+                    pos: s.pos,
                     kind: s.kind.clone(),
                     free: s.store.free(),
                 })
@@ -557,7 +557,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
                 if energy > 0 || owned || kind.is_buffer() {
                     stores.push(StoreFact {
                         id: s.id.clone(),
-                        pos: s.pos.clone(),
+                        pos: s.pos,
                         kind,
                         energy,
                         free: s.store.free(),
@@ -581,7 +581,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
                 repairs.push(RepairFact {
                     id: s.id.clone(),
                     kind: s.kind.clone(),
-                    pos: s.pos.clone(),
+                    pos: s.pos,
                     hits: s.hits,
                     hits_max: rampart_target(level).min(s.hits_max),
                     decay: f64::from(engine::RAMPART_DECAY_AMOUNT)
@@ -614,7 +614,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
                 repairs.push(RepairFact {
                     id: s.id.clone(),
                     kind: s.kind.clone(),
-                    pos: s.pos.clone(),
+                    pos: s.pos,
                     hits: s.hits,
                     hits_max: s.hits_max,
                     decay,
@@ -631,7 +631,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
         if energy > 0 {
             stores.push(StoreFact {
                 id: r.id.clone(),
-                pos: r.pos.clone(),
+                pos: r.pos,
                 kind: StoreKind::Remains,
                 energy,
                 free: 0,
@@ -644,7 +644,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
 
     let store_of = |kind: StoreKind, dug: i32, l: &LinkFact| StoreFact {
         id: l.id.clone(),
-        pos: l.pos.clone(),
+        pos: l.pos,
         kind,
         energy: l.energy,
         free: l.free,
@@ -677,7 +677,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
     let buffer = stores.iter().find(|s| s.kind.is_buffer()).cloned();
 
     Ground {
-        room: room.name.clone(),
+        room: room.name,
         controller: room.controller.clone(),
         sources,
         minerals,
@@ -690,7 +690,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             .map(|s| SiteFact {
                 id: s.id.clone(),
                 kind: s.kind.clone(),
-                pos: s.pos.clone(),
+                pos: s.pos,
                 left: 0.max(s.progress_total - s.progress),
             })
             .collect(),
@@ -700,7 +700,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             .iter()
             .map(|p| PileFact {
                 id: p.id.clone(),
-                pos: p.pos.clone(),
+                pos: p.pos,
                 resource: p.resource.clone(),
                 amount: p.amount,
             })
@@ -721,11 +721,11 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             Some(c) => seats_at(atlas, engine::UPGRADE_RANGE, &c.pos),
             None => Some(0),
         },
-        buffer_tile: built.map(|b| b.pos.clone()).or_else(|| {
+        buffer_tile: built.map(|b| b.pos).or_else(|| {
             room.sites
                 .iter()
                 .find(|s| s.kind.is_container() && Atlas::is_buffer(room, &s.pos))
-                .map(|s| s.pos.clone())
+                .map(|s| s.pos)
         }),
         buffer: buffer.clone(),
         feed: feed.or(buffer.clone()),
@@ -737,7 +737,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             .filter(|s| s.kind.is_lab() && s.owner.is_ours())
             .map(|s| LabFact {
                 id: s.id.clone(),
-                pos: s.pos.clone(),
+                pos: s.pos,
                 held: s
                     .store
                     .held
@@ -756,7 +756,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
                     .held
                     .iter()
                     .filter(|(r, n)| crate::core::vocabulary::is_mineral(r) && *n > 0)
-                    .map(|(r, n)| (s.id.clone(), s.pos.clone(), r.clone(), *n))
+                    .map(|(r, n)| (s.id.clone(), s.pos, r.clone(), *n))
             })
             .collect(),
         lab_plan: None,
@@ -767,7 +767,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             .find(|s| s.kind.is_terminal() && s.owner.is_ours())
             .map(|s| TerminalFact {
                 id: s.id.clone(),
-                pos: s.pos.clone(),
+                pos: s.pos,
                 store: s.store.clone(),
                 cooldown: s.cooldown,
             }),
@@ -786,11 +786,11 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             .map(|s| s.store.amount_of(&Resource::Energy))
             .sum(),
         buffer_seats: match (&buffer, &room.controller) {
-            (Some(b), Some(c)) if atlas.sees(&room.name) => {
-                let walkable = |t: Tile| atlas.passable(&room.name, t) && !tiles::on_edge(t);
+            (Some(b), Some(c)) if atlas.sees(room.name) => {
+                let walkable = |t: Tile| atlas.passable(room.name, t) && !tiles::on_edge(t);
                 Atlas::upgrader_seats(walkable, tiles::of_pos(&c.pos), tiles::of_pos(&b.pos))
                     .into_iter()
-                    .map(|t| tiles::to_pos(&room.name, t))
+                    .map(|t| tiles::to_pos(room.name, t))
                     .collect()
             }
             _ => Vec::new(),
@@ -804,11 +804,11 @@ fn blind(outpost: &Outpost, intel: &Intel, world: &World, declarations: &Declara
     let row = intel.get(&outpost.room);
     let owner = |user: &String| Owner::of_user(user.clone(), &world.me, declarations);
     Room {
-        name: outpost.room.clone(),
+        name: outpost.room,
         terrain: None,
         controller: Some(Controller {
             id: outpost.controller.id.clone(),
-            pos: outpost.controller.pos.clone(),
+            pos: outpost.controller.pos,
             owner: row
                 .and_then(|r| r.owner.as_ref())
                 .map_or(Owner::Nobody, owner),
@@ -832,7 +832,7 @@ fn blind(outpost: &Outpost, intel: &Intel, world: &World, declarations: &Declara
             .iter()
             .map(|s| crate::core::world::Source {
                 id: s.id.clone(),
-                pos: s.pos.clone(),
+                pos: s.pos,
                 energy: 0,
                 energy_capacity: 0,
                 ticks_to_regeneration: 0,
@@ -847,13 +847,10 @@ fn blind(outpost: &Outpost, intel: &Intel, world: &World, declarations: &Declara
     }
 }
 
-fn tree_of(routes: &mut BTreeMap<String, Tree>, atlas: &Atlas, room: &str) {
-    if !routes.contains_key(room) {
-        routes.insert(
-            room.to_string(),
-            atlas.tree(&BTreeSet::new(), tick::REACH_HOPS, room),
-        );
-    }
+fn tree_of(routes: &mut BTreeMap<RoomName, Tree>, atlas: &Atlas, room: RoomName) {
+    routes
+        .entry(room)
+        .or_insert_with(|| atlas.tree(&BTreeSet::new(), tick::REACH_HOPS, room));
 }
 
 /// `creeps` is the world's, less every body a fight holds: the port of F#'s
@@ -887,7 +884,7 @@ pub fn of_world(
 
             colony_rooms.push(room);
             colonies.push(Colony {
-                room: room.name.clone(),
+                room: room.name,
                 controller: c.clone(),
                 spawns,
                 bank: room.energy_available,
@@ -896,7 +893,7 @@ pub fn of_world(
         }
     }
 
-    let is_colony = |name: &str| colonies.iter().any(|c| c.room == name);
+    let is_colony = |name: RoomName| colonies.iter().any(|c| c.room == name);
 
     // A declared room is dug by bodies its richest colony casts.
     let richest = colony_rooms
@@ -908,7 +905,7 @@ pub fn of_world(
     // At the rate the reserver holds, not this tick's: a body lives longer
     // than a lapse lasts. The engine refuses a harvest on another's hold.
     let remote_of = |outpost: &Outpost| -> Ground {
-        let room: Cow<Room> = world.room(&outpost.room).map_or_else(
+        let room: Cow<Room> = world.room(outpost.room).map_or_else(
             || Cow::Owned(blind(outpost, intel, world, declarations)),
             Cow::Borrowed,
         );
@@ -949,12 +946,12 @@ pub fn of_world(
         })
         .collect();
 
-    for outpost in worked.iter().filter(|o| !is_colony(&o.room)) {
+    for outpost in worked.iter().filter(|o| !is_colony(o.room)) {
         grounds.push(remote_of(outpost));
     }
 
-    let given_up = |room: &str| declarations.abandon.iter().any(|r| r == room);
-    let free_at = |grounds: &[Ground], room: &str| {
+    let given_up = |room: RoomName| declarations.abandon.contains(&room);
+    let free_at = |grounds: &[Ground], room: RoomName| {
         grounds
             .iter()
             .find(|g| g.room == room)
@@ -963,7 +960,7 @@ pub fn of_world(
     };
 
     if let Some((home, targets)) = &declarations.labs
-        && !given_up(home)
+        && !given_up(*home)
         && let Some(g) = grounds.iter_mut().find(|g| &g.room == home)
     {
         // The lab a body waiting at home is boosted from is the cast's and not
@@ -972,13 +969,13 @@ pub fn of_world(
             .filter(|c| &c.pos.room == home)
             .filter_map(|c| {
                 let compound = tick::boost_of_name(&c.name)?;
-                let lab = tick::booster(world, home, compound)?;
+                let lab = tick::booster(world, *home, compound)?;
                 Some((lab.id.clone(), Resource::Compound(compound)))
             })
             .collect();
         let labs: Vec<(String, Pos)> = (g.labs.iter())
             .filter(|l| !kept.contains_key(&l.id))
-            .map(|l| (l.id.clone(), l.pos.clone()))
+            .map(|l| (l.id.clone(), l.pos))
             .collect();
         let held = |id: &str| {
             g.labs
@@ -1030,7 +1027,7 @@ pub fn of_world(
         // stores: the reaction refuses it as a lab of its own.
         let mut waited: BTreeMap<&str, (Resource, i32, i32)> = BTreeMap::new();
         for creep in (world.creeps.iter()).filter(|c| &c.pos.room == home) {
-            let Some(w) = tick::waiting(world, home, creep) else {
+            let Some(w) = tick::waiting(world, *home, creep) else {
                 continue;
             };
             let at =
@@ -1046,18 +1043,18 @@ pub fn of_world(
                 let lab = lab_at(id)?;
                 Some(BoostLab {
                     id: id.to_string(),
-                    pos: lab.pos.clone(),
+                    pos: lab.pos,
                     compound: compound.clone(),
                     mineral: mineral - lab.store.amount_of(&compound),
                     energy: energy - lab.store.amount_of(&Resource::Energy),
                 })
             });
         let mut short = super::labs::ore_short(targets, &stock);
-        let home_free = free_at(&grounds, home);
+        let home_free = free_at(&grounds, *home);
 
         // The colonies in their order, each the ore it holds up to what is left.
         for g in grounds.iter_mut().take(colonies.len()) {
-            if &g.room == home || g.terminal.is_none() || given_up(&g.room) {
+            if &g.room == home || g.terminal.is_none() || given_up(g.room) {
                 continue;
             }
             for (ore, left) in &mut short {
@@ -1069,18 +1066,18 @@ pub fn of_world(
                 }
             }
             if !g.shipment.is_empty() {
-                g.ship_to = Some((home.clone(), home_free));
+                g.ship_to = Some((*home, home_free));
             }
         }
     }
 
     for (i, room) in colony_rooms.iter().enumerate() {
-        if given_up(&room.name) {
+        if given_up(room.name) {
             let to = grounds
                 .iter()
                 .take(colonies.len())
-                .filter(|g| g.terminal.is_some() && !given_up(&g.room))
-                .map(|g| (g.room.clone(), free_at(&grounds, &g.room)))
+                .filter(|g| g.terminal.is_some() && !given_up(g.room))
+                .map(|g| (g.room, free_at(&grounds, g.room)))
                 .max_by_key(|(_, free)| *free);
             super::abandon::evacuate(&mut grounds[i], room, &world.creeps, to);
         }
@@ -1094,18 +1091,18 @@ pub fn of_world(
         })
         .collect();
 
-    let mut routes: BTreeMap<String, Tree> = BTreeMap::new();
+    let mut routes: BTreeMap<RoomName, Tree> = BTreeMap::new();
 
     for s in &world.spawns {
-        tree_of(&mut routes, atlas, &s.pos.room);
+        tree_of(&mut routes, atlas, s.pos.room);
     }
 
     for g in &grounds {
-        tree_of(&mut routes, atlas, &g.room);
+        tree_of(&mut routes, atlas, g.room);
     }
 
     for c in creeps {
-        tree_of(&mut routes, atlas, &c.pos.room);
+        tree_of(&mut routes, atlas, c.pos.room);
     }
 
     Derived {
@@ -1116,23 +1113,23 @@ pub fn of_world(
             .flat_map(|g| {
                 g.sources
                     .iter()
-                    .filter_map(|s| s.post.clone().map(|p| (s.id.clone(), p)))
+                    .filter_map(|s| s.post.map(|p| (s.id.clone(), p)))
                     .chain(g.minerals.iter().filter_map(|m| {
                         m.container.as_ref()?;
-                        m.post.clone().map(|p| (m.id.clone(), p))
+                        m.post.map(|p| (m.id.clone(), p))
                     }))
             })
             .collect(),
         grounds,
         scouts: scouts
             .iter()
-            .map(|s| (Pos::new(s.room.as_str(), 25, 25), s.age, s.cast))
+            .map(|s| (Pos::new(s.room, 25, 25), s.age, s.cast))
             .collect(),
         claims: declarations
             .claims
             .iter()
             .filter(|_| owned_rooms(world) < world.rooms_allowed)
-            .filter_map(|claim| match world.room(&claim.room) {
+            .filter_map(|claim| match world.room(claim.room) {
                 Some(room) => room.controller.clone(),
                 None => blind(claim, intel, world, declarations).controller,
             })
