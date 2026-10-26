@@ -764,7 +764,7 @@ impl<'a> Scene<'a> {
                 .all(|s| s.pos != b.pos || s.walkable || Scene::rival(s))
             {
                 weights[tiles::of_pos(&b.pos)] = grid::weight(
-                    if world::terrain::is_swamp(&room.terrain, b.pos.x, b.pos.y) {
+                    if world::terrain::is_swamp(room.terrain.as_deref(), b.pos.x, b.pos.y) {
                         engine::SWAMP_WEIGHT
                     } else {
                         engine::PLAIN_WEIGHT

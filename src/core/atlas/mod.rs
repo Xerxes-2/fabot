@@ -421,7 +421,10 @@ impl Atlas {
                 strikers.push(striker(tiles::of_pos(&lair.pos), f));
             }
         }
-        Atlas::strikes(&room.terrain, &strikers)
+        match &room.terrain {
+            Some(terrain) => Atlas::strikes(&terrain[..], &strikers),
+            None => Vec::new(),
+        }
     }
 
     /// ~10 kB each. A dropped resource's tile is a new goal, so a room's keys
@@ -481,15 +484,14 @@ impl Atlas {
         mut previous: Atlas,
         world: &World,
         seen: impl IntoIterator<Item = (&'a str, Option<&'a [Post]>)>,
-        terrains: impl IntoIterator<Item = (&'a str, &'a [u8])>,
+        terrains: impl IntoIterator<Item = (&'a str, &'a [u8; tiles::COUNT])>,
     ) -> Atlas {
         let mut rooms: HashMap<Coords, RoomGrid> = HashMap::default();
 
-        for (c, room) in (world.rooms.iter())
-            .filter(|r| r.terrain.len() == tiles::COUNT)
-            .filter_map(|r| Some((tiles::room_coords(&r.name)?, r)))
+        for (c, room, terrain) in (world.rooms.iter())
+            .filter_map(|r| Some((tiles::room_coords(&r.name)?, r, r.terrain.as_deref()?)))
         {
-            let mut weights = Atlas::ground(&room.terrain);
+            let mut weights = Atlas::ground(terrain);
 
             for s in &room.structures {
                 if s.kind == Kind::Road {
@@ -553,7 +555,7 @@ impl Atlas {
             let Some(c) = tiles::room_coords(name) else {
                 continue;
             };
-            if terrain.len() != tiles::COUNT || rooms.contains_key(&c) {
+            if rooms.contains_key(&c) {
                 continue;
             }
             let grid = match previous.rooms.remove(&c) {

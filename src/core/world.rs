@@ -455,8 +455,8 @@ pub struct Remains {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Room {
     pub name: String,
-    /// `Game.map.getRoomTerrain(name).getRawBuffer()`.
-    pub terrain: Vec<u8>,
+    /// `Game.map.getRoomTerrain(name).getRawBuffer()`, `None` where unread.
+    pub terrain: Option<terrain::Terrain>,
     pub controller: Option<Controller>,
     /// 0 in a room without spawns.
     pub energy_available: i32,
@@ -519,16 +519,32 @@ pub struct World {
 }
 
 pub mod terrain {
+    use crate::core::atlas::tiles::COUNT;
+    use std::rc::Rc;
+
     pub const WALL: u8 = 1;
     pub const SWAMP: u8 = 2;
 
-    pub fn is_wall(terrain: &[u8], x: i32, y: i32) -> bool {
-        terrain[(y * 50 + x) as usize] & WALL != 0
+    /// A whole room's raw buffer, shared between the map cache and each tick's rooms.
+    pub type Terrain = Rc<[u8; COUNT]>;
+
+    /// The engine's buffer is short for a room the map doesn't hold: unread,
+    /// which an all-plain room must not pass for.
+    pub fn of(raw: Vec<u8>) -> Option<Terrain> {
+        Some(Rc::new(<[u8; COUNT]>::try_from(raw).ok()?))
     }
 
-    pub fn is_swamp(terrain: &[u8], x: i32, y: i32) -> bool {
-        let t = terrain[(y * 50 + x) as usize];
-        t & WALL == 0 && t & SWAMP != 0
+    /// An unread room is neither wall nor swamp: its callers (layout, a
+    /// fight's casting) walk rooms in sight, and a guess beats a panic there.
+    pub fn is_wall(terrain: Option<&[u8; COUNT]>, x: i32, y: i32) -> bool {
+        terrain.is_some_and(|t| t[(y * 50 + x) as usize] & WALL != 0)
+    }
+
+    pub fn is_swamp(terrain: Option<&[u8; COUNT]>, x: i32, y: i32) -> bool {
+        terrain.is_some_and(|t| {
+            let t = t[(y * 50 + x) as usize];
+            t & WALL == 0 && t & SWAMP != 0
+        })
     }
 }
 

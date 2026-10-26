@@ -154,7 +154,7 @@ pub fn terrain_at(room: &Room, at: &Pos) -> exchange::Terrain {
     let last = engine::ROOM_SIDE - 1;
 
     exchange::Terrain {
-        weight: if terrain::is_swamp(&room.terrain, at.x, at.y) {
+        weight: if terrain::is_swamp(room.terrain.as_deref(), at.x, at.y) {
             engine::SWAMP_WEIGHT
         } else {
             engine::PLAIN_WEIGHT
@@ -506,7 +506,7 @@ mod tests {
     fn colony(name: &str, bank: i32) -> Room {
         Room {
             name: name.to_string(),
-            terrain: Vec::new(),
+            terrain: None,
             controller: None,
             energy_available: bank,
             energy_capacity: 12_900,

@@ -68,7 +68,7 @@ pub fn census_of(room: &Room, ours: &[Creep]) -> Census {
     let mut walkable = [0u8; tiles::COUNT];
 
     for (t, w) in walkable.iter_mut().enumerate() {
-        if room.terrain.get(t).copied().unwrap_or(0) & terrain::WALL == 0 {
+        if room.terrain.as_ref().map_or(0, |terrain| terrain[t]) & terrain::WALL == 0 {
             *w = 1;
         }
     }

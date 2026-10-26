@@ -292,7 +292,7 @@ pub(crate) mod dice {
 
         let room = Room {
             name: name.clone(),
-            terrain: vec![0; 2500],
+            terrain: crate::core::world::terrain::of(vec![0; 2500]),
             controller: Some(controller),
             energy_available: if owned { bank } else { 0 },
             energy_capacity: if owned { bank_capacity } else { 0 },

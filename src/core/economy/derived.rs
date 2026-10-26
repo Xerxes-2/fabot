@@ -413,7 +413,7 @@ pub fn rampart_target(level: i32) -> i32 {
 pub const RAMPART_SAFE: i32 = 10 * engine::RAMPART_DECAY_AMOUNT;
 
 fn swamp(room: &Room, pos: &Pos) -> bool {
-    room.terrain.len() == tiles::COUNT && terrain::is_swamp(&room.terrain, pos.x, pos.y)
+    terrain::is_swamp(room.terrain.as_deref(), pos.x, pos.y)
 }
 
 fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
@@ -805,7 +805,7 @@ fn blind(outpost: &Outpost, intel: &Intel, world: &World, declarations: &Declara
     let owner = |user: &String| Owner::of_user(user.clone(), &world.me, declarations);
     Room {
         name: outpost.room.clone(),
-        terrain: Vec::new(),
+        terrain: None,
         controller: Some(Controller {
             id: outpost.controller.id.clone(),
             pos: outpost.controller.pos.clone(),

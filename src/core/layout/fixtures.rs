@@ -166,7 +166,7 @@ fn colony_of(rng: &mut Rng, blobs: i32) -> Option<Colony> {
 
     let room = Room {
         name: ROOM.to_string(),
-        terrain,
+        terrain: terrain::of(terrain),
         controller: Some(Controller {
             id: "c".to_string(),
             pos: at(controller),

@@ -9,7 +9,9 @@ use std::io::Read;
 use fabot::core::layout::{ground, plan, sites};
 use fabot::core::tiles::{self, Tile};
 use fabot::core::vocabulary::Resource;
-use fabot::core::world::{Controller, Kind, Mineral, Owner, Pos, Room, Source, Store, Structure};
+use fabot::core::world::{
+    Controller, Kind, Mineral, Owner, Pos, Room, Source, Store, Structure, terrain,
+};
 use serde_json::{Value, json};
 
 fn main() {
@@ -29,12 +31,14 @@ fn main() {
 
     let room = Room {
         name: name.clone(),
-        terrain: input["terrain"]
-            .as_str()
-            .unwrap()
-            .bytes()
-            .map(|c| c - b'0')
-            .collect(),
+        terrain: terrain::of(
+            input["terrain"]
+                .as_str()
+                .unwrap()
+                .bytes()
+                .map(|c| c - b'0')
+                .collect(),
+        ),
         controller: Some(Controller {
             id: "controller".into(),
             pos: pos(&input["controller"]),

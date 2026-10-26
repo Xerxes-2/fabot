@@ -32,7 +32,7 @@ fn absent(v: &JsValue) -> bool {
 /// `ARCHITECTURE.md` §4's `terrain` row.
 #[derive(Default)]
 pub struct Maps {
-    terrain: HashMap<String, Vec<u8>>,
+    terrain: HashMap<String, Option<terrain::Terrain>>,
     status: HashMap<String, Option<String>>,
 }
 
@@ -41,8 +41,8 @@ pub struct Maps {
 const READS_A_TICK: usize = 10;
 
 impl Maps {
-    pub fn terrains(&self) -> impl Iterator<Item = (&str, &[u8])> {
-        (self.terrain.iter()).map(|(room, t)| (room.as_str(), t.as_slice()))
+    pub fn terrains(&self) -> impl Iterator<Item = (&str, &[u8; tiles::COUNT])> {
+        (self.terrain.iter()).filter_map(|(room, t)| Some((room.as_str(), &**t.as_ref()?)))
     }
 
     /// Kept when empty too, so a room the map lacks is asked once.
@@ -275,13 +275,11 @@ impl<'a> Reader<'a> {
 
     fn room(&mut self) -> Room {
         let name = self.s();
-        let terrain = if let Some(terrain) = self.maps.terrain.get(&name)
-            && !terrain.is_empty()
-        {
-            terrain.clone()
+        let terrain = if let Some(Some(terrain)) = self.maps.terrain.get(&name) {
+            Some(terrain.clone())
         } else {
             let terrain = terrain_of(&name);
-            if !terrain.is_empty() {
+            if terrain.is_some() {
                 self.maps.terrain.insert(name.clone(), terrain.clone());
             }
             terrain
@@ -415,7 +413,7 @@ pub fn of_game(maps: &mut Maps, declarations: &Declarations, drain: Option<&str>
 
 /// `Game.map.getRoomTerrain(name).getRawBuffer()`: the map serves rooms the
 /// bot cannot see, and reading it needs no `Room` object.
-fn terrain_of(name: &str) -> Vec<u8> {
+fn terrain_of(name: &str) -> Option<terrain::Terrain> {
     let read = || -> Option<Vec<u8>> {
         let game = Reflect::get(&js_sys::global(), &JsValue::from_str("Game")).ok()?;
         let map = field(&game, "map");
@@ -436,7 +434,7 @@ fn terrain_of(name: &str) -> Vec<u8> {
         .ok()?;
         Some(js_sys::Uint8Array::new(&raw).to_vec())
     };
-    read().unwrap_or_default()
+    terrain::of(read()?)
 }
 
 /// `None` where the map has no `getRoomStatus` (the bench), so no room reads closed.

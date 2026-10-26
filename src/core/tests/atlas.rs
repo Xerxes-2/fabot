@@ -55,7 +55,7 @@ impl Ground {
 fn room_of(name: &str, terrain: Vec<u8>, structures: Vec<Structure>) -> Room {
     Room {
         name: name.to_string(),
-        terrain,
+        terrain: terrain::of(terrain),
         controller: None,
         energy_available: 0,
         energy_capacity: 0,

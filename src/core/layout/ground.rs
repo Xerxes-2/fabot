@@ -45,12 +45,10 @@ pub fn obstacles(room: &Room) -> Vec<Tile> {
 }
 
 pub fn of_room(room: &Room) -> Option<Ground> {
-    if room.terrain.len() != tiles::COUNT {
-        return None;
-    }
+    let terrain = room.terrain.as_deref()?;
 
     let mut weights: Table<Weight> = tiles::table(None);
-    for (weight, t) in weights.iter_mut().zip(&room.terrain) {
+    for (weight, t) in weights.iter_mut().zip(terrain) {
         *weight = if t & terrain::WALL != 0 {
             None
         } else if t & terrain::SWAMP != 0 {

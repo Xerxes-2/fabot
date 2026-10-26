@@ -244,7 +244,7 @@ fn world_of(errand: &Errand) -> World {
         bucket: 10_000,
         rooms: vec![Room {
             name: ROOM.to_string(),
-            terrain: errand.terrain.clone(),
+            terrain: terrain::of(errand.terrain.clone()),
             controller: None,
             energy_available: 0,
             energy_capacity: 0,
