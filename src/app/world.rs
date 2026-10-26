@@ -49,13 +49,14 @@ impl Maps {
     fn read_around(&mut self, homes: impl Iterator<Item = (i32, i32)>) {
         let reach = crate::core::tick::SIEGE_HOPS;
         let mut unread: Vec<(i32, String)> = Vec::new();
+        let mut room = String::new();
         for (x, y) in homes {
             for dx in -reach..=reach {
                 let side = reach - dx.abs();
                 for dy in -side..=side {
-                    let room = tiles::room_name(x + dx, y + dy);
-                    if !self.terrain.contains_key(&room) {
-                        unread.push((dx.abs() + dy.abs(), room));
+                    tiles::write_room_name(&mut room, x + dx, y + dy);
+                    if !self.terrain.contains_key(room.as_str()) {
+                        unread.push((dx.abs() + dy.abs(), room.clone()));
                     }
                 }
             }
@@ -85,7 +86,7 @@ struct Reader<'a> {
     declarations: &'a Declarations,
 }
 
-impl Reader<'_> {
+impl<'a> Reader<'a> {
     fn n(&mut self) -> i32 {
         self.at += 1;
         self.ints[self.at - 1]
@@ -96,7 +97,12 @@ impl Reader<'_> {
     }
 
     fn s(&mut self) -> String {
-        self.strs.next().unwrap_or_default().to_string()
+        self.str().to_string()
+    }
+
+    /// A string only parsed: no copy.
+    fn str(&mut self) -> &'a str {
+        self.strs.next().unwrap_or_default()
     }
 
     fn list<T>(&mut self, mut each: impl FnMut(&mut Self) -> T) -> Vec<T> {
@@ -134,10 +140,10 @@ impl Reader<'_> {
     /// Only the resources `screeps-game-api` names count, as its `store_types` read them.
     fn store(&mut self) -> Store {
         let held = self
-            .list(|r| (r.s(), r.n()))
+            .list(|r| (r.str(), r.n()))
             .into_iter()
             .filter(|(name, amount)| *amount > 0 && name.parse::<ResourceType>().is_ok())
-            .map(|(name, amount)| (vocabulary::resource_of_name(&name), amount))
+            .map(|(name, amount)| (vocabulary::resource_of_name(name), amount))
             .collect();
         Store {
             held,
@@ -147,16 +153,16 @@ impl Reader<'_> {
 
     fn body(&mut self) -> Vec<Part> {
         self.list(|r| {
-            let kind = vocabulary::part_of_name(&r.s()).unwrap_or(BodyPart::Tough);
+            let kind = vocabulary::part_of_name(r.str()).unwrap_or(BodyPart::Tough);
             let hits = r.n();
-            let boost = r.s();
+            let boost = r.str();
             Part {
                 kind,
                 hits,
                 boost: if boost.is_empty() {
                     Boost::Unboosted
                 } else {
-                    vocabulary::boost::of_compound(kind, &boost)
+                    vocabulary::boost::of_compound(kind, boost)
                 },
             }
         })
@@ -200,7 +206,7 @@ impl Reader<'_> {
     }
 
     fn structure(&mut self, room: &str) -> Structure {
-        let kind = Kind::of_name(&self.s());
+        let kind = Kind::of_name(self.str());
         let id = self.s();
         let pos = self.pos_in(room);
         let owner = self.owner();
@@ -299,12 +305,12 @@ impl Reader<'_> {
             minerals: self.list(|r| Mineral {
                 id: r.s(),
                 pos: r.pos(),
-                resource: vocabulary::resource_of_name(&r.s()),
+                resource: vocabulary::resource_of_name(r.str()),
                 amount: r.n(),
             }),
             structures: self.list(|r| r.structure(&name)),
             sites: self.list(|r| Site {
-                kind: Kind::of_name(&r.s()),
+                kind: Kind::of_name(r.str()),
                 id: r.s(),
                 pos: r.pos_in(&name),
                 owner: r.owner(),
@@ -314,7 +320,7 @@ impl Reader<'_> {
             piles: self.list(|r| Pile {
                 id: r.s(),
                 pos: r.pos(),
-                resource: vocabulary::resource_of_name(&r.s()),
+                resource: vocabulary::resource_of_name(r.str()),
                 amount: r.n(),
             }),
             remains: self.list(Reader::remains),

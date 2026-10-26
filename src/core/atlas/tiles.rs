@@ -361,14 +361,31 @@ pub fn seam_range(a: &Pos, b: &Pos) -> Option<i32> {
 }
 
 pub fn room_name(x: i32, y: i32) -> String {
-    let axis = |outward: &str, inward: &str, value: i32| -> String {
-        if value < 0 {
-            format!("{}{}", outward, -value - 1)
+    let mut name = String::with_capacity(8);
+    write_room_name(&mut name, x, y);
+    name
+}
+
+/// `room_name` into a buffer the caller reuses.
+pub fn write_room_name(name: &mut String, x: i32, y: i32) {
+    name.clear();
+    for (outward, inward, value) in [('W', 'E', x), ('N', 'S', y)] {
+        let (side, value) = if value < 0 {
+            (outward, -value - 1)
         } else {
-            format!("{inward}{value}")
+            (inward, value)
+        };
+        name.push(side);
+        let digits = name.len();
+        let mut rest = value;
+        loop {
+            name.insert(digits, char::from(b'0' + (rest % 10) as u8));
+            rest /= 10;
+            if rest == 0 {
+                break;
+            }
         }
-    };
-    format!("{}{}", axis("W", "E", x), axis("N", "S", y))
+    }
 }
 
 pub fn room_toward(name: &str, exit: i32) -> Option<String> {
