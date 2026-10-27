@@ -170,7 +170,7 @@ impl<'a> Scene<'a> {
     /// set it buys staffs it; after, only on an event.
     pub(super) fn besieged(
         &self,
-        atlas: &mut Atlas,
+        atlas: &Atlas,
         asked: &mut Asked,
         e: &Engagement,
         target: &str,
@@ -655,7 +655,7 @@ impl<'a> Scene<'a> {
 
     pub(super) fn priced(
         &self,
-        atlas: &mut Atlas,
+        atlas: &Atlas,
         asked: &mut Asked,
         e: &Engagement,
         free: &mut Vec<String>,

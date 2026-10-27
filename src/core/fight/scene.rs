@@ -255,7 +255,7 @@ impl<'a> Scene<'a> {
             at: exposed
                 .first()
                 .or(prey.first().map(|c| &c.pos))
-                .cloned()
+                .copied()
                 .unwrap_or_else(|| middle(room.name)),
             escort,
             marks,
@@ -659,7 +659,7 @@ impl<'a> Scene<'a> {
 
     pub(super) fn unreached(
         &self,
-        atlas: &mut Atlas,
+        atlas: &Atlas,
         room: &Room,
         b: &Structure,
         in_room: &[&Creep],

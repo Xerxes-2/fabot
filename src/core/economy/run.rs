@@ -98,7 +98,7 @@ fn near(
 }
 
 fn ticks_to(
-    atlas: &mut Atlas,
+    atlas: &Atlas,
     derived: &Derived,
     mover: Mover,
     target: &Target,
@@ -218,7 +218,7 @@ fn seat_of(stood: &BTreeSet<Pos>, creep: &Creep, offer: &Offer, seats: Option<&[
 
     let tiles: Option<Vec<Pos>> = match seats {
         Some(seats) => {
-            let open: Vec<Pos> = seats.iter().filter(|p| free(p)).cloned().collect();
+            let open: Vec<Pos> = seats.iter().filter(|p| free(p)).copied().collect();
             if open.is_empty() {
                 Some(seats.to_vec())
             } else {

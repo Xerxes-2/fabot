@@ -98,7 +98,7 @@ impl Matcher<'_> {
         pool::garrisons(&self.bodies[bi], &self.pool[oi])
     }
 
-    fn posted(&mut self, bi: usize, oi: usize) -> bool {
+    fn posted(&self, bi: usize, oi: usize) -> bool {
         self.garrison(bi, oi)
             && match &self.pool[oi].post {
                 Some(post) => self.bodies[bi].pos.within(0, post),

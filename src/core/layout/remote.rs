@@ -34,7 +34,7 @@ fn ours(room: &Room) -> bool {
 }
 
 /// The engine builds nothing on the border.
-fn walk(atlas: &mut Atlas, target: &Target, from: &Pos) -> Vec<Pos> {
+fn walk(atlas: &Atlas, target: &Target, from: &Pos) -> Vec<Pos> {
     let mut path: Vec<Pos> = Vec::new();
     let mut room = from.room;
     let mut tile = tiles::of_pos(from);

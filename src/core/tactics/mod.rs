@@ -255,7 +255,7 @@ pub fn kite(
 
     if swings.is_empty() {
         let at = at
-            .cloned()
+            .copied()
             .unwrap_or_else(|| aim(sight, order, centre, creep));
         toward(sight, creep, &at, engine::RANGED_RANGE)
     } else {
@@ -739,7 +739,7 @@ pub fn rampart(sight: &mut Sight, creep: &Creep) -> Wish {
         let nearest = ramparts
             .iter()
             .min_by_key(|p| (creep.pos.range(p).unwrap_or(99), p.x, p.y))
-            .cloned();
+            .copied();
 
         match nearest {
             Some(p) => toward(sight, creep, &p, 0),
@@ -754,7 +754,7 @@ pub fn retreat(sight: &mut Sight, creep: &Creep) -> Wish {
         .homes
         .iter()
         .filter(|p| p.room == room)
-        .cloned()
+        .copied()
         .collect();
 
     let home: Option<Pos> = if here.is_empty() {

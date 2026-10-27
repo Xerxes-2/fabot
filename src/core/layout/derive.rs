@@ -110,7 +110,7 @@ pub fn colonies(
                 .filter(|s| s.owner.is_ours() && !s.kind.is_road() && !s.kind.is_container())
                 .map(|s| &s.pos)
                 .chain(ours.iter().map(|c| &c.pos))
-                .cloned()
+                .copied()
                 .collect(),
             ours,
         });

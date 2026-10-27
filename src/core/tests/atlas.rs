@@ -198,7 +198,7 @@ fn covered(footprint: Footprint, anchor: Tile) -> Vec<(i32, i32)> {
 
 /// The walk followed by `first_step` from the start: each tile and its ticks,
 /// until a goal or no step.
-fn followed(atlas: &mut Atlas, walk: &Walk, target: &Target) -> Vec<(Tile, i32)> {
+fn followed(atlas: &Atlas, walk: &Walk, target: &Target) -> Vec<(Tile, i32)> {
     let mut out = Vec::new();
     let mut tile = walk.start;
     for seen in 0.. {
@@ -386,9 +386,9 @@ fn a_walk_takes_at_least_a_tick_a_tile_of_range_it_must_close() {
 #[test]
 fn each_first_step_lands_where_the_walk_is_shorter_on_open_ground_to_a_seat() {
     for (walk, _) in walks(12) {
-        let mut atlas = Atlas::of_world(&world_of(&walk.ground));
+        let atlas = Atlas::of_world(&world_of(&walk.ground));
         let target = target_of(ROOM, &walk);
-        let path = followed(&mut atlas, &walk, &target);
+        let path = followed(&atlas, &walk, &target);
         let open = |tile: Tile| {
             covered(walk.mover.footprint, tile)
                 .iter()
@@ -493,9 +493,9 @@ fn toward_another_room_the_walk_ends_on_an_exit() {
     for (walk, mut dice) in walks(17) {
         let toward = dice.pick(&[tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT]);
         let onto = tiles::room_toward(ROOM, toward).unwrap();
-        let mut atlas = Atlas::of_world(&world_of(&walk.ground));
+        let atlas = Atlas::of_world(&world_of(&walk.ground));
         let target = target_of(onto, &walk);
-        if let Some(&(tile, ticks)) = followed(&mut atlas, &walk, &target).last() {
+        if let Some(&(tile, ticks)) = followed(&atlas, &walk, &target).last() {
             assert_eq!(ticks, 0);
             let edge = covered(walk.mover.footprint, tile);
             assert!(

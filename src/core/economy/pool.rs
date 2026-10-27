@@ -844,7 +844,7 @@ pub fn pool(
         }
         let own =
             (owners.get(&o.target.room)).map_or(&o.target.room, |ci| &derived.colonies[*ci].room);
-        o.shut.extend(lean.iter().filter(|r| *r != own).cloned());
+        o.shut.extend(lean.iter().filter(|r| *r != own).copied());
     }
 
     offers
