@@ -522,7 +522,9 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                     .filter(|g| g.room == creep.pos.room)
                     .find_map(|g| g.buffer.as_ref());
 
+                // An empty buffer has nothing to draw: the engine refuses it.
                 if let Some(b) = buffer
+                    && b.energy > 0
                     && pool::draws_buffer(body, offer)
                     && creep.pos.within(1, &b.pos)
                 {
