@@ -532,35 +532,8 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
                     ));
                 }
 
-                // Away from a colony no crew raises a container nor stays to
-                // keep it.
-                let raising = if pool::garrisons(body, offer)
-                    && body.energy > 0
-                    && body.free == 0
-                    && offer.post.as_ref() == Some(&creep.pos)
-                {
-                    derived
-                        .grounds
-                        .iter()
-                        .skip(derived.colonies.len())
-                        .find_map(|g| match g.sites.iter().find(|s| s.pos == creep.pos) {
-                            Some(site) => Some(CreepAct::Build(site.id.clone())),
-                            None => g
-                                .repairs
-                                .iter()
-                                .find(|r| {
-                                    r.pos == creep.pos
-                                        && r.kind.is_container()
-                                        && 2 * r.hits < r.hits_max
-                                })
-                                .map(|r| CreepAct::Repair(r.id.clone())),
-                        })
-                } else {
-                    None
-                };
-
-                if let Some(act) = &raising {
-                    acts.push(Intent::Creep(creep.name.clone(), act.clone()))
+                if let Some(act) = raising(&derived, body, offer) {
+                    acts.push(Intent::Creep(creep.name.clone(), act))
                 } else {
                     let arrived = creep.pos.within(offer.task.range_of(), &offer.target)
                         && seats
@@ -615,21 +588,17 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             None if !derived.colonies.is_empty()
                 && derived.colonies.iter().all(|c| c.room != creep.pos.room) =>
             {
-                // Home, where it can be matched.
-                let mut home = derived.colonies[0].spawns[0].pos;
-                let mut best =
-                    distance(&*context.atlas, &derived, &creep.pos, &home).unwrap_or(i32::MAX);
-
-                for colony in &derived.colonies[1..] {
-                    let at = &colony.spawns[0].pos;
-                    let d = distance(&*context.atlas, &derived, &creep.pos, at).unwrap_or(i32::MAX);
-
-                    // `Array.minBy`: the last of equal keys.
-                    if d <= best {
-                        best = d;
-                        home = *at;
-                    }
-                }
+                // Home, where it can be matched: the last of equal walks.
+                let walk = |c: &&derived::Colony| {
+                    distance(&*context.atlas, &derived, &creep.pos, &c.spawns[0].pos)
+                        .unwrap_or(i32::MAX)
+                };
+                let home = derived
+                    .colonies
+                    .iter()
+                    .rev()
+                    .min_by_key(walk)
+                    .map_or(creep.pos, |c| c.spawns[0].pos);
 
                 wish_in(
                     &mut wishes,
@@ -645,12 +614,8 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         }
     }
 
-    let mut moves: Vec<Intent> = Vec::new();
-    for (room, list) in wishes {
-        for wish in list {
-            moves.push(Intent::Wish(room, wish));
-        }
-    }
+    let moves = (wishes.into_iter())
+        .flat_map(|(room, list)| list.into_iter().map(move |w| Intent::Wish(room, w)));
 
     let mut sends: Vec<Intent> = Vec::new();
     for g in &derived.grounds {
@@ -668,12 +633,12 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         }
     }
 
-    let mut taken: BTreeSet<String> = BTreeSet::new();
-    for act in &acts {
-        if let Intent::Creep(name, CreepAct::Pickup(_)) = act {
-            taken.insert(name.clone());
-        }
-    }
+    let taken: BTreeSet<String> = (acts.iter())
+        .filter_map(|act| match act {
+            Intent::Creep(name, CreepAct::Pickup(_)) => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
 
     intents.extend(acts);
     intents.extend(pickups(&derived, &taken));
@@ -684,6 +649,27 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     next.assignments = assignments;
 
     Ok((intents, next))
+}
+
+/// A garrison full on its post raises or keeps its container; away from a
+/// colony no crew raises one nor stays to keep it.
+fn raising(derived: &Derived, body: &Body, offer: &Offer) -> Option<CreepAct> {
+    let at = &body.pos;
+    if !(pool::garrisons(body, offer)
+        && body.energy > 0
+        && body.free == 0
+        && offer.post.as_ref() == Some(at))
+    {
+        return None;
+    }
+    (derived.grounds.iter().skip(derived.colonies.len())).find_map(|g| {
+        match g.sites.iter().find(|s| s.pos == *at) {
+            Some(site) => Some(CreepAct::Build(site.id.clone())),
+            None => (g.repairs.iter())
+                .find(|r| r.pos == *at && r.kind.is_container() && 2 * r.hits < r.hits_max)
+                .map(|r| CreepAct::Repair(r.id.clone())),
+        }
+    })
 }
 
 #[cfg(test)]

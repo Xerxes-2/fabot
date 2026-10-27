@@ -830,6 +830,132 @@ fn tree_of(routes: &mut BTreeMap<RoomName, Tree>, atlas: &Atlas, room: RoomName)
 
 /// `creeps` is the world's, less every body a fight holds: the port of F#'s
 /// `{ World with Creeps = filtered }`, whose record copy shares the rooms.
+fn free_at(grounds: &[Ground], room: RoomName) -> i32 {
+    (grounds.iter().find(|g| g.room == room))
+        .and_then(|g| g.terminal.as_ref())
+        .map_or(0, |t| t.store.free())
+}
+
+/// The declared lab home's plan and boost lab, and each other colony's ore
+/// shipped to it.
+fn stock_labs(
+    world: &World,
+    grounds: &mut [Ground],
+    colonies: usize,
+    (home, targets): (RoomName, &BTreeMap<crate::core::vocabulary::Compound, i32>),
+    given_up: &dyn Fn(RoomName) -> bool,
+) {
+    let home = &home;
+    let Some(g) = grounds.iter_mut().find(|g| &g.room == home) else {
+        return;
+    };
+    // The lab a body waiting at home is boosted from is the cast's and not
+    // a reaction's: its compound is kept while the body still lacks it.
+    let kept: BTreeMap<String, Resource> = (world.creeps.iter())
+        .filter(|c| &c.pos.room == home)
+        .filter_map(|c| {
+            let compound = crate::core::boost::of_name(&c.name)?;
+            let lab = crate::core::boost::booster(world, *home, compound)?;
+            Some((lab.id.clone(), Resource::Compound(compound)))
+        })
+        .collect();
+    let labs: Vec<(String, Pos)> = (g.labs.iter())
+        .filter(|l| !kept.contains_key(&l.id))
+        .map(|l| (l.id.clone(), l.pos))
+        .collect();
+    let held = |id: &str| {
+        g.labs
+            .iter()
+            .find(|l| l.id == id)
+            .and_then(|l| l.held.clone())
+    };
+    let stock = |r: &Resource| -> i32 {
+        g.ores
+            .iter()
+            .filter(|o| &o.2 == r)
+            .map(|o| o.3)
+            .sum::<i32>()
+            + g.labs
+                .iter()
+                .filter_map(|l| l.held.as_ref().filter(|h| &h.0 == r).map(|h| h.1))
+                .sum::<i32>()
+            // A load between a store and a lab is still the home's.
+            + world
+                .creeps
+                .iter()
+                .filter(|c| &c.pos.room == home)
+                .map(|c| c.store.amount_of(r))
+                .sum::<i32>()
+    };
+    let mut plan = super::labs::plan_for(targets, &stock, &labs, &held);
+    let lab_at = |id: &str| {
+        (world.rooms.iter())
+            .filter(|r| &r.name == home)
+            .flat_map(|r| r.structures.iter())
+            .find(|s| s.id == id)
+    };
+    // A lab holds one mineral: whatever else a body's booster holds is
+    // drained, or the compound it waits on has nowhere to land. The
+    // booster's own drain, so a cluster too small to run a reaction
+    // still empties it.
+    for (id, compound) in &kept {
+        let Some(lab) = lab_at(id) else {
+            continue;
+        };
+        for (r, n) in &lab.store.held {
+            if *n > 0 && r != compound && crate::core::vocabulary::is_mineral(r) {
+                plan.drains.push((id.clone(), r.clone()));
+            }
+        }
+    }
+    g.lab_plan = Some(plan);
+    // The lab a waiting cast is boosted from is stocked from the home's
+    // stores: the reaction refuses it as a lab of its own.
+    let mut waited: BTreeMap<&str, (Resource, i32, i32)> = BTreeMap::new();
+    for creep in (world.creeps.iter()).filter(|c| &c.pos.room == home) {
+        let Some(w) = crate::core::boost::waiting(world, *home, creep) else {
+            continue;
+        };
+        let at = waited
+            .entry(w.lab.id.as_str())
+            .or_insert((Resource::Compound(w.compound), 0, 0));
+        at.1 += w.mineral;
+        at.2 += w.energy;
+    }
+    g.boost_lab = waited
+        .into_iter()
+        .find_map(|(id, (compound, mineral, energy))| {
+            let lab = lab_at(id)?;
+            Some(BoostLab {
+                id: id.to_string(),
+                pos: lab.pos,
+                compound: compound.clone(),
+                mineral: mineral - lab.store.amount_of(&compound),
+                energy: energy - lab.store.amount_of(&Resource::Energy),
+            })
+        });
+    let mut short = super::labs::ore_short(targets, &stock);
+    let home_free = free_at(grounds, *home);
+
+    // The colonies in their order, each the ore it holds up to what is left.
+    for g in grounds.iter_mut().take(colonies) {
+        if &g.room == home || g.terminal.is_none() || given_up(g.room) {
+            continue;
+        }
+        for (ore, left) in &mut short {
+            let held: i32 = g.ores.iter().filter(|o| &o.2 == ore).map(|o| o.3).sum();
+            let sent = held.min(*left);
+            if sent > 0 {
+                g.shipment.push((ore.clone(), sent));
+                *left -= sent;
+            }
+        }
+        if !g.shipment.is_empty() {
+            g.ship_to = Some((*home, home_free));
+        }
+    }
+}
+
 pub fn of_world(
     world: &World,
     creeps: &[&Creep],
@@ -926,124 +1052,17 @@ pub fn of_world(
     }
 
     let given_up = |room: RoomName| declarations.abandon.contains(&room);
-    let free_at = |grounds: &[Ground], room: RoomName| {
-        grounds
-            .iter()
-            .find(|g| g.room == room)
-            .and_then(|g| g.terminal.as_ref())
-            .map_or(0, |t| t.store.free())
-    };
 
     if let Some((home, targets)) = &declarations.labs
         && !given_up(*home)
-        && let Some(g) = grounds.iter_mut().find(|g| &g.room == home)
     {
-        // The lab a body waiting at home is boosted from is the cast's and not
-        // a reaction's: its compound is kept while the body still lacks it.
-        let kept: BTreeMap<String, Resource> = (world.creeps.iter())
-            .filter(|c| &c.pos.room == home)
-            .filter_map(|c| {
-                let compound = crate::core::boost::of_name(&c.name)?;
-                let lab = crate::core::boost::booster(world, *home, compound)?;
-                Some((lab.id.clone(), Resource::Compound(compound)))
-            })
-            .collect();
-        let labs: Vec<(String, Pos)> = (g.labs.iter())
-            .filter(|l| !kept.contains_key(&l.id))
-            .map(|l| (l.id.clone(), l.pos))
-            .collect();
-        let held = |id: &str| {
-            g.labs
-                .iter()
-                .find(|l| l.id == id)
-                .and_then(|l| l.held.clone())
-        };
-        let stock = |r: &Resource| -> i32 {
-            g.ores
-                .iter()
-                .filter(|o| &o.2 == r)
-                .map(|o| o.3)
-                .sum::<i32>()
-                + g.labs
-                    .iter()
-                    .filter_map(|l| l.held.as_ref().filter(|h| &h.0 == r).map(|h| h.1))
-                    .sum::<i32>()
-                // A load between a store and a lab is still the home's.
-                + world
-                    .creeps
-                    .iter()
-                    .filter(|c| &c.pos.room == home)
-                    .map(|c| c.store.amount_of(r))
-                    .sum::<i32>()
-        };
-        let mut plan = super::labs::plan_for(targets, &stock, &labs, &held);
-        let lab_at = |id: &str| {
-            (world.rooms.iter())
-                .filter(|r| &r.name == home)
-                .flat_map(|r| r.structures.iter())
-                .find(|s| s.id == id)
-        };
-        // A lab holds one mineral: whatever else a body's booster holds is
-        // drained, or the compound it waits on has nowhere to land. The
-        // booster's own drain, so a cluster too small to run a reaction
-        // still empties it.
-        for (id, compound) in &kept {
-            let Some(lab) = lab_at(id) else {
-                continue;
-            };
-            for (r, n) in &lab.store.held {
-                if *n > 0 && r != compound && crate::core::vocabulary::is_mineral(r) {
-                    plan.drains.push((id.clone(), r.clone()));
-                }
-            }
-        }
-        g.lab_plan = Some(plan);
-        // The lab a waiting cast is boosted from is stocked from the home's
-        // stores: the reaction refuses it as a lab of its own.
-        let mut waited: BTreeMap<&str, (Resource, i32, i32)> = BTreeMap::new();
-        for creep in (world.creeps.iter()).filter(|c| &c.pos.room == home) {
-            let Some(w) = crate::core::boost::waiting(world, *home, creep) else {
-                continue;
-            };
-            let at =
-                waited
-                    .entry(w.lab.id.as_str())
-                    .or_insert((Resource::Compound(w.compound), 0, 0));
-            at.1 += w.mineral;
-            at.2 += w.energy;
-        }
-        g.boost_lab = waited
-            .into_iter()
-            .find_map(|(id, (compound, mineral, energy))| {
-                let lab = lab_at(id)?;
-                Some(BoostLab {
-                    id: id.to_string(),
-                    pos: lab.pos,
-                    compound: compound.clone(),
-                    mineral: mineral - lab.store.amount_of(&compound),
-                    energy: energy - lab.store.amount_of(&Resource::Energy),
-                })
-            });
-        let mut short = super::labs::ore_short(targets, &stock);
-        let home_free = free_at(&grounds, *home);
-
-        // The colonies in their order, each the ore it holds up to what is left.
-        for g in grounds.iter_mut().take(colonies.len()) {
-            if &g.room == home || g.terminal.is_none() || given_up(g.room) {
-                continue;
-            }
-            for (ore, left) in &mut short {
-                let held: i32 = g.ores.iter().filter(|o| &o.2 == ore).map(|o| o.3).sum();
-                let sent = held.min(*left);
-                if sent > 0 {
-                    g.shipment.push((ore.clone(), sent));
-                    *left -= sent;
-                }
-            }
-            if !g.shipment.is_empty() {
-                g.ship_to = Some((*home, home_free));
-            }
-        }
+        stock_labs(
+            world,
+            &mut grounds,
+            colonies.len(),
+            (*home, targets),
+            &given_up,
+        );
     }
 
     for (i, room) in colony_rooms.iter().enumerate() {
@@ -1068,21 +1087,17 @@ pub fn of_world(
 
     let mut routes: BTreeMap<RoomName, Tree> = BTreeMap::new();
 
-    for s in &world.spawns {
-        tree_of(&mut routes, atlas, s.pos.room);
-    }
-
-    for g in &grounds {
-        tree_of(&mut routes, atlas, g.room);
-    }
-
-    for c in creeps {
-        tree_of(&mut routes, atlas, c.pos.room);
+    let spawns = world.spawns.iter().map(|s| s.pos.room);
+    for room in spawns
+        .chain(grounds.iter().map(|g| g.room))
+        .chain(creeps.iter().map(|c| c.pos.room))
+    {
+        tree_of(&mut routes, atlas, room);
     }
 
     Derived {
         time: world.time,
-        colonies: colonies.clone(),
+        colonies,
         posts: grounds
             .iter()
             .flat_map(|g| {

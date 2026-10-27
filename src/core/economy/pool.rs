@@ -453,6 +453,140 @@ pub fn repair_value(r: &RepairFact) -> f64 {
 }
 
 /// `held`: last tick's assignments, whose Refills are what is already aboard.
+/// A mineral's dig: its miner's work over the extractor's cycle.
+const MINERAL_RATE: i32 =
+    bodies::MINER_WORK * engine::MINERAL_HARVEST_PER_WORK / engine::MINERAL_HARVEST_CYCLE;
+
+/// `colony`: the ground is a colony's own room.
+fn dig_offers(offers: &mut Vec<Offer>, ground: &super::derived::Ground, colony: bool) {
+    // Offered through a regeneration gap too, so its holders keep their
+    // seats. Priced at the rate, the engine's cap on what its seats dig.
+    // Away from a colony only at a post: a worker never walks out to dig.
+    for s in &ground.sources {
+        if colony || s.post.is_some() {
+            let mut harvest = offer(
+                Task::Harvest(s.id.clone()),
+                &s.pos,
+                f64::from(s.rate),
+                Capacity::Seated {
+                    seats: s.seats.unwrap_or(i32::MAX),
+                    posts: i32::from(s.post.is_some()),
+                    work: (s.rate + engine::HARVEST_PER_WORK - 1) / engine::HARVEST_PER_WORK,
+                },
+            );
+            harvest.post = s.post;
+            offers.push(harvest);
+        }
+    }
+
+    // Dug only from its container's tile, whose holder is the garrison.
+    for m in &ground.minerals {
+        let Some(post) = m
+            .post
+            .as_ref()
+            .filter(|_| colony && m.container.is_some() && m.amount > 0)
+        else {
+            continue;
+        };
+        let mut harvest = offer(
+            Task::Harvest(m.id.clone()),
+            &m.pos,
+            f64::from(MINERAL_RATE),
+            Capacity::Seated {
+                seats: 1,
+                posts: 1,
+                work: bodies::MINER_WORK,
+            },
+        );
+        harvest.post = Some(*post);
+        offers.push(harvest);
+    }
+
+    for m in &ground.minerals {
+        if let Some(id) = m.container.as_ref().filter(|_| m.held > 0) {
+            let fill = f64::from(m.held) / f64::from(engine::CONTAINER_CAPACITY);
+            offers.push(offer(
+                Task::Withdraw(id.clone(), m.resource.clone()),
+                m.post.as_ref().unwrap_or(&m.pos),
+                price::flow_draw(price::overflow_loss(MINERAL_RATE, fill)),
+                Capacity::Load(m.held),
+            ));
+        }
+    }
+}
+
+fn work_offers(
+    offers: &mut Vec<Offer>,
+    derived: &Derived,
+    ground: &super::derived::Ground,
+    colony: bool,
+    draw: Draw,
+) {
+    for s in &ground.sites {
+        let rank = site_rank(derived, s);
+        let mut build = offer(
+            Task::Build(s.id.clone()),
+            &s.pos,
+            price::value_of_rank(rank),
+            Capacity::Load(s.left),
+        );
+        // Past the priced ranks' clamp, as the nursery's other offers.
+        build.priority = rank;
+        build.draw = draw;
+        offers.push(build);
+    }
+
+    for r in &ground.repairs {
+        let missing = (r.hits_max - r.hits + engine::REPAIR_HITS_PER_ENERGY - 1)
+            / engine::REPAIR_HITS_PER_ENERGY;
+
+        let mut repair = offer(
+            Task::Repair(r.id.clone()),
+            &r.pos,
+            repair_value(r),
+            Capacity::Load(missing),
+        );
+        repair.draw = draw;
+        offers.push(repair);
+    }
+
+    match &ground.controller {
+        Some(c) if c.owner.is_ours() => {
+            let capacity = Capacity::Seated {
+                seats: ground.upgrade_seats.unwrap_or(i32::MAX),
+                posts: 0,
+                work: bodies::upgradable_at(c.level),
+            };
+
+            let mut upgrade = offer(
+                Task::Upgrade(c.id.clone()),
+                &c.pos,
+                price::value_of_rank(price::UPGRADE_RANK),
+                capacity,
+            );
+            upgrade.draw = draw;
+
+            if inside_deadline(c) {
+                upgrade.priority = price::DEADLINE_RANK;
+            } else if colony && c.level < NURSERY_LEVEL && nursed(derived, ground.room) {
+                upgrade.priority = NURSERY_RANK;
+            }
+            if !ground.abandoned || inside_deadline(c) {
+                offers.push(upgrade);
+            }
+        }
+        Some(c) if ground.reservable && !colony => {
+            offers.push(offer(
+                Task::Reserve(c.id.clone()),
+                &c.pos,
+                f64::from(super::derived::reserve_gain(ground)),
+                Capacity::Bodies(1),
+            ));
+        }
+        _ => (),
+    }
+}
+
 pub fn pool(
     derived: &Derived,
     owners: &BTreeMap<RoomName, usize>,
@@ -502,64 +636,7 @@ pub fn pool(
     for (i, ground) in derived.grounds.iter().enumerate() {
         let colony = derived.colonies.get(i);
 
-        // Offered through a regeneration gap too, so its holders keep their
-        // seats. Priced at the rate, the engine's cap on what its seats dig.
-        // Away from a colony only at a post: a worker never walks out to dig.
-        for s in &ground.sources {
-            if colony.is_some() || s.post.is_some() {
-                let mut harvest = offer(
-                    Task::Harvest(s.id.clone()),
-                    &s.pos,
-                    f64::from(s.rate),
-                    Capacity::Seated {
-                        seats: s.seats.unwrap_or(i32::MAX),
-                        posts: i32::from(s.post.is_some()),
-                        work: (s.rate + engine::HARVEST_PER_WORK - 1) / engine::HARVEST_PER_WORK,
-                    },
-                );
-                harvest.post = s.post;
-                offers.push(harvest);
-            }
-        }
-
-        // Dug only from its container's tile, whose holder is the garrison.
-        for m in &ground.minerals {
-            let Some(post) = m
-                .post
-                .as_ref()
-                .filter(|_| colony.is_some() && m.container.is_some() && m.amount > 0)
-            else {
-                continue;
-            };
-            let rate = bodies::MINER_WORK * engine::MINERAL_HARVEST_PER_WORK
-                / engine::MINERAL_HARVEST_CYCLE;
-            let mut harvest = offer(
-                Task::Harvest(m.id.clone()),
-                &m.pos,
-                f64::from(rate),
-                Capacity::Seated {
-                    seats: 1,
-                    posts: 1,
-                    work: bodies::MINER_WORK,
-                },
-            );
-            harvest.post = Some(*post);
-            offers.push(harvest);
-        }
-
-        for m in &ground.minerals {
-            if let Some(id) = m.container.as_ref().filter(|_| m.held > 0) {
-                let fill = f64::from(m.held) / f64::from(engine::CONTAINER_CAPACITY);
-                let rate = bodies::MINER_WORK * engine::MINERAL_HARVEST_PER_WORK
-                    / engine::MINERAL_HARVEST_CYCLE;
-                offers.push(offer(
-                    Task::Withdraw(id.clone(), m.resource.clone()),
-                    m.post.as_ref().unwrap_or(&m.pos),
-                    price::flow_draw(price::overflow_loss(rate, fill)),
-                    Capacity::Load(m.held),
-                ));
-            }
-        }
+        dig_offers(&mut offers, ground, colony.is_some());
 
         if let Some(plan) = &ground.lab_plan {
             lab_offers(&mut offers, ground, plan);
@@ -612,72 +689,7 @@ pub fn pool(
             Draw::Open
         };
 
-        for s in &ground.sites {
-            let rank = site_rank(derived, s);
-            let mut build = offer(
-                Task::Build(s.id.clone()),
-                &s.pos,
-                price::value_of_rank(rank),
-                Capacity::Load(s.left),
-            );
-            // Past the priced ranks' clamp, as the nursery's other offers.
-            build.priority = rank;
-            build.draw = draw;
-            offers.push(build);
-        }
-
-        for r in &ground.repairs {
-            let missing = (r.hits_max - r.hits + engine::REPAIR_HITS_PER_ENERGY - 1)
-                / engine::REPAIR_HITS_PER_ENERGY;
-
-            let mut repair = offer(
-                Task::Repair(r.id.clone()),
-                &r.pos,
-                repair_value(r),
-                Capacity::Load(missing),
-            );
-            repair.draw = draw;
-            offers.push(repair);
-        }
-
-        match &ground.controller {
-            Some(c) if c.owner.is_ours() => {
-                let capacity = Capacity::Seated {
-                    seats: ground.upgrade_seats.unwrap_or(i32::MAX),
-                    posts: 0,
-                    work: bodies::upgradable_at(c.level),
-                };
-
-                let mut upgrade = offer(
-                    Task::Upgrade(c.id.clone()),
-                    &c.pos,
-                    price::value_of_rank(price::UPGRADE_RANK),
-                    capacity,
-                );
-                upgrade.draw = draw;
-
-                if inside_deadline(c) {
-                    upgrade.priority = price::DEADLINE_RANK;
-                } else if colony.is_some()
-                    && c.level < NURSERY_LEVEL
-                    && nursed(derived, ground.room)
-                {
-                    upgrade.priority = NURSERY_RANK;
-                }
-                if !ground.abandoned || inside_deadline(c) {
-                    offers.push(upgrade);
-                }
-            }
-            Some(c) if ground.reservable && colony.is_none() => {
-                offers.push(offer(
-                    Task::Reserve(c.id.clone()),
-                    &c.pos,
-                    f64::from(super::derived::reserve_gain(ground)),
-                    Capacity::Bodies(1),
-                ));
-            }
-            _ => (),
-        }
+        work_offers(&mut offers, derived, ground, colony.is_some(), draw);
 
         let starved = colony.is_some_and(|c| c.bank < c.bank_capacity);
 
