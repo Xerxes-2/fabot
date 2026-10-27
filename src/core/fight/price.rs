@@ -203,9 +203,7 @@ impl<'a> Scene<'a> {
             let capacity = self.capacity_of(atlas, e);
 
             let priced = |set: &[casting::Body]| {
-                let fighters: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
-
-                self.breach_in(atlas, room, goal, colony, &fighters, &[])
+                self.breach_in(atlas, room, goal, colony, &cast_all(set), &[])
             };
             // Shot in where no barrier stands in the way, which a ranged set's
             // plan never breaks: it dismantles nothing. What the dismantlers'
@@ -225,9 +223,7 @@ impl<'a> Scene<'a> {
                 .then(|| {
                     let hard = raid::hardest(room).map_or_else(|| goal.pos, |s| s.pos);
                     let priced = |set: &[casting::Body]| {
-                        let ours: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
-
-                        raid::plan(atlas, room, &hard, &from, &ours, &[])
+                        raid::plan(atlas, room, &hard, &from, &cast_all(set), &[])
                     };
 
                     raid::reinforce(capacity, &[], priced)
@@ -356,18 +352,14 @@ impl<'a> Scene<'a> {
                     if raid::raids(e) {
                         let hard = raid::hardest(room).map_or_else(|| goal.pos, |s| s.pos);
                         let priced = |set: &[casting::Body]| {
-                            let ours: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
-
-                            raid::plan(atlas, room, &hard, &from, &ours, &breaking)
+                            raid::plan(atlas, room, &hard, &from, &cast_all(set), &breaking)
                         };
 
                         return raid::reinforce(e.capacity, &fielded, priced);
                     }
 
                     let priced = |set: &[casting::Body]| {
-                        let fighters: Vec<Fighter> = set.iter().map(|b| fighter::cast(b)).collect();
-
-                        self.breach_in(atlas, room, goal, colony, &fighters, &breaking)
+                        self.breach_in(atlas, room, goal, colony, &cast_all(set), &breaking)
                     };
 
                     casting::reinforce(e.capacity, &fielded, &priced)
@@ -724,7 +716,7 @@ impl<'a> Scene<'a> {
             .map(|c| c.body.clone())
             .collect();
 
-        let asked_fighters: Vec<Fighter> = asked_bodies.iter().map(|b| fighter::cast(b)).collect();
+        let asked_fighters = cast_all(&asked_bodies);
 
         let core_hits: i32 = raid
             .iter()
@@ -899,6 +891,10 @@ impl<'a> Scene<'a> {
             None => defend::give_up(self.homes.contains(&e.room), self.world.time, e),
         }
     }
+}
+
+fn cast_all(set: &[casting::Body]) -> Vec<Fighter> {
+    set.iter().map(|b| fighter::cast(b)).collect()
 }
 
 /// What a `Defend`'s price found, for its candidates to read (§6.3).
