@@ -213,17 +213,20 @@ fn struck(kind: BodyPart, h: &Creep, at: &Pos) -> bool {
     reach(kind, h).is_some_and(|r| at.within(r, &h.pos))
 }
 
+/// A tired body's step waits where it stands: the engine refuses it.
 fn step_to(creep: &Creep, tile: Tile) -> Wish {
+    let moves = plan::can_move(creep, mover_of(creep).factor);
+    let at = tiles::of_pos(&creep.pos);
     Wish {
         creep: creep.name.clone(),
         footprint: Footprint::One,
-        at: tiles::of_pos(&creep.pos),
-        head: tile,
+        at,
+        head: if moves { tile } else { at },
         onward: None,
         tail: Vec::new(),
         working: Vec::new(),
         weight: WEIGHT,
-        moves: true,
+        moves,
     }
 }
 
@@ -267,7 +270,7 @@ pub fn kite(
             .filter(|t| gap(*t) > gap(here));
 
         match step {
-            Some(t) if plan::can_move(creep, mover_of(creep).factor) => step_to(creep, t),
+            Some(t) => step_to(creep, t),
             _ => hold(sight, creep),
         }
     }
@@ -445,7 +448,7 @@ pub fn step_back(
     };
 
     match found {
-        Some(t) if plan::can_move(creep, mover_of(creep).factor) => step_to(creep, t),
+        Some(t) => step_to(creep, t),
         _ => hold(sight, creep),
     }
 }
@@ -647,7 +650,7 @@ pub fn siege(
             (
                 None,
                 match off {
-                    Some(t) if plan::can_move(creep, mover_of(creep).factor) => step_to(creep, t),
+                    Some(t) => step_to(creep, t),
                     _ => hold(sight, creep),
                 },
             )
