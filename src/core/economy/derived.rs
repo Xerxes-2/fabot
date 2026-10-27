@@ -10,7 +10,8 @@ use crate::core::tick::{self, Declarations, Outpost};
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::{BodyPart, Resource, part_count_in};
 use crate::core::world::{
-    Controller, Creep, Kind, Owner, Part, Pos, Room, RoomName, Spawn, Store, World, terrain,
+    Controller, Creep, Kind, Owner, Part, Pos, Room, RoomName, Source, Spawn, Store, Structure,
+    World, terrain,
 };
 
 use super::bodies::{self, Pattern};
@@ -416,6 +417,46 @@ fn swamp(room: &Room, pos: &Pos) -> bool {
     terrain::is_swamp(room.terrain.as_deref(), pos.x, pos.y)
 }
 
+/// What keeping `s` standing costs, where it is below the hits we hold it at.
+fn repair_of(room: &Room, level: i32, owned_room: bool, s: &Structure) -> Option<RepairFact> {
+    let per = |amount: i32, time: i32| f64::from(amount) / f64::from(time);
+    let (hits_max, decay, rebuild) = match s.kind {
+        Kind::Rampart if s.owner.is_ours() => (
+            rampart_target(level).min(s.hits_max),
+            per(engine::RAMPART_DECAY_AMOUNT, engine::RAMPART_DECAY_TIME),
+            0,
+        ),
+        Kind::Road => {
+            let ratio = if swamp(room, &s.pos) {
+                engine::ROAD_SWAMP_RATIO
+            } else {
+                1
+            };
+            let decay = per(engine::ROAD_DECAY_AMOUNT * ratio, engine::ROAD_DECAY_TIME);
+            (s.hits_max, decay, engine::ROAD_BUILD_COST * ratio)
+        }
+        Kind::Container => {
+            let period = if owned_room {
+                engine::CONTAINER_DECAY_TIME_OWNED
+            } else {
+                engine::CONTAINER_DECAY_TIME
+            };
+            let decay = per(engine::CONTAINER_DECAY_AMOUNT, period);
+            (s.hits_max, decay, engine::CONTAINER_BUILD_COST)
+        }
+        _ => return None,
+    };
+    (s.hits < hits_max).then(|| RepairFact {
+        id: s.id.clone(),
+        kind: s.kind.clone(),
+        pos: s.pos,
+        hits: s.hits,
+        hits_max,
+        decay,
+        rebuild,
+    })
+}
+
 fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
     let owned_room = room.controller.as_ref().is_some_and(|c| c.owner.is_ours());
     let level = room.controller.as_ref().map_or(0, |c| c.level);
@@ -426,9 +467,8 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
         .iter()
         .find(|s| s.kind.is_storage() && s.owner.is_ours());
 
-    let mut links: Vec<LinkFact> = Vec::new();
-    for s in &room.structures {
-        let role = if !s.kind.is_link() || !s.owner.is_ours() {
+    let role_of = |s: &Structure| {
+        if !s.kind.is_link() || !s.owner.is_ours() {
             None
         } else if Atlas::is_source_link(room, &s.pos) {
             Some(LinkRole::Source)
@@ -438,27 +478,28 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             Some(LinkRole::Hub)
         } else {
             None
-        };
-        if let Some(role) = role {
-            links.push(LinkFact {
+        }
+    };
+    let links: Vec<LinkFact> = (room.structures.iter())
+        .filter_map(|s| {
+            Some(LinkFact {
                 id: s.id.clone(),
                 pos: s.pos,
-                role,
+                role: role_of(s)?,
                 energy: s.store.amount_of(&Resource::Energy),
                 free: s.store.free(),
                 cooldown: s.cooldown,
-            });
-        }
-    }
+            })
+        })
+        .collect();
 
     let controller_link = links.iter().find(|l| l.role.is_controller()).cloned();
     let hub_link = links.iter().find(|l| l.role.is_hub()).cloned();
 
-    let mut sources: Vec<SourceFact> = Vec::new();
-    for s in &room.sources {
+    let source_of = |s: &Source| {
         let post = Atlas::post_of(room, &s.pos);
         let seats = seats_at(atlas, 1, &s.pos);
-        sources.push(SourceFact {
+        SourceFact {
             id: s.id.clone(),
             pos: s.pos,
             rate,
@@ -471,23 +512,21 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             seats,
             energy: s.energy,
             dug: dug_at(capacity, owned_room, rate, post.is_some(), seats),
-        });
-    }
+        }
+    };
+    let sources: Vec<SourceFact> = room.sources.iter().map(source_of).collect();
 
-    let mut minerals: Vec<MineralFact> = Vec::new();
-    for m in &room.minerals {
-        let extractor = room
-            .structures
-            .iter()
-            .find(|s| s.kind.is_extractor() && s.owner.is_ours() && s.pos == m.pos);
-        if let Some(extractor) = extractor {
+    let minerals: Vec<MineralFact> = (room.minerals.iter())
+        .filter_map(|m| {
+            let extractor = (room.structures.iter())
+                .find(|s| s.kind.is_extractor() && s.owner.is_ours() && s.pos == m.pos)?;
             let post = Atlas::post_of(room, &m.pos);
             let container = post.as_ref().and_then(|(_, id)| id.clone());
             let held = container
                 .as_ref()
                 .and_then(|id| room.structures.iter().find(|s| &s.id == id))
                 .map_or(0, |c| c.store.amount_of(&m.resource));
-            minerals.push(MineralFact {
+            Some(MineralFact {
                 id: m.id.clone(),
                 pos: m.pos,
                 resource: m.resource.clone(),
@@ -496,28 +535,15 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
                 post: post.map(|(p, _)| p),
                 container,
                 held,
-            });
-        }
-    }
+            })
+        })
+        .collect();
 
     let income: i32 = sources.iter().map(|s| s.dug).sum();
-    let posted: i32 = sources
-        .iter()
-        .map(|s| if s.container.is_some() { s.dug } else { 0 })
-        .sum();
-
-    let served_dug = |pos: &Pos| -> i32 {
-        sources
-            .iter()
-            .map(|s| {
-                if s.pos.range(pos) == Some(1) {
-                    s.dug
-                } else {
-                    0
-                }
-            })
-            .sum()
-    };
+    let dug_of =
+        |by: &dyn Fn(&SourceFact) -> bool| sources.iter().filter(|s| by(s)).map(|s| s.dug).sum();
+    let posted: i32 = dug_of(&|s| s.container.is_some());
+    let served_dug = |pos: &Pos| -> i32 { dug_of(&|s| s.pos.range(pos) == Some(1)) };
 
     let mut refills: Vec<RefillFact> = Vec::new();
     let mut stores: Vec<StoreFact> = Vec::new();
@@ -574,55 +600,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             _ => (),
         }
 
-        match s.kind {
-            Kind::Rampart
-                if s.owner.is_ours() && s.hits < rampart_target(level).min(s.hits_max) =>
-            {
-                repairs.push(RepairFact {
-                    id: s.id.clone(),
-                    kind: s.kind.clone(),
-                    pos: s.pos,
-                    hits: s.hits,
-                    hits_max: rampart_target(level).min(s.hits_max),
-                    decay: f64::from(engine::RAMPART_DECAY_AMOUNT)
-                        / f64::from(engine::RAMPART_DECAY_TIME),
-                    rebuild: 0,
-                })
-            }
-            Kind::Road | Kind::Container if s.hits < s.hits_max => {
-                let swamp = swamp(room, &s.pos);
-
-                let (decay, rebuild) = if s.kind.is_road() {
-                    let ratio = if swamp { engine::ROAD_SWAMP_RATIO } else { 1 };
-                    (
-                        f64::from(engine::ROAD_DECAY_AMOUNT * ratio)
-                            / f64::from(engine::ROAD_DECAY_TIME),
-                        engine::ROAD_BUILD_COST * ratio,
-                    )
-                } else {
-                    let period = if owned_room {
-                        engine::CONTAINER_DECAY_TIME_OWNED
-                    } else {
-                        engine::CONTAINER_DECAY_TIME
-                    };
-                    (
-                        f64::from(engine::CONTAINER_DECAY_AMOUNT) / f64::from(period),
-                        engine::CONTAINER_BUILD_COST,
-                    )
-                };
-
-                repairs.push(RepairFact {
-                    id: s.id.clone(),
-                    kind: s.kind.clone(),
-                    pos: s.pos,
-                    hits: s.hits,
-                    hits_max: s.hits_max,
-                    decay,
-                    rebuild,
-                })
-            }
-            _ => (),
-        }
+        repairs.extend(repair_of(room, level, owned_room, s));
     }
 
     for r in &room.remains {
@@ -660,10 +638,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
                 .map(|hub| store_of(StoreKind::Container, 0, hub))
         }
         (None, Some(hub)) => {
-            let dug: i32 = sources
-                .iter()
-                .map(|s| if s.link.is_some() { s.dug } else { 0 })
-                .sum();
+            let dug: i32 = dug_of(&|s| s.link.is_some());
 
             if hub.energy > 0 {
                 stores.push(store_of(StoreKind::Container, dug, hub));

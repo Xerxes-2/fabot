@@ -729,31 +729,21 @@ fn expiring_now(
     owners: &BTreeMap<RoomName, usize>,
     body: &Body,
 ) -> bool {
-    let spawn_time = lead(body, 0);
-
-    if body.ticks_to_live <= spawn_time {
-        true
-    } else {
-        match owners
-            .get(&body.pos.room)
-            .copied()
-            .or_else(|| walks.near(&|_| true, &body.pos))
-        {
-            Some(ci) => {
-                let home = home_of(&derived.colonies[ci]);
-
-                let walked = |walks: &mut dyn Walks, fresh: bool| -> i32 {
-                    walks
-                        .walk(fresh, body, &home)
-                        .or_else(|| walks.distance(&home, &body.pos))
-                        .unwrap_or(0)
-                };
-
-                expiring(body, walked(walks, false)) && expiring(body, walked(walks, true))
-            }
-            None => false,
-        }
+    if body.ticks_to_live <= lead(body, 0) {
+        return true;
     }
+    let near = owners.get(&body.pos.room).copied();
+    let Some(ci) = near.or_else(|| walks.near(&|_| true, &body.pos)) else {
+        return false;
+    };
+    let home = home_of(&derived.colonies[ci]);
+    let walked = |walks: &mut dyn Walks, fresh: bool| -> i32 {
+        walks
+            .walk(fresh, body, &home)
+            .or_else(|| walks.distance(&home, &body.pos))
+            .unwrap_or(0)
+    };
+    expiring(body, walked(walks, false)) && expiring(body, walked(walks, true))
 }
 
 /// The ledger and the idle spawns a cast spends, so a cast names only what it
@@ -833,8 +823,6 @@ pub fn plan(
 
             // The nearest open demand of the pattern: a body out of a seat's
             // reach never fills it, or a far colony's surplus sits in it.
-            let mut pick: Option<usize> = None;
-            let mut least = i32::MAX;
             let at = work_at(body);
             // The nearest seat by distance can be a young colony's that a
             // neighbour's remote crew never reaches; a dig or claim seat is
@@ -844,28 +832,20 @@ pub fn plan(
                     && matches!(pattern, Pattern::Worker | Pattern::Hauler)
             });
 
-            for (i, d) in all.iter().enumerate() {
-                // One cast for another room's seat upgrades whichever
-                // controller it reaches first.
-                if d.pattern == pattern
+            // One cast for another room's seat upgrades whichever
+            // controller it reaches first.
+            let open = |d: &&Demand| {
+                d.pattern == pattern
                     && d.left.get() > 0
                     && d.seats_left.get() > 0
                     && (!d.pattern.is_upgrader() || d.at.room == at.room)
                     && serves.is_none_or(|ci| owners.get(&d.at.room) == Some(ci))
-                {
-                    let Some(ticks) = walks.distance(&at, &d.at) else {
-                        continue;
-                    };
+            };
+            let nearest = (all.iter().filter(open))
+                .filter_map(|d| Some((walks.distance(&at, &d.at)?, d)))
+                .min_by_key(|(ticks, _)| *ticks);
 
-                    if pick.is_none() || ticks < least {
-                        pick = Some(i);
-                        least = ticks;
-                    }
-                }
-            }
-
-            if let Some(i) = pick {
-                let d = &all[i];
+            if let Some((_, d)) = nearest {
                 d.left.set(0.max(d.left.get() - parts));
                 d.seats_left.set(0.max(d.seats_left.get() - 1));
             }
@@ -970,16 +950,13 @@ pub fn plan(
         }
     }
 
-    let mut richest: Option<&Colony> = None;
-    for colony in colonies {
-        let better = match richest {
-            Some(r) => colony.bank_capacity > r.bank_capacity,
-            None => true,
-        };
-        if better {
-            richest = Some(colony);
+    let richest = (colonies.iter()).reduce(|r, c| {
+        if c.bank_capacity > r.bank_capacity {
+            c
+        } else {
+            r
         }
-    }
+    });
 
     let tick_worth = |ci: usize| -> f64 {
         f64::from(derived.grounds[ci].income) / colonies[ci].spawns.len() as f64
@@ -1001,41 +978,36 @@ pub fn plan(
             .or(richest)
             .and_then(|colony| body_for(colony, d));
 
-        let mut left = d.left.get();
-        let mut seats_left = d.seats_left.get();
-        let mut go = true;
+        let Some(body) = body.filter(|b| parts_of(d.pattern, b) > 0) else {
+            continue;
+        };
+        let ret = (d.value)(&body).map(|v| match caster {
+            Some(ci) => price::body_return(
+                v,
+                engine::body_cost(&body),
+                engine::SPAWN_TICKS_PER_PART * body.len() as i32,
+                tick_worth(ci),
+            ),
+            None => 0.0,
+        });
+        let (mut left, mut seats_left) = (d.left.get(), d.seats_left.get());
 
-        while go && left > 0 && seats_left > 0 {
-            match &body {
-                Some(body) if parts_of(d.pattern, body) > 0 => {
-                    let ret = (d.value)(body).map(|v| match caster {
-                        Some(ci) => price::body_return(
-                            v,
-                            engine::body_cost(body),
-                            engine::SPAWN_TICKS_PER_PART * body.len() as i32,
-                            tick_worth(ci),
-                        ),
-                        None => 0.0,
-                    });
+        while left > 0 && seats_left > 0 {
+            let order = cast_order(derived, owners, d, caster, ret, d.seats - seats_left);
+            seats.push((
+                order,
+                Seat {
+                    pattern: d.pattern,
+                    at: d.at,
+                    parts: left,
+                    colony: caster,
+                    body: body.clone(),
+                    ret,
+                },
+            ));
 
-                    let order = cast_order(derived, owners, d, caster, ret, d.seats - seats_left);
-                    seats.push((
-                        order,
-                        Seat {
-                            pattern: d.pattern,
-                            at: d.at,
-                            parts: left,
-                            colony: caster,
-                            body: body.clone(),
-                            ret,
-                        },
-                    ));
-
-                    left -= parts_of(d.pattern, body);
-                    seats_left -= 1;
-                }
-                _ => go = false,
-            }
+            left -= parts_of(d.pattern, &body);
+            seats_left -= 1;
         }
     }
 
