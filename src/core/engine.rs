@@ -21,15 +21,7 @@ pub const BOOST_MINERAL_PER_PART: i32 = 30;
 pub const RESERVATION_CAP: i32 = 5000;
 /// CONTROLLER_RESERVE. The reservation decays by one a tick, so N parts gain N - 1.
 pub const RESERVE_PER_CLAIM: i32 = 1;
-/// NUKE_DAMAGE; a rampart on the tile takes it first.
-pub const NUKE_DAMAGE_CENTRE: i32 = 10_000_000;
-pub const NUKE_DAMAGE_RING: i32 = 5_000_000;
-pub const NUKE_RADIUS: i32 = 2;
 pub const CONTAINER_CAPACITY: i32 = 2000;
-pub const SPAWN_ENERGY_CAPACITY: i32 = 300;
-pub const STORAGE_CAPACITY: i32 = 1_000_000;
-pub const TERMINAL_CAPACITY: i32 = 300_000;
-pub const TERMINAL_COOLDOWN: i32 = 10;
 pub const TERMINAL_MIN_SEND: i32 = 100;
 
 /// The energy a terminal spends sending `amount` across `distance` rooms.
@@ -60,16 +52,12 @@ pub const ATTACK_POWER: i32 = 30;
 pub const RANGED_ATTACK_POWER: i32 = 10;
 pub const DISMANTLE_POWER: i32 = 50;
 pub const REPAIR_POWER: i32 = 100;
-pub const EXTENSION_HITS: i32 = 1000;
 pub const HEAL_POWER: i32 = 12;
 pub const RANGED_HEAL_POWER: i32 = 4;
-pub const TOWER_POWER_HEAL: i32 = 400;
 pub const TOWER_POWER_ATTACK: i32 = 600;
-pub const TOWER_POWER_REPAIR: i32 = 800;
 pub const TOWER_CAPACITY: i32 = 1000;
 /// A tower holding less does nothing.
 pub const TOWER_ENERGY_COST: i32 = 10;
-pub const TOWER_HITS: i32 = 3000;
 pub const TOWER_OPTIMAL_RANGE: i32 = 5;
 pub const TOWER_FALLOFF_RANGE: i32 = 20;
 pub const TOWER_FALLOFF: f64 = 0.75;
@@ -78,7 +66,6 @@ pub const PART_HITS: i32 = 100;
 pub const HELD_OUTPUT_PER_TICK: i32 = 10;
 pub const NEUTRAL_OUTPUT_PER_TICK: i32 = 5;
 pub const SOURCE_REGEN_TIME: i32 = 300;
-pub const BUILD_PER_WORK: i32 = 5;
 /// UPGRADE_CONTROLLER_POWER.
 pub const UPGRADE_DRAIN_PER_WORK: i32 = 1;
 /// CONTROLLER_MAX_UPGRADE_PER_TICK at `controllerMaxLevel`, summed over every
@@ -95,7 +82,6 @@ pub const ROAD_SWAMP_RATIO: i32 = 5;
 /// ROAD_DECAY_AMOUNT every ROAD_DECAY_TIME, on plain.
 pub const ROAD_DECAY_AMOUNT: i32 = 100;
 pub const ROAD_DECAY_TIME: i32 = 1000;
-pub const ROAD_HITS: i32 = 5000;
 /// ROAD_WEAROUT: decay-timer ticks a step brings forward, per body part.
 pub const ROAD_WEAROUT: i32 = 1;
 /// CONTAINER_DECAY every CONTAINER_DECAY_TIME, or _OWNED in an owned room.
@@ -103,7 +89,6 @@ pub const CONTAINER_DECAY_AMOUNT: i32 = 5000;
 pub const CONTAINER_DECAY_TIME: i32 = 100;
 pub const CONTAINER_DECAY_TIME_OWNED: i32 = 500;
 pub const CONTAINER_BUILD_COST: i32 = 5000;
-pub const CONTAINER_HITS: i32 = 250_000;
 pub const TOMBSTONE_DECAY_PER_PART: i32 = 5;
 /// A creep aged out is buried on its last tick: its tombstone's creep has this left.
 pub const AGED_OUT_TICKS_TO_LIVE: i32 = 1;
@@ -130,14 +115,6 @@ pub fn part_cost(part: BodyPart) -> i32 {
 
 pub fn body_cost(body: &[BodyPart]) -> i32 {
     body.iter().map(|part| part_cost(*part)).sum()
-}
-
-pub fn reaction_time(compound: Compound) -> i32 {
-    match compound {
-        Compound::Hydroxide => 20,
-        Compound::UtriumHydride => 10,
-        Compound::UtriumAcid => 5,
-    }
 }
 
 pub fn reagents_of(compound: Compound) -> (Resource, Resource) {
@@ -170,11 +147,6 @@ pub fn safe_mode_downgrade_line(level: i32) -> i32 {
     controller_downgrade(level) / 2 - 5_000
 }
 
-/// `calcTerminalEnergyCost`, over the linear room distance.
-pub fn send_fee(range: i32, amount: i32) -> i32 {
-    (f64::from(amount) * (1.0 - (-f64::from(range) / 30.0).exp())).ceil() as i32
-}
-
 pub fn mass_attack_power_at(range: i32) -> i32 {
     match range {
         0 | 1 => RANGED_ATTACK_POWER,
@@ -196,16 +168,8 @@ fn tower_power_at(power: i32, range: i32) -> i32 {
     }
 }
 
-pub fn tower_heal_at(range: i32) -> i32 {
-    tower_power_at(TOWER_POWER_HEAL, range)
-}
-
 pub fn tower_attack_at(range: i32) -> i32 {
     tower_power_at(TOWER_POWER_ATTACK, range)
-}
-
-pub fn tower_repair_at(range: i32) -> i32 {
-    tower_power_at(TOWER_POWER_REPAIR, range)
 }
 
 /// The engine destroys parts from the head; a part with any hit left acts.
@@ -317,19 +281,6 @@ pub fn damage_for(body: &[BodyPart], boosts: &[Boost], hits: i32, taken: i32) ->
         damage += f64::from(take) / boost::damage_ratio(*part, *boost);
     }
     (damage + f64::from(left) - 1e-9).ceil() as i32
-}
-
-pub fn controller_level_progress(level: i32) -> i32 {
-    match level {
-        1 => 200,
-        2 => 45_000,
-        3 => 135_000,
-        4 => 405_000,
-        5 => 1_215_000,
-        6 => 3_645_000,
-        7 => 10_935_000,
-        _ => 0,
-    }
 }
 
 const SPAWN_ROW: [i32; 9] = [0, 1, 1, 1, 1, 1, 1, 2, 3];

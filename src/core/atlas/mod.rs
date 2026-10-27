@@ -901,7 +901,3 @@ pub fn onward(candidates: impl Iterator<Item = (RoomName, i32, i32)>) -> Option<
         })
         .map(|(room, _, _)| room)
 }
-
-pub fn owner_is_ours(owner: &Owner) -> bool {
-    owner.is_ours()
-}

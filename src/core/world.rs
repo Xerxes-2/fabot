@@ -394,9 +394,6 @@ impl Kind {
     pub fn is_spawn(&self) -> bool {
         *self == Kind::Spawn
     }
-    pub fn is_extension(&self) -> bool {
-        *self == Kind::Extension
-    }
     pub fn is_tower(&self) -> bool {
         *self == Kind::Tower
     }
@@ -430,26 +427,11 @@ impl Kind {
     pub fn is_lab(&self) -> bool {
         *self == Kind::Lab
     }
-    pub fn is_factory(&self) -> bool {
-        *self == Kind::Factory
-    }
-    pub fn is_power_spawn(&self) -> bool {
-        *self == Kind::PowerSpawn
-    }
-    pub fn is_nuker(&self) -> bool {
-        *self == Kind::Nuker
-    }
     pub fn is_keeper_lair(&self) -> bool {
         *self == Kind::KeeperLair
     }
     pub fn is_invader_core(&self) -> bool {
         *self == Kind::InvaderCore
-    }
-    pub fn is_power_bank(&self) -> bool {
-        *self == Kind::PowerBank
-    }
-    pub fn is_portal(&self) -> bool {
-        *self == Kind::Portal
     }
 }
 
@@ -798,10 +780,6 @@ impl World {
     pub fn room(&self, name: RoomName) -> Option<&Room> {
         self.rooms.iter().find(|r| r.name == name)
     }
-}
-
-pub fn part_hits(part: &Part) -> i32 {
-    part.hits
 }
 
 pub fn body_kinds(creep: &Creep) -> Vec<BodyPart> {

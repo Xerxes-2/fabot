@@ -197,16 +197,6 @@ impl Ore {
     }
 }
 
-pub const ALL_ORES: [Ore; 7] = [
-    Ore::Hydrogen,
-    Ore::Oxygen,
-    Ore::Utrium,
-    Ore::Keanium,
-    Ore::Lemergium,
-    Ore::Zynthium,
-    Ore::Catalyst,
-];
-
 /// The UH line alone; a compound joins the day a decision names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Compound {
@@ -220,12 +210,6 @@ impl Compound {
         self as i32
     }
 }
-
-pub const ALL_COMPOUNDS: [Compound; 3] = [
-    Compound::Hydroxide,
-    Compound::UtriumHydride,
-    Compound::UtriumAcid,
-];
 
 /// A season's own resource stays `Season`'s and joins here only as `Other`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -248,18 +232,6 @@ impl Resource {
 
     pub fn is_energy(&self) -> bool {
         self == &Resource::Energy
-    }
-
-    pub fn is_ore(&self) -> bool {
-        matches!(self, Resource::Ore(_))
-    }
-
-    pub fn is_compound(&self) -> bool {
-        matches!(self, Resource::Compound(_))
-    }
-
-    pub fn is_other(&self) -> bool {
-        matches!(self, Resource::Other(_))
     }
 }
 

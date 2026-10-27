@@ -116,9 +116,6 @@ pub enum Rank {
 }
 
 impl Rank {
-    pub fn is_floor(self) -> bool {
-        self == Rank::Floor
-    }
     pub fn is_fight(self) -> bool {
         self == Rank::Fight
     }

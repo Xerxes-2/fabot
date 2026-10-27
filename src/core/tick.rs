@@ -6,7 +6,7 @@ use crate::core::HashMap;
 
 use super::atlas::{Atlas, Mover, Target, Tree};
 use super::engine;
-use super::grid::{self, FatigueFactor, Footprint};
+use super::grid::{self, Footprint};
 use super::intents::{Ask, CreepAct, Intent, LabAct, Rank, SpawnAct};
 use super::mv;
 use super::state::State;
@@ -830,21 +830,6 @@ pub fn module_list() -> &'static [Module] {
 /// A `Target` for a creep's own tile, as `Strategy` and `Layout` build one.
 pub fn target_of(pos: &Pos, range: i32) -> Target {
     target_at(pos, range)
-}
-
-pub fn walker_of(body: &[BodyPart]) -> Mover {
-    Mover {
-        footprint: Footprint::One,
-        factor: grid::loaded_factor(body),
-    }
-}
-
-pub fn factor_loaded(body: &[BodyPart]) -> FatigueFactor {
-    grid::loaded_factor(body)
-}
-
-pub fn pairs_by_room<T: Clone>(pairs: &[(RoomName, T)]) -> Vec<(RoomName, Vec<T>)> {
-    by_room(pairs)
 }
 
 pub type Effects = BTreeMap<String, String>;

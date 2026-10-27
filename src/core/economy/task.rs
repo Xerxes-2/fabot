@@ -88,16 +88,8 @@ impl Task {
         )
     }
 
-    pub fn is_refill(&self) -> bool {
-        matches!(self, Task::Refill(_, _))
-    }
-
     pub fn is_upgrade(&self) -> bool {
         matches!(self, Task::Upgrade(_))
-    }
-
-    pub fn is_build_or_repair(&self) -> bool {
-        matches!(self, Task::Build(_) | Task::Repair(_))
     }
 
     pub fn range_of(&self) -> i32 {
