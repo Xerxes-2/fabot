@@ -389,7 +389,7 @@ fn front_of(scene: &Scene, atlas: &Atlas, e: &Engagement) -> Option<tactics::Fro
     };
     Some(tactics::Front {
         breach: wall.pos,
-        wall: wall.id.clone(),
+        wall: (!room.controller.as_ref().is_some_and(|c| c.id == wall.id)).then(|| wall.id.clone()),
         line: room
             .structures
             .iter()

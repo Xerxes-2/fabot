@@ -490,7 +490,8 @@ pub fn seats_at(atlas: &Atlas, line: &[Pos], room: RoomName, work: Tile) -> i32 
 /// A siege's breach as its members read it this tick.
 pub struct Front {
     pub breach: Pos,
-    pub wall: String,
+    /// None where the breach is his controller: tapped, never struck.
+    pub wall: Option<String>,
     pub line: Vec<Pos>,
     pub towers: Vec<Pos>,
     /// What the towers deal a body working the breach.
@@ -656,7 +657,7 @@ pub fn siege(
             )
         } else if at_breach(creep) {
             (
-                Some(CreepAct::Dismantle(front.wall.clone())),
+                front.wall.clone().map(CreepAct::Dismantle),
                 toward(sight, creep, &front.breach, engine::MELEE_RANGE),
             )
         } else {
