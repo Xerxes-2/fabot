@@ -8,7 +8,7 @@
 // soak-runs/worlds/, and the bundle under test runs on from it as a deploy
 // would, Memory kept.
 //
-// Usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch] [--capture]
+// Usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch] [--capture] [--base name]
 //        npm run scenario -- <name> --watch [--tick-ms N] [--port N]
 //   name    the scenarios to run (default all but the nightly ones), by file name
 //   --modules  also the scenarios naming any of these modules (directories under src/core)
@@ -18,6 +18,9 @@
 //   --fetch  fetch the tarball a rival's `fetch.json` names; without it a
 //           scenario whose rival is not cached is SKIPped, never failed
 //   --bot   the bundle (default dist/main.js)
+//   --base  a bundle name whose runs stand in soak-runs (an earlier --bot
+//           name.js): each measure is printed beside the base's, marked
+//           better or worse by its bound's side, and each soak's score
 //   --capture  every tick each soak decides, to its capture.jsonl, which
 //           `npm run replay` decides again with another bundle
 //   --jobs  soaks at once (default a quarter of the hardware threads, as soak:many)
@@ -58,7 +61,7 @@ const watch = [];
 const WATCH_VALUES = ["--tick-ms", "--port"];
 const rest = process.argv.slice(2);
 for (let i = 0; i < rest.length; i++)
-  if (rest[i] === "--bot" || rest[i] === "--jobs" || rest[i] === "--modules") flags[rest[i]] = rest[++i] ?? fail(`${rest[i - 1]} takes a value`);
+  if (rest[i] === "--bot" || rest[i] === "--jobs" || rest[i] === "--modules" || rest[i] === "--base") flags[rest[i]] = rest[++i] ?? fail(`${rest[i - 1]} takes a value`);
   else if (rest[i] === "--list" || rest[i] === "--nightly" || rest[i] === "--fetch" || rest[i] === "--capture") flags[rest[i]] = true;
   else if (rest[i] === "--watch") watch.push(rest[i]);
   else if (WATCH_VALUES.includes(rest[i])) watch.push(rest[i], rest[++i]);
@@ -448,7 +451,7 @@ const codeOf = (...paths) =>
 const harness = codeOf(...["seed", "waves", "core", "colony.mjs", "node.mjs", "live.mjs"].map((f) => join(HERE, "engine", f)));
 const worldOf = (start) => `${recipe(start, seats(start.opponents).map((s) => ({ ...s, code: codeOf(s.bot === "@bot" ? bot : s.bot) })))}-t${start.at}-${start.bundle}-h${harness}`;
 const worldDir = (start) => join(REPO, "soak-runs/worlds", worldOf(start));
-const keyOf = (start) => `scenario-${basename(bot, ".js")}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}`;
+const keyOf = (start, name = basename(bot, ".js")) => `scenario-${name}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}`;
 const runs = new Map();
 for (const s of scenarios) {
   const run = runs.get(keyOf(s.start)) ?? { name: keyOf(s.start), label: `${recipe(s.start, s.start.opponents)}${s.start.at ? `-t${s.start.at}` : ""}`, start: s.start, ticks: 0, scenarios: [], secs: 0 };
@@ -565,6 +568,7 @@ if (invalid.length) {
 }
 
 let failed = 0;
+const moved = { better: 0, worse: 0 };
 // A soak that skipped (soak.mjs's exit 4) measured nothing: a rival's tarball is
 // not in the cache, and the run may not reach the registry.
 const SKIPPED = 4;
@@ -588,17 +592,44 @@ for (const s of scenarios) {
     continue;
   }
   const samples = samplesOf(dir);
+  const baseDir = flags["--base"] && join(REPO, "soak-runs", keyOf(s.start, flags["--base"]));
+  const base = baseDir && existsSync(join(baseDir, "samples.jsonl")) ? samplesOf(baseDir) : null;
   for (const a of s.assert) {
     const value = measures[a.measure](samples, a, dir);
     const max = a.max ?? countCeilings[a.measure] ?? Infinity;
     const ok = value <= max && value >= (a.min ?? -Infinity);
     if (!ok) failed++;
+    let against = "";
+    if (base) {
+      const was = measures[a.measure](base, a, baseDir);
+      // A bound below says more is better; a bound above, less.
+      const better = a.min !== undefined ? value > was : value < was;
+      const mark = value === was ? "=" : better ? "better" : "WORSE";
+      if (value !== was) moved[better ? "better" : "worse"]++;
+      against = `; base ${was} ${mark}`;
+    }
     const window = a.from !== undefined || a.to !== undefined ? ` t${a.from ?? 0}-${a.to ?? s.ticks}` : "";
     const bound = [a.min !== undefined && `≥ ${a.min}`, max !== Infinity && `≤ ${max}`].filter(Boolean).join(", ");
-    console.log(`${ok ? "pass" : "FAIL"} ${s.name}: ${a.measure}${a.who ? ` of ${a.who}` : ""}${a.room ? ` in ${a.room}` : ""}${window} ${value} (${bound})`);
+    console.log(`${ok ? "pass" : "FAIL"} ${s.name}: ${a.measure}${a.who ? ` of ${a.who}` : ""}${a.room ? ` in ${a.room}` : ""}${window} ${value} (${bound}${against})`);
   }
   const rows = s.assert.some((a) => a.measure === "predictedWinsLost") ? engagementsOf(dir) : [];
   if (rows.length) for (const line of [`${rows.length} engagements`, ...report(rows)]) console.log(`  ${s.name}: ${line}`);
+}
+if (flags["--base"]) {
+  // A soak's score at its last tick (the season's: controller, structures,
+  // fortification, stock), against the base's on the same start.
+  const scoreOf = (dir) => {
+    const last = existsSync(join(dir, "samples.jsonl")) ? samplesOf(dir).at(-1) : undefined;
+    return last?.score ? Object.values(last.score).reduce((a, b) => a + b, 0) : undefined;
+  };
+  const rows = [...runs.values()]
+    .map((r) => ({ label: r.label, now: scoreOf(join(REPO, "soak-runs", r.name)), was: scoreOf(join(REPO, "soak-runs", keyOf(r.start, flags["--base"]))) }))
+    .filter((r) => r.now !== undefined && r.was !== undefined && r.was > 0)
+    .map((r) => ({ ...r, change: r.now / r.was - 1 }));
+  for (const r of rows.filter((r) => Math.abs(r.change) >= 0.005).sort((a, b) => a.change - b.change))
+    console.log(`score ${r.label}: ${r.now.toFixed(0)} against ${r.was.toFixed(0)} (${r.change >= 0 ? "+" : ""}${(100 * r.change).toFixed(1)}%)`);
+  const mean = rows.reduce((a, r) => a + r.change, 0) / Math.max(1, rows.length);
+  console.log(`against ${flags["--base"]}: ${moved.better} measures better, ${moved.worse} worse; score over ${rows.length} soaks ${mean >= 0 ? "+" : ""}${(100 * mean).toFixed(2)}% on mean`);
 }
 const slowest = [...runs.values()].sort((a, b) => b.secs - a.secs).slice(0, 5);
 console.log(`slowest: ${slowest.map((r) => `${r.label} ${r.secs.toFixed(0)} s (${r.scenarios.join(", ")})`).join("; ")}`);

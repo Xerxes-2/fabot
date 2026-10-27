@@ -866,7 +866,10 @@ minute; a refactor's claim is an identical replay, which the soak fingerprints
 (every 100 ticks, and the rivals' own noise) cannot make. `--at T` prints one
 tick's intents: an incident is debugged by replaying it, not by reasoning
 about what the bot might have seen. A capture is only as good as the base
-that recorded it: recapture when the base's behaviour changes.
+that recorded it: recapture when the base's behaviour changes. A change of
+behaviour is then read whole: `npm run scenario -- --bot B.js --base A` prints
+each measure beside the base's run of it (better or worse by its bound's side)
+and each soak's season score against the base's.
 
 ## 11. Live safety
 
