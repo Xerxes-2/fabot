@@ -9,8 +9,8 @@ Items marked ❓ are open: the owner decides them before the module is started.
 ## 0. What v2 is
 
 A Screeps seasonal-server bot in Rust, compiled to WASM and bundled into one JS
-file, ported tick for tick from an F#/Fable tree that stands on the `fable`
-bookmark, never changed again. v2 is a
+file, ported tick for tick from an F#/Fable tree (main's history, before
+`14c9617b`). v2 is a
 port of v1's economy and a redesign of everything that assumed a unit smaller
 than the world.
 v1 taught us four things this document is built around:

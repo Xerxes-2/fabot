@@ -185,7 +185,6 @@ args lists the rest (engagements, rooms, creeps, regions, replay, kill
 switches). `observe exchange` lands with its module.
 
 v1 lives on the `v1` bookmark (`9677b5e8`, the code that ran live before v2),
-and v2's F#/Fable tree on `fable` (the last commit that held it). Both are
-rollbacks only: deployed from a workspace on the bookmark, never changed again.
-Nothing ports from v2 to v1. For v2 it is
-source to port from (`git show v1:<path>`), never a fact about v2.
+a rollback only: deployed from a workspace on the bookmark, never changed
+again. Nothing ports from v2 to v1. For v2 it is source to port from
+(`git show v1:<path>`), never a fact about v2.

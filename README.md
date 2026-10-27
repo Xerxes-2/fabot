@@ -4,8 +4,7 @@ Screeps seasonal-server bot in Rust, compiled to WASM and bundled into one JS
 file.
 
 This is **v2**: `ARCHITECTURE.md` is the design and `AGENTS.md` the working
-rules. v1 is on the `v1` bookmark and v2's F#/Fable tree, which the Rust was
-ported from, on `fable` (`git show <bookmark>:<path>`); both are rollbacks only.
+rules. v1 is on the `v1` bookmark (`git show v1:<path>`), a rollback only.
 
 ## Prerequisites
 
