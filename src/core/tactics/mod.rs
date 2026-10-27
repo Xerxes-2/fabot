@@ -37,15 +37,10 @@ pub fn name(tactic: Tactic) -> &'static str {
 }
 
 pub fn by_name(name: &str) -> Option<Tactic> {
-    [
-        Tactic::Kite,
-        Tactic::Close,
-        Tactic::Hold,
-        Tactic::BlobKite,
-        Tactic::BlobClose,
-    ]
-    .into_iter()
-    .find(|tactic| self::name(*tactic) == name)
+    use Tactic::*;
+    [Kite, Close, Hold, BlobKite, BlobClose]
+        .into_iter()
+        .find(|t| self::name(*t) == name)
 }
 
 /// One candidate as its kind's price finds it (§6.3): the bodies it fields and
@@ -190,7 +185,7 @@ pub fn hold(sight: &Sight, creep: &Creep) -> Wish {
 fn aim(sight: &Sight, order: &[String], centre: &Pos, creep: &Creep) -> Pos {
     ranked(sight, order, creep)
         .first()
-        .map_or_else(|| *centre, |h| h.pos)
+        .map_or(*centre, |h| h.pos)
 }
 
 pub fn close(sight: &mut Sight, order: &[String], centre: &Pos, creep: &Creep) -> Wish {
@@ -200,12 +195,12 @@ pub fn close(sight: &mut Sight, order: &[String], centre: &Pos, creep: &Creep) -
 
 /// How far `kind` of `h` strikes next tick, a step nearer.
 fn reach(kind: BodyPart, h: &Creep) -> Option<i32> {
-    let range = if kind == BodyPart::RangedAttack {
+    let ranged = kind == BodyPart::RangedAttack;
+    let range = if ranged {
         engine::RANGED_RANGE
     } else {
         engine::MELEE_RANGE
     };
-
     (live(kind, h) > 0).then(|| range + live(BodyPart::Move, h).min(1))
 }
 
