@@ -854,10 +854,19 @@ found yet.
 
 ### 10.4 Replay
 
-Because `decide` is deterministic (§1), the recorder's capture of a live tick
-replays the exact decision locally: `scripts/replay <capture> <tick>` prints
-the Intents and the State diff. An incident is debugged by replaying it, not
-by reasoning about what the bot might have seen.
+Because `decide` is deterministic (§1), a captured tick replays the exact
+decision locally. `npm run scenario -- --capture` writes every tick each soak
+decides (`capture.jsonl`, objects as changes since the tick before), and
+`npm run replay -- --a A.js --b B.js <tag>` stands each tick as the bench does
+(§9.1) and has both bundles decide it: identical intents and Memory on every
+tick, or the first tick apart with the intents each made and the Memory paths
+that differ. Each tick is stood from A's recorded world, so ticks after the
+first difference still compare. The library's 274k ticks replay in about a
+minute; a refactor's claim is an identical replay, which the soak fingerprints
+(every 100 ticks, and the rivals' own noise) cannot make. `--at T` prints one
+tick's intents: an incident is debugged by replaying it, not by reasoning
+about what the bot might have seen. A capture is only as good as the base
+that recorded it: recapture when the base's behaviour changes.
 
 ## 11. Live safety
 

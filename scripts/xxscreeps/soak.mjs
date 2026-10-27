@@ -177,7 +177,7 @@ if (!existsSync(bot)) fail(flags["--bot"] ? `--bot: no file at ${bot}` : "no dis
 const live = flags["--world"] && JSON.parse(readFileSync(flags["--world"], "utf8"));
 const OUR_NAME = live?.username ?? "fabot";
 const from = flags["--from"] && resolve(flags["--from"]);
-if (from && (!flags["--room"] || node || late || windows.length)) fail(`--from needs --room, and takes no --node, --late or --capture\n${usage}`);
+if (from && (!flags["--room"] || node || late)) fail(`--from needs --room, and takes no --node or --late\n${usage}`);
 const opponents = flags["--opponents"] ? JSON.parse(readFileSync(flags["--opponents"], "utf8")) : [];
 for (const o of opponents)
   if (!/^[a-z][\w-]*$/.test(o.name ?? "") || o.name === OUR_NAME || !existsSync(o.bot ?? "") || !/^[WE]\d+[NS]\d+$/.test(o.room ?? ""))

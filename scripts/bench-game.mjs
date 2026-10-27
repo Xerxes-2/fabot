@@ -124,8 +124,14 @@ function Room(r, objects) {
   this.energyAvailable = r.energyAvailable;
   this.energyCapacityAvailable = r.energyCapacityAvailable;
   this.controller = r.controller === undefined ? undefined : objects[r.controller];
+  this._events = r.events ?? [];
   this._found = Object.fromEntries(Object.entries(r.find).map(([type, ids]) => [type, ids.map((id) => objects[id])]));
 }
+// Only the attacks were captured: what a drain reads.
+globalThis.EVENT_ATTACK ??= 1;
+Room.prototype.getEventLog = function () {
+  return this._events;
+};
 Room.prototype.find = function (type) {
   const found = this._found[type] ?? [];
   const copy = new Array(found.length);

@@ -16,11 +16,10 @@
 //        npm run bench -- --a A.js --counts capture.jsonl…
 //   node --cpu-prof --max-old-space-size=256 scripts/bench.mjs --a A.js …   one bundle's profile
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
 import { resolve } from "node:path";
-import { createInterface } from "node:readline";
 import { getHeapStatistics } from "node:v8";
 import { load, stand } from "./bench-game.mjs";
+import { ticksOf } from "./capture-read.mjs";
 
 const usage = "usage: npm run bench -- --a A.js [--b B.js] [--rounds R] [--cold K | --counts] capture.jsonl…";
 const fail = (m) => {
@@ -44,15 +43,11 @@ const sides = Object.keys(bundles);
 
 async function* replay() {
   let last;
-  for (const f of files)
-    for await (const line of createInterface({ input: createReadStream(f), crlfDelay: Infinity })) {
-      if (!line) continue;
-      const tick = JSON.parse(line);
-      for (const r of tick.rooms) r.terrain = Uint8Array.from(r.terrain, Number);
-      const i = last && last.time === tick.time - 1 ? last.i + 1 : 0;
-      last = { time: tick.time, i };
-      yield [tick, i];
-    }
+  for await (const tick of ticksOf(files)) {
+    const i = last && last.time === tick.time - 1 ? last.i + 1 : 0;
+    last = { time: tick.time, i };
+    yield [tick, i];
+  }
 }
 
 function runTick(bot, tick) {

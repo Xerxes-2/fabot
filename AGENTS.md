@@ -93,6 +93,10 @@ Docs:
 
 ## Verification
 
+- A refactor (no behaviour meant to change) is verified by an identical
+  replay of the library's captures against its base (`npm run replay`,
+  `ARCHITECTURE.md` §10.4). A change of behaviour reads its first differing
+  tick there before the scenarios run.
 - A behaviour fix is verified by an xxscreeps scenario that reproduces the
   incident passing, and the scenario library not regressing
   (`ARCHITECTURE.md` §10.2). Add the scenario to the library.

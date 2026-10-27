@@ -6,6 +6,13 @@ const KEYS = ["id", "name", "structureType", "my", "hits", "hitsMax", "cooldown"
   "ticksToRegeneration", "mineralType", "mineralAmount", "resourceType", "amount", "level", "ticksToDowngrade", "safeModeAvailable", "safeMode", "safeModeCooldown", "upgradeBlocked",
   "ticksToLive", "fatigue", "spawning"];
 
+// A tick holds only the objects that changed since the last it wrote (`gone`
+// the keys that left) and a room's terrain the first time the room is seen;
+// `full` marks the first tick after a load, which holds everything.
+// `scripts/capture-read.mjs` stands each tick whole again.
+let last = null;
+const terrainSeen = new Set();
+
 module.exports = (memory) => {
   const objects = {};
   const ref = (o) => {
@@ -29,18 +36,32 @@ module.exports = (memory) => {
     energyCapacityAvailable: room.energyCapacityAvailable,
     controller: room.controller ? ref(room.controller) : undefined,
     find: Object.fromEntries(FINDS.map((f) => [f, room.find(f).map(ref)])),
-    terrain: Array.from(Game.map.getRoomTerrain(room.name).getRawBuffer()).join(""),
+    // The attacks a drain reads off the log (`read.js`).
+    ...((events) => (events.length ? { events } : {}))(
+      room.getEventLog().filter((e) => (e.event ?? e._$Variant) === EVENT_ATTACK).map((e) => ({ event: EVENT_ATTACK, objectId: e.objectId, data: { targetId: e.data?.targetId } })),
+    ),
+    ...(terrainSeen.has(room.name) ? {} : (terrainSeen.add(room.name), { terrain: Array.from(Game.map.getRoomTerrain(room.name).getRawBuffer()).join("") })),
   }));
+  // Read before the changes are taken: they ref the objects too.
+  const creeps = ids(Game.creeps);
+  const spawns = ids(Game.spawns);
+  const written = Object.fromEntries(Object.entries(objects).map(([k, s]) => [k, JSON.stringify(s)]));
+  const full = last === null;
+  const changed = full ? objects : Object.fromEntries(Object.keys(objects).filter((k) => last[k] !== written[k]).map((k) => [k, objects[k]]));
+  const gone = full ? [] : Object.keys(last).filter((k) => !(k in written));
+  last = written;
   return JSON.stringify({
+    ...(full ? { full } : {}),
     time: Game.time,
     cpu: { limit: Game.cpu.limit, bucket: Game.cpu.bucket },
     gcl: { level: Game.gcl.level },
     memory,
     intel: RawMemory.segments[2],
     rooms,
-    creeps: ids(Game.creeps),
-    spawns: ids(Game.spawns),
+    creeps,
+    spawns,
     constructionSites: Object.keys(Game.constructionSites),
-    objects,
+    objects: changed,
+    gone,
   });
 };

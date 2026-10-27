@@ -13,6 +13,7 @@
     "observe": "node --env-file-if-exists=.env scripts/observe.mjs",
     "cpuprofile": "node scripts/cpuprofile.mjs",
     "bench": "node --max-old-space-size=256 scripts/bench.mjs",
+    "replay": "node scripts/replay.mjs",
     "xx": "node scripts/xxscreeps/xx.mjs",
     "soak": "node scripts/xxscreeps/soak.mjs",
     "soak:many": "node scripts/xxscreeps/soak-many.mjs",
