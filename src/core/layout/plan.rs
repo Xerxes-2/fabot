@@ -229,47 +229,109 @@ pub fn controller_link(
         })
         .collect();
 
-    let mut best: Option<(Tile, Vec<Tile>)> = None;
-    for (t, seats) in seated {
-        let key = (-(seats.len() as i32), tiles::range(t, container), t);
-        let better = match &best {
-            None => true,
-            Some((bt, bseats)) => {
-                let best_key = (-(bseats.len() as i32), tiles::range(*bt, container), *bt);
-                key < best_key
+    (seated.into_iter())
+        .min_by_key(|(t, seats)| (-(seats.len() as i32), tiles::range(*t, container), *t))
+        .map(|(t, _)| t)
+}
+
+/// The free tiles off the lattice, nearest the anchor by their road first:
+/// each kind takes the nearest still open.
+struct Slots {
+    ordered: Vec<Tile>,
+    rank: [i32; tiles::COUNT],
+    taken: [bool; tiles::COUNT],
+    cursor: usize,
+    picked: Vec<(Kind, Tile)>,
+}
+
+impl Slots {
+    fn open(&self, t: Tile) -> bool {
+        self.rank[t] != NONE && !self.taken[t]
+    }
+
+    fn take(&mut self, kind: &Kind, t: Tile) {
+        self.taken[t] = true;
+        self.picked.push((kind.clone(), t));
+    }
+
+    fn fill(&mut self, kind: &Kind, n: i32) {
+        for _ in 0..n {
+            while self.cursor < self.ordered.len() && self.taken[self.ordered[self.cursor]] {
+                self.cursor += 1;
             }
-        };
-        if better {
-            best = Some((t, seats));
+            if let Some(&t) = self.ordered.get(self.cursor) {
+                self.take(kind, t);
+            }
+        }
+    }
+}
+
+/// The hub beside the anchor, the spawns on their slots, then every kind
+/// nearest first and the labs as one cluster.
+fn pick(
+    anchor: Tile,
+    spawns: &[Tile],
+    ordered: Vec<Tile>,
+) -> ([bool; tiles::COUNT], Vec<(Kind, Tile)>) {
+    let mut rank = [NONE; tiles::COUNT];
+    for (i, t) in ordered.iter().enumerate() {
+        rank[*t] = i as i32;
+    }
+    let mut slots = Slots {
+        ordered,
+        rank,
+        taken: [false; tiles::COUNT],
+        cursor: 0,
+        picked: Vec::new(),
+    };
+
+    let mut hub = HUB.iter();
+    for direction in [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT] {
+        if let Some(t) = tiles::neighbour(anchor, direction)
+            && slots.open(t)
+            && let Some(kind) = hub.next()
+        {
+            slots.take(kind, t);
+        }
+    }
+    for kind in hub {
+        slots.fill(kind, 1);
+    }
+
+    let spawn_slots = ground::spawn_slots(anchor);
+    let (standing, free): (Vec<Tile>, Vec<Tile>) =
+        spawn_slots.iter().partition(|t| spawns.contains(t));
+    let mut placed_spawns = 0;
+    for t in standing.into_iter().chain(free) {
+        if placed_spawns < count(&Kind::Spawn) && slots.open(t) {
+            slots.take(&Kind::Spawn, t);
+            placed_spawns += 1;
         }
     }
 
-    best.map(|(t, _)| t)
-}
-
-fn is_open(t: Tile, rank: &[i32], taken: &[bool]) -> bool {
-    rank[t] != NONE && !taken[t]
-}
-
-fn fill(
-    kind: &Kind,
-    n: i32,
-    ordered: &[Tile],
-    taken: &mut [bool],
-    cursor: &mut usize,
-    picked: &mut Vec<(Kind, Tile)>,
-) {
-    for _ in 0..n {
-        while *cursor < ordered.len() && taken[ordered[*cursor]] {
-            *cursor += 1;
-        }
-
-        if *cursor < ordered.len() {
-            let t = ordered[*cursor];
-            taken[t] = true;
-            picked.push((kind.clone(), t));
-        }
+    for (kind, n) in [
+        (Kind::Spawn, count(&Kind::Spawn) - placed_spawns),
+        (Kind::Tower, count(&Kind::Tower)),
+        (Kind::Extension, count(&Kind::Extension)),
+        (Kind::PowerSpawn, count(&Kind::PowerSpawn)),
+        (Kind::Nuker, count(&Kind::Nuker)),
+    ] {
+        slots.fill(&kind, n);
     }
+
+    let nearest: Vec<Tile> = (slots.ordered.iter().copied())
+        .filter(|t| slots.open(*t))
+        .collect();
+    let head = &nearest[..nearest.len().min(lab_search() as usize)];
+    let open = |t: Tile| slots.open(t);
+    let cluster =
+        lab_cluster(head, &slots.rank, open).or_else(|| lab_cluster(&nearest, &slots.rank, open));
+    for t in cluster.into_iter().flatten() {
+        slots.take(&Kind::Lab, t);
+    }
+
+    slots.fill(&Kind::Observer, count(&Kind::Observer));
+    (slots.taken, slots.picked)
 }
 
 /// `spawns` only order the spawn slots, so a spawn on a slot never moves the
@@ -335,38 +397,20 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         path
     }
 
-    let mut source_walks: Vec<(Tile, Vec<Tile>)> = Vec::new();
-    for s in &ground.sources {
-        let path = way_out(&lane, &*walk, &mut clear, *s);
-        if path.is_empty() {
-            unfit.push("source unreached".into());
-        } else {
-            source_walks.push((*s, path));
-        }
-    }
-
-    let controller_walk: Vec<Tile> = match ground.controller {
-        Some(c) => {
-            let path = way_out(&lane, &*walk, &mut clear, c);
-            if path.is_empty() {
-                unfit.push("controller unreached".into());
-                Vec::new()
-            } else {
-                path
-            }
-        }
-        None => Vec::new(),
+    let mut ways = |rocks: &[Tile], what: &'static str| -> Vec<(Tile, Vec<Tile>)> {
+        let walks = rocks
+            .iter()
+            .map(|r| (*r, way_out(&lane, &*walk, &mut clear, *r)));
+        let (found, lost): (Vec<_>, Vec<_>) = walks.partition(|(_, path)| !path.is_empty());
+        unfit.extend(lost.iter().map(|_| Cow::Borrowed(what)));
+        found
     };
-
-    let mut mineral_walks: Vec<(Tile, Vec<Tile>)> = Vec::new();
-    for m in &ground.minerals {
-        let path = way_out(&lane, &*walk, &mut clear, *m);
-        if path.is_empty() {
-            unfit.push("mineral unreached".into());
-        } else {
-            mineral_walks.push((*m, path));
-        }
-    }
+    let source_walks = ways(&ground.sources, "source unreached");
+    let controller_walk: Vec<Tile> = (ways(ground.controller.as_slice(), "controller unreached"))
+        .pop()
+        .map(|(_, path)| path)
+        .unwrap_or_default();
+    let mineral_walks = ways(&ground.minerals, "mineral unreached");
 
     let controller_seat: Option<(Tile, Tile, Vec<Tile>)> =
         match (ground.controller, controller_walk.as_slice()) {
@@ -409,95 +453,8 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         }
     }
 
-    let mut keys = slot_list;
-    keys.sort_unstable();
-    let ordered: Vec<Tile> = keys.iter().map(|(_, t)| *t).collect();
-
-    let mut rank = [NONE; tiles::COUNT];
-    for (i, t) in ordered.iter().enumerate() {
-        rank[*t] = i as i32;
-    }
-
-    let mut taken = [false; tiles::COUNT];
-    let mut picked: Vec<(Kind, Tile)> = Vec::new();
-    let mut cursor = 0usize;
-
-    let mut hub_filled = 0usize;
-
-    for direction in [tiles::TOP, tiles::RIGHT, tiles::BOTTOM, tiles::LEFT] {
-        if let Some(t) = tiles::neighbour(anchor, direction)
-            && hub_filled < HUB.len()
-            && rank[t] != NONE
-            && !taken[t]
-        {
-            taken[t] = true;
-            picked.push((HUB[hub_filled].clone(), t));
-            hub_filled += 1;
-        }
-    }
-
-    for kind in HUB.iter().skip(hub_filled) {
-        fill(kind, 1, &ordered, &mut taken, &mut cursor, &mut picked);
-    }
-
-    let slots = ground::spawn_slots(anchor);
-
-    let order: Vec<Tile> = slots
-        .iter()
-        .filter(|t| spawns.contains(t))
-        .chain(slots.iter().filter(|t| !spawns.contains(t)))
-        .copied()
-        .collect();
-
-    let mut placed_spawns = 0;
-
-    for t in order {
-        if placed_spawns < count(&Kind::Spawn) && rank[t] != NONE && !taken[t] {
-            taken[t] = true;
-            picked.push((Kind::Spawn, t));
-            placed_spawns += 1;
-        }
-    }
-
-    for (kind, n) in [
-        (Kind::Spawn, count(&Kind::Spawn) - placed_spawns),
-        (Kind::Tower, count(&Kind::Tower)),
-        (Kind::Extension, count(&Kind::Extension)),
-        (Kind::PowerSpawn, count(&Kind::PowerSpawn)),
-        (Kind::Nuker, count(&Kind::Nuker)),
-    ] {
-        fill(&kind, n, &ordered, &mut taken, &mut cursor, &mut picked);
-    }
-
-    let nearest: Vec<Tile> = ordered
-        .iter()
-        .copied()
-        .filter(|t| is_open(*t, &rank, &taken))
-        .collect();
-
-    let head: Vec<Tile> = nearest
-        .iter()
-        .take(lab_search() as usize)
-        .copied()
-        .collect();
-    let cluster = lab_cluster(&head, &rank, |t| is_open(t, &rank, &taken))
-        .or_else(|| lab_cluster(&nearest, &rank, |t| is_open(t, &rank, &taken)));
-
-    if let Some(cluster) = cluster {
-        for t in cluster {
-            taken[t] = true;
-            picked.push((Kind::Lab, t));
-        }
-    }
-
-    fill(
-        &Kind::Observer,
-        count(&Kind::Observer),
-        &ordered,
-        &mut taken,
-        &mut cursor,
-        &mut picked,
-    );
+    slot_list.sort_unstable();
+    let (taken, picked) = pick(anchor, spawns, slot_list.iter().map(|(_, t)| *t).collect());
 
     let mut road_level = [NONE; tiles::COUNT];
     let mut ranks: BTreeMap<Kind, i32> = BTreeMap::new();
@@ -548,20 +505,12 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
     // shoves its harvester off it.
     let rock_level = haul_level();
 
-    for (_, path) in &source_walks {
-        for t in path {
-            board.on_way[*t] = true;
-        }
-    }
-
-    for t in &controller_walk {
+    let rocks = source_walks
+        .iter()
+        .chain(&mineral_walks)
+        .map(|(_, path)| path);
+    for t in rocks.chain([&controller_walk]).flatten() {
         board.on_way[*t] = true;
-    }
-
-    for (_, path) in &mineral_walks {
-        for t in path {
-            board.on_way[*t] = true;
-        }
     }
 
     // A dead end's link is held as it is planted, so no other container or
@@ -653,21 +602,11 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
             }
             // A link built late beats none.
             None if on_first => {
-                let candidates: Vec<Tile> = tiles::around(*container)
-                    .iter()
-                    .copied()
+                let best = (tiles::around(*container).iter().copied())
                     .filter(|t| board.free(*t) && tiles::range(*t, *c) <= engine::UPGRADE_RANGE)
-                    .collect();
+                    .min_by_key(|t| (-board.open_count(*t), *t));
 
-                let mut best: Option<(i32, Tile)> = None;
-                for t in candidates {
-                    let key = (-board.open_count(t), t);
-                    if best.is_none_or(|b| key < b) {
-                        best = Some(key);
-                    }
-                }
-
-                if let Some((_, t)) = best {
+                if let Some(t) = best {
                     board.taken[t] = true;
                     links.push(t);
                 }
@@ -711,14 +650,10 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         }
     }
 
-    let mut road_keys: Vec<(i32, i32, Tile)> = Vec::new();
-
-    for t in tiles::all() {
-        if board.road_level[t] != NONE && !board.taken[t] {
-            road_keys.push((board.road_level[t], (ROAD_SPAN - 1).min(board.walk[t]), t));
-        }
-    }
-
+    let mut road_keys: Vec<(i32, i32, Tile)> = (tiles::all())
+        .filter(|t| board.road_level[*t] != NONE && !board.taken[*t])
+        .map(|t| (board.road_level[t], (ROAD_SPAN - 1).min(board.walk[t]), t))
+        .collect();
     road_keys.sort_unstable();
 
     let roads: Vec<Item> = road_keys
@@ -731,15 +666,9 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         .collect();
 
     // A source's container too: its harvester cannot leave it.
-    let mut covered: Vec<(Tile, i32)> = Vec::new();
-    for i in &board.items {
-        if KEEP.contains(&i.kind) {
-            covered.push((i.tile, i.level));
-        }
-    }
-    for p in &posted {
-        covered.push((p.container, rock_level));
-    }
+    let kept = (board.items.iter()).filter(|i| KEEP.contains(&i.kind));
+    let covered =
+        (kept.map(|i| (i.tile, i.level))).chain(posted.iter().map(|p| (p.container, rock_level)));
 
     let mut distinct: Vec<(Tile, i32)> = Vec::new();
     for c in covered {
@@ -757,11 +686,10 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         })
         .collect();
 
-    let mut all: Vec<Item> = Vec::new();
-    all.extend(board.items.iter().cloned());
+    let mut all: Vec<Item> = board.items.clone();
     all.extend(board.extra.iter().cloned());
-    all.extend(roads.iter().cloned());
-    all.extend(ramparts.iter().cloned());
+    all.extend(roads);
+    all.extend(ramparts);
 
     for kind in sized() {
         if (all.iter().filter(|i| i.kind.name() == kind.name()).count() as i32) < count(&kind) {
