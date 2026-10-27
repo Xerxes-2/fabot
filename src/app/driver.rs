@@ -109,7 +109,7 @@ fn run_tick() -> Result<(), String> {
         trace: wire::tracing(),
     };
 
-    let mut result = tick::run(clock, tick::module_list(), &mut context, state);
+    let mut result = tick::run(clock, &tick::MODULES, &mut context, state);
 
     for report in &result.reports {
         phases.push((report.module.to_string(), report.cpu));

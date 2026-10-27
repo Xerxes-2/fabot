@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use crate::core::engine;
 use crate::core::exchange::{self, Fighter, fighter};
-use crate::core::tick::{self, Declarations};
+use crate::core::tick::Declarations;
 use crate::core::vocabulary::{self, BodyPart, Boost, Compound, Resource};
 use crate::core::world::{
     Creep, Kind, Owner, Pos, Room, RoomName, Spawn, Store, Structure, World, terrain,
@@ -195,7 +195,7 @@ pub fn side_in(room: &Room, bodies: Vec<Fighter>) -> exchange::Side {
 /// cast unboosted rather than held.
 pub fn cluster_boost(world: &World, declarations: &Declarations) -> Option<(&'static str, i32)> {
     let (home, _) = declarations.labs.as_ref()?;
-    let (compound, energy) = tick::home_holds(world, *home, Compound::UtriumAcid);
+    let (compound, energy) = crate::core::boost::home_holds(world, *home, Compound::UtriumAcid);
     let parts =
         (compound / engine::BOOST_MINERAL_PER_PART).min(energy / engine::BOOST_ENERGY_PER_PART);
 

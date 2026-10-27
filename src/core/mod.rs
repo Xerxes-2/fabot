@@ -1,4 +1,5 @@
 pub mod atlas;
+pub mod boost;
 pub mod economy;
 pub mod engine;
 pub mod exchange;

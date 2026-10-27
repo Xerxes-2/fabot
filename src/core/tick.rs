@@ -7,13 +7,13 @@ use crate::core::HashMap;
 use super::atlas::{Atlas, Mover, Target, Tree};
 use super::engine;
 use super::grid::{self, Footprint};
-use super::intents::{Ask, CreepAct, Intent, LabAct, Rank, SpawnAct};
+use super::intents::{Ask, CreepAct, Intent, Rank, SpawnAct};
 use super::mv;
 use super::state::State;
 use super::strategy::intel::Intel;
 use super::tactics::{self, Tactic};
 use super::tiles::{self, Tile};
-use super::vocabulary::{BodyPart, Boost, Compound, Resource};
+use super::vocabulary::{BodyPart, Compound};
 use super::world::{Creep, Owner, Pos, RoomName, Sightings, World};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -393,62 +393,38 @@ fn by_room<T: Clone>(pairs: &[(RoomName, T)]) -> Vec<(RoomName, Vec<T>)> {
 /// cannot pay yet holds the economy's behind it, one its capacity never pays
 /// holds nothing.
 pub fn queue(world: &World, asks: &[(RoomName, Ask)]) -> Vec<Intent> {
-    let rank = |a: &Ask| -> i32 {
-        match a.rank {
-            Rank::Floor => 0,
-            Rank::Fight => 1,
-            Rank::Economy => 2,
-        }
+    let rank = |a: &Ask| match a.rank {
+        Rank::Floor => 0,
+        Rank::Fight => 1,
+        Rank::Economy => 2,
     };
-
-    fn serve(
-        idle: &[&super::world::Spawn],
-        capacity: i32,
-        bank: i32,
-        held: bool,
-        asks: &[Ask],
-    ) -> Vec<Intent> {
-        let mut out = Vec::new();
-        let mut bank = bank;
-        let mut held = held;
-        let mut idle_at = 0;
-        for a in asks {
-            if idle_at >= idle.len() {
-                break;
-            }
-            if held && a.rank.is_economy() {
-                break;
-            }
-            if engine::body_cost(&a.body) <= bank {
-                out.push(Intent::Spawn(
-                    idle[idle_at].id.clone(),
-                    SpawnAct::SpawnCreep(a.body.clone(), a.name.clone()),
-                ));
-                bank -= engine::body_cost(&a.body);
-                idle_at += 1;
-            } else {
-                held = held || (a.rank.is_fight() && engine::body_cost(&a.body) <= capacity);
-            }
-        }
-        out
-    }
 
     let mut out = Vec::new();
     for (room, mut asks) in by_room(asks) {
         asks.sort_by_key(rank);
-        if let Some(r) = world.room(room) {
-            let idle: Vec<&super::world::Spawn> = world
-                .spawns
-                .iter()
-                .filter(|s| s.pos.room == room && s.spawning.is_none())
-                .collect();
-            out.extend(serve(
-                &idle,
-                r.energy_capacity,
-                r.energy_available,
-                false,
-                &asks,
+        let Some(r) = world.room(room) else {
+            continue;
+        };
+        let mut idle = (world.spawns.iter()).filter(|s| s.pos.room == room && s.spawning.is_none());
+        let mut bank = r.energy_available;
+        let mut held = false;
+        for a in &asks {
+            if held && a.rank.is_economy() {
+                break;
+            }
+            let cost = engine::body_cost(&a.body);
+            if cost > bank {
+                held = held || (a.rank.is_fight() && cost <= r.energy_capacity);
+                continue;
+            }
+            let Some(spawn) = idle.next() else {
+                break;
+            };
+            out.push(Intent::Spawn(
+                spawn.id.clone(),
+                SpawnAct::SpawnCreep(a.body.clone(), a.name.clone()),
             ));
+            bank -= cost;
         }
     }
     out
@@ -505,209 +481,8 @@ pub fn arbitrate(context: &Context, wishes: &[(RoomName, mv::Wish)]) -> Vec<Inte
     out
 }
 
-/// The compound a cast name asks for, read off its last token: a body cast
-/// with a compound walks to the lab before it takes its work.
-pub fn boost_of_name(name: &str) -> Option<Compound> {
-    match super::vocabulary::resource_of_name(name.rsplit('-').next()?) {
-        Resource::Compound(compound) => Some(compound),
-        _ => None,
-    }
-}
-
-/// The lab a body asking for `compound` is boosted from: one with room for it
-/// holding the most of it, ties to the lower id; a lab holding another mineral
-/// only when none has room, its drain making room.
-pub fn booster<'a>(
-    world: &'a World,
-    room: RoomName,
-    compound: Compound,
-) -> Option<&'a super::world::Structure> {
-    let held = |s: &super::world::Structure| s.store.amount_of(&Resource::Compound(compound));
-    let most = |a: &&'a super::world::Structure, b: &&'a super::world::Structure| {
-        held(a).cmp(&held(b)).then_with(|| b.id.cmp(&a.id))
-    };
-
-    (labs_in(world, room))
-        .filter(|l| holds_room_for(l, compound))
-        .max_by(most)
-        .or_else(|| labs_in(world, room).max_by(most))
-}
-
-fn labs_in(world: &World, room: RoomName) -> impl Iterator<Item = &super::world::Structure> {
-    (world.rooms.iter())
-        .filter(move |r| r.name == room)
-        .flat_map(|r| r.structures.iter())
-        .filter(|s| s.kind == super::world::Kind::Lab && s.owner.is_ours())
-}
-
-/// What the home holds of a compound and of energy, over the stores a haul
-/// fills: its labs, terminal, storage and the loads on its bodies.
-pub fn home_holds(world: &World, room: RoomName, compound: Compound) -> (i32, i32) {
-    let held = |s: &super::world::Store| {
-        (
-            s.amount_of(&Resource::Compound(compound)),
-            s.amount_of(&Resource::Energy),
-        )
-    };
-    let stores = (world.rooms.iter())
-        .filter(|r| r.name == room)
-        .flat_map(|r| r.structures.iter())
-        .filter(|s| {
-            s.owner.is_ours() && (s.kind.is_lab() || s.kind.is_terminal() || s.kind.is_storage())
-        })
-        .map(|s| held(&s.store))
-        .chain(
-            (world.creeps.iter())
-                .filter(move |c| c.pos.room == room)
-                .map(|c| held(&c.store)),
-        );
-
-    stores.fold((0, 0), |(compound_, energy), (m, e)| {
-        (compound_ + m, energy + e)
-    })
-}
-
-/// Whether the lab holds the compound or nothing: a lab holds one mineral, so
-/// another one in it leaves the compound nowhere to land.
-fn holds_room_for(lab: &super::world::Structure, compound: Compound) -> bool {
-    let wanted = Resource::Compound(compound);
-    (lab.store.held.iter())
-        .all(|(r, n)| *n <= 0 || r == &wanted || !super::vocabulary::is_mineral(r))
-}
-
-/// Whether the lab can boost a part now: a boost spends one of each a part.
-fn can_boost(lab: &super::world::Structure, compound: Compound) -> bool {
-    lab.store.amount_of(&Resource::Compound(compound)) >= engine::BOOST_MINERAL_PER_PART
-        && lab.store.amount_of(&Resource::Energy) >= engine::BOOST_ENERGY_PER_PART
-}
-
-/// The mineral and energy a body's unboosted parts ask of `compound`.
-fn boost_need(creep: &super::world::Creep, compound: Compound) -> (i32, i32) {
-    let name = super::vocabulary::resource_name(&Resource::Compound(compound));
-    let parts = (creep.body.iter())
-        .filter(|p| {
-            p.boost == Boost::Unboosted
-                && super::vocabulary::boost::of_compound(p.kind, &name) != Boost::Unboosted
-        })
-        .count() as i32;
-
-    (
-        parts * engine::BOOST_MINERAL_PER_PART,
-        parts * engine::BOOST_ENERGY_PER_PART,
-    )
-}
-
-/// What a body cast with a compound still asks of the lab it walks to: the
-/// lab, the compound, and the mineral and energy its unboosted parts need.
-pub struct Waiting<'a> {
-    pub lab: &'a super::world::Structure,
-    pub compound: Compound,
-    pub mineral: i32,
-    pub energy: i32,
-}
-
-/// The lab a body waits at this tick, and what its parts still ask of it: one
-/// that has room for the compound, while the home holds what the parts ask and
-/// can carry it there. Read afresh every tick, so a colony that cannot serve the
-/// body costs it the compound and never its raid.
-pub fn waiting<'a>(
-    world: &'a World,
-    home: RoomName,
-    creep: &super::world::Creep,
-) -> Option<Waiting<'a>> {
-    let compound = boost_of_name(&creep.name)?;
-    let (mineral, energy) = boost_need(creep, compound);
-    let (held, fuel) = home_holds(world, home, compound);
-
-    if mineral == 0 || held < mineral || fuel < energy {
-        return None;
-    }
-    let lab = booster(world, home, compound)?;
-    // A colony with nothing left to carry the load fights the body unboosted
-    // rather than stand it at a lab nothing will fill.
-    let carried = can_boost(lab, compound)
-        || (world.creeps.iter()).any(|c| {
-            c.owner.is_ours()
-                && c.pos.room == home
-                && c.name != creep.name
-                && boost_of_name(&c.name).is_none()
-                && c.store.free() > 0
-        });
-    if !holds_room_for(lab, compound) || !carried {
-        return None;
-    }
-
-    Some(Waiting {
-        lab,
-        compound,
-        mineral,
-        energy,
-    })
-}
-
-/// A body whose cast asked for a compound and whose parts do not carry it yet
-/// is held at the lab and boosted there: its module's acts and wish are
-/// dropped for the walk, or the boost itself when it stands beside it.
-fn boost_stop(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
-    let Some((home, _)) = &context.declarations.labs else {
-        return intents;
-    };
-    let home = *home;
-    let mut stalls: Vec<(String, Pos, String, Compound)> = Vec::new();
-
-    for creep in (context.world.creeps.iter()).filter(|c| c.owner.is_ours() && c.pos.room == home) {
-        if let Some(w) = waiting(context.world, home, creep) {
-            stalls.push((creep.name.clone(), w.lab.pos, w.lab.id.clone(), w.compound));
-        }
-    }
-
-    if stalls.is_empty() {
-        return intents;
-    }
-
-    let stalling: BTreeSet<&str> = stalls.iter().map(|(name, _, _, _)| name.as_str()).collect();
-    let mut out: Vec<Intent> = (intents.into_iter())
-        .filter(|i| {
-            let actor = i.actor();
-            i.is_queue() || !stalling.contains(actor.as_str())
-        })
-        .collect();
-
-    let mut boostable: BTreeSet<&str> = BTreeSet::new();
-    for lab in labs_in(context.world, home) {
-        for compound in stalls.iter().map(|(_, _, _, c)| c) {
-            if can_boost(lab, *compound) {
-                boostable.insert(lab.id.as_str());
-            }
-        }
-    }
-
-    for (name, at, lab, _) in &stalls {
-        let Some(creep) = context.world.creeps.iter().find(|c| &c.name == name) else {
-            continue;
-        };
-        if creep.pos.within(1, at) && boostable.contains(lab.as_str()) {
-            out.push(Intent::Lab(
-                lab.clone(),
-                LabAct::BoostCreep(creep.id.clone()),
-            ));
-            continue;
-        }
-        let mover = Mover {
-            footprint: Footprint::One,
-            factor: grid::loaded_factor(&super::world::body_kinds(creep)),
-        };
-        out.push(Intent::Wish(
-            creep.pos.room,
-            mv::plan::toward(context.atlas, creep, mover, &target_at(at, 1), 1),
-        ));
-    }
-
-    out
-}
-
 fn settle(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
-    let intents = boost_stop(context, intents);
+    let intents = super::boost::stop(context, intents);
     let mut asks = Vec::new();
     let mut wishes = Vec::new();
     for i in &intents {
@@ -822,15 +597,6 @@ pub const MODULES: [Module; 4] = [
         run: super::layout::decide,
     },
 ];
-
-pub fn module_list() -> &'static [Module] {
-    &MODULES
-}
-
-/// A `Target` for a creep's own tile, as `Strategy` and `Layout` build one.
-pub fn target_of(pos: &Pos, range: i32) -> Target {
-    target_at(pos, range)
-}
 
 pub type Effects = BTreeMap<String, String>;
 

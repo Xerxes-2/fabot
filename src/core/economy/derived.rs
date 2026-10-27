@@ -943,8 +943,8 @@ pub fn of_world(
         let kept: BTreeMap<String, Resource> = (world.creeps.iter())
             .filter(|c| &c.pos.room == home)
             .filter_map(|c| {
-                let compound = tick::boost_of_name(&c.name)?;
-                let lab = tick::booster(world, *home, compound)?;
+                let compound = crate::core::boost::of_name(&c.name)?;
+                let lab = crate::core::boost::booster(world, *home, compound)?;
                 Some((lab.id.clone(), Resource::Compound(compound)))
             })
             .collect();
@@ -1002,7 +1002,7 @@ pub fn of_world(
         // stores: the reaction refuses it as a lab of its own.
         let mut waited: BTreeMap<&str, (Resource, i32, i32)> = BTreeMap::new();
         for creep in (world.creeps.iter()).filter(|c| &c.pos.room == home) {
-            let Some(w) = tick::waiting(world, *home, creep) else {
+            let Some(w) = crate::core::boost::waiting(world, *home, creep) else {
                 continue;
             };
             let at =
