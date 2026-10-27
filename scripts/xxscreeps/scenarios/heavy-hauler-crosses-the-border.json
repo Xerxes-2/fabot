@@ -4,7 +4,6 @@
   "start": { "world": "scripts/xxscreeps/worlds/heavy-border.json", "seed": 1 },
   "ticks": 150,
   "assert": [
-    { "measure": "faults", "max": 0 },
     { "measure": "bounced", "to": 150, "max": 0 }
   ]
 }

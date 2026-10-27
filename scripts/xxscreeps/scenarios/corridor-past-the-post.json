@@ -4,7 +4,6 @@
   "start": { "world": "scripts/xxscreeps/worlds/corridor-post.json", "seed": 1 },
   "ticks": 4000,
   "assert": [
-    { "measure": "faults", "max": 0 },
     { "measure": "stillLoaded", "max": 350 }
   ]
 }

@@ -29,7 +29,6 @@
     { "measure": "oscillation", "kind": "sweep", "max": 5 },
     { "measure": "sweepNet", "min": 0 },
     { "measure": "bodiesLost", "max": 0 },
-    { "measure": "threatLookupsMost" },
-    { "measure": "faults", "max": 0 }
+    { "measure": "threatLookupsMost" }
   ]
 }

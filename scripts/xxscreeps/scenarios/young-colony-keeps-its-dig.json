@@ -5,8 +5,6 @@
   "ticks": 4000,
   "assert": [
     { "measure": "carriedOut", "room": "W1N1", "max": 1000 },
-    { "measure": "upgrade", "to": 2750, "min": 40000 },
-    { "measure": "refusals", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "upgrade", "to": 2750, "min": 40000 }
   ]
 }

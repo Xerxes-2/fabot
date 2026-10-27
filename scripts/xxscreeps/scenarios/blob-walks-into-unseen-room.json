@@ -6,7 +6,6 @@
   "assert": [
     { "measure": "blobStallTicks", "max": 4 },
     { "measure": "blobArrival", "max": 89 },
-    { "measure": "oscillation", "max": 6 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "oscillation", "max": 6 }
   ]
 }

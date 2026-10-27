@@ -16,8 +16,6 @@
   },
   "ticks": 4000,
   "assert": [
-    { "measure": "claimersCast", "max": 1 },
-    { "measure": "refusals", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "claimersCast", "max": 1 }
   ]
 }

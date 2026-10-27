@@ -30,10 +30,6 @@
     {
       "measure": "oscillation",
       "max": 10
-    },
-    {
-      "measure": "faults",
-      "max": 0
     }
   ]
 }

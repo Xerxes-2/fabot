@@ -7,7 +7,6 @@
     { "measure": "bounced", "max": 20 },
     { "measure": "stalest", "room": "W2S1", "max": 200 },
     { "measure": "stalest", "room": "W2S2", "max": 200 },
-    { "measure": "scoutStill", "max": 10 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "scoutStill", "max": 10 }
   ]
 }

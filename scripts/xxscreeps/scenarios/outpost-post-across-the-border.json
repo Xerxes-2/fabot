@@ -15,10 +15,6 @@
       "measure": "bodiesSpent",
       "room": "W3N1",
       "min": 1400
-    },
-    {
-      "measure": "faults",
-      "max": 0
     }
   ]
 }

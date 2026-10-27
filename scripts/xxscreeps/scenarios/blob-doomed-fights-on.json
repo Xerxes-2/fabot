@@ -6,7 +6,6 @@
   "assert": [
     { "measure": "bodiesLost", "max": 0 },
     { "measure": "raidsKilled", "min": 1 },
-    { "measure": "oscillation", "max": 6 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "oscillation", "max": 6 }
   ]
 }

@@ -4,7 +4,6 @@
   "start": { "world": "scripts/xxscreeps/worlds/young-among-outposts.json", "seed": 1 },
   "ticks": 1500,
   "assert": [
-    { "measure": "build", "room": "W2S5", "to": 1000, "min": 3000 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "build", "room": "W2S5", "to": 1000, "min": 3000 }
   ]
 }

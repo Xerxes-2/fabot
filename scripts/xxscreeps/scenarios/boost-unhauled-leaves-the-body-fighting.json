@@ -5,7 +5,6 @@
   "ticks": 60,
   "assert": [
     { "measure": "struckOn", "name": "raider-1", "min": 1 },
-    { "measure": "boosted", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "boosted", "max": 0 }
   ]
 }

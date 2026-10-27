@@ -4,7 +4,6 @@
   "start": { "world": "scripts/xxscreeps/worlds/boost-lab-drained.json", "seed": 1 },
   "ticks": 200,
   "assert": [
-    { "measure": "boosted", "min": 3 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "boosted", "min": 3 }
   ]
 }

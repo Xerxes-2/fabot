@@ -47,10 +47,6 @@
     },
     {
       "measure": "threatLookupsMost"
-    },
-    {
-      "measure": "faults",
-      "max": 0
     }
   ]
 }

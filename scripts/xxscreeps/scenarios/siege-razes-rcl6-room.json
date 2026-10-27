@@ -20,7 +20,6 @@
     { "measure": "siegeFirstRaze", "max": 1066 },
     { "measure": "siegeFirstTarget", "kind": "link", "min": 1 },
     { "measure": "siegeRampartsLost", "max": 0 },
-    { "measure": "bodiesLost", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "bodiesLost", "max": 0 }
   ]
 }

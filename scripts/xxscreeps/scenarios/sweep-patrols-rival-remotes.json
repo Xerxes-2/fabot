@@ -24,7 +24,6 @@
     { "measure": "sweepKilled", "min": 5000 },
     { "measure": "fightTicksBack", "max": 0 },
     { "measure": "bodiesLost", "max": 0 },
-    { "measure": "threatLookupsMost" },
-    { "measure": "faults", "max": 0 }
+    { "measure": "threatLookupsMost" }
   ]
 }

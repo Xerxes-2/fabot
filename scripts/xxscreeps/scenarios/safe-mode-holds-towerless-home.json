@@ -6,7 +6,6 @@
   "assert": [
     { "measure": "safeModeAt", "from": 1000, "max": 1100 },
     { "measure": "fewestCreeps", "from": 1000, "min": 6 },
-    { "measure": "predictedWinsLost", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "predictedWinsLost", "max": 0 }
   ]
 }

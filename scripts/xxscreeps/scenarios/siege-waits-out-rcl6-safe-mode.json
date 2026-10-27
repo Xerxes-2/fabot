@@ -16,7 +16,6 @@
   "ticks": 4500,
   "assert": [
     { "measure": "mostCast", "max": 0 },
-    { "measure": "bodiesLost", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "bodiesLost", "max": 0 }
   ]
 }

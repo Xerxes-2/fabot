@@ -4,7 +4,6 @@
   "start": { "world": "scripts/xxscreeps/worlds/swamp-road.json", "seed": 1 },
   "ticks": 3000,
   "assert": [
-    { "measure": "faults", "max": 0 },
     { "measure": "roadLoss", "to": 3000, "max": 550 }
   ]
 }

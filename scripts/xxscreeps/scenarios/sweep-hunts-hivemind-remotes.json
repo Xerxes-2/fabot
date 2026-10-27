@@ -12,7 +12,6 @@
   "assert": [
     { "measure": "sweepNet", "min": 0 },
     { "measure": "bodiesLost", "max": 0 },
-    { "measure": "diedAlone", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "diedAlone", "max": 0 }
   ]
 }

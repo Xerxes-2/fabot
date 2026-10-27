@@ -73,6 +73,14 @@ const modules = readdirSync(CORE).filter((m) => m !== "tests" && statSync(join(C
 const library = readdirSync(LIBRARY)
   .filter((f) => f.endsWith(".json"))
   .map((f) => ({ name: basename(f, ".json"), ...JSON.parse(readFileSync(join(LIBRARY, f), "utf8")) }));
+// Every scenario holds these unless it bounds them itself: an act the engine
+// refuses is a decision made on a wrong reading of the world, and a fault a
+// module that threw.
+const ALWAYS = [
+  { measure: "refusals", max: 0 },
+  { measure: "faults", max: 0 },
+];
+for (const s of library) s.assert = [...s.assert, ...ALWAYS.filter((d) => !s.assert.some((a) => a.measure === d.measure))];
 for (const s of library)
   if (!s.modules?.length || s.modules.some((m) => !modules.includes(m))) fail(`${s.name}: "modules" must name some of ${modules.join(", ")}`);
 // A scripted rival shares our blind spots: each fight kind meets an open-source bot at least once.
@@ -268,8 +276,12 @@ const measures = {
   engagements: (_, __, dir) => engagementsOf(dir).length,
   // Priced or not: a sweep that finds nothing opens unanswered.
   engagementsOpened: (_, a, dir) => rowsOf(dir).filter((e) => (!a.kind || e.kind === a.kind) && (!a.room || e.room === a.room)).length,
-  // Acts the engine refused, every kind (the soak's refusals.json).
-  refusals: (_, __, dir) => Object.values(JSON.parse(readFileSync(join(dir, "refusals.json"), "utf8"))).reduce((n, c) => n + c, 0),
+  // Acts the engine refused (the soak's refusals.json), but an observer's
+  // look at a room xxscreeps' map does not hold (-10), which no live map refuses.
+  refusals: (_, __, dir) =>
+    Object.entries(JSON.parse(readFileSync(join(dir, "refusals.json"), "utf8")))
+      .filter(([act]) => act !== "observeRoom -10")
+      .reduce((n, [, c]) => n + c, 0),
   // Raids an answered engagement saw die without disengaging.
   raidsKilled: (_, __, dir) => engagementsOf(dir).filter(({ a }) => a.won === true).length,
   // Over the sets of two or more that walked to their raid (soak-step's

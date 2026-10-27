@@ -19,7 +19,6 @@
   "ticks": 2500,
   "assert": [
     { "measure": "safeModeAt", "from": 1500, "max": 1900 },
-    { "measure": "fewestCreeps", "from": 1500, "min": 4 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "fewestCreeps", "from": 1500, "min": 4 }
   ]
 }

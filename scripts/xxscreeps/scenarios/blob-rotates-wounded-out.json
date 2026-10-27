@@ -7,7 +7,6 @@
     { "measure": "bodiesLost", "max": 0 },
     { "measure": "raidsKilled", "min": 1 },
     { "measure": "fightLowestHits", "min": 25 },
-    { "measure": "oscillation", "max": 5 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "oscillation", "max": 5 }
   ]
 }

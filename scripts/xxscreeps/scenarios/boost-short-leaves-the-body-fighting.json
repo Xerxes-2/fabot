@@ -6,7 +6,6 @@
   "assert": [
     { "measure": "boosted", "max": 0 },
     { "measure": "homeHostileTicks", "from": 3000, "max": 700 },
-    { "measure": "predictedWinsLost", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "predictedWinsLost", "max": 0 }
   ]
 }

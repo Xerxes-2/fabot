@@ -7,7 +7,6 @@
     { "measure": "blobAnchorRange", "min": 100 },
     { "measure": "blobStallTicks", "max": 2 },
     { "measure": "blobArrival", "max": 46 },
-    { "measure": "oscillation", "max": 5 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "oscillation", "max": 5 }
   ]
 }

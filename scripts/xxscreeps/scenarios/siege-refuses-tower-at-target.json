@@ -26,10 +26,6 @@
     {
       "measure": "oscillation",
       "max": 5
-    },
-    {
-      "measure": "faults",
-      "max": 0
     }
   ]
 }

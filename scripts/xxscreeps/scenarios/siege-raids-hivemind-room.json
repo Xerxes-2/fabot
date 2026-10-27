@@ -32,10 +32,6 @@
     {
       "measure": "diedAlone",
       "max": 0
-    },
-    {
-      "measure": "faults",
-      "max": 0
     }
   ]
 }

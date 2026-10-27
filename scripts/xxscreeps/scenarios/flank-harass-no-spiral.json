@@ -23,7 +23,6 @@
     { "measure": "fightShare", "max": 6 },
     { "measure": "engagements", "min": 50 },
     { "measure": "bodiesLost", "max": 3 },
-    { "measure": "poorestOutpost", "min": 140000 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "poorestOutpost", "min": 140000 }
   ]
 }

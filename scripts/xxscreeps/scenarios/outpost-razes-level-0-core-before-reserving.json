@@ -6,8 +6,6 @@
   "assert": [
     { "measure": "coresAtEnd", "to": 3000, "max": 0 },
     { "measure": "poorestOutpost", "from": 4000, "min": 27000 },
-    { "measure": "closedOnCore", "max": 0 },
-    { "measure": "refusals", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "closedOnCore", "max": 0 }
   ]
 }

@@ -18,7 +18,6 @@
     { "measure": "towerSpent", "who": "rival", "min": 1500 },
     { "measure": "towerLeft", "who": "rival", "max": 500 },
     { "measure": "cast", "max": 60000 },
-    { "measure": "bodiesLost", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "bodiesLost", "max": 0 }
   ]
 }

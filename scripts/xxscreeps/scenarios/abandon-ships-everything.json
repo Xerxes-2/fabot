@@ -5,8 +5,6 @@
   "ticks": 3000,
   "assert": [
     { "measure": "heldAtEnd", "room": "W1N1", "max": 200 },
-    { "measure": "oresAtEnd", "room": "W2N1", "min": 10500 },
-    { "measure": "refusals", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "oresAtEnd", "room": "W2N1", "min": 10500 }
   ]
 }

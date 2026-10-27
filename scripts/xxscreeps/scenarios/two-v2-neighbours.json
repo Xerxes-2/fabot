@@ -9,7 +9,6 @@
     { "measure": "spawnsLost", "max": 0 },
     { "measure": "spawnsLost", "who": "rival", "max": 0 },
     { "measure": "creepsAtEnd", "min": 5 },
-    { "measure": "creepsAtEnd", "who": "rival", "min": 5 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "creepsAtEnd", "who": "rival", "min": 5 }
   ]
 }

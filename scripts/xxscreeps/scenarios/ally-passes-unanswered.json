@@ -19,7 +19,6 @@
   "ticks": 600,
   "assert": [
     { "measure": "attackersAtEnd", "to": 500, "min": 1 },
-    { "measure": "engagements", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "engagements", "max": 0 }
   ]
 }

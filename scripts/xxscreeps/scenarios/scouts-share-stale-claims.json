@@ -11,7 +11,6 @@
     { "measure": "stalest", "room": "W7S2", "max": 600 },
     { "measure": "scoutTicksIn", "room": "W1S1", "max": 60 },
     { "measure": "scoutStill", "max": 10 },
-    { "measure": "scoutsCast", "max": 2 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "scoutsCast", "max": 2 }
   ]
 }

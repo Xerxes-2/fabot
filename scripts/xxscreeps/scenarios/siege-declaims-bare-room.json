@@ -9,7 +9,6 @@
   "ticks": 3200,
   "assert": [
     { "measure": "levelsLost", "who": "rival", "min": 1 },
-    { "measure": "bodiesLost", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "bodiesLost", "max": 0 }
   ]
 }

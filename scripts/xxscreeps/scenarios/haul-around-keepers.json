@@ -19,10 +19,6 @@
       "measure": "dug",
       "room": "W6S7",
       "min": 1
-    },
-    {
-      "measure": "faults",
-      "max": 0
     }
   ]
 }

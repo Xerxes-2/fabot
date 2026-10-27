@@ -13,7 +13,6 @@
   "assert": [
     { "measure": "struckOn", "name": "scout-enemy", "min": 1 },
     { "measure": "struckOn", "name": "scout-stranger", "max": 0 },
-    { "measure": "engagements", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "engagements", "max": 0 }
   ]
 }

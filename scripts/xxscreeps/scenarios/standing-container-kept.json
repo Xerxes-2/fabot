@@ -4,7 +4,6 @@
   "start": { "room": "W8N3", "seed": 1, "node": "T3" },
   "ticks": 1500,
   "assert": [
-    { "measure": "sourceContainersAtEnd", "max": 2 },
-    { "measure": "refusals", "max": 0 }
+    { "measure": "sourceContainersAtEnd", "max": 2 }
   ]
 }

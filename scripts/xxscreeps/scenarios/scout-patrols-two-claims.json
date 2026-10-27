@@ -16,8 +16,6 @@
     { "measure": "scoutsCast", "max": 4 },
     { "measure": "scoutStill", "max": 100 },
     { "measure": "scoutTicksIn", "room": "W7N3", "min": 20 },
-    { "measure": "scoutTicksIn", "room": "W8N2", "min": 20 },
-    { "measure": "refusals", "max": 0 },
-    { "measure": "faults", "max": 0 }
+    { "measure": "scoutTicksIn", "room": "W8N2", "min": 20 }
   ]
 }
