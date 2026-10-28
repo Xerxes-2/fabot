@@ -9,7 +9,7 @@ use crate::core::vocabulary::Resource;
 use crate::core::world::{Kind, Pos, RoomName};
 
 use super::bodies::{self, Pattern};
-use super::derived::{Body, Derived, RepairFact, StoreKind};
+use super::derived::{Body, Colony, Derived, Ground, RepairFact, StoreKind};
 use super::matcher::Assignments;
 use super::price;
 use super::task::{self, Task};
@@ -587,6 +587,121 @@ fn work_offers(
     }
 }
 
+/// The storage is offered for every ore a body carries, so no load is
+/// stranded.
+fn carried_ores(derived: &Derived) -> Vec<Resource> {
+    let mut seen: BTreeSet<Cow<'static, str>> = BTreeSet::new();
+    let mut ores = Vec::new();
+    for body in &derived.bodies {
+        for (resource, _) in &body.store.held {
+            let name = crate::core::vocabulary::resource_name(resource);
+            if !resource.is_energy() && seen.insert(name) {
+                ores.push(resource.clone());
+            }
+        }
+    }
+    ores
+}
+
+/// A load in the room of a colony short of its reserve is its own growth.
+fn lean_of(derived: &Derived) -> BTreeSet<RoomName> {
+    derived
+        .colonies
+        .iter()
+        .zip(&derived.grounds)
+        .filter(|(c, g)| {
+            let reserve =
+                super::quota::reserve_target(derived.reserve_lifetimes, c.controller.level);
+            !g.stores.iter().any(|s| s.owned && s.energy >= reserve)
+        })
+        .map(|(c, _)| c.room)
+        .collect()
+}
+
+/// An upgrader waiting on its buffer loses a tick of what the row hired it
+/// at. `fed`: the feed has room and an upgrader drinks it.
+fn feed_worth_of(derived: &Derived, ground: &Ground, fed: bool, colony: Option<&Colony>) -> f64 {
+    match (fed, &ground.buffer, colony) {
+        (true, Some(buffer), Some(c)) => {
+            let upgradable = bodies::upgradable_at(c.controller.level);
+
+            let upgraders: i32 = derived
+                .bodies
+                .iter()
+                .map(|b| i32::from(b.pattern.is_upgrader() && b.pos.room == ground.room))
+                .sum();
+
+            bodies::sized(Pattern::Upgrader, upgradable, c.bank_capacity).map_or(0.0, |body| {
+                bodies::upgrader_hire(upgradable, upgraders, &body) * (1.0 - buffer.fill)
+            })
+        }
+        _ => 0.0,
+    }
+}
+
+/// Each store's withdraw of its spare energy, a storage's capped by the room
+/// its sinks have `left` past a walk from it, and an owned store's refill.
+fn store_offers(
+    offers: &mut Vec<Offer>,
+    ground: &Ground,
+    ores: &[Resource],
+    stock_worth: f64,
+    left: &dyn Fn(&Pos) -> i32,
+) {
+    let reserve = fee_reserve(ground);
+    let kept = |id: &str| {
+        if ground.terminal.as_ref().is_some_and(|t| t.id == id) {
+            reserve
+        } else {
+            0
+        }
+    };
+
+    for s in &ground.stores {
+        let spare = s.energy - kept(&s.id);
+        if spare > 0 && !s.kind.is_buffer() {
+            let value = if s.kind.is_remains() {
+                price::flow_draw(price::transient_loss(s.energy))
+            } else if s.kind == StoreKind::Container && s.source_dug > 0 {
+                price::flow_draw(price::overflow_loss(s.source_dug, s.fill))
+            } else {
+                stock_worth
+            };
+
+            let (draw, load) = if s.kind.is_storage() {
+                let left = left(&s.pos);
+                if left > 0 {
+                    (Draw::Open, spare.min(left))
+                } else {
+                    (Draw::Spenders, spare)
+                }
+            } else {
+                (Draw::Open, spare)
+            };
+
+            let mut withdraw = offer(
+                Task::Withdraw(s.id.clone(), Resource::Energy),
+                &s.pos,
+                value,
+                Capacity::Load(load),
+            );
+            withdraw.draw = draw;
+            offers.push(withdraw);
+        }
+
+        if s.owned && s.free > 0 && !ground.abandoned {
+            for r in std::iter::once(Resource::Energy).chain(ores.iter().cloned()) {
+                offers.push(offer(
+                    Task::Refill(s.id.clone(), r),
+                    &s.pos,
+                    price::value_of_rank(price::BOTTOM_RANK),
+                    Capacity::Load(s.free),
+                ));
+            }
+        }
+    }
+}
+
 pub fn pool(
     derived: &Derived,
     owners: &BTreeMap<RoomName, usize>,
@@ -594,21 +709,7 @@ pub fn pool(
 ) -> Vec<Offer> {
     let mut offers: Vec<Offer> = Vec::new();
 
-    // The storage is offered for every ore a body carries, so no load is
-    // stranded.
-    let ores: Vec<Resource> = {
-        let mut seen: BTreeSet<Cow<'static, str>> = BTreeSet::new();
-        let mut ores = Vec::new();
-        for body in &derived.bodies {
-            for (resource, _) in &body.store.held {
-                let name = crate::core::vocabulary::resource_name(resource);
-                if !resource.is_energy() && seen.insert(name) {
-                    ores.push(resource.clone());
-                }
-            }
-        }
-        ores
-    };
+    let ores = carried_ores(derived);
 
     // A tick a spawn waits is a tick of the income bodies earn, and every
     // colony's alike: travel picks the ring, so a richer room's never draws a
@@ -620,18 +721,7 @@ pub fn pool(
     };
 
     let colony_rooms: BTreeSet<RoomName> = derived.colonies.iter().map(|c| c.room).collect();
-    // A load in the room of a colony short of its reserve is its own growth.
-    let lean: BTreeSet<RoomName> = derived
-        .colonies
-        .iter()
-        .zip(&derived.grounds)
-        .filter(|(c, g)| {
-            let reserve =
-                super::quota::reserve_target(derived.reserve_lifetimes, c.controller.level);
-            !g.stores.iter().any(|s| s.owned && s.energy >= reserve)
-        })
-        .map(|(c, _)| c.room)
-        .collect();
+    let lean = lean_of(derived);
 
     for (i, ground) in derived.grounds.iter().enumerate() {
         let colony = derived.colonies.get(i);
@@ -701,25 +791,7 @@ pub fn pool(
 
         let feed = ground.feed.as_ref().filter(|f| f.free > 0 && drinks);
 
-        // An upgrader waiting on its buffer loses a tick of what the row hired
-        // it at.
-        let feed_worth = match (feed, &ground.buffer, colony) {
-            (Some(_), Some(buffer), Some(c)) => {
-                let upgradable = bodies::upgradable_at(c.controller.level);
-
-                let upgraders: i32 = derived
-                    .bodies
-                    .iter()
-                    .map(|b| i32::from(b.pattern.is_upgrader() && b.pos.room == ground.room))
-                    .sum();
-
-                bodies::sized(Pattern::Upgrader, upgradable, c.bank_capacity).map_or(0.0, |body| {
-                    bodies::upgrader_hire(upgradable, upgraders, &body) * (1.0 - buffer.fill)
-                })
-            }
-            _ => 0.0,
-        };
-
+        let feed_worth = feed_worth_of(derived, ground, feed.is_some(), colony);
         hungriest = hungriest.max(feed_worth);
 
         // A loaded body is its sink's next delivery, so a draw past the room
@@ -747,58 +819,9 @@ pub fn pool(
                 .map_or(0, |r| drain * r)
         };
 
-        let reserve = fee_reserve(ground);
-        let kept = |id: &str| {
-            if ground.terminal.as_ref().is_some_and(|t| t.id == id) {
-                reserve
-            } else {
-                0
-            }
-        };
-
-        for s in &ground.stores {
-            let spare = s.energy - kept(&s.id);
-            if spare > 0 && !s.kind.is_buffer() {
-                let value = if s.kind.is_remains() {
-                    price::flow_draw(price::transient_loss(s.energy))
-                } else if s.kind == StoreKind::Container && s.source_dug > 0 {
-                    price::flow_draw(price::overflow_loss(s.source_dug, s.fill))
-                } else {
-                    price::stock_draw(starved, hungriest)
-                };
-
-                let (draw, load) = if s.kind.is_storage() {
-                    let left = room + walked(&s.pos) - aboard;
-                    if left > 0 {
-                        (Draw::Open, spare.min(left))
-                    } else {
-                        (Draw::Spenders, spare)
-                    }
-                } else {
-                    (Draw::Open, spare)
-                };
-
-                let mut withdraw = offer(
-                    Task::Withdraw(s.id.clone(), Resource::Energy),
-                    &s.pos,
-                    value,
-                    Capacity::Load(load),
-                );
-                withdraw.draw = draw;
-                offers.push(withdraw);
-            }
-
-            if s.owned && s.free > 0 && !ground.abandoned {
-                for r in std::iter::once(Resource::Energy).chain(ores.iter().cloned()) {
-                    offers.push(offer(
-                        Task::Refill(s.id.clone(), r),
-                        &s.pos,
-                        price::value_of_rank(price::BOTTOM_RANK),
-                        Capacity::Load(s.free),
-                    ));
-                }
-            }
-        }
+        let left = |at: &Pos| room + walked(at) - aboard;
+        let stock_worth = price::stock_draw(starved, hungriest);
+        store_offers(&mut offers, ground, &ores, stock_worth, &left);
 
         if let Some(f) = feed {
             let mut refill = offer(
