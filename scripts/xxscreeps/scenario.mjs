@@ -8,7 +8,7 @@
 // soak-runs/worlds/, and the bundle under test runs on from it as a deploy
 // would, Memory kept.
 //
-// Usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch] [--capture] [--base name]
+// Usage: npm run scenario -- [name...] [--modules m,n] [--list] [--bot main.js] [--jobs J] [--nightly] [--fetch] [--capture] [--base name] [--seeds N]
 //        npm run scenario -- <name> --watch [--tick-ms N] [--port N]
 //   name    the scenarios to run (default all but the nightly ones), by file name
 //   --modules  also the scenarios naming any of these modules (directories under src/core)
@@ -21,6 +21,7 @@
 //   --base  a bundle name whose runs stand in soak-runs (an earlier --bot
 //           name.js): each measure is printed beside the base's, marked
 //           better or worse by its bound's side, and each soak's score
+//   --seeds each start also on the N - 1 seeds after its own
 //   --capture  every tick each soak decides, to its capture.jsonl, which
 //           `npm run replay` decides again with another bundle
 //   --jobs  soaks at once (default a quarter of the hardware threads, as soak:many)
@@ -61,7 +62,7 @@ const watch = [];
 const WATCH_VALUES = ["--tick-ms", "--port"];
 const rest = process.argv.slice(2);
 for (let i = 0; i < rest.length; i++)
-  if (rest[i] === "--bot" || rest[i] === "--jobs" || rest[i] === "--modules" || rest[i] === "--base") flags[rest[i]] = rest[++i] ?? fail(`${rest[i - 1]} takes a value`);
+  if (["--bot", "--jobs", "--modules", "--base", "--seeds"].includes(rest[i])) flags[rest[i]] = rest[++i] ?? fail(`${rest[i - 1]} takes a value`);
   else if (rest[i] === "--list" || rest[i] === "--nightly" || rest[i] === "--fetch" || rest[i] === "--capture") flags[rest[i]] = true;
   else if (rest[i] === "--watch") watch.push(rest[i]);
   else if (WATCH_VALUES.includes(rest[i])) watch.push(rest[i], rest[++i]);
@@ -102,7 +103,17 @@ for (const n of names) if (!library.some((s) => s.name === n)) fail(`no scenario
 const touched = flags["--modules"]?.split(",").filter(Boolean) ?? [];
 for (const m of touched) if (!modules.includes(m)) fail(`no module ${m}; the modules: ${modules.join(", ")}`);
 const meets = (s) => (touched.length ? s.modules.some((m) => touched.includes(m)) : !names.length);
-const scenarios = library.filter((s) => names.includes(s.name) || (meets(s) && (flags["--nightly"] || !s.nightly)));
+// --seeds N plays each start on its seed and the N - 1 after it: one seed is one
+// game, and a change of behaviour is read over several.
+const seeds = Number(flags["--seeds"] ?? 1);
+if (!Number.isInteger(seeds) || seeds < 1) fail("--seeds takes a count of seeds, 1 or more");
+const scenarios = library
+  .filter((s) => names.includes(s.name) || (meets(s) && (flags["--nightly"] || !s.nightly)))
+  .flatMap((s) =>
+    Array.from({ length: seeds }, (_, k) =>
+      k === 0 ? s : { ...s, name: `${s.name}@s${(s.start.seed ?? 1) + k}`, start: { ...s.start, seed: (s.start.seed ?? 1) + k } },
+    ),
+  );
 if (flags["--list"]) {
   for (const s of scenarios) console.log(`${s.name}  ${s.modules.join(",")}`);
   console.log(`${scenarios.length} of ${library.length} scenarios`);
