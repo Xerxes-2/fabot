@@ -604,7 +604,6 @@ fn labs_of(room: &Room) -> Vec<LabFact> {
         .collect()
 }
 
-/// The minerals our storage and terminal hold, each with its store.
 fn ores_of(room: &Room) -> Vec<(String, Pos, Resource, i32)> {
     room.structures
         .iter()
@@ -992,7 +991,6 @@ fn stock_labs(
     }
 }
 
-/// Our rooms with a spawn, each with its room.
 fn colonies_of(world: &World) -> (Vec<Colony>, Vec<&Room>) {
     let mut colonies: Vec<Colony> = Vec::new();
     let mut colony_rooms: Vec<&Room> = Vec::new();
@@ -1065,7 +1063,6 @@ fn remote_of(
     }
 }
 
-/// The bodies the spawns are making, for the economy.
 fn ovens_of(world: &World) -> Vec<Body> {
     world
         .spawns

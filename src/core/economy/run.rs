@@ -385,7 +385,6 @@ fn dug_out(derived: &Derived) -> BTreeSet<String> {
         .collect()
 }
 
-/// What the links, terminals and labs do this tick.
 fn sends(derived: &Derived) -> Vec<Intent> {
     let mut sends: Vec<Intent> = Vec::new();
     for g in &derived.grounds {
@@ -578,11 +577,11 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         })
         .collect();
 
-    let dug_out = dug_out(&derived);
+    let dug = dug_out(&derived);
 
     let ready = |task: &Task| -> bool {
         match task {
-            Task::Harvest(id) => !dug_out.contains(id),
+            Task::Harvest(id) => !dug.contains(id),
             _ => true,
         }
     };

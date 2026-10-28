@@ -270,7 +270,7 @@ fn haul_trip(walks: &mut dyn Walks, derived: &Derived, ci: usize, fetch: &Pos) -
 }
 
 /// A colony's haulers: the carry its flows need over their trips, `(carries,
-/// remote, flow)`, worth what the digs it hauls leave.
+/// remote, flow)`.
 fn hauler_demand(
     colony: &Colony,
     (carries, remote, flow): (f64, f64, f64),
@@ -790,10 +790,9 @@ impl Foundry<'_> {
     }
 }
 
-/// A seat its bank cannot pay yields to the next it can: an order, never a
-/// veto. Never to an upgrader.
-/// Each standing body, less those leaving now, charged to the nearest open
-/// demand of its pattern: its parts by pattern.
+/// Each standing body, less those leaving now, takes its parts and a seat off
+/// the nearest open demand of its pattern (`Demand::left` and `seats_left`
+/// fall): its parts by pattern.
 fn charged(
     walks: &mut dyn Walks,
     derived: &Derived,
@@ -1035,6 +1034,8 @@ fn cast(foundry: &mut Foundry, seats: Vec<((i32, f64), Seat)>, served: &[i32]) -
     seated
 }
 
+/// A seat its bank cannot pay yields to the next it can: an order, never a
+/// veto. Never to an upgrader.
 pub fn plan(
     walks: &mut dyn Walks,
     derived: &Derived,

@@ -9,7 +9,7 @@ use crate::core::vocabulary::Resource;
 use crate::core::world::{Kind, Pos, RoomName};
 
 use super::bodies::{self, Pattern};
-use super::derived::{Body, Colony, Derived, Ground, RepairFact, StoreKind};
+use super::derived::{Body, Colony, Derived, Ground, RepairFact, StoreFact, StoreKind};
 use super::matcher::Assignments;
 use super::price;
 use super::task::{self, Task};
@@ -587,8 +587,6 @@ fn work_offers(
     }
 }
 
-/// The storage is offered for every ore a body carries, so no load is
-/// stranded.
 fn carried_ores(derived: &Derived) -> Vec<Resource> {
     let mut seen: BTreeSet<Cow<'static, str>> = BTreeSet::new();
     let mut ores = Vec::new();
@@ -619,10 +617,15 @@ fn lean_of(derived: &Derived) -> BTreeSet<RoomName> {
 }
 
 /// An upgrader waiting on its buffer loses a tick of what the row hired it
-/// at. `fed`: the feed has room and an upgrader drinks it.
-fn feed_worth_of(derived: &Derived, ground: &Ground, fed: bool, colony: Option<&Colony>) -> f64 {
-    match (fed, &ground.buffer, colony) {
-        (true, Some(buffer), Some(c)) => {
+/// at. `feed`: the feed with room, where an upgrader drinks it.
+fn feed_worth_of(
+    derived: &Derived,
+    ground: &Ground,
+    feed: Option<&StoreFact>,
+    colony: Option<&Colony>,
+) -> f64 {
+    match (feed, &ground.buffer, colony) {
+        (Some(_), Some(buffer), Some(c)) => {
             let upgradable = bodies::upgradable_at(c.controller.level);
 
             let upgraders: i32 = derived
@@ -669,9 +672,9 @@ fn store_offers(
             };
 
             let (draw, load) = if s.kind.is_storage() {
-                let left = left(&s.pos);
-                if left > 0 {
-                    (Draw::Open, spare.min(left))
+                let room = left(&s.pos);
+                if room > 0 {
+                    (Draw::Open, spare.min(room))
                 } else {
                     (Draw::Spenders, spare)
                 }
@@ -708,6 +711,8 @@ pub fn pool(
     held: &Assignments,
 ) -> Vec<Offer> {
     let mut offers: Vec<Offer> = Vec::new();
+    // The storage is offered for every ore a body carries, so no load is
+    // stranded.
 
     let ores = carried_ores(derived);
 
@@ -791,7 +796,7 @@ pub fn pool(
 
         let feed = ground.feed.as_ref().filter(|f| f.free > 0 && drinks);
 
-        let feed_worth = feed_worth_of(derived, ground, feed.is_some(), colony);
+        let feed_worth = feed_worth_of(derived, ground, feed, colony);
         hungriest = hungriest.max(feed_worth);
 
         // A loaded body is its sink's next delivery, so a draw past the room
