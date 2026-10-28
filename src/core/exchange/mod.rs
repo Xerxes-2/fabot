@@ -54,6 +54,22 @@ impl Outcome {
     pub fn is_win(&self) -> bool {
         matches!(self, Outcome::Win(_, _))
     }
+
+    /// What a Win is priced to lose; none on a Kite or Lose.
+    pub fn losses(&self) -> Losses {
+        match self {
+            Outcome::Win(_, losses) => *losses,
+            _ => Losses { dead: 0, hits: 0 },
+        }
+    }
+
+    /// The ticks a Win or Kite is priced to run.
+    pub fn ticks(&self) -> i32 {
+        match self {
+            Outcome::Win(ticks, _) | Outcome::Kite(ticks) => *ticks,
+            Outcome::Lose => 0,
+        }
+    }
 }
 
 pub type Body = Vec<BodyPart>;

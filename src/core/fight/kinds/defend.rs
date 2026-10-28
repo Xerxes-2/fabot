@@ -218,9 +218,8 @@ fn razed(home: &Home) -> bool {
                 &f.creep.pos,
             )
     };
-    // Two of the dig fallen within a tombstone's life: the raid kills faster
-    // than the spawn regrows (a raid camping a source takes each harvester as
-    // it arrives, and no hand ever falls). The hands have the floor's rule.
+    // Two of the dig fallen within a tombstone's life: a raid camping a
+    // source kills faster than the spawn regrows, and no hand ever falls.
     let dug = |c: &Creep| c.body.iter().any(|p| p.kind.is_work());
     let culled = home
         .fallen

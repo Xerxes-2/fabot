@@ -94,18 +94,15 @@ impl<'a> Scene<'a> {
     /// The usernames whose room this is and who stands in it: what a rule's
     /// `rival` names (§6.3).
     pub(super) fn rivals_of(&self, room: RoomName) -> BTreeSet<&'a str> {
-        let Some(seen) = self.in_sight(room) else {
-            return BTreeSet::new();
-        };
-
-        let owners = seen
-            .structures
-            .iter()
-            .map(|s| &s.owner)
-            .chain(seen.controller.as_ref().map(|c| &c.owner))
-            .chain(seen.hostiles().map(|h| &h.owner));
-
-        owners.filter_map(Owner::user).collect()
+        let seen = self.in_sight(room).into_iter();
+        (seen.flat_map(|r| {
+            let owners = r.structures.iter().map(|s| &s.owner);
+            owners
+                .chain(r.controller.as_ref().map(|c| &c.owner))
+                .chain(r.hostiles().map(|h| &h.owner))
+        }))
+        .filter_map(Owner::user)
+        .collect()
     }
 
     /// A kind's candidates as the operator's rules leave them, and the pin it
@@ -371,14 +368,15 @@ impl<'a> Scene<'a> {
 
     /// How many of the drain's bodies the set already holds, standing or in
     /// an oven: a pair's shape is no other body's.
-    pub(super) fn paired(&self, e: &Engagement, asked: &Asked, set: &[casting::Body]) -> usize {
-        let of = |body: &[BodyPart]| set.iter().any(|s| s.as_slice() == body);
-
-        (self.members_of(e))
+    pub(super) fn paired(&self, e: &Engagement, ovens: &[Cast], set: &[casting::Body]) -> usize {
+        let of = |body: &[BodyPart]| set.contains(&body.to_vec());
+        let stand = self
+            .members_of(e)
             .iter()
-            .filter(|c| of(&c.body.iter().map(|p| p.kind).collect::<Vec<_>>()))
-            .count()
-            + (asked.casts)
+            .filter(|c| of(&crate::core::world::body_kinds(c)))
+            .count();
+        stand
+            + ovens
                 .iter()
                 .filter(|c| c.engagement == e.id && of(&c.body))
                 .count()
@@ -468,7 +466,7 @@ impl<'a> Scene<'a> {
         let due: BTreeMap<String, casting::Body> = members
             .iter()
             .filter(|c| !held.contains(&slot(&c.name)))
-            .map(|c| (slot(&c.name), c.body.iter().map(|p| p.kind).collect()))
+            .map(|c| (slot(&c.name), crate::core::world::body_kinds(c)))
             .collect();
 
         let due: Vec<(String, casting::Body)> = due.into_iter().collect();
@@ -612,17 +610,7 @@ impl<'a> Scene<'a> {
     /// A pair of the drain stands or is in an oven, or one has tripped: a drain
     /// with none of those holds nothing.
     pub(super) fn pair_worked(&self, e: &Engagement) -> bool {
-        let set = casting::drains(e.capacity);
-        let of = |body: &[BodyPart]| set.iter().any(|s| s.as_slice() == body);
-
-        e.ignored > 0
-            || (self.members_of(e)).iter().any(|c| {
-                let body: Vec<BodyPart> = c.body.iter().map(|p| p.kind).collect();
-                of(&body)
-            })
-            || (self.waiting)
-                .iter()
-                .any(|c| c.engagement == e.id && of(&c.body))
+        e.ignored > 0 || self.paired(e, &self.waiting, &casting::drains(e.capacity)) > 0
     }
 
     /// Whole, as cast: a part struck off is healed back, and only a body lost
@@ -640,7 +628,7 @@ impl<'a> Scene<'a> {
             .ours
             .iter()
             .filter_map(|n| self.ours.get(n.as_str()))
-            .map(|c| (slot_of(&c.name), c.body.iter().map(|p| p.kind).collect()))
+            .map(|c| (slot_of(&c.name), crate::core::world::body_kinds(c)))
             .collect();
 
         bodies.extend(

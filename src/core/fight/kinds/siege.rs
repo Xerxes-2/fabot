@@ -7,7 +7,7 @@ use super::sweep;
 use crate::core::atlas::Atlas;
 use crate::core::atlas::tiles::{self, Tile, TileSet};
 use crate::core::engine;
-use crate::core::exchange::{self, Losses, Outcome};
+use crate::core::exchange::{self, Outcome};
 use crate::core::tactics::{self, Offer, Tactic};
 use crate::core::vocabulary::Resource;
 use crate::core::world::{Controller, Kind, Owner, Pos, Room, RoomName, Structure};
@@ -327,12 +327,7 @@ pub fn offers(
         .iter()
         .map(|s| sweep::yield_of(s, engine::CREEP_LIFETIME))
         .sum();
-    let (ticks, losses) = match outcome {
-        Outcome::Win(ticks, losses) => (ticks, losses),
-        Outcome::Kite(ticks) => (ticks, Losses { dead: 0, hits: 0 }),
-        Outcome::Lose => (0, Losses { dead: 0, hits: 0 }),
-    };
-    let cost = casting::spent(set, losses, ticks, 0);
+    let cost = casting::spent(set, outcome.losses(), outcome.ticks(), 0);
 
     candidates
         .iter()

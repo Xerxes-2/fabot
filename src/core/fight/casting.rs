@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use crate::core::engine;
 use crate::core::exchange::{self, Fighter, fighter};
 use crate::core::tick::Declarations;
-use crate::core::vocabulary::{self, BodyPart, Boost, Compound, Resource};
+use crate::core::vocabulary::{self, BodyPart, Compound, Resource};
 use crate::core::world::{
     Creep, Kind, Owner, Pos, Room, RoomName, Spawn, Store, Structure, World, terrain,
 };
@@ -99,8 +99,10 @@ fn with_heal(mut body: Body) -> Body {
 }
 
 pub fn fighter_of(c: &Creep) -> Fighter {
-    let body: Vec<BodyPart> = c.body.iter().map(|p| p.kind).collect();
-    let boosts: Vec<Boost> = c.body.iter().map(|p| p.boost).collect();
+    let (body, boosts) = (
+        crate::core::world::body_kinds(c),
+        crate::core::world::body_boosts(c),
+    );
     let mut f = fighter::of_parts(&body, &boosts, c.hits, Some(c.pos));
     f.invader = c.owner == Owner::Invader;
     f

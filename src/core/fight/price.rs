@@ -185,15 +185,13 @@ impl<'a> Scene<'a> {
             .find(|s| s.pos.room == colony)
             .map_or_else(|| middle(colony), |s| s.pos);
 
-        let Some(room) = self.in_sight(e.room) else {
-            return Some(e.clone());
-        };
-
-        if let Some(c) = siege::tapped(room, target) {
+        let room = self.in_sight(e.room);
+        if let Some(c) = room.and_then(|r| siege::tapped(r, target)) {
             return Some(self.tapped(atlas, asked, e, c));
         }
-
-        let Some(goal) = room.structures.iter().find(|s| s.id == target) else {
+        let Some((room, goal)) =
+            room.and_then(|r| Some((r, r.structures.iter().find(|s| s.id == target)?)))
+        else {
             return Some(e.clone());
         };
 
@@ -284,7 +282,7 @@ impl<'a> Scene<'a> {
                 let pairs = casting::pairs(e.capacity) as usize;
                 let missing: Vec<casting::Body> = (casting::pair().iter())
                     .flat_map(|body| {
-                        let have = self.paired(e, asked, std::slice::from_ref(body));
+                        let have = self.paired(e, &asked.casts, std::slice::from_ref(body));
                         std::iter::repeat_n(body.clone(), pairs.saturating_sub(have))
                     })
                     .collect();
@@ -661,21 +659,27 @@ impl<'a> Scene<'a> {
         free: &mut Vec<String>,
         declarations: &Declarations,
     ) -> Engagement {
-        if self.spent(e) {
-            return e.clone();
-        }
+        self.priced_after(atlas, asked, e, free, declarations, (None, 0))
+    }
 
-        let Some(g) = self.by_id.get(&e.group).cloned() else {
+    /// `wait`: the ticks a cast holds the set forming (None: the casts
+    /// asked), and `fight` the ticks its fight is priced to.
+    fn priced_after(
+        &self,
+        atlas: &Atlas,
+        asked: &mut Asked,
+        e: &Engagement,
+        free: &mut Vec<String>,
+        declarations: &Declarations,
+        (wait, fight): (Option<i32>, i32),
+    ) -> Engagement {
+        let g = self
+            .by_id
+            .get(&e.group)
+            .filter(|_| !self.spent(e) && e.phase != Phase::Disengaging);
+        let Some((g, room)) = g.and_then(|g| Some((g.clone(), self.in_sight(g.room)?))) else {
             return e.clone();
         };
-
-        let Some(room) = self.in_sight(g.room) else {
-            return e.clone();
-        };
-
-        if e.phase == Phase::Disengaging {
-            return e.clone();
-        }
 
         // A home's towers leave a body they cannot out-heal, armed or not, to its Defend.
         let raid: Vec<Creep> = self.foes[&room.name]
@@ -697,7 +701,32 @@ impl<'a> Scene<'a> {
             towers: Vec::new(),
         };
 
-        let joining = self.joining(atlas, e, free);
+        let asked_bodies: Vec<casting::Body> = (asked.casts.iter())
+            .filter(|c| c.engagement == e.id)
+            .map(|c| c.body.clone())
+            .collect();
+        let asked_fighters = cast_all(&asked_bodies);
+
+        // A forming set joins when its casts stand there, spawned one after
+        // another and walked from the nearest colony; held by none, it goes
+        // as it stands. Held, it counts a body only if it lives to the fight's
+        // end, or bodies with 19-99 ticks to live price a win it reaches with one.
+        let colony = (self.colonies_of(atlas, e).iter())
+            .filter_map(|r| self.walk_to(atlas, e, r.name))
+            .min();
+        let waiting = |casts: &[casting::Body]| match casts.len() {
+            0 => 0,
+            _ => engine::SPAWN_TICKS_PER_PART * casts.concat().len() as i32 + colony.unwrap_or(0),
+        };
+        let wait = wait.unwrap_or_else(|| waiting(&asked_bodies));
+        let outlives = |c: &Creep, wait: i32, fight: i32| {
+            (self.walk_to(atlas, e, c.pos.room))
+                .is_some_and(|w| c.ticks_to_live > wait.max(w) + fight)
+        };
+        let lasts = |c: &&Creep| wait == 0 || outlives(c, wait, fight);
+        let joining: Vec<String> = (self.joining(atlas, e, free).into_iter())
+            .filter(|n| self.ours.get(n.as_str()).is_some_and(lasts))
+            .collect();
 
         let mut fielding_names: Vec<String> = e.ours.iter().cloned().collect();
         fielding_names.extend(joining.iter().cloned());
@@ -705,18 +734,10 @@ impl<'a> Scene<'a> {
         let fielding: Vec<&Creep> = fielding_names
             .iter()
             .filter_map(|n| self.ours.get(n.as_str()).copied())
+            .filter(lasts)
             .collect();
 
         let bodies: Vec<Fighter> = fielding.iter().map(|c| casting::fighter_of(c)).collect();
-
-        let asked_bodies: Vec<casting::Body> = asked
-            .casts
-            .iter()
-            .filter(|c| c.engagement == e.id)
-            .map(|c| c.body.clone())
-            .collect();
-
-        let asked_fighters = cast_all(&asked_bodies);
 
         let core_hits: i32 = raid
             .iter()
@@ -764,13 +785,12 @@ impl<'a> Scene<'a> {
 
                     let razing = casting::razer(capacity, core_hits, &[]);
 
-                    let fielded_cost: i32 = fielding
-                        .iter()
-                        .map(|c| c.body.iter().map(|p| p.kind).collect::<Vec<_>>())
-                        .chain(asked_bodies.iter().cloned())
-                        .filter(|b| !razing.contains(b))
-                        .map(|b| engine::body_cost(&b))
-                        .sum();
+                    let fielded_cost: i32 =
+                        (fielding.iter().map(|c| crate::core::world::body_kinds(c)))
+                            .chain(asked_bodies.iter().cloned())
+                            .filter(|b| !razing.contains(b))
+                            .map(|b| engine::body_cost(&b))
+                            .sum();
 
                     let worth = tick_worth * ticks - fielded_cost;
 
@@ -808,6 +828,14 @@ impl<'a> Scene<'a> {
             self.boost,
         ) {
             Some((set, outcome, landed)) => {
+                // The set asked here holds the rest: priced again without a
+                // body that would not outlast it. Each pass drops one.
+                let after = wait.max(waiting(&[asked_bodies.clone(), set.clone()].concat()));
+                let held = (Some(after), outcome.ticks());
+                if after > 0 && fielding.iter().any(|c| !outlives(c, after, held.1)) {
+                    return self.priced_after(atlas, asked, e, free, declarations, held);
+                }
+
                 let mut priced_bodies: Vec<Fighter> = bodies.clone();
                 priced_bodies.extend(asked_fighters.iter().cloned());
                 priced_bodies.extend(set.iter().map(|b| fighter::cast(b)));
@@ -825,14 +853,8 @@ impl<'a> Scene<'a> {
                     holds: exchange::stance_against(stance, &landed, &theirs, terrain)
                         == Stance::Hold,
                     won: outcome.is_win(),
-                    losses: match outcome {
-                        Outcome::Win(_, losses) => losses,
-                        _ => Losses { dead: 0, hits: 0 },
-                    },
-                    ticks: match outcome {
-                        Outcome::Win(ticks, _) | Outcome::Kite(ticks) => ticks,
-                        Outcome::Lose => 0,
-                    },
+                    losses: outcome.losses(),
+                    ticks: outcome.ticks(),
                     set,
                     tick_worth,
                 };
@@ -854,11 +876,7 @@ impl<'a> Scene<'a> {
                     order: casting::kill_order(&raid),
                     offers,
                 };
-                next.budget = e.lost
-                    + match outcome {
-                        Outcome::Win(_, losses) => losses.dead,
-                        _ => 0,
-                    };
+                next.budget = e.lost + outcome.losses().dead;
                 next.unanswered = false;
                 next.capacity = capacity;
                 // A core alone is no fight Exchange predicts (§10.1).
@@ -874,6 +892,7 @@ impl<'a> Scene<'a> {
                     .ours
                     .iter()
                     .filter_map(|n| self.ours.get(n.as_str()))
+                    .filter(|c| lasts(c))
                     .map(|c| casting::fighter_of(c))
                     .collect();
 

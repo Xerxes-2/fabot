@@ -286,17 +286,15 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .collect();
     let cornered: BTreeSet<i32> = sweeps()
         .filter(|e| {
-            let Some(ground) = grounds.get(&e.room) else {
-                return false;
-            };
             let members = scene.members_of(e);
-            members.iter().filter(|c| c.pos.room == e.room).any(|c| {
-                let mates: Vec<&Creep> = members
-                    .iter()
-                    .copied()
+            let mates = |c: &Creep| {
+                (members.iter().copied())
                     .filter(|m| m.name != c.name)
-                    .collect();
-                tactics::cornered(atlas, &ground.threat, &mates, c)
+                    .collect::<Vec<_>>()
+            };
+            (grounds.get(&e.room)).is_some_and(|g| {
+                (members.iter().filter(|c| c.pos.room == e.room))
+                    .any(|c| tactics::cornered(atlas, &g.threat, &mates(c), c))
             })
         })
         .map(|e| e.id)
