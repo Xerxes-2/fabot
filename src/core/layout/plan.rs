@@ -334,13 +334,18 @@ fn pick(
     (slots.taken, slots.picked)
 }
 
-/// `spawns` only order the spawn slots, so a spawn on a slot never moves the
-/// plan. Ways are laid before slots are handed out, so no structure stands on
-/// one.
-fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> (Plan, bool) {
-    let weights: &[Weight; tiles::COUNT] = &ground.weights;
-    let mut unfit: Vec<Cow<'static, str>> = Vec::new();
-
+/// Each tile on the lattice, the lane a road takes (a detour off the
+/// lattice), the walk from the anchor down it, and the tiles off the lattice
+/// a lattice tile's way home crosses.
+fn lanes(
+    weights: &[Weight; tiles::COUNT],
+    anchor: Tile,
+) -> (
+    [bool; tiles::COUNT],
+    [Weight; tiles::COUNT],
+    tiles::Table<i32>,
+    [bool; tiles::COUNT],
+) {
     let mut on_lat = [false; tiles::COUNT];
     let mut lane: [Weight; tiles::COUNT] = [None; tiles::COUNT];
 
@@ -381,6 +386,68 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
             }
         }
     }
+
+    (on_lat, lane, walk, clear)
+}
+
+/// Each item by its kind's priority, then its level, then as drawn.
+fn in_build_order(
+    all: Vec<Item>,
+    posted: &[Posted],
+    weights: &[Weight; tiles::COUNT],
+    buffer: Option<Tile>,
+) -> Vec<Item> {
+    // A container whose rock other seats ring goes before the extensions: its
+    // harvester digs beside the crews. A rock's only seat waits for the bank,
+    // or a small harvester holds it a life.
+    let crowded: Vec<Tile> = posted
+        .iter()
+        .filter(|p| {
+            tiles::around(p.rock)
+                .iter()
+                .filter(|n| weights[**n].is_some())
+                .count()
+                > 1
+        })
+        .map(|p| p.container)
+        .collect();
+
+    // The upgraders' only seat: a room that reaches a level with lower items
+    // unbuilt builds it with them.
+    let rank_of = |i: &Item| -> i32 {
+        if i.kind.is_container() && crowded.contains(&i.tile) {
+            2 * priority(&Kind::Extension) - 1
+        } else if i.kind.is_container() && buffer == Some(i.tile) {
+            2 * priority(&Kind::Extension)
+        } else {
+            2 * priority(&i.kind)
+        }
+    };
+
+    let mut keys: Vec<i32> = (0..all.len())
+        .map(|i| {
+            let item = &all[i];
+            (rank_of(item) * (engine::CONTROLLER_MAX_LEVEL + 2) + item.level) * all.len() as i32
+                + i as i32
+        })
+        .collect();
+
+    keys.sort_unstable();
+
+    keys.iter()
+        .map(|key| all[(*key % all.len() as i32) as usize].clone())
+        .collect()
+}
+
+/// `spawns` only order the spawn slots, so a spawn on a slot never moves the
+/// plan. Ways are laid before slots are handed out, so no structure stands on
+/// one.
+fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> (Plan, bool) {
+    let weights: &[Weight; tiles::COUNT] = &ground.weights;
+    let mut unfit: Vec<Cow<'static, str>> = Vec::new();
+
+    let (on_lat, lane, walk, mut clear) = lanes(weights, anchor);
+    let lattice = |t: Tile| -> bool { on_lat[t] && lane[t].is_some() };
 
     fn way_out(
         lane: &[Weight; tiles::COUNT],
@@ -513,49 +580,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         board.on_way[*t] = true;
     }
 
-    // A dead end's link is held as it is planted, so no other container or
-    // link takes the room it was chosen for.
-    let mut posted: Vec<Posted> = Vec::new();
-
-    for (rock, path) in &source_walks {
-        let head = path[0];
-
-        let found = tiles::within(1, *rock)
-            .into_iter()
-            .find(|t| board.dead_end(*rock, head, *t));
-
-        match found {
-            Some(t) if !board.taken[head] => {
-                board.plant(&Kind::Container, t, rock_level);
-                board.pave(path, rock_level);
-                let link = board.source_link(t);
-                if let Some(l) = link {
-                    board.taken[l] = true;
-                }
-
-                posted.push(Posted {
-                    rock: *rock,
-                    container: t,
-                    link,
-                    path: path.clone(),
-                });
-            }
-            _ => {
-                if !board.taken[head] {
-                    board.plant(&Kind::Container, head, rock_level);
-                }
-
-                board.pave(&path[1..], rock_level);
-
-                posted.push(Posted {
-                    rock: *rock,
-                    container: head,
-                    link: None,
-                    path: path.clone(),
-                });
-            }
-        }
-    }
+    let posted = board.post(&source_walks, rock_level);
 
     if let Some((_, buffer, rest)) = &controller_seat {
         if !board.taken[*buffer] {
@@ -577,114 +602,10 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         board.pave(&path[1..], dig_level);
     }
 
-    let mut links: Vec<Tile> = Vec::new();
+    let linked = board.link(on_first, controller_seat.as_ref(), &posted);
 
-    let mut linked = controller_seat.is_none();
-
-    if let Some((c, container, _)) = &controller_seat {
-        let found = {
-            let walkable = |t: Tile| board.walkable(t);
-            let linkable = |t: Tile| board.linkable(t);
-            let standable = |t: Tile| board.standable(t);
-            controller_link(walkable, linkable, standable, *c, *container)
-        };
-
-        match found {
-            Some(t) => {
-                board.taken[t] = true;
-                links.push(t);
-                linked = true;
-
-                let seats = Atlas::upgrader_seats(|t: Tile| board.walkable(t), *c, t);
-                for n in seats {
-                    board.held[n] = true;
-                }
-            }
-            // A link built late beats none.
-            None if on_first => {
-                let best = (tiles::around(*container).iter().copied())
-                    .filter(|t| board.free(*t) && tiles::range(*t, *c) <= engine::UPGRADE_RANGE)
-                    .min_by_key(|t| (-board.open_count(*t), *t));
-
-                if let Some(t) = best {
-                    board.taken[t] = true;
-                    links.push(t);
-                }
-            }
-            None => (),
-        }
-    }
-
-    let mut order: Vec<usize> = (0..posted.len()).collect();
-    order.sort_by_key(|i| (-(posted[*i].path.len() as i32), posted[*i].rock));
-
-    for i in order {
-        let container = posted[i].container;
-        let link = posted[i].link.or_else(|| board.source_link(container));
-        if let Some(t) = link {
-            board.taken[t] = true;
-            links.push(t);
-        }
-    }
-
-    let hub_links = board.items.iter().filter(|i| i.kind.is_link()).count() as i32;
-    let outer: Vec<Tile> = links
-        .iter()
-        .take((count(&Kind::Link) - hub_links).max(0) as usize)
-        .copied()
-        .collect();
-
-    for (i, t) in outer.iter().enumerate() {
-        board.extra.push(Item {
-            kind: Kind::Link,
-            tile: *t,
-            level: level_of(&Kind::Link, i as i32),
-        });
-    }
-
-    // The hub's link comes last: it pays the 3% loss on all the storage's
-    // energy to save a walk, where a source's link saves a whole haul.
-    for k in 0..board.items.len() {
-        if board.items[k].kind.is_link() {
-            board.items[k].level = level_of(&Kind::Link, outer.len() as i32);
-        }
-    }
-
-    let mut road_keys: Vec<(i32, i32, Tile)> = (tiles::all())
-        .filter(|t| board.road_level[*t] != NONE && !board.taken[*t])
-        .map(|t| (board.road_level[t], (ROAD_SPAN - 1).min(board.walk[t]), t))
-        .collect();
-    road_keys.sort_unstable();
-
-    let roads: Vec<Item> = road_keys
-        .iter()
-        .map(|&(_, _, t)| Item {
-            kind: Kind::Road,
-            tile: t,
-            level: board.road_level[t],
-        })
-        .collect();
-
-    // A source's container too: its harvester cannot leave it.
-    let kept = (board.items.iter()).filter(|i| KEEP.contains(&i.kind));
-    let covered =
-        (kept.map(|i| (i.tile, i.level))).chain(posted.iter().map(|p| (p.container, rock_level)));
-
-    let mut distinct: Vec<(Tile, i32)> = Vec::new();
-    for c in covered {
-        if !distinct.iter().any(|d| d.0 == c.0) {
-            distinct.push(c);
-        }
-    }
-
-    let ramparts: Vec<Item> = distinct
-        .iter()
-        .map(|(t, level)| Item {
-            kind: Kind::Rampart,
-            tile: *t,
-            level: rampart_level().max(*level),
-        })
-        .collect();
+    let roads = board.roads();
+    let ramparts = board.ramparts(&posted, rock_level);
 
     let mut all: Vec<Item> = board.items.clone();
     all.extend(board.extra.iter().cloned());
@@ -697,49 +618,8 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         }
     }
 
-    // A container whose rock other seats ring goes before the extensions: its
-    // harvester digs beside the crews. A rock's only seat waits for the bank,
-    // or a small harvester holds it a life.
-    let crowded: Vec<Tile> = posted
-        .iter()
-        .filter(|p| {
-            tiles::around(p.rock)
-                .iter()
-                .filter(|n| board.weights[**n].is_some())
-                .count()
-                > 1
-        })
-        .map(|p| p.container)
-        .collect();
-
     let buffer = controller_seat.as_ref().map(|(_, t, _)| *t);
-
-    // The upgraders' only seat: a room that reaches a level with lower items
-    // unbuilt builds it with them.
-    let rank_of = |i: &Item| -> i32 {
-        if i.kind.is_container() && crowded.contains(&i.tile) {
-            2 * priority(&Kind::Extension) - 1
-        } else if i.kind.is_container() && buffer == Some(i.tile) {
-            2 * priority(&Kind::Extension)
-        } else {
-            2 * priority(&i.kind)
-        }
-    };
-
-    let mut keys: Vec<i32> = (0..all.len())
-        .map(|i| {
-            let item = &all[i];
-            (rank_of(item) * (engine::CONTROLLER_MAX_LEVEL + 2) + item.level) * all.len() as i32
-                + i as i32
-        })
-        .collect();
-
-    keys.sort_unstable();
-
-    let items: Vec<Item> = keys
-        .iter()
-        .map(|key| all[(*key % all.len() as i32) as usize].clone())
-        .collect();
+    let items = in_build_order(all, &posted, board.weights, buffer);
 
     (
         Plan {
@@ -826,6 +706,179 @@ struct Board<'a> {
 }
 
 impl Board<'_> {
+    /// A dead end's link is held as it is planted, so no other container or
+    /// link takes the room it was chosen for.
+    fn post(&mut self, source_walks: &[(Tile, Vec<Tile>)], rock_level: i32) -> Vec<Posted> {
+        let mut posted: Vec<Posted> = Vec::new();
+
+        for (rock, path) in source_walks {
+            let head = path[0];
+
+            let found = tiles::within(1, *rock)
+                .into_iter()
+                .find(|t| self.dead_end(*rock, head, *t));
+
+            match found {
+                Some(t) if !self.taken[head] => {
+                    self.plant(&Kind::Container, t, rock_level);
+                    self.pave(path, rock_level);
+                    let link = self.source_link(t);
+                    if let Some(l) = link {
+                        self.taken[l] = true;
+                    }
+
+                    posted.push(Posted {
+                        rock: *rock,
+                        container: t,
+                        link,
+                        path: path.clone(),
+                    });
+                }
+                _ => {
+                    if !self.taken[head] {
+                        self.plant(&Kind::Container, head, rock_level);
+                    }
+
+                    self.pave(&path[1..], rock_level);
+
+                    posted.push(Posted {
+                        rock: *rock,
+                        container: head,
+                        link: None,
+                        path: path.clone(),
+                    });
+                }
+            }
+        }
+        posted
+    }
+
+    /// The controller's link, then the sources', the farthest first, as many
+    /// as the level allows past the hub's; the hub's comes last. False where
+    /// the controller's container has no link tile.
+    fn link(
+        &mut self,
+        on_first: bool,
+        controller_seat: Option<&(Tile, Tile, Vec<Tile>)>,
+        posted: &[Posted],
+    ) -> bool {
+        let mut links: Vec<Tile> = Vec::new();
+
+        let mut linked = controller_seat.is_none();
+
+        if let Some((c, container, _)) = controller_seat {
+            let found = {
+                let walkable = |t: Tile| self.walkable(t);
+                let linkable = |t: Tile| self.linkable(t);
+                let standable = |t: Tile| self.standable(t);
+                controller_link(walkable, linkable, standable, *c, *container)
+            };
+
+            match found {
+                Some(t) => {
+                    self.taken[t] = true;
+                    links.push(t);
+                    linked = true;
+
+                    let seats = Atlas::upgrader_seats(|t: Tile| self.walkable(t), *c, t);
+                    for n in seats {
+                        self.held[n] = true;
+                    }
+                }
+                // A link built late beats none.
+                None if on_first => {
+                    let best = (tiles::around(*container).iter().copied())
+                        .filter(|t| self.free(*t) && tiles::range(*t, *c) <= engine::UPGRADE_RANGE)
+                        .min_by_key(|t| (-self.open_count(*t), *t));
+
+                    if let Some(t) = best {
+                        self.taken[t] = true;
+                        links.push(t);
+                    }
+                }
+                None => (),
+            }
+        }
+
+        let mut order: Vec<usize> = (0..posted.len()).collect();
+        order.sort_by_key(|i| (-(posted[*i].path.len() as i32), posted[*i].rock));
+
+        for i in order {
+            let container = posted[i].container;
+            let link = posted[i].link.or_else(|| self.source_link(container));
+            if let Some(t) = link {
+                self.taken[t] = true;
+                links.push(t);
+            }
+        }
+
+        let hub_links = self.items.iter().filter(|i| i.kind.is_link()).count() as i32;
+        let outer: Vec<Tile> = links
+            .iter()
+            .take((count(&Kind::Link) - hub_links).max(0) as usize)
+            .copied()
+            .collect();
+
+        for (i, t) in outer.iter().enumerate() {
+            self.extra.push(Item {
+                kind: Kind::Link,
+                tile: *t,
+                level: level_of(&Kind::Link, i as i32),
+            });
+        }
+
+        // The hub's link comes last: it pays the 3% loss on all the storage's
+        // energy to save a walk, where a source's link saves a whole haul.
+        for k in 0..self.items.len() {
+            if self.items[k].kind.is_link() {
+                self.items[k].level = level_of(&Kind::Link, outer.len() as i32);
+            }
+        }
+        linked
+    }
+
+    /// Each road, the lowest level first, and nearer the anchor among equals.
+    fn roads(&self) -> Vec<Item> {
+        let mut road_keys: Vec<(i32, i32, Tile)> = (tiles::all())
+            .filter(|t| self.road_level[*t] != NONE && !self.taken[*t])
+            .map(|t| (self.road_level[t], (ROAD_SPAN - 1).min(self.walk[t]), t))
+            .collect();
+        road_keys.sort_unstable();
+
+        road_keys
+            .iter()
+            .map(|&(_, _, t)| Item {
+                kind: Kind::Road,
+                tile: t,
+                level: self.road_level[t],
+            })
+            .collect()
+    }
+
+    /// A rampart over each kept structure, a source's container too: its
+    /// harvester cannot leave it.
+    fn ramparts(&self, posted: &[Posted], rock_level: i32) -> Vec<Item> {
+        let kept = (self.items.iter()).filter(|i| KEEP.contains(&i.kind));
+        let covered = (kept.map(|i| (i.tile, i.level)))
+            .chain(posted.iter().map(|p| (p.container, rock_level)));
+
+        let mut distinct: Vec<(Tile, i32)> = Vec::new();
+        for c in covered {
+            if !distinct.iter().any(|d| d.0 == c.0) {
+                distinct.push(c);
+            }
+        }
+
+        distinct
+            .iter()
+            .map(|(t, level)| Item {
+                kind: Kind::Rampart,
+                tile: *t,
+                level: rampart_level().max(*level),
+            })
+            .collect()
+    }
+
     fn walkable(&self, t: Tile) -> bool {
         self.weights[t].is_some()
     }
