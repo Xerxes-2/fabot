@@ -5,7 +5,11 @@
 // keyed by its inputs (Node's version and the mods' virtual modules, which name only
 // xxscreeps files: our mods provide none of constants, game or schema), and a miss
 // bundles into a directory of its own. Idempotent; a reinstall drops patch and cache.
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+//
+// It also mends where xxscreeps' rules part from the live server's, so the
+// harness never refuses what live admits. Such a patch changes the sandbox's
+// code, which the cache key does not read: applying one drops the cache.
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const MARK = "// fabot: runtime-cache";
@@ -52,13 +56,23 @@ const compileRuntime = runOnce(async () => {
       "    await fs.rm(outDir, { recursive: true, force: true });\n    return { source, map };\n}",
     ],
   ],
+  // A ruin keeps its structure's type, and a rampart's placement check read a
+  // rampart's ruin as a rampart standing: live, only a structure blocks a site.
+  "mods/classic/defense/rampart.js": [
+    [
+      "            if (object.structureType === 'rampart') {",
+      `            ${MARK}: a ruin is no rampart\n            if (object['#lookType'] === C.LOOK_STRUCTURES && object.structureType === 'rampart') {`,
+    ],
+  ],
 };
+const SANDBOX = ["mods/classic/defense/rampart.js"];
 
 export function patchRuntimeCache(xxscreepsDir) {
   for (const [rel, pairs] of Object.entries(edits)) {
     const path = join(xxscreepsDir, "dist", rel);
     let text = readFileSync(path, "utf8");
     if (text.includes(MARK)) continue;
+    if (SANDBOX.includes(rel)) rmSync(join(xxscreepsDir, "dist", "runtime-cache"), { recursive: true, force: true });
     for (const [from, to] of pairs) {
       if (text.split(from).length !== 2) throw new Error(`runtime-cache: ${rel} no longer has the text the patch replaces; xxscreeps changed`);
       text = text.replace(from, () => to);
