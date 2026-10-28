@@ -702,13 +702,9 @@ impl<'a> Scene<'a> {
             .filter_map(|n| self.ours.get(n.as_str()).copied())
             .collect();
 
-        // Each body stands there after its walk, and a cast after the colony
-        // nearest spawns it: Exchange fights them once all stand there.
+        // A cast stands there once the colony nearest spawns it and it walks over.
         let walk = |r: RoomName| self.walk_to(atlas, e, r);
-        let fighter_at = |c: &Creep| Fighter {
-            arrives: walk(c.pos.room).unwrap_or(0),
-            ..casting::fighter_of(c)
-        };
+        let fighter_at = |c: &Creep| casting::fighter_of(c);
         let bodies: Vec<Fighter> = fielding.iter().map(|c| fighter_at(c)).collect();
         let nearest = (self.colonies_of(atlas, e).into_iter())
             .filter_map(|r| Some((walk(r.name)?, r.name)))

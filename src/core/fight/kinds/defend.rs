@@ -83,7 +83,9 @@ pub fn step(facts: &Facts, e: &Engagement) -> Option<Engagement> {
         return if facts.home { None } else { Some(e.clone()) };
     }
 
-    if facts.group.is_some() && e.lost > e.budget {
+    // A home spends its budget and stands down; an outpost's loss is priced
+    // again, and it quits when the set left no longer wins.
+    if facts.group.is_some() && facts.held && e.lost > e.budget {
         return quit();
     }
 

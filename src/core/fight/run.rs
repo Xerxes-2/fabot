@@ -520,6 +520,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             Objective::Defend
                 if left
                     || grew
+                    || e.lost > e.budget
                     || changed(&e, &events, &scene.by_id)
                     || e.since == world.time && e.phase == Phase::Forming =>
             {

@@ -24,8 +24,6 @@ pub struct Fighter {
     pub invader: bool,
     /// Its ticks to live, from now.
     pub lives: i32,
-    /// The ticks before it stands at the fight, from now: its walk there.
-    pub arrives: i32,
 }
 
 pub fn of_parts(body: &[BodyPart], boosts: &[Boost], hits: i32, pos: Option<Pos>) -> Fighter {
@@ -57,7 +55,6 @@ pub fn of_parts(body: &[BodyPart], boosts: &[Boost], hits: i32, pos: Option<Pos>
         strikes_back: engine::ATTACK_POWER * attack,
         invader: false,
         lives: engine::CREEP_LIFETIME,
-        arrives: 0,
     }
 }
 

@@ -35,21 +35,20 @@ pub struct Forming {
     pub spawns: i32,
 }
 
-/// The tick, from now, a side stands formed: its slowest body there, and
-/// every cast spawned and walked.
+/// The tick, from now, a side's casts stand spawned and walked, past the
+/// walk a cast's approach already counts.
 fn formed(side: &Side) -> i32 {
     let cast: i32 = (side.bodies.iter().filter(|f| f.pos.is_none()))
         .map(|f| f.body.len() as i32)
         .sum();
     let casts = match side.forming {
         Some(Forming { walk, spawns }) if cast > 0 => {
-            engine::SPAWN_TICKS_PER_PART * ((cast + spawns.max(1) - 1) / spawns.max(1)) + walk
+            let spawned = (cast + spawns.max(1) - 1) / spawns.max(1);
+            engine::SPAWN_TICKS_PER_PART * spawned + (walk - CAST_WALK).max(0)
         }
         _ => 0,
     };
-    (side.bodies.iter().filter(|f| f.pos.is_some()))
-        .map(|f| f.arrives)
-        .fold(casts, i32::max)
+    casts
 }
 
 /// `weight` is the step weight of the ground fought on; `run_off` the tiles a
@@ -131,8 +130,17 @@ struct Foe {
     f: Fighter,
 }
 
+/// Across rooms too: a body a room off walks its tiles in.
 fn range_to(tile: &Pos, f: &Fighter) -> Option<i32> {
-    f.pos.as_ref().and_then(|at| tile.range(at))
+    let at = f.pos.as_ref()?;
+    let global = |p: &Pos| {
+        let (x, y) = p.room.on_grid()?;
+        Some((x * engine::ROOM_SIDE + p.x, y * engine::ROOM_SIDE + p.y))
+    };
+    tile.range(at).or_else(|| {
+        let ((ax, ay), (bx, by)) = (global(tile)?, global(at)?);
+        Some((ax - bx).abs().max((ay - by).abs()))
+    })
 }
 
 fn between(a: &Foe, b: &Foe) -> Option<i32> {
