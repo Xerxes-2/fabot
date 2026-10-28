@@ -364,6 +364,123 @@ fn wish_in(groups: &mut Vec<(RoomName, Vec<Wish>)>, room: RoomName, wish: Wish) 
     }
 }
 
+/// A dug-out source's holders stay seated until it regenerates, and an
+/// extractor's until it cools or its container has room for a pull (v1's
+/// heldByFullContainer): a pull past it drops ore nothing picks up.
+fn dug_out(derived: &Derived) -> BTreeSet<String> {
+    derived
+        .grounds
+        .iter()
+        .flat_map(|g| {
+            let sources = (g.sources.iter())
+                .filter(|s| s.energy == 0)
+                .map(|s| s.id.clone());
+            let full = |m: &&derived::MineralFact| {
+                m.cooldown > 0
+                    || engine::CONTAINER_CAPACITY - m.held
+                        < bodies::MINER_WORK * engine::MINERAL_HARVEST_PER_WORK
+            };
+            sources.chain(g.minerals.iter().filter(full).map(|m| m.id.clone()))
+        })
+        .collect()
+}
+
+/// What the links, terminals and labs do this tick.
+fn sends(derived: &Derived) -> Vec<Intent> {
+    let mut sends: Vec<Intent> = Vec::new();
+    for g in &derived.grounds {
+        link_sends(&mut sends, g);
+        if let Some(send) = terminal_send(g) {
+            sends.push(send);
+        }
+        if let Some(plan) = &g.lab_plan {
+            let lab = |id: &str| g.labs.iter().find(|l| l.id == id);
+            let held = |id: &str| lab(id).and_then(|l| l.held.clone());
+            let cooldown = |id: &str| lab(id).map_or(0, |l| l.cooldown);
+            for (output, a, b) in super::labs::ready_runs(plan, &held, &cooldown) {
+                sends.push(Intent::Lab(output, LabAct::RunReaction(a, b)));
+            }
+        }
+    }
+
+    sends
+}
+
+/// An assigned body's acts this tick, and its walk: to a free seat of its
+/// Task, else in its range.
+fn work(
+    atlas: &mut Atlas,
+    derived: &Derived,
+    (creep, body, mover): (&Creep, &Body, Mover),
+    offer: &Offer,
+    stood: &BTreeSet<Pos>,
+    ready: &dyn Fn(&Task) -> bool,
+    acts: &mut Vec<Intent>,
+) -> Wish {
+    let seats = seats_of(&*atlas, derived, body, offer);
+
+    let buffer = derived
+        .grounds
+        .iter()
+        .filter(|g| g.room == creep.pos.room)
+        .find_map(|g| g.buffer.as_ref());
+
+    // An empty buffer has nothing to draw: the engine refuses it.
+    if let Some(b) = buffer
+        && b.energy > 0
+        && pool::draws_buffer(body, offer)
+        && creep.pos.within(1, &b.pos)
+    {
+        acts.push(Intent::Creep(
+            creep.name.clone(),
+            CreepAct::Withdraw(b.id.clone(), Resource::Energy),
+        ));
+    }
+
+    if let Some(act) = raising(derived, body, offer) {
+        acts.push(Intent::Creep(creep.name.clone(), act))
+    } else {
+        let arrived = creep.pos.within(offer.task.range_of(), &offer.target)
+            && seats
+                .as_ref()
+                .is_none_or(|seats| seats.iter().any(|p| p == &creep.pos))
+            && ready(&offer.task);
+
+        // The API refuses an upgrade from an empty store before
+        // the draw lands.
+        let can_act =
+            body.energy > 0 || !(pool::draws_buffer(body, offer) || offer.task.is_upgrade());
+
+        if arrived
+            && can_act
+            && let Some(act) = act_of(derived, &offer.task)
+        {
+            acts.push(Intent::Creep(creep.name.clone(), act));
+        }
+    }
+
+    if pool::garrisons(body, offer) && body.energy > 0 {
+        let link = derived.grounds.iter().find_map(|g| {
+            g.links.iter().find(|l| {
+                g.receiver.is_some()
+                    && l.role.is_source()
+                    && l.free > 0
+                    && creep.pos.within(1, &l.pos)
+            })
+        });
+
+        if let Some(l) = link {
+            acts.push(Intent::Creep(
+                creep.name.clone(),
+                CreepAct::Transfer(l.id.clone(), Resource::Energy),
+            ));
+        }
+    }
+
+    let target = seat_of(stood, creep, offer, seats.as_deref());
+    plan::toward(atlas, creep, mover, &target, weight_of(offer.priority))
+}
+
 pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, State), String> {
     let worked = tick::worked(context);
 
@@ -461,29 +578,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         })
         .collect();
 
-    // A dug-out source's holders stay seated until it regenerates, and an
-    // extractor's until it cools or its container has room for a pull (v1's
-    // heldByFullContainer): a pull past it drops ore nothing picks up.
-    let dug_out: BTreeSet<String> = derived
-        .grounds
-        .iter()
-        .flat_map(|g| {
-            g.sources
-                .iter()
-                .filter(|s| s.energy == 0)
-                .map(|s| s.id.clone())
-                .chain(
-                    g.minerals
-                        .iter()
-                        .filter(|m| {
-                            m.cooldown > 0
-                                || engine::CONTAINER_CAPACITY - m.held
-                                    < bodies::MINER_WORK * engine::MINERAL_HARVEST_PER_WORK
-                        })
-                        .map(|m| m.id.clone()),
-                )
-        })
-        .collect();
+    let dug_out = dug_out(&derived);
 
     let ready = |task: &Task| -> bool {
         match task {
@@ -514,78 +609,16 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         match assigned {
             Some(offer) => {
                 let body = bodies[creep.name.as_str()];
-                let seats = seats_of(&*context.atlas, &derived, body, offer);
-
-                let buffer = derived
-                    .grounds
-                    .iter()
-                    .filter(|g| g.room == creep.pos.room)
-                    .find_map(|g| g.buffer.as_ref());
-
-                // An empty buffer has nothing to draw: the engine refuses it.
-                if let Some(b) = buffer
-                    && b.energy > 0
-                    && pool::draws_buffer(body, offer)
-                    && creep.pos.within(1, &b.pos)
-                {
-                    acts.push(Intent::Creep(
-                        creep.name.clone(),
-                        CreepAct::Withdraw(b.id.clone(), Resource::Energy),
-                    ));
-                }
-
-                if let Some(act) = raising(&derived, body, offer) {
-                    acts.push(Intent::Creep(creep.name.clone(), act))
-                } else {
-                    let arrived = creep.pos.within(offer.task.range_of(), &offer.target)
-                        && seats
-                            .as_ref()
-                            .is_none_or(|seats| seats.iter().any(|p| p == &creep.pos))
-                        && ready(&offer.task);
-
-                    // The API refuses an upgrade from an empty store before
-                    // the draw lands.
-                    let can_act = body.energy > 0
-                        || !(pool::draws_buffer(body, offer) || offer.task.is_upgrade());
-
-                    if arrived
-                        && can_act
-                        && let Some(act) = act_of(&derived, &offer.task)
-                    {
-                        acts.push(Intent::Creep(creep.name.clone(), act));
-                    }
-                }
-
-                if pool::garrisons(body, offer) && body.energy > 0 {
-                    let link = derived.grounds.iter().find_map(|g| {
-                        g.links.iter().find(|l| {
-                            g.receiver.is_some()
-                                && l.role.is_source()
-                                && l.free > 0
-                                && creep.pos.within(1, &l.pos)
-                        })
-                    });
-
-                    if let Some(l) = link {
-                        acts.push(Intent::Creep(
-                            creep.name.clone(),
-                            CreepAct::Transfer(l.id.clone(), Resource::Energy),
-                        ));
-                    }
-                }
-
-                let target = seat_of(&stood, creep, offer, seats.as_deref());
-                wish_in(
-                    &mut wishes,
-                    creep.pos.room,
-                    plan::toward(
-                        context.atlas,
-                        creep,
-                        mover,
-                        &target,
-                        weight_of(offer.priority),
-                    ),
+                let wish = work(
+                    context.atlas,
+                    &derived,
+                    (creep, body, mover),
+                    offer,
+                    &stood,
+                    &ready,
+                    &mut acts,
                 );
+                wish_in(&mut wishes, creep.pos.room, wish);
             }
             None if !derived.colonies.is_empty()
                 && derived.colonies.iter().all(|c| c.room != creep.pos.room) =>
@@ -619,22 +652,6 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     let moves = (wishes.into_iter())
         .flat_map(|(room, list)| list.into_iter().map(move |w| Intent::Wish(room, w)));
 
-    let mut sends: Vec<Intent> = Vec::new();
-    for g in &derived.grounds {
-        link_sends(&mut sends, g);
-        if let Some(send) = terminal_send(g) {
-            sends.push(send);
-        }
-        if let Some(plan) = &g.lab_plan {
-            let lab = |id: &str| g.labs.iter().find(|l| l.id == id);
-            let held = |id: &str| lab(id).and_then(|l| l.held.clone());
-            let cooldown = |id: &str| lab(id).map_or(0, |l| l.cooldown);
-            for (output, a, b) in super::labs::ready_runs(plan, &held, &cooldown) {
-                sends.push(Intent::Lab(output, LabAct::RunReaction(a, b)));
-            }
-        }
-    }
-
     let taken: BTreeSet<String> = (acts.iter())
         .filter_map(|act| match act {
             Intent::Creep(name, CreepAct::Pickup(_)) => Some(name.clone()),
@@ -644,7 +661,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     intents.extend(acts);
     intents.extend(pickups(&derived, &taken));
-    intents.extend(sends);
+    intents.extend(sends(&derived));
     intents.extend(moves);
 
     let mut next = state.clone();
