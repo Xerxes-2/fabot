@@ -99,7 +99,11 @@ for (const { name, start } of library.filter((s) => s.start.world)) {
 }
 for (const s of library.filter((s) => FIGHT_KINDS.some((k) => s.name.startsWith(`${k}-`))))
   if (!s.assert.some((a) => a.measure === "bodiesLost" && a.max !== undefined)) fail(`${s.name}: a fight scenario bounds bodiesLost by a "max"`);
-for (const n of names) if (!library.some((s) => s.name === n)) fail(`no scenario ${n}; the library: ${library.map((s) => s.name).join(", ")}`);
+// name@sK names a scenario on seed K alone, as --seeds names its runs.
+const seeded = (s, seed) => (seed === (s.start.seed ?? 1) ? s : { ...s, name: `${s.name}@s${seed}`, start: { ...s.start, seed } });
+const pinned = names.filter((n) => /@s\d+$/.test(n)).map((n) => [n.replace(/@s\d+$/, ""), Number(n.match(/@s(\d+)$/)[1])]);
+names.splice(0, names.length, ...names.filter((n) => !/@s\d+$/.test(n)));
+for (const n of [...names, ...pinned.map(([n]) => n)]) if (!library.some((s) => s.name === n)) fail(`no scenario ${n}; the library: ${library.map((s) => s.name).join(", ")}`);
 const touched = flags["--modules"]?.split(",").filter(Boolean) ?? [];
 for (const m of touched) if (!modules.includes(m)) fail(`no module ${m}; the modules: ${modules.join(", ")}`);
 const meets = (s) => (touched.length ? s.modules.some((m) => touched.includes(m)) : !names.length);
@@ -108,12 +112,9 @@ const meets = (s) => (touched.length ? s.modules.some((m) => touched.includes(m)
 const seeds = Number(flags["--seeds"] ?? 1);
 if (!Number.isInteger(seeds) || seeds < 1) fail("--seeds takes a count of seeds, 1 or more");
 const scenarios = library
-  .filter((s) => names.includes(s.name) || (meets(s) && (flags["--nightly"] || !s.nightly)))
-  .flatMap((s) =>
-    Array.from({ length: seeds }, (_, k) =>
-      k === 0 ? s : { ...s, name: `${s.name}@s${(s.start.seed ?? 1) + k}`, start: { ...s.start, seed: (s.start.seed ?? 1) + k } },
-    ),
-  );
+  .filter((s) => names.includes(s.name) || (!pinned.length && meets(s) && (flags["--nightly"] || !s.nightly)))
+  .flatMap((s) => Array.from({ length: seeds }, (_, k) => seeded(s, (s.start.seed ?? 1) + k)))
+  .concat(pinned.map(([n, seed]) => seeded(library.find((s) => s.name === n), seed)));
 if (flags["--list"]) {
   for (const s of scenarios) console.log(`${s.name}  ${s.modules.join(",")}`);
   console.log(`${scenarios.length} of ${library.length} scenarios`);
