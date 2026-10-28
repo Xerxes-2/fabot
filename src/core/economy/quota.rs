@@ -774,45 +774,17 @@ impl Foundry<'_> {
 
 /// A seat its bank cannot pay yields to the next it can: an order, never a
 /// veto. Never to an upgrader.
-pub fn plan(
+/// Each standing body, less those leaving now, charged to the nearest open
+/// demand of its pattern: its parts by pattern.
+fn charged(
     walks: &mut dyn Walks,
     derived: &Derived,
     owners: &BTreeMap<RoomName, usize>,
-    pool: &[super::pool::Offer],
-    assignments: &BTreeMap<String, String>,
-) -> Plan {
+    all: &[Demand],
+    work_at: &dyn Fn(&Body) -> Pos,
+) -> BTreeMap<Pattern, i32> {
     let colonies = &derived.colonies;
-
-    // A colony that feeds outposts cannot wait for a bank that holds its whole
-    // hauler. A lone room can, and regresses when it casts to the bank instead.
-    let mut served = vec![0i32; colonies.len()];
-
-    for ci in owners.values() {
-        served[*ci] += 1;
-    }
-
-    let others = ground_demands(owners, walks, derived);
-
-    let spent = spend_demands(owners, walks, derived, &others);
-
-    let mut all = others;
-    all.extend(spent);
-
     let mut standing: BTreeMap<Pattern, i32> = BTreeMap::new();
-    let targets: HashMap<&str, &Pos> = pool
-        .iter()
-        .map(|offer| (offer.id.as_str(), &offer.target))
-        .collect();
-
-    let work_at = |body: &Body| -> Pos {
-        match assignments
-            .get(&body.name)
-            .and_then(|id| targets.get(id.as_str()))
-        {
-            Some(pos) => *(*pos),
-            None => body.pos,
-        }
-    };
 
     for body in derived.bodies.iter().chain(derived.ovens.iter()) {
         if !expiring_now(walks, derived, owners, body) {
@@ -852,41 +824,16 @@ pub fn plan(
         }
     }
 
-    let wants: Vec<Want> = bodies::ALL_PATTERNS
-        .iter()
-        .map(|pattern| Want {
-            pattern: *pattern,
-            wanted: all
-                .iter()
-                .filter(|d| d.pattern == *pattern)
-                .map(|d| d.wanted)
-                .sum(),
-            standing: standing.get(pattern).copied().unwrap_or(0),
-        })
-        .collect();
+    standing
+}
 
-    let mut bank: Vec<i32> = colonies.iter().map(|c| c.bank).collect();
-
-    let mut idle: Vec<Vec<usize>> = colonies
-        .iter()
-        .map(|c| {
-            c.spawns
-                .iter()
-                .enumerate()
-                .filter(|(_, s)| s.spawning.is_none())
-                .map(|(i, _)| i)
-                .collect()
-        })
-        .collect();
-
-    let mut casts: Vec<Cast> = Vec::new();
-    let mut foundry = Foundry {
-        casts: &mut casts,
-        idle: &mut idle,
-        bank: &mut bank,
-        colonies,
-        time: derived.time,
-    };
+fn floors(
+    foundry: &mut Foundry,
+    derived: &Derived,
+    owners: &BTreeMap<RoomName, usize>,
+    work_at: &dyn Fn(&Body) -> Pos,
+) {
+    let colonies = &derived.colonies;
 
     // The anchor floor: with no harvester, nothing digs what refills the bank.
     for (ci, colony) in colonies.iter().enumerate() {
@@ -949,6 +896,18 @@ pub fn plan(
             foundry.at(ci, pattern, body, true);
         }
     }
+}
+
+/// Every demand's seats, each priced by the colony that would cast it, in
+/// cast order.
+fn seats_of(
+    walks: &mut dyn Walks,
+    derived: &Derived,
+    owners: &BTreeMap<RoomName, usize>,
+    all: &[Demand],
+    foundry: &Foundry,
+) -> Vec<((i32, f64), Seat)> {
+    let colonies = &derived.colonies;
 
     let richest = (colonies.iter()).reduce(|r, c| {
         if c.bank_capacity > r.bank_capacity {
@@ -964,7 +923,7 @@ pub fn plan(
 
     let mut seats: Vec<((i32, f64), Seat)> = Vec::new();
 
-    for d in &all {
+    for d in all {
         let caster = match owners.get(&d.at.room).copied() {
             Some(ci) if !foundry.idle[ci].is_empty() && castable(derived, d, ci) => Some(ci),
             _ => walks.near(
@@ -1016,6 +975,14 @@ pub fn plan(
             .then(va.partial_cmp(vb).unwrap_or(Ordering::Equal))
     });
 
+    seats
+}
+
+/// In order, each seat its colony can pay for now; a colony short of one
+/// upgrader seat casts no later upgrader.
+fn cast(foundry: &mut Foundry, seats: Vec<((i32, f64), Seat)>, served: &[i32]) -> Vec<Seat> {
+    let colonies = foundry.colonies;
+
     let mut waiting = vec![false; colonies.len()];
 
     let mut seated: Vec<Seat> = Vec::with_capacity(seats.len());
@@ -1046,6 +1013,92 @@ pub fn plan(
 
         seated.push(seat);
     }
+
+    seated
+}
+
+pub fn plan(
+    walks: &mut dyn Walks,
+    derived: &Derived,
+    owners: &BTreeMap<RoomName, usize>,
+    pool: &[super::pool::Offer],
+    assignments: &BTreeMap<String, String>,
+) -> Plan {
+    let colonies = &derived.colonies;
+
+    // A colony that feeds outposts cannot wait for a bank that holds its whole
+    // hauler. A lone room can, and regresses when it casts to the bank instead.
+    let mut served = vec![0i32; colonies.len()];
+
+    for ci in owners.values() {
+        served[*ci] += 1;
+    }
+
+    let others = ground_demands(owners, walks, derived);
+
+    let spent = spend_demands(owners, walks, derived, &others);
+
+    let mut all = others;
+    all.extend(spent);
+
+    let targets: HashMap<&str, &Pos> = pool
+        .iter()
+        .map(|offer| (offer.id.as_str(), &offer.target))
+        .collect();
+
+    let work_at = &|body: &Body| -> Pos {
+        match assignments
+            .get(&body.name)
+            .and_then(|id| targets.get(id.as_str()))
+        {
+            Some(pos) => *(*pos),
+            None => body.pos,
+        }
+    };
+
+    let standing = charged(walks, derived, owners, &all, work_at);
+
+    let wants: Vec<Want> = bodies::ALL_PATTERNS
+        .iter()
+        .map(|pattern| Want {
+            pattern: *pattern,
+            wanted: all
+                .iter()
+                .filter(|d| d.pattern == *pattern)
+                .map(|d| d.wanted)
+                .sum(),
+            standing: standing.get(pattern).copied().unwrap_or(0),
+        })
+        .collect();
+
+    let mut bank: Vec<i32> = colonies.iter().map(|c| c.bank).collect();
+
+    let mut idle: Vec<Vec<usize>> = colonies
+        .iter()
+        .map(|c| {
+            c.spawns
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.spawning.is_none())
+                .map(|(i, _)| i)
+                .collect()
+        })
+        .collect();
+
+    let mut casts: Vec<Cast> = Vec::new();
+    let mut foundry = Foundry {
+        casts: &mut casts,
+        idle: &mut idle,
+        bank: &mut bank,
+        colonies,
+        time: derived.time,
+    };
+
+    floors(&mut foundry, derived, owners, work_at);
+
+    let seats = seats_of(walks, derived, owners, &all, &foundry);
+
+    let seated = cast(&mut foundry, seats, &served);
 
     Plan {
         wants,
