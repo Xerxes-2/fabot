@@ -105,6 +105,7 @@ pub fn fighter_of(c: &Creep) -> Fighter {
     );
     let mut f = fighter::of_parts(&body, &boosts, c.hits, Some(c.pos));
     f.invader = c.owner == Owner::Invader;
+    f.lives = c.ticks_to_live;
     f
 }
 
@@ -188,6 +189,7 @@ pub fn side_in(room: &Room, bodies: Vec<Fighter>) -> exchange::Side {
                 energy: s.store.amount_of(&Resource::Energy),
             })
             .collect(),
+        forming: None,
     }
 }
 

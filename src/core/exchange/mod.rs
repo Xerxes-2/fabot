@@ -23,6 +23,33 @@ pub struct Side {
     pub bodies: Vec<Fighter>,
     pub ramparts: BTreeMap<Pos, i32>,
     pub towers: Vec<Tower>,
+    /// Where its casts come from, when they hold it forming: it fights once
+    /// they stand there. None: a cast stands there now.
+    pub forming: Option<Forming>,
+}
+
+/// A colony's casts, spawned one after another on each of its spawns and walked over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Forming {
+    pub walk: i32,
+    pub spawns: i32,
+}
+
+/// The tick, from now, a side stands formed: its slowest body there, and
+/// every cast spawned and walked.
+fn formed(side: &Side) -> i32 {
+    let cast: i32 = (side.bodies.iter().filter(|f| f.pos.is_none()))
+        .map(|f| f.body.len() as i32)
+        .sum();
+    let casts = match side.forming {
+        Some(Forming { walk, spawns }) if cast > 0 => {
+            engine::SPAWN_TICKS_PER_PART * ((cast + spawns.max(1) - 1) / spawns.max(1)) + walk
+        }
+        _ => 0,
+    };
+    (side.bodies.iter().filter(|f| f.pos.is_some()))
+        .map(|f| f.arrives)
+        .fold(casts, i32::max)
 }
 
 /// `weight` is the step weight of the ground fought on; `run_off` the tiles a
@@ -370,6 +397,8 @@ struct Focused {
     hits: i32,
     /// What its own swing is struck back a tick, focused or not.
     back: i32,
+    /// The tick of the fight it ages out on.
+    until: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -458,14 +487,22 @@ fn focused_against(
         }
     };
 
+    // A body aging out leaves the fight with the hits it has: no loss, and
+    // none of its strike or heal past that tick.
     let phase = |mut layers: Vec<f64>,
                  mut alive: Vec<(Focused, f64)>,
                  mut elapsed: f64,
                  mut dead: i32|
      -> Fight {
+        let mut gone: Vec<(Focused, f64)> = Vec::new();
         loop {
+            let (aged, kept): (Vec<_>, Vec<_>) =
+                alive.into_iter().partition(|(b, _)| b.until <= elapsed);
+            gone.extend(aged);
+            alive = kept;
+            let with_gone = |standing: Vec<(Focused, f64)>| [standing, gone.clone()].concat();
             if alive.is_empty() {
-                return ends(false, Some(elapsed), dead, &[]);
+                return ends(false, Some(elapsed), dead, &gone);
             }
 
             let (focus, left) = alive[0];
@@ -478,14 +515,23 @@ fn focused_against(
             } else {
                 left / rate
             };
+            let ages = (alive.iter().map(|(b, _)| b.until - elapsed)).fold(f64::INFINITY, f64::min);
+            let step = span.min(ages);
 
-            match spend(&price, dealt(&alive), span, &layers) {
+            match spend(&price, dealt(&alive), step, &layers) {
                 Ok(t) => {
                     let mut standing = vec![(focus, left - t * rate.max(0.0))];
                     standing.extend(worn(t, &rest));
-                    return ends(true, Some(elapsed + t), dead, &standing);
+                    return ends(true, Some(elapsed + t), dead, &with_gone(standing));
                 }
-                Err(_) if span.is_infinite() => return ends(false, None, dead, &alive),
+                Err(_) if step.is_infinite() => return ends(false, None, dead, &with_gone(alive)),
+                Err(rest_layers) if ages < span => {
+                    layers = rest_layers;
+                    let mut standing = vec![(focus, left - step * rate.max(0.0))];
+                    standing.extend(worn(step, &rest));
+                    alive = standing;
+                    elapsed += step;
+                }
                 Err(rest_layers) => {
                     layers = rest_layers;
                     alive = worn(span, &rest);
@@ -1067,6 +1113,15 @@ fn towers_on(
 }
 
 fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Outcome {
+    // Ours fight once formed, and a body that ages out before is none of it.
+    let start = formed(ours);
+    let ours = &Side {
+        bodies: (ours.bodies.iter())
+            .filter(|f| f.lives > start)
+            .cloned()
+            .collect(),
+        ..ours.clone()
+    };
     let raid: Vec<Foe> = theirs
         .bodies
         .iter()
@@ -1137,6 +1192,7 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
     let towers = towers_on(&ours.towers, &|h: &Foe| strikes_from(h), &raid);
     let walking_in = towers_on(&ours.towers, &|_: &Foe| Vec::new(), &raid);
 
+    let approach = approach_of(terrain, stance, &fighters, &theirs.bodies);
     let bodies: Vec<Focused> = pairs
         .iter()
         .map(|(f, (range, heal_range))| Focused {
@@ -1144,11 +1200,11 @@ fn exchange(stance: Stance, ours: &Side, theirs: &Side, terrain: Terrain) -> Out
             heals: fighter::heal_at(f, *heal_range),
             hits: f.hits,
             back: 0,
+            until: f64::from(f.lives - start) - approach,
         })
         .collect();
 
     let dealt = towers + bodies.iter().map(|b| b.deals).sum::<i32>();
-    let approach = approach_of(terrain, stance, &fighters, &theirs.bodies);
 
     let settle = |horizon: i32, price: &Price| -> (Outcome, i32) {
         let struck = struck_back(price, dealt, back.struck, back.swingers);
@@ -1641,6 +1697,7 @@ mod tests {
                     energy: 1000,
                 })
                 .collect(),
+            forming: None,
         }
     }
 

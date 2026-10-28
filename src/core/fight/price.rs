@@ -447,6 +447,7 @@ impl<'a> Scene<'a> {
             bodies: ground.escort.iter().map(casting::fighter_of).collect(),
             ramparts: BTreeMap::new(),
             towers: Vec::new(),
+            forming: None,
         };
         let (mut set, outcome, _) = casting::price(
             Stance::Standoff,
@@ -659,20 +660,6 @@ impl<'a> Scene<'a> {
         free: &mut Vec<String>,
         declarations: &Declarations,
     ) -> Engagement {
-        self.priced_after(atlas, asked, e, free, declarations, (None, 0))
-    }
-
-    /// `wait`: the ticks a cast holds the set forming (None: the casts
-    /// asked), and `fight` the ticks its fight is priced to.
-    fn priced_after(
-        &self,
-        atlas: &Atlas,
-        asked: &mut Asked,
-        e: &Engagement,
-        free: &mut Vec<String>,
-        declarations: &Declarations,
-        (wait, fight): (Option<i32>, i32),
-    ) -> Engagement {
         let g = self
             .by_id
             .get(&e.group)
@@ -699,6 +686,7 @@ impl<'a> Scene<'a> {
                 .collect(),
             ramparts: BTreeMap::new(),
             towers: Vec::new(),
+            forming: None,
         };
 
         let asked_bodies: Vec<casting::Body> = (asked.casts.iter())
@@ -707,37 +695,33 @@ impl<'a> Scene<'a> {
             .collect();
         let asked_fighters = cast_all(&asked_bodies);
 
-        // A forming set joins when its casts stand there, spawned one after
-        // another and walked from the nearest colony; held by none, it goes
-        // as it stands. Held, it counts a body only if it lives to the fight's
-        // end, or bodies with 19-99 ticks to live price a win it reaches with one.
-        let colony = (self.colonies_of(atlas, e).iter())
-            .filter_map(|r| self.walk_to(atlas, e, r.name))
-            .min();
-        let waiting = |casts: &[casting::Body]| match casts.len() {
-            0 => 0,
-            _ => engine::SPAWN_TICKS_PER_PART * casts.concat().len() as i32 + colony.unwrap_or(0),
-        };
-        let wait = wait.unwrap_or_else(|| waiting(&asked_bodies));
-        let outlives = |c: &Creep, wait: i32, fight: i32| {
-            (self.walk_to(atlas, e, c.pos.room))
-                .is_some_and(|w| c.ticks_to_live > wait.max(w) + fight)
-        };
-        let lasts = |c: &&Creep| wait == 0 || outlives(c, wait, fight);
-        let joining: Vec<String> = (self.joining(atlas, e, free).into_iter())
-            .filter(|n| self.ours.get(n.as_str()).is_some_and(lasts))
-            .collect();
-
+        let joining = self.joining(atlas, e, free);
         let mut fielding_names: Vec<String> = e.ours.iter().cloned().collect();
         fielding_names.extend(joining.iter().cloned());
-
-        let fielding: Vec<&Creep> = fielding_names
-            .iter()
+        let fielding: Vec<&Creep> = (fielding_names.iter())
             .filter_map(|n| self.ours.get(n.as_str()).copied())
-            .filter(lasts)
             .collect();
 
-        let bodies: Vec<Fighter> = fielding.iter().map(|c| casting::fighter_of(c)).collect();
+        // Each body stands there after its walk, and a cast after the colony
+        // nearest spawns it: Exchange fights them once all stand there.
+        let walk = |r: RoomName| self.walk_to(atlas, e, r);
+        let fighter_at = |c: &Creep| Fighter {
+            arrives: walk(c.pos.room).unwrap_or(0),
+            ..casting::fighter_of(c)
+        };
+        let bodies: Vec<Fighter> = fielding.iter().map(|c| fighter_at(c)).collect();
+        let nearest = (self.colonies_of(atlas, e).into_iter())
+            .filter_map(|r| Some((walk(r.name)?, r.name)))
+            .min();
+        let forming = nearest.map(|(walk, colony)| exchange::Forming {
+            walk,
+            spawns: self
+                .world
+                .spawns
+                .iter()
+                .filter(|s| s.pos.room == colony)
+                .count() as i32,
+        });
 
         let core_hits: i32 = raid
             .iter()
@@ -819,7 +803,10 @@ impl<'a> Scene<'a> {
 
         match casting::price(
             stance,
-            &casting::side_in(room, ours_now),
+            &Side {
+                forming,
+                ..casting::side_in(room, ours_now)
+            },
             &theirs,
             terrain,
             &blocks,
@@ -828,14 +815,6 @@ impl<'a> Scene<'a> {
             self.boost,
         ) {
             Some((set, outcome, landed)) => {
-                // The set asked here holds the rest: priced again without a
-                // body that would not outlast it. Each pass drops one.
-                let after = wait.max(waiting(&[asked_bodies.clone(), set.clone()].concat()));
-                let held = (Some(after), outcome.ticks());
-                if after > 0 && fielding.iter().any(|c| !outlives(c, after, held.1)) {
-                    return self.priced_after(atlas, asked, e, free, declarations, held);
-                }
-
                 let mut priced_bodies: Vec<Fighter> = bodies.clone();
                 priced_bodies.extend(asked_fighters.iter().cloned());
                 priced_bodies.extend(set.iter().map(|b| fighter::cast(b)));
@@ -892,8 +871,7 @@ impl<'a> Scene<'a> {
                     .ours
                     .iter()
                     .filter_map(|n| self.ours.get(n.as_str()))
-                    .filter(|c| lasts(c))
-                    .map(|c| casting::fighter_of(c))
+                    .map(|c| fighter_at(c))
                     .collect();
 
                 if casting::wins(stance, &casting::side_in(room, standing), &theirs, terrain) {
