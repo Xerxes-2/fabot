@@ -513,11 +513,11 @@ impl<'a> Scene<'a> {
             held: self.homes.contains(&e.room),
             asked: self.waiting.iter().any(|c| c.engagement == e.id),
             threatens,
-            // A core in sight stands in a group of its own, so a room in sight
-            // holds open only the engagement on that group.
-            clear: sightings::clear(self.sightings, self.world.time, e.room)
-                || self.foes.contains_key(&e.room)
-                    && sightings::unarmed(self.sightings, self.world.time, e.room),
+            // A room in sight shows where its groups stand: one gone from it
+            // has left, whoever else stands there (a core, or Invaders the
+            // raid passed), and they open engagements of their own.
+            clear: self.in_sight(e.room).is_some()
+                || sightings::clear(self.sightings, self.world.time, e.room),
         }
     }
 
