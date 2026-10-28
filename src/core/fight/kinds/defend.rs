@@ -207,21 +207,30 @@ fn razed(home: &Home) -> bool {
     };
 
     // A raider steps a tile a tick from its kill; past a few it is not told from a stranger.
-    let killed: Vec<&Creep> = home
+    let fell = |f: &&Fallen| {
+        f.died >= home.opened
+            && f.creep.owner.is_ours()
+            && f.creep.ticks_to_live > engine::AGED_OUT_TICKS_TO_LIVE
+            && reaches(
+                false,
+                KILL_DRIFT.min(home.time - f.died),
+                &raid,
+                &f.creep.pos,
+            )
+    };
+    // Two of the dig fallen within a tombstone's life: the raid kills faster
+    // than the spawn regrows (a raid camping a source takes each harvester as
+    // it arrives, and no hand ever falls). The hands have the floor's rule.
+    let dug = |c: &Creep| c.body.iter().any(|p| p.kind.is_work());
+    let culled = home
         .fallen
         .iter()
-        .filter(|f| {
-            f.died >= home.opened
-                && f.creep.owner.is_ours()
-                && f.creep.ticks_to_live > engine::AGED_OUT_TICKS_TO_LIVE
-                && hand(&f.creep)
-                && reaches(
-                    false,
-                    KILL_DRIFT.min(home.time - f.died),
-                    &raid,
-                    &f.creep.pos,
-                )
-        })
+        .filter(fell)
+        .filter(|f| dug(&f.creep))
+        .count()
+        >= 2;
+    let killed: Vec<&Creep> = (home.fallen.iter().filter(fell))
+        .filter(|f| hand(&f.creep))
         .map(|f| &f.creep)
         .collect();
 
@@ -234,7 +243,8 @@ fn razed(home: &Home) -> bool {
     !raid.is_empty()
         && (half(spawn_lost, spawn_all)
             || bank_lost >= 2 && half(bank_lost, bank_all)
-            || left < whole && whole >= REFILLING_FLOOR && left < REFILLING_FLOOR)
+            || left < whole && whole >= REFILLING_FLOOR && left < REFILLING_FLOOR
+            || culled)
 }
 
 fn keeps(kind: &Kind) -> bool {
@@ -614,6 +624,25 @@ mod tests {
                 .collect();
 
             assert_eq!(safe_mode(false, &[rival(&standing, &fallen)]), None);
+        }
+    }
+
+    #[test]
+    fn a_raid_killing_two_diggers_spends_it_and_one_never() {
+        let mut rng = Rng(0x5851_f42d_4c95_7f2d);
+
+        for _ in 0..DRAWS {
+            let n = 1 + rng.below(3) as usize;
+            let mut h = rival(&[], &(0..n).map(|_| slain(1)).collect::<Vec<_>>());
+            for f in &mut h.fallen {
+                f.creep.body.push(Part {
+                    kind: BodyPart::Work,
+                    hits: 100,
+                    boost: Boost::Unboosted,
+                });
+            }
+
+            assert_eq!(safe_mode(false, &[h]).is_some(), n >= 2);
         }
     }
 
