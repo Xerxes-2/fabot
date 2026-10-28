@@ -869,7 +869,9 @@ about what the bot might have seen. A capture is only as good as the base
 that recorded it: recapture when the base's behaviour changes. A change of
 behaviour is then read whole: `npm run scenario -- --bot B.js --base A` prints
 each measure beside the base's run of it (better or worse by its bound's side)
-and each soak's season score against the base's.
+and each soak's season score against the base's. One seed is one game, and a fight turns on a
+tick: `--seeds N` plays each start on N seeds, and a change is read over them
+(four seeds of the fight scenarios run in about eleven minutes).
 
 ## 11. Live safety
 
