@@ -54,6 +54,19 @@ import * as Nuker from "xxscreeps/mods/modern/nuker/nuker.js";
 
 const [capturePath] = process.argv.slice(2);
 const capture = JSON.parse(fs.readFileSync(capturePath, "utf8"));
+// A capture reads its rooms over several ticks, so a creep crossing a border
+// between two reads stands in both. Stood twice, the copy the bot never sees
+// blocks its tile all run: keep the one off the exit tiles.
+{
+  const edge = (o) => o.x === 0 || o.y === 0 || o.x === 49 || o.y === 49;
+  const kept = new Map();
+  for (const r of capture.rooms)
+    for (const o of r.objects ?? []) {
+      const was = kept.get(o._id);
+      if (!was || (edge(was) && !edge(o))) kept.set(o._id, o);
+    }
+  for (const r of capture.rooms) r.objects = (r.objects ?? []).filter((o) => kept.get(o._id) === o);
+}
 // The modern stronghold mod, loaded only for a capture with an invader core:
 // the core is the one object the classic mods do not know.
 const InvaderCore = [...capture.rooms, ...(capture.terrain ?? [])].some((r) => (r.objects ?? []).some((o) => o.type === "invaderCore"))
