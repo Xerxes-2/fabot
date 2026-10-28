@@ -457,16 +457,11 @@ fn repair_of(room: &Room, level: i32, owned_room: bool, s: &Structure) -> Option
     })
 }
 
-fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
-    let owned_room = room.controller.as_ref().is_some_and(|c| c.owner.is_ours());
-    let level = room.controller.as_ref().map_or(0, |c| c.level);
-    let built = Atlas::buffer(room);
-    let is_buffer = |id: &str| built.is_some_and(|b| b.id == id);
-    let storage = room
-        .structures
-        .iter()
-        .find(|s| s.kind.is_storage() && s.owner.is_ours());
-
+fn links_of(
+    room: &Room,
+    is_buffer: &dyn Fn(&str) -> bool,
+    storage: Option<&Structure>,
+) -> Vec<LinkFact> {
     let role_of = |s: &Structure| {
         if !s.kind.is_link() || !s.owner.is_ours() {
             None
@@ -480,7 +475,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             None
         }
     };
-    let links: Vec<LinkFact> = (room.structures.iter())
+    (room.structures.iter())
         .filter_map(|s| {
             Some(LinkFact {
                 id: s.id.clone(),
@@ -491,32 +486,11 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
                 cooldown: s.cooldown,
             })
         })
-        .collect();
+        .collect()
+}
 
-    let controller_link = links.iter().find(|l| l.role.is_controller()).cloned();
-    let hub_link = links.iter().find(|l| l.role.is_hub()).cloned();
-
-    let source_of = |s: &Source| {
-        let post = Atlas::post_of(room, &s.pos);
-        let seats = seats_at(atlas, 1, &s.pos);
-        SourceFact {
-            id: s.id.clone(),
-            pos: s.pos,
-            rate,
-            post: post.as_ref().map(|(p, _)| *p),
-            container: post.as_ref().and_then(|(_, id)| id.clone()),
-            link: links
-                .iter()
-                .find(|l| l.role.is_source() && l.pos.within(2, &s.pos))
-                .map(|l| l.id.clone()),
-            seats,
-            energy: s.energy,
-            dug: dug_at(capacity, owned_room, rate, post.is_some(), seats),
-        }
-    };
-    let sources: Vec<SourceFact> = room.sources.iter().map(source_of).collect();
-
-    let minerals: Vec<MineralFact> = (room.minerals.iter())
+fn minerals_of(room: &Room) -> Vec<MineralFact> {
+    (room.minerals.iter())
         .filter_map(|m| {
             let extractor = (room.structures.iter())
                 .find(|s| s.kind.is_extractor() && s.owner.is_ours() && s.pos == m.pos)?;
@@ -537,30 +511,22 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
                 held,
             })
         })
-        .collect();
+        .collect()
+}
 
-    let income: i32 = sources.iter().map(|s| s.dug).sum();
-    let dug_of =
-        |by: &dyn Fn(&SourceFact) -> bool| sources.iter().filter(|s| by(s)).map(|s| s.dug).sum();
-    let posted: i32 = dug_of(&|s| s.container.is_some());
-    let served_dug = |pos: &Pos| -> i32 { dug_of(&|s| s.pos.range(pos) == Some(1)) };
-
-    let mut refills: Vec<RefillFact> = Vec::new();
+/// The stores a body draws energy from or fills: its containers, storage and
+/// terminal, and any remains with energy. `buffered`: an owned room's buffer
+/// container is its buffer.
+fn stores_of(
+    room: &Room,
+    buffered: bool,
+    is_buffer: &dyn Fn(&str) -> bool,
+    served_dug: &dyn Fn(&Pos) -> i32,
+) -> Vec<StoreFact> {
     let mut stores: Vec<StoreFact> = Vec::new();
-    let mut repairs: Vec<RepairFact> = Vec::new();
 
     for s in &room.structures {
         match s.kind {
-            Kind::Spawn | Kind::Extension | Kind::Tower
-                if s.owner.is_ours() && s.store.free() > 0 =>
-            {
-                refills.push(RefillFact {
-                    id: s.id.clone(),
-                    pos: s.pos,
-                    kind: s.kind.clone(),
-                    free: s.store.free(),
-                })
-            }
             Kind::Container | Kind::Storage | Kind::Terminal
                 if !s.kind.is_terminal() || s.owner.is_ours() =>
             {
@@ -574,7 +540,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
 
                 let kind = if s.kind.is_storage() || s.kind.is_terminal() {
                     StoreKind::Storage
-                } else if owned_room && is_buffer(&s.id) {
+                } else if buffered && is_buffer(&s.id) {
                     StoreKind::Buffer
                 } else {
                     StoreKind::Container
@@ -599,8 +565,6 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             }
             _ => (),
         }
-
-        repairs.extend(repair_of(room, level, owned_room, s));
     }
 
     for r in &room.remains {
@@ -619,6 +583,113 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             })
         }
     }
+    stores
+}
+
+fn labs_of(room: &Room) -> Vec<LabFact> {
+    room.structures
+        .iter()
+        .filter(|s| s.kind.is_lab() && s.owner.is_ours())
+        .map(|s| LabFact {
+            id: s.id.clone(),
+            pos: s.pos,
+            held: s
+                .store
+                .held
+                .iter()
+                .find(|(r, n)| !r.is_energy() && *n > 0)
+                .cloned(),
+            cooldown: s.cooldown,
+        })
+        .collect()
+}
+
+/// The minerals our storage and terminal hold, each with its store.
+fn ores_of(room: &Room) -> Vec<(String, Pos, Resource, i32)> {
+    room.structures
+        .iter()
+        .filter(|s| (s.kind.is_storage() || s.kind.is_terminal()) && s.owner.is_ours())
+        .flat_map(|s| {
+            s.store
+                .held
+                .iter()
+                .filter(|(r, n)| crate::core::vocabulary::is_mineral(r) && *n > 0)
+                .map(|(r, n)| (s.id.clone(), s.pos, r.clone(), *n))
+        })
+        .collect()
+}
+
+/// The tiles an upgrader drinks from the buffer and reaches the controller.
+fn buffer_seats_of(atlas: &Atlas, room: &Room, buffer: Option<&StoreFact>) -> Vec<Pos> {
+    match (buffer, &room.controller) {
+        (Some(b), Some(c)) if atlas.sees(room.name) => {
+            let walkable = |t: Tile| atlas.passable(room.name, t) && !tiles::on_edge(t);
+            Atlas::upgrader_seats(walkable, tiles::of_pos(&c.pos), tiles::of_pos(&b.pos))
+                .into_iter()
+                .map(|t| tiles::to_pos(room.name, t))
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
+    let owned_room = room.controller.as_ref().is_some_and(|c| c.owner.is_ours());
+    let level = room.controller.as_ref().map_or(0, |c| c.level);
+    let built = Atlas::buffer(room);
+    let is_buffer = |id: &str| built.is_some_and(|b| b.id == id);
+    let storage = room
+        .structures
+        .iter()
+        .find(|s| s.kind.is_storage() && s.owner.is_ours());
+
+    let links = links_of(room, &is_buffer, storage);
+
+    let controller_link = links.iter().find(|l| l.role.is_controller()).cloned();
+    let hub_link = links.iter().find(|l| l.role.is_hub()).cloned();
+
+    let source_of = |s: &Source| {
+        let post = Atlas::post_of(room, &s.pos);
+        let seats = seats_at(atlas, 1, &s.pos);
+        SourceFact {
+            id: s.id.clone(),
+            pos: s.pos,
+            rate,
+            post: post.as_ref().map(|(p, _)| *p),
+            container: post.as_ref().and_then(|(_, id)| id.clone()),
+            link: links
+                .iter()
+                .find(|l| l.role.is_source() && l.pos.within(2, &s.pos))
+                .map(|l| l.id.clone()),
+            seats,
+            energy: s.energy,
+            dug: dug_at(capacity, owned_room, rate, post.is_some(), seats),
+        }
+    };
+    let sources: Vec<SourceFact> = room.sources.iter().map(source_of).collect();
+
+    let minerals = minerals_of(room);
+
+    let income: i32 = sources.iter().map(|s| s.dug).sum();
+    let dug_of =
+        |by: &dyn Fn(&SourceFact) -> bool| sources.iter().filter(|s| by(s)).map(|s| s.dug).sum();
+    let posted: i32 = dug_of(&|s| s.container.is_some());
+    let served_dug = |pos: &Pos| -> i32 { dug_of(&|s| s.pos.range(pos) == Some(1)) };
+
+    let refills: Vec<RefillFact> = (room.structures.iter())
+        .filter(|s| matches!(s.kind, Kind::Spawn | Kind::Extension | Kind::Tower))
+        .filter(|s| s.owner.is_ours() && s.store.free() > 0)
+        .map(|s| RefillFact {
+            id: s.id.clone(),
+            pos: s.pos,
+            kind: s.kind.clone(),
+            free: s.store.free(),
+        })
+        .collect();
+    let mut stores = stores_of(room, owned_room, &is_buffer, &served_dug);
+    let repairs: Vec<RepairFact> = (room.structures.iter())
+        .flat_map(|s| repair_of(room, level, owned_room, s))
+        .collect();
 
     let store_of = |kind: StoreKind, dug: i32, l: &LinkFact| StoreFact {
         id: l.id.clone(),
@@ -706,34 +777,8 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
         feed: feed.or(buffer.clone()),
         links,
         receiver: controller_link.or(hub_link),
-        labs: room
-            .structures
-            .iter()
-            .filter(|s| s.kind.is_lab() && s.owner.is_ours())
-            .map(|s| LabFact {
-                id: s.id.clone(),
-                pos: s.pos,
-                held: s
-                    .store
-                    .held
-                    .iter()
-                    .find(|(r, n)| !r.is_energy() && *n > 0)
-                    .cloned(),
-                cooldown: s.cooldown,
-            })
-            .collect(),
-        ores: room
-            .structures
-            .iter()
-            .filter(|s| (s.kind.is_storage() || s.kind.is_terminal()) && s.owner.is_ours())
-            .flat_map(|s| {
-                s.store
-                    .held
-                    .iter()
-                    .filter(|(r, n)| crate::core::vocabulary::is_mineral(r) && *n > 0)
-                    .map(|(r, n)| (s.id.clone(), s.pos, r.clone(), *n))
-            })
-            .collect(),
+        labs: labs_of(room),
+        ores: ores_of(room),
         lab_plan: None,
         boost_lab: None,
         terminal: room
@@ -760,16 +805,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
             .filter(|s| s.kind.is_tower() && s.owner.is_ours())
             .map(|s| s.store.amount_of(&Resource::Energy))
             .sum(),
-        buffer_seats: match (&buffer, &room.controller) {
-            (Some(b), Some(c)) if atlas.sees(room.name) => {
-                let walkable = |t: Tile| atlas.passable(room.name, t) && !tiles::on_edge(t);
-                Atlas::upgrader_seats(walkable, tiles::of_pos(&c.pos), tiles::of_pos(&b.pos))
-                    .into_iter()
-                    .map(|t| tiles::to_pos(room.name, t))
-                    .collect()
-            }
-            _ => Vec::new(),
-        },
+        buffer_seats: buffer_seats_of(atlas, room, buffer.as_ref()),
     }
 }
 
@@ -956,15 +992,8 @@ fn stock_labs(
     }
 }
 
-pub fn of_world(
-    world: &World,
-    creeps: &[&Creep],
-    atlas: &Atlas,
-    declarations: &Declarations,
-    worked: &[Outpost],
-    intel: &Intel,
-    scouts: &[Scout],
-) -> Derived {
+/// Our rooms with a spawn, each with its room.
+fn colonies_of(world: &World) -> (Vec<Colony>, Vec<&Room>) {
     let mut colonies: Vec<Colony> = Vec::new();
     let mut colony_rooms: Vec<&Room> = Vec::new();
 
@@ -994,6 +1023,80 @@ pub fn of_world(
         }
     }
 
+    (colonies, colony_rooms)
+}
+
+/// At the rate the reserver holds, not this tick's: a body lives longer
+/// than a lapse lasts. The engine refuses a harvest on another's hold.
+fn remote_of(
+    atlas: &Atlas,
+    world: &World,
+    intel: &Intel,
+    declarations: &Declarations,
+    richest: i32,
+    outpost: &Outpost,
+) -> Ground {
+    let room: Cow<Room> = world.room(outpost.room).map_or_else(
+        || Cow::Owned(blind(outpost, intel, world, declarations)),
+        Cow::Borrowed,
+    );
+
+    let withheld = |c: &Controller| {
+        if invader_held(c) {
+            room.sources.len() as i32
+        } else {
+            0
+        }
+    };
+
+    match &room.controller {
+        Some(c) if !c.owner.is_ours() && !reservable(c) => {
+            let sources = withheld(c);
+            let mut bare = room.clone().into_owned();
+            bare.sources = Vec::new();
+            let mut ground = ground_of(atlas, richest, 0, &bare);
+            ground.withheld = sources;
+            ground
+        }
+        _ if richest >= engine::body_cost(bodies::block_of(Pattern::Claimer)) => {
+            ground_of(atlas, richest, engine::HELD_OUTPUT_PER_TICK, &room)
+        }
+        _ => ground_of(atlas, richest, engine::NEUTRAL_OUTPUT_PER_TICK, &room),
+    }
+}
+
+/// The bodies the spawns are making, for the economy.
+fn ovens_of(world: &World) -> Vec<Body> {
+    world
+        .spawns
+        .iter()
+        .filter_map(|s| {
+            s.spawning
+                .as_ref()
+                .filter(|oven| !tick::fights(&oven.name))
+                .map(|oven| {
+                    let life = if oven.body.iter().any(|p| p.kind == BodyPart::Claim) {
+                        engine::CLAIM_LIFETIME
+                    } else {
+                        engine::CREEP_LIFETIME
+                    };
+                    body_of(&oven.name, &s.pos, &oven.body, &Store::empty(), life)
+                })
+        })
+        .collect()
+}
+
+pub fn of_world(
+    world: &World,
+    creeps: &[&Creep],
+    atlas: &Atlas,
+    declarations: &Declarations,
+    worked: &[Outpost],
+    intel: &Intel,
+    scouts: &[Scout],
+) -> Derived {
+    let (colonies, colony_rooms) = colonies_of(world);
+
     let is_colony = |name: RoomName| colonies.iter().any(|c| c.room == name);
 
     // A declared room is dug by bodies its richest colony casts.
@@ -1003,37 +1106,8 @@ pub fn of_world(
         .max()
         .unwrap_or(0);
 
-    // At the rate the reserver holds, not this tick's: a body lives longer
-    // than a lapse lasts. The engine refuses a harvest on another's hold.
-    let remote_of = |outpost: &Outpost| -> Ground {
-        let room: Cow<Room> = world.room(outpost.room).map_or_else(
-            || Cow::Owned(blind(outpost, intel, world, declarations)),
-            Cow::Borrowed,
-        );
-
-        let withheld = |c: &Controller| {
-            if invader_held(c) {
-                room.sources.len() as i32
-            } else {
-                0
-            }
-        };
-
-        match &room.controller {
-            Some(c) if !c.owner.is_ours() && !reservable(c) => {
-                let sources = withheld(c);
-                let mut bare = room.clone().into_owned();
-                bare.sources = Vec::new();
-                let mut ground = ground_of(atlas, richest, 0, &bare);
-                ground.withheld = sources;
-                ground
-            }
-            _ if richest >= engine::body_cost(bodies::block_of(Pattern::Claimer)) => {
-                ground_of(atlas, richest, engine::HELD_OUTPUT_PER_TICK, &room)
-            }
-            _ => ground_of(atlas, richest, engine::NEUTRAL_OUTPUT_PER_TICK, &room),
-        }
-    };
+    let remote_of =
+        |outpost: &Outpost| remote_of(atlas, world, intel, declarations, richest, outpost);
 
     let mut grounds: Vec<Ground> = colony_rooms
         .iter()
@@ -1125,23 +1199,7 @@ pub fn of_world(
             })
             .filter(reservable)
             .collect(),
-        ovens: world
-            .spawns
-            .iter()
-            .filter_map(|s| {
-                s.spawning
-                    .as_ref()
-                    .filter(|oven| !tick::fights(&oven.name))
-                    .map(|oven| {
-                        let life = if oven.body.iter().any(|p| p.kind == BodyPart::Claim) {
-                            engine::CLAIM_LIFETIME
-                        } else {
-                            engine::CREEP_LIFETIME
-                        };
-                        body_of(&oven.name, &s.pos, &oven.body, &Store::empty(), life)
-                    })
-            })
-            .collect(),
+        ovens: ovens_of(world),
         workers: bodies
             .iter()
             .filter(|b| b.work > 0 && b.carry > 0)
