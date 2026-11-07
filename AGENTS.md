@@ -9,6 +9,34 @@ every agent and every review after. Prefer deleting to adding, a type or a
 name to a sentence, one place for a fact to two, and short reports to long
 ones.
 
+## Rewrite period (active)
+
+The season is over. Until the owner deletes this section, the rules below are
+suspended, and this section wins over any rule under it that says otherwise.
+
+- **"Refactor" means rewrite.** Behaviour may change. An identical replay is
+  not required; the first differing tick is reported, not fixed.
+- **Architecture changes are in scope.** A store, a memo, a `static`, a
+  `Tuning` field, a new module, a merged or deleted module, a changed row in
+  `ARCHITECTURE.md` §4: decide it, do not stop and ask. The agent is the owner
+  for these decisions; each one lands in `ARCHITECTURE.md` with its why in a
+  sentence, and the rest in the commit.
+- **Ceilings may be raised** (`scripts/ceilings.json`) while a rewrite is in
+  flight, in the same commit as the rewrite. The commit says the new number
+  and when it comes back down. Net lines added may be positive.
+- **The ask is the target, not the permission.** A rewrite is given a
+  destination (the modules after, the structure, a measure) and is done to
+  that destination. Several options are listed with the most radical first,
+  and the most radical that reaches the destination is taken; the safest is
+  taken only when the others are shown not to work.
+- **Verification is the scenario library and the soak**, not the replay:
+  `npm run scenario` passes and `npm run soak:many` does not regress beyond
+  noise (§Verification). A rewrite with no scenario covering it adds one.
+
+What stays: `decide` is deterministic; no names or ids in source; `Fight` and
+`Economy` do not import each other; the comment-share ceiling; the paraphrase
+test; `jj ship` and its gates.
+
 ## Boundaries
 
 - A module's state is the row it owns in `ARCHITECTURE.md` §4. Adding a store,
