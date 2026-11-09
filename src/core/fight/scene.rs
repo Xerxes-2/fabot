@@ -575,10 +575,9 @@ impl<'a> Scene<'a> {
     }
 
     /// One of his towers struck one of ours in his room on the trip just
-    /// ended: what his room's event log is read for, and the only answer a
-    /// drain counts.
+    /// ended: the only answer a drain counts.
     pub(super) fn drawn(&self, e: &Engagement) -> bool {
-        if self.world.attacks.is_empty() {
+        if e.phase != Phase::Draining || self.world.attacks.is_empty() {
             return false;
         }
 

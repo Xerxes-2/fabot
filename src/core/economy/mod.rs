@@ -422,6 +422,7 @@ pub(crate) mod dice {
             spawns: rooms.iter().flat_map(|(_, s)| s.clone()).collect(),
             creeps,
             attacks: Vec::new(),
+            destroyed: Vec::new(),
             our_sites: 0,
             rooms_allowed: rooms.len() as i32 + 1,
             closed: Default::default(),

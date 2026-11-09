@@ -80,6 +80,7 @@ fn world_of_rooms(rooms: Vec<Room>) -> World {
         spawns: Vec::new(),
         creeps: Vec::new(),
         attacks: Vec::new(),
+        destroyed: Vec::new(),
         our_sites: 0,
         rooms_allowed: 1,
         closed: Default::default(),

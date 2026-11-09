@@ -9,8 +9,9 @@ use crate::core::engine;
 use crate::core::fight::shape::Engagement;
 use crate::core::intents::{CreepAct, Intent, Refusal, SpawnAct, TowerAct};
 use crate::core::tick;
+use crate::core::tick::Declarations;
 use crate::core::vocabulary::{BodyPart, Resource};
-use crate::core::world::{Creep, Room, RoomName, World};
+use crate::core::world::{Creep, Owner, Pos, Room, RoomName, World, hostiles};
 
 pub const WINDOW: i32 = 100;
 const RING: usize = 150;
@@ -31,10 +32,19 @@ const SPAWNING: &str = "spawn.util";
 const IDLE_WANT: &str = "spawn.idleWant";
 const SHORT: &str = "short.";
 const FLIPS: &str = "fight.flips";
+const DEATH: &str = "death.";
+const LOST: &str = "lost.structure";
+const DWELL: &str = "hostile.dwell";
 const BODIES: &str = "bodies";
 const BODIES_OF: &str = "bodies.";
 const IDLE_OF: &str = "idle.";
 const CHURN: &str = "churn.task";
+const STUCK: &str = "move.stuck";
+const WEDGED: &str = "move.stuck20";
+const EDGE: &str = "move.edgeFlips";
+const SWING: &str = "move.swings";
+const IN_RANGE: &str = "shot.inRange";
+const MISSED: &str = "shot.missed";
 const REFUSED: &str = "refuse.";
 const CPU: &str = "cpu.";
 const BUCKET: &str = "bucket";
@@ -120,6 +130,21 @@ const METRICS: &[Metric] = &[
         Fold::Sum,
         "engagements opened in a room within a window of one closing there",
     ),
+    metric(
+        DEATH,
+        Fold::Sum,
+        "our bodies dead with more than 5 ticks to live, by what last struck them within 5 ticks: a player's creep (player), a player's tower (tower), an Invader's or keeper's creep or tower (npc), or none seen while wounded or out of sight (unknown)",
+    ),
+    metric(
+        LOST,
+        Fold::Sum,
+        "structures destroyed in a room we own or reserve on a tick a creep not ours struck them",
+    ),
+    metric(
+        DWELL,
+        Fold::Sum,
+        "ticks an armed creep, neither an ally's nor a keeper, stood in a room we own or declare an outpost, with no engagement open there or no armed body of ours within its reach (its weapon's range + 2)",
+    ),
     metric(BODIES, Fold::Mean, "economy bodies"),
     metric(
         BODIES_OF,
@@ -135,6 +160,36 @@ const METRICS: &[Metric] = &[
         CHURN,
         Fold::PerBody,
         "task changes on a tick the body's load held, per 100 economy bodies",
+    ),
+    metric(
+        STUCK,
+        Fold::Share(BODIES),
+        "% of economy body-ticks that asked to step rested and stood on the tile of the tick before",
+    ),
+    metric(
+        WEDGED,
+        Fold::Sum,
+        "economy bodies stuck 20 ticks in a row, a tired tick neither breaking nor adding to the run",
+    ),
+    metric(
+        EDGE,
+        Fold::PerBody,
+        "an economy body's returns to the room it left 5 ticks before or less, per 100 economy bodies",
+    ),
+    metric(
+        SWING,
+        Fold::PerBody,
+        "an economy body back on the tile of two ticks before, the tile between in the same room, per 100 economy bodies a window: the A-B-A swing the scenarios' oscillation counts per 100 ticks of one fight body",
+    ),
+    metric(
+        IN_RANGE,
+        Fold::Sum,
+        "armed body-ticks of ours with a creep, neither an ally's, a stranger's nor a keeper, within its longest weapon's range, not healing a wounded one of ours",
+    ),
+    metric(
+        MISSED,
+        Fold::Share(IN_RANGE),
+        "% of those with no attack, ranged attack or mass attack asked",
     ),
     metric(
         REFUSED,
@@ -160,6 +215,14 @@ const THRESHOLDS: &[(&str, Bound)] = &[
     (IDLE_WANT, Bound::Max(50)),
     (STALE, Bound::Max(3000)),
     (FLIPS, Bound::Max(1)),
+    (DEATH, Bound::Max(1)),
+    (LOST, Bound::Max(0)),
+    (DWELL, Bound::Max(20)),
+    (STUCK, Bound::Max(5)),
+    (WEDGED, Bound::Max(0)),
+    (EDGE, Bound::Max(5)),
+    (SWING, Bound::Max(25)),
+    (MISSED, Bound::Max(20)),
     (REFUSED, Bound::Max(50)),
     (BUCKET, Bound::Min(1000)),
 ];
@@ -203,6 +266,47 @@ struct Stale {
 }
 
 #[derive(Clone, Copy, Debug)]
+enum Cause {
+    Player,
+    Tower,
+    Npc,
+    Unknown,
+}
+
+impl Cause {
+    fn name(self) -> &'static str {
+        match self {
+            Cause::Player => "player",
+            Cause::Tower => "tower",
+            Cause::Npc => "npc",
+            Cause::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Track {
+    id: String,
+    seen: i32,
+    at: Pos,
+    before: Option<Pos>,
+    stepped: bool,
+    tired: bool,
+    still: i32,
+    left_at: Option<(RoomName, i32)>,
+    ttl: i32,
+    wounded: bool,
+    struck: Option<(Cause, i32)>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct Asked {
+    step: bool,
+    strike: bool,
+    heal: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
 struct Upgraded {
     level: i32,
     progress: i32,
@@ -224,6 +328,7 @@ pub struct Metrics {
     controllers: BTreeMap<RoomName, Upgraded>,
     engaged: BTreeMap<i32, RoomName>,
     closed: BTreeMap<RoomName, i32>,
+    tracks: HashMap<String, Track>,
 }
 
 pub struct Seen<'a> {
@@ -233,6 +338,7 @@ pub struct Seen<'a> {
     pub intents: &'a [Intent],
     pub refusals: &'a [Refusal],
     pub phases: &'a [(String, f64)],
+    pub declarations: &'a Declarations,
 }
 
 fn add(sums: &mut Sums, row: Row, name: &str, v: f64) {
@@ -350,6 +456,226 @@ fn verb(intent: &Intent) -> Option<(&str, &'static str)> {
     })
 }
 
+/// Fewer ticks to live than this at its last sight, a body died of age.
+const AGED: i32 = 5;
+/// A body struck this many ticks or fewer before it died died of that strike.
+const STRUCK_LATELY: i32 = 5;
+const WEDGED_TICKS: i32 = 20;
+const FLIP_TICKS: i32 = 5;
+
+impl Track {
+    fn of(c: &Creep, time: i32) -> Track {
+        Track {
+            id: c.id.clone(),
+            seen: time,
+            at: c.pos,
+            before: None,
+            stepped: false,
+            tired: false,
+            still: 0,
+            left_at: None,
+            ttl: c.ticks_to_live,
+            wounded: c.hits < c.hits_max,
+            struck: None,
+        }
+    }
+
+    fn moved(&mut self, now: Pos, time: i32) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if self.seen != time - 1 {
+            self.before = None;
+            self.stepped = false;
+            self.still = 0;
+        }
+        if self.stepped && now == self.at {
+            out.push(STUCK);
+            self.still += 1;
+            if self.still == WEDGED_TICKS {
+                out.push(WEDGED);
+            }
+        } else if !self.tired {
+            self.still = 0;
+        }
+        if now.room != self.at.room {
+            if (self.left_at).is_some_and(|(room, at)| room == now.room && time - at <= FLIP_TICKS)
+            {
+                out.push(EDGE);
+            }
+            self.left_at = Some((self.at.room, time));
+        }
+        if self.before == Some(now) && self.at != now && self.at.room == now.room {
+            out.push(SWING);
+        }
+        self.before = (self.seen == time - 1).then_some(self.at);
+        self.at = now;
+        self.seen = time;
+        out
+    }
+}
+
+/// An attacker gone the same tick, or out of sight, is unknown.
+fn cause_of(room: Option<&Room>, by: &str) -> Cause {
+    let npc = |o: &Owner| matches!(o, Owner::Invader | Owner::Keeper);
+    let Some(room) = room else {
+        return Cause::Unknown;
+    };
+    if let Some(c) = room.others.iter().find(|c| c.id == by) {
+        return if npc(&c.owner) {
+            Cause::Npc
+        } else {
+            Cause::Player
+        };
+    }
+    match room
+        .structures
+        .iter()
+        .find(|s| s.id == by && s.kind.is_tower())
+    {
+        Some(s) if npc(&s.owner) => Cause::Npc,
+        Some(_) => Cause::Tower,
+        None => Cause::Unknown,
+    }
+}
+
+/// Fight bodies' steps are left to the scenarios (`oscillation`): a kite's step back is a swing that pays.
+fn steps(
+    sums: &mut Sums,
+    tracks: &mut HashMap<String, Track>,
+    world: &World,
+    asked: &HashMap<&str, Asked>,
+) {
+    let time = world.time;
+    for c in &world.creeps {
+        let a = asked.get(c.name.as_str()).copied().unwrap_or_default();
+        let Some(t) = tracks.get_mut(&c.name) else {
+            tracks.insert(c.name.clone(), Track::of(c, time));
+            continue;
+        };
+        let steps = t.moved(c.pos, time);
+        if !tick::fights(&c.name) && bodies::pattern_of_name(&c.name).is_some() {
+            for name in steps {
+                add(sums, None, name, 1.0);
+            }
+        }
+        t.stepped = a.step && c.fatigue == 0;
+        t.tired = a.step && c.fatigue > 0;
+        t.ttl = c.ticks_to_live;
+        t.wounded = c.hits < c.hits_max;
+    }
+}
+
+fn shots(sums: &mut Sums, world: &World, asked: &HashMap<&str, Asked>) {
+    for c in &world.creeps {
+        let a = asked.get(c.name.as_str()).copied().unwrap_or_default();
+        let reach = if c.live(BodyPart::RangedAttack) > 0 {
+            engine::RANGED_RANGE
+        } else if c.live(BodyPart::Attack) > 0 {
+            engine::MELEE_RANGE
+        } else {
+            continue;
+        };
+        let foe = |h: &Creep| {
+            !matches!(h.owner, Owner::Stranger(_) | Owner::Keeper) && c.pos.within(reach, &h.pos)
+        };
+        if !a.heal
+            && world
+                .room(c.pos.room)
+                .is_some_and(|r| r.hostiles().any(foe))
+        {
+            add(sums, None, IN_RANGE, 1.0);
+            if !a.strike {
+                add(sums, None, MISSED, 1.0);
+            }
+        }
+    }
+}
+
+/// The strike that killed a body is logged the tick after, in a room that
+/// may have gone out of sight with it: the last strike seen stands for it.
+fn deaths(sums: &mut Sums, tracks: &mut HashMap<String, Track>, world: &World) {
+    let time = world.time;
+    if !world.attacks.is_empty() {
+        let ids: HashMap<&str, (&str, RoomName)> = (tracks.iter())
+            .map(|(name, t)| (t.id.as_str(), (name.as_str(), t.at.room)))
+            .collect();
+        let struck: Vec<(String, Cause)> = (world.attacks.iter())
+            .filter_map(|(by, at)| {
+                let (name, room) = ids.get(at.as_str())?;
+                Some((name.to_string(), cause_of(world.room(*room), by)))
+            })
+            .collect();
+        for (name, cause) in struck {
+            if let Some(t) = tracks.get_mut(&name) {
+                let known = (t.struck).is_some_and(|(c, at)| {
+                    !matches!(c, Cause::Unknown) && time - at <= STRUCK_LATELY
+                });
+                if !(known && matches!(cause, Cause::Unknown)) {
+                    t.struck = Some((cause, time));
+                }
+            }
+        }
+    }
+
+    tracks.retain(|_, t| {
+        if t.seen == time {
+            return true;
+        }
+        // Out of sight it may have died unwounded; we never recycle a body.
+        let unseen = world.room(t.at.room).is_none();
+        let cause = match t.struck {
+            Some((cause, at)) if time - at <= STRUCK_LATELY => Some(cause),
+            _ => (t.wounded || unseen).then_some(Cause::Unknown),
+        };
+        if t.ttl > AGED
+            && let Some(cause) = cause
+        {
+            add(
+                sums,
+                Some(t.at.room),
+                &format!("{DEATH}{}", cause.name()),
+                1.0,
+            );
+        }
+        false
+    });
+}
+
+/// A body of ours that dismantles is no loss's cause.
+fn lost(sums: &mut Sums, world: &World) {
+    for (room, id) in &world.destroyed {
+        let struck = (world.attacks.iter())
+            .any(|(by, at)| at == id && !world.creeps.iter().any(|c| &c.id == by));
+        if struck && world.room(*room).is_some_and(ours) {
+            add(sums, Some(*room), LOST, 1.0);
+        }
+    }
+}
+
+fn dwell(sums: &mut Sums, seen: &Seen) {
+    let world = seen.world;
+    for r in &world.rooms {
+        let worked = r.controller.as_ref().is_some_and(|c| c.owner.is_ours())
+            || (seen.declarations.outposts.iter()).any(|o| o.room == r.name);
+        if !worked {
+            continue;
+        }
+        let mut armed = (r.hostiles())
+            .filter(|h| h.owner != Owner::Keeper && hostiles::strikes(h))
+            .peekable();
+        if armed.peek().is_none() {
+            continue;
+        }
+        let engaged = seen.engagements.iter().any(|e| e.room == r.name);
+        let answered = |h: &Creep| {
+            (world.creeps.iter())
+                .any(|c| hostiles::strikes(c) && c.pos.within(hostiles::reach(h), &h.pos))
+        };
+        if !engaged || !armed.all(answered) {
+            add(sums, Some(r.name), DWELL, 1.0);
+        }
+    }
+}
+
 pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
     let world = seen.world;
     let start = world.time - world.time.rem_euclid(WINDOW);
@@ -369,12 +695,24 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         .map(|c| (c.name.as_str(), c))
         .collect();
     let fed = fed(&creeps, seen.intents);
-    let mut acted: Vec<&str> = Vec::new();
+    let mut asked: HashMap<&str, Asked> = HashMap::default();
     let mut spawned: BTreeSet<&str> = BTreeSet::new();
     let mut owed: BTreeSet<RoomName> = BTreeSet::new();
     for intent in seen.intents {
         match intent {
-            Intent::Creep(name, _) => acted.push(name.as_str()),
+            Intent::Creep(name, act) => {
+                let a = asked.entry(name.as_str()).or_default();
+                match act {
+                    CreepAct::Move(_) => a.step = true,
+                    CreepAct::AttackCreep(_)
+                    | CreepAct::RangedAttackCreep(_)
+                    | CreepAct::RangedMassAttack => a.strike = true,
+                    CreepAct::HealCreep(id) | CreepAct::RangedHealCreep(id) => {
+                        a.heal |= (world.creeps.iter()).any(|c| &c.id == id && c.hits < c.hits_max);
+                    }
+                    _ => (),
+                }
+            }
             Intent::Spawn(id, _) => {
                 spawned.insert(id.as_str());
             }
@@ -393,7 +731,6 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         }
     }
 
-    acted.sort_unstable();
     for c in world.creeps.iter().filter(|c| !tick::fights(&c.name)) {
         let Some(p) = bodies::pattern_of_name(&c.name) else {
             continue;
@@ -401,7 +738,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         let pace = m.paces.entry(p).or_default();
         pace.bodies += 1.0;
         let task = seen.assignments.get(&c.name);
-        if task.is_none() || acted.binary_search(&c.name.as_str()).is_err() {
+        if task.is_none() || !asked.contains_key(c.name.as_str()) {
             pace.idle += 1.0;
         }
         let load = c.store.used();
@@ -457,6 +794,12 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
     }
     m.engaged = now;
     m.closed.retain(|_, t| world.time - *t < WINDOW);
+
+    steps(sums, &mut m.tracks, world, &asked);
+    shots(sums, world, &asked);
+    deaths(sums, &mut m.tracks, world);
+    lost(sums, world);
+    dwell(sums, seen);
 
     for r in seen.refusals {
         add(sums, None, &format!("{REFUSED}{}.{}", r.act, r.code), 1.0);
@@ -730,6 +1073,46 @@ mod tests {
             ..Metrics::default()
         };
         assert_eq!(Metrics::of_text(&m.text()).ring, ring);
+    }
+
+    #[test]
+    fn a_body_counts_its_stuck_steps_flips_and_swings() {
+        let (x, y) = (RoomName::named("W1N1"), RoomName::named("W2N1"));
+        let mut t = Track {
+            id: String::new(),
+            seen: 0,
+            at: Pos::new(x, 10, 10),
+            before: None,
+            stepped: false,
+            tired: false,
+            still: 0,
+            left_at: None,
+            ttl: 1500,
+            wounded: false,
+            struck: None,
+        };
+        let seen = |t: &mut Track, time: i32, pos: Pos, stepped: bool, tired: bool| {
+            let out = t.moved(pos, time);
+            (t.stepped, t.tired) = (stepped, tired);
+            out
+        };
+        let mut stuck = Vec::new();
+        for time in 1..=25 {
+            stuck.extend(seen(
+                &mut t,
+                time,
+                Pos::new(x, 10, 10),
+                time % 5 != 0,
+                time % 5 == 0,
+            ));
+        }
+        let wedged = stuck.iter().filter(|n| **n == WEDGED).count();
+        assert_eq!((stuck.len() - wedged, wedged), (20, 1));
+        assert!(seen(&mut t, 26, Pos::new(x, 11, 10), false, false).is_empty());
+        assert_eq!(seen(&mut t, 27, Pos::new(x, 10, 10), false, false), [SWING]);
+        assert!(seen(&mut t, 28, Pos::new(y, 49, 10), false, false).is_empty());
+        assert!(seen(&mut t, 34, Pos::new(x, 0, 10), false, false).is_empty());
+        assert_eq!(seen(&mut t, 35, Pos::new(y, 49, 10), false, false), [EDGE]);
     }
 
     #[test]

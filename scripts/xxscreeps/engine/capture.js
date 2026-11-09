@@ -36,9 +36,11 @@ module.exports = (memory) => {
     energyCapacityAvailable: room.energyCapacityAvailable,
     controller: room.controller ? ref(room.controller) : undefined,
     find: Object.fromEntries(FINDS.map((f) => [f, room.find(f).map(ref)])),
-    // The attacks a drain reads off the log (`read.js`).
     ...((events) => (events.length ? { events } : {}))(
-      room.getEventLog().filter((e) => (e.event ?? e._$Variant) === EVENT_ATTACK).map((e) => ({ event: EVENT_ATTACK, objectId: e.objectId, data: { targetId: e.data?.targetId } })),
+      room
+        .getEventLog()
+        .filter((e) => [EVENT_ATTACK, EVENT_OBJECT_DESTROYED].includes(e.event ?? e._$Variant))
+        .map((e) => ({ event: e.event ?? e._$Variant, objectId: e.objectId, data: { targetId: e.data?.targetId, type: e.data?.type } })),
     ),
     ...(terrainSeen.has(room.name) ? {} : (terrainSeen.add(room.name), { terrain: Array.from(Game.map.getRoomTerrain(room.name).getRawBuffer()).join("") })),
   }));

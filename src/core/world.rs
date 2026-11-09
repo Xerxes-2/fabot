@@ -607,9 +607,10 @@ pub struct World {
     /// Rooms whose `Game.map.getRoomStatus` is not our spawns' room's: the
     /// engine leaves a creep on the exit tile into one, never carrying it across.
     pub closed: BTreeSet<RoomName>,
-    /// One of his towers striking one of ours this tick, `(attacker, target)`
-    /// ids: his room's event log, read only for the room a drain stands in.
+    /// Last tick's strikes, `(attacker, target)` ids, off the rooms' event logs (§3).
     pub attacks: Vec<(String, String)>,
+    /// Last tick's structures destroyed, off the same logs.
+    pub destroyed: Vec<(RoomName, String)>,
 }
 
 pub mod terrain {
@@ -647,7 +648,7 @@ pub mod hostiles {
     use crate::core::engine;
     use std::collections::BTreeSet;
 
-    fn strikes(creep: &Creep) -> bool {
+    pub fn strikes(creep: &Creep) -> bool {
         creep
             .body
             .iter()

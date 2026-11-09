@@ -76,6 +76,7 @@ const room = {
   energyCapacityAvailable: 300,
   controller: { id: "c1", my: true, owner: { username: "me" }, pos: at(30, 30), level: 1, progress: 10, progressTotal: 200, ticksToDowngrade: 20000, safeModeAvailable: 1 },
   find: (type) => found[type] ?? [],
+  getEventLog: () => "[]",
   createConstructionSite: () => 0,
 };
 spawn.room = room;

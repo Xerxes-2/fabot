@@ -146,7 +146,7 @@ cold tick never spends more than ❓ 60% of the limit.
 |---|---|---|---|---|
 | `Bindings` | the Screeps API surface | — | — | port verbatim |
 | `Engine` | server constants and formulas | — | — | port verbatim |
-| `World` | this tick's facts, one record | Game | — | port, trim |
+| `World` | this tick's facts, one record; last tick's strikes and structures destroyed off the event log of each room we own, reserve or stand in (and a drain's) | Game | — | port, trim |
 | `Atlas` | geometry in two layers: the **room graph** (a node a room's region, left by a stretch of border both rooms open, priced by the flood across it round every tile a keeper strikes; grown from the target's room, so every room's way on is the same whichever room asks and a body never walks back; a keeper room whose lairs no intel places taken only past every other; rooms to avoid) and the **tile grid** per room (terrain, floods, seats, work areas, first steps). Every tile query takes a **footprint** (1×1 today, 2×2 for a formation) | World, `terrain` for rooms out of sight, `intel.rooms` for avoided and keeper rooms | flood table, kept across ticks per room while its weights hold; out of sight, a room's grid is what stood there when last seen (else its terrain) and is kept, floods and all under the same bound, while it stays so (the owner's call: part of the flood table, not a second cache); the rooms whose lairs intel reads otherwise than their names, rebuilt each tick | port, add the graph layer, widen the query |
 | `Economy` | task pool, planner, matcher, quota, spawns, labs, terminals, market | World, Atlas, declarations, `State.Economy` | tasks, casts, `State.Economy` | port, trim (§5) |
 | `Layout` | construction and tower plans | World, Atlas, declarations (outposts' containers and roads) | sites, tower intents | port |
@@ -157,7 +157,7 @@ cold tick never spends more than ❓ 60% of the limit.
 | `Season` | this season's rules: what scores, its structures, its NPCs, its map quirks | World | declarations to Strategy, season intents | **new**, disposable (§8) |
 | `Move` | per-room movement arbitration, run by `Tick` over every module's wishes, and the step functions (chase, kite, flee, formation) | Intents, Atlas | move intents | port `Resolver.fs`, drop fight precedence |
 | `Executor` | API calls | Intents | Game | port |
-| `Observe` | what the operator reads: health, faults, per-module CPU, engagements, exchange error, the metrics (§10.5) | everything; the metrics: World, assignments, engagements, the tick's intents and refusals, phases | `State.Observe`, `metrics` | rewrite small |
+| `Observe` | what the operator reads: health, faults, per-module CPU, engagements, exchange error, the metrics (§10.5) | everything; the metrics: World, assignments, engagements, the tick's intents and refusals, phases, the declared outposts | `State.Observe`, `metrics` | rewrite small |
 
 Dependency direction is top to bottom. `Fight` and `Economy` do not import each
 other; `Season` is imported by `Strategy` only. The seam between them is a
@@ -201,7 +201,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK body stood there, its keeper lairs and the resource each guards; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
 | `observe.*` | health, faults, per-module CPU, counters, this tick's tactic offers (§6.3), the metrics past their threshold | Main, then Observe | segment 1 | operator; calibrates the benchmark |
-| `metrics` | the open window's sums; each creep's last task and load, each site's last progress and when, each colony's last controller progress, last tick's engagements and each room's last close; the closed windows | Observe | heap | what a tick is compared against; a reset loses the open window and restarts the sites' ages |
+| `metrics` | the open window's sums; each creep's last task and load, each site's last progress and when, each colony's last controller progress, last tick's engagements and each room's last close; each body's last tile and the one before, its stuck run, the room it last left and when, its ticks to live, whether it was wounded and what last struck it and when; the closed windows | Observe | heap | what a tick is compared against; a reset loses the open window and the bodies' tracks and restarts the sites' ages |
 | `metrics.windows` | 100-tick windows aligned on the game tick, a row a room and one for the world, the last 150 (fewer past the segment's 100 KB) | Observe | segment 3, written as a window closes | `observe metrics`, the soak's `metrics.jsonl` (§10.5) |
 | `scouts`, `preyed` | the declared rooms a scout serves, with their rows' age; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
 | `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) and whether it is armed; a room in sight holds only what stands there now. A level-0 core is unarmed: it keeps its core engagement open but stands nothing down | World | heap | vision grace; when a stood-down outpost is clear |
@@ -879,7 +879,8 @@ tick: `--seeds N` plays each start on N seeds, and a change is read over them
 
 The bot measures its own economy and fight in 100-tick windows (idle share per
 pattern, task churn, spend split, spawn use, stale sites, engagement flips,
-refusals, CPU per phase), so live and the soak read one number by one
+refusals, CPU per phase, deaths by cause, structures lost, hostile dwell,
+stuck steps, edge flips, swings, missed shots), so live and the soak read one number by one
 definition: last season most faults were found by the owner watching the
 client. `core/observe/metrics.rs` holds the definitions and the thresholds,
 each in one table; `observe health` lists a metric past its threshold (never
@@ -889,8 +890,11 @@ after the executor, and no decision reads it, so `decide` stays
 deterministic. Spend is estimated from the intents (WORK × power, capped by
 the target and carried energy), not read from the event log, which is a call
 a room; `metrics-spend-matches-ledger` holds it within 2% of the soak's engine
-ledger per category on E1. Deaths, dwell and loops (M2) will need the event
-log. Its CPU budget, 1% of the bot's, is read on a live-sized world (the
+ledger per category on E1; `deathsError` holds the deaths (event log read
+by World) to the bodies the soak saw struck and gone. Steps are counted over
+economy bodies only: a fight body's swing may pay and a set's border wait
+flips by design, so the scenarios judge those (`oscillation`, `bounced`).
+Its CPU budget, 1% of the bot's, is read on a live-sized world (the
 soak's `--world` of a live capture); a one-colony node, whose whole tick is
 under a millisecond, reads higher.
 

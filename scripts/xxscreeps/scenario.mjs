@@ -197,6 +197,8 @@ const windowsOf = (dir, a) =>
 // A spend category the ledger moved less than this in a run is too small to
 // read a percent off.
 const LEDGER_LEAST = 1000;
+// `AGED` in `src/core/observe/metrics.rs`: fewer ticks to live, a body died of age.
+const AGED = 5;
 const measures = {
   metric: (_, a, dir) => {
     const values = windowsOf(dir, a).filter((w) => w.ticks === 100 && w.row === (a.room ?? "*")).map((w) => w.values[a.metric] ?? 0);
@@ -218,6 +220,20 @@ const measures = {
       .filter(([, ledger]) => ledger >= LEDGER_LEAST)
       .map(([bot, ledger]) => Math.abs((100 * (bot - ledger)) / ledger));
     return errors.length ? Number(Math.max(...errors).toFixed(1)) : Infinity;
+  },
+  // The bot's deaths (`death.*`) against the engine's, over the bot's full
+  // windows: a body is counted dead the tick after it was last seen, and
+  // `bodies.jsonl` also closes a body that only walked out of its rooms, so
+  // one that comes back, or was never struck, did not die.
+  deathsError: (_, a, dir) => {
+    const full = windowsOf(dir, a).filter((w) => w.ticks === 100);
+    if (!full.length) return Infinity;
+    const [lo, hi] = [Math.min(...full.map((w) => w.start)), Math.max(...full.map((w) => w.start)) + 100];
+    const bot = full.reduce((n, w) => n + Object.entries(w.values).reduce((m, [k, v]) => m + (k.startsWith("death.") ? v : 0), 0), 0);
+    const lives = livesOf(dir);
+    const back = (b) => lives.some((c) => c.name === b.name && c.first > b.last);
+    const died = lives.filter((b) => b.ours && b.struck && b.ttl > AGED && b.last + 1 >= lo && b.last + 1 < hi && !back(b));
+    return Math.abs(bot - died.length);
   },
   // Energy lost to pile decay.
   decayed: (samples, a) => at(samples, a.to ?? Infinity).ledger.decayed - at(samples, a.from ?? 0).ledger.decayed,

@@ -46,6 +46,15 @@ globalThis.__fabotRead = (() => {
     n(xs.length);
     for (const x of xs) each(x);
   };
+  // Parsed only when it holds a strike or a destruction: most ticks a room logs
+  // harvests and transfers alone, and on a colony's 22 KB log the search costs
+  // 2.5 us against the parse's 29 (two `includes` cost 14).
+  const struckOrDestroyed = new RegExp(`"event":(${EVENT_ATTACK}|${EVENT_OBJECT_DESTROYED}),`);
+  const eventsOf = (r) => {
+    const raw = r.getEventLog(true);
+    if (typeof raw !== "string") return raw ?? [];
+    return struckOrDestroyed.test(raw) ? JSON.parse(raw) : [];
+  };
 
   const controller = (c) => {
     s(c.id), pos(c.pos), owner(c);
@@ -179,8 +188,9 @@ globalThis.__fabotRead = (() => {
 
     const [time, bucket] = [n(), n()];
     const rooms = list(room);
-    // A drain's event log is read for a live drain only: consumed, not stood.
-    list(() => [s(), s()]);
+    // The event log is read live only: its strikes and destructions consumed, not stood.
+    const strikes = list(() => [s(), s()]);
+    const destroyed = list(() => [s(), s()]);
     const creeps = {};
     const spawns = Object.fromEntries(
       list(() => {
@@ -210,13 +220,23 @@ globalThis.__fabotRead = (() => {
     const spawns = sorted(game.spawns).map((k) => game.spawns[k]);
     const creeps = sorted(game.creeps).map((k) => game.creeps[k]);
     const mine = rooms.find((r) => r.controller && r.controller.my === true);
-    s(spawns.length ? spawns[0].owner?.username : creeps.length ? creeps[0].owner.username : mine?.controller.owner?.username);
+    const user = spawns.length ? spawns[0].owner?.username : creeps.length ? creeps[0].owner.username : mine?.controller.owner?.username;
+    s(user);
     list(rooms, room);
-    // The one room a drain stands in is the one whose log is read: his towers'
-    // shots there, and who each struck.
-    const logged = drain === undefined ? undefined : game.rooms[drain];
-    const shots = logged === undefined ? [] : logged.getEventLog().filter((e) => (e.event ?? e._$Variant) === EVENT_ATTACK);
+    const stood = new Set(creeps.map((c) => c.pos.roomName));
+    const shots = [];
+    const destroyed = [];
+    for (const r of rooms) {
+      const c = r.controller;
+      if (r.name !== drain && !stood.has(r.name) && c?.my !== true && c?.reservation?.username !== user) continue;
+      for (const e of eventsOf(r)) {
+        const kind = e.event ?? e._$Variant;
+        if (kind === EVENT_ATTACK) shots.push(e);
+        else if (kind === EVENT_OBJECT_DESTROYED && e.data?.type !== "creep") destroyed.push([r.name, e.objectId]);
+      }
+    }
     list(shots, (e) => (s(e.objectId), s(e.data?.targetId)));
+    list(destroyed, ([name, id]) => (s(name), s(id)));
     list(spawns, (sp) => {
       s(sp.id), s(sp.name), pos(sp.pos);
       if (absent(sp.spawning)) return n(0);

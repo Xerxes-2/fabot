@@ -1,0 +1,11 @@
+{
+  "why": "economy bodies through a one-wide corridor past a miner's post never stand where they asked to step, nor cross back over a border",
+  "modules": ["mv", "observe"],
+  "start": { "world": "scripts/xxscreeps/worlds/corridor-post.json", "seed": 1 },
+  "ticks": 4000,
+  "assert": [
+    { "metric": "move.stuck", "max": 1 },
+    { "metric": "move.stuck20", "max": 0 },
+    { "metric": "move.edgeFlips", "max": 0 }
+  ]
+}

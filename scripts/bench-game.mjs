@@ -127,8 +127,9 @@ function Room(r, objects) {
   this._events = r.events ?? [];
   this._found = Object.fromEntries(Object.entries(r.find).map(([type, ids]) => [type, ids.map((id) => objects[id])]));
 }
-// Only the attacks were captured: what a drain reads.
+// Only the attacks and the destructions were captured: what `read.js` keeps.
 globalThis.EVENT_ATTACK ??= 1;
+globalThis.EVENT_OBJECT_DESTROYED ??= 2;
 Room.prototype.getEventLog = function () {
   return this._events;
 };

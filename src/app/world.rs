@@ -379,6 +379,7 @@ pub fn of_game(
     let bucket = r.n();
     let rooms = r.list(Reader::room);
     let attacks = r.list(|r| (r.s(), r.s()));
+    let destroyed = r.list(|r| (r.room_name(), r.s()));
     let spawns = r.list(Reader::spawn);
     let creeps = r.list(Reader::creep);
     let mut world = World {
@@ -393,6 +394,7 @@ pub fn of_game(
         rooms_allowed: r.n(),
         closed: BTreeSet::new(),
         attacks,
+        destroyed,
     };
     let ours = world.spawns.first().and_then(|s| r.maps.status(s.pos.room));
     let homes = world
