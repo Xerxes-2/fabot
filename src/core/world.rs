@@ -774,6 +774,12 @@ impl Creep {
     pub fn is_ours(&self) -> bool {
         self.owner.is_ours()
     }
+
+    pub fn live(&self, kind: BodyPart) -> i32 {
+        (self.body.iter())
+            .filter(|p| p.hits > 0 && super::vocabulary::same_part(p.kind, kind))
+            .count() as i32
+    }
 }
 
 impl World {

@@ -9,6 +9,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use super::js::{self, field, int_of};
 use crate::core::exchange::{Losses, Outcome};
 use crate::core::fight::shape::{Cast, Engagement, Group, Objective, Phase, Plan};
+use crate::core::observe::metrics::Metrics;
 use crate::core::state::State;
 use crate::core::strategy::intel::{self, Intel};
 use crate::core::tactics::{self, Offer, Tactic};
@@ -19,6 +20,7 @@ use crate::core::world::{Pos, RoomName, World};
 /// Read by `npm run observe` and `scripts/capture`.
 pub const OBSERVE_SEGMENT: u8 = 1;
 const INTEL_SEGMENT: u8 = 2;
+pub const METRICS_SEGMENT: u8 = 3;
 
 fn set_field(o: &JsValue, name: &str, value: &JsValue) {
     let _ = Reflect::set(o, &JsValue::from_str(name), value);
@@ -540,9 +542,10 @@ pub struct Observed {
     pub counts: Vec<(String, i32)>,
     pub off: Vec<String>,
     pub faults: Vec<Fault>,
-    pub refusals: Vec<crate::app::executor::Refusal>,
+    pub refusals: Vec<crate::core::intents::Refusal>,
     /// Each engagement priced this tick, its candidates' offers beside it (§6.3).
     pub offers: Vec<(i32, Vec<Offer>)>,
+    pub alerts: Vec<String>,
 }
 
 pub fn write_observe(o: &Observed) {
@@ -609,6 +612,12 @@ pub fn write_observe(o: &Observed) {
     }
     set_field(root.as_ref(), "refusals", refusals.as_ref());
 
+    let alerts = Array::new();
+    for a in &o.alerts {
+        alerts.push(&JsValue::from_str(a));
+    }
+    set_field(root.as_ref(), "alerts", alerts.as_ref());
+
     let text: String = js_sys::JSON::stringify(root.as_ref())
         .ok()
         .and_then(|text| text.as_string())
@@ -620,11 +629,17 @@ pub fn write_observe(o: &Observed) {
 /// segment against the ten saved per tick, so a cold heap replaces it.
 pub fn read_intel(asked: bool) -> Option<Intel> {
     if !asked {
-        raw_memory::set_active_segments(&[INTEL_SEGMENT]);
+        raw_memory::set_active_segments(&[INTEL_SEGMENT, METRICS_SEGMENT]);
         return None;
     }
     let text = raw_memory::segments().get(INTEL_SEGMENT);
     Some(text.map_or_else(Intel::new, |text| intel::of_text(&text)))
+}
+
+/// Read once after a reset, the tick after `read_intel` asked for it.
+pub fn read_metrics() -> Metrics {
+    let text = raw_memory::segments().get(METRICS_SEGMENT);
+    text.map_or_else(Metrics::default, |text| Metrics::of_text(&text))
 }
 
 pub fn write_intel(rows: &Intel) {

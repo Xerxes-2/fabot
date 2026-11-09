@@ -32,7 +32,9 @@
 // "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
 // (soak's --world; crafted ones under worlds/), "seed", "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "withdrawn"? (rooms whose open siege the owner has just withdrawn) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"?, "name"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
-// [from, to), counted from the run's first tick.
+// [from, to), counted from the run's first tick; { "metric": a name the bot's
+// metrics carry (`src/core/observe/metrics.rs`), "room"? } bounds its worst
+// full window, and fails when none was read.
 // Exits non-zero when a bound fails or a soak does, or loses ticks twice.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -186,7 +188,37 @@ const sideOf = (a) => (s) => (a.who ? s.others[a.who] : s);
 const within = (samples, a) => samples.filter((s) => s.t >= (a.from ?? 0) && s.t < (a.to ?? Infinity));
 const upgradedIn = (s, a) => (a.room ? (s.rooms[a.room]?.upgrade ?? 0) : s.ledger.upgrade);
 const builtIn = (s, a) => (a.room ? (s.rooms[a.room]?.build ?? 0) : s.ledger.build);
+const windowsOf = (dir, a) =>
+  readFileSync(join(dir, "metrics.jsonl"), "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => JSON.parse(l))
+    .filter((w) => w.t >= (a.from ?? 0) && w.t < (a.to ?? Infinity));
+// A spend category the ledger moved less than this in a run is too small to
+// read a percent off.
+const LEDGER_LEAST = 1000;
 const measures = {
+  metric: (_, a, dir) => {
+    const values = windowsOf(dir, a).filter((w) => w.ticks === 100 && w.row === (a.room ?? "*")).map((w) => w.values[a.metric] ?? 0);
+    if (!values.length) return a.min !== undefined ? -Infinity : Infinity;
+    return a.min !== undefined ? Math.min(...values) : Math.max(...values);
+  },
+  // The most percent the bot's spend split (`spend.*`, its metrics) is off the
+  // engine's ledger by category, over the rooms the ledger follows, between
+  // the first and the last full window read with the ledger beside it.
+  spendError: (samples, a, dir) => {
+    const rooms = new Set(Object.keys(samples.at(-1).rooms));
+    const seen = windowsOf(dir, a);
+    const marks = seen.filter((w) => w.ledger && w.ticks === 100);
+    if (marks.length < 2) return Infinity;
+    const [first, last] = [marks[0], marks.at(-1)];
+    const inside = seen.filter((w) => rooms.has(w.row) && w.start > first.start && w.start <= last.start);
+    const errors = ["build", "repair", "upgrade", "spawn", "tower"]
+      .map((k) => [inside.reduce((n, w) => n + (w.values[`spend.${k}`] ?? 0), 0), last.ledger[k] - first.ledger[k]])
+      .filter(([, ledger]) => ledger >= LEDGER_LEAST)
+      .map(([bot, ledger]) => Math.abs((100 * (bot - ledger)) / ledger));
+    return errors.length ? Number(Math.max(...errors).toFixed(1)) : Infinity;
+  },
   // Energy lost to pile decay.
   decayed: (samples, a) => at(samples, a.to ?? Infinity).ledger.decayed - at(samples, a.from ?? 0).ledger.decayed,
   // Roads and containers lost between samples, over every room the soak follows.
@@ -451,6 +483,7 @@ const measures = {
       return Number(((100 * misses) / Math.max(1, hits + misses)).toFixed(2));
     }),
 };
+for (const s of scenarios) for (const a of s.assert) if (a.metric !== undefined) a.measure = "metric";
 for (const s of scenarios) for (const a of s.assert) if (!measures[a.measure]) fail(`${s.name}: no measure ${a.measure}`);
 for (const { name, start } of scenarios)
   if ((start.at === undefined) !== (start.bundle === undefined) || (start.at !== undefined && (start.node || !/^[0-9a-f]{8,40}$/.test(start.bundle))))
@@ -634,7 +667,7 @@ for (const s of scenarios) {
     }
     const window = a.from !== undefined || a.to !== undefined ? ` t${a.from ?? 0}-${a.to ?? s.ticks}` : "";
     const bound = [a.min !== undefined && `≥ ${a.min}`, max !== Infinity && `≤ ${max}`].filter(Boolean).join(", ");
-    console.log(`${ok ? "pass" : "FAIL"} ${s.name}: ${a.measure}${a.who ? ` of ${a.who}` : ""}${a.room ? ` in ${a.room}` : ""}${window} ${value} (${bound}${against})`);
+    console.log(`${ok ? "pass" : "FAIL"} ${s.name}: ${a.metric ?? a.measure}${a.who ? ` of ${a.who}` : ""}${a.room ? ` in ${a.room}` : ""}${window} ${value} (${bound}${against})`);
   }
   const rows = s.assert.some((a) => a.measure === "predictedWinsLost") ? engagementsOf(dir) : [];
   if (rows.length) for (const line of [`${rows.length} engagements`, ...report(rows)]) console.log(`  ${s.name}: ${line}`);

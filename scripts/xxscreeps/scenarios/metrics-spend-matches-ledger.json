@@ -1,0 +1,7 @@
+{
+  "why": "the bot's spend split, estimated from its intents, reads the engine's ledger within 2% a category, so live and the soak read one number",
+  "modules": ["economy", "observe"],
+  "start": { "room": "W8N3", "seed": 1, "node": "E1" },
+  "ticks": 12000,
+  "assert": [{ "measure": "spendError", "max": 2 }]
+}

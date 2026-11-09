@@ -131,6 +131,13 @@ pub struct Ask {
     pub rank: Rank,
 }
 
+#[derive(Clone, Debug)]
+pub struct Refusal {
+    pub actor: String,
+    pub act: String,
+    pub code: i32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Intent {
     Creep(String, CreepAct),
@@ -151,6 +158,8 @@ pub enum Intent {
     Trace(String, Vec<(crate::core::world::Pos, i64)>),
     /// Summed into the observe segment's counts (§9.3).
     Count(&'static str, i32),
+    /// A colony's seats of a pattern the quota left uncast; nothing reaches the game.
+    Short(RoomName, crate::core::economy::bodies::Pattern, i32),
 }
 
 impl Intent {
@@ -169,6 +178,7 @@ impl Intent {
             Intent::Wish(_, wish) => wish.creep.clone(),
             Intent::Trace(creep, _) => creep.clone(),
             Intent::Count(name, _) => name.to_string(),
+            Intent::Short(room, _, _) => room.to_string(),
         }
     }
 

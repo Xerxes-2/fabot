@@ -52,6 +52,7 @@ pub const ATTACK_POWER: i32 = 30;
 pub const RANGED_ATTACK_POWER: i32 = 10;
 pub const DISMANTLE_POWER: i32 = 50;
 pub const REPAIR_POWER: i32 = 100;
+pub const BUILD_POWER: i32 = 5;
 pub const HEAL_POWER: i32 = 12;
 pub const RANGED_HEAL_POWER: i32 = 4;
 pub const TOWER_POWER_ATTACK: i32 = 600;

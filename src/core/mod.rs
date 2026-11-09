@@ -7,6 +7,7 @@ pub mod fight;
 pub mod intents;
 pub mod layout;
 pub mod mv;
+pub mod observe;
 pub mod state;
 pub mod strategy;
 pub mod tactics;

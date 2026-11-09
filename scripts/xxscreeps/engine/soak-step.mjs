@@ -7,7 +7,8 @@
 // `samples.jsonl` (one sample a line), `faults.jsonl` (each fault once),
 // `refusals.json` (counts by act and code), `lost.json` (the ticks lost),
 // `levels.json` (the tick each controller level was first seen),
-// `observe.json` (the last segment read), `trace.jsonl` (the bot's `#trace` lines), `cpu.jsonl` (tick, engine-reported
+// `observe.json` (the last segment read), `metrics.jsonl` (each 100-tick window
+// segment 3 holds, a row a line, `t` the run tick it was read; the newest read carries the `ledger` as it stood then), `trace.jsonl` (the bot's `#trace` lines), `cpu.jsonl` (tick, engine-reported
 // CPU, the bot's own phases and counts) and `console.log`. Each sample carries the
 // room's energy ledger, cumulative from the first tick (`ledger`): dug,
 // spawn regeneration, spent on bodies, building, upgrading, repairing and
@@ -47,6 +48,7 @@ import { loadMemorySegmentBlob, loadUserMemoryString } from "xxscreeps/mods/meta
 import { getProcessorChannel, pushIntentsForRoomNextTick } from "xxscreeps/engine/processor/model.js";
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
+import { METRICS, windows } from "./metrics.mjs";
 
 const [ticksArg, everyArg, roomArg, username, out, wavesArg = "", opponentsPath, coresArg = "", waveArg = "melee,healer,ranged", watchArg = "0"] = process.argv.slice(2);
 const homes = roomArg.split(",");
@@ -143,10 +145,20 @@ const nextTick = async (ms) => {
   }
 };
 
+async function segmentText(id) {
+  const blob = await loadMemorySegmentBlob(shard, ours, id);
+  return blob === null ? null : typedArrayToString(new Uint16Array(blob.buffer, blob.byteOffset, blob.length >>> 1));
+}
+let windowsRead = -Infinity;
+async function readWindows(t) {
+  const fresh = windows(await segmentText(METRICS)).filter((w) => w.start > windowsRead);
+  windowsRead = Math.max(windowsRead, ...fresh.map((w) => w.start));
+  const ledgered = ledgerRow();
+  for (const w of fresh) fs.writeSync(metricsOut, JSON.stringify({ t, ...w, ...(w.start === windowsRead && { ledger: ledgered }) }) + "\n");
+}
 async function observed() {
-  const blob = await loadMemorySegmentBlob(shard, ours, observeSegment);
-  if (blob === null) return null;
-  const text = typedArrayToString(new Uint16Array(blob.buffer, blob.byteOffset, blob.length >>> 1));
+  const text = await segmentText(observeSegment);
+  if (text === null) return null;
   try {
     return JSON.parse(text);
   } catch {
@@ -851,6 +863,7 @@ const faultsOut = fs.openSync(join(out, "faults.jsonl"), "w");
 const cpuOut = fs.openSync(join(out, "cpu.jsonl"), "w");
 const decayOut = fs.openSync(join(out, "decay.jsonl"), "w");
 const livesOut = fs.openSync(join(out, "bodies.jsonl"), "w");
+const metricsOut = fs.openSync(join(out, "metrics.jsonl"), "w");
 const seenFaults = new Set();
 const levels = [];
 const refusals = {};
@@ -896,6 +909,7 @@ for (let t = 0; t < ticks; t++) {
       refusals[key] = (refusals[key] ?? 0) + 1;
     }
   }
+  if (fresh && obs.tick % 100 === 0) await readWindows(t);
   fs.writeSync(cpuOut, JSON.stringify({ t, time, cpu, observed: fresh ? obs.cpu : null, phases: fresh ? obs.phases : null, counts: fresh ? obs.counts : null }) + "\n");
   const rooms = await Promise.all(roomNames.map((name) => shard.loadRoom(name, time)));
   const room = rooms[0];

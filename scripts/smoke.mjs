@@ -115,7 +115,7 @@ const observe = JSON.parse(segments[1] ?? fail("no observe segment written"));
 if (observe.tick !== 103) fail(`observe tick ${observe.tick}, not 103`);
 if (observe.faults.length !== 0) fail(`faults: ${JSON.stringify(observe.faults)}`);
 const phases = observe.phases.map(([name]) => name);
-for (const want of ["memory", "world", "atlas", "economy", "execute", "write", "record"])
+for (const want of ["memory", "world", "atlas", "economy", "execute", "write", "metrics", "record"])
   if (!phases.includes(want)) fail(`phase ${want} not reported: ${phases}`);
 const pass = globalThis.__fabotRead().map((each) => (typeof each === "string" ? each : Array.from(each)));
 const [recorded] = unpack(RECORDER.map((id) => segments[id]));
@@ -146,15 +146,20 @@ console.error = error;
 if (!trapped) fail("a short read did not trap");
 // A cold heap replaces the active list even when intel is loaded, and reads it the tick after.
 segments[2] += "W9N9 50 - 0 - - - -\n";
+segments[3] = "names stock\n@0 100\nW1N1 5\n";
 active.length = 0;
 Game.time = 105;
 main.loop();
 const after = JSON.parse(segments[1]);
 if (after.tick !== 105 || after.faults.length !== 0) fail(`the tick after a trap: ${JSON.stringify(after).slice(0, 200)}`);
-if (JSON.stringify(active) !== "[[2]]") fail(`a cold heap set the active segments to ${JSON.stringify(active)}`);
+if (JSON.stringify(active) !== "[[2,3]]") fail(`a cold heap set the active segments to ${JSON.stringify(active)}`);
 Game.time = 106;
 main.loop();
 if (!segments[2].includes("W9N9 50 ")) fail(`intel was not read after a reset: ${segments[2]}`);
+// The metrics' ring outlives a reset; the window it was open on is lost.
+Game.time = 200;
+main.loop();
+if (!/^@0 100\nW1N1 5$/m.test(segments[3]) || !/^@100 1$/m.test(segments[3])) fail(`the metrics' ring after a reset: ${segments[3]}`);
 
 // What the recorder kept, stood as the bench's Game, reads as the tick did.
 stand(recorded, [], getHeapStatistics, () => 0);

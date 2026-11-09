@@ -1,0 +1,11 @@
+{
+  "why": "a settled colony's economy bodies keep their tasks and work: no pattern idles past its threshold and no body changes task once a window on average",
+  "modules": ["economy", "observe"],
+  "start": { "room": "W3N1", "seed": 1, "at": 26000, "bundle": "17032c937555" },
+  "ticks": 4000,
+  "assert": [
+    { "metric": "churn.task", "from": 200, "max": 100 },
+    { "metric": "idle.harvester", "from": 200, "max": 40 },
+    { "metric": "idle.hauler", "from": 200, "max": 50 }
+  ]
+}

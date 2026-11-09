@@ -576,6 +576,24 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
             )
         })
         .collect();
+    let mut owed: BTreeMap<(RoomName, bodies::Pattern), i32> = BTreeMap::new();
+    for seat in &plan.seats {
+        if let Some(ci) = seat.colony {
+            *owed
+                .entry((derived.colonies[ci].room, seat.pattern))
+                .or_default() += 1;
+        }
+    }
+    for cast in plan.casts.iter().filter(|c| !c.floor) {
+        if let Some(pattern) = bodies::pattern_of_name(&cast.name) {
+            *owed.entry((cast.colony, pattern)).or_default() -= 1;
+        }
+    }
+    intents.extend(
+        (owed.into_iter())
+            .filter(|(_, n)| *n > 0)
+            .map(|((room, p), n)| Intent::Short(room, p, n)),
+    );
 
     let dug = dug_out(&derived);
 

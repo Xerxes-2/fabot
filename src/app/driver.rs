@@ -4,12 +4,13 @@ use std::collections::BTreeMap;
 
 use wasm_bindgen::prelude::*;
 
-use crate::app::executor::Refusal;
 use crate::app::wire;
 use crate::app::world;
 use crate::core::atlas::Atlas;
 use crate::core::economy::abandon;
+use crate::core::intents::Refusal;
 use crate::core::layout::shape::Standing;
+use crate::core::observe::metrics::{self, Metrics, Seen};
 use crate::core::strategy::intel::{self, Intel};
 use crate::core::tick::{self, Context, Declarations};
 use crate::core::world::{RoomName, Sightings};
@@ -32,6 +33,8 @@ struct Heap {
     /// `None` until its segment is read after a reset.
     intel: Option<Intel>,
     intel_asked: bool,
+    /// `None` until its segment is read, with intel's.
+    metrics: Option<Metrics>,
 }
 
 thread_local! {
@@ -44,6 +47,7 @@ thread_local! {
         maps: world::Maps::default(),
         intel: None,
         intel_asked: false,
+        metrics: None,
     });
 }
 
@@ -61,8 +65,8 @@ fn run_tick() -> Result<(), String> {
     let clock = || game_cpu::get_used();
     let mut phases: Vec<(String, f64)> = Vec::new();
 
-    let (mut sightings, mut atlas, mut faults, standing, mut maps, held, asked) =
-        HEAP.with(|heap| {
+    let (mut sightings, mut atlas, mut faults, standing, mut maps, held, asked, metrics) = HEAP
+        .with(|heap| {
             let mut heap = heap.borrow_mut();
             (
                 std::mem::take(&mut heap.sightings),
@@ -72,9 +76,11 @@ fn run_tick() -> Result<(), String> {
                 std::mem::take(&mut heap.maps),
                 heap.intel.take(),
                 std::mem::replace(&mut heap.intel_asked, true),
+                heap.metrics.take(),
             )
         });
     let mut intel = held.or_else(|| wire::read_intel(asked));
+    let metrics = metrics.or_else(|| asked.then(wire::read_metrics));
 
     let start = clock();
     let mut state = wire::read_state();
@@ -160,6 +166,24 @@ fn run_tick() -> Result<(), String> {
             counts.push((name.to_string(), *n));
         }
     }
+    let start = clock();
+    let metrics = metrics.map(|m| {
+        let seen = Seen {
+            world: &world,
+            assignments: &result.state.assignments,
+            engagements: &result.state.engagements,
+            intents: &result.intents,
+            refusals: &refusals,
+            phases: &phases,
+        };
+        let mut m = metrics::step(m, &seen);
+        if world.time % metrics::WINDOW == 0 {
+            wire::write_segment(wire::METRICS_SEGMENT, &m.text());
+        }
+        m
+    });
+    phases.push(("metrics".to_string(), clock() - start));
+
     let observed = wire::Observed {
         tick: world.time,
         version: wire::version(),
@@ -177,6 +201,7 @@ fn run_tick() -> Result<(), String> {
             .filter(|e| !e.plan.offers.is_empty())
             .map(|e| (e.id, e.plan.offers.clone()))
             .collect(),
+        alerts: metrics.as_ref().map(Metrics::alerts).unwrap_or_default(),
     };
     wire::write_observe(&observed);
     let standing = std::mem::take(&mut result.state.layout);
@@ -189,6 +214,7 @@ fn run_tick() -> Result<(), String> {
         heap.atlas = atlas;
         heap.maps = maps;
         heap.intel = intel;
+        heap.metrics = metrics;
     });
 
     Ok(())
@@ -208,6 +234,7 @@ fn faulted_by(faults: &mut Vec<wire::Fault>, error: &str) {
         faults: faults.clone(),
         refusals: Vec::new(),
         offers: Vec::new(),
+        alerts: Vec::new(),
     };
     wire::write_observe(&observed);
 }

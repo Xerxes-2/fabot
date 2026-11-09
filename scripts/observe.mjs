@@ -6,11 +6,14 @@
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { connect, fail } from "./screeps-api.mjs";
+import { METRICS, windows } from "./metrics.mjs";
 import { replay, views } from "./observe-views.mjs";
 
 const OBSERVE = 1;
 const USAGE = `usage: npm run observe -- <command>
-  health             tick, version, bucket, CPU, faults, refusals, modules off
+  health             tick, version, bucket, CPU, faults, refusals, modules off, metrics past their threshold
+  metrics [room] [--since <tick>]
+                     the 100-tick windows of segment 3, a metric a line (\`*\`, the default: the world's row); without --since the last ten
   cpu                CPU by phase and module, this tick
   faults             the fault ring, newest first
   switches           Memory.v2.switches as stored
@@ -33,7 +36,7 @@ const USAGE = `usage: npm run observe -- <command>
   regions <room>     walkable regions past rival ramparts: exits per side, owned structures beside
   replay <capture.jsonl> [--trace <creep>]
                      dist/main.js run on the captured ticks, offline: intents, refusals, tile scores`;
-const LIVE = ["health", "cpu", "faults", "switches", "switch", "declare", "capture", "tap", "battle", "wait", "engagements", "room", "creep", "regions"];
+const LIVE = ["metrics", "health", "cpu", "faults", "switches", "switch", "declare", "capture", "tap", "battle", "wait", "engagements", "room", "creep", "regions"];
 
 const [cmd, ...args] = process.argv.slice(2);
 if (cmd === "replay") {
@@ -70,6 +73,7 @@ switch (cmd) {
     console.log(`off: ${o.off.length ? o.off.join(", ") : "none"}`);
     console.log(`faults: ${o.faults.length} in ring${o.faults[0] ? `, newest t${o.faults[0].tick} ${o.faults[0].where}: ${o.faults[0].message}` : ""}`);
     console.log(`refusals this tick: ${o.refusals.length}`);
+    for (const alert of o.alerts ?? []) console.log(`metric ${alert}`);
     for (const [key] of o.counts.filter(([k]) => k.startsWith("refused:"))) console.log(`refused ${key.slice("refused:".length)}`);
     // Destroyed before the unclaim: `destroy()` needs our controller, and an
     // owned structure left standing keeps the room in sight, read every tick.
@@ -79,6 +83,21 @@ switch (cmd) {
   for (const s of Game.rooms["${room}"].find(FIND_MY_STRUCTURES)) if (s.structureType !== "controller") s.destroy();
   Game.rooms["${room}"].controller.unclaim();`}`);
     }
+    break;
+  }
+  case "metrics": {
+    const since = args.includes("--since") ? Number(args[args.indexOf("--since") + 1]) : undefined;
+    const row = args.find((a, i) => !a.startsWith("--") && args[i - 1] !== "--since") ?? "*";
+    if (since !== undefined && !Number.isInteger(since)) fail("usage: observe metrics [room] [--since <tick>]");
+    const all = windows(await raw(METRICS)).filter((w) => w.row === row);
+    const shown = since === undefined ? all.slice(-10) : all.filter((w) => w.start >= since);
+    if (!shown.length) fail(`no window of ${row} in segment ${METRICS}`);
+    const names = [...new Set(shown.flatMap((w) => Object.keys(w.values)))].sort();
+    const width = Math.max(...names.map((n) => n.length));
+    console.log(`${"start".padEnd(width)} ${shown.map((w) => String(w.start).padStart(8)).join("")}`);
+    for (const name of names) console.log(`${name.padEnd(width)} ${shown.map((w) => String(w.values[name] ?? 0).padStart(8)).join("")}`);
+    const partial = shown.filter((w) => w.ticks < 100);
+    if (partial.length) console.log(`partial (a reset): ${partial.map((w) => `t${w.start} ${w.ticks} ticks`).join(", ")}`);
     break;
   }
   case "cpu": {
