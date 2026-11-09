@@ -1,0 +1,9 @@
+{
+  "why": "an RCL8 colony at the edge of an 18-room world: its observer looks only at rooms the map holds (observing past the edge was refused, -10, twice a tick)",
+  "modules": ["atlas", "strategy"],
+  "start": { "world": "scripts/xxscreeps/worlds/young-among-outposts.json", "seed": 1 },
+  "ticks": 300,
+  "assert": [
+    { "metric": "refuse.observeRoom.-10", "max": 0 }
+  ]
+}

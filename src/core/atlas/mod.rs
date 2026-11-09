@@ -659,6 +659,10 @@ impl Atlas {
         self.grid(room).is_some()
     }
 
+    pub fn has_terrain(&self, room: RoomName) -> bool {
+        self.rooms.contains_key(&room.coords())
+    }
+
     fn seat(footprint: Footprint, weights: &[Weight; tiles::COUNT], tile: Tile) -> bool {
         weight_of(footprint, weights, tile).is_some() && !on_edge(footprint, tile)
     }

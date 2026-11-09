@@ -109,6 +109,7 @@ pub fn preyed(intel: &Intel, declarations: &Declarations, time: i32) -> Vec<Room
 /// Every declared room no observer covers is scouted (`ARCHITECTURE.md` §7.1).
 pub fn sight(
     world: &World,
+    atlas: &Atlas,
     declarations: &Declarations,
     intel: &Intel,
     preyed: &[RoomName],
@@ -127,6 +128,9 @@ pub fn sight(
     stale.sort();
 
     let mut observe = |room: &RoomName| -> Option<Intent> {
+        if !atlas.has_terrain(*room) {
+            return None;
+        }
         let (at, observer) = free
             .iter()
             .enumerate()
