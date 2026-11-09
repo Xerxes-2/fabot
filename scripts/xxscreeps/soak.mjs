@@ -22,7 +22,8 @@
 //            (Memory.v2.declarations.outposts) and an Invader wave in each;
 //            E2 is N5 with the first of them declared a claim (`claims`),
 //            C2 with both, G2 E2 with no GCL level spare for it;
-//            L5 is N5 with H, O and U stocked and its labs the cluster (`labs`)
+//            L5 is N5 with H, O and U stocked and its labs the cluster (`labs`);
+//            N6 and N7 are RCL7 and RCL8 with their bodies standing
 //   --invaders  room:every[:first][,…]: an Invader wave (`engine/waves`) in
 //            room at t = first, first + every, … (first defaults to every);
 //            E1's default: its outposts every 4000, from 1000 and 2500
@@ -55,7 +56,10 @@
 //            tick (`engine/live.mjs`): our user the capture's, every home of
 //            ours a colony the samples follow, the capture's outposts declared;
 //            stood on the template with every structure kind (`xx.mjs`); its
-//            --opponents are its own users, their code seated on their rooms
+//            --opponents are its own users, their code seated on their rooms.
+//            A world with no home of ours (`season-world.mjs`'s) is a map
+//            our colony is seated on as on the template: --room, --node,
+//            --late and --opponents as without --world
 //   --unsafe  our room without the engine's safe mode, which would decide
 //            every fight in it for us; implied by --opponents
 //   --ended   our room's starting safe mode ended, its stock kept to activate,
@@ -83,7 +87,7 @@ import { patchRuntimeCache } from "./runtime-cache.mjs";
 // Where the run's wall time went, written to timing.json (`scenario.mjs` sums them).
 const began = Date.now();
 const marks = { node26: 0, node26Calls: 0 };
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|N6|N7|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -118,6 +122,7 @@ const whole = (flag, fallback, min) => {
   if (!(Number.isInteger(n) && n >= min)) fail(`${flag} needs a whole number ≥ ${min}\n${usage}`);
   return n;
 };
+const LATE_BODIES = "harvester:work6carry1move3*2,harvester:work20carry1move10,hauler:carry32move16*2,upgrader:work15carry1move15,worker:work16carry17move17*2";
 // Each node's level and storage stock; N4's links are what it judges, so
 // they are left to the bot, and every node's ramparts, which a node would
 // stand at full hits the bot never paid for.
@@ -149,6 +154,11 @@ const NODES = {
   // An RCL7 node as another bot left it: its roads and containers worn to
   // half, its links and ramparts sites to build.
   T7: { level: 7, stored: 100000, without: ["link", "rampart", "factory"], worn: 0.5 },
+  // The late game without its climb: every structure (the modern template's
+  // too) and about the bodies a live RCL8 home carried (captures/live-w11s25.json,
+  // its outposts' bodies aside), so the run starts working, not casting.
+  N6: { level: 7, stored: 300000, without: ["rampart"], modern: true, bodies: LATE_BODIES },
+  N7: { level: 8, stored: 500000, without: ["rampart"], modern: true, bodies: LATE_BODIES },
 };
 const node = flags["--node"] === undefined ? undefined : NODES[flags["--node"]];
 if (flags["--node"] !== undefined && !node) fail(`--node: one of ${Object.keys(NODES).join(", ")}`);
@@ -175,6 +185,10 @@ if (flags["--run"] !== undefined && !/^[\w.-]+$/.test(flags["--run"])) fail("--r
 const bot = resolve(flags["--bot"] ?? join(REPO, "dist/main.js"));
 if (!existsSync(bot)) fail(flags["--bot"] ? `--bot: no file at ${bot}` : "no dist/main.js: npm run build first");
 const live = flags["--world"] && JSON.parse(readFileSync(flags["--world"], "utf8"));
+const homes = (live?.rooms ?? [])
+  .filter((r) => r.objects.some((o) => o.type === "controller" && o.user === live.userId) && r.objects.some((o) => o.type === "spawn" && o.user === live.userId))
+  .map((r) => r.name);
+const seated = live && homes.length > 0;
 const OUR_NAME = live?.username ?? "fabot";
 const from = flags["--from"] && resolve(flags["--from"]);
 if (from && (!flags["--room"] || node || late)) fail(`--from needs --room, and takes no --node or --late\n${usage}`);
@@ -182,9 +196,10 @@ const opponents = flags["--opponents"] ? JSON.parse(readFileSync(flags["--oppone
 for (const o of opponents)
   if (!/^[a-z][\w-]*$/.test(o.name ?? "") || o.name === OUR_NAME || !existsSync(o.bot ?? "") || !/^[WE]\d+[NS]\d+$/.test(o.room ?? ""))
     fail(`--opponents: ${JSON.stringify(o)} needs a name, a bot that exists and a room`);
-if (live && (from || node || late || flags["--room"] || cores.length || flags["--unsafe"] || flags["--ended"]))
-  fail(`--world takes no --from, --node, --late, --room, --core, --unsafe or --ended\n${usage}`);
-if (live && opponents.some((o) => !Object.values(live.users).includes(o.name))) fail("--world: an opponent is one of the world's users, its rooms the world's");
+if (live && from) fail(`--world takes no --from\n${usage}`);
+if (seated && (node || late || flags["--room"] || cores.length || flags["--unsafe"] || flags["--ended"]))
+  fail(`--world with a home of ours takes no --node, --late, --room, --core, --unsafe or --ended\n${usage}`);
+if (seated && opponents.some((o) => !Object.values(live.users).includes(o.name))) fail("--world: an opponent is one of the world's users, its rooms the world's");
 const specOf = (bot) => (lstatSync(bot).isDirectory() && existsSync(join(bot, "fetch.json")) ? JSON.parse(readFileSync(join(bot, "fetch.json"), "utf8")) : null);
 const cacheOf = (spec) => join(CACHE, "opponents", createHash("sha256").update(spec.integrity).digest("hex").slice(0, 16));
 // Exit 4: an opponent's code is not cached, and this run did not ask for the
@@ -197,7 +212,8 @@ for (const o of opponents) {
   }
 }
 // A world's schema is its mods' (`xx.mjs` templateOf).
-const template = live ? `${TEMPLATE}-modern` : cores.length ? `${TEMPLATE}-stronghold` : TEMPLATE;
+const modern = live || node?.modern;
+const template = modern ? `${TEMPLATE}-modern` : cores.length ? `${TEMPLATE}-stronghold` : TEMPLATE;
 if (!existsSync(join(template, "screeps/shard0/data.json"))) fail(`no template world at ${template}: npm run xx -- setup first`);
 patchRuntimeCache(dirname(XXSCREEPS));
 
@@ -240,9 +256,9 @@ const screepsrc = [
   "mods:",
   "  - ./seed/index.js",
   "  - xxscreeps/mods/classic",
-  ...(cores.length || live ? ["  - xxscreeps/mods/modern/stronghold"] : []),
+  ...(cores.length || modern ? ["  - xxscreeps/mods/modern/stronghold"] : []),
   ...(cores.length ? ["  - ./core/index.js"] : []),
-  ...(live ? ["  - xxscreeps/mods/modern/observer", "  - xxscreeps/mods/modern/powerspawn"] : []),
+  ...(modern ? ["  - xxscreeps/mods/modern/observer", "  - xxscreeps/mods/modern/powerspawn"] : []),
   "  - ./waves/index.js",
   ...(watch ? ["  - xxscreeps/mods/backend/password"] : []),
   "game:",
@@ -328,12 +344,14 @@ if (listOnly) {
   console.log(node26([XXSCREEPS, script("colony.mjs"), "--list"], world, true).trim().split("\n").at(-1));
   process.exit(0);
 }
-const homes = (live?.rooms ?? [])
-  .filter((r) => r.objects.some((o) => o.type === "controller" && o.user === live.userId) && r.objects.some((o) => o.type === "spawn" && o.user === live.userId))
-  .map((r) => r.name);
-if (live && homes.length === 0) fail(`--world: no room of ${live.username}'s with a spawn`);
-const colony = live ? { room: homes.join(",") } : from ? { room: flags["--room"] } : JSON.parse(node26([XXSCREEPS, script("colony.mjs"), ...(flags["--room"] ? [flags["--room"]] : [])], world, true).trim().split("\n").at(-1));
-const run = flags["--run"] ?? `${live ? "world" : colony.room}${flags["--node"] ? `-${flags["--node"]}` : ""}-seed${seed}`;
+if (live) {
+  node26([XXSCREEPS, script("seed/manage.js"), "bot", "add", OUR_NAME, "./bot"], world);
+  const flat = (rooms = []) => rooms.map((r) => ({ ...r, terrain: [r.terrain].flat().join("") }));
+  writeFileSync(join(world, "capture.json"), JSON.stringify({ ...live, rooms: flat(live.rooms), terrain: flat(live.terrain) }));
+  node26([XXSCREEPS, script("live.mjs"), "capture.json"], world);
+}
+const colony = seated ? { room: homes.join(",") } : from ? { room: flags["--room"] } : JSON.parse(node26([XXSCREEPS, script("colony.mjs"), ...(flags["--room"] ? [flags["--room"]] : [])], world, true).trim().split("\n").at(-1));
+const run = flags["--run"] ?? `${seated ? "world" : colony.room}${flags["--node"] ? `-${flags["--node"]}` : ""}-seed${seed}`;
 const out = join(REPO, "soak-runs", run);
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
@@ -366,15 +384,9 @@ if (node && node.level > 1) {
   writeFileSync(join(world, "node.json"), JSON.stringify(built));
   [colony.x, colony.y] = [built[0].x, built[0].y];
 }
-console.error(`colony: ${colony.room}${from ? ` from ${from}` : live ? ` from ${flags["--world"]}` : `, spawn at ${colony.x},${colony.y}`}; output ${out}`);
+console.error(`colony: ${colony.room}${from ? ` from ${from}` : seated ? ` from ${flags["--world"]}` : `, spawn at ${colony.x},${colony.y}`}; output ${out}`);
 if (from) node26([XXSCREEPS, "manage", "bot", "update", OUR_NAME, "./bot"], world);
-else if (live) {
-  node26([XXSCREEPS, script("seed/manage.js"), "bot", "add", OUR_NAME, "./bot"], world);
-  const flat = (rooms = []) => rooms.map((r) => ({ ...r, terrain: [r.terrain].flat().join("") }));
-  writeFileSync(join(world, "capture.json"), JSON.stringify({ ...live, rooms: flat(live.rooms), terrain: flat(live.terrain) }));
-  node26([XXSCREEPS, script("live.mjs"), "capture.json"], world);
-}
-else node26([XXSCREEPS, script("seed/manage.js"), "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
+else if (!seated) node26([XXSCREEPS, script("seed/manage.js"), "bot", "add", OUR_NAME, "./bot", "--spawn", colony.room, `${colony.x},${colony.y}`], world);
 async function cached(spec) {
   const cache = cacheOf(spec);
   if (existsSync(join(cache, ".ok"))) return true;
@@ -403,7 +415,7 @@ for (const o of opponents) {
     if (spec) copied(spec, dir);
   } else cpSync(o.bot, join(dir, "main.js"));
   if (o.config) writeFileSync(join(dir, "opponent.js"), `module.exports = ${JSON.stringify(o.config)};\n`);
-  if (from || live) {
+  if (from || seated) {
     node26([XXSCREEPS, "manage", "bot", "update", o.name, `./bot-${o.name}`], world);
     continue;
   }
@@ -411,12 +423,12 @@ for (const o of opponents) {
   node26([XXSCREEPS, script("seed/manage.js"), "bot", "add", o.name, `./bot-${o.name}`, "--spawn", o.room, `${seat.x},${seat.y}`], world);
 }
 writeFileSync(join(world, "opponents.json"), JSON.stringify(opponents.map(({ name, room, raid }) => ({ name, room, raid }))));
-if (built) node26([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME, String(node.worn ?? 1), node.labStock ?? ""], world);
+if (built) node26([XXSCREEPS, script("node.mjs"), "stand", colony.room, "node.json", String(node.level), String(node.stored), OUR_NAME, String(node.worn ?? 1), node.labStock ?? "", node.bodies ?? ""], world);
 if (flags["--ended"]) node26([XXSCREEPS, script("node.mjs"), "ended", colony.room], world);
-else if ((opponents.length && !live) || flags["--unsafe"]) node26([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
+else if ((opponents.length && !seated) || flags["--unsafe"]) node26([XXSCREEPS, script("node.mjs"), "unsafe", colony.room], world);
 if ((node?.outposts || node?.claims) && colony.outposts.length === 0) fail(`${colony.room}: no neighbour fits an outpost`);
 const allies = opponents.filter((o) => o.ally).map((o) => o.name);
-if (node?.outposts || node?.claims || node?.labs || (allies.length && !live && !from)) {
+if (node?.outposts || node?.claims || node?.labs || (allies.length && !seated && !from)) {
   const claims = colony.outposts.slice(0, node?.claims ?? 0);
   const labs = node?.labs ? { labs: { home: colony.room, targets: node.labs } } : {};
   writeFileSync(join(world, "declarations.json"), JSON.stringify({ outposts: node?.outposts ? colony.outposts : [], claims, allies, ...labs }));

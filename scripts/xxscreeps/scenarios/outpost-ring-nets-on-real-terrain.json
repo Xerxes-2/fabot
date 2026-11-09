@@ -1,0 +1,9 @@
+{
+  "why": "a one-source claim on the season's real map works both declared neighbours through their Invader waves, each netting positive after its bodies (runs read 59k and 66k by t8000)",
+  "modules": ["economy", "strategy", "fight"],
+  "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E25S9", "seed": 1, "node": "E1" },
+  "ticks": 8000,
+  "assert": [
+    { "measure": "poorestOutpost", "min": 40000 }
+  ]
+}

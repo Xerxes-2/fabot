@@ -2,13 +2,16 @@
 // under xxscreeps' own loader, cwd the world directory:
 //   xxscreeps.js file://…/node.mjs ground <room>
 //     prints the room's ground as `src/bin/plan.rs` reads it
-//   xxscreeps.js file://…/node.mjs stand <room> <structures.json> <level> <stored> <username> [<worn>] [<lab>]
+//   xxscreeps.js file://…/node.mjs stand <room> <structures.json> <level> <stored> <username> [<worn>] [<lab>] [<bodies>]
 //     after `manage bot add --spawn` stood the first spawn: the controller
 //     at <level> (progress 0, its downgrade timer full, the claim's safe
 //     mode kept and one more in stock for each level skipped), every other structure of the list ours at full hits on its
 //     tile (its roads and containers at <worn> of them, default 1), and <stored> energy in the storage
 //     (`<energy>,<resource>:<n>,…` puts each resource there too); <lab> the
-//     first lab's store (`<resource>:<n>,…`).
+//     first lab's store (`<resource>:<n>,…`); <bodies> creeps of ours stood
+//     around the first spawn, `<pattern>:<part><n>…[*<count>],…` (as
+//     `harvester:work6carry1move3*2`), named as the bot casts them, their
+//     ticks to live spread over a lifetime.
 //   xxscreeps.js file://…/node.mjs declare <room> <username> <declarations.json> [short]
 //     <username>'s Memory as `{ v2: { declarations } }`, what the bot reads
 //     its declarations from (src/app/wire.rs), and the GCL its claims need
@@ -40,6 +43,7 @@ import * as Link from "xxscreeps/mods/classic/logistics/link.js";
 import * as Extractor from "xxscreeps/mods/classic/mineral/extractor.js";
 import * as Terminal from "xxscreeps/mods/classic/brokerage/terminal.js";
 import * as Lab from "xxscreeps/mods/classic/chemistry/lab.js";
+import * as Creep from "xxscreeps/mods/classic/creep/creep.js";
 
 const [mode, roomName, ...rest] = process.argv.slice(2);
 const db = await Database.connect();
@@ -62,7 +66,7 @@ if (mode === "ground") {
     }),
   );
 } else if (mode === "stand") {
-  const [listPath, levelArg, storedArg, username, wornArg = "1", labStock = ""] = rest;
+  const [listPath, levelArg, storedArg, username, wornArg = "1", labStock = "", bodiesArg = ""] = rest;
   const level = Number(levelArg);
   const ours = await User.findUserByName(db, username);
   const list = JSON.parse(fs.readFileSync(listPath, "utf8"));
@@ -78,6 +82,20 @@ if (mode === "ground") {
     terminal: (pos) => Terminal.create(pos, ours),
     lab: (pos) => Lab.create(pos, ours),
   };
+  // Their schema is the modern template's alone.
+  for (const [kind, path] of [["factory", "factory/factory"], ["observer", "observer/observer"], ["powerSpawn", "powerspawn/powerspawn"], ["nuker", "nuker/nuker"]])
+    if (list.some((s) => s.kind === kind)) {
+      const mod = await import(`xxscreeps/mods/modern/${path}.js`);
+      create[kind] = (pos) => mod.create(pos, ours);
+    }
+  const bodies = bodiesArg
+    .split(",")
+    .filter(Boolean)
+    .flatMap((spec) => {
+      const [, pattern, parts, count = "1"] = /^(\w+):([a-z_0-9]+)(?:\*(\d+))?$/.exec(spec);
+      const body = [...parts.matchAll(/([a-z_]+)(\d+)/g)].flatMap(([, type, n]) => Array(Number(n)).fill(type));
+      return Array.from({ length: Number(count) }, () => ({ pattern, body }));
+    });
   const state = new GameState(world, time, [room]);
   runWithState(state, () =>
     runAsUser(ours, () => {
@@ -114,6 +132,20 @@ if (mode === "ground") {
         }
         if (s.kind === "road" || s.kind === "container") object.hits = Math.ceil(object.hits * Number(wornArg));
         room["#insertObject"](object);
+      }
+      const blocked = new Set(list.filter((s) => !["road", "container", "rampart"].includes(s.kind)).map((s) => s.y * 50 + s.x));
+      const terrain = world.map.getRoomTerrain(roomName);
+      const free = [];
+      for (let r = 1; free.length < bodies.length && r < 25; r++)
+        for (let y = first.y - r; y <= first.y + r; y++)
+          for (let x = first.x - r; x <= first.x + r; x++)
+            if (Math.max(Math.abs(x - first.x), Math.abs(y - first.y)) === r && x > 0 && y > 0 && x < 49 && y < 49 && !(terrain.get(x, y) & 1) && !blocked.has(y * 50 + x)) free.push([x, y]);
+      if (free.length < bodies.length) throw new Error(`${roomName}: no free tile for ${bodies.length} bodies near the first spawn`);
+      for (const [i, { pattern, body }] of bodies.entries()) {
+        const creep = Creep.create(new RoomPosition(...free[i], roomName), body, `${pattern}-${time - i}-${spawns[0].name}`, ours);
+        creep.id = (++nextId).toString(16).padStart(24, "0");
+        creep["#ageTime"] = time + Math.round((1500 * (i + 1)) / bodies.length);
+        room["#insertObject"](creep);
       }
       room["#flushObjects"](state);
       room.controller.safeModeAvailable += level - room.controller.level;

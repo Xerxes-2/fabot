@@ -10,11 +10,13 @@
 //   --seed   the starts (default 1,2,1+7): an engine seed, or seed+K for a bot that
 //            sits out its first K ticks (soak.mjs --late), a nudge the seed
 //            alone does not give a room with few tie-breaks
-//   --room   these rooms instead of the extremes of harvest seats: both
-//            sources with one seat (a small harvester cannot fill a source)
-//            and both with four or more (bodies can crowd in instead)
-//   --ticks  per run (default 30000; a node's 5000)
-//   --node   start every run at this node (soak.mjs --node)
+//   --room   these starts instead of the default: the extremes of harvest
+//            seats, both sources with one seat (a small harvester cannot fill
+//            a source) and both with four or more (bodies can crowd in
+//            instead), and the late game. A start is [<world>:]<room>[@<node>],
+//            <world> one of worlds/ with no home of ours (soak.mjs --world, --node)
+//   --ticks  per run (default 30000; a node's 10000)
+//   --node   start every run without its own node at this one
 //   --jobs   runs at once (default a quarter of the hardware threads: a soak
 //            keeps server, processor, runner and stepper threads busy, and
 //            more jobs only slow each other)
@@ -22,8 +24,8 @@
 //   --fresh  run even where the cache holds this bundle, room, seed and ticks
 //
 // A finished run is cached under soak-runs/.cache/ by its bundle's code (the
-// version stamp aside), room, seed, ticks, node and the soak scripts (with the
-// plan a node is built from), so a base that
+// version stamp aside), start, seed, ticks and the soak scripts (with the
+// plan a node is built from, and the world), so a base that
 // has not changed is not run again.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -40,7 +42,7 @@ const SOAK = join(HERE, "soak.mjs");
 const RUNS = join(REPO, "soak-runs");
 const CACHE = join(RUNS, ".cache");
 const usage =
-  "usage: npm run soak:many -- [--bot [name=]a.js,...] [--seed 1,2,1+7] [--room A,B,...] [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh]";
+  "usage: npm run soak:many -- [--bot [name=]a.js,...] [--seed 1,2,1+7] [--room [world:]A[@N],...] [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh]";
 const fail = (m) => {
   console.error(m);
   process.exit(1);
@@ -65,7 +67,14 @@ const whole = (text, flag, min) => {
 };
 const node = flags["--node"] ?? "";
 if (!/^[A-Za-z0-9]*$/.test(node)) fail("--node: a node's name, as N3");
-const ticks = whole(flags["--ticks"] ?? (node ? 5000 : 30000), "--ticks", 1);
+const starts = (flags["--room"] ?? "W9N8,W8N3,season-late-seat:W12S28@N7").split(",").map((spec) => {
+  const m = /^(?:([\w-]+):)?([WE]\d+[NS]\d+)(?:@([A-Za-z0-9]+))?$/.exec(spec);
+  if (!m) fail(`--room: "${spec}" is not [world:]room[@node]`);
+  const world = m[1] && join(HERE, "worlds", `${m[1]}.json`);
+  if (world && !existsSync(world)) fail(`--room: no world ${world}`);
+  const at = m[3] ?? node;
+  return { label: spec, room: m[2], world, node: at, ticks: whole(flags["--ticks"] ?? (at ? 10000 : 30000), "--ticks", 1) };
+});
 const seeds = (flags["--seed"] ?? "1,2,1+7").split(",").map((spec) => {
   const [seed, late = "0"] = spec.split("+");
   return { seed: whole(seed, "--seed", 0), late: whole(late, "--seed", 0), label: spec };
@@ -73,7 +82,6 @@ const seeds = (flags["--seed"] ?? "1,2,1+7").split(",").map((spec) => {
 const jobs = whole(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / 4)), "--jobs", 1);
 const tag = flags["--tag"] ?? "many";
 if (!/^[A-Za-z0-9-]+$/.test(tag)) fail("--tag: letters, digits, dashes");
-const rooms = (flags["--room"] ?? "W9N8,W8N3").split(",");
 
 const bots = (flags["--bot"] ?? join(REPO, "dist/main.js")).split(",").map((spec) => {
   const [name, path] = spec.includes("=") ? spec.split("=") : [basename(spec, ".js"), spec];
@@ -97,20 +105,19 @@ const scriptsHash = hash(
     .filter((f) => f.endsWith(".mjs") || f.endsWith(".js"))
     .sort()
     .map((f) => readFileSync(f)),
-  // A node is built from the plan of this tree's Layout, whatever the bundle.
-  ...(node ? [join(REPO, "src/bin/plan.rs"), ...readdirSync(join(REPO, "src/core/layout")).sort().map((f) => join(REPO, "src/core/layout", f))].map((f) => readFileSync(f)) : []),
-  node,
 );
+// A node is built from the plan of this tree's Layout, whatever the bundle.
+const planHash = hash(...[join(REPO, "src/bin/plan.rs"), ...readdirSync(join(REPO, "src/core/layout")).sort().map((f) => join(REPO, "src/core/layout", f))].map((f) => readFileSync(f)));
 for (const b of bots) b.code = hash(readFileSync(b.file, "utf8").replace(/^var __FABOT_VERSION__ = .*$/m, ""));
 
 const runs = bots.flatMap((bot) =>
   seeds.flatMap((seed) =>
-    rooms.map((room) => ({
+    starts.map((start) => ({
       bot,
       seed,
-      room,
-      name: `${tag}-${bot.name}${node ? `-${node}` : ""}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${room}`,
-      key: hash(bot.code, room, String(seed.seed), String(seed.late), String(ticks), scriptsHash),
+      start,
+      name: `${tag}-${bot.name}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${start.label.replace(/[:@]/g, "-")}`,
+      key: hash(bot.code, start.room, start.node ? planHash + start.node : "", start.world ? readFileSync(start.world) : "", String(seed.seed), String(seed.late), String(start.ticks), scriptsHash),
     })),
   ),
 );
@@ -120,20 +127,21 @@ const cached = (run) => !flags["--fresh"] && existsSync(join(CACHE, run.key, "le
 // Two bundles of the same code share their runs.
 const todo = runs.filter((r, i) => !cached(r) && runs.findIndex((o) => o.key === r.key) === i);
 console.error(
-  `${bots.map((b) => b.name).join(" vs ")}; rooms ${rooms.join(", ")}; starts ${seeds.map((x) => x.label).join(", ")}; ${ticks} ticks; ` +
+  `${bots.map((b) => b.name).join(" vs ")}; ${starts.map((s) => `${s.label} ${s.ticks} ticks`).join(", ")}; seeds ${seeds.map((x) => x.label).join(", ")}; ` +
     `${runs.length - todo.length} cached, ${todo.length} to run, ${jobs} at a time`,
 );
 
 function soak(run) {
   return new Promise((done) => {
-    const args = ["--room", run.room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : [])];
+    const { room, world, node, ticks } = run.start;
+    const args = ["--room", room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : []), ...(world ? ["--world", world] : [])];
     const child = spawn("node", [SOAK, ...args], { stdio: ["ignore", "ignore", "ignore"], env: node26Env({ ...process.env, FABOT_PLAN_BUILT: "1" }) });
     child.on("exit", (code) => done(code));
   });
 }
 
 // Built once here: parallel builds of one project collide.
-if (node && todo.length && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
+if (todo.some((r) => r.start.node) && spawnSync("cargo", ["build", "--release", "--quiet", "--features", "tools", "--bin", "plan", "--manifest-path", join(REPO, "Cargo.toml")], { stdio: "inherit" }).status !== 0)
   fail("the plan tool did not build");
 const codes = {};
 const queue = [...todo];
@@ -190,15 +198,15 @@ const rowOf = (run) => {
 };
 
 const cell = (v, w = 9) => String(v ?? "-").padStart(w);
-console.log(["room", "seed", "bundle", "ok", "rcl", "rcl3", "rcl4", "control", "structs", "fortify", "stock", "worth", "score", "faults"].map((h, i) => cell(h, i === 2 ? 12 : 9)).join(""));
-for (const room of rooms)
+console.log(["room", "seed", "bundle", "ok", "rcl", "rcl3", "rcl4", "control", "structs", "fortify", "stock", "worth", "score", "faults"].map((h, i) => cell(h, i === 0 || i === 2 ? 12 : 9)).join(""));
+for (const start of starts)
   for (const seed of seeds)
     for (const bot of bots) {
-      const run = runs.find((r) => r.room === room && r.seed === seed && r.bot === bot);
+      const run = runs.find((r) => r.start === start && r.seed === seed && r.bot === bot);
       const r = rowOf(run);
       console.log(
-        [room, seed.label, bot.name, r.ok ? "yes" : "NO", r.rcl, r.rcl3, r.rcl4, r.controller, r.structures, r.fortified, r.stock, r.open ? `${r.worth}?` : r.worth, r.open ? `${r.score}?` : r.score, r.faults]
-          .map((v, i) => cell(v, i === 2 ? 12 : 9))
+        [start.label.split(":").at(-1), seed.label, bot.name, r.ok ? "yes" : "NO", r.rcl, r.rcl3, r.rcl4, r.controller, r.structures, r.fortified, r.stock, r.open ? `${r.worth}?` : r.worth, r.open ? `${r.score}?` : r.score, r.faults]
+          .map((v, i) => cell(v, i === 0 || i === 2 ? 12 : 9))
           .join(""),
       );
     }

@@ -1,10 +1,11 @@
 // Offline, server stopped: choose where the soak's colony stands. Runs under
 // xxscreeps' own loader, cwd the world directory:
 //   xxscreeps.js file://…/colony.mjs [<room> | --list]
-// The room is the given one, or the first by name with an unowned controller
-// and two sources. The spawn's tile is the plain one at range ≥ 3 from every
-// source, the controller and the edges, with no wall around it, nearest (sum
-// of ranges) to the sources and the controller; ties go to the lower y, then x.
+// The room is the given one (an unowned controller and a source), or the
+// first by name with an unowned controller and two sources. The spawn's tile
+// is the plain one at range ≥ 3 from every source, the controller and the
+// edges, with no wall around it, nearest (sum of ranges) to the sources and
+// the controller; ties go to the lower y, then x.
 // Prints `{ "room": …, "x": …, "y": … , "outposts": […] }` and changes
 // nothing: `manage bot add --spawn` stands it. The outposts are node E1's: of
 // the rooms an exit leads to, those with a controller nobody owns or reserves
@@ -69,9 +70,9 @@ const fitting = [];
 let chosen = null;
 for (const name of candidates) {
   const s = await survey(name);
-  const fits = s?.controller && s.sources.length === 2 && !s.controller["#user"];
+  const fits = s?.controller && (wanted ? s.sources.length > 0 : s.sources.length === 2) && !s.controller["#user"];
   if (!fits) {
-    if (wanted) throw new Error(`${name}: needs an unowned controller and two sources`);
+    if (wanted) throw new Error(`${name}: needs an unowned controller and a source`);
     continue;
   }
   const tile = spawnTile(name, s);

@@ -730,6 +730,11 @@ everything v1 used its self-written arena for, and more:
   rule forbids, which prices nothing it may fight and casts nothing.
 - **Soak.** The real sector's terrain and rooms, from one spawn for thousands
   of ticks: income curve, expansion cadence, losses to NPC waves, CPU curve.
+  ✅ Season 11's own map (`season-world.mjs`) stands in for the template's
+  small sector, where a claim may have no sourced neighbour:
+  `season-outpost-ring` is a one-source claim with three sourced neighbours
+  (remote mining, so a named room needs only one source), `season-late-seat`
+  our own RCL8 seat and its block (the late nodes).
   A change to the economy is read off this curve, not off a unit test. It is
   judged on the long horizon (`npm run soak -- --ticks 30000`, where a
   structure's payback, thousands of ticks, has time to show): the RCL and
@@ -738,8 +743,10 @@ everything v1 used its self-written arena for, and more:
   Before it ships, the same over the two extremes of harvest seats
   (`npm run soak:many`: rooms whose sources have one seat each, and rooms
   whose sources have four or more), so no change is tuned to one kind of
-  terrain. The extremes answer differently (a crowd of small bodies works
-  only where seats are many), so they are read apart, never as a median.
+  terrain, and 10,000 ticks of N7 on `season-late-seat`, so it is judged on
+  the late economy a respawn never reaches. The extremes answer differently
+  (a crowd of small bodies works only where seats are many), so they are
+  read apart, never as a median.
   A soak is a relative measure: A against B on the same rooms and seed,
   reported as the difference, never as what live will do (live has
   neighbours, season rules and the owner's hand, which no soak calibrates
@@ -751,6 +758,8 @@ everything v1 used its self-written arena for, and more:
   read apart and never counts as a room's regression. Players' same-tick contested intents resolve in user-id order,
   so a run repeats but is one-sided (the Invader usually moves first); a
   gap between soak and live surfaces as an incident and becomes a scenario.
+  That a run repeats is checked by `ab.mjs --a x.js --b x.js` (identical
+  fingerprints: N7 and E1 on the season worlds, 2026-11-10).
 - **Nodes.** A long soak from a respawn reaches RCL3 in 10,000 ticks and
   never sees links, labs or power. Each node below is a start state built
   from Layout's own plan (the level's allowed structures on their planned
@@ -777,7 +786,7 @@ everything v1 used its self-written arena for, and more:
   Each push runs the one or two nodes its change touches (about a minute);
   nightly runs them all with the long soak over the seat extremes. Nodes N1–N4 come first
   (the economy and links), N5–N7 with their structures, E with Strategy, S
-  with Fight. `npm run soak -- --node N1` … `N5` builds those five (`scripts/plan`; N5 stands its links), and `E1` ✅ N4 with two neighbours declared as outposts (`declarations.outposts`) and an Invader wave in each every 4000 ticks (`--invaders`, xxscreeps' own harvest goal doubling after each raid); each sample's `rooms` line reads an outpost's net after its bodies; ❓ the rest, with their structures.
+  with Fight. `npm run soak -- --node N1` … `N5` builds those five (`scripts/plan`; N5 stands its links), and `E1` ✅ N4 with two neighbours declared as outposts (`declarations.outposts`) and an Invader wave in each every 4000 ticks (`--invaders`, xxscreeps' own harvest goal doubling after each raid); each sample's `rooms` line reads an outpost's net after its bodies; `N6` and `N7` ✅ RCL7 and RCL8 with their bodies standing; ❓ the rest, with their structures.
 - **Adversaries.** xxscreeps hosts several users. Self-play: the attacker is
   our own bundle with only `Fight` in its modules, an engagement declared at
   start and its squads standing, against the full bot defending; each game
@@ -825,14 +834,12 @@ highways and a keeper core; `export`/`import` move a world as a payload JSON;
 `manage game pause-tick N` steps N ticks — the soak's world, the scenario
 library's seeding and the per-tick assertion respectively.
 
-Speed, measured 2026-10-10 on v1's `w11s28-invasion` (two rooms, 8 bodies,
-5 invaders, three towers, the melee stand-in as our side): **43 ticks in
-1,176 ms, ~27 ms/tick** of engine time, in this cloud container. The bot's own
-CPU adds to that. So a 300-tick scenario is ~10 s, a library of fifty is
-~8 min, a 3,000-tick soak is ~2 min plus the bot: **scenarios for the touched
-modules run at `jj ship`; the full library and the soak run nightly.** The
-~4 min wall time of that run was v1's `dotnet test` producing the scenario
-and nix fetching Node 24, neither of which v2 pays per run.
+Speed, measured 2026-11-10, a step's ms a tick with our bot's CPU of it in
+brackets, four soaks at once: a respawn on `season-outpost-ring` 1.7 (0.6),
+E1 there 3.4 (1.3), N7 on `season-late-seat` 2.9 (1.2), the five-colony live
+capture (70 rooms, 124 bodies) 35 (19). The engine's part grows with the
+world as the bot's does. **Scenarios for the touched modules run at
+`jj ship`; the full library and the soak run nightly.**
 
 Known limits: vanilla rules only (`Season/` is live-only, by design); small NPC
 deviations (flee counts armed hostiles only; healer picks by range).
