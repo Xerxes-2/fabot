@@ -8,7 +8,7 @@ use std::rc::Rc;
 use crate::core::HashMap;
 use crate::core::engine;
 use crate::core::vocabulary::{BodyPart, part_count_in};
-use crate::core::world::{Pos, RoomName};
+use crate::core::world::{Pos, RoomName, Rules};
 
 use super::bodies::{self, Pattern};
 use super::derived::{Body, Colony, Derived, Ground, SourceFact, key_parts_in};
@@ -167,12 +167,9 @@ fn round_trip(
 }
 
 /// `lifetimes` is the owner's number (`ARCHITECTURE.md` §5).
-pub fn reserve_target(lifetimes: f64, level: i32) -> i32 {
-    (f64::from(
-        engine::controller_structures("tower", level)
-            * engine::TOWER_ENERGY_COST
-            * engine::CREEP_LIFETIME,
-    ) * lifetimes) as i32
+pub fn reserve_target(rules: &Rules, lifetimes: f64, level: i32) -> i32 {
+    (f64::from(rules.allowed("tower", level) * engine::TOWER_ENERGY_COST * engine::CREEP_LIFETIME)
+        * lifetimes) as i32
 }
 
 /// Without a storage a remote's haul has no sink but the spawn ring.
@@ -647,7 +644,7 @@ fn spend_demands(
         let storage = ground.stores.iter().find(|s| s.owned);
         let (reserve, stock) = match storage {
             Some(_) => (
-                reserve_target(derived.reserve_lifetimes, colony.controller.level),
+                colony.reserve,
                 ground
                     .stores
                     .iter()
@@ -1160,17 +1157,22 @@ mod tests {
     }
 
     fn derive(g: &dice::Generated) -> Derived {
-        let atlas = Atlas::of_world(&g.world);
+        let mut atlas = Atlas::of_world(&g.world);
         let all: Vec<&Creep> = g.world.creeps.iter().collect();
+        let declarations = tick::Declarations {
+            claims: g.claims.clone(),
+            ..tick::undeclared()
+        };
+        let ours = tick::Derived {
+            worked: g.worked.clone(),
+            ..tick::derive(&g.world, &mut atlas, &declarations, &BTreeMap::new())
+        };
         crate::core::economy::derived::of_world(
             &g.world,
             &all,
             &atlas,
-            &tick::Declarations {
-                claims: g.claims.clone(),
-                ..tick::undeclared()
-            },
-            &g.worked,
+            &declarations,
+            &ours,
             &std::collections::BTreeMap::new(),
             &[],
         )

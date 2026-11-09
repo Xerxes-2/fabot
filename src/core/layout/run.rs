@@ -1,14 +1,15 @@
 use crate::core::engine;
 use crate::core::intents::{Intent, RoomAct};
 use crate::core::state::State;
-use crate::core::tick::{self, Context, Module};
+use crate::core::tick::{Context, Module};
+use crate::core::world::Rules;
 
 use super::derive;
 use super::remote;
 use super::sites;
 use super::towers;
 
-pub fn decide_over(colonies: &[derive::Colony], budget: i32) -> Vec<Intent> {
+pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], budget: i32) -> Vec<Intent> {
     let mut budget = budget;
     let mut intents: Vec<Intent> = Vec::new();
 
@@ -16,9 +17,9 @@ pub fn decide_over(colonies: &[derive::Colony], budget: i32) -> Vec<Intent> {
         if let Some(plan) = &colony.plan
             && budget > 0
             && colony.census.pending < sites::SITES_IN_FLIGHT
-            && sites::may_place(&colony.census, colony.level)
+            && sites::may_place(rules, &colony.census, colony.level)
         {
-            for p in sites::place(&colony.census, colony.level, plan, budget) {
+            for p in sites::place(rules, &colony.census, colony.level, plan, budget) {
                 budget -= 1;
                 intents.push(Intent::Room(
                     colony.room,
@@ -40,7 +41,7 @@ pub fn decide_over(colonies: &[derive::Colony], budget: i32) -> Vec<Intent> {
 
 pub fn decide(ctx: &mut Context, state: &State) -> Result<(Vec<Intent>, State), String> {
     let world = ctx.world;
-    let (mut colonies, standing) = derive::colonies(world, &state.layout);
+    let (mut colonies, standing) = derive::colonies(world, &ctx.derived.owned, &state.layout);
     for c in &mut colonies {
         if ctx.declarations.abandon.contains(&c.room) {
             c.plan = None;
@@ -48,7 +49,7 @@ pub fn decide(ctx: &mut Context, state: &State) -> Result<(Vec<Intent>, State), 
     }
 
     let budget = engine::MAX_CONSTRUCTION_SITES - world.our_sites;
-    let home = decide_over(&colonies, budget);
+    let home = decide_over(&world.rules, &colonies, budget);
 
     let placed: i32 = home
         .iter()
@@ -58,8 +59,7 @@ pub fn decide(ctx: &mut Context, state: &State) -> Result<(Vec<Intent>, State), 
         })
         .sum();
 
-    let worked = tick::worked(ctx);
-    let sites = remote::sites(ctx.atlas, world, &worked, &home, budget - placed);
+    let sites = remote::sites(ctx.atlas, world, ctx.derived, &home, budget - placed);
 
     let mut intents = home;
     intents.extend(sites);

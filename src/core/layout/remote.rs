@@ -7,7 +7,7 @@ use crate::core::HashMap;
 use crate::core::atlas::{Atlas, Mover, Target, Tree};
 use crate::core::grid::Footprint;
 use crate::core::intents::{Intent, RoomAct};
-use crate::core::tick::{self, Outpost};
+use crate::core::tick;
 use crate::core::tiles::{self, Tile, TileSet};
 use crate::core::world::{Kind, Owner, Pos, Room, RoomName, World, terrain};
 
@@ -174,17 +174,16 @@ fn sink_for<'t>(
 pub fn sites(
     atlas: &mut Atlas,
     world: &World,
-    outposts: &[Outpost],
+    derived: &tick::Derived,
     planned: &[Intent],
     budget: i32,
 ) -> Vec<Intent> {
+    let (colonies, outposts) = (&derived.colonies, &derived.worked);
     let mut intents: Vec<Intent> = Vec::new();
     let mut budget = budget;
     let mut taken: BTreeMap<RoomName, TileSet> = BTreeMap::new();
     let mut pending: BTreeMap<RoomName, i32> = BTreeMap::new();
     let mut rooms: BTreeMap<RoomName, &Room> = BTreeMap::new();
-
-    let colonies = tick::colonies(world);
 
     for room in &world.rooms {
         if colonies.contains(&room.name)

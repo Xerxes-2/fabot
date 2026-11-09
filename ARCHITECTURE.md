@@ -94,7 +94,9 @@ World ──▶ Derived ──▶ decisions ──▶ Intents
 - `Derived` is one record built once per tick: hostile reach per room, each
   creep's `Fighter`, the Tracker's groups, store lines, census — whatever more
   than one module reads. A field that may go unused is `Lazy<_>`: computed at
-  most once, only if asked.
+  most once, only if asked. `Tick` builds it before any module runs and hands
+  it to each in `Context`; it lives in `core/tick.rs`, below `Fight` and
+  `Economy`, so both read it without importing each other.
 - Decision functions in `Fight`, `Economy`, `Strategy` take `Derived` (and
   `Atlas`), not `World`. What a function reads is its signature; a `World`
   parameter below the deriving stage is a review flag.
@@ -145,8 +147,8 @@ cold tick never spends more than ❓ 60% of the limit.
 | Module | Owns | Reads | Writes | v1 origin |
 |---|---|---|---|---|
 | `Bindings` | the Screeps API surface | — | — | port verbatim |
-| `Engine` | server constants and formulas | — | — | port verbatim |
-| `World` | this tick's facts, one record; last tick's strikes and structures destroyed off the event log of each room we own, reserve or stand in (and a drain's) | Game | — | port, trim |
+| `Engine` | formulas, and the server constants the game exposes no global for | — | — | port verbatim |
+| `World` | this tick's facts, one record; last tick's strikes and structures destroyed off the event log of each room we own, reserve or stand in (and a drain's); `rules`, the engine tables the game exposes as globals (`CONTROLLER_STRUCTURES`), read each tick since a season's server may override one | Game | — | port, trim |
 | `Atlas` | geometry in two layers: the **room graph** (a node a room's region, left by a stretch of border both rooms open, priced by the flood across it round every tile a keeper strikes; grown from the target's room, so every room's way on is the same whichever room asks and a body never walks back; a keeper room whose lairs no intel places taken only past every other; rooms to avoid) and the **tile grid** per room (terrain, floods, seats, work areas, first steps). Every tile query takes a **footprint** (1×1 today, 2×2 for a formation) | World, `terrain` for rooms out of sight, `intel.rooms` for avoided and keeper rooms | flood table, kept across ticks per room while its weights hold; out of sight, a room's grid is what stood there when last seen (else its terrain) and is kept, floods and all under the same bound, while it stays so (the owner's call: part of the flood table, not a second cache); the rooms whose lairs intel reads otherwise than their names, rebuilt each tick | port, add the graph layer, widen the query |
 | `Economy` | task pool, planner, matcher, quota, spawns, labs, terminals, market | World, Atlas, declarations, `State.Economy` | tasks, casts, `State.Economy` | port, trim (§5) |
 | `Layout` | construction and tower plans | World, Atlas, declarations (outposts' containers and roads) | sites, tower intents | port |

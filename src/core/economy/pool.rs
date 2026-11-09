@@ -607,11 +607,7 @@ fn lean_of(derived: &Derived) -> BTreeSet<RoomName> {
         .colonies
         .iter()
         .zip(&derived.grounds)
-        .filter(|(c, g)| {
-            let reserve =
-                super::quota::reserve_target(derived.reserve_lifetimes, c.controller.level);
-            !g.stores.iter().any(|s| s.owned && s.energy >= reserve)
-        })
+        .filter(|(c, g)| !g.stores.iter().any(|s| s.owned && s.energy >= c.reserve))
         .map(|(c, _)| c.room)
         .collect()
 }

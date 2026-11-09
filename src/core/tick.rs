@@ -14,7 +14,7 @@ use super::strategy::intel::Intel;
 use super::tactics::{self, Tactic};
 use super::tiles::{self, Tile};
 use super::vocabulary::{BodyPart, Compound};
-use super::world::{Creep, Owner, Pos, RoomName, Sightings, World};
+use super::world::{Creep, Owner, Pos, RoomName, Sightings, World, hostiles};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Declared {
@@ -189,6 +189,7 @@ pub struct Context<'a> {
     pub declarations: &'a Declarations,
     pub sightings: &'a Sightings,
     pub intel: &'a Intel,
+    pub derived: &'a Derived,
     /// The harness's trace is wanted (`Intent::Trace`); never live.
     pub trace: bool,
 }
@@ -260,23 +261,54 @@ pub fn nearest<'t>(
     })
 }
 
-pub fn colonies(world: &World) -> Vec<RoomName> {
-    world
-        .rooms
-        .iter()
-        .filter(|r| {
-            r.controller.as_ref().is_some_and(|c| c.owner.is_ours())
-                && world.spawns.iter().any(|s| s.pos.room == r.name)
-        })
+pub struct Derived {
+    pub owned: BTreeSet<RoomName>,
+    /// The owned rooms a spawn stands in, in `World.rooms`' order.
+    pub colonies: Vec<RoomName>,
+    /// The declared outposts and raised claims a colony reaches, whose work
+    /// no foe stands down (`ARCHITECTURE.md` §13, M1b).
+    pub worked: Vec<Outpost>,
+}
+
+pub fn derive(
+    world: &World,
+    atlas: &mut Atlas,
+    declarations: &Declarations,
+    sightings: &Sightings,
+) -> Derived {
+    let owned = hostiles::owned(&world.rooms);
+    let spawned = |room: RoomName| world.spawns.iter().any(|s| s.pos.room == room);
+    let colonies: Vec<RoomName> = (world.rooms.iter())
         .map(|r| r.name)
-        .collect()
+        .filter(|room| owned.contains(room) && spawned(*room))
+        .collect();
+
+    let trees: Vec<(RoomName, Tree)> = (colonies.iter())
+        .map(|home| (*home, atlas.tree(&BTreeSet::new(), REACH_HOPS, *home)))
+        .collect();
+    let raised =
+        (declarations.claims.iter()).filter(|c| owned.contains(&c.room) && !spawned(c.room));
+    let worked = (declarations.outposts.iter())
+        .chain(raised)
+        .filter(|o| {
+            open(world, sightings, &owned, o.room)
+                && (trees.iter()).any(|(home, tree)| home == &o.room || tree.contains(o.room))
+        })
+        .cloned()
+        .collect();
+
+    Derived {
+        owned,
+        colonies,
+        worked,
+    }
 }
 
 /// Whether an outpost's work is open (`ARCHITECTURE.md` §13, M1b): a foe
 /// stands down the work it can reach and no more.
-fn open(context: &Context, owned: &BTreeSet<RoomName>, room: RoomName) -> bool {
-    let Some(seen) = context.world.room(room) else {
-        return super::world::sightings::unarmed(context.sightings, context.world.time, room);
+fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: RoomName) -> bool {
+    let Some(seen) = world.room(room) else {
+        return super::world::sightings::unarmed(sightings, world.time, room);
     };
 
     let core = seen
@@ -301,45 +333,9 @@ fn open(context: &Context, owned: &BTreeSet<RoomName>, room: RoomName) -> bool {
             // An Invader's raid only ever walks to the work, so it stands the
             // room down on sight; a player's only the work it can strike.
             c.owner == Owner::Invader
-                || (super::world::hostiles::armed(owned, &foes, c)
-                    && work
-                        .iter()
-                        .any(|at| c.pos.within(super::world::hostiles::reach(c), at)))
+                || (hostiles::armed(owned, &foes, c)
+                    && work.iter().any(|at| c.pos.within(hostiles::reach(c), at)))
         })
-}
-
-/// The declared outposts a colony's spawn reaches and whose work no foe stands
-/// down (`ARCHITECTURE.md` §13, M1b): a stood-down room is no ground.
-pub fn worked(context: &Context) -> Vec<Outpost> {
-    let owned = super::world::hostiles::owned(&context.world.rooms);
-    let trees: Vec<(RoomName, Tree)> = colonies(context.world)
-        .into_iter()
-        .map(|home| {
-            let tree = context.atlas.tree(&BTreeSet::new(), REACH_HOPS, home);
-            (home, tree)
-        })
-        .collect();
-
-    let raised = context.declarations.claims.iter().filter(|c| {
-        context.world.room(c.room).is_some_and(|r| {
-            r.controller.as_ref().is_some_and(|k| k.owner.is_ours())
-                && !context.world.spawns.iter().any(|s| s.pos.room == c.room)
-        })
-    });
-
-    context
-        .declarations
-        .outposts
-        .iter()
-        .chain(raised)
-        .filter(|o| {
-            open(context, &owned, o.room)
-                && trees
-                    .iter()
-                    .any(|(home, tree)| home == &o.room || tree.contains(o.room))
-        })
-        .cloned()
-        .collect()
 }
 
 pub type ModuleRun = fn(&mut Context, &State) -> Result<(Vec<Intent>, State), String>;

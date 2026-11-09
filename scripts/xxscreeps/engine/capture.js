@@ -8,7 +8,8 @@ const KEYS = ["id", "name", "structureType", "my", "hits", "hitsMax", "cooldown"
 
 // A tick holds only the objects that changed since the last it wrote (`gone`
 // the keys that left) and a room's terrain the first time the room is seen;
-// `full` marks the first tick after a load, which holds everything.
+// `full` marks the first tick after a load, which holds everything and
+// `CONTROLLER_STRUCTURES`.
 // `scripts/capture-read.mjs` stands each tick whole again.
 let last = null;
 const terrainSeen = new Set();
@@ -53,7 +54,7 @@ module.exports = (memory) => {
   const gone = full ? [] : Object.keys(last).filter((k) => !(k in written));
   last = written;
   return JSON.stringify({
-    ...(full ? { full } : {}),
+    ...(full ? { full, controllerStructures: CONTROLLER_STRUCTURES } : {}),
     time: Game.time,
     cpu: { limit: Game.cpu.limit, bucket: Game.cpu.bucket },
     gcl: { level: Game.gcl.level },

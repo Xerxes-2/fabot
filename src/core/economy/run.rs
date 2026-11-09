@@ -481,8 +481,6 @@ fn work(
 }
 
 pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, State), String> {
-    let worked = tick::worked(context);
-
     // `{ World with Creeps = filtered }`: a creep a fight holds is not in the
     // pool, and only the creep list differs.
     let seen: Vec<&Creep> = context
@@ -497,7 +495,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         &seen,
         context.atlas,
         context.declarations,
-        &worked,
+        context.derived,
         context.intel,
         &state.scouts,
     );
@@ -725,6 +723,7 @@ mod tests {
             let mut atlas = Atlas::of_world(&g.world);
             let sightings = BTreeMap::new();
             let declarations = tick::undeclared();
+            let derived = tick::derive(&g.world, &mut atlas, &declarations, &sightings);
 
             let mut context = Context {
                 world: &g.world,
@@ -732,6 +731,7 @@ mod tests {
                 declarations: &declarations,
                 sightings: &sightings,
                 intel: &BTreeMap::new(),
+                derived: &derived,
                 trace: false,
             };
 

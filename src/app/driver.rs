@@ -106,12 +106,17 @@ fn run_tick() -> Result<(), String> {
     atlas = Atlas::following(atlas, &world, seen, maps.terrains());
     phases.push(("atlas".to_string(), clock() - start));
 
+    let start = clock();
+    let derived = tick::derive(&world, &mut atlas, &declarations, &sightings);
+    phases.push(("derive".to_string(), clock() - start));
+
     let mut context = Context {
         world: &world,
         atlas: &mut atlas,
         declarations: &declarations,
         sightings: &sightings,
         intel: rows,
+        derived: &derived,
         trace: wire::tracing(),
     };
 

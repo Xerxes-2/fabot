@@ -130,6 +130,27 @@ function Room(r, objects) {
 // Only the attacks and the destructions were captured: what `read.js` keeps.
 globalThis.EVENT_ATTACK ??= 1;
 globalThis.EVENT_OBJECT_DESTROYED ??= 2;
+// The vanilla engine's, for a capture from before captures carried the table.
+const from = (level, n) => Array.from({ length: 9 }, (_, l) => (l >= level ? n : 0));
+const VANILLA = {
+  spawn: [0, 1, 1, 1, 1, 1, 1, 2, 3],
+  extension: [0, 0, 5, 10, 20, 30, 40, 50, 60],
+  link: [0, 0, 0, 0, 0, 2, 3, 4, 6],
+  road: from(0, 2500),
+  constructedWall: from(2, 2500),
+  rampart: from(2, 2500),
+  storage: from(4, 1),
+  tower: [0, 0, 0, 1, 1, 2, 2, 3, 6],
+  observer: from(8, 1),
+  powerSpawn: from(8, 1),
+  extractor: from(6, 1),
+  terminal: from(6, 1),
+  lab: [0, 0, 0, 0, 0, 0, 3, 6, 10],
+  container: from(0, 5),
+  nuker: from(8, 1),
+  factory: from(7, 1),
+};
+globalThis.CONTROLLER_STRUCTURES ??= VANILLA;
 Room.prototype.getEventLog = function () {
   return this._events;
 };
@@ -170,6 +191,7 @@ export const load = (path) => {
 // it accepts pushed onto `list`. The clock is the caller's.
 export function stand(captured, list, getHeapStatistics, clock) {
   tick = captured;
+  globalThis.CONTROLLER_STRUCTURES = tick.controllerStructures ?? VANILLA;
   intents = { list, charged: new Set() };
   data = {};
   const objects = {};

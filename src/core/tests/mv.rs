@@ -263,6 +263,7 @@ fn world_of(errand: &Errand) -> World {
         our_sites: 0,
         rooms_allowed: 1,
         closed: Default::default(),
+        rules: crate::core::world::Rules::vanilla(),
     }
 }
 

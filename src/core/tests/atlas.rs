@@ -84,6 +84,7 @@ fn world_of_rooms(rooms: Vec<Room>) -> World {
         our_sites: 0,
         rooms_allowed: 1,
         closed: Default::default(),
+        rules: crate::core::world::Rules::vanilla(),
     }
 }
 

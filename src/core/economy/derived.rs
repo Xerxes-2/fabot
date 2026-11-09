@@ -266,6 +266,7 @@ pub struct Colony {
     pub spawns: Vec<Spawn>,
     pub bank: i32,
     pub bank_capacity: i32,
+    pub reserve: i32,
 }
 
 #[derive(Clone, Debug)]
@@ -284,8 +285,6 @@ pub struct Derived {
     pub carriers: Vec<Body>,
     pub claimers: Vec<Body>,
     pub posts: BTreeMap<String, Pos>,
-    /// Creep lifetimes of tower fire a reserve holds.
-    pub reserve_lifetimes: f64,
     /// From each room a spawn or body stands in, `Atlas::tree`'s.
     pub routes: BTreeMap<RoomName, Tree>,
 }
@@ -333,11 +332,6 @@ fn body_of(name: &str, pos: &Pos, parts: &[Part], store: &Store, life: i32) -> B
             .unwrap_or_else(|| bodies::pattern_of_parts(work, carry, moves, claim)),
         bound: None,
     }
-}
-
-fn owned_rooms(world: &World) -> i32 {
-    let ours = |r: &&Room| r.controller.as_ref().is_some_and(|c| c.owner.is_ours());
-    world.rooms.iter().filter(ours).count() as i32
 }
 
 fn reservable(c: &Controller) -> bool {
@@ -991,39 +985,6 @@ fn stock_labs(
     }
 }
 
-fn colonies_of(world: &World) -> (Vec<Colony>, Vec<&Room>) {
-    let mut colonies: Vec<Colony> = Vec::new();
-    let mut colony_rooms: Vec<&Room> = Vec::new();
-
-    for room in &world.rooms {
-        if let Some(c) = &room.controller
-            && c.owner.is_ours()
-        {
-            let spawns: Vec<Spawn> = world
-                .spawns
-                .iter()
-                .filter(|s| s.pos.room == room.name)
-                .cloned()
-                .collect();
-
-            if spawns.is_empty() {
-                continue;
-            }
-
-            colony_rooms.push(room);
-            colonies.push(Colony {
-                room: room.name,
-                controller: c.clone(),
-                spawns,
-                bank: room.energy_available,
-                bank_capacity: room.energy_capacity,
-            });
-        }
-    }
-
-    (colonies, colony_rooms)
-}
-
 /// At the rate the reserver holds, not this tick's: a body lives longer
 /// than a lapse lasts. The engine refuses a harvest on another's hold.
 fn remote_of(
@@ -1088,11 +1049,33 @@ pub fn of_world(
     creeps: &[&Creep],
     atlas: &Atlas,
     declarations: &Declarations,
-    worked: &[Outpost],
+    ours: &tick::Derived,
     intel: &Intel,
     scouts: &[Scout],
 ) -> Derived {
-    let (colonies, colony_rooms) = colonies_of(world);
+    let colony_rooms: Vec<&Room> = (ours.colonies.iter())
+        .filter_map(|name| world.room(*name))
+        .collect();
+    let colonies: Vec<Colony> = (colony_rooms.iter())
+        .filter_map(|room| {
+            let controller = room.controller.clone()?;
+            Some(Colony {
+                room: room.name,
+                reserve: super::quota::reserve_target(
+                    &world.rules,
+                    declarations.reserve_lifetimes,
+                    controller.level,
+                ),
+                controller,
+                spawns: (world.spawns.iter())
+                    .filter(|s| s.pos.room == room.name)
+                    .cloned()
+                    .collect(),
+                bank: room.energy_available,
+                bank_capacity: room.energy_capacity,
+            })
+        })
+        .collect();
 
     let is_colony = |name: RoomName| colonies.iter().any(|c| c.room == name);
 
@@ -1118,7 +1101,7 @@ pub fn of_world(
         })
         .collect();
 
-    for outpost in worked.iter().filter(|o| !is_colony(o.room)) {
+    for outpost in ours.worked.iter().filter(|o| !is_colony(o.room)) {
         grounds.push(remote_of(outpost));
     }
 
@@ -1189,7 +1172,7 @@ pub fn of_world(
         claims: declarations
             .claims
             .iter()
-            .filter(|_| owned_rooms(world) < world.rooms_allowed)
+            .filter(|_| (ours.owned.len() as i32) < world.rooms_allowed)
             .filter_map(|claim| match world.room(claim.room) {
                 Some(room) => room.controller.clone(),
                 None => blind(claim, intel, world, declarations).controller,
@@ -1208,7 +1191,6 @@ pub fn of_world(
             .cloned()
             .collect(),
         claimers: bodies.iter().filter(|b| b.claim > 0).cloned().collect(),
-        reserve_lifetimes: declarations.reserve_lifetimes,
         routes,
         bodies,
     }

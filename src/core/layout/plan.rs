@@ -8,7 +8,7 @@ use crate::core::atlas::Atlas;
 use crate::core::engine;
 use crate::core::grid::{self, Footprint, UNREACHED, Weight};
 use crate::core::tiles::{self, Tile};
-use crate::core::world::Kind;
+use crate::core::world::{Kind, Rules};
 
 use super::ground::{self, Ground, SPAWN_OFFSETS};
 use super::shape::{Item, Plan};
@@ -27,16 +27,14 @@ pub fn on_lattice(anchor: Tile, tile: Tile) -> bool {
     wrap(dx + dy) == 0 || wrap(dx - dy) == 0
 }
 
-fn labs() -> i32 {
-    engine::controller_structures("lab", engine::CONTROLLER_MAX_LEVEL)
+fn labs(rules: &Rules) -> i32 {
+    rules.allowed("lab", engine::CONTROLLER_MAX_LEVEL)
 }
 
-pub fn level_of(kind: &Kind, rank: i32) -> i32 {
+pub fn level_of(rules: &Rules, kind: &Kind, rank: i32) -> i32 {
     let name = kind.name();
     let mut level = 0;
-    while level <= engine::CONTROLLER_MAX_LEVEL
-        && engine::controller_structures(&name, level) <= rank
-    {
+    while level <= engine::CONTROLLER_MAX_LEVEL && rules.allowed(&name, level) <= rank {
         level += 1;
     }
     level
@@ -64,9 +62,14 @@ pub fn priority(kind: &Kind) -> i32 {
     }
 }
 
-fn lab_cluster(inputs: &[Tile], rank: &[i32], is_open: impl Fn(Tile) -> bool) -> Option<Vec<Tile>> {
+fn lab_cluster(
+    rules: &Rules,
+    inputs: &[Tile],
+    rank: &[i32],
+    is_open: impl Fn(Tile) -> bool,
+) -> Option<Vec<Tile>> {
     let reach = engine::LAB_REACTION_RANGE;
-    let labs = labs();
+    let labs = labs(rules);
     let mut best: Option<Vec<Tile>> = None;
     let mut best_cost = i32::MAX;
 
@@ -123,14 +126,14 @@ fn lab_cluster(inputs: &[Tile], rank: &[i32], is_open: impl Fn(Tile) -> bool) ->
 }
 
 /// A few labs' worth of first inputs: enough on open ground.
-fn lab_search() -> i32 {
-    3 * labs()
+fn lab_search(rules: &Rules) -> i32 {
+    3 * labs(rules)
 }
 
 const HUB: [Kind; 4] = [Kind::Storage, Kind::Link, Kind::Terminal, Kind::Factory];
 
-fn count(kind: &Kind) -> i32 {
-    engine::controller_structures(&kind.name(), engine::CONTROLLER_MAX_LEVEL)
+fn count(rules: &Rules, kind: &Kind) -> i32 {
+    rules.allowed(&kind.name(), engine::CONTROLLER_MAX_LEVEL)
 }
 
 /// Not links, containers or roads: they are seated by what they serve.
@@ -153,8 +156,8 @@ pub fn sized() -> Vec<Kind> {
 const KEEP: [Kind; 4] = [Kind::Spawn, Kind::Tower, Kind::Storage, Kind::Terminal];
 
 /// The first tower: the room's first defence.
-pub fn rampart_level() -> i32 {
-    level_of(&Kind::Tower, 0)
+pub fn rampart_level(rules: &Rules) -> i32 {
+    level_of(rules, &Kind::Tower, 0)
 }
 
 /// A road leaves the lattice only to go round a wall. A design constant.
@@ -169,8 +172,8 @@ fn steps() -> Vec<Option<u16>> {
 const NONE: i32 = i32::MAX;
 
 /// At the first level a room's energy goes to its controller alone.
-pub fn haul_level() -> i32 {
-    level_of(&Kind::Extension, 0)
+pub fn haul_level(rules: &Rules) -> i32 {
+    level_of(rules, &Kind::Extension, 0)
 }
 
 struct Posted {
@@ -269,6 +272,7 @@ impl Slots {
 /// The hub beside the anchor, the spawns on their slots, then every kind
 /// nearest first and the labs as one cluster.
 fn pick(
+    rules: &Rules,
     anchor: Tile,
     spawns: &[Tile],
     ordered: Vec<Tile>,
@@ -303,18 +307,18 @@ fn pick(
         spawn_slots.iter().partition(|t| spawns.contains(t));
     let mut placed_spawns = 0;
     for t in standing.into_iter().chain(free) {
-        if placed_spawns < count(&Kind::Spawn) && slots.open(t) {
+        if placed_spawns < count(rules, &Kind::Spawn) && slots.open(t) {
             slots.take(&Kind::Spawn, t);
             placed_spawns += 1;
         }
     }
 
     for (kind, n) in [
-        (Kind::Spawn, count(&Kind::Spawn) - placed_spawns),
-        (Kind::Tower, count(&Kind::Tower)),
-        (Kind::Extension, count(&Kind::Extension)),
-        (Kind::PowerSpawn, count(&Kind::PowerSpawn)),
-        (Kind::Nuker, count(&Kind::Nuker)),
+        (Kind::Spawn, count(rules, &Kind::Spawn) - placed_spawns),
+        (Kind::Tower, count(rules, &Kind::Tower)),
+        (Kind::Extension, count(rules, &Kind::Extension)),
+        (Kind::PowerSpawn, count(rules, &Kind::PowerSpawn)),
+        (Kind::Nuker, count(rules, &Kind::Nuker)),
     ] {
         slots.fill(&kind, n);
     }
@@ -322,15 +326,15 @@ fn pick(
     let nearest: Vec<Tile> = (slots.ordered.iter().copied())
         .filter(|t| slots.open(*t))
         .collect();
-    let head = &nearest[..nearest.len().min(lab_search() as usize)];
+    let head = &nearest[..nearest.len().min(lab_search(rules) as usize)];
     let open = |t: Tile| slots.open(t);
-    let cluster =
-        lab_cluster(head, &slots.rank, open).or_else(|| lab_cluster(&nearest, &slots.rank, open));
+    let cluster = lab_cluster(rules, head, &slots.rank, open)
+        .or_else(|| lab_cluster(rules, &nearest, &slots.rank, open));
     for t in cluster.into_iter().flatten() {
         slots.take(&Kind::Lab, t);
     }
 
-    slots.fill(&Kind::Observer, count(&Kind::Observer));
+    slots.fill(&Kind::Observer, count(rules, &Kind::Observer));
     (slots.taken, slots.picked)
 }
 
@@ -442,7 +446,13 @@ fn in_build_order(
 /// `spawns` only order the spawn slots, so a spawn on a slot never moves the
 /// plan. Ways are laid before slots are handed out, so no structure stands on
 /// one.
-fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> (Plan, bool) {
+fn draw_with(
+    rules: &Rules,
+    on_first: bool,
+    ground: &Ground,
+    anchor: Tile,
+    spawns: &[Tile],
+) -> (Plan, bool) {
     let weights: &[Weight; tiles::COUNT] = &ground.weights;
     let mut unfit: Vec<Cow<'static, str>> = Vec::new();
 
@@ -521,7 +531,12 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
     }
 
     slot_list.sort_unstable();
-    let (taken, picked) = pick(anchor, spawns, slot_list.iter().map(|(_, t)| *t).collect());
+    let (taken, picked) = pick(
+        rules,
+        anchor,
+        spawns,
+        slot_list.iter().map(|(_, t)| *t).collect(),
+    );
 
     let mut road_level = [NONE; tiles::COUNT];
     let mut ranks: BTreeMap<Kind, i32> = BTreeMap::new();
@@ -530,7 +545,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
     for (kind, t) in &picked {
         let r = ranks.get(kind).copied().unwrap_or(0);
         ranks.insert(kind.clone(), r + 1);
-        let level = level_of(kind, r);
+        let level = level_of(rules, kind, r);
         items.push(Item {
             kind: kind.clone(),
             tile: *t,
@@ -548,14 +563,15 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         });
 
         while let Some(at) = road {
-            road_level[at] = road_level[at].min(level.max(haul_level()));
+            road_level[at] = road_level[at].min(level.max(haul_level(rules)));
             road = down(&lane, &*walk, at);
         }
     }
 
-    road_level[anchor] = road_level[anchor].min(haul_level());
+    road_level[anchor] = road_level[anchor].min(haul_level(rules));
 
     let mut board = Board {
+        rules,
         weights,
         anchor,
         walk,
@@ -570,7 +586,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
 
     // A container takes a dead end off its way out, so no body walking past
     // shoves its harvester off it.
-    let rock_level = haul_level();
+    let rock_level = haul_level(rules);
 
     let rocks = source_walks
         .iter()
@@ -590,7 +606,7 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
         board.pave(rest, rock_level);
     }
 
-    let dig_level = level_of(&Kind::Extractor, 0);
+    let dig_level = level_of(rules, &Kind::Extractor, 0);
 
     for (m, path) in &mineral_walks {
         board.plant(&Kind::Extractor, *m, dig_level);
@@ -613,7 +629,9 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
     all.extend(ramparts);
 
     for kind in sized() {
-        if (all.iter().filter(|i| i.kind.name() == kind.name()).count() as i32) < count(&kind) {
+        if (all.iter().filter(|i| i.kind.name() == kind.name()).count() as i32)
+            < count(rules, &kind)
+        {
             unfit.push(kind.name());
         }
     }
@@ -634,18 +652,18 @@ fn draw_with(on_first: bool, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> 
 
 /// The controller's container a tile further out, leaving the first for an
 /// upgrader to stand on.
-pub fn draw(ground: &Ground, anchor: Tile, spawns: &[Tile]) -> Plan {
-    let (plan, linked) = draw_with(false, ground, anchor, spawns);
+pub fn draw(rules: &Rules, ground: &Ground, anchor: Tile, spawns: &[Tile]) -> Plan {
+    let (plan, linked) = draw_with(rules, false, ground, anchor, spawns);
     if linked {
         plan
     } else {
-        draw_with(true, ground, anchor, spawns).0
+        draw_with(rules, true, ground, anchor, spawns).0
     }
 }
 
 /// Scored so the spawns a plan places, built where it says, give the plan
 /// again: an anchor before it in the order seats no spawn, standing or not.
-pub fn of_ground(ground: &Ground, spawns: &[Tile]) -> Option<Plan> {
+pub fn of_ground(rules: &Rules, ground: &Ground, spawns: &[Tile]) -> Option<Plan> {
     let candidates = ground::anchors(ground, spawns);
 
     let score = |plan: &Plan| -> i32 {
@@ -679,7 +697,7 @@ pub fn of_ground(ground: &Ground, spawns: &[Tile]) -> Option<Plan> {
             .as_ref()
             .is_none_or(|(s, _)| *s <= 2 * spawns.len() as i32)
     {
-        let plan = draw(ground, candidates[i], spawns);
+        let plan = draw(rules, ground, candidates[i], spawns);
         let s = score(&plan);
 
         if best.as_ref().is_none_or(|(b, _)| s > *b) {
@@ -693,6 +711,7 @@ pub fn of_ground(ground: &Ground, spawns: &[Tile]) -> Option<Plan> {
 }
 
 struct Board<'a> {
+    rules: &'a Rules,
     weights: &'a [Weight; tiles::COUNT],
     anchor: Tile,
     walk: tiles::Table<i32>,
@@ -815,7 +834,7 @@ impl Board<'_> {
         let hub_links = self.items.iter().filter(|i| i.kind.is_link()).count() as i32;
         let outer: Vec<Tile> = links
             .iter()
-            .take((count(&Kind::Link) - hub_links).max(0) as usize)
+            .take((count(self.rules, &Kind::Link) - hub_links).max(0) as usize)
             .copied()
             .collect();
 
@@ -823,7 +842,7 @@ impl Board<'_> {
             self.extra.push(Item {
                 kind: Kind::Link,
                 tile: *t,
-                level: level_of(&Kind::Link, i as i32),
+                level: level_of(self.rules, &Kind::Link, i as i32),
             });
         }
 
@@ -831,7 +850,7 @@ impl Board<'_> {
         // energy to save a walk, where a source's link saves a whole haul.
         for k in 0..self.items.len() {
             if self.items[k].kind.is_link() {
-                self.items[k].level = level_of(&Kind::Link, outer.len() as i32);
+                self.items[k].level = level_of(self.rules, &Kind::Link, outer.len() as i32);
             }
         }
         linked
@@ -874,7 +893,7 @@ impl Board<'_> {
             .map(|(t, level)| Item {
                 kind: Kind::Rampart,
                 tile: *t,
-                level: rampart_level().max(*level),
+                level: rampart_level(self.rules).max(*level),
             })
             .collect()
     }
@@ -974,27 +993,8 @@ mod tests {
     use super::*;
     use crate::core::layout::fixtures as fx;
 
-    const NAMES: [&str; 16] = [
-        "spawn",
-        "extension",
-        "link",
-        "road",
-        "constructedWall",
-        "rampart",
-        "storage",
-        "tower",
-        "observer",
-        "powerSpawn",
-        "extractor",
-        "terminal",
-        "lab",
-        "container",
-        "nuker",
-        "factory",
-    ];
-
     fn allowed(kind: &Kind) -> i32 {
-        engine::controller_structures(&kind.name(), engine::CONTROLLER_MAX_LEVEL)
+        Rules::vanilla().allowed(&kind.name(), engine::CONTROLLER_MAX_LEVEL)
     }
 
     fn rankable() -> Vec<Kind> {
@@ -1005,11 +1005,11 @@ mod tests {
 
     #[test]
     fn the_allowance_never_falls_as_the_level_rises() {
-        for name in NAMES {
+        let rules = Rules::vanilla();
+        for name in rules.structures.keys() {
             for level in 0..engine::CONTROLLER_MAX_LEVEL {
                 assert!(
-                    engine::controller_structures(name, level)
-                        <= engine::controller_structures(name, level + 1),
+                    rules.allowed(name, level) <= rules.allowed(name, level + 1),
                     "{name} at {level}"
                 );
             }
@@ -1018,14 +1018,15 @@ mod tests {
 
     #[test]
     fn a_ranks_level_is_the_first_the_allowance_admits_it_at() {
+        let rules = Rules::vanilla();
         for kind in rankable() {
             let top = allowed(&kind);
 
             for rank in 0..top {
-                let level = level_of(&kind, rank);
+                let level = level_of(&rules, &kind, rank);
 
                 assert!(
-                    engine::controller_structures(&kind.name(), level) > rank,
+                    rules.allowed(&kind.name(), level) > rank,
                     "admitted: {} rank {} at {}",
                     kind.name(),
                     rank,
@@ -1034,7 +1035,7 @@ mod tests {
 
                 if level > 0 {
                     assert!(
-                        engine::controller_structures(&kind.name(), level - 1) <= rank,
+                        rules.allowed(&kind.name(), level - 1) <= rank,
                         "not before: {} rank {} at {}",
                         kind.name(),
                         rank,
@@ -1125,6 +1126,7 @@ mod tests {
 
     #[test]
     fn each_items_level_admits_it_and_every_lower_rank_of_its_kind() {
+        let rules = Rules::vanilla();
         for colony in fx::samples(3).take(fx::MAX_TEST) {
             let Some((_, plan)) = fx::plan_of(&colony) else {
                 continue;
@@ -1139,7 +1141,7 @@ mod tests {
                         .count() as i32;
 
                     assert!(
-                        seated <= engine::controller_structures(&kind.name(), level),
+                        seated <= rules.allowed(&kind.name(), level),
                         "{} at {}: {} seated",
                         kind.name(),
                         level,
@@ -1315,6 +1317,7 @@ mod tests {
 
     #[test]
     fn a_rooms_founding_spawn_standing_where_its_plan_says_leaves_the_plan_unchanged() {
+        let rules = Rules::vanilla();
         for colony in fx::samples(8).take(fx::MAX_TEST) {
             let Some((ground, plan)) = fx::plan_of(&fx::bare(&colony)) else {
                 continue;
@@ -1322,7 +1325,7 @@ mod tests {
 
             match plan.items.iter().find(|i| i.kind.is_spawn()) {
                 None => assert!(plan.unfit.contains(&Kind::Spawn.name())),
-                Some(first) => match of_ground(&ground, &[first.tile]) {
+                Some(first) => match of_ground(&rules, &ground, &[first.tile]) {
                     Some(founded) => assert!(fx::same(&plan, &founded)),
                     None => panic!("no plan from a founding spawn"),
                 },
@@ -1332,6 +1335,7 @@ mod tests {
 
     #[test]
     fn a_second_and_third_spawn_on_their_planned_tiles_never_move_the_plan() {
+        let rules = Rules::vanilla();
         for colony in fx::samples(9).take(fx::MAX_TEST) {
             let Some((ground, plan)) = fx::plan_of(&fx::bare(&colony)) else {
                 continue;
@@ -1348,7 +1352,7 @@ mod tests {
                 let mut taken = spawns[0..n].to_vec();
                 taken.sort_unstable();
 
-                match of_ground(&ground, &taken) {
+                match of_ground(&rules, &ground, &taken) {
                     Some(grown) => assert!(fx::same(&plan, &grown)),
                     None => panic!("no plan from {n} spawns"),
                 }

@@ -8,8 +8,8 @@ use crate::core::layout::shape::Plan;
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::Resource;
 use crate::core::world::{
-    Controller, Creep, Kind, Mineral, Owner, Pos, Room, RoomName, Site, Source, Spawn, Store,
-    Structure, World, terrain,
+    Controller, Creep, Kind, Mineral, Owner, Pos, Room, RoomName, Rules, Site, Source, Spawn,
+    Store, Structure, World, terrain,
 };
 
 pub const ROOM: RoomName = RoomName::named("W1N1");
@@ -235,7 +235,7 @@ pub fn samples(seed: u64) -> impl Iterator<Item = Colony> {
 
 pub fn plan_of(colony: &Colony) -> Option<(Ground, Plan)> {
     let ground = ground::of_room(&colony.room)?;
-    let plan = plan::of_ground(&ground, &colony.spawns)?;
+    let plan = plan::of_ground(&Rules::vanilla(), &ground, &colony.spawns)?;
     Some((ground, plan))
 }
 
@@ -358,6 +358,7 @@ pub fn world_of(room: Room, spawns: Vec<Spawn>, creeps: Vec<Creep>) -> World {
         our_sites: 0,
         rooms_allowed: 1,
         closed: Default::default(),
+        rules: Rules::vanilla(),
     }
 }
 

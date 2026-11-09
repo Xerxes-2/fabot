@@ -7,6 +7,7 @@ import { createInterface } from "node:readline";
 export async function* ticksOf(files) {
   for (const file of files) {
     let objects = {};
+    let controllerStructures;
     const terrain = new Map();
     for await (const line of createInterface({ input: createReadStream(file), crlfDelay: Infinity })) {
       if (!line) continue;
@@ -15,6 +16,7 @@ export async function* ticksOf(files) {
       if (full || gone === undefined) objects = {};
       for (const k of gone ?? []) delete objects[k];
       Object.assign(objects, tick.objects);
+      tick.controllerStructures = controllerStructures = tick.controllerStructures ?? controllerStructures;
       // Standing a tick reads its records and never writes them.
       tick.objects = { ...objects };
       for (const r of tick.rooms) {

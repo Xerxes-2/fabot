@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use crate::core::atlas::Atlas;
 use crate::core::engine;
 use crate::core::tiles::{self, Tile};
-use crate::core::world::{Creep, Kind, Pos, Room, Structure, terrain};
+use crate::core::world::{Creep, Kind, Pos, Room, Rules, Structure, terrain};
 
 use super::plan::{controller_link, haul_level, sized};
 use super::shape::{Item, Plan};
@@ -254,19 +254,25 @@ fn held_of(census: &Census, kind: &Kind) -> i32 {
 
 /// Below the haul's level no road or container is due, so only a kind short
 /// of its allowance can be placed; false lets the caller skip the plan.
-pub fn may_place(census: &Census, level: i32) -> bool {
+pub fn may_place(rules: &Rules, census: &Census, level: i32) -> bool {
     let mut kinds = vec![Kind::Link, Kind::Extractor];
     kinds.extend(sized());
 
-    level >= haul_level()
+    level >= haul_level(rules)
         || kinds
             .iter()
-            .any(|kind| held_of(census, kind) < engine::controller_structures(&kind.name(), level))
+            .any(|kind| held_of(census, kind) < rules.allowed(&kind.name(), level))
 }
 
 /// The engine stacks a road only with a rampart, any other kind only with a
 /// road or a rampart.
-pub fn place(census: &Census, level: i32, plan: &Plan, budget: i32) -> Vec<Placement> {
+pub fn place(
+    rules: &Rules,
+    census: &Census,
+    level: i32,
+    plan: &Plan,
+    budget: i32,
+) -> Vec<Placement> {
     let room = budget.min(SITES_IN_FLIGHT - census.pending);
     let mut placed: Vec<Placement> = Vec::new();
     let mut added = vec![0i32; kinds() as usize];
@@ -362,7 +368,7 @@ pub fn place(census: &Census, level: i32, plan: &Plan, budget: i32) -> Vec<Place
                     && (!item.kind.is_container() || census.served[t] == 0)
                     && (!item.kind.is_road() || census.road[t] == 0)
                     && held_of(census, &item.kind) + added_of(&added, &item.kind)
-                        < engine::controller_structures(&item.kind.name(), level) =>
+                        < rules.allowed(&item.kind.name(), level) =>
             {
                 taken.insert(t);
                 added[item.kind.ordinal() as usize] = added_of(&added, &item.kind) + 1;
@@ -439,7 +445,13 @@ mod tests {
                 let mut one = plan.clone();
                 one.items = vec![i.clone()];
 
-                for p in place(&census, engine::CONTROLLER_MAX_LEVEL, &one, 1) {
+                for p in place(
+                    &Rules::vanilla(),
+                    &census,
+                    engine::CONTROLLER_MAX_LEVEL,
+                    &one,
+                    1,
+                ) {
                     let t = tiles::index(p.x, p.y);
 
                     assert!(
@@ -495,7 +507,8 @@ mod tests {
                 .collect();
 
             let counted = census_of(&room, &[]);
-            let placed = place(&counted, case.level, &plan, case.budget);
+            let rules = Rules::vanilla();
+            let placed = place(&rules, &counted, case.level, &plan, case.budget);
 
             let held = |kind: &Kind| -> i32 {
                 (room
@@ -550,11 +563,10 @@ mod tests {
                     && !tiles_placed.contains(&t)
                     && !(i.kind.is_container() && counted.served[t] > 0)
                     && clear(&i.kind, &standing(t))
-                    && held(&i.kind) + added
-                        < engine::controller_structures(&i.kind.name(), case.level)
+                    && held(&i.kind) + added < rules.allowed(&i.kind.name(), case.level)
             };
 
-            assert!(may_place(&counted, case.level) || placed.is_empty());
+            assert!(may_place(&rules, &counted, case.level) || placed.is_empty());
             assert!((placed.len() as i32) <= cap);
             assert!((placed.len() as i32) == cap || !plan.items.iter().any(admitted));
             assert_eq!(fx::distinct(&tiles_placed), tiles_placed);
@@ -572,10 +584,7 @@ mod tests {
                     .filter(|q| q.kind.name() == p.kind.name())
                     .count() as i32;
 
-                assert!(
-                    held(&p.kind) + added
-                        <= engine::controller_structures(&p.kind.name(), case.level)
-                );
+                assert!(held(&p.kind) + added <= rules.allowed(&p.kind.name(), case.level));
             }
 
             for p in &placed {

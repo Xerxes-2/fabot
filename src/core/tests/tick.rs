@@ -61,16 +61,19 @@ fn run(throws: &[bool], state: State) -> TickResult {
         our_sites: 0,
         rooms_allowed: 1,
         closed: Default::default(),
+        rules: crate::core::world::Rules::vanilla(),
     };
     let mut atlas = Atlas::of_world(&world);
     let declarations = tick::undeclared();
     let sightings = BTreeMap::new();
+    let derived = tick::derive(&world, &mut atlas, &declarations, &sightings);
     let mut context = Context {
         world: &world,
         atlas: &mut atlas,
         declarations: &declarations,
         sightings: &sightings,
         intel: &BTreeMap::new(),
+        derived: &derived,
         trace: false,
     };
     let modules: Vec<Module> = throws

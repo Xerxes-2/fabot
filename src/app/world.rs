@@ -392,6 +392,9 @@ pub fn of_game(
         creeps,
         our_sites: r.n(),
         rooms_allowed: r.n(),
+        rules: Rules {
+            structures: r.list(|r| (r.s(), r.list(Reader::n))).into_iter().collect(),
+        },
         closed: BTreeSet::new(),
         attacks,
         destroyed,

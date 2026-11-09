@@ -611,6 +611,51 @@ pub struct World {
     pub attacks: Vec<(String, String)>,
     /// Last tick's structures destroyed, off the same logs.
     pub destroyed: Vec<(RoomName, String)>,
+    pub rules: Rules,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Rules {
+    pub structures: BTreeMap<String, Vec<i32>>,
+}
+
+impl Rules {
+    /// `CONTROLLER_STRUCTURES`; sites count with standing structures.
+    pub fn allowed(&self, kind: &str, level: i32) -> i32 {
+        let row = self.structures.get(kind).map_or(&[][..], Vec::as_slice);
+        let at = usize::try_from(level).map_or(None, |l| row.get(l).or(row.last()));
+        at.copied().unwrap_or(0)
+    }
+
+    #[cfg(any(test, feature = "tools"))]
+    pub fn vanilla() -> Rules {
+        let row = |r: [i32; 9]| r.to_vec();
+        let from =
+            |level: usize, n: i32| row(std::array::from_fn(|l| if l >= level { n } else { 0 }));
+        let structures = [
+            ("spawn", row([0, 1, 1, 1, 1, 1, 1, 2, 3])),
+            ("extension", row([0, 0, 5, 10, 20, 30, 40, 50, 60])),
+            ("link", row([0, 0, 0, 0, 0, 2, 3, 4, 6])),
+            ("road", from(0, 2500)),
+            ("constructedWall", from(2, 2500)),
+            ("rampart", from(2, 2500)),
+            ("storage", from(4, 1)),
+            ("tower", row([0, 0, 0, 1, 1, 2, 2, 3, 6])),
+            ("observer", from(8, 1)),
+            ("powerSpawn", from(8, 1)),
+            ("extractor", from(6, 1)),
+            ("terminal", from(6, 1)),
+            ("lab", row([0, 0, 0, 0, 0, 0, 3, 6, 10])),
+            ("container", from(0, 5)),
+            ("nuker", from(8, 1)),
+            ("factory", from(7, 1)),
+        ];
+        Rules {
+            structures: (structures.into_iter())
+                .map(|(kind, row)| (kind.to_string(), row))
+                .collect(),
+        }
+    }
 }
 
 pub mod terrain {

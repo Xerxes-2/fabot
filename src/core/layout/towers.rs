@@ -187,8 +187,9 @@ mod tests {
 
             let world = fx::world_of(room, Vec::new(), ours.clone());
 
-            let (colonies, _) = derive::colonies(&world, &BTreeMap::new());
-            let acts = run::decide_over(&colonies, 0);
+            let owned = crate::core::world::hostiles::owned(&world.rooms);
+            let (colonies, _) = derive::colonies(&world, &owned, &BTreeMap::new());
+            let acts = run::decide_over(&world.rules, &colonies, 0);
 
             let ids: Vec<String> = acts
                 .iter()

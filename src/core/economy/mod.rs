@@ -426,6 +426,7 @@ pub(crate) mod dice {
             our_sites: 0,
             rooms_allowed: rooms.len() as i32 + 1,
             closed: Default::default(),
+            rules: crate::core::world::Rules::vanilla(),
         };
 
         Generated {

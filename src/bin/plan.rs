@@ -10,7 +10,7 @@ use fabot::core::layout::{ground, plan, sites};
 use fabot::core::tiles::{self, Tile};
 use fabot::core::vocabulary::Resource;
 use fabot::core::world::{
-    Controller, Kind, Mineral, Owner, Pos, Room, RoomName, Source, Store, Structure, terrain,
+    Controller, Kind, Mineral, Owner, Pos, Room, RoomName, Rules, Source, Store, Structure, terrain,
 };
 use serde_json::{Value, json};
 
@@ -83,15 +83,16 @@ fn main() {
         others: Vec::new(),
     };
 
+    let rules = Rules::vanilla();
     let ground = ground::of_room(&room).unwrap();
-    let first_spawn = plan::of_ground(&ground, &[])
+    let first_spawn = plan::of_ground(&rules, &ground, &[])
         .unwrap()
         .items
         .into_iter()
         .find(|i| i.kind == Kind::Spawn)
         .unwrap();
     // The plan the bot draws once its first spawn stands.
-    let plan = plan::of_ground(&ground, &[first_spawn.tile]).unwrap();
+    let plan = plan::of_ground(&rules, &ground, &[first_spawn.tile]).unwrap();
 
     let mut built: Vec<Structure> = Vec::new();
     let build = |built: &mut Vec<Structure>, kind: Kind, tile: Tile| {
@@ -120,7 +121,7 @@ fn main() {
             },
             &[],
         );
-        let placed = sites::place(&census, level, &plan, i32::MAX);
+        let placed = sites::place(&rules, &census, level, &plan, i32::MAX);
         if placed.is_empty() {
             break;
         }

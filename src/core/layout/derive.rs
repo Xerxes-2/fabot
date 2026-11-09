@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::engine;
 use crate::core::tiles::{self, Tile};
@@ -49,18 +49,15 @@ pub fn key_of(room: &Room, spawns: &[Tile]) -> String {
 
 pub fn colonies(
     world: &World,
+    owned: &BTreeSet<RoomName>,
     standing: &BTreeMap<RoomName, Standing>,
 ) -> (Vec<Colony>, BTreeMap<RoomName, Standing>) {
     let mut next: BTreeMap<RoomName, Standing> = BTreeMap::new();
     let mut found: Vec<Colony> = Vec::new();
 
-    let mut rooms: Vec<&Room> = world.rooms.iter().collect();
-    rooms.sort_by_key(|r| r.name);
-
-    for room in rooms {
-        let level = match &room.controller {
-            Some(c) if c.owner.is_ours() => c.level,
-            _ => continue,
+    for room in owned.iter().filter_map(|name| world.room(*name)) {
+        let Some(level) = room.controller.as_ref().map(|c| c.level) else {
+            continue;
         };
 
         let spawns = spawns_in(world, room.name);
@@ -70,7 +67,8 @@ pub fn colonies(
             Some(s) if s.key == key => s.clone(),
             _ => Standing {
                 key,
-                plan: ground::of_room(room).and_then(|ground| plan::of_ground(&ground, &spawns)),
+                plan: ground::of_room(room)
+                    .and_then(|ground| plan::of_ground(&world.rules, &ground, &spawns)),
             },
         };
 
@@ -124,8 +122,7 @@ mod tests {
     use super::*;
     use crate::core::layout::fixtures as fx;
     use crate::core::layout::shape::Plan;
-    use crate::core::world::{Kind, Owner};
-    use std::collections::BTreeMap;
+    use crate::core::world::{Kind, Owner, hostiles};
 
     fn agree(a: &Option<Plan>, b: &Option<Plan>) -> bool {
         match (a, b) {
@@ -153,8 +150,9 @@ mod tests {
 
             let world = fx::world_of(colony.room.clone(), spawns.clone(), Vec::new());
 
-            let (first, standing) = colonies(&world, &BTreeMap::new());
-            let (kept, _) = colonies(&world, &standing);
+            let owned = hostiles::owned(&world.rooms);
+            let (first, standing) = colonies(&world, &owned, &BTreeMap::new());
+            let (kept, _) = colonies(&world, &owned, &standing);
 
             let mut walled = colony.room.clone();
             walled.structures.push(fx::structure(
@@ -166,9 +164,14 @@ mod tests {
 
             let (moved, _) = colonies(
                 &fx::world_of(walled.clone(), spawns.clone(), Vec::new()),
+                &owned,
                 &standing,
             );
-            let (fresh, _) = colonies(&fx::world_of(walled, spawns, Vec::new()), &BTreeMap::new());
+            let (fresh, _) = colonies(
+                &fx::world_of(walled, spawns, Vec::new()),
+                &owned,
+                &BTreeMap::new(),
+            );
 
             let plan_in =
                 |cs: &[Colony]| -> Option<Plan> { cs.first().and_then(|c| c.plan.clone()) };

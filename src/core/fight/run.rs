@@ -101,7 +101,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         .flat_map(|r| foes[&r.name].clone())
         .collect();
 
-    let owned = hostiles::owned(&world.rooms);
+    let owned = &context.derived.owned;
     let held = state
         .engagements
         .iter()
@@ -110,13 +110,13 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     let (groups, events) = tracker::step(
         tracker::LOST_GROUP_TICKS,
         held,
-        &owned,
+        owned,
         &state.groups,
         &hostiles,
         world.time,
     );
 
-    let homes: BTreeSet<RoomName> = tick::colonies(world).into_iter().collect();
+    let homes: BTreeSet<RoomName> = context.derived.colonies.iter().copied().collect();
     let worked: BTreeSet<RoomName> = declarations.outposts.iter().map(|o| o.room).collect();
 
     let by_id: BTreeMap<i32, Group> = groups.iter().map(|g| (g.id, g.clone())).collect();
@@ -135,7 +135,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
 
     let armed: BTreeSet<String> = hostiles
         .iter()
-        .filter(|h| cores.contains(&h.id) || hostiles::armed(&owned, &hostiles, h))
+        .filter(|h| cores.contains(&h.id) || hostiles::armed(owned, &hostiles, h))
         .map(|h| h.id.clone())
         .collect();
 

@@ -208,7 +208,9 @@ globalThis.__fabotRead = (() => {
     );
     for (const id of list(() => creep(object(s())))) creeps[objects[id].name] = id;
     const constructionSites = Array.from({ length: n() }, (_, i) => `site:${i}`);
-    return { time, cpu: { bucket }, gcl: { level: n() }, rooms, creeps, spawns, constructionSites, objects };
+    const gcl = { level: n() };
+    const controllerStructures = Object.fromEntries(list(() => [s(), list(n)]));
+    return { time, cpu: { bucket }, gcl, rooms, creeps, spawns, constructionSites, objects, controllerStructures };
   };
 
   return (drain) => {
@@ -248,6 +250,10 @@ globalThis.__fabotRead = (() => {
       creep,
     );
     n(Object.keys(game.constructionSites).length), n(game.gcl.level);
+    // A season's server may override an engine table (`World.rules`). The
+    // official server's rows are objects by level, missing the levels at 0.
+    const levels = (row) => Array.from({ length: 9 }, (_, l) => row[l] ?? 0);
+    list(sorted(CONTROLLER_STRUCTURES), (kind) => (s(kind), list(levels(CONTROLLER_STRUCTURES[kind]), n)));
     return [ints.subarray(0, at), strs.join("\0")];
   };
 })();
