@@ -217,7 +217,7 @@ fn act(intent: &Intent) -> (String, i32) {
             crate::app::wire::trace(&line);
             ("trace".to_string(), 0)
         }
-        Intent::Count(_, _) | Intent::Short(_, _, _) => ("count".to_string(), 0),
+        Intent::Count(_, _) | Intent::Short(_, _, _) | Intent::Held(_) => ("count".to_string(), 0),
         Intent::Spawn(id, SpawnAct::SpawnCreep(body, name)) => match world::object_by_id(id) {
             None => ("spawn".to_string(), NOT_FOUND),
             Some(spawn) => {

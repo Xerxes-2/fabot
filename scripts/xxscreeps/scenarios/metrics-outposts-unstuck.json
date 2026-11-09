@@ -1,11 +1,11 @@
 {
-  "why": "a colony working two outposts moves its economy bodies without standing where they asked to step or swinging back and forth past 60 a window (runs read 28 to 42)",
+  "why": "a colony working two outposts moves its economy bodies rarely held, never wedged, and without swinging back and forth past 60 a window (runs read 28 to 42)",
   "modules": ["economy", "mv", "observe"],
   "start": { "room": "W8N3", "seed": 1, "node": "E1" },
   "ticks": 4000,
   "assert": [
-    { "metric": "move.stuck", "max": 1 },
-    { "metric": "move.stuck20", "max": 0 },
+    { "metric": "move.held", "max": 1 },
+    { "metric": "move.wedged", "max": 0 },
     { "metric": "move.swings", "max": 60 }
   ]
 }

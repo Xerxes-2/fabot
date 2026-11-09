@@ -160,6 +160,8 @@ pub enum Intent {
     Count(&'static str, i32),
     /// A colony's seats of a pattern the quota left uncast; nothing reaches the game.
     Short(RoomName, crate::core::economy::bodies::Pattern, i32),
+    /// A movable body the arbitration left standing: read by the metrics alone, nothing reaches the game.
+    Held(String),
 }
 
 impl Intent {
@@ -179,6 +181,7 @@ impl Intent {
             Intent::Trace(creep, _) => creep.clone(),
             Intent::Count(name, _) => name.to_string(),
             Intent::Short(room, _, _) => room.to_string(),
+            Intent::Held(creep) => creep.clone(),
         }
     }
 

@@ -880,7 +880,7 @@ tick: `--seeds N` plays each start on N seeds, and a change is read over them
 The bot measures its own economy and fight in 100-tick windows (idle share per
 pattern, task churn, spend split, spawn use, stale sites, engagement flips,
 refusals, CPU per phase, deaths by cause, structures lost, hostile dwell,
-stuck steps, edge flips, swings, missed shots), so live and the soak read one number by one
+held steps, edge flips, swings, missed shots), so live and the soak read one number by one
 definition: last season most faults were found by the owner watching the
 client. `core/observe/metrics.rs` holds the definitions and the thresholds,
 each in one table; `observe health` lists a metric past its threshold (never
@@ -894,6 +894,14 @@ ledger per category on E1; `deathsError` holds the deaths (event log read
 by World) to the bodies the soak saw struck and gone. Steps are counted over
 economy bodies only: a fight body's swing may pay and a set's border wait
 flips by design, so the scenarios judge those (`oscillation`, `bounced`).
+A held step is Move's own verdict (`Intent::Held`, a wish the arbitration
+left standing): the mover never steps into a taken tile, so a body waiting
+behind another never shows as a refused step.
+A threshold comes from healthy soaks (`npm run metrics:baseline` over
+`soak:many`, the nodes and the live-sized world, past the colony's forming):
+1.5 × the healthy p99 rounded up (to a multiple of 5 above 5), or 0 for what
+must never happen. A metric a healthy run already fires is a fault or a wrong
+definition, never a looser bound.
 Its CPU budget, 1% of the bot's, is read on a live-sized world (the
 soak's `--world` of a live capture); a one-colony node, whose whole tick is
 under a millisecond, reads higher.

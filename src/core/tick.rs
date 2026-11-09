@@ -472,6 +472,12 @@ pub fn arbitrate(context: &Context, wishes: &[(RoomName, mv::Wish)]) -> Vec<Inte
             &held,
             &ws,
         );
+        let stepped: BTreeSet<&str> = steps.iter().map(|(name, _)| name.as_str()).collect();
+        out.extend(
+            (ws.iter())
+                .filter(|w| w.moves && !w.stays() && !stepped.contains(w.creep.as_str()))
+                .map(|w| Intent::Held(w.creep.clone())),
+        );
         out.extend(
             steps
                 .into_iter()
