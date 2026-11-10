@@ -560,7 +560,11 @@ impl Plan<'_> {
                     k,
                     body.clone(),
                 );
-                self.out.last_mut().expect("pushed").spends = true;
+                let slot = self.out.last_mut().expect("pushed");
+                slot.spends = true;
+                if storage.is_some() && stocked > 0.0 {
+                    slot.rank = STOCKED;
+                }
             }
             drunk = f64::from(n * work.min(upgradable));
             upgraded = 0.0;
@@ -755,13 +759,15 @@ pub fn plan(atlas: &mut Atlas, derived: &Derived, owners: &[Option<usize>]) -> V
         ));
     }
     // A scout takes whichever room its walk picks, so a slot is a count:
-    // one a room, cast only for the rooms Strategy casts for.
+    // one a room, cast only for the rooms Strategy casts for, and one a
+    // colony: a second watches the room the first left, and both stand.
     let mut scouts = derived.scouts.clone();
     scouts.sort_by_key(|(_, _, cast)| !*cast);
+    let mut casting = BTreeSet::new();
     for (k, (at, _, cast)) in scouts.iter().enumerate() {
         let job = Job::Scout(at.room);
         if let Some(mut slot) = errand(atlas, derived, job, *at, &k.to_string()) {
-            if !cast {
+            if !cast || !casting.insert(slot.colony) {
                 slot.body.clear();
             }
             out.push(slot);
@@ -773,6 +779,8 @@ pub fn plan(atlas: &mut Atlas, derived: &Derived, owners: &[Option<usize>]) -> V
 /// A controller inside its downgrade deadline is worked before any other
 /// slot is cast or walked to.
 const DEADLINE: i32 = -1;
+/// Upgraders while the stock stands past the reserve (§5).
+const STOCKED: i32 = 4;
 const OUTPOST_HAUL: i32 = 5;
 const FLOOR: i32 = 6;
 const MINE: i32 = 7;

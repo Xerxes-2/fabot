@@ -87,7 +87,7 @@ import { patchRuntimeCache } from "./runtime-cache.mjs";
 // Where the run's wall time went, written to timing.json (`scenario.mjs` sums them).
 const began = Date.now();
 const marks = { node26: 0, node26Calls: 0 };
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|N6|N7|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|N6|N7|E0|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -135,6 +135,7 @@ const NODES = {
   N4: { level: 5, stored: 50000, without: ["link", "rampart"] },
   T4: { level: 5, stored: 50000, without: ["link", "rampart"], moved: true },
   E1: { level: 5, stored: 50000, without: ["link", "rampart"], outposts: true },
+  E0: { level: 4, stored: 5000, without: ["rampart"], outposts: true },
   N5: { level: 6, stored: 100000, without: ["rampart"] },
   E2: { level: 6, stored: 100000, without: ["rampart"], claims: 1 },
   C2: { level: 6, stored: 100000, without: ["rampart"], claims: 2 },

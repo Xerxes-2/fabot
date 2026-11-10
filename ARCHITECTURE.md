@@ -240,7 +240,10 @@ road. The home's carriers fetch only at home, so the ring never waits on a
 body gone to an outpost. The stock is drawn only for its sinks' room past
 the loads at home bound for them, which book first: a load never goes back
 into the store it came from. A remote is served by the nearest colony
-with a storage; a stood-down outpost keeps its slots and its bodies wait at home. The outposts' carriers
+with a storage; a stood-down outpost keeps its slots and its bodies wait at home. While its stock
+stands past the reserve, a colony's upgraders are cast before its outposts'
+haul: the haul only adds to the stock they draw down, so a spawn too busy for
+both would bank the outposts' income. The outposts' carriers
 take at most half the spawns' time, or a far ring of outposts casts nothing
 but haulers; the home's own carriers queue ahead of a fight's casts, since
 they refill the bank those are paid from.
@@ -810,6 +813,7 @@ everything v1 used its self-written arena for, and more:
   | N5 RCL6 | terminal, extractor, 3 labs, storage 100k | mining, reactions, upgrade boost, market | ore a tick, boosted upgrade rate, market net |
   | N6 RCL7 | 2 spawns, factory, 6 labs, storage 300k | spawn queueing, compression, big bodies | spawn use, factory output, CPU |
   | N7 RCL8 | the full set, storage 500k | where energy goes past the 15/tick upgrade cap | power processed, surplus use, CPU |
+  | E0 outposts | N3 + E1's neighbours, one spawn | upgraders before the outposts' haul while stocked | upgrade against N3, most stored |
   | E1 outposts | RCL5 + two neutral neighbours | reservation, remote haul, whether an outpost pays | outpost net (after its bodies), reservation held |
   | E2 claim | RCL6 + a neighbour Strategy picks | choosing, claiming, pioneers, aid | ticks to the child's RCL3, mother's income cost |
   | E3 colonies | three colonies at RCL7, 5, 2 | cross-colony work, terminal balancing | total income, cross-colony work share, CPU vs colonies |

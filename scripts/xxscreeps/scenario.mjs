@@ -285,6 +285,7 @@ const measures = {
   dug: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.dug ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.dug ?? 0),
   // The least energy the home's storage and containers held.
   leastStored: (samples, a) => Math.min(...within(samples, a).map((s) => s.stored)),
+  mostStored: (samples, a) => Math.max(...within(samples, a).map((s) => s.stored)),
   // Percent of the colony's harvest the engagements cast into bodies.
   fightShare: (samples, _, dir) => Math.round((100 * rowsOf(dir).reduce((n, e) => n + (e.cast ?? 0), 0)) / Math.max(1, samples.at(-1).ledger.dug)),
   // Energy a side's towers spent: ours, or `who`'s an opponent's.
