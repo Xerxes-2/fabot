@@ -130,6 +130,8 @@ function Room(r, objects) {
 // Only the attacks and the destructions were captured: what `read.js` keeps.
 globalThis.EVENT_ATTACK ??= 1;
 globalThis.EVENT_OBJECT_DESTROYED ??= 2;
+// Only the metrics price a lost structure, and no decision reads them.
+globalThis.CONSTRUCTION_COST ??= {};
 // The vanilla engine's, for a capture from before captures carried the table.
 const from = (level, n) => Array.from({ length: 9 }, (_, l) => (l >= level ? n : 0));
 const VANILLA = {

@@ -267,7 +267,7 @@ fn last_resort(home: &Home) -> bool {
             || razed(home))
 }
 
-fn fireable(c: &Controller) -> bool {
+pub fn fireable(c: &Controller) -> bool {
     c.safe_mode_available > 0
         && c.safe_mode_cooldown == 0
         && c.upgrade_blocked == 0

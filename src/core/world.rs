@@ -609,8 +609,8 @@ pub struct World {
     pub closed: BTreeSet<RoomName>,
     /// Last tick's strikes, `(attacker, target)` ids, off the rooms' event logs (§3).
     pub attacks: Vec<(String, String)>,
-    /// Last tick's structures destroyed, off the same logs.
-    pub destroyed: Vec<(RoomName, String)>,
+    /// Last tick's structures destroyed, off the same logs, with their build cost.
+    pub destroyed: Vec<(RoomName, String, i32)>,
     pub rules: Rules,
 }
 

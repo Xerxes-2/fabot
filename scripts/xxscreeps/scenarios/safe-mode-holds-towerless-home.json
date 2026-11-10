@@ -1,11 +1,12 @@
 {
-  "why": "an Invader raid no cast answers in a home with no tower spends the safe mode before it kills the economy",
-  "modules": ["atlas", "economy", "exchange", "fight", "mv", "tactics"],
+  "why": "an Invader raid no cast answers in a home with no tower spends the safe mode before it kills the economy; the raid's ticks in a home below RCL3 count as exposure",
+  "modules": ["atlas", "economy", "exchange", "fight", "mv", "observe", "tactics"],
   "start": { "room": "W8N3", "seed": 1, "node": "N1", "invaders": "W8N3:20000:1000", "ended": true },
   "ticks": 1900,
   "assert": [
     { "measure": "safeModeAt", "from": 1000, "max": 1100 },
     { "measure": "fewestCreeps", "from": 1000, "min": 6 },
-    { "measure": "predictedWinsLost", "max": 0 }
+    { "measure": "predictedWinsLost", "max": 0 },
+    { "metric": "exposure", "room": "W8N3", "from": 1100, "to": 1200, "min": 50 }
   ]
 }

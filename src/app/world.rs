@@ -379,7 +379,7 @@ pub fn of_game(
     let bucket = r.n();
     let rooms = r.list(Reader::room);
     let attacks = r.list(|r| (r.s(), r.s()));
-    let destroyed = r.list(|r| (r.room_name(), r.s()));
+    let destroyed = r.list(|r| (r.room_name(), r.s(), r.n()));
     let spawns = r.list(Reader::spawn);
     let creeps = r.list(Reader::creep);
     let mut world = World {

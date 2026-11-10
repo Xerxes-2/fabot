@@ -187,6 +187,7 @@ fn run_tick() -> Result<(), String> {
             refusals: &refusals,
             phases: &phases,
             declarations: &declarations,
+            derived: &derived,
         };
         let mut m = metrics::step(m, &seen);
         if world.time % metrics::WINDOW == 0 {

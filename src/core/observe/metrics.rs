@@ -6,10 +6,11 @@ use std::fmt::Write;
 use crate::core::HashMap;
 use crate::core::economy::bodies::{self, Pattern};
 use crate::core::engine;
+use crate::core::fight::kinds::defend;
 use crate::core::fight::shape::{Cast, Engagement, Phase};
 use crate::core::intents::{CreepAct, Intent, Refusal, SpawnAct, TowerAct};
 use crate::core::tick;
-use crate::core::tick::Declarations;
+use crate::core::tick::{Declarations, Derived};
 use crate::core::vocabulary::{BodyPart, Resource};
 use crate::core::world::{Creep, Owner, Pos, Room, RoomName, World, hostiles};
 
@@ -35,6 +36,9 @@ const FLIPS: &str = "fight.flips";
 const DEATH: &str = "death.";
 const LOST: &str = "lost.structure";
 const DWELL: &str = "hostile.dwell";
+const EXPOSURE: &str = "exposure";
+const ROOMS_HELD: &str = "held";
+const LOSS: &str = "loss.";
 const BODIES: &str = "bodies";
 const BODIES_OF: &str = "bodies.";
 const IDLE_OF: &str = "idle.";
@@ -145,6 +149,21 @@ const METRICS: &[Metric] = &[
         Fold::Sum,
         "ticks an armed creep, neither an ally's nor a keeper, stood in a room we own or declare an outpost with no tower of ours able to fire and no engagement answering (none open, or one disengaging or left to towers and ramparts with no body of its own queued or spawning); its defenders' walk out is not dwell",
     ),
+    metric(
+        EXPOSURE,
+        Fold::Sum,
+        "colony-ticks with an armed creep, neither an ally's nor a keeper, in the colony or in a declared outpost no other colony is nearer, while the colony is below RCL3, has no tower holding a shot's energy, or has no safe mode on or able to fire",
+    ),
+    metric(
+        ROOMS_HELD,
+        Fold::Sum,
+        "ticks a room is a colony of ours or an outpost we work",
+    ),
+    metric(
+        LOSS,
+        Fold::Sum,
+        "energy lost: the body cost of the deaths death.* counts, by the same cause, and the build cost of the structures lost.structure counts (structure)",
+    ),
     metric(BODIES, Fold::Mean, "economy bodies"),
     metric(
         BODIES_OF,
@@ -218,6 +237,7 @@ const THRESHOLDS: &[(&str, Bound)] = &[
     (DEATH, Bound::Max(2)),
     (LOST, Bound::Max(0)),
     (DWELL, Bound::Max(20)),
+    (EXPOSURE, Bound::Max(0)),
     (HELD, Bound::Max(3)),
     (WEDGED, Bound::Max(0)),
     (EDGE, Bound::Max(5)),
@@ -295,6 +315,7 @@ struct Track {
     ttl: i32,
     wounded: bool,
     struck: Option<(Cause, i32)>,
+    cost: i32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -338,6 +359,7 @@ pub struct Seen<'a> {
     pub refusals: &'a [Refusal],
     pub phases: &'a [(String, f64)],
     pub declarations: &'a Declarations,
+    pub derived: &'a Derived,
 }
 
 fn add(sums: &mut Sums, row: Row, name: &str, v: f64) {
@@ -474,6 +496,7 @@ impl Track {
             ttl: c.ticks_to_live,
             wounded: c.hits < c.hits_max,
             struck: None,
+            cost: engine::body_cost(&c.body.iter().map(|p| p.kind).collect::<Vec<_>>()),
         }
     }
 
@@ -623,11 +646,13 @@ fn deaths(sums: &mut Sums, tracks: &mut HashMap<String, Track>, world: &World) {
         if t.ttl > AGED
             && let Some(cause) = cause
         {
+            let row = Some(t.at.room);
+            add(sums, row, &format!("{DEATH}{}", cause.name()), 1.0);
             add(
                 sums,
-                Some(t.at.room),
-                &format!("{DEATH}{}", cause.name()),
-                1.0,
+                row,
+                &format!("{LOSS}{}", cause.name()),
+                f64::from(t.cost),
             );
         }
         false
@@ -636,25 +661,38 @@ fn deaths(sums: &mut Sums, tracks: &mut HashMap<String, Track>, world: &World) {
 
 /// A body of ours that dismantles is no loss's cause.
 fn lost(sums: &mut Sums, world: &World) {
-    for (room, id) in &world.destroyed {
+    for (room, id, cost) in &world.destroyed {
         let struck = (world.attacks.iter())
             .any(|(by, at)| at == id && !world.creeps.iter().any(|c| &c.id == by));
         if struck && world.room(*room).is_some_and(ours) {
             add(sums, Some(*room), LOST, 1.0);
+            add(
+                sums,
+                Some(*room),
+                &format!("{LOSS}structure"),
+                f64::from(*cost),
+            );
         }
     }
+}
+
+fn armed(r: &Room) -> bool {
+    (r.hostiles()).any(|h| h.owner != Owner::Keeper && hostiles::strikes(h))
+}
+
+fn towers(r: &Room) -> bool {
+    (r.structures.iter()).any(|s| {
+        s.kind.is_tower()
+            && s.owner.is_ours()
+            && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
+    })
 }
 
 fn dwell(sums: &mut Sums, seen: &Seen) {
     for r in &seen.world.rooms {
         let worked = r.controller.as_ref().is_some_and(|c| c.owner.is_ours())
             || (seen.declarations.outposts.iter()).any(|o| o.room == r.name);
-        let armed = (r.hostiles()).any(|h| h.owner != Owner::Keeper && hostiles::strikes(h));
-        let towers = (r.structures.iter()).any(|s| {
-            s.kind.is_tower()
-                && s.owner.is_ours()
-                && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
-        });
+        let (armed, towers) = (armed(r), towers(r));
         let answered = seen.engagements.iter().any(|e| {
             e.room == r.name
                 && e.phase != Phase::Disengaging
@@ -663,6 +701,44 @@ fn dwell(sums: &mut Sums, seen: &Seen) {
         if worked && armed && !towers && !answered {
             add(sums, Some(r.name), DWELL, 1.0);
         }
+    }
+}
+
+fn reach(a: RoomName, b: RoomName) -> i32 {
+    let ((ax, ay), (bx, by)) = (a.coords(), b.coords());
+    (ax - bx).abs().max((ay - by).abs())
+}
+
+/// No colony owns an outpost, so exposure counts one against the nearest;
+/// by room distance, as metrics has no Atlas to walk.
+fn exposure(sums: &mut Sums, seen: &Seen) {
+    let colonies = &seen.derived.colonies;
+    let nearest = |room: RoomName| colonies.iter().copied().min_by_key(|c| reach(*c, room));
+    for colony in colonies {
+        let Some(r) = seen.world.room(*colony) else {
+            continue;
+        };
+        let Some(c) = r.controller.as_ref() else {
+            continue;
+        };
+        let safe = c.safe_mode > 0 || defend::fireable(c);
+        if c.level >= 3 && towers(r) && safe {
+            continue;
+        }
+        let mut outposts = (seen.declarations.outposts.iter())
+            .filter(|o| nearest(o.room) == Some(*colony))
+            .filter_map(|o| seen.world.room(o.room));
+        if armed(r) || outposts.any(armed) {
+            add(sums, Some(*colony), EXPOSURE, 1.0);
+        }
+    }
+}
+
+fn held(sums: &mut Sums, seen: &Seen) {
+    let colonies = &seen.derived.colonies;
+    let worked = (seen.derived.worked.iter()).map(|o| o.room);
+    for room in colonies.iter().copied().chain(worked) {
+        add(sums, Some(room), ROOMS_HELD, 1.0);
     }
 }
 
@@ -796,6 +872,8 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
     deaths(sums, &mut m.tracks, world);
     lost(sums, world);
     dwell(sums, seen);
+    exposure(sums, seen);
+    held(sums, seen);
 
     for r in seen.refusals {
         add(sums, None, &format!("{REFUSED}{}.{}", r.act, r.code), 1.0);
@@ -1085,6 +1163,7 @@ mod tests {
             ttl: 1500,
             wounded: false,
             struck: None,
+            cost: 0,
         };
         let mut stuck = Vec::new();
         for time in 1..=62 {

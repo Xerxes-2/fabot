@@ -752,7 +752,12 @@ everything v1 used its self-written arena for, and more:
   (`npm run soak:many`: rooms whose sources have one seat each, and rooms
   whose sources have four or more), so no change is tuned to one kind of
   terrain, and 10,000 ticks of N7 on `season-late-seat`, so it is judged on
-  the late economy a respawn never reaches. The extremes answer differently
+  the late economy a respawn never reaches, and 10,000 ticks of E1 on
+  `season-outpost-ring` with Hivemind seated two rooms off, so exposure and
+  losses (§10.5) are read against a rival that contests the outposts
+  (Hivemind over TooAngel: it reaches RCL3 there and walks our outposts,
+  where TooAngel stays at RCL2; our safe mode kept, as a live colony keeps
+  its own). The extremes answer differently
   (a crowd of small bodies works only where seats are many), so they are
   read apart, never as a median.
   A soak is a relative measure: A against B on the same rooms and seed,
@@ -897,7 +902,12 @@ pattern, task churn, spend split, spawn use, stale sites, engagement flips,
 refusals, CPU per phase, deaths by cause, structures lost, hostile dwell,
 held steps, edge flips, swings, missed shots), so live and the soak read one number by one
 definition: last season most faults were found by the owner watching the
-client. `core/observe/metrics.rs` holds the definitions and the thresholds,
+client. Plan gates and soak comparisons read three axes: season output
+(controller progress until a season proxy lands), exposure, and losses
+(`loss.*`, in energy) over rooms `held`. Exposure counts the ticks a raid could
+cost a colony a level: a foe in it or its nearest outposts while it is below
+RCL3, has no stocked tower, or cannot fire a safe mode.
+`core/observe/metrics.rs` holds the definitions and the thresholds,
 each in one table; `observe health` lists a metric past its threshold (never
 `Game.notify`), and a scenario bounds one with `{ "metric", "max"|"min" }`.
 It is a pure step from the tick's World, assignments, engagements and their casts, intents and refusals

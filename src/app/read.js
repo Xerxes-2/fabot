@@ -190,7 +190,7 @@ globalThis.__fabotRead = (() => {
     const rooms = list(room);
     // The event log is read live only: its strikes and destructions consumed, not stood.
     const strikes = list(() => [s(), s()]);
-    const destroyed = list(() => [s(), s()]);
+    const destroyed = list(() => [s(), s(), n()]);
     const creeps = {};
     const spawns = Object.fromEntries(
       list(() => {
@@ -234,11 +234,15 @@ globalThis.__fabotRead = (() => {
       for (const e of eventsOf(r)) {
         const kind = e.event ?? e._$Variant;
         if (kind === EVENT_ATTACK) shots.push(e);
-        else if (kind === EVENT_OBJECT_DESTROYED && e.data?.type !== "creep") destroyed.push([r.name, e.objectId]);
+        else if (kind === EVENT_OBJECT_DESTROYED) {
+          // xxscreeps logs the type beside the id, the game under `data`.
+          const type = (e.data ?? e).type;
+          if (type !== "creep") destroyed.push([r.name, e.objectId, CONSTRUCTION_COST[type] ?? 0]);
+        }
       }
     }
     list(shots, (e) => (s(e.objectId), s(e.data?.targetId)));
-    list(destroyed, ([name, id]) => (s(name), s(id)));
+    list(destroyed, ([name, id, cost]) => (s(name), s(id), n(cost)));
     list(spawns, (sp) => {
       s(sp.id), s(sp.name), pos(sp.pos);
       if (absent(sp.spawning)) return n(0);

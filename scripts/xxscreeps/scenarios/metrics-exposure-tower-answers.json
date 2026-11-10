@@ -1,0 +1,10 @@
+{
+  "why": "Invaders in an RCL3 home with a stocked tower and a safe mode ready leave it unexposed: exposure counts only a colony a raid could cost a level",
+  "modules": ["observe"],
+  "start": { "room": "W8N3", "seed": 1, "node": "N3", "invaders": "W8N3:1000:1000", "ended": true },
+  "ticks": 2500,
+  "assert": [
+    { "measure": "homeHostileTicks", "min": 1 },
+    { "metric": "exposure", "room": "W8N3", "max": 0 }
+  ]
+}

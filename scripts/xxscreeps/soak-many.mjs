@@ -13,8 +13,12 @@
 //   --room   these starts instead of the default: the extremes of harvest
 //            seats, both sources with one seat (a small harvester cannot fill
 //            a source) and both with four or more (bodies can crowd in
-//            instead), and the late game. A start is [<world>:]<room>[@<node>],
-//            <world> one of worlds/ with no home of ours (soak.mjs --world, --node)
+//            instead), the late game, and a contested start: E1 on Season
+//            11's map with Hivemind seated two rooms off, contesting our
+//            outposts. A start is [<world>:]<room>[@<node>][+<bot>:<room>],
+//            <world> one of worlds/ with no home of ours (soak.mjs --world,
+//            --node), <bot> a rival under engine/ seated in <room>
+//            (soak.mjs --opponents), our safe mode kept to activate (--ended)
 //   --ticks  per run (default 30000; a node's 10000)
 //   --node   start every run without its own node at this one
 //   --jobs   runs at once (default a quarter of the hardware threads: a soak
@@ -29,7 +33,7 @@
 // has not changed is not run again.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { node26Env } from "./node26.mjs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -67,13 +71,15 @@ const whole = (text, flag, min) => {
 };
 const node = flags["--node"] ?? "";
 if (!/^[A-Za-z0-9]*$/.test(node)) fail("--node: a node's name, as N3");
-const starts = (flags["--room"] ?? "W9N8,W8N3,season-late-seat:W12S28@N7").split(",").map((spec) => {
-  const m = /^(?:([\w-]+):)?([WE]\d+[NS]\d+)(?:@([A-Za-z0-9]+))?$/.exec(spec);
-  if (!m) fail(`--room: "${spec}" is not [world:]room[@node]`);
+const starts = (flags["--room"] ?? "W9N8,W8N3,season-late-seat:W12S28@N7,season-outpost-ring:E25S9@E1+hivemind:E27S9").split(",").map((spec) => {
+  const m = /^(?:([\w-]+):)?([WE]\d+[NS]\d+)(?:@([A-Za-z0-9]+))?(?:\+([a-z]+):([WE]\d+[NS]\d+))?$/.exec(spec);
+  if (!m) fail(`--room: "${spec}" is not [world:]room[@node][+bot:room]`);
   const world = m[1] && join(HERE, "worlds", `${m[1]}.json`);
   if (world && !existsSync(world)) fail(`--room: no world ${world}`);
   const at = m[3] ?? node;
-  return { label: spec, room: m[2], world, node: at, ticks: whole(flags["--ticks"] ?? (at ? 10000 : 30000), "--ticks", 1) };
+  const rival = m[4] && { name: m[4], bot: join(HERE, "engine", m[4]), room: m[5] };
+  if (rival && !existsSync(rival.bot)) fail(`--room: no rival ${rival.bot}`);
+  return { label: spec, room: m[2], world, node: at, rival, ticks: whole(flags["--ticks"] ?? (at ? 10000 : 30000), "--ticks", 1) };
 });
 const seeds = (flags["--seed"] ?? "1,2,1+7").split(",").map((spec) => {
   const [seed, late = "0"] = spec.split("+");
@@ -116,8 +122,8 @@ const runs = bots.flatMap((bot) =>
       bot,
       seed,
       start,
-      name: `${tag}-${bot.name}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${start.label.replace(/[:@]/g, "-")}`,
-      key: hash(bot.code, start.room, start.node ? planHash + start.node : "", start.world ? readFileSync(start.world) : "", String(seed.seed), String(seed.late), String(start.ticks), scriptsHash),
+      name: `${tag}-${bot.name}-s${seed.seed}${seed.late ? `l${seed.late}` : ""}-${start.label.replace(/[:@+]/g, "-")}`,
+      key: hash(bot.code, start.room, start.rival ? `${start.rival.name}:${start.rival.room}` : "", start.node ? planHash + start.node : "", start.world ? readFileSync(start.world) : "", String(seed.seed), String(seed.late), String(start.ticks), scriptsHash),
     })),
   ),
 );
@@ -133,10 +139,15 @@ console.error(
 
 function soak(run) {
   return new Promise((done) => {
-    const { room, world, node, ticks } = run.start;
-    const args = ["--room", room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : []), ...(world ? ["--world", world] : [])];
+    const { room, world, node, rival, ticks } = run.start;
+    const opponents = join(RUNS, `${run.name}.opponents.json`);
+    if (rival) writeFileSync(opponents, JSON.stringify([rival]));
+    const args = [...(rival ? ["--opponents", opponents, "--ended"] : []), "--room", room, "--run", run.name, "--ticks", String(ticks), "--seed", String(run.seed.seed), "--late", String(run.seed.late), "--every", "100", "--bot", run.bot.file, ...(node ? ["--node", node] : []), ...(world ? ["--world", world] : [])];
     const child = spawn("node", [SOAK, ...args], { stdio: ["ignore", "ignore", "ignore"], env: node26Env({ ...process.env, FABOT_PLAN_BUILT: "1" }) });
-    child.on("exit", (code) => done(code));
+    child.on("exit", (code) => {
+      rmSync(opponents, { force: true });
+      done(code);
+    });
   });
 }
 
@@ -172,6 +183,11 @@ const rowOf = (run) => {
   const faults = (read(run, "faults.jsonl") ?? "").split("\n").filter(Boolean).length;
   const refusals = Object.values(JSON.parse(read(run, "refusals.json") ?? "{}")).reduce((a, b) => a + b, 0);
   const last = samples.at(-1) ?? {};
+  const sum = (named) =>
+    (read(run, "metrics.jsonl") ?? "").split("\n").filter(Boolean).reduce((a, l) => {
+      const { values } = JSON.parse(l);
+      return a + Object.entries(values).reduce((b, [n, v]) => b + (named(n) ? v : 0), 0);
+    }, 0);
   const at = (rcl) => levels.find((l) => l.rcl >= rcl)?.t;
   // What the economy ends with, in energy, as the room stands at the last
   // sample (the sampler's `worth`): every economy shows up here; a
@@ -191,6 +207,8 @@ const rowOf = (run) => {
     worth: k(w ? w.controller + w.structures + w.sites + w.fortification + w.stock : 0),
     score: k(last.score ? last.score.controller + last.score.structures + last.score.fortification + last.score.stock : 0),
     faults: faults + refusals,
+    exposure: sum((n) => n === "exposure"),
+    lostHeld: `${(sum((n) => n.startsWith("loss.")) / 1000).toFixed(1)}k/${(sum((n) => n === "held") / 1000).toFixed(1)}k`,
     // The ledger closes within a percent of what was dug, or the worth is
     // not to be read.
     open: ledger && ledger.dug > 0 && Math.abs(ledger.residual) > ledger.dug / 100,
@@ -198,15 +216,15 @@ const rowOf = (run) => {
 };
 
 const cell = (v, w = 9) => String(v ?? "-").padStart(w);
-console.log(["room", "seed", "bundle", "ok", "rcl", "rcl3", "rcl4", "control", "structs", "fortify", "stock", "worth", "score", "faults"].map((h, i) => cell(h, i === 0 || i === 2 ? 12 : 9)).join(""));
+console.log(["room", "seed", "bundle", "ok", "rcl", "rcl3", "rcl4", "control", "structs", "fortify", "stock", "worth", "score", "faults", "exposure", "lost/held"].map((h, i) => cell(h, i === 0 || i === 2 ? 12 : i === 15 ? 14 : 9)).join(""));
 for (const start of starts)
   for (const seed of seeds)
     for (const bot of bots) {
       const run = runs.find((r) => r.start === start && r.seed === seed && r.bot === bot);
       const r = rowOf(run);
       console.log(
-        [start.label.split(":").at(-1), seed.label, bot.name, r.ok ? "yes" : "NO", r.rcl, r.rcl3, r.rcl4, r.controller, r.structures, r.fortified, r.stock, r.open ? `${r.worth}?` : r.worth, r.open ? `${r.score}?` : r.score, r.faults]
-          .map((v, i) => cell(v, i === 0 || i === 2 ? 12 : 9))
+        [start.label.split("+")[0].split(":").at(-1), seed.label, bot.name, r.ok ? "yes" : "NO", r.rcl, r.rcl3, r.rcl4, r.controller, r.structures, r.fortified, r.stock, r.open ? `${r.worth}?` : r.worth, r.open ? `${r.score}?` : r.score, r.faults, r.exposure, r.lostHeld]
+          .map((v, i) => cell(v, i === 0 || i === 2 ? 12 : i === 15 ? 14 : 9))
           .join(""),
       );
     }
