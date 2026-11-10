@@ -32,25 +32,6 @@ pub struct Body {
     pub free: i32,
     pub ticks_to_live: i32,
     pub pattern: Pattern,
-    /// The storage-less colony it was cast by.
-    pub bound: Option<usize>,
-}
-
-impl Body {
-    /// A storage-less colony's body serves that colony alone; any other body
-    /// serves whatever colony's work it reaches (`ARCHITECTURE.md` §5).
-    pub fn serves(&self, colony: Option<usize>) -> bool {
-        self.bound.is_none_or(|ci| Some(ci) == colony)
-    }
-}
-
-pub fn key_parts_in(pattern: Pattern, body: &Body) -> i32 {
-    match bodies::key_part_of(pattern) {
-        BodyPart::Carry => body.carry,
-        BodyPart::Claim => body.claim,
-        BodyPart::Move => body.moves,
-        _ => body.work,
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -246,6 +227,18 @@ impl Ground {
     pub fn has_storage(&self) -> bool {
         self.stores.iter().any(|s| s.owned)
     }
+
+    /// The energy its storage holds, the terminal's being the shipments';
+    /// `None` without a storage.
+    pub fn stock(&self) -> Option<i32> {
+        self.has_storage().then(|| {
+            self.stores
+                .iter()
+                .filter(|s| s.owned)
+                .map(|s| s.energy)
+                .sum()
+        })
+    }
 }
 
 /// The lab a waiting body walks to, and what the colony's stores owe it.
@@ -279,23 +272,12 @@ pub struct Derived {
     /// Each room's centre, its age and whether a scout is cast for it.
     pub scouts: Vec<(Pos, i32, bool)>,
     pub bodies: Vec<Body>,
-    /// Counted against the quota as if they stood, so no seat is cast twice.
+    /// Hold their slots as if they stood, so no slot is cast twice.
     pub ovens: Vec<Body>,
-    pub workers: Vec<Body>,
-    pub carriers: Vec<Body>,
-    pub claimers: Vec<Body>,
-    pub posts: BTreeMap<String, Pos>,
     /// From each room a spawn or body stands in, `Atlas::tree`'s.
     pub routes: BTreeMap<RoomName, Tree>,
-}
-
-/// The storage-less colony a creep's name says cast it.
-fn bound_colony(colonies: &[Colony], grounds: &[Ground], name: &str) -> Option<usize> {
-    let spawn = bodies::spawn_of_name(name)?;
-    let ci = colonies
-        .iter()
-        .position(|c| c.spawns.iter().any(|s| s.name == spawn))?;
-    (!grounds[ci].has_storage()).then_some(ci)
+    /// The declared outposts a foe stands down this tick.
+    pub closed: Vec<Outpost>,
 }
 
 fn body_of(name: &str, pos: &Pos, parts: &[Part], store: &Store, life: i32) -> Body {
@@ -330,7 +312,6 @@ fn body_of(name: &str, pos: &Pos, parts: &[Part], store: &Store, life: i32) -> B
         ticks_to_live: life,
         pattern: bodies::pattern_of_name(name)
             .unwrap_or_else(|| bodies::pattern_of_parts(work, carry, moves, claim)),
-        bound: None,
     }
 }
 
@@ -1061,11 +1042,9 @@ pub fn of_world(
             let controller = room.controller.clone()?;
             Some(Colony {
                 room: room.name,
-                reserve: super::quota::reserve_target(
-                    &world.rules,
-                    declarations.reserve_lifetimes,
-                    controller.level,
-                ),
+                reserve: (declarations.colonies.iter())
+                    .find(|p| p.room == room.name)
+                    .map_or(0, |p| p.reserve),
                 controller,
                 spawns: (world.spawns.iter())
                     .filter(|s| s.pos.room == room.name)
@@ -1133,10 +1112,7 @@ pub fn of_world(
 
     let bodies: Vec<Body> = creeps
         .iter()
-        .map(|c| Body {
-            bound: bound_colony(&colonies, &grounds, &c.name),
-            ..body_of(&c.name, &c.pos, &c.body, &c.store, c.ticks_to_live)
-        })
+        .map(|c| body_of(&c.name, &c.pos, &c.body, &c.store, c.ticks_to_live))
         .collect();
 
     let mut routes: BTreeMap<RoomName, Tree> = BTreeMap::new();
@@ -1152,18 +1128,6 @@ pub fn of_world(
     Derived {
         time: world.time,
         colonies,
-        posts: grounds
-            .iter()
-            .flat_map(|g| {
-                g.sources
-                    .iter()
-                    .filter_map(|s| s.post.map(|p| (s.id.clone(), p)))
-                    .chain(g.minerals.iter().filter_map(|m| {
-                        m.container.as_ref()?;
-                        m.post.map(|p| (m.id.clone(), p))
-                    }))
-            })
-            .collect(),
         grounds,
         scouts: scouts
             .iter()
@@ -1180,18 +1144,12 @@ pub fn of_world(
             .filter(reservable)
             .collect(),
         ovens: ovens_of(world),
-        workers: bodies
-            .iter()
-            .filter(|b| b.work > 0 && b.carry > 0)
-            .cloned()
-            .collect(),
-        carriers: bodies
-            .iter()
-            .filter(|b| b.carry > 0 && b.work == 0)
-            .cloned()
-            .collect(),
-        claimers: bodies.iter().filter(|b| b.claim > 0).cloned().collect(),
         routes,
         bodies,
+        closed: (declarations.outposts.iter())
+            .filter(|o| !ours.worked.iter().any(|w| w.room == o.room))
+            .filter(|o| !ours.colonies.contains(&o.room))
+            .cloned()
+            .collect(),
     }
 }

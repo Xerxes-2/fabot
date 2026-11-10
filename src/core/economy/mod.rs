@@ -1,25 +1,16 @@
-//! The task pool and matcher.
-//!
-//! `decide` is `run.rs`'s: one `Derived` built once from the world, the pool,
-//! the match, the quota, and the intents they imply. `tick::MODULES` registers
-//! it as `"economy"` in `Main`.
 pub mod abandon;
 pub mod bodies;
 pub mod derived;
+pub mod jobs;
 pub mod labs;
-pub mod matcher;
-pub mod pool;
-pub mod price;
-pub mod quota;
 pub mod run;
+pub mod slots;
 pub mod task;
 
 pub use run::decide;
 
 #[cfg(test)]
 pub(crate) mod dice {
-    use std::collections::BTreeSet;
-
     use crate::core::engine;
     use crate::core::tick::{Declared, Outpost};
     use crate::core::vocabulary::{BodyPart, Boost, Compound, Ore, Resource, part_count_in};
@@ -28,10 +19,7 @@ pub(crate) mod dice {
         Source, Spawn, Store, Structure, World,
     };
 
-    use super::bodies;
-    use super::derived::Body;
-    use super::pool::{Capacity, Draw, Offer};
-    use super::task::{self, Task};
+    use super::task::Task;
 
     pub use crate::core::tests::Dice;
 
@@ -70,84 +58,6 @@ pub(crate) mod dice {
             7 => Task::Reserve(target.to_string()),
             8 => Task::Scout(at().room),
             _ => Task::Claim(target.to_string()),
-        }
-    }
-
-    pub fn body(dice: &mut Dice, i: usize) -> Body {
-        let work = dice.between(0, 6);
-        let carry = dice.between(0, 6);
-        let moves = dice.between(0, 6);
-        let claim = if dice.chance(5) {
-            dice.between(1, 3)
-        } else {
-            0
-        };
-        let capacity = carry * engine::CARRY_PART_CAPACITY;
-        let energy = dice.between(0, capacity);
-        let ore = if dice.chance(5) {
-            dice.between(0, capacity - energy)
-        } else {
-            0
-        };
-        let life = dice.between(1, engine::CREEP_LIFETIME);
-
-        let held: Vec<(Resource, i32)> = vec![
-            (Resource::Energy, energy),
-            (Resource::Ore(Ore::Hydrogen), ore),
-        ]
-        .into_iter()
-        .filter(|(_, n)| *n > 0)
-        .collect();
-
-        let store = Store { held, capacity };
-
-        Body {
-            name: format!("b{i}"),
-            pos: at(),
-            work,
-            carry,
-            moves,
-            claim,
-            size: work + carry + moves + claim,
-            energy,
-            free: store.free(),
-            store,
-            ticks_to_live: life,
-            pattern: bodies::pattern_of_parts(work, carry, moves, claim),
-            bound: None,
-        }
-    }
-
-    pub fn offer(dice: &mut Dice, i: usize) -> Offer {
-        let task = task(dice, &format!("o{i}"));
-        let priority = dice.between(-10, 40);
-        let draw = dice.pick(&[Draw::Open, Draw::Spenders, Draw::Buffer]);
-
-        let capacity = match dice.below(5) {
-            0 => Capacity::Unbounded,
-            1 => Capacity::Bodies(dice.between(0, 3)),
-            2 => Capacity::Work(dice.between(0, 12)),
-            3 => Capacity::Load(dice.between(0, 400)),
-            _ => {
-                let seats = dice.between(0, 4);
-                Capacity::Seated {
-                    seats,
-                    posts: seats.min(dice.between(0, 1)),
-                    work: dice.between(0, 12),
-                }
-            }
-        };
-
-        Offer {
-            id: task::task_id(&task),
-            task,
-            target: at(),
-            priority,
-            capacity,
-            draw,
-            post: None,
-            shut: BTreeSet::new(),
-            colony: None,
         }
     }
 

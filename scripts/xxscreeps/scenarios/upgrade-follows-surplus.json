@@ -1,0 +1,10 @@
+{
+  "why": "an RCL7 colony stocked far past its reserve (300k against 30k, no rival near) spends the excess on upgrading within a few lifetimes and stops at the reserve: its upgrade bodies follow the surplus, dig plus the stock past the reserve over a life (main at cec315a3 reads 146k upgraded; the slots read 248k with the storage's least 42k)",
+  "modules": ["economy"],
+  "start": { "world": "scripts/xxscreeps/worlds/season-late-seat.json", "room": "W12S28", "seed": 1, "node": "N6" },
+  "ticks": 5000,
+  "assert": [
+    { "measure": "upgrade", "min": 190000 },
+    { "measure": "leastStored", "min": 30000 }
+  ]
+}

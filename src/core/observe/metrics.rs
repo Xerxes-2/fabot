@@ -5,6 +5,7 @@ use std::fmt::Write;
 
 use crate::core::HashMap;
 use crate::core::economy::bodies::{self, Pattern};
+use crate::core::economy::slots;
 use crate::core::engine;
 use crate::core::fight::kinds::defend;
 use crate::core::fight::shape::{Cast, Engagement, Phase};
@@ -127,7 +128,7 @@ const METRICS: &[Metric] = &[
     metric(
         SHORT,
         Fold::Mean,
-        "the colony's seats of the pattern the quota left uncast",
+        "the colony's open slots of the pattern left uncast",
     ),
     metric(
         FLIPS,
@@ -477,6 +478,10 @@ fn verb(intent: &Intent) -> Option<(&str, &'static str)> {
     })
 }
 
+fn task_of<'a>(assignments: &'a BTreeMap<String, String>, name: &str) -> Option<&'a str> {
+    assignments.get(name).and_then(|held| slots::task_of(held))
+}
+
 /// Fewer ticks to live than this at its last sight, a body died of age.
 const AGED: i32 = 5;
 /// A body struck this many ticks or fewer before it died died of that strike.
@@ -809,14 +814,14 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         };
         let pace = m.paces.entry(p).or_default();
         pace.bodies += 1.0;
-        let task = seen.assignments.get(&c.name);
+        let task = task_of(seen.assignments, &c.name);
         if task.is_none() || !asked.contains_key(c.name.as_str()) {
             pace.idle += 1.0;
         }
         let load = c.store.used();
         match (task, m.tasks.get_mut(&c.name)) {
             (Some(now), Some(held)) => {
-                if *now != held.task {
+                if now != held.task {
                     if held.load == load {
                         add(sums, None, CHURN, 1.0);
                     }
@@ -826,7 +831,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
             }
             (Some(now), None) => {
                 let held = Held {
-                    task: now.clone(),
+                    task: now.to_string(),
                     load,
                 };
                 m.tasks.insert(c.name.clone(), held);
@@ -835,12 +840,12 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         }
     }
     m.tasks
-        .retain(|name, _| seen.assignments.contains_key(name));
+        .retain(|name, _| task_of(seen.assignments, name).is_some());
 
     for s in &world.spawns {
         let row = Some(s.pos.room);
         add(sums, row, SPAWN_TICKS, 1.0);
-        // Below a full bank the spawn waits on energy, which the quota casts to.
+        // Below a full bank the spawn waits on energy, which the casts wait for.
         let full = world
             .room(s.pos.room)
             .is_some_and(|r| r.energy_available >= r.energy_capacity);

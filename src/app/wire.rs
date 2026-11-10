@@ -477,6 +477,7 @@ pub fn read_declarations() -> Declarations {
                 room,
                 stage: Stage::Abandon,
                 target: 0,
+                reserve: 0,
             })
             .collect(),
         avoid: rooms(&declared, "avoid"),

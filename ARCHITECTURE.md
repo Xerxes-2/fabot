@@ -73,7 +73,7 @@ tick arrives; otherwise its standing output is replayed:
 | Module | Decision | Key |
 |---|---|---|
 | Layout | the plan | census signature |
-| Economy | the match | none — the match reads each body's store, so it re-matches nearly every tick |
+| Economy | the slots | none — slots are re-derived each tick; a body keeps its slot and its task |
 | Fight | an engagement's plan | an engagement event (§6.2) |
 | Strategy | open/close operations, declarations | intel changed, an engagement closed, a due tick |
 | Move | a path | the next step blocked |
@@ -129,11 +129,11 @@ cold tick never spends more than ❓ 60% of the limit.
 
 ## 2. Units
 
-- **The world** is the decision unit. One `decide` call, one pool of tasks, one
-  set of engagements, one Strategy.
+- **The world** is the decision unit. One `decide` call, one set of
+  engagements, one Strategy.
 - **A colony** is a resource: a controller, its spawns, its storage, its
-  terminal. It owns no decision. "Whose creep does this" falls out of travel
-  cost in the world pool, cut off by room-graph hops (§3) for CPU.
+  terminal. It owns no decision. "Which colony serves this" is the nearest by
+  walk with a storage, cut off by room-graph hops (§3) for CPU.
 - **A room** is a fact in `World` and a row in `intel`; its role (home,
   outpost, errand, avoided, targeted) is data Strategy writes, never a
   constant in source.
@@ -150,12 +150,12 @@ cold tick never spends more than ❓ 60% of the limit.
 | `Engine` | formulas, and the server constants the game exposes no global for | — | — | port verbatim |
 | `World` | this tick's facts, one record; last tick's strikes and structures destroyed off the event log of each room we own, reserve or stand in (and a drain's); `rules`, the engine tables the game exposes as globals (`CONTROLLER_STRUCTURES`), read each tick since a season's server may override one | Game | — | port, trim |
 | `Atlas` | geometry in two layers: the **room graph** (a node a room's region, left by a stretch of border both rooms open, priced by the flood across it round every tile a keeper strikes; grown from the target's room, so every room's way on is the same whichever room asks and a body never walks back; a keeper room whose lairs no intel places taken only past every other; rooms to avoid) and the **tile grid** per room (terrain, floods, seats, work areas, first steps). Every tile query takes a **footprint** (1×1 today, 2×2 for a formation) | World, `terrain` for rooms out of sight, `intel.rooms` for avoided and keeper rooms | flood table, kept across ticks per room while its weights hold; out of sight, a room's grid is what stood there when last seen (else its terrain) and is kept, floods and all under the same bound, while it stays so (the owner's call: part of the flood table, not a second cache); the rooms whose lairs intel reads otherwise than their names, rebuilt each tick | port, add the graph layer, widen the query |
-| `Economy` | task pool, planner, matcher, quota, spawns, labs, terminals, market | World, Atlas, declarations, `State.Economy` | tasks, casts, `State.Economy` | port, trim (§5) |
+| `Economy` | slots, their casts and tasks, labs, terminals | World, Atlas, declarations, `State.Economy` | tasks, casts, `State.Economy` | port, trim (§5) |
 | `Layout` | construction and tower plans | World, Atlas, declarations (outposts' containers and roads; each colony's plan: built to its `target`, nothing while abandoning) | sites, tower intents | port |
 | `Exchange` | who wins: pure fight arithmetic | bodies, terrain | — | port from `Facts.fs:2883–4056, 1038–1582`, `Fighter.fs`, `Arrival.fs`; narrow the input |
 | `Fight` | tracker, engagements (one kind per file), casting | World, Atlas, Exchange, declarations (the operator's tactic rules, §6.3), `State.Fight`, `intel.rooms` (a patrol's staleness) | fight intents, casts, declarations, `State.Fight` | **new** (§6) |
 | `Tactics` | what one fight body does this tick (§6.4): strikes, steps, the Hunt score, heals, and which tactic a kind picks (§6.3); it imports no Fight | Atlas, Move, the `Sight` and plan Fight hands down | creep intents, wishes | **new**, split from Fight |
-| `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Derived, Exchange, `State.Intel`, `Season` | declarations (a `ColonyPlan` per colony, under the operator's rows), opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
+| `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Derived, Exchange, `State.Intel`, `Season`, the open engagements' rooms and pending casts (a colony's reserve) | declarations (a `ColonyPlan` per colony, under the operator's rows), opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
 | `Season` | this season's rules: what scores, its structures, its NPCs, its map quirks | World | declarations to Strategy, season intents | **new**, disposable (§8) |
 | `Move` | per-room movement arbitration, run by `Tick` over every module's wishes, and the step functions (chase, kite, flee, formation) | Intents, Atlas | move intents | port `Resolver.fs`, drop fight precedence |
 | `Executor` | API calls | Intents | Game | port |
@@ -192,11 +192,11 @@ recorder's ring; the rest are assigned here as their stores land.
 
 | Store | Shape | Owner | Lives in | Why |
 |---|---|---|---|---|
-| `assignments` | creep → task id | Economy | Memory | sticky matching |
+| `assignments` | creep → `slot|task` | Economy | Memory | a body keeps its slot; its task held while it can be done |
 | `fight.engagements` | id → Engagement (§6.2), with the tick it opened, never moved | Fight | Memory | the commitment; read every tick; not the offers (§6.3); a home's deaths since it opened are its raid's |
 | `fight.groups` | id → Group (§6.1) | Fight | Memory | hostile identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | never cast twice |
-| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims, the operator's tactic rules; a `ColonyPlan` per colony (stage, build target) and `flows` (the lab colony's compound stocks), where abandon and labs live, so a colony's lifecycle and what moves between rooms are one plan Economy and Layout read rather than per-purpose fields | Strategy | Memory (the operator's); Strategy's plans rebuilt each tick | what the world is for us, as data |
+| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims, the operator's tactic rules; a `ColonyPlan` per colony (stage, build target, reserve) and `flows` (the lab colony's compound stocks), where abandon and labs live, so a colony's lifecycle and what moves between rooms are one plan Economy and Layout read rather than per-purpose fields | Strategy | Memory (the operator's); Strategy's plans rebuilt each tick | what the world is for us, as data |
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
 | `recorder` | the last ticks' read pass (`app/read.js`), Memory and intel rows, deflated; a tick over a segment spans several, so the ring keeps fewer | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
@@ -224,20 +224,28 @@ outposts. §6 and §7 replace them.
 
 ## 5. Economy (port)
 
-The task pool + matcher is right for the economy: tasks are independent, bodies
-interchangeable, and re-matching on a key change is cheap and does not
-oscillate (stickiness via `assignments` is enough). It becomes **one world
-pool**; a creep takes the nearest task it fits whatever colony spawned it.
-Two exceptions, since rank before walk sent loads across colonies: a colony
-whose storage can fill its spawn ring keeps the ring to bodies in its own
-room, and its buffer's feed too once the storage can fill both; and a load in
-the room of a colony short of its reserve fills that colony's sinks only. A
-colony without a storage casts only for its own room and its bodies work
-there alone, as v1's colonies each worked their own; a stocked colony's
-bodies may still help it, and while it is nursed its controller's buffer is
-built first, a sink beside the controller for a neighbour's haulers. A remote
-is served by the nearest colony with a storage (without one its haul has no
-sink but the spawn ring), and a body out there counts for that colony's seat.
+A colony's flows become **slots**: each slot casts one body and is the
+work that body does, so what is cast and what is offered are one list
+(the quota and the pool modelled one economy twice). Its flows: each source's
+dig, one carrier pool for its own and its outposts' dig, the ring, the
+controller's drink and the ore, a reserver per outpost, workers for its sites
+and repairs, and upgraders on the buffer's seats. Casts are slots less the
+bodies that stand; a body keeps its slot until the slot goes or the body
+dies, so an arriving body never re-matches the others. A hauler is 2:1 or
+1:1 CARRY:MOVE, whichever delivers more over a life per energy on its route
+(`bodies::carry_per_move`): any ratio between moves no faster than 1:1 off
+road. A remote is served by the nearest colony with a storage; a stood-down
+outpost keeps its slots and its bodies wait at home. The outposts' carriers
+take at most half the spawns' time, or a far ring of outposts casts nothing
+but haulers; the home's own carriers queue ahead of a fight's casts, since
+they refill the bank those are paid from.
+
+The spend follows the **surplus**: dig less the fixed bodies' upkeep, plus
+the stock past the reserve over a creep life. It is negative below the
+reserve, so spending below it cannot be written, and spending it draws the
+stock to the reserve and no further. Sites and repairs take half the income
+(all of it before a colony has upgraders, all past a capped controller's
+take); the stock past the reserve upgrades.
 
 **The objective is long-run growth, by simple rules first.** A slower start
 that ends higher is the better economy; an early regression is accepted when
@@ -247,22 +255,22 @@ priced decision only when a soak shows it losing: a pricing of every
 investment by its return was built and measured, cost twice the CPU and 580
 lines for no gain, and was not merged.
 
-**A colony keeps a reserve before it spends the surplus.** With storage, the
-target is every tower the level allows firing for a number of creep
-lifetimes (towers × TOWER_ENERGY_COST × CREEP_LIFE_TIME × n). n is a
-declaration the operator sets live (`observe declare reserve n`), 2 by
-default (30k at RCL4, 180k at RCL8): the season fights daily, and v1,
-spending all its surplus, held under 100k at RCL8. Below the target no body past the floor is hired on income (its surplus is an estimate a soak
-put at twice what banks); above it the surplus and the excess hire upgraders. Open-source bots keep 75k–150k at RCL7–8 and
-pay walls from a higher threshold.
+**A colony keeps a reserve before it spends the surplus**, and Strategy
+declares it in the colony's `ColonyPlan` (`strategy::reserve`). Threatened
+(a rival player's room within three rooms, a fight open at home, or a fight
+cast it owes) it is every tower the level allows firing for n creep lifetimes
+(towers × TOWER_ENERGY_COST × CREEP_LIFE_TIME × n), n declared live by the
+operator (`observe declare reserve n`), 2 by default (30k at RCL4, 180k at
+RCL8); otherwise a third of it. The fight casts it owes are added: a committed
+cast is paid before any surplus, as the old bank's order had it. Owner, 2026-11-10: the full reserve cost a
+quiet young colony a lifetime of upgrading (main kept its RCL4 stock under
+it anyway), and the season's fights come from neighbours, which intel sees.
+Open-source bots keep 75k–150k at RCL7–8.
 
 Port with these cuts:
-- No fight tasks (`Guard`, `Defend`, `Assault`, `Flee`), no Safety band, no fight
-  cases in the matcher's keep cascade.
+- No fight tasks (`Guard`, `Defend`, `Assault`, `Flee`), no Safety band.
 - No `Facts.fs`. Its ~1,100 economy lines (task ids, stages, hunger, perimeter)
   move into `Economy`; the rest is fight and does not come.
-- `Price` (what a tick of delay costs) stays; it is the economy's pricing and
-  it works there.
 - Outposts, errands and the rooms a colony works come from `declarations`, not
   from `Colonies.fs`.
 - Every `#NNN` comment and every branch that exists for one live incident is
@@ -790,7 +798,7 @@ everything v1 used its self-written arena for, and more:
   | N7 RCL8 | the full set, storage 500k | where energy goes past the 15/tick upgrade cap | power processed, surplus use, CPU |
   | E1 outposts | RCL5 + two neutral neighbours | reservation, remote haul, whether an outpost pays | outpost net (after its bodies), reservation held |
   | E2 claim | RCL6 + a neighbour Strategy picks | choosing, claiming, pioneers, aid | ticks to the child's RCL3, mother's income cost |
-  | E3 colonies | three colonies at RCL7, 5, 2 | the world pool across colonies, terminal balancing | total income, cross-colony work share, CPU vs colonies |
+  | E3 colonies | three colonies at RCL7, 5, 2 | cross-colony work, terminal balancing | total income, cross-colony work share, CPU vs colonies |
   | S1 invaders | N3 + timed Invader waves, home and outposts | `Defend`, towers, recovery | losses, ticks back to income |
   | S2 keepers | RCL7 + a keeper room | `KeeperDuty`, whether keeper mining pays | keeper-room net, losses |
   | S3 stronghold | RCL7 + a stronghold next door | whether to fight it, `Siege` | the decision, gain vs cost |
@@ -984,7 +992,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 | `Types/Rules.fs` `Engine`, `Types/Vocabulary.fs`, `Types/Lists.fs` | `core/engine.rs`, `vocabulary.rs`, `lists.rs` | ✅ `Engine` less policy (`guardCap`) and season (`reactorCapacity`), plus part costs, regen time and level progress; `Vocabulary` less `Task` (Economy's) and with season resources as `Resource.Other` |
 | `Core/Atlas.fs`, `Grid.fs`, `Geometry.fs` | `core/atlas/` | ✅ tile index `y*50+x` (the terrain buffer's), the flood, footprint on every query, a minimal room graph, the flood table. Known gaps: a route is chosen without the footprint (a Quad can be routed through a one-tile gap); boosted CARRY is priced unboosted. |
 | `Decide/Resolver.fs` | `core/mv/` | ✅ arbitration (two-tier eviction, best chain, displacer's onward last) and `Plan` wishes; re-derived each tick from `Atlas.firstStep` (§1's "path" key is not stored). Fight steps ✅ in `fight/tactics.rs` (kite, close and pursue, retreat), without v1's threat maps; formation stepping comes with `Siege` |
-| `Decide/Pool, Matcher, Planner, Quota, Spawns, Price, Bodies` | `core/economy/` | ✅ one world pool, matcher, quota and casts, wired as the `economy` module (`economy/run.rs`): match, cast, act in range, wish toward the target; assignments in `Memory.v2.assignments`. The RCL2–4 chain: a harvester on each source's post, haulers from built containers, the controller's buffer and its upgraders, the surplus split between upgraders and workers after the reserve (§5, `declarations.reserve`). Declared outposts (`declarations.outposts`) are worked while no armed one in the room reaches their work, and while no armed one last seen in a blind room outlives the tick. Known gaps: claims are not yet declared; cross-room travel prices each room between at a room's side |
+| `Decide/Pool, Matcher, Planner, Quota, Spawns, Price, Bodies` | `core/economy/` | ✅ rewritten as slots (§5, `economy/slots.rs`, `jobs.rs`, `run.rs`): flows to slots, casts, tasks, act in range, wish toward the target; assignments in `Memory.v2.assignments`. Declared outposts (`declarations.outposts`) are worked while no armed one in the room reaches their work, and while no armed one last seen in a blind room outlives the tick. Known gaps: claims are not yet declared; cross-room travel prices each room between at a room's side |
 | `Decide/Labs, Layout` | `Economy`, `Layout` | Layout ✅ in the tick after `economy`: a standing plan per room, sites in plan order as the level allows, towers on hostiles. Labs ✅: the cluster's reaction plan per tick and the boost a cast asks for (§5, §6.5) |
 | `Types/Colonies.fs` declarations, `allies` | `declarations` data | not ported as code; the current rooms seed the first `declarations`. ✅ `declarations.allies` (player names): an ally's creeps leave `Hostiles` as the world is read, so nothing answers them |
 | `Decide/Facts.fs:2883–4056, 1038–1582, 2153–2196`, `Fighter.fs`, `Arrival.fs` | `Exchange` | ✅ `core/exchange/`; `npm run exchange` is §10.1's generated set |

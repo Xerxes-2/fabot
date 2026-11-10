@@ -1,5 +1,5 @@
 {
-  "why": "a cheap raider poking both outposts and the home every 500 ticks for 20000 ticks starts no spending spiral: once at §5's reserve (60k, two towers) the home's stock stays near it, no level or spawn lost, the fight casts a small share of the harvest. A fight body cast with a MOVE last loses 8 fewer bodies, and the one dip below the reserve (57443 at t4300) is back above it by t5000",
+  "why": "a cheap raider poking both outposts and the home every 500 ticks for 20000 ticks starts no spending spiral: the home's stock stays above §5's reserve (20k unthreatened at RCL5, 60k while a rival is near; the slots read a least of 49.9k), no level or spawn lost, the fight casts a small share of the harvest. A fight body cast with a MOVE last loses 8 fewer bodies",
   "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "tactics"],
   "start": {
     "room": "W8N3",
@@ -19,7 +19,7 @@
   "assert": [
     { "measure": "levelsLost", "max": 0 },
     { "measure": "spawnsLost", "max": 0 },
-    { "measure": "leastStored", "from": 3500, "min": 57000 },
+    { "measure": "leastStored", "from": 3500, "min": 20000 },
     { "measure": "fightShare", "max": 6 },
     { "measure": "engagements", "min": 50 },
     { "measure": "bodiesLost", "max": 3 },

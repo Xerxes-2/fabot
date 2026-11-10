@@ -158,7 +158,7 @@ pub enum Intent {
     Trace(String, Vec<(crate::core::world::Pos, i64)>),
     /// Summed into the observe segment's counts (§9.3).
     Count(&'static str, i32),
-    /// A colony's seats of a pattern the quota left uncast; nothing reaches the game.
+    /// A colony's open slots of a pattern left uncast; nothing reaches the game.
     Short(RoomName, crate::core::economy::bodies::Pattern, i32),
     /// A movable body the arbitration left standing: read by the metrics alone, nothing reaches the game.
     Held(String),

@@ -1,7 +1,5 @@
-/// The pool, the match, the quota, and the acts and walks they imply.
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::core::HashMap;
 use crate::core::atlas::{self, Atlas, Mover, Target};
 use crate::core::engine;
 use crate::core::grid::{self, Footprint};
@@ -15,40 +13,12 @@ use crate::core::world::{Creep, Pos, RoomName};
 
 use super::bodies;
 use super::derived::{self, Body, Derived, Ground, LinkFact};
-use super::matcher::{self, Assignments};
-use super::pool::{self, Offer};
-use super::price;
-use super::quota::{self, Walks};
+use super::jobs::Jobs;
+use super::slots::{self, Job, Slot, distance};
 use super::task::{self, Task};
 
-fn weight_of(priority: i32) -> i32 {
-    (price::BOTTOM_RANK - priority + 1).max(1)
-}
-
-fn target_of(offer: &Offer) -> Target {
-    Target {
-        room: offer.target.room,
-        tiles: vec![tiles::of_pos(&offer.target)],
-        range: offer.task.range_of(),
-        avoid: BTreeSet::new(),
-        max_hops: tick::REACH_HOPS,
-    }
-}
-
-/// The ticks from `a` to `b`: in one room its range, else its crossings off
-/// a tree `Derived` grew from either end, a search only without one.
-fn distance(atlas: &Atlas, derived: &Derived, a: &Pos, b: &Pos) -> Option<i32> {
-    if let Some(r) = a.range(b) {
-        return Some(r);
-    }
-    let tree = (derived.routes.get(&b.room)).or_else(|| derived.routes.get(&a.room));
-    let crossed = match tree {
-        Some(tree) => tree.crossings(a.room, b.room),
-        None => (atlas.route(&BTreeSet::new(), tick::REACH_HOPS, a.room, b.room))
-            .map(|r| r.len() as i32 - 1),
-    };
-    crossed.map(|n| Atlas::crossing_ticks() * n)
-}
+/// Creep name → `slot|task`.
+type Assignments = BTreeMap<String, String>;
 
 /// Re-chosen only on arrival off the exit band, so a walk is never turned
 /// mid-way nor on a border; a scout whose open rooms lie past `REACH_HOPS`
@@ -58,7 +28,10 @@ fn scouting(atlas: &Atlas, derived: &Derived, held: &Assignments) -> Assignments
         .filter(|b| b.pattern.is_scout())
         .collect();
     scouts.sort_by(|a, b| a.name.cmp(&b.name));
-    let kept = |b: &Body| match held.get(&b.name).and_then(|id| task::of_task_id(id)) {
+    let kept = |b: &Body| match (held.get(&b.name))
+        .and_then(|v| slots::task_of(v))
+        .and_then(task::of_task_id)
+    {
         Some(Task::Scout(room)) => (derived.scouts.iter())
             .find(|(at, _, _)| at.room == room)
             .filter(|(at, _, _)| !b.pos.within(Task::Scout(room).range_of(), at))
@@ -87,157 +60,92 @@ fn scouting(atlas: &Atlas, derived: &Derived, held: &Assignments) -> Assignments
         .collect()
 }
 
-fn near(
-    atlas: &mut Atlas,
-    derived: &Derived,
-    homes: &[Pos],
-    can: &dyn Fn(usize) -> bool,
-    at: &Pos,
-) -> Option<usize> {
-    tick::nearest(atlas, &|room| derived.routes.get(&room), homes, can, at)
-}
-
-fn ticks_to(
-    atlas: &Atlas,
-    derived: &Derived,
-    mover: Mover,
-    target: &Target,
-    from: &Pos,
-) -> Option<i32> {
-    match derived.routes.get(&target.room) {
-        Some(tree)
-            if from.room != target.room
-                && target.avoid.is_empty()
-                && target.max_hops == tick::REACH_HOPS =>
-        {
-            atlas.ticks_on(tree, mover, target, from)
-        }
-        _ => atlas.ticks_to(mover, target, from),
-    }
-}
-
-pub struct Walked<'a> {
-    pub atlas: &'a mut Atlas,
-    pub derived: &'a Derived,
-    pub homes: &'a [Pos],
-    pub creeps: &'a BTreeMap<&'a str, &'a Creep>,
-    pub movers: &'a BTreeMap<&'a str, Mover>,
-    pub offers: &'a [Offer],
-    pub by_id: &'a HashMap<&'a str, usize>,
-    pub assignments: &'a Assignments,
-}
-
-impl Walks for Walked<'_> {
-    fn distance(&mut self, a: &Pos, b: &Pos) -> Option<i32> {
-        distance(&*self.atlas, self.derived, a, b)
-    }
-
-    fn leg(&mut self, body: &[BodyPart], from: &Pos, onto: &Pos, range: i32) -> Option<i32> {
-        let mover = Mover {
-            footprint: Footprint::One,
-            factor: grid::loaded_factor(body),
-        };
-        ticks_to(
-            self.atlas,
-            self.derived,
-            mover,
-            &tick::target_at(onto, range),
-            from,
-        )
-    }
-
-    fn near(&mut self, can: &dyn Fn(usize) -> bool, at: &Pos) -> Option<usize> {
-        near(&mut *self.atlas, self.derived, self.homes, can, at)
-    }
-
-    fn walk(&mut self, fresh: bool, body: &Body, from: &Pos) -> Option<i32> {
-        let creep = *self.creeps.get(body.name.as_str())?;
-        let id = self.assignments.get(&body.name)?;
-        let oi = *self.by_id.get(id.as_str())?;
-        let offer = &self.offers[oi];
-
-        let mover = if fresh {
-            let kinds: Vec<BodyPart> = creep.body.iter().map(|p| p.kind).collect();
-            Mover {
-                footprint: Footprint::One,
-                factor: grid::empty_factor(&kinds),
-            }
-        } else {
-            *self.movers.get(body.name.as_str())?
-        };
-
-        ticks_to(self.atlas, self.derived, mover, &target_of(offer), from)
-    }
-}
-
-/// A body digs from nowhere else, so a harvester's dig falls into the container
-/// and a light body keeps off the post.
-fn seats_of(atlas: &Atlas, derived: &Derived, body: &Body, offer: &Offer) -> Option<Vec<Pos>> {
-    match &offer.task {
-        Task::Harvest(id) => {
-            let seats = atlas.seats(Footprint::One, offer.task.range_of(), &offer.target);
-
-            match (seats.is_empty(), derived.posts.get(id)) {
-                (true, _) => None,
-                (false, Some(post)) if pool::garrisons(body, offer) => Some(vec![*post]),
-                (false, Some(post)) => Some(seats.into_iter().filter(|p| p != post).collect()),
-                (false, None) => Some(seats),
-            }
-        }
-        Task::Upgrade(_) if pool::draws_buffer(body, offer) => derived
-            .grounds
-            .iter()
-            .find(|g| g.room == offer.target.room)
-            .and_then(|g| {
-                if g.buffer_seats.is_empty() {
-                    None
-                } else {
-                    Some(g.buffer_seats.clone())
-                }
-            }),
-        Task::Build(_) | Task::Repair(_) if pool::draws_buffer(body, offer) => derived
-            .grounds
-            .iter()
-            .find_map(|g| {
-                if g.room == offer.target.room {
-                    g.buffer.as_ref()
-                } else {
-                    None
-                }
-            })
-            .map(|b| atlas.seats(Footprint::One, 1, &b.pos))
-            .filter(|seats| !seats.is_empty()),
-        _ => None,
-    }
-}
-
-/// A seat no other body stands on, so one body on the nearest seat does not
-/// hold the crew short of the rest.
-fn seat_of(stood: &BTreeSet<Pos>, creep: &Creep, offer: &Offer, seats: Option<&[Pos]>) -> Target {
-    let free = |p: &Pos| p == &creep.pos || !stood.contains(p);
-
-    let tiles: Option<Vec<Pos>> = match seats {
-        Some(seats) => {
-            let open: Vec<Pos> = seats.iter().filter(|p| free(p)).copied().collect();
-            if open.is_empty() {
-                Some(seats.to_vec())
-            } else {
-                Some(open)
-            }
-        }
-        None => None,
+fn ring_member(derived: &Derived, task: &Task, at: &Pos) -> Option<Task> {
+    let Task::Refill(id, r) = task else {
+        return None;
     };
+    let g = (derived.grounds.iter()).find(|g| &super::jobs::ring_id(g.room) == id)?;
+    (g.refills.iter())
+        .filter(|f| !f.kind.is_tower() && f.free > 0)
+        .min_by_key(|f| (at.range(&f.pos).unwrap_or(i32::MAX), f.id.clone()))
+        .map(|f| Task::Refill(f.id.clone(), r.clone()))
+}
 
-    match tiles {
-        Some(tiles) if !tiles.is_empty() => Target {
-            room: offer.target.room,
-            tiles: tiles.iter().map(tiles::of_pos).collect(),
-            range: 0,
-            avoid: BTreeSet::new(),
-            max_hops: tick::REACH_HOPS,
-        },
-        _ => target_of(offer),
-    }
+fn spot_of(derived: &Derived, task: &Task) -> Option<Pos> {
+    let id = match task {
+        Task::Scout(room) => return Some(Pos::new(*room, 25, 25)),
+        Task::Harvest(id)
+        | Task::Withdraw(id, _)
+        | Task::Pickup(id, _)
+        | Task::Refill(id, _)
+        | Task::Build(id)
+        | Task::Repair(id)
+        | Task::Upgrade(id)
+        | Task::Reserve(id)
+        | Task::Claim(id) => id,
+    };
+    let claim = derived.claims.iter().filter(|c| &c.id == id).map(|c| c.pos);
+    derived
+        .grounds
+        .iter()
+        .find_map(|g| {
+            let ctrl = g.controller.iter().filter(|c| &c.id == id).map(|c| c.pos);
+            (g.sources.iter().filter(|x| &x.id == id).map(|x| x.pos))
+                .chain(g.minerals.iter().filter(|x| &x.id == id).map(|x| x.pos))
+                .chain(g.stores.iter().filter(|x| &x.id == id).map(|x| x.pos))
+                .chain(g.refills.iter().filter(|x| &x.id == id).map(|x| x.pos))
+                .chain(g.sites.iter().filter(|x| &x.id == id).map(|x| x.pos))
+                .chain(g.repairs.iter().filter(|x| &x.id == id).map(|x| x.pos))
+                .chain(g.piles.iter().filter(|x| &x.id == id).map(|x| x.pos))
+                .chain(g.labs.iter().filter(|x| &x.id == id).map(|x| x.pos))
+                .chain(g.links.iter().filter(|x| &x.id == id).map(|x| x.pos))
+                .chain(g.terminal.iter().filter(|x| &x.id == id).map(|x| x.pos))
+                .chain(g.boost_lab.iter().filter(|x| &x.id == id).map(|x| x.pos))
+                .chain(g.ores.iter().filter(|x| &x.0 == id).map(|x| x.1))
+                .chain(ctrl)
+                .next()
+        })
+        .or_else(|| claim.clone().next())
+}
+
+/// What a store, link, lab or container holds of `r`: the engine refuses a
+/// draw from nothing.
+fn holds(derived: &Derived, id: &str, r: &Resource) -> i32 {
+    derived
+        .grounds
+        .iter()
+        .map(|g| {
+            let stored = (g.stores.iter())
+                .filter(|s| s.id == id && r.is_energy())
+                .map(|s| s.energy)
+                .sum::<i32>();
+            let linked = (g.links.iter())
+                .filter(|l| l.id == id && r.is_energy())
+                .map(|l| l.energy)
+                .sum::<i32>();
+            let ores = (g.ores.iter())
+                .filter(|o| o.0 == id && &o.2 == r)
+                .map(|o| o.3)
+                .sum::<i32>();
+            let labs = (g.labs.iter())
+                .filter(|l| l.id == id)
+                .filter_map(|l| l.held.as_ref().filter(|h| &h.0 == r).map(|h| h.1))
+                .sum::<i32>();
+            let mined = (g.minerals.iter())
+                .filter(|m| m.container.as_deref() == Some(id) && &m.resource == r)
+                .map(|m| m.held)
+                .sum::<i32>();
+            let terminal = (g.terminal.iter())
+                .filter(|t| t.id == id)
+                .map(|t| t.store.amount_of(r))
+                .sum::<i32>();
+            stored.max(terminal)
+                + linked
+                + ores.max(0) * i32::from(stored == 0 && terminal == 0)
+                + labs
+                + mined
+        })
+        .sum()
 }
 
 fn act_of(derived: &Derived, task: &Task) -> Option<CreepAct> {
@@ -267,7 +175,7 @@ fn act_of(derived: &Derived, task: &Task) -> Option<CreepAct> {
 /// Every body with room and no other resource aboard picks up dropped energy
 /// beside it, beside its Task's own act: the engine's pickup conflicts with no
 /// other, and a pile no Task reaches decays. Not a harvester, whose dig falls
-/// where it stands. `taken`: the bodies whose act is already a pickup.
+/// where it stands. `taken`: the bodies whose act already fills them.
 fn pickups(derived: &Derived, taken: &BTreeSet<String>) -> Vec<Intent> {
     let mut picks = Vec::new();
 
@@ -279,9 +187,10 @@ fn pickups(derived: &Derived, taken: &BTreeSet<String>) -> Vec<Intent> {
         {
             let pile = derived.grounds.iter().enumerate().find_map(|(gi, g)| {
                 let colony = (gi < derived.colonies.len()).then_some(gi);
+                let _ = colony;
                 g.piles
                     .iter()
-                    .find(|p| p.resource.is_energy() && b.pos.within(1, &p.pos) && b.serves(colony))
+                    .find(|p| p.resource.is_energy() && b.pos.within(1, &p.pos))
             });
 
             if let Some(p) = pile {
@@ -405,60 +314,136 @@ fn sends(derived: &Derived) -> Vec<Intent> {
     sends
 }
 
-/// An assigned body's acts this tick, and its walk: to a free seat of its
-/// Task, else in its range.
+/// Arbitration's weight: the dig and its carriers walk first.
+fn weight_of(job: &Job) -> i32 {
+    match job {
+        Job::Dig(_) | Job::Reserve(_) | Job::Claim(_) => 41,
+        Job::Fill => 31,
+        Job::Work(_) => 21,
+        Job::Upgrade => 11,
+        Job::Scout(_) => 1,
+    }
+}
+
+/// The seats beside a source no post holds, for a worker's dig.
+fn dig_seats(atlas: &Atlas, derived: &Derived, id: &str, at: &Pos) -> Vec<Pos> {
+    let post = (derived.grounds.iter())
+        .flat_map(|g| g.sources.iter())
+        .find(|s| s.id == id)
+        .and_then(|s| s.post);
+    let seats = atlas.seats(Footprint::One, 1, at);
+    seats.into_iter().filter(|p| Some(*p) != post).collect()
+}
+
+/// A seated task walks to a seat no other body stands on, so one body on the
+/// nearest seat does not hold the rest short of theirs.
+fn target_of(
+    atlas: &Atlas,
+    derived: &Derived,
+    (slot, task, at): (&Slot, &Task, Pos),
+    stood: &BTreeSet<Pos>,
+    creep: &Creep,
+) -> (Target, Option<Vec<Pos>>) {
+    let seats: Option<Vec<Pos>> = match (&slot.job, task) {
+        (Job::Dig(_) | Job::Upgrade, _) if slot.seat != at => Some(vec![slot.seat]),
+        (_, Task::Harvest(id)) => {
+            Some(dig_seats(atlas, derived, id, &at)).filter(|s| !s.is_empty())
+        }
+        // A worker upgrades off the upgraders' seats.
+        (Job::Work(_), Task::Upgrade(_)) => {
+            let buffer = (derived.grounds.iter())
+                .find(|g| g.room == at.room)
+                .map_or(&[][..], |g| &g.buffer_seats[..]);
+            let seats = atlas.seats(Footprint::One, task.range_of(), &at);
+            Some(
+                seats
+                    .into_iter()
+                    .filter(|p| !buffer.contains(p))
+                    .collect::<Vec<_>>(),
+            )
+            .filter(|s| !s.is_empty())
+        }
+        _ => None,
+    };
+    let target = match &seats {
+        Some(seats) => {
+            let open: Vec<Pos> = (seats.iter())
+                .filter(|p| **p == creep.pos || !stood.contains(*p))
+                .copied()
+                .collect();
+            let tiles = if open.is_empty() { seats.clone() } else { open };
+            Target {
+                room: at.room,
+                tiles: tiles.iter().map(tiles::of_pos).collect(),
+                range: 0,
+                avoid: BTreeSet::new(),
+                max_hops: tick::REACH_HOPS,
+            }
+        }
+        None => tick::target_at(&at, task.range_of()),
+    };
+    (target, seats)
+}
+
+/// An assigned body's acts this tick, and its walk: to its seat, else in its
+/// task's range.
 fn work(
     atlas: &mut Atlas,
     derived: &Derived,
     (creep, body, mover): (&Creep, &Body, Mover),
-    offer: &Offer,
+    (slot, task): (&Slot, &Task),
     stood: &BTreeSet<Pos>,
     ready: &dyn Fn(&Task) -> bool,
     acts: &mut Vec<Intent>,
 ) -> Wish {
-    let seats = seats_of(&*atlas, derived, body, offer);
-
-    let buffer = derived
-        .grounds
-        .iter()
+    let ring = ring_member(derived, task, &creep.pos);
+    let task = ring.as_ref().unwrap_or(task);
+    let Some(at) = spot_of(derived, task) else {
+        return plan::stay(&*atlas, creep, mover.factor, 1);
+    };
+    let (target, seats) = target_of(&*atlas, derived, (slot, task, at), stood, creep);
+    let buffer = (derived.grounds.iter())
         .filter(|g| g.room == creep.pos.room)
         .find_map(|g| g.buffer.as_ref());
-
-    // An empty buffer has nothing to draw: the engine refuses it.
-    if let Some(b) = buffer
-        && b.energy > 0
-        && pool::draws_buffer(body, offer)
-        && creep.pos.within(1, &b.pos)
+    let beside = buffer.filter(|b| b.energy > 0 && creep.pos.within(1, &b.pos));
+    // The engine withdraws before it upgrades, so the draw tops up the spend.
+    if let Some(b) = beside
+        && task.is_upgrade()
+        && body.free > 0
+        && body.energy < body.work * engine::UPGRADE_DRAIN_PER_WORK
     {
         acts.push(Intent::Creep(
             creep.name.clone(),
             CreepAct::Withdraw(b.id.clone(), Resource::Energy),
         ));
     }
-
-    if let Some(act) = raising(derived, body, offer) {
-        acts.push(Intent::Creep(creep.name.clone(), act))
+    let digs = matches!(slot.job, Job::Dig(_));
+    if let Some(act) = raising(derived, body, digs && creep.pos == slot.seat) {
+        acts.push(Intent::Creep(creep.name.clone(), act));
     } else {
-        let arrived = creep.pos.within(offer.task.range_of(), &offer.target)
+        let arrived = creep.pos.within(task.range_of(), &at)
             && seats
                 .as_ref()
-                .is_none_or(|seats| seats.iter().any(|p| p == &creep.pos))
-            && ready(&offer.task);
-
-        // The API refuses an upgrade from an empty store before
-        // the draw lands.
-        let can_act =
-            body.energy > 0 || !(pool::draws_buffer(body, offer) || offer.task.is_upgrade());
-
+                .is_none_or(|seats| seats.contains(&creep.pos))
+            && ready(task);
+        // The API refuses a spend from an empty store before the draw lands.
+        let can = match task {
+            Task::Upgrade(_) | Task::Build(_) | Task::Repair(_) => body.energy > 0 && body.work > 0,
+            Task::Harvest(_) => body.work > 0,
+            Task::Reserve(_) | Task::Claim(_) => body.claim > 0,
+            Task::Withdraw(id, r) => holds(derived, id, r) > 0 && body.free > 0,
+            Task::Pickup(..) => body.free > 0,
+            Task::Refill(_, r) => body.store.amount_of(r) > 0,
+            _ => true,
+        };
         if arrived
-            && can_act
-            && let Some(act) = act_of(derived, &offer.task)
+            && can
+            && let Some(act) = act_of(derived, task)
         {
             acts.push(Intent::Creep(creep.name.clone(), act));
         }
     }
-
-    if pool::garrisons(body, offer) && body.energy > 0 {
+    if digs && body.energy > 0 {
         let link = derived.grounds.iter().find_map(|g| {
             g.links.iter().find(|l| {
                 g.receiver.is_some()
@@ -467,7 +452,6 @@ fn work(
                     && creep.pos.within(1, &l.pos)
             })
         });
-
         if let Some(l) = link {
             acts.push(Intent::Creep(
                 creep.name.clone(),
@@ -475,18 +459,13 @@ fn work(
             ));
         }
     }
-
-    let target = seat_of(stood, creep, offer, seats.as_deref());
-    plan::toward(atlas, creep, mover, &target, weight_of(offer.priority))
+    plan::toward(atlas, creep, mover, &target, weight_of(&slot.job))
 }
 
 pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, State), String> {
     // `{ World with Creeps = filtered }`: a creep a fight holds is not in the
-    // pool, and only the creep list differs.
-    let seen: Vec<&Creep> = context
-        .world
-        .creeps
-        .iter()
+    // economy, and only the creep list differs.
+    let seen: Vec<&Creep> = (context.world.creeps.iter())
         .filter(|c| !tick::fights(&c.name))
         .collect();
 
@@ -500,10 +479,7 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         &state.scouts,
     );
 
-    let creeps: BTreeMap<&str, &Creep> = seen.iter().map(|c| (c.name.as_str(), *c)).collect();
-
-    let movers: BTreeMap<&str, Mover> = seen
-        .iter()
+    let movers: BTreeMap<&str, Mover> = (seen.iter())
         .map(|c| {
             let mover = Mover {
                 footprint: Footprint::One,
@@ -513,197 +489,209 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         })
         .collect();
 
-    let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
-    let owners = quota::owners(
-        &mut |can, at| near(&mut *context.atlas, &derived, &homes, can, at),
-        &derived,
-    );
-    let offers = pool::pool(&derived, &owners, &state.assignments);
+    let owners = slots::owners(context.atlas, &derived);
+    let slots = slots::plan(context.atlas, &derived, &owners);
+    let (assigned, holders) = slots::assign(&*context.atlas, &derived, &slots, &state.assignments);
+    let (casts, short) = slots::casts(&*context.atlas, &derived, &slots, &holders);
 
-    let by_id: HashMap<&str, usize> = offers
-        .iter()
-        .enumerate()
-        .map(|(i, offer)| (offer.id.as_str(), i))
-        .collect();
-
-    let mut hired = state.assignments.clone();
-    hired.extend(scouting(&*context.atlas, &derived, &state.assignments));
-    let assignments = {
-        let mut travel = |body: &Body, offer: &Offer| -> Option<i32> {
-            let mover = *movers.get(body.name.as_str())?;
-            ticks_to(context.atlas, &derived, mover, &target_of(offer), &body.pos)
-        };
-        // Each step moves a body at most a tile, in a tick at least.
-        let floor = |body: &Body, offer: &Offer| {
-            body.pos
-                .range(&offer.target)
-                .map_or(0, |r| r - offer.task.range_of())
-        };
-        matcher::match_all(&mut travel, &floor, &offers, &derived.bodies, &hired)
-    };
-
-    let plan = {
-        let mut walked = Walked {
-            atlas: &mut *context.atlas,
-            derived: &derived,
-            homes: &homes,
-            creeps: &creeps,
-            movers: &movers,
-            offers: &offers,
-            by_id: &by_id,
-            assignments: &assignments,
-        };
-        quota::plan(&mut walked, &derived, &owners, &offers, &assignments)
-    };
-
-    let mut intents: Vec<Intent> = plan
-        .casts
-        .iter()
+    let mut intents: Vec<Intent> = (casts.iter())
         .map(|cast| {
+            let rank = if cast.floor {
+                Rank::Floor
+            } else {
+                Rank::Economy
+            };
             Intent::Queue(
                 cast.colony,
                 Ask {
                     body: cast.body.clone(),
                     name: cast.name.clone(),
-                    rank: if cast.floor {
-                        Rank::Floor
-                    } else {
-                        Rank::Economy
-                    },
+                    rank,
                 },
             )
         })
         .collect();
-    let mut owed: BTreeMap<(RoomName, bodies::Pattern), i32> = BTreeMap::new();
-    for seat in &plan.seats {
-        if let Some(ci) = seat.colony {
-            *owed
-                .entry((derived.colonies[ci].room, seat.pattern))
-                .or_default() += 1;
-        }
-    }
-    for cast in plan.casts.iter().filter(|c| !c.floor) {
-        if let Some(pattern) = bodies::pattern_of_name(&cast.name) {
-            *owed.entry((cast.colony, pattern)).or_default() -= 1;
-        }
-    }
     intents.extend(
-        (owed.into_iter())
-            .filter(|(_, n)| *n > 0)
-            .map(|((room, p), n)| Intent::Short(room, p, n)),
+        short
+            .into_iter()
+            .map(|(room, p, n)| Intent::Short(room, p, n)),
     );
 
+    let scouted = scouting(&*context.atlas, &derived, &state.assignments);
     let dug = dug_out(&derived);
-
-    let ready = |task: &Task| -> bool {
-        match task {
-            Task::Harvest(id) => !dug.contains(id),
-            _ => true,
-        }
+    let ready = |task: &Task| match task {
+        Task::Harvest(id) => !dug.contains(id),
+        _ => true,
     };
-
     let stood: BTreeSet<Pos> = seen.iter().map(|c| c.pos).collect();
-
-    let bodies: BTreeMap<&str, &Body> = derived
-        .bodies
-        .iter()
+    let bodies: BTreeMap<&str, &Body> = (derived.bodies.iter())
         .map(|b| (b.name.as_str(), b))
         .collect();
 
+    // A body holding a task books its load before another picks.
+    let kept = |name: &str| {
+        (state.assignments.get(name))
+            .and_then(|v| slots::task_of(v))
+            .and_then(task::of_task_id)
+    };
+    let mut order: Vec<&Creep> = seen.clone();
+    order.sort_by_key(|c| (kept(&c.name).is_none(), c.name.clone()));
+    let held: Vec<(usize, &Body)> = (assigned.iter())
+        .filter_map(|(name, si)| Some((*si, *bodies.get(name.as_str())?)))
+        .collect();
+    let mut jobs = Jobs::new(&*context.atlas, &derived, (&slots, &owners), &held);
+
+    // A scout walks where `scouting` sends it, with a slot to count it or
+    // without, as where no colony casts one.
+    let strays: BTreeMap<&str, Slot> = (derived.bodies.iter())
+        .filter(|b| b.pattern.is_scout() && !assigned.contains_key(&b.name))
+        .filter_map(|b| {
+            let Task::Scout(room) = task::of_task_id(scouted.get(&b.name)?)? else {
+                return None;
+            };
+            let slot = Slot {
+                id: String::new(),
+                colony: 0,
+                room,
+                job: Job::Scout(room),
+                seat: Pos::new(room, 25, 25),
+                body: Vec::new(),
+                fed_by: None,
+                spends: false,
+                rank: 0,
+                closed: false,
+            };
+            Some((b.name.as_str(), slot))
+        })
+        .collect();
+    type Held<'a> = Option<(&'a Slot, &'a Body, Option<Task>)>;
+    let tasks: Vec<(&Creep, Held)> = (order.into_iter())
+        .map(|creep| {
+            let at = (assigned.get(&creep.name))
+                .map(|si| &slots[*si])
+                .or_else(|| strays.get(creep.name.as_str()))
+                .zip(bodies.get(creep.name.as_str()).copied());
+            let at = at.map(|(slot, body)| {
+                let task = match &slot.job {
+                    Job::Scout(_) => scouted.get(&creep.name).and_then(|id| task::of_task_id(id)),
+                    _ => jobs.task(slot, body, kept(&creep.name)),
+                };
+                (slot, body, task)
+            });
+            (creep, at)
+        })
+        .collect();
+
+    let mut next = Assignments::new();
     let mut acts: Vec<Intent> = Vec::new();
     let mut wishes: Vec<(RoomName, Vec<Wish>)> = Vec::new();
-
-    for creep in &seen {
+    for (creep, at) in tasks {
         let mover = movers[creep.name.as_str()];
-
-        let assigned = assignments
-            .get(&creep.name)
-            .and_then(|id| by_id.get(id.as_str()))
-            .map(|oi| &offers[*oi]);
-
-        match assigned {
-            Some(offer) => {
-                let body = bodies[creep.name.as_str()];
-                let wish = work(
-                    context.atlas,
-                    &derived,
-                    (creep, body, mover),
-                    offer,
-                    &stood,
-                    &ready,
-                    &mut acts,
-                );
-                wish_in(&mut wishes, creep.pos.room, wish);
-            }
-            None if !derived.colonies.is_empty()
-                && derived.colonies.iter().all(|c| c.room != creep.pos.room) =>
-            {
-                // Home, where it can be matched: the last of equal walks.
-                let walk = |c: &&derived::Colony| {
-                    distance(&*context.atlas, &derived, &creep.pos, &c.spawns[0].pos)
-                        .unwrap_or(i32::MAX)
-                };
-                let home = derived
-                    .colonies
+        let Some((slot, body, task)) = at else {
+            // What a body without a slot holds is spent where it stands.
+            let controller = (derived.grounds.iter())
+                .filter_map(|g| g.controller.as_ref())
+                .find(|c| c.owner.is_ours() && creep.pos.within(task::RANGE_UPGRADE, &c.pos));
+            if let Some(c) = controller.filter(|_| creep.store.amount_of(&Resource::Energy) > 0)
+                && creep
+                    .body
                     .iter()
-                    .rev()
-                    .min_by_key(walk)
-                    .map_or(creep.pos, |c| c.spawns[0].pos);
-
-                wish_in(
-                    &mut wishes,
-                    creep.pos.room,
-                    plan::toward(context.atlas, creep, mover, &tick::target_at(&home, 1), 1),
-                );
+                    .any(|p| p.kind == BodyPart::Work && p.hits > 0)
+            {
+                acts.push(Intent::Creep(
+                    creep.name.clone(),
+                    CreepAct::Upgrade(c.id.clone()),
+                ));
             }
-            None => wish_in(
-                &mut wishes,
-                creep.pos.room,
-                plan::stay(&*context.atlas, creep, mover.factor, 1),
-            ),
+            let wish = home(context.atlas, &derived, creep, mover);
+            wish_in(&mut wishes, creep.pos.room, wish);
+            continue;
+        };
+        if slot.closed {
+            next.insert(creep.name.clone(), format!("{}|", slot.id));
+            let wish = home(context.atlas, &derived, creep, mover);
+            wish_in(&mut wishes, creep.pos.room, wish);
+            continue;
         }
+        let held = task.as_ref().map_or(String::new(), task::task_id);
+        next.insert(creep.name.clone(), format!("{}|{held}", slot.id));
+
+        let wish = match &task {
+            Some(task) => work(
+                context.atlas,
+                &derived,
+                (creep, body, mover),
+                (slot, task),
+                &stood,
+                &ready,
+                &mut acts,
+            ),
+            None => plan::stay(&*context.atlas, creep, mover.factor, 1),
+        };
+        wish_in(&mut wishes, creep.pos.room, wish);
+    }
+    for b in &derived.ovens {
+        if let Some(si) = assigned.get(&b.name) {
+            next.insert(b.name.clone(), format!("{}|", slots[*si].id));
+        }
+    }
+    for c in &casts {
+        next.insert(c.name.clone(), format!("{}|", c.slot));
     }
 
     let moves = (wishes.into_iter())
         .flat_map(|(room, list)| list.into_iter().map(move |w| Intent::Wish(room, w)));
-
     let taken: BTreeSet<String> = (acts.iter())
         .filter_map(|act| match act {
-            Intent::Creep(name, CreepAct::Pickup(_)) => Some(name.clone()),
+            Intent::Creep(
+                name,
+                CreepAct::Pickup(_) | CreepAct::Withdraw(..) | CreepAct::Harvest(_),
+            ) => Some(name.clone()),
             _ => None,
         })
         .collect();
-
     intents.extend(acts);
     intents.extend(pickups(&derived, &taken));
     intents.extend(sends(&derived));
     intents.extend(moves);
 
-    let mut next = state.clone();
-    next.assignments = assignments;
-
-    Ok((intents, next))
+    let mut state = state.clone();
+    state.assignments = next;
+    Ok((intents, state))
 }
 
-/// A garrison full on its post raises or keeps its container; away from a
-/// colony no crew raises one nor stays to keep it.
-fn raising(derived: &Derived, body: &Body, offer: &Offer) -> Option<CreepAct> {
+/// A body with no slot walks home, where one may open, the last of equal
+/// walks; at home it stands.
+fn home(atlas: &mut Atlas, derived: &Derived, creep: &Creep, mover: Mover) -> Wish {
+    if derived.colonies.is_empty() || derived.colonies.iter().any(|c| c.room == creep.pos.room) {
+        return plan::stay(&*atlas, creep, mover.factor, 1);
+    }
+    let walk = |c: &&derived::Colony| {
+        distance(&*atlas, derived, &creep.pos, &c.spawns[0].pos).unwrap_or(i32::MAX)
+    };
+    let home = (derived.colonies.iter().rev())
+        .min_by_key(walk)
+        .map_or(creep.pos, |c| c.spawns[0].pos);
+    plan::toward(atlas, creep, mover, &tick::target_at(&home, 1), 1)
+}
+
+/// A harvester full on its post raises or keeps the container under it, so
+/// its dig never piles on the site.
+fn raising(derived: &Derived, body: &Body, posted: bool) -> Option<CreepAct> {
     let at = &body.pos;
-    if !(pool::garrisons(body, offer)
-        && body.energy > 0
-        && body.free == 0
-        && offer.post.as_ref() == Some(at))
-    {
+    if !(posted && body.work > 0 && body.energy > 0 && body.free == 0) {
         return None;
     }
-    (derived.grounds.iter().skip(derived.colonies.len())).find_map(|g| {
-        match g.sites.iter().find(|s| s.pos == *at) {
+    derived
+        .grounds
+        .iter()
+        .filter(|g| g.room == at.room)
+        .find_map(|g| match g.sites.iter().find(|s| s.pos == *at) {
             Some(site) => Some(CreepAct::Build(site.id.clone())),
             None => (g.repairs.iter())
                 .find(|r| r.pos == *at && r.kind.is_container() && 2 * r.hits < r.hits_max)
                 .map(|r| CreepAct::Repair(r.id.clone())),
-        }
-    })
+        })
 }
 
 #[cfg(test)]
@@ -715,14 +703,16 @@ mod tests {
     use crate::core::state::State;
 
     #[test]
-    fn decide_never_faults_and_assigns_only_offered_tasks() {
+    fn decide_never_faults_and_holds_a_slot_and_a_task_it_can_read() {
         let mut dice = Dice::new(51);
 
         for _ in 0..100 {
             let g = dice::world(&mut dice);
             let mut atlas = Atlas::of_world(&g.world);
             let sightings = BTreeMap::new();
-            let declarations = tick::undeclared();
+            let mut declarations = tick::undeclared();
+            declarations.outposts = g.worked.clone();
+            declarations.claims = g.claims.clone();
             let derived = tick::derive(&g.world, &mut atlas, &declarations, &sightings);
 
             let mut context = Context {
@@ -735,12 +725,14 @@ mod tests {
                 trace: false,
             };
 
-            let (intents, state) = decide(&mut context, &State::empty()).expect("a world decides");
+            let (_, first) = decide(&mut context, &State::empty()).expect("a world decides");
+            let (intents, state) = decide(&mut context, &first).expect("a world decides again");
 
-            for (name, id) in &state.assignments {
+            for (name, held) in &state.assignments {
+                assert!(!slots::slot_of(held).is_empty(), "{name} {held}");
                 assert!(
-                    crate::core::economy::task::of_task_id(id).is_some(),
-                    "{name} {id}"
+                    slots::task_of(held).is_none_or(|t| task::of_task_id(t).is_some()),
+                    "{name} {held}"
                 );
             }
 

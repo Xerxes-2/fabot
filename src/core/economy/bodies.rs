@@ -1,5 +1,3 @@
-/// A pattern shapes what a body is good at, never what it is assigned: the
-/// matcher reads parts, not patterns, but for the harvester's seat (`Pool::fits`).
 use crate::core::engine;
 use crate::core::vocabulary::{BodyPart, part_count_in};
 
@@ -31,7 +29,6 @@ impl Pattern {
     }
 }
 
-/// In the order a quota reports them.
 pub const ALL_PATTERNS: [Pattern; 6] = [
     Pattern::Worker,
     Pattern::Harvester,
@@ -262,6 +259,39 @@ pub fn sized(pattern: Pattern, most: i32, capacity: i32) -> Option<Vec<BodyPart>
     }
 }
 
+/// A route's walk for a loaded body at each full-speed pace, and back empty.
+#[derive(Clone, Copy, Debug)]
+pub struct Leg {
+    /// One CARRY a MOVE: full speed loaded on plain.
+    pub even: i32,
+    /// Two CARRY a MOVE: full speed loaded on road only.
+    pub roaded: i32,
+    pub empty: i32,
+}
+
+/// CARRY a MOVE: any ratio between 2 and 1 walks plain no faster than 2 and
+/// carries less, so only these two are ever cast. Energy delivered over a
+/// life per energy spent decides; a tie goes to 2, fewer parts and creeps a
+/// load.
+pub fn carry_per_move(leg: Leg) -> i32 {
+    let delivered = |carry: i32, cost: i32, loaded: i32| {
+        f64::from(carry) / f64::from(cost) / f64::from(loaded + leg.empty).max(1.0)
+    };
+    let even = delivered(engine::CARRY_PART_CAPACITY, 100, leg.even);
+    let roaded = delivered(2 * engine::CARRY_PART_CAPACITY, 150, leg.roaded);
+    if even > roaded { 1 } else { 2 }
+}
+
+/// A hauler of `carry` CARRY at most, in whole blocks of the ratio.
+pub fn hauler(ratio: i32, carry: i32, capacity: i32) -> Option<Vec<BodyPart>> {
+    let mut block = replicate(ratio, BodyPart::Carry);
+    block.push(BodyPart::Move);
+    (capacity >= engine::body_cost(&block)).then(|| {
+        let most = (carry + ratio - 1) / ratio;
+        engine::with_move_last(whole_blocks(&block, most.max(1), capacity))
+    })
+}
+
 /// The energy a controller takes a tick: past it an upgrader drinks nothing.
 pub fn upgradable_at(level: i32) -> i32 {
     if level >= engine::CONTROLLER_MAX_LEVEL {
@@ -334,6 +364,24 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn a_hauler_on_road_carries_two_a_move_and_on_plain_one() {
+        for d in 1..60 {
+            let road = Leg {
+                even: d,
+                roaded: d,
+                empty: d,
+            };
+            let plain = Leg {
+                even: d,
+                roaded: 2 * d,
+                empty: d,
+            };
+            assert_eq!(carry_per_move(road), 2);
+            assert_eq!(carry_per_move(plain), 1);
         }
     }
 

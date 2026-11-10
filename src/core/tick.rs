@@ -117,6 +117,8 @@ pub struct ColonyPlan {
     pub room: RoomName,
     pub stage: Stage,
     pub target: i32,
+    /// The stock its economy keeps before it spends a surplus.
+    pub reserve: i32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

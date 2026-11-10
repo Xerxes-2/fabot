@@ -371,6 +371,7 @@ pub fn exploited(owned: &BTreeSet<RoomName>) -> Vec<ColonyPlan> {
             room: *room,
             stage: Stage::Exploit,
             target: 8,
+            reserve: 0,
         })
         .collect()
 }

@@ -59,11 +59,11 @@ pub fn evacuate(g: &mut Ground, room: &Room, creeps: &[Creep], to: Option<(RoomN
         .collect();
 
     let mut owed: Vec<(Resource, i32)> = Vec::new();
-    // An ore aboard is still owed, or its carrier finds no terminal to fill.
+    // A load aboard is still owed, or its carrier finds no terminal to fill.
     let aboard = creeps
         .iter()
         .filter(|c| c.owner.is_ours() && c.pos.room == room.name)
-        .flat_map(|c| c.store.held.iter().filter(|(r, _)| !r.is_energy()).cloned());
+        .flat_map(|c| c.store.held.iter().cloned());
     for (r, n) in g.ores.iter().map(|o| (o.2.clone(), o.3)).chain(aboard) {
         match owed.iter_mut().find(|(each, _)| *each == r) {
             Some((_, total)) => *total += n,
