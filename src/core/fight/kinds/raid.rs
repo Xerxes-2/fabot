@@ -353,6 +353,9 @@ pub fn volley(sight: &Sight, room: &Room, c: &Creep) -> Option<CreepAct> {
         .iter()
         .filter(|p| p.hits > 0 && p.kind.is_ranged_attack())
         .count() as i32;
+    if guns == 0 {
+        return None;
+    }
     let sources: Vec<Pos> = room.sources.iter().map(|s| s.pos).collect();
     let theirs = || room.structures.iter().filter(|s| s.owner.is_theirs());
     let cover = |s: &Structure| theirs().find(|r| r.kind == Kind::Rampart && r.pos == s.pos);

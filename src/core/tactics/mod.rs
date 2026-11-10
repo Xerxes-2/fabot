@@ -441,7 +441,6 @@ pub fn step_back(
     }
 }
 
-/// To a shot's range of the group, as one.
 pub fn blob(
     sight: &mut Sight,
     centre: &Pos,
@@ -475,13 +474,13 @@ pub fn seats_at(atlas: &Atlas, line: &[Pos], room: RoomName, work: Tile) -> i32 
         .count() as i32
 }
 
-/// A siege's breach as its members read it this tick.
 pub struct Front {
     pub breach: Pos,
     /// None where the breach is his controller: tapped, never struck.
     pub wall: Option<String>,
     pub line: Vec<Pos>,
     pub towers: Vec<Pos>,
+    pub struck: Option<String>,
     /// What the towers deal a body working the breach.
     pub strike: i32,
     /// The rival's sources outside its ramparts, where pickets stand, and
@@ -543,12 +542,10 @@ fn nearest_tower(front: &Front, at: &Pos) -> i32 {
         .fold(99, |least, t| least.min(t.range(at).unwrap_or(99)))
 }
 
-/// Assumed, as the scripted rival does: towers aim at the nearest of the set.
+/// Seen, not assumed: a rival's towers may focus the softest, not the nearest.
 pub fn focus_of<'a>(front: &Front, members: &[&'a Creep]) -> Option<&'a Creep> {
-    members
-        .iter()
-        .copied()
-        .min_by_key(|m| (nearest_tower(front, &m.pos), &m.name))
+    let spared = |m: &Creep| front.struck.as_ref() != Some(&m.id);
+    (members.iter().copied()).min_by_key(|m| (spared(m), nearest_tower(front, &m.pos), &m.name))
 }
 
 /// The edge a drain bounces through (`ARCHITECTURE.md` §6.2): `bounce`'s
@@ -670,13 +667,12 @@ pub fn siege(
             )
         }
     } else {
-        let at_breach_room: Vec<&Creep> = dismantlers
-            .iter()
-            .copied()
-            .filter(|d| d.pos.room == front.breach.room)
+        // Beside the body his towers strike: there the plan pooled the heal.
+        let struck = |m: &Creep| m.name != creep.name && front.struck.as_ref() == Some(&m.id);
+        let focus: Vec<&Creep> = (members.iter().copied())
+            .filter(|m| struck(m) || (dismantles(m) && m.pos.room == front.breach.room))
             .collect();
-
-        let anchor = focus_of(front, &at_breach_room).or_else(|| {
+        let anchor = focus_of(front, &focus).or_else(|| {
             dismantlers
                 .iter()
                 .copied()
@@ -695,7 +691,7 @@ pub fn siege(
 
                 let mut medics: Vec<String> = members
                     .iter()
-                    .filter(|m| !dismantles(m))
+                    .filter(|m| !dismantles(m) && m.name != d.name)
                     .map(|m| m.name.clone())
                     .collect();
                 medics.sort();

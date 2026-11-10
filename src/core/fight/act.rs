@@ -371,6 +371,10 @@ fn front_of(scene: &Scene, atlas: &Atlas, e: &Engagement) -> Option<tactics::Fro
         return None;
     };
     let towers = scene.charged(room);
+    let fired: BTreeSet<&String> = scene.towers_in(room).iter().map(|t| &t.id).collect();
+    let struck = (scene.world.attacks.iter())
+        .find(|(by, _)| fired.contains(by))
+        .map(|(_, at)| at.clone());
     let strike = (towers.iter())
         .map(|t| t.range(&wall.pos).map_or(0, engine::tower_attack_at))
         .sum();
@@ -390,14 +394,12 @@ fn front_of(scene: &Scene, atlas: &Atlas, e: &Engagement) -> Option<tactics::Fro
     Some(tactics::Front {
         breach: wall.pos,
         wall: (!room.controller.as_ref().is_some_and(|c| c.id == wall.id)).then(|| wall.id.clone()),
-        line: room
-            .structures
-            .iter()
-            .filter(|s| Scene::rival(s))
+        line: (room.structures.iter().filter(|s| Scene::rival(s)))
             .map(|s| s.pos)
             .collect(),
         posts,
         towers,
+        struck,
         strike,
     })
 }
