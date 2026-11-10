@@ -2,7 +2,7 @@
 use crate::core::atlas::{Atlas, Field, Mover, Target};
 use crate::core::grid::{self, FatigueFactor, Footprint};
 use crate::core::mv::Wish;
-use crate::core::tiles::{self, Tile};
+use crate::core::tiles::{self, Tile, TileSet};
 use crate::core::world::Creep;
 
 pub fn can_move(creep: &Creep, factor: FatigueFactor) -> bool {
@@ -58,7 +58,6 @@ pub fn stay(atlas: &Atlas, creep: &Creep, factor: FatigueFactor, weight: i32) ->
     wish(creep, moves, head, None, tail, Vec::new(), weight)
 }
 
-/// The tail is the way round a body the Atlas's walk does not see.
 pub fn toward(
     atlas: &mut Atlas,
     creep: &Creep,
@@ -66,12 +65,24 @@ pub fn toward(
     target: &Target,
     weight: i32,
 ) -> Wish {
+    toward_round(atlas, creep, mover, target, weight, None)
+}
+
+/// The tail is the way round a body the Atlas's walk does not see.
+pub fn toward_round(
+    atlas: &mut Atlas,
+    creep: &Creep,
+    mover: Mover,
+    target: &Target,
+    weight: i32,
+    danger: Option<&TileSet>,
+) -> Wish {
     let room = &creep.pos.room;
     let at = tiles::of_pos(&creep.pos);
     let moves = can_move(creep, mover.factor);
 
     let field: Option<Field> = if rests_soon(creep, mover.factor) {
-        atlas.field(mover, target, &creep.pos)
+        atlas.field_round(mover, target, &creep.pos, danger)
     } else {
         None
     };

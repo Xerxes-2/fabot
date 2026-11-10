@@ -59,12 +59,13 @@ pub struct RoomGrid {
 }
 
 /// What a flood is a function of besides the room's weights: the mover's
-/// footprint and pace, and its goals.
+/// footprint and pace, its goals, and the tiles it walks round.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct FloodOf<'a> {
     footprint: Footprint,
     steps: [Option<i32>; 3],
     goal: Goal<'a>,
+    danger: Option<&'a TileSet>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -75,6 +76,8 @@ enum Goal<'a> {
         tiles: &'a [Tile],
     },
     Exit(&'a [(Tile, Tile)]),
+    /// Off the border band, since a body left on it is carried across.
+    Clear,
 }
 
 /// A kept flood's `FloodOf`, owning its goal; a lookup borrows it, so a hit
@@ -84,16 +87,18 @@ pub struct FloodKey {
     footprint: Footprint,
     steps: [Option<i32>; 3],
     goal: KeptGoal,
+    danger: Option<TileSet>,
 }
 
 #[derive(Clone, Debug)]
 enum KeptGoal {
     Seats { range: i32, tiles: Vec<Tile> },
     Exit(Vec<(Tile, Tile)>),
+    Clear,
 }
 
 impl FloodOf<'_> {
-    fn of(mover: Mover, goal: Goal) -> FloodOf {
+    fn of<'a>(mover: Mover, goal: Goal<'a>, danger: Option<&'a TileSet>) -> FloodOf<'a> {
         let grounds = [
             engine::ROAD_WEIGHT,
             engine::PLAIN_WEIGHT,
@@ -103,6 +108,7 @@ impl FloodOf<'_> {
             footprint: mover.footprint,
             steps: grounds.map(|w| step_ticks(mover.factor, w)),
             goal,
+            danger,
         }
     }
 
@@ -113,11 +119,13 @@ impl FloodOf<'_> {
                 tiles: tiles.to_vec(),
             },
             Goal::Exit(exit) => KeptGoal::Exit(exit.to_vec()),
+            Goal::Clear => KeptGoal::Clear,
         };
         FloodKey {
             footprint: self.footprint,
             steps: self.steps,
             goal,
+            danger: self.danger.cloned(),
         }
     }
 }
@@ -140,11 +148,13 @@ impl Keyed for FloodKey {
                 tiles,
             },
             KeptGoal::Exit(exit) => Goal::Exit(exit),
+            KeptGoal::Clear => Goal::Clear,
         };
         FloodOf {
             footprint: self.footprint,
             steps: self.steps,
             goal,
+            danger: self.danger.as_ref(),
         }
     }
 }
@@ -185,12 +195,20 @@ impl std::hash::Hash for FloodKey {
 
 impl RoomGrid {
     /// The flood toward `goal`, and whether it was kept.
-    fn flood(&self, mover: Mover, goal: Goal) -> (Rc<Table<i32>>, bool) {
-        let key = FloodOf::of(mover, goal);
+    fn flood(&self, mover: Mover, goal: Goal, danger: Option<&TileSet>) -> (Rc<Table<i32>>, bool) {
+        let key = FloodOf::of(mover, goal, danger);
         if let Some(dist) = self.floods.borrow().get(&key as &dyn Keyed) {
             return (dist.clone(), true);
         }
         let footprint = mover.footprint;
+        let walled = danger.filter(|_| goal != Goal::Clear).map(|danger| {
+            let mut weights = (*self.weights).clone();
+            for t in tiles::all().filter(|t| danger.contains(*t)) {
+                weights[t] = None;
+            }
+            weights
+        });
+        let weights = walled.as_ref().unwrap_or(&self.weights);
         let goals = match key.goal {
             Goal::Seats {
                 range,
@@ -199,19 +217,24 @@ impl RoomGrid {
                 let mut goals = Vec::new();
                 for &tile in targets {
                     if tile.index() < tiles::COUNT {
-                        Atlas::seats_near(footprint, &self.weights, range, tile, &mut goals);
+                        Atlas::seats_near(footprint, weights, range, tile, &mut goals);
                     }
                 }
                 goals
             }
             Goal::Exit(exit) => (exit.iter())
-                .flat_map(|(a, b)| {
-                    Atlas::exit_goals(footprint, &self.weights, Atlas::stretch(*a, *b))
+                .flat_map(|(a, b)| Atlas::exit_goals(footprint, weights, Atlas::stretch(*a, *b)))
+                .collect(),
+            Goal::Clear => tiles::all()
+                .filter(|t| {
+                    weight_of(footprint, weights, *t).is_some()
+                        && !on_edge(footprint, *t)
+                        && !danger.is_some_and(|d| d.contains(*t))
                 })
                 .collect(),
         };
         let steps = step_table(mover.factor);
-        let dist = Rc::new(flood(footprint, &self.weights, &steps, &goals));
+        let dist = Rc::new(flood(footprint, weights, &steps, &goals));
         self.floods.borrow_mut().insert(key.kept(), dist.clone());
         (dist, false)
     }
@@ -881,7 +904,13 @@ impl Atlas {
         &band[at(first)..=at(last)]
     }
 
-    fn flood_seats(&self, grid: &RoomGrid, mover: Mover, target: &Target) -> Rc<Table<i32>> {
+    fn flood_seats(
+        &self,
+        grid: &RoomGrid,
+        mover: Mover,
+        target: &Target,
+        danger: Option<&TileSet>,
+    ) -> Rc<Table<i32>> {
         let sorted = |t: &[Tile]| t.is_sorted_by(|a, b| a < b);
         let mut owned = Vec::new();
         let tiles = if sorted(&target.tiles) {
@@ -893,29 +922,66 @@ impl Atlas {
             &owned
         };
         let range = target.range;
-        self.flood_in(grid, mover, Goal::Seats { range, tiles })
+        self.flood_in(grid, mover, Goal::Seats { range, tiles }, danger)
     }
 
-    fn flood_in(&self, grid: &RoomGrid, mover: Mover, goal: Goal) -> Rc<Table<i32>> {
-        let (dist, kept) = grid.flood(mover, goal);
+    fn flood_in(
+        &self,
+        grid: &RoomGrid,
+        mover: Mover,
+        goal: Goal,
+        danger: Option<&TileSet>,
+    ) -> Rc<Table<i32>> {
+        let (dist, kept) = grid.flood(mover, goal, danger);
         let count = if kept { &self.hits } else { &self.misses };
         count.set(count.get() + 1);
         dist
     }
 
-    /// Out of another room than the target's, the flood toward the exit the
-    /// room graph leaves `at`'s region by.
     pub fn field(&self, mover: Mover, target: &Target, at: &Pos) -> Option<Field> {
+        self.field_round(mover, target, at, None)
+    }
+
+    /// Out of another room than the target's, the flood toward the exit the
+    /// room graph leaves `at`'s region by. `danger` is walled in this room
+    /// only, since the room graph prices rooms, not tiles; from inside it in
+    /// the target's room, the walk is to the nearest tile clear of it.
+    pub fn field_round(
+        &self,
+        mover: Mover,
+        target: &Target,
+        at: &Pos,
+        danger: Option<&TileSet>,
+    ) -> Option<Field> {
         let grid = self.grid(at.room).filter(|_| mover.factor.moves > 0)?;
         let tile = tiles::of_pos(at);
+        let inside = danger.is_some_and(|d| d.contains(tile));
+        if at.room == target.room && inside {
+            let clear = self.flood_in(grid, mover, Goal::Clear, danger);
+            return Some(Atlas::field_of(grid, mover, clear, 0));
+        }
         if at.room == target.room {
-            let seats = self.flood_seats(grid, mover, target);
+            let seats = self.flood_seats(grid, mover, target, danger);
             return Some(Atlas::field_of(grid, mover, seats, 0));
         }
         let (avoid, hops) = (&target.avoid, target.max_hops);
         let stop = [(at.room.coords(), Some(tile))];
         let ways = graph::search(self, mover, target.room, Some(target), avoid, hops, &stop);
-        let (dist, onward) = ways.out_of(self, mover, at.room, tile)?;
+        let (dist, onward, exit) = ways.out_of(self, mover, at.room, tile)?;
+        // Reached on its way through, a body leaves by the graph's way: a
+        // hostile hunting it follows it anywhere in the room, never across.
+        let Some(danger) = danger.filter(|_| !inside) else {
+            return Some(Atlas::field_of(grid, mover, dist, onward));
+        };
+        let walled = self.flood_in(grid, mover, Goal::Exit(exit), Some(danger));
+        if walled[tile] != UNREACHED {
+            return Some(Atlas::field_of(grid, mover, walled, onward));
+        }
+        // The graph's way out is walled: any other way on the whole tree knows.
+        let all = graph::search(self, mover, target.room, Some(target), avoid, hops, &[]);
+        let (dist, onward) = all
+            .round(self, mover, at.room, tile, danger)
+            .unwrap_or((walled, onward));
         Some(Atlas::field_of(grid, mover, dist, onward))
     }
 
@@ -944,7 +1010,7 @@ impl Atlas {
     pub fn ticks_on(&self, tree: &Tree, mover: Mover, target: &Target, from: &Pos) -> Option<i32> {
         let (start, root) = (from.room.coords(), tree.root?);
         let flood = |c: Coords, exit: &graph::Exit| {
-            Some(self.flood_in(self.rooms.get(&c)?, mover, Goal::Exit(exit)))
+            Some(self.flood_in(self.rooms.get(&c)?, mover, Goal::Exit(exit), None))
         };
         // On the band already, a body lands on its own mirror tile: the leg
         // is the walk it takes on either side of the border.
@@ -972,7 +1038,7 @@ impl Atlas {
             }
             let seats = self
                 .grid(target.room)
-                .map(|g| self.flood_seats(g, mover, target));
+                .map(|g| self.flood_seats(g, mover, target, None));
             let entry = match seats {
                 Some(seats) => landed(&seats, &last.exit, own)?,
                 None => Atlas::crossing_ticks(),
@@ -1019,10 +1085,10 @@ mod tests {
             tiles: &tiles,
         };
         let mut kept: HashMap<FloodKey, i32> = HashMap::default();
-        kept.insert(FloodOf::of(Atlas::PACE, seats).kept(), 1);
-        kept.insert(FloodOf::of(Atlas::PACE, Goal::Exit(&exit)).kept(), 2);
+        kept.insert(FloodOf::of(Atlas::PACE, seats, None).kept(), 1);
+        kept.insert(FloodOf::of(Atlas::PACE, Goal::Exit(&exit), None).kept(), 2);
         let at = |goal| {
-            kept.get(&FloodOf::of(Atlas::PACE, goal) as &dyn Keyed)
+            kept.get(&FloodOf::of(Atlas::PACE, goal, None) as &dyn Keyed)
                 .copied()
         };
         assert_eq!(at(seats), Some(1));

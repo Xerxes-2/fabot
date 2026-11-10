@@ -12,9 +12,9 @@ use super::mv;
 use super::state::State;
 use super::strategy::intel::Intel;
 use super::tactics::{self, Tactic};
-use super::tiles::{self, Tile};
+use super::tiles::{self, Tile, TileSet};
 use super::vocabulary::{BodyPart, Compound, Resource};
-use super::world::{Creep, Owner, Pos, RoomName, Sightings, World, hostiles};
+use super::world::{Creep, Owner, Pos, Room, RoomName, Sightings, World, hostiles};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Declared {
@@ -316,6 +316,48 @@ pub struct Derived {
     /// The declared outposts and raised claims a colony reaches, whose work
     /// no foe stands down (`ARCHITECTURE.md` §13, M1b).
     pub worked: Vec<Outpost>,
+    /// What a body outside a fight walks round, per room with any.
+    pub danger: Vec<(RoomName, TileSet)>,
+}
+
+impl Derived {
+    pub fn danger(&self, room: RoomName) -> Option<&TileSet> {
+        (self.danger.iter()).find_map(|(r, d)| (*r == room).then_some(d))
+    }
+}
+
+/// A keeper's strikes the Atlas walls already; a tower strikes the whole
+/// room, its reach taken where its fire is above its weakest. None in a room
+/// we own: its refills keep the towers firing, and the strikes they take are
+/// what calls the safe mode.
+fn danger(world: &World, owned: &BTreeSet<RoomName>) -> Vec<(RoomName, TileSet)> {
+    let reaches = |r: &Room| {
+        let creeps = (r.hostiles())
+            .filter(|c| c.owner != Owner::Keeper && hostiles::strikes(c))
+            .map(|c| (tiles::of_pos(&c.pos), hostiles::reach(c)));
+        let towers = (r.structures.iter())
+            .filter(|s| {
+                s.kind.is_tower()
+                    && s.owner.is_theirs()
+                    && !s.owner.is_ally()
+                    && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
+            })
+            .map(|s| (tiles::of_pos(&s.pos), engine::TOWER_FALLOFF_RANGE));
+        creeps.chain(towers).collect::<Vec<_>>()
+    };
+    (world.rooms.iter())
+        .filter(|r| !owned.contains(&r.name))
+        .filter_map(|r| {
+            let reaches = reaches(r);
+            let mut set = TileSet::default();
+            for (at, reach) in &reaches {
+                tiles::within(*reach, *at).into_iter().for_each(|t| {
+                    set.insert(t);
+                });
+            }
+            (!reaches.is_empty()).then_some((r.name, set))
+        })
+        .collect()
 }
 
 pub fn derive(
@@ -346,6 +388,7 @@ pub fn derive(
         .collect();
 
     Derived {
+        danger: danger(world, &owned),
         owned,
         colonies,
         worked,

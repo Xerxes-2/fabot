@@ -7,7 +7,7 @@ use std::collections::{BTreeSet, BinaryHeap};
 use std::rc::Rc;
 
 use super::grid::{UNREACHED, weight_of};
-use super::tiles::{self, Table, Tile};
+use super::tiles::{self, Table, Tile, TileSet};
 use super::{Atlas, Coords, Goal, Mover, RoomGrid, Target};
 use crate::core::HashMap;
 use crate::core::world::RoomName;
@@ -102,12 +102,69 @@ impl Ways {
         mover: Mover,
         room: RoomName,
         at: Tile,
-    ) -> Option<(Rc<Table<i32>>, i32)> {
+    ) -> Option<(Rc<Table<i32>>, i32, &Exit)> {
         let c = room.coords();
         let grid = atlas.rooms.get(&c)?;
         let held = |n: &&Node| n.dist.as_ref().is_some_and(|d| holds(mover, d, grid, at));
         let node = self.regions(c).map(|n| &self.nodes[n]).find(held)?;
-        Some((node.dist.clone()?, node.value))
+        Some((node.dist.clone()?, node.value, &node.exit))
+    }
+}
+
+impl Ways {
+    /// Out of `room` with `danger` walled, the way on through a neighbour's
+    /// region whose own way on never comes back, the fewest ticks first.
+    pub fn round(
+        &self,
+        atlas: &Atlas,
+        mover: Mover,
+        room: RoomName,
+        at: Tile,
+        danger: &TileSet,
+    ) -> Option<(Rc<Table<i32>>, i32)> {
+        let c = room.coords();
+        let grid = atlas.rooms.get(&c)?;
+        let through = |mut n: usize| loop {
+            let node = &self.nodes[n];
+            match node.next {
+                _ if node.room == c => return true,
+                Some(next) => n = next,
+                None => return false,
+            }
+        };
+        let mut best: Option<(i32, Rc<Table<i32>>, i32)> = None;
+        for side in Atlas::EXITS {
+            let there = neighbour(c, side);
+            let far = atlas.rooms.get(&there);
+            for n in self.regions(there).filter(|n| !through(*n)) {
+                let node = &self.nodes[n];
+                let land = |l: Tile| match &node.dist {
+                    Some(d) => d[Atlas::anchor(mover.footprint, l)],
+                    None => Atlas::crossing_ticks(),
+                };
+                let mut exit = Vec::new();
+                let mut landing = UNREACHED;
+                for s in stretches(Some(grid), far, side) {
+                    let d = s.iter().map(|(_, l)| land(*l)).min().unwrap_or(UNREACHED);
+                    if d != UNREACHED {
+                        exit.push((s[0].0, s[s.len() - 1].0));
+                        landing = landing.min(d);
+                    }
+                }
+                if exit.is_empty() {
+                    continue;
+                }
+                let dist = atlas.flood_in(grid, mover, Goal::Exit(&exit), Some(danger));
+                if dist[at] == UNREACHED {
+                    continue;
+                }
+                let onward = node.value + landing;
+                if best.as_ref().is_none_or(|b| dist[at] + onward < b.0) {
+                    best = Some((dist[at] + onward, dist, onward));
+                }
+            }
+        }
+        best.map(|(_, dist, onward)| (dist, onward))
     }
 }
 
@@ -249,7 +306,7 @@ pub fn search(
             .copied()
             .unwrap_or(tiles::is_keeper_room(c)),
     };
-    let seats = target.and_then(|t| Some(atlas.flood_seats(grid_of(start)?, mover, t)));
+    let seats = target.and_then(|t| Some(atlas.flood_seats(grid_of(start)?, mover, t, None)));
     let on = |d: &Table<i32>, t: Tile| d[Atlas::anchor(mover.footprint, t)];
     ways.nodes.push(Node {
         room: start,
@@ -322,7 +379,7 @@ pub fn search(
         if held {
             continue;
         }
-        let dist = grid_of(r.room).map(|g| atlas.flood_in(g, mover, Goal::Exit(exit)));
+        let dist = grid_of(r.room).map(|g| atlas.flood_in(g, mover, Goal::Exit(exit), None));
         match ways.regions(r.room).last() {
             Some(last) => ways.nodes[last].next_in_room = Some(ways.nodes.len()),
             None => {

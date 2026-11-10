@@ -7,7 +7,7 @@ use crate::core::intents::{Ask, CreepAct, Intent, LabAct, LinkAct, Rank, Termina
 use crate::core::mv::{Wish, plan};
 use crate::core::state::State;
 use crate::core::tick::{self, Context};
-use crate::core::tiles::{self};
+use crate::core::tiles::{self, TileSet};
 use crate::core::vocabulary::{BodyPart, Resource};
 use crate::core::world::{Creep, Pos, RoomName};
 
@@ -390,7 +390,7 @@ fn target_of(
 fn work(
     atlas: &mut Atlas,
     derived: &Derived,
-    (creep, body, mover): (&Creep, &Body, Mover),
+    (creep, body, mover, danger): (&Creep, &Body, Mover, Option<&TileSet>),
     (slot, task): (&Slot, &Task),
     stood: &BTreeSet<Pos>,
     ready: &dyn Fn(&Task) -> bool,
@@ -459,7 +459,7 @@ fn work(
             ));
         }
     }
-    plan::toward(atlas, creep, mover, &target, weight_of(&slot.job))
+    plan::toward_round(atlas, creep, mover, &target, weight_of(&slot.job), danger)
 }
 
 pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, String> {
@@ -587,6 +587,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
     let mut wishes: Vec<(RoomName, Vec<Wish>)> = Vec::new();
     for (creep, at) in tasks {
         let mover = movers[creep.name.as_str()];
+        let danger = context.derived.danger(creep.pos.room);
         let Some((slot, body, task)) = at else {
             // What a body without a slot holds is spent where it stands.
             let controller = (derived.grounds.iter())
@@ -603,13 +604,13 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
                     CreepAct::Upgrade(c.id.clone()),
                 ));
             }
-            let wish = home(context.atlas, &derived, creep, mover);
+            let wish = home(context.atlas, &derived, creep, mover, danger);
             wish_in(&mut wishes, creep.pos.room, wish);
             continue;
         };
         if slot.closed {
             next.insert(creep.name.clone(), format!("{}|", slot.id));
-            let wish = home(context.atlas, &derived, creep, mover);
+            let wish = home(context.atlas, &derived, creep, mover, danger);
             wish_in(&mut wishes, creep.pos.room, wish);
             continue;
         }
@@ -620,7 +621,7 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             Some(task) => work(
                 context.atlas,
                 &derived,
-                (creep, body, mover),
+                (creep, body, mover, danger),
                 (slot, task),
                 &stood,
                 &ready,
@@ -661,7 +662,13 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
 
 /// A body with no slot walks home, where one may open, the last of equal
 /// walks; at home it stands.
-fn home(atlas: &mut Atlas, derived: &Derived, creep: &Creep, mover: Mover) -> Wish {
+fn home(
+    atlas: &mut Atlas,
+    derived: &Derived,
+    creep: &Creep,
+    mover: Mover,
+    danger: Option<&TileSet>,
+) -> Wish {
     if derived.colonies.is_empty() || derived.colonies.iter().any(|c| c.room == creep.pos.room) {
         return plan::stay(&*atlas, creep, mover.factor, 1);
     }
@@ -671,7 +678,7 @@ fn home(atlas: &mut Atlas, derived: &Derived, creep: &Creep, mover: Mover) -> Wi
     let home = (derived.colonies.iter().rev())
         .min_by_key(walk)
         .map_or(creep.pos, |c| c.spawns[0].pos);
-    plan::toward(atlas, creep, mover, &tick::target_at(&home, 1), 1)
+    plan::toward_round(atlas, creep, mover, &tick::target_at(&home, 1), 1, danger)
 }
 
 /// A harvester full on its post raises or keeps the container under it, so

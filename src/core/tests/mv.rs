@@ -7,7 +7,7 @@ use super::Dice;
 use crate::core::atlas::{Atlas, Mover, Target};
 use crate::core::grid::{Footprint, factor_of};
 use crate::core::mv::{Wish, arbitrate::arbitrate, plan};
-use crate::core::tiles::{self, Tile};
+use crate::core::tiles::{self, Tile, TileSet};
 use crate::core::vocabulary::{BodyPart, Boost};
 use crate::core::world::{Creep, Owner, Part, Room, RoomName, Store, World, terrain};
 
@@ -484,6 +484,37 @@ fn a_planned_wishs_working_tiles_hold_where_it_stands() {
     for errand in errands(32) {
         let (_, _, wish) = planned(&errand);
         assert!(wish.working.is_empty() || wish.working.contains(&wish.at));
+    }
+}
+
+#[test]
+fn a_planned_walk_never_steps_into_danger_and_steps_on_out_of_it_while_a_clear_tile_is_beside_it() {
+    let mut dice = Dice::new(34);
+    for errand in errands(34) {
+        let mut danger = TileSet::default();
+        let centre = Tile::of_index(dice.below(tiles::COUNT as i32) as usize);
+        for t in tiles::within(dice.between(1, 5), centre) {
+            danger.insert(t);
+        }
+        let mut atlas = Atlas::of_world(&world_of(&errand));
+        let mover = Mover {
+            footprint: Footprint::One,
+            factor: factor_of(&errand.creep),
+        };
+        let wish = plan::toward_round(
+            &mut atlas,
+            &errand.creep,
+            mover,
+            &errand.target,
+            3,
+            Some(&danger),
+        );
+        let clear = |t: Tile| atlas.passable(ROOM, t) && !danger.contains(t) && !tiles::on_edge(t);
+        if !danger.contains(wish.at) {
+            assert!(wish.stays() || !danger.contains(wish.head));
+        } else if wish.moves && around(wish.at).into_iter().any(clear) {
+            assert!(!wish.stays());
+        }
     }
 }
 

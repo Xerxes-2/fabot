@@ -107,7 +107,9 @@ World ──▶ Derived ──▶ decisions ──▶ Intents
 - **One cache exists**: `Atlas`'s flood table of goal-seeded reverse
   floods, keyed by (room, goal tiles and range — or the exit toward the next
   room —, footprint, pace class: the body's step ticks on road, plain and
-  swamp; a seat's price follows from swamp's), counting hits and misses. A
+  swamp; a seat's price follows from swamp's; the danger it walls, which
+  moves only where a hostile's own tile already changes the weights),
+  counting hits and misses. A
   room's floods outlive the tick while its weights are unchanged (owner's
   decision): within one tick half the floods repeated, across ticks nearly
   all, and a flood is a pure function of the weights, so a kept one is the
@@ -268,7 +270,14 @@ it anyway), and the season's fights come from neighbours, which intel sees.
 Open-source bots keep 75k–150k at RCL7–8.
 
 Port with these cuts:
-- No fight tasks (`Guard`, `Defend`, `Assault`, `Flee`), no Safety band.
+- No fight tasks (`Guard`, `Defend`, `Assault`, `Flee`), no Safety band. v1's
+  flee survives in `Move`: `Derived.danger` (each hostile's `hostiles::reach`,
+  an enemy tower's falloff range; none in a room we own, whose refills
+  feed the towers) is walled for a body outside a fight: it leaves a room
+  by another neighbour's way when the graph's is walled, and waits clear of
+  it while its target or every way on stands in it. Reached in its target's
+  room it walks to the nearest clear tile; reached on its way through it
+  leaves by the graph's way, since a hunter follows it anywhere but across.
 - No `Facts.fs`. Its ~1,100 economy lines (task ids, stages, hunger, perimeter)
   move into `Economy`; the rest is fight and does not come.
 - Outposts, errands and the rooms a colony works come from `declarations`, not

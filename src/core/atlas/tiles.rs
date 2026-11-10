@@ -67,7 +67,7 @@ pub fn table<T: Clone>(value: T) -> Table<T> {
 }
 
 /// A room's tiles, a bit each.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TileSet([u64; COUNT.div_ceil(64)]);
 
 impl Default for TileSet {
