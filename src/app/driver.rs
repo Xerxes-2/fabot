@@ -177,6 +177,7 @@ fn run_tick() -> Result<(), String> {
             world: &world,
             assignments: &result.state.assignments,
             engagements: &result.state.engagements,
+            casts: &result.state.casts,
             intents: &result.intents,
             refusals: &refusals,
             phases: &phases,

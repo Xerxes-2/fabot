@@ -6,7 +6,7 @@ use std::fmt::Write;
 use crate::core::HashMap;
 use crate::core::economy::bodies::{self, Pattern};
 use crate::core::engine;
-use crate::core::fight::shape::{Engagement, Phase};
+use crate::core::fight::shape::{Cast, Engagement, Phase};
 use crate::core::intents::{CreepAct, Intent, Refusal, SpawnAct, TowerAct};
 use crate::core::tick;
 use crate::core::tick::Declarations;
@@ -143,7 +143,7 @@ const METRICS: &[Metric] = &[
     metric(
         DWELL,
         Fold::Sum,
-        "ticks an armed creep, neither an ally's nor a keeper, stood in a room we own or declare an outpost with no tower of ours able to fire and no engagement answering (none open, or one disengaging or left to towers and ramparts); its defenders' walk out is not dwell",
+        "ticks an armed creep, neither an ally's nor a keeper, stood in a room we own or declare an outpost with no tower of ours able to fire and no engagement answering (none open, or one disengaging or left to towers and ramparts with no body of its own queued or spawning); its defenders' walk out is not dwell",
     ),
     metric(BODIES, Fold::Mean, "economy bodies"),
     metric(
@@ -333,6 +333,7 @@ pub struct Seen<'a> {
     pub world: &'a World,
     pub assignments: &'a BTreeMap<String, String>,
     pub engagements: &'a [Engagement],
+    pub casts: &'a [Cast],
     pub intents: &'a [Intent],
     pub refusals: &'a [Refusal],
     pub phases: &'a [(String, f64)],
@@ -654,8 +655,11 @@ fn dwell(sums: &mut Sums, seen: &Seen) {
                 && s.owner.is_ours()
                 && s.store.amount_of(&Resource::Energy) >= engine::TOWER_ENERGY_COST
         });
-        let answered = (seen.engagements.iter())
-            .any(|e| e.room == r.name && !e.unanswered && e.phase != Phase::Disengaging);
+        let answered = seen.engagements.iter().any(|e| {
+            e.room == r.name
+                && e.phase != Phase::Disengaging
+                && (!e.unanswered || seen.casts.iter().any(|c| c.engagement == e.id))
+        });
         if worked && armed && !towers && !answered {
             add(sums, Some(r.name), DWELL, 1.0);
         }

@@ -159,7 +159,7 @@ cold tick never spends more than ❓ 60% of the limit.
 | `Season` | this season's rules: what scores, its structures, its NPCs, its map quirks | World | declarations to Strategy, season intents | **new**, disposable (§8) |
 | `Move` | per-room movement arbitration, run by `Tick` over every module's wishes, and the step functions (chase, kite, flee, formation) | Intents, Atlas | move intents | port `Resolver.fs`, drop fight precedence |
 | `Executor` | API calls | Intents | Game | port |
-| `Observe` | what the operator reads: health, faults, per-module CPU, engagements, exchange error, the metrics (§10.5) | everything; the metrics: World, assignments, engagements, the tick's intents and refusals, phases, the declared outposts | `State.Observe`, `metrics` | rewrite small |
+| `Observe` | what the operator reads: health, faults, per-module CPU, engagements, exchange error, the metrics (§10.5) | everything; the metrics: World, assignments, engagements and their casts, the tick's intents and refusals, phases, the declared outposts | `State.Observe`, `metrics` | rewrite small |
 
 Dependency direction is top to bottom. `Fight` and `Economy` do not import each
 other; `Season` is imported by `Strategy` only. The seam between them is a
@@ -894,7 +894,7 @@ definition: last season most faults were found by the owner watching the
 client. `core/observe/metrics.rs` holds the definitions and the thresholds,
 each in one table; `observe health` lists a metric past its threshold (never
 `Game.notify`), and a scenario bounds one with `{ "metric", "max"|"min" }`.
-It is a pure step from the tick's World, assignments, intents and refusals
+It is a pure step from the tick's World, assignments, engagements and their casts, intents and refusals
 after the executor, and no decision reads it, so `decide` stays
 deterministic. Spend is estimated from the intents (WORK × power, capped by
 the target and carried energy), not read from the event log, which is a call
