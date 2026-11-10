@@ -91,12 +91,12 @@ const METRICS: &[Metric] = &[
     metric(
         BUILD,
         Fold::Sum,
-        "accepted build intents: WORK × 5, capped by the site's remainder and the energy held or fed",
+        "accepted build intents: WORK × 5, capped by what the tick's earlier builders left of the site and the energy held or fed",
     ),
     metric(
         REPAIR,
         Fold::Sum,
-        "accepted repair intents: WORK × 1, capped by hits missing / 100 and the energy held or fed",
+        "accepted repair intents: WORK × 1, capped by hits missing / 100 after the tick's earlier repairs and the energy held or fed",
     ),
     metric(
         UPGRADE,
@@ -431,11 +431,13 @@ fn fed<'a>(creeps: &HashMap<&str, &'a Creep>, intents: &'a [Intent]) -> HashMap<
 }
 
 /// What one accepted act spends and where. A body builds and repairs within
-/// its room, so its target is looked for there alone.
-fn spent(
-    world: &World,
+/// its room, so its target is looked for there alone. The engine applies one
+/// body's act before the next's, so bodies on one target share what is `undone`.
+fn spent<'w>(
+    world: &'w World,
     creeps: &HashMap<&str, &Creep>,
     fed: &HashMap<&str, i32>,
+    undone: &mut HashMap<&'w str, i32>,
     intent: &Intent,
 ) -> Option<(RoomName, &'static str, i32)> {
     match intent {
@@ -443,24 +445,26 @@ fn spent(
             let c = creeps.get(name.as_str())?;
             let works = c.live(BodyPart::Work);
             let room = || world.room(c.pos.room);
-            let (what, most) = match act {
+            let held = energy(c) + fed.get(name.as_str()).copied().unwrap_or(0);
+            let (what, (id, total), most) = match act {
                 CreepAct::Build(id) => {
                     let s = room()?.sites.iter().find(|s| &s.id == id)?;
-                    (
-                        BUILD,
-                        (works * engine::BUILD_POWER).min(s.progress_total - s.progress),
-                    )
+                    let target = (s.id.as_str(), s.progress_total - s.progress);
+                    (BUILD, target, works * engine::BUILD_POWER)
                 }
                 CreepAct::Repair(id) => {
                     let s = room()?.structures.iter().find(|s| &s.id == id)?;
                     let per = engine::REPAIR_HITS_PER_ENERGY;
-                    (REPAIR, works.min((s.hits_max - s.hits + per - 1) / per))
+                    let target = (s.id.as_str(), (s.hits_max - s.hits + per - 1) / per);
+                    (REPAIR, target, works)
                 }
-                CreepAct::Upgrade(_) => (UPGRADE, works),
+                CreepAct::Upgrade(_) => return Some((c.pos.room, UPGRADE, works.min(held))),
                 _ => return None,
             };
-            let held = energy(c) + fed.get(name.as_str()).copied().unwrap_or(0);
-            Some((c.pos.room, what, most.min(held)))
+            let left = undone.entry(id).or_insert(total);
+            let n = most.min(held).min(*left);
+            *left -= n;
+            Some((c.pos.room, what, n))
         }
         Intent::Spawn(id, SpawnAct::SpawnCreep(body, _)) => {
             let s = world.spawns.iter().find(|s| &s.id == id)?;
@@ -813,6 +817,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         .map(|c| (c.name.as_str(), c))
         .collect();
     let fed = fed(&creeps, seen.intents);
+    let mut undone = HashMap::default();
     let mut asked: HashMap<&str, Asked> = HashMap::default();
     let mut spawned: BTreeSet<RoomName> = BTreeSet::new();
     let mut owed: BTreeSet<RoomName> = BTreeSet::new();
@@ -849,7 +854,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
         }
         if let Some(act) = verb(intent)
             && !refused.contains(&act)
-            && let Some((room, what, n)) = spent(world, &creeps, &fed, intent)
+            && let Some((room, what, n)) = spent(world, &creeps, &fed, &mut undone, intent)
         {
             add(sums, Some(room), what, f64::from(n));
         }
