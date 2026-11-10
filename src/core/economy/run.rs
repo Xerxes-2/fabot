@@ -443,20 +443,24 @@ fn work(
             acts.push(Intent::Creep(creep.name.clone(), act));
         }
     }
-    if digs && body.energy > 0 {
-        let link = derived.grounds.iter().find_map(|g| {
-            g.links.iter().find(|l| {
-                g.receiver.is_some()
-                    && l.role.is_source()
-                    && l.free > 0
-                    && creep.pos.within(1, &l.pos)
-            })
+    if digs && let Some(g) = derived.grounds.iter().find(|g| g.room == creep.pos.room) {
+        let link = (g.links.iter()).find(|l| {
+            g.receiver.is_some() && l.role.is_source() && l.free > 0 && creep.pos.within(1, &l.pos)
         });
         if let Some(l) = link {
-            acts.push(Intent::Creep(
-                creep.name.clone(),
-                CreepAct::Transfer(l.id.clone(), Resource::Energy),
-            ));
+            if body.energy > 0 {
+                acts.push(Intent::Creep(
+                    creep.name.clone(),
+                    CreepAct::Transfer(l.id.clone(), Resource::Energy),
+                ));
+            }
+            let under = (g.stores.iter()).find(|s| s.pos == creep.pos && s.energy > 0);
+            if let Some(c) = under.filter(|_| body.free > 0) {
+                acts.push(Intent::Creep(
+                    creep.name.clone(),
+                    CreepAct::Withdraw(c.id.clone(), Resource::Energy),
+                ));
+            }
         }
     }
     plan::toward_round(atlas, creep, mover, &target, weight_of(&slot.job), danger)

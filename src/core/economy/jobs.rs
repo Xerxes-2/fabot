@@ -50,6 +50,28 @@ pub fn ring_id(room: RoomName) -> String {
     format!("ring-{room}")
 }
 
+/// What the source links send the controller's link a tick, read off the
+/// structures, not the harvesters, whose walks and successions would flip the
+/// feed's sink.
+fn inflow(g: &Ground) -> i32 {
+    match &g.receiver {
+        Some(r) if r.role.is_controller() => (g.sources.iter())
+            .filter(|s| s.link.is_some())
+            .map(|s| s.dug)
+            .sum(),
+        _ => 0,
+    }
+}
+
+fn drink(derived: &Derived, g: &Ground) -> i32 {
+    let level = g.controller.as_ref().map_or(0, |c| c.level);
+    (derived.bodies.iter())
+        .filter(|b| b.pos.room == g.room && b.pattern.is_upgrader())
+        .map(|b| b.work * engine::UPGRADE_DRAIN_PER_WORK)
+        .sum::<i32>()
+        .min(super::bodies::upgradable_at(level))
+}
+
 fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
     let g = &derived.grounds[ci];
     let mut out = Vec::new();
@@ -101,9 +123,11 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
     }
     // The feed is the upgraders' alone: a worker's draw from it would spend
     // the stock its own reserve keeps from it.
-    let drinks = (derived.bodies.iter()).any(|b| b.pos.room == g.room && b.pattern.is_upgrader());
-    if let Some(f) = g.feed.as_ref().filter(|_| drinks) {
-        add(&f.id, f.pos, Resource::Energy, f.free, 2);
+    if let Some(f) = &g.feed {
+        let linked = g.receiver.as_ref().is_some_and(|r| r.id == f.id);
+        if drink(derived, g) > if linked { inflow(g) } else { 0 } {
+            add(&f.id, f.pos, Resource::Energy, f.free, 2);
+        }
     }
     if let Some(plan) = &g.lab_plan {
         for (lab, reagent, room) in &plan.fills {

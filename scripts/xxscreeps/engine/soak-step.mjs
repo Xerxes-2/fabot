@@ -183,7 +183,7 @@ const CREEP_LIFE_TIME = 1500;
 const CREEP_CLAIM_LIFE_TIME = 600;
 const PARTS = ["tough", "move", "work", "carry", "attack", "ranged_attack", "heal"];
 const PART_COST = { move: 50, work: 100, carry: 50, attack: 80, ranged_attack: 150, heal: 250, claim: 600, tough: 10 };
-const ledger = { dug: 0, regen: 0, spawn: 0, build: 0, upgrade: 0, repair: 0, tower: 0, decayed: 0, linked: 0, stock0: null, stock: 0 };
+const ledger = { dug: 0, regen: 0, spawn: 0, build: 0, upgrade: 0, repair: 0, tower: 0, decayed: 0, linked: 0, handFed: 0, stock0: null, stock: 0 };
 // What a colony holds, in energy, as it stands: the controller's climb, every
 // structure at its construction cost (a road at its terrain's), ramparts' and
 // walls' hits at the repair rate, sites at their progress, and the stock.
@@ -281,6 +281,13 @@ function account(rooms, time) {
     const sources = new Set(objects.filter((o) => o["#lookType"] === "source").map((o) => o.id));
     const towers = new Set(objects.filter((o) => o.structureType === "tower" && o["#user"] === ours).map((o) => o.id));
     const links = new Set(objects.filter((o) => o.structureType === "link" && o["#user"] === ours).map((o) => o.id));
+    // Mirrors the row's `buffer`: the controller's nearest link off a source.
+    const ctl = objects.find((o) => o.structureType === "controller");
+    const fed = new Set(
+      objects
+        .filter((o) => links.has(o.id) && ctl && near(o.pos, ctl.pos, 3) && !objects.some((s) => s["#lookType"] === "source" && near(s.pos, o.pos, 2)))
+        .map((o) => o.id),
+    );
     for (const e of room["#eventLog"] ?? []) {
       const kind = e.event ?? e._$Variant;
       if (kind === HARVEST && sources.has(e.targetId)) {
@@ -300,6 +307,7 @@ function account(rooms, time) {
           line.repair += e.energySpent ?? 0;
         }
       } else if (kind === TRANSFER && links.has(e.objectId) && links.has(e.targetId)) ledger.linked += e.amount - Math.floor(e.amount * LINK_KEEPS);
+      else if (kind === TRANSFER && fed.has(e.targetId) && !links.has(e.objectId)) ledger.handFed += e.amount;
       else if ((kind === ATTACK || kind === HEAL) && towers.has(e.objectId)) ledger.tower += 10;
     }
     if (room["#user"] === ours && room.controller?.["#user"] !== ours && room.controller?.["#reservationEndTime"] > time) line.reserved++;

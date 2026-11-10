@@ -239,7 +239,10 @@ dies, so an arriving body never re-matches the others. A hauler is 2:1 or
 road. The home's carriers fetch only at home, so the ring never waits on a
 body gone to an outpost. The stock is drawn only for its sinks' room past
 the loads at home bound for them, which book first: a load never goes back
-into the store it came from. A remote is served by the nearest colony
+into the store it came from. The source links feed the controller's link
+first: carriers bring it only while the upgraders drink more than the links
+send, and a harvester drains the container under it into its link while the
+link has room. A remote is served by the nearest colony
 with a storage; a stood-down outpost keeps its slots and its bodies wait at home. While its stock
 stands past the reserve, a colony's upgraders are cast before its outposts'
 haul: the haul only adds to the stock they draw down, so a spawn too busy for

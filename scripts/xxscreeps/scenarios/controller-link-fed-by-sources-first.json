@@ -1,0 +1,7 @@
+{
+  "why": "the source links feed the controller's link first and carriers bring it only while the upgraders drink more than the links send: main (a31d7649) hand-fed it 28,142 over 4,000 ticks of 19-28 WORK drinking against 9-19 e/t of inflow; fixed 23,710",
+  "modules": ["economy"],
+  "start": { "room": "W9N8", "seed": 1, "node": "N5" },
+  "ticks": 4000,
+  "assert": [{ "measure": "handFed", "max": 25000 }]
+}
