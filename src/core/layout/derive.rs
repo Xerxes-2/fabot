@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::engine;
+use crate::core::tick::{ColonyPlan, Stage};
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::Resource;
 use crate::core::world::{Creep, Pos, Room, RoomName, Structure, World};
@@ -12,7 +13,7 @@ use super::sites::{self, Census};
 
 pub struct Colony {
     pub room: RoomName,
-    pub level: i32,
+    pub target: i32,
     pub plan: Option<super::shape::Plan>,
     pub census: Census,
     pub towers: Vec<Structure>,
@@ -50,13 +51,14 @@ pub fn key_of(room: &Room, spawns: &[Tile]) -> String {
 pub fn colonies(
     world: &World,
     owned: &BTreeSet<RoomName>,
+    plans: &[ColonyPlan],
     standing: &BTreeMap<RoomName, Standing>,
 ) -> (Vec<Colony>, BTreeMap<RoomName, Standing>) {
     let mut next: BTreeMap<RoomName, Standing> = BTreeMap::new();
     let mut found: Vec<Colony> = Vec::new();
 
     for room in owned.iter().filter_map(|name| world.room(*name)) {
-        let Some(level) = room.controller.as_ref().map(|c| c.level) else {
+        let Some(colony) = plans.iter().find(|p| p.room == room.name) else {
             continue;
         };
 
@@ -72,7 +74,10 @@ pub fn colonies(
             },
         };
 
-        let plan = kept.plan.clone();
+        let plan = match colony.stage {
+            Stage::Abandon => None,
+            Stage::Exploit => kept.plan.clone(),
+        };
         next.insert(room.name, kept);
 
         let ours: Vec<Creep> = world
@@ -97,7 +102,7 @@ pub fn colonies(
 
         found.push(Colony {
             room: room.name,
-            level,
+            target: colony.target,
             plan,
             census: sites::census_of(room, &ours),
             towers,
@@ -151,8 +156,9 @@ mod tests {
             let world = fx::world_of(colony.room.clone(), spawns.clone(), Vec::new());
 
             let owned = hostiles::owned(&world.rooms);
-            let (first, standing) = colonies(&world, &owned, &BTreeMap::new());
-            let (kept, _) = colonies(&world, &owned, &standing);
+            let plans = fx::exploited(&owned);
+            let (first, standing) = colonies(&world, &owned, &plans, &BTreeMap::new());
+            let (kept, _) = colonies(&world, &owned, &plans, &standing);
 
             let mut walled = colony.room.clone();
             walled.structures.push(fx::structure(
@@ -165,11 +171,13 @@ mod tests {
             let (moved, _) = colonies(
                 &fx::world_of(walled.clone(), spawns.clone(), Vec::new()),
                 &owned,
+                &plans,
                 &standing,
             );
             let (fresh, _) = colonies(
                 &fx::world_of(walled, spawns, Vec::new()),
                 &owned,
+                &plans,
                 &BTreeMap::new(),
             );
 

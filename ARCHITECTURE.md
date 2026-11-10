@@ -151,11 +151,11 @@ cold tick never spends more than ❓ 60% of the limit.
 | `World` | this tick's facts, one record; last tick's strikes and structures destroyed off the event log of each room we own, reserve or stand in (and a drain's); `rules`, the engine tables the game exposes as globals (`CONTROLLER_STRUCTURES`), read each tick since a season's server may override one | Game | — | port, trim |
 | `Atlas` | geometry in two layers: the **room graph** (a node a room's region, left by a stretch of border both rooms open, priced by the flood across it round every tile a keeper strikes; grown from the target's room, so every room's way on is the same whichever room asks and a body never walks back; a keeper room whose lairs no intel places taken only past every other; rooms to avoid) and the **tile grid** per room (terrain, floods, seats, work areas, first steps). Every tile query takes a **footprint** (1×1 today, 2×2 for a formation) | World, `terrain` for rooms out of sight, `intel.rooms` for avoided and keeper rooms | flood table, kept across ticks per room while its weights hold; out of sight, a room's grid is what stood there when last seen (else its terrain) and is kept, floods and all under the same bound, while it stays so (the owner's call: part of the flood table, not a second cache); the rooms whose lairs intel reads otherwise than their names, rebuilt each tick | port, add the graph layer, widen the query |
 | `Economy` | task pool, planner, matcher, quota, spawns, labs, terminals, market | World, Atlas, declarations, `State.Economy` | tasks, casts, `State.Economy` | port, trim (§5) |
-| `Layout` | construction and tower plans | World, Atlas, declarations (outposts' containers and roads) | sites, tower intents | port |
+| `Layout` | construction and tower plans | World, Atlas, declarations (outposts' containers and roads; each colony's plan: built to its `target`, nothing while abandoning) | sites, tower intents | port |
 | `Exchange` | who wins: pure fight arithmetic | bodies, terrain | — | port from `Facts.fs:2883–4056, 1038–1582`, `Fighter.fs`, `Arrival.fs`; narrow the input |
 | `Fight` | tracker, engagements (one kind per file), casting | World, Atlas, Exchange, declarations (the operator's tactic rules, §6.3), `State.Fight`, `intel.rooms` (a patrol's staleness) | fight intents, casts, declarations, `State.Fight` | **new** (§6) |
 | `Tactics` | what one fight body does this tick (§6.4): strikes, steps, the Hunt score, heals, and which tactic a kind picks (§6.3); it imports no Fight | Atlas, Move, the `Sight` and plan Fight hands down | creep intents, wishes | **new**, split from Fight |
-| `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Exchange, `State.Intel`, `Season` | declarations, opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
+| `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Derived, Exchange, `State.Intel`, `Season` | declarations (a `ColonyPlan` per colony, under the operator's rows), opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
 | `Season` | this season's rules: what scores, its structures, its NPCs, its map quirks | World | declarations to Strategy, season intents | **new**, disposable (§8) |
 | `Move` | per-room movement arbitration, run by `Tick` over every module's wishes, and the step functions (chase, kite, flee, formation) | Intents, Atlas | move intents | port `Resolver.fs`, drop fight precedence |
 | `Executor` | API calls | Intents | Game | port |
@@ -196,7 +196,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `fight.engagements` | id → Engagement (§6.2), with the tick it opened, never moved | Fight | Memory | the commitment; read every tick; not the offers (§6.3); a home's deaths since it opened are its raid's |
 | `fight.groups` | id → Group (§6.1) | Fight | Memory | hostile identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | never cast twice |
-| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims, colonies to abandon, the operator's tactic rules | Strategy | Memory | what the world is for us, as data |
+| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims, the operator's tactic rules; a `ColonyPlan` per colony (stage, build target) and `flows` (the lab colony's compound stocks), where abandon and labs live, so a colony's lifecycle and what moves between rooms are one plan Economy and Layout read rather than per-purpose fields | Strategy | Memory (the operator's); Strategy's plans rebuilt each tick | what the world is for us, as data |
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
 | `recorder` | the last ticks' read pass (`app/read.js`), Memory and intel rows, deflated; a tick over a segment spans several, so the ring keeps fewer | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
@@ -594,6 +594,12 @@ outpost for CPU; the budget is explicit here); a claim by the same plus GCL
 room; a room is avoided by what intel saw there. A priced candidate that pays
 is declared; one that stops paying is withdrawn. No room is ever named in
 source.
+
+Each tick, once `Derived` is built and before any module runs, Strategy writes a `ColonyPlan` for every room we
+own (today: `Exploit` built to its controller's level) and
+`Declarations::planned` merges it under the operator's rows: **an operator row
+always wins** and Strategy fills only rooms the operator left undeclared
+(owner's call), so a hand decision is never undone by the next plan.
 
 ### 7.3 Operations and force allocation
 

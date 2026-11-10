@@ -17,9 +17,9 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], budget: i32) -> V
         if let Some(plan) = &colony.plan
             && budget > 0
             && colony.census.pending < sites::SITES_IN_FLIGHT
-            && sites::may_place(rules, &colony.census, colony.level)
+            && sites::may_place(rules, &colony.census, colony.target)
         {
-            for p in sites::place(rules, &colony.census, colony.level, plan, budget) {
+            for p in sites::place(rules, &colony.census, colony.target, plan, budget) {
                 budget -= 1;
                 intents.push(Intent::Room(
                     colony.room,
@@ -41,12 +41,12 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], budget: i32) -> V
 
 pub fn decide(ctx: &mut Context, state: &State) -> Result<(Vec<Intent>, State), String> {
     let world = ctx.world;
-    let (mut colonies, standing) = derive::colonies(world, &ctx.derived.owned, &state.layout);
-    for c in &mut colonies {
-        if ctx.declarations.abandon.contains(&c.room) {
-            c.plan = None;
-        }
-    }
+    let (colonies, standing) = derive::colonies(
+        world,
+        &ctx.derived.owned,
+        &ctx.declarations.colonies,
+        &state.layout,
+    );
 
     let budget = engine::MAX_CONSTRUCTION_SITES - world.our_sites;
     let home = decide_over(&world.rules, &colonies, budget);

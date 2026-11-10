@@ -13,8 +13,10 @@ use crate::core::observe::metrics::Metrics;
 use crate::core::state::State;
 use crate::core::strategy::intel::{self, Intel};
 use crate::core::tactics::{self, Offer, Tactic};
-use crate::core::tick::{Declarations, Declared, Outpost, TacticRule, undeclared};
-use crate::core::vocabulary::{self, Compound, Resource};
+use crate::core::tick::{
+    ColonyPlan, Declarations, Declared, Flow, Node, Outpost, Stage, TacticRule, undeclared,
+};
+use crate::core::vocabulary::{self, Resource};
 use crate::core::world::{Pos, RoomName, World};
 
 /// Read by `npm run observe` and `scripts/capture`.
@@ -431,7 +433,7 @@ fn outpost_of(o: &JsValue) -> Option<Outpost> {
 
 /// `{ home, targets: { compound: stock } }`; a compound we have no recipe for
 /// is dropped.
-fn labs_of(o: &JsValue) -> Option<(RoomName, BTreeMap<Compound, i32>)> {
+fn labs_of(o: &JsValue) -> Option<Vec<Flow>> {
     let home = room_of(&field(o, "home"))?;
     let targets = field(o, "targets");
     let names = Reflect::own_keys(&targets).ok()?;
@@ -441,12 +443,16 @@ fn labs_of(o: &JsValue) -> Option<(RoomName, BTreeMap<Compound, i32>)> {
             let name = name.as_string()?;
             let stock = field(&targets, &name).as_f64()? as i32;
             match vocabulary::resource_of_name(&name) {
-                Resource::Compound(c) if stock > 0 => Some((c, stock)),
+                what @ Resource::Compound(_) => Some(Flow {
+                    what,
+                    to: Node::Colony(home),
+                    stock,
+                }),
                 _ => None,
             }
         })
         .collect();
-    Some((home, parsed))
+    Some(parsed)
 }
 
 pub fn read_declarations() -> Declarations {
@@ -459,14 +465,20 @@ pub fn read_declarations() -> Declarations {
         outposts: array_of(&field(&declared, "outposts"))
             .map(|outposts| outposts.iter().filter_map(outpost_of).collect())
             .unwrap_or_default(),
-        labs: labs_of(&field(&declared, "labs")),
+        flows: labs_of(&field(&declared, "labs")).unwrap_or_default(),
         claims: array_of(&field(&declared, "claims"))
             .map(|claims| claims.iter().filter_map(outpost_of).collect())
             .unwrap_or_default(),
         allies: names(&declared, "allies"),
         enemies: names(&declared, "enemies"),
         sieges: rooms(&declared, "sieges"),
-        abandon: rooms(&declared, "abandon"),
+        colonies: (rooms::<Vec<_>>(&declared, "abandon").into_iter())
+            .map(|room| ColonyPlan {
+                room,
+                stage: Stage::Abandon,
+                target: 0,
+            })
+            .collect(),
         avoid: rooms(&declared, "avoid"),
         tactics: array_of(&field(&declared, "tactics"))
             .map(|rules| rules.iter().filter_map(rule_of).collect())

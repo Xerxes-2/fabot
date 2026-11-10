@@ -196,8 +196,8 @@ pub fn side_in(room: &Room, bodies: Vec<Fighter>) -> exchange::Side {
 /// or it holds under a part's worth. A body the stock does not all cover is
 /// cast unboosted rather than held.
 pub fn cluster_boost(world: &World, declarations: &Declarations) -> Option<(&'static str, i32)> {
-    let (home, _) = declarations.labs.as_ref()?;
-    let (compound, energy) = crate::core::boost::home_holds(world, *home, Compound::UtriumAcid);
+    let (home, _) = declarations.labs()?;
+    let (compound, energy) = crate::core::boost::home_holds(world, home, Compound::UtriumAcid);
     let parts =
         (compound / engine::BOOST_MINERAL_PER_PART).min(energy / engine::BOOST_ENERGY_PER_PART);
 

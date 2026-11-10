@@ -11,8 +11,11 @@ use crate::core::economy::abandon;
 use crate::core::intents::Refusal;
 use crate::core::layout::shape::Standing;
 use crate::core::observe::metrics::{self, Metrics, Seen};
-use crate::core::strategy::intel::{self, Intel};
-use crate::core::tick::{self, Context, Declarations};
+use crate::core::strategy::{
+    self,
+    intel::{self, Intel},
+};
+use crate::core::tick::{self, Context, Declarations, Stage};
 use crate::core::world::{RoomName, Sightings};
 
 const FAULTS_KEPT: usize = 20;
@@ -109,6 +112,7 @@ fn run_tick() -> Result<(), String> {
     let start = clock();
     let derived = tick::derive(&world, &mut atlas, &declarations, &sightings);
     phases.push(("derive".to_string(), clock() - start));
+    let declarations = declarations.planned(strategy::plan(&world, &derived.owned));
 
     let mut context = Context {
         world: &world,
@@ -157,7 +161,8 @@ fn run_tick() -> Result<(), String> {
         ("atlasHits".to_string(), atlas.hits()),
         ("atlasMisses".to_string(), atlas.misses()),
     ];
-    for room in declarations.abandon.iter().filter_map(|r| world.room(*r)) {
+    let abandoning = (declarations.colonies.iter()).filter(|p| p.stage == Stage::Abandon);
+    for room in abandoning.filter_map(|p| world.room(p.room)) {
         counts.push((format!("abandon:{}", room.name), abandon::left(room)));
     }
     for room in &refused.rooms {

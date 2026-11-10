@@ -13,7 +13,7 @@ use super::state::State;
 use super::strategy::intel::Intel;
 use super::tactics::{self, Tactic};
 use super::tiles::{self, Tile};
-use super::vocabulary::{BodyPart, Compound};
+use super::vocabulary::{BodyPart, Compound, Resource};
 use super::world::{Creep, Owner, Pos, RoomName, Sightings, World, hostiles};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,6 +105,32 @@ fn checked(rules: Vec<TacticRule>) -> (Vec<TacticRule>, Vec<String>) {
     (kept, refused)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stage {
+    Exploit,
+    /// Emptied before the owner unclaims it by hand.
+    Abandon,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColonyPlan {
+    pub room: RoomName,
+    pub stage: Stage,
+    pub target: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Node {
+    Colony(RoomName),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Flow {
+    pub what: Resource,
+    pub to: Node,
+    pub stock: i32,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Declarations {
     /// The creep lifetimes of tower fire a colony's reserve holds.
@@ -112,15 +138,12 @@ pub struct Declarations {
     pub outposts: Vec<Outpost>,
     /// Declared as an outpost is, so a claimer walks to one unseen.
     pub claims: Vec<Outpost>,
-    /// The one colony whose labs react, and the stock of each compound it
-    /// makes toward.
-    pub labs: Option<(RoomName, BTreeMap<Compound, i32>)>,
     pub allies: BTreeSet<String>,
     pub enemies: BTreeSet<String>,
     /// The rival rooms whose towers and economy are razed.
     pub sieges: Vec<RoomName>,
-    /// Our colonies being emptied before the owner unclaims them by hand.
-    pub abandon: Vec<RoomName>,
+    pub colonies: Vec<ColonyPlan>,
+    pub flows: Vec<Flow>,
     /// Rooms no fight body walks through on its way: a rival's towers.
     pub avoid: BTreeSet<RoomName>,
     /// The operator's tactic rules, per rival and room (§6.3).
@@ -158,6 +181,29 @@ impl Declarations {
         refused
     }
 
+    pub fn planned(mut self, strategy: Vec<ColonyPlan>) -> Declarations {
+        let declared: BTreeSet<RoomName> = self.colonies.iter().map(|p| p.room).collect();
+        (self.colonies).extend(strategy.into_iter().filter(|p| !declared.contains(&p.room)));
+        self
+    }
+
+    pub fn abandoning(&self, room: RoomName) -> bool {
+        (self.colonies.iter()).any(|p| p.room == room && p.stage == Stage::Abandon)
+    }
+
+    pub fn labs(&self) -> Option<(RoomName, BTreeMap<Compound, i32>)> {
+        let Node::Colony(home) = self.flows.first()?.to;
+        let targets = (self.flows.iter())
+            .filter_map(|f| match f.what {
+                Resource::Compound(c) if f.to == Node::Colony(home) && f.stock > 0 => {
+                    Some((c, f.stock))
+                }
+                _ => None,
+            })
+            .collect();
+        Some((home, targets))
+    }
+
     /// A declared siege's owner, as intel last saw it, is an enemy (owner's call).
     pub fn besieging(mut self, intel: &Intel) -> Declarations {
         let owners: Vec<String> = (self.sieges.iter())
@@ -173,11 +219,11 @@ pub fn undeclared() -> Declarations {
         reserve_lifetimes: 2.0,
         outposts: Vec::new(),
         claims: Vec::new(),
-        labs: None,
         allies: BTreeSet::new(),
         enemies: BTreeSet::new(),
         sieges: Vec::new(),
-        abandon: Vec::new(),
+        colonies: Vec::new(),
+        flows: Vec::new(),
         avoid: BTreeSet::new(),
         tactics: Vec::new(),
     }

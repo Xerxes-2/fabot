@@ -142,10 +142,9 @@ pub fn waiting<'a>(world: &'a World, home: RoomName, creep: &world::Creep) -> Op
 /// is held at the lab and boosted there: its module's acts and wish are
 /// dropped for the walk, or the boost itself when it stands beside it.
 pub fn stop(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
-    let Some((home, _)) = &context.declarations.labs else {
+    let Some((home, _)) = context.declarations.labs() else {
         return intents;
     };
-    let home = *home;
     let mut stalls: Vec<(String, Pos, String, Compound)> = Vec::new();
 
     for creep in (context.world.creeps.iter()).filter(|c| c.owner.is_ours() && c.pos.room == home) {

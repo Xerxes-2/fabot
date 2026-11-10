@@ -1105,9 +1105,9 @@ pub fn of_world(
         grounds.push(remote_of(outpost));
     }
 
-    let given_up = |room: RoomName| declarations.abandon.contains(&room);
+    let given_up = |room: RoomName| declarations.abandoning(room);
 
-    if let Some((home, targets)) = &declarations.labs
+    if let Some((home, targets)) = &declarations.labs()
         && !given_up(*home)
     {
         stock_labs(

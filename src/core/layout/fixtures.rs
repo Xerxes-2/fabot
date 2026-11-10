@@ -1,10 +1,13 @@
 //! The rooms Layout's suites draw their cases from: walled blobs and swamp over
 //! open ground, with a few walls of another owner, one or two sources, a
 //! mineral, a controller and none, one or two spawns.
+use std::collections::BTreeSet;
+
 use crate::core::layout::ground::{self, Ground};
 use crate::core::layout::plan;
 use crate::core::layout::shape::Item;
 use crate::core::layout::shape::Plan;
+use crate::core::tick::{ColonyPlan, Stage};
 use crate::core::tiles::{self, Tile};
 use crate::core::vocabulary::Resource;
 use crate::core::world::{
@@ -360,6 +363,16 @@ pub fn world_of(room: Room, spawns: Vec<Spawn>, creeps: Vec<Creep>) -> World {
         closed: Default::default(),
         rules: Rules::vanilla(),
     }
+}
+
+pub fn exploited(owned: &BTreeSet<RoomName>) -> Vec<ColonyPlan> {
+    (owned.iter())
+        .map(|room| ColonyPlan {
+            room: *room,
+            stage: Stage::Exploit,
+            target: 8,
+        })
+        .collect()
 }
 
 pub fn spawn_named(id: &str, tile: Tile) -> Spawn {
