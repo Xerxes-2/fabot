@@ -242,9 +242,11 @@ body gone to an outpost. The stock is drawn only for its sinks' room past
 the loads at home bound for them, which book first: a load never goes back
 into the store it came from. The source links feed the controller's link
 first: carriers bring it only while the upgraders drink more than the links
-send, and a harvester drains the container under it into its link while the
-link has room. A remote is served by the nearest colony
-with a storage; a stood-down outpost keeps its slots and its bodies wait at home. While its stock
+send, and while they do only upgraders draw the controller's buffer, or a
+worker's draw is carried back from the stock. A harvester drains the container
+under it into its link while the link has room. A remote is served by the
+nearest colony with a storage; a stood-down outpost keeps its slots and its
+bodies wait at home. While its stock
 stands past the reserve, a colony's upgraders are cast before its outposts'
 haul: the haul only adds to the stock they draw down, so a spawn too busy for
 both would bank the outposts' income. The outposts' carriers

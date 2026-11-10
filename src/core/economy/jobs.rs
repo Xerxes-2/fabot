@@ -72,6 +72,16 @@ fn drink(derived: &Derived, g: &Ground) -> i32 {
         .min(super::bodies::upgradable_at(level))
 }
 
+/// While carriers bring the feed, the controller's buffer is the upgraders'
+/// alone (§5): a worker's draw from it would be carried back by hand from the
+/// stock.
+fn hand_fed(derived: &Derived, g: &Ground) -> bool {
+    g.feed.as_ref().is_some_and(|f| {
+        let linked = g.receiver.as_ref().is_some_and(|r| r.id == f.id);
+        drink(derived, g) > if linked { inflow(g) } else { 0 }
+    })
+}
+
 fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
     let g = &derived.grounds[ci];
     let mut out = Vec::new();
@@ -121,13 +131,10 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
             );
         }
     }
-    // The feed is the upgraders' alone: a worker's draw from it would spend
-    // the stock its own reserve keeps from it.
-    if let Some(f) = &g.feed {
-        let linked = g.receiver.as_ref().is_some_and(|r| r.id == f.id);
-        if drink(derived, g) > if linked { inflow(g) } else { 0 } {
-            add(&f.id, f.pos, Resource::Energy, f.free, 2);
-        }
+    if hand_fed(derived, g)
+        && let Some(f) = &g.feed
+    {
+        add(&f.id, f.pos, Resource::Energy, f.free, 2);
     }
     if let Some(plan) = &g.lab_plan {
         for (lab, reagent, room) in &plan.fills {
@@ -657,7 +664,10 @@ impl<'a> Jobs<'a> {
         // spawn's, nor half a load past it: a draw takes all it has room for.
         // Under it, what stands in a link or container is the reserve's too.
         let short = g.stock().is_some_and(|n| n < reserve);
-        for s in g.stores.iter().filter(|s| !short || s.kind.is_remains()) {
+        let fed = hand_fed(self.derived, g);
+        for s in (g.stores.iter())
+            .filter(|s| (!short || s.kind.is_remains()) && !(fed && s.kind.is_buffer()))
+        {
             let spare = s.energy - if s.owned { reserve } else { 0 };
             spots.push(Spot {
                 task: Task::Withdraw(s.id.clone(), Resource::Energy),
