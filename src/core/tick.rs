@@ -386,7 +386,9 @@ fn open(world: &World, sightings: &Sightings, owned: &BTreeSet<RoomName>, room: 
         })
 }
 
-pub type ModuleRun = fn(&mut Context, &State) -> Result<(Vec<Intent>, State), String>;
+/// A module writes its rows of the state only once it cannot fault: a fault
+/// leaves the state as it found it.
+pub type ModuleRun = fn(&mut Context, &mut State) -> Result<Vec<Intent>, String>;
 
 pub struct Module {
     pub name: &'static str,
@@ -413,15 +415,17 @@ pub struct TickResult {
     pub reports: Vec<Report>,
 }
 
-fn by_room<T: Clone>(pairs: &[(RoomName, T)]) -> Vec<(RoomName, Vec<T>)> {
-    let mut groups: HashMap<RoomName, Vec<T>> = HashMap::default();
+fn by_room<'a, T>(pairs: &[(RoomName, &'a T)]) -> Vec<(RoomName, Vec<&'a T>)> {
+    let mut groups: HashMap<RoomName, Vec<&T>> = HashMap::default();
     let mut rooms: Vec<RoomName> = Vec::new();
-    for (room, value) in pairs {
-        if !groups.contains_key(room) {
-            groups.insert(*room, Vec::new());
-            rooms.push(*room);
-        }
-        groups.get_mut(room).unwrap().push(value.clone());
+    for &(room, value) in pairs {
+        groups
+            .entry(room)
+            .or_insert_with(|| {
+                rooms.push(room);
+                Vec::new()
+            })
+            .push(value);
     }
     rooms
         .into_iter()
@@ -436,7 +440,7 @@ fn by_room<T: Clone>(pairs: &[(RoomName, T)]) -> Vec<(RoomName, Vec<T>)> {
 /// economy's, on its idle spawns while the bank pays; a fight ask the bank
 /// cannot pay yet holds the economy's behind it, one its capacity never pays
 /// holds nothing.
-pub fn queue(world: &World, asks: &[(RoomName, Ask)]) -> Vec<Intent> {
+pub fn queue(world: &World, asks: &[(RoomName, &Ask)]) -> Vec<Intent> {
     let rank = |a: &Ask| match a.rank {
         Rank::Floor => 0,
         Rank::Fight => 1,
@@ -445,7 +449,7 @@ pub fn queue(world: &World, asks: &[(RoomName, Ask)]) -> Vec<Intent> {
 
     let mut out = Vec::new();
     for (room, mut asks) in by_room(asks) {
-        asks.sort_by_key(rank);
+        asks.sort_by_key(|a| rank(a));
         let Some(r) = world.room(room) else {
             continue;
         };
@@ -476,15 +480,15 @@ pub fn queue(world: &World, asks: &[(RoomName, Ask)]) -> Vec<Intent> {
 
 /// One arbitration per room over every module's wishes (§3's `Move`); a creep
 /// of ours that wishes nothing holds its tile.
-pub fn arbitrate(context: &Context, wishes: &[(RoomName, mv::Wish)]) -> Vec<Intent> {
-    let mut wished: BTreeSet<String> = BTreeSet::new();
+pub fn arbitrate(context: &Context, wishes: &[(RoomName, &mv::Wish)]) -> Vec<Intent> {
+    let mut wished: BTreeSet<&str> = BTreeSet::new();
     let groups = by_room(wishes);
     let mut scratch = mv::arbitrate::scratch();
     let mut out = Vec::new();
 
     for (_, ws) in &groups {
         for w in ws {
-            wished.insert(w.creep.clone());
+            wished.insert(&w.creep);
         }
     }
 
@@ -494,7 +498,7 @@ pub fn arbitrate(context: &Context, wishes: &[(RoomName, mv::Wish)]) -> Vec<Inte
         let theirs: BTreeSet<Tile> = (context.world.room(room).into_iter())
             .flat_map(|r| r.hostiles().map(|c| tiles::of_pos(&c.pos)))
             .collect();
-        let (glued, ws): (Vec<mv::Wish>, Vec<mv::Wish>) =
+        let (glued, ws): (Vec<&mv::Wish>, Vec<&mv::Wish>) =
             (ws.into_iter()).partition(|w| w.head != w.at && theirs.contains(&w.head));
         out.extend(glued.iter().map(|w| {
             Intent::Creep(
@@ -506,7 +510,7 @@ pub fn arbitrate(context: &Context, wishes: &[(RoomName, mv::Wish)]) -> Vec<Inte
             .world
             .creeps
             .iter()
-            .filter(|c| c.pos.room == room && !wished.contains(&c.name))
+            .filter(|c| c.pos.room == room && !wished.contains(c.name.as_str()))
             .map(|c| tiles::of_pos(&c.pos))
             .collect();
         held.extend(glued.iter().map(|w| w.at));
@@ -531,22 +535,22 @@ pub fn arbitrate(context: &Context, wishes: &[(RoomName, mv::Wish)]) -> Vec<Inte
     out
 }
 
-fn settle(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
+fn settle(context: &mut Context, intents: &[Intent]) -> Vec<Intent> {
     let intents = super::boost::stop(context, intents);
     let mut asks = Vec::new();
     let mut wishes = Vec::new();
-    for i in &intents {
+    for i in intents.iter() {
         match i {
-            Intent::Queue(room, ask) => asks.push((*room, ask.clone())),
-            Intent::Wish(room, wish) => wishes.push((*room, wish.clone())),
+            Intent::Queue(room, ask) => asks.push((*room, ask)),
+            Intent::Wish(room, wish) => wishes.push((*room, wish)),
             _ => (),
         }
     }
     let mut out = queue(context.world, &asks);
     out.extend(
-        intents
-            .into_iter()
-            .filter(|i| !i.is_queue() && !i.is_wish()),
+        (intents.iter())
+            .filter(|i| !i.is_queue() && !i.is_wish())
+            .cloned(),
     );
     out.extend(arbitrate(context, &wishes));
     out
@@ -572,9 +576,9 @@ pub fn run(
             continue;
         }
         let start = clock();
-        let (produced, next, outcome) = match (m.run)(context, &state) {
-            Ok((produced, next)) => (produced, next, Outcome::Ran),
-            Err(error) => (Vec::new(), state.clone(), Outcome::Faulted(error)),
+        let (produced, outcome) = match (m.run)(context, &mut state) {
+            Ok(produced) => (produced, Outcome::Ran),
+            Err(error) => (Vec::new(), Outcome::Faulted(error)),
         };
         reports.push(Report {
             module: m.name,
@@ -582,7 +586,6 @@ pub fn run(
             outcome,
         });
         intents.extend(produced);
-        state = next;
     }
 
     let start = clock();
@@ -597,13 +600,12 @@ pub fn run(
     };
 
     let (settled, outcome) = if let Ok(settled) =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            settle(context, intents.clone())
-        })) {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| settle(context, &intents)))
+    {
         (settled, Outcome::Ran)
     } else {
         let rest: Vec<Intent> = intents.iter().filter(|i| !is_fight(i)).cloned().collect();
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| settle(context, rest))) {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| settle(context, &rest))) {
             Ok(settled) => (settled, Outcome::Faulted("settle".to_string())),
             Err(_) => (
                 intents

@@ -39,7 +39,7 @@ pub fn decide_over(rules: &Rules, colonies: &[derive::Colony], budget: i32) -> V
     intents
 }
 
-pub fn decide(ctx: &mut Context, state: &State) -> Result<(Vec<Intent>, State), String> {
+pub fn decide(ctx: &mut Context, state: &mut State) -> Result<Vec<Intent>, String> {
     let world = ctx.world;
     let (colonies, standing) = derive::colonies(
         world,
@@ -64,13 +64,8 @@ pub fn decide(ctx: &mut Context, state: &State) -> Result<(Vec<Intent>, State), 
     let mut intents = home;
     intents.extend(sites);
 
-    Ok((
-        intents,
-        State {
-            layout: standing,
-            ..state.clone()
-        },
-    ))
+    state.layout = standing;
+    Ok(intents)
 }
 
 pub fn layout() -> Module {

@@ -14,17 +14,14 @@ use crate::core::world::World;
 const NAMES: [&str; 8] = ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7"];
 
 /// Module `I` says its name once, as creep `cI`.
-fn say<const I: usize>(_: &mut Context, state: &State) -> Result<(Vec<Intent>, State), String> {
-    Ok((
-        vec![Intent::Creep(
-            format!("c{I}"),
-            CreepAct::Say(NAMES[I].to_string()),
-        )],
-        state.clone(),
-    ))
+fn say<const I: usize>(_: &mut Context, _: &mut State) -> Result<Vec<Intent>, String> {
+    Ok(vec![Intent::Creep(
+        format!("c{I}"),
+        CreepAct::Say(NAMES[I].to_string()),
+    )])
 }
 
-fn broke<const I: usize>(_: &mut Context, _: &State) -> Result<(Vec<Intent>, State), String> {
+fn broke<const I: usize>(_: &mut Context, _: &mut State) -> Result<Vec<Intent>, String> {
     Err(format!("{} broke", NAMES[I]))
 }
 

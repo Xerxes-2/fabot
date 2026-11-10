@@ -60,43 +60,138 @@ pub struct RoomGrid {
 
 /// What a flood is a function of besides the room's weights: the mover's
 /// footprint and pace, and its goals.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct FloodOf<'a> {
+    footprint: Footprint,
+    steps: [Option<i32>; 3],
+    goal: Goal<'a>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Goal<'a> {
+    /// Sorted, each tile once.
+    Seats {
+        range: i32,
+        tiles: &'a [Tile],
+    },
+    Exit(&'a [(Tile, Tile)]),
+}
+
+/// A kept flood's `FloodOf`, owning its goal; a lookup borrows it, so a hit
+/// allocates nothing.
+#[derive(Clone, Debug)]
 pub struct FloodKey {
     footprint: Footprint,
     steps: [Option<i32>; 3],
-    goal: Goal,
+    goal: KeptGoal,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum Goal {
+#[derive(Clone, Debug)]
+enum KeptGoal {
     Seats { range: i32, tiles: Vec<Tile> },
-    Exit(graph::Exit),
+    Exit(Vec<(Tile, Tile)>),
 }
 
-impl FloodKey {
-    fn of(mover: Mover, goal: Goal) -> FloodKey {
+impl FloodOf<'_> {
+    fn of(mover: Mover, goal: Goal) -> FloodOf {
         let grounds = [
             engine::ROAD_WEIGHT,
             engine::PLAIN_WEIGHT,
             engine::SWAMP_WEIGHT,
         ];
-        FloodKey {
+        FloodOf {
             footprint: mover.footprint,
             steps: grounds.map(|w| step_ticks(mover.factor, w)),
             goal,
         }
+    }
+
+    fn kept(&self) -> FloodKey {
+        let goal = match self.goal {
+            Goal::Seats { range, tiles } => KeptGoal::Seats {
+                range,
+                tiles: tiles.to_vec(),
+            },
+            Goal::Exit(exit) => KeptGoal::Exit(exit.to_vec()),
+        };
+        FloodKey {
+            footprint: self.footprint,
+            steps: self.steps,
+            goal,
+        }
+    }
+}
+
+trait Keyed {
+    fn key(&self) -> FloodOf<'_>;
+}
+
+impl Keyed for FloodOf<'_> {
+    fn key(&self) -> FloodOf<'_> {
+        *self
+    }
+}
+
+impl Keyed for FloodKey {
+    fn key(&self) -> FloodOf<'_> {
+        let goal = match &self.goal {
+            KeptGoal::Seats { range, tiles } => Goal::Seats {
+                range: *range,
+                tiles,
+            },
+            KeptGoal::Exit(exit) => Goal::Exit(exit),
+        };
+        FloodOf {
+            footprint: self.footprint,
+            steps: self.steps,
+            goal,
+        }
+    }
+}
+
+impl<'a> std::borrow::Borrow<dyn Keyed + 'a> for FloodKey {
+    fn borrow(&self) -> &(dyn Keyed + 'a) {
+        self
+    }
+}
+
+impl PartialEq for dyn Keyed + '_ {
+    fn eq(&self, other: &Self) -> bool {
+        self.key() == other.key()
+    }
+}
+
+impl Eq for dyn Keyed + '_ {}
+
+impl std::hash::Hash for dyn Keyed + '_ {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.key().hash(state);
+    }
+}
+
+impl PartialEq for FloodKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.key() == other.key()
+    }
+}
+
+impl Eq for FloodKey {}
+
+impl std::hash::Hash for FloodKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.key().hash(state);
     }
 }
 
 impl RoomGrid {
     /// The flood toward `goal`, and whether it was kept.
     fn flood(&self, mover: Mover, goal: Goal) -> (Rc<Table<i32>>, bool) {
-        let key = FloodKey::of(mover, goal);
-        if let Some(dist) = self.floods.borrow().get(&key) {
+        let key = FloodOf::of(mover, goal);
+        if let Some(dist) = self.floods.borrow().get(&key as &dyn Keyed) {
             return (dist.clone(), true);
         }
         let footprint = mover.footprint;
-        let goals = match &key.goal {
+        let goals = match key.goal {
             Goal::Seats {
                 range,
                 tiles: targets,
@@ -104,7 +199,7 @@ impl RoomGrid {
                 let mut goals = Vec::new();
                 for &tile in targets {
                     if tile.index() < tiles::COUNT {
-                        Atlas::seats_near(footprint, &self.weights, *range, tile, &mut goals);
+                        Atlas::seats_near(footprint, &self.weights, range, tile, &mut goals);
                     }
                 }
                 goals
@@ -117,7 +212,7 @@ impl RoomGrid {
         };
         let steps = step_table(mover.factor);
         let dist = Rc::new(flood(footprint, &self.weights, &steps, &goals));
-        self.floods.borrow_mut().insert(key, dist.clone());
+        self.floods.borrow_mut().insert(key.kept(), dist.clone());
         (dist, false)
     }
 }
@@ -786,14 +881,19 @@ impl Atlas {
         &band[at(first)..=at(last)]
     }
 
-    fn seats_of(target: &Target) -> Goal {
-        let mut targets = target.tiles.clone();
-        targets.sort_unstable();
-        targets.dedup();
-        Goal::Seats {
-            range: target.range,
-            tiles: targets,
-        }
+    fn flood_seats(&self, grid: &RoomGrid, mover: Mover, target: &Target) -> Rc<Table<i32>> {
+        let sorted = |t: &[Tile]| t.is_sorted_by(|a, b| a < b);
+        let mut owned = Vec::new();
+        let tiles = if sorted(&target.tiles) {
+            &target.tiles
+        } else {
+            owned.extend_from_slice(&target.tiles);
+            owned.sort_unstable();
+            owned.dedup();
+            &owned
+        };
+        let range = target.range;
+        self.flood_in(grid, mover, Goal::Seats { range, tiles })
     }
 
     fn flood_in(&self, grid: &RoomGrid, mover: Mover, goal: Goal) -> Rc<Table<i32>> {
@@ -809,7 +909,7 @@ impl Atlas {
         let grid = self.grid(at.room).filter(|_| mover.factor.moves > 0)?;
         let tile = tiles::of_pos(at);
         if at.room == target.room {
-            let seats = self.flood_in(grid, mover, Atlas::seats_of(target));
+            let seats = self.flood_seats(grid, mover, target);
             return Some(Atlas::field_of(grid, mover, seats, 0));
         }
         let (avoid, hops) = (&target.avoid, target.max_hops);
@@ -844,7 +944,7 @@ impl Atlas {
     pub fn ticks_on(&self, tree: &Tree, mover: Mover, target: &Target, from: &Pos) -> Option<i32> {
         let (start, root) = (from.room.coords(), tree.root?);
         let flood = |c: Coords, exit: &graph::Exit| {
-            Some(self.flood_in(self.rooms.get(&c)?, mover, Goal::Exit(exit.clone())))
+            Some(self.flood_in(self.rooms.get(&c)?, mover, Goal::Exit(exit)))
         };
         // On the band already, a body lands on its own mirror tile: the leg
         // is the walk it takes on either side of the border.
@@ -872,7 +972,7 @@ impl Atlas {
             }
             let seats = self
                 .grid(target.room)
-                .map(|g| self.flood_in(g, mover, Atlas::seats_of(target)));
+                .map(|g| self.flood_seats(g, mover, target));
             let entry = match seats {
                 Some(seats) => landed(&seats, &last.exit, own)?,
                 None => Atlas::crossing_ticks(),
@@ -904,4 +1004,35 @@ pub fn onward(candidates: impl Iterator<Item = (RoomName, i32, i32)>) -> Option<
             (rate, std::cmp::Reverse(*walk), std::cmp::Reverse(*room))
         })
         .map(|(room, _, _)| room)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_kept_flood_is_found_by_its_borrowed_goal_and_by_no_other() {
+        let t = Tile::of_index;
+        let (tiles, exit) = ([t(3), t(7)], [(t(3), t(7))]);
+        let seats = Goal::Seats {
+            range: 1,
+            tiles: &tiles,
+        };
+        let mut kept: HashMap<FloodKey, i32> = HashMap::default();
+        kept.insert(FloodOf::of(Atlas::PACE, seats).kept(), 1);
+        kept.insert(FloodOf::of(Atlas::PACE, Goal::Exit(&exit)).kept(), 2);
+        let at = |goal| {
+            kept.get(&FloodOf::of(Atlas::PACE, goal) as &dyn Keyed)
+                .copied()
+        };
+        assert_eq!(at(seats), Some(1));
+        assert_eq!(at(Goal::Exit(&exit)), Some(2));
+        assert_eq!(
+            at(Goal::Seats {
+                range: 2,
+                tiles: &tiles
+            }),
+            None
+        );
+    }
 }

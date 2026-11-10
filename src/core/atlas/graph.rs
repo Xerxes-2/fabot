@@ -13,7 +13,7 @@ use crate::core::HashMap;
 use crate::core::world::RoomName;
 
 /// Each stretch's first and last tile on its band.
-pub type Exit = Vec<(Tile, Tile)>;
+pub type Exit = Rc<[(Tile, Tile)]>;
 
 /// A region settled on the way to the root, left by `exit` into `next`,
 /// `value` ticks on from there.
@@ -25,11 +25,13 @@ struct Node {
     blind: i32,
     next: Option<usize>,
     dist: Option<Rc<Table<i32>>>,
+    next_in_room: Option<usize>,
 }
 
 struct Reached {
     room: Coords,
-    exit: Exit,
+    /// Its stretches in the search's `exits`.
+    exit: std::ops::Range<usize>,
     value: i32,
     hops: i32,
     blind: i32,
@@ -38,8 +40,8 @@ struct Reached {
 
 pub struct Ways {
     nodes: Vec<Node>,
-    /// Each room's regions, in the order settled.
-    rooms: HashMap<Coords, Vec<usize>>,
+    /// Each room's first region settled.
+    rooms: HashMap<Coords, usize>,
     root: Option<Coords>,
 }
 
@@ -59,10 +61,17 @@ pub struct Way {
 }
 
 impl Ways {
+    /// The room's regions, in the order settled.
+    fn regions(&self, room: Coords) -> impl Iterator<Item = usize> + '_ {
+        std::iter::successors(self.rooms.get(&room).copied(), |n| {
+            self.nodes[*n].next_in_room
+        })
+    }
+
     pub fn tree(&self) -> Tree {
         let at = |n: usize| {
-            let room = &self.rooms[&self.nodes[n].room];
-            room.iter().position(|m| *m == n).unwrap_or(0)
+            let room = self.nodes[n].room;
+            self.regions(room).position(|m| m == n).unwrap_or(0)
         };
         let way = |n: &Node| {
             let next = n.next?;
@@ -73,14 +82,12 @@ impl Ways {
                 exit: n.exit.clone(),
             })
         };
-        let next = (self.rooms.iter())
-            .map(|(room, at)| {
-                (
-                    *room,
-                    at.iter().filter_map(|n| way(&self.nodes[*n])).collect(),
-                )
-            })
-            .collect();
+        let mut next = HashMap::default();
+        next.reserve(self.rooms.len());
+        for room in self.rooms.keys() {
+            let ways = self.regions(*room).filter_map(|n| way(&self.nodes[n]));
+            next.insert(*room, ways.collect());
+        }
         Tree {
             root: self.root,
             next,
@@ -99,12 +106,7 @@ impl Ways {
         let c = room.coords();
         let grid = atlas.rooms.get(&c)?;
         let held = |n: &&Node| n.dist.as_ref().is_some_and(|d| holds(mover, d, grid, at));
-        let node = self
-            .rooms
-            .get(&c)?
-            .iter()
-            .map(|n| &self.nodes[*n])
-            .find(held)?;
+        let node = self.regions(c).map(|n| &self.nodes[n]).find(held)?;
         Some((node.dist.clone()?, node.value))
     }
 }
@@ -247,21 +249,22 @@ pub fn search(
             .copied()
             .unwrap_or(tiles::is_keeper_room(c)),
     };
-    let seats =
-        target.and_then(|t| Some(atlas.flood_in(grid_of(start)?, mover, Atlas::seats_of(t))));
+    let seats = target.and_then(|t| Some(atlas.flood_seats(grid_of(start)?, mover, t)));
     let on = |d: &Table<i32>, t: Tile| d[Atlas::anchor(mover.footprint, t)];
     ways.nodes.push(Node {
         room: start,
-        exit: Vec::new(),
+        exit: Rc::new([]),
         value: 0,
         hops: 0,
         blind: 0,
         next: None,
         dist: seats,
+        next_in_room: None,
     });
-    ways.rooms.insert(start, vec![0]);
+    ways.rooms.insert(start, 0);
 
     let mut reached: Vec<Reached> = Vec::new();
+    let mut exits: Vec<(Tile, Tile)> = Vec::new();
     let mut queue: BinaryHeap<Reverse<(i32, i32, usize)>> = BinaryHeap::new();
     let mut settled = Some(0);
     loop {
@@ -283,22 +286,22 @@ pub fn search(
                     (None, None) => 0,
                     (None, Some(_)) => Atlas::crossing_ticks(),
                 };
-                let mut exit: Exit = Vec::new();
+                let first = exits.len();
                 let mut ticks = UNREACHED;
                 for s in stretches(grid_of(there), near, opposite(side)) {
                     let d = s.iter().map(entry).min().unwrap_or(UNREACHED);
                     if d != UNREACHED {
-                        exit.push((s[0].0, s[s.len() - 1].0));
+                        exits.push((s[0].0, s[s.len() - 1].0));
                         ticks = ticks.min(d);
                     }
                 }
-                if exit.is_empty() {
+                if exits.len() == first {
                     continue;
                 }
                 queue.push(Reverse((blind, node.value + ticks, reached.len())));
                 reached.push(Reached {
                     room: there,
-                    exit,
+                    exit: first..exits.len(),
                     value: node.value + ticks,
                     hops: node.hops + 1,
                     blind,
@@ -309,27 +312,33 @@ pub fn search(
         let Some(Reverse((_, _, r))) = queue.pop() else {
             break;
         };
-        let r = &mut reached[r];
-        let exit_tiles = r.exit.iter().flat_map(|(a, b)| Atlas::stretch(*a, *b));
-        let regions = ways.rooms.get(&r.room).map_or(&[][..], |v| v.as_slice());
-        let held = regions.iter().any(|&n| {
+        let r = &reached[r];
+        let exit = &exits[r.exit.clone()];
+        let exit_tiles = exit.iter().flat_map(|(a, b)| Atlas::stretch(*a, *b));
+        let held = ways.regions(r.room).any(|n| {
             (ways.nodes[n].dist.as_ref())
                 .is_none_or(|d| exit_tiles.clone().any(|t| on(d, *t) != UNREACHED))
         });
         if held {
             continue;
         }
-        let dist = grid_of(r.room).map(|g| atlas.flood_in(g, mover, Goal::Exit(r.exit.clone())));
-        ways.rooms.entry(r.room).or_default().push(ways.nodes.len());
+        let dist = grid_of(r.room).map(|g| atlas.flood_in(g, mover, Goal::Exit(exit)));
+        match ways.regions(r.room).last() {
+            Some(last) => ways.nodes[last].next_in_room = Some(ways.nodes.len()),
+            None => {
+                ways.rooms.insert(r.room, ways.nodes.len());
+            }
+        }
         settled = Some(ways.nodes.len());
         ways.nodes.push(Node {
             room: r.room,
-            exit: std::mem::take(&mut r.exit),
+            exit: Rc::from(exit),
             value: r.value,
             hops: r.hops,
             blind: r.blind,
             next: Some(r.next),
             dist,
+            next_in_room: None,
         });
         if bounded && ends.contains(&r.room) {
             stops.retain(|stop| !resolved(atlas, mover, &ways, *stop));
@@ -344,9 +353,8 @@ pub fn search(
 /// A stop's room has a region holding its tile, or every stretch of its
 /// borders lies in a region settled already: the tile's region has no way out.
 fn resolved(atlas: &Atlas, mover: Mover, ways: &Ways, (room, at): Stop) -> bool {
-    let dists: Vec<&Table<i32>> = (ways.rooms.get(&room).map_or(&[][..], |v| v.as_slice()))
-        .iter()
-        .filter_map(|n| ways.nodes[*n].dist.as_deref())
+    let dists: Vec<&Table<i32>> = (ways.regions(room))
+        .filter_map(|n| ways.nodes[n].dist.as_deref())
         .collect();
     let (Some(at), Some(grid)) = (at, atlas.rooms.get(&room)) else {
         return true;

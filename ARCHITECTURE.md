@@ -680,9 +680,11 @@ The boundary is pure; the inside is written as a systems language. Everything
 below is the **default** a module's first line is written in; any of it yields
 to a measurement on the benchmark above, in either direction:
 
-- Module boundaries take and return owned values. Inside a function, `Vec`s,
-  mutable locals and loops on any path that runs per creep or per tile, and
-  no allocation a tick can avoid.
+- Module boundaries take and return owned values, but for `State`, which a
+  module writes in place once it cannot fault (`ModuleRun`): returned whole,
+  each module cloned it, ~700 allocations a tick on the live capture
+  (2026-11-10). Inside a function, `Vec`s, mutable locals and loops on any
+  path that runs per creep or per tile, and no allocation a tick can avoid.
 - A call across the wasm–JS seam is the seam's cost: on the live-sized capture
   ~90% of what reading the world cost over the F# reader was the number of
   calls, not the work in them (2026-10-17). So `World::of_game`, the only

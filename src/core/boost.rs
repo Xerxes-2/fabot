@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use super::atlas::Mover;
@@ -141,9 +142,9 @@ pub fn waiting<'a>(world: &'a World, home: RoomName, creep: &world::Creep) -> Op
 /// A body whose cast asked for a compound and whose parts do not carry it yet
 /// is held at the lab and boosted there: its module's acts and wish are
 /// dropped for the walk, or the boost itself when it stands beside it.
-pub fn stop(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
+pub fn stop<'a>(context: &mut Context, intents: &'a [Intent]) -> Cow<'a, [Intent]> {
     let Some((home, _)) = context.declarations.labs() else {
-        return intents;
+        return Cow::Borrowed(intents);
     };
     let mut stalls: Vec<(String, Pos, String, Compound)> = Vec::new();
 
@@ -154,15 +155,16 @@ pub fn stop(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
     }
 
     if stalls.is_empty() {
-        return intents;
+        return Cow::Borrowed(intents);
     }
 
     let stalling: BTreeSet<&str> = stalls.iter().map(|(name, _, _, _)| name.as_str()).collect();
-    let mut out: Vec<Intent> = (intents.into_iter())
+    let mut out: Vec<Intent> = (intents.iter())
         .filter(|i| {
             let actor = i.actor();
             i.is_queue() || !stalling.contains(actor.as_str())
         })
+        .cloned()
         .collect();
 
     let mut boostable: BTreeSet<&str> = BTreeSet::new();
@@ -195,5 +197,5 @@ pub fn stop(context: &mut Context, intents: Vec<Intent>) -> Vec<Intent> {
         ));
     }
 
-    out
+    Cow::Owned(out)
 }

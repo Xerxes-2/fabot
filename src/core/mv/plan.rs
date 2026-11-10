@@ -16,10 +16,9 @@ pub fn rests_soon(creep: &Creep, factor: FatigueFactor) -> bool {
 
 fn beside(atlas: &Atlas, creep: &Creep) -> Vec<Tile> {
     let at = tiles::of_pos(&creep.pos);
-    tiles::within(1, at)
-        .into_iter()
-        .filter(|tile| *tile != at && atlas.passable(creep.pos.room, *tile))
-        .collect()
+    let mut near = tiles::within(1, at);
+    near.retain(|tile| *tile != at && atlas.passable(creep.pos.room, *tile));
+    near
 }
 
 fn wish(
@@ -48,10 +47,8 @@ fn wish(
 /// body staying in the room stays a step inside it.
 pub fn stay(atlas: &Atlas, creep: &Creep, factor: FatigueFactor, weight: i32) -> Wish {
     let at = tiles::of_pos(&creep.pos);
-    let mut tail: Vec<Tile> = beside(atlas, creep)
-        .into_iter()
-        .filter(|tile| !tiles::on_edge(*tile))
-        .collect();
+    let mut tail = beside(atlas, creep);
+    tail.retain(|tile| !tiles::on_edge(*tile));
     let moves = can_move(creep, factor);
     let head = if moves && tiles::on_edge(at) && !tail.is_empty() {
         tail.remove(0)
@@ -106,16 +103,13 @@ pub fn toward(
             None => stay(atlas, creep, mover.factor, weight),
             Some(head) => {
                 let onward = field.step(head).and_then(|d| tiles::neighbour(head, d));
-                let mut tail: Vec<Tile> = beside(atlas, creep)
-                    .into_iter()
-                    .filter(|tile| {
-                        *tile != head
-                            && (ticks(*tile) < here
-                                || (ticks(*tile) < grid::UNREACHED
-                                    && tiles::range(*tile, head) == 1))
-                            && (ticks(*tile) == 0 || !tiles::on_edge(*tile))
-                    })
-                    .collect();
+                let mut tail = beside(atlas, creep);
+                tail.retain(|tile| {
+                    *tile != head
+                        && (ticks(*tile) < here
+                            || (ticks(*tile) < grid::UNREACHED && tiles::range(*tile, head) == 1))
+                        && (ticks(*tile) == 0 || !tiles::on_edge(*tile))
+                });
                 tail.sort_by_key(|tile| (ticks(*tile), *tile));
                 wish(creep, moves, head, onward, tail, Vec::new(), weight)
             }

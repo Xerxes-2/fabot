@@ -146,9 +146,9 @@ impl<'a> Reader<'a> {
 
     /// Only the resources `screeps-game-api` names count, as its `store_types` read them.
     fn store(&mut self) -> Store {
-        let held = self
-            .list(|r| (r.str(), r.n()))
-            .into_iter()
+        let count = self.n();
+        let held = (0..count)
+            .map(|_| (self.str(), self.n()))
             .filter(|(name, amount)| *amount > 0 && name.parse::<ResourceType>().is_ok())
             .map(|(name, amount)| (vocabulary::resource_of_name(name), amount))
             .collect();

@@ -404,13 +404,15 @@ fn front_of(scene: &Scene, atlas: &Atlas, e: &Engagement) -> Option<tactics::Fro
     })
 }
 
-/// Each home in sight as safe mode reads it: its raid, what stands and what fell.
+/// Each home in sight with a hostile in it as safe mode reads it: its raid,
+/// what stands and what fell. One with none never spends it.
 fn homes_of(scene: &Scene, decided: &[Engagement]) -> Vec<Home> {
     let world = scene.world;
     let mut homes_lost: Vec<Home> = Vec::new();
 
     for name in &scene.homes {
-        let Some(room) = scene.in_sight(*name) else {
+        let raided = |r: &&world::Room| r.hostiles().next().is_some();
+        let Some(room) = scene.in_sight(*name).filter(raided) else {
             continue;
         };
 

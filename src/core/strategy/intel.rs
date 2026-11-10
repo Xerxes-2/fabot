@@ -199,33 +199,31 @@ const NONE: &str = "-";
 /// for none, `lairs` each lair's tile and its resource's as `lair.resource,…`
 /// (`.` alone for none): a segment holds thousands.
 pub fn to_text(intel: &Intel) -> String {
-    let name = |user: &Option<String>| user.clone().unwrap_or_else(|| NONE.to_string());
+    use std::fmt::Write;
+    fn name(user: &Option<String>) -> &str {
+        user.as_deref().unwrap_or(NONE)
+    }
     let mut out = String::new();
     for (room, r) in intel {
-        let (reserver, lapse) = match &r.reservation {
-            Some((user, lapse)) => (user.as_str(), lapse.to_string()),
-            None => (NONE, NONE.to_string()),
+        let _ = write!(out, "{room} {} {} {} ", r.seen, name(&r.owner), r.level);
+        let _ = match &r.reservation {
+            Some((user, lapse)) => write!(out, "{user} {lapse}"),
+            None => write!(out, "{NONE} {NONE}"),
         };
-        out.push_str(&format!(
-            "{room} {} {} {} {reserver} {lapse} {} {}\n",
-            r.seen,
-            name(&r.owner),
-            r.level,
-            name(&r.worker),
-            r.lairs
-                .as_ref()
-                .map_or(NONE.to_string(), |posts| posts_text(posts))
-        ));
+        let _ = write!(out, " {} ", name(&r.worker));
+        match r.lairs.as_deref() {
+            None => out.push_str(NONE),
+            Some([]) => out.push('.'),
+            Some(posts) => {
+                for (i, (lair, resource)) in posts.iter().enumerate() {
+                    let comma = if i == 0 { "" } else { "," };
+                    let _ = write!(out, "{comma}{}.{}", lair.index(), resource.index());
+                }
+            }
+        }
+        out.push('\n');
     }
     out
-}
-
-fn posts_text(posts: &[Post]) -> String {
-    let post = |(lair, resource): &Post| format!("{}.{}", lair.index(), resource.index());
-    match posts.iter().map(post).collect::<Vec<_>>().join(",") {
-        none if none.is_empty() => ".".to_string(),
-        posts => posts,
-    }
 }
 
 /// A count, written before posts were, is none only at zero.

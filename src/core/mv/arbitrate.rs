@@ -62,7 +62,7 @@ pub fn resolve(
     scratch: &mut Scratch,
     passable: impl Fn(Tile) -> bool,
     held: &[Tile],
-    wishes: &[Wish],
+    wishes: &[&Wish],
 ) -> Resolution {
     let blocked = &mut scratch.blocked;
     let steps_onto = &mut scratch.steps_onto;
@@ -89,14 +89,14 @@ pub fn resolve(
         }
     }
 
-    let mut movable: Vec<&Wish> = wishes.iter().filter(|w| w.movable()).collect();
+    let mut movable: Vec<&Wish> = wishes.iter().copied().filter(|w| w.movable()).collect();
     movable.sort_by(|a, b| offered(a, b));
 
-    let mut placed: Vec<Wish> = Vec::new();
+    let mut placed: Vec<&Wish> = Vec::new();
     for wish in movable {
         if !blocked[wish.at] && holder[wish.at].is_none() {
             holder[wish.at] = Some(placed.len());
-            placed.push(wish.clone());
+            placed.push(wish);
         }
     }
 
@@ -241,7 +241,7 @@ pub fn resolve(
 }
 
 struct Search<'a> {
-    order: &'a [Wish],
+    order: &'a [&'a Wish],
     candidates: &'a [Vec<Tile>],
     tile_of: Vec<Tile>,
     holder: [Option<usize>; tiles::COUNT],
@@ -341,7 +341,7 @@ pub fn arbitrate_with(
     scratch: &mut Scratch,
     passable: impl Fn(Tile) -> bool,
     held: &[Tile],
-    wishes: &[Wish],
+    wishes: &[&Wish],
 ) -> Vec<(String, i32)> {
     resolve(scratch, passable, held, wishes).steps
 }
@@ -351,5 +351,6 @@ pub fn arbitrate(
     held: &[Tile],
     wishes: &[Wish],
 ) -> Vec<(String, i32)> {
-    arbitrate_with(&mut scratch(), passable, held, wishes)
+    let wishes: Vec<&Wish> = wishes.iter().collect();
+    arbitrate_with(&mut scratch(), passable, held, &wishes)
 }

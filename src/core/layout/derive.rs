@@ -98,7 +98,7 @@ pub fn colonies(
             .cloned()
             .collect();
 
-        towers.sort_by_key(|t| t.id.clone());
+        towers.sort_by(|a, b| a.id.cmp(&b.id));
 
         found.push(Colony {
             room: room.name,

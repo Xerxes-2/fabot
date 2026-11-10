@@ -782,11 +782,18 @@ fn rank_of(job: &Job, own: bool) -> i32 {
 }
 
 pub fn expiring(atlas: &Atlas, derived: &Derived, body: &Body, slot: &Slot) -> bool {
+    expires(body, home_walk(atlas, derived, slot))
+}
+
+fn home_walk(atlas: &Atlas, derived: &Derived, slot: &Slot) -> i32 {
     let home = derived.colonies[slot.colony].spawns[0].pos;
-    let walk = (walk(atlas, derived, &slot.body, &home, &slot.seat))
+    (walk(atlas, derived, &slot.body, &home, &slot.seat))
         .or_else(|| distance(atlas, derived, &home, &slot.seat))
-        .unwrap_or(0);
-    body.ticks_to_live <= body.size * engine::SPAWN_TICKS_PER_PART + walk
+        .unwrap_or(0)
+}
+
+fn expires(body: &Body, home_walk: i32) -> bool {
+    body.ticks_to_live <= body.size * engine::SPAWN_TICKS_PER_PART + home_walk
 }
 
 pub type Holders<'a> = BTreeMap<&'a str, Vec<&'a Body>>;
@@ -821,6 +828,11 @@ pub fn assign<'a>(
             None => loose.push(b),
         }
     }
+    let walks: Vec<i32> = if loose.iter().all(|b| b.pattern.is_scout()) {
+        Vec::new()
+    } else {
+        slots.iter().map(|s| home_walk(atlas, derived, s)).collect()
+    };
     for b in loose {
         if b.pattern.is_scout() {
             continue;
@@ -828,10 +840,10 @@ pub fn assign<'a>(
         let near = |open: bool| {
             (slots.iter().enumerate())
                 .filter(|(_, s)| s.job.pattern() == b.pattern)
-                .filter(|(_, s)| {
+                .filter(|(i, s)| {
                     let taken = holders
                         .get(s.id.as_str())
-                        .is_some_and(|h| h.iter().any(|h| !expiring(atlas, derived, h, s)));
+                        .is_some_and(|h| h.iter().any(|h| !expires(h, walks[*i])));
                     if open { !taken } else { !s.job.seated() }
                 })
                 .filter_map(|(i, s)| {

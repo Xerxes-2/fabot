@@ -462,7 +462,7 @@ fn work(
     plan::toward(atlas, creep, mover, &target, weight_of(&slot.job))
 }
 
-pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, State), String> {
+pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, String> {
     // `{ World with Creeps = filtered }`: a creep a fight holds is not in the
     // economy, and only the creep list differs.
     let seen: Vec<&Creep> = (context.world.creeps.iter())
@@ -655,9 +655,8 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     intents.extend(sends(&derived));
     intents.extend(moves);
 
-    let mut state = state.clone();
     state.assignments = next;
-    Ok((intents, state))
+    Ok(intents)
 }
 
 /// A body with no slot walks home, where one may open, the last of equal
@@ -725,8 +724,9 @@ mod tests {
                 trace: false,
             };
 
-            let (_, first) = decide(&mut context, &State::empty()).expect("a world decides");
-            let (intents, state) = decide(&mut context, &first).expect("a world decides again");
+            let mut state = State::empty();
+            decide(&mut context, &mut state).expect("a world decides");
+            let intents = decide(&mut context, &mut state).expect("a world decides again");
 
             for (name, held) in &state.assignments {
                 assert!(!slots::slot_of(held).is_empty(), "{name} {held}");

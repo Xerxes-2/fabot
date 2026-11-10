@@ -452,10 +452,11 @@ fn links_of(
     };
     (room.structures.iter())
         .filter_map(|s| {
+            let role = role_of(s)?;
             Some(LinkFact {
                 id: s.id.clone(),
                 pos: s.pos,
-                role: role_of(s)?,
+                role,
                 energy: s.store.amount_of(&Resource::Energy),
                 free: s.store.free(),
                 cooldown: s.cooldown,

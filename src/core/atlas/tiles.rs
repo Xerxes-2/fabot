@@ -204,7 +204,8 @@ pub fn direction(from: Tile, onto: Tile) -> i32 {
 pub fn within(radius: i32, tile: Tile) -> Vec<Tile> {
     let x = x_of(tile);
     let y = y_of(tile);
-    let mut tiles = Vec::new();
+    let side = (2 * radius + 1).clamp(0, SIDE) as usize;
+    let mut tiles = Vec::with_capacity(side * side);
     for ty in (y - radius).max(0)..=(y + radius).min(SIDE - 1) {
         for tx in (x - radius).max(0)..=(x + radius).min(SIDE - 1) {
             tiles.push(index(tx, ty));

@@ -67,7 +67,7 @@ fn changed(e: &Engagement, events: &[tracker::Event], by_id: &BTreeMap<i32, Grou
     })
 }
 
-pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, State), String> {
+pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, String> {
     let world = context.world;
     let declarations = context.declarations;
     let context_trace = context.trace;
@@ -572,15 +572,10 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
     let mut engagements = decided;
     engagements.sort_by_key(|e| e.id);
 
-    Ok((
-        out,
-        State {
-            groups,
-            engagements,
-            casts,
-            ..state.clone()
-        },
-    ))
+    state.groups = groups;
+    state.engagements = engagements;
+    state.casts = casts;
+    Ok(out)
 }
 
 pub static FIGHT: Module = Module {

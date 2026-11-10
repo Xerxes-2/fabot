@@ -11,7 +11,7 @@ use super::tiles;
 use super::world::{RoomName, Rules, World};
 use intel::Intel;
 
-pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, State), String> {
+pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, String> {
     let mut preyed = intel::preyed(context.intel, context.declarations, context.world.time);
     preyed.retain(|room| context.atlas.has_terrain(*room));
     let (observed, scouts) = intel::sight(
@@ -21,14 +21,9 @@ pub fn decide(context: &mut Context, state: &State) -> Result<(Vec<Intent>, Stat
         context.intel,
         &preyed,
     );
-    Ok((
-        observed,
-        State {
-            scouts,
-            preyed,
-            ..state.clone()
-        },
-    ))
+    state.scouts = scouts;
+    state.preyed = preyed;
+    Ok(observed)
 }
 
 /// A rival's room this near raids within a creep life.
