@@ -1,11 +1,11 @@
 {
-  "why": "a colony working two outposts moves its economy bodies rarely held, never wedged, and without swinging back and forth past 60 a window (runs read 28 to 42). Swings 60 -> 80 while #802 folds the slot economy's ring-before-trickle rule into one choice: it reads 76 with the rule, 47 without",
+  "why": "a colony working two outposts moves its economy bodies rarely held, never wedged, and without swinging back and forth past 60 a window (runs read 28 to 42; main 31)",
   "modules": ["economy", "mv", "observe"],
   "start": { "room": "W8N3", "seed": 1, "node": "E1" },
   "ticks": 4000,
   "assert": [
     { "metric": "move.held", "max": 1 },
     { "metric": "move.wedged", "max": 0 },
-    { "metric": "move.swings", "max": 80 }
+    { "metric": "move.swings", "max": 60 }
   ]
 }

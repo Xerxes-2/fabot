@@ -19,7 +19,7 @@
 // tombstone or ruin it fell out of. `bodies.jsonl`: each body, ours or not,
 // once it is gone from the colony's rooms and their neighbours or the run ends: its parts, the ticks it
 // was first and last seen, its ticks to live then, the damage struck on it, its ticks by room and
-// by action, and each room it entered with the tick.
+// by action, each room it entered with the tick, and its ticks within two steps of a rival's reach (`near`).
 // The colony's rooms are <room> (several homes: each sample's `homes` holds
 // one sample a home, the first's at its top) and the outposts its Memory declares
 // (`v2.declarations.outposts`, read at the start): the ledger and the worth
@@ -251,6 +251,8 @@ const pileLog = new Map();
 const graves = new Map();
 const lives = new Map();
 const near = (a, b, r) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= r;
+// The range a body strikes at with the parts it has left (none: -Infinity).
+const reach = (o) => (o.body.some((p) => p.type === "ranged_attack" && p.hits > 0) ? 3 : o.body.some((p) => p.type === "attack" && p.hits > 0) ? 1 : -Infinity);
 function roleOf(pos, objects) {
   const by = (pred) => objects.filter(pred);
   if (by((o) => o["#lookType"] === "constructionSite" && near(o.pos, pos, 0)).length) return "on a site";
@@ -379,6 +381,7 @@ function live(rooms, time) {
     const struck = new Map();
     for (const e of room["#eventLog"] ?? [])
       if ((e.event ?? e._$Variant) === ATTACK) struck.set(e.targetId, (struck.get(e.targetId) ?? 0) + e.damage);
+    const rivals = room["#objects"].filter((o) => o.body !== undefined && o["#user"] !== ours && reach(o) > 0);
     for (const o of room["#objects"]) {
       if (o.body === undefined) continue;
       const key = `${o["#user"]} ${o.name}`;
@@ -396,6 +399,7 @@ function live(rooms, time) {
       life.rooms[room.name] = (life.rooms[room.name] ?? 0) + 1;
       for (const a of (o["#actionLog"] ?? []).filter((a) => a.time === time)) life.acts[a.type] = (life.acts[a.type] ?? 0) + 1;
       if (struck.has(o.id)) life.struck = (life.struck ?? 0) + struck.get(o.id);
+      if (life.ours && rivals.some((h) => near(h.pos, o.pos, reach(h) + 2))) life.near = (life.near ?? 0) + 1;
     }
   }
   for (const [key, life] of lives)
@@ -653,15 +657,13 @@ function fought(rec, phase, bodies, theirs) {
   }
   const f = rec.fight;
   if (!f) return;
-  const live = (h, type) => h.body.some((p) => p.type === type && p.hits > 0);
-  const reach = (h) => (live(h, "ranged_attack") ? 3 : live(h, "attack") ? 1 : -2) + 1;
   for (const o of bodies) {
     f.taken[o.name] = (f.taken[o.name] ?? 0) + Math.max(0, (f.last[o.name] ?? o.hits) - o.hits);
     f.last[o.name] = o.hits;
     f.low[o.name] = Math.min(f.low[o.name] ?? 1, o.hits / o.hitsMax);
     if (o.hits < o.hitsMax / 2 && theirs.length) {
       f.wounded++;
-      if (theirs.every((h) => h.pos.roomName !== o.pos.roomName || seam(h.pos, o.pos) > reach(h))) f.out++;
+      if (theirs.every((h) => h.pos.roomName !== o.pos.roomName || seam(h.pos, o.pos) > reach(h) + 1)) f.out++;
     }
   }
 }
@@ -686,7 +688,6 @@ function swinging(rec, bodies, t, seen) {
 // those still in its reach then (the hunt's step is the next tick's shot).
 function keeping(rec, room, objects, bodies) {
   const prey = objects.filter((o) => o.body !== undefined && o.pos.roomName === room && ![ours, kInvaderUserId].includes(o["#user"]) && o.body.every((p) => !["attack", "ranged_attack"].includes(p.type)));
-  const reach = (b) => (b.body.some((p) => p.type === "ranged_attack" && p.hits > 0) ? 3 : b.body.some((p) => p.type === "attack" && p.hits > 0) ? 1 : -1);
   const here = bodies.filter((b) => b.pos.roomName === room);
   const pairs = here.flatMap((b) => prey.filter((p) => near(b.pos, p.pos, reach(b))).map((p) => `${b.name} ${p.id}`));
   for (const k of rec.inReach ?? []) {
@@ -750,6 +751,7 @@ async function engaged(t, time, rooms) {
     const objects = seen.flatMap((r) => [...r["#objects"]]);
     if (rec.kind === "siege") {
       rec.left = razeLeft(objects, e.room);
+      if (rec.left === 0 && rec.fighting !== undefined) rec.bare ??= t;
       breaching(rec, e, objects, t);
     }
     if (rec.kind === "sweep") {

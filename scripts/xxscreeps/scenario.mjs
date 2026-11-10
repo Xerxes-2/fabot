@@ -163,6 +163,7 @@ const siegeSet = (dir) => {
   const ask = [...most].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0];
   return of.filter((b) => castOf(b) === ask);
 };
+const lastSiege = (dir) => rowsOf(dir).filter((e) => e.kind === "siege").sort((a, b) => a.opened - b.opened).at(-1);
 const moves = (body) => [...body].filter((p) => p === "m").length;
 const scoutsOf = (dir) => livesOf(dir).filter((b) => b.ours && b.name.startsWith("scout-"));
 const walksOf = (dir) => rowsOf(dir).flatMap((e) => (e.blob ? [e.blob] : []));
@@ -283,8 +284,20 @@ const measures = {
   // Energy our bodies carried out of a home across its border.
   carriedOut: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.carriedOut ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.carriedOut ?? 0),
   dug: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.dug ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.dug ?? 0),
-  // The least energy the home's storage and containers held.
+  // Energy dug in `room` a tick, the least-squares slope from the tick a rival first
+  // entered it (none: its first dig): a cast order shifted by a hundred ticks moves a fit less than a window.
+  digRate: (samples, a, dir) => {
+    const raid = Math.min(...livesOf(dir).flatMap((b) => (b.ours ? [] : (b.entered ?? []).filter(([r]) => r === a.room).map(([, t]) => t))));
+    const worked = within(samples, a).filter((s) => s.rooms[a.room]?.dug > 0 && (raid === Infinity || s.t >= raid));
+    if (worked.length < 2) return -Infinity;
+    const [mt, md] = [mean(worked.map((s) => s.t)), mean(worked.map((s) => s.rooms[a.room].dug))];
+    const slope = worked.reduce((n, s) => n + (s.t - mt) * (s.rooms[a.room].dug - md), 0) / worked.reduce((n, s) => n + (s.t - mt) ** 2, 0);
+    return Number(slope.toFixed(1));
+  },
+  // The least energy the home's storage and containers held, and the ticks it stood below `below`.
   leastStored: (samples, a) => Math.min(...within(samples, a).map((s) => s.stored)),
+  ticksBelow: (samples, a) =>
+    a.below === undefined ? Infinity : within(samples, a).reduce((n, s, i, seen) => n + (s.stored < a.below && seen[i + 1] ? seen[i + 1].t - s.t : 0), 0),
   mostStored: (samples, a) => Math.max(...within(samples, a).map((s) => s.stored)),
   // Percent of the colony's harvest the engagements cast into bodies.
   fightShare: (samples, _, dir) => Math.round((100 * rowsOf(dir).reduce((n, e) => n + (e.cast ?? 0), 0)) / Math.max(1, samples.at(-1).ledger.dug)),
@@ -373,10 +386,13 @@ const measures = {
   // over the engagements of `kind` (none named: every one); none seen: 0.
   oscillation: (_, a, dir) =>
     Math.max(0, ...rowsOf(dir).filter((e) => !a.kind || e.kind === a.kind).flatMap((e) => Object.values(e.swung).map((s) => Math.round((100 * s.swings) / Math.max(1, s.ticks))))),
-  // The most ticks a siege took from its open to its breach (one that never breached: Infinity).
-  breachTicks: (_, __, dir) => Math.max(...rowsOf(dir).filter((e) => e.kind === "siege").map((e) => (e.breached ?? (e.disengaged || e.closed === null ? Infinity : e.closed)) - e.opened), ...(rowsOf(dir).some((e) => e.kind === "siege") ? [] : [Infinity])),
-  // The rival's structures the last siege opened left standing in its room (none opened: Infinity).
-  razeLeft: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "siege").sort((a, b) => a.opened - b.opened).at(-1)?.left ?? Infinity,
+  // The most ticks a siege took from its muster to its breach (one that never breached: Infinity),
+  // so its cast's wait on the economy's spawns is not read.
+  breachTicks: (_, __, dir) => Math.max(...rowsOf(dir).filter((e) => e.kind === "siege").map((e) => (e.mustered === undefined ? Infinity : (e.breached ?? (e.disengaged || e.closed === null ? Infinity : e.closed)) - e.mustered)), ...(rowsOf(dir).some((e) => e.kind === "siege") ? [] : [Infinity])),
+  // The rival's structures the last siege opened left standing in its room (none opened: Infinity),
+  // and the ticks from its fight's start until it first stood none (never: Infinity), which a rebuild after does not move.
+  razeLeft: (_, __, dir) => lastSiege(dir)?.left ?? Infinity,
+  razeTicks: (_, __, dir) => (lastSiege(dir)?.bare ?? Infinity) - (lastSiege(dir)?.fighting ?? 0),
   // Over the first siege: the ticks from its open until its first target fell
   // (never: Infinity), the ramparts its room lost before, and its bodies that
   // landed in a region the target is walled off from.
@@ -444,9 +460,14 @@ const measures = {
       const cast = b.body.length;
       return moves(b.body) > moves(b.body.slice(Math.max(0, cast - Math.ceil(b.hits / 100))));
     }).length,
-  // The damage struck on our bodies that swing nothing, a harvester or a hauler: what a
-  // raid that never meets a fight costs the room's work.
-  unarmedStruck: (_, __, dir) => livesOf(dir).reduce((n, b) => n + (b.ours && !/[ar]/.test(b.body ?? "") ? (b.struck ?? 0) : 0), 0),
+  // The damage struck on our bodies that swing nothing, a harvester or a hauler, a tick one
+  // stood near a rival's reach (soak-step's `near`): what a raid that never meets a fight
+  // costs the room's work, however long the raid stays.
+  unarmedStruckRate: (_, __, dir) => {
+    const unarmed = livesOf(dir).filter((b) => b.ours && !/[ar]/.test(b.body ?? ""));
+    const [struck, near] = ["struck", "near"].map((k) => unarmed.reduce((n, b) => n + (b[k] ?? 0), 0));
+    return near ? Number((struck / near).toFixed(2)) : struck ? Infinity : 0;
+  },
   // Ticks an enemy stood in `room`.
   hostileTicks: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.hostile ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.hostile ?? 0),
   // The damage struck on the body called `name`.
