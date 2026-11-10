@@ -205,7 +205,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK body stood there, its keeper lairs and the resource each guards; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
 | `observe.*` | health, faults, per-module CPU, counters, this tick's tactic offers (§6.3), the metrics past their threshold | Main, then Observe | segment 1 | operator; calibrates the benchmark |
-| `metrics` | the open window's sums; each creep's last task and load, each site's last progress and when, each colony's last controller progress, last tick's engagements and each room's last close; each body's last tile and the one before, its stuck run, the room it last left and when, its ticks to live, whether it was wounded and what last struck it and when; the closed windows | Observe | heap | what a tick is compared against; a reset loses the open window and the bodies' tracks and restarts the sites' ages |
+| `metrics` | the open window's sums; each creep's last task and load, each site's last progress and when, each colony's last controller progress, last tick's engagements and each room's last close; each body's last tile and the one before, its stuck run, the room it last left and when, its ticks to live, whether it was wounded and what last struck it and when, its last energy draw not yet delivered; the closed windows | Observe | heap | what a tick is compared against; a reset loses the open window and the bodies' tracks and restarts the sites' ages |
 | `metrics.windows` | 100-tick windows aligned on the game tick, a row a room and one for the world, the last 150 (fewer past the segment's 100 KB) | Observe | segment 3, written as a window closes | `observe metrics`, the soak's `metrics.jsonl` (§10.5) |
 | `scouts`, `preyed` | the declared rooms a scout serves, with their rows' age; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
 | `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) and whether it is armed; a room in sight holds only what stands there now. A level-0 core is unarmed: it keeps its core engagement open but stands nothing down | World | heap | vision grace; when a stood-down outpost is clear |
@@ -236,8 +236,11 @@ bodies that stand; a body keeps its slot until the slot goes or the body
 dies, so an arriving body never re-matches the others. A hauler is 2:1 or
 1:1 CARRY:MOVE, whichever delivers more over a life per energy on its route
 (`bodies::carry_per_move`): any ratio between moves no faster than 1:1 off
-road. A remote is served by the nearest colony with a storage; a stood-down
-outpost keeps its slots and its bodies wait at home. The outposts' carriers
+road. The home's carriers fetch only at home, so the ring never waits on a
+body gone to an outpost. The stock is drawn only for its sinks' room past
+the loads at home bound for them, which book first: a load never goes back
+into the store it came from. A remote is served by the nearest colony
+with a storage; a stood-down outpost keeps its slots and its bodies wait at home. The outposts' carriers
 take at most half the spawns' time, or a far ring of outposts casts nothing
 but haulers; the home's own carriers queue ahead of a fight's casts, since
 they refill the bank those are paid from.
@@ -918,7 +921,7 @@ tick: `--seeds N` plays each start on N seeds, and a change is read over them
 ### 10.5 Metrics
 
 The bot measures its own economy and fight in 100-tick windows (idle share per
-pattern, task churn, spend split, spawn use, stale sites, engagement flips,
+pattern, task churn, loads returned to their store, spend split, spawn use, stale sites, engagement flips,
 refusals, CPU per phase, deaths by cause, structures lost, hostile dwell,
 held steps, edge flips, swings, missed shots), so live and the soak read one number by one
 definition: last season most faults were found by the owner watching the

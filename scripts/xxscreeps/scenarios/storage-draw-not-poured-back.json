@@ -1,6 +1,6 @@
 {
-  "why": "the stock is drawn only for the room its sinks have left past what is already aboard for them",
-  "modules": ["atlas", "economy", "mv"],
+  "why": "the stock is drawn only for the room its sinks have left past what is aboard for them, and a load drawn from it is never put back: main drew and banked 900 a carrier every three ticks beside the storage (carry.returned 52,200-70,200 a window) while a carrier walking in held the ring's booking; fixed it reads 900 to 1,800, a sink filled under a load on its way. The bound adds 900",
+  "modules": ["atlas", "economy", "mv", "observe"],
   "start": {
     "room": "W8N3",
     "seed": 1,
@@ -8,6 +8,7 @@
   },
   "ticks": 4000,
   "assert": [
+    { "metric": "carry.returned", "max": 2700 },
     {
       "measure": "pouredBack",
       "max": 100000

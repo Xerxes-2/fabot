@@ -799,6 +799,10 @@ fn rank_of(job: &Job, own: bool) -> i32 {
     }
 }
 
+pub fn far(slot: &Slot) -> bool {
+    slot.job == Job::Fill && slot.rank == OUTPOST_HAUL
+}
+
 pub fn expiring(atlas: &Atlas, derived: &Derived, body: &Body, slot: &Slot) -> bool {
     expires(body, home_walk(atlas, derived, slot))
 }
@@ -919,11 +923,7 @@ pub fn casts(
         // A carrier waits on any dig it carries, a spender on every one.
         (s.fed_by.as_deref()).is_none_or(|ids| {
             let mut ids = ids.split(',').filter(|id| !id.is_empty());
-            if s.job == Job::Fill && s.rank == OUTPOST_HAUL {
-                ids.any(held)
-            } else {
-                ids.all(held)
-            }
+            if far(s) { ids.any(held) } else { ids.all(held) }
         })
     };
 

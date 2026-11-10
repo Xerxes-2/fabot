@@ -44,6 +44,7 @@ const BODIES: &str = "bodies";
 const BODIES_OF: &str = "bodies.";
 const IDLE_OF: &str = "idle.";
 const CHURN: &str = "churn.task";
+const RETURNED: &str = "carry.returned";
 const HELD: &str = "move.held";
 const WEDGED: &str = "move.wedged";
 const EDGE: &str = "move.edgeFlips";
@@ -182,6 +183,11 @@ const METRICS: &[Metric] = &[
         "task changes on a tick the body's load held, per 100 economy bodies",
     ),
     metric(
+        RETURNED,
+        Fold::Sum,
+        "energy a body transferred into the store it last withdrew energy from, no transfer, build, repair or upgrade between: at most what it drew",
+    ),
+    metric(
         HELD,
         Fold::Share(BODIES),
         "% of economy body-ticks whose step the arbitration denied",
@@ -232,6 +238,7 @@ const THRESHOLDS: &[(&str, Bound)] = &[
     ("idle.worker", Bound::Max(85)),
     ("idle.upgrader", Bound::Max(30)),
     (CHURN, Bound::Max(50)),
+    (RETURNED, Bound::Max(1800)),
     (IDLE_WANT, Bound::Max(0)),
     (STALE, Bound::Max(3000)),
     (FLIPS, Bound::Max(1)),
@@ -349,6 +356,8 @@ pub struct Metrics {
     engaged: BTreeMap<i32, RoomName>,
     closed: BTreeMap<RoomName, i32>,
     tracks: HashMap<String, Track>,
+    /// A body's last energy draw not yet delivered: the store and the amount.
+    drawn: HashMap<String, (String, i32)>,
 }
 
 pub struct Seen<'a> {
@@ -476,6 +485,44 @@ fn verb(intent: &Intent) -> Option<(&str, &'static str)> {
         Intent::Tower(id, TowerAct::Heal(_)) => (id, "heal"),
         _ => return None,
     })
+}
+
+fn returned(
+    sums: &mut Sums,
+    drawn: &mut HashMap<String, (String, i32)>,
+    creeps: &HashMap<&str, &Creep>,
+    intents: &[Intent],
+    refused: &BTreeSet<(&str, &str)>,
+) {
+    for intent in intents {
+        let Intent::Creep(name, act) = intent else {
+            continue;
+        };
+        let Some(c) = creeps.get(name.as_str()) else {
+            continue;
+        };
+        match act {
+            CreepAct::Withdraw(id, Resource::Energy) if !refused.contains(&(name, "withdraw")) => {
+                drawn.insert(name.clone(), (id.clone(), c.store.free()));
+            }
+            CreepAct::Transfer(id, Resource::Energy) if !refused.contains(&(name, "transfer")) => {
+                if let Some((from, n)) = drawn.remove(name.as_str())
+                    && &from == id
+                {
+                    add(sums, None, RETURNED, f64::from(n.min(energy(c))));
+                }
+            }
+            CreepAct::Transfer(_, Resource::Energy) => (),
+            CreepAct::Transfer(..)
+            | CreepAct::Build(_)
+            | CreepAct::Repair(_)
+            | CreepAct::Upgrade(_) => {
+                drawn.remove(name.as_str());
+            }
+            _ => (),
+        }
+    }
+    drawn.retain(|name, _| creeps.contains_key(name.as_str()));
 }
 
 fn task_of<'a>(assignments: &'a BTreeMap<String, String>, name: &str) -> Option<&'a str> {
@@ -841,6 +888,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
     }
     m.tasks
         .retain(|name, _| task_of(seen.assignments, name).is_some());
+    returned(sums, &mut m.drawn, &creeps, seen.intents, &refused);
 
     for s in &world.spawns {
         let row = Some(s.pos.room);

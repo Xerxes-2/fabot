@@ -135,7 +135,12 @@ fn ores_aboard(derived: &Derived) -> Vec<Resource> {
     out
 }
 
-fn takes_of(derived: &Derived, ci: usize, sinks: &[Spot], outposts: &[&Ground]) -> Vec<Spot> {
+fn takes_of(
+    derived: &Derived,
+    ci: usize,
+    (sinks, aboard): (&[Spot], i32),
+    outposts: &[&Ground],
+) -> Vec<Spot> {
     let g = &derived.grounds[ci];
     let mut out = Vec::new();
     let mut add = |task: Task, pos: Pos, amount: i32, tier: i32| {
@@ -181,7 +186,8 @@ fn takes_of(derived: &Derived, ci: usize, sinks: &[Spot], outposts: &[&Ground]) 
     let short: i32 = (sinks.iter())
         .filter(|s| s.tier < 3 && matches!(&s.task, Task::Refill(_, r) if r.is_energy()))
         .map(|s| s.amount)
-        .sum();
+        .sum::<i32>()
+        - aboard;
     let feed = g.feed.as_ref().map(|f| f.id.as_str());
     let linked = |id: &str| g.links.iter().any(|l| l.id == id);
     for st in
@@ -267,6 +273,19 @@ fn takes_of(derived: &Derived, ci: usize, sinks: &[Spot], outposts: &[&Ground]) 
     out
 }
 
+/// What the stock's draw counts as already bound for a sink: it books its
+/// sink first, or the drawn load finds the room taken and goes back in. A
+/// load still walking in from an outpost keeps no sink waiting, and a
+/// worker's draw is its own spending.
+fn counted(derived: &Derived, sinks: &[Spot], slot: &Slot, at: &Pos, task: &Task) -> bool {
+    let ci = slot.colony;
+    let drawn = matches!(task, Task::Withdraw(id, r) if r.is_energy()
+        && derived.grounds[ci].stores.iter().any(|s| s.owned && &s.id == id));
+    slot.job == Job::Fill
+        && at.room == derived.colonies[ci].room
+        && (drawn || sinks.iter().any(|s| s.tier < 3 && &s.task == task))
+}
+
 fn carried(body: &Body, r: &Resource) -> i32 {
     body.store.amount_of(r)
 }
@@ -276,11 +295,21 @@ impl<'a> Jobs<'a> {
         atlas: &'a Atlas,
         derived: &'a Derived,
         (slots, owners): (&[Slot], &[Option<usize>]),
-        held: &[(usize, &Body)],
+        held: &[(usize, &Body, Option<Task>)],
     ) -> Jobs<'a> {
         let sinks: Vec<Vec<Spot>> = (0..derived.colonies.len())
             .map(|ci| sinks_of(derived, ci))
             .collect();
+        let mut aboard = vec![0; derived.colonies.len()];
+        for (si, body, task) in held {
+            let ci = slots[*si].colony;
+            if task
+                .as_ref()
+                .is_some_and(|t| counted(derived, &sinks[ci], &slots[*si], &body.pos, t))
+            {
+                aboard[ci] += body.energy;
+            }
+        }
         let takes = (0..derived.colonies.len())
             .map(|ci| {
                 let outposts: Vec<&Ground> = (derived.grounds.iter().enumerate())
@@ -288,11 +317,11 @@ impl<'a> Jobs<'a> {
                     .filter(|(gi, _)| owners.get(*gi) == Some(&Some(ci)))
                     .map(|(_, g)| g)
                     .collect();
-                takes_of(derived, ci, &sinks[ci], &outposts)
+                takes_of(derived, ci, (&sinks[ci], aboard[ci]), &outposts)
             })
             .collect();
         let mut carried = vec![false; derived.colonies.len()];
-        for (si, _) in held {
+        for (si, _, _) in held {
             if slots[*si].job == Job::Fill {
                 carried[slots[*si].colony] = true;
             }
@@ -305,6 +334,10 @@ impl<'a> Jobs<'a> {
             digging: HashMap::default(),
             carried,
         }
+    }
+
+    pub fn counted(&self, slot: &Slot, at: &Pos, task: &Task) -> bool {
+        counted(self.derived, &self.sinks[slot.colony], slot, at, task)
     }
 
     fn distance(&self, a: &Pos, b: &Pos) -> i32 {
@@ -407,28 +440,26 @@ impl<'a> Jobs<'a> {
             Job::Claim(id) => Some(Task::Claim(id.clone())),
             Job::Scout(room) => Some(Task::Scout(*room)),
             Job::Fill => {
-                // Energy drawn from the storage waits aboard for the next
-                // sink rather than pour back.
-                let storage = self.derived.grounds[ci].stores.iter().find(|s| s.owned);
-                let banks = !kept.is_some_and(
-                    |t| matches!(t, Task::Withdraw(id, _) if storage.is_some_and(|s| &s.id == id)),
-                );
                 // Energy is fetched only for a sink with room: with none, the
                 // dig waits in its container for the workers, not aboard.
                 let room: i32 = (self.sinks[ci].iter())
                     .filter(|s| matches!(&s.task, Task::Refill(_, r) if r.is_energy()))
                     .map(|s| s.amount.max(0))
                     .sum();
+                // The home's carriers are cast for its own flows and stay on
+                // them, so the ring never waits on a body gone to an outpost.
+                let home = self.derived.colonies[ci].room;
+                let far = slots::far(slot);
                 let fits = |s: &Spot| {
-                    room > 0
-                        || !matches!(&s.task, Task::Withdraw(_, r) | Task::Pickup(_, r) if r.is_energy())
+                    (far || s.pos.room == home)
+                        && (room > 0
+                            || !matches!(&s.task, Task::Withdraw(_, r) | Task::Pickup(_, r) if r.is_energy()))
                 };
                 let mut takes = std::mem::take(&mut self.takes[ci]);
                 let more = takes.iter().any(|s| s.amount > 0 && fits(s));
                 // A fight's cast waits on the ring, never on a source's trickle.
                 let ring =
                     (self.sinks[ci].iter()).any(|s| s.tier == 0 && s.amount >= body.store.capacity);
-                let home = self.derived.colonies[ci].room;
                 let trickle = self.derived.grounds[ci].has_storage()
                     && body.free < body.store.capacity
                     && (takes.iter()).any(|s| {
@@ -437,11 +468,11 @@ impl<'a> Jobs<'a> {
                 let task = if Jobs::fetching(body, kept, more) && !(ring && trickle) {
                     self.fetch(&mut takes, body, kept, &fits).or_else(|| {
                         (body.free < body.store.capacity)
-                            .then(|| self.deliver(ci, body, kept, banks))
+                            .then(|| self.deliver(ci, body, kept, true))
                             .flatten()
                     })
                 } else {
-                    self.deliver(ci, body, kept, banks)
+                    self.deliver(ci, body, kept, true)
                 };
                 self.takes[ci] = takes;
                 task
