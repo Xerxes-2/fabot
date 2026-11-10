@@ -167,12 +167,15 @@ function healer(creep, allies) {
   if (lead && !creep.pos.isNearTo(lead)) step(creep, [{ pos: lead.pos, range: 1 }], false);
 }
 
-function raid() {
+// With nothing to strike where it stands, a raid walks on to { target }, as a
+// player's would past a scout it killed.
+function raid(config) {
   for (const room of Object.values(Game.rooms)) {
     const foes = room.find(FIND_HOSTILE_CREEPS);
     const allies = room.find(FIND_MY_CREEPS);
     for (const creep of allies) {
-      if (active(creep, ATTACK)) swing(creep, foes);
+      if (config.target && room.name !== config.target && !targetOf(creep, foes)) toward(creep, config.target);
+      else if (active(creep, ATTACK)) swing(creep, foes);
       else if (active(creep, RANGED_ATTACK)) gun(creep, foes);
       else if (active(creep, HEAL)) healer(creep, allies);
     }

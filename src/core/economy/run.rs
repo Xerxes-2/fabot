@@ -44,8 +44,15 @@ fn scouting(atlas: &Atlas, derived: &Derived, held: &Assignments) -> Assignments
     for b in scouts {
         let walks = |open: &dyn Fn(RoomName) -> bool| {
             let rooms = (derived.scouts.iter()).filter(|(at, _, _)| open(at.room));
+            // A radius room is three apart but its route may run past the
+            // reach the trees hold.
+            let far = |at: &Pos| {
+                let rooms = atlas.route(&BTreeSet::new(), tick::SIEGE_HOPS, b.pos.room, at.room)?;
+                Some(Atlas::crossing_ticks() * (rooms.len() as i32 - 1))
+            };
             atlas::onward(rooms.filter_map(|(at, age, _)| {
-                Some((at.room, *age, distance(atlas, derived, &b.pos, at)?))
+                let walk = distance(atlas, derived, &b.pos, at).or_else(|| far(at))?;
+                Some((at.room, *age, walk))
             }))
         };
         if !out.contains_key(&b.name)
@@ -380,6 +387,11 @@ fn target_of(
                 max_hops: tick::REACH_HOPS,
             }
         }
+        // A scout walks as far as its choice reached (`scouting`).
+        None if matches!(task, Task::Scout(_)) => Target {
+            max_hops: tick::SIEGE_HOPS,
+            ..tick::target_at(&at, task.range_of())
+        },
         None => tick::target_at(&at, task.range_of()),
     };
     (target, seats)

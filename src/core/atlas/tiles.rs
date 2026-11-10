@@ -301,10 +301,19 @@ pub fn rooms_apart(a: RoomName, b: RoomName) -> i32 {
     }
 }
 
-pub fn is_keeper_room((x, y): (i32, i32)) -> bool {
+fn in_sector((x, y): (i32, i32)) -> (i32, i32) {
     let local = |c: i32| (if c < 0 { -c - 1 } else { c }) % 10;
-    let (x, y) = (local(x), local(y));
+    (local(x), local(y))
+}
+
+pub fn is_keeper_room(c: (i32, i32)) -> bool {
+    let (x, y) = in_sector(c);
     (4..=6).contains(&x) && (4..=6).contains(&y) && (x, y) != (5, 5)
+}
+
+pub fn has_controller(c: (i32, i32)) -> bool {
+    let (x, y) = in_sector(c);
+    x != 0 && y != 0 && !((4..=6).contains(&x) && (4..=6).contains(&y))
 }
 
 /// Across rooms, where adjacent rooms' edge tiles are one tile.

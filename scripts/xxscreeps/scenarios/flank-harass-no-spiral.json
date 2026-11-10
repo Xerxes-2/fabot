@@ -1,5 +1,5 @@
 {
-  "why": "a cheap raider poking both outposts and the home every 500 ticks for 20000 ticks starts no spending spiral: the home's stock stays above §5's reserve (20k unthreatened at RCL5, 60k while a rival is near; the slots read a least of 49.9k), no level or spawn lost, the fight casts a small share of the harvest. A fight body cast with a MOVE last loses 8 fewer bodies. Up to 9k ticks below the reserve until #806: the rival's room one away is never scouted, so the threat reserve never fires and the fight's casts draw below the quiet 20k reserve once the upgraders spend the stock (#805); main 5.0k/7.3k/7.5k over seeds 1-3, #806 none",
+  "why": "a cheap raider poking both outposts and the home every 500 ticks for 20000 ticks starts no spending spiral: the home's stock stays above §5's reserve (20k unthreatened at RCL5, 60k while a rival is near; the slots read a least of 49.9k), no level or spawn lost, the fight casts a small share of the harvest. A fight body cast with a MOVE last loses 8 fewer bodies. The rival's room one away is scouted before its first raid, so the threat reserve holds the stock: no tick below the quiet 20k reserve (main, never scouting it, 5.0k/7.3k/7.5k ticks below over seeds 1-3)",
   "modules": ["atlas", "economy", "exchange", "fight", "layout", "mv", "tactics"],
   "start": {
     "room": "W8N3",
@@ -19,7 +19,8 @@
   "assert": [
     { "measure": "levelsLost", "max": 0 },
     { "measure": "spawnsLost", "max": 0 },
-    { "measure": "ticksBelow", "from": 3500, "below": 20000, "max": 9000 },
+    { "measure": "ticksBelow", "from": 3500, "below": 20000, "max": 0 },
+    { "measure": "firstIn", "room": "W8N4", "max": 1500 },
     { "measure": "fightShare", "max": 6 },
     { "measure": "engagements", "min": 50 },
     { "measure": "bodiesLost", "max": 3 },

@@ -263,6 +263,7 @@ const measures = {
     for (const [, t, until] of stays.sort((x, y) => x[1] - y[1])) [worst, seen] = [Math.max(worst, t - seen), Math.max(seen, until)];
     return Math.max(worst, Math.max(...lives.map((b) => b.last)) - seen);
   },
+  firstIn: (_, a, dir) => Math.min(...livesOf(dir).filter((b) => b.ours).flatMap((b) => (b.entered ?? []).filter(([r]) => r === a.room).map(([, t]) => t))),
   claimersCast: (samples, a) => new Set(within(samples, a).flatMap((s) => s.bodies.filter((b) => b.startsWith("claimer-")).map((b) => b.split("@")[0]))).size,
   claimSpawned: (samples) => samples.find((s) => Object.values(s.claimed ?? {}).every((c) => c.spawns > 0) && Object.keys(s.claimed ?? {}).length)?.t ?? Infinity,
   // The most of a compound (`resource`) stood at once.

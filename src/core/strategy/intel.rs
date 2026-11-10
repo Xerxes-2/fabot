@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::atlas::tiles::Tile;
 use crate::core::atlas::{Atlas, Post};
@@ -76,7 +76,7 @@ fn declared(declarations: &Declarations) -> impl Iterator<Item = &RoomName> {
         .chain(&declarations.sieges)
 }
 
-/// A declared room a scout serves; `cast` while its row is past `STALE`: a
+/// A room a scout serves; `cast` while its row is past `STALE` or missing: a
 /// living scout patrols, a new one is cast only for a stale row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Scout {
@@ -106,13 +106,49 @@ pub fn preyed(intel: &Intel, declarations: &Declarations, time: i32) -> Vec<Room
     rooms.into_iter().map(|(_, room)| *room).collect()
 }
 
-/// Every declared room no observer covers is scouted (`ARCHITECTURE.md` §7.1).
+/// Rooms a rival raising §5's reserve could hold, scouted from a colony a tower
+/// guards; by route too, as one walled off by terrain raids no sooner than a far one.
+pub fn threat_radius(
+    world: &World,
+    atlas: &Atlas,
+    owned: &BTreeSet<RoomName>,
+) -> BTreeMap<RoomName, i32> {
+    let towered = (owned.iter().filter_map(|r| world.room(*r)))
+        .filter(|room| {
+            let level = room.controller.as_ref().map_or(0, |c| c.level);
+            world.rules.allowed("tower", level) > 0
+        })
+        .map(|room| {
+            (
+                room.name,
+                atlas.tree(&BTreeSet::new(), super::NEAR, room.name),
+            )
+        });
+    towered
+        .flat_map(|(home, tree)| {
+            let (x, y) = home.coords();
+            (-super::NEAR..=super::NEAR)
+                .flat_map(move |dx| (-super::NEAR..=super::NEAR).map(move |dy| (x + dx, y + dy)))
+                .filter(|c| tiles::has_controller(*c))
+                .map(|(x, y)| RoomName::new(x, y))
+                .filter(|room| atlas.has_terrain(*room))
+                .filter_map(move |room| Some((room, tree.crossings(room, home)?)))
+        })
+        .filter(|(room, _)| !owned.contains(room) && !world.closed.contains(room))
+        .fold(BTreeMap::new(), |mut radius, (room, hops)| {
+            let at = radius.entry(room).or_insert(hops);
+            *at = (*at).min(hops);
+            radius
+        })
+}
+
+/// Every declared or threat-radius room no observer covers is scouted (§7.1).
 pub fn sight(
     world: &World,
     atlas: &Atlas,
     declarations: &Declarations,
     intel: &Intel,
-    preyed: &[RoomName],
+    (preyed, radius): (&[RoomName], &BTreeMap<RoomName, i32>),
 ) -> (Vec<Intent>, Vec<Scout>) {
     let mut free: Vec<_> = world
         .rooms
@@ -177,17 +213,30 @@ pub fn sight(
     observed.extend(frontier.iter().filter_map(&mut observe));
 
     let seen = |room: &RoomName| intel.get(room).map(|r| r.seen);
+    // Rings nearest first: a nearer rival raids sooner, and age alone strays.
+    let ring = (radius.iter())
+        .filter(|(room, _)| !intel.contains_key(*room))
+        .map(|(_, hops)| *hops)
+        .min();
+    let near = (radius.iter())
+        .filter(|(room, hops)| intel.contains_key(*room) || Some(**hops) == ring)
+        .map(|(room, _)| room);
     let mut rooms: Vec<&RoomName> = declared(declarations)
+        .chain(near)
         .filter(|room| !covered(&observed, room))
         .collect();
     rooms.sort_by_key(|room| (seen(room), *room));
     rooms.dedup();
     let scouts = rooms
         .into_iter()
-        .map(|room| Scout {
-            room: *room,
-            age: world.time - seen(room).unwrap_or(0),
-            cast: seen(room).is_some_and(|at| world.time - at > STALE),
+        .map(|room| {
+            // Read every tick, as an observer would.
+            let siege = declarations.sieges.contains(room);
+            Scout {
+                room: *room,
+                age: world.time - seen(room).filter(|_| !siege).unwrap_or(0),
+                cast: siege || seen(room).is_none_or(|at| world.time - at > STALE),
+            }
         })
         .collect();
     (observed, scouts)

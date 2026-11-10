@@ -758,17 +758,31 @@ pub fn plan(atlas: &mut Atlas, derived: &Derived, owners: &[Option<usize>]) -> V
             &c.id,
         ));
     }
-    // A scout takes whichever room its walk picks, so a slot is a count:
-    // one a room, cast only for the rooms Strategy casts for, and one a
-    // colony: a second watches the room the first left, and both stand.
+    // A scout takes whichever room its walk picks, so a slot is a count, one
+    // a colony, keyed by it so a living scout keeps it however rooms reorder.
     let mut scouts = derived.scouts.clone();
-    scouts.sort_by_key(|(_, _, cast)| !*cast);
-    let mut casting = BTreeSet::new();
-    for (k, (at, _, cast)) in scouts.iter().enumerate() {
-        let job = Job::Scout(at.room);
-        if let Some(mut slot) = errand(atlas, derived, job, *at, &k.to_string()) {
-            if !cast || !casting.insert(slot.colony) {
+    scouts.sort_by_key(|(_, age, cast)| (!*cast, -age));
+    let mut held = BTreeSet::new();
+    for (at, age, cast) in &scouts {
+        if held.len() == derived.colonies.len() {
+            break;
+        }
+        let Some(mut slot) = errand(atlas, derived, Job::Scout(at.room), *at, "") else {
+            continue;
+        };
+        if held.insert(slot.colony) {
+            slot.id = format!(
+                "{}:{}:0",
+                bodies::name_of(Pattern::Scout),
+                derived.colonies[slot.colony].room
+            );
+            if !cast {
                 slot.body.clear();
+            }
+            // A row never written reads as old as the world: the reserve
+            // (§5) cannot be read until it is, so its scout goes before any spend.
+            if *age >= derived.time {
+                slot.rank = SIGHT;
             }
             out.push(slot);
         }
@@ -791,6 +805,7 @@ const PIONEERS: usize = 4;
 /// nearest stocked neighbour's workers too.
 const RAISED_UNTIL: i32 = 3;
 const SPEND: i32 = 10;
+const SIGHT: i32 = 3;
 
 /// Cast order: a colony's own dig and its carriers first, then its outposts'
 /// reservers, whose bodies see them, their dig and haul, its floor of
@@ -799,11 +814,11 @@ fn rank_of(job: &Job, own: bool) -> i32 {
     match (job, own) {
         (Job::Dig(_), true) => 0,
         (Job::Fill, _) => 2,
-        (Job::Reserve(_) | Job::Claim(_), _) => 3,
+        (Job::Reserve(_) | Job::Claim(_), _) => SIGHT,
+        (Job::Scout(_), _) => 12,
         (Job::Dig(_), false) => 4,
         (Job::Work(_), _) => SPEND,
         (Job::Upgrade, _) => 11,
-        (Job::Scout(_), _) => 12,
     }
 }
 
@@ -865,6 +880,13 @@ pub fn assign<'a>(
     };
     for b in loose {
         if b.pattern.is_scout() {
+            let free = (slots.iter().enumerate()).find(|(_, s)| {
+                s.job.pattern() == b.pattern && !holders.contains_key(s.id.as_str())
+            });
+            if let Some((i, s)) = free {
+                out.insert(b.name.clone(), i);
+                holders.entry(s.id.as_str()).or_default().push(b);
+            }
             continue;
         }
         let near = |open: bool| {

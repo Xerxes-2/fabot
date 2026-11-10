@@ -8,19 +8,25 @@ use super::engine;
 use super::fight::shape::{Cast, Engagement};
 use super::tick::{ColonyPlan, Context, Declarations, Stage};
 use super::tiles;
-use super::world::{RoomName, Rules, World};
+use super::world::{RoomName, Rules, World, sightings};
 use intel::Intel;
 
 pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, String> {
     let mut preyed = intel::preyed(context.intel, context.declarations, context.world.time);
     preyed.retain(|room| context.atlas.has_terrain(*room));
-    let (observed, scouts) = intel::sight(
+    // A scout only dies where armed bodies stand, and draws them off; a
+    // siege's sight is the fight's.
+    let unarmed = |room| sightings::unarmed(context.sightings, context.world.time, room);
+    let mut radius = intel::threat_radius(context.world, context.atlas, &context.derived.owned);
+    radius.retain(|room, _| unarmed(*room));
+    let (observed, mut scouts) = intel::sight(
         context.world,
         context.atlas,
         context.declarations,
         context.intel,
-        &preyed,
+        (&preyed, &radius),
     );
+    scouts.retain(|s| context.declarations.sieges.contains(&s.room) || unarmed(s.room));
     state.scouts = scouts;
     state.preyed = preyed;
     Ok(observed)

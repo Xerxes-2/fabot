@@ -17,7 +17,7 @@
 // less the residual it reports. `decay.jsonl`: each energy pile that
 // decayed, once it is gone or the run ends, with its tile's role and the
 // tombstone or ruin it fell out of. `bodies.jsonl`: each body, ours or not,
-// once it is gone from the colony's rooms and their neighbours or the run ends: its parts, the ticks it
+// once it is gone from the colony's rooms, their neighbours and the opponents' rooms or the run ends: its parts, the ticks it
 // was first and last seen, its ticks to live then, the damage struck on it, its ticks by room and
 // by action, each room it entered with the tick, and its ticks within two steps of a rival's reach (`near`).
 // The colony's rooms are <room> (several homes: each sample's `homes` holds
@@ -211,7 +211,7 @@ const creditOf = (stock, level) => {
   return reserve === 0 ? stock : reserve * Math.tanh(stock / reserve);
 };
 const world = await shard.loadWorld();
-const bordering = [...new Set(roomNames.flatMap((r) => Object.values(world.map.describeExits(r) ?? {})))].filter(
+const bordering = [...new Set([...roomNames.flatMap((r) => Object.values(world.map.describeExits(r) ?? {})), ...opponents.map((o) => o.room)])].filter(
   (r) => !roomNames.includes(r) && world.map.describeExits(r) !== null,
 );
 const roadCost = (room, pos) => {

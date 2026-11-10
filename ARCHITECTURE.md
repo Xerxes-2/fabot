@@ -208,7 +208,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `observe.*` | health, faults, per-module CPU, counters, this tick's tactic offers (§6.3), the metrics past their threshold | Main, then Observe | segment 1 | operator; calibrates the benchmark |
 | `metrics` | the open window's sums; each creep's last task and load, each site's last progress and when, each colony's last controller progress, last tick's engagements and each room's last close; each body's last tile and the one before, its stuck run, the room it last left and when, its ticks to live, whether it was wounded and what last struck it and when, its last energy draw not yet delivered; the closed windows | Observe | heap | what a tick is compared against; a reset loses the open window and the bodies' tracks and restarts the sites' ages |
 | `metrics.windows` | 100-tick windows aligned on the game tick, a row a room and one for the world, the last 150 (fewer past the segment's 100 KB) | Observe | segment 3, written as a window closes | `observe metrics`, the soak's `metrics.jsonl` (§10.5) |
-| `scouts`, `preyed` | the declared rooms a scout serves, with their rows' age; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
+| `scouts`, `preyed` | the declared and threat-radius rooms a scout serves, with their rows' age; the rooms an enemy owns, reserves or works, stalest first | Strategy | heap, this tick only | Economy casts scouts, Fight's sweep candidates; derived from intel each tick |
 | `sightings` | room → each armed hostile's or Invader core's id → the tick it is gone (seen tick + its ticksToLive, or the core's collapse; a deploying core's deploy plus the longest collapse) and whether it is armed; a room in sight holds only what stands there now. A level-0 core is unarmed: it keeps its core engagement open but stands nothing down | World | heap | vision grace; when a stood-down outpost is clear |
 | `standing.*` | per module: last output and the key it was decided on | each module | heap | the replay (§1) |
 | `terrain` | room → its raw terrain buffer, read the first tick it is seen and, a few a tick nearest our spawns first, for every room out to `SIEGE_HOPS`; room → its `getRoomStatus`, for each room in sight, beside one or declared | World | heap | terrain never changes, a status only when a novice or respawn area ends (a reset reads it afresh), and reading either is calls across the seam (§9.2); a room whose status is not our spawns' is never routed into or served, since the engine leaves a creep on the exit tile into it; a room with no terrain read is never observed, since one off the shard refuses the observer |
@@ -602,11 +602,21 @@ and opens engagements. It runs on its key (§1), not every tick.
 every visible room. Economy reads a declared claim or outpost out of sight as
 its row last saw it, so a room another holds casts no claimer. Strategy owns
 the observers: each declared siege every tick, then the stalest rows older
-than `STALE` (a creep life, the owner's) in range. Every declared room no
+than `STALE` (a creep life, the owner's) in range. Every declared room, and
+every room with a controller and our status within three of a room of ours
+a tower stands in, by both coordinates and route
+(`threat_radius`, where a rival raises §5's reserve), that no
 observer covers is a `Scout room` declaration: a living 1-MOVE scout never
 idles; as it stands in its room, Economy sends it on by `atlas::onward` (the
-row's age over the walk), one room a scout; a new one is cast only for a row past
-`STALE` (a room never seen is served as nobody's, its bodies' sight its first row).
+row's age over the walk, out to `SIEGE_HOPS`, as a radius room lies past the
+trees' reach from another), one room a scout; a new one is cast only for a row past
+`STALE` or never written, since no body of ours need pass a radius room; for
+a row never written it is cast before any spend, the reserve unreadable
+without it. Rows never written are offered a ring at a time, nearest first:
+by age alone a scout strays outward and the nearest rival is read last. A
+declared siege no observer covers reads as never seen, so a scout stands in
+it as an observer would: the siege prices its successors and breach on sight.
+A room where armed bodies stand is left out, a siege's aside.
 ❓ After the sweep: rows grow towers and sources with their first reader,
 and whether the room graph's avoided set comes from them.
 
