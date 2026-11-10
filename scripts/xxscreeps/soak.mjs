@@ -413,8 +413,9 @@ for (const o of opponents) {
     cpSync(o.bot, dir, { recursive: true, filter: (f) => basename(f) !== "fetch.json" });
     const spec = specOf(o.bot);
     if (spec) copied(spec, dir);
+    cpSync(join(HERE, "engine", "seat.js"), join(dir, "seat.js"));
   } else cpSync(o.bot, join(dir, "main.js"));
-  if (o.config) writeFileSync(join(dir, "opponent.js"), `module.exports = ${JSON.stringify(o.config)};\n`);
+  writeFileSync(join(dir, "opponent.js"), `module.exports = ${JSON.stringify({ ...o.config, seed })};\n`);
   if (from || seated) {
     node26([XXSCREEPS, "manage", "bot", "update", o.name, `./bot-${o.name}`], world);
     continue;

@@ -521,7 +521,7 @@ const codeOf = (...paths) =>
     .reduce((h, f) => h.update(f).update(readFileSync(f)), createHash("sha256"))
     .digest("hex")
     .slice(0, 8);
-const harness = codeOf(...["seed", "waves", "core", "colony.mjs", "node.mjs", "live.mjs"].map((f) => join(HERE, "engine", f)));
+const harness = codeOf(...["seed", "seat.js", "waves", "core", "colony.mjs", "node.mjs", "live.mjs"].map((f) => join(HERE, "engine", f)));
 const worldOf = (start) => `${recipe(start, seats(start.opponents).map((s) => ({ ...s, code: codeOf(s.bot === "@bot" ? bot : s.bot) })))}-t${start.at}-${start.bundle}-h${harness}`;
 const worldDir = (start) => join(REPO, "soak-runs/worlds", worldOf(start));
 const keyOf = (start, name = basename(bot, ".js")) => `scenario-${name}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}`;

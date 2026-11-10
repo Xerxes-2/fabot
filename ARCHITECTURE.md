@@ -822,10 +822,11 @@ everything v1 used its self-written arena for, and more:
   Invader waves). TooAngel (AGPL, so fetched by its pinned
   tarball and integrity, never vendored: `engine/tooangel/fetch.json`)
   plays from next door in a world cached at tick 11000, its RCL3, and sends
-  its melee squad at our home every 1500 ticks (`defend-holds-tooangel-attack`, its
-  Math.random seeded). A run fetches only with `--fetch`; without the tarball
-  in the cache that scenario is skipped, never failed, and `jj ship` never
-  reaches the registry. Hivemind,
+  its melee squad at our home every 1500 ticks (`defend-holds-tooangel-attack`).
+  A seated bot reads a pinned CPU and bucket and draws from the world's seed
+  (`engine/seat.js`): read off the machine, they throttle it by load. A run
+  fetches only with `--fetch`; without the tarball in the cache that
+  scenario is skipped, never failed, and `jj ship` never reaches the registry. Hivemind,
   fetched the same way, holds the declared-room world against a siege and
   a sweep, both the offence target and so nightly: `--nightly` runs them,
   and they join the daily library once they pass. `siege-outlasts-safe-mode`,
