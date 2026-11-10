@@ -110,16 +110,17 @@ fn run_tick() -> Result<(), String> {
     phases.push(("atlas".to_string(), clock() - start));
 
     let start = clock();
-    let derived = tick::derive(&world, &mut atlas, &declarations, &sightings);
+    let mut derived = tick::derive(&world, &mut atlas, &declarations, &sightings);
     phases.push(("derive".to_string(), clock() - start));
     let plans = strategy::plan(
         &world,
-        &derived.owned,
+        &derived,
         &declarations,
         rows,
         (&state.engagements, &state.casts, &state.due),
     );
     let declarations = declarations.planned(plans);
+    derived.worked = tick::worked(&world, &sightings, &declarations, &derived);
 
     let mut context = Context {
         world: &world,

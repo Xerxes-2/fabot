@@ -203,7 +203,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
 | `recorder` | the last ticks' read pass (`app/read.js`), Memory and intel rows, deflated; a tick over a segment spans several, so the ring keeps fewer | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
-| `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK body stood there, its keeper lairs and the resource each guards; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
+| `intel.rooms` | room → last seen, owner and level, reserver and the tick its hold lapses, whose WORK body stood there, its keeper lairs and the resource each guards, its controller and sources and whether a container stood at each; by username, never stance | Strategy | heap, segment 2 every 100 ticks, the recorder's capture | a declared room out of sight is served as it was last seen (§7.1) |
 | `engagements.log` | closed engagements with prediction vs outcome | Observe | segment | §10.1 |
 | `observe.*` | health, faults, per-module CPU, counters, this tick's tactic offers (§6.3), the metrics past their threshold | Main, then Observe | segment 1 | operator; calibrates the benchmark |
 | `metrics` | the open window's sums; each creep's last task and load, each site's last progress and when, each colony's last controller progress, last tick's engagements and each room's last close; each body's last tile and the one before, its stuck run, the room it last left and when, its ticks to live, whether it was wounded and what last struck it and when, its last energy draw not yet delivered; the closed windows | Observe | heap | what a tick is compared against; a reset loses the open window and the bodies' tracks and restarts the sites' ages |
@@ -631,7 +631,7 @@ rules by the operator alone) and editable by the operator (`observe declare`;
 forbid? }`, refused where a name is no tactic's or a pin is what a rule that
 joins it forbids). The world reader turns every owner into its stance once
 (`world::Owner`): a stranger, neither ally nor enemy, is fought where it
-threatens us but never hunted; enemies are declared by hand, and a declared siege's owner, as intel last saw it, is one (owner's call). Candidates are priced once when intel changes or a due tick comes:
+threatens us but never hunted; enemies are declared by hand, and a declared siege's owner, as intel last saw it, is one (owner's call). Candidates are priced off intel:
 an outpost by sources, distance, threat and the CPU it costs (v1 withdrew an
 outpost for CPU; the budget is explicit here); a claim by the same plus GCL
 room; a room is avoided by what intel saw there. A priced candidate that pays
@@ -639,8 +639,24 @@ is declared; one that stops paying is withdrawn. No room is ever named in
 source.
 
 Each tick, once `Derived` is built and before any module runs, Strategy writes a `ColonyPlan` for every room we
-own (today: `Exploit` built to its controller's level) and
-`Declarations::planned` merges it under the operator's rows: **an operator row
+own (today: `Exploit` built to its controller's level) and the outposts
+`strategy::outposts::chosen` picks off intel (kept fresh by the threat
+radius's scout) and Atlas's crossings for each colony with a storage below
+RCL8 (an RCL8 colony's remotes raised its task churn tenfold and cost its
+sweeps a third of their catches, #811): the operator's rows first, then the rooms that stand
+(intel saw a container at every source), then the most net energy a spawn
+tick (dig less the bodies' upkeep, a room another player works paying its
+bodies twice, an ally's never) while each home's spawns' half and the CPU's
+half (0.2 an intent, a body acting once a tick) carry them. A home adds one
+room that does not stand at a time, so its spawns take on one room's bodies
+at once, and the ranking puts the rooms that stand first, so a new reading
+of intel never drops one. A storage-less colony declares none: its haul has
+nowhere to bank (served from its feed, half the remote dig decayed). While an
+operation is open (a fight cast owed, a declared claim not yet spawned, a
+declared siege, an open siege or sweep, a boost the colony fills) a colony adds no
+room that does not stand: an operator's declaration wins over an
+auto-picked room (owner's call). `Declarations::planned` merges both
+under the operator's rows: **an operator row
 always wins** and Strategy fills only rooms the operator left undeclared
 (owner's call), so a hand decision is never undone by the next plan.
 

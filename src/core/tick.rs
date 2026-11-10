@@ -184,9 +184,11 @@ impl Declarations {
         refused
     }
 
-    pub fn planned(mut self, strategy: Vec<ColonyPlan>) -> Declarations {
+    pub fn planned(mut self, (plans, outposts): (Vec<ColonyPlan>, Vec<Outpost>)) -> Declarations {
         let declared: BTreeSet<RoomName> = self.colonies.iter().map(|p| p.room).collect();
-        (self.colonies).extend(strategy.into_iter().filter(|p| !declared.contains(&p.room)));
+        (self.colonies).extend(plans.into_iter().filter(|p| !declared.contains(&p.room)));
+        let declared: BTreeSet<RoomName> = self.outposts.iter().map(|o| o.room).collect();
+        (self.outposts).extend(outposts.into_iter().filter(|o| !declared.contains(&o.room)));
         self
     }
 
@@ -319,6 +321,7 @@ pub struct Derived {
     pub worked: Vec<Outpost>,
     /// What a body outside a fight walks round, per room with any.
     pub danger: Vec<(RoomName, TileSet)>,
+    pub trees: Vec<(RoomName, Tree)>,
 }
 
 impl Derived {
@@ -377,23 +380,36 @@ pub fn derive(
     let trees: Vec<(RoomName, Tree)> = (colonies.iter())
         .map(|home| (*home, atlas.tree(&BTreeSet::new(), REACH_HOPS, *home)))
         .collect();
-    let raised =
-        (declarations.claims.iter()).filter(|c| owned.contains(&c.room) && !spawned(c.room));
-    let worked = (declarations.outposts.iter())
-        .chain(raised)
-        .filter(|o| {
-            open(world, sightings, &owned, o.room)
-                && (trees.iter()).any(|(home, tree)| home == &o.room || tree.contains(o.room))
-        })
-        .cloned()
-        .collect();
-
-    Derived {
+    let mut derived = Derived {
         danger: danger(world, &owned),
         owned,
         colonies,
-        worked,
-    }
+        worked: Vec::new(),
+        trees,
+    };
+    derived.worked = worked(world, sightings, declarations, &derived);
+    derived
+}
+
+pub fn worked(
+    world: &World,
+    sightings: &Sightings,
+    declarations: &Declarations,
+    derived: &Derived,
+) -> Vec<Outpost> {
+    let owned = &derived.owned;
+    let spawned = |room: RoomName| derived.colonies.contains(&room);
+    let raised =
+        (declarations.claims.iter()).filter(|c| owned.contains(&c.room) && !spawned(c.room));
+    (declarations.outposts.iter())
+        .chain(raised)
+        .filter(|o| {
+            open(world, sightings, owned, o.room)
+                && (derived.trees.iter())
+                    .any(|(home, tree)| home == &o.room || tree.contains(o.room))
+        })
+        .cloned()
+        .collect()
 }
 
 /// Whether an outpost's work is open (`ARCHITECTURE.md` §13, M1b): a foe

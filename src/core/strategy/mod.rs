@@ -1,4 +1,5 @@
 pub mod intel;
+pub mod outposts;
 
 use super::intents::Intent;
 use super::state::State;
@@ -6,7 +7,7 @@ use std::collections::BTreeSet;
 
 use super::engine;
 use super::fight::shape::{Cast, Engagement};
-use super::tick::{ColonyPlan, Context, Declarations, Stage};
+use super::tick::{ColonyPlan, Context, Declarations, Derived, Outpost, Stage};
 use super::tiles;
 use super::world::{RoomName, Rules, World, sightings};
 use intel::Intel;
@@ -44,18 +45,18 @@ pub fn reserve(rules: &Rules, lifetimes: f64, level: i32, threatened: bool) -> i
 
 pub fn plan(
     world: &World,
-    owned: &BTreeSet<RoomName>,
+    derived: &Derived,
     declarations: &Declarations,
     intel: &Intel,
     (engagements, casts, due): (&[Engagement], &[Cast], &BTreeSet<RoomName>),
-) -> Vec<ColonyPlan> {
+) -> (Vec<ColonyPlan>, Vec<Outpost>) {
     let rival = |name: &str| name != world.me && !declarations.allies.contains(name);
     let rivals: Vec<RoomName> = (intel.iter())
         .filter(|(_, row)| row.level > 0 && row.owner.as_deref().is_some_and(rival))
         .map(|(room, _)| *room)
         .collect();
     let fought = |room: RoomName| engagements.iter().any(|e| e.room == room);
-    (owned.iter().filter_map(|r| world.room(*r)))
+    let plans: Vec<ColonyPlan> = (derived.owned.iter().filter_map(|r| world.room(*r)))
         .filter_map(|room| {
             let level = room.controller.as_ref()?.level;
             let near = rivals
@@ -81,5 +82,9 @@ pub fn plan(
                 owes: asked > 0 || due.contains(&room.name),
             })
         })
-        .collect()
+        .collect();
+    let preyed = intel::preyed(intel, declarations, world.time);
+    let busy = outposts::busy(&plans, declarations, (engagements, &preyed, derived));
+    let candidates = outposts::survey(world, derived, declarations, intel);
+    (plans, outposts::chosen(world, candidates, &busy))
 }

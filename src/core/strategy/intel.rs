@@ -4,10 +4,10 @@ use crate::core::atlas::tiles::Tile;
 use crate::core::atlas::{Atlas, Post};
 use crate::core::engine;
 use crate::core::intents::Intent;
-use crate::core::tick::{self, Declarations};
+use crate::core::tick::{self, Declarations, Declared};
 use crate::core::tiles;
 use crate::core::vocabulary::BodyPart;
-use crate::core::world::{Owner, RoomName, World};
+use crate::core::world::{Owner, Pos, RoomName, World};
 
 /// A room as it stood when last seen, by username: a stance is the
 /// declarations' and changes without a sight.
@@ -22,6 +22,10 @@ pub struct Row {
     pub worker: Option<String>,
     /// None on a row written before posts were read: unknown, not none.
     pub lairs: Option<Vec<Post>>,
+    pub controller: Option<Declared>,
+    /// None on a row written before sources were read: unknown, not none.
+    pub sources: Option<Vec<Declared>>,
+    pub contained: bool,
 }
 
 pub type Intel = BTreeMap<RoomName, Row>;
@@ -57,6 +61,21 @@ pub fn step(world: &World, intel: &mut Intel) {
                 .find(|h| h.body.iter().any(|p| p.kind == BodyPart::Work))
                 .and_then(|h| user(&world.me, &h.owner)),
             lairs: Some(Atlas::posts(room)),
+            controller: c.map(|c| Declared {
+                id: c.id.clone(),
+                pos: c.pos,
+            }),
+            sources: Some(
+                (room.sources.iter())
+                    .map(|s| Declared {
+                        id: s.id.clone(),
+                        pos: s.pos,
+                    })
+                    .collect(),
+            ),
+            contained: (room.sources.iter()).all(|s| {
+                (room.structures.iter()).any(|c| c.kind.is_container() && c.pos.within(1, &s.pos))
+            }),
         };
         match intel.get_mut(&room.name) {
             Some(held) => *held = row,
@@ -244,9 +263,10 @@ pub fn sight(
 
 const NONE: &str = "-";
 
-/// One line a room, `room seen owner level reserver lapse worker lairs`, `-`
-/// for none, `lairs` each lair's tile and its resource's as `lair.resource,…`
-/// (`.` alone for none): a segment holds thousands.
+/// One line a room, `room seen owner level reserver lapse worker lairs
+/// controller sources contained`, `-` for none, `lairs` each lair's tile and its
+/// resource's as `lair.resource,…` and `sources` each as `id@tile,…` (`.`
+/// alone for none): a segment holds thousands.
 pub fn to_text(intel: &Intel) -> String {
     use std::fmt::Write;
     fn name(user: &Option<String>) -> &str {
@@ -270,6 +290,21 @@ pub fn to_text(intel: &Intel) -> String {
                 }
             }
         }
+        let _ = match &r.controller {
+            Some(c) => write!(out, " {}@{}", c.id, c.pos.index()),
+            None => write!(out, " {NONE}"),
+        };
+        match r.sources.as_deref() {
+            None => out.push_str(" -"),
+            Some([]) => out.push_str(" ."),
+            Some(sources) => {
+                for (i, s) in sources.iter().enumerate() {
+                    let sep = if i == 0 { ' ' } else { ',' };
+                    let _ = write!(out, "{sep}{}@{}", s.id, s.pos.index());
+                }
+            }
+        }
+        out.push_str(if r.contained { " 1" } else { " 0" });
         out.push('\n');
     }
     out
@@ -296,14 +331,36 @@ fn posts_of(text: &str) -> Option<Vec<Post>> {
     }
 }
 
+fn site_of(room: RoomName, text: &str) -> Option<Declared> {
+    let (id, at) = text.split_once('@')?;
+    let at: i32 = at
+        .parse()
+        .ok()
+        .filter(|i| (0..tiles::COUNT as i32).contains(i))?;
+    Some(Declared {
+        id: id.to_string(),
+        pos: Pos::new(room, at % 50, at / 50),
+    })
+}
+
 pub fn of_text(text: &str) -> Intel {
     let name = |s: &str| (s != NONE).then(|| s.to_string());
     text.lines()
         .filter_map(|line| {
             let f: Vec<&str> = line.split(' ').collect();
-            if !(7..=8).contains(&f.len()) {
+            if !(7..=11).contains(&f.len()) {
                 return None;
             }
+            let room = RoomName::parse(f[0])?;
+            let sources = match f.get(9).copied() {
+                None | Some(NONE) => None,
+                Some(".") => Some(Vec::new()),
+                Some(list) => Some(
+                    (list.split(','))
+                        .map(|s| site_of(room, s))
+                        .collect::<Option<_>>()?,
+                ),
+            };
             let row = Row {
                 seen: f[1].parse().ok()?,
                 owner: name(f[2]),
@@ -311,8 +368,11 @@ pub fn of_text(text: &str) -> Intel {
                 reservation: name(f[4]).zip(f[5].parse().ok()),
                 worker: name(f[6]),
                 lairs: f.get(7).and_then(|p| posts_of(p)),
+                controller: f.get(8).and_then(|c| site_of(room, c)),
+                sources,
+                contained: f.get(10) == Some(&"1"),
             };
-            Some((RoomName::parse(f[0])?, row))
+            Some((room, row))
         })
         .collect()
 }
@@ -329,6 +389,14 @@ mod tests {
             dice.chance(2)
                 .then(|| dice.pick(&["a", "b_c", "d-e", "Invader"]).to_string())
         };
+        let site = |dice: &mut Dice| Declared {
+            id: format!("{:x}", dice.between(0, 9_999_999)),
+            pos: Pos::new(
+                RoomName::named("W1N1"),
+                dice.between(0, 49),
+                dice.between(0, 49),
+            ),
+        };
         for _ in 0..300 {
             let row = Row {
                 seen: dice.between(0, 9_999_999),
@@ -342,6 +410,11 @@ mod tests {
                         .map(|_| (tile(&mut dice), tile(&mut dice)))
                         .collect()
                 }),
+                controller: dice.chance(2).then(|| site(&mut dice)),
+                sources: dice
+                    .chance(2)
+                    .then(|| (0..dice.below(3)).map(|_| site(&mut dice)).collect()),
+                contained: dice.chance(2),
             };
             let intel: Intel = [(RoomName::named("W1N1"), row)].into();
             assert_eq!(of_text(&to_text(&intel)), intel);

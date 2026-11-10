@@ -37,6 +37,7 @@
 // part: compound } }] } stands the opponent's bodies on the edge of `room`
 // (default <room>) toward its room (`waves/`) at t = first, first + every, …
 // <cores>: room:tick,… — a level-0 Invader core (`core/`) stood in room at t = tick.
+// <follow>: soak's --follow, rooms the samples follow besides.
 // <watch ms>: soak's --watch, each step held to it and the server left up after the last; 0 (default) off.
 import * as fs from "node:fs";
 import { join } from "node:path";
@@ -50,7 +51,7 @@ import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
 import { METRICS, windows } from "./metrics.mjs";
 
-const [ticksArg, everyArg, roomArg, username, out, wavesArg = "", opponentsPath, coresArg = "", waveArg = "melee,healer,ranged", watchArg = "0"] = process.argv.slice(2);
+const [ticksArg, everyArg, roomArg, username, out, wavesArg = "", opponentsPath, coresArg = "", waveArg = "melee,healer,ranged", watchArg = "0", followArg = ""] = process.argv.slice(2);
 const homes = roomArg.split(",");
 const roomName = homes[0];
 const ticks = Number(ticksArg);
@@ -64,7 +65,7 @@ const ours = await User.findUserByName(db, username);
 const svc = getServiceChannel(shard);
 const memory = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}");
 const claimed = (memory.v2?.declarations?.claims ?? []).map((o) => o.room);
-const roomNames = [...homes, ...(memory.v2?.declarations?.outposts ?? []).map((o) => o.room), ...claimed];
+const roomNames = [...new Set([...homes, ...(memory.v2?.declarations?.outposts ?? []).map((o) => o.room), ...claimed, ...followArg.split(",").filter(Boolean)])];
 const waves = wavesArg
   .split(",")
   .filter(Boolean)

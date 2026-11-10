@@ -60,6 +60,8 @@
 //            A world with no home of ours (`season-world.mjs`'s) is a map
 //            our colony is seated on as on the template: --room, --node,
 //            --late and --opponents as without --world
+//   --follow room,…: rooms the samples follow beside the colony's and its
+//            declared outposts': an outpost Strategy picks is declared nowhere
 //   --unsafe  our room without the engine's safe mode, which would decide
 //            every fight in it for us; implied by --opponents
 //   --ended   our room's starting safe mode ended, its stock kept to activate,
@@ -87,7 +89,7 @@ import { patchRuntimeCache } from "./runtime-cache.mjs";
 // Where the run's wall time went, written to timing.json (`scenario.mjs` sums them).
 const began = Date.now();
 const marks = { node26: 0, node26Calls: 0 };
-const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|N6|N7|E0|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
+const usage = "usage: npm run soak -- [--ticks N] [--every K] [--seed N] [--room <name>] [--run <name>] [--bot <main.js>] [--late K] [--node N1|N2|N3|T3|N4|T4|N5|T7|N6|N7|E0|E1|E2|C2|G2|L5] [--invaders room:every[:first],…] [--wave role[:size],…] [--core room:tick,…] [--capture a-b,…] [--save <dir>] [--from <dir> --room <name>] [--opponents <file.json>] [--world <capture.json>] [--follow room,…] [--unsafe] [--ended] [--keep] [--fetch] [--watch [--tick-ms N] [--port N]]";
 const fail = (message) => {
   console.error(message);
   process.exit(1);
@@ -112,7 +114,7 @@ for (let i = 0; i < rest.length; i++) {
     flags[a] = true;
     continue;
   }
-  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from", "--invaders", "--wave", "--core", "--opponents", "--world", ...WATCH_VALUES].includes(a)) fail(usage);
+  if (!["--ticks", "--every", "--seed", "--room", "--run", "--bot", "--late", "--node", "--capture", "--save", "--from", "--invaders", "--wave", "--core", "--opponents", "--world", "--follow", ...WATCH_VALUES].includes(a)) fail(usage);
   const value = rest[++i];
   if (value === undefined || value.startsWith("--")) fail(`${a} needs a value\n${usage}`);
   flags[a] = value;
@@ -484,7 +486,7 @@ const stepperAt = Date.now();
 // Spawned, not run synchronously, so a signal is handled while it steps.
 const stepper = spawn(
   NODE,
-  [XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out, waves.join(","), "opponents.json", cores.join(","), wave, String(watch ? watch.ms : 0)],
+  [XXSCREEPS, script("soak-step.mjs"), String(ticks), String(every), colony.room, OUR_NAME, out, waves.join(","), "opponents.json", cores.join(","), wave, String(watch ? watch.ms : 0), flags["--follow"] ?? ""],
   { cwd: world, env: node26Env(), detached: true, stdio: ["ignore", "pipe", "inherit"] },
 );
 children.push(stepper);

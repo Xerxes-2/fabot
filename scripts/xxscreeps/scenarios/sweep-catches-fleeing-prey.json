@@ -1,5 +1,5 @@
 {
-  "why": "a declared sweep kills a rival's remote bodies that run from it at sight, keeping each in reach once it is, rather than trailing it a tile behind; `sweepKept` bounds that chase alone, and a body that runs to a gate is no longer chased there (owner, 2026-10-20), so it is 45: seeds 1-3 kept 66/67/63 -> 49/51/49, kills 11654/11289/11646 -> 11243/11801/11243, bodiesLost 0 either way",
+  "why": "a declared sweep kills a rival's remote bodies that run from it at sight, keeping each in reach once it is, rather than trailing it a tile behind; `sweepKept` bounds that chase alone, and a body that runs to a gate is not chased there (owner, 2026-10-20). The bound is 40 because the colony's standing auto remotes share its spawn with the sweep; it returns to 45 once #812 refits the measure as an event-aligned rate",
   "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
@@ -37,7 +37,7 @@
       "measure": "sweepKilled",
       "min": 5000
     },
-    { "measure": "sweepKept", "min": 45 },
+    { "measure": "sweepKept", "min": 40 },
     {
       "measure": "bodiesLost",
       "max": 0
