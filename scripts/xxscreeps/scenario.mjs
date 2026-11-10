@@ -361,11 +361,14 @@ const measures = {
   raidsKilled: (_, __, dir) => engagementsOf(dir).filter(({ a }) => a.won === true).length,
   // Over the sets of two or more that walked to their raid (soak-step's
   // `blob`), the worst: the percent of approaching ticks every member stood
-  // within ⌊n/2⌋ + 1 of the median member (none walked: -Infinity), the
-  // percent of member-ticks one stood still free of fatigue, and the median
-  // member's ticks from the muster to within 3 of the raid (none: Infinity).
+  // within ⌊n/2⌋ + 1 of the median member (none walked: -Infinity), the tiles
+  // a tick the set stood past that, the ticks a member stood still free of
+  // fatigue (none walked: Infinity), and the median member's ticks from the
+  // muster to within 3 of the raid (none: Infinity). A spread and a stall are
+  // read as amounts, so one tile or one tick more is a small change, not a flip.
   blobAnchorRange: (_, __, dir) => Math.min(...walksOf(dir).map((w) => (100 * w.near) / w.ticks), ...(walksOf(dir).length ? [] : [-Infinity])),
-  blobStallTicks: (_, __, dir) => Math.max(...walksOf(dir).map((w) => (100 * w.stalls) / Math.max(1, w.memberTicks)), ...(walksOf(dir).length ? [] : [Infinity])),
+  blobSpread: (_, __, dir) => Math.max(...walksOf(dir).map((w) => w.over / w.ticks), ...(walksOf(dir).length ? [] : [Infinity])),
+  blobStallTicks: (_, __, dir) => Math.max(...walksOf(dir).map((w) => w.stalls / w.members), ...(walksOf(dir).length ? [] : [Infinity])),
   blobArrival: (_, __, dir) => Math.max(...walksOf(dir).map((w) => w.arrival ?? Infinity), ...(walksOf(dir).length ? [] : [Infinity])),
   // Over the sets of two or more that fought (soak-step's `fought`), the
   // worst: the most hits one member lost over the mean of its set's, its

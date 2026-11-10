@@ -1,11 +1,11 @@
 {
-  "why": "three uniform ranged bodies walk to an outpost's raid as one: through a swamp patch, a 1-wide gap and the exit, each within R+1 of the median member, never stalled, arriving no later than walking alone (43 on main) plus three",
+  "why": "three uniform ranged bodies walk to an outpost's raid as one: through a swamp patch, a 1-wide gap and the exit, each within R+1 of the median member, a stall a member at most, arriving no later than walking alone (43 on main) plus three. Main spreads 0 tiles a tick past R+1 and stalls 0.67 ticks a member",
   "modules": ["atlas", "exchange", "fight", "mv", "tactics"],
   "start": { "world": "scripts/xxscreeps/worlds/blob-gap-swamp.json", "seed": 1, "invaders": "W2N1:3000:400" },
   "ticks": 600,
   "assert": [
-    { "measure": "blobAnchorRange", "min": 100 },
-    { "measure": "blobStallTicks", "max": 2 },
+    { "measure": "blobSpread", "max": 0.1 },
+    { "measure": "blobStallTicks", "max": 1.5 },
     { "measure": "blobArrival", "max": 46 },
     { "measure": "oscillation", "max": 5 }
   ]

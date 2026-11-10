@@ -604,7 +604,7 @@ async function standing(ids) {
 async function closed(e, t) {
   const { members, casts, walk, fight, swing, sources, mourned, inReach, ...rest } = e;
   const arrivals = Object.values(walk?.arrived ?? {}).sort((a, b) => a - b);
-  const blob = walk && { ...walk, last: undefined, arrived: undefined, arrival: arrivals.length ? arrivals[(arrivals.length - 1) >> 1] : null };
+  const blob = walk && { ...walk, last: undefined, arrived: undefined, members: Object.keys(walk.members).length, arrival: arrivals.length ? arrivals[(arrivals.length - 1) >> 1] : null };
   const fought = fight && { ...fight, last: undefined };
   const swung = Object.fromEntries(Object.entries(swing).map(([n, { ticks, swings }]) => [n, { ticks, swings }]));
   fs.writeSync(engagementsOut, JSON.stringify({ ...rest, blob, fought, swung, closed: t, outlived: t === null || (await standing(members)) }) + "\n");
@@ -620,11 +620,12 @@ const seam = (a, b) => {
 };
 // A set of two or more on its way to the raid, each tick it approaches:
 // whether every member stands within ⌊n/2⌋ + 1 of the median member by range
-// to the raid (`near` of `ticks`), and the members that stood still free of
-// fatigue (`stalls` of `memberTicks`); `arrived`: each member's ticks from the
+// to the raid (`near` of `ticks`) and the tiles the set stood past it
+// (`over`), and the members that stood still free of fatigue (`stalls` of
+// the `members` that walked); `arrived`: each member's ticks from the
 // muster to its first within 3 of the raid.
 function walking(rec, phase, bodies, theirs, t) {
-  if (phase === "approaching" && bodies.length >= 2 && theirs.length) rec.walk ??= { muster: t, ticks: 0, near: 0, memberTicks: 0, stalls: 0, arrived: {}, last: {} };
+  if (phase === "approaching" && bodies.length >= 2 && theirs.length) rec.walk ??= { muster: t, ticks: 0, near: 0, over: 0, stalls: 0, members: {}, arrived: {}, last: {} };
   const w = rec.walk;
   if (!w || !theirs.length) return;
   const toRaid = (o) => Math.min(...theirs.map((h) => seam(o.pos, h.pos)));
@@ -632,11 +633,11 @@ function walking(rec, phase, bodies, theirs, t) {
     const ranked = [...bodies].sort((a, b) => toRaid(a) - toRaid(b) || (a.name < b.name ? -1 : 1));
     const anchor = ranked[(ranked.length - 1) >> 1];
     w.ticks++;
-    if (bodies.every((o) => seam(o.pos, anchor.pos) <= (bodies.length >> 1) + 1)) w.near++;
-    for (const o of bodies.filter((o) => w.last[o.name])) {
-      w.memberTicks++;
-      if (w.last[o.name].fatigue === 0 && seam(w.last[o.name].pos, o.pos) === 0) w.stalls++;
-    }
+    const past = bodies.map((o) => seam(o.pos, anchor.pos) - (bodies.length >> 1) - 1);
+    if (past.every((d) => d <= 0)) w.near++;
+    w.over += past.reduce((n, d) => n + Math.max(0, d), 0);
+    for (const o of bodies) w.members[o.name] = true;
+    for (const o of bodies.filter((o) => w.last[o.name])) if (w.last[o.name].fatigue === 0 && seam(w.last[o.name].pos, o.pos) === 0) w.stalls++;
   }
   for (const o of bodies) {
     w.last[o.name] = { pos: o.pos, fatigue: o.fatigue };
