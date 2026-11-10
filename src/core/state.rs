@@ -16,6 +16,8 @@ pub struct State {
     pub groups: Vec<Group>,
     pub engagements: Vec<Engagement>,
     pub casts: Vec<Cast>,
+    /// The colonies a siege successor falls due at within a body's spawn time.
+    pub due: BTreeSet<RoomName>,
     /// Strategy's `Scout room` declarations, rebuilt each tick before Economy reads them.
     pub scouts: Vec<Scout>,
     /// Strategy's sweep candidates this tick, the stalest seen first.
@@ -31,6 +33,7 @@ impl State {
             groups: Vec::new(),
             engagements: Vec::new(),
             casts: Vec::new(),
+            due: BTreeSet::new(),
             scouts: Vec::new(),
             preyed: Vec::new(),
         }

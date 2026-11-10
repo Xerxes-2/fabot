@@ -362,6 +362,7 @@ pub fn read_state() -> State {
         groups: list_of(group_of, &field(&fight, "groups")),
         engagements: list_of(engagement_of, &field(&fight, "engagements")),
         casts: list_of(cast_of, &field(&fight, "casts")),
+        due: rooms(&fight, "due"),
         scouts: Vec::new(),
         preyed: Vec::new(),
     }
@@ -403,6 +404,10 @@ pub fn write_state(state: &State) {
     set_field(fight.as_ref(), "groups", groups.as_ref());
     set_field(fight.as_ref(), "engagements", engagements.as_ref());
     set_field(fight.as_ref(), "casts", casts.as_ref());
+    let due: Array = (state.due.iter())
+        .map(|r| JsValue::from(r.to_string()))
+        .collect();
+    set_field(fight.as_ref(), "due", due.as_ref());
     set_field(&root, "fight", fight.as_ref());
 }
 
@@ -478,6 +483,7 @@ pub fn read_declarations() -> Declarations {
                 stage: Stage::Abandon,
                 target: 0,
                 reserve: 0,
+                owes: false,
             })
             .collect(),
         avoid: rooms(&declared, "avoid"),

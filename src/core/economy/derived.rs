@@ -260,6 +260,7 @@ pub struct Colony {
     pub bank: i32,
     pub bank_capacity: i32,
     pub reserve: i32,
+    pub owes: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1041,11 +1042,11 @@ pub fn of_world(
     let colonies: Vec<Colony> = (colony_rooms.iter())
         .filter_map(|room| {
             let controller = room.controller.clone()?;
+            let plan = (declarations.colonies.iter()).find(|p| p.room == room.name);
             Some(Colony {
                 room: room.name,
-                reserve: (declarations.colonies.iter())
-                    .find(|p| p.room == room.name)
-                    .map_or(0, |p| p.reserve),
+                reserve: plan.map_or(0, |p| p.reserve),
+                owes: plan.is_some_and(|p| p.owes),
                 controller,
                 spawns: (world.spawns.iter())
                     .filter(|s| s.pos.room == room.name)

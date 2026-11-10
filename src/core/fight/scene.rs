@@ -18,11 +18,13 @@ use crate::core::world::{
 };
 use crate::core::{engine, tiles};
 
+#[derive(Default)]
 pub(super) struct Asked {
     pub(super) queued: BTreeMap<RoomName, i32>,
     /// The energy each room's queued bodies will draw of its bank.
     pub(super) asked: BTreeMap<RoomName, i32>,
     pub(super) casts: Vec<Cast>,
+    pub(super) due: BTreeSet<RoomName>,
 }
 
 impl Asked {
@@ -435,10 +437,8 @@ impl<'a> Scene<'a> {
     /// A body that dies before a successor asked now could stand is
     /// succeeded in its slot (§6.2's rotation).
     pub(super) fn succeed(&self, atlas: &Atlas, e: &Engagement, asked: &mut Asked) {
-        let Some(walk) = self
-            .colonies_of(atlas, e)
-            .iter()
-            .filter_map(|r| self.walk_to(atlas, e, r.name))
+        let Some((walk, home)) = (self.colonies_of(atlas, e).iter())
+            .filter_map(|r| Some((self.walk_to(atlas, e, r.name)?, r.name)))
             .min()
         else {
             return;
@@ -447,12 +447,13 @@ impl<'a> Scene<'a> {
         let slot = slot_of;
         let members = self.members_of(e);
 
-        let lasts =
-            |c: &Creep| c.ticks_to_live > engine::SPAWN_TICKS_PER_PART * c.body.len() as i32 + walk;
+        let lasts = |c: &Creep, lead: i32| {
+            c.ticks_to_live > engine::SPAWN_TICKS_PER_PART * c.body.len() as i32 + walk + lead
+        };
 
         let held: BTreeSet<String> = members
             .iter()
-            .filter(|c| lasts(c))
+            .filter(|c| lasts(c, 0))
             .map(|c| slot(&c.name))
             .chain(
                 asked
@@ -468,6 +469,11 @@ impl<'a> Scene<'a> {
             .filter(|c| !held.contains(&slot(&c.name)))
             .map(|c| (slot(&c.name), crate::core::world::body_kinds(c)))
             .collect();
+
+        let lead = engine::SPAWN_TICKS_PER_PART * engine::MAX_BODY_PARTS as i32;
+        asked
+            .due
+            .extend(members.iter().any(|c| !lasts(c, lead)).then_some(home));
 
         let due: Vec<(String, casting::Body)> = due.into_iter().collect();
         self.ask_slots(atlas, e, &due, asked);

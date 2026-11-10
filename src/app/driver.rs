@@ -117,7 +117,7 @@ fn run_tick() -> Result<(), String> {
         &derived.owned,
         &declarations,
         rows,
-        (&state.engagements, &state.casts),
+        (&state.engagements, &state.casts, &state.due),
     );
     let declarations = declarations.planned(plans);
 

@@ -41,7 +41,7 @@ pub fn plan(
     owned: &BTreeSet<RoomName>,
     declarations: &Declarations,
     intel: &Intel,
-    (engagements, casts): (&[Engagement], &[Cast]),
+    (engagements, casts, due): (&[Engagement], &[Cast], &BTreeSet<RoomName>),
 ) -> Vec<ColonyPlan> {
     let rival = |name: &str| name != world.me && !declarations.allies.contains(name);
     let rivals: Vec<RoomName> = (intel.iter())
@@ -72,6 +72,7 @@ pub fn plan(
                 stage: Stage::Exploit,
                 target: level,
                 reserve: kept + asked,
+                owes: asked > 0 || due.contains(&room.name),
             })
         })
         .collect()

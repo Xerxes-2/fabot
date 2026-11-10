@@ -1008,7 +1008,13 @@ pub fn casts(
         }
         let mut waiting = false;
         for s in mine {
-            if !open(s) || !fed(s) || s.body.is_empty() || casts.iter().any(|c| c.slot == s.id) {
+            // A spend body cast now holds a spawn the fight's ask waits on.
+            if colony.owes && (s.spends || s.rank == STOCKED)
+                || !open(s)
+                || !fed(s)
+                || s.body.is_empty()
+                || casts.iter().any(|c| c.slot == s.id)
+            {
                 continue;
             }
             if let Some(n) = spare

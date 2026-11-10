@@ -426,6 +426,21 @@ const measures = {
     const stands = Math.max(...set.map((b) => b.first + 3 * b.body.length));
     return 1500 - (stands - Math.min(...set.map((b) => b.first)));
   },
+  // Over the fight asks from `from` (a body's name carries its tick and engagement;
+  // a name re-asked after its body died is its first), the most ticks from the
+  // ask to its last body standing past that ask's own spawn time (none: Infinity).
+  askLag: (samples, a, dir) => {
+    const start = samples[0].time - samples[0].t;
+    const first = [...Map.groupBy(livesOf(dir), (b) => b.name).values()].map((v) => v[0]);
+    const asks = Map.groupBy(
+      first.filter((b) => b.ours && /^fight-\d+-\d+-/.test(b.name)),
+      (b) => Number(b.name.split("-")[1]) - start + "-" + b.name.split("-")[2],
+    );
+    const lags = [...asks]
+      .filter(([key]) => parseInt(key) >= (a.from ?? 0))
+      .map(([key, set]) => Math.max(...set.map((b) => b.first + 3 * b.body.length)) - start - parseInt(key) - 3 * set.reduce((n, b) => n + b.body.length, 0));
+    return lags.length ? Math.max(...lags) : Infinity;
+  },
   // Over the sweeps, the rival's bodies killed and harvest denied (soak-step's `killed`, `denied`), and those less what they cast.
   sweepKilled: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.killed ?? 0), 0),
   sweepDenied: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.denied ?? 0), 0),

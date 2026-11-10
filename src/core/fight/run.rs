@@ -472,9 +472,8 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         .collect();
 
     let mut asked = Asked {
-        queued: BTreeMap::new(),
-        asked: BTreeMap::new(),
         casts: scene.waiting.clone(),
+        ..Asked::default()
     };
 
     for c in &scene.waiting {
@@ -538,14 +537,11 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
     let mut casts = asked.casts;
     casts.retain(|c| kept.contains(&c.engagement));
 
-    let ovens: BTreeSet<String> = world
-        .spawns
-        .iter()
-        .filter_map(|s| s.spawning.as_ref().map(|o| o.name.clone()))
+    let ovens: BTreeSet<&String> = (world.spawns.iter())
+        .filter_map(|s| s.spawning.as_ref().map(|o| &o.name))
         .collect();
 
-    let mut out: Vec<Intent> = casts
-        .iter()
+    let mut out: Vec<Intent> = (casts.iter())
         .filter(|c| !ovens.contains(&c.name))
         .map(|c| {
             Intent::Queue(
@@ -569,12 +565,11 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         &grounds,
     ));
 
-    let mut engagements = decided;
-    engagements.sort_by_key(|e| e.id);
-
     state.groups = groups;
-    state.engagements = engagements;
+    state.engagements = decided;
+    state.engagements.sort_by_key(|e| e.id);
     state.casts = casts;
+    state.due = asked.due;
     Ok(out)
 }
 
