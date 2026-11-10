@@ -1,4 +1,5 @@
 use crate::core::engine;
+use crate::core::grid::{self, FatigueFactor};
 use crate::core::vocabulary::{BodyPart, part_count_in};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -208,19 +209,47 @@ fn harvester_body(moves: impl Fn(i32) -> i32, most: i32, capacity: i32) -> Vec<B
     body
 }
 
-/// The MOVEs walk it to the buffer once at road parity; the CARRY holds one
-/// draw from the buffer at its feet.
-fn upgrader_body(most: i32, capacity: i32) -> Vec<BodyPart> {
-    let pairs = ((capacity - engine::part_cost(BodyPart::Carry))
-        / engine::body_cost(&[BodyPart::Work, BodyPart::Move]))
-    .min((engine::MAX_BODY_PARTS as i32 - 1) / 2)
-    .min(most)
-    .max(1);
-
-    let mut body = replicate(pairs, BodyPart::Work);
+/// It walks to its seat once and empty, so its CARRY never fatigues: a MOVE
+/// is bought only while the ticks it saves upgrade more than the WORK it costs.
+fn upgrader_body(roads: i32, plains: i32, most: i32, capacity: i32) -> Vec<BodyPart> {
+    let dearest = engine::MAX_BODY_PARTS as i32;
+    let [work_cost, carry_cost, move_cost] =
+        [BodyPart::Work, BodyPart::Carry, BodyPart::Move].map(engine::part_cost);
+    let priced = |moves: i32| {
+        let work = ((capacity - carry_cost - moves * move_cost) / work_cost)
+            .min(most)
+            .min(dearest - 1 - moves);
+        let factor = FatigueFactor {
+            weight: work,
+            moves,
+        };
+        let step = |weight| grid::step_ticks(factor, weight).expect("a MOVE");
+        let arrives = roads * step(engine::ROAD_WEIGHT) + plains * step(engine::PLAIN_WEIGHT);
+        let spawned = engine::SPAWN_TICKS_PER_PART * (work + 1 + moves);
+        let upgrading = (engine::CREEP_LIFETIME - arrives - spawned).max(0);
+        let cost = work * work_cost + carry_cost + moves * move_cost;
+        (work, f64::from(work * upgrading) / f64::from(cost))
+    };
+    let (mut moves, (mut work, mut rate)) = (1, priced(1));
+    for m in 2..dearest {
+        let (w, r) = priced(m);
+        if w < 1 {
+            break;
+        }
+        if r > rate {
+            (moves, work, rate) = (m, w, r);
+        }
+    }
+    let mut body = replicate(work, BodyPart::Work);
     body.push(BodyPart::Carry);
-    body.extend(replicate(pairs, BodyPart::Move));
+    body.extend(replicate(moves, BodyPart::Move));
     body
+}
+
+/// `roads` and `plains` are the walk to the seat, a swamp five plains.
+pub fn upgrader(roads: i32, plains: i32, most: i32, capacity: i32) -> Option<Vec<BodyPart>> {
+    (capacity >= engine::body_cost(block_of(Pattern::Upgrader)))
+        .then(|| engine::with_move_last(upgrader_body(roads, plains, most.max(1), capacity)))
 }
 
 fn whole_blocks(block: &[BodyPart], most: i32, capacity: i32) -> Vec<BodyPart> {
@@ -251,7 +280,7 @@ pub fn sized(pattern: Pattern, most: i32, capacity: i32) -> Option<Vec<BodyPart>
             Pattern::Worker => worker_body(most, capacity),
             Pattern::Harvester => harvester_body(|n| (n + 1) / 2, most.max(2), capacity),
             Pattern::Hauler => whole_blocks(block_of(pattern), (most + 1) / 2, capacity),
-            Pattern::Upgrader => upgrader_body(most, capacity),
+            Pattern::Upgrader => upgrader_body(0, 0, most, capacity),
             Pattern::Claimer => whole_blocks(block_of(pattern), most, capacity),
             Pattern::Scout => block_of(pattern).to_vec(),
         };
@@ -383,6 +412,28 @@ mod tests {
             assert_eq!(carry_per_move(road), 2);
             assert_eq!(carry_per_move(plain), 1);
         }
+    }
+
+    #[test]
+    fn an_upgrader_buys_move_only_as_its_walk_grows_and_leaves_its_road() {
+        let moves = |roads: i32, plains: i32, most: i32, capacity: i32| {
+            part_count_in(
+                &upgrader(roads, plains, most, capacity).unwrap(),
+                BodyPart::Move,
+            )
+        };
+        for capacity in [550, 1300, 2300, 5600, 12900] {
+            for most in [15, i32::MAX] {
+                assert_eq!(moves(0, 0, most, capacity), 1);
+                for d in 1..50 {
+                    assert!(moves(d, 0, most, capacity) >= moves(d - 1, 0, most, capacity));
+                    assert!(moves(0, d, most, capacity) >= moves(d, 0, most, capacity));
+                }
+            }
+        }
+        let rcl8 = upgrader(15, 0, 15, 12900).unwrap();
+        assert_eq!(part_count_in(&rcl8, BodyPart::Work), 15);
+        assert_eq!(part_count_in(&rcl8, BodyPart::Move), 2);
     }
 
     #[test]

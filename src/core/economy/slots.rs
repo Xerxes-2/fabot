@@ -492,14 +492,32 @@ impl Plan<'_> {
         // controller leaves them all past its take; a colony with no upgrader
         // yet builds what it can first.
         let upgradable = bodies::upgradable_at(colony.controller.level);
-        let upgrader = bodies::sized(Pattern::Upgrader, upgradable, capacity).filter(|b| {
-            ground.buffer.is_some()
-                && !ground.buffer_seats.is_empty()
-                && bodies::standing(
-                    part_count_in(b, BodyPart::Work),
-                    part_count_in(b, BodyPart::Carry),
-                )
-        });
+        // A swamp is five plains at either pace, so two paces part road from off it.
+        let upgrader = (ground.buffer.as_ref())
+            .and_then(|b| {
+                let even = walk(
+                    atlas,
+                    derived,
+                    &[BodyPart::Carry, BodyPart::Move],
+                    &home,
+                    &b.pos,
+                )?;
+                let roaded = walk(
+                    atlas,
+                    derived,
+                    &[BodyPart::Carry, BodyPart::Carry, BodyPart::Move],
+                    &home,
+                    &b.pos,
+                )?;
+                bodies::upgrader(2 * even - roaded, roaded - even, upgradable, capacity)
+            })
+            .filter(|b| {
+                !ground.buffer_seats.is_empty()
+                    && bodies::standing(
+                        part_count_in(b, BodyPart::Work),
+                        part_count_in(b, BodyPart::Carry),
+                    )
+            });
         let young = upgrader.is_none() && storage.is_none();
         let works = match () {
             _ if upgradable < i32::MAX => (surplus - f64::from(upgradable)).max(0.0),
