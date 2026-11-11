@@ -117,15 +117,15 @@ pub fn waiting<'a>(world: &'a World, home: RoomName, creep: &world::Creep) -> Op
         return None;
     }
     let lab = booster(world, home, compound)?;
-    // A colony with nothing left to carry the load fights the body unboosted
-    // rather than stand it at a lab nothing will fill.
+    // A colony with no body to carry the load fights the body unboosted
+    // rather than stand it at a lab nothing will fill, even while loaded.
     let carried = can_boost(lab, compound)
         || (world.creeps.iter()).any(|c| {
             c.owner.is_ours()
                 && c.pos.room == home
                 && c.name != creep.name
                 && of_name(&c.name).is_none()
-                && c.store.free() > 0
+                && c.store.capacity > 0
         });
     if !holds_room_for(lab, compound) || !carried {
         return None;
