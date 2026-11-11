@@ -189,6 +189,7 @@ const sideOf = (a) => (s) => (a.who ? s.others[a.who] : s);
 const within = (samples, a) => samples.filter((s) => s.t >= (a.from ?? 0) && s.t < (a.to ?? Infinity));
 const upgradedIn = (s, a) => (a.room ? (s.rooms[a.room]?.upgrade ?? 0) : s.ledger.upgrade);
 const builtIn = (s, a) => (a.room ? (s.rooms[a.room]?.build ?? 0) : s.ledger.build);
+const decayedIn = (s, a) => (a.room ? (s.rooms[a.room]?.decayed ?? 0) : s.ledger.decayed);
 const windowsOf = (dir, a) =>
   readFileSync(join(dir, "metrics.jsonl"), "utf8")
     .split("\n")
@@ -237,7 +238,7 @@ const measures = {
     return Math.abs(bot - died.length);
   },
   // Energy lost to pile decay.
-  decayed: (samples, a) => at(samples, a.to ?? Infinity).ledger.decayed - at(samples, a.from ?? 0).ledger.decayed,
+  decayed: (samples, a) => decayedIn(at(samples, a.to ?? Infinity), a) - decayedIn(at(samples, a.from ?? 0), a),
   // Roads and containers lost between samples, over every room the soak follows.
   decayedAway: (samples, a) => {
     const standing = (s) => Object.values(s.rooms).reduce((n, r) => n + r.roads + r.containers, 0);

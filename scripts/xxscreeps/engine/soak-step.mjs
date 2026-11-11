@@ -21,8 +21,9 @@
 // was first and last seen, its ticks to live then, the damage struck on it, its ticks by room and
 // by action, each room it entered with the tick, and the times it came into a rival's reach (`reached`).
 // The colony's rooms are <room> (several homes: each sample's `homes` holds
-// one sample a home, the first's at its top) and the outposts its Memory declares
-// (`v2.declarations.outposts`, read at the start): the ledger and the worth
+// one sample a home, the first's at its top), the outposts and claims its Memory
+// declares at the start, and each room we later reserve or a body of ours
+// harvests, builds or repairs in, from the tick it first does: the ledger and the worth
 // sum over them, and each sample's `rooms` holds one line a room, cumulative:
 // dug, decayed, built, repaired, `bodies` (each of our bodies' cost spread
 // over its life, charged to the room it stands in each tick), `net` (dug less
@@ -33,7 +34,7 @@
 // at t = first, first + every, …
 // <opponents.json>: [{ name, room, raid? }], the players seated beside ours;
 // each sample's `others` holds each one's room as it stands: level, spawns,
-// creeps. A raid { first, every?, room?, bodies: [{ part: count, boosts?: {
+// creeps, and its worth and score over its room and the followed ones. A raid { first, every?, room?, bodies: [{ part: count, boosts?: {
 // part: compound } }] } stands the opponent's bodies on the edge of `room`
 // (default <room>) toward its room (`waves/`) at t = first, first + every, …
 // <cores>: room:tick,… — a level-0 Invader core (`core/`) stood in room at t = tick.
@@ -46,7 +47,7 @@ import * as User from "xxscreeps/engine/db/user/index.js";
 import { getServiceChannel } from "xxscreeps/engine/service/index.js";
 import { getConsoleChannel, runnerUsageChannel } from "xxscreeps/engine/runner/model.js";
 import { loadMemorySegmentBlob, loadUserMemoryString } from "xxscreeps/mods/meta/memory/model.js";
-import { getProcessorChannel, pushIntentsForRoomNextTick } from "xxscreeps/engine/processor/model.js";
+import { getProcessorChannel, pushIntentsForRoomNextTick, userToIntentRoomsSetKey } from "xxscreeps/engine/processor/model.js";
 import { kInvaderUserId } from "xxscreeps/mods/classic/invader/game.js";
 import { typedArrayToString } from "xxscreeps/utility/string.js";
 import { METRICS, windows } from "./metrics.mjs";
@@ -212,20 +213,25 @@ const creditOf = (stock, level) => {
   return reserve === 0 ? stock : reserve * Math.tanh(stock / reserve);
 };
 const world = await shard.loadWorld();
-const bordering = [...new Set([...roomNames.flatMap((r) => Object.values(world.map.describeExits(r) ?? {})), ...opponents.map((o) => o.room)])].filter(
-  (r) => !roomNames.includes(r) && world.map.describeExits(r) !== null,
-);
+const borderOf = () =>
+  [...new Set([...roomNames.flatMap((r) => Object.values(world.map.describeExits(r) ?? {})), ...opponents.map((o) => o.room)])].filter(
+    (r) => !roomNames.includes(r) && world.map.describeExits(r) !== null,
+  );
+let bordering = borderOf();
 const roadCost = (room, pos) => {
   const t = world.map.getRoomTerrain(room).get(pos.x, pos.y);
   return t & 1 ? 150 * 300 : t & 2 ? 5 * 300 : 300;
 };
-function worthAndScore(rooms, stock) {
+// A seat's: its own objects, and the ownerless ones (roads, containers, walls)
+// in the rooms it owns or reserves; ours also in the rooms no other seat holds.
+function worthAndScore(rooms, stock, user = ours) {
   const worth = { controller: 0, structures: 0, fortification: 0, sites: 0, stock };
   const score = { controller: 0, structures: 0, fortification: 0, stock: 0 };
-  const level = Math.max(0, ...rooms.map((r) => r["#level"] ?? 0));
+  const level = Math.max(0, ...rooms.filter((r) => r.controller?.["#user"] === user).map((r) => r["#level"] ?? 0));
   for (const room of rooms) for (const o of room["#objects"]) {
-    const mine = o["#user"] === ours;
-    const ownerless = o.structureType === "road" || o.structureType === "container";
+    const mine = o["#user"] === user;
+    const held = room["#user"] === user || (user === ours && !opponents.some((s) => s.id === room["#user"]));
+    const ownerless = held && (o.structureType === "road" || o.structureType === "container");
     if (o["#lookType"] === "constructionSite") {
       if (mine) worth.sites += o.progress ?? 0;
     } else if (o.structureType === "controller") {
@@ -233,7 +239,7 @@ function worthAndScore(rooms, stock) {
       for (let l = 1; l < room["#level"]; l++) worth.controller += CONTROLLER_LEVELS[l];
       worth.controller += o["#progress"] ?? 0;
     } else if (o.structureType === "rampart" || o.structureType === "constructedWall") {
-      if (mine || o.structureType === "constructedWall") worth.fortification += Math.floor(o.hits * REPAIR_COST);
+      if (mine || (held && o.structureType === "constructedWall")) worth.fortification += Math.floor(o.hits * REPAIR_COST);
     } else if (o.structureType !== undefined && (mine || ownerless)) {
       const cost = o.structureType === "road" ? roadCost(room.name, o.pos) : CONSTRUCTION_COST[o.structureType] ?? 0;
       worth.structures += cost;
@@ -274,7 +280,32 @@ const pileOut = (p) => fs.writeSync(decayOut, JSON.stringify(p) + "\n");
 let regenNext = 0;
 
 // One tick of the ledger, off the colony's rooms as the tick left them.
-const lines = Object.fromEntries(roomNames.map((r) => [r, { dug: 0, decayed: 0, build: 0, upgrade: 0, repair: 0, bodies: 0, reserved: 0, hostile: 0, waves: 0, carriedOut: 0, leastDowngrade: Infinity }]));
+const newLine = () => ({ dug: 0, decayed: 0, build: 0, upgrade: 0, repair: 0, bodies: 0, reserved: 0, hostile: 0, waves: 0, carriedOut: 0, leastDowngrade: Infinity });
+const lines = Object.fromEntries(roomNames.map((r) => [r, newLine()]));
+// The energy objects hold as the ledger counts it: piles, stores, and the
+// bodies of `user` (another's carry is theirs).
+const stockOf = (objects, user = ours) =>
+  objects.reduce((n, o) => n + (o["#lookType"] === "resource" ? (o.resourceType === "energy" ? o.amount : 0) : o.body !== undefined && o["#user"] !== user ? 0 : energyIn(o)), 0);
+// Strategy picks remotes as it runs. A room joins with what it held the tick
+// before as held from the start: the ledger saw none of it come in.
+async function followWorked(time) {
+  const before = roomNames.length;
+  for (const name of (await shard.scratch.sMembers(userToIntentRoomsSetKey(ours))).sort()) {
+    if (roomNames.includes(name)) continue;
+    const room = await shard.loadRoom(name, time);
+    const objects = [...room["#objects"]];
+    const sources = new Set(objects.filter((o) => o["#lookType"] === "source").map((o) => o.id));
+    const worked = (room["#eventLog"] ?? []).some((e) => {
+      const kind = e.event ?? e._$Variant;
+      return ((kind === HARVEST && sources.has(e.targetId)) || kind === BUILD || kind === REPAIR) && objects.some((o) => o.id === e.objectId && o.body !== undefined && o["#user"] === ours);
+    });
+    if (room["#user"] !== ours && !worked) continue;
+    roomNames.push(name);
+    lines[name] = newLine();
+    if (ledger.stock0 !== null) ledger.stock0 += stockOf([...(await shard.loadRoom(name, time - 1))["#objects"]]);
+  }
+  if (roomNames.length > before) bordering = borderOf();
+}
 function account(rooms, time) {
   ledger.regen += regenNext;
   regenNext = 0;
@@ -283,6 +314,7 @@ function account(rooms, time) {
   for (const room of rooms) {
     const line = lines[room.name];
     const objects = [...room["#objects"]];
+    stock += stockOf(objects);
     const sources = new Set(objects.filter((o) => o["#lookType"] === "source").map((o) => o.id));
     const towers = new Set(objects.filter((o) => o.structureType === "tower" && o["#user"] === ours).map((o) => o.id));
     const links = new Set(objects.filter((o) => o.structureType === "link" && o["#user"] === ours).map((o) => o.id));
@@ -324,7 +356,6 @@ function account(rooms, time) {
       if (o["#lookType"] === "resource") {
         if (o.resourceType !== "energy") continue;
         piles.set(o.id, o.amount);
-        stock += o.amount;
         const before = lastPiles.get(o.id);
         if (before !== undefined) {
           ledger.decayed += Math.ceil(before / 1000);
@@ -359,7 +390,6 @@ function account(rooms, time) {
         }
         line.bodies += cost / (o.body.some((p) => p.type === "claim") ? CREEP_CLAIM_LIFE_TIME : CREEP_LIFE_TIME);
       }
-      stock += energyIn(o);
       if ((o.structureType === "spawn" || o.structureType === "extension") && o["#user"] === ours) {
         bank += energyIn(o);
         if (o.structureType === "spawn") spawns.push(o);
@@ -931,6 +961,7 @@ for (let t = 0; t < ticks; t++) {
   }
   if (fresh && obs.tick % 100 === 0) await readWindows(t);
   fs.writeSync(cpuOut, JSON.stringify({ t, time, cpu, observed: fresh ? obs.cpu : null, phases: fresh ? obs.phases : null, counts: fresh ? obs.counts : null }) + "\n");
+  await followWorked(time);
   const rooms = await Promise.all(roomNames.map((name) => shard.loadRoom(name, time)));
   const room = rooms[0];
   account(rooms, time);
@@ -972,7 +1003,11 @@ for (let t = 0; t < ticks; t++) {
     for (const o of opponents) {
       const room = await shard.loadRoom(o.room, time);
       const objects = [...room["#objects"]].filter((x) => x["#user"] === o.id);
+      const seat = [room, ...rooms.filter((r) => r.name !== o.room)];
+      const { worth, score } = worthAndScore(seat, seat.filter((r) => r["#user"] === o.id).reduce((n, r) => n + stockOf([...r["#objects"]], o.id), 0), o.id);
       row.others[o.name] = {
+        worth,
+        score,
         rcl: room["#user"] === o.id ? room["#level"] : 0,
         spawns: objects.filter((x) => x.structureType === "spawn").length,
         creeps: objects.filter((x) => x.body !== undefined).length,

@@ -3,5 +3,5 @@
   "modules": ["atlas", "economy", "layout", "mv"],
   "start": { "room": "W3N1", "seed": 1, "at": 26000, "bundle": "17032c937555" },
   "ticks": 4000,
-  "assert": [{ "measure": "decayed", "max": 1000 }]
+  "assert": [{ "measure": "decayed", "room": "W3N1", "max": 1000 }]
 }
