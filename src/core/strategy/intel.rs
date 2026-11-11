@@ -125,25 +125,20 @@ pub fn preyed(intel: &Intel, declarations: &Declarations, time: i32) -> Vec<Room
     rooms.into_iter().map(|(_, room)| *room).collect()
 }
 
-/// Rooms a rival raising §5's reserve could hold, scouted from a colony a tower
-/// guards; by route too, as one walled off by terrain raids no sooner than a far one.
+/// Rooms a rival raising §5's reserve could hold and the remotes outposts
+/// picks from, so from RCL1; by route too, as one walled off by terrain raids no sooner than a far one.
 pub fn threat_radius(
     world: &World,
     atlas: &Atlas,
     owned: &BTreeSet<RoomName>,
 ) -> BTreeMap<RoomName, i32> {
-    let towered = (owned.iter().filter_map(|r| world.room(*r)))
-        .filter(|room| {
-            let level = room.controller.as_ref().map_or(0, |c| c.level);
-            world.rules.allowed("tower", level) > 0
-        })
+    (owned.iter().filter_map(|r| world.room(*r)))
         .map(|room| {
             (
                 room.name,
                 atlas.tree(&BTreeSet::new(), super::NEAR, room.name),
             )
-        });
-    towered
+        })
         .flat_map(|(home, tree)| {
             let (x, y) = home.coords();
             (-super::NEAR..=super::NEAR)

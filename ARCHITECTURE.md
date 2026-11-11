@@ -650,9 +650,10 @@ every visible room. Economy reads a declared claim or outpost out of sight as
 its row last saw it, so a room another holds casts no claimer. Strategy owns
 the observers: each declared siege every tick, then the stalest rows older
 than `STALE` (a creep life, the owner's) in range. Every declared room, and
-every room with a controller and our status within three of a room of ours
-a tower stands in, by both coordinates and route
-(`threat_radius`, where a rival raises §5's reserve), that no
+every room with a controller and our status within three of a room of ours,
+by both coordinates and route
+(`threat_radius`, where a rival raises §5's reserve and outposts are picked
+from RCL2, so scouted from RCL1), that no
 observer covers is a `Scout room` declaration: a living 1-MOVE scout never
 idles; as it stands in its room, Economy sends it on by `atlas::onward` (the
 row's age over the walk, out to `SIEGE_HOPS`, as a radius room lies past the
