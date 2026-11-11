@@ -62,7 +62,7 @@
         "00000000000000022222222222222222222000000000000000"
       ],
       "objects": [
-        {"_id":"a00001","type":"controller","x":44,"y":12,"room":"W1N1","user":"f00000000000000000000001","level":4,"progress":0,"downgradeTime":120000,"safeModeAvailable":1},
+        {"_id":"a00001","type":"controller","x":44,"y":12,"room":"W1N1","user":"f00000000000000000000001","level":4,"progress":0,"downgradeTime":140000,"safeModeAvailable":1},
         {"_id":"a00002","type":"source","x":4,"y":32,"room":"W1N1","energy":3000,"energyCapacity":3000},
         {"_id":"a00003","type":"source","x":45,"y":25,"room":"W1N1","energy":3000,"energyCapacity":3000},
         {"_id":"a00004","type":"spawn","x":8,"y":25,"room":"W1N1","user":"f00000000000000000000001","name":"Spawn1","store":{"energy":300}},

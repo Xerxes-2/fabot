@@ -64,7 +64,7 @@
         "00000000000000000000000000000000000000000000000000"
       ],
       "objects": [
-        {"_id":"b00001","type":"controller","x":6,"y":25,"room":"W1N1","user":"f00000000000000000000001","level":6,"progress":0,"downgradeTime":150000,"safeModeAvailable":1},
+        {"_id":"b00001","type":"controller","x":6,"y":25,"room":"W1N1","user":"f00000000000000000000001","level":6,"progress":0,"downgradeTime":220000,"safeModeAvailable":1},
         {"_id":"b00002","type":"source","x":44,"y":32,"room":"W1N1","energy":3000,"energyCapacity":3000},
         {"_id":"b00003","type":"mineral","x":45,"y":8,"room":"W1N1","mineralType":"H","mineralAmount":70000},
         {"_id":"b00004","type":"spawn","x":40,"y":25,"room":"W1N1","user":"f00000000000000000000001","name":"Spawn1","store":{"energy":300}},

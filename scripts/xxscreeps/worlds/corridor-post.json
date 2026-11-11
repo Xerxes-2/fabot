@@ -62,7 +62,7 @@
         "11111111111111111111111111111111111111111111111111"
       ],
       "objects": [
-        { "type": "controller", "x": 8, "y": 8, "user": "f00000000000000000000001", "level": 6, "progress": 0, "downgradeTime": 150000, "safeModeAvailable": 1, "_id": "c00001", "room": "W1N1" },
+        { "type": "controller", "x": 8, "y": 8, "user": "f00000000000000000000001", "level": 6, "progress": 0, "downgradeTime": 220000, "safeModeAvailable": 1, "_id": "c00001", "room": "W1N1" },
         { "type": "source", "x": 36, "y": 22, "energy": 3000, "energyCapacity": 3000, "_id": "c00002", "room": "W1N1" },
         { "type": "source", "x": 4, "y": 40, "energy": 3000, "energyCapacity": 3000, "_id": "c00003", "room": "W1N1" },
         { "type": "spawn", "x": 16, "y": 30, "user": "f00000000000000000000001", "name": "Spawn1", "store": { "energy": 300 }, "_id": "c00004", "room": "W1N1" },

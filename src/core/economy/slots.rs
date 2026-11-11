@@ -227,8 +227,9 @@ fn drain(per: f64) -> f64 {
         .min(life)
 }
 
+/// Half the timer: a level-up lands inside it, and safe mode's grace stays banked.
 pub fn inside_deadline(c: &crate::core::world::Controller) -> bool {
-    c.level > 0 && c.ticks_to_downgrade < engine::safe_mode_downgrade_line(c.level)
+    c.level > 0 && c.ticks_to_downgrade <= engine::controller_downgrade(c.level) / 2
 }
 
 /// What a WORK of a worker spends a tick at `power` a WORK while working:

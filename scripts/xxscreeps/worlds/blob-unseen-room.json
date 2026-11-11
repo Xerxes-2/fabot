@@ -62,7 +62,7 @@
         "11111111111111111111111111111111111111111111111111"
       ],
       "objects": [
-        {"_id":"b00001","type":"controller","x":44,"y":8,"room":"W1N1","user":"f00000000000000000000001","level":4,"progress":0,"downgradeTime":120000,"safeModeAvailable":1},
+        {"_id":"b00001","type":"controller","x":44,"y":8,"room":"W1N1","user":"f00000000000000000000001","level":4,"progress":0,"downgradeTime":140000,"safeModeAvailable":1},
         {"_id":"b00002","type":"source","x":45,"y":18,"room":"W1N1","energy":3000,"energyCapacity":3000},
         {"_id":"b00003","type":"source","x":45,"y":34,"room":"W1N1","energy":3000,"energyCapacity":3000},
         {"_id":"b00004","type":"spawn","x":36,"y":25,"room":"W1N1","user":"f00000000000000000000001","name":"Spawn1","store":{"energy":300}},
