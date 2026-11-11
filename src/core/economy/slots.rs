@@ -7,7 +7,7 @@ use crate::core::engine;
 use crate::core::grid::{self, Footprint};
 use crate::core::tick;
 use crate::core::vocabulary::{BodyPart, part_count_in};
-use crate::core::world::{Pos, RoomName};
+use crate::core::world::{Kind, Pos, RoomName};
 
 use super::bodies::{self, Leg, Pattern};
 use super::derived::{Body, Derived, dig_work};
@@ -168,7 +168,7 @@ fn sponsors(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
     let banks = |ci: usize| !derived.grounds[ci].abandoned && derived.grounds[ci].has_storage();
     (derived.colonies.iter().enumerate())
         .map(|(cj, c)| {
-            let young = c.controller.level < RAISED_UNTIL && !derived.grounds[cj].has_storage();
+            let young = c.controller.level < TOWER_LEVEL && !derived.grounds[cj].has_storage();
             let can = |ci: usize| ci != cj && banks(ci);
             let at = c.controller.pos;
             young.then(|| tick::nearest(atlas, &|r| derived.routes.get(&r), &homes, can, &at))?
@@ -341,6 +341,7 @@ impl Plan<'_> {
         let mut dug = 0.0;
         let mut far_dug = 0.0;
         let mut owed = 0;
+        let mut payback = 0;
         let mut repairs = false;
         let mut crews = 0;
         let mut digs: Vec<String> = Vec::new();
@@ -360,7 +361,14 @@ impl Plan<'_> {
             }
             let own = gi == ci;
             let raised = !own && g.controller.as_ref().is_some_and(|c| c.owner.is_ours());
-            owed += g.sites.iter().map(|s| s.left).sum::<i32>();
+            // Owner, 2026-11-12: the tower is rushed, so an outpost's sites wait for it.
+            if own || raised || colony.controller.level >= TOWER_LEVEL {
+                owed += g.sites.iter().map(|s| s.left).sum::<i32>();
+                payback += (g.sites.iter())
+                    .filter(|s| pays_back(&s.kind))
+                    .map(|s| s.left)
+                    .sum::<i32>();
+            }
             repairs |= !g.repairs.is_empty();
             if raised {
                 // A claim without its spawn is raised by workers sent from here.
@@ -567,10 +575,6 @@ impl Plan<'_> {
         };
         // Negative below the reserve, so no spend is written below it.
         let surplus = (dug - fixed + stocked).max(0.0);
-        // Sites and repairs take half the income, so a backlog never stops
-        // the controller, and the stock past the reserve upgrades; a capped
-        // controller leaves them all past its take; a colony with no upgrader
-        // yet builds what it can first.
         let upgradable = bodies::upgradable_at(colony.controller.level);
         // A swamp is five plains at either pace, so two paces part road from off it.
         let upgrader = (ground.buffer.as_ref())
@@ -598,11 +602,12 @@ impl Plan<'_> {
                         part_count_in(b, BodyPart::Carry),
                     )
             });
-        let young = upgrader.is_none() && storage.is_none();
+        // A structure pays only once it stands, so a level is built out before
+        // it is upgraded; a road backlog never stops the controller.
         let works = match () {
             _ if !draws => 0.0,
             _ if upgradable < i32::MAX => (surplus - f64::from(upgradable)).max(0.0),
-            _ if young => surplus,
+            _ if payback > 0 => surplus,
             _ => ((dug - fixed) / 2.0).clamp(0.0, surplus),
         };
         let build = works.min(f64::from(owed) / life);
@@ -664,11 +669,8 @@ impl Plan<'_> {
                 bodies(upgraded, engine::UPGRADE_DRAIN_PER_WORK),
             )
         });
-        // A colony without a storage builds before it upgrades, every body:
-        // its sites are what its growth waits on, and it has no stock to
-        // split. A stocked one keeps a body upgrading while sites stand.
         let builders = builders.max(i32::from(owed > 0 || mend > 0.0));
-        let all_build = young && owed > 0;
+        let all_build = payback > 0 && upgradable == i32::MAX;
         let upgraders = upgraders.max(i32::from(drunk == 0.0 && storage.is_some()));
         // No more workers than the controller has seats in reach: one past
         // them stands in the others' way and spends nothing.
@@ -712,13 +714,23 @@ impl Plan<'_> {
         let home_carriers = haulers(&local, capacity).len();
         local.extend(remote);
         let mut carriers = haulers(&local, capacity);
-        // The outposts' carriers take at most half the spawns' time, so the
-        // home's own bodies are still cast; past it the far dig waits.
-        let spawn_time = f64::from(engine::CREEP_LIFETIME) * colony.spawns.len() as f64 / 2.0;
-        let mut spent = 0.0;
+        let ticks = |b: &Vec<BodyPart>| {
+            let life = if b.contains(&BodyPart::Claim) {
+                engine::CLAIM_LIFETIME
+            } else {
+                engine::CREEP_LIFETIME
+            };
+            f64::from(engine::SPAWN_TICKS_PER_PART * b.len() as i32 * engine::CREEP_LIFETIME)
+                / f64::from(life)
+        };
+        let spawn_time = f64::from(engine::CREEP_LIFETIME) * colony.spawns.len() as f64;
+        let mut spent = (self.out.iter().filter(|s| s.colony == ci))
+            .map(|s| ticks(&s.body))
+            .chain(carriers.iter().take(home_carriers).map(ticks))
+            .sum::<f64>();
         let far_carriers = (carriers.iter().skip(home_carriers))
             .take_while(|b| {
-                spent += f64::from(engine::SPAWN_TICKS_PER_PART * b.len() as i32);
+                spent += ticks(b);
                 spent <= spawn_time
             })
             .count();
@@ -890,9 +902,17 @@ const PIONEER: i32 = 9;
 const PIONEERS: usize = 4;
 /// Below the level its first tower stands at, a colony is raised by its
 /// nearest stocked neighbour's workers too.
-const RAISED_UNTIL: i32 = 3;
+const TOWER_LEVEL: i32 = 3;
 const SPEND: i32 = 10;
 const SIGHT: i32 = 3;
+
+/// Hivemind's (MIT) build-out: what raises the dig, the bank or its defence.
+fn pays_back(kind: &Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Spawn | Kind::Extension | Kind::Container | Kind::Storage | Kind::Link | Kind::Tower
+    )
+}
 
 /// Cast order: a colony's own dig and its carriers first, then its outposts'
 /// reservers, whose bodies see them, their dig and haul, its floor of

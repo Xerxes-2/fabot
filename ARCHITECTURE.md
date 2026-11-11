@@ -265,7 +265,7 @@ slots and its bodies wait at home. While its stock stands past the reserve
 (a pile: while its draw outruns its decay), a colony's upgraders are cast
 before its outposts' haul: the haul only adds to the stock they draw down, so a spawn too busy for
 both would bank the outposts' income. The outposts' carriers
-take at most half the spawns' time, or a far ring of outposts casts nothing
+take the spawns' time the colony's other bodies leave over a life, or a far ring of outposts casts nothing
 but haulers; the home's own carriers queue ahead of a fight's casts, since
 they refill the bank those are paid from. While a colony owes a fight cast
 (`ColonyPlan.owes`: one asked of it, or one `fight.due` names), its spawns take no spend body (the upgraders and workers
@@ -286,9 +286,14 @@ is the upgraders' alone, whom carriers feed: a worker draws only a full
 load past the reserve, so none is cast short of it but the downgrade deadline's, which
 draws the reserve, since a lost controller loses the room the reserve
 defends. Upgrade is the score, so it shrinks with the stock rather than
-stopping while it refills. Sites and repairs take half the income
-(all of it before a colony has upgraders, all past a capped controller's
-take); the stock past the reserve upgrades.
+stopping while it refills. While a site that pays back stands (spawn,
+extension, container, storage, link, tower) every worker builds and the
+surplus is its: a structure pays only once complete, so a level is built out
+before it is upgraded, as Hivemind does (owner, 2026-11-12: only RCL3's tower
+and RCL6's minerals are worth rushing). Below RCL3 an outpost's sites wait for
+the tower: its dig piles on the post and is hauled from there. Other sites and repairs take half the
+income (all past a capped controller's take), so remote roads never stall the
+controller; the stock past the reserve upgrades.
 
 **The objective is long-run growth, by simple rules first.** A slower start
 that ends higher is the better economy; an early regression is accepted when
