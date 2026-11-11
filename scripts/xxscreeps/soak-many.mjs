@@ -7,9 +7,10 @@
 //                             [--ticks T] [--jobs J] [--tag name] [--node N] [--fresh]
 //   --bot    the bundles to compare (default dist/main.js); the first is the
 //            base the others are read against. A name defaults to the file's.
-//   --seed   the starts (default 1,2,1+7): an engine seed, or seed+K for a bot that
-//            sits out its first K ticks (soak.mjs --late), a nudge the seed
-//            alone does not give a room with few tie-breaks
+//   --seed   the starts for every room (default 1,2,1+7, the contested start
+//            1,2,3,4,1+7,2+7: its spread is wider): an engine seed, or seed+K
+//            for a bot that sits out its first K ticks (soak.mjs --late), a
+//            nudge the seed alone does not give a room with few tie-breaks
 //   --room   these starts instead of the default: the extremes of harvest
 //            seats, both sources with one seat (a small harvester cannot fill
 //            a source) and both with four or more (bodies can crowd in
@@ -71,7 +72,13 @@ const whole = (text, flag, min) => {
 };
 const node = flags["--node"] ?? "";
 if (!/^[A-Za-z0-9]*$/.test(node)) fail("--node: a node's name, as N3");
-const starts = (flags["--room"] ?? "W9N8,W8N3,season-late-seat:W12S28@N7,season-outpost-ring:E25S9@E1+hivemind:E27S9").split(",").map((spec) => {
+const parseSeeds = (text) =>
+  text.split(",").map((spec) => {
+    const [seed, late = "0"] = spec.split("+");
+    return { seed: whole(seed, "--seed", 0), late: whole(late, "--seed", 0), label: spec };
+  });
+const CONTESTED = "season-outpost-ring:E25S9@E1+hivemind:E27S9";
+const starts = (flags["--room"] ?? `W9N8,W8N3,season-late-seat:W12S28@N7,${CONTESTED}`).split(",").map((spec) => {
   const m = /^(?:([\w-]+):)?([WE]\d+[NS]\d+)(?:@([A-Za-z0-9]+))?(?:\+([a-z]+):([WE]\d+[NS]\d+))?$/.exec(spec);
   if (!m) fail(`--room: "${spec}" is not [world:]room[@node][+bot:room]`);
   const world = m[1] && join(HERE, "worlds", `${m[1]}.json`);
@@ -79,11 +86,7 @@ const starts = (flags["--room"] ?? "W9N8,W8N3,season-late-seat:W12S28@N7,season-
   const at = m[3] ?? node;
   const rival = m[4] && { name: m[4], bot: join(HERE, "engine", m[4]), room: m[5] };
   if (rival && !existsSync(rival.bot)) fail(`--room: no rival ${rival.bot}`);
-  return { label: spec, room: m[2], world, node: at, rival, ticks: whole(flags["--ticks"] ?? (at ? 10000 : 30000), "--ticks", 1) };
-});
-const seeds = (flags["--seed"] ?? "1,2,1+7").split(",").map((spec) => {
-  const [seed, late = "0"] = spec.split("+");
-  return { seed: whole(seed, "--seed", 0), late: whole(late, "--seed", 0), label: spec };
+  return { label: spec, room: m[2], world, node: at, rival, seeds: parseSeeds(flags["--seed"] ?? (spec === CONTESTED ? "1,2,3,4,1+7,2+7" : "1,2,1+7")), ticks: whole(flags["--ticks"] ?? (at ? 10000 : 30000), "--ticks", 1) };
 });
 const jobs = whole(flags["--jobs"] ?? Math.max(1, Math.floor(availableParallelism() / 4)), "--jobs", 1);
 const tag = flags["--tag"] ?? "many";
@@ -117,8 +120,8 @@ const planHash = hash(...[join(REPO, "src/bin/plan.rs"), ...readdirSync(join(REP
 for (const b of bots) b.code = hash(readFileSync(b.file, "utf8").replace(/^var __FABOT_VERSION__ = .*$/m, ""));
 
 const runs = bots.flatMap((bot) =>
-  seeds.flatMap((seed) =>
-    starts.map((start) => ({
+  starts.flatMap((start) =>
+    start.seeds.map((seed) => ({
       bot,
       seed,
       start,
@@ -133,7 +136,7 @@ const cached = (run) => !flags["--fresh"] && existsSync(join(CACHE, run.key, "le
 // Two bundles of the same code share their runs.
 const todo = runs.filter((r, i) => !cached(r) && runs.findIndex((o) => o.key === r.key) === i);
 console.error(
-  `${bots.map((b) => b.name).join(" vs ")}; ${starts.map((s) => `${s.label} ${s.ticks} ticks`).join(", ")}; seeds ${seeds.map((x) => x.label).join(", ")}; ` +
+  `${bots.map((b) => b.name).join(" vs ")}; ${starts.map((s) => `${s.label} ${s.ticks} ticks, seeds ${s.seeds.map((x) => x.label).join(" ")}`).join("; ")}; ` +
     `${runs.length - todo.length} cached, ${todo.length} to run, ${jobs} at a time`,
 );
 
@@ -218,7 +221,7 @@ const rowOf = (run) => {
 const cell = (v, w = 9) => String(v ?? "-").padStart(w);
 console.log(["room", "seed", "bundle", "ok", "rcl", "rcl3", "rcl4", "control", "structs", "fortify", "stock", "worth", "score", "faults", "exposure", "lost/held"].map((h, i) => cell(h, i === 0 || i === 2 ? 12 : i === 15 ? 14 : 9)).join(""));
 for (const start of starts)
-  for (const seed of seeds)
+  for (const seed of start.seeds)
     for (const bot of bots) {
       const run = runs.find((r) => r.start === start && r.seed === seed && r.bot === bot);
       const r = rowOf(run);

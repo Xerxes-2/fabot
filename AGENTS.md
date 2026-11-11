@@ -140,7 +140,8 @@ Docs:
   (`npm run soak -- --ticks 30000`, `ARCHITECTURE.md` §5, §10.2): long-run
   growth is the objective, and an early regression is accepted when the end
   of the run improves. Before shipping, `npm run soak:many` (the
-  seat extremes) over its default starts (two seeds and a late start): no room regresses,
+  seat extremes) over its default starts (two seeds and a late start; six starts for the
+  contested room): no room regresses,
   where a loss smaller than that room's spread across the starts on the
   base is noise.
 - Unit tests only for invariants and pure arithmetic. A test that asserts one
