@@ -659,7 +659,7 @@ impl<'a> Jobs<'a> {
             .derived
             .colonies
             .get(ci)
-            .filter(|c| c.room == g.room)
+            .filter(|c| c.room == g.room && !slot.draws_reserve())
             .map_or(0, |c| c.reserve);
         let mut spots: Vec<Spot> = Vec::new();
         // A worker never draws the reserve, that is the towers' and the
@@ -670,7 +670,7 @@ impl<'a> Jobs<'a> {
         for s in (g.stores.iter())
             .filter(|s| (!short || s.kind.is_remains()) && !(fed && s.kind.is_buffer()))
         {
-            let spare = s.energy - if s.owned { reserve } else { 0 };
+            let spare = s.spare(reserve);
             spots.push(Spot {
                 task: Task::Withdraw(s.id.clone(), Resource::Energy),
                 pos: s.pos,
@@ -699,7 +699,7 @@ impl<'a> Jobs<'a> {
             spots.push(Spot {
                 task: Task::Withdraw(st.id.clone(), Resource::Energy),
                 pos: st.pos,
-                amount: Some(st.energy - c.reserve)
+                amount: Some(st.spare(c.reserve))
                     .filter(|n| *n >= body.free)
                     .unwrap_or(0),
                 tier: 1,

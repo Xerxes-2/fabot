@@ -62,6 +62,13 @@ pub struct Slot {
     pub closed: bool,
 }
 
+impl Slot {
+    /// A lost controller loses the room the reserve defends.
+    pub fn draws_reserve(&self) -> bool {
+        self.rank == DEADLINE
+    }
+}
+
 /// The ticks from `a` to `b`: in one room its range, else its crossings off
 /// a tree `Derived` grew from either end, a search only without one.
 pub fn distance(atlas: &Atlas, derived: &Derived, a: &Pos, b: &Pos) -> Option<i32> {
@@ -491,13 +498,6 @@ impl Plan<'_> {
             }
         }
 
-        let floor = if owed > 0 || repairs { 2 } else { 1 };
-        fixed += f64::from(floor) * worker.as_deref().map_or(0.0, upkeep);
-        let carried: Vec<(f64, Leg)> = local.iter().chain(&remote).copied().collect();
-        fixed += haulers(&carried, capacity)
-            .iter()
-            .map(|b| upkeep(b))
-            .sum::<f64>();
         let kept = f64::from(colony.reserve);
         // Without a storage what waits in the containers is the stock, spent
         // within the ticks a source fills one, or it overflows.
@@ -527,6 +527,26 @@ impl Plan<'_> {
             } else {
                 0.0
             };
+        // A worker draws only a full load past the reserve from one store
+        // (`jobs::fuel`): short of it the surplus is the hand-fed upgraders'.
+        // With no reserve kept the containers and piles are a worker's too.
+        let load = worker.as_deref().map_or(0, |w| {
+            part_count_in(w, BodyPart::Carry) * engine::CARRY_PART_CAPACITY
+        });
+        let draws = storage.is_none()
+            || colony.reserve <= 0
+            || (ground.stores.iter()).any(|s| s.owned && s.spare(colony.reserve) >= load);
+        let floor = match () {
+            _ if !draws => i32::from(inside_deadline(&colony.controller)),
+            _ if owed > 0 || repairs => 2,
+            _ => 1,
+        };
+        fixed += f64::from(floor) * worker.as_deref().map_or(0.0, upkeep);
+        let carried: Vec<(f64, Leg)> = local.iter().chain(&remote).copied().collect();
+        fixed += haulers(&carried, capacity)
+            .iter()
+            .map(|b| upkeep(b))
+            .sum::<f64>();
         // With no reserve to draw down, spend sized to dig no carrier brings
         // home drinks the bank that would cast those carriers.
         let carry = |flows: &[(f64, Leg)]| {
@@ -580,6 +600,7 @@ impl Plan<'_> {
             });
         let young = upgrader.is_none() && storage.is_none();
         let works = match () {
+            _ if !draws => 0.0,
             _ if upgradable < i32::MAX => (surplus - f64::from(upgradable)).max(0.0),
             _ if young => surplus,
             _ => ((dug - fixed) / 2.0).clamp(0.0, surplus),
@@ -652,6 +673,7 @@ impl Plan<'_> {
         // No more workers than the controller has seats in reach: one past
         // them stands in the others' way and spends nothing.
         let spenders = (builders + upgraders).min(ground.upgrade_seats.unwrap_or(i32::MAX));
+        let spenders = if draws { spenders } else { 0 };
         for k in 0..(floor.max(spenders) + crews) {
             let rank = match k {
                 0 if inside_deadline(&colony.controller) => DEADLINE,

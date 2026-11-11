@@ -208,6 +208,17 @@ const measures = {
     if (!values.length) return a.min !== undefined ? -Infinity : Infinity;
     return a.min !== undefined ? Math.min(...values) : Math.max(...values);
   },
+  // A body cast before the stock fell is not one cast under it.
+  castsBelow: (samples, a, dir) =>
+    new Set(
+      livesOf(dir)
+        .filter((b) => b.ours && b.name.startsWith(`${a.pattern}-`))
+        .filter((b) => {
+          const at = samples.filter((s) => s.time <= b.first).at(-1);
+          return at && at.t >= (a.from ?? 0) && at.stored < a.below;
+        })
+        .map((b) => b.name),
+    ).size,
   // The most percent the bot's spend split (`spend.*`, its metrics) is off the
   // engine's ledger by category, over the rooms the ledger follows, between
   // the first and the last full window read with the ledger beside it.

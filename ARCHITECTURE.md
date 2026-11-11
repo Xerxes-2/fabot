@@ -273,7 +273,12 @@ to draw down, spend sized to the rest drinks the bank that would cast them. The 
 1000, u a worker's upkeep an energy it spends): over h ticks it loses h/2D
 of itself to decay, and the bodies cast to spend it outlive it by life − h.
 It is negative below the reserve, so spending below it cannot be written, and spending it draws the
-stock to the reserve and no further. Sites and repairs take half the income
+stock to the reserve and no further. Below a storage's reserve the surplus
+is the upgraders' alone, whom carriers feed: a worker draws only a full
+load past the reserve, so none is cast short of it but the downgrade deadline's, which
+draws the reserve, since a lost controller loses the room the reserve
+defends. Upgrade is the score, so it shrinks with the stock rather than
+stopping while it refills. Sites and repairs take half the income
 (all of it before a colony has upgraders, all past a capped controller's
 take); the stock past the reserve upgrades.
 

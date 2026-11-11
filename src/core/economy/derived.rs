@@ -123,6 +123,14 @@ pub struct StoreFact {
     pub owned: bool,
 }
 
+impl StoreFact {
+    /// What a worker may draw: an owned store keeps the whole reserve, each
+    /// one, since a draw is from one store.
+    pub fn spare(&self, reserve: i32) -> i32 {
+        self.energy - if self.owned { reserve } else { 0 }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LinkRole {
     Source,
