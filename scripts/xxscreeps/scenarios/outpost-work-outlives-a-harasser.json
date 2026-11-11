@@ -1,5 +1,5 @@
 {
-  "why": "a harasser that leaves the room whenever an armed body of ours arrives and walks back in when it is gone never meets a fight: the outpost's work goes on while the harasser is out of reach of it, so the room keeps its output, its bodies take the raid's damage and live, and no chase buys the room a body per return; a body outside a fight walks round its reach: main strikes 2.0 a tick an unarmed body stood near it (seeds 2-3: 3.2, 1.9), 7.9 with the danger grid off; the outpost digs 20.1 a tick from the raid on (seeds 2-3: 20.6, 20.2)",
+  "why": "a harasser that leaves the room whenever an armed body of ours arrives and walks back in when it is gone never meets a fight: the outpost's work goes on while the harasser is out of reach of it, so the room keeps its output, its bodies take the raid's damage and live, and no chase buys the room a body per return; a body outside a fight walks round its reach and out of it: main takes 22-40 struck each time an unarmed body comes into the harasser's reach with the raid arriving at 1340-1460 (the spawn's wait moves the total, not this), 74-96 with the danger grid off, so the bound sits between (#810); the outpost digs 18.3-20.1 a tick from the raid on over those arrivals",
   "modules": ["atlas", "economy", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "room": "W8N3",
@@ -19,7 +19,7 @@
   "ticks": 2600,
   "assert": [
     { "measure": "digRate", "room": "W8N2", "min": 18 },
-    { "measure": "unarmedStruckRate", "max": 4 },
+    { "measure": "unarmedStruckPerReach", "max": 55 },
     { "measure": "mostCast", "max": 1400 },
     { "measure": "predictedWinsLost", "max": 0 },
     { "measure": "bodiesLost", "max": 0 }

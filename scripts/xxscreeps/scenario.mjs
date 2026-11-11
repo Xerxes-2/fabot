@@ -350,6 +350,17 @@ const measures = {
     const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
     return Math.min(...Object.keys(last.rooms).slice(1).map((r) => last.rooms[r].net - (first.rooms[r]?.net ?? 0)));
   },
+  // The most percent of an outpost's dig that decayed over the sample steps no rival stood
+  // in it (none dug: Infinity): haul fallen behind its dig, however long a raider dwells.
+  quietRot: (samples, a) => {
+    const seen = within(samples, a);
+    const rot = (r) => {
+      const quiet = seen.slice(1).map((s, i) => [seen[i].rooms[r], s.rooms[r]]).filter(([was, now]) => was && now && was.hostile === now.hostile);
+      const dug = quiet.reduce((n, [was, now]) => n + now.dug - was.dug, 0);
+      return dug ? (100 * quiet.reduce((n, [was, now]) => n + now.decayed - was.decayed, 0)) / dug : Infinity;
+    };
+    return Number(Math.max(...Object.keys(samples.at(-1).rooms).slice(1).map(rot)).toFixed(1));
+  },
   // Ticks an enemy stood in the colony's own room.
   homeHostileTicks: (samples, a) => {
     const [first, last] = [at(samples, a.from ?? 0), at(samples, a.to ?? Infinity)];
@@ -456,6 +467,7 @@ const measures = {
   sweepKilled: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.killed ?? 0), 0),
   sweepDenied: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.denied ?? 0), 0),
   sweepNet: (_, __, dir) => rowsOf(dir).filter((e) => e.kind === "sweep").reduce((n, e) => n + (e.killed ?? 0) + (e.denied ?? 0) - e.cast, 0),
+  // Percent of the steps a prey took from inside a sweep body's reach that ended still in it (soak-step's `held`/`kept`).
   sweepKept: (_, __, dir) => {
     const rows = rowsOf(dir).filter((e) => e.kind === "sweep");
     return Math.round((100 * rows.reduce((n, e) => n + (e.kept ?? 0), 0)) / Math.max(1, rows.reduce((n, e) => n + (e.held ?? 0), 0)));
@@ -489,13 +501,13 @@ const measures = {
       const cast = b.body.length;
       return moves(b.body) > moves(b.body.slice(Math.max(0, cast - Math.ceil(b.hits / 100))));
     }).length,
-  // The damage struck on our bodies that swing nothing, a harvester or a hauler, a tick one
-  // stood near a rival's reach (soak-step's `near`): what a raid that never meets a fight
-  // costs the room's work, however long the raid stays.
-  unarmedStruckRate: (_, __, dir) => {
+  // The damage struck on our bodies that swing nothing, a harvester or a hauler, each time one
+  // came into a rival's reach (soak-step's `reached`): how long a body stays under fire, which
+  // the raid's wait on our spawn moves less than it moves the damage.
+  unarmedStruckPerReach: (_, __, dir) => {
     const unarmed = livesOf(dir).filter((b) => b.ours && !/[ar]/.test(b.body ?? ""));
-    const [struck, near] = ["struck", "near"].map((k) => unarmed.reduce((n, b) => n + (b[k] ?? 0), 0));
-    return near ? Number((struck / near).toFixed(2)) : struck ? Infinity : 0;
+    const [struck, reached] = ["struck", "reached"].map((k) => unarmed.reduce((n, b) => n + (b[k] ?? 0), 0));
+    return reached ? Math.round(struck / reached) : struck ? Infinity : 0;
   },
   // Ticks an enemy stood in `room`.
   hostileTicks: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.hostile ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.hostile ?? 0),

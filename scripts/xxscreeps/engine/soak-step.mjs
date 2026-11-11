@@ -19,7 +19,7 @@
 // tombstone or ruin it fell out of. `bodies.jsonl`: each body, ours or not,
 // once it is gone from the colony's rooms, their neighbours and the opponents' rooms or the run ends: its parts, the ticks it
 // was first and last seen, its ticks to live then, the damage struck on it, its ticks by room and
-// by action, each room it entered with the tick, and its ticks within two steps of a rival's reach (`near`).
+// by action, each room it entered with the tick, and the times it came into a rival's reach (`reached`).
 // The colony's rooms are <room> (several homes: each sample's `homes` holds
 // one sample a home, the first's at its top) and the outposts its Memory declares
 // (`v2.declarations.outposts`, read at the start): the ledger and the worth
@@ -251,6 +251,8 @@ let lastPiles = new Map();
 const pileLog = new Map();
 const graves = new Map();
 const lives = new Map();
+// The bodies standing in a rival's reach last tick, by key.
+let inReach = new Set();
 const near = (a, b, r) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= r;
 // The range a body strikes at with the parts it has left (none: -Infinity).
 const reach = (o) => (o.body.some((p) => p.type === "ranged_attack" && p.hits > 0) ? 3 : o.body.some((p) => p.type === "attack" && p.hits > 0) ? 1 : -Infinity);
@@ -378,6 +380,7 @@ function account(rooms, time) {
 }
 
 function live(rooms, time) {
+  const reaching = new Set();
   for (const room of rooms) {
     const struck = new Map();
     for (const e of room["#eventLog"] ?? [])
@@ -400,9 +403,13 @@ function live(rooms, time) {
       life.rooms[room.name] = (life.rooms[room.name] ?? 0) + 1;
       for (const a of (o["#actionLog"] ?? []).filter((a) => a.time === time)) life.acts[a.type] = (life.acts[a.type] ?? 0) + 1;
       if (struck.has(o.id)) life.struck = (life.struck ?? 0) + struck.get(o.id);
-      if (life.ours && rivals.some((h) => near(h.pos, o.pos, reach(h) + 2))) life.near = (life.near ?? 0) + 1;
+      if (life.ours && rivals.some((h) => near(h.pos, o.pos, reach(h)))) {
+        if (!inReach.has(key)) life.reached = (life.reached ?? 0) + 1;
+        reaching.add(key);
+      }
     }
   }
+  inReach = reaching;
   for (const [key, life] of lives)
     if (life.last !== time) {
       fs.writeSync(livesOut, JSON.stringify(life) + "\n");
@@ -686,17 +693,18 @@ function swinging(rec, bodies, t, seen) {
   }
 }
 // A sweep's `held`/`kept`: each pair of an armed body of it and a rival's
-// unarmed one in its reach a tick, both standing in the room the next, and
-// those still in its reach then (the hunt's step is the next tick's shot).
+// unarmed one in its reach a tick, both standing in the room the next and the
+// prey on another tile, and those still in its reach then (the hunt's step is
+// the next tick's shot). A prey shot where it stands keeps itself in reach.
 function keeping(rec, room, objects, bodies) {
   const prey = objects.filter((o) => o.body !== undefined && o.pos.roomName === room && ![ours, kInvaderUserId].includes(o["#user"]) && o.body.every((p) => !["attack", "ranged_attack"].includes(p.type)));
   const here = bodies.filter((b) => b.pos.roomName === room);
-  const pairs = here.flatMap((b) => prey.filter((p) => near(b.pos, p.pos, reach(b))).map((p) => `${b.name} ${p.id}`));
-  for (const k of rec.inReach ?? []) {
-    const [name, id] = k.split(" ");
-    if (!here.some((b) => b.name === name) || !prey.some((p) => p.id === id)) continue;
+  const pairs = here.flatMap((b) => prey.filter((p) => near(b.pos, p.pos, reach(b))).map((p) => ({ name: b.name, id: p.id, pos: p.pos })));
+  for (const was of rec.inReach ?? []) {
+    const now = prey.find((p) => p.id === was.id);
+    if (!here.some((b) => b.name === was.name) || !now || near(now.pos, was.pos, 0)) continue;
     rec.held = (rec.held ?? 0) + 1;
-    if (pairs.includes(k)) rec.kept = (rec.kept ?? 0) + 1;
+    if (pairs.some((k) => k.name === was.name && k.id === was.id)) rec.kept = (rec.kept ?? 0) + 1;
   }
   rec.inReach = pairs;
 }

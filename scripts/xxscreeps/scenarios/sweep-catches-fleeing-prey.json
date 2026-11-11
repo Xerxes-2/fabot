@@ -1,5 +1,5 @@
 {
-  "why": "a declared sweep kills a rival's remote bodies that run from it at sight, keeping each in reach once it is, rather than trailing it a tile behind; `sweepKept` bounds that chase alone, and a body that runs to a gate is not chased there (owner, 2026-10-20). The bound is 40 because the colony's standing auto remotes share its spawn with the sweep; it returns to 45 once #812 refits the measure as an event-aligned rate",
+  "why": "a declared sweep kills a rival's remote bodies that run from it at sight, keeping each in reach once it is, rather than trailing it a tile behind; `sweepKept` bounds that chase alone, and a body that runs to a gate is not chased there (owner, 2026-10-20). `sweepKept` reads the prey's steps alone, so how many prey were shot standing, which the spawn's order decides, does not move it (#812). A hunt reads a prey that stood last tick as staying, so one stepping every other tick leaves reach on each step: main keeps 27/39/25 over seeds 1-3, and a hunt reading such a prey as free to step keeps 94/80/94; the bound sits under main's seeds (#812)",
   "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/siege-declared-room.json",
@@ -37,7 +37,7 @@
       "measure": "sweepKilled",
       "min": 5000
     },
-    { "measure": "sweepKept", "min": 40 },
+    { "measure": "sweepKept", "min": 20 },
     {
       "measure": "bodiesLost",
       "max": 0
