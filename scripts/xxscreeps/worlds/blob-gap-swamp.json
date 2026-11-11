@@ -148,6 +148,7 @@
       ],
       "objects": [
         {"_id":"b00029","type":"controller","x":25,"y":6,"room":"W2N1"},
+        {"_id":"b00099","type":"creep","x":31,"y":41,"room":"W2N1","user":"f00000000000000000000001","name":"scout-99000-Spawn1","body":[{"type":"move","hits":100}],"hits":100,"ageTime":101500,"store":{}},
         {"_id":"b00030","type":"source","x":30,"y":42,"room":"W2N1","energy":3000,"energyCapacity":3000}
       ]
     },

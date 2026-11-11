@@ -66,6 +66,7 @@ const ours = await User.findUserByName(db, username);
 const svc = getServiceChannel(shard);
 const memory = JSON.parse((await loadUserMemoryString(shard, ours)) || "{}");
 const claimed = (memory.v2?.declarations?.claims ?? []).map((o) => o.room);
+const full = memory.v2?.switches?.economy === false;
 const roomNames = [...new Set([...homes, ...(memory.v2?.declarations?.outposts ?? []).map((o) => o.room), ...claimed, ...followArg.split(",").filter(Boolean)])];
 const waves = wavesArg
   .split(",")
@@ -990,6 +991,7 @@ for (let t = 0; t < ticks; t++) {
     await pushIntentsForRoomNextTick(shard, core.room, kInvaderUserId, { local: { soakCore: [[]] }, internal: true });
     process.stderr.write(`t${t} core in ${core.room}\n`);
   }
+  if (full) for (const home of homes) await pushIntentsForRoomNextTick(shard, home, kInvaderUserId, { local: { soakFull: [[]] }, internal: true });
   if (room["#level"] !== levels.at(-1)?.rcl) levels.push({ t, time, rcl: room["#level"] });
   if (t % every === 0 || t === ticks - 1) {
     const row = sample(t, time, room);

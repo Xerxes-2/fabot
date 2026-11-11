@@ -4,6 +4,7 @@
   "start": {
     "world": "scripts/xxscreeps/worlds/sweep-melee-closes.json",
     "seed": 1,
+    "off": ["economy"],
     "opponents": [{ "name": "rival", "bot": "scripts/xxscreeps/engine/rival", "room": "W2N1", "config": { "role": "pass" } }]
   },
   "ticks": 150,

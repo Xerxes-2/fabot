@@ -3,7 +3,8 @@
   "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "world": "scripts/xxscreeps/worlds/stronghold-bunker5.json",
-    "seed": 1
+    "seed": 1,
+    "off": ["economy"]
   },
   "ticks": 300,
   "assert": [

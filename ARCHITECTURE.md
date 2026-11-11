@@ -833,6 +833,9 @@ everything v1 used its self-written arena for, and more:
   The operator's rules are a scenario like any other:
   `tactics-forbid-stands-the-siege-down` is a declared siege whose tactic a
   rule forbids, which prices nothing it may fight and casts nothing.
+  A tactic's scenario runs with the economy switched off (`"off"`), its bank
+  stood full each tick, so an economy change never moves its fight; one that
+  tests the fight with the colony (defend, siege, outposts) keeps it on.
 - **Soak.** The real sector's terrain and rooms, from one spawn for thousands
   of ticks: income curve, expansion cadence, losses to NPC waves, CPU curve.
   ✅ Season 11's own map (`season-world.mjs`) stands in for the template's
