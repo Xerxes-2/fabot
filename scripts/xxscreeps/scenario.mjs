@@ -385,6 +385,13 @@ const measures = {
     const [to, from] = [at(samples, a.to ?? Infinity).ledger, at(samples, a.from ?? 0).ledger];
     return (100 * ((to.handFed ?? 0) - (from.handFed ?? 0))) / Math.max(1, to.upgrade - from.upgrade);
   },
+  // A bundle that never read `carry.ring` fails, rather than read as none carried.
+  ringHauledShare: (_, a, dir) => {
+    const seen = windowsOf(dir, a);
+    const sum = (k) => seen.reduce((n, w) => n + (w.values[k] ?? 0), 0);
+    if (!seen.some((w) => "carry.ring" in w.values)) return Infinity;
+    return Math.round((100 * sum("carry.ring")) / Math.max(1, sum("spend.spawn")));
+  },
   // Energy lost to link transfers: none means no link ever sent.
   linked: (samples, a) => at(samples, a.to ?? Infinity).ledger.linked - at(samples, a.from ?? 0).ledger.linked,
   // The least any declared outpost netted after its bodies (`rooms`, the

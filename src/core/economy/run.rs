@@ -485,14 +485,16 @@ fn work(
         }
     }
     if digs && let Some(g) = derived.grounds.iter().find(|g| g.room == creep.pos.room) {
-        let link = (g.links.iter()).find(|l| {
-            g.receiver.is_some() && l.role.is_source() && l.free > 0 && creep.pos.within(1, &l.pos)
-        });
-        if let Some(l) = link {
+        let beside = |p: &Pos| creep.pos.within(1, p);
+        let bay = (g.bays.iter()).find(|b| beside(&b.pos)).map(|b| &b.id);
+        let link = (g.links.iter())
+            .find(|l| g.receiver.is_some() && l.role.is_source() && l.free > 0 && beside(&l.pos))
+            .map(|l| &l.id);
+        if let Some(to) = bay.or(link) {
             if body.energy > 0 {
                 acts.push(Intent::Creep(
                     creep.name.clone(),
-                    CreepAct::Transfer(l.id.clone(), Resource::Energy),
+                    CreepAct::Transfer(to.clone(), Resource::Energy),
                 ));
             }
             let under = (g.stores.iter()).find(|s| s.pos == creep.pos && s.energy > 0);

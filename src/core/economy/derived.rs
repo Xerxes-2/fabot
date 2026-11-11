@@ -44,6 +44,8 @@ pub struct SourceFact {
     pub link: Option<String>,
     pub seats: Option<i32>,
     pub energy: i32,
+    /// What its bay's extensions hold full: its container keeps it for them.
+    pub bay: i32,
     /// What every income and flow is read off, never `rate` alone.
     pub dug: i32,
 }
@@ -195,6 +197,7 @@ pub struct Ground {
     pub sources: Vec<SourceFact>,
     pub minerals: Vec<MineralFact>,
     pub refills: Vec<RefillFact>,
+    pub bays: Vec<RefillFact>,
     pub stores: Vec<StoreFact>,
     pub sites: Vec<SiteFact>,
     pub repairs: Vec<RepairFact>,
@@ -626,6 +629,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
     let controller_link = links.iter().find(|l| l.role.is_controller()).cloned();
     let hub_link = links.iter().find(|l| l.role.is_hub()).cloned();
 
+    let in_bay = Atlas::in_bay(room);
     let source_of = |s: &Source| {
         // An owned room's source is dug from the first bank, before its container's site.
         let post = Atlas::post_of(room, &s.pos).or_else(|| {
@@ -645,6 +649,11 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
                 .map(|l| l.id.clone()),
             seats,
             energy: s.energy,
+            bay: (room.structures.iter())
+                .filter(|x| x.kind == Kind::Extension && x.owner.is_ours())
+                .filter(|x| post.as_ref().is_some_and(|(p, _)| p.within(1, &x.pos)))
+                .map(|x| x.store.capacity)
+                .sum(),
             dug: dug_at(capacity, owned_room, rate, post.is_some(), seats),
         }
     };
@@ -658,7 +667,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
     let posted: i32 = dug_of(&|s| s.container.is_some());
     let served_dug = |pos: &Pos| -> i32 { dug_of(&|s| s.pos.range(pos) == Some(1)) };
 
-    let refills: Vec<RefillFact> = (room.structures.iter())
+    let (bays, refills): (Vec<RefillFact>, Vec<RefillFact>) = (room.structures.iter())
         .filter(|s| matches!(s.kind, Kind::Spawn | Kind::Extension | Kind::Tower))
         .filter(|s| s.owner.is_ours() && s.store.free() > 0)
         .map(|s| RefillFact {
@@ -667,7 +676,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
             kind: s.kind.clone(),
             free: s.store.free(),
         })
-        .collect();
+        .partition(|r| in_bay(&r.kind, &r.pos));
     let mut stores = stores_of(room, owned_room, &is_buffer, &served_dug);
     let repairs: Vec<RepairFact> = (room.structures.iter())
         .flat_map(|s| repair_of(room, wall, owned_room, s))
@@ -710,6 +719,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
         sources,
         minerals,
         refills,
+        bays,
         stores,
         sites: room
             .sites
@@ -1147,6 +1157,18 @@ pub fn of_world(
         .iter()
         .map(|c| body_of(&c.name, &c.pos, &c.body, &c.store, c.ticks_to_live))
         .collect();
+
+    // A bay with no harvester beside to keep it is the carriers' (Hivemind's).
+    for g in &mut grounds {
+        let kept = |r: &RefillFact| {
+            (bodies.iter()).any(|b| {
+                b.pattern.is_harvester() && b.store.capacity > 0 && b.pos.within(1, &r.pos)
+            })
+        };
+        let (kept, left): (Vec<_>, Vec<_>) = g.bays.drain(..).partition(kept);
+        g.bays = kept;
+        g.refills.extend(left);
+    }
 
     let mut routes: BTreeMap<RoomName, Tree> = BTreeMap::new();
 

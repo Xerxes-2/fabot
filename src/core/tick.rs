@@ -14,7 +14,9 @@ use super::strategy::intel::Intel;
 use super::tactics::{self, Tactic};
 use super::tiles::{self, Tile, TileSet};
 use super::vocabulary::{BodyPart, Compound, Resource};
-use super::world::{Creep, Owner, Pos, Room, RoomName, Sightings, World, hostiles};
+use super::world::{
+    Creep, Kind, Owner, Pos, Room, RoomName, Sightings, Structure, World, hostiles,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Declared {
@@ -500,6 +502,22 @@ fn by_room<'a, T>(pairs: &[(RoomName, &'a T)]) -> Vec<(RoomName, Vec<&'a T>)> {
         .collect()
 }
 
+/// Hivemind's order: the bays, which their harvesters refill, first. None
+/// without a bay, so the engine keeps its own.
+fn drawn(r: &Room, spawn: &Pos) -> Vec<String> {
+    let in_bay = Atlas::in_bay(r);
+    let bay = |s: &&Structure| in_bay(&s.kind, &s.pos);
+    let ours = (r.structures.iter()).filter(|s| s.owner.is_ours());
+    let mut energy: Vec<&Structure> = ours
+        .filter(|s| s.kind.is_spawn() || s.kind == Kind::Extension)
+        .collect();
+    if !energy.iter().any(bay) {
+        return Vec::new();
+    }
+    energy.sort_by_key(|s| (!bay(s), !s.kind.is_spawn(), spawn.range(&s.pos)));
+    energy.into_iter().map(|s| s.id.clone()).collect()
+}
+
 /// Each room's spawn queue: floors, then the fight's asks, then the
 /// economy's, on its idle spawns while the bank pays; a fight ask the bank
 /// cannot pay yet holds the economy's behind it, one its capacity never pays
@@ -534,7 +552,7 @@ pub fn queue(world: &World, asks: &[(RoomName, &Ask)]) -> Vec<Intent> {
             };
             out.push(Intent::Spawn(
                 spawn.id.clone(),
-                SpawnAct::SpawnCreep(a.body.clone(), a.name.clone()),
+                SpawnAct::SpawnCreep(a.body.clone(), a.name.clone(), drawn(r, &spawn.pos)),
             ));
             bank -= cost;
         }

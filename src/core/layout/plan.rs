@@ -544,37 +544,41 @@ fn draw_with(
         .collect();
     let ring = cut::ring(weights, &keep);
 
-    let mut road_level = [NONE; tiles::COUNT];
     let mut ranks: BTreeMap<Kind, i32> = BTreeMap::new();
     let mut items: Vec<Item> = Vec::new();
 
     for (kind, t) in &picked {
         let r = ranks.get(kind).copied().unwrap_or(0);
         ranks.insert(kind.clone(), r + 1);
-        let level = level_of(rules, kind, r);
         items.push(Item {
             kind: kind.clone(),
             tile: *t,
-            level,
+            level: level_of(rules, kind, r),
         });
-
-        let mut road = access[*t].or_else(|| {
-            tiles::least_around(*t, UNREACHED, |n| {
-                if lane[n].is_some() && !taken[n] {
-                    walk[n]
-                } else {
-                    UNREACHED
-                }
-            })
-        });
-
-        while let Some(at) = road {
-            road_level[at] = road_level[at].min(level.max(haul_level(rules)));
-            road = down(&lane, &*walk, at);
-        }
     }
 
-    road_level[anchor] = road_level[anchor].min(haul_level(rules));
+    let roads_to = |items: &[Item], taken: &[bool; tiles::COUNT], walk: &[i32]| {
+        let mut road_level = [NONE; tiles::COUNT];
+        for i in items {
+            let mut road = access[i.tile].or_else(|| {
+                tiles::least_around(i.tile, UNREACHED, |n| {
+                    if lane[n].is_some() && !taken[n] {
+                        walk[n]
+                    } else {
+                        UNREACHED
+                    }
+                })
+            });
+
+            while let Some(at) = road {
+                road_level[at] = road_level[at].min(i.level.max(haul_level(rules)));
+                road = down(&lane, walk, at);
+            }
+        }
+        road_level[anchor] = road_level[anchor].min(haul_level(rules));
+        road_level
+    };
+    let road_level = roads_to(&items, &taken, &*walk);
 
     let mut board = Board {
         rules,
@@ -583,6 +587,7 @@ fn draw_with(
         walk,
         taken,
         road_level,
+        paved: [NONE; tiles::COUNT],
         clear,
         on_way: [false; tiles::COUNT],
         held,
@@ -625,6 +630,11 @@ fn draw_with(
     }
 
     let linked = board.link(on_first, controller_seat.as_ref(), &posted);
+    board.bays(&posted);
+    let lattice_roads = roads_to(&board.items, &board.taken, &*board.walk);
+    for t in tiles::all() {
+        board.road_level[t] = lattice_roads[t].min(board.paved[t]);
+    }
 
     let roads = board.roads();
     let ramparts = board.ramparts(&posted, rock_level);
@@ -725,6 +735,7 @@ struct Board<'a> {
     walk: tiles::Table<i32>,
     taken: [bool; tiles::COUNT],
     road_level: [i32; tiles::COUNT],
+    paved: [i32; tiles::COUNT],
     clear: [bool; tiles::COUNT],
     on_way: [bool; tiles::COUNT],
     held: [bool; tiles::COUNT],
@@ -906,6 +917,52 @@ impl Board<'_> {
             .collect()
     }
 
+    /// Hivemind's harvest bays (MIT, © David Franke). They rank after the
+    /// first level's extensions, whose harvesters are too small to keep one.
+    fn bays(&mut self, posted: &[Posted]) {
+        let early = self
+            .rules
+            .allowed(&Kind::Extension.name(), haul_level(self.rules)) as usize;
+        let mut lattice: Vec<Tile> = (self.items.iter())
+            .filter(|i| i.kind == Kind::Extension)
+            .map(|i| i.tile)
+            .collect();
+        let mut bays: Vec<Tile> = Vec::new();
+        for p in posted {
+            let entry = (p.path.iter()).find(|t| tiles::range(**t, p.container) == 1);
+            let mut open: Vec<Tile> = (tiles::around(p.container).iter().copied())
+                .filter(|n| self.linkable(*n))
+                .collect();
+            // A second carrier draws beside the one on the road in, not behind it.
+            let beside_road = |t: Tile| entry.is_none_or(|e| tiles::range(t, *e) > 1);
+            if let Some(i) =
+                (0..open.len()).min_by_key(|i| (beside_road(open[*i]), self.walk[open[*i]]))
+            {
+                open.remove(i);
+            }
+            for n in open {
+                if early + bays.len() < lattice.len() {
+                    self.taken[n] = true;
+                    bays.push(n);
+                }
+            }
+        }
+        for t in lattice.drain(lattice.len() - bays.len()..) {
+            self.taken[t] = false;
+        }
+        self.items
+            .retain(|i| i.kind != Kind::Extension || lattice.contains(&i.tile));
+
+        let late = lattice.split_off(early.min(lattice.len()));
+        for (rank, t) in lattice.iter().chain(&bays).chain(&late).enumerate() {
+            let level = level_of(self.rules, &Kind::Extension, rank as i32);
+            match self.items.iter_mut().find(|i| i.tile == *t) {
+                Some(i) => i.level = level,
+                None => self.plant(&Kind::Extension, *t, level),
+            }
+        }
+    }
+
     fn ring(&self, cut: &[Tile]) -> Vec<Item> {
         let mut items: Vec<Item> = (cut.iter())
             .map(|t| Item {
@@ -979,7 +1036,6 @@ impl Board<'_> {
 
     fn plant(&mut self, kind: &Kind, t: Tile, level: i32) {
         self.taken[t] = true;
-        self.road_level[t] = NONE;
         self.extra.push(Item {
             kind: kind.clone(),
             tile: t,
@@ -991,6 +1047,7 @@ impl Board<'_> {
         for t in path {
             if !self.taken[*t] {
                 self.road_level[*t] = self.road_level[*t].min(level);
+                self.paved[*t] = self.paved[*t].min(level);
             }
         }
     }

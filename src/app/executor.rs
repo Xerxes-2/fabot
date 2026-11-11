@@ -235,17 +235,26 @@ fn act(intent: &Intent) -> (String, i32) {
                 _ => ("recycle".to_string(), NOT_FOUND),
             }
         }
-        Intent::Spawn(id, SpawnAct::SpawnCreep(body, name)) => match world::object_by_id(id) {
+        Intent::Spawn(id, SpawnAct::SpawnCreep(body, name, drawn)) => match world::object_by_id(id)
+        {
             None => ("spawn".to_string(), NOT_FOUND),
             Some(spawn) => {
                 let parts = Array::new();
                 for part in body {
                     parts.push(&JsValue::from_str(vocabulary::part_name(*part)));
                 }
+                let options = js_sys::Object::new();
+                if !drawn.is_empty() {
+                    let structures: Array = drawn
+                        .iter()
+                        .filter_map(|id| world::object_by_id(id))
+                        .collect();
+                    let _ = Reflect::set(&options, &"energyStructures".into(), &structures);
+                }
                 match call(
                     &spawn,
                     "spawnCreep",
-                    &[parts.into(), JsValue::from_str(name)],
+                    &[parts.into(), JsValue::from_str(name), options.into()],
                 ) {
                     Ok(code) => ("spawn".to_string(), code),
                     Err(()) => ("threw".to_string(), THREW),

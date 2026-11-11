@@ -244,7 +244,15 @@ into the store it came from. The source links feed the controller's link
 first: carriers bring it only while the upgraders drink more than the links
 send, and while they do only upgraders draw the controller's buffer, or a
 worker's draw is carried back from the stock. A harvester drains the container
-under it into its link while the link has room. A remote is served by the
+under it into its link while the link has room. Each source's post is a **harvest
+bay** (Hivemind's): its free neighbours past the link hold extensions, as many
+fewer on the lattice (its farthest). They rank after the first level's
+extensions: that level's harvester is too small to keep them. One neighbour
+beside the road in stays open, so a second carrier draws beside the first, not
+behind it. Its harvester refills them before the
+link, from a container the carriers leave a full bay's worth in, and a spawn
+draws them first, so the energy they hold is never hauled; a bay with no
+harvester beside it is the carriers'. A remote is served by the
 nearest colony with a bank: its storage, or before one stands the **pile**
 (`ColonyPlan.pile`), energy dropped on the centre of the hub Layout plans
 round the storage's tile. It is Hivemind's storage location: a paved tile

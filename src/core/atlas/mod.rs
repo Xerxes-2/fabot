@@ -435,13 +435,23 @@ impl Atlas {
             .unwrap_or(0)
     }
 
+    pub fn source_posts(room: &Room) -> Vec<Pos> {
+        (room.sources.iter())
+            .filter_map(|s| Atlas::post_of(room, &s.pos).map(|(p, _)| p))
+            .collect()
+    }
+
+    /// A harvest bay's extension: its harvester keeps it, not the carriers.
+    pub fn in_bay(room: &Room) -> impl Fn(&Kind, &Pos) -> bool {
+        let posts = Atlas::source_posts(room);
+        move |kind, pos| *kind == Kind::Extension && posts.iter().any(|p| p.within(1, pos))
+    }
+
     /// A link buffer's upgrader tiles stay open: held, they priced every walk
     /// past the controller dearer.
     pub fn work_seats(room: &Room) -> Vec<Tile> {
-        let mut seats: Vec<Tile> = room
-            .sources
-            .iter()
-            .filter_map(|s| Atlas::post_of(room, &s.pos).map(|(p, _)| tiles::of_pos(&p)))
+        let mut seats: Vec<Tile> = (Atlas::source_posts(room).iter())
+            .map(tiles::of_pos)
             .collect();
         if let Some(b) = Atlas::buffer(room)
             && b.kind.is_container()

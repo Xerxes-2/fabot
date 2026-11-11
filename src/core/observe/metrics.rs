@@ -13,7 +13,7 @@ use crate::core::intents::{CreepAct, Intent, Refusal, SpawnAct, TowerAct};
 use crate::core::tick;
 use crate::core::tick::{Declarations, Derived};
 use crate::core::vocabulary::{BodyPart, Resource};
-use crate::core::world::{Creep, Owner, Pos, Room, RoomName, World, hostiles};
+use crate::core::world::{Creep, Kind, Owner, Pos, Room, RoomName, World, hostiles};
 
 pub const WINDOW: i32 = 100;
 const RING: usize = 150;
@@ -45,6 +45,7 @@ const BODIES_OF: &str = "bodies.";
 const IDLE_OF: &str = "idle.";
 const CHURN: &str = "churn.task";
 const RETURNED: &str = "carry.returned";
+const RING_FED: &str = "carry.ring";
 const HELD: &str = "move.held";
 const WEDGED: &str = "move.wedged";
 const EDGE: &str = "move.edgeFlips";
@@ -186,6 +187,11 @@ const METRICS: &[Metric] = &[
         RETURNED,
         Fold::Sum,
         "energy a body transferred into the store it last withdrew energy from, no transfer, build, repair or upgrade between: at most what it drew",
+    ),
+    metric(
+        RING_FED,
+        Fold::Sum,
+        "energy carriers transferred into a spawn or an extension",
     ),
     metric(
         HELD,
@@ -466,7 +472,7 @@ fn spent<'w>(
             *left -= n;
             Some((c.pos.room, what, n))
         }
-        Intent::Spawn(id, SpawnAct::SpawnCreep(body, _)) => {
+        Intent::Spawn(id, SpawnAct::SpawnCreep(body, ..)) => {
             let s = world.spawns.iter().find(|s| &s.id == id)?;
             Some((s.pos.room, SPAWN, engine::body_cost(body)))
         }
@@ -495,7 +501,7 @@ fn returned(
     sums: &mut Sums,
     drawn: &mut HashMap<String, (String, i32)>,
     creeps: &HashMap<&str, &Creep>,
-    intents: &[Intent],
+    (intents, world): (&[Intent], &World),
     refused: &BTreeSet<(&str, &str)>,
 ) {
     for intent in intents {
@@ -505,6 +511,19 @@ fn returned(
         let Some(c) = creeps.get(name.as_str()) else {
             continue;
         };
+        if let CreepAct::Transfer(id, Resource::Energy) = act
+            && let Some(s) = (world.rooms.iter().flat_map(|r| r.structures.iter()))
+                .find(|s| &s.id == id && (s.kind.is_spawn() || s.kind == Kind::Extension))
+            && !refused.contains(&(name, "transfer"))
+            && bodies::pattern_of_name(name) == Some(Pattern::Hauler)
+        {
+            add(
+                sums,
+                None,
+                RING_FED,
+                f64::from(energy(c).min(s.store.free())),
+            );
+        }
         match act {
             CreepAct::Withdraw(id, Resource::Energy) if !refused.contains(&(name, "withdraw")) => {
                 drawn.insert(name.clone(), (id.clone(), c.store.free()));
@@ -895,7 +914,7 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
     }
     m.tasks
         .retain(|name, _| task_of(seen.assignments, name).is_some());
-    returned(sums, &mut m.drawn, &creeps, seen.intents, &refused);
+    returned(sums, &mut m.drawn, &creeps, (seen.intents, world), &refused);
 
     for s in &world.spawns {
         let row = Some(s.pos.room);

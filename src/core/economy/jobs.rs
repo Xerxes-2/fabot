@@ -223,13 +223,19 @@ fn takes_of(
         - aboard;
     let feed = g.feed.as_ref().map(|f| f.id.as_str());
     let linked = |id: &str| g.links.iter().any(|l| l.id == id);
+    let bay = |id: &str| {
+        (g.sources.iter())
+            .filter(|s| s.container.as_deref() == Some(id))
+            .map(|s| s.bay)
+            .sum::<i32>()
+    };
     for st in
         (g.stores.iter()).filter(|s| s.source_dug > 0 && !s.kind.is_buffer() && !linked(&s.id))
     {
         add(
             Task::Withdraw(st.id.clone(), Resource::Energy),
             st.pos,
-            st.energy,
+            st.energy - bay(&st.id),
             dig,
         );
     }
@@ -587,17 +593,17 @@ impl<'a> Jobs<'a> {
         if let Some(t) = repair(&at_risk) {
             return Some(t);
         }
-        // The links and the buffer feed the controller: they go up with the
-        // extensions.
+        // The links feed the controller: they go up with the extensions. The
+        // buffer goes first, or a bay's sites beside it hold its upgraders off.
         // A crowded source's crews spill their dig on its post until it stands.
+        let buffer = |p: &Pos| grounds.iter().any(|g| g.buffer_tile.as_ref() == Some(p));
         let crowded = |p: &Pos| {
-            grounds.iter().any(|g| {
-                g.buffer_tile.as_ref() == Some(p)
-                    || (g.sources.iter()).any(|s| s.post == Some(*p) && s.seats.unwrap_or(0) > 1)
-            })
+            (grounds.iter())
+                .any(|g| (g.sources.iter()).any(|s| s.post == Some(*p) && s.seats.unwrap_or(0) > 1))
         };
         let first = |s: &super::derived::SiteFact| match s.kind {
             Kind::Spawn => 0,
+            Kind::Container if buffer(&s.pos) => 0,
             Kind::Extension | Kind::Link => 1,
             Kind::Container if crowded(&s.pos) => 1,
             Kind::Container | Kind::Tower => 2,
