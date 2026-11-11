@@ -2,7 +2,8 @@
 // is a start, a number of ticks and bounds on what the run measured. Starts
 // are recipes (room, seed, late, node), or a small crafted world checked in
 // for what no recipe stands (a road through swamp); scenarios
-// with one start share one soak, run to the longest of their ticks. A start
+// with one start and one length share one soak, since a measure reads its
+// whole run. A start
 // `at` tick T resumes the world a soak of `bundle` left at T: that bundle is
 // pinned to a commit so the world is played once and cached under
 // soak-runs/worlds/, and the bundle under test runs on from it as a deploy
@@ -619,11 +620,10 @@ const codeOf = (...paths) =>
 const harness = codeOf(...["seed", "seat.js", "waves", "core", "colony.mjs", "node.mjs", "live.mjs"].map((f) => join(HERE, "engine", f)));
 const worldOf = (start) => `${recipe(start, seats(start.opponents).map((s) => ({ ...s, code: codeOf(s.bot === "@bot" ? bot : s.bot) })))}-t${start.at}-${start.bundle}-h${harness}`;
 const worldDir = (start) => join(REPO, "soak-runs/worlds", worldOf(start));
-const keyOf = (start, name = basename(bot, ".js")) => `scenario-${name}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}`;
+const keyOf = ({ start, ticks }, name = basename(bot, ".js")) => `scenario-${name}-${start.at ? `${worldOf(start)}${tag(start.opponents)}` : recipe(start, start.opponents)}-${ticks}`;
 const runs = new Map();
 for (const s of scenarios) {
-  const run = runs.get(keyOf(s.start)) ?? { name: keyOf(s.start), label: `${recipe(s.start, s.start.opponents)}${s.start.at ? `-t${s.start.at}` : ""}`, start: s.start, ticks: 0, scenarios: [], secs: 0 };
-  run.ticks = Math.max(run.ticks, s.ticks);
+  const run = runs.get(keyOf(s)) ?? { name: keyOf(s), label: `${recipe(s.start, s.start.opponents)}${s.start.at ? `-t${s.start.at}` : ""}-${s.ticks}`, start: s.start, ticks: s.ticks, scenarios: [], secs: 0 };
   run.scenarios.push(s.name);
   runs.set(run.name, run);
 }
@@ -742,7 +742,7 @@ const moved = { better: 0, worse: 0 };
 const SKIPPED = 4;
 let skipped = 0;
 for (const s of scenarios) {
-  const run = runs.get(keyOf(s.start));
+  const run = runs.get(keyOf(s));
   const dir = join(REPO, "soak-runs", run.name);
   if (run.code === SKIPPED) {
     skipped++;
@@ -760,7 +760,7 @@ for (const s of scenarios) {
     continue;
   }
   const samples = samplesOf(dir);
-  const baseDir = flags["--base"] && join(REPO, "soak-runs", keyOf(s.start, flags["--base"]));
+  const baseDir = flags["--base"] && join(REPO, "soak-runs", keyOf(s, flags["--base"]));
   const base = baseDir && existsSync(join(baseDir, "samples.jsonl")) ? samplesOf(baseDir) : null;
   for (const a of s.assert) {
     const value = measures[a.measure](samples, a, dir);
@@ -791,7 +791,7 @@ if (flags["--base"]) {
     return last?.score ? Object.values(last.score).reduce((a, b) => a + b, 0) : undefined;
   };
   const rows = [...runs.values()]
-    .map((r) => ({ label: r.label, now: scoreOf(join(REPO, "soak-runs", r.name)), was: scoreOf(join(REPO, "soak-runs", keyOf(r.start, flags["--base"]))) }))
+    .map((r) => ({ label: r.label, now: scoreOf(join(REPO, "soak-runs", r.name)), was: scoreOf(join(REPO, "soak-runs", keyOf(r, flags["--base"]))) }))
     .filter((r) => r.now !== undefined && r.was !== undefined && r.was > 0)
     .map((r) => ({ ...r, change: r.now / r.was - 1 }));
   for (const r of rows.filter((r) => Math.abs(r.change) >= 0.005).sort((a, b) => a.change - b.change))
