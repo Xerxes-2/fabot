@@ -225,26 +225,16 @@ pub fn sites(
             if let Some(sink) = sink {
                 let home = tick::target_at(&sink, 1);
 
+                // A reserver acts from beside the controller: a post there
+                // takes a tile no other seat can give it.
+                let beside = |p: &Pos| (room.controller.iter()).any(|c| c.pos.within(1, p));
                 for s in &room.sources {
-                    match Atlas::post_of(room, &s.pos) {
-                        Some((post, Some(_))) => {
-                            for p in walk(atlas, &home, &post) {
-                                place(
-                                    &rooms,
-                                    &mut taken,
-                                    &mut pending,
-                                    planned,
-                                    &mut budget,
-                                    &mut intents,
-                                    &p,
-                                    &Kind::Road,
-                                );
-                            }
-                        }
-                        Some((_, None)) => (),
-                        None => {
+                    let road_to = match Atlas::post_of(room, &s.pos) {
+                        Some((_, None)) => continue,
+                        Some((post, Some(_))) if !beside(&post) => Some(post),
+                        held => {
                             let open_tiles = taken[&room.name].clone();
-                            let mut seats: Vec<(i32, Tile)> = Vec::new();
+                            let mut seats: Vec<(bool, i32, Tile)> = Vec::new();
 
                             for t in tiles::within(1, tiles::of_pos(&s.pos)) {
                                 if t != tiles::of_pos(&s.pos)
@@ -262,25 +252,41 @@ pub fn sites(
                                         &tiles::to_pos(room.name, t),
                                     )
                                 {
-                                    seats.push((ticks, t));
+                                    seats.push((beside(&tiles::to_pos(room.name, t)), ticks, t));
                                 }
                             }
 
                             seats.sort_unstable();
 
-                            if let Some((_, t)) = seats.first() {
-                                place(
-                                    &rooms,
-                                    &mut taken,
-                                    &mut pending,
-                                    planned,
-                                    &mut budget,
-                                    &mut intents,
-                                    &tiles::to_pos(room.name, *t),
-                                    &Kind::Container,
-                                );
+                            match (seats.first(), held) {
+                                (Some(&(on, _, t)), held) if !on || held.is_none() => {
+                                    place(
+                                        &rooms,
+                                        &mut taken,
+                                        &mut pending,
+                                        planned,
+                                        &mut budget,
+                                        &mut intents,
+                                        &tiles::to_pos(room.name, t),
+                                        &Kind::Container,
+                                    );
+                                    None
+                                }
+                                (_, held) => held.map(|(post, _)| post),
                             }
                         }
+                    };
+                    for p in road_to.iter().flat_map(|post| walk(atlas, &home, post)) {
+                        place(
+                            &rooms,
+                            &mut taken,
+                            &mut pending,
+                            planned,
+                            &mut budget,
+                            &mut intents,
+                            &p,
+                            &Kind::Road,
+                        );
                     }
                 }
             }

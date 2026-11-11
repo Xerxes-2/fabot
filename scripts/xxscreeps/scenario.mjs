@@ -30,7 +30,7 @@
 // A scenario file: { "why": the invariant, "modules": the src/core modules it tests, "nightly"?, "start": { "room", "seed",
 // "late"?, "node"?, "invaders"? (soak's --invaders), "wave"? (soak's --wave), "core"? (soak's --core), "unsafe"?, "ended"?, "at"?, "bundle"?,
 // "opponents"? (soak's --opponents) } or { "world": a capture-shaped file
-// (soak's --world; crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "withdrawn"? (rooms whose open siege the owner has just withdrawn) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"?, "name"? }] };
+// (soak's --world; crafted ones under worlds/), "seed", "room"?, "node"?, "late"? (a world with no home of ours, as a recipe's), "ended"?, "invaders"?, "wave"?, "opponents"? (the world's own users), "declarations"? (in place of the world's), "withdrawn"? (rooms whose open siege the owner has just withdrawn) }, "ticks", "assert": [{ "measure", "from"?, "to"?, "max"?, "min"?, "who"?, "room"?, "kind"?, "name"?, "act"? }] };
 // a measure is one of `measures` below, read off the soak's output over ticks
 // [from, to), counted from the run's first tick; { "metric": a name the bot's
 // metrics carry (`src/core/observe/metrics.rs`), "room"? } bounds its worst
@@ -274,6 +274,14 @@ const measures = {
     return Math.max(worst, Math.max(...lives.map((b) => b.last)) - seen);
   },
   firstIn: (_, a, dir) => Math.min(...livesOf(dir).filter((b) => b.ours).flatMap((b) => (b.entered ?? []).filter(([r]) => r === a.room).map(([, t]) => t))),
+  // Percent of the ticks our `name`-prefixed bodies stood in `room` they did `act`, pooled over
+  // the lives that stood longest there: a life's acts are not split by room.
+  actShare: (_, a, dir) => {
+    const most = (b) => Object.entries(b.rooms).sort((x, y) => y[1] - x[1])[0]?.[0];
+    const of = livesOf(dir).filter((b) => b.ours && b.name.startsWith(a.name) && most(b) === a.room);
+    const ticks = of.reduce((n, b) => n + b.rooms[a.room], 0);
+    return ticks ? Math.round((100 * of.reduce((n, b) => n + (b.acts[a.act] ?? 0), 0)) / ticks) : -Infinity;
+  },
   claimersCast: (samples, a) => new Set(within(samples, a).flatMap((s) => s.bodies.filter((b) => b.startsWith("claimer-")).map((b) => b.split("@")[0]))).size,
   claimSpawned: (samples) => samples.find((s) => Object.values(s.claimed ?? {}).every((c) => c.spawns > 0) && Object.keys(s.claimed ?? {}).length)?.t ?? Infinity,
   // The most of a compound (`resource`) stood at once.
@@ -583,7 +591,7 @@ for (const { name, start } of scenarios)
   if ((start.at === undefined) !== (start.bundle === undefined) || (start.at !== undefined && (start.node || !/^[0-9a-f]{8,40}$/.test(start.bundle))))
     fail(`${name}: a start "at" a tick names its "bundle" by commit id, and no node`);
 for (const { name, start } of scenarios)
-  if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "withdrawn", "follow"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "withdrawn", "follow" and nothing else`);
+  if (start.world && Object.keys(start).some((k) => !["world", "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "withdrawn", "follow", "ended"].includes(k))) fail(`${name}: a "world" start takes a "seed", "room", "node", "late", "invaders", "wave", "opponents", "declarations", "withdrawn", "follow", "ended" and nothing else`);
 
 // A world holds its opponents' seats; their config is the scenario's.
 const tag = (opponents = []) => (opponents.length ? `-o${createHash("sha256").update(JSON.stringify(opponents)).digest("hex").slice(0, 8)}` : "");
@@ -661,7 +669,7 @@ const play = async ({ name, start, ticks }) => {
     start = { ...start, world };
   }
   if (start.world)
-    return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.room ? ["--room", start.room] : []), ...(start.node ? ["--node", start.node] : []), ...(start.late ? ["--late", String(start.late)] : []), ...(start.invaders ? ["--invaders", start.invaders] : []), ...(start.wave ? ["--wave", start.wave] : []), ...(start.follow ? ["--follow", start.follow.join(",")] : []), ...opponentsOf(name, start.opponents)]);
+    return soak(["--world", resolve(REPO, start.world), "--seed", String(start.seed), "--ticks", String(ticks), "--run", name, "--bot", bot, ...(start.room ? ["--room", start.room] : []), ...(start.node ? ["--node", start.node] : []), ...(start.late ? ["--late", String(start.late)] : []), ...(start.invaders ? ["--invaders", start.invaders] : []), ...(start.wave ? ["--wave", start.wave] : []), ...(start.follow ? ["--follow", start.follow.join(",")] : []), ...(start.ended ? ["--ended"] : []), ...opponentsOf(name, start.opponents)]);
   const recipe = ["--room", start.room, "--seed", String(start.seed), "--late", String(start.late ?? 0)];
   if (!start.at)
     return soak([

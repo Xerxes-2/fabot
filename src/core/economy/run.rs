@@ -342,6 +342,26 @@ fn dig_seats(atlas: &Atlas, derived: &Derived, id: &str, at: &Pos) -> Vec<Pos> {
     seats.into_iter().filter(|p| Some(*p) != post).collect()
 }
 
+/// A reserver keeps off every post in the room: its controller can share a
+/// seat with a source, and its harvester stands nowhere else. None when no
+/// seat is a post, or every one is: any tile in range serves.
+fn reserve_seats(atlas: &Atlas, derived: &Derived, at: &Pos) -> Option<Vec<Pos>> {
+    let posts: Vec<Pos> = (derived.grounds.iter())
+        .filter(|g| g.room == at.room)
+        .flat_map(|g| {
+            (g.sources.iter().filter_map(|s| s.post))
+                .chain(g.minerals.iter().filter_map(|m| m.post))
+                .chain(g.buffer_seats.iter().copied())
+        })
+        .collect();
+    let seats = atlas.seats(Footprint::One, 1, at);
+    let open: Vec<Pos> = (seats.iter())
+        .filter(|p| !posts.contains(p))
+        .copied()
+        .collect();
+    (!open.is_empty() && open.len() < seats.len()).then_some(open)
+}
+
 /// A seated task walks to a seat no other body stands on, so one body on the
 /// nearest seat does not hold the rest short of theirs.
 fn target_of(
@@ -356,6 +376,7 @@ fn target_of(
         (_, Task::Harvest(id)) => {
             Some(dig_seats(atlas, derived, id, &at)).filter(|s| !s.is_empty())
         }
+        (_, Task::Reserve(_) | Task::Claim(_)) => reserve_seats(atlas, derived, &at),
         // A worker upgrades off the upgraders' seats.
         (Job::Work(_), Task::Upgrade(_)) => {
             let buffer = (derived.grounds.iter())
