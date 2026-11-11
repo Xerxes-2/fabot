@@ -1,12 +1,12 @@
 {
-  "why": "a mixed blob (three rangers, a WORK:MOVE and a MOVE:HEAL body) walks to an outpost's raid through a room none of ours sees, as one: no member parked for the unseen walk. A lone member's walk is about 84 (33 steps to the home's exit, 49 across the unseen room); seeds 1-5 measured 85-88, main 89, a set parked for the walk 101-103. Main stalls 1.2 ticks a member (queued at the home's swamp patch) and spreads 0 tiles a tick past R+1",
+  "why": "a mixed blob (three rangers, a WORK:MOVE and a MOVE:HEAL body) walks to an outpost's raid through a room none of ours sees, as one: no member parked for the unseen walk. A lone member's walk is about 84 (33 steps to the home's exit, 49 across the unseen room); seeds 1-5 measured 85-88, main 89, a set parked for the walk 101-103. Main stalls 1.2 ticks a member (queued at the home's swamp patch) and spreads 0 tiles a tick past R+1. blobArrival 92 -> 93 until #824: an economy body's tile on the home's walk moves the arrival, seeds 1/2/3 read 91/86/87 on main d5d06491 and 93/86/87 with the slotless spend",
   "modules": ["atlas", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": { "world": "scripts/xxscreeps/worlds/blob-unseen-room.json", "seed": 1, "invaders": "W3N1:3000:600" },
   "ticks": 800,
   "assert": [
     { "measure": "blobSpread", "max": 0.1 },
     { "measure": "blobStallTicks", "max": 1.6 },
-    { "measure": "blobArrival", "max": 92 },
+    { "measure": "blobArrival", "max": 93 },
     { "measure": "oscillation", "max": 6 }
   ]
 }

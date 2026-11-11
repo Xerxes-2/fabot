@@ -645,20 +645,36 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
         let mover = movers[creep.name.as_str()];
         let danger = context.derived.danger(creep.pos.room);
         let Some((slot, body, task)) = at else {
-            // What a body without a slot holds is spent where it stands.
-            let controller = (derived.grounds.iter())
-                .filter_map(|g| g.controller.as_ref())
-                .find(|c| c.owner.is_ours() && creep.pos.within(task::RANGE_UPGRADE, &c.pos));
-            if let Some(c) = controller.filter(|_| creep.store.amount_of(&Resource::Energy) > 0)
-                && creep
-                    .body
-                    .iter()
-                    .any(|p| p.kind == BodyPart::Work && p.hits > 0)
-            {
-                acts.push(Intent::Creep(
-                    creep.name.clone(),
-                    CreepAct::Upgrade(c.id.clone()),
-                ));
+            // A load held idle is lost to every sink.
+            let loaded = creep.store.amount_of(&Resource::Energy) > 0;
+            let works = (creep.body.iter()).any(|p| p.kind == BodyPart::Work && p.hits > 0);
+            let sink = (derived.grounds.iter())
+                .filter(|g| g.room == creep.pos.room)
+                .find_map(|g| match (works, &g.controller, g.bank()) {
+                    (true, Some(c), _) if c.owner.is_ours() => {
+                        Some((c.pos, task::RANGE_UPGRADE, CreepAct::Upgrade(c.id.clone())))
+                    }
+                    (false, _, Some(s)) if s.owned => {
+                        Some((s.pos, 1, CreepAct::Transfer(s.id.clone(), Resource::Energy)))
+                    }
+                    (false, _, Some(s)) => Some((s.pos, 0, CreepAct::Drop(Resource::Energy))),
+                    _ => None,
+                });
+            if let Some((to, reach, act)) = sink.filter(|_| loaded) {
+                if creep.pos.within(reach, &to) {
+                    acts.push(Intent::Creep(creep.name.clone(), act));
+                } else {
+                    let wish = plan::toward_round(
+                        context.atlas,
+                        creep,
+                        mover,
+                        &tick::target_at(&to, reach),
+                        reach,
+                        danger,
+                    );
+                    wish_in(&mut wishes, creep.pos.room, wish);
+                    continue;
+                }
             }
             // A retired body has no seat to come back to.
             if let Some(s) = (derived.colonies.iter())
