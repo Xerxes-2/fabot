@@ -28,6 +28,7 @@ pub struct Jobs<'a> {
     /// Per colony: a carrier stands, so a worker refills the ring only
     /// without one.
     carried: Vec<bool>,
+    hauls: Vec<i32>,
 }
 
 /// The energy the terminal keeps for its shipment's fee, a hundred over as
@@ -372,6 +373,9 @@ impl<'a> Jobs<'a> {
             takes,
             digging: HashMap::default(),
             carried,
+            hauls: (0..derived.grounds.len())
+                .map(|gi| derived.haul(owners, gi))
+                .collect(),
         }
     }
 
@@ -566,6 +570,7 @@ impl<'a> Jobs<'a> {
         };
         // What is aboard was drawn past the reserve: a held task spends it.
         if let Some(t @ (Task::Build(_) | Task::Repair(_) | Task::Upgrade(_))) = kept
+            && !slot.draws_reserve()
             && grounds.iter().any(|g| match t {
                 Task::Build(id) => g.sites.iter().any(|s| &s.id == id),
                 Task::Repair(id) => g.repairs.iter().any(|r| &r.id == id),
@@ -576,22 +581,27 @@ impl<'a> Jobs<'a> {
             return Some(t.clone());
         }
         let near = |pos: &Pos| (pos.room != slot.room, self.distance(&body.pos, pos));
-        let repair = |fits: &dyn Fn(&&super::derived::RepairFact) -> bool| {
+        let haul = |g: &Ground| {
+            let gi = derived.grounds.iter().position(|x| x.room == g.room);
+            gi.map_or(0, |gi| self.hauls[gi])
+        };
+        let repair = |fits: &dyn Fn(&super::derived::RepairFact, i32) -> bool| {
             (grounds.iter())
-                .flat_map(|g| g.repairs.iter())
-                .filter(fits)
+                .flat_map(|g| g.repairs.iter().filter(move |r| fits(r, haul(g))))
                 .min_by_key(|r| near(&r.pos))
                 .map(|r| Task::Repair(r.id.clone()))
         };
         // Built at 1 hit, a rampart is gone at its first decay.
-        if let Some(t) = repair(&|r| r.kind == Kind::Rampart && r.hits <= RAMPART_SAFE) {
+        if let Some(t) = repair(&|r, _| r.kind == Kind::Rampart && r.hits <= RAMPART_SAFE) {
             return Some(t);
+        }
+        if slot.draws_reserve() {
+            return repair(&|r, haul| r.at_risk(haul));
         }
         if let Some(c) = controller.filter(|_| !builds) {
             return Some(Task::Upgrade(c.id.clone()));
         }
-        let life = f64::from(engine::CREEP_LIFETIME);
-        if let Some(t) = repair(&|r| f64::from(r.hits) < r.decay * life) {
+        if let Some(t) = repair(&|r, haul| r.at_risk(haul)) {
             return Some(t);
         }
         // The links feed the controller: they go up with the extensions. The
@@ -619,7 +629,7 @@ impl<'a> Jobs<'a> {
         // A rampart to its target, anything else once it is half gone, by the
         // bodies the surplus hires for it: a floor body's pace is unpriced.
         if let Some(t) =
-            repair(&|r| slot.spends && (r.kind == Kind::Rampart || 2 * r.hits < r.hits_max))
+            repair(&|r, _| slot.spends && (r.kind == Kind::Rampart || 2 * r.hits < r.hits_max))
         {
             return Some(t);
         }

@@ -63,9 +63,9 @@ pub struct Slot {
 }
 
 impl Slot {
-    /// A lost controller loses the room the reserve defends.
+    /// A lost controller loses the room; a lost road costs more than its repair.
     pub fn draws_reserve(&self) -> bool {
-        self.rank == DEADLINE
+        matches!((self.rank, &self.job), (DEADLINE, _) | (MEND, Job::Work(_)))
     }
 }
 
@@ -343,6 +343,7 @@ impl Plan<'_> {
         let mut owed = 0;
         let mut payback = 0;
         let mut repairs = false;
+        let mut mends = false;
         let mut crews = 0;
         let mut digs: Vec<String> = Vec::new();
         let mut local: Vec<(f64, Leg)> = Vec::new();
@@ -370,6 +371,8 @@ impl Plan<'_> {
                     .sum::<i32>();
             }
             repairs |= !g.repairs.is_empty();
+            let haul = derived.haul(owners, gi);
+            mends |= own && g.repairs.iter().any(|r| r.rebuild > 0 && r.at_risk(haul));
             if raised {
                 // A claim without its spawn is raised by workers sent from here.
                 for k in 0..PIONEERS {
@@ -551,7 +554,7 @@ impl Plan<'_> {
         let draws = past_reserve || drawn(ground.kept_from_builders(colony.reserve));
         let owed = if past_reserve { owed } else { payback };
         let floor = match () {
-            _ if !draws => i32::from(inside_deadline(&colony.controller)),
+            _ if !draws => i32::from(inside_deadline(&colony.controller) || mends),
             _ if owed > 0 || repairs => 2,
             _ => 1,
         };
@@ -622,8 +625,11 @@ impl Plan<'_> {
         // a life, out of the sites' share.
         let mended: f64 = (derived.grounds.iter().enumerate())
             .filter(|(gi, _)| owners[*gi] == Some(ci))
-            .flat_map(|(_, g)| g.repairs.iter())
-            .map(|r| r.decay + f64::from(r.hits_max - r.hits) / life)
+            .flat_map(|(gi, g)| {
+                let haul = derived.haul(owners, gi);
+                (g.repairs.iter())
+                    .map(move |r| r.loss(haul) + f64::from(r.hits_max - r.hits) / life)
+            })
             .sum::<f64>()
             / f64::from(engine::REPAIR_HITS_PER_ENERGY);
         let mend = (works - build).max(0.0).min(mended);
@@ -686,6 +692,7 @@ impl Plan<'_> {
         for k in 0..(floor.max(spenders) + crews) {
             let rank = match k {
                 0 if inside_deadline(&colony.controller) => DEADLINE,
+                0 if mends && !draws => MEND,
                 k if k < floor => FLOOR,
                 k if k < floor + crews => CREW,
                 _ => SPEND,
@@ -899,6 +906,8 @@ pub fn plan(atlas: &mut Atlas, derived: &Derived, owners: &[Option<usize>]) -> V
 /// A controller inside its downgrade deadline is worked before any other
 /// slot is cast or walked to.
 const DEADLINE: i32 = -1;
+/// Below the reserve a lost road costs more than the energy that mends it.
+const MEND: i32 = 3;
 /// Upgraders while the stock stands past the reserve (§5).
 const STOCKED: i32 = 4;
 const OUTPOST_HAUL: i32 = 5;

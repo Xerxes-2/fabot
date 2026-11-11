@@ -851,10 +851,14 @@ async function engaged(t, time, rooms) {
 let roadLoss = 0;
 const trails = new Map();
 let onRoad = [];
+const roadsLost = {};
+let paved = new Set();
 function detours(rooms) {
   const objects = rooms.flatMap((r) => [...r["#objects"]]);
   const key = (p, dx = 0, dy = 0) => `${p.roomName}:${p.x + dx},${p.y + dy}`;
-  const roads = new Set(objects.filter((o) => o.structureType === "road").map((o) => key(o.pos)));
+  const roads = new Set(objects.filter((o) => o.structureType === "road" && o["#lookType"] === "structure").map((o) => key(o.pos)));
+  for (const tile of paved) if (!roads.has(tile)) roadsLost[tile.split(":")[0]] = (roadsLost[tile.split(":")[0]] ?? 0) + 1;
+  paved = roads;
   const besideRoad = (p) => [-1, 0, 1].some((dx) => [-1, 0, 1].some((dy) => roads.has(key(p, dx, dy))));
   for (const o of objects)
     if (o.body !== undefined && o["#user"] === ours) {
@@ -1034,6 +1038,7 @@ for (let t = 0; t < ticks; t++) {
     if (homes.length > 1) row.homes = Object.fromEntries(homes.map((h, i) => [h, (({ bodies, foes, ...s }) => s)(sample(t, time, rooms[i]))]));
     row.botCpu = fresh ? obs.cpu : null;
     row.roadLoss = roadLoss;
+    row.roadsLost = { ...roadsLost };
     row.stillLoaded = stillLoaded;
     // Ore held in our storages and terminals: what the mines brought home.
     row.ore = rooms.flatMap((r) => [...r["#objects"]])

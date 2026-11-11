@@ -1,0 +1,7 @@
+{
+  "why": "a home road is repaired before its traffic wears it away: a road is at risk at its loss over a life, wear from the haul crossing it included, and one at risk casts the floor's first worker before the spend (main loses its first home road at t35130, a decay every ~400 ticks and no worker cast for 1500, #829)",
+  "modules": ["economy"],
+  "start": { "world": "scripts/xxscreeps/worlds/season-outpost-ring.json", "room": "E23S9", "seed": 1, "ended": true },
+  "ticks": 36000,
+  "assert": [{ "measure": "roadsLost", "room": "E23S9", "max": 0 }]
+}

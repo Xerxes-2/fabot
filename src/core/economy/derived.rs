@@ -178,7 +178,19 @@ pub struct RepairFact {
     pub hits: i32,
     pub hits_max: i32,
     pub decay: f64,
+    /// Hits a tick worn off by each energy a tick hauled across it.
+    pub wear: f64,
     pub rebuild: i32,
+}
+
+impl RepairFact {
+    pub fn loss(&self, haul: i32) -> f64 {
+        self.decay + self.wear * f64::from(haul)
+    }
+
+    pub fn at_risk(&self, haul: i32) -> bool {
+        f64::from(self.hits) < self.loss(haul) * f64::from(engine::CREEP_LIFETIME)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -310,6 +322,21 @@ pub struct Derived {
     pub closed: Vec<Outpost>,
 }
 
+impl Derived {
+    /// An outpost's roads keep their timer: their haul sent young homes' workers out.
+    pub fn haul(&self, owners: &[Option<usize>], gi: usize) -> i32 {
+        if gi >= self.colonies.len() {
+            return 0;
+        }
+        (self.grounds.iter().zip(owners))
+            .filter(|(_, o)| **o == Some(gi))
+            .flat_map(|(g, _)| &g.sources)
+            .filter(|s| s.container.is_some() && s.link.is_none())
+            .map(|s| s.dug)
+            .sum()
+    }
+}
+
 fn body_of(name: &str, pos: &Pos, parts: &[Part], store: &Store, life: i32) -> Body {
     let mut work = 0;
     let mut carry = 0;
@@ -412,10 +439,11 @@ fn swamp(room: &Room, pos: &Pos) -> bool {
 /// What keeping `s` standing costs, where it is below the hits we hold it at.
 fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<RepairFact> {
     let per = |amount: i32, time: i32| f64::from(amount) / f64::from(time);
-    let (hits_max, decay, rebuild) = match s.kind {
+    let (hits_max, decay, wear, rebuild) = match s.kind {
         Kind::Rampart if s.owner.is_ours() => (
             wall.min(s.hits_max),
             per(engine::RAMPART_DECAY_AMOUNT, engine::RAMPART_DECAY_TIME),
+            0.0,
             0,
         ),
         Kind::Road => {
@@ -424,8 +452,12 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
             } else {
                 1
             };
+            let block = bodies::block_of(Pattern::Hauler);
+            let load = part_count_in(block, BodyPart::Carry) * engine::CARRY_PART_CAPACITY;
+            let steps = 2.0 / f64::from(load);
             let decay = per(engine::ROAD_DECAY_AMOUNT * ratio, engine::ROAD_DECAY_TIME);
-            (s.hits_max, decay, engine::ROAD_BUILD_COST * ratio)
+            let wear = decay * steps * f64::from(block.len() as i32 * engine::ROAD_WEAROUT);
+            (s.hits_max, decay, wear, engine::ROAD_BUILD_COST * ratio)
         }
         Kind::Container => {
             let period = if owned_room {
@@ -434,7 +466,7 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
                 engine::CONTAINER_DECAY_TIME
             };
             let decay = per(engine::CONTAINER_DECAY_AMOUNT, period);
-            (s.hits_max, decay, engine::CONTAINER_BUILD_COST)
+            (s.hits_max, decay, 0.0, engine::CONTAINER_BUILD_COST)
         }
         _ => return None,
     };
@@ -445,6 +477,7 @@ fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<
         hits: s.hits,
         hits_max,
         decay,
+        wear,
         rebuild,
     })
 }

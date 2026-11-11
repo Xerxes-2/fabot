@@ -257,6 +257,7 @@ const measures = {
     const seen = within(samples, a);
     return seen.slice(1).reduce((n, s, i) => n + Math.max(0, standing(seen[i]) - standing(s)), 0);
   },
+  roadsLost: (samples, a) => (at(samples, a.to ?? Infinity).roadsLost?.[a.room] ?? 0) - (at(samples, a.from ?? 0).roadsLost?.[a.room] ?? 0),
   // Ticks bodies lost beside a road: grounded off it, or stopped for a body on it.
   roadLoss: (samples, a) => at(samples, a.to ?? Infinity).roadLoss - at(samples, a.from ?? 0).roadLoss,
   stillLoaded: (samples, a) => at(samples, a.to ?? Infinity).stillLoaded,
