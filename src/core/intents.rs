@@ -70,6 +70,7 @@ pub fn performed(acts: &[CreepAct]) -> Vec<CreepAct> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SpawnAct {
     SpawnCreep(Vec<BodyPart>, String),
+    RecycleCreep(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

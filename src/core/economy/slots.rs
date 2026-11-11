@@ -902,6 +902,22 @@ fn home_walk(atlas: &Atlas, derived: &Derived, slot: &Slot) -> i32 {
         .unwrap_or(0)
 }
 
+/// Home dig is worth a recast: the bank that cast this body has grown.
+fn outgrown(derived: &Derived, body: &Body, slot: &Slot) -> bool {
+    let Job::Dig(id) = &slot.job else {
+        return false;
+    };
+    let rate = (derived.grounds.iter())
+        .filter(|g| g.room == slot.room)
+        .flat_map(|g| g.sources.iter())
+        .find(|s| &s.id == id)
+        .map_or(0, |s| s.rate);
+    let dug = |work: i32| (work * engine::HARVEST_PER_WORK).min(rate);
+    body.pattern.is_harvester()
+        && slot.room == derived.colonies[slot.colony].room
+        && dug(body.work) < dug(part_count_in(&slot.body, BodyPart::Work))
+}
+
 fn expires(body: &Body, home_walk: i32) -> bool {
     body.ticks_to_live <= body.size * engine::SPAWN_TICKS_PER_PART + home_walk
 }
@@ -910,13 +926,14 @@ pub type Holders<'a> = BTreeMap<&'a str, Vec<&'a Body>>;
 
 /// Each body's slot: the one it held while that slot stands, else the
 /// nearest of its pattern no body holds, else, for a job that takes extras,
-/// the nearest of its pattern.
+/// the nearest of its pattern. Last, the outgrown bodies whose successors
+/// stand at their seats.
 pub fn assign<'a>(
     atlas: &Atlas,
     derived: &'a Derived,
     slots: &'a [Slot],
     held: &BTreeMap<String, String>,
-) -> (BTreeMap<String, usize>, Holders<'a>) {
+) -> (BTreeMap<String, usize>, Holders<'a>, BTreeSet<String>) {
     let by_id: BTreeMap<&str, usize> = slots
         .iter()
         .enumerate()
@@ -956,11 +973,12 @@ pub fn assign<'a>(
         }
         let near = |open: bool| {
             (slots.iter().enumerate())
-                .filter(|(_, s)| s.job.pattern() == b.pattern)
+                .filter(|(_, s)| s.job.pattern() == b.pattern && !outgrown(derived, b, s))
                 .filter(|(i, s)| {
-                    let taken = holders
-                        .get(s.id.as_str())
-                        .is_some_and(|h| h.iter().any(|h| !expires(h, walks[*i])));
+                    let taken = holders.get(s.id.as_str()).is_some_and(|h| {
+                        h.iter()
+                            .any(|h| !expires(h, walks[*i]) && !outgrown(derived, h, s))
+                    });
                     if open { !taken } else { !s.job.seated() }
                 })
                 .filter_map(|(i, s)| {
@@ -976,7 +994,31 @@ pub fn assign<'a>(
             holders.entry(slots[i].id.as_str()).or_default().push(b);
         }
     }
-    (out, holders)
+    let relieved = |s: &Slot, h: &[&Body]| {
+        h.iter()
+            .any(|b| !outgrown(derived, b, s) && b.pos.within(1, &s.seat))
+    };
+    for s in slots {
+        if let Some(h) = holders.get_mut(s.id.as_str())
+            && relieved(s, h)
+        {
+            for b in h.iter().filter(|b| outgrown(derived, b, s)) {
+                out.remove(&b.name);
+            }
+            h.retain(|b| !outgrown(derived, b, s));
+        }
+    }
+    let retired = (all.iter())
+        .filter(|b| !out.contains_key(&b.name))
+        .filter(|b| {
+            slots.iter().any(|s| {
+                outgrown(derived, b, s)
+                    && holders.get(s.id.as_str()).is_some_and(|h| relieved(s, h))
+            })
+        })
+        .map(|b| b.name.clone())
+        .collect();
+    (out, holders, retired)
 }
 
 /// An assignment is `slot|task`; the task is what the body did last tick.
@@ -1009,9 +1051,10 @@ pub fn casts(
     holders: &Holders,
 ) -> (Vec<Cast>, Vec<(RoomName, Pattern, i32)>) {
     let open = |s: &Slot| {
-        holders
-            .get(s.id.as_str())
-            .is_none_or(|h| h.iter().all(|b| expiring(atlas, derived, b, s)))
+        holders.get(s.id.as_str()).is_none_or(|h| {
+            h.iter()
+                .all(|b| expiring(atlas, derived, b, s) || outgrown(derived, b, s))
+        })
     };
     let held = |id: &str| holders.get(id).is_some_and(|h| !h.is_empty());
     let fed = |s: &Slot| {

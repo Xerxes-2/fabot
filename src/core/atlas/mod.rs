@@ -407,12 +407,7 @@ impl Atlas {
     /// Farthest from the controller first, so a controller container on a seat
     /// is no post.
     pub fn post_of(room: &Room, source: &Pos) -> Option<(Pos, Option<String>)> {
-        let from_controller = |p: &Pos| -> i32 {
-            room.controller
-                .as_ref()
-                .and_then(|c| c.pos.range(p))
-                .unwrap_or(0)
-        };
+        let from_controller = |p: &Pos| Atlas::from_controller(room, p);
         let mut candidates: Vec<(Pos, Option<String>)> = Vec::new();
         for s in &room.structures {
             if s.kind.is_container() {
@@ -428,6 +423,16 @@ impl Atlas {
         candidates
             .sort_by_key(|(p, built)| (-from_controller(p), built.is_none(), tiles::of_pos(p)));
         candidates.into_iter().next()
+    }
+
+    pub fn bare_post(room: &Room, seats: Vec<Pos>) -> Option<Pos> {
+        (seats.into_iter()).min_by_key(|p| (-Atlas::from_controller(room, p), tiles::of_pos(p)))
+    }
+
+    fn from_controller(room: &Room, p: &Pos) -> i32 {
+        (room.controller.as_ref())
+            .and_then(|c| c.pos.range(p))
+            .unwrap_or(0)
     }
 
     /// A link buffer's upgrader tiles stay open: held, they priced every walk

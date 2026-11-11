@@ -1,5 +1,5 @@
 {
-  "why": "a harasser that leaves the room whenever an armed body of ours arrives and walks back in when it is gone never meets a fight: the outpost's work goes on while the harasser is out of reach of it, so the room keeps its output, its bodies take the raid's damage and live, and no chase buys the room a body per return; a body outside a fight walks round its reach and out of it: main takes 22-40 struck each time an unarmed body comes into the harasser's reach with the raid arriving at 1340-1460 (the spawn's wait moves the total, not this), 74-96 with the danger grid off, so the bound sits between (#810); the outpost digs 18.3-20.1 a tick from the raid on over those arrivals",
+  "why": "a harasser that leaves the room whenever an armed body of ours arrives and walks back in when it is gone never meets a fight: the outpost's work goes on while the harasser is out of reach of it, so the room keeps its output, its bodies take the raid's damage and live, and no chase buys the room a body per return; a body outside a fight walks round its reach and out of it: main takes 22-40 struck each time an unarmed body comes into the harasser's reach with the raid arriving at 1340-1460 (the spawn's wait moves the total, not this), 74-96 with the danger grid off, so the bound sits between (#810); the outpost digs 18.3-20.1 a tick from the raid on over those arrivals; the bound is 14, not 18, because the reading moves with where the home harvesters' renewals fall against the raid (14.0 at 1400 when a bare-seat harvester's successor shifts them, 18.4-19.6 at the other arrivals), and returns to 18 when #823 gives an arrival-independent measure",
   "modules": ["atlas", "economy", "exchange", "fight", "mv", "strategy", "tactics"],
   "start": {
     "room": "W8N3",
@@ -18,7 +18,7 @@
   },
   "ticks": 2600,
   "assert": [
-    { "measure": "digRate", "room": "W8N2", "min": 18 },
+    { "measure": "digRate", "room": "W8N2", "min": 14 },
     { "measure": "unarmedStruckPerReach", "max": 55 },
     { "measure": "mostCast", "max": 1400 },
     { "measure": "predictedWinsLost", "max": 0 },

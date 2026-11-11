@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::core::atlas::{self, Atlas, Mover, Target};
 use crate::core::engine;
 use crate::core::grid::{self, Footprint};
-use crate::core::intents::{Ask, CreepAct, Intent, LabAct, LinkAct, Rank, TerminalAct};
+use crate::core::intents::{Ask, CreepAct, Intent, LabAct, LinkAct, Rank, SpawnAct, TerminalAct};
 use crate::core::mv::{Wish, plan};
 use crate::core::state::State;
 use crate::core::tick::{self, Context};
@@ -536,7 +536,8 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
 
     let owners = slots::owners(context.atlas, &derived);
     let slots = slots::plan(context.atlas, &derived, &owners);
-    let (assigned, holders) = slots::assign(&*context.atlas, &derived, &slots, &state.assignments);
+    let (assigned, holders, retired) =
+        slots::assign(&*context.atlas, &derived, &slots, &state.assignments);
     let (casts, short) = slots::casts(&*context.atlas, &derived, &slots, &holders);
 
     let mut intents: Vec<Intent> = (casts.iter())
@@ -658,6 +659,20 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
                     creep.name.clone(),
                     CreepAct::Upgrade(c.id.clone()),
                 ));
+            }
+            // A retired body has no seat to come back to.
+            if let Some(s) = (derived.colonies.iter())
+                .find(|c| retired.contains(&creep.name) && c.room == creep.pos.room)
+                .map(|c| &c.spawns[0])
+            {
+                if creep.pos.within(1, &s.pos) {
+                    let recycle = SpawnAct::RecycleCreep(creep.id.clone());
+                    acts.push(Intent::Spawn(s.id.clone(), recycle));
+                }
+                let to = tick::target_at(&s.pos, 1);
+                let wish = plan::toward_round(context.atlas, creep, mover, &to, 1, danger);
+                wish_in(&mut wishes, creep.pos.room, wish);
+                continue;
             }
             let wish = home(context.atlas, &derived, creep, mover, danger);
             wish_in(&mut wishes, creep.pos.room, wish);

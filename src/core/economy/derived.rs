@@ -619,7 +619,11 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) ->
     let hub_link = links.iter().find(|l| l.role.is_hub()).cloned();
 
     let source_of = |s: &Source| {
-        let post = Atlas::post_of(room, &s.pos);
+        // An owned room's source is dug from the first bank, before its container's site.
+        let post = Atlas::post_of(room, &s.pos).or_else(|| {
+            let seats = owned_room.then(|| atlas.seats(Footprint::One, 1, &s.pos))?;
+            Atlas::bare_post(room, seats).map(|p| (p, None))
+        });
         let seats = seats_at(atlas, 1, &s.pos);
         SourceFact {
             id: s.id.clone(),

@@ -484,7 +484,7 @@ fn verb(intent: &Intent) -> Option<(&str, &'static str)> {
         Intent::Creep(name, CreepAct::Build(_)) => (name, "build"),
         Intent::Creep(name, CreepAct::Repair(_)) => (name, "repair"),
         Intent::Creep(name, CreepAct::Upgrade(_)) => (name, "upgrade"),
-        Intent::Spawn(id, _) => (id, "spawn"),
+        Intent::Spawn(id, SpawnAct::SpawnCreep(..)) => (id, "spawn"),
         Intent::Tower(id, TowerAct::Attack(_)) => (id, "attack"),
         Intent::Tower(id, TowerAct::Heal(_)) => (id, "heal"),
         _ => return None,
@@ -835,7 +835,9 @@ pub fn step(mut m: Metrics, seen: &Seen) -> Metrics {
                     _ => (),
                 }
             }
-            Intent::Spawn(id, _) if !refused.contains(&(id.as_str(), "spawn")) => {
+            Intent::Spawn(id, SpawnAct::SpawnCreep(..))
+                if !refused.contains(&(id.as_str(), "spawn")) =>
+            {
                 spawned.extend(
                     world
                         .spawns

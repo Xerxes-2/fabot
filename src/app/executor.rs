@@ -226,6 +226,15 @@ fn act(intent: &Intent) -> (String, i32) {
             ("trace".to_string(), 0)
         }
         Intent::Count(_, _) | Intent::Short(_, _, _) | Intent::Held(_) => ("count".to_string(), 0),
+        Intent::Spawn(id, SpawnAct::RecycleCreep(creep)) => {
+            match (world::object_by_id(id), world::object_by_id(creep)) {
+                (Some(spawn), Some(creep)) => match call(&spawn, "recycleCreep", &[creep]) {
+                    Ok(code) => ("recycle".to_string(), code),
+                    Err(()) => ("threw".to_string(), THREW),
+                },
+                _ => ("recycle".to_string(), NOT_FOUND),
+            }
+        }
         Intent::Spawn(id, SpawnAct::SpawnCreep(body, name)) => match world::object_by_id(id) {
             None => ("spawn".to_string(), NOT_FOUND),
             Some(spawn) => {
