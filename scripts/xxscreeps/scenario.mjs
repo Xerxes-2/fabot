@@ -288,6 +288,16 @@ const measures = {
   pouredBack: (samples, a) => at(samples, a.to ?? Infinity).pouredBack - at(samples, a.from ?? 0).pouredBack,
   // Energy spent on construction (`room`: in that room alone).
   build: (samples, a) => builtIn(at(samples, a.to ?? Infinity), a) - builtIn(at(samples, a.from ?? 0), a),
+  // The longest stretch nothing was upgraded once the storage stood; no storage reads as never.
+  upgradeStall: (samples, a) => {
+    const seen = within(samples, a).filter((s) => s.built.storage);
+    let most = seen.length ? 0 : Infinity;
+    for (let i = 1, from = seen[0]?.t; i < seen.length; i++) {
+      if (upgradedIn(seen[i], a) > upgradedIn(seen[i - 1], a)) from = seen[i].t;
+      most = Math.max(most, seen[i].t - from);
+    }
+    return most;
+  },
   // Energy a room's spawns put into bodies (`room`: the room).
   bodiesSpent: (samples, a) => (at(samples, a.to ?? Infinity).rooms[a.room]?.bodies ?? 0) - (at(samples, a.from ?? 0).rooms[a.room]?.bodies ?? 0),
   // The fewest ticks `room`'s controller stood from its downgrade over the run, never ours: -Infinity.

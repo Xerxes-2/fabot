@@ -1,0 +1,7 @@
+{
+  "why": "the controller is upgraded past the buffer container's first decay: its upgraders keep the buffer they drink from (main at 3614fb7a: the buffer decayed at t27800 with no worker able to mend it below the reserve, no upgrader is cast without one, upgradeStall 1100)",
+  "modules": ["economy"],
+  "start": { "room": "W8N3", "seed": 1, "at": 26000, "bundle": "3614fb7a5765" },
+  "ticks": 4000,
+  "assert": [{ "measure": "upgradeStall", "max": 800 }]
+}

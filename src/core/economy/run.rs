@@ -430,7 +430,7 @@ fn work(
         ));
     }
     let digs = matches!(slot.job, Job::Dig(_));
-    if let Some(act) = raising(derived, body, digs && creep.pos == slot.seat) {
+    if let Some(act) = raising(derived, body, slot) {
         acts.push(Intent::Creep(creep.name.clone(), act));
     } else {
         let arrived = creep.pos.within(task.range_of(), &at)
@@ -708,22 +708,28 @@ fn home(
 }
 
 /// A harvester full on its post raises or keeps the container under it, so
-/// its dig never piles on the site.
-fn raising(derived: &Derived, body: &Body, posted: bool) -> Option<CreepAct> {
+/// its dig never piles on the site; an upgrader keeps its buffer, which no
+/// worker below the reserve has the energy to mend.
+fn raising(derived: &Derived, body: &Body, slot: &Slot) -> Option<CreepAct> {
     let at = &body.pos;
-    if !(posted && body.work > 0 && body.energy > 0 && body.free == 0) {
+    if !(*at == slot.seat && body.work > 0 && body.energy > 0) {
         return None;
     }
-    derived
-        .grounds
-        .iter()
-        .filter(|g| g.room == at.room)
-        .find_map(|g| match g.sites.iter().find(|s| s.pos == *at) {
-            Some(site) => Some(CreepAct::Build(site.id.clone())),
-            None => (g.repairs.iter())
-                .find(|r| r.pos == *at && r.kind.is_container() && 2 * r.hits < r.hits_max)
-                .map(|r| CreepAct::Repair(r.id.clone())),
-        })
+    let g = derived.grounds.iter().find(|g| g.room == at.room)?;
+    let kept = match slot.job {
+        Job::Dig(_) if body.free == 0 => {
+            if let Some(site) = g.sites.iter().find(|s| s.pos == *at) {
+                return Some(CreepAct::Build(site.id.clone()));
+            }
+            (g.repairs.iter()).find(|r| r.pos == *at && r.kind.is_container())
+        }
+        Job::Upgrade => {
+            (g.repairs.iter()).find(|r| g.buffer.as_ref().is_some_and(|b| b.id == r.id))
+        }
+        _ => None,
+    };
+    kept.filter(|r| 2 * r.hits < r.hits_max)
+        .map(|r| CreepAct::Repair(r.id.clone()))
 }
 
 #[cfg(test)]
