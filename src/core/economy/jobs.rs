@@ -144,11 +144,13 @@ fn sinks_of(derived: &Derived, ci: usize) -> Vec<Spot> {
         }
     }
     if !g.abandoned
-        && let Some(s) = g.stores.iter().find(|s| s.owned)
+        && let Some(s) = g.bank()
     {
         add(&s.id, s.pos, Resource::Energy, s.free, 3);
-        for r in ores_aboard(derived) {
-            add(&s.id, s.pos, r, s.free, 3);
+        if s.owned {
+            for r in ores_aboard(derived) {
+                add(&s.id, s.pos, r, s.free, 3);
+            }
         }
     }
     out
@@ -186,7 +188,7 @@ fn takes_of(
     };
     // With a stock to draw the ring is filled from it first, and the dig
     // banked after.
-    let dig = i32::from(g.has_storage());
+    let dig = i32::from(g.bank().is_some());
     for o in outposts {
         for st in o.stores.iter().filter(|s| s.source_dug > 0) {
             add(
@@ -231,7 +233,7 @@ fn takes_of(
             dig,
         );
     }
-    for s in g.stores.iter().filter(|s| s.kind.is_storage() && s.owned) {
+    if let Some(s) = g.bank() {
         add(
             Task::Withdraw(s.id.clone(), Resource::Energy),
             s.pos,
@@ -311,7 +313,7 @@ fn takes_of(
 fn counted(derived: &Derived, sinks: &[Spot], slot: &Slot, at: &Pos, task: &Task) -> bool {
     let ci = slot.colony;
     let drawn = matches!(task, Task::Withdraw(id, r) if r.is_energy()
-        && derived.grounds[ci].stores.iter().any(|s| s.owned && &s.id == id));
+        && derived.grounds[ci].bank().is_some_and(|s| &s.id == id));
     slot.job == Job::Fill
         && at.room == derived.colonies[ci].room
         && (drawn || sinks.iter().any(|s| s.tier < 3 && &s.task == task))
@@ -491,7 +493,7 @@ impl<'a> Jobs<'a> {
                 // A fight's cast waits on the ring, never on a source's trickle.
                 let ring =
                     (self.sinks[ci].iter()).any(|s| s.tier == 0 && s.amount >= body.store.capacity);
-                let trickle = self.derived.grounds[ci].has_storage()
+                let trickle = self.derived.grounds[ci].bank().is_some()
                     && body.free < body.store.capacity
                     && (takes.iter()).any(|s| {
                         Some(&s.task) == kept && s.pos.room == home && s.amount < body.free
@@ -626,7 +628,7 @@ impl<'a> Jobs<'a> {
         let homes = &self.derived.colonies;
         at.is_some_and(|at| {
             (0..homes.len())
-                .filter(|i| self.derived.grounds[*i].has_storage())
+                .filter(|i| self.derived.grounds[*i].bank().is_some())
                 .min_by_key(|i| self.distance(&homes[*i].spawns[0].pos, &at))
                 == Some(ci)
         })

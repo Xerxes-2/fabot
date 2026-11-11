@@ -122,6 +122,8 @@ pub struct ColonyPlan {
     pub rampart_hits: i32,
     pub ring: bool,
     pub owes: bool,
+    /// Where its haul is banked while no storage stands (`ARCHITECTURE.md` §5).
+    pub pile: Option<Pos>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

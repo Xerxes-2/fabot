@@ -59,7 +59,18 @@ pub fn decide(ctx: &mut Context, state: &mut State) -> Result<Vec<Intent>, Strin
         })
         .sum();
 
-    let sites = remote::sites(ctx.atlas, world, ctx.derived, &home, budget - placed);
+    let piles = |room| {
+        (ctx.declarations.colonies.iter())
+            .find(|p| p.room == room)?
+            .pile
+    };
+    let sites = remote::sites(
+        ctx.atlas,
+        world,
+        ctx.derived,
+        (&home, &piles),
+        budget - placed,
+    );
 
     let mut intents = home;
     intents.extend(sites);

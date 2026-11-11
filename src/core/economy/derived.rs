@@ -93,6 +93,7 @@ pub enum StoreKind {
     Storage,
     Buffer,
     Remains,
+    Pile,
 }
 
 impl StoreKind {
@@ -104,6 +105,9 @@ impl StoreKind {
     }
     pub fn is_remains(self) -> bool {
         self == StoreKind::Remains
+    }
+    pub fn is_pile(self) -> bool {
+        self == StoreKind::Pile
     }
 }
 
@@ -226,6 +230,10 @@ pub struct Ground {
 impl Ground {
     pub fn has_storage(&self) -> bool {
         self.stores.iter().any(|s| s.owned)
+    }
+
+    pub fn bank(&self) -> Option<&StoreFact> {
+        self.stores.iter().find(|s| s.owned || s.kind.is_pile())
     }
 
     /// The energy its storage holds, the terminal's being the shipments';
@@ -1069,6 +1077,29 @@ pub fn of_world(
             )
         })
         .collect();
+
+    for g in &mut grounds {
+        let plan = (declarations.colonies.iter()).find(|p| p.room == g.room);
+        if let Some(pos) = plan.and_then(|p| p.pile) {
+            let (energy, rest): (Vec<PileFact>, Vec<PileFact>) =
+                (g.piles.drain(..)).partition(|p| p.pos == pos && p.resource.is_energy());
+            g.piles = rest;
+            // A draw picks up the pile by its id; a drop needs none.
+            let id = energy
+                .first()
+                .map_or_else(|| format!("pile-{}", g.room), |p| p.id.clone());
+            g.stores.push(StoreFact {
+                id,
+                pos,
+                kind: StoreKind::Pile,
+                energy: energy.iter().map(|p| p.amount).sum(),
+                free: engine::STORAGE_CAPACITY,
+                fill: 0.0,
+                source_dug: 0,
+                owned: false,
+            });
+        }
+    }
 
     for outpost in ours.worked.iter().filter(|o| !is_colony(o.room)) {
         grounds.push(remote_of(outpost));

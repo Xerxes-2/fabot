@@ -89,6 +89,14 @@ fn act(intent: &Intent) -> (String, i32) {
                 CreepAct::Pickup(id) => on("pickup", id, |t| {
                     call(&creep, "pickup", std::slice::from_ref(t))
                 }),
+                CreepAct::Drop(resource) => match call(
+                    &creep,
+                    "drop",
+                    &[JsValue::from_str(&vocabulary::resource_name(resource))],
+                ) {
+                    Ok(code) => (verb("drop"), code),
+                    Err(()) => (verb("threw"), THREW),
+                },
                 CreepAct::Build(id) => on("build", id, |t| {
                     call(&creep, "build", std::slice::from_ref(t))
                 }),

@@ -3,10 +3,12 @@ pub mod outposts;
 
 use super::intents::Intent;
 use super::state::State;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use super::atlas::Atlas;
 use super::engine;
 use super::fight::shape::{Cast, Engagement};
+use super::layout::Standing;
 use super::tick::{ColonyPlan, Context, Declarations, Derived, Outpost, Stage};
 use super::tiles;
 use super::vocabulary::{BodyPart, Boost, boost};
@@ -88,6 +90,7 @@ pub fn plan(
     declarations: &Declarations,
     intel: &Intel,
     (engagements, casts, due): (&[Engagement], &[Cast], &BTreeSet<RoomName>),
+    layout: &BTreeMap<RoomName, Standing>,
 ) -> (Vec<ColonyPlan>, Vec<Outpost>) {
     let rival = |name: &str| name != world.me && !declarations.allies.contains(name);
     let rivals: Vec<(RoomName, i32)> = (intel.iter())
@@ -117,6 +120,14 @@ pub fn plan(
             );
             let (rampart_hits, outheals) =
                 wall(&world.rules, threat.unwrap_or(level), level, threatened);
+            // Banked once its own dig is carried: before a container stands,
+            // the workers dig and spend it where it falls.
+            let carried = (room.sources.iter())
+                .any(|s| matches!(Atlas::post_of(room, &s.pos), Some((_, Some(_)))));
+            let stored = (room.structures.iter()).any(|s| s.kind.is_storage() && s.owner.is_ours());
+            let pile = (carried && !stored)
+                .then(|| layout.get(&room.name)?.plan.as_ref()?.pile())
+                .flatten();
             Some(ColonyPlan {
                 room: room.name,
                 stage: Stage::Exploit,
@@ -125,11 +136,12 @@ pub fn plan(
                 rampart_hits,
                 ring: near && outheals,
                 owes: asked > 0 || due.contains(&room.name),
+                pile,
             })
         })
         .collect();
     let preyed = intel::preyed(intel, declarations, world.time);
     let busy = outposts::busy(&plans, declarations, (engagements, &preyed, derived));
-    let candidates = outposts::survey(world, derived, declarations, intel);
+    let candidates = outposts::survey(world, derived, (declarations, &plans), intel);
     (plans, outposts::chosen(world, candidates, &busy))
 }

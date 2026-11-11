@@ -135,7 +135,7 @@ cold tick never spends more than ❓ 60% of the limit.
   engagements, one Strategy.
 - **A colony** is a resource: a controller, its spawns, its storage, its
   terminal. It owns no decision. "Which colony serves this" is the nearest by
-  walk with a storage, cut off by room-graph hops (§3) for CPU.
+  walk with a bank (§5), cut off by room-graph hops (§3) for CPU.
 - **A room** is a fact in `World` and a row in `intel`; its role (home,
   outpost, errand, avoided, targeted) is data Strategy writes, never a
   constant in source.
@@ -157,7 +157,7 @@ cold tick never spends more than ❓ 60% of the limit.
 | `Exchange` | who wins: pure fight arithmetic | bodies, terrain | — | port from `Facts.fs:2883–4056, 1038–1582`, `Fighter.fs`, `Arrival.fs`; narrow the input |
 | `Fight` | tracker, engagements (one kind per file), casting | World, Atlas, Exchange, declarations (the operator's tactic rules, §6.3), `State.Fight`, `intel.rooms` (a patrol's staleness) | fight intents, casts, declarations, `State.Fight` | **new** (§6) |
 | `Tactics` | what one fight body does this tick (§6.4): strikes, steps, the Hunt score, heals, and which tactic a kind picks (§6.3); it imports no Fight | Atlas, Move, the `Sight` and plan Fight hands down | creep intents, wishes | **new**, split from Fight |
-| `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Derived, Exchange, `State.Intel`, `Season`, the open engagements' rooms, pending casts and `fight.due` (a colony's reserve and `owes`) | declarations (a `ColonyPlan` per colony, under the operator's rows), opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
+| `Strategy` | intel; declarations (homes, outposts, errands, avoided rooms, allies); which operations to open; force allocation across engagements | World, Derived, Exchange, `State.Intel`, `Season`, Layout's standing plans (a pile's tile), the open engagements' rooms, pending casts and `fight.due` (a colony's reserve and `owes`) | declarations (a `ColonyPlan` per colony, under the operator's rows), opens/closes engagements, `State.Intel` | **new** (§7); v1 `Operations.fs` bidding informs it |
 | `Season` | this season's rules: what scores, its structures, its NPCs, its map quirks | World | declarations to Strategy, season intents | **new**, disposable (§8) |
 | `Move` | per-room movement arbitration, run by `Tick` over every module's wishes, and the step functions (chase, kite, flee, formation) | Intents, Atlas | move intents | port `Resolver.fs`, drop fight precedence |
 | `Executor` | API calls | Intents | Game | port |
@@ -199,7 +199,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `fight.groups` | id → Group (§6.1) | Fight | Memory | hostile identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | never cast twice |
 | `fight.due` | the colonies a siege member's successor falls due at within a body's spawn time | Fight | Memory | Strategy's `owes` (§5) |
-| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims, the operator's tactic rules; a `ColonyPlan` per colony (stage, build target, reserve, rampart hits and ring, whether it owes a fight cast) and `flows` (the lab colony's compound stocks), where abandon and labs live, so a colony's lifecycle and what moves between rooms are one plan Economy and Layout read rather than per-purpose fields | Strategy | Memory (the operator's); Strategy's plans rebuilt each tick | what the world is for us, as data |
+| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims, the operator's tactic rules; a `ColonyPlan` per colony (stage, build target, reserve, rampart hits and ring, whether it owes a fight cast, its pile) and `flows` (the lab colony's compound stocks), where abandon and labs live, so a colony's lifecycle and what moves between rooms are one plan Economy and Layout read rather than per-purpose fields | Strategy | Memory (the operator's); Strategy's plans rebuilt each tick | what the world is for us, as data |
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
 | `recorder` | the last ticks' read pass (`app/read.js`), Memory and intel rows, deflated; a tick over a segment spans several, so the ring keeps fewer | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
@@ -245,10 +245,17 @@ first: carriers bring it only while the upgraders drink more than the links
 send, and while they do only upgraders draw the controller's buffer, or a
 worker's draw is carried back from the stock. A harvester drains the container
 under it into its link while the link has room. A remote is served by the
-nearest colony with a storage; a stood-down outpost keeps its slots and its
-bodies wait at home. While its stock
-stands past the reserve, a colony's upgraders are cast before its outposts'
-haul: the haul only adds to the stock they draw down, so a spawn too busy for
+nearest colony with a bank: its storage, or before one stands the **pile**
+(`ColonyPlan.pile`), energy dropped on the centre of the hub Layout plans
+round the storage's tile. It is Hivemind's storage location: a paved tile
+no structure takes, so the pile blocks no site and the storage takes it
+over. It stands from when a home source's container does; before it the
+workers dig and spend where the energy falls. The pile is a store like the
+storage, but keeps no reserve: one on the ground pays its decay every tick,
+at RCL3's quiet 10k half a source's dig. A stood-down outpost keeps its
+slots and its bodies wait at home. While its stock stands past the reserve
+(a pile: while its draw outruns its decay), a colony's upgraders are cast
+before its outposts' haul: the haul only adds to the stock they draw down, so a spawn too busy for
 both would bank the outposts' income. The outposts' carriers
 take at most half the spawns' time, or a far ring of outposts casts nothing
 but haulers; the home's own carriers queue ahead of a fight's casts, since
@@ -259,8 +266,13 @@ a spend body already spawning holds the spawn its whole spawn time when the ask
 comes (v1's hold while a defender is owed).
 
 The spend follows the **surplus**: dig less the fixed bodies' upkeep, plus
-the stock past the reserve over a creep life. It is negative below the
-reserve, so spending below it cannot be written, and spending it draws the
+the stock past the reserve over a creep life. Before a storage, an outpost's
+dig counts as far as the carriers that bring it home stand: with no reserve
+to draw down, spend sized to the rest drinks the bank that would cast them. The pile is drawn down over
+√(2·D·u·life) ticks instead and its decay counts as upkeep (D the engine's
+1000, u a worker's upkeep an energy it spends): over h ticks it loses h/2D
+of itself to decay, and the bodies cast to spend it outlive it by life − h.
+It is negative below the reserve, so spending below it cannot be written, and spending it draws the
 stock to the reserve and no further. Sites and repairs take half the income
 (all of it before a colony has upgraders, all past a capped controller's
 take); the stock past the reserve upgrades.
@@ -661,7 +673,7 @@ source.
 Each tick, once `Derived` is built and before any module runs, Strategy writes a `ColonyPlan` for every room we
 own (today: `Exploit` built to its controller's level) and the outposts
 `strategy::outposts::chosen` picks off intel (kept fresh by the threat
-radius's scout) and Atlas's crossings for each colony with a storage below
+radius's scout) and Atlas's crossings for each colony from RCL2 below
 RCL8 (an RCL8 colony's remotes raised its task churn tenfold and cost its
 sweeps a third of their catches, #811): the operator's rows first, then the rooms that stand
 (intel saw a container at every source), then the most net energy a spawn
@@ -670,8 +682,7 @@ bodies twice, an ally's never) while each home's spawns' half and the CPU's
 half (0.2 an intent, a body acting once a tick) carry them. A home adds one
 room that does not stand at a time, so its spawns take on one room's bodies
 at once, and the ranking puts the rooms that stand first, so a new reading
-of intel never drops one. A storage-less colony declares none: its haul has
-nowhere to bank (served from its feed, half the remote dig decayed). While an
+of intel never drops one. While an
 operation is open (a fight cast owed, a declared claim not yet spawned, a
 declared siege, an open siege or sweep, a boost the colony fills) a colony adds no
 room that does not stand: an operator's declaration wins over an

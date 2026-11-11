@@ -169,11 +169,14 @@ fn sponsors(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
         .collect()
 }
 
-/// The colony that serves each ground: its own colony, else the nearest whose
-/// storage banks the haul (`ARCHITECTURE.md` §5).
+fn banks(derived: &Derived, ci: usize) -> bool {
+    !derived.grounds[ci].abandoned && derived.grounds[ci].bank().is_some()
+}
+
+/// The colony that serves each ground: its own colony, else the nearest that
+/// banks the haul (`ARCHITECTURE.md` §5).
 pub fn owners(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
     let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
-    let banks = |ci: usize| !derived.grounds[ci].abandoned && derived.grounds[ci].has_storage();
     let mut out = Vec::new();
     for (gi, ground) in derived.grounds.iter().enumerate() {
         if gi < derived.colonies.len() {
@@ -183,7 +186,13 @@ pub fn owners(atlas: &mut Atlas, derived: &Derived) -> Vec<Option<usize>> {
         let at = (ground.controller.as_ref().map(|c| c.pos))
             .or_else(|| ground.sources.first().map(|s| s.pos));
         out.push(at.and_then(|at| {
-            tick::nearest(atlas, &|room| derived.routes.get(&room), &homes, banks, &at)
+            tick::nearest(
+                atlas,
+                &|room| derived.routes.get(&room),
+                &homes,
+                |ci| banks(derived, ci),
+                &at,
+            )
         }));
     }
     out
@@ -209,6 +218,15 @@ fn upkeep(body: &[BodyPart]) -> f64 {
     f64::from(engine::body_cost(body)) / f64::from(life)
 }
 
+/// Over `h` ticks a pile loses `h / 2D` of itself to decay and the bodies cast
+/// to spend it idle a life less `h` at `per` an energy: least at √(2·D·per·life).
+fn drain(per: f64) -> f64 {
+    let life = f64::from(engine::CREEP_LIFETIME);
+    (2.0 * f64::from(engine::ENERGY_DECAY) * per * life)
+        .sqrt()
+        .min(life)
+}
+
 pub fn inside_deadline(c: &crate::core::world::Controller) -> bool {
     c.level > 0 && c.ticks_to_downgrade < engine::safe_mode_downgrade_line(c.level)
 }
@@ -218,7 +236,7 @@ pub fn inside_deadline(c: &crate::core::world::Controller) -> bool {
 fn worker_pace(atlas: &Atlas, derived: &Derived, ci: usize, body: &[BodyPart], power: i32) -> f64 {
     let (colony, ground) = (&derived.colonies[ci], &derived.grounds[ci]);
     let work = part_count_in(body, BodyPart::Work).max(1);
-    let fetches: Vec<(Pos, i32)> = match (&ground.buffer, ground.stores.iter().find(|s| s.owned)) {
+    let fetches: Vec<(Pos, i32)> = match (&ground.buffer, ground.bank()) {
         (Some(b), _) => vec![(b.pos, 1)],
         (None, Some(s)) => vec![(s.pos, 1)],
         (None, None) => (ground.sources.iter())
@@ -287,8 +305,9 @@ impl Plan<'_> {
         let capacity = colony.bank_capacity;
         let life = f64::from(engine::CREEP_LIFETIME);
         let storage = ground.stores.iter().find(|s| s.owned);
+        let bank = ground.bank();
         let home = colony.spawns[0].pos;
-        let drop = storage.map_or(home, |s| s.pos);
+        let drop = bank.map_or(home, |s| s.pos);
 
         if ground.abandoned {
             if !ground.shipment.is_empty() {
@@ -312,6 +331,7 @@ impl Plan<'_> {
         let mut fixed = 0.0;
         let worker = bodies::sized(Pattern::Worker, engine::MAX_BODY_PARTS as i32, capacity);
         let mut dug = 0.0;
+        let mut far_dug = 0.0;
         let mut owed = 0;
         let mut repairs = false;
         let mut crews = 0;
@@ -368,6 +388,9 @@ impl Plan<'_> {
                 let post = s.post.unwrap_or(s.pos);
                 fixed += upkeep(&body);
                 dug += f64::from(rate);
+                if !own {
+                    far_dug += f64::from(rate);
+                }
                 let dig_id = format!("harvester:{}:0", s.id);
                 if own {
                     digs.push(dig_id.clone());
@@ -402,8 +425,8 @@ impl Plan<'_> {
                     .sum();
                 let fills = engine::CONTAINER_CAPACITY / engine::HELD_OUTPUT_PER_TICK;
                 let rate = rate + (waiting / fills).min(rate);
-                let to = storage
-                    .map_or_else(|| ground.buffer.as_ref().map_or(home, |b| b.pos), |s| s.pos);
+                let to =
+                    bank.map_or_else(|| ground.buffer.as_ref().map_or(home, |b| b.pos), |s| s.pos);
                 let Some(leg) = leg(atlas, derived, &post, &to) else {
                     continue;
                 };
@@ -482,9 +505,45 @@ impl Plan<'_> {
             .map(|s| s.energy)
             .sum();
         let fills = f64::from(engine::CONTAINER_CAPACITY / engine::HELD_OUTPUT_PER_TICK);
-        let stocked = (ground.stock()).map_or(f64::from(held) / fills, |stock| {
-            (f64::from(stock) - kept) / life
-        });
+        let banked = match (ground.stock(), bank) {
+            (Some(stock), _) => (f64::from(stock) - kept) / life,
+            (None, Some(pile)) => {
+                let pace = |w: &Vec<BodyPart>| {
+                    let work = f64::from(part_count_in(w, BodyPart::Work));
+                    upkeep(w)
+                        / work
+                        / worker_pace(atlas, derived, ci, w, engine::UPGRADE_DRAIN_PER_WORK)
+                };
+                let piled = f64::from(pile.energy);
+                let decay = (piled / f64::from(engine::ENERGY_DECAY)).ceil();
+                piled / drain(worker.as_ref().map_or(1.0, pace)) - decay
+            }
+            (None, None) => 0.0,
+        };
+        let stocked = banked
+            + if storage.is_none() {
+                f64::from(held) / fills
+            } else {
+                0.0
+            };
+        // With no reserve to draw down, spend sized to dig no carrier brings
+        // home drinks the bank that would cast those carriers.
+        let carry = |flows: &[(f64, Leg)]| {
+            (haulers(flows, capacity).iter())
+                .map(|b| part_count_in(b, BodyPart::Carry))
+                .sum::<i32>()
+        };
+        let names: Vec<&str> = colony.spawns.iter().map(|s| s.name.as_str()).collect();
+        let standing: i32 = (derived.bodies.iter().chain(derived.ovens.iter()))
+            .filter(|b| b.pattern.is_hauler())
+            .filter(|b| bodies::spawn_of_name(&b.name).is_some_and(|n| names.contains(&n)))
+            .map(|b| b.carry)
+            .sum();
+        let hauled = f64::from(standing - carry(&local)) / f64::from(carry(&remote).max(1));
+        let dug = match storage {
+            Some(_) => dug,
+            None => dug - far_dug * (1.0 - hauled.clamp(0.0, 1.0)),
+        };
         // Negative below the reserve, so no spend is written below it.
         let surplus = (dug - fixed + stocked).max(0.0);
         // Sites and repairs take half the income, so a backlog never stops
@@ -562,7 +621,7 @@ impl Plan<'_> {
                 );
                 let slot = self.out.last_mut().expect("pushed");
                 slot.spends = true;
-                if storage.is_some() && stocked > 0.0 {
+                if banked > 0.0 {
                     slot.rank = STOCKED;
                 }
             }
@@ -604,8 +663,8 @@ impl Plan<'_> {
         }
 
         // The dig, the ring's upkeep, the controller's drink and the ore, each
-        // over its own walk to or from the storage.
-        if let Some(s) = storage {
+        // over its own walk to or from the bank.
+        if let Some(s) = bank {
             let ring = leg(atlas, derived, &s.pos, &home);
             let feed = ground.feed.as_ref().map_or(home, |f| f.pos);
             let fed = leg(atlas, derived, &s.pos, &feed);
@@ -721,10 +780,15 @@ pub fn plan(atlas: &mut Atlas, derived: &Derived, owners: &[Option<usize>]) -> V
     // A stood-down outpost keeps its dig and reserver slots, never cast, so
     // its bodies hold them and come back when it reopens.
     let homes: Vec<Pos> = derived.colonies.iter().map(|c| c.spawns[0].pos).collect();
-    let banks = |ci: usize| !derived.grounds[ci].abandoned && derived.grounds[ci].has_storage();
     for o in &derived.closed {
         let at = o.controller.pos;
-        let Some(ci) = tick::nearest(atlas, &|r| derived.routes.get(&r), &homes, banks, &at) else {
+        let Some(ci) = tick::nearest(
+            atlas,
+            &|r| derived.routes.get(&r),
+            &homes,
+            |ci| banks(derived, ci),
+            &at,
+        ) else {
             continue;
         };
         let jobs = (o.sources.iter())

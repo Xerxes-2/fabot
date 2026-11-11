@@ -118,6 +118,7 @@ fn run_tick() -> Result<(), String> {
         &declarations,
         rows,
         (&state.engagements, &state.casts, &state.due),
+        &state.layout,
     );
     let declarations = declarations.planned(plans);
     derived.worked = tick::worked(&world, &sightings, &declarations, &derived);

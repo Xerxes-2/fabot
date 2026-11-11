@@ -146,7 +146,7 @@ fn place(
 fn sink_for<'t>(
     atlas: &mut Atlas,
     trees: &dyn Fn(RoomName) -> Option<&'t Tree>,
-    homes: &[Pos],
+    (homes, bank): (&[Pos], &dyn Fn(RoomName) -> Option<Pos>),
     rooms: &BTreeMap<RoomName, &Room>,
     room: &Room,
 ) -> Option<Pos> {
@@ -156,17 +156,16 @@ fn sink_for<'t>(
         .map(|c| c.pos)
         .or_else(|| room.sources.first().map(|s| s.pos))?;
 
-    let storage = |i: usize| {
+    let sink = |i: usize| {
         let home = rooms.get(&homes[i].room)?;
-        let s = home
-            .structures
-            .iter()
-            .find(|s| s.kind.is_storage() && s.owner.is_ours())?;
-        Some(s.pos)
+        (home.structures.iter())
+            .find(|s| s.kind.is_storage() && s.owner.is_ours())
+            .map(|s| s.pos)
+            .or_else(|| bank(home.name))
     };
 
-    let i = tick::nearest(atlas, trees, homes, |i| storage(i).is_some(), &from)?;
-    storage(i)
+    let i = tick::nearest(atlas, trees, homes, |i| sink(i).is_some(), &from)?;
+    sink(i)
 }
 
 /// v1's seat: the shortest walk out toward home. The owner's rule: the walk
@@ -175,7 +174,7 @@ pub fn sites(
     atlas: &mut Atlas,
     world: &World,
     derived: &tick::Derived,
-    planned: &[Intent],
+    (planned, piles): (&[Intent], &dyn Fn(RoomName) -> Option<Pos>),
     budget: i32,
 ) -> Vec<Intent> {
     let (colonies, outposts) = (&derived.colonies, &derived.worked);
@@ -220,7 +219,8 @@ pub fn sites(
         opened(&mut taken, &mut pending, planned, room);
 
         if budget > 0 && pending[&room.name] < SITES_IN_FLIGHT {
-            let sink = sink_for(atlas, &|room| trees.get(&room), &homes, &rooms, room);
+            let trees = |room| trees.get(&room);
+            let sink = sink_for(atlas, &trees, (&homes, piles), &rooms, room);
 
             if let Some(sink) = sink {
                 let home = tick::target_at(&sink, 1);

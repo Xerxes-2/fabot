@@ -11,6 +11,7 @@ pub enum CreepAct {
     Transfer(String, Resource),
     Withdraw(String, Resource),
     Pickup(String),
+    Drop(Resource),
     Build(String),
     Repair(String),
     Upgrade(String),

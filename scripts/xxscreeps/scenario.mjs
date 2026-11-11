@@ -264,6 +264,14 @@ const measures = {
     const slope = worked.reduce((n, s) => n + (s.t - mt) * (s.rooms[a.room].net - mn), 0) / worked.reduce((n, s) => n + (s.t - mt) ** 2, 0);
     return Number(slope.toFixed(1));
   },
+  // Percent of the dig that decays, the least-squares slopes of both from the first outpost dig.
+  decayShare: (samples, a) => {
+    const seen = within(samples, a).filter((s) => Object.values(s.rooms).slice(1).some((r) => r.dug > 0));
+    if (seen.length < 2) return Infinity;
+    const mt = mean(seen.map((s) => s.t));
+    const slope = (y, my = mean(seen.map(y))) => seen.reduce((n, s) => n + (s.t - mt) * (y(s) - my), 0);
+    return Math.round((100 * slope((s) => s.ledger.decayed)) / slope((s) => s.ledger.dug));
+  },
   // The most outposts dug at once with no container yet, over the samples.
   rising: (samples, a) => Math.max(0, ...within(samples, a).map((s) => Object.entries(s.rooms).slice(1).filter(([, r]) => r.dug > 0 && r.containers === 0).length)),
   // The most ticks `room` went without one of our bodies in it.

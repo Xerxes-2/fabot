@@ -375,6 +375,7 @@ pub fn exploited(owned: &BTreeSet<RoomName>) -> Vec<ColonyPlan> {
             rampart_hits: 0,
             ring: false,
             owes: false,
+            pile: None,
         })
         .collect()
 }

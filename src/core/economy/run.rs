@@ -155,6 +155,10 @@ fn holds(derived: &Derived, id: &str, r: &Resource) -> i32 {
         .sum()
 }
 
+fn piled(derived: &Derived, id: &str) -> bool {
+    (derived.grounds.iter()).any(|g| g.stores.iter().any(|s| s.kind.is_pile() && s.id == id))
+}
+
 fn act_of(derived: &Derived, task: &Task) -> Option<CreepAct> {
     let held = |id: &str| {
         derived.grounds.iter().any(|g| {
@@ -166,6 +170,8 @@ fn act_of(derived: &Derived, task: &Task) -> Option<CreepAct> {
 
     Some(match task {
         Task::Harvest(id) => CreepAct::Harvest(id.clone()),
+        Task::Withdraw(id, _) if piled(derived, id) => CreepAct::Pickup(id.clone()),
+        Task::Refill(id, r) if piled(derived, id) => CreepAct::Drop(r.clone()),
         Task::Withdraw(id, r) => CreepAct::Withdraw(id.clone(), r.clone()),
         Task::Pickup(id, _) => CreepAct::Pickup(id.clone()),
         Task::Refill(id, r) => CreepAct::Transfer(id.clone(), r.clone()),
@@ -377,6 +383,8 @@ fn target_of(
             Some(dig_seats(atlas, derived, id, &at)).filter(|s| !s.is_empty())
         }
         (_, Task::Reserve(_) | Task::Claim(_)) => reserve_seats(atlas, derived, &at),
+        // A drop lands where the body stands.
+        (_, Task::Refill(id, _)) if piled(derived, id) => Some(vec![at]),
         // A worker upgrades off the upgraders' seats.
         (Job::Work(_), Task::Upgrade(_)) => {
             let buffer = (derived.grounds.iter())

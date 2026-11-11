@@ -31,6 +31,9 @@ pub fn extension_energy(level: i32) -> i32 {
 /// CONTROLLER_RESERVE. The reservation decays by one a tick, so N parts gain N - 1.
 pub const RESERVE_PER_CLAIM: i32 = 1;
 pub const CONTAINER_CAPACITY: i32 = 2000;
+pub const STORAGE_CAPACITY: i32 = 1_000_000;
+/// ENERGY_DECAY: a dropped pile loses ceil(amount / this) a tick.
+pub const ENERGY_DECAY: i32 = 1000;
 pub const TERMINAL_MIN_SEND: i32 = 100;
 
 /// The energy a terminal spends sending `amount` across `distance` rooms.

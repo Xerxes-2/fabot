@@ -141,7 +141,7 @@ pub fn chosen(
 pub fn survey(
     world: &World,
     derived: &Derived,
-    declarations: &Declarations,
+    (declarations, plans): (&Declarations, &[ColonyPlan]),
     intel: &Intel,
 ) -> Vec<Candidate> {
     let mut by_room: BTreeMap<RoomName, Candidate> = BTreeMap::new();
@@ -160,8 +160,9 @@ pub fn survey(
         };
         // `ARCHITECTURE.md` §7.2.
         let level = room.controller.as_ref().map_or(0, |c| c.level);
-        let picks = level < engine::CONTROLLER_MAX_LEVEL
-            && (room.structures.iter()).any(|s| s.kind.is_storage() && s.owner.is_ours());
+        let banks = (room.structures.iter()).any(|s| s.kind.is_storage() && s.owner.is_ours())
+            || plans.iter().any(|p| p.room == *home && p.pile.is_some());
+        let picks = banks && (2..engine::CONTROLLER_MAX_LEVEL).contains(&level);
         let walk = |hops: i32, outpost: &Outpost| {
             let to = |s: &crate::core::tick::Declared| tiles::seam_range(&spawn.pos, &s.pos);
             let ranges: Vec<i32> = outpost.sources.iter().filter_map(to).collect();

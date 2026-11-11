@@ -486,6 +486,7 @@ pub fn read_declarations() -> Declarations {
                 rampart_hits: 0,
                 ring: false,
                 owes: false,
+                pile: None,
             })
             .collect(),
         avoid: rooms(&declared, "avoid"),
