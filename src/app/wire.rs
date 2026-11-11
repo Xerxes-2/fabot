@@ -483,6 +483,8 @@ pub fn read_declarations() -> Declarations {
                 stage: Stage::Abandon,
                 target: 0,
                 reserve: 0,
+                rampart_hits: 0,
+                ring: false,
                 owes: false,
             })
             .collect(),

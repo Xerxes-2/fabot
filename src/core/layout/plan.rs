@@ -10,6 +10,7 @@ use crate::core::grid::{self, Footprint, UNREACHED, Weight};
 use crate::core::tiles::{self, Tile};
 use crate::core::world::{Kind, Rules};
 
+use super::cut;
 use super::ground::{self, Ground, SPAWN_OFFSETS};
 use super::shape::{Item, Plan};
 
@@ -537,6 +538,11 @@ fn draw_with(
         spawns,
         slot_list.iter().map(|(_, t)| *t).collect(),
     );
+    let keep: Vec<Tile> = (picked.iter())
+        .filter(|(kind, _)| KEEP.contains(kind) || kind.is_lab())
+        .map(|(_, t)| *t)
+        .collect();
+    let ring = cut::ring(weights, &keep);
 
     let mut road_level = [NONE; tiles::COUNT];
     let mut ranks: BTreeMap<Kind, i32> = BTreeMap::new();
@@ -622,6 +628,7 @@ fn draw_with(
 
     let roads = board.roads();
     let ramparts = board.ramparts(&posted, rock_level);
+    let ring = board.ring(&ring);
 
     let mut all: Vec<Item> = board.items.clone();
     all.extend(board.extra.iter().cloned());
@@ -644,6 +651,7 @@ fn draw_with(
             room: ground.room,
             anchor,
             items,
+            ring,
             unfit,
         },
         linked,
@@ -896,6 +904,21 @@ impl Board<'_> {
                 level: rampart_level(self.rules).max(*level),
             })
             .collect()
+    }
+
+    fn ring(&self, cut: &[Tile]) -> Vec<Item> {
+        let mut items: Vec<Item> = (cut.iter())
+            .map(|t| Item {
+                kind: Kind::Rampart,
+                tile: *t,
+                level: (self.items.iter().chain(&self.extra))
+                    .filter(|i| i.tile == *t && !i.kind.walkable())
+                    .map(|i| i.level)
+                    .fold(rampart_level(self.rules), i32::max),
+            })
+            .collect();
+        items.sort_by_key(|i| i.level);
+        items
     }
 
     fn walkable(&self, t: Tile) -> bool {

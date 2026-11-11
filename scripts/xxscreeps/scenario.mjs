@@ -351,7 +351,11 @@ const measures = {
   // Links standing beside a source's container.
   postedLinksAtEnd: (samples, a) => at(samples, a.to ?? Infinity).postedLinks,
   linksAtEnd: (samples, a) => at(samples, a.to ?? Infinity).built.link ?? 0,
-  handFed: (samples, a) => (at(samples, a.to ?? Infinity).ledger.handFed ?? 0) - (at(samples, a.from ?? 0).ledger.handFed ?? 0),
+  // A share: the amount alone tracks how much is upgraded.
+  handFedShare: (samples, a) => {
+    const [to, from] = [at(samples, a.to ?? Infinity).ledger, at(samples, a.from ?? 0).ledger];
+    return (100 * ((to.handFed ?? 0) - (from.handFed ?? 0))) / Math.max(1, to.upgrade - from.upgrade);
+  },
   // Energy lost to link transfers: none means no link ever sent.
   linked: (samples, a) => at(samples, a.to ?? Infinity).ledger.linked - at(samples, a.from ?? 0).ledger.linked,
   // The least any declared outpost netted after its bodies (`rooms`, the

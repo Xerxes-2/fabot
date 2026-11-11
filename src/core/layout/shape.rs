@@ -19,6 +19,8 @@ pub struct Plan {
     pub room: RoomName,
     pub anchor: Tile,
     pub items: Vec<Item>,
+    /// Built only while Strategy declares it (`ColonyPlan.ring`).
+    pub ring: Vec<Item>,
     pub unfit: Vec<Cow<'static, str>>,
 }
 

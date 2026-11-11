@@ -282,12 +282,17 @@ pub fn place(
 
     let mut planned = [0u8; tiles::COUNT];
     let mut solid = [0u8; tiles::COUNT];
+    // A rampart over a planned structure waits for it to stand.
+    let mut under = [0u8; tiles::COUNT];
 
     for i in &plan.items {
         planned[i.tile] = 1;
 
         if !i.kind.walkable() {
             solid[i.tile] = 1;
+        }
+        if !i.kind.is_road() && !i.kind.is_rampart() {
+            under[i.tile] = 1;
         }
     }
 
@@ -359,7 +364,7 @@ pub fn place(
                 if (placed.len() as i32) < room
                     && census.site[t] == 0
                     && (if item.kind.is_rampart() {
-                        census.solid[t] > 0 && census.rampart[t] == 0
+                        (census.solid[t] > 0 || under[t] == 0) && census.rampart[t] == 0
                     } else {
                         census.solid[t] == 0
                     })

@@ -119,6 +119,8 @@ pub struct ColonyPlan {
     pub target: i32,
     /// The stock its economy keeps before it spends a surplus.
     pub reserve: i32,
+    pub rampart_hits: i32,
+    pub ring: bool,
     pub owes: bool,
 }
 

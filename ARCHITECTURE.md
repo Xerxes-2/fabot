@@ -199,7 +199,7 @@ recorder's ring; the rest are assigned here as their stores land.
 | `fight.groups` | id → Group (§6.1) | Fight | Memory | hostile identity across ticks |
 | `fight.casts` | pending casts by engagement | Fight | Memory | never cast twice |
 | `fight.due` | the colonies a siege member's successor falls due at within a body's spawn time | Fight | Memory | Strategy's `owes` (§5) |
-| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims, the operator's tactic rules; a `ColonyPlan` per colony (stage, build target, reserve, whether it owes a fight cast) and `flows` (the lab colony's compound stocks), where abandon and labs live, so a colony's lifecycle and what moves between rooms are one plan Economy and Layout read rather than per-purpose fields | Strategy | Memory (the operator's); Strategy's plans rebuilt each tick | what the world is for us, as data |
+| `declarations` | homes, outposts, errands, avoided rooms, allies, enemies, claims, the operator's tactic rules; a `ColonyPlan` per colony (stage, build target, reserve, rampart hits and ring, whether it owes a fight cast) and `flows` (the lab colony's compound stocks), where abandon and labs live, so a colony's lifecycle and what moves between rooms are one plan Economy and Layout read rather than per-purpose fields | Strategy | Memory (the operator's); Strategy's plans rebuilt each tick | what the world is for us, as data |
 | `switches` | name → bool: `false` skips a module, `true` opts in (`recorder`) | Main | Memory | turn a module off live |
 | `recorder` | the last ticks' read pass (`app/read.js`), Memory and intel rows, deflated; a tick over a segment spans several, so the ring keeps fewer | Main | segments 10–14 | the capture (§9.1) |
 | `economy.plan` | per colony: layout memo, census signature | Economy | segment | read on key change |
@@ -284,6 +284,26 @@ cast is paid before any surplus, as the old bank's order had it. Owner, 2026-11-
 quiet young colony a lifetime of upgrading (main kept its RCL4 stock under
 it anyway), and the season's fights come from neighbours, which intel sees.
 Open-source bots keep 75k–150k at RCL7–8.
+
+**Ramparts are kept at hits Strategy declares** beside the reserve
+(`strategy::wall`, `ColonyPlan.rampart_hits`): v1's floor, the ticks held
+times the damage a tick. The damage is the largest dismantler the nearest
+rival's level fields, boosted once it has labs, capped at our level (a wall
+above it outbids the economy that holds it, and safe mode answers); the ticks
+are as long as our towers take to kill it through its quad's heals from the
+ring's far end, at most the time a colony casts its answer twice. A quiet
+colony keeps a third, as its reserve does. Each spawn, tower, storage,
+terminal and source container has its own rampart; while a rival's room is
+near and its quad out-heals our towers (`ColonyPlan.ring`) Layout also
+builds a **ring** that seals every tile in ranged reach of them and the labs
+from the exits, a minimum vertex cut (`layout/cut.rs`, Hivemind's planner's
+idea). The cut is drawn with the plan, a one-off of its key kept in the
+standing plan, never a store of its own.
+❓ The gate is a rule on our towers' damage, not a price of the ring's upkeep
+against the losses it saves; no scenario yet seats a rival whose quad
+out-heals our towers, so the ring itself is unproven, and towers placed to
+cover it (Hivemind's) wait for that, since moving them shifts every live plan.
+A ring whose rival goes stays standing and repaired, never replaced.
 
 Port with these cuts:
 - No fight tasks (`Guard`, `Defend`, `Assault`, `Flee`), no Safety band. v1's
@@ -1047,7 +1067,7 @@ Status: ✅ landed · ⏳ next · blank not started.
 | `Core/Atlas.fs`, `Grid.fs`, `Geometry.fs` | `core/atlas/` | ✅ tile index `y*50+x` (the terrain buffer's), the flood, footprint on every query, a minimal room graph, the flood table. Known gaps: a route is chosen without the footprint (a Quad can be routed through a one-tile gap); boosted CARRY is priced unboosted. |
 | `Decide/Resolver.fs` | `core/mv/` | ✅ arbitration (two-tier eviction, best chain, displacer's onward last) and `Plan` wishes; re-derived each tick from `Atlas.firstStep` (§1's "path" key is not stored). Fight steps ✅ in `fight/tactics.rs` (kite, close and pursue, retreat), without v1's threat maps; formation stepping comes with `Siege` |
 | `Decide/Pool, Matcher, Planner, Quota, Spawns, Price, Bodies` | `core/economy/` | ✅ rewritten as slots (§5, `economy/slots.rs`, `jobs.rs`, `run.rs`): flows to slots, casts, tasks, act in range, wish toward the target; assignments in `Memory.v2.assignments`. Declared outposts (`declarations.outposts`) are worked while no armed one in the room reaches their work, and while no armed one last seen in a blind room outlives the tick. Known gaps: claims are not yet declared; cross-room travel prices each room between at a room's side |
-| `Decide/Labs, Layout` | `Economy`, `Layout` | Layout ✅ in the tick after `economy`: a standing plan per room, sites in plan order as the level allows, towers on hostiles. Labs ✅: the cluster's reaction plan per tick and the boost a cast asks for (§5, §6.5) |
+| `Decide/Labs, Layout` | `Economy`, `Layout` | Layout ✅ in the tick after `economy`: a standing plan per room with its rampart ring (§5), sites in plan order as the level allows, towers on hostiles. Labs ✅: the cluster's reaction plan per tick and the boost a cast asks for (§5, §6.5) |
 | `Types/Colonies.fs` declarations, `allies` | `declarations` data | not ported as code; the current rooms seed the first `declarations`. ✅ `declarations.allies` (player names): an ally's creeps leave `Hostiles` as the world is read, so nothing answers them |
 | `Decide/Facts.fs:2883–4056, 1038–1582, 2153–2196`, `Fighter.fs`, `Arrival.fs` | `Exchange` | ✅ `core/exchange/`; `npm run exchange` is §10.1's generated set |
 | `Decide/Emitter.fs` strike/heal/glue | `core/tactics` | ✅ the strike (swing, shot, volley where it outdeals the shot) and the heal reflex; glue ported into Hunt (a body beside a mark that may step wishes onto its tile; `Tick` sends that move unarbitrated) |

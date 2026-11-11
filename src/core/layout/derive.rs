@@ -76,7 +76,12 @@ pub fn colonies(
 
         let plan = match colony.stage {
             Stage::Abandon => None,
-            Stage::Exploit => kept.plan.clone(),
+            Stage::Exploit => kept.plan.clone().map(|mut plan| {
+                if colony.ring {
+                    plan.items.append(&mut plan.ring);
+                }
+                plan
+            }),
         };
         next.insert(room.name, kept);
 

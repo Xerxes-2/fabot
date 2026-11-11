@@ -373,19 +373,6 @@ pub fn dug_at(capacity: i32, home: bool, rate: i32, posted: bool, seats: Option<
     }
 }
 
-/// Low while the room grows, so the walls never outbid its upgrading; a room
-/// fallen under the first tower's level keeps that level's.
-pub fn rampart_target(level: i32) -> i32 {
-    match level {
-        l if l <= 3 => 10_000,
-        4 => 50_000,
-        5 => 100_000,
-        6 => 500_000,
-        7 => 1_000_000,
-        _ => 3_000_000,
-    }
-}
-
 /// Ten decay periods: the margin every bot keeps against losing a rampart.
 pub const RAMPART_SAFE: i32 = 10 * engine::RAMPART_DECAY_AMOUNT;
 
@@ -394,11 +381,11 @@ fn swamp(room: &Room, pos: &Pos) -> bool {
 }
 
 /// What keeping `s` standing costs, where it is below the hits we hold it at.
-fn repair_of(room: &Room, level: i32, owned_room: bool, s: &Structure) -> Option<RepairFact> {
+fn repair_of(room: &Room, wall: i32, owned_room: bool, s: &Structure) -> Option<RepairFact> {
     let per = |amount: i32, time: i32| f64::from(amount) / f64::from(time);
     let (hits_max, decay, rebuild) = match s.kind {
         Kind::Rampart if s.owner.is_ours() => (
-            rampart_target(level).min(s.hits_max),
+            wall.min(s.hits_max),
             per(engine::RAMPART_DECAY_AMOUNT, engine::RAMPART_DECAY_TIME),
             0,
         ),
@@ -609,9 +596,8 @@ fn buffer_seats_of(atlas: &Atlas, room: &Room, buffer: Option<&StoreFact>) -> Ve
     }
 }
 
-fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
+fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room, wall: i32) -> Ground {
     let owned_room = room.controller.as_ref().is_some_and(|c| c.owner.is_ours());
-    let level = room.controller.as_ref().map_or(0, |c| c.level);
     let built = Atlas::buffer(room);
     let is_buffer = |id: &str| built.is_some_and(|b| b.id == id);
     let storage = room
@@ -664,7 +650,7 @@ fn ground_of(atlas: &Atlas, capacity: i32, rate: i32, room: &Room) -> Ground {
         .collect();
     let mut stores = stores_of(room, owned_room, &is_buffer, &served_dug);
     let repairs: Vec<RepairFact> = (room.structures.iter())
-        .flat_map(|s| repair_of(room, level, owned_room, s))
+        .flat_map(|s| repair_of(room, wall, owned_room, s))
         .collect();
 
     let store_of = |kind: StoreKind, dug: i32, l: &LinkFact| StoreFact {
@@ -996,14 +982,14 @@ fn remote_of(
             let sources = withheld(c);
             let mut bare = room.clone().into_owned();
             bare.sources = Vec::new();
-            let mut ground = ground_of(atlas, richest, 0, &bare);
+            let mut ground = ground_of(atlas, richest, 0, &bare, 0);
             ground.withheld = sources;
             ground
         }
         _ if richest >= engine::body_cost(bodies::block_of(Pattern::Claimer)) => {
-            ground_of(atlas, richest, engine::HELD_OUTPUT_PER_TICK, &room)
+            ground_of(atlas, richest, engine::HELD_OUTPUT_PER_TICK, &room, 0)
         }
-        _ => ground_of(atlas, richest, engine::NEUTRAL_OUTPUT_PER_TICK, &room),
+        _ => ground_of(atlas, richest, engine::NEUTRAL_OUTPUT_PER_TICK, &room, 0),
     }
 }
 
@@ -1039,10 +1025,11 @@ pub fn of_world(
     let colony_rooms: Vec<&Room> = (ours.colonies.iter())
         .filter_map(|name| world.room(*name))
         .collect();
+    let plan_of = |room: RoomName| (declarations.colonies.iter()).find(|p| p.room == room);
     let colonies: Vec<Colony> = (colony_rooms.iter())
         .filter_map(|room| {
             let controller = room.controller.clone()?;
-            let plan = (declarations.colonies.iter()).find(|p| p.room == room.name);
+            let plan = plan_of(room.name);
             Some(Colony {
                 room: room.name,
                 reserve: plan.map_or(0, |p| p.reserve),
@@ -1078,6 +1065,7 @@ pub fn of_world(
                 room.energy_capacity,
                 engine::HELD_OUTPUT_PER_TICK,
                 room,
+                plan_of(room.name).map_or(0, |p| p.rampart_hits),
             )
         })
         .collect();

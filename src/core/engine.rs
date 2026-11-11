@@ -19,6 +19,15 @@ pub const SPAWN_TICKS_PER_PART: i32 = 3;
 pub const BOOST_ENERGY_PER_PART: i32 = 20;
 pub const BOOST_MINERAL_PER_PART: i32 = 30;
 pub const RESERVATION_CAP: i32 = 5000;
+pub const SPAWN_ENERGY: i32 = 300;
+
+pub fn extension_energy(level: i32) -> i32 {
+    match level {
+        7 => 100,
+        l if l >= 8 => 200,
+        _ => 50,
+    }
+}
 /// CONTROLLER_RESERVE. The reservation decays by one a tick, so N parts gain N - 1.
 pub const RESERVE_PER_CLAIM: i32 = 1;
 pub const CONTAINER_CAPACITY: i32 = 2000;
