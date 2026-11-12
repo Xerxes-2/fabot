@@ -12,8 +12,7 @@ fn hook_panics() {
     std::panic::set_hook(Box::new(|info| {
         let where_ = info
             .location()
-            .map(|at| format!("{}:{}", at.file(), at.line()))
-            .unwrap_or_default();
+            .map_or_default(|at| format!("{}:{}", at.file(), at.line()));
         let message = info
             .payload()
             .downcast_ref::<&str>()

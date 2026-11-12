@@ -55,9 +55,7 @@ fn array_of(v: &JsValue) -> Option<Vec<JsValue>> {
 }
 
 fn list_of<T>(parse: impl Fn(&JsValue) -> Option<T>, v: &JsValue) -> Vec<T> {
-    array_of(v)
-        .map(|items| items.iter().filter_map(parse).collect())
-        .unwrap_or_default()
+    array_of(v).map_or_default(|items| items.iter().filter_map(parse).collect())
 }
 
 fn pos_of(v: &JsValue) -> Option<Pos> {
@@ -468,12 +466,10 @@ pub fn read_declarations() -> Declarations {
             _ => undeclared().reserve_lifetimes,
         },
         outposts: array_of(&field(&declared, "outposts"))
-            .map(|outposts| outposts.iter().filter_map(outpost_of).collect())
-            .unwrap_or_default(),
+            .map_or_default(|outposts| outposts.iter().filter_map(outpost_of).collect()),
         flows: labs_of(&field(&declared, "labs")).unwrap_or_default(),
         claims: array_of(&field(&declared, "claims"))
-            .map(|claims| claims.iter().filter_map(outpost_of).collect())
-            .unwrap_or_default(),
+            .map_or_default(|claims| claims.iter().filter_map(outpost_of).collect()),
         allies: names(&declared, "allies"),
         enemies: names(&declared, "enemies"),
         sieges: rooms(&declared, "sieges"),
@@ -491,8 +487,7 @@ pub fn read_declarations() -> Declarations {
             .collect(),
         avoid: rooms(&declared, "avoid"),
         tactics: array_of(&field(&declared, "tactics"))
-            .map(|rules| rules.iter().filter_map(rule_of).collect())
-            .unwrap_or_default(),
+            .map_or_default(|rules| rules.iter().filter_map(rule_of).collect()),
     }
 }
 
@@ -526,8 +521,7 @@ fn listed<I, T: FromIterator<I> + Default>(
     read: impl Fn(&JsValue) -> Option<I>,
 ) -> T {
     array_of(&field(declared, key))
-        .map(|entries| entries.iter().filter_map(read).collect())
-        .unwrap_or_default()
+        .map_or_default(|entries| entries.iter().filter_map(read).collect())
 }
 
 /// Only the xxscreeps harness's wrapper sets `fabotTrace`: live, nothing is

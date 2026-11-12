@@ -486,8 +486,7 @@ fn draw_with(
     let source_walks = ways(&ground.sources, "source unreached");
     let controller_walk: Vec<Tile> = (ways(ground.controller.as_slice(), "controller unreached"))
         .pop()
-        .map(|(_, path)| path)
-        .unwrap_or_default();
+        .map_or_default(|(_, path)| path);
     let mineral_walks = ways(&ground.minerals, "mineral unreached");
 
     let controller_seat: Option<(Tile, Tile, Vec<Tile>)> =

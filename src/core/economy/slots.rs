@@ -657,8 +657,7 @@ impl Plan<'_> {
             let new =
                 ((upgraded - f64::from(kept * work)) / (f64::from(work) + upkeep(body))).max(0.0);
             let n = (kept + new.floor() as i32).clamp(0, most);
-            for k in 0..n as usize {
-                let seat = ground.buffer_seats[k];
+            for (k, &seat) in ground.buffer_seats.iter().enumerate().take(n as usize) {
                 self.push(
                     ci,
                     colony.room,

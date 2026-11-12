@@ -223,7 +223,7 @@ fn run_tick() -> Result<(), String> {
             .filter(|e| !e.plan.offers.is_empty())
             .map(|e| (e.id, e.plan.offers.clone()))
             .collect(),
-        alerts: metrics.as_ref().map(Metrics::alerts).unwrap_or_default(),
+        alerts: metrics.as_ref().map_or_default(Metrics::alerts),
     };
     wire::write_observe(&observed);
     let standing = std::mem::take(&mut result.state.layout);
