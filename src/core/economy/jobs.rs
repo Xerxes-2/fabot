@@ -622,7 +622,8 @@ impl<'a> Jobs<'a> {
             Kind::Extension | Kind::Link => 1,
             Kind::Container if crowded(&s.pos) => 1,
             Kind::Container | Kind::Tower => 2,
-            _ => 3,
+            _ if s.kind.pays_back() => 3,
+            _ => 4,
         };
         if let Some(s) = (grounds.iter())
             .flat_map(|g| g.sites.iter())

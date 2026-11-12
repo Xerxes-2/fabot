@@ -287,7 +287,7 @@ load past the reserve, so none is cast short of it but the downgrade deadline's,
 draws the reserve, since a lost controller loses the room the reserve
 defends. Upgrade is the score, so it shrinks with the stock rather than
 stopping while it refills. While a site that pays back stands (spawn,
-extension, container, storage, link, tower) every worker builds and the
+extension, container, storage, link, tower, extractor, terminal) every worker builds and the
 surplus is its: a structure pays only once complete, so a level is built out
 before it is upgraded, as Hivemind does (owner, 2026-11-12: only RCL3's tower
 and RCL6's minerals are worth rushing), and below the reserve too. Below RCL3 an outpost's sites wait for

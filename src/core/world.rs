@@ -270,7 +270,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// Hivemind's (MIT) build-out: what raises the dig, the bank or its defence.
+    /// Hivemind's (MIT) build-out, and the ore RCL6 is reached for (owner).
     pub fn pays_back(&self) -> bool {
         matches!(
             self,
@@ -280,6 +280,8 @@ impl Kind {
                 | Kind::Storage
                 | Kind::Link
                 | Kind::Tower
+                | Kind::Extractor
+                | Kind::Terminal
         )
     }
 
