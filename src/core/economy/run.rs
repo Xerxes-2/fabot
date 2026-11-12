@@ -633,10 +633,17 @@ pub fn decide(context: &mut Context, state: &mut State) -> Result<Vec<Intent>, S
             let sink = (derived.grounds.iter())
                 .filter(|g| g.room == creep.pos.room)
                 .find_map(|g| match (works, &g.controller, g.bank()) {
-                    (true, Some(c), _) if c.owner.is_ours() => {
+                    (true, Some(c), _)
+                        if c.owner.is_ours() && !slots::fed(c) && !g.sites.is_empty() =>
+                    {
+                        (g.sites.iter())
+                            .min_by_key(|s| creep.pos.range(&s.pos))
+                            .map(|s| (s.pos, task::RANGE_UPGRADE, CreepAct::Build(s.id.clone())))
+                    }
+                    (true, Some(c), _) if c.owner.is_ours() && slots::fed(c) => {
                         Some((c.pos, task::RANGE_UPGRADE, CreepAct::Upgrade(c.id.clone())))
                     }
-                    (false, _, Some(s)) if s.owned => {
+                    (_, _, Some(s)) if s.owned => {
                         Some((s.pos, 1, CreepAct::Transfer(s.id.clone(), Resource::Energy)))
                     }
                     (false, _, Some(s)) => Some((s.pos, 0, CreepAct::Drop(Resource::Energy))),

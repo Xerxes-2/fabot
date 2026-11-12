@@ -239,6 +239,12 @@ pub fn inside_deadline(c: &crate::core::world::Controller) -> bool {
     c.level > 0 && c.ticks_to_downgrade <= engine::controller_downgrade(c.level) / 2
 }
 
+/// Owner, 2026-11-13: past the last level upgrading only feeds GCL, so the
+/// controller is fed only to keep its level.
+pub fn fed(c: &crate::core::world::Controller) -> bool {
+    c.level < engine::CONTROLLER_MAX_LEVEL || inside_deadline(c)
+}
+
 /// What a WORK of a worker spends a tick at `power` a WORK while working:
 /// its load lasts so long, then it walks to its energy and back.
 fn worker_pace(atlas: &Atlas, derived: &Derived, ci: usize, body: &[BodyPart], power: i32) -> f64 {
@@ -349,6 +355,7 @@ impl Plan<'_> {
         let mut local: Vec<(f64, Leg)> = Vec::new();
         let mut remote: Vec<(f64, Leg)> = Vec::new();
         let mut far: Vec<String> = Vec::new();
+        let fed = fed(&colony.controller);
         let mut drink: i32 = (derived.bodies.iter().chain(derived.ovens.iter()))
             .filter(|b| b.pos.room == colony.room && b.work > 0 && b.carry > 0)
             .filter(|b| !b.pattern.is_harvester())
@@ -621,6 +628,7 @@ impl Plan<'_> {
         let works = match () {
             _ if !draws => 0.0,
             _ if !past_reserve => f64::from(payback) / life,
+            _ if !fed => surplus,
             _ if upgradable < i32::MAX => (surplus - f64::from(upgradable)).max(0.0),
             _ if payback > 0 => surplus,
             _ => ((dug - fixed) / 2.0).clamp(0.0, surplus),
@@ -644,7 +652,7 @@ impl Plan<'_> {
         let mend = (works - build).max(0.0).min(mended);
 
         let mut drunk = 0.0;
-        let mut upgraded = surplus - build - mend;
+        let mut upgraded = if fed { surplus - build - mend } else { 0.0 };
         if let Some(body) = &upgrader {
             let work = part_count_in(body, BodyPart::Work);
             let most =
@@ -677,6 +685,7 @@ impl Plan<'_> {
             upgraded = 0.0;
         }
 
+        let upgraded = upgraded.min(f64::from(upgradable) - drunk).max(0.0);
         let (builders, upgraders) = worker.as_ref().map_or((0, 0), |body| {
             let work = f64::from(part_count_in(body, BodyPart::Work).max(1));
             let per = upkeep(body) / work;
@@ -691,8 +700,10 @@ impl Plan<'_> {
             )
         });
         let builders = builders.max(i32::from(owed > 0 || mend > 0.0));
-        let all_build = payback > 0 && upgradable == i32::MAX;
-        let upgraders = upgraders.max(i32::from(past_reserve && drunk == 0.0 && storage.is_some()));
+        let all_build = !fed || (payback > 0 && upgradable == i32::MAX);
+        let upgraders = upgraders.max(i32::from(
+            fed && past_reserve && drunk == 0.0 && storage.is_some(),
+        ));
         // No more workers than the controller has seats in reach: one past
         // them stands in the others' way and spends nothing.
         let spenders = (builders + upgraders).min(ground.upgrade_seats.unwrap_or(i32::MAX));

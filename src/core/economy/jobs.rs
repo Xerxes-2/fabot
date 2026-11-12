@@ -553,7 +553,8 @@ impl<'a> Jobs<'a> {
             .colonies
             .get(ci)
             .is_some_and(|c| c.room == slot.room);
-        let controller = ground.controller.as_ref().filter(|c| c.owner.is_ours());
+        let controller =
+            (ground.controller.as_ref()).filter(|c| c.owner.is_ours() && slots::fed(c));
         if let Some(c) = controller.filter(|c| slots::inside_deadline(c)) {
             return Some(Task::Upgrade(c.id.clone()));
         }

@@ -293,8 +293,12 @@ surplus is its: a structure pays only once complete, so a level is built out
 before it is upgraded, as Hivemind does (owner, 2026-11-12: only RCL3's tower
 and RCL6's minerals are worth rushing), and below the reserve too. Below RCL3 an outpost's sites wait for
 the tower: its dig piles on the post and is hauled from there. Other sites and repairs take half the
-income (all past a capped controller's take), so remote roads never stall the
-controller; the stock past the reserve upgrades. A structure lost within a creep
+income, so remote roads never stall the controller; the stock past the
+reserve upgrades. At RCL8 the controller is fed only inside its downgrade
+deadline (owner, 2026-11-13: upgrading there only feeds GCL; sites, ramparts,
+labs and lower colonies use the energy better): no upgrader, no upgrade spend,
+every worker builds, and a load held with no slot goes to a site or the
+storage. A structure lost within a creep
 life at its pace is mended before a builder's sites; below the reserve a home
 road at risk still casts the floor's first worker, which draws the reserve
 like the deadline's, to mend only. A home road's pace counts the wear of the
